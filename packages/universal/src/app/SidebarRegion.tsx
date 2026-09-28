@@ -6,7 +6,7 @@ import type { View as AppView } from "@jaira/ui/store";
 import { newItems, standingRoot, type TreeDraft } from "@jaira/ui/filesModel";
 import { FOLD, OPENED, PANE, openOf, paneOf, unfoldedOf } from "@jaira/ui/uiState";
 import { healthCounts, logUnseen } from "@jaira/ui/updatesModel";
-import { useHealth } from "@jaira/ui/updatesStore";
+import { checkForUpdate, useHealth } from "@jaira/ui/updatesStore";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { settingsPageProblems } from "@jaira/ui/settingsSections";
 import { fixHealthItem, openHealthPage, useForgeOAuth } from "@jaira/ui/settingsShell";
@@ -19,6 +19,8 @@ import { ChatListPanel } from "../components/chat/ChatListPanel";
 import { useChatSurface } from "../components/chat/surface";
 import { anchorRectOf } from "../components/floats/anchor";
 import { HealthPop } from "../components/floats/HealthCard";
+import { ShellFloats } from "../components/floats/ShellFloats";
+import { UpdateRow } from "../components/floats/UpdateRow";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
 
@@ -42,6 +44,10 @@ export function ShellSidebar(): JSX.Element {
     if (health.length === 0) setHealthAt(null);
   }, [health.length]);
   const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
+  const openAbout = (): void => {
+    actions.setSection("about");
+    actions.setView("settings");
+  };
   const [finding, setFinding] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => groupProjects(state.projects, ui.groupWorkspaces !== false), [state.projects, ui.groupWorkspaces]);
   const projectHues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
@@ -148,6 +154,9 @@ export function ShellSidebar(): JSX.Element {
       theme={appearance.scheme}
       onTheme={actions.setTheme}
       onChooseProject={(mode) => void actions.chooseProject(mode)}
+      // The Update row above Settings (`App.tsx`'s `SidebarUpdateRow`): About, where a failure or a
+      // download is said in full — with the release notes, from its menu (`AboutPage` holds their fold).
+      update={(collapsed) => <UpdateRow collapsed={collapsed} onOpenAbout={openAbout} onNotes={openAbout} onRetry={checkForUpdate} />}
       onProjectSettings={(p) => {
         actions.standOn(p.project);
         actions.setConfigLayer(p.kind === "shared" ? "base" : "project");
@@ -155,6 +164,8 @@ export function ShellSidebar(): JSX.Element {
       }}
     />
     {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
+    {/* The dialogs `App.tsx` raises on its own, over any room (drawn here, as this region is always on screen). */}
+    <ShellFloats />
     {healthAt !== null ? (
       <HealthPop
         anchor={healthAt.at}

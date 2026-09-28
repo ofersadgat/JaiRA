@@ -1,9 +1,9 @@
 import { useState, type ComponentType, type JSX } from "react";
 import { CONFIG_SECTIONS } from "@jaira/shared/browser";
-import { SettingsRowsContext } from "@jaira/ui/controls";
+import { SelectInput as DomSelectInput, SettingsRowsContext } from "@jaira/ui/controls";
 import { SchemaForm as DomSchemaForm } from "@jaira/ui/schemaForm/SchemaForm";
 import type { Schema, SchemaFormContext } from "@jaira/ui/schemaForm/types";
-import { FormRowsContext, SchemaForm, SettingsGroup } from "@jaira/universal";
+import { FormRowsContext, SchemaForm, Select, SelectInput, SettingsGroup } from "@jaira/universal";
 
 /**
  * The schema form's field kinds as specimens (decision 0015): `schemaForm/SchemaForm.tsx` and its
@@ -16,6 +16,9 @@ import { FormRowsContext, SchemaForm, SettingsGroup } from "@jaira/universal";
  *    and nested object.
  *  - `form-rows` — the same renderer on a Settings page: layered (no switches, a ↺ where the layer
  *    states a value), each field a settings row inside a card.
+ *  - `selects` — Chromium's menulist, as `select.cfg-input` (`width: 100%`: of the column, of a field,
+ *    disabled) and as the plain `<select>` the Logs bar uses: the text's inset and line, and
+ *    the arrow (`MenulistArrow`), one for both.
  */
 
 const FIELDS: Schema = {
@@ -140,6 +143,48 @@ function rowsCtx(path: string, doc: Record<string, unknown>, setDoc: (next: Reco
   return { path, isSet: (p) => STATED.has(p), setAt: (p, v) => setDoc(setPath(doc, p, v)) };
 }
 
+const CHOICES: Array<[string, string]> = [
+  ["natively on Windows", "native"],
+  ["in WSL: Ubuntu-24.04", "wsl"],
+  ["a longer choice than the others", "long"],
+];
+
+function DomSelects(): JSX.Element {
+  const [value, setValue] = useValue("native");
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12, padding: 12 }}>
+      <DomSelectInput value={value} options={CHOICES} onChange={setValue} />
+      <div style={{ width: 272 }}>
+        <DomSelectInput value={value} options={CHOICES} onChange={setValue} />
+      </div>
+      <DomSelectInput value={value} options={CHOICES} onChange={setValue} disabled />
+      {/* As the Logs bar sets it: `.logs-bar select` — width auto, min-width 150. */}
+      <select value={value} onChange={(e) => setValue(e.target.value)} style={{ width: "auto", minWidth: 150 }}>
+        {CHOICES.map(([label, v]) => (
+          <option key={v} value={v}>
+            {label}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function RnSelects(): JSX.Element {
+  const [value, setValue] = useValue("native");
+  const plain = CHOICES.map(([label, v]) => ({ label, value: v }));
+  return (
+    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12, padding: 12 }}>
+      <SelectInput value={value} options={CHOICES} onChange={setValue} fill />
+      <div style={{ width: 272 }}>
+        <SelectInput value={value} options={CHOICES} onChange={setValue} fill />
+      </div>
+      <SelectInput value={value} options={CHOICES} onChange={setValue} disabled fill />
+      <Select value={value} options={plain} onChange={setValue} minWidth={150} />
+    </div>
+  );
+}
+
 const DomFields = fieldsOf(DomSchemaForm, LEAVES);
 const RnFields = fieldsOf(SchemaForm, LEAVES);
 const DomLists = fieldsOf(DomSchemaForm, null);
@@ -157,6 +202,12 @@ export const FORM_SPECIMENS = {
     width: 440,
     dom: () => <DomLists />,
     rn: () => <RnLists />,
+  },
+  // The menulists: `select.cfg-input` three ways, and the plain `<select>`.
+  selects: {
+    width: 400,
+    dom: () => <DomSelects />,
+    rn: () => <RnSelects />,
   },
   // A Settings page's card of rows (`.set-group`), at the page's readable width.
   "form-rows": {

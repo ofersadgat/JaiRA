@@ -3,6 +3,7 @@ import { View, isWeb } from "@tamagui/core";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Icon, type IconName } from "../panel/Icon";
+import { InlineGlyph } from "./InlineGlyph";
 
 /** DM Sans' ascent and descent, as fractions of the size. */
 const ASCENT = 0.992;
@@ -26,9 +27,9 @@ export function GateTitle({ icon, children }: { icon?: IconName | undefined; chi
       <Txt spec={spec} marginBottom={8}>
         {icon !== undefined ? (
           <>
-            <View display={"inline-block" as never} width={16} height={16} marginRight={4} {...({ verticalAlign: -2 } as object)}>
+            <InlineGlyph size={16} drop={2} after={4}>
               <Icon name={icon} size={16} color={String(t.v("dim"))} />
-            </View>{" "}
+            </InlineGlyph>{" "}
           </>
         ) : null}
         {children}

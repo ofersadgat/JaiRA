@@ -10,6 +10,7 @@ import { Uncopied } from "../../app/Uncopied";
 import { Icon } from "./Icon";
 import { gateBodyOf } from "../floats/GateBodies";
 import { GateTitle } from "../floats/GateTitle";
+import { InlineGlyph } from "../floats/InlineGlyph";
 
 /** One question, picked from its options alone: what this file's `ChooseOption` draws. */
 const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 1 && choices[0]!.freeText === undefined && choices[0]!.multiple !== true && choices[0]!.requireConfirm !== true;
@@ -138,8 +139,15 @@ function Option({ label, icon, description, primary = false, danger = false, sel
       })}
     >
       <View flexDirection="row" alignItems="center">
-        {icon !== undefined ? <Icon name={icon} size={Number(t.scaled("size-app", 13 / 12.5)) || 13} color={String(primary ? t.v("on-accent") : danger ? t.v("bad") : t.v("text"))} box={{ marginRight: 4 }} /> : null}
+        {/* `<AuthoredIcon/> {label}`: the glyph (13, 2 under the baseline) inline in the label, a space after it. */}
         <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: primary ? 600 : 400, color: primary ? "on-accent" : danger ? "bad" : "text" }} numberOfLines={1}>
+          {icon !== undefined ? (
+            <>
+              <InlineGlyph size={13} drop={2}>
+                <Icon name={icon} size={13} color={String(primary ? t.v("on-accent") : danger ? t.v("bad") : t.v("text"))} />
+              </InlineGlyph>{" "}
+            </>
+          ) : null}
           {label}
         </Txt>
       </View>

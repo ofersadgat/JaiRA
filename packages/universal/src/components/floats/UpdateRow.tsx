@@ -1,4 +1,4 @@
-import { Fragment, useState, type JSX } from "react";
+import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { Linking } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { FloatRect } from "@jaira/ui/floatPlace";
@@ -27,7 +27,8 @@ import { TipLayer } from "./TipLayer";
  *   .side-hit             the rest of the row: gap 8, padding 0 7; the glyph 15 wide, the label
  *                         app-label — in --accent, --text once ready, --bad after a failure
  *   .upd-side-ver         data 11/12 on a line of 1, --dim, pushed right, at most 58%, one line
- *   .upd-side-bar         44 × 4, radius 3, --dim at 16%, filled in --accent to the percent
+ *   .upd-side-bar         44 wide, radius 3, --dim at 16%, filled in --accent to the percent; 6 tall
+ *                         (`.um-bar`'s height comes later than the row's 4 and wins)
  *   .side-act             20 square, radius 5, app 11/12.5; .upd-caret / .upd-retry 3 before the edge,
  *                         the chevron 12 (on: --text on --fill-ghost-selected); .upd-dismiss app 14/12.5,
  *                         shown only while the row is under the pointer
@@ -45,12 +46,13 @@ export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collap
   const next = update.available;
   const open = menuAt !== undefined;
   const tone = updateRowTone(row);
-  const ink = open ? "text" : tone === "ready" ? "text" : tone === "bad" ? "bad" : "accent";
-  const glyphInk = tone === "bad" ? "bad" : tone === "ready" && !open ? "accent" : ink;
+  // The label keeps `.app-label`'s --dim whatever the row's state (its own colour beats the hit's); the
+  // glyph takes the hit's: --accent, --bad after a failure (`.upd-side.bad .side-glyph`).
+  const glyphInk = tone === "bad" ? "bad" : "accent";
   const click = (): void =>
     pressUpdateRow(row, next, { openUrl: (url) => void (isWeb ? window.open(url, "_blank", "noopener") : Linking.openURL(url)), apply: () => applyUpdate("wait"), onOpenAbout });
   const published = publishedWords(next?.releaseDate);
-  const act = (label: string, glyph: JSX.Element, onPress: (from: unknown) => void, extra: Record<string, unknown> = {}): JSX.Element => (
+  const act = (label: string, glyph: JSX.Element, onPress: (from: unknown) => void, { on, ...rest }: Record<string, unknown> = {}): JSX.Element => (
     <Press
       key={label}
       onPress={(e) => onPress(isWeb ? (e as unknown as { currentTarget: unknown }).currentTarget : undefined)}
@@ -62,8 +64,8 @@ export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collap
       alignItems="center"
       justifyContent="center"
       borderRadius={5}
-      {...extra}
-      box={({ hovered: h }) => ({ backgroundColor: extra["on"] === true ? t.v("fill-ghost-selected") : h ? t.v("fill-ghost-selected") : "transparent" })}
+      {...rest}
+      box={({ hovered: h }) => ({ backgroundColor: on === true ? t.v("fill-ghost-selected") : h ? t.v("fill-ghost-selected") : "transparent" })}
     >
       {glyph}
     </Press>
@@ -106,15 +108,17 @@ export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collap
         <Glyph width={15} color={glyphInk}>
           {row.glyph}
         </Glyph>
-        <Txt register="app-label" ellip flexShrink={1} minWidth={0} color={t.v(ink) as never}>
+        <Txt register="app-label" ellip flex={1} minWidth={0}>
           {row.label}
         </Txt>
         {collapsed ? null : row.kind === "downloading" ? (
           <>
-            <View width={44} height={4} flexShrink={0} marginLeft="auto" borderRadius={3} overflow="hidden" backgroundColor={t.mix(t.v("dim"), 16, "transparent") as never}>
+            <View width={44} height={6} flexShrink={0} marginLeft="auto" borderRadius={3} overflow="hidden" backgroundColor={t.mix(t.v("dim"), 16, "transparent") as never}>
               <View height="100%" width={`${row.percent ?? 0}%`} borderRadius={3} backgroundColor={t.v("accent") as never} />
             </View>
-            <Version>{`${row.percent ?? 0}%`}</Version>
+            <Version>
+              {row.percent ?? 0}%
+            </Version>
           </>
         ) : row.version !== undefined ? (
           <Version auto>{row.version}</Version>
@@ -173,7 +177,7 @@ export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collap
 const TIP = { voice: "app", scale: 11.5 / 12.5, lineHeight: 1.4, color: "dim" } as const;
 
 /** `.upd-side-ver`: data 11/12 on a line of 1, --dim, one line, at most 58%. */
-function Version({ auto = false, children }: { auto?: boolean; children: string }): JSX.Element {
+function Version({ auto = false, children }: { auto?: boolean; children: ReactNode }): JSX.Element {
   return (
     <Txt spec={{ voice: "data", scale: 11 / 12, lineHeight: 1, color: "dim" }} ellip flexShrink={1} minWidth={0} maxWidth="58%" {...(auto ? { marginLeft: "auto" } : {})}>
       {children}

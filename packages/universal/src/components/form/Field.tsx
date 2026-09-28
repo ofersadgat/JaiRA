@@ -331,11 +331,24 @@ export function Level({ title, hint, depth = 0, children }: { title: string; hin
  *                          `.cfg-hint` after "· "
  *   .cfg-disclosure-body   padding 4 4 11 17
  */
-export function Disclosure({ summary, desc, children, defaultOpen = false }: { summary: string; desc?: string; children: ReactNode; defaultOpen?: boolean }): JSX.Element {
+export function Disclosure({
+  summary,
+  desc,
+  children,
+  defaultOpen = false,
+  card = false,
+}: {
+  summary: string;
+  desc?: string;
+  children: ReactNode;
+  defaultOpen?: boolean;
+  /** Straight in a card (`.set-group > .cfg-disclosure`): padding 13 16, its rule still at its top. */
+  card?: boolean;
+}): JSX.Element {
   const t = useTokens();
   const [open, setOpen] = useState(defaultOpen);
   return (
-    <View paddingTop={2} {...(edge(t, { top: 1 }) as object)}>
+    <View {...(card ? { paddingVertical: 13, paddingHorizontal: 16 } : { paddingTop: 2 })} {...(edge(t, { top: 1 }) as object)}>
       <Press onPress={() => setOpen((o) => !o)} {...({ "aria-expanded": open } as object)} flexDirection="row" alignItems="center" gap={8} paddingVertical={7} paddingHorizontal={4} borderRadius={5}>
         {({ hovered }) => (
           <>

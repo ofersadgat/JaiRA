@@ -174,6 +174,11 @@ async function main(): Promise<void> {
       // Any page, by its path without the leading slash (Git Bash rewrites one): `specimen-dom?name=markdown`.
       await app.navigate((await app.evaluate<string>("location.protocol + '//' + location.host")) + "/" + path);
       await app.until("document.readyState === 'complete' && document.body.children.length > 0", path);
+      // A specimen page draws its box once its graph is built (slow while the shared dev server rebuilds).
+      if (path.startsWith("specimen-")) {
+        await app.until("document.getElementById('specimen') !== null", `${path} to draw`, 400);
+        await new Promise((r) => setTimeout(r, 800));
+      }
       await new Promise((r) => setTimeout(r, 500));
     } else if (scene !== undefined || look !== undefined || arg("--page") !== undefined) {
       await goTo(app, arg("--page") === "rn" ? "/rn" : "/", {

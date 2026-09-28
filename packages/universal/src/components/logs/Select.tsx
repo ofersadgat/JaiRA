@@ -1,11 +1,11 @@
 import { useMemo, useRef, useState, type JSX } from "react";
 import { View as RNView } from "react-native";
-import { View } from "@tamagui/core";
 import type { MenuItem } from "@jaira/ui/menu";
 import { sourceGroups } from "@jaira/ui/logsModel";
 import { Press, Txt, edge, lengthToken, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
+import { MenulistArrow } from "../form/MenulistArrow";
 
 /**
  * A plain `<select>`, universal (decision 0015) — the one `styles.css` styles as `input, textarea,
@@ -16,7 +16,7 @@ import { ContextMenu, type MenuAt } from "../Menu";
  *                        (hovered --rule), radius --control-radius, padding 5 9. Chromium's menulist
  *                        draws its text on a `normal` line (DM Sans: 1.3867), 3 in from the padding, and
  *                        keeps room for its arrow after it (40.6 wider than the text in all); the arrow
- *                        in the text's colour (see `Chevron`).
+ *                        in the text's colour (`MenulistArrow`).
  *   .logs-bar select     width auto, flex none, min-width 150
  *
  * Options may come in groups (`<optgroup>`): the menu lists a group's label, disabled, over its entries.
@@ -94,32 +94,10 @@ export function Select({
         <Txt spec={{ ...text, color: disabled ? "dim" : "text" }} numberOfLines={1}>
           {shown}
         </Txt>
-        <Chevron />
+        <MenulistArrow color={disabled ? "dim" : "text"} />
       </Press>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </RNView>
-  );
-}
-
-/**
- * Chromium's menulist arrow, measured on the desktop's page: a chevron whose centre line is 7.2 wide and 3.33
- * tall, its right end 5.2 in from the box's right edge and 0.2 above its middle, stroked 1.5 —
- * drawn as its two strokes, meeting at the point, so a phone draws it too.
- */
-function Chevron(): JSX.Element {
-  const t = useTokens();
-  const ink = t.v("text") as never;
-  const [w, h, stroke] = [7.2, 3.33, 1.5];
-  const length = Math.hypot(w / 2, h) + stroke / 2;
-  const angle = (Math.atan2(h, w / 2) * 180) / Math.PI;
-  const bar = (cx: number, turn: number): JSX.Element => (
-    <View position="absolute" left={cx - length / 2} top={h / 2 - stroke / 2} width={length} height={stroke} backgroundColor={ink} transform={[{ rotate: `${turn * angle}deg` }]} />
-  );
-  return (
-    <View position="absolute" right={5.2} top="50%" marginTop={-h / 2 - 0.2} width={w} height={h} aria-hidden>
-      {bar(w / 4, 1)}
-      {bar((3 * w) / 4, -1)}
-    </View>
   );
 }
 

@@ -1,5 +1,5 @@
 import { useMemo, useState, type JSX, type ReactNode } from "react";
-import type { LayoutChangeEvent } from "react-native";
+import { PixelRatio, Platform, type LayoutChangeEvent } from "react-native";
 import { View } from "@tamagui/core";
 import {
   BUILTIN_FUNCTIONS,
@@ -155,11 +155,10 @@ export function FunctionsSections({
   );
 }
 
-/** `.fx-rules`: padding 4 16 12, a --line above. */
+/** `.fx-rules`: padding 4 16 12, a --line above — the card's own rule between its children, the same border. */
 function FxRules({ children }: { children: ReactNode }): JSX.Element {
-  const t = useTokens();
   return (
-    <View paddingTop={4} paddingHorizontal={16} paddingBottom={12} {...(edge(t, { top: 1 }) as object)}>
+    <View paddingTop={4} paddingHorizontal={16} paddingBottom={12}>
       {children}
     </View>
   );
@@ -173,28 +172,35 @@ const SUB = { voice: "app", scale: 11 / 12.5 } as const;
 
 /**
  * The line box of a cell holding one inline-block (`.fx-cell`, 10.5/12.5 on 1.6) on the row's strut
- * (its size, on 1.5): Chromium rounds each font's ascent and descent to whole pixels (DM Sans: 0.992
- * and 0.31 em) and aligns the two baselines. It returns the line's height and the block's top in it,
- * or nothing where the sizes are CSS (the desktop's own page).
+ * (its size, on 1.5), as Chromium lays it out — in DEVICE pixels: each font's ascent and descent
+ * rounded to whole ones (DM Sans: 0.992 and 0.31 em), the line height floored to a 64th, the half
+ * leading above floored to a whole one, and the two baselines aligned. It returns the line's height and
+ * the block's top in it, in CSS pixels, or nothing where the sizes are CSS (the desktop's own page).
+ * Measured: a row's 17.25 and a sub-row's 17.1667, the pill at the line's top in both.
  */
-function cellLine(t: ReturnType<typeof useTokens>, strutScale: number): { line: number; top: number } | undefined {
+function cellLine(t: ReturnType<typeof useTokens>, strutScale: number, dpr: number): { line: number; top: number } | undefined {
   const strut = t.scaled("size-app", strutScale);
   const box = t.scaled("size-app", 10.5 / 12.5);
   if (typeof strut !== "number" || typeof box !== "number") return undefined;
-  const above = (size: number, line: number): number => (line - (Math.round(size * 0.992) + Math.round(size * 0.31))) / 2 + Math.round(size * 0.992);
-  const [sLine, bLine] = [strut * 1.5, box * 1.6];
-  const [sUp, bUp] = [above(strut, sLine), above(box, bLine)];
-  const up = Math.max(sUp, bUp);
-  return { line: up + Math.max(sLine - sUp, bLine - bUp), top: up - bUp };
+  const metrics = (css: number, lineHeight: number): { up: number; down: number } => {
+    const size = css * dpr;
+    const [ascent, descent] = [Math.round(size * 0.992), Math.round(size * 0.31)];
+    const line = Math.floor(css * lineHeight * dpr * 64) / 64;
+    const up = ascent + Math.floor((line - ascent - descent) / 2);
+    return { up, down: line - up };
+  };
+  const [s, b] = [metrics(strut, 1.5), metrics(box, 1.6)];
+  const up = Math.max(s.up, b.up);
+  return { line: (up + Math.max(s.down, b.down)) / dpr, top: (up - b.up) / dpr };
 }
 
 /** One cell's contents, as the table and its measuring pass both draw it. */
 function HeadCell({ column, first }: { column: SetColumn; first: boolean }): JSX.Element {
   return (
     <View alignItems="center">
-      {/* The bucket is a block on the th's 1.5 line; the th's own line under it measures a third of a pixel short in Chromium (content 31.17 at 10.5px, not 31.5). */}
+      {/* The bucket is a block on the th's 1.5 line. */}
       {first ? (
-        <Txt spec={{ voice: "data", scale: (10.5 / 12.5) * (12.5 / 12), weight: 600, lineHeight: 1.5 }} marginBottom={-1 / 3}>
+        <Txt spec={{ voice: "data", scale: (10.5 / 12.5) * (12.5 / 12), weight: 600, lineHeight: 1.5 }}>
           {column.bucket}
         </Txt>
       ) : null}
@@ -251,8 +257,26 @@ function FnName({ name, sub, what, onToggle, open }: { name: string; sub: boolea
 }
 
 /**
+ * Half of a collapsed border (`border-collapse: collapse`): a cell's 1px rule is drawn centred on the
+ * line between it and its neighbour, half in each, so each cell's box reaches half-way into the rules
+ * on its sides and the table's last rule stands half outside it.
+ */
+const HALF = 1 / 3;
+
+/** A collapsed rule: centred on its cell's bottom (or left) edge, over whatever the next row paints. */
+function CollapsedRule({ side }: { side: "bottom" | "left" }): JSX.Element {
+  const t = useTokens();
+  return side === "bottom" ? (
+    <View position="absolute" left={0} right={0} bottom={-HALF} height={0} zIndex={1} pointerEvents="none" {...(edge(t, { top: 1 }) as object)} />
+  ) : (
+    <View position="absolute" top={0} bottom={0} left={-HALF} width={0} zIndex={1} pointerEvents="none" {...(edge(t, { left: 1 }) as object)} />
+  );
+}
+
+/**
  * The table: measured once (each column as wide as its widest cell, every cell drawn where nothing
- * sees it), then laid out row by row at those widths, the room left over shared in proportion.
+ * sees it), then laid out row by row at those widths, the room left over shared in proportion. Its
+ * rules are collapsed borders (`CollapsedRule`, `HALF`), as `.fx-table`'s are.
  */
 function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { columns: SetColumn[]; rows: TableRow[]; open: string | null; onToggle: (name: string) => void; onOpenSet: (id: string) => void; detail: (name: string) => JSX.Element }): JSX.Element {
   const t = useTokens();
@@ -263,10 +287,27 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
   const fns = rows.filter((row): row is Extract<TableRow, { kind: "fn" }> => row.kind === "fn");
   const measured = natural.length === count && natural.every((w) => w !== undefined) && width !== undefined;
   const widths = measured ? shareOut(natural as number[], width) : undefined;
-  const pad = { paddingVertical: 4, paddingHorizontal: 7 } as const;
-  const rowLine = cellLine(t, 11.5 / 12.5);
-  const subLine = cellLine(t, 11 / 12.5);
-  const rule = (i: number, head = false): object => ({ ...(edge(t, { bottom: 1, ...(i >= 2 && starts[i - 2] ? { left: 1 } : {}) }) as object), ...(head ? { backgroundColor: t.v("panel-2") } : {}) });
+  /** Whether column `i` starts a permission set's bucket (`.fx-bucket-start`, a rule on its left). */
+  const startsAt = (i: number): boolean => i >= 2 && starts[i - 2] === true;
+  /** A cell's padding (`th, td`: 4 7), and the halves of the rules on its sides. */
+  const padOf = (i: number, head = false): object => ({
+    paddingTop: 4 + (head ? 0 : HALF),
+    paddingBottom: 4 + HALF,
+    paddingLeft: 7 + (startsAt(i) ? HALF : 0),
+    paddingRight: 7 + (startsAt(i + 1) ? HALF : 0),
+  });
+  // The device's pixels. In a browser (the `/rn` page) the ones Chromium lays the page out in — the
+  // studio's 1.5, a 1px border drawn ⅔ wide — which `devicePixelRatio` there does not report (it reads 2).
+  const dpr = Platform.OS === "web" ? 1.5 : PixelRatio.get();
+  const rowLine = cellLine(t, 11.5 / 12.5, dpr);
+  const subLine = cellLine(t, 11 / 12.5, dpr);
+  /** A cell's own rules: the one under it, and a bucket's on its left. */
+  const rules = (i: number): JSX.Element => (
+    <>
+      <CollapsedRule side="bottom" />
+      {startsAt(i) ? <CollapsedRule side="left" /> : null}
+    </>
+  );
   const probe = (i: number, cells: ReactNode[]): JSX.Element => (
     <View
       key={i}
@@ -286,14 +327,15 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
       }}
     >
       {cells.map((cell, k) => (
-        <View key={k} {...pad} {...(i >= 2 && starts[i - 2] ? (edge(t, { left: 1 }, "transparent") as object) : {})}>
+        <View key={k} {...padOf(i)}>
           {cell}
         </View>
       ))}
     </View>
   );
   return (
-    <View overflow="hidden" onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
+    // The last row's rule is half outside the table: the table's box holds it.
+    <View overflow="hidden" paddingBottom={HALF} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
       {/* The measuring pass: each column's cells in a column of their own, as wide as the widest. */}
       <View height={0} overflow="hidden">
         {probe(0, [<Txt key="h" spec={{ voice: "app", scale: 10.5 / 12.5, weight: 500 }}>Function</Txt>, ...fns.map((row) => <FnName key={row.name} name={row.name} sub={row.sub} what={row.what} open={false} onToggle={() => undefined} />)])}
@@ -305,44 +347,55 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
           <View flexDirection="row" alignItems="stretch">
             {/* `th.fx-fn` is left-aligned; the Defaults head keeps the table's centre (only its cells are left). */}
             {["Function", "Defaults"].map((word, i) => (
-              <View key={word} width={widths[i]} {...pad} {...rule(i, true)} justifyContent="flex-end" alignItems={i === 0 ? "flex-start" : "center"}>
+              <View key={word} width={widths[i]} {...padOf(i, true)} position="relative" backgroundColor={t.v("panel-2") as never} justifyContent="flex-end" alignItems={i === 0 ? "flex-start" : "center"}>
                 <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 500, color: "dim" }}>{word}</Txt>
+                {rules(i)}
               </View>
             ))}
             {columns.map((column, c) => (
-              <View key={column.id} width={widths[2 + c]} {...pad} {...rule(2 + c, true)} justifyContent="flex-end">
+              <View key={column.id} width={widths[2 + c]} {...padOf(2 + c, true)} position="relative" backgroundColor={t.v("panel-2") as never} justifyContent="flex-end">
                 <HeadCell column={column} first={starts[c]!} />
+                {rules(2 + c)}
               </View>
             ))}
           </View>
           {rows.map((row, r) =>
             row.kind === "group" ? (
-              <View key={`g${r}`} paddingTop={7} paddingBottom={4} paddingHorizontal={7} backgroundColor={t.v("panel-2") as never} {...(edge(t, { bottom: 1 }) as object)}>
+              <View key={`g${r}`} position="relative" paddingTop={7 + HALF} paddingBottom={4 + HALF} paddingHorizontal={7} backgroundColor={t.v("panel-2") as never}>
                 <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 600, ls: 0.1, upper: true, color: "dim" }}>{row.label}</Txt>
+                <CollapsedRule side="bottom" />
               </View>
             ) : (
               <View key={row.name}>
                 <View flexDirection="row" alignItems="stretch" backgroundColor={open === row.name ? (t.v("tint-accent") as never) : "transparent"}>
-                  <View width={widths[0]} {...pad} {...rule(0)} justifyContent="center">
+                  <View width={widths[0]} {...padOf(0)} position="relative" justifyContent="center">
                     <FnName name={row.name} sub={row.sub} what={row.what} open={open === row.name} onToggle={() => onToggle(row.name)} />
+                    {rules(0)}
                   </View>
-                  <View width={widths[1]} {...pad} {...rule(1)} justifyContent="center">
+                  <View width={widths[1]} {...padOf(1)} position="relative" justifyContent="center">
                     <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "dim" }} numberOfLines={1}>
                       {row.defaults}
                     </Txt>
+                    {rules(1)}
                   </View>
                   {columns.map((column, c) => {
                     const line = row.sub ? subLine : rowLine;
                     return (
-                      <View key={column.id} width={widths[2 + c]} {...pad} {...rule(2 + c)} justifyContent="center">
+                      <View key={column.id} width={widths[2 + c]} {...padOf(2 + c)} position="relative" justifyContent="center">
                         <View {...(line !== undefined ? { height: line.line, paddingTop: line.top } : {})} alignItems="center">
                           <Cell column={column} name={row.name} onOpenSet={onOpenSet} />
                         </View>
+                        {rules(2 + c)}
                       </View>
                     );
                   })}
                 </View>
-                {open === row.name ? <View {...(edge(t, { bottom: 1 }) as object)}>{detail(row.name)}</View> : null}
+                {open === row.name ? (
+                  <View position="relative" paddingTop={HALF} paddingBottom={HALF}>
+                    {detail(row.name)}
+                    <CollapsedRule side="bottom" />
+                  </View>
+                ) : null}
               </View>
             ),
           )}

@@ -5,7 +5,7 @@ import { steppedSize } from "@jaira/ui/sizeStep";
 import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
-import { Svg } from "../panel/Svg";
+import { MenulistArrow } from "../form/MenulistArrow";
 
 /**
  * The settings fields, universal (decision 0015): `controls.tsx`'s `SelectInput` and `editorKnobs.tsx`'s
@@ -13,8 +13,9 @@ import { Svg } from "../panel/Svg";
  *
  *   select.cfg-input     1px --line (hovered --rule), radius --control-radius, --bg, padding 6 9, app
  *                        at 12.5/12.5 in --text on a `normal` line (DM Sans: 1.3867); as wide as its
- *                        widest choice plus the menulist's arrow, which Chromium draws 8.9 × 5.4, 4.8
- *                        in from the right edge, in the text's colour. Disabled: 0.55 opacity.
+ *                        widest choice plus the menulist's arrow (`MenulistArrow`, the plain select's
+ *                        too). Disabled (`select:disabled`, then `.cfg-input:disabled`): --dim on
+ *                        --panel-2, at 0.55.
  *   .size-box            row, centred, gap 5, padding 3 4 3 9, 1px --line, radius --control-radius,
  *                        --panel
  *   .size-n              34 wide, right-aligned, data-num (data 600 at 0.79, tabular) in --text
@@ -71,7 +72,7 @@ export function SelectInput({
         paddingLeft={9 + MENULIST_INSET}
         paddingRight={9 + MENULIST_ROOM}
         borderRadius={lengthToken(t, "control-radius", 7)}
-        backgroundColor={t.v("bg") as never}
+        backgroundColor={t.v(disabled ? "panel-2" : "bg") as never}
         {...(disabled ? { opacity: 0.55 } : {})}
         box={({ hovered }) => edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, hovered && !disabled ? "rule" : "line")}
       >
@@ -82,35 +83,14 @@ export function SelectInput({
           </Txt>
         ))}
         <View minHeight={typeof lineBox === "number" ? Math.ceil(lineBox) : undefined} justifyContent="center">
-          <Txt spec={text} numberOfLines={1}>
+          <Txt spec={{ ...text, color: disabled ? "dim" : "text" }} numberOfLines={1}>
             {shown}
           </Txt>
         </View>
-        <Chevron right={4.67 - 1 - 0.67} />
+        <MenulistArrow color={disabled ? "dim" : "text"} />
       </Press>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </RNView>
-  );
-}
-
-/**
- * Chromium's menulist arrow, measured off the desktop's pictures: two arms 8 apart at their tops,
- * meeting 3.9 below, stroked 1.2, their tops 2.5 above the box's middle and 4.7 in from its right edge.
- */
-function Chevron({ right }: { right: number }): JSX.Element {
-  const t = useTokens();
-  return (
-    <Svg
-      width={10}
-      height={6}
-      viewBox="0 0 10 6"
-      color={String(t.v("text"))}
-      strokeWidth={1.2}
-      linecap="butt"
-      linejoin="miter"
-      shapes={[{ kind: "path", d: "M1 1.1 L5 4.97 L9 1.1" }]}
-      box={{ position: "absolute", right, top: "50%", marginTop: -3.6, pointerEvents: "none", "aria-hidden": true }}
-    />
   );
 }
 

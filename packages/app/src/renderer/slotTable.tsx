@@ -5,20 +5,40 @@
  * why sharing the shape also closes WORKFLOWS.md §4.3's "single most common silent failure".
  */
 import type { JSX, ReactNode } from "react";
-import {
-  ANY_TYPE,
-  DEFAULT_MEDIA_TYPE,
-  OWNED_KEYWORDS,
-  SLOT_TYPES,
-  type SlotType,
-  type SlotTypeName,
-} from "@jaira/shared/browser";
-import { NO_ISSUES, fieldClass, markFor, type FormIssues } from "./issues";
+import { DEFAULT_MEDIA_TYPE, SLOT_TYPES, type SlotType, type SlotTypeName } from "@jaira/shared/browser";
+import { NO_ISSUES, markFor, type FormIssues } from "./issues";
 import { LinkInput, LinkToggle } from "./links";
 import { LinkPreview } from "./linkPreview";
 import { emptySlotRow, type SlotRow } from "./slotForm";
 import { slotValueOf, useReadOnly, useRunReading } from "./reading";
 import { ReadValue } from "./readValue";
+import {
+  DEFAULT_PLACEHOLDER,
+  DEFAULT_TITLE,
+  LINKED_LIST_TITLE,
+  LIST_TITLE,
+  MEDIA_TITLE,
+  OPTIONAL_TITLE,
+  SPREAD_TITLE,
+  SPREAD_WORDS,
+  bindingHeadOf,
+  bindingPlaceholderOf,
+  bindingTitleOf,
+  isProduced,
+  linkedRows,
+  linkedTypeWords,
+  linkedWrapper,
+  namePlaceholderOf,
+  nameTitleOf,
+  slotMarksOf,
+  slotMoreShown,
+  slotPathOf,
+  slotTypeHint,
+  slotTypeWords,
+  summarizeSchema,
+} from "./slotTableModel";
+
+export { summarizeSchema };
 
 /**
  * The type control on one slot row: the vocabulary, a `list of` toggle, and an artifact's media type.
@@ -53,8 +73,8 @@ export function SlotTypePicker({
     // A spread declares N slots, each keeping the child's own schema and optionality. There is no
     // one type here to pick.
     return (
-      <span className={`slot-type-custom${mark}`} title="a spread — each slot keeps the child's own schema (§3.5)">
-        per child
+      <span className={`slot-type-custom${mark}`} title={SPREAD_TITLE}>
+        {SPREAD_WORDS}
       </span>
     );
   }
@@ -68,12 +88,11 @@ export function SlotTypePicker({
   if (row.typeRef !== undefined) {
     // The wrapper is the ROW's, not the referenced document's — see {@link SlotRow.typeRef}. Held
     // through the link so unlinking gives back a picker that says the same thing it did.
-    const wrapped = row.type ?? ANY_TYPE;
+    const wrapped = linkedWrapper(row);
     if (onLink === undefined) {
       return (
         <span className={`slot-type-custom${mark}`} title={`${row.typeRef} — a linked type; edit it on the JSON tab`}>
-          🔗 {wrapped.list ? "list of " : ""}
-          {row.typeRef}
+          {linkedTypeWords(row)}
         </span>
       );
     }
@@ -86,7 +105,7 @@ export function SlotTypePicker({
           mark={mark}
           onChange={(ref) => onLink(ref)}
         />
-        <label className="slot-opt" title="wrap the named type in an array — a list of these">
+        <label className="slot-opt" title={LINKED_LIST_TITLE}>
           <input
             type="checkbox"
             checked={wrapped.list}
@@ -112,10 +131,8 @@ export function SlotTypePicker({
   // unticked switch is a fact the sentence simply does not mention.
   if (readOnly) {
     return (
-      <span className={`slot-type-custom${mark}`} title={SLOT_TYPES.find((t) => t.name === type.name)?.hint}>
-        {type.list ? "list of " : ""}
-        {SLOT_TYPES.find((t) => t.name === type.name)?.label ?? type.name}
-        {type.name === "artifact" && (type.mediaType ?? "").length > 0 ? ` · ${type.mediaType}` : ""}
+      <span className={`slot-type-custom${mark}`} title={slotTypeHint(type)}>
+        {slotTypeWords(type)}
       </span>
     );
   }
@@ -126,7 +143,7 @@ export function SlotTypePicker({
       <select
         className={mark.trim()}
         value={type.name}
-        title={SLOT_TYPES.find((t) => t.name === type.name)?.hint}
+        title={slotTypeHint(type)}
         onChange={(e) => {
           const name = e.target.value as SlotTypeName;
           // A media type is only meaningful on an artifact, and one has to be there or the slot is
@@ -144,7 +161,7 @@ export function SlotTypePicker({
           </option>
         ))}
       </select>
-      <label className="slot-opt" title="wrap the type in an array — a list of these">
+      <label className="slot-opt" title={LIST_TITLE}>
         <input type="checkbox" checked={type.list} onChange={(e) => onChange({ ...type, list: e.target.checked })} />
         list
       </label>
@@ -154,7 +171,7 @@ export function SlotTypePicker({
           value={type.mediaType ?? ""}
           placeholder={DEFAULT_MEDIA_TYPE}
           spellCheck={false}
-          title="the content's media type — what makes this slot a blob"
+          title={MEDIA_TITLE}
           onChange={(e) => onChange({ ...type, mediaType: e.target.value })}
         />
       ) : null}
@@ -164,19 +181,6 @@ export function SlotTypePicker({
       {onLink !== undefined ? <LinkToggle linked={false} onToggle={() => onLink("")} /> : null}
     </span>
   );
-}
-
-/** A one-glance label for a schema the picker does not model. The full document is the tooltip. */
-function summarizeSchema(text: string): string {
-  try {
-    const schema = JSON.parse(text) as Record<string, unknown>;
-    const type = typeof schema["type"] === "string" ? (schema["type"] as string) : "schema";
-    const named = typeof schema["x-type"] === "string" ? ` ${schema["x-type"] as string}` : "";
-    const extra = Object.keys(schema).filter((k) => !OWNED_KEYWORDS.includes(k));
-    return `${type}${named}${extra.length > 0 ? ` +${extra.join(" +")}` : ""}`;
-  } catch {
-    return "schema";
-  }
 }
 
 /**
@@ -230,7 +234,7 @@ function SlotMore({
       </details>
     );
   }
-  if (!hasDefault && !hasDescription && value === undefined) return null;
+  if (!slotMoreShown(readOnly, hasDefault, hasDescription, value)) return null;
   return <div className="slot-more open">{children}</div>;
 }
 
@@ -283,25 +287,13 @@ export function SlotTable({
   const edit = (index: number, patch: Partial<SlotRow>): void =>
     onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
   /** True when this row's empty binding is a MEANING rather than a blank — see `emptyBindingMeans`. */
-  const produced = (row: SlotRow): boolean =>
-    emptyBindingMeans !== undefined && row.structured !== true && row.binding.trim().length === 0;
+  const produced = (row: SlotRow): boolean => isProduced(row, emptyBindingMeans);
 
   /** A row's lint path, or `undefined` when this table is not part of a linted document. */
-  const pathOf = (row: SlotRow): string | undefined =>
-    path === undefined || row.name.trim().length === 0 ? undefined : `${path}.${row.name.trim()}`;
+  const pathOf = (row: SlotRow): string | undefined => slotPathOf(path, row);
 
   /** Linking is presence of `typeRef`, so unlinking has to DELETE the key, not blank it. */
-  const link = (index: number, ref: string | null): void =>
-    onChange(
-      rows.map((row, i) => {
-        if (i !== index) return row;
-        if (ref === null) {
-          const { typeRef: _dropped, ...rest } = row;
-          return rest;
-        }
-        return { ...row, typeRef: ref };
-      }),
-    );
+  const link = (index: number, ref: string | null): void => onChange(linkedRows(rows, index, ref));
   // A table with nothing in it, in a reading, is a heading over the word "none". The form needs it —
   // that is where you add the first row — and a reading of a state that declares no operation inputs
   // is better off not mentioning operation inputs.
@@ -326,7 +318,7 @@ export function SlotTable({
           <div className={`slot-row slot-head${optional ? " with-optional" : ""}`}>
             <span>Name</span>
             <span>Type</span>
-            <span>{emptyBindingMeans === undefined ? "Binding — where the value comes from" : `Binding — empty means ${emptyBindingMeans}`}</span>
+            <span>{bindingHeadOf(emptyBindingMeans)}</span>
             {optional ? <span /> : null}
             {readOnly ? null : <span />}
           </div>
@@ -335,8 +327,7 @@ export function SlotTable({
           // Which BOX is wrong. A slot's own diagnostics are binding checks — `checkBinding` reports
           // them at the slot's path — so they belong to the binding box; `<slot>.kind` is the type
           // picker's, and is excluded from the binding box's share.
-          const typeMark = rowPath === undefined ? "" : fieldClass(issues, `${rowPath}.kind`);
-          const bindingMark = rowPath === undefined ? "" : fieldClass(issues, rowPath, [`${rowPath}.kind`]);
+          const { typeMark, bindingMark } = slotMarksOf(issues, rowPath);
           return (
           <div className="slot-group" key={i}>
             <div
@@ -346,9 +337,9 @@ export function SlotTable({
             >
               <input
                 value={row.name}
-                placeholder={optional ? "name" : "name, or prefix* to spread a child"}
+                placeholder={namePlaceholderOf(optional)}
                 spellCheck={false}
-                title={row.spread === true ? "a spread: republishes every output of the bound child, prefixed" : undefined}
+                title={nameTitleOf(row)}
                 onChange={(e) => edit(i, { name: e.target.value })}
               />
               <SlotTypePicker
@@ -366,16 +357,10 @@ export function SlotTable({
                 // example of the other case and looking unfilled.
                 // A slot's DEFAULT is what an empty binding means (the panel rulings, 2026-09-24), so it
                 // is what the empty box says: `significant`, not an example of some other binding.
-                placeholder={produced(row) ? emptyBindingMeans! : row.default.length > 0 ? `default: ${row.default}` : bindingHint}
+                placeholder={bindingPlaceholderOf(row, emptyBindingMeans, bindingHint)}
                 spellCheck={false}
                 disabled={row.structured === true}
-                title={
-                  row.structured === true
-                    ? "a computed binding — edit it on the JSON tab"
-                    : produced(row)
-                      ? "§3.3: an output with a binding is derived, one without is produced — there is no third case"
-                      : undefined
-                }
+                title={bindingTitleOf(row, emptyBindingMeans)}
                 onChange={(e) => edit(i, { binding: e.target.value })}
               />
               {optional ? (
@@ -386,7 +371,7 @@ export function SlotTable({
                   // says the otherwise.
                   <span className="slot-opt sub">{row.optional ? "optional" : ""}</span>
                 ) : (
-                  <label className="slot-opt" title="SPEC §4.1: a slot is required unless it says otherwise">
+                  <label className="slot-opt" title={OPTIONAL_TITLE}>
                     <input
                       type="checkbox"
                       checked={row.optional}
@@ -424,9 +409,9 @@ export function SlotTable({
                   <Boxed readOnly={readOnly} label="default">
                     <input
                       value={row.default}
-                      placeholder="default — also the opt-out from the reachability rule"
+                      placeholder={DEFAULT_PLACEHOLDER}
                       spellCheck={false}
-                      title="JSON, or plain text for a string: significant, 3, [&quot;a&quot;]"
+                      title={DEFAULT_TITLE}
                       onChange={(e) => edit(i, { default: e.target.value })}
                     />
                   </Boxed>

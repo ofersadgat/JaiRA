@@ -2,7 +2,7 @@ import { Fragment, type JSX } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
 import { hueOf, type AnswerMenu, type HintPiece, type Reach } from "@jaira/ui/approvalModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
-import { Press, Txt, font, lengthToken } from "../../primitives";
+import { Press, Txt, edge, font, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { MenuLayer } from "../MenuLayer";
@@ -19,7 +19,8 @@ import { Float } from "./Float";
  *   .answer-what           column, gap 4, padding 4 7 6; its label a .cx-opt-hint; a row per choice
  *                          (centred, gap 7): the swatch (9, radius 3) when there are several, then
  *                          .verdict-seg — 1px --line, radius --control-radius, --panel, clipped; its
- *                          buttons share the width, centred, padding 4 9, app 11/12.5 at 500 (650 on),
+ *                          buttons share the width, centred, padding 4 9, app 11/12.5 at 500 (650 on; the
+ *                          widths' `.mono` is `.approval-surface`'s, so out here it is the same face),
  *                          --dim, a --line between; on: --accent at 13%, --text
  *   .answer-rule           1 tall, 3 4 margins, --line
  *   .cx-submenu button     a row from the top left, gap 8, padding 5 7, radius 7, --dim; hovered --text
@@ -83,37 +84,32 @@ export function AnswerMenuCard({
                   {choice.options.map((option, i) => {
                     const on = choice.chosen === option.width;
                     const spec = { voice: "app", scale: 11 / 12.5, weight: on ? 650 : 500, color: on ? "text" : "dim" } as const;
-                    const mono = { voice: "data", scale: 11 / 12, weight: on ? 650 : 500, color: on ? "text" : "dim" } as const;
                     return (
                       <Press
                         key={option.width}
                         onPress={() => onChoose(choice.key, option.width)}
                         flexGrow={1}
                         flexShrink={1}
-                        flexBasis={0}
+                        // `flex: 1 1 0` on a button whose own edge counts: the one with the rule to its left
+                        // starts that rule wider (1px, as Chromium lays it out at this density).
+                        flexBasis={i > 0 ? hairline() : 0}
                         flexDirection="row"
                         alignItems="center"
                         justifyContent="center"
                         gap={4}
                         paddingVertical={4}
                         paddingHorizontal={9}
-                        {...(i > 0 ? { borderLeftWidth: 1, borderStyle: "solid", borderLeftColor: t.v("line") } : {})}
+                        {...(i > 0 ? edge(t, { left: 1 }) : {})}
                         box={({ hovered }) => ({ backgroundColor: on ? t.mix(t.v("accent"), 13, "transparent") : hovered ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}
                         {...((isWeb ? { role: "radio", "aria-checked": on } : {}) as object)}
                       >
-                        <Txt spec={spec} {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}>
-                          {option.program ? (
-                            <>
-                              every <Txt spec={mono}>{option.width}</Txt> command
-                            </>
-                          ) : option.server !== undefined ? (
-                            <>
-                              every <Txt spec={mono}>{option.server}</Txt> tool
-                            </>
-                          ) : (
-                            <Txt spec={mono}>{option.width}</Txt>
-                          )}
-                        </Txt>
+                        {/* The button is a flex row (gap 4): each run of words is an item of its own, its
+                            edge spaces gone — "every", the width, "command". */}
+                        {(option.program ? ["every", option.width, "command"] : option.server !== undefined ? ["every", option.server, "tool"] : [option.width]).map((words, k) => (
+                          <Txt key={k} spec={spec} {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}>
+                            {words}
+                          </Txt>
+                        ))}
                       </Press>
                     );
                   })}
@@ -148,7 +144,7 @@ export function AnswerMenuCard({
                   <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 500, lineHeight: 1.25, color: item.isDefault || hovered ? "text" : "dim" }} ellip>
                     {item.name}
                   </Txt>
-                  <Txt spec={HINT} {...((isWeb ? { overflowWrap: "anywhere" } : {}) as object)}>
+                  <Txt spec={HINT} {...((isWeb ? { style: { overflowWrap: "anywhere" } } : {}) as object)}>
                     <Hint hint={item.hint} spec={HINT} />
                   </Txt>
                 </View>
@@ -201,11 +197,18 @@ export function Hint({ hint, spec }: { hint: readonly HintPiece[]; spec: Record<
         typeof piece === "string" ? (
           <Fragment key={at}>{piece}</Fragment>
         ) : (
-          <Text key={at} {...(font(t, { voice: "data", scale: (spec["scale"] as number) ?? 1, weight: 700, color: spec["color"] as string }) as object)}>
+          // `b.mono`, outside `.approval-surface`: bold in the hint's own face.
+          <Text key={at} {...(font(t, { voice: "app", scale: (spec["scale"] as number) ?? 1, lineHeight: (spec["lineHeight"] as number) ?? 1.5, weight: 700, color: spec["color"] as string }) as object)}>
             {piece.code}
           </Text>
         ),
       )}
     </>
   );
+}
+
+/** A 1px edge as Chromium lays it out: whole device pixels, at least one. */
+function hairline(): number {
+  const dpr = typeof window !== "undefined" && typeof window.devicePixelRatio === "number" ? window.devicePixelRatio : 1;
+  return Math.max(1, Math.floor(dpr)) / dpr;
 }

@@ -20,7 +20,7 @@
  * screen. That is also the honest model for a panel: it is a second window onto a file, opened
  * deliberately, and closing it is how you put it away.
  */
-import { useEffect, useState, type JSX } from "react";
+import type { JSX } from "react";
 import type {
   ExecutorInfo,
   FileTree,
@@ -31,6 +31,7 @@ import type {
 } from "@jaira/shared/browser";
 import type { UiSurface } from "./fileTypes";
 import { WorkflowEditor } from "./stateEditor";
+import { useStateSource } from "./configPanelModel";
 
 export function StatePanel({
   stateId,
@@ -64,18 +65,7 @@ export function StatePanel({
   /** Go to it properly — the panel is a reading, and this is the way out of one. */
   onOpenState?: ((stateId: string) => void) | undefined;
 }): JSX.Element {
-  const [source, setSource] = useState<WorkflowSource | null | "missing">(null);
-
-  useEffect(() => {
-    let live = true;
-    setSource(null);
-    void read(stateId).then((found) => {
-      if (live) setSource(found ?? "missing");
-    });
-    return () => {
-      live = false;
-    };
-  }, [stateId, read]);
+  const source = useStateSource(stateId, read);
 
   if (source === null) return <p className="empty">Reading {stateId}…</p>;
   if (source === "missing") {

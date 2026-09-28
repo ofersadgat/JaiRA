@@ -1,6 +1,8 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import { parseStructured, type StructuredFormat } from "@jaira/shared/browser";
+import { parseStructured, type StructuredFormat, type WorkflowSource } from "@jaira/shared/browser";
+import { ReadOnlyContext } from "@jaira/ui/reading";
+import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
 import { registerSurfaceTable, newSurfaceRegistry, SURFACE_KEYS, type SurfaceKey } from "@jaira/ui/fileSurfaceTable";
 import { isReading, type FileSurface, type FileSurfaceProps } from "@jaira/ui/fileTypes";
@@ -15,6 +17,8 @@ import { JsonEdit } from "./SchemaEdit";
 import { EditorActions, ReadingNote, Sub } from "./EditorActions";
 import { CompositeView } from "../run/RunView";
 import { useRunContext } from "../run/runContext";
+import { WorkflowEditor } from "../workflow/WorkflowEditor";
+import { useShell } from "../../app/shell";
 
 /**
  * The file surfaces, universal (decision 0015): what draws each half of the Files panel, by the same
@@ -128,8 +132,69 @@ function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
   return <CompositeView {...props} context={context} state={state} />;
 }
 
+/**
+ * `fileSurfaces.tsx`'s `WorkflowEdit`: the authoring form for a state file — the workflow editor
+ * (`components/workflow/WorkflowEditor.tsx`) over the document, saved through the channel that lints it.
+ * What the room's context does not carry yet (the children's slots, reading and writing another state,
+ * the tab each file was left on) is read from the store, as `App.tsx` hands it to the desktop's.
+ */
+function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
+  const { state, actions } = useShell();
+  // The Tools field's permission sets and tools (`App.tsx` reads them for the whole window).
+  const toolsFieldData = useToolsFieldRead(state.at, state.tree);
+  const key = docKey(doc.layer, doc.path);
+  const reading = isReading(context);
+  if (doc.stateId === undefined) return <Empty>This file does not name a state.</Empty>;
+  const source: WorkflowSource = {
+    stateId: doc.stateId,
+    layer: doc.layer,
+    file: doc.file,
+    text: doc.text,
+    exists: doc.exists,
+    ...(doc.builtIn !== undefined ? { builtIn: doc.builtIn } : {}),
+  };
+  const editorTab = context.editorTab ?? state.editorTab;
+  const onEditorTab = context.onEditorTab ?? actions.setEditorTab;
+  const readState = context.readState ?? actions.readState;
+  const saveState = context.saveState ?? actions.saveState;
+  const form = (
+    <WorkflowEditor
+      source={source}
+      tree={context.tree}
+      executors={context.executors}
+      busy={busy}
+      validateSchema={context.validateSchema}
+      loadStateSlots={context.stateSlots ?? actions.stateSlots}
+      {...(context.wrapJson !== undefined ? { wrapJson: context.wrapJson } : {})}
+      onWrapJson={context.onWrapJson}
+      ui={context.ui}
+      issues={context.state?.issues ?? []}
+      reveal={context.revealIssue ?? null}
+      draft={context.drafts?.[key] ?? null}
+      {...(context.onDraft ? { onDraft: (text: string | null) => context.onDraft?.(key, text) } : {})}
+      tab={editorTab?.[key] ?? "form"}
+      onTab={(next) => onEditorTab(key, next)}
+      onOpenState={context.onDrill}
+      readState={readState}
+      saveState={saveState}
+      {...(context.readFile !== undefined ? { readFile: context.readFile } : {})}
+      {...(context.builtInActions !== undefined
+        ? {
+            layerActions: {
+              hasProject: context.builtInActions.hasProject,
+              onOverride: (toLayer) => context.builtInActions?.onOverride(source.stateId, toLayer),
+              ...(context.builtInActions.onEditCopy !== undefined ? { onEditCopy: (text: () => string) => context.builtInActions?.onEditCopy?.(source.stateId, text) } : {}),
+            },
+          }
+        : {})}
+      onSave={(_stateId, _layer, text) => onSave(text)}
+    />
+  );
+  return <ToolsFieldProvider value={toolsFieldData}>{reading ? <ReadOnlyContext.Provider value={true}>{form}</ReadOnlyContext.Provider> : form}</ToolsFieldProvider>;
+}
+
 /** The copies there are, by the table's key. */
-const COPIED: Partial<Record<SurfaceKey, FileSurface>> = { MarkdownView, MarkdownFileEdit, JsonView, YamlView, ConfigEffectiveView, WorkflowRunView, TextEdit, CodeSourceView, ConfigEdit, JsonEdit };
+const COPIED: Partial<Record<SurfaceKey, FileSurface>> = { MarkdownView, MarkdownFileEdit, JsonView, YamlView, ConfigEffectiveView, WorkflowRunView, WorkflowEdit, TextEdit, CodeSourceView, ConfigEdit, JsonEdit };
 
 /** The table, registered with the copies — and an {@link Uncopied} box for every surface without one. */
 export const SURFACES = registerSurfaceTable(

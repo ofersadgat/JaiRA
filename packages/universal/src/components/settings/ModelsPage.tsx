@@ -83,11 +83,9 @@ export function ModelsPage(): JSX.Element {
         {tree === undefined ? (
           notYet
         ) : (
-          <View paddingVertical={13} paddingHorizontal={16}>
-            <Disclosure summary="How a call is dispatched" desc="the executor tree, and the layers around each level">
-              <ExecutorTree resolved={tree} overlay={overlay} locked={locked} agents={state.executors.map((e) => e.name)} onOverlay={onOverlay} split />
-            </Disclosure>
-          </View>
+          <Disclosure card summary="How a call is dispatched" desc="the executor tree, and the layers around each level">
+            <ExecutorTree resolved={tree} overlay={overlay} locked={locked} agents={state.executors.map((e) => e.name)} onOverlay={onOverlay} split />
+          </Disclosure>
         )}
       </SettingsSection>
     </>
@@ -478,8 +476,11 @@ function CandidateNote({ status, picked, left }: { status: CandidateStatus; pick
   );
 }
 
-/** A button in a section's heading takes the heading's font (`button { font: inherit }`). */
-export const SECTION_FONT = { scale: 1.1, weight: 450, lineHeight: 1.3, ls: -0.005 } as const;
+/**
+ * A button in a section's heading takes the heading's font (`button { font: inherit }`): its size,
+ * weight and line, not its tracking — `font` does not carry `letter-spacing`, and a button's is `normal`.
+ */
+export const SECTION_FONT = { scale: 1.1, weight: 450, lineHeight: 1.3 } as const;
 
 /** Settings → Models → Catalog: what this machine's routes say they serve. */
 function CatalogSection({ catalog }: { catalog: CatalogState }): JSX.Element {

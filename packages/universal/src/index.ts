@@ -16,8 +16,14 @@ export { CopiesBoard } from "./screens/CopiesBoard";
 export { SchemaForm, registerWidget } from "./components/form/SchemaForm";
 export { Field, FieldGrid, FormRowsContext, Level } from "./components/form/Field";
 export { SettingsGroup } from "./components/settings/SettingsPage";
+// The two selects (`select.cfg-input` and the plain one), for the select specimen.
+export { SelectInput } from "./components/settings/fields";
+export { Select } from "./components/logs/Select";
 // The floats and dialogs `App.tsx` owns, and the Components room's stage, for the specimens.
 export { Stage as GalleryStage } from "./components/gallery/GalleryPane";
+export { ApprovalDialog, ModuleApprovalDialog } from "./components/floats/Dialogs";
+export { FolderBrowser } from "./components/floats/FolderBrowser";
+export { UpdateRow } from "./components/floats/UpdateRow";
 
 /** Every universal copy there is, by the slot it fills. `/universal` and native draw all of them. */
 export const COPIES: Partial<Slots> = { Pill, TaskCard };

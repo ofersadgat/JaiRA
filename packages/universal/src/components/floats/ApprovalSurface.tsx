@@ -99,7 +99,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
                   {...hover(segment.part)}
                   color={t.v("text") as never}
                   backgroundColor={t.mix(colorOf(t, hueOf(segment.part)), hot === segment.part ? 26 : 13, "transparent") as never}
-                  {...((isWeb ? { paddingVertical: 1, paddingHorizontal: 3, borderRadius: 4, boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" } : {}) as object)}
+                  {...((isWeb ? { paddingVertical: 1, paddingHorizontal: 3, borderRadius: 4, style: { boxDecorationBreak: "clone", WebkitBoxDecorationBreak: "clone" } } : {}) as object)}
                 >
                   <Pieces t={t} pieces={segment.pieces} hue={colorOf(t, hueOf(segment.part))} />
                 </Text>
@@ -135,7 +135,8 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
             caret={pending.asker === undefined}
             open={open?.which === decision}
             onMain={() => decide(decision, "once")}
-            onCaret={(from) => setOpen(open?.which === decision ? null : { which: decision, at: anchorRectOf(from) })}
+            // Placed against the whole split, as the desktop's `pop.anchor` is (the caret's parent on web).
+            onCaret={(from) => setOpen(open?.which === decision ? null : { which: decision, at: anchorRectOf((from as { parentElement?: unknown } | undefined)?.parentElement) })}
           />
         ))}
       </View>
@@ -170,7 +171,9 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
   const [column, setColumn] = useState<{ x: number; width: number } | null>(null);
   const line = useRef<HTMLElement | null>(null);
   const subject = useRef<HTMLElement | null>(null);
-  const measure = (e: { nativeEvent: { layout: { x: number; width: number } } }): void => {
+  const words = useRef<HTMLElement | null>(null);
+  const [wants, setWants] = useState(0);
+  const measure =(e: { nativeEvent: { layout: { x: number; width: number } } }): void => {
     // On web off the elements themselves, to the sub-pixel (`onLayout` rounds there).
     const a = line.current;
     const b = subject.current;
@@ -179,6 +182,19 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
         ? { x: b.getBoundingClientRect().left - a.getBoundingClientRect().left, width: b.getBoundingClientRect().width }
         : { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width };
     setColumn((was) => (was !== null && Math.abs(was.x - next.x) < 0.01 && Math.abs(was.width - next.width) < 0.01 ? was : next));
+    // What the row's grid asks of a box sized to its content (a dialog, a stage's card): each fr column
+    // as wide as the widest of its words per fr, the others as they are (web; a phone's rows fill).
+    const text = words.current;
+    if (!isWeb || a === null || b === null || text === null || typeof document === "undefined") return;
+    const full = (el: HTMLElement): number => {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      return range.getBoundingClientRect().width;
+    };
+    const kids = [...a.children] as HTMLElement[];
+    const fixed = kids.filter((k) => k !== text && k !== b).reduce((sum, k) => sum + k.getBoundingClientRect().width, 0) + 8 * (kids.length - 1);
+    const want = fixed + 2.2 * Math.max(full(text) / 1.2, full(b));
+    setWants((was) => (Math.abs(was - want) < 0.01 ? was : want));
   };
   return (
     <View
@@ -190,9 +206,10 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
       borderRadius={lengthToken(t, "control-radius-sm", 6) as never}
       backgroundColor={(asks ? t.v("tint-warn") : hot ? t.mix(hue, 9, "transparent") : "transparent") as never}
     >
-      <View ref={line as never} flexDirection="row" alignItems="baseline" gap={8}>
+      {/* Measured again when the row itself changes (web: its elements are read, so either event will do). */}
+      <View ref={line as never} {...((isWeb ? { onLayout: measure } : {}) as object)} flexDirection="row" alignItems="baseline" gap={8}>
         <View width={9} height={9} borderRadius={3} backgroundColor={hue as never} alignSelf="center" flexShrink={0} />
-        <Txt spec={{ voice: "data", scale: 11 / 12 }} ellip flexGrow={1.2} flexShrink={1} flexBasis={0} minWidth={0} {...((isWeb ? { title: row.pieces.map((p) => p.text).join("") } : {}) as object)}>
+        <Txt ref={words as never} spec={{ voice: "data", scale: 11 / 12 }} ellip flexGrow={1.2} flexShrink={1} flexBasis={0} minWidth={0} {...((isWeb ? { title: row.pieces.map((p) => p.text).join("") } : {}) as object)}>
           <Pieces t={t} pieces={row.pieces} hue={hue} />
         </Txt>
         <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "tok-hint" }} flexShrink={0}>
@@ -208,11 +225,12 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
           spec={{ voice: "app", scale: 10.5 / 12.5, color: "tok-hint" }}
           marginLeft={column?.x ?? 0}
           width={column?.width ?? 0}
-          {...((isWeb ? { title: row.note, overflowWrap: "anywhere" } : {}) as object)}
+          {...((isWeb ? { title: row.note, style: { overflowWrap: "anywhere" } } : {}) as object)}
         >
           {row.note}
         </Txt>
       ) : null}
+      {wants > 0 ? <View height={0} width={wants} maxWidth="100%" /> : null}
     </View>
   );
 }

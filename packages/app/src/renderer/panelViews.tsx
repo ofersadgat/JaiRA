@@ -625,19 +625,8 @@ export function StateChecks({
   );
 }
 
-/** A stable `read` for `ConfigPanel`, whose effect re-reads whenever the function changes. */
-export function useEffectiveRead(stateId: string, taskId?: string, instanceId?: string, project?: string | null): () => ReturnType<typeof invokeEffective> {
-  return useCallback(() => invokeEffective(stateId, taskId, instanceId, project), [stateId, taskId, instanceId, project]);
-}
-
-function invokeEffective(stateId: string, taskId?: string, instanceId?: string, project?: string | null) {
-  return invoke("state:effective", {
-    stateId,
-    ...(taskId !== undefined ? { taskId } : {}),
-    ...(instanceId !== undefined ? { instanceId } : {}),
-    ...(project !== undefined && project !== null ? { project } : {}),
-  });
-}
+// `useEffectiveRead` is `configPanelModel.ts`'s, so the universal config card reads the same way.
+export { useEffectiveRead } from "./configPanelModel";
 
 /** What a re-run with changes needs: the workflow's form, filled with what the task was called with. */
 export interface RerunSurface {

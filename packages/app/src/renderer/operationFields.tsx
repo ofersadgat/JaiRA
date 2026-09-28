@@ -31,20 +31,27 @@ import { LinkPreview } from "./linkPreview";
 import { emptySlotRow } from "./slotForm";
 import { SlotTable, SlotTypePicker } from "./slotTable";
 import { ToolsFieldControl, useToolsFieldData } from "./toolsField";
+import {
+  CONVERSATION_TITLE,
+  FORK_TITLE,
+  LINKED_NOTE,
+  REF_HINT,
+  SESSION_CHOICES,
+  SESSION_NAME_TITLE,
+  SESSION_TITLE,
+  STRUCTURED_SESSION,
+  modelKnobsSet,
+  operationFieldPaths,
+  reasoningFormOf,
+  reasoningValueOf,
+  simpleFieldShown,
+  visibleField,
+  withField,
+  withJson,
+  withRef,
+} from "./operationFieldsModel";
 
-export const REF_HINT = "a referenced value — edit it on the JSON tab";
-
-/**
- * Every lint path a control inside an `operation` block marks for itself.
- *
- * Exported because the KIND picker sits outside the block and takes what is left: a diagnostic
- * against `operation` that none of these claims — the block failing to resolve at all, or a lowered
- * spelling this form does not render, like `operation.config.model` — is about what kind of
- * operation this is, and the picker is the box that says so.
- */
-export function operationFieldPaths(path: string): string[] {
-  return [...SIMPLE_FIELDS.map((spec) => `${path}.${spec.key}`), `${path}.session`, `${path}.input`, `${path}.output`];
-}
+export { REF_HINT, operationFieldPaths };
 
 /**
  * The completion lists this editor's controls reference, rendered ONCE per form.
@@ -93,7 +100,7 @@ function SimpleFieldControl({
   // A form shows every field it COULD hold, because that is how you find the one to fill in. A
   // reading shows what the state says — and a column of empty boxes labelled Tools, Search path and
   // Seed buries the two lines that are actually declared.
-  if (readOnly && !linked && !structured && value.trim().length === 0) return null;
+  if (!simpleFieldShown(readOnly, form, spec)) return null;
   // The linter names a field by its AUTHORED key — `operation.function`, not `operation.functionRef`
   // — which is the whole reason `SimpleField` carries both spellings.
   const mark = path === undefined ? "" : fieldClass(issues, `${path}.${spec.key}`);
@@ -135,23 +142,11 @@ function SimpleFieldControl({
         />
       )}
       {structured ? <span className="sub">{REF_HINT}</span> : null}
-      {linked ? <span className="sub">spliced in where it is referenced — a copy, not a live link</span> : null}
+      {linked ? <span className="sub">{LINKED_NOTE}</span> : null}
       {/* And what it says, since the whole cost of a link is that the substance moved elsewhere. */}
       {linked && ref !== undefined && ref.length > 0 ? <LinkPreview reference={ref} /> : null}
     </label>
   );
-}
-
-/** Whether anything under "Model settings" was actually tuned — see the fold's own note. */
-function MODEL_KNOBS_SET(form: OperationFieldsForm): boolean {
-  const tuned = SIMPLE_FIELDS.some(
-    (spec) =>
-      spec.group === "model" &&
-      spec.prominent !== true &&
-      ((form.fields[spec.name] ?? "").trim().length > 0 || form.refs[spec.name] !== undefined),
-  );
-  const json = JSON_FIELDS.some((spec) => (form.json[spec.name] ?? "").trim().length > 0);
-  return tuned || json || form.reasoning.effort.length > 0 || form.reasoning.budgetTokens.trim().length > 0;
 }
 
 /** One arbitrary-JSON field. No generated form beats a JSON box for a value nothing has a schema for. */
@@ -212,20 +207,22 @@ function SessionControl({
           className={path === undefined ? undefined : fieldClass(issues, `${path}.session`).trim()}
           value={value.mode}
           disabled={value.mode === "structured"}
-          title={value.mode === "structured" ? REF_HINT : "which conversation stream this call joins"}
+          title={value.mode === "structured" ? REF_HINT : SESSION_TITLE}
           onChange={(e) => onChange({ ...value, mode: e.target.value as SessionForm["mode"] })}
         >
-          <option value="absent">not declared — its own stream</option>
-          <option value="named">named — shared by every state using the name</option>
-          <option value="fresh">fresh — override the chain and start new</option>
-          {value.mode === "structured" ? <option value="structured">a computed position</option> : null}
+          {SESSION_CHOICES.map((choice) => (
+            <option key={choice.value} value={choice.value}>
+              {choice.label}
+            </option>
+          ))}
+          {value.mode === "structured" ? <option value={STRUCTURED_SESSION.value}>{STRUCTURED_SESSION.label}</option> : null}
         </select>
         {value.mode === "named" ? (
           <input
             value={value.name}
             placeholder="review"
             spellCheck={false}
-            title="also the resource-bundle key — workspace and permissions"
+            title={SESSION_NAME_TITLE}
             onChange={(e) => onChange({ ...value, name: e.target.value })}
           />
         ) : null}
@@ -249,7 +246,7 @@ function ConversationControl({
       <div className="row-controls">
         <select
           value={value.mode}
-          title="the transcript preamble injected into THIS call (SPEC §4.7)"
+          title={CONVERSATION_TITLE}
           onChange={(e) => onChange({ ...value, mode: e.target.value as ConversationForm["mode"] })}
         >
           <option value="">not declared</option>
@@ -280,26 +277,6 @@ function ConversationControl({
  * `function`, a function operation has no `prompt`. An `environment` block shows both, because it is
  * a defaults layer and may legitimately supply either.
  */
-/** The form's reasoning text as the value SchemaForm edits: a level, and a budget when it reads as a number. */
-function reasoningValueOf(form: ReasoningForm): Record<string, unknown> {
-  const budget = form.budgetTokens.trim();
-  return {
-    ...(form.effort !== "" ? { effort: form.effort } : {}),
-    ...(budget !== "" ? { budgetTokens: Number.isFinite(Number(budget)) ? Number(budget) : budget } : {}),
-  };
-}
-
-/** SchemaForm's value back as the form's text — what the form serialises from. */
-function reasoningFormOf(value: unknown): ReasoningForm {
-  const bag = value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  const effort = bag["effort"];
-  const budget = bag["budgetTokens"];
-  return {
-    effort: typeof effort === "string" ? effort : "",
-    budgetTokens: typeof budget === "number" || typeof budget === "string" ? String(budget) : "",
-  };
-}
-
 export function OperationFieldsEditor({
   form,
   show,
@@ -333,25 +310,11 @@ export function OperationFieldsEditor({
   // it takes one. A model inherited from the `environment` rather than named here is not known here.
   const namedModel = form.fields["model"]?.trim();
   const thinking = useModelParameters(namedModel === "" ? undefined : namedModel);
-  const setField = (name: string, value: string): void =>
-    onChange({ ...form, fields: { ...form.fields, [name]: value } });
-  const setJson = (name: string, value: string): void =>
-    onChange({ ...form, json: { ...form.json, [name]: value } });
-  const setRef = (name: string, ref: string | null): void => {
-    const refs = { ...form.refs };
-    // Deleting the key is what "not linked" IS — an empty string there means a link whose target has
-    // not been typed yet, and the two must stay distinguishable or unlinking would write a literal
-    // empty prompt.
-    if (ref === null) delete refs[name];
-    else refs[name] = ref;
-    onChange({ ...form, refs });
-  };
+  const setField = (name: string, value: string): void => onChange(withField(form, name, value));
+  const setJson = (name: string, value: string): void => onChange(withJson(form, name, value));
+  const setRef = (name: string, ref: string | null): void => onChange(withRef(form, name, ref));
 
-  const visible = (spec: SimpleField): boolean =>
-    (spec.name !== "prompt" || show.prompt) &&
-    (spec.name !== "functionRef" || show.function) &&
-    // A block says its tools ONCE, in the field below — see {@link ToolsFieldControl}.
-    (spec.name !== "tools" || form.toolsField === undefined);
+  const visible = (spec: SimpleField): boolean => visibleField(spec, show, form);
 
   // The block's OWN anchor, so a diagnostic against `operation` has somewhere to scroll to and
   // something to say in a tooltip. It is not marked in colour — the boxes below are.
@@ -448,7 +411,7 @@ export function OperationFieldsEditor({
         onChange={(session) => onChange({ ...form, session })}
       />
       {readOnly && !form.fork ? null : (
-        <label className="slot-opt wide" title="always branch, rather than appending when the position is still the head">
+        <label className="slot-opt wide" title={FORK_TITLE}>
           <input type="checkbox" checked={form.fork} onChange={(e) => onChange({ ...form, fork: e.target.checked })} />
           fork the session rather than appending
         </label>
@@ -459,7 +422,7 @@ export function OperationFieldsEditor({
       {/* Thirteen empty boxes when nothing is tuned, which is nearly always. A fold hides them from
           an author; a reading should not carry them at all — and when it does carry them, it opens
           them, because a reader is not going to guess that a closed fold has something in it. */}
-      {readOnly && !MODEL_KNOBS_SET(form) ? null : (
+      {readOnly && !modelKnobsSet(form) ? null : (
       <details className="model-knobs" open={readOnly}>
         <summary>Model settings</summary>
         {SIMPLE_FIELDS.filter((spec) => spec.group === "model" && spec.prominent !== true).map((spec) => (

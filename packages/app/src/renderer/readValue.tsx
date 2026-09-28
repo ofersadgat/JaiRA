@@ -19,16 +19,7 @@
  */
 import type { JSX } from "react";
 import type { JsonValue } from "@declarative-ai/json";
-
-/**
- * A value as the box under a slot shows it.
- *
- * A string is itself — prose in quotes is prose nobody can read — and everything else is JSON, which
- * is what it is.
- */
-function textOf(value: JsonValue): string {
-  return typeof value === "string" ? value : JSON.stringify(value, null, 2);
-}
+import { valueTextOf as textOf } from "./linkModel";
 
 export function ReadValue({ value }: { value: JsonValue | undefined }): JSX.Element | null {
   if (value === undefined) return null;

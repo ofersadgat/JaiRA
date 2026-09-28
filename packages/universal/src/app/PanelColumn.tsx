@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState, type JSX } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
-import type { TaskDetail } from "@jaira/shared/browser";
+import { SHARED_SESSION, type TaskDetail } from "@jaira/shared/browser";
+import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
+import { projectName } from "@jaira/ui/projects";
 import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, usePanelStacks, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
@@ -8,6 +10,8 @@ import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
 import { PANE, SHUT, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { faceOf, type FaceHost } from "../components/panel/faces";
+import { EventsTaskAutomations } from "../components/workflow/ConfigPanel";
+import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { NewTaskForm } from "../components/panel/NewTaskForm";
 import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBridge";
 import type { TranscriptSource } from "../components/panel/RunTranscript";
@@ -33,6 +37,9 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const t = useTokens();
   const { state, actions } = useShell();
   const ui = state.settings.ui;
+  const look = useMemo(() => lookOf(state.config), [state.config]);
+  // The Tools field's permission sets and tools, for the workflow editor in a state's Configuration.
+  const toolsFieldData = useToolsFieldRead(state.at, state.tree);
   const room = roomOf(state.view);
   const { setStacks, onStack, panelStack, roomRef } = usePanelStacks(room);
   // Which reading of a drilled run the column shows — the title bar's toggle (`viewState.ts`).
@@ -159,6 +166,56 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     rerunSurface: (task) => rerunSurfaceFor(state, actions, task, selectedProject, onStack),
     onFork: (taskId, seq) => void actions.forkTask(taskId, seq, selectedProject),
     turns: state.conversation?.turns ?? [],
+    // The workflow editor's, in a configuration card and a state's Configuration (`App.tsx`'s `config`).
+    config: {
+      tree: state.tree,
+      executors: state.executors,
+      busy: state.busy,
+      wrapJson: look.editors.json.wrap,
+      onWrapJson: actions.setWrapJson,
+      services: {
+        readFile: actions.readFile,
+        readState: actions.readState,
+        loadStateSlots: actions.stateSlots,
+        validateSchema: actions.validateSchema,
+        wrapJson: look.editors.json.wrap,
+        onWrapJson: actions.setWrapJson,
+      },
+      readState: actions.readState,
+      saveState: actions.saveState,
+      ui: {
+        pane: (id, fallback) => ui.panes[id] ?? fallback,
+        setPane: actions.setPane,
+        open: (id, fallback) => ui.open[id] ?? fallback,
+        setOpen: actions.setFold,
+      },
+    },
+    // The events task's Configuration tab: Settings' Automations editor on the task's layer (`App.tsx`'s
+    // `automationsOf`). Settings is opened on its page; the part it scrolls to is the desktop's alone.
+    automationsOf: (project, onOpenConversation) => {
+      const at = project ?? state.at ?? SHARED_SESSION;
+      const shared = at === SHARED_SESSION;
+      const toSettings = (section: Parameters<typeof actions.setSection>[0]): void => {
+        if (!shared) actions.standOn(at);
+        actions.setConfigLayer(shared ? "base" : "project");
+        actions.setSection(section);
+        actions.setView("settings");
+      };
+      return (
+        <EventsTaskAutomations
+          project={at}
+          projectName={shared ? "Shared" : (state.projects.find((p) => p.project === at)?.label ?? projectName(at))}
+          busy={state.busy}
+          workflows={state.workflows.map((entry) => ({ id: entry.rootId, label: entry.label }))}
+          forms={state.workflowForms}
+          onWorkflow={actions.pickWorkflow}
+          onOpenConversation={onOpenConversation}
+          onEditFile={(layer) => void actions.openWorkflow(EVENTS_STATE_ID, layer)}
+          onOpenEvents={() => toSettings("tools")}
+          onOpenConnections={() => toSettings("connections")}
+        />
+      );
+    },
   };
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
   void roomRef;
@@ -180,7 +237,9 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         backgroundColor={t.v("panel") as never}
         {...(edge(t, { left: 1 }, geometry.open ? "line" : "rule") as object)}
       >
-        <SidePanel stack={panelStack} onStack={onStack} face={face} folded={!geometry.open} onFold={(folded) => geometry.foldKey !== null && actions.setFold(geometry.foldKey, !folded)} closeFolds={closeFoldsOf(panelStack)} />
+        <ToolsFieldProvider value={toolsFieldData}>
+          <SidePanel stack={panelStack} onStack={onStack} face={face} folded={!geometry.open} onFold={(folded) => geometry.foldKey !== null && actions.setFold(geometry.foldKey, !folded)} closeFolds={closeFoldsOf(panelStack)} />
+        </ToolsFieldProvider>
       </View>
     </>
   );

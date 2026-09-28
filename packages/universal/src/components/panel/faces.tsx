@@ -1,7 +1,12 @@
 import type { JSX, ReactNode } from "react";
 import type { PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
 import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
-import { pop, push, selectStep, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { View } from "@tamagui/core";
+import type { ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
+import type { ConfigPanelServices } from "@jaira/ui/configPanel";
+import { useEffectiveRead } from "@jaira/ui/configPanelModel";
+import type { UiSurface } from "@jaira/ui/fileTypes";
 import { rerunStartsOf } from "@jaira/ui/panelHost";
 import { checksCountOf } from "@jaira/ui/panelViewsModel";
 import { taskNameOf } from "@jaira/ui/taskName";
@@ -21,6 +26,8 @@ import { RunPanel } from "./RunPanel";
 import type { RunSurface } from "@jaira/ui/runPanel";
 import { StepsBody } from "./StepsView";
 import { TaskConversation } from "./TaskConversation";
+import { ConfigCard as WorkflowConfigCard } from "../workflow/ConfigPanel";
+import { StatePanel } from "../workflow/StatePanel";
 
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
 
@@ -72,6 +79,23 @@ export interface FaceHost {
   onFork?: ((taskId: string, seq: number) => void) | undefined;
   /** The conversation's turns, for where a copy may start. */
   turns: readonly { kind: string; instanceId?: string | undefined; seq: number }[];
+  /**
+   * What the workflow editor needs in a configuration card and a state's Configuration (`PanelHost.config`
+   * and the context's `readState`/`saveState`/`ui`).
+   */
+  config: {
+    tree: FileTree | null;
+    executors: ExecutorInfo[];
+    busy: boolean;
+    services: ConfigPanelServices;
+    wrapJson?: boolean | undefined;
+    onWrapJson?: ((wrap: boolean) => void) | undefined;
+    readState?: ((stateId: string) => Promise<WorkflowSource | null>) | undefined;
+    saveState?: ((source: WorkflowSource, text: string) => void) | undefined;
+    ui?: UiSurface | undefined;
+  };
+  /** The events task's automations — Settings' Automations editor, for the task's project (or Shared's). */
+  automationsOf: (project: string | undefined, onOpenConversation: () => void) => ReactNode;
 }
 
 /** A task's status glyph (`board.tsx`'s `Badge`): 16 wide, 15px, coloured by status. */
@@ -146,13 +170,44 @@ function stepsBody(host: FaceHost, detail: TaskDetail, entry: { step?: string; p
   );
 }
 
+/** The configuration a run resolved against — a card, and a tab (`panelFaces.tsx`'s `ConfigCard`). */
+function ConfigCard({ host, stateId, taskId, instanceId, project }: { host: FaceHost; stateId: string; taskId?: string | undefined; instanceId?: string | undefined; project?: string | null | undefined }): JSX.Element {
+  const read = useEffectiveRead(stateId, taskId, instanceId, project ?? host.project ?? null);
+  return <WorkflowConfigCard read={read} stateId={stateId} tree={host.config.tree} executors={host.config.executors} services={host.config.services} onOpenState={host.openInFiles} />;
+}
+
+/** A state's configuration, editable — its own copy of the file (`panelFaces.tsx`'s `StateConfig`). */
+function StateConfig({ host, stateId }: { host: FaceHost; stateId: string }): JSX.Element {
+  const { readState, saveState } = host.config;
+  if (readState === undefined) return <PanelEmpty>This state&apos;s file cannot be read here.</PanelEmpty>;
+  // `.sp-body.scroll`'s padding (12 12 18), around a panel that fills it rather than scrolling in it.
+  return (
+    <View flex={1} minHeight={0} flexDirection="column" paddingTop={12} paddingHorizontal={12} paddingBottom={18}>
+    <StatePanel
+      stateId={stateId}
+      read={readState}
+      save={saveState ?? (() => undefined)}
+      tree={host.config.tree}
+      executors={host.config.executors}
+      busy={host.config.busy}
+      validateSchema={host.config.services.validateSchema}
+      loadStateSlots={host.config.services.loadStateSlots}
+      wrapJson={host.config.wrapJson}
+      onWrapJson={host.config.onWrapJson}
+      ui={host.config.ui}
+      readFile={host.config.services.readFile}
+      onOpenState={host.openInFiles}
+    />
+    </View>
+  );
+}
+
 /** The ⨯ that lets go of a held value. */
 const dropIcon = (host: FaceHost) => (item: PinnedValue): ReactNode => <SpIcon icon="cross" label="Let go of it" onPress={() => host.unhold(item)} />;
 
 /**
- * The face of any entry (`panelFaces.tsx`'s `faceOf`). {@link Uncopied}: a task's Configuration (the
- * workflow's configuration form, `ConfigPanel`) and an events task's Automations, a state's
- * Configuration, a subagent's conversation, and a task the store is not holding (`OwnRun`).
+ * The face of any entry (`panelFaces.tsx`'s `faceOf`). {@link Uncopied}: a subagent's conversation, and
+ * a task the store is not holding (`OwnRun`).
  */
 export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
@@ -177,7 +232,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
           case "outputs":
             return <OutputsView detail={detail} sessions={host.source.sessionHistory} onOpen={(title, value) => pushPreview(host, { title, value })} />;
           case "configuration":
-            return <Uncopied name={isEventsTask(detail) ? "the events task's automations" : "the configuration as it ran (ConfigPanel)"} flex={1} />;
+            if (isEventsTask(detail)) return host.automationsOf(project, () => host.onStack((was) => setTab(was, "conversation")));
+            return <ConfigCard host={host} stateId={detail.workflow} taskId={detail.taskId} project={project} />;
         }
       };
       return {
@@ -205,7 +261,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
           case "held":
             return <HeldView held={host.held} onOpen={(item) => pushPreview(host, item as PinnedValue)} onDrop={(item) => host.unhold(item as PinnedValue)} dropIcon={(item) => dropIcon(host)(item as PinnedValue)} />;
           case "configuration":
-            return isEventsTask(detail) ? <Uncopied name="the events task's automations" flex={1} /> : null;
+            // The conversation is the main view's already, so "open it" has nowhere else to go.
+            return isEventsTask(detail) ? host.automationsOf(project, () => undefined) : null;
         }
       };
       const verbs: PanelVerb[] = [
@@ -270,7 +327,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
               />
             );
           case "configuration":
-            return <Uncopied name="the state's configuration (StatePanel)" flex={1} />;
+            return <StateConfig host={host} stateId={entry.stateId} />;
         }
       };
       return {
@@ -282,6 +339,9 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
         tabs,
         tab: open,
         body: body(),
+        // The state panel fills the body and scrolls its own form (`.state-panel` is flex 1 in the
+        // DOM's scrolling body, which it never overflows), so the body is not a scroller around it.
+        ...(open === "configuration" && view !== undefined && view !== null ? { scroll: false } : {}),
       };
     }
 
@@ -294,7 +354,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
         title: name,
         titleText: `${name} · configuration`,
         sub: entry.instanceId,
-        body: <Uncopied name="the configuration as it ran (ConfigPanel)" flex={1} />,
+        body: <ConfigCard host={host} stateId={entry.stateId} taskId={entry.taskId} instanceId={entry.instanceId} project={entry.project} />,
       };
     }
 

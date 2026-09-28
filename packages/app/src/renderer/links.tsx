@@ -18,15 +18,9 @@
  */
 import type { JSX } from "react";
 import { useReadOnly } from "./reading";
-import { isKnownRef } from "./completions";
+import { LINK_PLACEHOLDER, LINK_TARGETS_ID, UNRESOLVED_NOTE, isUnresolvedLink, linkToggleTitle, linkToggleWords } from "./linkModel";
 
-/**
- * The datalist every link control completes against.
- *
- * One list for the whole editor rather than one per control: a state form renders a link control per
- * linkable field, per slot row and once for the operation, and a datalist id has to be unique.
- */
-export const LINK_TARGETS_ID = "link-targets";
+export { LINK_TARGETS_ID };
 
 export function LinkTargets({ targets }: { targets: string[] }): JSX.Element {
   return (
@@ -63,14 +57,10 @@ export function LinkToggle({
       type="button"
       className={`ghost sm link-toggle${linked ? " on" : ""}`}
       disabled={disabled === true}
-      title={
-        linked
-          ? "hold this value inline instead of in a file — what you had before linking comes back"
-          : "hold this value in a file and reference it (WORKFLOWS.md §2.2)"
-      }
+      title={linkToggleTitle(linked)}
       onClick={() => onToggle(!linked)}
     >
-      🔗 {linked ? "Linked" : "Link"}
+      {linkToggleWords(linked)}
     </button>
   );
 }
@@ -97,7 +87,7 @@ export function LinkInput({
   mark?: string;
   onChange: (value: string) => void;
 }): JSX.Element {
-  const unresolved = value.trim().length > 0 && !isKnownRef(value, targets);
+  const unresolved = isUnresolvedLink(value, targets);
   return (
     <>
       <input
@@ -105,11 +95,11 @@ export function LinkInput({
         list={LINK_TARGETS_ID}
         value={value}
         spellCheck={false}
-        placeholder={placeholder ?? "$/prompts/feature_goals.md"}
+        placeholder={placeholder ?? LINK_PLACEHOLDER}
         onChange={(e) => onChange(e.target.value)}
       />
       {unresolved ? (
-        <span className="sub warn">no file here yet — the linter will call this unresolved</span>
+        <span className="sub warn">{UNRESOLVED_NOTE}</span>
       ) : null}
     </>
   );

@@ -9,6 +9,7 @@ import { useTokens } from "../../tokens";
 import { Chip } from "../files/Chip";
 import { Icon } from "../panel/Icon";
 import { Svg } from "../panel/Svg";
+import { InlineGlyph } from "./InlineGlyph";
 import { Button } from "../settings/Button";
 
 /**
@@ -176,9 +177,9 @@ export function OptionButton({
       <Txt spec={{ ...BODY, weight: primary ? 600 : 400, color: ink }}>
         {icon !== undefined ? (
           <>
-            <View display={(isWeb ? "inline-flex" : "flex") as never} width={13} height={13} {...((isWeb ? { verticalAlign: -2 } : {}) as object)}>
+            <InlineGlyph size={13} drop={2}>
               <Icon name={icon} size={13} color={String(t.v(ink))} />
-            </View>{" "}
+            </InlineGlyph>{" "}
           </>
         ) : null}
         {label}

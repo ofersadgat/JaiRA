@@ -11,10 +11,9 @@
  * Rendering only. Every write goes through `applyForm`, which MERGES rather than rebuilds — see
  * `stateForm` for why that distinction is the whole safety property.
  */
-import { lazy, Suspense, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { lazy, Suspense, useEffect, useRef, type JSX, type ReactNode } from "react";
 import {
   WORKFLOW_JSON,
-  isWritableLayer,
   type ExecutorInfo,
   type FileTree,
   type LintIssue,
@@ -25,41 +24,47 @@ import {
   type WorkflowSource,
   type WritableLayer,
 } from "@jaira/shared/browser";
-import {
-  applyForm,
-  EMPTY_FORM,
-  emptyBindingRow,
-  emptyChildRow,
-  formOf,
-  type BindingRow,
-  type ChildRow,
-  type FormModel,
-  type TransitionRow,
-} from "./stateForm";
+import { emptyBindingRow, emptyChildRow, type BindingRow, type ChildRow, type FormModel, type TransitionRow } from "./stateForm";
 import { EditorActions, type EditorTab } from "./editorChrome";
 import { ReadOnlyContext, useReadOnly, useRunReading } from "./reading";
-import { LayerBar, layerBarOf, overrideTarget, type LayerBarAction } from "./builtIn";
+import { LayerBar, layerBarOf } from "./builtIn";
 import { ReadValue } from "./readValue";
 import { StateGraphView } from "./stateGraphView";
-import { anchorFor, fieldClass, FLASH_MS, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
+import { anchorFor, fieldClass, FLASH_MS, markFor, type FormIssues } from "./issues";
 import type { UiSurface } from "./fileTypes";
 import { SchemaJsonEditor, schemaReferenceProps } from "./schemaEditor";
 import { SlotTable } from "./slotTable";
 import { EMPTY_OPERATION_FIELDS, type OperationFieldsForm } from "./operationForm";
-import { operationFieldPaths, OperationDataLists, OperationFieldsEditor, REF_HINT } from "./operationFields";
-import { LinkInput, LinkTargets, LinkToggle } from "./links";
+import { OperationDataLists, OperationFieldsEditor, REF_HINT } from "./operationFields";
+import { LinkInput, LinkTargets } from "./links";
 import { LinkPreview, LinkReaderProvider } from "./linkPreview";
+import { childKeyOptions, childStateOptions } from "./completions";
 import {
-  bindingTargets,
-  childKeyOptions,
-  childStateIdOf,
-  childStateOptions,
-  functionOptions,
-  guardTargets,
-  resolveRef,
-  linkTargets,
-  operationOutputNames,
-} from "./completions";
+  BINDING_TARGETS_ID,
+  ENVIRONMENT_KINDS,
+  GUARD_TARGETS_ID,
+  MOUNT_KINDS,
+  NO_STATE_SLOTS,
+  OPERATION_KINDS,
+  TABS,
+  TAB_TITLES,
+  TAB_WORDS,
+  bindingTableOf,
+  childRowOf,
+  editedRow,
+  editorPathOf,
+  freeChildKeys,
+  kindMarksOf,
+  moved,
+  outputsEmptyMeans,
+  savesOf,
+  transitionMarksOf,
+  transitionTargetsOf,
+  useWorkflowEditor,
+  type LayerActions,
+} from "./stateEditorModel";
+
+export { seedRequiredBindings } from "./stateEditorModel";
 
 /**
  * The diff editor, for "Compare with what ships". Loaded on first use, never with the form — Monaco
@@ -68,48 +73,6 @@ import {
  */
 const MonacoDiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 
-
-/**
- * The datalist every binding box completes against.
- *
- * One list for the whole form: a state has a binding box per slot, per operation input and per child
- * wire, and they all name paths in the SAME evaluation scope — this state's inputs and its children's
- * outputs. A list per table would be the same content under N ids.
- */
-const BINDING_TARGETS_ID = "binding-targets";
-
-/**
- * The datalist a `when` guard completes against.
- *
- * Separate from the binding list and that is the whole point: hw refuses a BINDING whose path starts
- * with `operation` — "not a runtime namespace — expected inputs, outputs, children or artifacts" —
- * while the same path in a guard loads cleanly. One shared list would suggest paths that fail the
- * workflow to load in half the places it was offered.
- */
-const GUARD_TARGETS_ID = "guard-targets";
-
-/** What the operation block's own controls mark, so the kind picker can take what is left over. */
-const OPERATION_FIELD_PATHS = operationFieldPaths("operation");
-
-// --- shared row furniture ------------------------------------------------------
-
-/** The three readings of a state file, in the order the tab strip offers them. */
-const TABS: readonly EditorTab[] = ["form", "json", "graph"];
-const TAB_WORDS: Record<EditorTab, string> = { form: "Form", json: "JSON", graph: "Graph" };
-const TAB_TITLES: Record<EditorTab, string> = {
-  form: "the fields, as controls",
-  json: "the document, as text",
-  graph: "what runs after what, and what makes it",
-};
-
-/** Move a row within a list. Order is semantics for children and transitions alike. */
-function moved<T>(rows: readonly T[], from: number, to: number): T[] {
-  if (to < 0 || to >= rows.length) return [...rows];
-  const next = [...rows];
-  const [row] = next.splice(from, 1);
-  next.splice(to, 0, row!);
-  return next;
-}
 
 /**
  * What the tabs draw INTO — inert in a reading, and nothing at all otherwise.
@@ -186,23 +149,10 @@ function BindingTable({
   const reading = useRunReading();
   // `children.<key>.inputs` — the key is what the recorded values are filed under, and this path is
   // the only place the table is told which child it is wiring.
-  const childKey = /^children\.([^.]+)\.inputs$/.exec(path ?? "")?.[1];
+  const table = bindingTableOf(rows, slots, path, issues, REF_HINT);
+  const childKey = table.childKey;
   const wired = childKey === undefined ? undefined : reading?.children?.[childKey];
-  const edit = (index: number, patch: Partial<BindingRow>): void =>
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  const byName = new Map(slots.map((slot) => [slot.name, slot]));
-  const pathOf = (row: BindingRow): string | undefined =>
-    path === undefined || row.name.trim().length === 0 ? undefined : `${path}.${row.name.trim()}`;
-  /**
-   * What is wrong with the TABLE rather than with any wire in it.
-   *
-   * One diagnostic, and it is the most common error a state has: "required child input 'goal' is not
-   * wired", reported at `children.<key>.inputs` because the wire it is about does not exist in the
-   * document. The box for it does exist — `seedRequiredBindings` puts a blank row there — so the
-   * error goes to that row below. Without this the row showed the form's own `.unwired` warning
-   * colour and nothing else, which is an error rendered as a caution.
-   */
-  const missing = path === undefined ? "" : fieldClass(issues, path, rows.map(pathOf).filter(Boolean) as string[]);
+  const edit = (index: number, patch: Partial<BindingRow>): void => onChange(editedRow(rows, index, patch));
   return (
     <div {...(path === undefined ? { className: "bindings" } : markFor(issues, path, "bindings"))}>
       <datalist id={listId}>
@@ -225,23 +175,15 @@ function BindingTable({
         </div>
       ) : (
         rows.map((row, i) => {
-          const slot = byName.get(row.name.trim());
-          // Seeded and still blank. Left as an ERROR rather than filled with a guess: the whole
-          // point of the row appearing is that this is a decision only the author can make, and a
-          // plausible default would be one the lint would then stop asking about.
-          const unwired = slot !== undefined && !slot.optional && row.structured !== true && row.value.trim().length === 0;
-          const rowPath = pathOf(row);
-          const base = `slot-row binding-row${unwired ? " unwired" : ""}`;
           // A row that IS the missing wire wears the table's error on both boxes: nothing about it
           // is right yet. A row that exists and is wrong wears it on the value, which is the part
-          // hw checked.
-          const rowMark = rowPath === undefined ? "" : fieldClass(issues, rowPath);
-          const absent = unwired ? missing : "";
+          // hw checked. See `bindingTableOf`.
+          const { slot, rowPath, base, nameMark, valueMark, valuePlaceholder, valueTitle } = table.rows[i]!;
           return (
             <div key={i} className="binding-group">
             <div {...(rowPath === undefined ? { className: base } : markFor(issues, rowPath, base))}>
               <input
-                className={absent.trim()}
+                className={nameMark}
                 value={row.name}
                 list={listId}
                 placeholder="the child's input"
@@ -253,13 +195,13 @@ function BindingTable({
               {/* The wire, and therefore the box a diagnostic about this wire belongs to — every
                   check hw runs at `children.<key>.inputs.<slot>` is about the value, not the name. */}
               <input
-                className={(rowMark.length > 0 ? rowMark : absent).trim()}
+                className={valueMark}
                 value={row.value}
                 list={bindingListId}
-                placeholder={unwired ? "required — nothing runs until this is bound" : ".inputs.issue"}
+                placeholder={valuePlaceholder}
                 spellCheck={false}
                 disabled={row.structured === true}
-                title={row.structured === true ? REF_HINT : slot?.description}
+                title={valueTitle}
                 onChange={(e) => edit(i, { value: e.target.value })}
               />
               {readOnly ? null : (
@@ -282,52 +224,6 @@ function BindingTable({
     </div>
   );
 }
-
-/**
- * Give every child a row for each REQUIRED input it declares, blank.
- *
- * The row is the whole feature. `applyBindings` drops a row with no value, so nothing is written and
- * `children.<key>.inputs` stays as it was — which means the state still fails to lint with "required
- * child input 'x' is not wired", exactly as it should. What changes is where you meet that sentence:
- * in the form, next to an empty box with the slot's name on it, instead of in the lint panel after
- * saving a child you had no way of knowing declared anything.
- *
- * Derived on every load rather than seeded once at mount, so a row deleted here comes back. That is
- * the correct behaviour and not an oversight: the row is a rendering of what the child declares, and
- * a required input does not stop being required because someone closed the row for it.
- *
- * OPTIONAL slots get no row. A blank row for one would never resolve into anything — it is not an
- * error, so nothing would ever clear it — and a table of permanent non-problems is how the two
- * genuine ones stop being read. "+ Wire" and the name completion cover them.
- *
- * Returns `rows` unchanged, by identity, when there is nothing to add. The caller writes back only
- * on a real change, so this cannot cycle with the effect that calls it.
- */
-export function seedRequiredBindings(
-  children: readonly ChildRow[],
-  declared: Record<string, StateSlots>,
-  stateIdOf: (child: ChildRow) => string,
-): ChildRow[] {
-  let changed = false;
-  const next = children.map((child) => {
-    const slots = declared[stateIdOf(child)];
-    if (slots === undefined) return child;
-    const present = new Set(child.inputs.map((row) => row.name.trim()));
-    const missing = slots.inputs.filter((slot) => !slot.optional && !present.has(slot.name));
-    if (missing.length === 0) return child;
-    changed = true;
-    return { ...child, inputs: [...child.inputs, ...missing.map((slot) => ({ name: slot.name, value: "" }))] };
-  });
-  return changed ? next : (children as ChildRow[]);
-}
-
-/**
- * The default for {@link WorkflowEditor}'s `loadStateSlots` — a form with no store behind it.
- *
- * A module constant rather than an inline default, so its identity is stable: it is an effect
- * dependency, and a fresh closure per render would fire the effect on every paint.
- */
-const NO_STATE_SLOTS = async (): Promise<null> => null;
 
 /**
  * The children table — the state's structure, in the order it runs.
@@ -361,23 +257,17 @@ function ChildrenTable({
   onChange: (rows: ChildRow[]) => void;
 }): JSX.Element {
   const readOnly = useReadOnly();
-  const edit = (index: number, patch: Partial<ChildRow>): void =>
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  const pathOf = (row: ChildRow): string | undefined =>
-    row.key.trim().length === 0 ? undefined : `children.${row.key.trim()}`;
-  // Keys already used are not offered again: a `children` map cannot hold the same key twice, and the
-  // second one would silently replace the first rather than adding a child.
-  const taken = new Set(rows.map((row) => row.key.trim()).filter((key) => key.length > 0));
+  const edit = (index: number, patch: Partial<ChildRow>): void => onChange(editedRow(rows, index, patch));
   return (
     // Two anchors: `sequence[i]` is a claim about which of THESE rows are steps, and the spine
     // checkbox is where it is edited, so a diagnostic about the sequence belongs to this table.
     <div {...markFor(issues, ["children", "sequence"], "slots children")}>
       <datalist id="child-keys">
-        {keyOptions
-          .filter((key) => !taken.has(key))
-          .map((key) => (
-            <option key={key} value={key} />
-          ))}
+        {/* Keys already used are not offered again: a `children` map cannot hold the same key twice,
+            and the second one would silently replace the first rather than adding a child. */}
+        {freeChildKeys(keyOptions, rows).map((key) => (
+          <option key={key} value={key} />
+        ))}
       </datalist>
       <datalist id="child-states">
         {stateOptions.map((id) => (
@@ -404,22 +294,9 @@ function ChildrenTable({
         <div className="sub">none — this state runs its own operation and nothing below it</div>
       ) : (
         rows.map((row, i) => {
-          const childPath = pathOf(row);
-          const inputsPath = childPath === undefined ? undefined : `${childPath}.inputs`;
-          // What the child MOUNTS. Everything reported against a child except its wiring (the rows
-          // below) and its per-mount environment (the selects below) is about the state it names:
-          // "references unknown state", "not a descendant path of".
-          const stateMark =
-            childPath === undefined
-              ? ""
-              : fieldClass(issues, childPath, [inputsPath!, `${childPath}.environment`]);
-          // What this mount actually RUNS, when the box does not already say it. A child's `state`
-          // is optional and a `./` one is relative to the parent's id rather than to its directory
-          // (WORKFLOWS.md §6), so the two commonest spellings — blank, and `./goals` — both name a
-          // file whose id appears nowhere on the row. The link had a destination the form knew and
-          // did not show.
-          const mounted = stateIdOf(row);
-          const resolved = mounted.length > 0 && mounted !== row.state.trim() ? mounted : "";
+          // What the child MOUNTS, what this mount actually RUNS, and whether its environment is
+          // drawn — see `childRowOf`.
+          const { childPath, inputsPath, stateMark, resolved, statePlaceholder, environmentShown, environmentOpen, environmentMark } = childRowOf(row, issues, stateIdOf, readOnly);
           return (
           <div className="slot-group" key={i}>
             <div
@@ -440,7 +317,7 @@ function ChildrenTable({
                   className={stateMark.trim()}
                   value={row.state}
                   list="child-states"
-                  placeholder={row.key ? `./${row.key}` : "state id (defaults to the key)"}
+                  placeholder={statePlaceholder}
                   spellCheck={false}
                   onChange={(e) => edit(i, { state: e.target.value })}
                 />
@@ -506,18 +383,8 @@ function ChildrenTable({
                 environment and the child's own, so it is a default the child may still override.
                 Folded away because it is genuinely optional — most mounts take what they inherit —
                 and open the moment this one says anything of its own. */}
-            {readOnly &&
-            row.environment.kind === "" &&
-            row.environment.functionRef.length === 0 &&
-            row.environment.model.length === 0 ? null : (
-            <details
-              className="slot-more"
-              open={
-                row.environment.kind !== "" ||
-                row.environment.functionRef.length > 0 ||
-                row.environment.model.length > 0
-              }
-            >
+            {!environmentShown ? null : (
+            <details className="slot-more" open={environmentOpen}>
               <summary>
                 environment
                 <span className="sub"> · defaults for this mount only</span>
@@ -526,9 +393,7 @@ function ChildrenTable({
                 {/* §6.1's own diagnostics — `children.<key>.environment.session` is the one hw
                     reports — belong to this mount's defaults, and this is the first box of them. */}
                 <select
-                  className={
-                    childPath === undefined ? undefined : fieldClass(issues, `${childPath}.environment`).trim()
-                  }
+                  className={childPath === undefined ? undefined : environmentMark}
                   value={row.environment.kind}
                   title="the operation kind this mount supplies to a child that leaves it to the chain"
                   onChange={(e) =>
@@ -537,9 +402,11 @@ function ChildrenTable({
                     })
                   }
                 >
-                  <option value="">kind…</option>
-                  <option value="prompt">prompt</option>
-                  <option value="function">function</option>
+                  {MOUNT_KINDS.map((kind) => (
+                    <option key={kind.value} value={kind.value}>
+                      {kind.label}
+                    </option>
+                  ))}
                 </select>
                 <input
                   value={row.environment.functionRef}
@@ -591,8 +458,7 @@ function TransitionsTable({
   onChange: (rows: TransitionRow[]) => void;
 }): JSX.Element {
   const readOnly = useReadOnly();
-  const edit = (index: number, patch: Partial<TransitionRow>): void =>
-    onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
+  const edit = (index: number, patch: Partial<TransitionRow>): void => onChange(editedRow(rows, index, patch));
   return (
     <div {...markFor(issues, "transitions", "slots")}>
       <datalist id={GUARD_TARGETS_ID}>
@@ -601,11 +467,9 @@ function TransitionsTable({
         ))}
       </datalist>
       <datalist id="transition-targets">
-        {childKeys.map((key) => (
+        {transitionTargetsOf(childKeys).map((key) => (
           <option key={key} value={key} />
         ))}
-        <option value="terminate.success" />
-        <option value="terminate.error" />
       </datalist>
       <div className="slots-head">
         <span>Transitions</span>
@@ -625,7 +489,7 @@ function TransitionsTable({
                 the row-level one is the cycle warning, whose remedy is a guard or a limit — and of
                 the two boxes here, this is the one that can carry it. */}
             <input
-              className={fieldClass(issues, `transitions[${i}]`, [`transitions[${i}].to`]).trim()}
+              className={transitionMarksOf(issues, i).when}
               value={row.when}
               list={GUARD_TARGETS_ID}
               placeholder="guard — empty is unconditional, and must infer to boolean"
@@ -636,7 +500,7 @@ function TransitionsTable({
             />
             <span className="arrow">→</span>
             <input
-              className={fieldClass(issues, `transitions[${i}].to`).trim()}
+              className={transitionMarksOf(issues, i).to}
               value={row.to}
               list="transition-targets"
               placeholder="child key or terminate.success"
@@ -780,112 +644,58 @@ export function WorkflowEditor({
    * graph's side panel and for a form rendered outside the shell: neither has a tree to follow an
    * override into. "Compare with what ships" needs only {@link readFile}, so it is not in here.
    */
-  layerActions?:
-    | {
-        hasProject: boolean;
-        /** Copy this shipped file up into a layer a person owns, and open the copy. */
-        onOverride: (toLayer: WritableLayer) => void;
-        /** Copy-on-edit: the first change copies the file into Shared with the change as its draft. */
-        onEditCopy?: ((text: () => string) => void) | undefined;
-      }
-    | undefined;
+  layerActions?: LayerActions;
 }): JSX.Element {
-  const [localTab, setLocalTab] = useState<EditorTab>("form");
-  /**
-   * Used only when nothing outside is holding the draft — see {@link draft}.
-   *
-   * Carries the file it belongs to. This component is not remounted when the panel opens another
-   * state, so an unkeyed draft would be shown over the next file the tree selected.
-   */
-  const [localDraft, setLocalDraft] = useState<{ file: string; text: string } | null>(null);
-
-  // A tab this host does not offer falls back to the first one it does — a remembered `graph` must
-  // not leave the side panel showing nothing at all.
-  const asked = tabProp ?? localTab;
-  const tab = tabs.includes(asked) ? asked : tabs[0]!;
-  const setTab = (next: EditorTab): void => (onTab ? onTab(next) : setLocalTab(next));
-
-  /**
-   * The file as this editor found it — what Revert goes back to, and what `dirty` is measured
-   * against.
-   *
-   * `source.text` itself, not a copy taken at mount: a save comes back as a new `source.text`, and
-   * the document is unmodified again the moment it does. Comparing against the mount value instead
-   * would leave the editor claiming unsaved changes forever after the first save.
-   */
-  // What ships is never edited (decision 0006): the form is a reading, there is no Save, and the
-  // provider at the foot of this component says so to every table below — the same switch the panel
-  // beside a finished run throws, for a different reason. `AppService.writable` would refuse the
-  // write anyway; this is the editor not offering it.
-  const shipped = !isWritableLayer(source.layer);
-  /**
-   * COPY-ON-EDIT (the person's ruling, 2026-09-24): a shipped state is edited where it is shown, and
-   * the first change is a copy into Shared carrying that change — so the form is live, not a reading.
-   * Not when Shared already has a copy: that copy is the one that loads, and editing the built-in
-   * would write a second one over it. The bar says to open the copy instead.
-   */
-  const copyOnEdit = shipped && layerActions?.onEditCopy !== undefined && source.builtIn?.layers.includes("base") !== true;
-  const readOnly = useReadOnly() || (shipped && !copyOnEdit);
-  /** The newest text while the copy is being written, and whether it has been asked for. */
-  const copying = useRef<{ file: string; text: string } | null>(null);
-  /** Redraws the form while the copy is being written — the text lives in the ref above. */
-  const [, redraw] = useState(0);
-  const onDisk = source.text || "{}";
-  const inFlight = copying.current !== null && copying.current.file === source.file ? copying.current.text : null;
-  const held = inFlight !== null
-    ? inFlight
-    : onDraft
-    ? (draft ?? null)
-    : localDraft !== null && localDraft.file === source.file
-      ? localDraft.text
-      : null;
-  const text = held ?? onDisk;
-  const dirty = text !== onDisk;
-
-  /** Write the document. A draft equal to the file is not a draft — see `drafts.ts`. */
-  const setText = (next: string): void => {
-    if (copyOnEdit) {
-      // The copy is asked for once; every keystroke until it opens lands in what it will carry.
-      const started = copying.current !== null && copying.current.file === source.file;
-      copying.current = { file: source.file, text: next };
-      if (!started) layerActions?.onEditCopy?.(() => copying.current?.text ?? next);
-      redraw((n) => n + 1);
-      return;
-    }
-    const value = next === onDisk ? null : next;
-    if (onDraft) onDraft(value);
-    else setLocalDraft(value === null ? null : { file: source.file, text: value });
-  };
-  // The state schema by default: this file IS a state, so the one thing the picker never has to ask
-  // is whether it applies.
-  const [schemaId, setSchemaId] = useState<string | null>("state");
-  const functions = functionOptions(executors);
-
-  let parsed: unknown;
-  let parseError: string | null = null;
-  try {
-    parsed = JSON.parse(text);
-  } catch (e) {
-    parseError = (e as Error).message;
-  }
-
-  /**
-   * The form's own model, held in state rather than re-derived from the document each render.
-   *
-   * Deriving it was simpler and wrong: a row you have just added has no name yet, `applyForm`
-   * refuses to serialize a nameless slot, and re-reading the document therefore erased the row
-   * between the click and the next paint. "+ Add" appeared to do nothing.
-   *
-   * A scalar field survives that round-trip because an empty label is representable — it is just an
-   * absent key. A list row is not: it has to exist while it is still too empty to write down.
-   */
-  const [form, setForm] = useState<FormModel>(() => formOf(parsed));
-
-  /** Every reference the tree can offer, for the link controls. Recomputed only when the tree does. */
-  const targets = useMemo(() => linkTargets(tree), [tree]);
-
-  /** The diagnostics, indexed by the path each control answers for — see `issues`. */
-  const marks = useMemo(() => (issues.length === 0 ? NO_ISSUES : formIssues(issues)), [issues]);
+  // The document, the drafts, the form and every decision over them are `stateEditorModel.ts`'s — the
+  // same hook the universal copy runs (decision 0015). What is left here is the drawing, and the
+  // scroll to a revealed issue, which needs the DOM.
+  const {
+    tab,
+    setTab,
+    shipped,
+    copyOnEdit,
+    readOnly,
+    onDisk,
+    text,
+    dirty,
+    setText,
+    schemaId,
+    setSchemaId,
+    functions,
+    parseError,
+    form,
+    targets,
+    marks,
+    declared,
+    childStateId,
+    bindings,
+    guards,
+    loadForm,
+    comparing,
+    shippedText,
+    compareError,
+    onLayerAction,
+    namedFunction,
+    offFunction,
+    editForm,
+    reader,
+  } = useWorkflowEditor({
+    source,
+    tree,
+    executors,
+    loadStateSlots,
+    ui,
+    issues,
+    reveal,
+    draft,
+    onDraft,
+    tab: tabProp,
+    onTab,
+    tabs,
+    readFile,
+    layerActions,
+    outerReadOnly: useReadOnly(),
+  });
 
   /**
    * The form's root, for {@link anchorFor} to search.
@@ -896,98 +706,14 @@ export function WorkflowEditor({
   const formRef = useRef<HTMLDivElement>(null);
 
   /**
-   * What each mounted child declares, accumulated as it is read.
-   *
-   * Accumulated rather than replaced, so retyping a child's `state` does not blank the table for the
-   * children beside it while one request is in flight. An id that resolved to nothing is remembered
-   * as an empty list — that is what stops the effect asking for it again on every keystroke.
-   */
-  const [declared, setDeclared] = useState<Record<string, StateSlots>>({});
-
-  const childStateId = useMemo(
-    () => (row: ChildRow) => childStateIdOf(source.stateId, row.key, row.state),
-    [source.stateId],
-  );
-
-  /**
-   * What the `.operation.*` namespace can offer, given what this file settles about the operation.
-   *
-   * `inherit` and `ref` are `unknown`: the block exists, so the node does, but which fields it
-   * carries is decided by the environment chain rather than here.
-   */
-  const operationKind =
-    form.operationKind === "" || form.operationKind === "prompt" || form.operationKind === "function"
-      ? form.operationKind
-      : "unknown";
-
-  /**
-   * Every runtime path a BINDING here could name — this state's inputs, the outputs its operation
-   * produces, and its children's outputs and outcomes.
-   *
-   * A produced output is one with no binding of its own (§3.3): the operation fills it, so
-   * `.outputs.<name>` is how a second output derives from what the call returned.
-   */
-  const producedOutputs = form.outputs
-    .filter((row) => row.binding.trim().length === 0)
-    .map((row) => row.name.trim());
-  const bindings = bindingTargets(
-    form.children.map((row) => ({ key: row.key, stateId: childStateId(row) })),
-    declared,
-    form.inputs.map((row) => row.name.trim()),
-    producedOutputs,
-    operationOutputNames(operationKind, producedOutputs),
-  );
-
-  /** Guards see everything a binding does, plus the operation and the control-flow scalars. */
-  const guards = [...bindings, ...guardTargets(operationKind)];
-
-  /** Render a document into the form. The text itself is derived, so this is the form model alone. */
-  const loadForm = (next: string): void => {
-    try {
-      setForm(formOf(JSON.parse(next)));
-    } catch {
-      setForm(EMPTY_FORM);
-    }
-  };
-
-  // Re-derive at the BOUNDARIES only: a different file, a save that came back, or returning from the
-  // JSON tab. The form's own writes to `text` move neither dependency, so an in-progress row stands.
-  //
-  // `text` rather than `source.text`: a file reopened with an unsaved draft has to come back to the
-  // draft, and the form is a rendering of whatever the document currently is — not of the file.
-  useEffect(() => {
-    loadForm(text);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [source.file, source.text]);
-
-  useEffect(() => {
-    if (tab !== "form") return;
-    // Deliberately not depending on `text`: this resyncs when the JSON tab hands control back, not
-    // on every keystroke the form itself makes.
-    try {
-      setForm(formOf(JSON.parse(text)));
-    } catch {
-      /* the form refuses to render over a document it could not parse; the tab body says so. */
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [tab]);
-
-  /**
-   * Show the control an inspector diagnostic is about: switch to the form, scroll to it, flash it.
-   *
-   * Two effects, split at the tab: the anchor has to be in the DOM before it can be found, and it is
-   * not while the JSON tab is up. The first asks for the form and the second runs once the form is
-   * there — which is also why `tab` is a dependency of the second and not of the first.
+   * Show the control an inspector diagnostic is about: scroll to it and flash it, once the form is up
+   * (the hook switched to it).
    *
    * The flash is applied to the node rather than held in React state, deliberately. A rendered
    * "which one is flashing" would have to be threaded through every table down to every row, and it
    * describes a second of animation rather than anything about the document. The red OUTLINE, which
    * is a fact about the document, is a class the components render from `marks` in the ordinary way.
    */
-  useEffect(() => {
-    if (reveal !== null) setTab("form");
-  }, [reveal]);
-
   useEffect(() => {
     if (reveal === null || tab !== "form" || formRef.current === null) return;
     const target = anchorFor(formRef.current, reveal.path);
@@ -1007,114 +733,6 @@ export function WorkflowEditor({
     };
   }, [reveal, tab]);
 
-  /**
-   * Read what any newly-named child declares, then seed a blank row per required input.
-   *
-   * Two effects rather than one, and split at the await: fetching is asynchronous and the state it
-   * lands in (`declared`) is not the state it changes (`form.children`). Folding them together would
-   * mean seeding from inside a promise, against a form that may have moved on three keystrokes ago.
-   *
-   * Only ids nothing is known about are asked for. `declared` remembers a miss as an empty list, so
-   * typing `./go`, `./goa`, `./goal` costs three requests and then stops — rather than one per
-   * render, forever, for a child that does not exist.
-   */
-  const childIds = form.children.map(childStateId).filter((id) => id.length > 0);
-  const unknownIds = childIds.filter((id) => declared[id] === undefined);
-  const unknownKey = [...new Set(unknownIds)].sort().join("\n");
-  useEffect(() => {
-    if (unknownKey.length === 0) return;
-    let live = true;
-    void (async () => {
-      const found = await loadStateSlots(unknownKey.split("\n"));
-      if (!live) return;
-      // A failed call is remembered as "nothing known" for every id asked about, not as an empty
-      // declaration: guessing "declares no inputs" would suppress the very rows this exists to add.
-      if (found === null) return;
-      setDeclared((prev) => {
-        const next = { ...prev };
-        for (const id of unknownKey.split("\n")) next[id] = found[id] ?? { inputs: [], outputs: [] };
-        return next;
-      });
-    })();
-    return () => {
-      live = false;
-    };
-  }, [unknownKey, loadStateSlots]);
-
-  /**
-   * "Compare with what ships": this document beside the built-in file of the same id.
-   *
-   * Held here rather than by the host because it is a way of LOOKING at the open file, like a tab,
-   * and it ends when the file does — a comparison left up over the next file the tree selected
-   * would be comparing the wrong pair.
-   */
-  const [comparing, setComparing] = useState(false);
-  const [shippedText, setShippedText] = useState<string | null>(null);
-  const [compareError, setCompareError] = useState<string | null>(null);
-  useEffect(() => {
-    setComparing(false);
-    setShippedText(null);
-    setCompareError(null);
-  }, [source.file]);
-
-  const onLayerAction = (id: LayerBarAction["id"]): void => {
-    const toLayer = overrideTarget(id);
-    if (toLayer !== null) return layerActions?.onOverride(toLayer);
-    if (comparing) return setComparing(false);
-    setComparing(true);
-    if (shippedText !== null) return;
-    if (readFile === undefined) return setCompareError("This panel cannot read the built-in file.");
-    void readFile("system", `workflows/${source.stateId}.json`).then((found) =>
-      found === null ? setCompareError("The built-in file could not be read.") : setShippedText(found),
-    );
-  };
-
-  // A named executor that exists but is switched off. An unknown name is NOT flagged: a `function`
-  // may name a host function or a sub-workflow, neither of which is in this list.
-  const namedFunction = form.operation.fields["functionRef"] ?? "";
-  const offFunction = executors.some((e) => e.name === namedFunction && !e.enabled);
-
-  const editForm = (patch: Partial<FormModel>): void => {
-    const next = { ...form, ...patch };
-    setForm(next);
-    if (parseError === null) setText(JSON.stringify(applyForm(parsed, next), null, 2));
-  };
-
-  /**
-   * Seeded rows go into the FORM only — never into `text`.
-   *
-   * `setForm` rather than `editForm`, and that is the whole point rather than an optimization.
-   * `editForm` re-serializes the document, so seeding through it would rewrite the editor's text the
-   * moment a state was opened: the file would read as modified before anyone touched it, the JSON
-   * tab would validate a draft nobody authored, and a save would write JaiRA's formatting over the
-   * author's.
-   *
-   * So the placeholder is exactly that — a placeholder. What is validated, what is saved, and what
-   * the lint surface reports on all stay the file as it is on disk until the author types a binding.
-   */
-  useEffect(() => {
-    setForm((current) => {
-      const seeded = seedRequiredBindings(current.children, declared, childStateId);
-      // Same array back when there is nothing to add, so React bails out of the update and this
-      // cannot cycle with its own dependency on `form.children`.
-      return seeded === current.children ? current : { ...current, children: seeded };
-    });
-  }, [declared, childStateId, form.children]);
-
-  /**
-   * What a link preview needs, supplied once for the whole form — see `linkPreview.tsx`.
-   *
-   * `null` when this editor was given no reader: a form rendered outside the shell shows its links
-   * as paths, which is what it can prove.
-   */
-  const reader = useMemo(
-    () =>
-      readFile === undefined
-        ? null
-        : { resolve: (ref: string) => resolveRef(tree, ref), read: readFile, ...(ui !== undefined ? { ui } : {}) },
-    [tree, readFile, ui],
-  );
-
   return (
     <ReadOnlyContext.Provider value={readOnly}>
     <LinkReaderProvider value={reader}>
@@ -1130,8 +748,7 @@ export function WorkflowEditor({
           {/* Isolated from the bar's `direction: rtl` (which exists to ellipsize at the START): without
               it the bidi algorithm moves a leading `$` or `.` to the far end of the path. */}
           <bdi>
-            {shipped ? `$SYSTEM/workflows/${source.stateId}.json` : source.file}
-            {source.exists ? "" : " · new file"}
+            {editorPathOf(source, shipped)}
           </bdi>
         </div>
         {/* Which layer supplied this file, and what can be done about it (decision 0006): a shipped
@@ -1277,11 +894,7 @@ export function WorkflowEditor({
               bindingHint=".children.critique.output.outcome"
               targets={targets}
               bindingListId={BINDING_TARGETS_ID}
-              emptyBindingMeans={
-                form.operationKind === "function"
-                  ? "the component's answer lands here by name"
-                  : "unbound — say where the value comes from"
-              }
+              emptyBindingMeans={outputsEmptyMeans(form)}
               path="outputs"
               issues={marks}
               onChange={(outputs) => editForm({ outputs })}
@@ -1315,25 +928,21 @@ export function WorkflowEditor({
               {/* A picker showing "inherited" is a picker showing that nothing was picked. The
                   reading's answer to "what kind of operation is this" is the block below it. */}
               {readOnly && form.operationKind === "inherit" ? null : (
-              <label
-                {...(form.operationKind === "" || form.operationKind === "ref"
-                  ? markFor(marks, "operation", "field")
-                  : { className: "field" })}
-              >
+              <label {...kindMarksOf(form, marks).label}>
                 <span>Kind</span>
                 <select
-                  className={fieldClass(marks, "operation", OPERATION_FIELD_PATHS).trim()}
+                  className={kindMarksOf(form, marks).select}
                   value={form.operationKind}
                   onChange={(e) => editForm({ operationKind: e.target.value as FormModel["operationKind"] })}
                 >
-                  <option value="">none — groups its children</option>
-                  <option value="prompt">prompt — one model call</option>
-                  <option value="function">function — host code, a gate, or an agent</option>
-                  {/* WORKFLOWS.md §5/§6.1: a block with no `kind` of its own takes one from an
-                      ancestor's `environment`. It is also how one state is mounted under two
+                  {/* WORKFLOWS.md §5/§6.1: `inherit` — a block with no `kind` of its own takes one
+                      from an ancestor's `environment`. It is also how one state is mounted under two
                       runtimes, so it has to be selectable and not just readable. */}
-                  <option value="inherit">inherited — whatever the environment chain says</option>
-                  <option value="ref">linked — a block held in another file</option>
+                  {OPERATION_KINDS.map((kind) => (
+                    <option key={kind.value} value={kind.value}>
+                      {kind.label}
+                    </option>
+                  ))}
                 </select>
               </label>
               )}
@@ -1411,9 +1020,11 @@ export function WorkflowEditor({
                     title="what this layer declares its descendants' operations to be"
                     onChange={(e) => editForm({ environmentKind: e.target.value as FormModel["environmentKind"] })}
                   >
-                    <option value="">kind: inherited</option>
-                    <option value="prompt">kind: prompt</option>
-                    <option value="function">kind: function</option>
+                    {ENVIRONMENT_KINDS.map((kind) => (
+                      <option key={kind.value} value={kind.value}>
+                        {kind.label}
+                      </option>
+                    ))}
                   </select>
                 )}
                 {readOnly ? null : (
@@ -1539,7 +1150,7 @@ export function WorkflowEditor({
           Absent altogether in a reading — not disabled. A greyed-out Save at the foot of a panel
           describing a run that finished last week is an offer about a document nobody is editing,
           and it takes a row of the column to make it. */}
-      {readOnly || shipped ? null : (
+      {!savesOf(readOnly, shipped) ? null : (
       <EditorActions
         // A file that is not on disk yet has a pending change whether or not anything was typed:
         // its existence. Without the second clause the panel offers "saving creates it" beside a

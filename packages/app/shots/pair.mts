@@ -5,6 +5,7 @@
  *   npx tsx packages/app/shots/pair.mts [--scene board|task|gate|archived|settings|files|chat|logs] [--look light|dark|<palette>[-wash]-<theme>]
  *                                       [--every-look] [--region sidebar] [--port 9301]
  *   npx tsx packages/app/shots/pair.mts --specimen markdown [--look …] [--every-look]   one component, from a fixture
+ *   --scroll-to <heading>   both pages scrolled so that heading tops its scroller, for a long page
  *   --texts   with a region: list the words that moved, and by how much (a specimen always does)
  *
  * Attaches to the app `studio.mts` keeps running, so a change to a copy is in the next run with no
@@ -35,8 +36,10 @@ const REGIONS: Record<string, string> = {
   inbox: "footer.strip",
   /** The whole room under the title bar — for the rooms that are one region (Files, Chat, Settings, Logs, …). */
   viewport: ".viewport",
+  /** The workflow editor (`stateEditor.tsx`'s `.pane.editor`): the first on the page — the Files room's, or the panel's. */
+  editor: ".pane.editor",
   /** What floats over the window: a menu, the needs-attention card, a dialog (the scenes that open one). */
-  float: ".context-menu, .prob-card, .modal",
+  float: ".context-menu, .prob-card, .modal, .cx-submenu",
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -83,6 +86,22 @@ function differ(a: PNG, b: PNG, diffTo?: string): { differing: number; exact: nu
   const differing = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0.1, includeAA: false, alpha: 0.15, aaColor: [255, 210, 0] });
   if (exact > 0 && diffTo !== undefined) writeFileSync(diffTo, PNG.sync.write(diff));
   return { differing, exact, total: a.width * a.height };
+}
+
+/** `--scroll-to <heading>`: the page scrolled so that heading sits at the top of its scroller, on both pages. */
+async function scrollTo(app: App): Promise<void> {
+  const heading = arg("--scroll-to");
+  if (heading === undefined) return;
+  const find = `[...document.querySelectorAll("*")].find((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent.trim() === ${JSON.stringify(heading)}) && e.getBoundingClientRect().left > 250)`;
+  try { await app.until(`${find} !== undefined`, `the ${heading} heading`, 8); } catch { console.log(`  (no ${heading} heading here)`); return; }
+  await app.evaluate(`(() => {
+    const el = ${find};
+    let box = el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+    const at = el.closest('[role="heading"]') ?? el;
+    box.scrollTop = Math.round((at.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop) * devicePixelRatio) / devicePixelRatio;
+  })()`);
+  await new Promise((r) => setTimeout(r, 400));
 }
 
 async function capture(app: App): Promise<PNG> {
@@ -153,7 +172,8 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
     const runs: Run[][] = [];
     for (const side of ["dom", "rn"]) {
       await app.navigate(`${origin}/specimen-${side}?name=${encodeURIComponent(name)}&look=${lookName(look)}`);
-      await app.until("document.getElementById('specimen') !== null", `the ${side} specimen to draw`);
+      // Patiently: the shared dev server rebuilds a page's graph after an edit anywhere in it.
+      await app.until("document.getElementById('specimen') !== null", `the ${side} specimen to draw`, 400);
       await app.evaluate("document.fonts.ready.then(() => true)");
       await new Promise((r) => setTimeout(r, 400));
       const r = await app.evaluate<Rect>(`(() => { const r = document.getElementById("specimen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
@@ -217,13 +237,15 @@ async function main(): Promise<void> {
   try {
     for (const look of looks) {
       for (const scene of scenes) {
-        const name = `${scene.name}-${lookName(look)}`;
+        const name = `${scene.name}${arg("--scroll-to") !== undefined ? `@${arg("--scroll-to")!.replace(/[^a-z0-9]+/gi, "_")}` : ""}-${lookName(look)}`;
         await goTo(app, "/", { look, scene });
+        await scrollTo(app);
         const regions: Record<string, Rect> = {};
         for (const [region, selector] of Object.entries(REGIONS)) {
           if (only !== undefined && region !== only) continue;
           const r = await app.evaluate<Rect | null>(
-            `(() => { const e = document.querySelector(${JSON.stringify(selector)}); if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
+            // A float is the last of its kind on the page: floats are appended to <body>, after everything.
+            `(() => { const e = ${region === "float" ? `[...document.querySelectorAll(${JSON.stringify(selector)})].pop()` : `document.querySelector(${JSON.stringify(selector)})`}; if (!e) return null; const r = e.getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`,
           );
           if (r !== null && r.width > 0 && r.height > 0) regions[region] = r;
         }
@@ -234,6 +256,7 @@ async function main(): Promise<void> {
         let unreached: string | undefined;
         try {
           await goTo(app, "/rn", { scene });
+          await scrollTo(app);
         } catch (e) {
           unreached = (e as Error).message;
         }

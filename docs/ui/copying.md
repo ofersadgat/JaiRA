@@ -21,7 +21,8 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   server. Stop yours when you are done (kill its `tsx … studio.mts` process and its `electron.exe`).
 - **`pair.mts`** loads `/` (the desktop's page) and `/rn` (the universal shell) in the same window, the
   same state and the same look, photographs both, and compares them region by region
-  (`sidebar`, `titlebar`, `board`, `panel`, `inbox`, and `viewport` for a whole room; `--region` for one). `--scene board|task|gate|archived|settings|files|chat|logs`
+  (`sidebar`, `titlebar`, `board`, `panel`, `inbox`, `editor` for the workflow editor, and `viewport` for
+  a whole room; `--region` for one). `--scene board|task|gate|archived|settings|files|chat|logs`
   picks a state and `--look light|dark|<palette>[-wash]-<theme>` a look (`--every-look` for all eight).
   Pictures and red-on-grey diffs land in `packages/app/shots/parity/rn-<port>/`: read the `.diff.png`,
   and the `.dom.png` and `.rn.png` beside it. A copy is done when its region says **identical** (or
@@ -109,6 +110,22 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   inherited 1.5; `components/logs/Select.tsx` draws Chromium's own select arrow from measurement.
 - **`ch` is not a constant in DM Sans**: its `0` widens with the size (`appCh()`).
 - **A form measured before its width is known** lays out as wide; wait for the width before drawing it.
+- **An `input` with a `list`** (a `<datalist>` with options) keeps 16 at its end for the list's indicator,
+  and its text stops short of it even where the indicator is not drawn (the workflow editor's `Box`,
+  `listed`).
+- **Equal specificity, later wins — even for a rule you did not expect to meet**: `button.sm` (later)
+  beats `.link-toggle`'s size and padding and `.reorder button`'s padding. Read the cascade, not the rule.
+- **A `select`'s `width: 100%` is its flex basis** (`flex: 1 1 auto`), not its options' width; squeezed it
+  stops at its padding and border, and it shrinks by its CONTENT box — so the padding and border must be on
+  the flex item itself, not on a box inside it (`workflow/controls.tsx`'s `Pick`).
+- **react-native-web's `onLayout` reports a transformed box's size scaled.** Inside a scaled canvas,
+  centre things with `transform: [{ translateX: "-50%" }]` rather than by measuring. And a DOM
+  `clientWidth` is rounded to whole pixels: read the element's own on web where the desktop's code reads it.
+- **Greyscale text from a composited layer, the other way round**: the desktop's graph canvas (and the
+  pane holding it) are composited, so their text is greyscale; the copy's are not until given a 3D no-op
+  (`translateZ(0)`) — `will-change: transform` composites too, but rasters the scaled text blurred.
+- **A CSS gradient's hard stop is sampled at each device pixel's centre**, with no anti-aliasing: a
+  swatch drawn as views of a device pixel each matches it (`workflow/StateGraph.tsx`'s `Strip`).
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
   a region passes in every look.
 

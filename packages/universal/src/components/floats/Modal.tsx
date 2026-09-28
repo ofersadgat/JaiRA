@@ -25,8 +25,11 @@ export function ModalBox({
   onDismiss,
   label,
   testID,
+  width,
   children,
 }: {
+  /** The dialog's own width, where its class sets one (`.folder-browser`: min(560px, 90vw)). */
+  width?: number | string;
   wide?: boolean;
   staged?: boolean;
   onDismiss?: (() => void) | undefined;
@@ -49,6 +52,7 @@ export function ModalBox({
         : wide
           ? { width: isWeb ? "min(1100px, 94vw)" : "94%", maxWidth: isWeb ? "min(1100px, 94vw)" : "94%", maxHeight: isWeb ? "90vh" : "90%" }
           : { minWidth: 380, maxWidth: isWeb ? "min(720px, 90vw)" : "90%" })}
+      {...(width !== undefined ? { width } : {})}
       {...((staged ? {} : { boxShadow: t.v("lift") }) as object)}
       {...(testID !== undefined ? { testID } : {})}
       {...((isWeb ? { role: "dialog", ...(label !== undefined ? { "aria-label": label } : {}) } : {}) as object)}

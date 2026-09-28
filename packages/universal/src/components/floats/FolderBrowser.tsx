@@ -66,8 +66,8 @@ export function FolderBrowser({
     rows.push(<FolderRow key={entry.path} glyph="▸" name={entry.name} project={entry.project} {...(entry.project ? { chip: "JaiRA project" } : entry.git ? { chip: "git" } : {})} onPress={() => go(entry.path)} />);
   }
   return (
-    <ModalBox staged={staged} onDismiss={onClose} label={title}>
-      <View width={isWeb ? ("min(560px, 90vw)" as never) : "100%"} maxWidth="100%" flexDirection="column" gap={10}>
+    <ModalBox staged={staged} onDismiss={onClose} label={title} width={isWeb ? "min(560px, 90vw)" : "90%"}>
+      <View flexDirection="column" gap={10}>
         <Txt spec={{ voice: "app", scale: 17 / 12.5, weight: 700, lineHeight: 1.35 }}>{title}</Txt>
         {machines.length > 1 ? <Segmented label="Machine" value={machine.id} options={machines.map((m) => [m.label, m.id] as const)} onChange={setMachineId} /> : null}
         <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={4} minWidth={0}>

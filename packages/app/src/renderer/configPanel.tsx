@@ -37,9 +37,10 @@
  * frozen at the moment it was pinned. It fetches on mount instead, the same way `statePanel.tsx`
  * does and for the same reason.
  */
-import { useEffect, useState, type JSX } from "react";
+import type { JSX } from "react";
 import type { EffectiveState, ExecutorInfo, FileTree } from "@jaira/shared/browser";
 import { ReadOnlyContext, RunReadingContext } from "./reading";
+import { copyWordsOf, readingTitleOf, useEffectiveState } from "./configPanelModel";
 import { WorkflowEditor } from "./stateEditor";
 
 /**
@@ -73,19 +74,7 @@ export function ConfigPanel({
   /** What the form needs to show a linked prompt, a child's slots, a graph — see the type. */
   services?: ConfigPanelServices | undefined;
 }): JSX.Element {
-  const [found, setFound] = useState<EffectiveState | null | "missing">(null);
-
-  useEffect(() => {
-    let live = true;
-    setFound(null);
-    void read().then(
-      (next) => live && setFound(next ?? "missing"),
-      () => live && setFound("missing"),
-    );
-    return () => {
-      live = false;
-    };
-  }, [read]);
+  const found = useEffectiveState(read);
 
   if (found === null) return <p className="empty">Reading the state…</p>;
   if (found === "missing") return <p className="empty">That state&apos;s configuration could not be read.</p>;
@@ -123,17 +112,13 @@ export function ConfigReading({
   return (
     <div className="pane config-panel">
       <div className="sb-gutter">
-        <span className="sb-session mono ellip" title={state.rootId !== undefined ? `in ${state.rootId}` : undefined}>
+        <span className="sb-session mono ellip" title={readingTitleOf(state)}>
           {state.stateId}
         </span>
         {/* WHICH document this is. Nothing else on screen distinguishes the copy a run pinned from
             the copy on disk, and after any edit they are two different states under one name. */}
         <span className={`sub ellip${state.from === "moved" ? " warn" : ""}`} title={state.snapshotHash}>
-          {state.from === "pinned"
-            ? "the file this run pinned"
-            : state.from === "moved"
-              ? "the workflow has changed since this run — this is the file as it stands now"
-              : "as it stands on disk now"}
+          {copyWordsOf(state)}
         </span>
         {onOpenState !== undefined ? (
           <button type="button" className="link" onClick={() => onOpenState(state.stateId)} title="open its file">

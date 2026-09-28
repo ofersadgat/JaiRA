@@ -138,9 +138,11 @@ function Details({ rows }: { rows: ReadonlyArray<{ label: string; value: string 
         <Fragment key={row.label}>
           <View flexDirection="row" gap={12} alignItems="baseline">
             <View flexShrink={0} {...(column > 0 ? { width: column } : {})}>
+              {/* A `max-content` column: a label never wraps, and the column is the widest of them. */}
               <Txt
                 spec={{ voice: "app", scale: 1, color: "dim" }}
                 alignSelf="flex-start"
+                {...((isWeb ? { whiteSpace: "nowrap" } : { numberOfLines: 1 }) as object)}
                 onLayout={(e: { nativeEvent: { layout: { width: number } }; target?: unknown }) => {
                   const el = e.target as { getBoundingClientRect?: () => DOMRect } | undefined;
                   const w = isWeb && typeof el?.getBoundingClientRect === "function" ? el.getBoundingClientRect().width : e.nativeEvent.layout.width;
@@ -150,7 +152,7 @@ function Details({ rows }: { rows: ReadonlyArray<{ label: string; value: string 
                 {row.label}
               </Txt>
             </View>
-            <Txt spec={{ voice: "data", scale: 1 }} flexGrow={1} flexShrink={1} minWidth={0} {...((isWeb ? { overflowWrap: "anywhere" } : {}) as object)}>
+            <Txt spec={{ voice: "data", scale: 1 }} flexGrow={1} flexShrink={1} minWidth={0} {...((isWeb ? { style: { overflowWrap: "anywhere" } } : {}) as object)}>
               {row.value}
             </Txt>
           </View>

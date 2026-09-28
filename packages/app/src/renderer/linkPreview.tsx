@@ -21,23 +21,12 @@
  * problem: a component that is not inside a provider simply shows nothing, which is exactly right
  * for a form rendered in a test or outside the shell.
  */
-import { createContext, useContext, useEffect, useState, type JSX } from "react";
-import { mimeOfPath, type WorkflowLayer } from "@jaira/shared/browser";
-import type { UiSurface } from "./fileTypes";
+import type { JSX } from "react";
+import { mimeOfPath } from "@jaira/shared/browser";
+import { linkPreviewTitle, useLinkPreview } from "./linkModel";
 import { ValueView } from "./valueView";
 
-export interface LinkReader {
-  /** The file a reference names, or `null` when this window cannot see one. */
-  resolve: (ref: string) => { layer: WorkflowLayer; path: string } | null;
-  /** That file's text. `null` for anything unreadable — a preview is never worth an error. */
-  read: (layer: WorkflowLayer, path: string) => Promise<string | null>;
-  /** Where the disclosure's state is remembered, so a fold survives clicking another file. */
-  ui?: UiSurface | undefined;
-}
-
-const LinkReaderContext = createContext<LinkReader | null>(null);
-
-export const LinkReaderProvider = LinkReaderContext.Provider;
+export { LinkReaderProvider, type LinkReader } from "./linkModel";
 
 /**
  * The target of one link, read-only, under the control that names it.
@@ -49,51 +38,16 @@ export const LinkReaderProvider = LinkReaderContext.Provider;
  * anywhere else it is shown.
  */
 export function LinkPreview({ reference }: { reference: string }): JSX.Element | null {
-  const reader = useContext(LinkReaderContext);
-  const at = reader === null ? null : reader.resolve(reference);
-  const [text, setText] = useState<string | null | "reading">("reading");
-  /**
-   * The fold, when there is no window layout to remember it in.
-   *
-   * The bar was always a button and always said "▾", and where the surface was absent it was also
-   * `disabled` — so the one control on it did nothing, forever, and the preview could not be shut.
-   * A form rendered outside the shell has nowhere to persist the choice; it can still honour it for
-   * as long as it is on screen, which is the whole of what the reader asked for.
-   */
-  const [localOpen, setLocalOpen] = useState(true);
-
-  useEffect(() => {
-    if (reader === null || at === null) return;
-    let live = true;
-    setText("reading");
-    void reader.read(at.layer, at.path).then((found) => {
-      if (live) setText(found);
-    });
-    return () => {
-      live = false;
-    };
-    // `at` is a fresh object every render; the two strings in it are what identify the file.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reader, at?.layer, at?.path]);
-
-  if (reader === null) return null;
-  // A reference this window cannot place says nothing here. The linter is what reports it — a
-  // preview that announced "not found" would be a second, worse diagnostic in a smaller typeface.
-  if (at === null) return null;
-
-  const foldId = `link:${at.layer}:${at.path}`;
-  const open = reader.ui === undefined ? localOpen : reader.ui.open(foldId, true);
-  const toggle = (): void => {
-    if (reader.ui === undefined) setLocalOpen(!open);
-    else reader.ui.setOpen(foldId, !open);
-  };
+  const preview = useLinkPreview(reference);
+  if (preview === null) return null;
+  const { at, text, open, toggle } = preview;
   return (
     <div className="link-preview">
       <button
         type="button"
         className="link-preview-bar"
         onClick={toggle}
-        title={`${at.path} — click to ${open ? "hide" : "show"} what it says`}
+        title={linkPreviewTitle(at.path, open)}
       >
         <span className="half-caret">{open ? "▾" : "▸"}</span>
         <span className="sub">what {reference} says</span>

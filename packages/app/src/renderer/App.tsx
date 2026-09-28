@@ -129,7 +129,8 @@ import { EventsTaskAutomations } from "./eventsTaskPanel";
 import { EVENTS_STATE_ID, eventsTaskOf } from "./automationsModel";
 import { DataPane, RunsPane } from "./settingsPages";
 import { ConnectionsPage } from "./connectionsPane";
-import { ToolsFieldProvider, type ToolsFieldData } from "./toolsField";
+import { ToolsFieldProvider } from "./toolsField";
+import { useToolsFieldRead } from "./toolsFieldModel";
 import { initialRunValues, runFieldsOf, runTargetOf, runValuesOf, settledMarkOf } from "./runForm";
 import type { RunSurface } from "./runPanel";
 import { RunModeToggle, RunView } from "./runViews";
@@ -473,25 +474,8 @@ export default function App(): JSX.Element {
    * state file in every layer. A read that fails leaves the field's picker offering what the state
    * already names and "none", which is what it can prove.
    */
-  const [permissionSetsRead, setPermissionSetsRead] = useState<PermissionSetsData | null>(null);
-  useEffect(() => {
-    let live = true;
-    void invoke("permissionSets:read", { project: permissionSetsProject ?? SHARED_SESSION, usedBy: false }).then(
-      (found) => live && setPermissionSetsRead(found),
-      () => live && setPermissionSetsRead(null),
-    );
-    return () => void (live = false);
-    // …and again when the TREE is refetched, which is what a `workflows` invalidate does — the scope
-    // every permission set write publishes. A permission set added in Settings is a file in that tree, so the two
-    // refresh together and the picker never lists a permission set that is not there.
-  }, [permissionSetsProject, state.tree]);
-  const toolsFieldData = useMemo<ToolsFieldData>(
-    () =>
-      permissionSetsRead === null
-        ? { permissionSets: [], tools: [] }
-        : { permissionSets: permissionSetChoicesAt(permissionSetsAt(permissionSetsRead.records, permissionSetsRead.layers[0] ?? "project")), tools: permissionSetsRead.tools },
-    [permissionSetsRead],
-  );
+  // Read and shaped by `toolsFieldModel.ts`, the hook the universal shell runs too.
+  const toolsFieldData = useToolsFieldRead(permissionSetsProject, state.tree);
   /**
    * Which of the sidebar drawers is currently showing its FIND field (SHELL.md §5.1).
    *

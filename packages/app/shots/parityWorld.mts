@@ -198,6 +198,89 @@ export const SCENES: readonly Scene[] = [
       await settle(800);
     },
   },
+  // …and its Configuration tab: the state's own file in the panel's workflow editor (`StatePanel`),
+  // the form over it — editable, with the JSON tab beside it.
+  {
+    name: "state-config",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "state")!.reach(app);
+      await app.evaluate(`(() => {
+        const tab = [...document.querySelectorAll('[role="tab"], button')].find((e) => (e.textContent.trim() === "Configuration" || e.getAttribute("title") === "Configuration" || e.getAttribute("aria-label") === "Configuration") && e.getBoundingClientRect().left > innerWidth - 420);
+        if (!tab) throw new Error("no Configuration tab");
+        tab.click();
+      })()`);
+      await app.until(says("Open in the editor"), "the state's configuration");
+      await settle(1500);
+    },
+  },
+  // A workflow's state files opened in the Files room (the seeded world's `.jaira/workflows/…`): a
+  // leaf's `.json` in the authoring form (the workflow editor), and a composite's, on its Graph tab —
+  // the state graph, drawn natively on /rn.
+  ...(
+    [
+      ["files-state", "goals.json", null],
+      ["files-state-json", "goals.json", "JSON"],
+      ["files-plan", "plan.json", "Form"],
+      ["files-graph", "plan.json", "Graph"],
+    ] as const
+  ).map(
+    ([name, file, tab]): Scene => ({
+      name,
+      reach: async (app) => {
+        await app.clickText("Files");
+        await app.until(says(".jaira"), "the Files drawer");
+        // The project's tree comes first (the built-in root below it has a `workflows` too), and a folder
+        // is clicked only while its row's caret says it is folded: the tree remembers what was unfolded.
+        const open = [".jaira", "workflows", "feature", ...(file === "plan.json" ? [] : ["plan"]), file];
+        for (const step of open) {
+          await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(step)})`, `${step} in the tree`);
+          await app.evaluate(`(() => {
+            const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(step)});
+            const row = el.closest("button, a, [role=button], li") ?? el;
+            if (!${JSON.stringify(step.endsWith(".json"))} && row.textContent.includes("▾")) return;
+            row.click();
+          })()`);
+          await settle(400);
+        }
+        await app.until(says("Graph") + " && " + says("default & description"), `${file} to open in the editor`);
+        if (tab !== null) {
+          await app.evaluate(`(() => {
+            const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(tab)});
+            (el.closest("button, [role=button]") ?? el).click();
+          })()`);
+          await app.until(says(tab === "Graph" ? "drag to pan" : tab === "JSON" ? "Schema" : "default & description"), `the ${tab} tab`);
+        }
+        await settle(1500);
+      },
+    }),
+  ),
+  // The same forms scrolled to a table further down — its heading at the top of the scroller, to a
+  // device pixel on both pages: a reading's children and their wiring, the editable form's children and
+  // transitions, a leaf's operation block.
+  ...(
+    [
+      ["task-config-children", "task-config", "Children"],
+      ["state-config-children", "state-config", "Children"],
+      ["files-state-operation", "files-state", "Operation"],
+      ["files-plan-children", "files-plan", "Children"],
+    ] as const
+  ).map(
+    ([name, from, heading]): Scene => ({
+      name,
+      reach: async (app) => {
+        await SCENES.find((s) => s.name === from)!.reach(app);
+        const find = `[...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(heading)} && e.getBoundingClientRect().left > 250)`;
+        await app.until(`${find} !== undefined`, `the ${heading} heading`);
+        await app.evaluate(`(() => {
+          const el = ${find};
+          let box = el.parentElement;
+          while (box && !(box.scrollHeight > box.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+          box.scrollTop = Math.round((el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 8) * devicePixelRatio) / devicePixelRatio;
+        })()`);
+        await settle(500);
+      },
+    }),
+  ),
   { name: "settings", reach: (app) => app.clickText("Settings") },
   // Each Settings page (`settings` opens on Connections), reached from the sidebar's sections list.
   ...(
@@ -540,6 +623,16 @@ export const SCENES: readonly Scene[] = [
       },
     }),
   ),
+  // An approval's answer menu, open: its caret pressed on the Components room's first command approval.
+  {
+    name: "gallery-approval-menu",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "gallery-approval")!.reach(app);
+      await app.evaluate(`document.querySelector('[aria-label^="Allow: what it covers"]').click()`);
+      await app.until(says("Allow once"), "the answer menu");
+      await settle(400);
+    },
+  },
 ];
 
 /** Scroll the Components page so the row titled `title` stands just under its sticky bar, to a device pixel on both pages. */

@@ -56,6 +56,7 @@ import {
   withToolHeld,
   withToolImplementation,
 } from "./composerPermissionSet";
+import { TYPED_LINE, lineOptionsOf, withLinePicked, withLineTyped, withoutOther } from "./permissionSetLinesModel";
 import { AddMenu, CategoryRow, CommandGroupRow, ModePicker, RUNNERS_HINT, RunnerGroupRow, SCRIPT_HINT, SHELL_HINT, SubjectRow, TOOL_ICONS, ToolRow, type AddOption } from "./permissionSetRows";
 
 const NO_PARKED = {};
@@ -340,10 +341,7 @@ export function PermissionSetLines({ permissionSet, tools, onChange, readOnly, n
   const locked = readOnly === true || onChange === undefined;
   const write = (next: PermissionSet): void => onChange?.(next);
   const byName = new Map(tools.map((tool) => [tool.name, tool]));
-  const clearOther = (): void => {
-    const { other: _gone, ...rest } = permissionSet;
-    write(rest);
-  };
+  const clearOther = (): void => write(withoutOther(permissionSet));
   return (
     <div className={`set-card${locked ? " set-readonly" : ""}`}>
       <div className="cx-cat-body set-flat">
@@ -393,23 +391,15 @@ export function PermissionSetLines({ permissionSet, tools, onChange, readOnly, n
           <AddMenu
             label={addLabel}
             startOpen={startAdding}
-            options={[
-              ...tools.filter((tool) => !Object.hasOwn(permissionSet.entries, tool.name)).map((tool) => toolOption(tool.name)),
-              ...(addableScript(permissionSet) ? [SCRIPT_OPTION] : []),
-              ...(permissionSet.other === undefined ? [{ subject: OTHER_SUBJECT, label: "other", hint: "anything no line names", icon: "shield" as const }] : []),
-            ]}
-            onPick={(subject) => {
-              if (subject === OTHER_SUBJECT) write(withOther(permissionSet, MODE_WHEN_UNSET));
-              else if (subject === SCRIPT_SUBJECT) write(withSubject(permissionSet, SCRIPT_SUBJECT, MODE_WHEN_UNSET));
-              else write(withToolHeld(permissionSet, NO_PARKED, subject, true));
-            }}
+            // What it offers and what each pick writes: `permissionSetLinesModel.ts`, which the universal copy runs.
+            options={lineOptionsOf(permissionSet, tools) as AddOption[]}
+            onPick={(subject) => write(withLinePicked(permissionSet, subject))}
             typed={{
-              label: "add a command",
-              example: "git commit",
+              ...TYPED_LINE,
               onAdd: (typed) => {
-                const named = commandSubjectOf(typed);
-                if ("problem" in named) return named.problem;
-                write(withCommand(permissionSet, named.subject));
+                const line = withLineTyped(permissionSet, typed);
+                if ("problem" in line) return line.problem;
+                write(line.next);
                 return undefined;
               },
             }}

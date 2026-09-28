@@ -54,13 +54,14 @@ export function ModuleApprovalDialog({
   const em = Number(t.scaled("size-data", 1)) || 12;
   return (
     <ModalBox wide staged={staged} testID="module-approval" label="Run this workflow's TypeScript?">
-      <GateTitle icon="shield">{"Run this workflow’s TypeScript?"}</GateTitle>
+      <GateTitle icon="shield">Run this workflow&apos;s TypeScript?</GateTitle>
       <Txt spec={SUB}>
         {files.length === 1 ? "1 file" : `${files.length} files`}
         {changed > 0 ? ` · ${changed} changed since you approved it` : ""} · nothing has run yet
       </Txt>
       {files.map((file, i) => (
-        // A file's line stands under the previous source's 1em.
+        // A file's line stands under the previous source's 1em (inside the file's box: a flex item's own
+        // children's margins do not collapse out of it).
         <View key={file.file} flexDirection="column" marginTop={i > 0 ? em : 0}>
           <Txt spec={SUB}>
             {file.file} — {file.previousHash !== undefined ? "changed since you approved it" : "never approved"}
@@ -81,8 +82,8 @@ export function ModuleApprovalDialog({
           </View>
         </View>
       ))}
-      {/* The last source's 1em collapses with the buttons' 14. */}
-      <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={files.length > 0 ? Math.max(em, 14) : 14}>
+      {/* The wide dialog is a flex column, so nothing collapses: the last source's 1em stands, and 14 more. */}
+      <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={files.length > 0 ? em + 14 : 14}>
         <Button onPress={onApprove}>Approve and run</Button>
         <Button kind="danger" onPress={onCancel}>
           Cancel
