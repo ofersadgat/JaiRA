@@ -72,6 +72,7 @@ export function useReplayTokens(): Tokens {
 function replayTokens(all: Record<string, TokenValue>): Tokens {
   const v = (name: string): TokenValue => all[name] ?? "";
   return {
+    replayed: true,
     v,
     scaled: (name, factor) => Number(v(name)) * factor,
     tint: (name, pct) => String(evaluate(`color-mix(in srgb, ${String(v(name))} ${pct}%, transparent)`, () => undefined)),

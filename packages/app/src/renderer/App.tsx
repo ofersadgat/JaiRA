@@ -80,19 +80,7 @@ import { Popover, usePopover } from "./popover";
 import { lookOf } from "./appearanceLayer";
 import { useSystemDark } from "./appearance";
 import { FilesTreeSection } from "./filesTreePane";
-import {
-  addCounts,
-  hueOf,
-  minusCounts,
-  Pill,
-  Pills,
-  projectCounts,
-  sumCounts,
-  taskCounts,
-  unseenRows,
-  unseenTasks,
-  type PillCounts,
-} from "./pill";
+import { hueOf, Pills } from "./pill";
 import { PointerMenus } from "./pointerMenu";
 import { projectName } from "./projects";
 import { InboxStrip } from "./inboxStrip";
@@ -147,6 +135,7 @@ import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
 import { EMPTY_STACK, push, reconcile, routeChange, selectStep, shownStack, topOf, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
+import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
 import { primaryAct } from "./taskAction";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
@@ -291,50 +280,6 @@ function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: s
   );
 }
 
-
-/**
- * The rooms INSIDE a project — nested under whichever one the address is standing on (SHELL.md
- * §5.1). Each is a view of that project's work, so none of them means anything at the root.
- */
-const VIEWS: readonly SidebarView[] = [
-  { id: "files", glyph: "❏", label: "Files" },
-  { id: "tasks", glyph: "▶", label: "Tasks" },
-  // The third activity, and the newest: TALKING. Files designs, Tasks operates, and this is the one
-  // you open when what you want is a conversation rather than a workflow — see `chatPane.tsx`.
-  { id: "chat", glyph: "✎", label: "Chat" },
-];
-
-/**
- * The rooms that belong to NO project, and therefore sit in the footer beside Settings.
- *
- * Debug is here rather than inside Settings for the same reason it always was: the self-test is what
- * you reach for when the app is not behaving, and burying it behind a configuration screen would
- * make it hardest to find in exactly the situation it exists for.
- */
-const FOOTER_VIEWS: readonly SidebarView[] = [
-  { id: "logs", glyph: "≡", label: "Logs" },
-  { id: "debug", glyph: "⌁", label: "Debug" },
-  // The gallery was the foot of Debug once. It is about authoring rather than diagnosis — what a
-  // gate looks like before a run has to reach it — and a page you scroll to the bottom of a
-  // self-test for is a page nobody opens on purpose.
-  { id: "gallery", glyph: "▤", label: "Components" },
-];
-
-/**
- * The rooms at the ROOT of the address — every project's work at once.
- *
- * The same two view ids the projects nest, because they are the same rooms seen from one level up:
- * Tasks at the root is the board sectioned by project, and Chat at the root is every conversation in
- * recency order. Named for the level rather than the room, because "Tasks" appearing twice in one
- * column with no way to tell which is which is the thing that would make this unreadable.
- *
- * No Files. The tree's top level is ALREADY every project with `~/.jaira` beside them (§2.2), so a
- * root Files row would open the same tree a project row opens — two ways to one view.
- */
-const ROOT_VIEWS: readonly SidebarView[] = [
-  { id: "tasks", glyph: "▦", label: "All tasks" },
-  { id: "chat", glyph: "✻", label: "All conversations" },
-];
 
 /** Every nav row, for the lookups that do not care which group a view is in. */
 const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
@@ -2123,57 +2068,10 @@ export default function App(): JSX.Element {
    * crumb over its board can never disagree about how much is waiting.
    */
   void shownProjects;
-  const sidebarProjects: SidebarProject[] = groups.map((g) => ({
-    project: g.key,
-    label: g.label,
-    kind: g.kind,
-    ...(g.where !== undefined ? { where: g.where } : {}),
-    // Looked up rather than recomputed from THIS list's index: the sidebar hides one project and the
-    // strip and the crumb bar hide none, and a hue derived from each list's own position would give
-    // one project two colours the moment those lists differ.
-    hue: projectHues[g.key] ?? "var(--p0)",
-    // A group's pills are its workspaces', together.
-    counts: sumCounts(g.members.map((m) => projectCounts(m, ui.seen))),
-    onSeen: () => {
-      for (const m of g.members) actions.markProjectSeen(m.project);
-    },
-  }));
+  const sidebarProjects: SidebarProject[] = sidebarProjectsOf(groups, projectHues, ui.seen, actions.markProjectSeen);
 
-  /**
-   * The conversations of the projects the sidebar lists, and of the OPEN one.
-   *
-   * `allConversations` is fetched for every open project whatever view is showing, so it is the one
-   * list that can answer "which of these ended rows is a conversation" — a project summary cannot:
-   * its `ended` rows carry a status and a clock and no workflow. That question is what makes a view
-   * row's pills honest, and answering it wrong is what put a `✓` on **All conversations** for a
-   * task that was never a conversation.
-   */
-  const chatsOf = (project: string): ProjectTask[] =>
-    state.allConversations.filter((t) => t.project === project);
-  /** The stopped rows of a project that are NOT conversations — what the Tasks rows count. */
-  const runsOf = (p: ProjectSummary): { taskId: string; at: number }[] => {
-    const chats = new Set(chatsOf(p.project).map((t) => t.taskId));
-    return unseenTasks(p, ui.seen).filter(({ taskId }) => !chats.has(taskId));
-  };
-
-  /**
-   * The root rows: every project's work at once, split by which ROOM it is in.
-   *
-   * Summed rather than per-project, which is what makes them a level: "all tasks" is one place, and
-   * the number beside it is how much is in it. Clicking the pills marks that row's share seen.
-   *
-   * Split, because the two rows are two rooms and the counts have to say which. Given the same
-   * total, **All conversations** carried a `✓` for a run that finished in a workflow — a mark
-   * pointing at a place that did not contain the thing it was pointing at, and no row below it
-   * repeating the mark, so there was nothing to follow it to. Chat counts conversations; Tasks
-   * counts what is left.
-   */
-  const chatCounts = taskCounts(state.allConversations, ui.seen);
-  /** The project the address is standing on, as the summary its rows count from. */
-  const atSummary = state.at === null ? null : (shownProjects.find((p) => p.project === state.at) ?? null);
-  /** Every workspace of the group the address stands in — a grouped project's rows count them all (decision 0013 §4). */
-  const atMembers = groupOf(groups, state.at)?.members ?? (atSummary === null ? [] : [atSummary]);
-  const atChats = atMembers.flatMap((m) => chatsOf(m.project));
+  /** What the room rows count, at the root and in the open project (`shellModel.ts`). */
+  const rooms = roomCountsOf(shownProjects, state.allConversations, groups, state.at, ui.seen);
   /**
    * Start a conversation, from the row that names them.
    *
@@ -2203,20 +2101,18 @@ export default function App(): JSX.Element {
       newChat.onAct(from);
     },
   };
-  /** Every project's work, before it is split between the two rooms. */
-  const allCounts = shownProjects.reduce<PillCounts>((sum, p) => addCounts(sum, projectCounts(p, ui.seen)), {});
   const rootRows: SidebarView[] = ROOT_VIEWS.map((v) => {
     if (v.id !== "chat") {
       return {
         ...v,
-        counts: minusCounts(allCounts, chatCounts),
-        onSeen: () => actions.markSeenAll(shownProjects.flatMap(runsOf)),
+        counts: rooms.rootTasks,
+        onSeen: () => actions.markSeenAll(rooms.seenRootTasks),
       };
     }
     return {
       ...v,
-      counts: chatCounts,
-      onSeen: () => actions.markSeenAll(unseenRows(state.allConversations, ui.seen)),
+      counts: rooms.rootChat,
+      onSeen: () => actions.markSeenAll(rooms.seenRootChat),
       // The same list the project's own Chat row opens, one level up (SHELL.md §5.1). "All
       // conversations" is a place and this is what is in it; a row that names a level and opens
       // onto nothing is the one arrangement that makes the level look empty.
@@ -2230,14 +2126,14 @@ export default function App(): JSX.Element {
       ? {
           ...v,
           // This project's work, less what is in the room next door — see `rootRows`.
-          counts: minusCounts(sumCounts(atMembers.map((m) => projectCounts(m, ui.seen))), taskCounts(atChats, ui.seen)),
-          onSeen: () => actions.markSeenAll(atMembers.flatMap(runsOf)),
+          counts: rooms.atTasks,
+          onSeen: () => actions.markSeenAll(rooms.seenAtTasks),
         }
       : v.id === "chat"
       ? {
           ...v,
-          counts: taskCounts(atChats, ui.seen),
-          onSeen: () => actions.markSeenAll(unseenRows(atChats, ui.seen)),
+          counts: rooms.atChat,
+          onSeen: () => actions.markSeenAll(rooms.seenAtChat),
           acts: [newChat, find("chat")],
           panel: <ChatListPanel surface={chat} find={finding.chat === true} />,
         }

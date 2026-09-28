@@ -5,6 +5,7 @@ import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
 import type { CardProps } from "@jaira/ui/slots";
 import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
+import { edge } from "../primitives";
 import { useLook, useTokens } from "../tokens";
 import { CardDom } from "./domFallback";
 import { MachineChip } from "./MachineChip";
@@ -154,7 +155,7 @@ export function TaskCard(props: CardProps): JSX.Element {
       paddingLeft={9}
       marginBottom={below}
       {...((child
-        ? { marginLeft: 14, borderLeftWidth: 2, borderLeftColor: t.mix(t.v("accent"), 45, t.v("line")), borderStyle: "solid" }
+        ? { marginLeft: 14, ...edge(t, { left: 2 }, t.mix(t.v("accent"), 45, t.v("line"))) }
         : {}) as object)}
       {...((archived ? { opacity: selected ? 1 : 0.62 } : {}) as object)}
       hoverStyle={{ backgroundColor: hoverGround as never, ...((hoverRing !== undefined ? { boxShadow: hoverRing } : {}) as object), ...(archived ? { opacity: 1 } : {}) }}

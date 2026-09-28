@@ -2,7 +2,7 @@
  * What `styles.css` actually does to an element, as Chromium decided it (decision 0015): for the element
  * a selector names and the ones inside it, every declaration that WON, with the rule it came from.
  *
- *   npx tsx packages/app/shots/cascade.mts '<selector>' [--depth 3] [--scene board] [--look dark] [--inherited] [--ua] [--page /rn]
+ *   npx tsx packages/app/shots/cascade.mts '<selector>' [--depth 3] [--scene board] [--look dark] [--inherited] [--ua] [--page dom|rn]
  *
  * Attaches to the app `studio.mts` keeps running. A universal copy has no cascade: every rule it carries,
  * it carries by hand, and working out which of forty matching rules wins — specificity, source order,
@@ -78,22 +78,44 @@ const nth = Number(arg("--nth") ?? 0);
 type Winner = { value: string; important: boolean; from: string; line?: number; implicit: boolean; rule: number; shorthand?: string };
 
 /** What is never a component's business: the studio's own "hold still" rule, and `* { box-sizing }`. */
-const NOISE = /^(animation|transition|caret-color)/;
+const NOISE = /^(animation|transition|caret-color|text-wrap-mode|font-size-adjust|word-wrap|-webkit-app-region|app-region)$|^(animation|transition)-/;
 
-/** The shorthand in `names` that `longhand` is part of: `padding` for `padding-top`, `border` for `border-top-color`. */
+/** Which longhands each shorthand sets — explicit, because a prefix lies (`flex-direction` is not `flex`'s). */
+const SHORTHANDS: Record<string, RegExp> = {
+  flex: /^flex-(grow|shrink|basis)$/,
+  "flex-flow": /^flex-(direction|wrap)$/,
+  padding: /^padding-(top|right|bottom|left)$/,
+  margin: /^margin-(top|right|bottom|left)$/,
+  inset: /^(top|right|bottom|left)$/,
+  border: /^border-(top|right|bottom|left)(-(width|style|color))?$|^border-(width|style|color)$|^border-image(-.*)?$/,
+  "border-top": /^border-top-(width|style|color)$/,
+  "border-right": /^border-right-(width|style|color)$/,
+  "border-bottom": /^border-bottom-(width|style|color)$/,
+  "border-left": /^border-left-(width|style|color)$/,
+  "border-width": /^border-(top|right|bottom|left)-width$/,
+  "border-style": /^border-(top|right|bottom|left)-style$/,
+  "border-color": /^border-(top|right|bottom|left)-color$/,
+  "border-radius": /^border-(top|bottom)-(left|right)-radius$/,
+  background: /^background-(image|position(-x|-y)?|size|repeat|attachment|origin|clip|color)$/,
+  font: /^(font-(style|variant(-.*)?|weight|stretch|size|family|optical-sizing|kerning|feature-settings|variation-settings|size-adjust)|line-height)$/,
+  overflow: /^overflow-(x|y)$/,
+  gap: /^(row|column)-gap$/,
+  "place-items": /^(align|justify)-items$/,
+  "place-content": /^(align|justify)-content$/,
+  "place-self": /^(align|justify)-self$/,
+  "white-space": /^(white-space-collapse|text-wrap-mode)$/,
+  "text-decoration": /^text-decoration-(line|style|color|thickness)$/,
+  outline: /^outline-(width|style|color)$/,
+  "list-style": /^list-style-(type|position|image)$/,
+  "grid-template": /^grid-template-(rows|columns|areas)$/,
+  "grid-area": /^grid-(row|column)-(start|end)$/,
+  "grid-row": /^grid-row-(start|end)$/,
+  "grid-column": /^grid-column-(start|end)$/,
+};
+
+/** The shorthand in `names` (one rule's properties) that `longhand` is part of, if any. */
 function shorthandOf(longhand: string, names: Set<string>): string | undefined {
-  const parts = longhand.split("-");
-  for (let i = parts.length - 1; i > 0; i--) {
-    const head = parts.slice(0, i).join("-");
-    if (names.has(head)) return head;
-  }
-  // `border-top-color` is also `border-color`'s, `border-top-left-radius` is `border-radius`'s.
-  const tail = parts.slice(-1)[0];
-  if (parts[0] === "border" && tail !== undefined && names.has(`border-${tail}`)) return `border-${tail}`;
-  if (longhand.endsWith("-radius") && names.has("border-radius")) return "border-radius";
-  if (longhand.startsWith("overflow-") && names.has("overflow")) return "overflow";
-  if ((longhand === "row-gap" || longhand === "column-gap") && names.has("gap")) return "gap";
-  if (["top", "right", "bottom", "left"].includes(longhand)) return names.has("inset") ? "inset" : undefined;
+  for (const [short, longs] of Object.entries(SHORTHANDS)) if (names.has(short) && longs.test(longhand)) return short;
   return undefined;
 }
 
@@ -145,8 +167,8 @@ async function main(): Promise<void> {
   try {
     const scene = arg("--scene");
     const look = arg("--look");
-    if (scene !== undefined || look !== undefined) {
-      await goTo(app, arg("--page") ?? "/", {
+    if (scene !== undefined || look !== undefined || arg("--page") !== undefined) {
+      await goTo(app, arg("--page") === "rn" ? "/rn" : "/", {
         ...(look !== undefined ? { look: parseLook(look) } : {}),
         ...(scene !== undefined ? { scene: SCENES.find((s) => s.name === scene) as Scene } : {}),
       });
@@ -154,7 +176,7 @@ async function main(): Promise<void> {
     await app.cdp("DOM.enable");
     await app.cdp("CSS.enable");
     // Number the elements, so each can be found by a selector CDP understands, depth-first.
-    const listed = await app.evaluate<{ id: number; level: number; label: string; box: string; text: string }[] | null>(`(() => {
+    const listed = await app.evaluate<{ id: number; level: number; label: string; box: string; text: string; font: string; computed: string }[] | null>(`(() => {
       document.querySelectorAll("[data-cascade]").forEach((e) => e.removeAttribute("data-cascade"));
       const root = document.querySelectorAll(${JSON.stringify(selector)})[${nth}];
       if (!root) return null;
@@ -166,7 +188,23 @@ async function main(): Promise<void> {
         const cls = typeof el.className === "string" && el.className !== "" ? "." + el.className.trim().split(/\\s+/).join(".") : "";
         const attrs = [...el.attributes].filter((a) => !["class", "style", "data-cascade"].includes(a.name) && !a.name.startsWith("on") && !a.name.startsWith("data-one")).map((a) => a.name + (a.value === "" ? "" : "=" + JSON.stringify(a.value.slice(0, 40)))).join(" ");
         const own = [...el.childNodes].filter((c) => c.nodeType === 3).map((c) => c.textContent.trim()).join(" ").trim();
-        out.push({ id: n++, level, label: el.tagName.toLowerCase() + cls + (attrs ? " [" + attrs + "]" : ""), box: Math.round(r.x) + "," + Math.round(r.y) + " " + Math.round(r.width * 100) / 100 + "×" + Math.round(r.height * 100) / 100, text: own.slice(0, 60) });
+        // For an element with words of its own: the font they are actually drawn in, all of it
+        // resolved — what a copy's Text has to say in full, since nothing is inherited on native.
+        let font = "";
+        if (own !== "") {
+          const c = getComputedStyle(el);
+          font = c.fontSize + "/" + c.lineHeight + " " + c.fontFamily.split(",")[0] + " " + c.fontWeight + (c.fontStyle !== "normal" ? " " + c.fontStyle : "") + " " + c.color + (c.letterSpacing !== "normal" ? " ls " + c.letterSpacing : "") + (c.textTransform !== "none" ? " " + c.textTransform : "");
+        }
+        // A universal element (on /rn) has no rules worth reading, only atomic classes: its computed box is the news.
+        let computed = "";
+        if (/is_(View|Text)/.test(cls) || el.getAttribute("role") === "button") {
+          const c = getComputedStyle(el);
+          const four = (p) => [c[p + "Top"], c[p + "Right"], c[p + "Bottom"], c[p + "Left"]].map((v) => v.replace("px", "")).join(" ");
+          const bw = [c.borderTopWidth, c.borderRightWidth, c.borderBottomWidth, c.borderLeftWidth].map((v) => v.replace("px", "")).join(" ");
+          computed = c.display + " " + c.flexDirection + " | pad " + four("padding") + " | mar " + four("margin") + " | border " + bw + " " + c.borderTopStyle + " " + c.borderTopColor + " | bg " + c.backgroundColor + (c.textAlign !== "start" ? " | align " + c.textAlign : "");
+        }
+        const cls2 = cls.replace(/\.(_[\w-]+|is_View|is_Text)/g, "");
+        out.push({ id: n++, level, label: el.tagName.toLowerCase() + cls2 + (cls2 !== cls ? " (tamagui)" : "") + (attrs ? " [" + attrs + "]" : ""), box: Math.round(r.x) + "," + Math.round(r.y) + " " + Math.round(r.width * 100) / 100 + "×" + Math.round(r.height * 100) / 100, text: own.slice(0, 60), font, computed });
         if (level < ${depth}) for (const c of el.children) walk(c, level + 1);
       };
       walk(root, 0);
@@ -179,6 +217,10 @@ async function main(): Promise<void> {
       const m = await app.cdp<Matched>("CSS.getMatchedStylesForNode", { nodeId });
       const indent = "  ".repeat(el.level);
       console.log(`${indent}${el.label}  (${el.box})${el.text !== "" ? `  "${el.text}"` : ""}`);
+      if (el.font !== "") console.log(`${indent}    = ${el.font}`);
+      if (el.computed !== "") console.log(`${indent}    ~ ${el.computed}`);
+      // A copy already drawn by Tamagui: its classes are its props, so its rules are no news.
+      if (el.label.includes("(tamagui)")) continue;
       print(winners(m.matchedCSSRules ?? [], m.inlineStyle?.cssProperties), `${indent}    `);
       for (const pseudo of m.pseudoElements ?? []) {
         if (pseudo.pseudoType !== "before" && pseudo.pseudoType !== "after") continue;

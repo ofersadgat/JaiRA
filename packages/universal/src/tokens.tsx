@@ -12,6 +12,12 @@ import { ReplayRoot, ReplayScope, useReplayLook, useReplayTokens, type RootLook 
  * `/rn` page, which tests the native path in a browser with no `styles.css` loaded.
  */
 export interface Tokens {
+  /**
+   * Whether these are the replayed cascade (native, and the `/rn` page) — values are numbers and
+   * colours — rather than the CSS variables themselves (the desktop's own page). A copy writes sizes
+   * the same either way; this is for the few places the two need different shapes (`letterSpacing`).
+   */
+  readonly replayed: boolean;
   /** `--name`. */
   v(name: string): string | number;
   /** `--name` scaled, for sizes: `calc(var(--size-data) * 0.8)`. */
@@ -40,6 +46,7 @@ export interface Look {
 }
 
 const WEB: Tokens = {
+  replayed: false,
   v: (name) => `var(--${name})`,
   scaled: (name, factor) => `calc(var(--${name}) * ${factor})`,
   tint: (name, pct) => `color-mix(in srgb, var(--${name}) ${pct}%, transparent)`,

@@ -44,11 +44,29 @@ function crop(png: PNG, r: Rect, scale: number): PNG {
   return out;
 }
 
-function differ(a: PNG, b: PNG, diffTo?: string): { differing: number; total: number } {
+/**
+ * Pixels that differ VISIBLY — a channel off by more than {@link VISIBLE} — and, beside them, pixels that
+ * differ at all. The split is there because the stylesheet's `color-mix()` is composited by Chromium in
+ * floating point and a copy's colour is 8-bit `rgba()` (a phone's compositor is different again), so a
+ * translucent ground comes out one level apart in one channel: identical to any eye, not to `===`.
+ */
+const VISIBLE = 2;
+function differ(a: PNG, b: PNG, diffTo?: string): { differing: number; exact: number; total: number } {
   const diff = new PNG({ width: a.width, height: a.height });
-  const differing = pixelmatch(a.data, b.data, diff.data, a.width, a.height, { threshold: 0 });
+  const exact = pixelmatch(a.data, b.data, undefined, a.width, a.height, { threshold: 0 });
+  let differing = 0;
+  for (let i = 0; i < a.data.length; i += 4) {
+    const far = Math.max(Math.abs(a.data[i]! - b.data[i]!), Math.abs(a.data[i + 1]! - b.data[i + 1]!), Math.abs(a.data[i + 2]! - b.data[i + 2]!)) > VISIBLE;
+    if (far) differing++;
+    // The diff image: visible differences red, the rest a faint copy of the page.
+    const grey = Math.round((a.data[i]! + a.data[i + 1]! + a.data[i + 2]!) / 3 / 4 + 190);
+    diff.data[i] = far ? 255 : grey;
+    diff.data[i + 1] = far ? 0 : grey;
+    diff.data[i + 2] = far ? 0 : grey;
+    diff.data[i + 3] = 255;
+  }
   if (differing > 0 && diffTo !== undefined) writeFileSync(diffTo, PNG.sync.write(diff));
-  return { differing, total: a.width * a.height };
+  return { differing, exact, total: a.width * a.height };
 }
 
 async function capture(app: App): Promise<PNG> {
@@ -121,8 +139,10 @@ async function main(): Promise<void> {
   if (failed) process.exitCode = 1;
 }
 
-function verdict(d: { differing: number; total: number }): string {
-  return d.differing === 0 ? "identical" : `${d.differing} px differ (${((100 * d.differing) / d.total).toFixed(2)}%)`;
+function verdict(d: { differing: number; exact: number; total: number }): string {
+  if (d.exact === 0) return "identical";
+  if (d.differing === 0) return `identical to the eye (${d.exact} px one or two levels apart)`;
+  return `${d.differing} px differ (${((100 * d.differing) / d.total).toFixed(2)}%)`;
 }
 
 await main();
