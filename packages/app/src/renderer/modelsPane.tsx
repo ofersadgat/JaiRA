@@ -16,7 +16,6 @@
 import type { JSX } from "react";
 import {
   DEFAULT_EXECUTOR,
-  pin,
   type AvailabilitySnapshot,
   type ConfigLayer,
   type ConfigView,
@@ -30,9 +29,12 @@ import { ModelDefaults, configWriter } from "./configPane";
 import { Disclosure } from "./controls";
 import { SettingsSection } from "./settingsLayout";
 import { LAYER_LABELS } from "./layerLabels";
-import { modelsBlock, type ModelPatch } from "./modelsConfig";
-import { Presets, type PresetDocs } from "./presetTabs";
-import { candidateLookupOf, candidatesInDraft, type CandidateLookup } from "./presetModel";
+import type { ModelPatch } from "./modelsConfig";
+import { definitionsOf, layerWordOf, otherLayerOf, presetsOf, suggestionsOf } from "./modelsPageModel";
+import { Presets } from "./presetTabs";
+import { candidateLookupOf, type CandidateLookup } from "./presetModel";
+
+export { functionRulesOverlay } from "./modelsPageModel";
 import type { ExecutorPatch, ExecutorTarget } from "./executorConfig";
 
 export interface ModelsPaneProps {
@@ -109,48 +111,6 @@ export function ModelsPane(props: ModelsPaneProps): JSX.Element {
 }
 
 /**
- * What saving the default executor's function rules writes — Settings → Tools draws them as its
- * available column, and they are still the default executor's overlay, pinned like any other field.
- */
-export function functionRulesOverlay(
-  config: ConfigView,
-  layer: ConfigLayer,
-  rules: string[] | undefined,
-): [name: string, definition: JairaOperationNode, layer: ConfigLayer] {
-  const overlay = definitionsOf(config[layer])[DEFAULT_EXECUTOR];
-  return [DEFAULT_EXECUTOR, pin(overlay, "function.rules", rules), layer];
-}
-
-/** The executor overlays a document states, as an object. */
-function definitionsOf(doc: unknown): Record<string, JairaOperationNode> {
-  if (doc === null || typeof doc !== "object" || Array.isArray(doc)) return {};
-  const block = (doc as Record<string, unknown>)["executors"];
-  if (block === null || typeof block !== "object" || Array.isArray(block)) return {};
-  return block as Record<string, JairaOperationNode>;
-}
-
-/** The presets a document states, as an object. */
-function presetsOf(doc: unknown): PresetDocs {
-  const block = modelsBlock(doc)?.["presets"];
-  return block !== null && typeof block === "object" && !Array.isArray(block) ? (block as PresetDocs) : {};
-}
-
-/**
- * The model ids a candidate's box suggests: every candidate a preset in view already names, then the
- * models the catalog knows, newest first (decision 0009 — no list kept here) — suggestions only, the
- * box takes any id.
- */
-function suggestionsOf(catalogIds: readonly string[], ...docs: PresetDocs[]): string[] {
-  const named = docs.flatMap((doc) => Object.values(doc).flatMap((preset) => candidatesInDraft(preset["model"])));
-  return [...new Set([...named, ...catalogIds].filter((id) => id.trim().length > 0))];
-}
-
-/** A layer as words in a sentence — "Shared (all projects)" → "shared", "This project" → "this project". */
-function layerWordOf(layer: ConfigLayer): string {
-  return LAYER_LABELS[layer].replace(/\s*\(.*\)\s*$/, "").toLowerCase();
-}
-
-/**
  * Named LLM configurations a state selects with `operation.configRef`.
  *
  * The group head, and the documents the tabs are drawn from: what THIS layer states, what is in
@@ -175,7 +135,7 @@ function PresetsGroup({
 }): JSX.Element {
   const builtIn = presetsOf(config.system);
   const effective = presetsOf(config.effective);
-  const other: ConfigLayer = layer === "base" ? "project" : "base";
+  const other: ConfigLayer = otherLayerOf(layer);
   return (
     <SettingsSection
       id="presets"

@@ -8,7 +8,7 @@
  * change is written to the page's layer (and taken out of the stronger ones by `saveConfig`), and a
  * ↺ beside a row the page's layer states takes it out again.
  */
-import { useEffect, useState, type JSX } from "react";
+import type { JSX } from "react";
 import { EVENT_SPECS, statesPath, type EventsStatusView, type JairaEventsConfig, type PathWrite } from "@jaira/shared/browser";
 import { Switch } from "./controls";
 import { BrandIcon } from "./icons";
@@ -149,38 +149,4 @@ export function EventsSection(props: EventsSectionProps): JSX.Element {
   );
 }
 
-/** How often the section re-reads what the watcher knows, while it is on screen. */
-const STATUS_EVERY_MS = 20_000;
-
-/**
- * The host's half: `events:status` read for `key` (the project, or the shared root) and re-read while
- * the page is open, and a clock for "2 min ago". Nothing here asks a forge — main answers from git
- * and memory.
- */
-export function useEventStatus(read: () => Promise<EventsStatusView>, key: string): { status: EventsStatusView | null; now: number } {
-  const [status, setStatus] = useState<EventsStatusView | null>(null);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    let live = true;
-    setStatus(null);
-    const once = (): void => {
-      read().then(
-        (next) => {
-          if (live) setStatus(next);
-        },
-        (e: unknown) => {
-          if (live) setStatus({ remotes: [], tasks: {}, cadenceMs: 60_000, problem: e instanceof Error ? e.message : String(e) });
-        },
-      );
-      setNow(Date.now());
-    };
-    once();
-    const timer = setInterval(once, STATUS_EVERY_MS);
-    return () => {
-      live = false;
-      clearInterval(timer);
-    };
-    // `read` is rebuilt with every render of the host; `key` is what makes it a different question.
-  }, [key]);
-  return { status, now };
-}
+export { useEventStatus } from "./settingsShell";

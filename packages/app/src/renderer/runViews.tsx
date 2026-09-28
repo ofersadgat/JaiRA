@@ -40,7 +40,7 @@ import type {
 import { Board, Column, Tile } from "./board";
 import { ApprovalSurface, GateSurface, QuestionSurface, type EditorServices } from "./components";
 import type { ComponentServices } from "./changesetReview";
-import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf, signatureOf } from "./transcript";
+import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf } from "./transcript";
 import { ValueView } from "./valueView";
 import { useStickToBottom } from "./stickToBottom";
 import { sessionKey } from "./sessionCache";
@@ -49,7 +49,7 @@ import { instanceOf as instanceOfState, nodeAt, type TrailStep } from "./trail";
 import { AnsweredForYou, Paper, Pulse, Transcript, durationOf, useElapsed, type CallSurface, type EditMessage } from "./transcriptView";
 import { ApprovalAskContext, approvalCallIndex } from "./workSummaryView";
 import { PickStepContext, advanceTargetOf, askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "./stateSurface";
-import { isComponentName, parseComponentConfig, readCall, MOVE_EVENTS, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
+import { isComponentName, parseComponentConfig, readCall, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
 import { PieceReadingContext, SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
@@ -59,6 +59,8 @@ import { Composer } from "./composer";
 import { OfflineBanner, PendingSend } from "./offline";
 import { invoke, subscribe } from "./store";
 import { useTaskRun } from "./taskRun";
+import { callsOf, costOfConversation, listed, settledGateCallOf, settledGateOf, toldOf } from "./runConversationModel";
+import { NO_RUN_OFFERS, restingOf, runColumnsOf, runDragOffersOf, runTileWordsOf, runsByChild, standingOn } from "./runBoardModel";
 
 // Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
 // has to work for a composite, which has no session row to look one up by. Re-exported because this
@@ -69,19 +71,9 @@ export { instanceOf } from "./trail";
 // universal copy (decision 0015); re-exported here, where their callers have always found them.
 export { askingInstanceOf, hasAsking } from "./stateSurface";
 
-/** Every execution of each declared child, keyed by the child key the parent mounted it under. */
-export function runsByChild(parent: InstanceNode | undefined): Map<string, InstanceNode[]> {
-  const out = new Map<string, InstanceNode[]>();
-  for (const child of parent?.children ?? []) {
-    const key = child.childKey ?? child.stateId;
-    const list = out.get(key);
-    if (list === undefined) out.set(key, [child]);
-    else list.push(child);
-  }
-  // Oldest first inside a column, so a retry reads downward as the story it is.
-  for (const list of out.values()) list.sort((a, b) => a.startedAt - b.startedAt);
-  return out;
-}
+// `runsByChild`, `runDragOffersOf` and what a card says live in `runBoardModel.ts`, shared with the
+// universal copy (decision 0015); re-exported here, where their callers have always found them.
+export { runsByChild, runDragOffersOf };
 
 /**
  * One execution, as a card in a board column.
@@ -111,23 +103,20 @@ function RunTile({
   onDragStart?: ((e: ReactDragEvent) => void) | undefined;
   onDragEnd?: (() => void) | undefined;
 }): JSX.Element {
-  const sig = signatureOf(node);
-  const took = node.endedAt !== undefined ? durationOf(node.endedAt - node.startedAt) : undefined;
+  const words = runTileWordsOf(node);
   return (
     <Tile
       status={node.status}
-      title={sig.label ?? sig.name}
+      title={words.title}
       selected={selected}
-      tip={`${node.stateId} · ${new Date(node.startedAt).toLocaleString()} — double-click to walk in`}
+      tip={words.tip}
       // Only when there is more than one. A lone card numbered "1 of 1" is a question raised and
       // immediately answered.
       trailing={total > 1 ? <span className="chip">{index + 1}</span> : undefined}
       meta={
         <>
-          <span className="ellip">
-            {node.status === "running" ? "running" : (took ?? new Date(node.startedAt).toLocaleTimeString())}
-          </span>
-          <span className="card-status">{node.status.replace(/_/g, " ")}</span>
+          <span className="ellip">{words.when}</span>
+          <span className="card-status">{words.status}</span>
         </>
       }
       // One click marks it, two walk into it — the same pair of gestures the task board uses, and the
@@ -138,14 +127,14 @@ function RunTile({
       {...(onDragStart !== undefined ? { onDragStart } : {})}
       {...(onDragEnd !== undefined ? { onDragEnd } : {})}
     >
-      {sig.params.length > 0 ? (
+      {words.args.length > 0 ? (
         <div className="card-args">
-          {sig.params.slice(0, 2).map((param) => (
+          {words.args.map((param) => (
             <div key={param.name} className="ellip">
               {param.name} {param.preview}
             </div>
           ))}
-          {sig.params.length > 2 ? <div className="sub">+{sig.params.length - 2} more</div> : null}
+          {words.more > 0 ? <div className="sub">+{words.more} more</div> : null}
         </div>
       ) : null}
     </Tile>
@@ -192,16 +181,10 @@ export function RunBoard({
   onDrop?: ((requestId: string) => void) | undefined;
 }): JSX.Element {
   const byChild = useMemo(() => runsByChild(parent), [parent]);
-  // What actually ran, when nothing says what was declared — a state view still in flight, or one
-  // that would not load. Fewer columns than the truth (a child nothing reached cannot appear) but
-  // never wrong about the ones it draws, which beats an empty board while a fetch lands.
-  const columns = declared.length > 0 ? declared : [...byChild.keys()].map((key) => ({ key }) as StateChild);
-  /**
-   * The card a drag picks up: the execution the run RESTS on — the parent's latest child that was
-   * not superseded. A wait belongs to the run, not to a pass, and the pass it is about is the one
-   * the parent stopped after; every other card in the column is history.
-   */
-  const resting = useMemo(() => [...(parent?.children ?? [])].reverse().find((n) => !n.superseded), [parent]);
+  // What actually ran, when nothing says what was declared (`runColumnsOf`).
+  const columns = runColumnsOf(declared, byChild);
+  // The card a drag picks up: the execution the run RESTS on (`restingOf`).
+  const resting = useMemo(() => restingOf(parent), [parent]);
   const [dragging, setDragging] = useState(false);
   const draggable = onDrop !== undefined && offers.size > 0;
   return (
@@ -265,34 +248,6 @@ export function RunBoard({
       </div>
     </div>
   );
-}
-
-const NO_RUN_OFFERS: ReadonlyMap<string, string> = new Map();
-
-/**
- * The drags this run's board can offer: column key → the wait a drop there would answer.
- *
- * The same reading `dragOffersOf` makes for the Tasks board, one level down. A wait names the task
- * it parked in and the child key its rule moves to (`to_state`, filled in by the hub), and this
- * board's columns ARE those keys — so a wait of this task whose target is a column here is an
- * offer, and one aimed anywhere else is not. FIRST wins where two rules offer the same move, which
- * is the engine's own order.
- */
-export function runDragOffersOf(
-  taskId: string | undefined,
-  columns: readonly { key: string }[],
-  requests: readonly PendingUserEvent[],
-): ReadonlyMap<string, string> {
-  if (taskId === undefined) return NO_RUN_OFFERS;
-  const keys = new Set(columns.map((c) => c.key));
-  const offers = new Map<string, string>();
-  for (const request of requests) {
-    if (!MOVE_EVENTS.includes(request.event) || request.taskId !== taskId) continue;
-    const to = advanceTargetOf(request);
-    if (to === undefined || !keys.has(to) || offers.has(to)) continue;
-    offers.set(to, request.requestId);
-  }
-  return offers;
 }
 
 // The key convention now lives in `sessionCache.ts`, with the invalidation that has to agree with
@@ -445,18 +400,9 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
   );
 }
 
-/**
- * An events automation's `notify` call, settled: what it told the person, and what about — the
- * notice the inbox strip showed. One line, because it asked nothing and answered nothing: the call's
- * answer is `{ text, event? }`, the event in a line (`eventSummary`). A failed `notify` is not a told line.
- */
-export function toldOf(call: ReadCall): { text: string; about?: string } | undefined {
-  if (call.name !== "notify" || call.error !== undefined || call.status !== "completed") return undefined;
-  const result = call.result !== null && typeof call.result === "object" && !Array.isArray(call.result) ? (call.result as Record<string, JsonValue>) : {};
-  const text = typeof result["text"] === "string" ? result["text"] : undefined;
-  if (text === undefined) return undefined;
-  return { text, ...(typeof result["event"] === "string" ? { about: result["event"] } : {}) };
-}
+// `toldOf`, the settled gate's call and request, `listed` and `costOfConversation` live in
+// `runConversationModel.ts`, shared with the universal copy (decision 0015); re-exported here.
+export { toldOf };
 
 function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Element {
   return (
@@ -472,62 +418,6 @@ function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Ele
 }
 
 /** Exported for the test that renders one — the same reason {@link TableView} is. */
-/**
- * The function call a settled `asked` state made, when its record is still there.
- *
- * Settled means the operation is no longer running, or the instance was cut from under it — a
- * cancel leaves `operation.status` at `running` (nothing ever completes it), so the instance's own
- * status has to be read too; see `headerToneOf` for the same rule. `asking` is the live gate being
- * hosted right now, which is never settled however the node reads.
- *
- * `undefined` when the record has been pruned, and then the panel falls back to the call listing:
- * a gate cannot be drawn from a call nothing remembers.
- */
-function settledGateCallOf(
-  node: InstanceNode,
-  records: Record<string, OperationRecordView>,
-  asking: boolean,
-): ReadCall | undefined {
-  if (asking || surfaceKindOf(node) !== "asked") return undefined;
-  const operation = node.operation;
-  if (operation === undefined) return undefined;
-  const cut = node.status === "canceled" || node.status === "failed" || node.status === "timeout";
-  if (operation.status === "running" && !cut) return undefined;
-  const calls = (node.calls ?? [])
-    .map((call) => records[call.operationId])
-    .filter((row): row is OperationRecordView => row !== undefined)
-    .map(readCall);
-  return calls.filter((call) => call.ref !== undefined || call.kind === "function").at(-1) ?? calls.at(-1);
-}
-
-/**
- * The request a settled gate is drawn from, rebuilt from its record.
- *
- * Everything `GateSurface` reads is on the call: the component is the function it called, the
- * inputs are the arguments it was called with (a component's authored surface IS its args — see
- * `withContract` in main), and the contract is parsed from those the way main parses it for a live
- * gate. What the record does not carry is which project parked it, spelled here as the empty
- * project, which `GateSurface` reads as "the focused one".
- */
-function settledGateOf(call: ReadCall, node: InstanceNode, taskId: string | undefined, project: string | undefined): PendingInteraction {
-  const component = call.name ?? call.ref ?? "function";
-  const pending: PendingInteraction = {
-    requestId: `settled:${node.instanceId}`,
-    taskId: taskId ?? "",
-    project: project ?? "",
-    component,
-    inputs: call.args,
-  };
-  if (isComponentName(component)) {
-    try {
-      pending.config = parseComponentConfig(component, call.args);
-    } catch (e) {
-      pending.configError = (e as Error).message;
-    }
-  }
-  return pending;
-}
-
 // "Answered for you" lives beside the question block it also marks (`transcriptView.tsx`); the gate
 // here and the shots import it from this module, as they always have.
 export { AnsweredForYou };
@@ -594,10 +484,7 @@ export function SilentState({ node, records }: { node: InstanceNode; records: Re
    * been pruned is a call nothing can say anything about, and a row reading "call (unknown)" is a
    * gap dressed up as information.
    */
-  const calls = useMemo(
-    () => (node.calls ?? []).map((call) => records[call.operationId]).filter((row) => row !== undefined).map(readCall),
-    [node.calls, records],
-  );
+  const calls = useMemo(() => callsOf(node, records), [node, records]);
   if (failure !== undefined) {
     return (
       <>
@@ -1264,12 +1151,6 @@ export interface ArmedRewind {
   doomed: string[];
 }
 
-/** "a, b and c" — the deleted states, said as a list. */
-function listed(names: readonly string[]): string {
-  if (names.length <= 1) return names[0] ?? "";
-  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
-}
-
 /**
  * The strip while a rewind is armed: the sentence, and the one filled button in the danger colour.
  *
@@ -1895,47 +1776,8 @@ export function RunModeToggle({ mode, onMode }: { mode: RunMode; onMode: (mode: 
   );
 }
 
-/**
- * Where the walk is standing, and what is under it.
- *
- * The trail's tail is the answer to both questions, and everything the panel renders comes from
- * here. The FALLBACK is what keeps the old behaviour honest rather than special: with no run walked
- * into, the run is this state's own newest instance and the declared children are the open file's —
- * exactly what the panel showed before there was a trail.
- */
-export function standingOn(
-  state: StateView,
-  context: FileSurfaceProps["context"],
-): {
-  node: InstanceNode | undefined;
-  stateId: string;
-  declared: readonly StateChild[];
-  deep: boolean;
-  /** Set when the tail is a SUBAGENT CONVERSATION — `node` is then its host. See `TrailStep.sidechain`. */
-  sidechain?: string;
-} {
-  const detail = context.detail;
-  const tail = context.trail?.at(-1);
-  if (tail === undefined) {
-    return {
-      node: instanceOfState(detail?.instances ?? [], state.stateId),
-      stateId: state.stateId,
-      declared: state.children,
-      deep: false,
-    };
-  }
-  const deep = tail.stateId !== state.stateId;
-  return {
-    node: nodeAt(detail?.instances ?? [], tail.instanceId),
-    stateId: tail.stateId,
-    // A step deeper is a different state, and its columns are ITS declared children. `trailState` is
-    // fetched for exactly this; without it the board falls back to what actually ran, which is the
-    // instance tree's own answer and misses only the children nothing reached.
-    declared: deep ? (context.trailState?.children ?? []) : state.children,
-    deep,
-    ...(tail.sidechain !== undefined ? { sidechain: tail.sidechain } : {}),
-  };
-}
+// `standingOn` lives in `runBoardModel.ts`, shared with the universal copy (decision 0015).
+export { standingOn };
 
 /**
  * Everything a state's viewer shows: whichever reading the toggle selects, of wherever the trail is
@@ -2027,11 +1869,4 @@ export function CompositeView(props: FileSurfaceProps & { state: StateView }): J
       )}
     </div>
   );
-}
-
-/** What one conversation has cost: the priced calls its instance made, summed; `undefined` when none was priced. */
-function costOfConversation(rows: readonly SessionRef[], instanceId: string): number | undefined {
-  let total: number | undefined;
-  for (const row of rows) if (String(row.instanceId) === instanceId && row.costUsd !== undefined) total = (total ?? 0) + row.costUsd;
-  return total;
 }

@@ -14,6 +14,12 @@ import type { AppState, View } from "./store";
 import { primaryAct } from "./taskAction";
 import { nodeAt } from "./trail";
 import { FOLD, PANE, PANE_WIDE, PANEL_MIN, PANEL_RAIL, openOf, paneOf } from "./uiState";
+import { projectName } from "./projects";
+import { initialRunValues, runValuesOf, settledMarkOf, type RunValues } from "./runForm";
+import type { RunSurface } from "./runPanel";
+import type { RerunSurface } from "./panelViews";
+import { pathOf } from "./panelViewsModel";
+import type { JsonValue } from "@declarative-ai/json";
 
 /** The rooms that have a side panel, and the fold each remembers — see `uiState.ts`'s `FOLD`. */
 export type PanelRoom = "files" | "tasks" | "chat" | "debug";
@@ -221,4 +227,99 @@ export function startAgainOf(
 export function openNewTaskWith(onStack: (next: (stack: PanelStack) => PanelStack) => void, setFold: (id: string, open: boolean) => void): void {
   onStack((was) => push(was, { kind: "newTask", key: "newTask" }));
   setFold(PANEL_FOLD.tasks, true);
+}
+
+/**
+ * A state's run form and history, as a board column (or a conversation's gutter) opens it in the panel —
+ * `App.tsx`'s `runSurfaceOf`, moved here unchanged so the universal panel builds the same surface.
+ *
+ * What the boxes hold: reached from a board column, the state's own defaults with whatever has been
+ * typed over them — a form for the NEXT run. Reached from a conversation's gutter, the panel is
+ * describing a run that already happened, so they hold what that run was called with; typing still
+ * wins, because the reason to look at those values beside the Run button is usually to change one of
+ * them and go again. How each value was settled (decision 0005 §4) is said only while the boxes still
+ * hold what the run was called with.
+ */
+export function runSurfaceFor(
+  state: Pick<AppState, "workflowForms" | "projects" | "runValues" | "tasks" | "sharedTasks" | "at" | "busy" | "selected">,
+  actions: {
+    setRunValues: (stateId: string, values: RunValues) => void;
+    runState: (stateId: string, title: string, inputs: Record<string, JsonValue>, project?: string) => unknown;
+    select: (taskId: string, project?: string) => void;
+  },
+  detail: TaskDetail | null,
+  stateId: string,
+  project: string | null,
+  runInstance: string | null,
+): RunSurface | undefined {
+  const fields = state.workflowForms[stateId];
+  if (fields === undefined) return undefined;
+  const summary = state.projects.find((p) => p.project === project);
+  const run = runInstance === null ? null : nodeAt(detail?.instances ?? [], runInstance);
+  const called = run?.inputs;
+  const recorded = state.runValues[stateId] === undefined ? run?.inputProvenance : undefined;
+  const titleOf = (taskId: string): string | undefined => [...state.tasks, ...state.sharedTasks].find((task) => task.taskId === taskId)?.title;
+  return {
+    fields,
+    values: state.runValues[stateId] ?? (called !== undefined ? runValuesOf(fields ?? [], called) : initialRunValues(fields ?? [])),
+    ...(recorded !== undefined ? { provenance: (path: string) => settledMarkOf(recorded[path], titleOf) } : {}),
+    target: {
+      ...(project !== null && project !== state.at ? { project } : {}),
+      label: summary?.label ?? projectName(project),
+      open: project !== null,
+    },
+    ...(project !== null ? { targetDir: project } : {}),
+    exists: true,
+    // A board column is a file on disk by construction. There is no editor here to have unsaved
+    // edits in — the one that could is in the other view, describing whatever IT has open.
+    dirty: false,
+    busy: state.busy,
+    tasks: summary?.kind === "shared" ? state.sharedTasks : state.tasks,
+    selected: state.selected,
+    onChange: (values) => actions.setRunValues(stateId, values),
+    onRun: (title, inputs) => void actions.runState(stateId, title, inputs, project ?? undefined),
+    onSelectTask: actions.select,
+  };
+}
+
+/**
+ * Where a re-run with changes starts: the task's workflow as a run form, opening on what the task was
+ * called with — `App.tsx`'s `rerunSurface`, moved here unchanged so the universal panel builds the same.
+ * Starting it makes a NEW task and closes the card (the stack back to its root).
+ */
+export function rerunSurfaceFor(
+  state: Pick<AppState, "workflowForms" | "runValues" | "busy">,
+  actions: { setRunValues: (stateId: string, values: RunValues) => void; runState: (stateId: string, title: string, inputs: Record<string, JsonValue>, project?: string) => unknown },
+  task: TaskDetail,
+  project: string | undefined,
+  onStack: (next: (stack: PanelStack) => PanelStack) => void,
+): RerunSurface {
+  const fields = state.workflowForms[task.workflow];
+  const key = `rerun:${task.taskId}`;
+  const called = task.instances[0]?.inputs ?? {};
+  return {
+    workflow: task.workflow,
+    fields,
+    values: state.runValues[key] ?? runValuesOf(fields ?? [], called),
+    busy: state.busy,
+    onChange: (values) => actions.setRunValues(key, values),
+    onRun: (inputs) => {
+      void actions.runState(task.workflow, `${task.title} · again`, inputs, project);
+      onStack((was) => ({ ...was, entries: was.entries.slice(0, 1), motion: "pop" }));
+    },
+  };
+}
+
+/**
+ * Every state the task entered, as a place a copy can start — its entry's journal position (the
+ * re-run card's "Start from", `panelFaces.tsx`). The root has nothing before it: starting there is
+ * starting from the beginning.
+ */
+export function rerunStartsOf(detail: TaskDetail, turns: readonly { kind: string; instanceId?: string | undefined; seq: number }[]): { seq: number; label: string }[] {
+  return turns.flatMap((turn) => {
+    if (turn.kind !== "entered" || turn.instanceId === undefined) return [];
+    const node = nodeAt(detail.instances, turn.instanceId);
+    if (node === undefined || node.parentInstanceId === undefined) return [];
+    return [{ seq: turn.seq, label: pathOf(detail.instances, node).slice(1).join(" › ") }];
+  });
 }

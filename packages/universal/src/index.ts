@@ -13,6 +13,9 @@ export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
 export { Uncopied } from "./app/Uncopied";
 export { CopiesBoard } from "./screens/CopiesBoard";
+export { SchemaForm, registerWidget } from "./components/form/SchemaForm";
+export { Field, FieldGrid, FormRowsContext, Level } from "./components/form/Field";
+export { SettingsGroup } from "./components/settings/SettingsPage";
 
 /** Every universal copy there is, by the slot it fills. `/universal` and native draw all of them. */
 export const COPIES: Partial<Slots> = { Pill, TaskCard };

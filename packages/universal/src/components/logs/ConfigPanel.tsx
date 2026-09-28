@@ -21,11 +21,12 @@ import { Select, SourceSelect } from "./Select";
  *   .log-rule-key      the data face;  input[type=number] 62 wide
  *   .log-config-add    row, gap 8, centred, wrapping; its second select and its input at least 240
  *
- * The table's columns are an auto-layout table's on the desktop, sized by what is in them; here they are
- * fixed shares of the width (a table's layout is not in React Native), close to what the desktop's
- * settles on for a few rules.
+ * The table's columns are an auto-layout table's on the desktop, sized by what is in them. Here they are
+ * fixed shares of the width (a table's layout is not in React Native): the shares the desktop settles on
+ * with no rules (274.92, 169.53, 206.94, 303.49 and 49.13 of 1004), which is where the panel opens. With
+ * rules in it the desktop's columns move to fit their controls, and these do not.
  */
-const COLUMNS = [0.14, 0.34, 0.2, 0.2, 0.12];
+const COLUMNS = [274.92, 169.53, 206.94, 303.49, 49.13].map((w) => w / 1004);
 
 export function ConfigPanel({ policy, onPolicy, sources }: { policy: LogPolicy; onPolicy: (policy: LogPolicy) => void; sources: string[] }): JSX.Element {
   const t = useTokens();
@@ -37,7 +38,7 @@ export function ConfigPanel({ policy, onPolicy, sources }: { policy: LogPolicy; 
   const cellText: FontSpec = { voice: "app", scale: 12 / 12.5 };
   const sub: FontSpec = { voice: "app", scale: 11 / 12.5, color: "dim" };
   const cell = (i: number, children: ReactNode, head = false): JSX.Element => (
-    <View key={i} flexGrow={COLUMNS[i]} flexBasis={0} minWidth={0} paddingRight={8} {...(head ? { paddingTop: 2, paddingBottom: 4 } : { paddingVertical: 3, justifyContent: "center" })}>
+    <View key={i} width={`${(COLUMNS[i] ?? 0) * 100}%`} flexShrink={0} minWidth={0} paddingRight={8} {...(head ? { paddingTop: 2, paddingBottom: 4 } : { paddingVertical: 3, justifyContent: "center" })}>
       {children}
     </View>
   );

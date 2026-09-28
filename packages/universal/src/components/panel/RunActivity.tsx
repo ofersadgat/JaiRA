@@ -25,12 +25,13 @@ import { lengthOf } from "./SidePanel";
  *                        button: radius --control-radius, padding --control-pad, the strip's font
  *   .run-doing .primary  --size-app × 11/12.5, 500, padding 3 12, --on-accent on --fill-accent
  */
-export function RunActivity({ detail, asking, onStop, onRerun, onResume }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined }): JSX.Element | null {
+export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined }): JSX.Element | null {
   const t = useTokens();
   const activity = activityOf(detail, asking, { rerun: onRerun !== undefined, resume: onResume !== undefined });
   const elapsed = useElapsed(startedAtOf(detail), activity.kind === "going", 1000);
-  if (activity.kind === "none") return null;
-  if (activity.kind === "forward") return <Uncopied name="the fast-forward strip" />;
+  // A run that did what it was asked says nothing — but `.cx-doing` still stands there, empty: its
+  // padding (10 over 14) is the room the DOM keeps under the conversation either way.
+  if (activity.kind === "none") return <View paddingTop={10} paddingBottom={14} backgroundColor={t.v("bg") as never} flexShrink={0} />;
   const base = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
   const at = (where: string): JSX.Element => <Txt spec={{ ...base, weight: 600, color: "text" }}>{where.length > 0 ? where : "this run"}</Txt>;
   const tone = activity.kind === "going" && activity.waiting ? { pct: 42, ground: 7, hue: "warn" } : activity.kind === "stopping" ? { pct: 40, ground: 6, hue: "warn" } : activity.kind === "stopped" && (activity.tone === "bad" || activity.tone === "warn") ? { pct: 40, ground: 6, hue: activity.tone } : undefined;
@@ -70,7 +71,45 @@ export function RunActivity({ detail, asking, onStop, onRerun, onResume }: { det
   );
   const mark = (hue: string): JSX.Element => <View width={6} height={6} borderRadius={3} flexShrink={0} backgroundColor={t.v(hue) as never} />;
   let body: JSX.Element;
-  if (activity.kind === "stopping") {
+  if (activity.kind === "forward") {
+    // `FastForwardStrip`: "Fast-forwarding to X · at Y · 1 of 3", Skip to X beside Stop. No clock:
+    // what it counts is states, not seconds.
+    const forward = detail.fastForward!;
+    const of = forward.through.length;
+    const cut = (
+      <Txt spec={base} opacity={0.5} flexShrink={1}>
+        ·
+      </Txt>
+    );
+    body = strip(
+      pulse(false),
+      <>
+        Fast-forwarding to <Txt spec={{ ...base, weight: 600, color: "text" }}>{forward.targetLabel}</Txt>
+      </>,
+      <>
+        {forward.at !== undefined ? (
+          <>
+            {cut}
+            <Txt spec={base} ellip flexShrink={1} minWidth={0}>
+              at <Txt spec={{ ...base, weight: 600, color: "text" }}>{forward.at}</Txt>
+            </Txt>
+          </>
+        ) : null}
+        {of > 0 ? (
+          <>
+            {cut}
+            <Txt spec={{ voice: "data", scale: 1, color: "dim" }} fontSize={t.scaled("size-app", 11 / 12.5)} flexShrink={0} title={forward.through.join(", ")}>
+              {Math.max(forward.step, 1)} of {of}
+            </Txt>
+          </>
+        ) : null}
+      </>,
+      <>
+        {onSkip !== undefined ? <StripButton kind="plain" words={`Skip to ${forward.targetLabel}`} title={`Stop what is running and go straight to ${forward.targetLabel}; what is between is recorded as skipped`} onPress={onSkip} t={t} /> : null}
+        <StripButton kind="danger" words="Stop" onPress={onStop} t={t} />
+      </>,
+    );
+  } else if (activity.kind === "stopping") {
     body = strip(pulse(false), <>Stopping {at(activity.where)} — waiting for the agent to finish what it is doing</>, null, <StripButton kind="danger" words="Force stop" onPress={onStop} t={t} />);
   } else if (activity.kind === "listening") {
     body = strip(mark("rule"), <>Listening for <Txt spec={{ ...base, weight: 600, color: "text" }}>{activity.listening.join(", ")}</Txt></>, null, <StripButton kind="quiet" words="Stop" onPress={onStop} t={t} />);
@@ -119,7 +158,7 @@ function padOf(t: Tokens): [number, number] {
 }
 
 /** The strip's one button: `danger`, `quiet`, or the rerun `primary`. */
-function StripButton({ kind, words, title, onPress, t }: { kind: "danger" | "quiet" | "primary"; words: string; title?: string; onPress: () => void; t: Tokens }): JSX.Element {
+function StripButton({ kind, words, title, onPress, t }: { kind: "danger" | "quiet" | "primary" | "plain"; words: string; title?: string; onPress: () => void; t: Tokens }): JSX.Element {
   const [padV, padH] = kind === "primary" ? [3, 12] : padOf(t);
   return (
     <Press
@@ -139,11 +178,14 @@ function StripButton({ kind, words, title, onPress, t }: { kind: "danger" | "qui
           ? { backgroundColor: hovered ? t.v("tint-bad") : "transparent", borderColor: t.mix(t.v("bad"), hovered ? 60 : 40, t.v("line")) }
           : kind === "quiet"
             ? { backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: "transparent" }
-            : { backgroundColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent"), borderColor: "transparent" }
+            : kind === "plain"
+              ? { backgroundColor: t.v(hovered ? "panel-3" : "panel-2"), borderColor: t.v(hovered ? "rule" : "line") }
+            : // `button.primary`'s --sheen stays: `.run-doing .primary` sets no shadow of its own.
+              { backgroundColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent"), borderColor: "transparent", boxShadow: t.v("sheen") }
       }
     >
       {({ hovered }) => (
-        <Txt spec={kind === "primary" ? { voice: "app", scale: 11 / 12.5, weight: 500, color: "on-accent" } : { voice: "app", scale: 11.5 / 12.5, color: kind === "danger" ? "bad" : hovered ? "text" : "dim" }} numberOfLines={1}>
+        <Txt spec={kind === "primary" ? { voice: "app", scale: 11 / 12.5, weight: 500, color: "on-accent" } : { voice: "app", scale: 11.5 / 12.5, color: kind === "danger" ? "bad" : kind === "plain" || hovered ? "text" : "dim" }} numberOfLines={1}>
           {words}
         </Txt>
       )}

@@ -19,45 +19,31 @@
  *    machine can use under it. Plugins follow the app: there is no other version to pick;
  *  - **Third-party notices** — `licensesPane.tsx`.
  */
-import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
+import type { ConfigView, HealthItem, JairaEngineConfig, UpdateChannel, UpdateState } from "@jaira/shared/browser";
 import {
-  channelOfVersion,
-  inheritedValue,
-  statesPath,
-  type CliCommandStatus,
-  type ConfigView,
-  type EngineStatus,
-  type HealthItem,
-  type JairaEngineConfig,
-  type UpdateChannel,
-  type UpdateState,
-} from "@jaira/shared/browser";
-import { invoke, subscribe as subscribePush } from "./store";
+  ANTHROPIC_TERMS,
+  TRACK_CHOICES,
+  buildTailOf,
+  commandWords,
+  downloadingThen,
+  engineSwitchesOf,
+  engineWhere,
+  pluginControlOf,
+  pluginDescriptionOf,
+  sentence,
+  updateTrackOf,
+  useCliCommand,
+  useEngineStatus,
+} from "./aboutModel";
 import { Disclosure, SettingsLayerContext, Switch } from "./controls";
 import { NeedsAttention } from "./healthView";
-import { SOURCE_WORDS } from "./layerLabels";
 import { ThirdPartyNotices } from "./licensesPane";
 import { ContextMenu, MENU_WIDTH, type MenuAnchor } from "./menu";
 import { Segmented, SettingsRow, SettingsSection } from "./settingsLayout";
-import {
-  buildDownloadBytes,
-  checkedAgo,
-  pluginFamilies,
-  publishedWords,
-  sizeWords,
-  waitedFor,
-  type PluginFamily,
-  type PluginRow,
-} from "./updatesModel";
+import { buildDownloadBytes, checkedAgo, pluginFamilies, publishedWords, sizeWords, waitedFor, type PluginFamily, type PluginRow } from "./updatesModel";
 import { applyUpdate, checkForUpdate, checkPlugin, installPlugin, removePlugin, usePlugins, useUpdate, type UpdateView } from "./updatesStore";
 import { UpdateSplit } from "./updatesView";
-
-const TRACK_CHOICES: ReadonlyArray<readonly [string, UpdateChannel]> = [
-  ["Stable", "stable"],
-  ["Nightly", "nightly"],
-];
-
-const TRACK_PATH = "updates.channel";
 
 const ver = (version: string): JSX.Element => <code className="upd-ver">{version}</code>;
 
@@ -69,13 +55,6 @@ function Bar({ percent, className }: { percent: number; className: string }): JS
     </span>
   );
 }
-
-/** "A development build does not update itself." — the updater's reason, as a sentence. */
-const sentence = (text: string): string => {
-  const trimmed = text.trim();
-  const capital = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
-};
 
 /** The Status row: where the updater stands, and the one control that moves it on. */
 function StatusRow({ view, notesOpen }: { view: UpdateView; notesOpen: boolean }): JSX.Element {
@@ -137,16 +116,7 @@ function StatusRow({ view, notesOpen }: { view: UpdateView; notesOpen: boolean }
       );
     }
     case "downloading": {
-      const then =
-        queued === "later"
-          ? " · then installs when JaiRA next closes"
-          : queued === "cancel"
-            ? " · then waits for you to restart"
-            : queued === "pause"
-              ? " · then pauses what is going and restarts"
-              : busy !== undefined && busy.runs + busy.turns > 0
-                ? ` · then restarts when ${waitedFor(busy)} finish`
-                : " · then restarts";
+      const then = downloadingThen(queued, busy);
       return row(
         <>
           Downloading {next !== undefined ? ver(next.version) : "the update"} · {state.percent ?? 0}%{then}
@@ -189,17 +159,8 @@ function StatusRow({ view, notesOpen }: { view: UpdateView; notesOpen: boolean }
 function UpdatesSection({ config, onTrack, notesOpen }: { config: ConfigView | null; onTrack: (channel: UpdateChannel | undefined) => void; notesOpen: boolean }): JSX.Element {
   const view = useUpdate();
   const state: UpdateState | null = view.update;
-  const version = state?.version ?? "";
-  const own = channelOfVersion(version);
-  const effective = (config?.effective as { updates?: { channel?: UpdateChannel } } | undefined)?.updates?.channel;
-  const channel = effective ?? state?.channel ?? own;
   // ↺ while the personal layer states the track: back to what Shared says, or this build's own.
-  const stated = config !== null && statesPath(config.you, TRACK_PATH);
-  const below = config !== null ? inheritedValue(config, TRACK_PATH, "you") : undefined;
-  const back =
-    below === undefined || below.value === undefined
-      ? `Back to this build's own track, ${own}`
-      : `Back to ${String(below.value)}, from ${SOURCE_WORDS[below.from]}`;
+  const { version, own, channel, stated, back, words } = updateTrackOf(config, state);
   return (
     <SettingsSection id="updates" title="Updates" info="JaiRA checks 15 seconds after it starts and then every hour. Nothing downloads or installs until you click.">
       <SettingsRow
@@ -214,7 +175,7 @@ function UpdatesSection({ config, onTrack, notesOpen }: { config: ConfigView | n
       />
       <SettingsRow
         name="Update track"
-        description={channel === "nightly" ? "Nightly: every day's build, a few a day at most." : "Stable: tested releases, a few a month."}
+        description={words}
         info="Kept on this machine, in personal-settings.json. Going from Nightly to Stable installs the latest stable release once, even though its version is older."
         reset={stated ? { label: back, onReset: () => onTrack(undefined), disabled: config === null } : undefined}
         control={<Segmented label="Update track" value={channel} options={TRACK_CHOICES} disabled={config === null || state?.status === "disabled"} onChange={onTrack} />}
@@ -324,21 +285,15 @@ function Get({ row, bytes, verb, primary, small }: { row: PluginRow; bytes: numb
   );
 }
 
-/** What the Agent SDK's own licence (`LICENSE.md`) points its use to. */
-const ANTHROPIC_TERMS = "https://code.claude.com/docs/en/legal-and-compliance";
-
 function BaseRow({ family, checked }: { family: PluginFamily; checked: Partial<Record<string, number>> }): JSX.Element {
   const row = family.base;
   const local = family.builds.length > 0;
-  const description = local
-    ? row.status.installed !== undefined
-      ? "Loads GGUF weights into JaiRA itself. Add another build beside the one you have."
-      : "Loads GGUF weights into JaiRA itself. Pick the build for your hardware; the suggested one fits this machine."
-    : row.id === "claude-agent-sdk"
+  const said = pluginDescriptionOf(family);
+  const description = said.terms
       ? (
           <>
-            Runs the Claude route on an API key, and reads the claude-cli route's usage.
-            {row.status.installed === undefined ? (
+            {said.text}
+            {said.terms ? (
               // Downloaded from npm by the person, under Anthropic's terms, which JaiRA does not redistribute
               // (decision 0011 §6) — so the terms are shown before the Download, where the choice is made.
               <>
@@ -352,18 +307,19 @@ function BaseRow({ family, checked }: { family: PluginFamily; checked: Partial<R
             ) : null}
           </>
         )
-      : row.note;
+      : said.text;
+  const kind = pluginControlOf(row, local);
   let control: ReactNode;
-  if (row.busy) control = <Progress row={row} />;
-  else if (row.workspace)
+  if (kind === "progress") control = <Progress row={row} />;
+  else if (kind === "checkout")
     control = (
       <>
         <FromCheckout version={row.status.installed} />
         <Check row={row} checked={checked[row.id]} />
       </>
     );
-  else if (row.status.error !== undefined) control = <button type="button" onClick={() => installPlugin(row.id)}>Try again</button>;
-  else if (row.current)
+  else if (kind === "retry") control = <button type="button" onClick={() => installPlugin(row.id)}>Try again</button>;
+  else if (kind === "current")
     control = (
       <>
         <Current version={row.status.version} />
@@ -371,14 +327,14 @@ function BaseRow({ family, checked }: { family: PluginFamily; checked: Partial<R
         <More label={row.name} onRemove={() => removePlugin(row.id)} />
       </>
     );
-  else if (row.outdated)
+  else if (kind === "outdated")
     control = (
       <>
         <Get row={row} bytes={row.status.downloadBytes} verb="Update" />
         <More label={row.name} onRemove={() => removePlugin(row.id)} />
       </>
     );
-  else if (local) control = <span className="sub">{row.status.downloadBytes !== undefined ? `${sizeWords(row.status.downloadBytes)} download, plus a build` : "pick a build below"}</span>;
+  else if (kind === "pick") control = <span className="sub">{row.status.downloadBytes !== undefined ? `${sizeWords(row.status.downloadBytes)} download, plus a build` : "pick a build below"}</span>;
   else control = <Get row={row} bytes={row.status.downloadBytes} verb="Download" />;
   return (
     <SettingsRow
@@ -414,23 +370,24 @@ function BuildLine({ family, build }: { family: PluginFamily; build: PluginRow }
   const baseIn = family.base.status.installed !== undefined;
   const installedBuilds = family.builds.filter((b) => b.status.installed !== undefined).length;
   const label = `the ${build.name} build`;
+  const kind = buildTailOf(build);
   let tail: ReactNode;
-  if (build.busy) tail = <Progress row={build} />;
-  else if (build.workspace) tail = <FromCheckout version={build.status.installed} />;
-  else if (build.status.error !== undefined)
+  if (kind === "progress") tail = <Progress row={build} />;
+  else if (kind === "checkout") tail = <FromCheckout version={build.status.installed} />;
+  else if (kind === "retry")
     tail = (
       <button type="button" className="sm" onClick={() => installPlugin(build.id)}>
         Try again
       </button>
     );
-  else if (build.current)
+  else if (kind === "current")
     tail = (
       <>
         <span className="plg-ok">✓ installed</span>
         <More label={label} note={installedBuilds === 1 ? "the only build" : undefined} onRemove={() => removePlugin(build.id)} />
       </>
     );
-  else if (build.outdated)
+  else if (kind === "outdated")
     tail = (
       <>
         <Get row={build} bytes={build.status.downloadBytes} verb="Update" small />
@@ -476,37 +433,12 @@ function PluginsSection(): JSX.Element {
 
 // --- the jaira command --------------------------------------------------------------------------------
 
-/** What the Command line row says for each state of the `jaira` command. */
-function commandWords(status: CliCommandStatus): string {
-  switch (status.state) {
-    case "installed":
-      return `On your PATH (${status.path ?? "installed"}), running this JaiRA.`;
-    case "missing":
-      return status.canInstall ? "Not on your PATH yet." : `Not on your PATH: ${status.reason ?? "reinstall JaiRA"}.`;
-    case "development":
-    case "unavailable":
-      return `Not here: ${status.reason ?? "this build has no command"}.`;
-  }
-}
-
 /**
  * The `jaira` command (decision 0011 §7): the CLI, run on this app's own Electron. The installer puts
  * it on the PATH on Windows and with the .deb; on macOS this row does, with an administrator prompt.
  */
 function CommandLineSection(): JSX.Element {
-  const [status, setStatus] = useState<CliCommandStatus | undefined>(undefined);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    void invoke("cli:status", undefined).then(setStatus, () => undefined);
-  }, []);
-  const install = (): void => {
-    setBusy(true);
-    setError(undefined);
-    invoke("cli:install", undefined)
-      .then(setStatus, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
-      .finally(() => setBusy(false));
-  };
+  const { status, busy, error, install } = useCliCommand();
   return (
     <SettingsSection id="command-line" title="Command line" info="The jaira command runs workflows, tasks and plugins from a terminal, on this app, its plugins and its version.">
       <SettingsRow
@@ -526,38 +458,6 @@ function CommandLineSection(): JSX.Element {
 
 // --- engine -------------------------------------------------------------------------------------------
 
-/** Where this window's engine runs, as the row names it. */
-function engineWhere(status: EngineStatus): { name: string; description: string } {
-  const host = status.host;
-  if (status.mode === "starting" || host === undefined) return { name: "Starting…", description: "Finding the engine, or starting it." };
-  const who = `process ${host.pid}, JaiRA ${host.version}`;
-  if (status.mode === "local") {
-    return { name: "This window", description: "The engine runs in this window's process. The jaira command and other JaiRA windows use it while this window is open." };
-  }
-  switch (host.kind) {
-    case "server":
-      return {
-        name: status.startedServer ? "A separate server this window started" : "A separate server",
-        description: `jaira serve (${who}). Runs carry on when this window closes.`,
-      };
-    case "desktop":
-      return { name: "Another JaiRA window", description: `It started first (${who}), so this window uses its engine. Quitting that window moves the engine here.` };
-    case "cli":
-      return { name: "A jaira command", description: `It is running (${who}); when it ends, this window runs the engine itself.` };
-  }
-}
-
-function useEngineStatus(): EngineStatus | undefined {
-  const [status, setStatus] = useState<EngineStatus | undefined>(undefined);
-  useEffect(() => {
-    void invoke("engine:status", undefined).then(setStatus, () => undefined);
-    return subscribePush((message) => {
-      if (message.type === "engine:changed") setStatus(message.status);
-    });
-  }, []);
-  return status;
-}
-
 /**
  * Where the engine runs (decision 0012 §5): now, and where it starts next time — in this window by
  * default, or a separate server the window starts and connects to. Both switches are the machine's, in
@@ -566,14 +466,10 @@ function useEngineStatus(): EngineStatus | undefined {
  */
 function EngineSection({ config, onEngine }: { config: ConfigView | null; onEngine: (patch: Partial<Record<keyof JairaEngineConfig, boolean | undefined>>) => void }): JSX.Element {
   const status = useEngineStatus();
-  const effective = (config?.effective as { engine?: JairaEngineConfig } | undefined)?.engine ?? {};
-  const separate = effective.separateServer === true;
-  const keep = effective.keepServerRunning === true;
+  const { separate, keep, resetLabel } = engineSwitchesOf(config);
   const reset = (path: "engine.separateServer" | "engine.keepServerRunning", key: keyof JairaEngineConfig) => {
-    if (config === null || !statesPath(config.you, path)) return undefined;
-    const below = inheritedValue(config, path, "you");
-    const label = below === undefined || below.value === undefined ? "Back to the default, off" : `Back to ${below.value === true ? "on" : "off"}, from ${SOURCE_WORDS[below.from]}`;
-    return { label, onReset: () => onEngine({ [key]: undefined }) };
+    const label = resetLabel(path);
+    return label === undefined ? undefined : { label, onReset: () => onEngine({ [key]: undefined }) };
   };
   const where = status !== undefined ? engineWhere(status) : undefined;
   return (
@@ -586,7 +482,7 @@ function EngineSection({ config, onEngine }: { config: ConfigView | null; onEngi
           ) : (
             <>
               {where.description}
-              {status?.note !== undefined ? <span className="upd-err"> {sentenceOf(status.note)}</span> : null}
+              {status?.note !== undefined ? <span className="upd-err"> {sentence(status.note)}</span> : null}
             </>
           )
         }
@@ -607,13 +503,6 @@ function EngineSection({ config, onEngine }: { config: ConfigView | null; onEngi
       />
     </SettingsSection>
   );
-}
-
-/** A note from main as a sentence: capitalised, with its full stop. */
-function sentenceOf(text: string): string {
-  const trimmed = text.trim();
-  const capital = trimmed.charAt(0).toUpperCase() + trimmed.slice(1);
-  return /[.!?]$/.test(capital) ? capital : `${capital}.`;
 }
 
 export function AboutPane({

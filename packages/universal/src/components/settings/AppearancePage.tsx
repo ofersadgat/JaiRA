@@ -25,6 +25,7 @@ import {
 import { PALETTE_CARDS } from "@jaira/ui/paletteCardsModel";
 import { useShell } from "../../app/shell";
 import { Uncopied } from "../../app/Uncopied";
+import { FileTypesPane } from "../files/FileTypesPane";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Markdown } from "../Markdown";
@@ -232,7 +233,15 @@ export function AppearancePage(): JSX.Element {
       {/* A workspace of its own (a tree beside a stage beside a live Monaco): not copied yet, but a
           section the accordion lists, as the DOM's is. */}
       <SettingsSection id="file-types" title="File types" plain wide layer={rowLayer("renderers", "editors")}>
-        <Uncopied name="FileTypesPane" height={846.2084} />
+        {/* `components/files/FileTypesPane.tsx`: the workspace, its preview the real surface (a Monaco island for code). */}
+        <FileTypesPane
+          renderers={look.renderers}
+          editorTheme={appearance.editorTheme}
+          editors={look.editors}
+          busy={busy}
+          onRenderer={(edits) => void actions.setRenderer(edits, layer)}
+          onEditor={(kind, patch) => void actions.setEditorLook(kind, patch, layer)}
+        />
       </SettingsSection>
       {state.config !== null ? (
         <SettingsSection id="files-tree" title="Files tree" plain>

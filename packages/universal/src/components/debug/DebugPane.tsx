@@ -6,7 +6,7 @@ import { BADGE } from "@jaira/ui/panelFaceModel";
 import { debugFileStatus, debugViewOf, readinessOf, verdictWord } from "@jaira/ui/debugModel";
 import { SELF_TEST_ROOT } from "@jaira/ui/debugWorkflow";
 import type { DebugFile, DebugState } from "@jaira/ui/store";
-import { PLAIN_SCROLLER, Press, Txt, edge, lengthToken, scrollbarProps, useHover, type FontSpec } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, appCh, edge, lengthToken, scrollbarProps, useHover, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Button } from "../settings/Button";
@@ -67,7 +67,7 @@ export function DebugPane({ debug, detail, availability, hasProject, onRun, onCa
           <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} marginBottom={4}>
             Workflow self-test
           </Txt>
-          <Txt spec={{ ...SUB, lineHeight: 1.5 }} maxWidth={chOf(t, 11 / 12.5, 70) as number}>
+          <Txt spec={{ ...SUB, lineHeight: 1.5 }} maxWidth={appCh(t, 11 / 12.5, 70) as number}>
             Two prompt states run in sequence. The first is asked to say hello world; the second takes what it said as a declared input and reports whether it did. A pass means the model answered{" "}
             <Txt spec={{ ...SUB, lineHeight: 1.5, italic: true }}>and</Txt> that its output was validated, bound and carried into the next state.
           </Txt>
@@ -190,11 +190,6 @@ export function DebugPane({ debug, detail, availability, hasProject, onRun, onCa
   );
 }
 
-/** A length in `ch` of DM Sans at a size of the app voice: the `0` is 0.662 of the size. */
-function chOf(t: ReturnType<typeof useTokens>, scale: number, n: number): number | string {
-  const size = t.scaled("size-app", scale);
-  return typeof size === "number" ? n * 0.662 * size : `${n}ch`;
-}
 
 /** A `section`: its `h3`, then what it holds, 8 apart. */
 function Section({ title, children }: { title: string; children: ReactNode }): JSX.Element {

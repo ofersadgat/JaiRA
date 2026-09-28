@@ -101,6 +101,14 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   `components/panel/SidePanel.tsx`).
 - **Scrolling to the end on web**: `scrollTo` with a very large y; `scrollToEnd` stops a fraction short.
 - **Icons** are `components/panel/Icon.tsx` (SVG). On web a real `<svg>`; on a phone `react-native-svg`.
+- **A Tamagui `View` is `position: static` on web.** An absolutely placed child needs
+  `position="relative"` on its parent, as the DOM's usually says; `PLAIN_SCROLLER` is static too, so a
+  scroller that must be absolute goes inside a wrapper `View`.
+- **Form controls.** The desktop page sets no `color-scheme`, so a placeholder is #757575 in every look
+  (`placeholderColor`). A menulist's text sits on a `normal` line (1.3867), a plain input's on the
+  inherited 1.5; `components/logs/Select.tsx` draws Chromium's own select arrow from measurement.
+- **`ch` is not a constant in DM Sans**: its `0` widens with the size (`appCh()`).
+- **A form measured before its width is known** lays out as wide; wait for the width before drawing it.
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
   a region passes in every look.
 

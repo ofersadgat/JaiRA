@@ -20,35 +20,41 @@
  */
 import { useMemo, useState, type JSX } from "react";
 import {
-  CONFIG_SECTIONS,
   COMPONENT_NAMES,
   BUILTIN_FUNCTIONS,
   DEFAULT_SMART_PROMPT,
   SMART_FUNCTION,
   TOOL_CATEGORIES,
-  entryOfDecl,
   functionAllowed,
-  isFunctionMode,
-  subjectKindOf,
-  COMMAND_RUNNERS,
-  RUNNER_GROUP_SUBJECT,
-  runnerSubject,
   toolsInCategory,
-  permissionSetsAt,
   type ConfigLayer,
   type ConfigView,
-  type PermissionSetMode,
   type PermissionSetsView,
-  type WorkflowLayer,
 } from "@jaira/shared/browser";
+import {
+  DEFAULTS_BLOCK,
+  WORKFLOW_FUNCTION_WHAT,
+  cellOf,
+  columnsOf,
+  commandSubjectsOf,
+  defaultsSchemaOf,
+  defaultsSummary,
+  isSubRow,
+  modeClass,
+  rulesWords,
+  runnerSubjectsOf,
+  showsDefaultPrompt,
+  usersOf,
+  valueAt,
+  withPresetSuggestions,
+  type SetColumn,
+} from "./functionsModel";
 import { configWriter, presetNamesOf } from "./configPane";
 import { Disclosure } from "./controls";
 import { Icon } from "./icons";
 import { RuleList } from "./executorTreePane";
 import { SchemaForm } from "./schemaForm/SchemaForm";
-import type { Schema } from "./schemaForm/types";
 import { SettingsSection } from "./settingsLayout";
-import { modeMeta } from "./permissionSetRows";
 import { permissionSetLayersOf } from "./permissionSetsPane";
 
 export interface FunctionsProps {
@@ -78,27 +84,6 @@ export interface FunctionsProps {
   /** Open one permission set in the pane above. */
   onOpenSet: (id: string) => void;
 }
-
-/** One column of the table: a permission set as this layer sees it. */
-interface SetColumn {
-  id: string;
-  bucket: string;
-  name: string;
-  /** This layer states it — its cells are outlined. */
-  here: boolean;
-  decl: Record<string, unknown>;
-}
-
-/** Where each function's defaults live in `settings.json` — one layered block, `functions.<name>`. */
-const DEFAULTS_BLOCK = "functions";
-
-/** What a function a workflow calls does, in the words of the menu that offers it. */
-const WORKFLOW_FUNCTION_WHAT: Record<string, string> = {
-  [SMART_FUNCTION]: "judges a call for a permission set: allow, deny, or unsure (then you are asked)",
-  approve_tool_call: "the approval prompt — puts one tool call to you",
-  review_artifacts: "a review of N files, each decided — optionally opened on the forge too",
-  ...Object.fromEntries(BUILTIN_FUNCTIONS.map((f) => [f.name, f.what])),
-};
 
 export function FunctionsSections(props: FunctionsProps): JSX.Element {
   const [open, setOpen] = useState<string | null>(null);
@@ -151,7 +136,7 @@ export function FunctionsSections(props: FunctionsProps): JSX.Element {
                       <FunctionRow
                         key={name}
                         name={name}
-                        sub={subjectKindOf(name) === "command" || (subjectKindOf(name) === "runner" && name !== RUNNER_GROUP_SUBJECT)}
+                        sub={isSubRow(name)}
                         defaults={defaultsSummary(name, writer)}
                         columns={columns}
                         open={open === name}
@@ -206,7 +191,7 @@ export function FunctionsSections(props: FunctionsProps): JSX.Element {
           })}
         </ul>
         <div className="fx-rules">
-          <Disclosure summary="Which of them a run may reach" desc={props.rules === undefined || props.rules.length === 0 ? "everything the workflow registers" : `${props.rules.length} rule${props.rules.length === 1 ? "" : "s"}`}>
+          <Disclosure summary="Which of them a run may reach" desc={rulesWords(props.rules)}>
             <p className="cfg-hint">
               Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract; the available column above
               is what they come to.
@@ -257,17 +242,16 @@ function FunctionRow({
         </th>
         <td className="fx-defaults">{defaults}</td>
         {columns.map((column, i) => {
-          const entry = column.decl[name];
-          const mode = entry === undefined ? undefined : entryOfDecl(entry as never).mode;
+          const { mode, text, title } = cellOf(column, name);
           return (
             <td key={column.id} className={i === 0 || columns[i - 1]!.bucket !== column.bucket ? "fx-bucket-start" : undefined}>
               <button
                 type="button"
                 className={`fx-cell ${modeClass(mode)}${column.here && mode !== undefined ? " here" : ""}`}
-                title={mode === undefined ? `${column.id} does not offer ${name}` : `${column.id}: ${modeMeta(mode).hint} — open it`}
+                title={title}
                 onClick={() => onOpenSet(column.id)}
               >
-                {mode === undefined ? "—" : isFunctionMode(mode) ? `☆ ${mode.function}` : mode}
+                {text}
               </button>
             </td>
           );
@@ -298,7 +282,6 @@ function FunctionDetail({
   // The judge's model may name a preset (`resolveModelField`), so its box suggests the presets in effect.
   const schema = name === SMART_FUNCTION && declared !== undefined && writer !== null ? withPresetSuggestions(declared, presetNamesOf(writer.effective)) : declared;
   const users = usersOf(name, columns);
-  const prompt = name === SMART_FUNCTION && writer !== null ? valueAt(writer.effective, `${DEFAULTS_BLOCK}.${SMART_FUNCTION}.prompt`) : undefined;
   return (
     <div className="fx-detail">
       {schema !== undefined && writer !== null ? (
@@ -310,7 +293,7 @@ function FunctionDetail({
             onChange={(next) => writer.set(`${DEFAULTS_BLOCK}.${name}`, next)}
             ctx={{ path: `${DEFAULTS_BLOCK}.${name}`, disabled: writer.locked, isSet: writer.stated, setAt: writer.set }}
           />
-          {name === SMART_FUNCTION && (typeof prompt !== "string" || prompt.length === 0 || prompt === DEFAULT_SMART_PROMPT) && !writer.stated(`${DEFAULTS_BLOCK}.${SMART_FUNCTION}.prompt`) ? (
+          {name === SMART_FUNCTION && showsDefaultPrompt(writer) ? (
             <div className="fx-default-prompt">
               <div className="sub">The prompt it uses now — the one JaiRA ships. The call being judged is appended as JSON.</div>
               <pre>{DEFAULT_SMART_PROMPT}</pre>
@@ -337,95 +320,4 @@ function FunctionDetail({
       )}
     </div>
   );
-}
-
-/** The permission sets this layer can see, in rail order. */
-function columnsOf(data: PermissionSetsView | null, layer: WorkflowLayer): SetColumn[] {
-  if (data === null) return [];
-  return permissionSetsAt(data.records, layer)
-    .map((at) => ({ id: at.id, bucket: at.bucket, name: at.name, here: at.here, decl: (at.source.decl ?? {}) as Record<string, unknown> }))
-    // Grouped by bucket in the order the rail lists them, each bucket's sets in their own order.
-    .sort((a, b) => (a.bucket === b.bucket ? 0 : a.bucket.localeCompare(b.bucket)));
-}
-
-/** Every command a set names (`git status`), for rows under `bash`. */
-function commandSubjectsOf(columns: SetColumn[]): string[] {
-  const seen = new Set<string>();
-  for (const column of columns) for (const subject of Object.keys(column.decl)) if (subjectKindOf(subject) === "command") seen.add(subject);
-  return [...seen].sort();
-}
-
-/** Every runner line a set writes — the group's first, then each runner's in the order they are listed. */
-function runnerSubjectsOf(columns: SetColumn[]): string[] {
-  const seen = new Set<string>();
-  for (const column of columns) for (const subject of Object.keys(column.decl)) if (subjectKindOf(subject) === "runner") seen.add(subject);
-  const order = [RUNNER_GROUP_SUBJECT, ...COMMAND_RUNNERS.map((runner) => runnerSubject(runner.program))];
-  return order.filter((subject) => seen.has(subject));
-}
-
-/** Who uses a function: the sets with a line for it — or, for a judge, the lines that hand calls to it. */
-function usersOf(name: string, columns: SetColumn[]): Array<{ id: string; says: string }> {
-  const out: Array<{ id: string; says: string }> = [];
-  for (const column of columns) {
-    if (name === SMART_FUNCTION || !(name in column.decl)) {
-      if (name !== SMART_FUNCTION) continue;
-      const lines = Object.entries(column.decl).filter(([, entry]) => {
-        const mode = entryOfDecl(entry as never).mode;
-        return isFunctionMode(mode) && mode.function === name;
-      });
-      if (lines.length > 0) out.push({ id: column.id, says: lines.length === Object.keys(column.decl).length ? `every line (${lines.length})` : `${lines.length} line${lines.length === 1 ? "" : "s"}` });
-      continue;
-    }
-    const mode = entryOfDecl(column.decl[name] as never).mode;
-    out.push({ id: column.id, says: modeMeta(mode).label });
-  }
-  return out;
-}
-
-/** The part of the `functions` block's schema that is this function's defaults, when it has any. */
-function defaultsSchemaOf(name: string): Schema | undefined {
-  const block = CONFIG_SECTIONS.find((s) => s.key === DEFAULTS_BLOCK)?.schema as Schema | undefined;
-  const properties = (block as { properties?: Record<string, Schema> } | undefined)?.properties;
-  return properties?.[name];
-}
-
-/** `smart`'s schema with the presets offered as its model's suggestions — `examples`, so any model id is still taken. */
-function withPresetSuggestions(schema: Schema, presets: readonly string[]): Schema {
-  const properties = (schema["properties"] ?? {}) as Record<string, Schema>;
-  const model = properties["model"];
-  if (model === undefined || presets.length === 0) return schema;
-  return { ...schema, properties: { ...properties, model: { ...model, examples: [...presets] } } };
-}
-
-/** One line for the Defaults column: what the function's defaults come to, or a dash. */
-function defaultsSummary(name: string, writer: ReturnType<typeof configWriter> | null): string {
-  if (defaultsSchemaOf(name) === undefined || writer === null) return "—";
-  const block = valueAt(writer.effective, `${DEFAULTS_BLOCK}.${name}`);
-  if (name === "bash") {
-    const builtins = (block as { builtins?: unknown } | undefined)?.builtins;
-    return builtins === false ? "built-in refusals off" : "built-in refusals on";
-  }
-  if (name === SMART_FUNCTION) {
-    const smart = (block ?? {}) as { model?: unknown; prompt?: unknown };
-    return `model: ${typeof smart.model === "string" && smart.model.length > 0 ? smart.model : "machine default"} · prompt: ${typeof smart.prompt === "string" && smart.prompt.length > 0 && smart.prompt !== DEFAULT_SMART_PROMPT ? "its own" : "default"}`;
-  }
-  if (block === undefined || block === null || typeof block !== "object") return "defaults";
-  const parts = Object.entries(block as Record<string, unknown>).filter(([, v]) => typeof v === "string" || typeof v === "number" || typeof v === "boolean");
-  return parts.length === 0 ? "defaults" : parts.map(([k, v]) => `${k}: ${String(v)}`).join(" · ");
-}
-
-function modeClass(mode: PermissionSetMode | undefined): string {
-  if (mode === undefined) return "none";
-  if (isFunctionMode(mode)) return "fn";
-  return mode;
-}
-
-/** The value at a dotted path of a document, or undefined. */
-function valueAt(doc: Record<string, unknown>, path: string): unknown {
-  let cursor: unknown = doc;
-  for (const part of path.split(".")) {
-    if (cursor === null || typeof cursor !== "object" || Array.isArray(cursor)) return undefined;
-    cursor = (cursor as Record<string, unknown>)[part];
-  }
-  return cursor;
 }

@@ -49,6 +49,7 @@ import { RunConversation, SidechainConversation, askingInstanceOf, hasAsking } f
 import type { PanelFace } from "./sidePanel";
 import { CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs as taskTabsOf, taskVerbsOf } from "./panelFaceModel";
 import { StatePanel } from "./statePanel";
+import { rerunStartsOf } from "./panelHost";
 import { TaskName } from "./taskName";
 import { nodeAt, type TrailStep } from "./trail";
 import { useTaskRun } from "./taskRun";
@@ -518,16 +519,8 @@ export function faceOf(host: PanelHost, entry: PanelEntry, headOnly = false): Pa
     case "rerun": {
       const surface = detail === null ? undefined : host.rerunSurface(detail);
       // Every state the task entered, as a place a copy can start — its entry's journal position.
-      const starts =
-        detail === null
-          ? []
-          : (host.context.conversation?.turns ?? []).flatMap((turn) => {
-              if (turn.kind !== "entered" || turn.instanceId === undefined) return [];
-              const node = nodeAt(detail.instances, turn.instanceId);
-              // The root has nothing before it: starting there is starting from the beginning.
-              if (node === undefined || node.parentInstanceId === undefined) return [];
-              return [{ seq: turn.seq, label: pathOf(detail.instances, node).slice(1).join(" › ") }];
-            });
+      // Every state the task entered, as a place a copy can start (`rerunStartsOf`, `panelHost.ts`).
+      const starts = detail === null ? [] : rerunStartsOf(detail, host.context.conversation?.turns ?? []);
       const run =
         surface === undefined || detail === null
           ? undefined

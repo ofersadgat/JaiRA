@@ -5,6 +5,7 @@
  *   npx tsx packages/app/shots/pair.mts [--scene board|task|gate|archived|settings|files|chat|logs] [--look light|dark|<palette>[-wash]-<theme>]
  *                                       [--every-look] [--region sidebar] [--port 9301]
  *   npx tsx packages/app/shots/pair.mts --specimen markdown [--look …] [--every-look]   one component, from a fixture
+ *   --texts   with a region: list the words that moved, and by how much (a specimen always does)
  *
  * Attaches to the app `studio.mts` keeps running, so a change to a copy is in the next run with no
  * build. `/rn` draws the universal shell on the native token path with no `styles.css` on the page, so
@@ -106,9 +107,9 @@ async function capture(app: App): Promise<PNG> {
  * Compared between the two pages, this says WHICH line moved and by how much — what a diff picture
  * cannot say.
  */
-const TEXTS = `(() => {
-  const root = document.getElementById("specimen");
-  const o = root.getBoundingClientRect();
+const texts = (root: string): string => `(() => {
+  const root = ${root};
+  const o = root === document.body ? { x: 0, y: 0 } : root.getBoundingClientRect();
   const out = [];
   const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   for (let n = walk.nextNode(); n; n = walk.nextNode()) {
@@ -155,7 +156,7 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
       await new Promise((r) => setTimeout(r, 400));
       const r = await app.evaluate<Rect>(`(() => { const r = document.getElementById("specimen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
       sizes.push(`${Math.round(r.width * 100) / 100}×${Math.round(r.height * 100) / 100}`);
-      runs.push(await app.evaluate<Run[]>(TEXTS));
+      runs.push(await app.evaluate<Run[]>(texts(`document.getElementById("specimen")`)));
       await app.cdp("Page.bringToFront");
       const shot = await app.cdp<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { ...r, scale: 1 } });
       shots.push(PNG.sync.read(Buffer.from(shot.data, "base64")));
@@ -214,6 +215,7 @@ async function main(): Promise<void> {
           );
           if (r !== null && r.width > 0 && r.height > 0) regions[region] = r;
         }
+        const domRuns = process.argv.includes("--texts") ? await app.evaluate<Run[]>(texts("document.body")) : [];
         const dom = await capture(app);
         // A scene is reached by what the page draws ("Awaiting you", a card's title), so on `/rn` it can
         // only be reached once the copies draw those. Until then the picture is of wherever it stopped.
@@ -234,6 +236,7 @@ async function main(): Promise<void> {
           `[...document.querySelectorAll("[data-island]")].map((e) => { const r = e.getBoundingClientRect(); return { name: e.getAttribute("data-island"), x: r.x, y: r.y, width: r.width, height: r.height }; })`,
         );
         const uncopied = await app.evaluate<string[]>(`[...document.querySelectorAll("[data-testid^=uncopied-]")].map((e) => e.getAttribute("data-testid").slice(9))`);
+        const rnRuns = process.argv.includes("--texts") ? await app.evaluate<Run[]>(texts("document.body")) : [];
         const rn = await capture(app);
         const ratio = dom.width / (await app.evaluate<number>("innerWidth"));
         for (const r of islands) for (const png of [dom, rn]) mask(png, r, ratio);
@@ -252,6 +255,12 @@ async function main(): Promise<void> {
           writeFileSync(join(OUT, `${name}.${region}.dom.png`), PNG.sync.write(crop(dom, r, scale)));
           writeFileSync(join(OUT, `${name}.${region}.rn.png`), PNG.sync.write(crop(rn, r, scale)));
           console.log(`  ${region.padEnd(8)} ${verdict(d)}  (${Math.round(r.x)},${Math.round(r.y)} ${Math.round(r.width)}×${Math.round(r.height)})`);
+          if (process.argv.includes("--texts") && d.differing !== 0) {
+            // Which words moved, of those the desktop draws inside this region (page coordinates).
+            const inside = (t: Run): boolean => t.x + t.w > r.x && t.x < r.x + r.width && t.y + t.h > r.y && t.y < r.y + r.height;
+            const moved = compareTexts(domRuns.filter(inside), rnRuns.filter(inside));
+            if (moved.length > 0) console.log(`    text that moved (rn − dom):\n${moved.map((m) => `  ${m}`).join("\n")}`);
+          }
           if (d.differing !== 0) failed = true;
         }
       }

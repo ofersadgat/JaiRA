@@ -28,12 +28,11 @@
  * away, and it stays visible while you are deep in the Files tree.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type ReactNode } from "react";
-import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, withPaths, isPluginId, SHARED_SESSION, type HealthItem, type HealthPage } from "@jaira/shared/browser";
+import { resolveTheme, permissionSetChoicesAt, permissionSetsAt, withPaths, SHARED_SESSION, type HealthItem, type HealthPage } from "@jaira/shared/browser";
 import type {
   BoardCard,
   ConfigLayer,
   EmbeddedWeightsReport,
-  ForgeSignInPending,
   LocalServerProbe,
   PendingApproval,
   ApprovalScope,
@@ -78,7 +77,8 @@ import { MachinesPane, useMachines } from "./machinesPane";
 import { FolderBrowser } from "./folderBrowser";
 import { HealthCard, NeedsAttention } from "./healthView";
 import { healthCounts, logUnseen } from "./updatesModel";
-import { checkForUpdate, dismissHealth, installPlugin, useHealth } from "./updatesStore";
+import { checkForUpdate, dismissHealth, useHealth } from "./updatesStore";
+import { automationsChannelOf, eventsProjectOf, fixHealthItem, openHealthPage, permissionSetsChannelOf, useForgeOAuth } from "./settingsShell";
 import { SidebarUpdateRow } from "./updatesView";
 import { Popover, usePopover } from "./popover";
 import { lookOf } from "./appearanceLayer";
@@ -137,7 +137,7 @@ import { RunModeToggle, RunView } from "./runViews";
 import { SidePanel } from "./sidePanel";
 import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
 import { EMPTY_STACK, push, selectStep, topOf, type PanelEntry, type PanelStack } from "./panelStack";
-import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, roomOf, usePanelStacks, useRoomRule } from "./panelHost";
+import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, roomOf, rerunSurfaceFor, runSurfaceFor, usePanelStacks, useRoomRule } from "./panelHost";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
 import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
@@ -410,65 +410,8 @@ export default function App(): JSX.Element {
       live = false;
     };
   }, [onConnections, state.availability.checkedAt, state.config, localScan]);
-  /**
-   * Signing in to a forge through the browser (OAuth device flow): the code the person types there
-   * while main polls, and why the last one did not work. Main tells us when it is over — after the
-   * token is stored and the check that names the account has landed.
-   */
-  const [forgeSignIns, setForgeSignIns] = useState<ReadonlyMap<string, ForgeSignInPending>>(new Map());
-  const [forgeErrors, setForgeErrors] = useState<ReadonlyMap<string, string>>(new Map());
-  const forgeError = useCallback((connection: string, reason: string | undefined): void => {
-    setForgeErrors((current) => {
-      const next = new Map(current);
-      if (reason === undefined) next.delete(connection);
-      else next.set(connection, reason);
-      return next;
-    });
-  }, []);
-  const forgePending = useCallback((connection: string, pending: ForgeSignInPending | undefined): void => {
-    setForgeSignIns((current) => {
-      const next = new Map(current);
-      if (pending === undefined) next.delete(connection);
-      else next.set(connection, pending);
-      return next;
-    });
-  }, []);
-  useEffect(() => {
-    void invoke("forge:signIns", undefined).then((list) => setForgeSignIns(new Map(list.map((p) => [p.connection, p]))), () => undefined);
-    return subscribe((message) => {
-      if (message.type !== "forge:signInFinished") return;
-      const { outcome } = message;
-      forgePending(outcome.connection, undefined);
-      forgeError(outcome.connection, outcome.ok || outcome.code === "canceled" ? undefined : outcome.reason);
-      actions.readAvailability();
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- subscribed once; the setters are stable
-  }, []);
-  const forgeOAuth = {
-    signingIn: new Set(forgeSignIns.keys()),
-    pending: new Map([...forgeSignIns].map(([connection, pending]) => [connection, pending.userCode])),
-    errors: forgeErrors,
-    viaOAuth: new Set((state.availability.forges ?? []).filter((check) => check.via === "oauth").map((check) => check.name)),
-    onSignIn: (connection: string) => {
-      forgeError(connection, undefined);
-      void invoke("forge:signIn", { connection }).then(
-        (start) => (start.ok ? forgePending(connection, start.pending) : forgeError(connection, start.fix !== undefined ? `${start.reason} — ${start.fix}` : start.reason)),
-        (e: unknown) => forgeError(connection, e instanceof Error ? e.message : String(e)),
-      );
-    },
-    onCancel: (connection: string) => {
-      void invoke("forge:cancelSignIn", { connection }).then(() => forgePending(connection, undefined));
-    },
-    onDisconnect: (connection: string) => {
-      void invoke("forge:signOut", { connection }).then(
-        (outcome) => {
-          forgeError(connection, outcome.ok ? undefined : outcome.reason);
-          actions.readAvailability();
-        },
-        (e: unknown) => forgeError(connection, e instanceof Error ? e.message : String(e)),
-      );
-    },
-  };
+  /** Signing in to a forge through the browser (OAuth device flow) — see `settingsShell.ts`. */
+  const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
   /**
    * Settings' warnings and errors (the person's rulings, 2026-09-26): the board main keeps, the card
    * the Settings row's pills open, and what each item's button does. A sign-in goes to the page it
@@ -485,37 +428,9 @@ export default function App(): JSX.Element {
   useEffect(() => {
     if (health.length === 0) healthPop.close();
   }, [health.length, healthPop.close]);
-  const toHealthPage = (page: HealthPage): void => {
-    if (page === "logs") return actions.setView("logs");
-    actions.setSection(page);
-    actions.setView("settings");
-  };
-  const fixHealth = (item: HealthItem): void => {
-    switch (item.action) {
-      case "sign-in":
-        if (item.subject !== undefined) {
-          if (item.id.startsWith("forge:")) {
-            if (forgeOAuth.viaOAuth.has(item.subject)) forgeOAuth.onSignIn(item.subject);
-          } else void actions.signIn(item.subject);
-        }
-        toHealthPage(item.page);
-        return;
-      case "check":
-        void actions.recheckAvailability();
-        return;
-      case "retry-plugin":
-        if (item.subject !== undefined && isPluginId(item.subject)) installPlugin(item.subject);
-        return;
-      case "retry-update":
-        checkForUpdate();
-        return;
-      case "open-logs":
-        actions.setView("logs");
-        return;
-      case undefined:
-        toHealthPage(item.page);
-    }
-  };
+  const toHealthPage = (page: HealthPage): void => openHealthPage(page, actions);
+  const fixHealth = (item: HealthItem): void =>
+    fixHealthItem(item, { forgeOAuth, signIn: (name) => void actions.signIn(name), recheck: () => void actions.recheckAvailability(), setView: actions.setView, setSection: actions.setSection });
   /** About, opened from the sidebar's Update row — with the release notes showing, from its menu. */
   const [notesOpen, setNotesOpen] = useState(false);
   // Only for the one opening: About opened from its list later starts with the notes folded.
@@ -540,33 +455,15 @@ export default function App(): JSX.Element {
   // A permission set saved from Settings publishes a `workflows` change: what read-only answered is asked again. (An edit made
   // outside the app to `permission-sets/` is not watched; it is read on the next window move or reload.)
   useEffect(() => subscribe((message) => void (message.type === "store:invalidate" && message.scope === "workflows" && forgetReadOnly(readOnlyJudge))), [readOnlyJudge]);
-  const permissionSetsChannel = useMemo<PermissionSetsChannel>(() => {
-    // At the root the window names the shared root rather than nothing: with several projects open,
-    // nothing named is a refusal, and with one it would read that project instead of the root.
-    const project = { project: permissionSetsProject ?? SHARED_SESSION };
-    return {
-      read: () => invoke("permissionSets:read", { ...project }),
-      write: (request) => invoke("permissionSets:write", { ...request, ...project }),
-      reset: (request) => invoke("permissionSets:reset", { ...request, ...project }),
-    };
-  }, [permissionSetsProject]);
+  const permissionSetsChannel = useMemo<PermissionSetsChannel>(() => permissionSetsChannelOf(permissionSetsProject), [permissionSetsProject]);
   /**
    * Settings → Tools → Events and Automations (decision 0010 §2, §4): the remotes and the watcher's
    * word on them for the page's project — the shared root's on Shared — and the events workflow's
    * three copies, read and written through the ordinary workflow channels.
    */
-  const eventsProject = state.configLayer !== "base" ? state.at : null;
-  const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject ?? SHARED_SESSION }), eventsProject ?? SHARED_SESSION);
-  const automationsChannel = useMemo<AutomationsChannel>(() => {
-    const project = permissionSetsProject !== null ? { project: permissionSetsProject } : {};
-    return {
-      read: (layer, stateId) => invoke("workflow:read", { stateId, layer, ...(layer === "base" ? {} : project) }),
-      write: (layer, stateId, text) => invoke("workflow:write", { stateId, layer, text, ...(layer === "base" ? {} : project) }),
-      // An automation's state taken away: nothing names it once its line is gone, and a project's copy
-      // of a Shared line's state is referred to by Shared's root, so the refusal is not the question.
-      remove: (layer, stateId) => invoke("workflow:delete", { stateId, layer, force: true, ...(layer === "base" ? {} : project) }),
-    };
-  }, [permissionSetsProject]);
+  const eventsProject = eventsProjectOf(state.configLayer, state.at);
+  const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject }), eventsProject);
+  const automationsChannel = useMemo<AutomationsChannel>(() => automationsChannelOf(permissionSetsProject), [permissionSetsProject]);
   /**
    * The permission sets a STATE can name, for the editor's one Tools field — the winner of each id, which
    * is what a bare `$/permission-sets/…` reference finds.
@@ -1280,49 +1177,8 @@ export default function App(): JSX.Element {
    * appearing first as "this file does not parse" — see {@link AppState.workflowForms}, where
    * `undefined` is "not asked yet" and `null` is the file, read and refused.
    */
-  const runSurfaceOf = (stateId: string, project: string | null, runInstance: string | null): RunSurface | undefined => {
-    const fields = state.workflowForms[stateId];
-    if (fields === undefined) return undefined;
-    const summary = state.projects.find((p) => p.project === project);
-    /**
-     * What this panel's boxes hold.
-     *
-     * Reached from a board column, they are the state's own defaults with whatever has been typed
-     * over them — a form for the NEXT run. Reached from a conversation's gutter, the panel is
-     * describing a run that already happened, so they hold what that run was called with; typing
-     * still wins, because the reason to look at those values beside the Run button is usually to
-     * change one of them and go again.
-     */
-    const run = runInstance === null ? null : nodeAt(detail?.instances ?? [], runInstance);
-    const called = run?.inputs;
-    // How each value was settled (decision 0005 §4) — said only while the boxes still hold what the
-    // run was called with. Once something is typed over them the form is a question about the NEXT
-    // run, and a mark saying where a value came from would be about a value no longer on screen.
-    const recorded = state.runValues[stateId] === undefined ? run?.inputProvenance : undefined;
-    const titleOf = (taskId: string): string | undefined => [...state.tasks, ...state.sharedTasks].find((task) => task.taskId === taskId)?.title;
-    return {
-      fields,
-      values:
-        state.runValues[stateId] ?? (called !== undefined ? runValuesOf(fields ?? [], called) : initialRunValues(fields ?? [])),
-      ...(recorded !== undefined ? { provenance: (path: string) => settledMarkOf(recorded[path], titleOf) } : {}),
-      target: {
-        ...(project !== null && project !== state.at ? { project } : {}),
-        label: summary?.label ?? projectName(project),
-        open: project !== null,
-      },
-      ...(project !== null ? { targetDir: project } : {}),
-      exists: true,
-      // A board column is a file on disk by construction. There is no editor here to have unsaved
-      // edits in — the one that could is in the other view, describing whatever IT has open.
-      dirty: false,
-      busy: state.busy,
-      tasks: summary?.kind === "shared" ? state.sharedTasks : state.tasks,
-      selected: state.selected,
-      onChange: (values) => actions.setRunValues(stateId, values),
-      onRun: (title, inputs) => void actions.runState(stateId, title, inputs, project ?? undefined),
-      onSelectTask: actions.select,
-    };
-  };
+  // A board column's (or any state's) run form and history — `panelHost.ts`, shared with the universal panel.
+  const runSurfaceOf = (stateId: string, project: string | null, runInstance: string | null): RunSurface | undefined => runSurfaceFor(state, actions, detail, stateId, project, runInstance);
   const workflowRunSurface: RunSurface | undefined =
     state.taskWorkflow === null ? undefined : runSurfaceOf(state.taskWorkflow, state.taskWorkflowProject, state.taskWorkflowRun);
 
@@ -1666,22 +1522,7 @@ export default function App(): JSX.Element {
       actions.setView("tasks");
       actions.openTask(taskId, project ?? state.at ?? "", detail?.workflow ?? step.stateId);
     },
-    rerunSurface: (task): RerunSurface => {
-      const fields = state.workflowForms[task.workflow];
-      const key = `rerun:${task.taskId}`;
-      const called = task.instances[0]?.inputs ?? {};
-      return {
-        workflow: task.workflow,
-        fields,
-        values: state.runValues[key] ?? runValuesOf(fields ?? [], called),
-        busy: state.busy,
-        onChange: (values) => actions.setRunValues(key, values),
-        onRun: (inputs) => {
-          void actions.runState(task.workflow, `${task.title} · again`, inputs, selectedProject);
-          onStack((was) => ({ ...was, entries: was.entries.slice(0, 1), motion: "pop" }));
-        },
-      };
-    },
+    rerunSurface: (task): RerunSurface => rerunSurfaceFor(state, actions, task, selectedProject, onStack),
     stateOf: (stateId, project) => {
       if (state.doc?.stateId === stateId && state.stateId === stateId) return { view: state.state, run: runSurface };
       if (state.taskWorkflow === stateId) return { view: state.taskState, run: workflowRunSurface };

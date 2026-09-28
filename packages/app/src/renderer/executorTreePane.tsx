@@ -22,9 +22,7 @@ import {
   EXECUTOR_STEP_ORDER,
   BUILTIN_FUNCTIONS,
   executorNode,
-  isPinned,
   parseFunctionRule,
-  pin,
   type ExecutorStepName,
   type JairaExecutorSteps,
   type JairaAgentNode,
@@ -34,7 +32,8 @@ import {
   type JairaRouterNode,
 } from "@jaira/shared/browser";
 import { Disclosure, Field, FieldGrid, Level, SelectInput, TextArea, TextInput, type LayerState } from "./controls";
-import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
+import { LlmConfigForm, type LlmConfigDoc } from "./llmConfigForm";
+import { activeStepsOf, allowFromText, ownerOf, routesOf, stepPathOf, summarisePromptNode, treeCtxOf, treeLayerOf, withoutModel, type TreeCtx } from "./executorTreeModel";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 
 export interface ExecutorTreeProps {
@@ -63,9 +62,7 @@ export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay, spl
     ...BUILTIN_FUNCTIONS,
     ...agents.map((name) => ({ name, what: "agent — delegate this state to that runtime" })),
   ];
-  const set = (path: string, value: unknown): void => onOverlay(pin(overlay, path, value));
-  const pinned = (path: string): boolean => isPinned(overlay, path);
-  const ctx = { locked, set, pinned, split };
+  const ctx = treeCtxOf(overlay, locked, onOverlay, split);
 
   return (
     <div className="cfg-stack">
@@ -85,21 +82,15 @@ export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay, spl
   );
 }
 
-interface Ctx {
-  locked: boolean;
-  set: (path: string, value: unknown) => void;
-  pinned: (path: string) => boolean;
-  split?: boolean;
-}
+type Ctx = TreeCtx;
 
 /**
  * The top router's routes as a list of their own — Settings → Models → Routes. The same cards the
  * tree draws, over the same overlay: configuring one pins only what changed.
  */
 export function ExecutorRoutes({ resolved, overlay, locked, onOverlay }: Omit<ExecutorTreeProps, "agents" | "split">): JSX.Element {
-  const ctx: Ctx = { locked, set: (path, value) => onOverlay(pin(overlay, path, value)), pinned: (path) => isPinned(overlay, path) };
-  const router = resolved.prompt;
-  const routes = router !== undefined && (router.kind === undefined || router.kind === "router") ? Object.entries((router as JairaRouterNode).routes ?? {}) : [];
+  const ctx = treeCtxOf(overlay, locked, onOverlay);
+  const routes = routesOf(resolved);
   return (
     <div className="cfg-stack">
       {routes.length === 0 ? (
@@ -115,13 +106,7 @@ export function ExecutorRoutes({ resolved, overlay, locked, onOverlay }: Omit<Ex
   );
 }
 
-/**
- * A row's place over one overlay path (`Field.layer`): its ↺ while the overlay pins it, which unpins
- * it so the tree derives it again. Editing the row pins what was typed.
- */
-function layerOf(ctx: Ctx, path: string): LayerState {
-  return { stated: ctx.pinned(path), disabled: ctx.locked, onInherit: () => ctx.set(path, undefined) };
-}
+const layerOf = treeLayerOf;
 
 /** What this level IS, and which upstream class it builds. */
 function NodeBanner({ kind }: { kind: string }): JSX.Element {
@@ -463,10 +448,7 @@ function LeafNode({ node, path, ctx }: { node: JairaProviderNode | JairaAgentNod
             rows={2}
             placeholder="anything"
             disabled={ctx.locked}
-            onChange={(v) => {
-              const list = v.split(/\r?\n/).map((s) => s.trim()).filter((s) => s.length > 0);
-              ctx.set(`${path}.allow`, list.length > 0 ? list : undefined);
-            }}
+            onChange={(v) => ctx.set(`${path}.allow`, allowFromText(v))}
           />
         </Field>
       </FieldGrid>
@@ -502,8 +484,8 @@ function StepStack({
   label: string;
   ctx: Ctx;
 }): JSX.Element {
-  const at = (name: string): string => (path.length === 0 ? `steps.${name}` : `${path}.steps.${name}`);
-  const active = EXECUTOR_STEP_ORDER.filter((name) => steps?.[name] !== undefined);
+  const at = (name: string): string => stepPathOf(path, name);
+  const active = activeStepsOf(steps);
   return (
     <Disclosure
       summary={label}
@@ -549,42 +531,6 @@ function StepStack({
       </div>
     </Disclosure>
   );
-}
-
-/** The call settings minus the model, which has its own field above. */
-function withoutModel(defaults: Record<string, unknown> | undefined): LlmConfigDoc {
-  const { model: _model, ...rest } = defaults ?? {};
-  return rest as LlmConfigDoc;
-}
-
-/**
- * Which provider or agent a leaf names.
- *
- * Read from either field rather than branched on `kind`, because a route node legitimately has NO
- * kind of its own: the prefix it sits under supplies it, and resolution fills it in. Branching would
- * read the wrong field on exactly the nodes the routes map exists to let people write.
- */
-function ownerOf(leaf: JairaProviderNode | JairaAgentNode): string | undefined {
-  return (leaf as JairaProviderNode).provider ?? (leaf as JairaAgentNode).agent;
-}
-
-/** One line for a collapsed route. */
-function summarisePromptNode(node: JairaPromptNode): string {
-  if (node.kind === undefined || node.kind === "router") {
-    return `router over ${Object.keys((node as JairaRouterNode).routes ?? {}).length} route(s)`;
-  }
-  const leaf = node as JairaProviderNode | JairaAgentNode;
-  const owner = ownerOf(leaf);
-  const steps = EXECUTOR_STEP_ORDER.filter((s) => leaf.steps?.[s] !== undefined);
-  return [
-    `${leaf.kind ?? "route"} ${owner ?? "the provider path"}`,
-    leaf.model ?? "its own default",
-    leaf.allow ? `only ${leaf.allow.join(", ")}` : null,
-    steps.length > 0 ? steps.join(" → ") : null,
-    summariseLlmConfig((leaf.defaults ?? {}) as LlmConfigDoc),
-  ]
-    .filter(Boolean)
-    .join(" · ");
 }
 
 export type { ExecutorStepName };

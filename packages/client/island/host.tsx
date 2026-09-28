@@ -7,7 +7,8 @@ import type { FromIsland, IslandLook, ToIsland } from "./protocol";
  * An island page's host (decision 0015, S5): one of the renderer's DOM components, drawn from props
  * that arrive over the bridge (`protocol.ts`), in a WebView on native and an iframe in the test
  * harness. The component is today's, unchanged; only its host is new. Each component has its own page
- * (`markdown.tsx`, `diff.tsx`, `markdownEditor.tsx`), so an island carries only what it draws.
+ * (`markdown.tsx`, `diff.tsx`, `markdownEditor.tsx`, `code.tsx`, `schemaText.tsx`), so an island
+ * carries only what it draws.
  */
 const start = performance.now();
 
@@ -51,6 +52,12 @@ export interface IslandPage {
   /** The selector that must match before the component counts as drawn. */
   drawn: string;
   draw(props: Record<string, unknown>, event: (name: string) => (value: unknown) => void): JSX.Element;
+  /**
+   * Apply what of the look the page's component reads beyond the palette (`IslandLook.appearance`)
+   * — the editor islands' fonts, editor palette and editor looks. Called on every render, before it
+   * is drawn, after the palette and scheme are on the root.
+   */
+  look?(look: IslandLook): void;
 }
 
 function applyLook(look: IslandLook): void {
@@ -65,13 +72,26 @@ function applyLook(look: IslandLook): void {
 function Island({ page }: { page: IslandPage }): JSX.Element | null {
   const [render, setRender] = useState<ToIsland | null>(null);
   const asked = useRef(0);
+  /** How many events this island has sent — what a render's `echo` is measured against. */
+  const emitted = useRef(0);
 
   useEffect(() => {
     const receive = (e: MessageEvent): void => {
       const message = (typeof e.data === "string" ? JSON.parse(e.data) : e.data) as ToIsland;
       if (message?.kind !== "render") return;
       applyLook(message.look);
+      page.look?.(message.look);
       asked.current = performance.now();
+      /**
+       * A render built before the host had seen this island's latest event is STALE: its props are
+       * the island's own earlier state coming back. An editor typed into quickly sends `a`, then
+       * `ab`; the host's render for `a` arrives after `ab` was typed, and drawing it would take the
+       * `b` back out. So a stale render moves the look and keeps the props the island has.
+       */
+      if (message.echo !== undefined && message.echo < emitted.current) {
+        setRender((drawn) => (drawn === null ? message : { ...drawn, look: message.look }));
+        return;
+      }
       setRender(message);
     };
     window.addEventListener("message", receive);
@@ -101,7 +121,10 @@ function Island({ page }: { page: IslandPage }): JSX.Element | null {
   }, [render]);
 
   if (render === null) return null;
-  return page.draw(render.props, (name) => (value) => send({ kind: "event", name, value }));
+  return page.draw(render.props, (name) => (value) => {
+    emitted.current += 1;
+    send({ kind: "event", name, value });
+  });
 }
 
 /** Mount `page` as this document's island. */

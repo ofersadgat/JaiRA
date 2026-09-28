@@ -41,7 +41,7 @@ function classicPage(): Plugin {
   };
 }
 
-/** Which island this build is: `ISLAND=markdown|diff|markdownEditor` (`build.mjs` runs all three). */
+/** Which island this build is: `ISLAND=markdown|diff|markdownEditor|code|schemaText` (`build.mjs` runs them all). */
 const ISLAND = process.env["ISLAND"] ?? "markdown";
 
 /** The page's one script names this build's island (`%ISLAND%` in `index.html`). */

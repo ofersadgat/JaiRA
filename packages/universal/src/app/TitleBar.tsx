@@ -7,7 +7,6 @@ import { NewTask } from "../components/NewTask";
 import { RunModeToggle } from "../components/RunModeToggle";
 import { TaskAddressBar } from "../components/TaskAddressBar";
 import { FilesAddress } from "./FilesView";
-import { Uncopied } from "./Uncopied";
 import { useShell } from "./shell";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
@@ -31,7 +30,8 @@ export function ShellTitleBar(): JSX.Element {
       </>
     );
   }
-  if (state.view !== "tasks") return <Uncopied name={`${state.view} address`} flex={1} />;
+  // Settings, Logs, Debug and Components have no address: the desktop's bar is its filler alone.
+  if (state.view !== "tasks") return <View flex={1} minWidth={8} />;
   return (
     <>
       <TasksAddress />

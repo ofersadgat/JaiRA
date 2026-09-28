@@ -3,6 +3,8 @@
  * (a finished task, a failed one, one parked at its gate, one archived), then launched once per look.
  * `parity.mts` runs the gates; `studio.mts` keeps one launched for iterating on a copy.
  */
+import { writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import { App } from "./driver.mjs";
 import { blockedAtTheGate, type World } from "./world.mjs";
@@ -32,7 +34,24 @@ export async function start(app: App, title: string, fake: unknown): Promise<str
 }
 
 /** `port` is the seeding launch's CDP port: studios seeding side by side each need their own. */
+/** A TypeScript file in the project, for the Files room's code editor (`files-ts`). */
+export const TS_SAMPLE = [
+  "/** Which lane a card belongs in. */",
+  'export type Lane = "running" | "finished" | "not-started";',
+  "",
+  "export function laneOfCard(card: { status: string; endedAt?: number }): Lane {",
+  '  if (card.status === "running") return "running";',
+  '  return card.endedAt !== undefined ? "finished" : "not-started";',
+  "}",
+  "",
+].join("\n");
+
+/** A `tsconfig.json`, which the schema-aware editor recognises by its name (`files-schema`): one field it rejects. */
+export const TSCONFIG_SAMPLE = JSON.stringify({ compilerOptions: { target: "ES2022", strict: true, module: 5 }, include: ["src"] }, null, 2);
+
 export async function seed(world: World, out: string, port = 9239): Promise<void> {
+  writeFileSync(join(world.project, "lint.ts"), TS_SAMPLE);
+  writeFileSync(join(world.project, "tsconfig.json"), TSCONFIG_SAMPLE);
   const app = await launch(world, port, out);
   try {
     await start(app, "add dark mode", happyRules());
@@ -90,6 +109,95 @@ export const SCENES: readonly Scene[] = [
       await app.until(says("retire the old lint"), "the archived card to show");
     },
   },
+  // The parked task's run, drilled from its card (a double-click): the Tasks room's middle column is the
+  // run's executions as cards, one column per child the workflow declares (`RunView`).
+  { name: "run", reach: (app) => drillParked(app) },
+  // …and its other reading, the title bar's "Conversation": the run's conversation in the middle column.
+  {
+    name: "run-convo",
+    reach: async (app) => {
+      await drillParked(app);
+      await clickFirst(app, "Conversation");
+      await app.until(says("Produced"), "the run's conversation, and its context in the panel");
+      await settle(1500);
+    },
+  },
+  // The parked task's other tabs in the panel: Steps, Changes, Outputs (`{}`) and Configuration (an icon).
+  ...(
+    [
+      ["task-steps", "Steps"],
+      ["task-changes", "Changes"],
+      ["task-outputs", "Outputs"],
+      ["task-config", "Configuration"],
+    ] as const
+  ).map(
+    ([name, tab]): Scene => ({
+      name,
+      reach: async (app) => {
+        await app.clickText(PARKED);
+        await app.until(says("Answering this continues the task."), "the task to open in the panel");
+        // By the tab's own name, which the labelled tab says and an icon tab carries as its title.
+        await app.evaluate(`(() => {
+          const want = ${JSON.stringify(tab)};
+          const tab = [...document.querySelectorAll('[role="tab"], button')].find((e) => e.textContent.trim() === want || e.getAttribute("title") === want || e.getAttribute("aria-label") === want || (e.textContent.trim().startsWith(want) && e.getAttribute("role") === "tab"));
+          if (!tab) throw new Error("no tab " + want);
+          tab.click();
+        })()`);
+        await settle(1200);
+      },
+    }),
+  ),
+  // The finished task and the failed one, opened in the panel: their conversations, the pieces a run
+  // that is over draws (settled gates, failed states, what could not be entered).
+  ...(
+    [
+      ["task-done", "add dark mode"],
+      ["task-failed", "rework the sync lint"],
+    ] as const
+  ).map(
+    ([name, title]): Scene => ({
+      name,
+      reach: async (app) => {
+        await app.until(says(title), `${title} on the board`);
+        await clickFirst(app, title);
+        await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(title)} && e.getBoundingClientRect().left > innerWidth - 420)`, `${title} to open in the panel`);
+        await settle(1500);
+      },
+    }),
+  ),
+  // The parked task's Steps with a step picked: the index over the step's card.
+  {
+    name: "task-step-card",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "task-steps")!.reach(app);
+      await app.evaluate(`(() => {
+        const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === "goals" && e.getBoundingClientRect().left > innerWidth - 420);
+        (el.closest("button, [role=button]") ?? el).click();
+      })()`);
+      await app.until(says("How it ran"), "the step's card");
+      await settle(1200);
+    },
+  },
+  // The title bar's "+ New task": the New-task form in the panel, nothing picked yet.
+  {
+    name: "new-task",
+    reach: async (app) => {
+      await app.until(says("New task"), "the New task button");
+      await clickFirst(app, "+ New task");
+      await app.until(says("Its inputs appear here."), "the New-task form");
+      await settle(800);
+    },
+  },
+  // A column of the board clicked: the state it stands for, described in the panel (its Run tab).
+  {
+    name: "state",
+    reach: async (app) => {
+      await app.until(says("Planning"), "the board");
+      await clickFirst(app, "Planning");
+      await app.until(says("Checks"), "the state to open in the panel");
+      await settle(800);
+    },
+  },
   { name: "settings", reach: (app) => app.clickText("Settings") },
   // Each Settings page (`settings` opens on Connections), reached from the sidebar's sections list.
   ...(
@@ -126,9 +234,9 @@ export const SCENES: readonly Scene[] = [
   },
   // Appearance scrolled to one of its sections, its heading at the top of the page — the viewport
   // photographs only what is scrolled into view, and the page is several windows tall.
-  ...(["Board", "Conversation", "Text"] as const).map(
+  ...(["Board", "Conversation", "Text", "File types"] as const).map(
     (heading): Scene => ({
-      name: `settings-appearance-${heading.toLowerCase()}`,
+      name: `settings-appearance-${heading.toLowerCase().replace(" ", "-")}`,
       reach: async (app) => {
         await app.clickText("Settings");
         await clickFirst(app, "Appearance");
@@ -156,6 +264,12 @@ export const SCENES: readonly Scene[] = [
       ["files-markdown", ["plan_doc.md"], "The Plan"],
       ["files-readme", ["README.md"], "an edit copies it to Shared"],
       ["files-json", ["permission-sets", "chat", "ask-first.json"], "read_file"],
+      // The code editor (Monaco, an island on /rn).
+      ["files-ts", ["lint.ts"], "Revert"],
+      // A type with no grammar: the plain box (`textarea.code-editor`), the configuration editor's too.
+      ["files-plain", [".jaira", ".gitignore"], "Revert"],
+      // A document held to a schema: the verdict, the hint, a violation, and "Add missing fields".
+      ["files-schema", ["tsconfig.json"], "Add missing fields"],
     ] as const
   ).map(
     ([name, open, shows]): Scene => ({
@@ -298,6 +412,9 @@ export const SCENES: readonly Scene[] = [
       await app.until(`document.getElementById("root").textContent.includes("Components")`, "the Components row");
       await app.clickText("Components");
       await app.until(says("Every row to"), "the Components room");
+      // Every card's form is laid out from its measured width on /rn (react-native-web's onLayout, a frame
+      // or more behind), where the desktop's container queries need none: let both pages settle.
+      await settle(2500);
     },
   },
   {
@@ -355,6 +472,25 @@ async function conversation(app: App): Promise<void> {
     fake: [{ output: "It checks that **every state** a workflow names exists:\n\n- the `sequence` entries\n- each transition's `to`\n\nRun it with `jaira lint`." }],
   });
   await settle(1500);
+}
+
+/**
+ * Drill the parked task's run: a double-click on its card in the board (the middle column — not the
+ * inbox strip's or the sidebar's mention of it), as a person opens a run.
+ */
+async function drillParked(app: App): Promise<void> {
+  await app.until(says(PARKED), "the parked card");
+  const hit = await app.evaluate<boolean>(`(() => {
+    const want = ${JSON.stringify(PARKED)};
+    const own = [...document.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.textContent === want);
+    const card = own.find((e) => { const r = e.getBoundingClientRect(); return r.left > 260 && r.bottom < innerHeight - 60; });
+    if (!card) return false;
+    card.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+    return true;
+  })()`);
+  if (!hit) throw new Error("no parked card to drill");
+  await app.until(says("not reached") + " || " + says("Human Review"), "the run to open");
+  await settle(800);
 }
 
 /**

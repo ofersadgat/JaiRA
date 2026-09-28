@@ -16,19 +16,17 @@ import { Icon } from "./icons";
 import { RunIndex, keyOfNode } from "./runIndex";
 import { invoke } from "./store";
 import { sizeOf, type ArtifactSurface } from "./transcriptView";
-import { nodeAt } from "./trail";
-import { RunInputsForm, useRunCheck } from "./runPanel";
+import { RunInputsForm } from "./runPanel";
+import { useRerunForm } from "./newTaskModel";
 import { createBlocker, runInputsOf, type RunField, type RunValues } from "./runForm";
 import { useTouched } from "./schemaForm/check";
 import { SelectInput } from "./controls";
 import { ValueView } from "./valueView";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
+import { STEP_ROW, callLine, checksCountOf, countOf, durationWords, pathOf, previewOf, runMetricsOf, stepRowsOf, tookOf, useStepFollow, useStepsFit, valueRowsOf } from "./panelViewsModel";
 
-/** How long a pick's own jump through the conversation takes to settle — see `StepsView`. */
-const SETTLE_MS = 1200;
-
-/** How tall one row of the Steps index is — `.rail.run-index`'s `--rail-cap`. */
-export const STEP_ROW = 30;
+// How tall one row of the Steps index is — `.rail.run-index`'s `--rail-cap` — lives in `panelViewsModel.ts`.
+export { STEP_ROW };
 
 /* ------------------------------------------------------------------------------------------------ */
 /* Small shared pieces                                                                              */
@@ -78,31 +76,14 @@ export function PanelRow({
   );
 }
 
-/**
- * A value in one line: a string's first line, a list's length, an object's size — or, for an artifact
- * envelope (`{path, mediaType, content}`), what it is called. The row opens the whole of it.
- */
-export function previewOf(value: unknown): string {
-  if (value === undefined) return "—";
-  if (value === null) return "null";
-  if (typeof value === "string") {
-    const line = value.split("\n").find((one) => one.trim() !== "")?.trim() ?? "";
-    return line === "" ? '""' : line.length > 80 ? `${line.slice(0, 80)}…` : line;
-  }
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (Array.isArray(value)) return `${value.length} item${value.length === 1 ? "" : "s"}`;
-  const record = value as Record<string, unknown>;
-  if (typeof record["content"] === "string" && typeof record["mediaType"] === "string") {
-    return typeof record["path"] === "string" ? record["path"] : previewOf(record["content"]);
-  }
-  const keys = Object.keys(record).length;
-  return `{ ${keys} key${keys === 1 ? "" : "s"} }`;
-}
+// `previewOf`, `tookOf`, `pathOf` and what a run consumed live in `panelViewsModel.ts`, shared with the
+// universal copy (decision 0015); re-exported here, where their callers have always found them.
+export { previewOf, tookOf, pathOf, checksCountOf };
 
 /** Rows for a value: one per key of an object, one for anything else. Each opens the value whole. */
 function ValueRows({ value, onOpen }: { value: unknown; onOpen: (name: string, value: unknown) => void }): JSX.Element {
-  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-    const entries = Object.entries(value as Record<string, unknown>);
+  const { rows: entries, keyed } = valueRowsOf(value);
+  if (keyed) {
     if (entries.length === 0) return <div className="set-row pv-row pv-none">empty</div>;
     return (
       <>
@@ -113,34 +94,6 @@ function ValueRows({ value, onOpen }: { value: unknown; onOpen: (name: string, v
     );
   }
   return <PanelRow name="value" value={previewOf(value)} mono onClick={() => onOpen("value", value)} />;
-}
-
-/** One call of an operation list as a row: "prompt · completed · $0.012". */
-function callLine(call: NonNullable<InstanceNode["operation"]>): string {
-  const cost = call.costUsd !== undefined && call.costUsd > 0 ? ` · $${call.costUsd.toFixed(call.costUsd < 0.1 ? 3 : 2)}` : "";
-  return `${call.kind} · ${call.status}${cost}`;
-}
-
-/** "3m 12s" — how long something took, in the two largest units. */
-export function tookOf(start: number, end: number | undefined, now = Date.now()): string {
-  const ms = Math.max(0, (end ?? now) - start);
-  if (ms < 1000) return `${ms} ms`;
-  const s = Math.round(ms / 1000);
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m ${s % 60}s`;
-  return `${Math.floor(m / 60)}h ${m % 60}m`;
-}
-
-/** The names from the run's root down to a node — the step card's path. */
-export function pathOf(instances: readonly InstanceNode[], node: InstanceNode): string[] {
-  const names: string[] = [];
-  let at: InstanceNode | undefined = node;
-  while (at !== undefined) {
-    names.unshift(at.childKey ?? at.stateId.split("/").pop() ?? at.stateId);
-    at = at.parentInstanceId === undefined ? undefined : nodeAt(instances, at.parentInstanceId);
-  }
-  return names;
 }
 
 /* ------------------------------------------------------------------------------------------------ */
@@ -190,39 +143,13 @@ export function StepsView({
 }): JSX.Element {
   const box = useRef<HTMLDivElement | null>(null);
   const [rows, setRows] = useState(12);
-  /**
-   * The card is about the step you PICKED, and it goes when the step being viewed moves on (the
-   * person's ruling, 2026-09-24): scroll the conversation to another sheet, or let the live step
-   * advance, and the card closes — picking a step again opens that one's. The move the pick itself
-   * causes (the conversation going to the step) is not a move away: `base` is the step being viewed
-   * when the pick was made, and reaching the picked step becomes the new base.
-   */
-  const base = useRef<string | undefined>(current);
-  /**
-   * Until when the conversation is still travelling to the pick. The jump is a smooth scroll that
-   * lands the step at the TOP, and "current" is read at the centre — so it passes other sheets on the
-   * way and may settle on the one below. What it settles on becomes the base.
-   */
-  const settling = useRef(0);
-  useEffect(() => {
-    base.current = current;
-    settling.current = Date.now() + SETTLE_MS;
-    // Only on a new pick: the current step at that moment is where "moving on" is measured from.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [step]);
-  useEffect(() => {
-    if (step === undefined || current === undefined) return;
-    if (current === step || Date.now() < settling.current) {
-      base.current = current;
-      return;
-    }
-    if (current !== base.current) onStep(undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current]);
+  // The card is about the step you PICKED, and it goes when the step being viewed moves on
+  // (`useStepFollow`, the person's ruling, 2026-09-24).
+  useStepFollow(step, current, onStep);
   useLayoutEffect(() => {
     const el = box.current;
     if (el === null) return;
-    const measure = (): void => setRows(Math.max(4, Math.floor((el.clientHeight - 8) / STEP_ROW)));
+    const measure = (): void => setRows(stepRowsOf(el.clientHeight));
     measure();
     if (typeof ResizeObserver === "undefined") return;
     const watch = new ResizeObserver(measure);
@@ -246,10 +173,7 @@ export function StepsView({
     window.addEventListener("pointerup", up);
   };
 
-  const fit = useMemo(
-    () => ({ capacity: rows, ...(current !== undefined ? { current: step ?? current } : step !== undefined ? { current: step } : {}), ...(onScreen !== undefined ? { onScreen } : {}), convo }),
-    [rows, current, step, onScreen, convo],
-  );
+  const fit = useStepsFit(rows, step, current, onScreen, convo);
 
   return (
     <div className="pv-steps">
@@ -390,15 +314,8 @@ export function StepCard({
 /* Outputs, produced, held                                                                 */
 /* ------------------------------------------------------------------------------------------------ */
 
-const count = (n: number): string => n.toLocaleString();
-
-/** `2.4 s`, `1 m 12 s`. */
-function duration(ms: number): string {
-  if (ms < 1000) return `${ms} ms`;
-  if (ms < 60_000) return `${(ms / 1000).toFixed(1)} s`;
-  const seconds = Math.round(ms / 1000);
-  return `${Math.floor(seconds / 60)} m ${seconds % 60} s`;
-}
+const count = countOf;
+const duration = durationWords;
 
 /**
  * What the run consumed, summed across every call it made.
@@ -412,29 +329,9 @@ function duration(ms: number): string {
  * executor reported, and this says which kind of number that was.
  */
 export function RunMetrics({ states }: { states: SessionRef[] }): JSX.Element | null {
-  const sum = (pick: (m: NonNullable<SessionRef["metrics"]>) => number | undefined): number | undefined => {
-    let total: number | undefined;
-    for (const row of states) {
-      const value = row.metrics === undefined ? undefined : pick(row.metrics);
-      if (value !== undefined) total = (total ?? 0) + value;
-    }
-    return total;
-  };
-  const cost = states.reduce<number | undefined>(
-    (acc, row) => (row.costUsd === undefined ? acc : (acc ?? 0) + row.costUsd),
-    undefined,
-  );
-  const started = states.reduce<number | undefined>((acc, row) => (acc === undefined ? row.at : Math.min(acc, row.at)), undefined);
-  const input = sum((m) => m.inputTokens);
-  const output = sum((m) => m.outputTokens);
-  const cached = sum((m) => m.cacheReadTokens);
-  const written = sum((m) => m.cacheWriteTokens);
-  const reasoning = sum((m) => m.reasoningTokens);
-  const spent = sum((m) => m.durationMs);
-  // Worst-of, because a total is only as trustworthy as its least trustworthy part.
-  const sources = new Set(states.map((row) => row.metrics?.costSource).filter((s) => s !== undefined));
-  const source = sources.has("unknown") ? "unknown" : sources.has("table") ? "table" : sources.has("provider") ? "provider" : undefined;
-  if (started === undefined && cost === undefined && input === undefined) return null;
+  const metrics = runMetricsOf(states);
+  if (metrics === null) return null;
+  const { started, spent, cost, source, input, output, cached, written, reasoning } = metrics;
 
   return (
     <PanelSection title="What it consumed" action={<span className="count">{states.length} calls</span>}>
@@ -728,15 +625,6 @@ export function StateChecks({
   );
 }
 
-/** "Checks" gets a count on its tab when something is wrong. */
-export function checksCountOf(state: StateView | null): { count?: number; tone?: "red" | "amber" } {
-  if (state === null) return {};
-  const errors = state.issues.filter((issue) => issue.severity === "error").length;
-  if (errors > 0) return { count: errors, tone: "red" };
-  if (state.issues.length > 0) return { count: state.issues.length, tone: "amber" };
-  return {};
-}
-
 /** A stable `read` for `ConfigPanel`, whose effect re-reads whenever the function changes. */
 export function useEffectiveRead(stateId: string, taskId?: string, instanceId?: string, project?: string | null): () => ReturnType<typeof invokeEffective> {
   return useCallback(() => invokeEffective(stateId, taskId, instanceId, project), [stateId, taskId, instanceId, project]);
@@ -774,12 +662,8 @@ export interface RerunSurface {
  * the task was called with. Starting it makes a NEW task; the one it came from is left as it ran.
  */
 export function RerunForm({ run, onCancel }: { run: RerunSurface; onCancel: () => void }): JSX.Element {
-  const check = useRunCheck(run.fields, run.values);
-  const { touched, touch } = useTouched(`rerun:${run.workflow}`);
-  const [from, setFrom] = useState("");
-  const forking = from !== "" && run.onFork !== undefined;
-  const blocked = forking ? (run.busy ? "busy" : null) : createBlocker({ workflow: run.workflow, fields: run.fields, check, busy: run.busy });
-  const startLabel = run.starts?.find((one) => String(one.seq) === from)?.label;
+  // Where the copy starts and why the button is off — `newTaskModel.ts`'s, shared with the universal copy.
+  const { check, touched, touch, from, setFrom, forking, blocked, startLabel } = useRerunForm(run);
   return (
     <form
       className="new-task-form"

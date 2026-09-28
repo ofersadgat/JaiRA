@@ -1,4 +1,5 @@
 import { lazy, Suspense, type JSX } from "react";
+import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
 import type { IslandProps } from "./types";
 
@@ -9,6 +10,9 @@ import type { IslandProps } from "./types";
  */
 const MonacoDiffPane = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 const MarkdownEditor = lazy(() => import("@jaira/ui/markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
+const MonacoCodePane = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.MonacoCodePane })));
+const CodeText = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.CodeText })));
+const SchemaTextField = lazy(() => import("@jaira/ui/schemaEditor").then((m) => ({ default: m.SchemaTextField })));
 
 export function Island(props: IslandProps): JSX.Element {
   // Marked, so the fidelity gate can leave it out: an island is the desktop's own component by
@@ -43,6 +47,50 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
         <div className="file-edit" style={box}>
           <Suspense fallback={null}>
             <MarkdownEditor text={String(p["text"] ?? "")} readOnly={p["readOnly"] !== false} {...(p["readOnly"] === false ? { onChange: event("change") } : {})} />
+          </Suspense>
+        </div>
+      );
+    // The island pages' own markup (`client/island/code.tsx`, `schemaText.tsx`), in the region given.
+    case "code": {
+      const text = String(p["text"] ?? "");
+      const mime = String(p["mime"] ?? "text/plain");
+      const file = typeof p["file"] === "string" ? p["file"] : undefined;
+      const reveal = p["reveal"] as { line: number; column: number } | undefined;
+      return (
+        <div className="file-edit" style={{ ...box, display: "flex", flexDirection: "column" }}>
+          <Suspense fallback={null}>
+            {p["reading"] === true ? (
+              <CodeText text={text} mime={mime} {...(typeof p["theme"] === "string" ? { theme: p["theme"] } : {})} />
+            ) : (
+              <MonacoCodePane
+                key={file}
+                text={text}
+                mime={mime}
+                onChange={event("change")}
+                {...(p["readOnly"] === true ? { readOnly: true } : {})}
+                view={(p["view"] as RenderView | undefined) ?? "write"}
+                {...(file === undefined ? {} : { file })}
+                {...(reveal === undefined ? {} : { reveal })}
+              />
+            )}
+          </Suspense>
+        </div>
+      );
+    }
+    case "schemaText":
+      return (
+        <div style={box}>
+          <Suspense fallback={null}>
+            <SchemaTextField
+              text={String(p["text"] ?? "")}
+              onChange={event("change")}
+              readOnly={p["readOnly"] === true}
+              wrap={p["wrap"] === true}
+              schemaId={typeof p["schemaId"] === "string" ? p["schemaId"] : null}
+              format={(p["format"] as SchemaFormat | undefined) ?? "json"}
+              {...(typeof p["mime"] === "string" ? { mime: p["mime"] } : {})}
+              fill={Number(p["fill"] ?? 0)}
+            />
           </Suspense>
         </div>
       );

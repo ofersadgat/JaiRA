@@ -20,11 +20,11 @@ import {
   TAB_SIZES,
   editorKnobApplies,
   type EditorKind,
-  type EditorKnob,
   type EditorLook,
 } from "@jaira/shared/browser";
 import { Chip, Switch } from "./controls";
 import { steppedSize } from "./sizeStep";
+import { KNOB_SWITCHES, KNOB_WORDS } from "./fileTypesModel";
 
 /**
  * A size, as a number with a stepper — not a slider.
@@ -108,26 +108,6 @@ export function ToggleRow({
 }
 
 /**
- * What each editor knob is CALLED, and what its two positions mean.
- *
- * The value words are the part worth a table. A switch whose right-hand column reads "on" and "off"
- * is a column repeating the switch back at you; what belongs there is what the app will DO, which is
- * why wrap says `wrapped` against `scrolls sideways` and whitespace says what it draws rather than
- * that it is enabled.
- */
-const KNOB_WORDS: Record<EditorKnob, { label: string; on: string; off: string }> = {
-  lineNumbers: { label: "Line numbers", on: "numbered", off: "no gutter" },
-  wrap: { label: "Wrap long lines", on: "wrapped", off: "scrolls sideways" },
-  minimap: { label: "Minimap", on: "down the right edge", off: "hidden" },
-  indentGuides: { label: "Indent guides", on: "shown", off: "hidden" },
-  currentLine: { label: "Mark the current line", on: "marked", off: "the caret says it" },
-  whitespace: { label: "Show spaces and tabs", on: "dots and arrows", off: "hidden" },
-  brackets: { label: "Colour bracket pairs", on: "Monaco's three colours", off: "the theme's own" },
-  tabSize: { label: "Tab width", on: "", off: "" },
-  lineHeight: { label: "Line spacing", on: "", off: "" },
-};
-
-/**
  * How one editing surface looks — the knobs it can actually answer, and nothing else.
  *
  * Driven by `EDITOR_KNOBS` rather than by a list written out here, which is what keeps this pane
@@ -146,10 +126,9 @@ export function EditorLookFields({
   busy: boolean;
   onChange: (patch: Partial<EditorLook>) => void;
 }): JSX.Element {
-  const switches: EditorKnob[] = ["lineNumbers", "wrap", "minimap", "indentGuides", "currentLine", "whitespace", "brackets"];
   return (
     <>
-      {switches
+      {KNOB_SWITCHES
         .filter((knob) => editorKnobApplies(kind, knob))
         .map((knob) => {
           const words = KNOB_WORDS[knob];

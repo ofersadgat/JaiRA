@@ -10,7 +10,8 @@ import { useState, type JSX } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type { HistorySize, InputSourcesResponse, WorkflowEntry } from "@jaira/shared/browser";
 import { SelectInput } from "./controls";
-import { RunInputsForm, useRunCheck } from "./runPanel";
+import { RunInputsForm } from "./runPanel";
+import { useNewTaskForm } from "./newTaskModel";
 import {
   createBlocker,
   initialRunValues,
@@ -91,40 +92,9 @@ export function NewTaskForm({
   /** Created, or cancelled: the panel it is in goes back to what it was showing. */
   onDone: () => void;
 }): JSX.Element {
-  const [workflow, setWorkflow] = useState("");
-  /** Which slots take their value from a task, per workflow — the popover's own, like the pick itself. */
-  const [taken, setTaken] = useState<Record<string, RunSources>>({});
-
-  const picked = workflows.find((entry) => entry.rootId === workflow);
-  const errors = picked?.issues.filter((issue) => issue.severity === "error").length ?? 0;
-  const fields = workflow.length === 0 ? undefined : forms[workflow];
-  // What the form opens holding until something is changed, and then what was changed — against the
-  // same map the Files view's run form uses, so one workflow's form holds one set of answers wherever
-  // it is filled in.
-  const form: RunValues = values[workflow] ?? initialRunValues(fields ?? []);
-  const offered = sources[workflow];
-  // Only what is still on offer: a source deleted since it was picked is a pick that means nothing.
-  const from = keptSources(taken[workflow] ?? {}, offered);
-  const fromTask: ValueSources = {
-    label: "from a task…",
-    optionsFor: (path) => sourceOptionsOf(offered?.[path]),
-    picked: (path) => (from[path] !== undefined ? sourceIdOf(from[path]!) : undefined),
-    pick: (path, id) => {
-      const next = { ...from };
-      if (id === undefined) delete next[path];
-      else next[path] = sourceRefOf(id);
-      setTaken({ ...taken, [workflow]: next });
-    },
-  };
-  const check = useRunCheck(fields, form, from);
-  const { touched, touch } = useTouched(workflow);
-  const blocked = createBlocker({ workflow, fields, check, busy });
-  const filled = (fields ?? []).filter(isFilled);
-
-  const pick = (stateId: string): void => {
-    setWorkflow(stateId);
-    if (stateId.length > 0) onPick(stateId);
-  };
+  // What the form decides — the pick, what its boxes hold, which slots come from a task, why the button
+  // is off — is `newTaskModel.ts`'s, shared with the universal copy (decision 0015).
+  const { workflow, pick, picked, errors, fields, form, from, fromTask, check, touched, touch, blocked, filled } = useNewTaskForm({ workflows, forms, values, sources, busy, onPick });
 
   return (
         <form

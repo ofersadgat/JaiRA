@@ -31,6 +31,8 @@ export function Svg({ width, height, viewBox = "0 0 24 24", color, fill = "none"
             ...(s.strokeWidth !== undefined ? { strokeWidth: s.strokeWidth } : {}),
             ...(s.opacity !== undefined ? { opacity: s.opacity } : {}),
             ...(s.dash !== undefined ? { strokeDasharray: s.dash } : {}),
+            ...(s.linecap !== undefined ? { strokeLinecap: s.linecap } : {}),
+            ...(s.nonScaling === true ? { vectorEffect: "non-scaling-stroke" } : {}),
           })
         : createElement("circle", {
             key: i,

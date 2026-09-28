@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, type JSX, type ReactNode } from "react";
 import { Platform, ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View } from "@tamagui/core";
-import { readCall, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type TaskDetail } from "@jaira/shared/browser";
+import { type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
+import { callsOf, toldOf } from "@jaira/ui/runConversationModel";
 import { paletteOfRun } from "@jaira/ui/rail";
 import { bandsOf, instancesOf, mountPathOf, notesOf, pathFrom, piecesOf, recordAt, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
 import { sessionKey } from "@jaira/ui/sessionCache";
@@ -16,11 +17,18 @@ import { GateSurface } from "./Gate";
 import { Icon } from "./Icon";
 import { RailedRows } from "./Rail";
 import { Transcript } from "./SessionTranscript";
+import { ValueView } from "./ValueView";
+import { Button } from "../settings/Button";
+import { advanceTargetOf } from "@jaira/ui/stateSurface";
+import { durationOf, useElapsed } from "@jaira/ui/runActivityModel";
+import type { PendingUserEvent } from "@jaira/shared/browser";
 
 /** What a run's conversation is read from — the store's fields `App.tsx` hands `FileSurfaceContext`. */
 export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessions" | "sessionHistory" | "records" | "liveTurn" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "batches" | "userEvents"> & {
   /** Whether a cut can be offered — `context.onRewind` and `context.onFork` both there. */
   cuts: boolean;
+  /** Answer a parked transition (`WaitingOn`'s button). */
+  onDeliverUserEvent?: ((requestId: string) => void) | undefined;
 };
 
 /**
@@ -39,9 +47,21 @@ export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessio
  *   .run-convo      flex 1, scrolls, follows the live edge
  *   .sb             column, at least the scroller's height, --bg, padding 14 16 22
  */
-export function RunTranscript({ detail, source, gate, onGate }: { detail: TaskDetail; source: TranscriptSource; gate?: PendingInteraction; onGate?: (value: unknown) => void }): JSX.Element {
+export function RunTranscript({
+  detail,
+  parent = detail.instances[0],
+  source,
+  gate,
+  onGate,
+}: {
+  detail: TaskDetail;
+  /** The run being READ — the trail's tail in the middle column, the task's root in the panel. */
+  parent?: InstanceNode | undefined;
+  source: TranscriptSource;
+  gate?: PendingInteraction;
+  onGate?: (value: unknown) => void;
+}): JSX.Element {
   const t = useTokens();
-  const parent = detail.instances[0];
   const { conversation, sessions, sessionHistory, records, liveTurn, onLoadSessions, shutStates, onToggleShutState, onSetShutStates } = source;
   const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory), { batches: source.batches }), [parent, sessionHistory, source.batches]);
   const needed = useMemo(() => instancesOf(bands), [bands]);
@@ -49,7 +69,7 @@ export function RunTranscript({ detail, source, gate, onGate }: { detail: TaskDe
   const notes = useMemo(() => notesOf(conversation?.turns ?? [], parent), [conversation, parent]);
   const rootPath = useMemo(() => (parent === undefined ? "" : mountPathOf(detail.instances, parent.instanceId)), [detail, parent]);
   const askingHere = useMemo(() => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail.instances)), [gate, onGate, detail.instances]);
-  const waits = useMemo(() => [...source.userEvents].filter((one) => one.taskId === detail.taskId), [source.userEvents, detail.taskId]);
+  const waits = useMemo(() => [...source.userEvents].filter((one) => one.taskId === detail.taskId).sort((a, b) => a.at - b.at), [source.userEvents, detail.taskId]);
 
   // Every panel is open, so every transcript in them is needed — fetched in one round.
   useEffect(() => {
@@ -134,7 +154,9 @@ export function RunTranscript({ detail, source, gate, onGate }: { detail: TaskDe
             }}
           />
         )}
-        {waits.length > 0 ? <Uncopied name="a parked transition (WaitingOn)" /> : null}
+        {waits.map((request) => (
+          <WaitingOn key={request.requestId} request={request} onDeliver={() => source.onDeliverUserEvent?.(request.requestId)} />
+        ))}
       </View>
     </ScrollView>
   );
@@ -150,6 +172,70 @@ function toEnd(view: ScrollView | null): void {
   if (Platform.OS === "web") view.scrollTo({ y: 1e9, animated: false });
   else view.scrollToEnd({ animated: false });
 }
+
+/**
+ * `WaitingOn`: a transition parked on a gesture (`on_user_event`), drawn where the run stopped — a sheet
+ * with a dashed --warn edge and no fill, its letterhead the amber title block ("waiting on you", where
+ * it would go, for how long), the sentence, and the button that delivers the move.
+ *
+ *   .sb-sheet.ss-waiting   dashed, --warn 34% into --line, no ground, no shadow
+ *   .ss-wait-do            row, centred, gap 10, wrapping, 11 above; `.ss-wait-or` app 12/12.5 --dim
+ */
+function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDeliver: () => void }): JSX.Element {
+  const t = useTokens();
+  const look = useLook();
+  const to = advanceTargetOf(request);
+  const waited = useElapsed(request.at, true) ?? 0;
+  const sheet = sheetLookOf(t, look);
+  const size = Number(t.scaled("size-data", 11 / 12)) || 11;
+  const body = { voice: "app" as const, scale: 13 / 12.5 };
+  const mono = { voice: "data" as const, scale: 1 };
+  return (
+    <View flexDirection="column" minWidth={0}>
+      <View flexDirection="column" minWidth={0} borderWidth={sheet.width} borderStyle="dashed" borderColor={(look.palette === "contrast" ? t.v("rule") : t.mix(t.v("warn"), 34, t.v("line"))) as never} borderRadius={sheet.radius} overflow="hidden">
+        <View flexDirection="column" alignItems="stretch" paddingTop={13} paddingHorizontal={15} paddingBottom={15} minWidth={0}>
+          <View flexDirection="row" alignItems="baseline" gap={9} marginTop={-13} marginHorizontal={-15} marginBottom={13} paddingVertical={9} paddingHorizontal={15} backgroundColor={t.mix(t.v("warn"), 14, t.v("panel")) as never} {...(edge(t, { bottom: 1 }, t.mix(t.v("warn"), 30, t.v("line")), "dashed") as object)}>
+            <Icon name="clock" size={size} color={String(t.v("warn"))} box={{ alignSelf: "center" }} />
+            <Txt spec={{ voice: "data", scale: 10 / 12, weight: 600, ls: 0.09, upper: true, color: "warn" }} flexShrink={0}>
+              waiting on you
+            </Txt>
+            <Txt spec={{ voice: "data", scale: 1, weight: 600, color: "warn" }} flexShrink={0}>
+              {to !== undefined ? `→ ${to}` : request.event}
+            </Txt>
+            <Txt spec={{ voice: "data", scale: 11 / 12, color: "warn", tabular: true }} flexShrink={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
+              {durationOf(waited)}
+            </Txt>
+          </View>
+          <Txt spec={body}>
+            {to !== undefined ? (
+              <>
+                Move this task to <Txt spec={mono}>{to}</Txt> to carry on. Nothing downstream runs until you do.
+              </>
+            ) : (
+              <>
+                This run is waiting for <Txt spec={mono}>{request.event}</Txt>.
+              </>
+            )}
+          </Txt>
+          {to !== undefined ? (
+            <View flexDirection="row" alignItems="center" gap={10} flexWrap="wrap" marginTop={11}>
+              <Button kind="primary" onPress={onDeliver}>
+                {`Advance to ${to}`}
+              </Button>
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>— or drag the card there on the board</Txt>
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </View>
+  );
+}
+
+/**
+ * Text as `white-space: normal` lays it out: every run of spaces and line breaks one space. A native
+ * `Text` keeps a newline as a break, so words the DOM reflows are collapsed before they are drawn.
+ */
+export const collapsed = (text: string): string => text.replace(/[ \t\n\r\f]+/g, " ");
 
 /** `p.empty`: a quiet sentence where there is nothing to draw. */
 export function Empty({ children }: { children: ReactNode }): JSX.Element {
@@ -190,7 +276,7 @@ function NoteRow({ note, root, cuts }: { note: BandNote; root: string; cuts: boo
           {VERB[note.kind]}
         </Txt>
       )}
-      {skipped && note.text.length > 0 ? <Txt spec={{ ...words, color: ink }} minWidth={0} flexShrink={1}>{note.text}</Txt> : null}
+      {skipped && note.text.length > 0 ? <Txt spec={{ ...words, color: ink }} minWidth={0} flexShrink={1}>{collapsed(note.text)}</Txt> : null}
       {where === "" ? null : (
         <Txt spec={words} ellip flexShrink={0} maxWidth="30%" title={note.stateId ?? where}>
           {where}
@@ -198,7 +284,7 @@ function NoteRow({ note, root, cuts }: { note: BandNote; root: string; cuts: boo
       )}
       {note.kind === "entered" || skipped || note.text.length === 0 ? null : (
         <Txt spec={{ ...words, color: ink }} minWidth={0} flexShrink={1}>
-          {note.kind === "blocked" ? `: ${note.text}` : note.text}
+          {collapsed(note.kind === "blocked" ? `: ${note.text}` : note.text)}
         </Txt>
       )}
       {cuts && moved ? <View width={44} height={21} marginLeft="auto" alignSelf="center" flexShrink={0} /> : null}
@@ -518,7 +604,9 @@ function Letterhead({
               <Icon name="chevron" size={size} color={String(t.v(hue ?? "dim"))} box={{ marginTop: baselineOf(size, 1.02, 0.3) - size }} />
             </View>
             {glyph !== undefined ? <Icon name={glyph} size={size} color={String(t.v(ink))} box={{ alignSelf: "center" }} /> : null}
-            {glyph === undefined && status !== undefined ? <Uncopied name="the outcome dot" /> : null}
+            {/* `.lh-dot`: 6 round, centred, --dim — its `.ts-dot-<status>` colour loses to `.lh-dot`, which
+                comes later at the same weight, so every status draws the same dot. */}
+            {glyph === undefined && status !== undefined ? <View width={6} height={6} borderRadius={3} alignSelf="center" flexShrink={0} backgroundColor={t.v("dim") as never} /> : null}
             {word !== undefined ? (
               <Txt spec={{ voice: "data", scale: 10 / 12, weight: 600, ls: 0.09, upper: true, color: ink }} flexShrink={0}>
                 {word}
@@ -559,18 +647,40 @@ function Letterhead({
  *   .ss-slot-name      data 11/12, --dim, 2 under; .ss-slot-value data 12/12, --text, ellipsed
  */
 function SilentState({ node, records }: { node: InstanceNode; records: Record<string, OperationRecordView> }): JSX.Element {
+  const t = useTokens();
   const failure = node.operation?.status === "failed" ? node.operation.reason : undefined;
-  const calls = useMemo(() => (node.calls ?? []).map((call) => records[call.operationId]).filter((row): row is OperationRecordView => row !== undefined).map(readCall), [node.calls, records]);
-  if (failure !== undefined) return <Uncopied name="a failed state" />;
-  if (calls.length > 0) return <>{calls.map((call, i) => <CallBlock key={i} call={call} />)}</>;
+  const calls = useMemo(() => callsOf(node, records), [node, records]);
+  // `.ss-call + .ss-call`: 14 above, 12 inside, a --line over; a told line and a call 10 apart.
+  const listed = calls.map((call, i) => {
+    const told = toldOf(call) !== undefined;
+    const before = i === 0 ? undefined : toldOf(calls[i - 1]!) !== undefined || told ? "told" : "call";
+    return (
+      <View key={i} minWidth={0} {...(before === "call" ? { marginTop: 14, paddingTop: 12, ...edge(t, { top: 1 }) } : before === "told" ? { marginTop: 10 } : {})}>
+        <CallBlock call={call} />
+      </View>
+    );
+  });
+  if (failure !== undefined) {
+    return (
+      <>
+        {/* `p.ss-fail`: the reason in the data voice, --bad, in a line of the body's font. */}
+        <Txt spec={{ voice: "app", scale: 13 / 12.5 }} {...({ overflowWrap: "anywhere" } as object)}>
+          <Txt spec={{ voice: "data", scale: 1, color: "bad", lineHeight: 13 / 12.5 * 1.5 * 12.5 / 12 }}>{collapsed(failure)}</Txt>
+        </Txt>
+        {listed}
+      </>
+    );
+  }
+  if (calls.length > 0) return <>{listed}</>;
   const slots = Object.entries(node.inputs ?? {});
   if (slots.length === 0) return <Empty>Nothing was bound to this run.</Empty>;
-  return <Slots slots={slots} gap={4} />;
+  return <Slots slots={slots} gap={10} provenance={node.inputProvenance} />;
 }
 
 function CallBlock({ call }: { call: ReadCall }): JSX.Element {
   const t = useTokens();
-  if (call.name === "notify") return <Uncopied name="a notify call" />;
+  const told = toldOf(call);
+  if (told !== undefined) return <ToldLine told={told} />;
   const args = Object.entries(call.args);
   return (
     <View minWidth={0}>
@@ -587,7 +697,35 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
         ) : null}
       </View>
       {args.length > 0 ? <Slots slots={args} gap={4} marginBottom={10} /> : null}
-      {call.error !== undefined || call.result !== undefined ? <Uncopied name="a call's returned value (ValueView)" /> : null}
+      {call.error !== undefined ? <ValueView value={call.error} label="error" /> : call.result !== undefined ? <ValueView value={call.result} label="returned" /> : null}
+    </View>
+  );
+}
+
+/**
+ * `ToldLine`: an events automation's `notify`, settled — what it told you, and what about.
+ *
+ *   .ss-told        row, wrapping, baseline, gap 2 6; the bell at 0.95em, "told you:" --dim, the text,
+ *                   and what it was about (`data-faint`: data 0.84, --tok-hint)
+ */
+function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Element {
+  const body = { voice: "app" as const, scale: 13 / 12.5 };
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="baseline" rowGap={2} columnGap={6} minWidth={0}>
+      <Txt spec={{ ...body, scale: (13 / 12.5) * 0.95 }} flexShrink={0} aria-hidden>
+        🔔
+      </Txt>
+      <Txt spec={{ ...body, color: "dim" }} flexShrink={0}>
+        told you:
+      </Txt>
+      <Txt spec={body} minWidth={0} {...({ overflowWrap: "anywhere" } as object)}>
+        {told.text}
+      </Txt>
+      {told.about !== undefined ? (
+        <Txt register="data-faint" minWidth={0} {...({ overflowWrap: "anywhere" } as object)}>
+          · {told.about}
+        </Txt>
+      ) : null}
     </View>
   );
 }
@@ -605,6 +743,23 @@ function baselineOf(size: number, ascent: number, descent: number): number {
   return (size * 1.5 - (a + d)) / 2 + a;
 }
 
+/**
+ * `.prov`: how a value was settled (decision 0005 §4) — bound by wiring, inferred, or asked. A pill 6
+ * after the name: data 600 at 10/12.5 on a 1.6 line, padding 0 6, 1px --line (inferred --accent, asked
+ * --warn, each 40 / 45% into --line).
+ */
+function Provenance({ via }: { via: string }): JSX.Element {
+  const t = useTokens();
+  const hue = via === "inferred" ? { ink: "accent", edge: t.mix(t.v("accent"), 40, t.v("line")) } : via === "asked" ? { ink: "warn", edge: t.mix(t.v("warn"), 45, t.v("line")) } : { ink: "dim", edge: t.v("line") };
+  return (
+    <View flexShrink={0} marginLeft={6} paddingHorizontal={6} borderWidth={1} borderStyle="solid" borderRadius={999} borderColor={hue.edge as never}>
+      <Txt spec={{ voice: "data", scale: (10 / 12.5) * (12.5 / 12), weight: 600, color: hue.ink, lineHeight: 1.6 }} fontSize={t.scaled("size-app", 10 / 12.5)}>
+        {via}
+      </Txt>
+    </View>
+  );
+}
+
 function slotLineOf(t: ReturnType<typeof useTokens>): { top: number; height: number } {
   const body = Number(t.scaled("size-app", 13 / 12.5)) || 13;
   const name = Number(t.scaled("size-data", 11 / 12)) || 11;
@@ -612,17 +767,18 @@ function slotLineOf(t: ReturnType<typeof useTokens>): { top: number; height: num
   return { top, height: Math.max(top + name * 1.5 + 2, body * 1.5) - Math.min(0, top) };
 }
 
-function Slots({ slots, gap, marginBottom = 0 }: { slots: [string, unknown][]; gap: number; marginBottom?: number }): JSX.Element {
+function Slots({ slots, gap, marginBottom = 0, provenance }: { slots: [string, unknown][]; gap: number; marginBottom?: number; provenance?: InstanceNode["inputProvenance"] | undefined }): JSX.Element {
   const t = useTokens();
   const line = slotLineOf(t);
   return (
     <View flexDirection="column" gap={gap} minWidth={0} marginBottom={marginBottom}>
       {slots.map(([name, value]) => (
         <View key={name} minWidth={0}>
-          <View height={line.height} alignItems="flex-start">
+          <View height={line.height} flexDirection="row" alignItems="flex-start">
             <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }} marginTop={line.top}>
               {name}
             </Txt>
+            {provenance?.[name] !== undefined ? <Provenance via={provenance[name]!.via} /> : null}
           </View>
           <Txt spec={{ voice: "data", scale: 1, color: "text" }} ellip minWidth={0} title={previewOf(value as never)}>
             {previewOf(value as never)}

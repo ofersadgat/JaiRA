@@ -5,6 +5,7 @@ import { steppedSize } from "@jaira/ui/sizeStep";
 import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
+import { Svg } from "../panel/Svg";
 
 /**
  * The settings fields, universal (decision 0015): `controls.tsx`'s `SelectInput` and `editorKnobs.tsx`'s
@@ -21,8 +22,12 @@ import { ContextMenu, type MenuAt } from "../Menu";
  *   .size-step button    15×10, ▲ ▼ at 7px on a line of 1, --dim (hovered --text); at a limit 0.35
  */
 
-/** Chromium's menulist sets its text 3 in from the padding, and keeps room for its arrow after it: 40.6 wider than the text in all. */
-const MENULIST_INSET = 3;
+/**
+ * Chromium's menulist sets its text 4 in from the padding (measured in a 272-wide one: the text sits a
+ * device pixel right of 3), and keeps room for its arrow after it: 40.6 wider than the text in all.
+ * Its line is `normal` rounded UP to a whole pixel, the text centred in it.
+ */
+const MENULIST_INSET = 4;
 const MENULIST_ROOM = 40.6 - 18 - 2 - MENULIST_INSET;
 
 /** A closed set of choices — `controls.tsx`'s `SelectInput`. It opens a menu of them. */
@@ -45,6 +50,8 @@ export function SelectInput({
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const shown = options.find(([, v]) => v === value)?.[0] ?? "";
   const text = { voice: "app", scale: 1, lineHeight: 1.3867 } as const;
+  const size = t.scaled("size-app", 1);
+  const lineBox = typeof size === "number" ? size * 1.3867 : undefined;
   const open = (): void =>
     box.current?.measureInWindow((x, y, _w, h) =>
       setMenu({
@@ -74,10 +81,12 @@ export function SelectInput({
             {label}
           </Txt>
         ))}
-        <Txt spec={text} numberOfLines={1}>
-          {shown}
-        </Txt>
-        <Chevron right={4.8 - 1} />
+        <View minHeight={typeof lineBox === "number" ? Math.ceil(lineBox) : undefined} justifyContent="center">
+          <Txt spec={text} numberOfLines={1}>
+            {shown}
+          </Txt>
+        </View>
+        <Chevron right={4.67 - 1 - 0.67} />
       </Press>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </RNView>
@@ -85,19 +94,23 @@ export function SelectInput({
 }
 
 /**
- * Chromium's menulist arrow: a chevron 8.9 wide and 5.4 tall, stroked about 1.6, centred on the box's
- * height — drawn as its two strokes so a phone draws it too.
+ * Chromium's menulist arrow, measured off the desktop's pictures: two arms 8 apart at their tops,
+ * meeting 3.9 below, stroked 1.2, their tops 2.5 above the box's middle and 4.7 in from its right edge.
  */
 function Chevron({ right }: { right: number }): JSX.Element {
   const t = useTokens();
-  const ink = t.v("text") as never;
   return (
-    <View position="absolute" right={right} top="50%" marginTop={-2.7} width={8.9} height={5.4} aria-hidden>
-      <View width={8.9} height={5.4}>
-        <View position="absolute" left={0.1} top={1.9} width={6.2} height={1.6} backgroundColor={ink} transform={[{ rotate: "45deg" }]} />
-        <View position="absolute" right={0.1} top={1.9} width={6.2} height={1.6} backgroundColor={ink} transform={[{ rotate: "-45deg" }]} />
-      </View>
-    </View>
+    <Svg
+      width={10}
+      height={6}
+      viewBox="0 0 10 6"
+      color={String(t.v("text"))}
+      strokeWidth={1.2}
+      linecap="butt"
+      linejoin="miter"
+      shapes={[{ kind: "path", d: "M1 1.1 L5 4.97 L9 1.1" }]}
+      box={{ position: "absolute", right, top: "50%", marginTop: -3.6, pointerEvents: "none", "aria-hidden": true }}
+    />
   );
 }
 

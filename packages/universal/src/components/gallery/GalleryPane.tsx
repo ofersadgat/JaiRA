@@ -17,20 +17,22 @@ import {
   type CardState,
   type Editor,
 } from "@jaira/ui/galleryModel";
-import { PLAIN_SCROLLER, Press, Txt, edge, lengthToken, scrollbarProps, type FontSpec } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, appCh, edge, lengthToken, scrollbarProps, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Button } from "../settings/Button";
 import { GateSurface } from "../panel/Gate";
 import { Outputs } from "../debug/DebugPane";
+import { SchemaForm } from "../form/SchemaForm";
+import type { Schema } from "@jaira/ui/schemaForm/types";
 
 /**
  * `galleryPane.tsx`'s `GalleryPane` and `componentGallery.tsx`'s `ComponentGallery`, universal (decision
  * 0015): the page's heading, the bar that slides every row to one variant, and a row per surface — its
  * heading, its tabs and arrows, and a carousel of cards. What it derives is `galleryModel.ts`, shared with
- * the desktop's. In a card, the dialog itself (`InteractionDialog`, `ApprovalSurface`, `QuestionSurface`)
- * and its config's form and JSON editor are {@link Uncopied}; the card's frame, heading, stage and config
- * box are copies. The rules, from `styles.css`:
+ * the desktop's. In a card, an interaction's dialog is the gate's own surface (`GateSurface`, the side
+ * panel's copy) and its config's form the one form (`form/SchemaForm`); an approval's and a question's
+ * dialogs and the JSON editor are {@link Uncopied}. The rules, from `styles.css`:
  *
  *   .gallery-page        --bg, scrolls, padding 12 14, column, gap 18
  *   .gallery-page-head   column, gap 8; h2 700 app at 15/12.5, margin 0; .sub margin 0, ≤ 80ch, line 1.5
@@ -81,11 +83,6 @@ export function GalleryPane(): JSX.Element {
 
 const SUB: FontSpec = { voice: "app", scale: 11 / 12.5, color: "dim" };
 
-/** A length in `ch` of DM Sans at a size of the app voice: the `0` is 0.662 of the size. */
-function appCh(t: Tokens, scale: number, n: number): number | string {
-  const size = t.scaled("size-app", scale);
-  return typeof size === "number" ? n * 0.662 * size : `${n}ch`;
-}
 
 /** `code`: the data face at 11/12. */
 function Code({ children }: { children: ReactNode }): JSX.Element {
@@ -164,14 +161,18 @@ function ComponentGallery({ groups = GALLERY_GROUPS }: { groups?: readonly Galle
               style={{ flexGrow: 0, ...PLAIN_SCROLLER } as never}
               contentContainerStyle={{ alignItems: "flex-start", ...PLAIN_SCROLLER } as never}
             >
-              {group.variants.map((variant) => {
+              {/* A slide is the track's width, so none is drawn before the track has one: a percentage of a
+                  sideways scroller's content is of nothing, and a card laid out that wide first would have
+                  its form measure itself wide. */}
+              {(showing[`${group.id}#w`] ?? 0) <= 0 ? null : group.variants.map((variant) => {
                 const surface = surfaces.find((s) => s.group === group.id && s.variant === variant.id)!;
                 const width = showing[`${group.id}#w`];
                 return (
-                  <View key={surface.id} {...(width !== undefined && width > 0 ? { width } : { width: "100%" })} minWidth={0}>
+                  <View key={surface.id} width={width} minWidth={0}>
                     <GalleryCard
                       surface={surface}
                       state={cards[surface.id] ?? initialState(surface)}
+                      onText={(text) => patch(surface.id, { text })}
                       onEditor={(editor) => patch(surface.id, { editor })}
                       onReset={() => patch(surface.id, { ...initialState(surface), result: undefined })}
                       onResult={(result) => patch(surface.id, { result })}
@@ -308,18 +309,21 @@ function Chip({ children, tone, spec }: { children: ReactNode; tone?: "ok" | "ba
 function GalleryCard({
   surface,
   state,
+  onText,
   onEditor,
   onReset,
   onResult,
 }: {
   surface: GallerySurface;
   state: CardState;
+  onText: (text: string) => void;
   onEditor: (editor: Editor) => void;
   onReset: () => void;
   onResult: (result: CardState["result"]) => void;
 }): JSX.Element {
   const t = useTokens();
   const entry = surface.schemaId === null ? undefined : schemaById(surface.schemaId);
+  const parsed = parsedDoc(state.text);
   // The body's width, for the container query: two columns while the card's content (the body) is wider
   // than 720, stacked below that.
   const [width, setWidth] = useState(0);
@@ -345,17 +349,24 @@ function GalleryCard({
           <Stage surface={surface} text={state.text} onResult={onResult} />
         </View>
         <View {...(stacked ? {} : { width: "34%", minWidth: 280, flexShrink: 0 })} minHeight={stacked ? 0 : 320} position="relative">
-          <View
-            {...(stacked ? { maxHeight: 420 } : { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 })}
-            flexDirection="column"
-            gap={8}
-            padding={8}
-            borderRadius={8}
-            backgroundColor={t.v("panel-2") as never}
-            {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
-            overflow="hidden"
+          {/* `.gallery-config`: the box that scrolls beside the dialog, its head held at the top — out of flow
+              over the side (a box of its own around the scroller, whose plain style keeps it in flow). */}
+          <View {...(stacked ? { maxHeight: 420 } : { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 })} flexDirection="column">
+          <ScrollView
+            style={
+              {
+                flex: 1,
+                borderRadius: 8,
+                backgroundColor: t.v("panel-2"),
+                ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object),
+                ...PLAIN_SCROLLER,
+              } as never
+            }
+            contentContainerStyle={{ flexDirection: "column", gap: 8, padding: 8, ...PLAIN_SCROLLER } as never}
+            stickyHeaderIndices={[0]}
+            {...scrollbarProps(t)}
           >
-            <View flexDirection="row" alignItems="center" gap={10}>
+            <View flexDirection="row" alignItems="center" gap={10} backgroundColor={t.v("panel-2") as never} zIndex={1}>
               <Seg
                 options={[
                   { label: "Form", on: state.editor === "form", disabled: entry === undefined, title: entry === undefined ? "no schema declares this document's shape" : "edit it as a form", onPress: () => onEditor("form") },
@@ -373,7 +384,17 @@ function GalleryCard({
                 )}
               </Press>
             </View>
-            <Uncopied name={state.editor === "form" && entry !== undefined ? "the config's form" : "the config's JSON editor"} flex={1} />
+            {state.editor === "form" && entry !== undefined ? (
+              parsed.doc === undefined ? (
+                // The form edits a parsed document; a broken one is repaired in the JSON view.
+                <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>This is not JSON yet: {parsed.error}. Fix it in the JSON view — the form edits a parsed document.</Txt>
+              ) : (
+                <SchemaForm schema={entry.document as Schema} value={parsed.doc} onChange={(next) => onText(JSON.stringify(next, null, 2))} ctx={{ path: "" }} />
+              )
+            ) : (
+              <Uncopied name="the config's JSON editor" height={240} />
+            )}
+          </ScrollView>
           </View>
         </View>
       </View>

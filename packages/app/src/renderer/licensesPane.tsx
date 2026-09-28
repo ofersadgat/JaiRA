@@ -12,22 +12,10 @@
  *
  * Nothing here is a setting, so it takes no layer.
  */
-import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
-import {
-  decodeThirdPartyLicenseManifest,
-  filterThirdPartyLicenseEntries,
-  formatLicenseBundles,
-  thirdPartyLicenseEntryKey,
-  type ThirdPartyLicenseEntry,
-  type ThirdPartyLicenseManifest,
-} from "@jaira/shared/browser";
-import { invoke } from "./store";
+import { useState, type JSX } from "react";
+import { formatLicenseBundles, thirdPartyLicenseEntryKey, type ThirdPartyLicenseEntry } from "@jaira/shared/browser";
+import { licenseCountWords, useLicenseManifest } from "./aboutModel";
 import { SettingsSection } from "./settingsLayout";
-
-type ManifestState =
-  | { readonly status: "loading" }
-  | { readonly status: "error"; readonly message: string }
-  | { readonly status: "ready"; readonly manifest: ThirdPartyLicenseManifest };
 
 function LicenseRow({ entry, open, onOpen }: { entry: ThirdPartyLicenseEntry; open: boolean; onOpen: (open: boolean) => void }): JSX.Element {
   return (
@@ -59,7 +47,7 @@ function LicenseRow({ entry, open, onOpen }: { entry: ThirdPartyLicenseEntry; op
 function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuery: (query: string) => void; shown: number; total: number }): JSX.Element {
   return (
     <span className="lic-head">
-      <span className="lic-count">{shown === total ? `${String(total)} notices` : `${String(shown)} of ${String(total)}`}</span>
+      <span className="lic-count">{licenseCountWords(shown, total)}</span>
       <input
         type="search"
         className="lic-search"
@@ -78,35 +66,9 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
 }
 
 export function ThirdPartyNotices(): JSX.Element {
-  const [state, setState] = useState<ManifestState>({ status: "loading" });
   const [query, setQuery] = useState("");
   const [openKey, setOpenKey] = useState<string | null>(null);
-  const [attempt, setAttempt] = useState(0);
-
-  useEffect(() => {
-    let live = true;
-    setState({ status: "loading" });
-    invoke("licenses:read", undefined).then(
-      (raw) => {
-        if (!live) return;
-        try {
-          setState({ status: "ready", manifest: decodeThirdPartyLicenseManifest(raw) });
-        } catch (error) {
-          setState({ status: "error", message: (error as Error).message });
-        }
-      },
-      (error: unknown) => {
-        if (live) setState({ status: "error", message: error instanceof Error ? error.message : "The license manifest could not be read." });
-      },
-    );
-    return () => {
-      live = false;
-    };
-  }, [attempt]);
-
-  const entries = state.status === "ready" ? state.manifest.entries : [];
-  const shown = useMemo(() => filterThirdPartyLicenseEntries(entries, query), [entries, query]);
-  const retry = useCallback(() => setAttempt((n) => n + 1), []);
+  const { state, entries, shown, retry } = useLicenseManifest(query);
 
   return (
     <SettingsSection

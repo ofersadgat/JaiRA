@@ -9,8 +9,12 @@ import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Markdown } from "../Markdown";
-import { Button } from "../settings/Button";
 import { DataView } from "./DataView";
+import { CodeSourceView, ConfigEdit, TextEdit } from "./CodeEdit";
+import { JsonEdit } from "./SchemaEdit";
+import { EditorActions, ReadingNote, Sub } from "./EditorActions";
+import { CompositeView } from "../run/RunView";
+import { useRunContext } from "../run/runContext";
 
 /**
  * The file surfaces, universal (decision 0015): what draws each half of the Files panel, by the same
@@ -73,48 +77,8 @@ function ConfigEffectiveView({ context }: FileSurfaceProps): JSX.Element {
   );
 }
 
-/**
- * `editorChrome.tsx`'s `EditorActions`: Save and Revert, pinned under the editor. The rules
- * (`cascade.mts '.pane-actions.pinned'`):
- *
- *   .pane-actions.pinned   row, centred, wrapping, gap 6; 8 above, a --line over it, --panel; pushed to
- *                          the foot (margin-top auto)
- *   button.primary/.ghost  `Button`'s; disabled at half opacity
- *   .sub                   --dim, app 11/12.5
- */
-export function EditorActions({ dirty, busy, onSave, onRevert, children }: { dirty?: boolean; busy?: boolean; onSave: () => void; onRevert?: () => void; children?: ReactNode }): JSX.Element {
-  return (
-    <EditorActionsRow>
-      <Button kind="primary" onPress={onSave} disabled={busy === true || dirty === false}>
-        Save
-      </Button>
-      {onRevert !== undefined ? (
-        <Button kind="ghost" onPress={onRevert} disabled={dirty === false}>
-          Revert
-        </Button>
-      ) : null}
-      {dirty === true ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>unsaved changes</Txt> : null}
-      {children}
-    </EditorActionsRow>
-  );
-}
-
-/** `ReadingNote`: the row a Save button would have been in, saying why there is none. */
-function ReadingNote(): JSX.Element {
-  return (
-    <EditorActionsRow>
-      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>The reading of this type — not a place to type. Appearance › File types.</Txt>
-    </EditorActionsRow>
-  );
-}
-function EditorActionsRow({ children }: { children: ReactNode }): JSX.Element {
-  const t = useTokens();
-  return (
-    <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} flexShrink={0} marginTop="auto" paddingTop={8} backgroundColor={t.v("panel") as never} borderTopWidth={1} borderRightWidth={0} borderBottomWidth={0} borderLeftWidth={0} borderStyle="solid" borderColor={t.v("line") as never}>
-      {children}
-    </View>
-  );
-}
+// Save and Revert, the reading note and `.file-edit` are `EditorActions.tsx`'s, shared by every editor.
+export { EditorActions } from "./EditorActions";
 
 /**
  * `fileSurfaces.tsx`'s `MarkdownFileEdit`: markdown, edited in the live preview — CodeMirror, an island
@@ -143,15 +107,29 @@ function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX
         <ReadingNote />
       ) : (
         <EditorActions dirty={draft.dirty || !doc.exists} busy={busy} onSave={() => onSave(draft.text)} onRevert={draft.revert}>
-          {doc.exists ? null : <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>new file — saving creates it</Txt>}
+          {doc.exists ? null : <Sub>new file — saving creates it</Sub>}
         </EditorActions>
       )}
     </View>
   );
 }
 
+/**
+ * `fileSurfaces.tsx`'s `WorkflowRunView`: what a state file IS DOING — its board, or its tasks and their
+ * conversation (`CompositeView`, `components/run/RunView.tsx`), exactly what the Tasks room shows for
+ * the same state. The run it reads comes from the store (`useRunContext`), over the room's context. A
+ * leaf's own panel (`LeafPanel`) is {@link Uncopied}.
+ */
+function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
+  const context = { ...props.context, ...useRunContext() };
+  const { state } = context;
+  if (state === null) return <Empty>This file does not resolve to a state.</Empty>;
+  if (state.board === null) return <Uncopied name="LeafPanel" flex={1} />;
+  return <CompositeView {...props} context={context} state={state} />;
+}
+
 /** The copies there are, by the table's key. */
-const COPIED: Partial<Record<SurfaceKey, FileSurface>> = { MarkdownView, MarkdownFileEdit, JsonView, YamlView, ConfigEffectiveView };
+const COPIED: Partial<Record<SurfaceKey, FileSurface>> = { MarkdownView, MarkdownFileEdit, JsonView, YamlView, ConfigEffectiveView, WorkflowRunView, TextEdit, CodeSourceView, ConfigEdit, JsonEdit };
 
 /** The table, registered with the copies — and an {@link Uncopied} box for every surface without one. */
 export const SURFACES = registerSurfaceTable(

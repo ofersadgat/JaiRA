@@ -18,7 +18,9 @@ import { runMode } from "./viewState";
 export function useFileSurfaces(): FileSurfaceContext {
   const { state, actions } = useShell();
   const mode = runMode.use();
-  const renderers = useMemo(() => lookOf(state.config).renderers, [state.config]);
+  const look = useMemo(() => lookOf(state.config), [state.config]);
+  const renderers = look.renderers;
+  const ui = state.settings.ui;
   const partial: Partial<FileSurfaceContext> = {
     state: state.state,
     config: state.config,
@@ -47,6 +49,21 @@ export function useFileSurfaces(): FileSurfaceContext {
     drafts: state.drafts,
     onDraft: actions.setDraft,
     renderers,
+    // The editors' (`components/files/CodeEdit.tsx`, `SchemaEdit.tsx`): saving `settings.json`, the
+    // schema a document answers to and its check, wrapping, and the field reference's remembered pane.
+    onSaveConfig: (layer, doc) => actions.saveConfigFile(layer, doc),
+    validateSchema: actions.validateSchema,
+    schemaChoice: state.schemaChoice,
+    onSchemaChoice: actions.setSchemaChoice,
+    detectSchema: actions.detectSchema,
+    wrapJson: look.editors.json.wrap,
+    onWrapJson: actions.setWrapJson,
+    ui: {
+      pane: (id, fallback) => ui.panes[id] ?? fallback,
+      setPane: actions.setPane,
+      open: (id, fallback) => ui.open[id] ?? fallback,
+      setOpen: actions.setFold,
+    },
   };
   return partial as FileSurfaceContext;
 }

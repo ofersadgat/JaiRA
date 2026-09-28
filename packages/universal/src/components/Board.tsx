@@ -254,7 +254,7 @@ function NoChildren(): JSX.Element {
  * on a phone, which has no background images, the lines are views under everything else, laid when the
  * body's size is known.
  */
-function graphPaperWeb(t: Tokens): Record<string, unknown> {
+export function graphPaperWeb(t: Tokens): Record<string, unknown> {
   const grid = String(t.v("grid"));
   return {
     backgroundImage: `linear-gradient(${grid} 1px, transparent 1px), linear-gradient(90deg, ${grid} 1px, transparent 1px)`,
@@ -263,7 +263,7 @@ function graphPaperWeb(t: Tokens): Record<string, unknown> {
   };
 }
 
-function GraphPaper({ t }: { t: Tokens }): JSX.Element {
+export function GraphPaper({ t }: { t: Tokens }): JSX.Element {
   const [size, setSize] = useState<{ w: number; h: number } | null>(null);
   const ink = t.v("grid") as never;
   return (
@@ -371,7 +371,7 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
  * A board column (`board.tsx`'s `Column`): the track, its heading, and whatever was put in it. A click
  * anywhere that is not a card describes the column; a double-click (a long press on a phone) walks in.
  */
-function Column({
+export function Column({
   t,
   look,
   index,

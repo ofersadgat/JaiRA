@@ -76,10 +76,19 @@ import { highlightJson, splitTokensAt, type HighlightLine, type Token } from "./
 import { highlightYaml } from "./yamlHighlight";
 import type { UiSurface } from "./fileTypes";
 import { Splitter } from "./splitter";
-import { FOLD, PANE, paneDefault } from "./uiState";
-
-/** How long to wait after the last keystroke before asking main to check the draft. */
-const VALIDATE_DEBOUNCE_MS = 300;
+import { FOLD, PANE } from "./uiState";
+import {
+  ANY_KEY,
+  REFERENCE_WIDTH,
+  VALIDATE_DEBOUNCE_MS,
+  addMissingTitle,
+  fieldInside,
+  plainSchemaLabel,
+  referenceNote,
+  referenceTitle,
+  schemaSyntax,
+  schemaVerdict,
+} from "./schemaEditorModel";
 
 /** What one Tab inserts. A literal tab, rendered two columns wide by the editor's `tab-size`. */
 const INDENT = "\t";
@@ -205,19 +214,12 @@ export function SchemaJsonEditor({
   onReferenceWidth,
   children,
 }: SchemaJsonEditorProps): JSX.Element {
-  const area = useRef<HTMLTextAreaElement | null>(null);
-  const layer = useRef<HTMLPreElement | null>(null);
-  /** A zero-width span rendered at the cursor inside the coloured layer — the dropdown's ruler. */
-  const anchor = useRef<HTMLSpanElement | null>(null);
+  /** The stack's own editing path, for the one edit made from the bar — see {@link SchemaTextStack}. */
+  const edit = useRef<SchemaSplice | null>(null);
   const [result, setResult] = useState<ValidateSchemaResult | null>(null);
-  const [cursor, setCursor] = useState(0);
   /** Used only when the host controls neither — see {@link SchemaJsonEditorProps.reference}. */
   const [localReference, setLocalReference] = useState(false);
   const [localReferenceWidth, setLocalReferenceWidth] = useState(REFERENCE_WIDTH);
-  /** Which suggestion the keyboard has selected. Reset whenever the list changes. */
-  const [highlighted, setHighlighted] = useState(0);
-  /** Escape hides the list until the next edit — a way to see the line under it. */
-  const [dismissed, setDismissed] = useState(false);
   /** Used only when the host does not control wrapping — see {@link SchemaJsonEditorProps.wrap}. */
   const [localWrap, setLocalWrap] = useState(false);
 
@@ -248,6 +250,170 @@ export function SchemaJsonEditor({
     }, VALIDATE_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [entry, text, format, validate]);
+
+  /** Add what the document is missing, leaving what it has exactly as it is. */
+  const addMissing = (): void => {
+    if (entry === undefined) return;
+    // An edit of the text, not a re-print of the value — comments, order and indentation survive
+    // (see `withMissingFields`). Through `splice` over the whole document, so filling in the missing
+    // fields is one undoable step rather than a silent replacement of everything the editor held.
+    const next = withMissingFields(entry, text, format);
+    if (next !== text) edit.current?.(0, text.length, next);
+  };
+
+  const parses = result?.parseError === undefined;
+  const syntax = schemaSyntax(format);
+  const plain = plainSchemaLabel(format);
+
+  // The palette this type asks for, published on the element the mapping rule reads — see
+  // `editorPaint`. Null where nothing was said, which leaves the window's own palette standing.
+  const paint = editorPaint(viewTheme(mime ?? "application/json", "text", readOnly ? "read" : "write", chosen));
+  return (
+    <div className={`file-edit schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={paint?.style}>
+      {/* `edit-bar` is the row every editing surface opens with — see `editorChrome`. What is IN it
+          differs (a schema picker here, a path and a tab switch on the state form); that it is one
+          quiet line of chrome above the text, and never part of the document, does not. */}
+      <div className="edit-bar schema-bar">
+        {lockedSchema ? (
+          <span className="schema-pick">
+            <span className="sub">Schema</span>
+            <span className="chip" title={entry?.hint ?? ""}>
+              {entry?.label ?? plain}
+            </span>
+          </span>
+        ) : (
+          <label className="schema-pick">
+            <span className="sub">Schema</span>
+            <select value={schemaId ?? ""} onChange={(e) => onSchema(e.target.value === "" ? null : e.target.value)}>
+              <option value="">{plain}</option>
+              {listSchemas(format).map((option) => (
+                <option key={option.id} value={option.id} title={option.hint}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        )}
+        {entry ? (
+          <>
+            {/* Merges rather than replaces, so it is safe on a document with content in it — which
+                is when "what else belongs here?" is actually being asked. */}
+            <button
+              className="ghost"
+              onClick={addMissing}
+              disabled={busy || !parses}
+              title={addMissingTitle(entry, parses, syntax)}
+            >
+              Add missing fields
+            </button>
+            <button className="ghost" onClick={() => setShowReference(!showReference)}>
+              {showReference ? "Hide fields" : "Fields"}
+            </button>
+            <SchemaStatus result={result} syntax={syntax} />
+          </>
+        ) : null}
+        {/* Outside the schema branch: wrapping is about reading the text, and a plain `.json` file
+            with no schema chosen has just as many long lines in it. */}
+        <label className="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways">
+          <input type="checkbox" checked={wrapping} onChange={(e) => setWrapping(e.target.checked)} />
+          <span className="sub">Wrap</span>
+        </label>
+        {children}
+      </div>
+      {entry ? <div className="sub schema-hint">{entry.hint}</div> : null}
+
+      {/* Two COLUMNS when the reference is open, not two rows. The reference is a thing you read
+          WHILE typing — "what else belongs in this block?" — and putting it under the editor meant
+          scrolling away from the line that raised the question. */}
+      <div
+        className={`schema-body${showReference && entry ? " with-reference" : ""}`}
+        style={{ "--reference-width": `${width}px` } as CSSProperties}
+      >
+        <div className="schema-main">
+          <SchemaTextStack
+            text={text}
+            onChange={onChange}
+            readOnly={readOnly}
+            wrapping={wrapping}
+            entry={entry}
+            format={format}
+            edit={edit}
+          />
+
+      {result?.parseError !== undefined ? (
+        <div className="reason">not valid {syntax}: {result.parseError}</div>
+      ) : (
+        (result?.violations ?? []).map((violation, i) => (
+          <div key={`${violation.path}-${i}`} className="notice bad violation">
+            <b>{violation.path.length > 0 ? violation.path : "(root)"}</b> — {violation.message}
+          </div>
+        ))
+      )}
+        </div>
+
+        {showReference && entry ? (
+          <>
+            <Splitter
+              label="Resize the field reference"
+              value={width}
+              reset={REFERENCE_WIDTH}
+              invert
+              min={200}
+              max={620}
+              onChange={setWidth}
+            />
+            <SchemaReference entry={entry} />
+          </>
+        ) : null}
+      </div>
+
+      {onSave ? (
+        <EditorActions dirty={dirty} busy={busy} onSave={onSave} onRevert={onRevert} />
+      ) : null}
+    </div>
+  );
+}
+
+/** Replace a span of the document through the editor's own editing path — see `SchemaTextStack`'s `splice`. */
+export type SchemaSplice = (from: number, to: number, inserted: string) => void;
+
+/**
+ * The editor itself: the coloured layer, the textarea over it, and the completion list at the caret —
+ * everything of {@link SchemaJsonEditor} that is typed INTO, apart from the bar, the verdict and the
+ * reference around it. Its own component so the universal copy (decision 0015) can host exactly this
+ * as an island, inside native chrome; the desktop draws it where it always stood, and the markup is
+ * what it was (a fragment: `.schema-main` still holds the stack, then the list, then the violations).
+ *
+ * `edit` is handed the stack's `splice`, for the one edit the bar makes ("Add missing fields"): through
+ * the textarea's own pipeline, so it stays one undoable step.
+ */
+export function SchemaTextStack({
+  text,
+  onChange,
+  readOnly,
+  wrapping,
+  entry,
+  format,
+  edit,
+}: {
+  text: string;
+  onChange: (text: string) => void;
+  readOnly: boolean;
+  wrapping: boolean;
+  entry: SchemaEntry | undefined;
+  format: SchemaFormat;
+  edit?: { current: SchemaSplice | null } | undefined;
+}): JSX.Element {
+  const area = useRef<HTMLTextAreaElement | null>(null);
+  const layer = useRef<HTMLPreElement | null>(null);
+  /** A zero-width span rendered at the cursor inside the coloured layer — the dropdown's ruler. */
+  const anchor = useRef<HTMLSpanElement | null>(null);
+  const [cursor, setCursor] = useState(0);
+  /** Which suggestion the keyboard has selected. Reset whenever the list changes. */
+  const [highlighted, setHighlighted] = useState(0);
+  /** Escape hides the list until the next edit — a way to see the line under it. */
+  const [dismissed, setDismissed] = useState(false);
+
 
   /**
    * What each key means, by the path it sits at.
@@ -490,19 +656,7 @@ export function SchemaJsonEditor({
     }
   };
 
-  /** Add what the document is missing, leaving what it has exactly as it is. */
-  const addMissing = (): void => {
-    if (entry === undefined) return;
-    // An edit of the text, not a re-print of the value — comments, order and indentation survive
-    // (see `withMissingFields`). Through `splice` over the whole document, so filling in the missing
-    // fields is one undoable step rather than a silent replacement of everything the editor held.
-    const next = withMissingFields(entry, text, format);
-    if (next !== text) splice(0, text.length, next);
-  };
-
-  const parses = result?.parseError === undefined;
-  const syntax = format === "yaml" ? "YAML" : "JSON";
-  const plain = `none — plain ${syntax}`;
+  if (edit !== undefined) edit.current = splice;
 
   /** The marker is only worth rendering when something is anchored to it. */
   const showMarker = suggestions.length > 0;
@@ -521,71 +675,8 @@ export function SchemaJsonEditor({
     </span>
   ) : null;
 
-  // The palette this type asks for, published on the element the mapping rule reads — see
-  // `editorPaint`. Null where nothing was said, which leaves the window's own palette standing.
-  const paint = editorPaint(viewTheme(mime ?? "application/json", "text", readOnly ? "read" : "write", chosen));
   return (
-    <div className={`file-edit schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={paint?.style}>
-      {/* `edit-bar` is the row every editing surface opens with — see `editorChrome`. What is IN it
-          differs (a schema picker here, a path and a tab switch on the state form); that it is one
-          quiet line of chrome above the text, and never part of the document, does not. */}
-      <div className="edit-bar schema-bar">
-        {lockedSchema ? (
-          <span className="schema-pick">
-            <span className="sub">Schema</span>
-            <span className="chip" title={entry?.hint ?? ""}>
-              {entry?.label ?? plain}
-            </span>
-          </span>
-        ) : (
-          <label className="schema-pick">
-            <span className="sub">Schema</span>
-            <select value={schemaId ?? ""} onChange={(e) => onSchema(e.target.value === "" ? null : e.target.value)}>
-              <option value="">{plain}</option>
-              {listSchemas(format).map((option) => (
-                <option key={option.id} value={option.id} title={option.hint}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {entry ? (
-          <>
-            {/* Merges rather than replaces, so it is safe on a document with content in it — which
-                is when "what else belongs here?" is actually being asked. */}
-            <button
-              className="ghost"
-              onClick={addMissing}
-              disabled={busy || !parses}
-              title={parses ? entry.hint : `fix the ${syntax} first — a document that cannot be read cannot be merged into`}
-            >
-              Add missing fields
-            </button>
-            <button className="ghost" onClick={() => setShowReference(!showReference)}>
-              {showReference ? "Hide fields" : "Fields"}
-            </button>
-            <SchemaStatus result={result} syntax={syntax} />
-          </>
-        ) : null}
-        {/* Outside the schema branch: wrapping is about reading the text, and a plain `.json` file
-            with no schema chosen has just as many long lines in it. */}
-        <label className="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways">
-          <input type="checkbox" checked={wrapping} onChange={(e) => setWrapping(e.target.checked)} />
-          <span className="sub">Wrap</span>
-        </label>
-        {children}
-      </div>
-      {entry ? <div className="sub schema-hint">{entry.hint}</div> : null}
-
-      {/* Two COLUMNS when the reference is open, not two rows. The reference is a thing you read
-          WHILE typing — "what else belongs in this block?" — and putting it under the editor meant
-          scrolling away from the line that raised the question. */}
-      <div
-        className={`schema-body${showReference && entry ? " with-reference" : ""}`}
-        style={{ "--reference-width": `${width}px` } as CSSProperties}
-      >
-        <div className="schema-main">
+    <>
       <div className={`editor-stack${wrapping ? " wrap" : ""}`}>
         {/* Behind the text, and never interactive: it is a rendering of the same characters. */}
         <pre className="code-layer highlight" ref={layer} aria-hidden="true">
@@ -674,38 +765,71 @@ export function SchemaJsonEditor({
           ) : null}
         </Popover>
       ) : null}
+    </>
+  );
+}
 
-
-      {result?.parseError !== undefined ? (
-        <div className="reason">not valid {syntax}: {result.parseError}</div>
-      ) : (
-        (result?.violations ?? []).map((violation, i) => (
-          <div key={`${violation.path}-${i}`} className="notice bad violation">
-            <b>{violation.path.length > 0 ? violation.path : "(root)"}</b> — {violation.message}
-          </div>
-        ))
-      )}
-        </div>
-
-        {showReference && entry ? (
-          <>
-            <Splitter
-              label="Resize the field reference"
-              value={width}
-              reset={REFERENCE_WIDTH}
-              invert
-              min={200}
-              max={620}
-              onChange={setWidth}
-            />
-            <SchemaReference entry={entry} />
-          </>
-        ) : null}
+/**
+ * {@link SchemaTextStack} on its own, for a host that draws the chrome itself — the universal copy's
+ * island (decision 0015), in a WebView on a phone and inline on web. What {@link SchemaJsonEditor}
+ * gives the stack beside the bar is here instead: the palette on the element the mapping reads, and
+ * "Add missing fields" as a count the host bumps (`fill`), made through the stack's own path so it is
+ * one undoable step.
+ *
+ * The text is held here as well as by the host. The textarea is controlled, and the host's copy comes
+ * back over a bridge: typing into a box whose value is a round trip behind would lose characters.
+ */
+export function SchemaTextField({
+  text,
+  onChange,
+  readOnly,
+  wrap,
+  schemaId,
+  format,
+  mime,
+  fill,
+}: {
+  text: string;
+  onChange: (text: string) => void;
+  readOnly: boolean;
+  wrap: boolean;
+  schemaId: string | null;
+  format: SchemaFormat;
+  mime?: string | undefined;
+  fill: number;
+}): JSX.Element {
+  const [local, setLocal] = useState(text);
+  useEffect(() => setLocal(text), [text]);
+  const chosen = useRenderChoice();
+  const edit = useRef<SchemaSplice | null>(null);
+  const entry = schemaId === null ? undefined : schemaById(schemaId);
+  const filled = useRef(fill);
+  useEffect(() => {
+    if (fill === filled.current) return;
+    filled.current = fill;
+    if (entry === undefined) return;
+    const next = withMissingFields(entry, local, format);
+    if (next !== local) edit.current?.(0, local.length, next);
+    // Only a new count asks; the text it reads is the one on screen.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [fill]);
+  const paint = editorPaint(viewTheme(mime ?? "application/json", "text", readOnly ? "read" : "write", chosen));
+  return (
+    <div className={`schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={{ ...paint?.style, height: "100%" }}>
+      <div className="schema-main" style={{ height: "100%" }}>
+        <SchemaTextStack
+          text={local}
+          onChange={(next) => {
+            setLocal(next);
+            onChange(next);
+          }}
+          readOnly={readOnly}
+          wrapping={wrap}
+          entry={entry}
+          format={format}
+          edit={edit}
+        />
       </div>
-
-      {onSave ? (
-        <EditorActions dirty={dirty} busy={busy} onSave={onSave} onRevert={onRevert} />
-      ) : null}
     </div>
   );
 }
@@ -734,15 +858,8 @@ function renderTokens(line: HighlightLine, column: number, marker: JSX.Element |
 
 /** A one-glance verdict, so "is it valid?" does not require reading the list below. */
 function SchemaStatus({ result, syntax }: { result: ValidateSchemaResult | null; syntax: string }): JSX.Element {
-  if (result === null) return <span className="chip">checking…</span>;
-  if (result.parseError !== undefined) return <span className="chip chip-bad">not {syntax}</span>;
-  const count = result.violations.length;
-  if (count === 0) return <span className="chip chip-ok">conforms</span>;
-  return (
-    <span className="chip chip-bad">
-      {count} {count === 1 ? "problem" : "problems"}
-    </span>
-  );
+  const verdict = schemaVerdict(result, syntax);
+  return <span className={verdict.tone === "plain" ? "chip" : `chip chip-${verdict.tone}`}>{verdict.text}</span>;
 }
 
 /**
@@ -769,41 +886,12 @@ function SchemaReference({ entry }: { entry: SchemaEntry }): JSX.Element {
 
   return (
     <section className="schema-reference">
-      <h4>{String(entry.document["title"] ?? entry.label)}</h4>
-      <div className="sub">
-        {entry.files !== undefined
-          ? "★ marks what a complete document is expected to carry."
-          : "★ marks what a complete document needs — required after the environment merge, never in the file itself."}
-      </div>
+      <h4>{referenceTitle(entry)}</h4>
+      <div className="sub">{referenceNote(entry)}</div>
       <FieldList entry={entry} path={[]} open={open} onToggle={toggle} />
     </section>
   );
 }
-
-/**
- * How deep the panel will expand.
- *
- * A slot's `schema` refers to itself — `items` of `items` of `items` — so there is no natural
- * bottom. The cap is not about performance (expansion is lazy) but about the tree staying a
- * reference rather than becoming a fractal.
- */
-const REFERENCE_DEPTH = 6;
-
-/**
- * How wide the reference column opens, and what a double-click on its divider restores.
- *
- * Read from the layout table so that the default and the remembered value cannot drift apart — the
- * shell stores this pane under {@link PANE.schemaReference}, and a second copy of the number here
- * would be the one a "reset" put back.
- */
-const REFERENCE_WIDTH = paneDefault(PANE.schemaReference);
-
-/**
- * The placeholder a map's author-chosen key is walked as. Any name resolves the same way — as long as
- * it is a name: a published schema says what a map's keys may be with a `patternProperties` pattern
- * (a Compose service is `^[a-zA-Z0-9._-]+$`), and `*` would match none of them.
- */
-const ANY_KEY = "name";
 
 function FieldList({
   entry,
@@ -838,18 +926,9 @@ function FieldRow({
   open: ReadonlySet<string>;
   onToggle: (at: string) => void;
 }): JSX.Element {
-  const here = [...path, property.key];
-  const at = here.join(".");
+  // What is inside it, and so whether it discloses — `fieldInside`, shared with the universal copy.
+  const { here, at, perEntry, hasChildren } = fieldInside(entry, path, property);
   const expanded = open.has(at);
-
-  // Two ways a field has something inside it. Declared properties are the ordinary case; a MAP —
-  // `inputs`, `children`, `properties` — declares none, because its keys are the author's, and its
-  // shape lives one synthetic step further down. Probing for both is how the panel describes a slot
-  // without needing to know the name of one.
-  const deeper = path.length < REFERENCE_DEPTH;
-  const direct = deeper ? propertiesOf(entry, here) : [];
-  const perEntry = deeper && direct.length === 0 ? propertiesOf(entry, [...here, ANY_KEY]) : [];
-  const hasChildren = direct.length > 0 || perEntry.length > 0;
 
   return (
     <>

@@ -28,36 +28,39 @@
  *    so each state it can be in is one call to `renderToStaticMarkup`. {@link PermissionSetsPane} is the
  *    thin host that reads, holds the drafts, and asks main for the writes.
  */
-import { useCallback, useEffect, useState, type JSX } from "react";
+import type { JSX } from "react";
 import {
   comparePermissionSets,
   copiedFrom,
   copyDifferences,
   declOfPermissionSet,
   isPermissionSetDirty,
-  overridesOf,
-  parsePermissionSet,
-  rebasePermissionSetChange,
-  resolvePermissionSetChoice,
   permissionSetBucketProblem,
-  PERMISSION_SET_LAYER_LABELS,
   permissionSetFileLabel,
-  permissionSetNameProblem,
   permissionSetOfAt,
-  permissionSetRailOf,
-  permissionSetRailSummary,
   permissionSetsAt,
   permissionSetStanding,
   usedByLine,
   type ConfigLayer,
-  type PermissionSet,
   type PermissionSetAt,
-  type PermissionSetDecl,
   type PermissionSetDrafts,
   type PermissionSetsView as PermissionSetsData,
-  type WorkflowLayer,
   type WritableLayer,
 } from "@jaira/shared/browser";
+import {
+  INTO_NAME,
+  LOWER_NAME,
+  PERSONAL,
+  choiceOfTab,
+  detachingLines,
+  newPermissionSetProblem,
+  permissionSetRailRows,
+  tabOfChoice,
+  usePermissionSetsHost,
+  type PermissionSetsChannel,
+  type PermissionSetsViewProps,
+  type RailFolds,
+} from "./permissionSetsHost";
 import { Icon } from "./icons";
 import { TabRail, type RailItem } from "./llmConfigForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
@@ -66,47 +69,16 @@ import { SettingsSection } from "./settingsLayout";
 import { PermissionSetCard } from "./permissionSetCard";
 import type { McpServerStatus } from "@jaira/shared/browser";
 
-// --- the model ---------------------------------------------------------------------------
-
-/** What the rail has chosen: a permission set, the `+ permission set` of one bucket, or `+ bucket`. */
-export type PermissionSetChoiceOf = { permissionSet: string } | { newIn: string } | "bucket";
-
-const permissionSetTab = (id: string): string => `permissionSet:${id}`;
-const newTab = (bucket: string): string => `new:${bucket}`;
-const BUCKET_TAB = "+bucket";
-
-function choiceOfTab(id: string): PermissionSetChoiceOf {
-  if (id === BUCKET_TAB) return "bucket";
-  return id.startsWith("new:") ? { newIn: id.slice("new:".length) } : { permissionSet: id.slice("permissionSet:".length) };
-}
-
-function tabOfChoice(choice: PermissionSetChoiceOf | undefined): string | undefined {
-  if (choice === undefined) return undefined;
-  if (choice === "bucket") return BUCKET_TAB;
-  return "newIn" in choice ? newTab(choice.newIn) : permissionSetTab(choice.permissionSet);
-}
-
-/**
- * What the pane reads, and where a change lands, for the layer the page's switch is on.
- *
- * A layer that holds files reads its own and writes its own. Any other — the personal layer, one
- * settings file with no `permission-sets/` beside it — reads as the nearest layer that does (this
- * project when one is open, else Shared), and has nowhere to write until the person says which.
- */
-export function permissionSetLayersOf(layer: ConfigLayer, layers: readonly WorkflowLayer[]): { reads: WritableLayer; writesTo: WritableLayer | undefined } {
-  if (layer === "project" || layer === "base") return { reads: layer, writesTo: layer };
-  return { reads: layers.includes("project") ? "project" : "base", writesTo: undefined };
-}
-
-/**
- * Which buckets of the rail are open, and how to open or close one — an accordion (the person's
- * note, 2026-09-25). The host opens the bucket a set is chosen in; the rest is the person's clicks.
- */
-export interface RailFolds {
-  open: ReadonlySet<string>;
-  onFold: (bucket: string) => void;
-}
-
+export {
+  NEW_PERMISSION_SET,
+  detachingLines,
+  newPermissionSetProblem,
+  permissionSetLayersOf,
+  type PermissionSetChoiceOf,
+  type PermissionSetsChannel,
+  type PermissionSetsViewProps,
+  type RailFolds,
+} from "./permissionSetsHost";
 /**
  * The rail, as the tab rail takes it. With nowhere to write there are no `+` rows and no dots: the
  * dot means "the layer you are editing states it", and that layer states nothing. With `folds`, each
@@ -118,82 +90,46 @@ export function permissionSetRailItems(
   drafts: PermissionSetDrafts,
   folds?: RailFolds,
 ): RailItem[] {
-  const writable = writesTo !== undefined;
-  const items: RailItem[] = [];
-  const isOpen = (path: string): boolean => folds === undefined || folds.open.has(path);
-  const closed: string[] = [];
-  for (const { bucket, permissionSets } of permissionSetRailOf(ats)) {
-    if (closed.some((path) => bucket.path.startsWith(`${path}/`))) continue;
-    const open = isOpen(bucket.path);
-    if (!open) closed.push(bucket.path);
-    items.push({
-      id: `bucket:${bucket.path}`,
-      summary: null,
-      indent: bucket.depth,
-      title: bucket.path,
-      ...(folds !== undefined ? { fold: { open, onFold: () => folds.onFold(bucket.path) } } : {}),
-      heading: (
-        <>
-          <span className="cx-chip-icon">
-            <Icon name="folder" />
-          </span>
-          <span>{bucket.name}</span>
-          <span className="cx-src">{PERMISSION_SET_LAYER_LABELS[bucket.layer]}</span>
-        </>
-      ),
-    });
-    if (!open) continue;
-    for (const at of permissionSets) {
-      // A copy says so beside its name, in the words its head's pill uses — the bucket's own pill
-      // names the layer that DEFINES the bucket, which for a copy of what ships is still built in.
-      const copy = copiedFrom(at) !== undefined ? <span className="cx-src">{permissionSetStanding(at).label}</span> : null;
-      items.push({
-        id: permissionSetTab(at.id),
-        mono: true,
-        indent: bucket.depth,
-        // The dot means "the layer you are EDITING states it".
-        label:
-          (at.here && writable) || copy !== null ? (
-            <>
-              {at.name}
-              {at.here && writable ? <i className="set-here-dot" title="set in the layer you are editing" /> : null}
-              {copy}
-            </>
-          ) : (
-            at.name
-          ),
-        summary: permissionSetRailSummary(at, drafts[at.id]),
-      });
+  return permissionSetRailRows(ats, writesTo, drafts, folds).map((row): RailItem => {
+    if (row.kind === "bucket") {
+      return {
+        id: row.id,
+        summary: null,
+        indent: row.depth,
+        title: row.path,
+        ...(row.fold !== undefined ? { fold: row.fold } : {}),
+        heading: (
+          <>
+            <span className="cx-chip-icon">
+              <Icon name="folder" />
+            </span>
+            <span>{row.name}</span>
+            <span className="cx-src">{row.layerLabel}</span>
+          </>
+        ),
+      };
     }
-    if (writable) items.push({ id: newTab(bucket.path), className: "set-rail-add", indent: bucket.depth, summary: "+ permission set", title: `add a permission set to ${bucket.path}` });
-  }
-  if (writable) items.push({ id: BUCKET_TAB, className: "set-rail-add", summary: "+ bucket", title: "add a bucket — a place with its own versions of the same names" });
-  return items;
+    if (row.kind === "add") return { id: row.id, className: "set-rail-add", ...(row.depth !== undefined ? { indent: row.depth } : {}), summary: row.summary, title: row.title };
+    const copy = row.copy !== undefined ? <span className="cx-src">{row.copy}</span> : null;
+    return {
+      id: row.id,
+      mono: true,
+      indent: row.depth,
+      // The dot means "the layer you are EDITING states it".
+      label:
+        row.dot || copy !== null ? (
+          <>
+            {row.name}
+            {row.dot ? <i className="set-here-dot" title="set in the layer you are editing" /> : null}
+            {copy}
+          </>
+        ) : (
+          row.name
+        ),
+      summary: row.summary,
+    };
+  });
 }
-
-/**
- * What saving this draft will do to the file, where that is worth saying BEFORE the save: a line the
- * followed permission set holds was taken out, which `$ref` plus siblings cannot say, so the file is written
- * whole and stops following. Names the lines, or is empty.
- */
-export function detachingLines(at: PermissionSetAt, draft: PermissionSet | undefined): string[] {
-  if (draft === undefined || !at.here || at.source.follows === undefined || at.lower?.decl === undefined) return [];
-  return overridesOf(at.lower.decl, declOfPermissionSet(draft)).dropped;
-}
-
-/** Why a name cannot be used for a new permission set in a bucket, or `undefined` when it can. */
-export function newPermissionSetProblem(ats: readonly PermissionSetAt[], bucket: string, name: string): string | undefined {
-  const problem = permissionSetBucketProblem(bucket.trim()) ?? permissionSetNameProblem(name.trim());
-  if (problem !== undefined) return problem;
-  const taken = ats.find((at) => at.id === `${bucket.trim()}/${name.trim()}`);
-  if (taken === undefined) return undefined;
-  return taken.here ? `there is already a permission set called '${taken.id}'` : `'${taken.id}' is inherited here — open it, and your first change copies it here`;
-}
-
-/** The map a new permission set starts as: nothing offered, and everything else asked about. */
-export const NEW_PERMISSION_SET: PermissionSetDecl = { other: "ask" };
-
-// --- the render function -----------------------------------------------------------------
 
 const HEAD_HINT = (
   <>
@@ -201,65 +137,6 @@ const HEAD_HINT = (
     place with its own versions of the same names.
   </>
 );
-
-const LOWER_NAME: Readonly<Record<WorkflowLayer, string>> = { system: "what ships", base: "the shared one", project: "this project's" };
-/** A layer a copy can be written into, as "Copy to …" and "copied to …" name it. */
-const INTO_NAME: Readonly<Record<WritableLayer, string>> = { base: "Shared", project: "this project" };
-/** The personal layer, as the page's switch names it. */
-const PERSONAL = "Just you";
-
-export interface PermissionSetsViewProps {
-  data: PermissionSetsData;
-  /** The layer whose files the pane reads: its own, and those of every layer below it. */
-  layer: WritableLayer;
-  /**
-   * Where a change is written: the layer being read — or, on the personal layer, which holds no
-   * permission sets, nowhere yet, so a change waits on {@link asking} for the person to say where.
-   */
-  writesTo: WritableLayer | undefined;
-  choice: PermissionSetChoiceOf | undefined;
-  onChoice: (next: PermissionSetChoiceOf) => void;
-  drafts: PermissionSetDrafts;
-  onDraft: (id: string, next: PermissionSet | undefined) => void;
-  /** "Compare with what ships" is open. */
-  comparing: boolean;
-  onCompare: (open: boolean) => void;
-  /** What is being typed under `+ permission set` / `+ bucket`. */
-  naming: { bucket?: string; name?: string };
-  onNaming: (next: { bucket?: string; name?: string }) => void;
-  /** A write is in flight, so nothing else may start. */
-  locked: boolean;
-  /** What the last write was refused with. */
-  problem: string | null;
-  onSave: (id: string, permissionSet: PermissionSet) => void;
-  /** Delete this layer's copy — "Put back the built-in" once confirmed, or "Reset to shared". */
-  onReset: (id: string) => void;
-  /**
-   * A change to a set this layer does not hold: `next` is the whole map as shown, with the change.
-   * The host writes it as this layer's copy, or — with nowhere to write — asks where it goes.
-   */
-  onCopy: (id: string, next: PermissionSet) => void;
-  /** The set whose change is waiting on "Copy to Shared" / "Copy to this project". */
-  asking?: string | undefined;
-  /** The answer: the layer the copy goes into, or `null` to drop the change. */
-  onCopyTo: (into: WritableLayer | null) => void;
-  /** "Put back the built-in?" is being asked, in place of the actions. */
-  puttingBack: boolean;
-  onPutBack: (open: boolean) => void;
-  /** Where the last change made on the personal layer went, said until the person moves on. */
-  told: string | null;
-  onAdd: (bucket: string, name: string) => void;
-  /** For a still picture: the card's folds, and an add-menu drawn open. */
-  folds?: ReadonlySet<string> | undefined;
-  startAdding?: string | undefined;
-  /** For a still picture: a tool line's mode menu drawn open. */
-  startMode?: { subject: string; open: "menu" | "function" } | undefined;
-  /** The configured MCP servers as the tools probe last found them — the card's MCP groups. */
-  mcp?: readonly McpServerStatus[] | undefined;
-  /** The rail's buckets as an accordion. Absent (a still picture) draws every bucket open. */
-  openBuckets?: ReadonlySet<string> | undefined;
-  onBucket?: ((bucket: string) => void) | undefined;
-}
 
 export function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
   const ats = permissionSetsAt(props.data.records, props.layer);
@@ -565,29 +442,7 @@ function NewPermissionSet({ ats, ...props }: PermissionSetsViewProps & { ats: re
 
 // --- the host ----------------------------------------------------------------------------
 
-/** The three calls the pane makes — the host's, so the view has no channel of its own. */
-export interface PermissionSetsChannel {
-  read: () => Promise<PermissionSetsData>;
-  write: (request: { id: string; layer: WritableLayer; permissionSet: PermissionSetDecl }) => Promise<unknown>;
-  reset: (request: { id: string; layer: WritableLayer }) => Promise<unknown>;
-}
-
-/** A change made on the personal layer, held while the person says which layer it goes to. */
-interface HeldChange {
-  id: string;
-  /** The map as the card showed it, and as the change left it — what {@link rebasePermissionSetChange} replays. */
-  from: PermissionSetDecl;
-  to: PermissionSetDecl;
-}
-
-/**
- * The state {@link PermissionSetsView} is drawn from, and the writes it asks for.
- *
- * Drafts are kept PER LAYER AND PERMISSION_SET, so that looking at another permission set loses
- * nothing. The selection is an id, not an index, which is the whole of "the selection survives a
- * save" — and a first change's copy: the records are re-read, this component does not remount, and
- * the id still resolves, now to the layer's own file.
- */
+/** The state {@link PermissionSetsView} is drawn from, and the writes it asks for — `permissionSetsHost.ts`. */
 export function PermissionSetsPane({
   channel,
   layer,
@@ -597,7 +452,7 @@ export function PermissionSetsPane({
   mcp,
 }: {
   channel: PermissionSetsChannel;
-  /** The layer the page's switch is on — any of them; see {@link permissionSetLayersOf}. */
+  /** The layer the page's switch is on — any of them; see `permissionSetLayersOf`. */
   layer: ConfigLayer;
   busy: boolean;
   /**
@@ -610,202 +465,7 @@ export function PermissionSetsPane({
   /** The configured MCP servers and the tools each listed — what the card's MCP section groups by. */
   mcp?: readonly McpServerStatus[] | undefined;
 }): JSX.Element {
-  const [data, setData] = useState<PermissionSetsData | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  const [wanted, setWanted] = useState<PermissionSetChoiceOf | undefined>(undefined);
-  const [pending, setPending] = useState<string | null>(null);
-  const [drafts, setDrafts] = useState<Readonly<Record<string, PermissionSetDrafts>>>({});
-  const [comparing, setComparing] = useState(false);
-  const [naming, setNaming] = useState<{ bucket?: string; name?: string }>({});
-  const [writing, setWriting] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
-  const [puttingBack, setPuttingBack] = useState(false);
-  const [held, setHeld] = useState<HeldChange | null>(null);
-  const [told, setTold] = useState<string | null>(null);
-  /**
-   * Where each set's personal-layer changes went, once asked: the next change to it goes there too
-   * without asking again, for as long as the page is open.
-   */
-  const [sentTo, setSentTo] = useState<Readonly<Record<string, WritableLayer>>>({});
-  /** The rail's open buckets — see {@link RailFolds}. */
-  const [openBuckets, setOpenBuckets] = useState<ReadonlySet<string>>(new Set());
-  /** The bucket the chosen set was last opened in, so choosing one opens its bucket once, not always. */
-  const [opened, setOpened] = useState<string | undefined>(undefined);
-
-  const load = useCallback(
-    (): Promise<void> =>
-      channel.read().then(
-        (next) => {
-          setData(next);
-          setFailed(null);
-          onData?.(next);
-        },
-        (e: unknown) => setFailed(e instanceof Error ? e.message : String(e)),
-      ),
-    [channel, onData],
-  );
-  useEffect(() => void load(), [load]);
-  useEffect(() => {
-    if (focus === undefined) return;
-    setWanted({ permissionSet: focus.id });
-    setComparing(false);
-    setProblem(null);
-  }, [focus]);
-  // A question asked on one layer is not a question on another.
-  useEffect(() => {
-    setHeld(null);
-    setTold(null);
-    setPuttingBack(false);
-  }, [layer]);
-
-  if (data === null) return <p className="empty">{failed !== null ? `Permission sets could not be read — ${failed}` : "Reading permission sets…"}</p>;
-
-  const { reads, writesTo } = permissionSetLayersOf(layer, data.layers);
-  const ats = permissionSetsAt(data.records, reads);
-  const chosenId = wanted !== undefined && wanted !== "bucket" && "permissionSet" in wanted ? wanted.permissionSet : undefined;
-  const resolved = resolvePermissionSetChoice(ats, chosenId, pending);
-  const choice: PermissionSetChoiceOf | undefined = wanted === "bucket" || (wanted !== undefined && "newIn" in wanted) ? wanted : resolved !== undefined ? { permissionSet: resolved } : undefined;
-  if (pending !== null && ats.some((at) => at.id === pending)) setPending(null);
-  // The bucket of what is on screen — and every bucket above it — opens when the choice moves there.
-  const holding = choice === undefined || choice === "bucket" ? undefined : "newIn" in choice ? choice.newIn : ats.find((at) => at.id === choice.permissionSet)?.bucket;
-  if (holding !== undefined && holding !== opened) {
-    setOpened(holding);
-    const parts = holding.split("/");
-    setOpenBuckets((current) => new Set([...current, ...parts.map((_, i) => parts.slice(0, i + 1).join("/"))]));
-  }
-
-  const dropDraft = (at: WorkflowLayer, id: string): void =>
-    setDrafts((current) => {
-      const { [id]: _gone, ...rest } = current[at] ?? {};
-      return { ...current, [at]: rest };
-    });
-
-  /** One write at a time, re-read after it, and whatever it was refused with said in the pane. */
-  const run = (act: () => Promise<unknown>, after: () => void): void => {
-    setWriting(true);
-    setProblem(null);
-    void act()
-      .then(after, (e: unknown) => setProblem(e instanceof Error ? e.message : String(e)))
-      .then(load)
-      .finally(() => setWriting(false));
-  };
-
-  /**
-   * A personal-layer change, sent where the person said: replayed over the set as THAT layer sees it
-   * (so none of a nearer layer's lines ride along), written there, and said — with where it landed,
-   * and when a nearer copy means the layer being read will not show it.
-   */
-  const send = ({ id, from, to }: HeldChange, into: WritableLayer): void => {
-    const there = permissionSetsAt(data.records, into).find((one) => one.id === id);
-    const onto = there?.source.decl !== undefined ? declOfPermissionSet(parsePermissionSet(there.source.decl).permissionSet) : from;
-    const file = there?.here === true ? there.source.file : permissionSetFileLabel(into, id);
-    const nearer = ats.find((one) => one.id === id);
-    const hidden = into === "base" && reads === "project" && nearer?.here === true && nearer.source.follows?.startsWith("$BASE/") !== true;
-    run(
-      () => channel.write({ id, layer: into, permissionSet: rebasePermissionSetChange(from, to, onto) }),
-      () => {
-        setHeld(null);
-        setSentTo((current) => ({ ...current, [id]: into }));
-        setTold(
-          `${there?.here === true ? `Changed in ${INTO_NAME[into]}` : `Copied to ${INTO_NAME[into]}, with your change`} — ${file}.` +
-            (hidden ? " This project has its own copy, and that is the one it reads." : ""),
-        );
-      },
-    );
-  };
-
-  return (
-    <PermissionSetsView
-      data={data}
-      layer={reads}
-      writesTo={writesTo}
-      choice={choice}
-      onChoice={(next) => {
-        setWanted(next);
-        setComparing(false);
-        setProblem(null);
-        setPuttingBack(false);
-        setHeld(null);
-        setTold(null);
-      }}
-      drafts={drafts[reads] ?? {}}
-      onDraft={(id, next) => (next === undefined ? dropDraft(reads, id) : setDrafts((current) => ({ ...current, [reads]: { ...current[reads], [id]: next } })))}
-      comparing={comparing}
-      onCompare={setComparing}
-      naming={naming}
-      onNaming={setNaming}
-      locked={busy || writing}
-      problem={problem}
-      mcp={mcp}
-      openBuckets={openBuckets}
-      onBucket={(bucket) =>
-        setOpenBuckets((current) => {
-          const next = new Set(current);
-          if (next.has(bucket)) next.delete(bucket);
-          else next.add(bucket);
-          return next;
-        })
-      }
-      onSave={(id, permissionSet) => {
-        if (writesTo === undefined) return;
-        run(
-          () => channel.write({ id, layer: writesTo, permissionSet: declOfPermissionSet(permissionSet) }),
-          () => dropDraft(reads, id),
-        );
-      }}
-      onReset={(id) => {
-        if (writesTo === undefined) return;
-        run(
-          () => channel.reset({ id, layer: writesTo }),
-          () => {
-            dropDraft(reads, id);
-            setComparing(false);
-            setPuttingBack(false);
-          },
-        );
-      }}
-      puttingBack={puttingBack}
-      onPutBack={setPuttingBack}
-      onCopy={(id, next) => {
-        const at = ats.find((one) => one.id === id);
-        if (at?.source.decl === undefined) return;
-        const to = declOfPermissionSet(next);
-        if (writesTo !== undefined) {
-          // The map as shown, with the one change: the writer keeps what the lower layer says as a
-          // `$ref` and writes only the line that differs — the copy and the change are one write.
-          run(
-            () => channel.write({ id, layer: writesTo, permissionSet: to }),
-            () => setWanted({ permissionSet: id }),
-          );
-          return;
-        }
-        const change: HeldChange = { id, from: declOfPermissionSet(permissionSetOfAt(at)), to };
-        const known = sentTo[id];
-        if (known !== undefined) send(change, known);
-        else {
-          setTold(null);
-          setHeld(change);
-        }
-      }}
-      asking={held?.id}
-      onCopyTo={(into) => {
-        if (held === null) return;
-        if (into === null) setHeld(null);
-        else send(held, into);
-      }}
-      told={told}
-      onAdd={(bucket, name) => {
-        if (writesTo === undefined) return;
-        const id = `${bucket}/${name}`;
-        run(
-          () => channel.write({ id, layer: writesTo, permissionSet: NEW_PERMISSION_SET }),
-          () => {
-            setPending(id);
-            setWanted({ permissionSet: id });
-            setNaming({});
-          },
-        );
-      }}
-    />
-  );
+  const host = usePermissionSetsHost({ channel, layer, busy, focus, onData, mcp });
+  if ("waiting" in host) return <p className="empty">{host.waiting}</p>;
+  return <PermissionSetsView {...host.props} />;
 }

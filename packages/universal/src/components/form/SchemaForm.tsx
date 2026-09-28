@@ -25,13 +25,13 @@ import {
 } from "@jaira/ui/schemaForm/model";
 import { presentationFor } from "@jaira/ui/schemaForm/presentation";
 import type { Schema, SchemaFormContext, WidgetProps } from "@jaira/ui/schemaForm/types";
-import { Uncopied } from "../../app/Uncopied";
-import { Press, Txt, edge, lengthToken } from "../../primitives";
+import { Press, Txt, edge, lengthToken, padToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Switch } from "../settings/controls";
 import { SelectInput } from "../settings/fields";
 import { ErrorLine, Field, FieldGrid, Span, useFormSlot } from "./Field";
 import { BoolField, Chip, FormInput, NumberText, PickWell, TextArea } from "./inputs";
+import { LlmConfigWidget } from "./LlmConfigForm";
 
 /**
  * `schemaForm/SchemaForm.tsx`, universal (decision 0015): the one recursive form every typed value is
@@ -83,11 +83,12 @@ function useShape(branches: readonly Schema[] | undefined, value: unknown, root:
 }
 
 /**
- * The `$type` widgets (`schemaForm/registry.ts`). `llm-config` is the call-settings form, which has no
- * copy yet; a host registers its copy here once it has one.
+ * The `$type` widgets (`schemaForm/registry.ts`): `llm-config` is the call-settings form. A host may
+ * register another.
  */
 const WIDGETS: Record<string, ComponentType<WidgetProps>> = {
-  "llm-config": () => <Uncopied name="LlmConfigForm" height={120} />,
+  // Reached at render time only: the form's module imports this one.
+  "llm-config": (props) => <LlmConfigWidget {...props} />,
 };
 export function registerWidget(type: string, widget: ComponentType<WidgetProps>): void {
   WIDGETS[type] = widget;
@@ -270,7 +271,7 @@ function Member({
       after={
         <>
           {required && !reading ? (
-            <Txt spec={{ voice: "app", scale: 1, weight: 700, color: "bad" }} title="required">
+            <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 700, color: "bad" }} title="required">
               *
             </Txt>
           ) : null}
@@ -381,7 +382,7 @@ function MapRows({ every, keys, obj, ctx, onChange }: { every: Schema; keys: str
           </View>
         );
         const remove = (
-          <QuietButton title={`remove ${key}`} disabled={disabled} onPress={() => onChange(Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)))}>
+          <QuietButton own title={`remove ${key}`} disabled={disabled} onPress={() => onChange(Object.fromEntries(Object.entries(obj).filter(([k]) => k !== key)))}>
             ✕
           </QuietButton>
         );
@@ -432,8 +433,26 @@ function KeyBox({ name, disabled, onRename }: { name: string; disabled: boolean;
 }
 
 /** `button.quiet` in a list row's actions (`.cfg-list-acts button`: padding 2 7). */
-function QuietButton({ title, disabled, onPress, children, caret = false, bad = false }: { title: string; disabled: boolean; onPress: () => void; children: string; caret?: boolean; bad?: boolean }): JSX.Element {
+function QuietButton({
+  title,
+  disabled,
+  onPress,
+  children,
+  caret = false,
+  bad = false,
+  own = false,
+}: {
+  title: string;
+  disabled: boolean;
+  onPress: () => void;
+  children: string;
+  caret?: boolean;
+  bad?: boolean;
+  /** A `button.quiet` outside a list's actions: the button's own padding (`--control-pad`). */
+  own?: boolean;
+}): JSX.Element {
   const t = useTokens();
+  const [padV, padH] = own ? padToken(t, "control-pad", [3, 10]) : caret ? [0, 4] : [2, 7];
   return (
     <Press
       onPress={onPress}
@@ -443,8 +462,8 @@ function QuietButton({ title, disabled, onPress, children, caret = false, bad = 
       flexDirection="row"
       alignItems="center"
       justifyContent="center"
-      paddingVertical={caret ? 0 : 2}
-      paddingHorizontal={caret ? 4 : 7}
+      paddingVertical={padV}
+      paddingHorizontal={padH}
       borderWidth={1}
       borderStyle="solid"
       borderColor="transparent"
@@ -555,7 +574,9 @@ function ListNode({ schema, value, onChange, ctx }: { schema: Schema; value: unk
                   >
                     {isOpen ? "▾" : "▸"}
                   </QuietButton>
-                  <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim" }} flexShrink={0}>{`[${i}]`}</Txt>
+                  <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim" }} flexShrink={0}>
+                    [{i}]
+                  </Txt>
                   {!isOpen ? (
                     <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} ellip minWidth={0} flexShrink={1}>
                       {summaryOf(items, item, root)}

@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import { Platform } from "react-native";
 import { WebView, type WebViewMessageEvent } from "react-native-webview";
 import { Paths } from "expo-file-system";
@@ -20,18 +20,34 @@ function pageOf(component: IslandProps["component"]): string {
   return `${Paths.bundle.uri.replace(/\/?$/, "/")}island/${component}/index.html`;
 }
 
-export function Island({ component, props, height, onEvent, onReport }: IslandProps): JSX.Element {
+export function Island({ component, props, height, appearance, onEvent, onReport }: IslandProps): JSX.Element {
   const web = useRef<WebView>(null);
   const look = useLook();
   const [measured, setMeasured] = useState(1);
-  const render = JSON.stringify({ kind: "render", component, props, look: { palette: look.palette, theme: look.scheme, wash: look.wash } });
+  /** Whether the page has said `ready` — before it, a render has nowhere to go. */
+  const ready = useRef(false);
+  /** How many events have come back: a render says it, so the island can tell a stale one (`host.tsx`). */
+  const heard = useRef(0);
+  const body = JSON.stringify({ component, props, look: { palette: look.palette, theme: look.scheme, wash: look.wash, ...(appearance === undefined ? {} : { appearance }) } });
+  const post = (): void => web.current?.postMessage(`{"kind":"render","echo":${heard.current},${body.slice(1)}`);
+
+  // Props and look moved (the draft after an edit, a revert, a palette switch): draw them.
+  useEffect(() => {
+    if (ready.current) post();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [body]);
 
   const receive = (e: WebViewMessageEvent): void => {
     const message = JSON.parse(e.nativeEvent.data) as { kind: string; px?: number; name?: string; value?: unknown };
     onReport?.(message);
-    if (message.kind === "ready") web.current?.postMessage(render);
-    else if (message.kind === "height" && height === undefined && message.px !== undefined && message.px > 0) setMeasured(message.px);
-    else if (message.kind === "event" && message.name !== undefined) onEvent?.(message.name, message.value);
+    if (message.kind === "ready") {
+      ready.current = true;
+      post();
+    } else if (message.kind === "height" && height === undefined && message.px !== undefined && message.px > 0) setMeasured(message.px);
+    else if (message.kind === "event" && message.name !== undefined) {
+      heard.current += 1;
+      onEvent?.(message.name, message.value);
+    }
   };
 
   const page = pageOf(component);

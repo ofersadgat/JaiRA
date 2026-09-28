@@ -4,7 +4,7 @@ import { View } from "@tamagui/core";
 
 /** One shape of a drawing: a path, a circle or a line, with its own paint where it differs. */
 export type Shape =
-  | { kind: "path"; d: string; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number; dash?: string }
+  | { kind: "path"; d: string; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number; dash?: string; linecap?: "round" | "butt" | "square"; nonScaling?: boolean }
   | { kind: "circle"; cx: number; cy: number; r: number; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number };
 
 export interface SvgProps {
@@ -44,6 +44,8 @@ export function Svg({ width, height, viewBox = "0 0 24 24", color = "#000", fill
               {...(s.strokeWidth !== undefined ? { strokeWidth: s.strokeWidth } : {})}
               {...(s.opacity !== undefined ? { opacity: s.opacity } : {})}
               {...(s.dash !== undefined ? { strokeDasharray: s.dash } : {})}
+              {...(s.linecap !== undefined ? { strokeLinecap: s.linecap } : {})}
+              {...(s.nonScaling === true ? { vectorEffect: "non-scaling-stroke" as const } : {})}
             />
           ) : (
             <Circle

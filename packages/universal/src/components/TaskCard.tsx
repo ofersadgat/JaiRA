@@ -58,43 +58,7 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
   const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);
   const archived = card.archived !== undefined;
   const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
-  const named = look.palette !== "classic";
-  const wash = look.wash && pill !== null ? pill : null;
-
-  // --- the ground, ring and shadow, in the order the cascade decides them ---
-  const tile = t.v("tile");
-  let ground: string | number = named ? tile : t.v("fill-ghost-hover");
-  let ring: string | undefined = named ? `0 0 0 1px ${t.v("tile-edge")}, ${t.v("tile-shadow")}` : undefined;
-  let hoverGround: string | number | undefined = named ? tile : t.v("fill-ghost-selected");
-  let hoverRing: string | undefined = named ? `0 0 0 1px ${t.v("rule")}, ${t.v("tile-shadow-hi")}` : undefined;
-  if (selected) {
-    ground = named ? t.mix(t.v("accent"), 7, tile) : t.v("tint-accent");
-    ring = named ? `0 0 0 1.5px ${t.v("accent")}, ${t.v("tile-shadow")}` : undefined;
-    hoverGround = ground;
-    hoverRing = ring;
-  }
-  if (wash !== null) {
-    const under = named ? tile : t.v("panel");
-    const edge = (name: string, pct: number): string => `0 0 0 1px ${t.mix(t.v(name), pct, "transparent")}`;
-    [ground, ring] =
-      wash === "running"
-        ? [t.mix(t.v("accent"), 11, under), edge("accent", 35)]
-        : wash === "waiting"
-          ? [t.mix(t.v("warn"), 14, under), edge("warn", 40)]
-          : wash === "error"
-            ? [t.mix(t.v("bad"), 10, under), edge("bad", 35)]
-            : wash === "success"
-              ? ["transparent", `0 0 0 1px ${t.v("line")}`]
-              : [ground, ring];
-    if (selected) ring = `0 0 0 2px ${t.v("accent")}`;
-    // The wash rules come later at equal specificity, so hovering changes nothing.
-    hoverGround = ground;
-    hoverRing = ring;
-  }
-  const radius =
-    look.palette === "contrast" ? 2 : look.palette === "pastel" || look.palette === "pastel-rail" ? 11 : look.palette === "blueprint" ? 1 : t.v("control-radius-sm");
-  // `.tray-cards .card` (0,2,0): 210 wide, no margin — which every palette's margin (0,3,0) beats.
-  const below = look.palette === "contrast" ? 8 : named ? 6 : last || inTray ? 0 : 4;
+  const { wash, ground, ring, hoverGround, hoverRing, radius, below } = tileChromeOf(t, look, { pill, selected, last, inTray });
 
   // --- the words ---
   const pending = taskNamePending(card);
@@ -238,4 +202,55 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
       {drawn}
     </Pressable>
   );
+}
+
+/**
+ * A tile's chrome (`board.tsx`'s `Tile`): its ground, ring and shadow, their hovered forms, its radius
+ * and the room under it, in the order the cascade decides them (see the rules above). Shared by the task
+ * card and the run board's execution card (`components/run/RunBoard.tsx`), which are the same tile.
+ */
+export function tileChromeOf(
+  t: ReturnType<typeof useTokens>,
+  look: ReturnType<typeof useLook>,
+  { pill, selected, last, inTray }: { pill: ReturnType<typeof pillKindOf>; selected: boolean; last: boolean; inTray: boolean },
+): { wash: ReturnType<typeof pillKindOf>; ground: string | number; ring: string | undefined; hoverGround: string | number | undefined; hoverRing: string | undefined; radius: string | number; below: number } {
+  const named = look.palette !== "classic";
+  const wash = look.wash && pill !== null ? pill : null;
+
+  // --- the ground, ring and shadow, in the order the cascade decides them ---
+  const tile = t.v("tile");
+  let ground: string | number = named ? tile : t.v("fill-ghost-hover");
+  let ring: string | undefined = named ? `0 0 0 1px ${t.v("tile-edge")}, ${t.v("tile-shadow")}` : undefined;
+  let hoverGround: string | number | undefined = named ? tile : t.v("fill-ghost-selected");
+  let hoverRing: string | undefined = named ? `0 0 0 1px ${t.v("rule")}, ${t.v("tile-shadow-hi")}` : undefined;
+  if (selected) {
+    ground = named ? t.mix(t.v("accent"), 7, tile) : t.v("tint-accent");
+    ring = named ? `0 0 0 1.5px ${t.v("accent")}, ${t.v("tile-shadow")}` : undefined;
+    hoverGround = ground;
+    hoverRing = ring;
+  }
+  if (wash !== null) {
+    const under = named ? tile : t.v("panel");
+    const edge = (name: string, pct: number): string => `0 0 0 1px ${t.mix(t.v(name), pct, "transparent")}`;
+    [ground, ring] =
+      wash === "running"
+        ? [t.mix(t.v("accent"), 11, under), edge("accent", 35)]
+        : wash === "waiting"
+          ? [t.mix(t.v("warn"), 14, under), edge("warn", 40)]
+          : wash === "error"
+            ? [t.mix(t.v("bad"), 10, under), edge("bad", 35)]
+            : wash === "success"
+              ? ["transparent", `0 0 0 1px ${t.v("line")}`]
+              : [ground, ring];
+    if (selected) ring = `0 0 0 2px ${t.v("accent")}`;
+    // The wash rules come later at equal specificity, so hovering changes nothing.
+    hoverGround = ground;
+    hoverRing = ring;
+  }
+  const radius =
+    look.palette === "contrast" ? 2 : look.palette === "pastel" || look.palette === "pastel-rail" ? 11 : look.palette === "blueprint" ? 1 : t.v("control-radius-sm");
+  // `.tray-cards .card` (0,2,0): 210 wide, no margin — which every palette's margin (0,3,0) beats.
+  const below = look.palette === "contrast" ? 8 : named ? 6 : last || inTray ? 0 : 4;
+
+  return { wash, ground, ring, hoverGround, hoverRing, radius, below };
 }

@@ -16,21 +16,19 @@ import type { BoardCard, StateView, TaskSummary } from "@jaira/shared/browser";
 import { Badge } from "./board";
 import {
   isFilled,
-  missingOf,
   runBlocker,
-  runChecksOf,
   runHistoryOf,
   runInputsOf,
   runSchemaOf,
   runTitle,
   type RunField,
   type RunHistory,
-  type RunSources,
   type RunTarget,
   type RunValues,
 } from "./runForm";
 import { SchemaForm } from "./schemaForm/SchemaForm";
-import { useSchemaCheck, useTouched } from "./schemaForm/check";
+import { useTouched } from "./schemaForm/check";
+import { useRunCheck } from "./newTaskModel";
 import type { FormCheck } from "./schemaForm/model";
 import type { SettledMark, ValueSources } from "./schemaForm/types";
 
@@ -97,10 +95,9 @@ export function RunInputsForm({
   );
 }
 
-/** The check a run form's values get: the run's own validator per slot, plus a required slot with nothing in it. */
-export function useRunCheck(fields: readonly RunField[] | null | undefined, values: RunValues, sources: RunSources = {}): FormCheck {
-  return useSchemaCheck(runChecksOf(fields ?? [], values, sources), missingOf(fields ?? [], values, sources));
-}
+// The check a run form's values get lives in `newTaskModel.ts`, shared with the universal copy
+// (decision 0015); re-exported here, where its callers have always found it.
+export { useRunCheck };
 
 /**
  * Everything the two sections need beyond the state itself.

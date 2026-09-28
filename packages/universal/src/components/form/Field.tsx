@@ -44,7 +44,17 @@ import { InfoIcon, InheritButton, SettingsSection, chOf, useDrawnRow } from "../
 export const FormRowsContext = createContext(false);
 
 /** Where a field stands: inside another field's control (`.cfg-control .set-field`), or in a level's card body. */
-const PlaceContext = createContext<{ nested: boolean; inset: boolean }>({ nested: false, inset: false });
+const PlaceContext = createContext<{ nested: boolean; inset: boolean; direct?: boolean }>({ nested: false, inset: false });
+
+/**
+ * Around a form that sits deeper in a field's control than its own list (a call-settings pane): its
+ * fields are still a field's (`.cfg-control .set-field`), but its list is not the control's own child,
+ * so it takes no rule on its left (`.cfg-control > .cfg-fields`).
+ */
+export function Deeper({ children }: { children: ReactNode }): JSX.Element {
+  const place = useContext(PlaceContext);
+  return <PlaceContext.Provider value={place.nested ? DEEPER : place}>{children}</PlaceContext.Provider>;
+}
 
 /** What a list says about each direct child: drawn or not, and whether it is a field (a rule goes between two). */
 type SlotReport = (hidden: boolean, field: boolean) => void;
@@ -104,7 +114,7 @@ export function FieldGrid({ children, min = 210 }: { children: ReactNode; min?: 
       <View
         flexDirection="column"
         onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
-        {...(place.nested ? { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0, marginLeft: 3, paddingLeft: 11, ...edge(t, { left: 2 }) } : {})}
+        {...(place.nested && place.direct !== false ? { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0, marginLeft: 3, paddingLeft: 11, ...edge(t, { left: 2 }) } : {})}
         {...(place.inset ? { marginVertical: -13 } : {})}
       >
         {items.map((item, i) => {
@@ -168,7 +178,8 @@ export function Field({
   if (layered.hidden) return null;
   const split = row && typeof hint === "string" ? splitHint(hint) : undefined;
   const more = split !== undefined ? [split.rest, param !== undefined ? `Writes ${param}.` : ""].filter((s) => s.length > 0).join(" ") : "";
-  const stack = wide || block || narrow;
+  // Only a settings row goes one column when `wide` (`.set-field.wide`); a plain field keeps its two.
+  const stack = (row && wide) || block || narrow;
   const hintSpec = row ? ({ voice: "app", scale: 1.03, lineHeight: 1.45, color: "dim" } as const) : ({ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" } as const);
   const hintBox = row ? { maxWidth: chOf(t, 62, 1.03) } : {};
   const labelText = row && !mono && label.length > 0 ? label.charAt(0).toUpperCase() + label.slice(1) : label;
@@ -192,7 +203,17 @@ export function Field({
       <View flexDirection="column" gap={row ? 3 : 2} minWidth={0} {...(stack ? {} : { flexGrow: 1, flexShrink: 1, flexBasis: 0 })}>
         <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6}>
           {lead}
-          <Txt spec={{ ...labelSpec, color: off && row ? "dim" : "text" }}>{labelText}</Txt>
+          <Txt spec={{ ...labelSpec, color: off && row ? "dim" : "text" }}>
+            {row && !mono && labelText.length > 1 ? (
+              // `::first-letter` is a box of its own in the DOM, so the first letter is not kerned with the next.
+              <>
+                <Txt spec={{ ...labelSpec, color: off && row ? "dim" : "text" }}>{labelText.charAt(0)}</Txt>
+                {labelText.slice(1)}
+              </>
+            ) : (
+              labelText
+            )}
+          </Txt>
           {layer?.stated === true ? <InheritButton label={layer.label ?? inherit} onInherit={layer.onInherit} disabled={layer.disabled} /> : null}
           {set && layer === undefined ? (
             <Txt
@@ -219,8 +240,8 @@ export function Field({
           <Txt spec={hintSpec} {...hintBox}>
             {hint}
             {param !== undefined && !row ? (
-              <Txt spec={{ voice: "data", scale: 10 / 12, color: "dim" }} numberOfLines={1}>
-                {`  ${param}`}
+              <Txt spec={{ voice: "data", scale: 10 / 12, lineHeight: 1.4, color: "dim" }} marginLeft={6} {...({ whiteSpace: "nowrap" } as object)}>
+                {param}
               </Txt>
             ) : null}
           </Txt>
@@ -240,7 +261,12 @@ export function Field({
         {...(off ? { opacity: row ? 0.5 : 1, pointerEvents: "none" } : {})}
       >
         <SettingsLayerContext.Provider value={null}>
-          <PlaceContext.Provider value={NESTED}>{children}</PlaceContext.Provider>
+          <PlaceContext.Provider value={NESTED}>
+            {/* What is inside a field's control is a form of its own: not a span of the list around it. */}
+            <SpanContext.Provider value={false}>
+              <BlockContext.Provider value={false}>{children}</BlockContext.Provider>
+            </SpanContext.Provider>
+          </PlaceContext.Provider>
         </SettingsLayerContext.Provider>
         {error !== undefined ? <ErrorLine>{error}</ErrorLine> : null}
       </View>
@@ -248,6 +274,7 @@ export function Field({
   );
 }
 const NESTED = { nested: true, inset: false };
+const DEEPER = { nested: true, inset: false, direct: false };
 const INSET = { nested: false, inset: true };
 
 /** `.reason.cfg-error`: what is wrong, on a line of its own under the control. */

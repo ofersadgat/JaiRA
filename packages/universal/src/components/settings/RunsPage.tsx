@@ -6,7 +6,7 @@ import { invoke, subscribe as subscribePush } from "@jaira/ui/store";
 import { useShell } from "../../app/shell";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { NumInput } from "../form/inputs";
+import { FormInput, NumInput } from "../form/inputs";
 import { MachineChip } from "../MachineChip";
 import { Button } from "./Button";
 import { Artifacts, ConfigBlockSection, ExecEnvironment } from "./ConfigBlocks";
@@ -184,12 +184,10 @@ function History(): JSX.Element {
           control={
             <View flexDirection="row" alignItems="center" gap={8} flexWrap="wrap">
               <View flexDirection="row" alignItems="center" gap={4}>
-                <View width={56}>
-                  <NumInput value={days} onChange={(n) => setDays(Math.max(0, n ?? 0))} />
-                </View>
+                <FormInput plain={{ scale: 11 / 12.5 }} num width={56} label="days" value={String(days)} onChange={(text) => setDays(Math.max(0, Number(text) || 0))} />
                 <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>days</Txt>
               </View>
-              <Button kind="ghost" onPress={() => actions.planPrune(days)} disabled={busy}>
+              <Button kind="ghost" font={{ scale: 11 / 12.5 }} onPress={() => actions.planPrune(days)} disabled={busy}>
                 Preview
               </Button>
             </View>

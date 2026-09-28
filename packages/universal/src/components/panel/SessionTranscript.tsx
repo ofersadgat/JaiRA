@@ -10,6 +10,7 @@ import { blocksOf, endOfBlock, gapBetween, iconOf, startOfBlock, type MessageEnt
 import { Txt, edge, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
+import { ValueView } from "./ValueView";
 import { Markdown } from "../Markdown";
 import { Icon } from "./Icon";
 import { Empty } from "./RunTranscript";
@@ -222,7 +223,7 @@ function Message({
         {value}
       </Txt>
     ) : (
-      <Uncopied name={`a ${view} reading (ValueView)`} />
+      <ValueView value={value} hint={reading.hint} view={view} chrome={false} />
     );
   // The rail's room: invisible at rest, as the DOM's is. A row of 21px controls, 4 above. With the host's
   // controls it shows under the pointer (web) or once the message is long-pressed (a phone).

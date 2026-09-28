@@ -5,7 +5,7 @@ import type { JobOutputChunk, LogEntry, LogLevel, LogQuery } from "@jaira/shared
 import type { LogsPanelProps } from "@jaira/ui/logs";
 import { datedOf, detailParts, keyOf, logQueryOf, nearEnd, reasonOf, sourcesOf, stamp, streamsOf, LEVELS } from "@jaira/ui/logsModel";
 import { isUnseenLog, type LogUnseen } from "@jaira/ui/updatesModel";
-import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps, useHover, type FontSpec } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, appCh, edge, scrollbarProps, useHover, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Pills } from "../Pills";
 import { Button } from "../settings/Button";
@@ -42,19 +42,15 @@ import { Select, SourceSelect } from "./Select";
  *   p.empty            --dim, padding 8 0, the p's 13px margins
  *   .console           a --line above, column, at most 45% tall
  */
-const MONO_CH = 0.6;
-/** DM Sans's `0`, the width of a `ch` in the app voice. */
-const APP_CH = 0.662;
-
-/** A length the stylesheet writes in `ch` of a size, as a number where the sizes are (replayed), or CSS. */
-function chOf(t: Tokens, voice: "app" | "data", scale: number, ch: number, n: number): number | string {
-  const size = t.scaled(`size-${voice}`, scale);
-  return typeof size === "number" ? n * ch * size : `calc(${String(size)} * ${n * ch})`;
+/** A length in `ch` of the data face (JetBrains Mono, whose `0` is 0.6 of the size), or the stylesheet's own. */
+function monoCh(t: Tokens, scale: number, n: number): number | string {
+  const size = t.scaled("size-data", scale);
+  return typeof size === "number" ? n * 0.6 * size : `calc(${String(size)} * ${n * 0.6})`;
 }
 
 /** The tracks: `[date?], time, level, source` in `ch` of the row's face, then the message and 92 for the links. */
-function tracks(t: Tokens, voice: "app" | "data", scale: number, ch: number, dated: boolean): (number | string)[] {
-  return [...(dated ? [10] : []), 11, 5, 22].map((n) => chOf(t, voice, scale, ch, n));
+function tracks(t: Tokens, voice: "app" | "data", scale: number, dated: boolean): (number | string)[] {
+  return [...(dated ? [10] : []), 11, 5, 22].map((n) => (voice === "app" ? appCh(t, scale, n) : monoCh(t, scale, n)));
 }
 
 export function LogsPanel({
@@ -174,7 +170,7 @@ function Empty({ children }: { children: string }): JSX.Element {
 function Head({ dated }: { dated: boolean }): JSX.Element {
   const t = useTokens();
   const spec: Partial<FontSpec> = { voice: "app", scale: 10 / 12.5, color: "dim", upper: true, ls: 0.04, lineHeight: 1.5 };
-  const widths = tracks(t, "app", 10 / 12.5, APP_CH, dated);
+  const widths = tracks(t, "app", 10 / 12.5, dated);
   const names = [...(dated ? ["date"] : []), "time", "level", "source"];
   return (
     <View flexDirection="row" gap={8} paddingVertical={4} paddingHorizontal={10} {...(edge(t, { bottom: 1 }) as object)}>
@@ -215,7 +211,7 @@ function LogLine({
   const { day, time } = stamp(entry.at);
   const fresh = isUnseenLog(entry, unseen);
   const reason = reasonOf(entry);
-  const widths = tracks(t, "data", 11.5 / 12, MONO_CH, dated);
+  const widths = tracks(t, "data", 11.5 / 12, dated);
   const row: FontSpec = { voice: "data", scale: 11.5 / 12 };
   // The level's cell is mono at the app voice's size: the row's face, a size of its own.
   const levelSize = t.scaled("size-app", 10 / 12.5);
@@ -231,6 +227,7 @@ function LogLine({
           the cells (which let it through) rather than their parent, so a link is never a button inside a
           button. The hover is the row's, links and all, as `.log-row:hover` is. */}
       <View
+        position="relative"
         flexDirection="row"
         gap={8}
         alignItems={open ? "flex-start" : "baseline"}
@@ -241,35 +238,36 @@ function LogLine({
       >
         <Press onPress={onToggle} {...({ "aria-expanded": open } as object)} position="absolute" top={0} right={0} bottom={0} left={0} />
         <View flex={1} minWidth={0} flexDirection="row" gap={8} alignItems={open ? "flex-start" : "baseline"} pointerEvents="none">
-        {cells.map((words, i) => (
-          <Txt key={i} spec={{ ...row, color: "dim", tabular: true }} textAlign="right" width={widths[i] as number} {...cell({})}>
-            {words}
-          </Txt>
-        ))}
-        <Txt
-          spec={{ ...row, upper: true, color: LEVEL_INK[entry.level] ?? "text" }}
-          fontSize={levelSize}
-          {...(levelLine !== undefined ? { lineHeight: levelLine } : {})}
-          width={widths[cells.length] as number}
-          {...cell({})}
-        >
-          {entry.level}
-        </Txt>
-        <Txt spec={{ ...row, color: "dim" }} width={widths[cells.length + 1] as number} {...cell({})} {...((isWeb ? { title: entry.source } : {}) as object)}>
-          {entry.source}
-        </Txt>
-        <Txt spec={row} flex={1} minWidth={0} {...cell({ flexShrink: 1 })} {...(open && isWeb ? { style: { overflowWrap: "anywhere" } } : {})}>
-          {fresh ? (
-            // An inline span with a margin: on native a nested text has none, and the dot sits against the words.
-            <Txt spec={{ voice: "data", scale: (11.5 / 12) * 0.8, color: LEVEL_INK[entry.level] ?? "text" }} marginRight={6} {...((isWeb ? { title: "Not seen yet" } : {}) as object)} aria-label="not seen yet">
-              {"●"}
+          {cells.map((words, i) => (
+            <Txt key={i} spec={{ ...row, color: "dim", tabular: true }} textAlign="right" width={widths[i] as number} {...cell({})}>
+              {words}
             </Txt>
-          ) : null}
-          {entry.message}
-          {reason !== undefined ? <Txt spec={{ ...row, color: "dim" }}> — {reason}</Txt> : null}
-        </Txt>
+          ))}
+          <Txt
+            spec={{ ...row, upper: true, color: LEVEL_INK[entry.level] ?? "text" }}
+            fontSize={levelSize}
+            {...(levelLine !== undefined ? { lineHeight: levelLine } : {})}
+            width={widths[cells.length] as number}
+            {...cell({})}
+          >
+            {entry.level}
+          </Txt>
+          <Txt spec={{ ...row, color: "dim" }} width={widths[cells.length + 1] as number} {...cell({})} {...((isWeb ? { title: entry.source } : {}) as object)}>
+            {entry.source}
+          </Txt>
+          <Txt spec={row} flex={1} minWidth={0} {...cell({ flexShrink: 1 })} {...(open && isWeb ? { style: { overflowWrap: "anywhere" } } : {})}>
+            {fresh ? (
+              // An inline span with a margin: on native a nested text has none, and the dot sits against the words.
+              <Txt spec={{ voice: "data", scale: (11.5 / 12) * 0.8, color: LEVEL_INK[entry.level] ?? "text" }} marginRight={6} {...((isWeb ? { title: "Not seen yet" } : {}) as object)} aria-label="not seen yet">
+                {"●"}
+              </Txt>
+            ) : null}
+            {entry.message}
+            {reason !== undefined ? <Txt spec={{ ...row, color: "dim" }}> — {reason}</Txt> : null}
+          </Txt>
         </View>
-        <View width={92} flexShrink={0} flexDirection="row" justifyContent="flex-end" overflow="hidden">
+        {/* Over the press layer (positioned, it paints above anything in flow), so a link takes its own press. */}
+        <View width={92} flexShrink={0} flexDirection="row" justifyContent="flex-end" overflow="hidden" position="relative" zIndex={1}>
           {entry.taskId !== undefined ? <RowLink words="task" onPress={() => onOpenTask(entry.taskId!)} /> : null}
           {entry.jobId !== undefined ? <RowLink words="output" onPress={() => onOpenJob(entry.jobId!)} /> : null}
         </View>
@@ -300,7 +298,7 @@ function Detail({ detail, dated }: { detail: unknown; dated: boolean }): JSX.Ele
   const { stack, rest } = useMemo(() => detailParts(detail), [detail]);
   if (stack === undefined && rest === undefined) return null;
   // `--log-indent`, resolved where it is used: in the body's face (DM Sans at 13/12.5), not the rows'.
-  const ch = chOf(t, "app", 13 / 12.5, APP_CH, dated ? 48 : 38);
+  const ch = appCh(t, 13 / 12.5, dated ? 48 : 38);
   const indent = typeof ch === "number" ? 10 + ch + (dated ? 32 : 24) : `calc(${ch} + ${dated ? 42 : 34}px)`;
   const pre = (words: string, top: number): JSX.Element => (
     <ScrollView horizontal style={{ marginTop: top, flexGrow: 0, borderRadius: 4, backgroundColor: t.v("panel-2") as string, ...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object), ...PLAIN_SCROLLER } as never} contentContainerStyle={{ paddingVertical: 6, paddingHorizontal: 8, ...PLAIN_SCROLLER } as never} {...scrollbarProps(t)}>

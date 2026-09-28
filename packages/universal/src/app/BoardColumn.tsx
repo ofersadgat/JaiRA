@@ -9,12 +9,15 @@ import { TaskAddressBar } from "../components/TaskAddressBar";
 import { Txt, edge, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
-import { Uncopied } from "./Uncopied";
-import { boardAt, runMode } from "./viewState";
+import { RunView } from "../components/run/RunView";
+import { useRunContext } from "../components/run/runContext";
+import { useFileSurfaces } from "./FilesView";
+import { boardAt } from "./viewState";
 
 /**
  * The Tasks room's middle column (`.tasks-view > .col.mid`, `App.tsx`): one board per project group,
- * each after its own address bar but the first, or the run the address has drilled into (`RunView`).
+ * each after its own address bar but the first, or the run the address has drilled into (`RunView`,
+ * `components/run/`).
  * The props each board gets are the ones `App.tsx` hands its own, from the same store.
  *
  *   .tasks-view .col.mid            a column on --bg that scrolls (both ways) while every project is listed
@@ -64,9 +67,17 @@ export function BoardColumn(): JSX.Element {
   }, []);
   // Groups arriving, or being narrowed away, move the boundaries without a scroll (as `App.tsx` re-measures).
   useEffect(track, [track, state.projects, state.boards, state.taskFocus]);
-  const mode = runMode.use();
+  // What a drilled run reads from (`App.tsx`'s `surfaces`), for `RunView`.
+  const runContext = { ...useFileSurfaces(), ...useRunContext() };
 
-  if (state.trail.length > 0 && state.taskFocus !== null) return <Uncopied name={mode === "conversation" ? "RunView (its conversation)" : "RunView"} flex={1} />;
+  // A RUN is on the path, so the column shows that run — its executions as cards, or what it said.
+  if (state.trail.length > 0 && state.taskFocus !== null) {
+    return (
+      <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never}>
+        <RunView context={runContext} />
+      </View>
+    );
+  }
 
   const pickTask = (project: string, taskId: string, e?: Mods): void => {
     const next = pickCard(picked, project, taskId, e, () => boardCardOrderOf(state.boards[project]).map((c) => c.taskId));

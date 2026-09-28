@@ -16,7 +16,7 @@ import { ContextMenu, type MenuAt } from "../Menu";
  *                        (hovered --rule), radius --control-radius, padding 5 9. Chromium's menulist
  *                        draws its text on a `normal` line (DM Sans: 1.3867), 3 in from the padding, and
  *                        keeps room for its arrow after it (40.6 wider than the text in all); the arrow
- *                        8.9 × 5.4, 4.8 in from the right edge, in the text's colour.
+ *                        in the text's colour (see `Chevron`).
  *   .logs-bar select     width auto, flex none, min-width 150
  *
  * Options may come in groups (`<optgroup>`): the menu lists a group's label, disabled, over its entries.
@@ -94,23 +94,31 @@ export function Select({
         <Txt spec={{ ...text, color: disabled ? "dim" : "text" }} numberOfLines={1}>
           {shown}
         </Txt>
-        <Chevron right={4.8 - 1} />
+        <Chevron />
       </Press>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </RNView>
   );
 }
 
-/** Chromium's menulist arrow: a chevron 8.9 wide and 5.4 tall, centred on the box's height. */
-function Chevron({ right }: { right: number }): JSX.Element {
+/**
+ * Chromium's menulist arrow, measured on the desktop's page: a chevron whose centre line is 7.2 wide and 3.33
+ * tall, its right end 5.2 in from the box's right edge and 0.2 above its middle, stroked 1.5 —
+ * drawn as its two strokes, meeting at the point, so a phone draws it too.
+ */
+function Chevron(): JSX.Element {
   const t = useTokens();
   const ink = t.v("text") as never;
+  const [w, h, stroke] = [7.2, 3.33, 1.5];
+  const length = Math.hypot(w / 2, h) + stroke / 2;
+  const angle = (Math.atan2(h, w / 2) * 180) / Math.PI;
+  const bar = (cx: number, turn: number): JSX.Element => (
+    <View position="absolute" left={cx - length / 2} top={h / 2 - stroke / 2} width={length} height={stroke} backgroundColor={ink} transform={[{ rotate: `${turn * angle}deg` }]} />
+  );
   return (
-    <View position="absolute" right={right} top="50%" marginTop={-2.7} width={8.9} height={5.4} aria-hidden>
-      <View width={8.9} height={5.4}>
-        <View position="absolute" left={0.1} top={1.9} width={6.2} height={1.6} backgroundColor={ink} transform={[{ rotate: "45deg" }]} />
-        <View position="absolute" right={0.1} top={1.9} width={6.2} height={1.6} backgroundColor={ink} transform={[{ rotate: "-45deg" }]} />
-      </View>
+    <View position="absolute" right={5.2} top="50%" marginTop={-h / 2 - 0.2} width={w} height={h} aria-hidden>
+      {bar(w / 4, 1)}
+      {bar((3 * w) / 4, -1)}
     </View>
   );
 }

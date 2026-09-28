@@ -26,6 +26,7 @@ import {
 } from "@jaira/shared/browser";
 import { Chip, Field, FieldGrid, NumInput, SelectInput, TextInput } from "./controls";
 import { execDistroOf, presetNamesOf, type Writer } from "./configWriter";
+import { DEFAULT_ENVIRONMENT, mergedDefaultsOf, modelDefaultsOf } from "./modelsPageModel";
 
 export { configWriter, layerWriter, presetNamesOf, type Writer } from "./configWriter";
 import { LlmConfigForm, summariseLlmConfig, type LlmConfigDoc } from "./llmConfigForm";
@@ -153,8 +154,6 @@ export function Artifacts({ effective, locked, set, layer }: Writer): JSX.Elemen
   );
 }
 
-/** Where the project-wide defaults live in the config document — see {@link ModelDefaults}. */
-const DEFAULT_ENVIRONMENT = "executors.default.prompt.defaults";
 
 /**
  * The project's own `environment` block: what fills a call that a state left unsaid — Settings →
@@ -171,11 +170,7 @@ const DEFAULT_ENVIRONMENT = "executors.default.prompt.defaults";
  * operation, applied to every state that never asked for one.
  */
 export function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.Element {
-  const executors = (effective["executors"] ?? {}) as Record<string, unknown>;
-  const prompt = ((executors["default"] as Record<string, unknown> | undefined)?.["prompt"] ?? {}) as Record<string, unknown>;
-  const defaults = (prompt["defaults"] ?? {}) as Record<string, unknown>;
-  const model = typeof defaults["model"] === "string" ? (defaults["model"] as string) : "";
-  const { model: _model, ...knobs } = defaults;
+  const { model, knobs } = modelDefaultsOf(effective);
   const presets = presetNamesOf(effective);
 
   return (
@@ -210,8 +205,7 @@ export function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.El
               // The model is written by the field above and merged back here, so editing a knob cannot
               // drop it — the same shape the executor tree's own defaults editor uses, for the same
               // reason: `LlmConfigForm` owns every key it renders and would otherwise take the block.
-              const merged = { ...next, ...(model === "" ? {} : { model }) };
-              set(DEFAULT_ENVIRONMENT, Object.keys(merged).length === 0 ? undefined : merged);
+              set(DEFAULT_ENVIRONMENT, mergedDefaultsOf(next, model));
             }}
           />
         </Field>

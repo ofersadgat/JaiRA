@@ -8,10 +8,16 @@ import { SettingsLayerContext } from "../components/settings/layers";
 import { LayerPicker } from "../components/settings/LayerPicker";
 import { MachinesPage } from "../components/settings/MachinesPage";
 import { DataPage, RunsPage } from "../components/settings/RunsPage";
+import { ModelsPage } from "../components/settings/ModelsPage";
+import { AboutPage } from "../components/settings/AboutPage";
+import { ToolsPage } from "../components/settings/ToolsPage";
 import { FormRowsContext } from "../components/form/Field";
 import { newPage, scrolled } from "../components/settings/parts";
 import { SettingsPage } from "../components/settings/SettingsPage";
 import { Segmented } from "../components/settings/controls";
+import { fixHealthItem, useForgeOAuth } from "@jaira/ui/settingsShell";
+import { useHealth } from "@jaira/ui/updatesStore";
+import { SettingsShellContext, type SettingsShell } from "../components/settings/NeedsAttention";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
 
@@ -32,6 +38,15 @@ export function SettingsView(): JSX.Element {
   const frame = settingsFrameOf(section, layer, justYou);
   const layerView = useMemo(() => ({ layer, view: state.config, onlyStated: frame.onlyStated }), [layer, state.config, frame.onlyStated]);
   const project = settingsProjectLabel(state.projects, state.at);
+  // What `App.tsx` holds for the pages: the health board, its fixes, and the forge sign-ins in flight.
+  const health = useHealth();
+  const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
+  const shell: SettingsShell = {
+    health,
+    forgeOAuth,
+    fixHealth: (item) =>
+      fixHealthItem(item, { forgeOAuth, signIn: (name) => void actions.signIn(name), recheck: () => void actions.recheckAvailability(), setView: actions.setView, setSection: actions.setSection }),
+  };
 
   // The page's scroll box, for the sidebar's accordion (`parts.ts`): where it is, and how to move it.
   const scroller = useRef<ScrollView | null>(null);
@@ -55,6 +70,12 @@ export function SettingsView(): JSX.Element {
       <RunsPage />
     ) : section === "data" ? (
       <DataPage />
+    ) : section === "models" ? (
+      <ModelsPage />
+    ) : section === "about" ? (
+      <AboutPage />
+    ) : section === "tools" ? (
+      <ToolsPage />
     ) : (
       <Uncopied name={`${SECTIONS.find((s) => s.id === section)?.label ?? section} page`} height={320} />
     );
@@ -74,6 +95,7 @@ export function SettingsView(): JSX.Element {
         onContentSizeChange={(_, h) => scrolled({ contentHeight: h })}
         {...scrollbarProps(t)}
       >
+        <SettingsShellContext.Provider value={shell}>
         <FormRowsContext.Provider value={true}>
         <SettingsLayerContext.Provider value={layerView}>
           <SettingsPage
@@ -91,6 +113,7 @@ export function SettingsView(): JSX.Element {
           </SettingsPage>
         </SettingsLayerContext.Provider>
         </FormRowsContext.Provider>
+        </SettingsShellContext.Provider>
       </ScrollView>
     </RNView>
   );

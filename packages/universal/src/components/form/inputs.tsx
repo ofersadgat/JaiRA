@@ -47,6 +47,8 @@ export function FormInput({
   label,
   bad = false,
   width,
+  plain,
+  tight = false,
   onBlur,
   onSubmit,
   onEscape,
@@ -62,6 +64,13 @@ export function FormInput({
   /** `.cfg-field.bad`: the value has a complaint. */
   bad?: boolean;
   width?: number | string | undefined;
+  /**
+   * A plain `input` (no `.cfg-input`): padding 5 9 and the font of the box it stands in — its scale of
+   * the app size (`.prune-controls`: 11/12.5).
+   */
+  plain?: { scale: number } | undefined;
+  /** `.au-name .cfg-input`: padding 2 8, at 600. */
+  tight?: boolean;
   onBlur?: (() => void) | undefined;
   onSubmit?: (() => void) | undefined;
   onEscape?: (() => void) | undefined;
@@ -70,7 +79,8 @@ export function FormInput({
   const look = useLook();
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const spec = mono ? ({ voice: "data", scale: 1 } as const) : ({ voice: "app", scale: 1 } as const);
+  const base = plain !== undefined ? ({ voice: "app", scale: plain.scale } as const) : mono ? ({ voice: "data", scale: 1 } as const) : ({ voice: "app", scale: 1 } as const);
+  const spec = tight ? { ...base, weight: 600 } : base;
   const ring = bad ? "bad" : focused ? "accent" : hovered && !disabled ? "rule" : "line";
   return (
     <RNTextInput
@@ -93,9 +103,9 @@ export function FormInput({
           ...(font(t, { ...spec, color: disabled ? "dim" : "text" }) as object),
           width: width ?? "100%",
           minWidth: 0,
-          ...(num ? { maxWidth: 120 } : {}),
-          paddingVertical: 6,
-          paddingHorizontal: 9,
+          ...(num && plain === undefined ? { maxWidth: 120 } : {}),
+          paddingVertical: tight ? 2 : plain !== undefined ? 5 : 6,
+          paddingHorizontal: tight ? 8 : 9,
           borderWidth: 1,
           borderStyle: "solid",
           borderColor: t.v(ring),
@@ -205,8 +215,8 @@ export function TextArea({
           ...(font(t, { ...spec, color: disabled ? "dim" : "text" }) as object),
           width: "100%",
           minWidth: 0,
-          // A textarea's own height: its rows of lines, the padding and the ring.
-          height: rows * line + 12 + 2,
+          // On web the textarea's own `rows` size it, as the DOM's; a phone is told its height.
+          ...(isWeb ? {} : { height: rows * line + 12 + 2 }),
           paddingVertical: 6,
           paddingHorizontal: 9,
           borderWidth: 1,
@@ -226,10 +236,11 @@ export function TextArea({
 
 /**
  * Chromium's own checkbox, as it draws `<input type="checkbox">` (the stylesheet leaves its look to the
- * browser): 13 square with a 3 3 3 4 margin, a 1px ring rounded 2. Light: white inside #767676
- * (hovered #4f4f4f); checked, #0075ff (hovered #005cc8) with a white tick. Dark (the page's
- * `color-scheme`): #3b3b3b inside #858585 (hovered #9c9c9c); checked #99c8ff (hovered #d1e6ff) with a
- * #3b3b3b tick. Measured off the desktop's pictures.
+ * browser), measured off the desktop's pictures: a 13-square box with a 3 3 3 4 margin, painted as a
+ * 12-square inside it (0.5 in from the left, flush at the top). Unchecked: a 1px ring rounded 2 on
+ * white, #767676 (hovered #4f4f4f). Checked: #0075ff (hovered #005cc8) with a white tick. In a dark
+ * `color-scheme`: #3b3b3b inside #858585 (hovered #9c9c9c); checked #99c8ff (hovered #d1e6ff) with a
+ * #3b3b3b tick. Drawn as a path, since a border would be snapped to whole device pixels.
  */
 export function Checkbox({ checked, disabled = false, onChange, label }: { checked: boolean; disabled?: boolean; onChange: (next: boolean) => void; label?: string }): JSX.Element {
   const look = useLook();
@@ -248,25 +259,31 @@ export function Checkbox({ checked, disabled = false, onChange, label }: { check
       marginLeft={4}
       flexShrink={0}
       {...(disabled ? { opacity: 0.5 } : {})}
-      box={({ hovered }) => {
+    >
+      {({ hovered }) => {
         const hover = hovered && !disabled;
         const fill = checked ? (dark ? (hover ? "#d1e6ff" : "#99c8ff") : hover ? "#005cc8" : "#0075ff") : dark ? "#3b3b3b" : "#ffffff";
-        const ring = checked ? fill : dark ? (hover ? "#9c9c9c" : "#858585") : hover ? "#4f4f4f" : "#767676";
-        return { width: 13, height: 13, borderRadius: 2, borderWidth: checked ? 0 : 1, borderStyle: "solid", borderColor: ring, backgroundColor: fill };
+        const ring = dark ? (hover ? "#9c9c9c" : "#858585") : hover ? "#4f4f4f" : "#767676";
+        return (
+          <Svg
+            width={13}
+            height={13}
+            viewBox="0 0 13 13"
+            color={dark ? "#3b3b3b" : "#ffffff"}
+            strokeWidth={1.6}
+            linecap="butt"
+            linejoin="miter"
+            shapes={
+              checked
+                ? [
+                    { kind: "path", d: "M2.5 0 H10.5 A2 2 0 0 1 12.5 2 V10 A2 2 0 0 1 10.5 12 H2.5 A2 2 0 0 1 0.5 10 V2 A2 2 0 0 1 2.5 0 Z", fill, stroke: "none" },
+                    { kind: "path", d: "M2.5 6.1 L5.17 8.67 L10.5 2.47" },
+                  ]
+                : [{ kind: "path", d: "M2.5 0.5 H10.5 A1.5 1.5 0 0 1 12 2 V10 A1.5 1.5 0 0 1 10.5 11.5 H2.5 A1.5 1.5 0 0 1 1 10 V2 A1.5 1.5 0 0 1 2.5 0.5 Z", fill, stroke: ring, strokeWidth: 1 }]
+            }
+          />
+        );
       }}
-    >
-      {checked ? (
-        <Svg
-          width={13}
-          height={13}
-          viewBox="0 0 13 13"
-          color={dark ? "#3b3b3b" : "#ffffff"}
-          strokeWidth={1.9}
-          linecap="butt"
-          linejoin="miter"
-          shapes={[{ kind: "path", d: "M2.6 6.5 L5.2 9.1 L10.4 3.9" }]}
-        />
-      ) : null}
     </Press>
   );
 }

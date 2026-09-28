@@ -297,3 +297,16 @@ export const PLAIN_SCROLLER: Record<string, unknown> = isWeb ? { transform: "non
 
 /** Chromium's own placeholder colour (`::placeholder`, which `styles.css` leaves alone): #757575, or #a9a9a9 in a dark scheme. */
 export const placeholderColor = (scheme: "light" | "dark"): string => (scheme === "dark" ? "#a9a9a9" : "#757575");
+
+/**
+ * A length the stylesheet writes in `ch` of the app voice (DM Sans), at a scale of `--size-app`: `n` widths
+ * of its `0`. The `0` widens with the optical size, which Chromium sets to the font size — measured on the
+ * desktop's page at 0.662 of the size at 10px, 0.667 at 11px and 0.6784 at 13px, and read between and
+ * beyond those as lines through them. On the desktop's page (not replayed) it is the stylesheet's `ch`.
+ */
+export function appCh(t: Tokens, scale: number, n: number): number | string {
+  const size = t.scaled("size-app", scale);
+  if (typeof size !== "number") return `calc(${n}ch)`;
+  const zero = size <= 11 ? 0.662 + 0.005 * (size - 10) : 0.667 + 0.0057 * (size - 11);
+  return n * size * zero;
+}

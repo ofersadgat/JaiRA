@@ -4,7 +4,7 @@ import { Platform, ScrollView, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
 import { acceptOffer, close, crumbOf, forward, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { labelPlan } from "@jaira/ui/panelTabs";
-import { Press, Txt, edge, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Icon } from "./Icon";
 
@@ -190,6 +190,7 @@ function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open:
             key={tab.id}
             onPress={() => onTab(tab.id)}
             title={tab.label}
+            label={tab.label}
             marginBottom={-1}
             role="tab"
             aria-selected={on}
@@ -429,8 +430,11 @@ export function SidePanel({
         <ScrollView
           key={`${top.key}|${"tab" in top ? top.tab : ""}`}
           {...(scrollbarProps(t) as object)}
-          style={{ flex: 1, minHeight: 0 }}
-          contentContainerStyle={{ paddingTop: 12, paddingHorizontal: 12, paddingBottom: 18 }}
+          // `PLAIN_SCROLLER`: the DOM's `.sp-body.scroll` is not composited, and its text is subpixel.
+          style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
+          // `.sp-body.scroll`: a column the scroller's height at least (a body that fills it, as Changes
+          // does, grows into it), padded 12 12 18, 14 between its blocks.
+          contentContainerStyle={{ flexGrow: 1, flexDirection: "column", gap: 14, paddingTop: 12, paddingHorizontal: 12, paddingBottom: 18, ...PLAIN_SCROLLER } as never}
         >
           {topFace.body}
         </ScrollView>

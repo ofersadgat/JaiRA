@@ -26,6 +26,7 @@ export function Splitter({
   extent = 0,
   label,
   reset,
+  invert = false,
 }: {
   value: number;
   onChange: (value: number) => void;
@@ -36,14 +37,16 @@ export function Splitter({
   extent?: number;
   label: string;
   reset: number;
+  /** The pane AFTER the divider is the one sized (the DOM's `invert`): a drag right narrows it. */
+  invert?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
   const [dragging, setDragging] = useState(false);
   const horizontal = orientation === "horizontal";
   // The latest props, for a responder made once.
-  const live = useRef({ value, onChange, min, max, reserve, extent, reset });
-  live.current = { value, onChange, min, max, reserve, extent, reset };
+  const live = useRef({ value, onChange, min, max, reserve, extent, reset, invert });
+  live.current = { value, onChange, min, max, reserve, extent, reset, invert };
   const from = useRef(0);
   const lastTap = useRef(0);
   const pan = useMemo(
@@ -61,7 +64,8 @@ export function Splitter({
         },
         onPanResponderMove: (_e, g) => {
           const l = live.current;
-          l.onChange(clampSplit(from.current + (horizontal ? g.dy : g.dx), l.min, l.max, l.reserve, l.extent));
+          const moved = horizontal ? g.dy : g.dx;
+          l.onChange(clampSplit(from.current + (l.invert ? -moved : moved), l.min, l.max, l.reserve, l.extent));
         },
         onPanResponderRelease: () => setDragging(false),
         onPanResponderTerminate: () => setDragging(false),

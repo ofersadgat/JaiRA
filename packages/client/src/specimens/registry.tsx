@@ -4,6 +4,7 @@ import type { FileSource } from "@jaira/shared/browser";
 import { FileInspector as DomFileInspector } from "@jaira/ui/files";
 import { DataView as DomDataView } from "@jaira/ui/valueView";
 import { DataView, FileInspector, Markdown } from "@jaira/universal";
+import { FORM_SPECIMENS } from "./formSpecimens";
 
 /**
  * The specimens: a DOM component and its universal copy, each drawn from the same fixture, for
@@ -74,6 +75,8 @@ const FILE: FileSource = {
 };
 
 export const SPECIMENS: Record<string, Specimen> = {
+  // The schema form's field kinds (`schemaForm/SchemaForm.tsx`): a run's or a gate's form, and Settings rows.
+  ...FORM_SPECIMENS,
   // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,

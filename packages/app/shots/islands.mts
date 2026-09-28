@@ -13,10 +13,16 @@
  * whether the grammars coloured the text, how the content height settles, memory with three islands
  * live, a palette switch, and typed input in the editable editor. Keyboard, IME and gestures are not
  * measured here — they need the device.
+ *
+ * The code editors (the Files room's surfaces): the Monaco editor (`code`) over a 2,000-line file —
+ * ready, drawn, its worker, its grammar, a palette switch with the person's editor look carried in
+ * the render, and typing that comes back — the same island as the code view (the tokenizer, no
+ * editor), and the schema-aware editor's text (`schemaText`), typed into.
  */
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
+import { defaultAppearanceConfig } from "@jaira/shared";
 import { App } from "./driver.mjs";
 
 const CLIENT_DIST = join(import.meta.dirname, "..", "..", "client", "dist");
@@ -191,6 +197,80 @@ async function main(): Promise<void> {
       await app.shot("three-dark");
     } catch (e) {
       note(`three islands: FAILED — ${(e as Error).message}`);
+    }
+
+    // 6. The code editor (Monaco, editable) over a 2,000-line file, with an editor look in the render.
+    await fresh();
+    const code = sources(2000).original;
+    // The person's look as the host sends it: the defaults, with the code editor's minimap off and a
+    // tab of 4 — so a look that did not arrive would show.
+    const defaults = defaultAppearanceConfig();
+    const appearance = { ...defaults, editors: { ...defaults.editors, code: { ...defaults.editors.code, minimap: false, tabSize: 4 } } };
+    await app.evaluate(
+      `open_("code", "code", ${JSON.stringify({ text: code, mime: "text/x-typescript", file: "C:/w/board.tsx", view: "write" })}, ${JSON.stringify({ ...LOOK, appearance })}, 700, false)`,
+    );
+    try {
+      await waitFor(app, `e.id === "code" && e.kind === "drawn"`, "the code editor to draw", 90);
+      await new Promise((r) => setTimeout(r, 1500));
+      const ev = (await events(app)).filter((e) => e.id === "code");
+      const fallback = ev.some((e) => e.kind === "log" && /web worker|fall(ing)? back/i.test(e.text ?? ""));
+      const drawn = ev.find((e) => e.kind === "drawn");
+      note(
+        `code editor 2000 lines: ready ${ev.find((e) => e.kind === "ready")?.at} ms, drawn ${drawn?.ms} ms after render, ${drawn?.colours} inks, worker ${fallback ? "FELL BACK to the main thread" : "started"}, heap ${((drawn?.heap ?? 0) / 1048576).toFixed(0)} MB` +
+          (ev.some((e) => e.kind === "error") ? `, errors: ${ev.filter((e) => e.kind === "error").map((e) => e.message).join("; ")}` : ""),
+      );
+      await app.shot("code-2000");
+      // A tap on the first line's text, then text committed the way an IME commits it.
+      await app.clickAt(200, 16);
+      await new Promise((r) => setTimeout(r, 300));
+      await app.type("typedOnAPhone ");
+      await app.until(`window.__events.some((e) => e.id === "code" && e.kind === "event" && e.name === "change" && String(e.value).includes("typedOnAPhone"))`, "the typed text to come back", 20);
+      note(`code editor: typed text reached the host as a change over the bridge`);
+      // The palette, switched without a reload: the window to dark, and the editors to follow it (the
+      // default editor palette, Monokai Light, is a palette of its own and stays light in a dark window,
+      // as it does on the desktop).
+      await app.evaluate(`render_("code", ${JSON.stringify({ palette: "ink", theme: "dark", appearance: { ...appearance, editorTheme: "app" } })})`);
+      await app.until(`window.__events.filter((e) => e.id === "code" && e.kind === "drawn").length >= 2`, "the code editor to redraw dark", 40);
+      // The dark grammar theme is fetched on the way (Shiki's), so give it a moment before the picture.
+      await new Promise((r) => setTimeout(r, 2500));
+      const said = (await events(app)).filter((e) => e.id === "code" && (e.kind === "log" || e.kind === "error")).map((e) => e.text ?? e.message);
+      note(`code editor: redrew in dark without a reload (see code-dark.png)${said.length > 0 ? `; it said: ${said.join(" | ").slice(0, 400)}` : ""}`);
+      await app.shot("code-dark");
+    } catch (e) {
+      const ev = (await events(app)).filter((x) => x.id === "code");
+      note(`code editor: FAILED — ${(e as Error).message}; ${JSON.stringify(ev.slice(0, 6)).slice(0, 600)}`);
+    }
+
+    // 7. The same island as the code view: the tokenizer's colours, no editor under them.
+    await fresh();
+    await app.evaluate(`open_("view", "code", ${JSON.stringify({ text: code, mime: "text/x-typescript", reading: true })}, ${JSON.stringify(LOOK)}, 700, false)`);
+    try {
+      await waitFor(app, `e.id === "view" && e.kind === "drawn"`, "the code view to draw", 90);
+      await new Promise((r) => setTimeout(r, 2500));
+      const ev = (await events(app)).filter((e) => e.id === "view");
+      const drawn = ev.filter((e) => e.kind === "drawn");
+      note(`code view 2000 lines: ready ${ev.find((e) => e.kind === "ready")?.at} ms, drawn ${drawn[0]?.ms} ms after render, ${drawn.at(-1)?.colours} inks`);
+      await app.shot("code-view");
+    } catch (e) {
+      note(`code view: FAILED — ${(e as Error).message}`);
+    }
+
+    // 8. The schema-aware editor's text: a permission set, against its schema, typed into.
+    await fresh();
+    const permissions = JSON.stringify({ description: "Ask before anything writes.", rules: [{ tool: "read_file", decision: "allow" }] }, null, 2);
+    await app.evaluate(`open_("json", "schemaText", ${JSON.stringify({ text: permissions, schemaId: null, format: "json", wrap: false, fill: 0 })}, ${JSON.stringify(LOOK)}, 400, false)`);
+    try {
+      await waitFor(app, `e.id === "json" && e.kind === "drawn"`, "the schema editor to draw", 60);
+      const ev = (await events(app)).filter((e) => e.id === "json");
+      note(`schema editor: ready ${ev.find((e) => e.kind === "ready")?.at} ms, drawn ${ev.find((e) => e.kind === "drawn")?.ms} ms after render, ${ev.find((e) => e.kind === "drawn")?.colours} inks`);
+      await app.clickAt(300, 60);
+      await new Promise((r) => setTimeout(r, 300));
+      await app.type("typed ");
+      await app.until(`window.__events.some((e) => e.id === "json" && e.kind === "event" && String(e.value).includes("typed "))`, "the typed text to come back", 20);
+      note(`schema editor: typed text reached the host as a change over the bridge`);
+      await app.shot("schema-typed");
+    } catch (e) {
+      note(`schema editor: FAILED — ${(e as Error).message}`);
     }
 
     // 5. The editable editor: does typed text come back over the bridge?

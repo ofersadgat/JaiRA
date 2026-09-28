@@ -20,48 +20,44 @@
  *  - **Sampling XOR reasoning.** `parseLlmConfig` upstream rejects a config carrying both, so the
  *    form refuses to produce one: turning reasoning on retires the sampling knobs, and says why.
  */
-import { useId, useMemo, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
-import { REASONING_EFFORTS, type ModelParametersView } from "@jaira/shared/browser";
-import { Field, FieldGrid, NumInput, SelectInput, TextArea, TextInput } from "./controls";
+import { useId, useState, type JSX, type KeyboardEvent, type ReactNode } from "react";
+import { Field, FieldGrid, NumInput, TextArea, TextInput } from "./controls";
+import {
+  LIMIT_FIELDS,
+  SAMPLING_FIELDS,
+  STOPS_FIELD,
+  advancedEdit,
+  advancedTextOf,
+  llmCategoriesOf,
+  llmSummariesOf,
+  numOf as num,
+  railMoveOf,
+  railStep,
+  reasoningOf,
+  reasoningSchemaOf,
+  refusedSamplingOf,
+  stopsFromText,
+  stopsOf,
+  withKey,
+  withoutSampling,
+  KNOWN_KEYS,
+  type CategoryKey,
+  type LlmConfigDoc,
+} from "./llmConfigModel";
 import { levelsFooter, useModelParameters } from "./modelParameters";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 import type { Schema } from "./schemaForm/types";
 
-/** The config as a plain document — what a preset or an executor's `models.config` holds. */
-export type LlmConfigDoc = Record<string, unknown>;
-
-/**
- * The knobs a sampling endpoint takes, and a reasoning endpoint REFUSES.
- *
- * Upstream's `SAMPLING_KEYS`, restated because `shared` must not import `@declarative-ai/llm` into
- * the renderer's bundle. If that list gains a key, this one does too — the cost of the split, and
- * cheaper than pulling the provider layer into Chromium.
- */
-const SAMPLING_KEYS = ["temperature", "topP", "topK", "presencePenalty", "frequencyPenalty"] as const;
-
-/**
- * The `reasoning` object's schema for SchemaForm: the resolved model's own (its levels as an `enum`
- * with their descriptions, a budget only where it takes one), or — for a model nothing describes — the
- * usual levels as SUGGESTIONS and a budget, since what it takes is not known.
- */
-export function reasoningSchemaOf(view: ModelParametersView | undefined): Schema {
-  const own = view?.reasoningSchema;
-  if (own !== null && typeof own === "object" && !Array.isArray(own) && view?.levels !== undefined) return own as Schema;
-  return {
-    type: "object",
-    additionalProperties: false,
-    properties: {
-      effort: { type: "string", examples: [...REASONING_EFFORTS], description: "A level rather than a number of tokens. A model that tops out lower clamps rather than refusing." },
-      budgetTokens: { type: "integer", minimum: 1, description: "A token ceiling on the thinking itself, for the models that take one." },
-    },
-  };
-}
-
-/**
- * The categories, their fields, and how each summarises itself when collapsed. `model` is drawn only
- * where a host supplies it ({@link LlmConfigForm}'s `lead`) — a preset's Model.
- */
-export type CategoryKey = "model" | "sampling" | "reasoning" | "limits" | "advanced";
+export {
+  SAMPLING_KEYS,
+  railMoveOf,
+  railStep,
+  reasoningSchemaOf,
+  summariseLlmConfig,
+  type CategoryKey,
+  type LlmConfigDoc,
+  type RailMove,
+} from "./llmConfigModel";
 
 /**
  * A section a HOST draws first, before the call settings: a preset's Model, which only a preset has.
@@ -76,46 +72,6 @@ export interface LeadSection {
 }
 
 // --- the rail ------------------------------------------------------------------------
-
-/** What a key pressed on a rail tab asks for. `in` and `out` cross to the rail beside this one. */
-export type RailMove = "prev" | "next" | "first" | "last" | "in" | "out";
-
-/**
- * Read an arrow key against the way the rail is LAID OUT.
- *
- * A rail is a column of tabs until the window is narrow, where it becomes a row of them. The keys
- * that run ALONG the rail move the selection; the pair that runs ACROSS it steps to the rail beside
- * it — the presets' sections from the presets, and back — so two nested rails are one keyboard
- * surface instead of two tab stops with nothing between them. Turned into a row, the pairs swap,
- * because "the next tab" has to be the one the eye finds next.
- */
-export function railMoveOf(key: string, row: boolean): RailMove | undefined {
-  switch (key) {
-    case "ArrowDown":
-      return row ? "in" : "next";
-    case "ArrowUp":
-      return row ? "out" : "prev";
-    case "ArrowRight":
-      return row ? "next" : "in";
-    case "ArrowLeft":
-      return row ? "prev" : "out";
-    case "Home":
-      return "first";
-    case "End":
-      return "last";
-    default:
-      return undefined;
-  }
-}
-
-/** The tab a move lands on. It wraps: a rail is short, and its ends are one key apart. */
-export function railStep(index: number, count: number, move: "prev" | "next" | "first" | "last"): number {
-  if (count <= 0) return -1;
-  if (move === "first") return 0;
-  if (move === "last") return count - 1;
-  const from = index < 0 ? (move === "next" ? -1 : 0) : index;
-  return (from + (move === "next" ? 1 : -1) + count) % count;
-}
 
 export interface RailItem {
   id: string;
@@ -245,33 +201,6 @@ export function TabRail({
   );
 }
 
-function num(doc: LlmConfigDoc, key: string): number | undefined {
-  const value = doc[key];
-  return typeof value === "number" ? value : undefined;
-}
-
-function reasoningOf(doc: LlmConfigDoc): { effort?: string; budgetTokens?: number } | undefined {
-  const value = doc["reasoning"];
-  return value !== null && typeof value === "object" && !Array.isArray(value)
-    ? (value as { effort?: string; budgetTokens?: number })
-    : undefined;
-}
-
-/**
- * The keys this form edits with a dedicated control. Everything else is "advanced", never dropped.
- * `model` is one of them wherever it is edited — a preset's Model section, or the field a Defaults
- * form draws beside this one — so it never turns up in Advanced as an "extra".
- */
-const KNOWN_KEYS = new Set<string>([
-  "model",
-  ...SAMPLING_KEYS,
-  "reasoning",
-  "maxOutputTokens",
-  "stopSequences",
-  "seed",
-  "maxSteps",
-]);
-
 export function LlmConfigForm({
   value,
   onChange,
@@ -337,56 +266,13 @@ export function LlmConfigForm({
   const thinking = useModelParameters(levelsFor ?? ownModel);
 
   /** Write one key. `undefined` REMOVES it, which is how a box goes back to inheriting. */
-  const set = (key: string, next: unknown): void => {
-    const doc = { ...value };
-    if (next === undefined) delete doc[key];
-    else doc[key] = next;
-    onChange(doc);
-  };
+  const set = (key: string, next: unknown): void => onChange(withKey(value, key, next));
 
-  const stops = Array.isArray(value["stopSequences"])
-    ? (value["stopSequences"] as unknown[]).filter((s): s is string => typeof s === "string")
-    : [];
+  const stops = stopsOf(value);
 
-  const extras = useMemo(() => Object.keys(value).filter((k) => !KNOWN_KEYS.has(k)), [value]);
+  const summaries = llmSummariesOf(value, lead?.summary);
 
-  const summaries: Record<CategoryKey, string> = {
-    model: lead?.summary ?? "",
-    sampling: reasoningOn
-      ? "not applicable — reasoning is on"
-      : (() => {
-          const set = SAMPLING_KEYS.filter((k) => value[k] !== undefined);
-          return set.length === 0 ? "provider defaults" : set.join(" · ");
-        })(),
-    reasoning: reasoning === undefined ? "off" : (reasoning.effort ?? `${reasoning.budgetTokens ?? "?"} tokens`),
-    limits: [
-      value["maxOutputTokens"] === undefined ? null : `${String(value["maxOutputTokens"])} tokens`,
-      stops.length > 0 ? `${stops.length} stop` : null,
-    ]
-      .filter(Boolean)
-      .join(" · ") || "no limits",
-    advanced: extras.length === 0 ? "none" : `${extras.length} extra`,
-  };
-
-  const CATEGORIES: Array<{ key: CategoryKey; label: string; hint: string }> = [
-    ...(lead !== undefined ? [{ key: lead.key, label: lead.label, hint: lead.hint }] : []),
-    {
-      key: "sampling",
-      label: "Sampling",
-      hint: "How the model picks its next token. A reasoning model rejects these outright, so they are only offered while reasoning is off.",
-    },
-    {
-      key: "reasoning",
-      label: "Reasoning",
-      hint: "How hard to think, as an effort level and/or a token budget. Provider-neutral: it is adapted to each provider's own shape at the call.",
-    },
-    { key: "limits", label: "Output limits", hint: "How long an answer may run, and what ends it." },
-    {
-      key: "advanced",
-      label: "Advanced",
-      hint: "Anything this form has no dedicated control for. Editable as JSON so a setting is never silently dropped.",
-    },
-  ];
+  const CATEGORIES = llmCategoriesOf(lead);
 
   return (
     <Frame unframed={unframed}>
@@ -415,62 +301,11 @@ export function LlmConfigForm({
             </div>
           ) : (
             <FieldGrid>
-              <Field
-                label="Temperature"
-                param="temperature"
-                hint="Higher is more varied, lower more repeatable. Empty inherits the provider's default."
-                set={here(value["temperature"])}
-              >
-                <NumInput value={num(value, "temperature")} disabled={disabled} onChange={(n) => set("temperature", n)} />
-              </Field>
-              <Field
-                label="Top-p"
-                param="topP"
-                hint="Nucleus sampling: consider only the most likely tokens adding up to this probability mass (0–1)."
-                set={here(value["topP"])}
-              >
-                <NumInput value={num(value, "topP")} disabled={disabled} onChange={(n) => set("topP", n)} />
-              </Field>
-              <Field
-                label="Top-k"
-                param="topK"
-                hint="Consider only the k most likely tokens. Provider-dependent; empty inherits."
-                set={here(value["topK"])}
-              >
-                <NumInput value={num(value, "topK")} disabled={disabled} onChange={(n) => set("topK", n)} />
-              </Field>
-              <Field
-                label="Presence penalty"
-                param="presencePenalty"
-                hint="Discourages tokens that already appeared at all."
-                set={here(value["presencePenalty"])}
-              >
-                <NumInput
-                  value={num(value, "presencePenalty")}
-                  disabled={disabled}
-                  onChange={(n) => set("presencePenalty", n)}
-                />
-              </Field>
-              <Field
-                label="Frequency penalty"
-                param="frequencyPenalty"
-                hint="Discourages tokens in proportion to how often they already appeared."
-                set={here(value["frequencyPenalty"])}
-              >
-                <NumInput
-                  value={num(value, "frequencyPenalty")}
-                  disabled={disabled}
-                  onChange={(n) => set("frequencyPenalty", n)}
-                />
-              </Field>
-              <Field
-                label="Seed"
-                param="seed"
-                hint="Fixes the sampler so an identical call draws an identical answer, where the provider supports it."
-                set={here(value["seed"])}
-              >
-                <NumInput value={num(value, "seed")} disabled={disabled} onChange={(n) => set("seed", n)} />
-              </Field>
+              {SAMPLING_FIELDS.map((field) => (
+                <Field key={field.param} label={field.label} param={field.param} hint={field.hint} set={here(value[field.param])}>
+                  <NumInput value={num(value, field.param)} disabled={disabled} onChange={(n) => set(field.param, n)} />
+                </Field>
+              ))}
             </FieldGrid>
           )
         ) : null}
@@ -503,20 +338,16 @@ export function LlmConfigForm({
               <p className="cfg-hint">No thinking budget: {thinking.resolved} takes a level only.</p>
             ) : null}
             <p className="cfg-hint">{levelsFooter(thinking)}</p>
-            {reasoningOn && SAMPLING_KEYS.some((k) => value[k] !== undefined) ? (
+            {refusedSamplingOf(value).length > 0 ? (
               <div className="notice warn">
                 This configuration also sets{" "}
-                {SAMPLING_KEYS.filter((k) => value[k] !== undefined).join(", ")}, which a reasoning endpoint
+                {refusedSamplingOf(value).join(", ")}, which a reasoning endpoint
                 refuses. Clear them, or turn reasoning off.
                 <div className="pane-actions">
                   <button
                     className="ghost"
                     disabled={disabled}
-                    onClick={() => {
-                      const doc = { ...value };
-                      for (const key of SAMPLING_KEYS) delete doc[key];
-                      onChange(doc);
-                    }}
+                    onClick={() => onChange(withoutSampling(value))}
                   >
                     Clear the sampling knobs
                   </button>
@@ -528,41 +359,13 @@ export function LlmConfigForm({
 
         {active === "limits" ? (
           <FieldGrid>
-            <Field
-              label="Max output tokens"
-              param="maxOutputTokens"
-              hint="A ceiling on the answer's length — the main lever on the cost of one call. Empty means the model's own maximum."
-              set={here(value["maxOutputTokens"])}
-            >
-              <NumInput
-                value={num(value, "maxOutputTokens")}
-                disabled={disabled}
-                onChange={(n) => set("maxOutputTokens", n)}
-              />
-            </Field>
-            <Field
-              label="Max tool steps"
-              param="maxSteps"
-              hint="How many model→tool→model round trips one call may take before it is stopped."
-              set={here(value["maxSteps"])}
-            >
-              <NumInput value={num(value, "maxSteps")} disabled={disabled} onChange={(n) => set("maxSteps", n)} />
-            </Field>
-            <Field
-              label="Stop sequences"
-              param="stopSequences"
-              hint="Comma-separated strings that end generation as soon as they appear."
-              set={here(value["stopSequences"])}
-            >
-              <TextInput
-                value={stops.join(", ")}
-                placeholder="—"
-                disabled={disabled}
-                onChange={(v) => {
-                  const list = v.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
-                  set("stopSequences", list.length > 0 ? list : undefined);
-                }}
-              />
+            {LIMIT_FIELDS.map((field) => (
+              <Field key={field.param} label={field.label} param={field.param} hint={field.hint} set={here(value[field.param])}>
+                <NumInput value={num(value, field.param)} disabled={disabled} onChange={(n) => set(field.param, n)} />
+              </Field>
+            ))}
+            <Field label={STOPS_FIELD.label} param={STOPS_FIELD.param} hint={STOPS_FIELD.hint} set={here(value[STOPS_FIELD.param])}>
+              <TextInput value={stops.join(", ")} placeholder="—" disabled={disabled} onChange={(v) => set("stopSequences", stopsFromText(v))} />
             </Field>
           </FieldGrid>
         ) : null}
@@ -596,8 +399,8 @@ function AdvancedJson({
   disabled: boolean;
   onChange: (next: LlmConfigDoc) => void;
 }): JSX.Element {
-  const extras = Object.fromEntries(Object.entries(value).filter(([k]) => !known.has(k)));
-  const saved = Object.keys(extras).length === 0 ? "" : JSON.stringify(extras, null, 2);
+  void known;
+  const saved = advancedTextOf(value);
   const [text, setText] = useState(saved);
   const [baseline, setBaseline] = useState(saved);
   const [problem, setProblem] = useState<string | null>(null);
@@ -623,41 +426,17 @@ function AdvancedJson({
           disabled={disabled}
           onChange={(v) => {
             setText(v);
-            if (v.trim() === "") {
-              setProblem(null);
-              onChange(Object.fromEntries(Object.entries(value).filter(([k]) => known.has(k))));
+            const edit = advancedEdit(value, v);
+            if ("problem" in edit) {
+              setProblem(edit.problem);
               return;
             }
-            try {
-              const parsed: unknown = JSON.parse(v);
-              if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-                setProblem("must be a JSON object");
-                return;
-              }
-              setProblem(null);
-              onChange({
-                ...Object.fromEntries(Object.entries(value).filter(([k]) => known.has(k))),
-                ...(parsed as LlmConfigDoc),
-              });
-            } catch (e) {
-              setProblem((e as Error).message);
-            }
+            setProblem(null);
+            onChange(edit.doc);
           }}
         />
       </Field>
       {problem ? <div className="sub warn-text">not saved — {problem}</div> : null}
     </div>
   );
-}
-
-/** A one-line summary of a config, for a row that shows one without opening it. */
-export function summariseLlmConfig(doc: LlmConfigDoc): string {
-  const parts: string[] = [];
-  const reasoning = reasoningOf(doc);
-  if (reasoning !== undefined) parts.push(`reasoning ${reasoning.effort ?? `${reasoning.budgetTokens ?? "?"}t`}`);
-  for (const key of SAMPLING_KEYS) if (doc[key] !== undefined) parts.push(`${key} ${String(doc[key])}`);
-  if (doc["maxOutputTokens"] !== undefined) parts.push(`≤${String(doc["maxOutputTokens"])} tokens`);
-  const extra = Object.keys(doc).filter((k) => !KNOWN_KEYS.has(k)).length;
-  if (extra > 0) parts.push(`+${extra} more`);
-  return parts.length === 0 ? "provider defaults" : parts.join(" · ");
 }

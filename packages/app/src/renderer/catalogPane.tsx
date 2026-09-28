@@ -8,84 +8,15 @@
  * agent. Each row opens to list the models its source reported, with their reasoning levels: what to
  * look at when a level is missing from a picker.
  */
-import { useEffect, useState, type JSX } from "react";
-import type { CatalogSourceView, CatalogStatusView } from "@jaira/shared/browser";
+import { useState, type JSX } from "react";
+import type { CatalogSourceView } from "@jaira/shared/browser";
+import { SOURCE_BRAND, catalogLastLine, catalogRowOf, type CatalogState } from "./catalogModel";
 import { StatusDot, type ProviderState } from "./controls";
 import { BrandIcon, Icon } from "./icons";
 import { Pill } from "./pill";
-import { agoLabel } from "./remoteStrip";
 import { SettingsSection } from "./settingsLayout";
-import { invoke } from "./store";
 
-/** The brand a source's row wears. */
-const SOURCE_BRAND: Record<string, string> = {
-  "openrouter-models": "openrouter",
-  "openrouter-native-mirrors": "openrouter",
-  "anthropic-models": "anthropic",
-  "claude-cli-models": "claude-cli",
-  "claude-code-models": "claude-code",
-  "codex-cli-models": "codex-cli",
-  "local-models": "local",
-  "embedded-models": "embedded",
-};
-
-/** `in 23 h`, `in 48 min` — when a source is asked next. */
-function inLabel(at: number, now: number): string {
-  const minutes = Math.max(0, Math.round((at - now) / 60_000));
-  return minutes < 90 ? `in ${minutes} min` : `in ${Math.round(minutes / 60)} h`;
-}
-
-/** The catalog's status as the Models page holds it — read once, shared by its section and its suggestions. */
-export interface CatalogState {
-  view: CatalogStatusView | null;
-  now: number;
-  busy: boolean;
-  refresh: () => void;
-}
-
-/**
- * Read the catalog's status. `stamp` is the last availability check's time: a refresh follows every
- * check, so the status is read again when that moves.
- */
-export function useCatalogStatus(stamp: number): CatalogState {
-  const [view, setView] = useState<CatalogStatusView | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-
-  // Read on mount and after every check — and, while a pass is running or a planned source has not
-  // answered yet, again every second and a half until it settles: the refresh that follows a check
-  // lands seconds AFTER it, and nothing else would tell this section it did.
-  const [tick, setTick] = useState(0);
-  const settling = view === null || view.refreshing || view.sources.some((s) => s.state === "not asked yet");
-  useEffect(() => {
-    let live = true;
-    void invoke("catalog:status", undefined)
-      .then((next) => live && setView(next))
-      .catch(() => undefined);
-    setNow(Date.now());
-    return () => {
-      live = false;
-    };
-  }, [stamp, tick]);
-  useEffect(() => {
-    if (!settling) return;
-    const timer = setTimeout(() => setTick((n) => n + 1), 1500);
-    return () => clearTimeout(timer);
-  }, [settling, tick]);
-
-  const refresh = (): void => {
-    setRefreshing(true);
-    void invoke("catalog:refresh", undefined)
-      .then((next) => {
-        setView(next);
-        setNow(Date.now());
-      })
-      .catch(() => undefined)
-      .finally(() => setRefreshing(false));
-  };
-
-  return { view, now, busy: refreshing || view?.refreshing === true, refresh };
-}
+export { useCatalogStatus, type CatalogState } from "./catalogModel";
 
 /** The Catalog section, over the page's {@link useCatalogStatus}. */
 export function CatalogSection({ catalog }: { catalog: CatalogState }): JSX.Element {
@@ -97,12 +28,7 @@ export function CatalogSection({ catalog }: { catalog: CatalogState }): JSX.Elem
       info="What this machine's routes say they serve — each model's levels, limits and price. Refreshed by itself after every availability check and hourly; press Refresh after installing a model or updating an agent."
       action={
         <span className="catalog-aside">
-          {view?.lastAt !== undefined ? (
-            <span className="app-secondary">
-              last refreshed {agoLabel(view.lastAt, now)}
-              {view.tookMs !== undefined ? ` · ${(view.tookMs / 1000).toFixed(1)} s` : ""}
-            </span>
-          ) : null}
+          {catalogLastLine(view, now) !== undefined ? <span className="app-secondary">{catalogLastLine(view, now)}</span> : null}
           <button type="button" className="ghost" disabled={busy} onClick={refresh}>
             {busy ? "Refreshing…" : "Refresh"}
           </button>
@@ -125,13 +51,8 @@ export function CatalogSection({ catalog }: { catalog: CatalogState }): JSX.Elem
 /** One source: what it asked, how that went, when it is asked next — and, opened, the models it said. */
 function CatalogRow({ source, now }: { source: CatalogSourceView; now: number }): JSX.Element {
   const [open, setOpen] = useState(false);
-  const state: ProviderState = source.state === "ok" ? "available" : source.state === "failed" ? "unavailable" : "unconfigured";
-  const next =
-    source.nextAt === undefined
-      ? undefined
-      : source.state === "failed"
-        ? `asks again ${inLabel(source.nextAt, now)}`
-        : `asked again ${inLabel(source.nextAt, now)}${source.changesWith !== undefined ? `, or when ${source.changesWith}` : ""}`;
+  const row = catalogRowOf(source, now);
+  const state: ProviderState = row.state;
   return (
     <li className={`cfg-row ${state}`}>
       <div className="cfg-row-head">
@@ -160,18 +81,7 @@ function CatalogRow({ source, now }: { source: CatalogSourceView; now: number })
       </div>
       <p className="cfg-say">
         <span className="cfg-say-state">{source.state}</span>
-        {source.state === "not configured" ? (
-          <> — {source.error}</>
-        ) : source.state === "not asked yet" ? (
-          <> — asks {source.asks} after the next availability check</>
-        ) : (
-          <>
-            {" — "}
-            {source.state === "failed" ? `${source.error} · ` : `asked ${source.asks} · `}
-            {source.at !== undefined ? agoLabel(source.at, now) : ""}
-            {next !== undefined ? ` · ${next}` : ""}
-          </>
-        )}
+        {row.say}
         {source.fix !== undefined ? <span className="cfg-fix">→ {source.fix}</span> : null}
       </p>
       {open ? (
