@@ -558,6 +558,15 @@ Android can pick neither a weight nor an optical size out of one variable file.
 - Tamagui's `onPress` never fired on Android; everything pressable is React Native's `Pressable`.
 - A shorthand holding a `var()` leaves CDP's longhands empty, and they still win.
 
+**The editors (the person, 2026-09-28):** "the editor is the one place that I'll allow a divergence on
+mobile to have for now. That being said, the desktop version should be able to use monaco/codeview as
+normal components since desktop is using electron (for now). I want to complete the process of building
+a pixel perfect ui match before tackling the editor." So:
+- on a phone the code editors are islands and may differ from the desktop's. That covers Monaco
+  (`code`, `diff`), CodeMirror (`markdownEditor`) and the JSON editor's text (`schemaText`);
+- on the desktop they stay the DOM components, drawn inline by the web `Island`;
+- editor work waits until every other surface matches.
+
 **Progress:**
 - The sidebar is identical to the desktop's in all eight looks, apart from one dot's anti-aliasing in two
   dark ones.
