@@ -1,0 +1,28 @@
+/*
+ * The two bundled faces, and nothing else from `styles.css`: the `/rn` page draws only what the
+ * universal tree draws, as a phone does, and a phone has these fonts too (loaded by `expo-font`).
+ * The variable files the desktop uses, so the browser picks weights and optical sizes as it does there.
+ */
+@font-face {
+  font-family: "DM Sans";
+  src: url("../../../app/src/renderer/fonts/dm-sans-variable.woff2") format("woff2");
+  font-weight: 100 1000;
+  font-style: normal;
+  font-display: block;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("../../../app/src/renderer/fonts/jetbrains-mono-variable.woff2") format("woff2");
+  font-weight: 400 800;
+  font-style: normal;
+  font-display: block;
+}
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+#root {
+  display: flex;
+  height: 100vh;
+}

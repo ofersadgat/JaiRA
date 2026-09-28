@@ -66,6 +66,24 @@ export function stackOf(families: readonly string[], fallback: string): string |
 }
 
 /**
+ * The typography preferences as the custom properties `applyAppearance` writes on `:root`, `null` for
+ * one the person has not set (removed, so the stylesheet's own value stands). Pure, so a host with no
+ * document — the native universal tree (decision 0015) — replays the same values over the stylesheet.
+ */
+export function typographyOf(a: Appearance): Record<string, string | null> {
+  return {
+    "--font-app": stackOf(a.appFamily, DEFAULT_APP_STACK),
+    "--font-data": stackOf(a.dataFamily, DEFAULT_DATA_STACK),
+    "--size-app": `${clampSize("sizeApp", a.sizeApp)}px`,
+    "--size-data": `${clampSize("sizeData", a.sizeData)}px`,
+    // Simple/advanced: the editor follows the data voice until it is separated. `null` restores the
+    // stylesheet's own `var(--size-data)`, so turning Advanced back off re-couples them rather than
+    // freezing the editor at whatever it happened to be.
+    "--size-editor": a.advanced ? `${clampSize("sizeEditor", a.sizeEditor)}px` : null,
+  };
+}
+
+/**
  * Write the preferences onto the document root as the tokens the stylesheet reads.
  *
  * Inline custom properties on `:root`, which is the one place that beats the stylesheet's own `:root`
@@ -79,14 +97,7 @@ export function applyAppearance(root: HTMLElement, a: Appearance): void {
     if (value === null) root.style.removeProperty(name);
     else root.style.setProperty(name, value);
   };
-  set("--font-app", stackOf(a.appFamily, DEFAULT_APP_STACK));
-  set("--font-data", stackOf(a.dataFamily, DEFAULT_DATA_STACK));
-  set("--size-app", `${clampSize("sizeApp", a.sizeApp)}px`);
-  set("--size-data", `${clampSize("sizeData", a.sizeData)}px`);
-  // Simple/advanced: the editor follows the data voice until it is separated. `null` restores the
-  // stylesheet's own `var(--size-data)`, so turning Advanced back off re-couples them rather than
-  // freezing the editor at whatever it happened to be.
-  set("--size-editor", a.advanced ? `${clampSize("sizeEditor", a.sizeEditor)}px` : null);
+  for (const [name, value] of Object.entries(typographyOf(a))) set(name, value);
   // Grayscale antialiasing, off by default — see `Appearance.smoothing`.
   set("-webkit-font-smoothing", a.smoothing ? "antialiased" : null);
   set("-moz-osx-font-smoothing", a.smoothing ? "grayscale" : null);

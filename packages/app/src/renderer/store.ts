@@ -125,7 +125,7 @@ import {
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
-import { applyAppearance, useSystemDark } from "./appearance";
+import { applyAppearance, typographyOf, useSystemDark } from "./appearance";
 import { surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
@@ -2207,10 +2207,18 @@ export function useApp() {
    * The look as three facts, for a host with no root element to read it from — the native universal
    * tree (decision 0015), whose tokens replay `styles.css` for a palette and a scheme it has to be told.
    */
-  const appearance = useMemo(
-    () => ({ palette: look.palette, scheme: resolveTheme(look.mode, systemDark), wash: surfaceOf(look).statusWash }),
-    [look, systemDark],
-  );
+  const appearance = useMemo(() => {
+    const surface = surfaceOf(look);
+    const overrides = Object.fromEntries(Object.entries(typographyOf(look)).filter((e): e is [string, string] => e[1] !== null).map(([k, v]) => [k.slice(2), v]));
+    return {
+      palette: look.palette,
+      scheme: resolveTheme(look.mode, systemDark),
+      wash: surface.statusWash,
+      buckets: surface.buckets === "line" ? ("line" as const) : ("box" as const),
+      lanes: surface.laneColors,
+      overrides,
+    };
+  }, [look, systemDark]);
 
   /**
    * Publish the renderer choices for the components that cannot be handed them.

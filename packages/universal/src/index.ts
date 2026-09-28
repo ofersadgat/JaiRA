@@ -3,9 +3,10 @@ import { Pill } from "./components/Pill";
 import { TaskCard } from "./components/TaskCard";
 
 export { config } from "./tamagui.config";
-export { TokenRoot, TokenScope, useLook, useTokens, type Look, type Tokens } from "./tokens";
+export { Replayed, TokenRoot, TokenScope, useLook, useTokens, type Look, type Tokens } from "./tokens";
 export { Island, type IslandProps } from "./islands";
 export { Connect } from "./screens/Connect";
+export { UniversalApp, useShell, Uncopied } from "./app/UniversalApp";
 export { CopiesBoard } from "./screens/CopiesBoard";
 
 /** Every universal copy there is, by the slot it fills. `/universal` and native draw all of them. */

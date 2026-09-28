@@ -74,6 +74,12 @@ const CLIENT_DIR = join(DIST, "client");
  * while the spike compares the two (`JAIRA_RENDERER=vite`).
  */
 const RENDERER: "one" | "vite" = process.env.JAIRA_RENDERER === "vite" ? "vite" : "one";
+/**
+ * The One client's DEV SERVER instead of the built client (`JAIRA_CLIENT_DEV=http://127.0.0.1:8081/`),
+ * so an edit reaches the window without a build — how the universal copies are iterated on against the
+ * desktop (decision 0015). Never in a packaged app: there the window loads only what it shipped with.
+ */
+const DEV_CLIENT = !app.isPackaged && process.env.JAIRA_CLIENT_DEV !== undefined && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/$/.test(process.env.JAIRA_CLIENT_DEV) ? process.env.JAIRA_CLIENT_DEV : undefined;
 /** The throwaway remote transport (0015 S2), when `JAIRA_SPIKE_WS` asks for it. */
 let spike: SpikeSocket | undefined;
 const PRELOAD = join(DIST, "preload.cjs");
@@ -845,7 +851,7 @@ async function createWindow(): Promise<BrowserWindow> {
     reportCrash("renderer", new Error(at));
   });
 
-  if (RENDERER === "one") await win.loadURL(CLIENT_URL);
+  if (RENDERER === "one") await win.loadURL(DEV_CLIENT ?? CLIENT_URL);
   else await win.loadFile(RENDERER_HTML);
   win.show();
   return win;

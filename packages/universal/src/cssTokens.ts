@@ -62,14 +62,15 @@ export type TokenValue = string | number;
  * change the ring the sidebar inherits. So the root's declarations are evaluated first, and each scope's
  * over what it inherits from the level above.
  */
-export function resolveAt(where: Where, blocks: readonly TokenBlock[] = BLOCKS): Record<string, TokenValue> {
+export function resolveAt(where: Where, blocks: readonly TokenBlock[] = BLOCKS, overrides: Readonly<Record<string, string>> = {}): Record<string, TokenValue> {
   const scopes = where.scopes ?? [];
   let inherited: Record<string, TokenValue> = {};
   for (let level = 0; level <= scopes.length; level++) {
     const here = { ...where, scopes: scopes.slice(0, level) };
     const all = declarationsAt(here, blocks);
     // Only what THIS level declares; everything else arrives computed from the level above.
-    const declared = level === 0 ? all : declaredOnlyAt(here, scopes[level - 1]!, blocks);
+    // The root's inline style (`applyAppearance`'s fonts and sizes) beats every `:root` rule.
+    const declared = level === 0 ? { ...all, ...overrides } : declaredOnlyAt(here, scopes[level - 1]!, blocks);
     inherited = computeLevel(declared, inherited);
   }
   return inherited;

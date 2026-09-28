@@ -20,16 +20,11 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
-import { happyRules } from "@jaira/runtime";
-import { App } from "./driver.mjs";
-import { blockedAtTheGate, buildWorld, type World } from "./world.mjs";
+import { LOOKS, PARKED, SCENES, drawn, launch, lookName, seed, settle } from "./parityWorld.mjs";
+import { buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "parity");
 const WORLD = join(import.meta.dirname, ".world-parity");
-const PARKED = "tighten the changeset lint";
-const says = (text: string): string => `document.body.innerText.includes(${JSON.stringify(text)})`;
-const settle = (ms = 1200): Promise<void> => new Promise((r) => setTimeout(r, ms));
-const drawn = "window.jaira && document.getElementById('root') && document.getElementById('root').children.length > 0";
 
 interface Page {
   /** Names the output folder. */
@@ -52,102 +47,6 @@ const PAIR: readonly [Page, Page] = process.argv[2] === "universal" ? [{ ...ONE,
 const PROOF =
   "location.protocol + (location.protocol === 'app:' ? ' ' + location.pathname : '') + (globalThis.__vxrnIsSPA === true ? ' one' : ' vite')";
 
-async function launch(world: World, port: number): Promise<App> {
-  // The One client is the window's default renderer; the other pages are reached by navigation.
-  process.env.JAIRA_RENDERER = "one";
-  const app = await App.launch(world, { out: OUT, port });
-  await app.until(drawn, "the window to draw");
-  return app;
-}
-
-async function start(app: App, title: string, fake: unknown): Promise<string> {
-  const made = await app.ipc<{ taskId: string }>("task:create", {
-    title,
-    workflow: "feature/plan",
-    inputs: { issue: `# ${title}\n\nThe issue this task was raised for.` },
-  });
-  await app.ipc("task:start", { taskId: made.taskId, fake });
-  return made.taskId;
-}
-
-async function seed(world: World): Promise<void> {
-  const app = await launch(world, 9239);
-  try {
-    await start(app, "add dark mode", happyRules());
-    await start(app, "rework the sync lint", [happyRules()[0]]);
-    await app.until(says("done"), "the completed task");
-    await app.until(says("failed"), "the failed task");
-    await start(app, PARKED, blockedAtTheGate());
-    await app.until(says("Awaiting you"), "the run to park at its gate");
-    // An archived task (main, 2026-09-27): held at the foot of the Finished lane, faded, wearing the
-    // pill of how it finished — the card copy has to draw that too.
-    const retired = await start(app, "retire the old lint", happyRules());
-    await app.until(`[...document.querySelectorAll("*")].filter((e) => e.textContent === "done").length >= 2`, "the task to archive to finish");
-    await app.ipc("task:archive", { taskIds: [retired] });
-    await app.until(says("1 archived"), "the archived task to be held at the foot");
-  } finally {
-    await app.close();
-  }
-}
-
-/**
- * The scenes. Each is reached from a freshly loaded page, and each is photographed on BOTH pages before
- * the next begins: reaching a scene can change what the next one shows (opening a task marks its
- * unseen counts seen), so the two pictures of a pair must be taken from the same state, back to back.
- */
-interface Scene {
-  readonly name: string;
-  /** Photographed in every look, not only the two base ones. */
-  readonly everyLook?: boolean;
-  /** Selector to frame, or the whole window. */
-  readonly of?: string;
-  reach(app: App): Promise<void>;
-}
-
-const SCENES: readonly Scene[] = [
-  { name: "board", everyLook: true, reach: async (app) => void (await app.until(says("Awaiting you"), "the gate to still be parked")) },
-  { name: "task", everyLook: true, reach: (app) => app.clickText(PARKED) },
-  {
-    // The Finished lane's foot opened: the archived card, faded, "archived … ago", its finishing pill.
-    name: "archived",
-    everyLook: true,
-    reach: async (app) => {
-      await app.until(says("1 archived"), "the archived foot");
-      await app.evaluate("document.querySelector('.lane-archived').click()");
-      await app.until(says("retire the old lint"), "the archived card to show");
-    },
-  },
-  { name: "settings", reach: (app) => app.clickText("Settings") },
-  {
-    // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
-    // renderer most likely to break under a new origin and a new content policy.
-    name: "file-types",
-    of: ".ft",
-    reach: async (app) => {
-      await app.clickText("Settings");
-      await app.clickText("Appearance");
-      // Scrolled into view, and again on every try, for the picture rather than for Monaco: `.ft` sits
-      // in the settings pane's own scroll container, which a capture paints only where it is scrolled
-      // to, and the page lays out after the preview mounts, undoing a scroll made before that. Monaco
-      // draws an editor below the fold perfectly well; what it cannot draw in is a hidden window,
-      // which is what used to leave this editor empty (see `launch` in the driver).
-      await app.until(`document.querySelector(".ft-preview-body") !== null`, "the preview to mount");
-      await app.until(
-        `(document.querySelector(".ft-preview-body").scrollIntoView({ block: "center" }),
-          [...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
-        "the preview's editor to colour itself",
-      );
-      // Then the section's top, which is what the picture frames: centred on the preview, `.ft` is
-      // about as tall as the window and its upper half lay above the fold, unpainted on both pages.
-      await app.evaluate(`document.querySelector(".ft").scrollIntoView({ block: "start" })`);
-      await app.until(
-        `(() => { const top = document.querySelector(".ft").getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
-        "File types to scroll into view",
-      );
-    },
-  },
-];
-
 function compare(name: string): { name: string; differing: number; total: number } {
   const a = PNG.sync.read(readFileSync(join(OUT, PAIR[0].label, `${name}.png`)));
   const b = PNG.sync.read(readFileSync(join(OUT, PAIR[1].label, `${name}.png`)));
@@ -160,37 +59,11 @@ function compare(name: string): { name: string; differing: number; total: number
   return { name, differing, total: a.width * a.height };
 }
 
-/**
- * The looks each gate runs in. The first two (the default palette, both modes) take every scene; the
- * rest take the scenes that draw the components copied so far, in the palettes whose rules those
- * components carry by hand (`--quick` skips them).
- */
-interface Look {
-  theme: "light" | "dark";
-  palette: string;
-  wash: boolean;
-}
-const LOOKS: readonly Look[] = [
-  { theme: "light", palette: "ink", wash: false },
-  { theme: "dark", palette: "ink", wash: false },
-  ...(process.argv.includes("--quick")
-    ? []
-    : ([
-        { theme: "light", palette: "classic", wash: false },
-        { theme: "dark", palette: "classic", wash: true },
-        { theme: "light", palette: "contrast", wash: false },
-        { theme: "dark", palette: "pastel", wash: false },
-        { theme: "light", palette: "blueprint", wash: false },
-        { theme: "light", palette: "ink", wash: true },
-      ] as const)),
-];
-const lookName = (l: Look): string => (l.palette === "ink" && !l.wash ? l.theme : `${l.palette}${l.wash ? "-wash" : ""}-${l.theme}`);
-
 async function main(): Promise<void> {
   rmSync(OUT, { recursive: true, force: true });
   for (const page of PAIR) mkdirSync(join(OUT, page.label), { recursive: true });
   const world = buildWorld(WORLD);
-  await seed(world);
+  await seed(world, OUT);
 
   const complaints = new Map<string, string[]>(PAIR.map((p) => [p.label, []]));
   const names = new Set<string>();
@@ -199,10 +72,10 @@ async function main(): Promise<void> {
   for (const [index, look] of LOOKS.entries()) {
     const theme = lookName(look);
     // The theme is read at startup, so the look is chosen by a launch of its own before the pair.
-    const chooser = await launch(world, port++);
+    const chooser = await launch(world, port++, OUT);
     await chooser.preferLook(look);
     await chooser.close();
-    const app = await launch(world, port++);
+    const app = await launch(world, port++, OUT);
     try {
       // A launch recovers the parked run (interrupts its pending call, re-registers it) a moment after
       // the window draws. Photographed before that settles, the two pages see two different runs.

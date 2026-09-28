@@ -80,7 +80,7 @@ export class App {
   said = "";
 
   private constructor(
-    private readonly child: ChildProcess,
+    private readonly child: ChildProcess | null,
     private readonly ws: WebSocket,
     private readonly out: string,
   ) {}
@@ -135,17 +135,26 @@ export class App {
     return App.attach(child, port, options, true);
   }
 
-  private static async attach(child: ChildProcess, port: number, options: Options, quiet = false): Promise<App> {
+  /**
+   * Attach to an app something else launched and keeps running (`studio.mts`), on its CDP `port`.
+   * {@link close} then detaches and leaves it running.
+   */
+  static async connect(port: number, options: Options): Promise<App> {
+    mkdirSync(options.out, { recursive: true });
+    return App.attach(null, port, options, true, false);
+  }
+
+  private static async attach(child: ChildProcess | null, port: number, options: Options, quiet = false, emulate = true): Promise<App> {
     // Assigned once attached; stdout that arrives before then is kept here and handed over.
     let app: App | undefined;
     let early = "";
-    child.stdout?.on("data", (d: Buffer) => {
+    child?.stdout?.on("data", (d: Buffer) => {
       if (app === undefined) early += String(d);
       else app.said += String(d);
     });
 
     const complaints: string[] = [];
-    child.stderr?.on("data", (d: Buffer) => {
+    child?.stderr?.on("data", (d: Buffer) => {
       if (quiet) return;
       const line = String(d).trim();
       // The endpoint announcement is not news, and neither is an empty flush.
@@ -188,6 +197,7 @@ export class App {
     // forever — a shot that hangs, not one that fails. This raises the PAGE; an app window that
     // something else covers is the business of the switch in `launch`.
     await app.send("Page.bringToFront");
+    if (!emulate) return app;
     await app.send("Emulation.setDeviceMetricsOverride", {
       width: options.phone?.width ?? options.width ?? 1280,
       height: options.phone?.height ?? options.height ?? 860,
@@ -218,6 +228,13 @@ export class App {
         this.complaints.push(said.slice(0, 300));
       }
     }
+  }
+
+  /** Any DevTools protocol call, for a rig that needs more than the verbs here (`cascade` reads the CSS domain). */
+  async cdp<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
+    const reply = (await this.send(method, params)) as { result?: unknown; error?: { message: string } };
+    if (reply.error !== undefined) throw new Error(`${method}: ${reply.error.message}`);
+    return reply.result as T;
   }
 
   private send(method: string, params: Record<string, unknown> = {}): Promise<Reply> {
@@ -481,7 +498,7 @@ export class App {
 
   async close(): Promise<void> {
     this.ws.close();
-    this.child.kill();
+    this.child?.kill();
     await sleep(300);
   }
 }
