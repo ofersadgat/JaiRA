@@ -149,15 +149,6 @@ describe("the machine key", () => {
     }
   });
 
-  it("reads a bare-hex key written before the scheme tag existed", () => {
-    const paths = base();
-    mkdirSync(dirname(paths.machineKeyFile), { recursive: true });
-    writeFileSync(paths.machineKeyFile, `${"cd".repeat(32)}\n`, "utf8");
-    const store = open(paths);
-    expect(() => store.approve("/p/x.ts", "h")).not.toThrow();
-    expect(store.approved("/p/x.ts")).toBe("h");
-  });
-
   it("refuses to run on a key that is not a key, rather than minting a new one", () => {
     // Silently replacing it would invalidate every approval on the machine, which reads as JaiRA
     // having forgotten what you agreed to. Loudly is the only honest option.

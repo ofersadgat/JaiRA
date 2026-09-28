@@ -58,10 +58,10 @@ export function pruneHistory(project: Project, options: PruneOptions = {}): Prun
       });
       continue;
     }
-    // `endedAt` is when the machine last stopped; a terminal task with none is legacy enough that
-    // `updatedAt` is the honest stand-in. Inclusive at the boundary: "ended before this instant"
-    // with a default of `now` must cover a task that ended within the same millisecond as the ask.
-    const endedAt = task.endedAt ?? task.updatedAt;
+    // When the machine last stopped — stamped on every finish. Inclusive at the boundary: "ended before
+    // this instant" with a default of `now` must cover a task that ended within the same millisecond.
+    const endedAt = task.endedAt;
+    if (endedAt === undefined) continue;
     if (endedAt > before) continue;
 
     const events = (

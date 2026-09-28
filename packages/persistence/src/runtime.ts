@@ -72,7 +72,7 @@ interface RawRuntime {
   document_id?: string | null;
   branch: string | null;
   worktree_path: string | null;
-  root_instance_id: string | number | null;
+  root_instance_id: string | null;
   parent_task_id: string | null;
   forked_at_seq?: number | null;
   fork_boundary_seq?: number | null;
@@ -95,7 +95,7 @@ function toRuntime(row: RawRuntime): TaskRuntimeRow {
     documentId: row.document_id ?? undefined,
     branch: row.branch ?? undefined,
     worktreePath: row.worktree_path ?? undefined,
-    rootInstanceId: row.root_instance_id === null ? undefined : String(row.root_instance_id),
+    rootInstanceId: row.root_instance_id ?? undefined,
     parentTaskId: row.parent_task_id ?? undefined,
     forkedAtSeq: row.forked_at_seq ?? undefined,
     forkBoundarySeq: row.fork_boundary_seq ?? undefined,

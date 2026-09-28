@@ -151,10 +151,10 @@ describe("in the events conversation", () => {
     expect(surfaceKindOf(node())).toBe("asked");
   });
 
-  it("a settled notify is one told line — its answer's text and event, else its argument", () => {
+  it("a settled notify is one told line — its answer's text and event", () => {
     const call = { name: "notify", ref: "notify", kind: "function", args: { text: "Deploy finished" }, status: "completed" };
     expect(toldOf({ ...call, result: { text: "Deploy finished", event: 'task.finished "Deploy 0.14.1"' } })).toEqual({ text: "Deploy finished", about: 'task.finished "Deploy 0.14.1"' });
-    expect(toldOf({ ...call, result: {} })).toEqual({ text: "Deploy finished" });
+    expect(toldOf({ ...call, result: { text: "Deploy finished" } })).toEqual({ text: "Deploy finished" });
     expect(toldOf({ ...call, status: "failed", error: { reason: "x" } })).toBeUndefined();
     expect(toldOf({ ...call, name: "start_task" })).toBeUndefined();
   });

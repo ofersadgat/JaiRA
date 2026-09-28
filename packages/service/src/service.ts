@@ -3802,10 +3802,9 @@ export class AppService {
    * draw an empty board whenever the newest task belonged to a different workflow. `boardView`
    * remains the fallback, and is still what answers the no-level "just show me something" case.
    */
-  board(request?: { level?: string; project?: string } | string): BoardView {
-    // A bare string is the old shape and still the common call. Widened rather than replaced because
-    // the Tasks view now draws one board PER project, and a level means nothing without saying whose.
-    const { level, project } = typeof request === "string" ? { level: request, project: undefined } : (request ?? {});
+  board(request: { level?: string; project?: string } = {}): BoardView {
+    // The Tasks view draws one board PER project, and a level means nothing without saying whose.
+    const { level, project } = request;
     const open = this.session(project);
     if (level !== undefined && level.length > 0) {
       const board = boardForState(open.project, level, this.browseWorkflowsIn(open), this.stateViewOptions());
@@ -7933,14 +7932,9 @@ export class AppService {
     // (`keptConnectUndo`), since nothing else about the drop's place in the journal holds still.
     const moved = kept.cutAt !== undefined ? project.events.list(taskId).find((stored) => stored.seq === kept.cutAt) : undefined;
     if (moved !== undefined) {
+      // A task that had FINISHED goes back to having finished: the rewind puts it back, outputs and
+      // all, from what the reopening journaled it cleared.
       await this.rewindTask({ taskId, at: moved.seq, project: open.dir });
-      // A task that had FINISHED goes back to having finished: the cut took away everything since.
-      // The rewind already did that, outputs and all, when the reopening journaled what it cleared;
-      // this is for a move made before reopenings were journaled.
-      if (undo.wasCompleted === true && !open.live.has(taskId) && project.runtime.get(taskId)?.status !== "completed") {
-        project.runtime.endTask(taskId, "success", Date.now());
-        project.runtime.setStatus(taskId, "completed", Date.now());
-      }
     }
     const now = project.runtime.get(taskId)!;
     if (undo.pin !== undefined && (now.snapshotHash !== undo.pin.snapshotHash || now.documentId !== undo.pin.documentId)) {

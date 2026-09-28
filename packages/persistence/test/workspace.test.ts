@@ -100,19 +100,6 @@ describe("one database, many workspaces", () => {
     const again = openAt(moved);
     expect(again.runtime.get(task.id)?.taskId).toBe(task.id);
   });
-
-  it("gives the shared root the records it held before every workspace's were in its file", () => {
-    // Stand in for an old shared root: a row nobody has claimed.
-    mkdirSync(join(home, "system"), { recursive: true });
-    const db = openDb(join(home, "system", "jaira.db"));
-    db.prepare(`INSERT INTO task_runtime (task_id, status, created_at, updated_at) VALUES ('t-oldsharedx', 'completed', 1, 1)`).run();
-    db.close();
-    const shared = openSharedProject({ baseDir: home });
-    open.push(shared);
-    expect(shared.runtime.get("t-oldsharedx")?.status).toBe("completed");
-    const a = openAt(clone("a"));
-    expect(a.runtime.get("t-oldsharedx")).toBeUndefined();
-  });
 });
 
 describe("a workspace whose records are files", () => {

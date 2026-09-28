@@ -431,6 +431,7 @@ const REFUSING_CAPS: RuntimeCapabilities = {
   mutatesWorkspace: false,
   policyEnforcement: "none",
   sessionResume: false,
+  sessionFork: false,
   streaming: false,
   interactive: false,
   readOnly: true,

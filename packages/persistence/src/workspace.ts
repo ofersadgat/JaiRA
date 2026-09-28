@@ -75,20 +75,6 @@ export function claimTask(db: JairaDb, workspace: string, taskId: string): void 
 }
 
 /**
- * Claim what no workspace owns yet for `workspace` — the shared root, whose records were the only
- * ones in this file before it held every workspace's (migration 21). Idempotent and cheap: every
- * row written since is claimed as it is inserted, so after the first open there is nothing to find.
- */
-export function claimUnowned(db: JairaDb, workspace: string): void {
-  db.prepare(
-    `INSERT OR IGNORE INTO task_owners (task_id, workspace)
-       SELECT task_id, ? FROM main.task_runtime WHERE task_id NOT IN (SELECT task_id FROM task_owners)`,
-  ).run(workspace);
-  db.prepare(`UPDATE repo_watch_cursors SET workspace = ? WHERE workspace = ''`).run(workspace);
-  db.prepare(`UPDATE repo_watch_seen SET workspace = ? WHERE workspace = ''`).run(workspace);
-}
-
-/**
  * Claim the rows a file-backed `tasks` concern replayed into this connection — a clone's own task
  * rows, or a pulled one's that no workspace has claimed. One another workspace owns stays theirs,
  * and is left out of everything this workspace lists.

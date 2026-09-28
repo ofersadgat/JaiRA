@@ -30,6 +30,7 @@ const log = createLogger("jaira.runtime.fakeExecutor");
 const CAPS: Capabilities = {
   structuredOutput: true,
   sessionResume: false,
+  sessionFork: false,
   streaming: false,
   interactive: false,
   readOnly: true,

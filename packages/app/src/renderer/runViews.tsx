@@ -487,13 +487,12 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
 /**
  * An events automation's `notify` call, settled: what it told the person, and what about — the
  * notice the inbox strip showed. One line, because it asked nothing and answered nothing: the call's
- * answer is `{ text, event? }`, the event in a line (`eventSummary`). Falls back to the arguments for
- * a record written before `notify` answered anything. A failed `notify` is not a told line.
+ * answer is `{ text, event? }`, the event in a line (`eventSummary`). A failed `notify` is not a told line.
  */
 export function toldOf(call: ReadCall): { text: string; about?: string } | undefined {
   if (call.name !== "notify" || call.error !== undefined || call.status !== "completed") return undefined;
   const result = call.result !== null && typeof call.result === "object" && !Array.isArray(call.result) ? (call.result as Record<string, JsonValue>) : {};
-  const text = typeof result["text"] === "string" ? result["text"] : typeof call.args["text"] === "string" ? call.args["text"] : undefined;
+  const text = typeof result["text"] === "string" ? result["text"] : undefined;
   if (text === undefined) return undefined;
   return { text, ...(typeof result["event"] === "string" ? { about: result["event"] } : {}) };
 }

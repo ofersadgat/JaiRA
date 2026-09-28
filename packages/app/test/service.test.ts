@@ -228,7 +228,7 @@ describe("AppService live human gate", () => {
     expect(card.activeStateId).toBe("feature/plan/critique/human_review");
     expect(card.hasSubBoard).toBe(true);
     // …and the sub-board places it in the human_review column.
-    const sub = service.board("feature/plan/critique");
+    const sub = service.board({ level: "feature/plan/critique" });
     expect(sub.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan", "feature/plan/critique"]);
     expect(sub.columns.find((c) => c.key === "human_review")!.cards.map((c) => c.taskId)).toEqual([taskId]);
 

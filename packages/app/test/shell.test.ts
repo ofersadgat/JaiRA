@@ -73,7 +73,7 @@ describe("the Files view's surfaces", () => {
 
     // `board:view` used to resolve every level against the newest task's workflow, so this is the
     // regression the Files view would hit the moment a project had two workflows.
-    const board = service.board("feature/plan/critique");
+    const board = service.board({ level: "feature/plan/critique" });
     expect(board.level).toBe("feature/plan/critique");
     expect(board.breadcrumb.map((c) => c.stateId)).toEqual(["feature/plan", "feature/plan/critique"]);
   });

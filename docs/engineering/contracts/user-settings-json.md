@@ -2,11 +2,11 @@
 id: engineering/contracts/user-settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-09-23
+updated: 2026-09-27
 visibility: internal
 kind: format
 owned_by: [engineering/units/user-settings]
-consumers: ["@jaira/app main service.ts readSettings, writeSettings, remember, restore and applyLogPolicy", "@jaira/persistence userSettingsMigration.ts migrateUserSettings, which moved the look out", "the renderer store and layout state, through settings:read and settings:write", "people editing user-settings.json by hand"]
+consumers: ["@jaira/app main service.ts readSettings, writeSettings, remember, restore and applyLogPolicy", "the renderer store and layout state, through settings:read and settings:write", "people editing user-settings.json by hand"]
 since: 2026-08-04
 siblings: [engineering/contracts/settings-json, engineering/contracts/ipc-channels]
 ---
@@ -60,9 +60,9 @@ Every map defaults to `{}`, and an absent id means that control's own default. T
 
 An override with an unknown `match` or `minLevel`, or a blank `key`, is dropped. Of two overrides with the same `match` and `key`, the later is kept.
 
-### The look moved out, once
+### The look is not in this file
 
-The file used to hold the look too: `theme`, `appearance`, `editors`, `renderers`, `conversation` and a personal `filesHidden`. On 2026-09-23 they became settings — the `appearance` block and `files.hidden` of [settings-json](settings-json.md) — and `migrateUserSettings` (`@jaira/persistence` `userSettingsMigration.ts`) moves them into `personal-settings.json`: as the app's service is constructed, before anything paints, and at every project open, so the CLI's first open moves them too. It reads them the way this file used to be read — forgivingly, a size clamped, an unreadable value dropped — writes only what differs from the default, keeps what the personal layer already states, appends the patterns to its `files.hidden`, and then removes the six fields from this file, leaving every other field as it was. A file with none of them is not touched; a personal layer that cannot be read leaves both files alone. The reader of the old fields is gone: after the move nothing reads them.
+How the app looks — mode, palette, the conversation's layout, the editors, the renderers and a person's own hidden patterns — is a setting: the `appearance` block and `files.hidden` of [settings-json](settings-json.md), whose personal layer is `personal-settings.json`. A `theme`, `appearance`, `editors`, `renderers`, `conversation` or `filesHidden` field in this file is not read.
 
 ## Nothing is refused on read, and a write fails only when the disk does
 
@@ -76,7 +76,7 @@ The file used to hold the look too: `theme`, `appearance`, `editors`, `renderers
 ## A renamed field silently resets that preference unless the file is migrated first
 
 - The file is never validated, so a renamed or retyped field raises nothing: every file holding the old form reads with the default.
-- The path is to migrate the file to the new form and then read only that form; no reader keeps the old form alive — the move of the look above is the example.
+- The path is to migrate the file to the new form, read only that form, and then delete the migration; no reader keeps the old form alive.
 - A `ui` id that is retired and later reused inherits whatever value a file still holds for it.
 
 ## A write rewrites the whole file, and a nested patch replaces the whole block

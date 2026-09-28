@@ -191,7 +191,7 @@ Resolution, in order, stopping at the first that applies:
 | `generate` | the generator or its lint refused | |
 | `connecting` | an earlier connect of this task stopped part-way, and this request is a DIFFERENT drop (another target or workflow); nothing is written | |
 
-`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made, mark}` or `{kind: "move", taskId, mark, pin?, wasCompleted?}`. `mark` names the connect's own `jaira.connect` rows ([journal-events](journal-events.md)): a move's Undo cuts at its `intent` row, wherever that row now sits, and an adoption's is judged from the adopted task's `intent` row. `pin` and `wasCompleted` are how the task stood before the drop, as the intent recorded them.
+`ConnectUndo` is `{kind: "adopt", parentTaskId, adoptedTaskId, made, mark}` or `{kind: "move", taskId, mark, pin?}`. `mark` names the connect's own `jaira.connect` rows ([journal-events](journal-events.md)): a move's Undo cuts at its `intent` row, wherever that row now sits, and an adoption's is judged from the adopted task's `intent` row. `pin` is how the task stood before the drop, as the intent recorded it; the rest is restored by the rewind alone.
 
 #### A real connect writes its intent first, and a retry finishes it
 

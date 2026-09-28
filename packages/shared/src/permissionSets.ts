@@ -18,9 +18,8 @@
  *  - {@link permissionSetOfEnvironment} reads that lowered shape back — what a loaded state, a message's
  *    inherited declaration and a run's resolved block all arrive as.
  *
- * A map is the only form. The old LIST form of `tools` and the old `permissions` block (`tools`,
- * `default`, `profile`) were read until every workflow had been migrated (decision 0007 step 7, and
- * the note of 2026-09-22 there); the linter now refuses them.
+ * A map is the only form of `tools`, and an authored `permissions` says only `scopes`: a mode is an
+ * entry of the permission set. The linter refuses anything else.
  *
  * Pure: no filesystem and no upstream import, so the renderer can read a permission set too. Following a
  * `$ref` needs a file, and that is handed in as a {@link PermissionSetReader} — `@jaira/persistence` builds
@@ -762,11 +761,11 @@ export function lowerStatePermissionSets(
    * block's reference in a message.
    */
   const lowerNode = (node: unknown, own: unknown, from: string, at: string, within: string | undefined): LoweredPermissionSet => {
-    const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
+    const modeKeys = isPlainObject(own) ? MODE_KEYS.filter((key) => own[key] !== undefined) : [];
     const found: PermissionSetIssue[] = [];
     let permissionSet: PermissionSet = { entries: {} };
     if (Array.isArray(node)) {
-      found.push({ path: "", message: LIST_FORM_MESSAGE, severity: "error" });
+      found.push({ path: "", message: MAP_FORM_MESSAGE, severity: "error" });
     } else {
       // A reference that names a LIST fragment (`["bash"]` in a file) is the list form by reference.
       const reference = typeof node === "string" ? node : (node as Record<string, unknown>)[PERMISSION_SET_REF_KEY];
@@ -779,7 +778,7 @@ export function lowerStatePermissionSets(
         }
       }
       if (listed) {
-        found.push({ path: "", message: `'${String(reference)}' names a list — ${LIST_FORM_MESSAGE}`, severity: "error" });
+        found.push({ path: "", message: `'${String(reference)}' names a list — ${MAP_FORM_MESSAGE}`, severity: "error" });
       } else {
         const resolved = resolvePermissionSetDecl(node, read, from, found);
         const parsed = parsePermissionSet(resolved ?? {});
@@ -793,7 +792,7 @@ export function lowerStatePermissionSets(
       found.push({ path: "", message: "a permission set cannot sit beside a bound or referenced `permissions` — write its modes as entries", severity: "error" });
     } else if (own !== undefined) {
       rest = own as PermissionsDecl;
-      if (oldKeys.length > 0) found.push({ path: "", message: oldPermissionsMessage(oldKeys), severity: "error" });
+      if (modeKeys.length > 0) found.push({ path: "", message: modeKeysMessage(modeKeys), severity: "error" });
     }
     if (checkFunction !== undefined) {
       const answered = new Map<string, string | undefined>();
@@ -823,12 +822,12 @@ export function lowerStatePermissionSets(
     const node = block["tools"];
     const own = block["permissions"];
     if (!Array.isArray(node) && !isPermissionSetNode(node)) {
-      // No permission set here. A `permissions` block that still says modes is the old statement on its own.
-      const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
-      if (oldKeys.length === 0) return block;
-      issues.push({ stateId, path: `${at}.permissions`, message: oldPermissionsMessage(oldKeys), severity: "error" });
+      // No permission set here. A `permissions` block that says modes is refused, and the modes dropped.
+      const modeKeys = isPlainObject(own) ? MODE_KEYS.filter((key) => own[key] !== undefined) : [];
+      if (modeKeys.length === 0) return block;
+      issues.push({ stateId, path: `${at}.permissions`, message: modeKeysMessage(modeKeys), severity: "error" });
       const { permissions: _permissions, ...others } = block;
-      const kept = withoutOldKeys(own as Record<string, unknown>);
+      const kept = withoutModeKeys(own as Record<string, unknown>);
       return { ...others, ...(Object.keys(kept).length > 0 ? { permissions: kept } : {}) };
     }
     const lowered = lowerNode(node, own, stateId, at, undefined);
@@ -845,12 +844,12 @@ export function lowerStatePermissionSets(
     if (expanded === undefined) return block;
     const node = expanded.tools?.node;
     if (node === undefined || (!Array.isArray(node) && !isPermissionSetNode(node))) {
-      // No permission set in it. Old modes in its `permissions` are refused as they are on the state; they
+      // No permission set in it. Modes in its `permissions` are refused as they are on the state; they
       // cannot be dropped from beside a reference, which is one more reason a run will not start.
       const own = expanded.permissions;
-      const oldKeys = isPlainObject(own) ? OLD_PERMISSION_KEYS.filter((key) => own[key] !== undefined) : [];
-      if (oldKeys.length > 0) {
-        issues.push({ stateId, path: `${at}.permissions`, message: `in the block '${reference}' names: ${oldPermissionsMessage(oldKeys)}`, severity: "error" });
+      const modeKeys = isPlainObject(own) ? MODE_KEYS.filter((key) => own[key] !== undefined) : [];
+      if (modeKeys.length > 0) {
+        issues.push({ stateId, path: `${at}.permissions`, message: `in the block '${reference}' names: ${modeKeysMessage(modeKeys)}`, severity: "error" });
       }
       return block;
     }
@@ -934,19 +933,18 @@ function mergePermissionsBlock(base: unknown, over: unknown): unknown {
   return { ...prior, ...next, ...(priorTools !== undefined || nextTools !== undefined ? { tools: { ...priorTools, ...nextTools } } : {}) };
 }
 
-/** The keys of a `permissions` block that said a MODE, before a permission set held them all. `scopes` is not one. */
-const OLD_PERMISSION_KEYS = ["tools", "default", "other", "profile"] as const;
+/** Keys of an authored `permissions` block that say a MODE — which only a permission set's entries say. `scopes` is not one. */
+const MODE_KEYS = ["tools", "default", "other", "profile"] as const;
 
-const LIST_FORM_MESSAGE =
-  "`tools` is a permission set map — a map from a tool, a command, `script` or `other` to a mode, or a reference to one; the list form was removed (decision 0007)";
+const MAP_FORM_MESSAGE = "`tools` is a permission set: a map from a tool, a command, `script` or `other` to a mode, or a reference to one";
 
-function oldPermissionsMessage(keys: readonly string[]): string {
-  return `permissions.${keys.join(", permissions.")} ${keys.length === 1 ? "is" : "are"} no longer read — a mode is an entry of the permission set in \`tools\`, \`default\` is its \`other\`, and a profile is the \`deny\` entries it meant (decision 0007)`;
+function modeKeysMessage(keys: readonly string[]): string {
+  return `permissions.${keys.join(", permissions.")} ${keys.length === 1 ? "is" : "are"} not a setting of \`permissions\`, which says only \`scopes\` — a mode is an entry of the permission set in \`tools\` (decision 0007)`;
 }
 
-function withoutOldKeys(permissions: Record<string, unknown>): Record<string, unknown> {
+function withoutModeKeys(permissions: Record<string, unknown>): Record<string, unknown> {
   const out = { ...permissions };
-  for (const key of OLD_PERMISSION_KEYS) delete out[key];
+  for (const key of MODE_KEYS) delete out[key];
   return out;
 }
 

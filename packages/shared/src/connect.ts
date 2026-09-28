@@ -250,8 +250,6 @@ export type ConnectUndo =
        */
       mark: string;
       pin?: { snapshotHash: string; documentId?: string };
-      /** The task had finished: it goes back to having finished. */
-      wasCompleted?: boolean;
     };
 
 export type TaskConnectResult =
@@ -292,7 +290,7 @@ export interface ConnectIntent {
   plan: ConnectPlan;
   steps: ConnectStep[];
   /** How the dragged task stood before the drop — what a move's Undo puts back. */
-  before: { pin?: { snapshotHash: string; documentId?: string }; wasCompleted?: true };
+  before: { pin?: { snapshotHash: string; documentId?: string } };
 }
 
 /**

@@ -485,8 +485,9 @@ the workspace specific stuff remains in the the workspace".
   empty the whole `main` table, which in a shared file is every other workspace's history. A replayed
   journal lets the shared table mint its sequence numbers again. A replayed task no workspace owns is
   claimed by the one that replayed it.
-- **The shared root's rows,** the only ones in the file before, are claimed for it on its next open
-  (`claimUnowned`).
+- **The shared root's rows,** the only ones in the file before, were claimed for it on its next open
+  (`claimUnowned`), removed on 2026-09-27 (the person: "lets get rid of all the back compat code");
+  the shared root no longer claims unowned records at open.
 - **A clone's old database** was merged once by a migration tool (`mergeLegacyDb`), deleted on
   2026-09-27 once the person's clones had been opened by this build:
   - it is brought to the current schema, attached, and copied in one transaction;
@@ -500,7 +501,7 @@ the workspace specific stuff remains in the the workspace".
   - a refused foreign id, which leaves no file;
   - recovery in one leaving the other's running task and open turn alone;
   - a moved clone keeping its history;
-  - the shared root's old rows;
+  - the shared root's old rows (the test went with `claimUnowned`);
   - a `both` workspace rebuilding its index without touching another's;
   - the merge, renumbered and with references following;
   - the merge conflict kept aside.

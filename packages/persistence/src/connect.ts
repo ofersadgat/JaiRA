@@ -797,7 +797,7 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   const activity: TaskActivity = host.activity?.(taskId) ?? activityFromRow(project, taskId, running);
   // How the task stood before the drop — what a move's Undo puts back, written into the intent.
   const pinNow = row.snapshotHash !== undefined ? { snapshotHash: row.snapshotHash, ...(row.documentId !== undefined ? { documentId: row.documentId } : {}) } : undefined;
-  const before: ConnectIntent["before"] = { ...(pinNow !== undefined ? { pin: pinNow } : {}), ...(row.status === "completed" ? { wasCompleted: true as const } : {}) };
+  const before: ConnectIntent["before"] = { ...(pinNow !== undefined ? { pin: pinNow } : {}) };
 
   // ---- rule 1: the target is in the task's workflow ----------------------------------------------
   const own = sourceStateId(meta.workflow);
@@ -1213,7 +1213,7 @@ export async function finishConnect(project: Project, taskId: string, open: Open
   const undo: ConnectUndo =
     adopts && parentTaskId !== undefined
       ? { kind: "adopt", parentTaskId, adoptedTaskId: taskId, made: true, mark }
-      : { kind: "move", taskId, mark, ...(intent.before.pin !== undefined ? { pin: intent.before.pin } : {}), ...(intent.before.wasCompleted === true ? { wasCompleted: true } : {}) };
+      : { kind: "move", taskId, mark, ...(intent.before.pin !== undefined ? { pin: intent.before.pin } : {}) };
   log.info(`connected ${taskId} to '${sourceStateId(intent.request.target)}' (${intent.plan.resolution}${intent.plan.modification !== undefined ? `, ${intent.plan.modification}` : ""})${parentTaskId !== undefined ? ` through ${parentTaskId}` : ""}${document?.documentId !== undefined ? `, ${document.documentId}` : ""}`);
   return {
     ok: true,

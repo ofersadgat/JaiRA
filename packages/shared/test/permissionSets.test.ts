@@ -381,16 +381,16 @@ describe("lowering a state file", () => {
     expect(lowered.issues).toEqual([]);
   });
 
-  it("refuses the LIST form — written, or in a file a reference names — and lowers it to nothing", () => {
+  it("refuses a LIST for `tools` — written, or in a file a reference names — and lowers it to nothing", () => {
     for (const tools of [["read_file"], [], "$/lib/list", { $ref: "$/lib/list" }]) {
       const { def, issues } = lowerStatePermissionSets("wf", { environment: { tools } }, read);
       expect(issues, JSON.stringify(tools)).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.tools", severity: "error" })]);
-      expect(issues[0]!.message).toMatch(/the list form was removed/);
+      expect(issues[0]!.message).toMatch(/`tools` is a permission set: a map/);
       expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...PERMISSION_SET_MARKERS }, implementations: {}, functions: {} } });
     }
   });
 
-  it("refuses the old `permissions` modes, beside a map or on their own, and keeps the scopes", () => {
+  it("refuses modes in `permissions`, beside a map or on their own, and keeps the scopes", () => {
     const scopes = [{ path: "app/**", default: "allow" }];
     const beside = lowerStatePermissionSets(
       "wf",
@@ -398,12 +398,12 @@ describe("lowering a state file", () => {
       read,
     );
     expect(beside.issues).toEqual([expect.objectContaining({ severity: "error", path: "environment.tools" })]);
-    expect(beside.issues[0]!.message).toMatch(/permissions\.tools, permissions\.default are no longer read/);
+    expect(beside.issues[0]!.message).toMatch(/permissions\.tools, permissions\.default are not a setting of `permissions`/);
     expect((beside.def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, functions: {}, scopes } });
 
     const alone = lowerStatePermissionSets("wf", { operation: { kind: "prompt", permissions: { profile: "read-only", scopes } } }, read);
     expect(alone.issues).toEqual([expect.objectContaining({ severity: "error", path: "operation.permissions" })]);
-    expect(alone.issues[0]!.message).toMatch(/permissions\.profile is no longer read/);
+    expect(alone.issues[0]!.message).toMatch(/permissions\.profile is not a setting of `permissions`/);
     expect((alone.def as { operation: unknown }).operation).toEqual({ kind: "prompt", permissions: { scopes } });
   });
 
@@ -516,13 +516,13 @@ describe("lowering a permission set inside a REFERENCED block", () => {
     }
   });
 
-  it("refuses the old forms inside a referenced block, naming the block", () => {
+  it("refuses a list or modes inside a referenced block, naming the block", () => {
     const list = lowerStatePermissionSets("wf", { environment: "$/envs/list" }, read);
     expect(list.issues).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.tools", severity: "error" })]);
-    expect(list.issues[0]!.message).toMatch(/^in the block '\$\/envs\/list' names: .*the list form was removed/);
+    expect(list.issues[0]!.message).toMatch(/^in the block '\$\/envs\/list' names: .*`tools` is a permission set: a map/);
     const old = lowerStatePermissionSets("wf", { environment: "$/envs/old" }, read);
     expect(old.issues).toEqual([expect.objectContaining({ stateId: "wf", path: "environment.permissions", severity: "error" })]);
-    expect(old.issues[0]!.message).toMatch(/^in the block '\$\/envs\/old' names: permissions\.default is no longer read/);
+    expect(old.issues[0]!.message).toMatch(/^in the block '\$\/envs\/old' names: permissions\.default is not a setting of `permissions`/);
   });
 
   it("lets a block's OWN `tools` win over the one its reference holds, as the engine's merge does", () => {

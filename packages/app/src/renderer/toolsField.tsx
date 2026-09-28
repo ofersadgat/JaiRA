@@ -2,9 +2,7 @@
  * The state editor's ONE Tools field (decision 0007 §6): a picker of the permission set the state starts
  * from, and beneath it the same rows Settings → Permission sets uses, for the lines the state writes over it.
  *
- * It replaces two fields that said one thing between them — a list of names in `tools`, and their
- * modes in `permissions` — for a state written the new way. A state still written the old way keeps
- * those two fields unchanged; which a state IS is `showsToolsField`'s call, not this component's.
+ * Whether a block shows it is `showsToolsField`'s call, not this component's.
  *
  * A render function: what it shows arrives as `value`, and every change leaves as the whole form.
  * The picker is asked through the schema form like every other typed input — an `enum`, so a box

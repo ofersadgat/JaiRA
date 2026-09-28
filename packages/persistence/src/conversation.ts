@@ -117,13 +117,8 @@ export function conversationView(project: Project, taskId: string, options: Conv
    */
   const pathOf = new Map<string, string>();
   /**
-   * The mount, or `undefined` when the event does not say.
-   *
-   * The two are different answers and the difference matters: `""` is the ROOT — the module a page
-   * is already about — while `undefined` is "this journal does not record where". Older runs are the
-   * second case, because `instance.blocked` carried no parent or key until it was given one. Reading
-   * those as the root would put every historical block on the module itself and, worse, make two
-   * blocks with the same reason indistinguishable.
+   * The mount, or `undefined` when the event names none — the root's own entry, which has no parent.
+   * `""` is the ROOT as a place other things are under; the two are different answers.
    */
   const under = (parentInstanceId: string | undefined, childKey: string | undefined, element?: number): string | undefined => {
     if (parentInstanceId === undefined || childKey === undefined) return undefined;

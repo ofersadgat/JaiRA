@@ -229,9 +229,9 @@ describe("a permission set inside a REFERENCED block", () => {
     write(project.paths.workflowsDir, "old.json", state("$/envs/old"));
     const entry = browseWorkflows(project).workflows.find((w) => w.rootId === "old")!;
     expect(entry.issues).toEqual([
-      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/^in the block '\$\/envs\/old' names: .*the list form was removed/) }),
+      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/^in the block '\$\/envs\/old' names: .*`tools` is a permission set: a map/) }),
     ]);
-    expect(() => load("old")).toThrow(/the list form was removed/);
+    expect(() => load("old")).toThrow(/`tools` is a permission set: a map/);
   });
 });
 
@@ -272,19 +272,19 @@ describe("the linter", () => {
     expect(issuesOf("plan").issues).toEqual([]);
   });
 
-  it("refuses the old LIST form and the old `permissions` modes, and a run will not start under either", () => {
+  it("refuses a LIST for `tools` and modes in `permissions`, and a run will not start under either", () => {
     write(project.paths.workflowsDir, "old.json", state({ tools: ["read_file"], permissions: { tools: { read_file: "allow" } } }));
     write(project.paths.workflowsDir, "ro.json", state({ permissions: { profile: "read-only" } }));
     expect(issuesOf("old").issues).toEqual([
-      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/the list form was removed/) }),
-      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/permissions\.tools is no longer read/) }),
+      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/`tools` is a permission set: a map/) }),
+      expect.objectContaining({ stateId: "old", path: "environment.tools", severity: "error", message: expect.stringMatching(/permissions\.tools is not a setting of `permissions`/) }),
     ]);
     expect(issuesOf("ro").issues).toEqual([
-      expect.objectContaining({ stateId: "ro", path: "environment.permissions", severity: "error", message: expect.stringMatching(/permissions\.profile is no longer read/) }),
+      expect.objectContaining({ stateId: "ro", path: "environment.permissions", severity: "error", message: expect.stringMatching(/permissions\.profile is not a setting of `permissions`/) }),
     ]);
-    expect(() => load("old")).toThrow(/the list form was removed/);
+    expect(() => load("old")).toThrow(/`tools` is a permission set: a map/);
     rmSync(join(project.paths.workflowsDir, "old.json"));
-    expect(() => load("ro")).toThrow(/permissions\.profile is no longer read/);
+    expect(() => load("ro")).toThrow(/permissions\.profile is not a setting of `permissions`/);
   });
 
   it("WARNS that an unknown tool name falls to `other`, and still loads", () => {

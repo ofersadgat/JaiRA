@@ -33,9 +33,8 @@
  * ## The scheme tag, and why the file is not just bytes
  *
  * The first field says how to read the rest, so the same file can be plaintext on a platform with
- * no wrapping and wrapped on one that has it — and so a root written before wrapping existed is
- * still readable. A key that could not say what form it was in would have to be guessed at, and
- * guessing wrong about a key means every approval on the machine silently fails.
+ * no wrapping and wrapped on one that has it. A key that could not say what form it was in would have
+ * to be guessed at, and guessing wrong about a key means every approval on the machine silently fails.
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -117,10 +116,10 @@ function unprotect(scheme: KeyScheme, payload: string, file: string): Buffer {
   return plain;
 }
 
-/** Split a stored line, tolerating the bare-hex form written before the scheme tag existed. */
+/** Split a stored line: its scheme, then the payload. */
 function parse(text: string): { scheme: KeyScheme; payload: string } {
   const at = text.indexOf(":");
-  if (at === -1) return { scheme: "plain", payload: text };
+  if (at === -1) throw new Error("the machine key has no scheme tag (dpapi: or plain:)");
   const scheme = text.slice(0, at);
   if (scheme !== "dpapi" && scheme !== "plain") throw new Error(`unknown machine-key scheme '${scheme}'`);
   return { scheme, payload: text.slice(at + 1) };

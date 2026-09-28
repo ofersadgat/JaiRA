@@ -150,7 +150,7 @@ describe("each: \"split\" — element 0 stays in the task that split, the rest b
 
     // Beta stands at the mount on the parent's board, and beside the parent at the top level; the
     // parent itself came to rest where its run ended. Manual: nobody started Beta.
-    const board = service.board("split/root");
+    const board = service.board({ level: "split/root" });
     expect(board.columns.find((c) => c.key === "work")!.cards.map((c) => c.taskId)).toEqual([beta.taskId]);
     expect(board.columns.find((c) => c.key === "finish")!.cards.map((c) => c.taskId)).toEqual([parent]);
     const roots = service.boardRoots();
@@ -294,7 +294,7 @@ describe("each: \"task\" — one task per element, under the parent", () => {
 
     // Filed in the parent's `work` column on the parent's board — the parent itself came to rest in
     // `finish`, where its run ended — and NOT at the top level.
-    const board = service.board("tasks/root");
+    const board = service.board({ level: "tasks/root" });
     const work = board.columns.find((c) => c.key === "work")!;
     expect(work.cards.map((c) => c.taskId).sort()).toEqual(made.map((t) => t.taskId).sort());
     expect(board.columns.find((c) => c.key === "finish")!.cards.map((c) => c.taskId)).toEqual([parent]);

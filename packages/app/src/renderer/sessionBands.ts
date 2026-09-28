@@ -692,10 +692,8 @@ export function notesOf(turns: readonly ConversationTurn[], root?: InstanceNode)
       ...(turn.stateId !== undefined ? { stateId: turn.stateId } : {}),
       ...(turn.instanceId !== undefined ? { instanceId: turn.instanceId } : {}),
     };
-    // An absent mount falls back to the state id. Journals written before `instance.blocked` carried
-    // its parent and key have no mount to show — and reading that absence as the ROOT would both
-    // print every historical block against the module itself and, because the de-duplication key is
-    // the path, silently collapse two blocks that happened to fail for the same reason into one.
+    // A turn with no mount falls back to its state id: the de-duplication key is the path, and an
+    // empty one would collapse two different turns that happen to say the same thing.
     const path = turn.path ?? turn.stateId ?? "";
     // A state being walked into — its own kind since the projection stopped folding three events
     // onto one. Drawn for every state, whether or not it has a panel: the grey is where the run's

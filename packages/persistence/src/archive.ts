@@ -23,11 +23,11 @@ export function autoArchive(project: Project, rule: JairaArchiveConfig = project
       const meta = project.tasks.tryRead(row.taskId);
       return meta !== undefined && !isChatWorkflow(meta.workflow) && meta.system === undefined;
     })
-    .sort((a, b) => (b.endedAt ?? b.updatedAt) - (a.endedAt ?? a.updatedAt));
+    .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
   const archived: string[] = [];
   for (const row of finished.slice(Math.max(0, Math.floor(rule.keepLatest)))) {
     const days = row.status === "completed" ? rule.succeededAfterDays : rule.failedAfterDays;
-    if (nowMs - (row.endedAt ?? row.updatedAt) < days * DAY_MS) continue;
+    if (row.endedAt === undefined || nowMs - row.endedAt < days * DAY_MS) continue;
     if (project.runtime.archive(row.taskId, nowMs)) archived.push(row.taskId);
   }
   return archived;

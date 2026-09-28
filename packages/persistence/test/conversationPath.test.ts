@@ -95,15 +95,6 @@ describe("a turn's mount path", () => {
     expect(blocked).toMatchObject({ stateId: "explore", path: "product/explore" });
   });
 
-  it("leaves the path UNSET when the journal does not record one", () => {
-    // Runs written before the blocked event carried its mount. Absent is not the same answer as the
-    // root, and reading it as the root would put every historical block on the module itself.
-    const turns = turnsOf([
-      entered("1", "feature"),
-      { type: "instance.blocked", stateId: "feature/product/draft", reason: "nope" },
-    ]);
-    expect(turns.find((t) => t.kind === "blocked")?.path).toBeUndefined();
-  });
 
   it("keeps a state ENTERING even when it goes on to start an operation", () => {
     // Dropping it was a decision about the transcript, taken in the projection. The transcript

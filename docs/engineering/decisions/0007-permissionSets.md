@@ -815,6 +815,9 @@ permission set, and each function's defaults live in one place, a layered `funct
   in [tool-policy](../units/tool-policy.md): a line no permission set judges (`run_command`'s, a state's with
   no permission set, an inline map) no longer answers to the rules, and a set whose own line was looser than a
   rule is now looser. This repository's `.jaira/settings.json` held an empty block; `~/.jaira` held none.
+- **Removed 2026-09-27** (the person: "lets get rid of all the back compat code"): the migration and
+  the refusals that named where `policy`, `smart` and `integrations.review` went are gone. Nothing
+  migrates a layer at open, and an old block is not read.
 - **Permission sets are to be renamed "permission sets"** in the same redesign. That is a separate,
   mechanical change; the code still says permission set.
 

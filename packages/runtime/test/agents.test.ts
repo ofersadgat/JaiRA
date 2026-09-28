@@ -181,6 +181,7 @@ describe("gateCapabilities (DESIGN §8.2)", () => {
           mutatesWorkspace: true,
           policyEnforcement: "none",
           sessionResume: false,
+          sessionFork: false,
           streaming: false,
           runtime: "node",
         },

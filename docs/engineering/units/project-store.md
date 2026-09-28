@@ -2,7 +2,7 @@
 id: engineering/units/project-store
 type: engineering-unit
 status: shipped
-updated: 2026-09-23
+updated: 2026-09-27
 implements: [product/pick-up-where-it-left-off, product/share-processes-across-projects, product/run-history-travels-with-the-repository, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: data
 owns_contracts: [engineering/contracts/sqlite-schema]
@@ -16,7 +16,7 @@ siblings: [engineering/units/storage-policy, engineering/units/process-claims, e
 
 ## The project store turns a directory into an open `Project`, and leaves what each store writes to the stores
 
-`openProject(dir, {baseDir})` in `project.ts` refuses a directory with no `.jaira/`, creates the shared root's layout with `initBase`, loads the layered config with `loadLayeredConfig` — built in, the shared root, the project and the personal layer `<base>/personal-settings.json` — and hands both to `openAt`. `openSharedProject` opens the shared root itself as a `Project` of `kind: "shared"`, merging the built-in layer, its own `settings.json` once and the personal layer, with no project layer between. Before either reads its config, the open runs the settings migrations, `migrateUserSettings` among them, which moves the look out of `user-settings.json` into the personal layer ([user-settings](user-settings.md)). `openAt` then runs, in this order:
+`openProject(dir, {baseDir})` in `project.ts` refuses a directory with no `.jaira/`, creates the shared root's layout with `initBase`, loads the layered config with `loadLayeredConfig` — built in, the shared root, the project and the personal layer `<base>/personal-settings.json` — and hands both to `openAt`. `openSharedProject` opens the shared root itself as a `Project` of `kind: "shared"`, merging the built-in layer, its own `settings.json` once and the personal layer, with no project layer between. `openAt` then runs, in this order:
 
 1. It creates `system/snapshots` and `system/tasks`, so a deleted or never-cloned `system/` is regenerated rather than refused.
 2. It opens `system/jaira.db` with `openDb`.
@@ -24,7 +24,7 @@ siblings: [engineering/units/storage-policy, engineering/units/process-claims, e
 4. It builds every store on that one connection, handing the journal, task and artifact stores a file log only when their concern is file-backed.
 5. It reads `jobs.orphans`, lets `runtime.recoverInterrupted` mark every `running` task with no live run claim `interrupted`, then calls `jobs.reapStale`.
 
-`openDb` in `db.ts` opens the file with `better-sqlite3` (a Node-API addon, so one binary serves Node and Electron), sets `journal_mode = WAL` and `foreign_keys = ON`, runs the bootstrap `SCHEMA`, runs `migrate`, and drops the `events` and `runs` shells the bootstrap recreates when they are empty. `migrate` in `migrations.ts` applies `MIGRATIONS` in order, each step in its own IMMEDIATE transaction that re-reads `PRAGMA user_version` before acting. `initProject` creates the project layout, writes `settings.json` from `defaultConfig()` when it is absent, and writes the `.gitignore` template or appends the `system/machine.key` line to an existing ignore file that lacks it. `sessionStoreFor(project, scope)` is the only constructor that gives a session store its conversation file log.
+`openDb` in `db.ts` opens the file with `better-sqlite3` (a Node-API addon, so one binary serves Node and Electron), sets `journal_mode = WAL` and `foreign_keys = ON`, creates a new database whole from one `SCHEMA` stamped `SCHEMA_BASELINE` (24), refuses one an older JaiRA made below the baseline ("move it aside to start a new one"), and runs `migrate`. `migrate` in `migrations.ts` applies the steps after the baseline, `MIGRATIONS`, in order, each step in its own IMMEDIATE transaction that re-reads `PRAGMA user_version` before acting. `initProject` creates the project layout, writes `settings.json` from `defaultConfig()` when it is absent, and writes the `.gitignore` template or appends the `system/machine.key` line to an existing ignore file that lacks it. `sessionStoreFor(project, scope)` is the only constructor that gives a session store its conversation file log.
 
 It deliberately does not own:
 
@@ -49,7 +49,7 @@ It deliberately does not own:
 | Shared root `workflows/`, `functions/`, `skills/`, `system/snapshots/`, `system/tasks/` | created by `initBase` on every open of any project | the filesystem | none |
 | `.jaira/settings.json` initial document | written once by `initProject` as the whole of `defaultConfig()` | the file | Settings, hand edits |
 | `<layer>/.gitignore` | written when absent; `system/machine.key` appended when the file names neither it nor `system/` | the file | the person |
-| `system/jaira.db` schema and `PRAGMA user_version` | bootstrap and migrations on every open | the database, see [sqlite-schema](../contracts/sqlite-schema.md) | every store |
+| `system/jaira.db` schema and `PRAGMA user_version` | created from `SCHEMA` or brought forward by migrations on every open | the database, see [sqlite-schema](../contracts/sqlite-schema.md) | every store |
 | `Project.recovered`, `Project.orphans`, `Project.storage` | computed per open | `task_runtime` and `jobs` rows; the `ShadowReport` | the CLI prints the first two; the app recovers native sessions for `recovered` |
 
 ## The invariants keep a project openable and its recovery honest
@@ -60,7 +60,7 @@ It deliberately does not own:
 | 2 | Running `initProject` on an initialised project succeeds and leaves the layout whole | `lifecycle.test.ts` "initProject creates the .jaira layout with a default config, idempotently" |
 | 3 | `initProject` never overwrites an existing `settings.json` | unasserted |
 | 4 | A missing `system/` is regenerated on open rather than failing it | `lifecycle.test.ts` "regenerates a missing system/ on open" |
-| 5 | A database at an older `user_version` opens at the current version with its conversations still readable | `sessionStore.test.ts` "normalises an old turn store into records plus positions, keeping every conversation readable", "moves a position onto the record's own key, and renumbers attempts so that key is one" |
+| 5 | A database below `SCHEMA_BASELINE` is refused rather than converted, naming the file | unasserted |
 | 6 | Two processes migrating one database apply each step once | unasserted |
 | 7 | A `running` task with a live run claim is never recovered, and one with a stale claim or no claim is marked `interrupted` | `jobs.test.ts` "does NOT interrupt a task another live process is driving", "interrupts a task whose owner stopped breathing", `"interrupts a task with no claim at all — the pre-jobs case still works"` |
 | 8 | An orphaned child process is reported in `Project.orphans` before it is reaped | `jobs.test.ts` "surfaces a child abandoned by a dead owner as an orphan" |
@@ -74,18 +74,18 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | A settings layer is malformed, half-written or holds a refused field | `readJsonFile` or `parseConfig` throws out of the open | fix the named field and reopen | the project does not open; the error names `config.<field>` |
 | Two processes open one database at once | each migration step takes the write lock, so the second waits and skips a step whose version it re-reads as applied; a lock held past `better-sqlite3`'s busy timeout throws `database is locked` | reopen | the second open fails only when the lock outlasts the timeout |
-| The process is killed during a migration | the step's transaction never commits and the database stays at the last whole version; rebuild steps check the table's shape, never the version | the next open re-runs the step | none |
+| The process is killed during a migration | the step's transaction never commits and the database stays at the last whole version | the next open re-runs the step | none |
 | A migration step throws | the step rolls back and the error leaves `openDb` | fix the cause and reopen | the project does not open |
+| The database was made by a JaiRA older than `SCHEMA_BASELINE` | `openDb` throws, naming the file and both versions: move it aside to start a new one | move the file aside and reopen | the project does not open |
 | The process is killed between the recovery transaction and the task row line under `storage.tasks: file` | the change dies with the connection and the file still says `running` | the next open recovers the task again | the task reads `interrupted` after that open |
 | The same project is opened again, by a second window or a retry | layout creation, `initBase`, migrations and recovery are idempotent; a task another process claimed within the stale window is left `running` | none needed | none |
 | A setting in the shared root's `settings.json` that `defaultConfig()` also states, such as `storage.*`, `memo.enabled`, `artifacts.*` or `execEnvironment` | `initProject` wrote the default into the project file, and the project layer wins the merge | delete the key from the project's `settings.json` | the shared value silently never applies to a project created by `init` |
 
 ## Migrations only append, the older build cannot read a newer database, and nothing rolls back
 
-- `MIGRATIONS` holds 17 steps. Step 7 is kept as a no-op because databases recorded running it. Steps 8, 12, 13, 14 and 16 rebuild or fold stored data; the shape each left is in [sqlite-schema](../contracts/sqlite-schema.md).
-- A step is idempotent where SQLite allows it: `addColumn` checks `PRAGMA table_info`, and every rebuild returns early when the table already has its new shape.
-- There are no down-migrations. An older build runs no step against a higher `user_version`, and its queries then fail on the dropped `runs`, `run_id` and `session_positions`.
-- The bootstrap `SCHEMA` still creates `events` and `runs`, so a fresh database walks the same steps an old one did; `openDb` drops each only while it is empty.
+- `MIGRATIONS` is empty. `SCHEMA` is the whole shape at `SCHEMA_BASELINE` (24); a later change is a step from 25 on AND a change to `SCHEMA`, folded into `SCHEMA` with the baseline raised once every database has taken it.
+- A step is idempotent where SQLite allows it (`IF NOT EXISTS`), so a half-applied step is recovered by running it again.
+- There are no down-migrations. An older build runs no step against a higher `user_version`.
 
 ## Budgets are the claim staleness window and nothing else
 

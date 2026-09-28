@@ -180,7 +180,7 @@ describe("projectRun", () => {
   it("records a blocked child without inventing an instance for it", () => {
     const run = projectRun([
       entered("1", "feature/plan"),
-      { type: "instance.blocked", stateId: "feature/plan/context", reason: "input 'goals' is undefined" },
+      { type: "instance.blocked", stateId: "feature/plan/context", childKey: "context", parentInstanceId: "1", reason: "input 'goals' is undefined" },
     ]);
     expect(flattenInstances(run.instances).map((n) => n.instanceId)).toEqual(["1"]);
     expect(run.blocked).toEqual([{ stateId: "feature/plan/context", reason: "input 'goals' is undefined" }]);
