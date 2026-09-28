@@ -303,7 +303,10 @@ function ContextMeter({ t, context, route, onPress }: { t: Tokens; context: Cont
       : fill === null
         ? `This conversation holds ${formatTokens(context.used)} tokens`
         : `This conversation: ${Math.round(fill)}% of the context (${formatTokens(context.used)} of ${formatTokens(context.window ?? 0)} tokens)`;
+  // `.um-wrap` is a block whose line holds the 26px button on its baseline, half a pixel of the line's
+  // descent under it: 26.5 tall, the button at its top — and it is the wrap the row centres.
   return (
+    <View flexShrink={0} height={26.5}>
     <Press
       onPress={onPress}
       title={title}
@@ -319,6 +322,7 @@ function ContextMeter({ t, context, route, onPress }: { t: Tokens; context: Cont
       <Ring t={t} pct={fill} tone={tone} size={16} />
       {text !== null ? <Txt spec={{ voice: "data", scale: 10.5 / 12, weight: 500, color: INK[tone], tabular: true, lineHeight: 1 }}>{text}</Txt> : null}
     </Press>
+    </View>
   );
 }
 

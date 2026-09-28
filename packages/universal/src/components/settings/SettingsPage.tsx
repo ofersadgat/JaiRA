@@ -1,12 +1,12 @@
 import { Children, createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import type { LayoutChangeEvent } from "react-native";
+import type { LayoutChangeEvent, View as RNView } from "react-native";
 import { View } from "@tamagui/core";
 import type { LeadPart } from "@jaira/ui/settingsSections";
 import type { RowLayer } from "@jaira/ui/settingsRows";
 import { Press, Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { SettingsLayerContext, useInheritLabel, useLayerRow } from "./layers";
-import { dropPart, placePart } from "./parts";
+import { dropPart, partsMoved, placePart } from "./parts";
 
 /**
  * `settingsLayout.tsx`'s page, section and row, universal (decision 0015): the shape every Settings page
@@ -48,7 +48,7 @@ function chOf(t: ReturnType<typeof useTokens>, n: number, scale: number): number
 }
 
 /** Whether "What you changed" left anything on the page: every row and stated section drawn says so. */
-const PageContext = createContext<{ mark: (key: object, drawn: boolean) => void; origin: number } | null>(null);
+const PageContext = createContext<{ mark: (key: object, drawn: boolean) => void } | null>(null);
 
 /** A row of the page that counts as drawn — `.cfg-field`, `.set-row:not(.full)`, `.cfg-row` in the CSS's `:has()`. */
 function useDrawnRow(drawn: boolean): void {
@@ -98,11 +98,10 @@ export function SettingsPage({
 }): JSX.Element {
   const t = useTokens();
   const { count, mark } = useMarks();
-  const [origin, setOrigin] = useState(0);
-  const page = useMemo(() => ({ mark, origin }), [mark, origin]);
+  const page = useMemo(() => ({ mark }), [mark]);
   return (
     <PageContext.Provider value={page}>
-      <View flexDirection="column" gap={26} maxWidth={1040} paddingTop={6} paddingHorizontal={4} paddingBottom={36} onLayout={(e: LayoutChangeEvent) => setOrigin(e.nativeEvent.layout.y)}>
+      <View flexDirection="column" gap={26} maxWidth={1040} paddingTop={6} paddingHorizontal={4} paddingBottom={36} onLayout={partsMoved}>
         <View flexDirection="row" justifyContent="space-between" alignItems="flex-start" gap={16} maxWidth={740}>
           <View flexShrink={1} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 1.5, weight: 650, ls: -0.015, lineHeight: 1.2 }} role="heading" aria-level={1}>
@@ -253,14 +252,13 @@ export function SettingsSection({
   // A stated section counts as drawn on its own; otherwise it is drawn while one of its rows is.
   useDrawnRow(layer?.stated === true && !layered.hidden);
   const hidden = at?.onlyStated === true && layer?.stated !== true && count === 0;
-  const [y, setY] = useState<number | null>(null);
-  const origin = page?.origin ?? 0;
+  const view = useRef<RNView | null>(null);
   const gone = hidden || (layer !== undefined && layered.hidden);
   useEffect(() => {
-    if (gone || y === null) return undefined;
-    placePart(id, title, origin + y);
+    if (gone || view.current === null) return undefined;
+    placePart(id, title, view.current);
     return () => dropPart(id);
-  }, [id, title, origin, y, gone]);
+  }, [id, title, gone]);
   if (layer !== undefined && layered.hidden) return null;
   const body = plain ? children : <SettingsGroup>{children}</SettingsGroup>;
   return (
@@ -270,7 +268,8 @@ export function SettingsSection({
         gap={10}
         {...(wide ? {} : { maxWidth: 740 })}
         {...(hidden ? { display: "none" } : {})}
-        onLayout={(e: LayoutChangeEvent) => setY(e.nativeEvent.layout.y)}
+        ref={view as never}
+        onLayout={partsMoved}
       >
         <SectionTitle title={title} info={info} action={action} layer={layer} />
         {lead !== undefined ? <SectionLead>{lead}</SectionLead> : null}

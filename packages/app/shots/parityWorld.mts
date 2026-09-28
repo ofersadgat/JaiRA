@@ -135,12 +135,12 @@ export const SCENES: readonly Scene[] = [
         await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === "Appearance" && e.getBoundingClientRect().left > 250)`, "the Appearance page");
         const find = `[...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(heading)} && e.getBoundingClientRect().left > 250)`;
         await app.until(`${find} !== undefined`, `the ${heading} heading`);
-        // To a whole pixel measured the same way on both pages: `scrollIntoView` lands a fraction apart.
+        // To a device pixel, measured the same way on both pages: `scrollIntoView` lands a fraction apart.
         await app.evaluate(`(() => {
           const el = ${find};
           let box = el.parentElement;
           while (box && !(box.scrollHeight > box.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
-          box.scrollTop = 2 * Math.round((el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop) / 2);
+          box.scrollTop = Math.round((el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop) * devicePixelRatio) / devicePixelRatio;
         })()`);
         await settle(300);
       },

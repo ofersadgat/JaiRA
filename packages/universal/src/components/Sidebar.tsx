@@ -184,7 +184,18 @@ function Column({
           )}
         </Row>
         {drawer ? (
-          <View flexDirection="column" flex={1} minHeight={0} marginTop={3} marginBottom={6} marginLeft={6} paddingLeft={8} {...(edge(t, { left: 1 }) as object)}>
+          <View
+            flexDirection="column"
+            // In the Settings panel the drawer is as tall as its list and scrolls past that
+            // (`.side-panel > .side-drawer { flex: 0 1 auto; overflow-y: auto }`); in the column it takes the rest.
+            {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden" } : { overflow: "hidden" }) } : { flex: 1 })}
+            minHeight={0}
+            marginTop={3}
+            marginBottom={6}
+            marginLeft={6}
+            paddingLeft={8}
+            {...(edge(t, { left: 1 }) as object)}
+          >
             {v.panel}
           </View>
         ) : null}

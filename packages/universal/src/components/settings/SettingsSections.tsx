@@ -94,7 +94,7 @@ export function SettingsSections({
                       })}
                     >
                       {({ hovered }) => (
-                        <Txt spec={{ voice: "app", scale: 0.94, weight: on ? 600 : 400, color: on || hovered ? "text" : "dim" }} ellip>
+                        <Txt spec={{ voice: "app", scale: 0.94, weight: on ? 600 : 400, color: on || hovered ? "text" : "dim" }}>
                           {part.label}
                         </Txt>
                       )}

@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { ScrollView, View as RNView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { JUST_YOU_VIEWS, SECTIONS, settingsFrameOf, settingsLayersFor, settingsLeadParts, settingsProjectLabel, type JustYouView } from "@jaira/ui/settingsSections";
 import { PLAIN_SCROLLER, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
@@ -33,10 +33,12 @@ export function SettingsView(): JSX.Element {
 
   // The page's scroll box, for the sidebar's accordion (`parts.ts`): where it is, and how to move it.
   const scroller = useRef<ScrollView | null>(null);
-  const attach = useCallback((view: ScrollView | null) => {
-    scroller.current = view;
-    newPage(view === null ? null : (y, animated) => scroller.current?.scrollTo({ y, animated }));
-  }, []);
+  const box = useRef<RNView | null>(null);
+  // Once the page's refs are all set (a parent's is set after its children's), and again for a new page.
+  useEffect(() => {
+    newPage(box.current, (y, animated) => scroller.current?.scrollTo({ y, animated }));
+    return () => newPage(null, null);
+  }, [section]);
   const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
     const { contentOffset, layoutMeasurement, contentSize } = e.nativeEvent;
     scrolled({ top: contentOffset.y, height: layoutMeasurement.height, contentHeight: contentSize.height });
@@ -52,33 +54,36 @@ export function SettingsView(): JSX.Element {
     );
 
   return (
-    <ScrollView
-      // A new page is a new scroll box, at its top (`useSettingsParts` sets `scrollTop = 0` on a new key).
-      key={section}
-      ref={attach}
-      style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER } as never}
-      contentContainerStyle={{ paddingVertical: 14, paddingHorizontal: 16, ...PLAIN_SCROLLER } as never}
-      onScroll={onScroll}
-      scrollEventThrottle={16}
-      onLayout={(e) => scrolled({ height: e.nativeEvent.layout.height })}
-      onContentSizeChange={(_, h) => scrolled({ contentHeight: h })}
-      {...scrollbarProps(t)}
-    >
-      <SettingsLayerContext.Provider value={layerView}>
-        <SettingsPage
-          title={frame.title}
-          lead={settingsLeadParts(section, layer, state.at)}
-          {...(frame.layered
-            ? {
-                aside: <LayerPicker value={layer} layers={settingsLayersFor(state.at !== null)} projectName={project ?? undefined} onChange={actions.setConfigLayer} disabled={state.busy} />,
-                onlyStated: frame.onlyStated,
-                ...(frame.under ? { under: <Segmented label="Which rows" value={justYou} options={JUST_YOU_VIEWS} onChange={setJustYou} /> } : {}),
-              }
-            : {})}
-        >
-          {page}
-        </SettingsPage>
-      </SettingsLayerContext.Provider>
-    </ScrollView>
+    // The scroll box's frame, which the accordion measures its sections against (`parts.ts`).
+    <RNView ref={box} collapsable={false} style={{ flex: 1, minWidth: 0 }}>
+      <ScrollView
+        // A new page is a new scroll box, at its top (`useSettingsParts` sets `scrollTop = 0` on a new key).
+        key={section}
+        ref={scroller}
+        style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER } as never}
+        contentContainerStyle={{ paddingVertical: 14, paddingHorizontal: 16, ...PLAIN_SCROLLER } as never}
+        onScroll={onScroll}
+        scrollEventThrottle={16}
+        onLayout={(e) => scrolled({ height: e.nativeEvent.layout.height })}
+        onContentSizeChange={(_, h) => scrolled({ contentHeight: h })}
+        {...scrollbarProps(t)}
+      >
+        <SettingsLayerContext.Provider value={layerView}>
+          <SettingsPage
+            title={frame.title}
+            lead={settingsLeadParts(section, layer, state.at)}
+            {...(frame.layered
+              ? {
+                  aside: <LayerPicker value={layer} layers={settingsLayersFor(state.at !== null)} projectName={project ?? undefined} onChange={actions.setConfigLayer} disabled={state.busy} />,
+                  onlyStated: frame.onlyStated,
+                  ...(frame.under ? { under: <Segmented label="Which rows" value={justYou} options={JUST_YOU_VIEWS} onChange={setJustYou} /> } : {}),
+                }
+              : {})}
+          >
+            {page}
+          </SettingsPage>
+        </SettingsLayerContext.Provider>
+      </ScrollView>
+    </RNView>
   );
 }

@@ -37,7 +37,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import {
-  LOG_SOURCES,
   type JobOutputChunk,
   type LogEntry,
   type LogLevel,
@@ -47,8 +46,22 @@ import {
 } from "@jaira/shared/browser";
 import { Pills } from "./pill";
 import { isUnseenLog, type LogUnseen } from "./updatesModel";
-
-const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
+import {
+  LEVELS,
+  datedOf,
+  detailParts,
+  dropOverride,
+  keyOf,
+  logQueryOf,
+  nearEnd,
+  putOverride,
+  reasonOf,
+  sampledOverride,
+  sourceGroups,
+  sourcesOf,
+  stamp,
+  streamsOf,
+} from "./logsModel";
 
 /**
  * What a row is hiding — the whole message, the stack, the fields.
@@ -63,16 +76,7 @@ const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
  * beside it as JSON, which is what that is.
  */
 function Detail({ detail }: { detail: unknown }): JSX.Element | null {
-  const { stack, rest } = useMemo((): { stack?: string; rest?: unknown } => {
-    if (detail === null || detail === undefined || typeof detail !== "object" || Array.isArray(detail)) {
-      return detail === undefined ? {} : { rest: detail };
-    }
-    const { stack: held, ...others } = detail as Record<string, unknown>;
-    return {
-      ...(typeof held === "string" ? { stack: held } : {}),
-      ...(Object.keys(others).length > 0 ? { rest: others } : {}),
-    };
-  }, [detail]);
+  const { stack, rest } = useMemo((): { stack?: string; rest?: unknown } => detailParts(detail), [detail]);
   // Nothing under this one. The row above has already unfolded to show the whole message, which for
   // most entries IS the whole entry — an empty box beneath it would be a promise of more that is not
   // there.
@@ -94,13 +98,7 @@ function Detail({ detail }: { detail: unknown }): JSX.Element | null {
  * around them. One column carrying sometimes-a-date-and-sometimes-not is ragged by construction; two
  * columns, each fixed, are not.
  */
-function stamp(at: number): { day: string; time: string } {
-  const when = new Date(at);
-  return {
-    day: when.toDateString() === new Date().toDateString() ? "" : when.toLocaleDateString(),
-    time: when.toLocaleTimeString(),
-  };
-}
+// `stamp` (logsModel.ts).
 
 /**
  * A row's identity, across launches.
@@ -109,20 +107,14 @@ function stamp(at: number): { day: string; time: string } {
  * with the timestamp it is unique in practice and stable across a refetch, which is what keeps an
  * expanded row expanded when a page arrives above it.
  */
-const keyOf = (entry: LogEntry): string => `${entry.at}-${entry.id}`;
+// `keyOf` (logsModel.ts).
 
 /**
  * Why it went wrong, when the entry says so only in its detail — `could not install the … plugin`
  * with the EPERM in `detail.message`. Printed after the message on the row's one line, so a reason is
  * read without unfolding the row; a message that already carries it is not repeated.
  */
-function reasonOf(entry: LogEntry): string | undefined {
-  const detail = entry.detail;
-  if (detail === null || detail === undefined || typeof detail !== "object" || Array.isArray(detail)) return undefined;
-  const said = (detail as Record<string, unknown>)["message"];
-  if (typeof said !== "string" || said.trim() === "" || entry.message.includes(said)) return undefined;
-  return said;
-}
+// `reasonOf` (logsModel.ts).
 
 export interface LogsPanelProps {
   /** The pages fetched so far, newest first. */
@@ -157,11 +149,7 @@ export interface LogsPanelProps {
  * as the whole, which is exactly the misreading that makes a truncated log worse than none.
  */
 function Console({ chunks, onClose }: { chunks: JobOutputChunk[]; onClose: () => void }): JSX.Element {
-  const streams = useMemo(() => {
-    const byStream = new Map<string, JobOutputChunk[]>();
-    for (const chunk of chunks) byStream.set(chunk.stream, [...(byStream.get(chunk.stream) ?? []), chunk]);
-    return [...byStream.entries()];
-  }, [chunks]);
+  const streams = useMemo(() => streamsOf(chunks), [chunks]);
   return (
     <div className="console">
       <div className="console-head">
@@ -214,14 +202,7 @@ export function LogsPanel({
    * The scroll handler asks for the next page with the SAME question the visible page answered —
    * anything else and scrolling would quietly widen the search.
    */
-  const query = useMemo(
-    (): LogQuery => ({
-      level,
-      ...(source === "" ? {} : { source }),
-      ...(text.trim() === "" ? {} : { text: text.trim() }),
-    }),
-    [level, source, text],
-  );
+  const query = useMemo((): LogQuery => logQueryOf(level, source, text), [level, source, text]);
 
   /**
    * The filters are read where the entries ARE, so changing one is a refetch.
@@ -259,13 +240,13 @@ export function LogsPanel({
     (e: React.UIEvent<HTMLDivElement>) => {
       const el = e.currentTarget;
       if (!hasOlder || loading) return;
-      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 400) onOlder(query);
+      if (nearEnd(el.scrollTop, el.clientHeight, el.scrollHeight)) onOlder(query);
     },
     [hasOlder, loading, onOlder, query],
   );
 
   /** The catalogue, plus whatever is actually in the log — see {@link LOG_SOURCES}. */
-  const sources = useMemo(() => [...new Set([...LOG_SOURCES, ...entries.map((e) => e.source)])].sort(), [entries]);
+  const sources = useMemo(() => sourcesOf(entries), [entries]);
 
   /**
    * Is any of this from another day?
@@ -275,7 +256,7 @@ export function LogsPanel({
    * of every row. It appears when it has something to say and the table is five columns until then,
    * which is the same rule the date inside the cell already follows.
    */
-  const dated = useMemo(() => entries.some((e) => stamp(e.at).day !== ""), [entries]);
+  const dated = useMemo(() => datedOf(entries), [entries]);
 
   return (
     <div className="logs">
@@ -436,14 +417,7 @@ function SourceSelect({
   onChange: (value: string) => void;
   label?: string;
 }): JSX.Element {
-  const groups = useMemo(() => {
-    const held = new Map<string, string[]>();
-    for (const s of sources) {
-      const top = s.includes(".") ? s.slice(0, s.indexOf(".")) : s;
-      held.set(top, [...(held.get(top) ?? []), s]);
-    }
-    return [...held.entries()];
-  }, [sources]);
+  const groups = useMemo(() => sourceGroups(sources), [sources]);
   return (
     <select value={value} onChange={(e) => onChange(e.target.value)} aria-label={label}>
       <option value="">all sources</option>
@@ -497,13 +471,8 @@ function ConfigPanel({
   const [minLevel, setMinLevel] = useState<LogLevel>("debug");
 
   /** Written by key, so editing a rule replaces it rather than adding a second one nobody can see. */
-  const put = (next: LogOverride): void =>
-    onPolicy({
-      ...policy,
-      overrides: [...policy.overrides.filter((o) => !(o.match === next.match && o.key === next.key)), next],
-    });
-  const drop = (o: LogOverride): void =>
-    onPolicy({ ...policy, overrides: policy.overrides.filter((h) => !(h.match === o.match && h.key === o.key)) });
+  const put = (next: LogOverride): void => onPolicy(putOverride(policy, next));
+  const drop = (o: LogOverride): void => onPolicy(dropOverride(policy, o));
 
   return (
     <div className="log-config">
@@ -572,10 +541,8 @@ function ConfigPanel({
                   value={o.samplingRate ?? 1}
                   aria-label={`Sampling for ${o.key}`}
                   onChange={(e) => {
-                    const rate = e.target.value === "" ? 1 : Number(e.target.value);
-                    if (!Number.isFinite(rate) || rate < 0 || rate > 1) return;
-                    const { samplingRate: _held, ...rest } = o;
-                    put(rate === 1 ? rest : { ...rest, samplingRate: rate });
+                    const next = sampledOverride(o, e.target.value);
+                    if (next !== undefined) put(next);
                   }}
                 />
               </td>

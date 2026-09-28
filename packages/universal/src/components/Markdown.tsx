@@ -294,14 +294,20 @@ function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
       </Txt>
     );
   }
-  const d = Math.floor((size * 0.992 * 2) / 3 + 1) / 2 > 0 ? Math.floor(((size * 0.992 * 2) / 3 + 1) / 2) : 4;
+  // Chromium's own arithmetic (`ListMarker`'s symbol rect), in whole pixels of the font's ascent: the disc
+  // is (⌊2A/3⌋ + 1) / 2 across and ⌊3(A − ⌊2A/3⌋) / 2⌋ under the top of the text, which sits half the
+  // leading under the top of the line (DM Sans: ascent 0.992 em, descent 0.31 em, each rounded).
+  const ascent = Math.round(size * 0.992);
+  const third = Math.floor((ascent * 2) / 3);
+  const d = Math.floor((third + 1) / 2) > 0 ? Math.floor((third + 1) / 2) : 4;
+  const textTop = (line - (ascent + Math.round(size * 0.31))) / 2;
   const color = t.v(ink.color ?? "text");
   const shape = marker.startsWith("◦")
     ? { borderRadius: 999, ...edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, String(color)) }
     : marker.startsWith("▪")
       ? { backgroundColor: color }
       : { borderRadius: 999, backgroundColor: color };
-  return <View position="absolute" width={d} height={d} left={-(size * (2 / 3) + d)} top={(line - d) / 2 + 0.45} {...(shape as object)} />;
+  return <View position="absolute" width={d} height={d} left={-(size * (2 / 3) + d)} top={textTop + Math.floor((3 * (ascent - third)) / 2)} {...(shape as object)} />;
 }
 
 function fenceBlock(block: FenceBlock, ctx: Ctx): Block {
