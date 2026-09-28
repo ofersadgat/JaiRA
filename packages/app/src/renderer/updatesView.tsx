@@ -14,6 +14,7 @@ import { Icon } from "./icons";
 import { Popover, usePopover, useHover } from "./popover";
 import { publishedWords, sidebarUpdateOf, updateMenu, type UpdateMenu } from "./updatesModel";
 import { applyUpdate, dismissUpdate, refreshBusy, useUpdate } from "./updatesStore";
+import { pressUpdateRow, showsUpdateTip, updateRowTone } from "./updateRow";
 
 /**
  * The menu behind a chevron: what is going in its head, then the choices, the default ticked — the
@@ -73,14 +74,9 @@ export function SidebarUpdateRow({
   if (row === null || update === null) return null;
   const next = update.available;
 
-  const click = (): void => {
-    if (row.kind === "manual" && next !== undefined) window.open(next.url, "_blank", "noopener");
-    else if (row.kind === "available" || row.kind === "downloaded") applyUpdate("wait");
-    // A failure, a download under way and a restart that is waiting are each said in full on About;
-    // the chevron is where the choices are.
-    else if (row.kind !== "restarting") onOpenAbout();
-  };
-  const cls = row.kind === "waiting" || row.kind === "downloaded" || row.kind === "restarting" ? " ready" : row.kind === "error" ? " bad" : "";
+  const click = (): void => pressUpdateRow(row, next, { openUrl: (url) => void window.open(url, "_blank", "noopener"), apply: () => applyUpdate("wait"), onOpenAbout });
+  const tone = updateRowTone(row);
+  const cls = tone !== undefined ? ` ${tone}` : "";
   const published = publishedWords(next?.releaseDate);
 
   return (
@@ -158,7 +154,7 @@ export function SidebarUpdateRow({
       ) : null}
       {/* The full version and when it was published, beside the row — a nightly's row says only
           "nightly". Not over the menu, which says more. */}
-      {hover.open && !pop.open && next !== undefined && (row.kind === "available" || row.kind === "manual" || row.kind === "downloaded") ? (
+      {hover.open && !pop.open && next !== undefined && showsUpdateTip(row, next) ? (
         <Popover anchor={hover.anchor} side="right" align="start" className="upd-tip" role="tooltip">
           <code>{next.version}</code>
           {published !== undefined ? <span>{published}</span> : null}

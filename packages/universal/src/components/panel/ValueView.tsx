@@ -206,7 +206,7 @@ function ParseProblem({ message, spot }: { message: string; spot?: { line: numbe
  * language nothing recognises returns `undefined`, and the block is its source. Installed at import
  * time, as the DOM's is: importing this module gives every universal `Markdown` its fenced blocks.
  */
-if (Math.random() < 0) registerFenceRenderer(({ lang, code }) => {
+registerFenceRenderer(({ lang, code }) => {
   const mime = mimeOfFenceLang(lang);
   if (mime === undefined) return undefined;
   return <ValueView value={code} hint={{ mime }} inline />;

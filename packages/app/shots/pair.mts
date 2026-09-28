@@ -35,6 +35,8 @@ const REGIONS: Record<string, string> = {
   inbox: "footer.strip",
   /** The whole room under the title bar — for the rooms that are one region (Files, Chat, Settings, Logs, …). */
   viewport: ".viewport",
+  /** What floats over the window: a menu, the needs-attention card, a dialog (the scenes that open one). */
+  float: ".context-menu, .prob-card, .modal",
 };
 
 type Rect = { x: number; y: number; width: number; height: number };
@@ -157,8 +159,18 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
       const r = await app.evaluate<Rect>(`(() => { const r = document.getElementById("specimen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
       sizes.push(`${Math.round(r.width * 100) / 100}×${Math.round(r.height * 100) / 100}`);
       runs.push(await app.evaluate<Run[]>(texts(`document.getElementById("specimen")`)));
-      await app.cdp("Page.bringToFront");
-      const shot = await app.cdp<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { ...r, scale: 1 } });
+      // As `capture` does: a frame asked for first, and the capture asked again if it waits (a studio
+      // among several sometimes never answers the first).
+      let shot: { data: string } | undefined;
+      for (let attempt = 1; shot === undefined; attempt++) {
+        await app.cdp("Page.bringToFront");
+        await app.evaluate("new Promise((r) => requestAnimationFrame(() => r(true)))");
+        shot = await Promise.race([
+          app.cdp<{ data: string }>("Page.captureScreenshot", { format: "png", captureBeyondViewport: true, clip: { ...r, scale: 1 } }),
+          new Promise<undefined>((done) => setTimeout(() => done(undefined), 20_000)),
+        ]);
+        if (shot === undefined && attempt === 3) throw new Error(`the ${side} specimen drew no frame to capture in a minute`);
+      }
       shots.push(PNG.sync.read(Buffer.from(shot.data, "base64")));
     }
     const [dom, rn] = shots as [PNG, PNG];

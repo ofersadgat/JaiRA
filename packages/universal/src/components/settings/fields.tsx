@@ -216,7 +216,7 @@ export function TextField({
     <TextInput
       value={value}
       onChangeText={onChange}
-      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor(look.scheme) } : {})}
+      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */ } : {})}
       editable={!disabled}
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       {...(onBlur !== undefined ? { onBlur } : {})}

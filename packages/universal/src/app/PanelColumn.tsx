@@ -102,6 +102,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     startAgain,
     resume: (taskId) => void actions.resumeTask(taskId, selectedProject),
     cancel: (taskId) => actions.cancelTask(taskId, selectedProject),
+    reviewChanges: (taskId) => actions.reviewChanges(taskId, selectedProject),
     // ⇤: the conversation into the main view, which hands the panel to its context.
     adoptTask: (taskId, at, workflow) => {
       runMode.set("conversation");

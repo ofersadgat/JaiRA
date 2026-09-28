@@ -3,6 +3,7 @@ import { ScrollView, type LayoutChangeEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { GALLERY_GROUPS, schemaById, surfacesOfGroups, type GalleryGroup, type GallerySurface } from "@jaira/shared/browser";
 import {
+  approvalOf,
   clampSlide,
   configCaption,
   initialState,
@@ -24,6 +25,8 @@ import { Button } from "../settings/Button";
 import { GateSurface } from "../panel/Gate";
 import { Outputs } from "../debug/DebugPane";
 import { SchemaForm } from "../form/SchemaForm";
+import { ApprovalSurface } from "../floats/ApprovalSurface";
+import { QuestionSurface } from "../floats/QuestionSurface";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 
 /**
@@ -31,8 +34,9 @@ import type { Schema } from "@jaira/ui/schemaForm/types";
  * 0015): the page's heading, the bar that slides every row to one variant, and a row per surface — its
  * heading, its tabs and arrows, and a carousel of cards. What it derives is `galleryModel.ts`, shared with
  * the desktop's. In a card, an interaction's dialog is the gate's own surface (`GateSurface`, the side
- * panel's copy) and its config's form the one form (`form/SchemaForm`); an approval's and a question's
- * dialogs and the JSON editor are {@link Uncopied}. The rules, from `styles.css`:
+ * panel's copy) and its config's form the one form (`form/SchemaForm`); an approval and a question are
+ * their surfaces (`floats/ApprovalSurface`, `floats/QuestionSurface`) in `.inline-gate`; a review, an edit
+ * and the JSON editor are {@link Uncopied}. The rules, from `styles.css`:
  *
  *   .gallery-page        --bg, scrolls, padding 12 14, column, gap 18
  *   .gallery-page-head   column, gap 8; h2 700 app at 15/12.5, margin 0; .sub margin 0, ≤ 80ch, line 1.5
@@ -110,7 +114,19 @@ function ComponentGallery({ groups = GALLERY_GROUPS }: { groups?: readonly Galle
   const across = variantsAcross(groups);
   return (
     <View flexDirection="column" gap={14}>
-      <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} paddingVertical={8} backgroundColor={t.v("bg") as never} {...(edge(t, { bottom: 1 }) as object)} role="toolbar" aria-label="Show every row's variant">
+      <View
+        // Sticky on web, as `.gallery-common` is (top 0, over the rows: z-index 2); a phone has no sticky.
+        {...((isWeb ? { position: "sticky", top: 0, zIndex: 2 } : {}) as object)}
+        flexDirection="row"
+        flexWrap="wrap"
+        alignItems="center"
+        gap={6}
+        paddingVertical={8}
+        backgroundColor={t.v("bg") as never}
+        {...(edge(t, { bottom: 1 }) as object)}
+        role="toolbar"
+        aria-label="Show every row's variant"
+      >
         <Txt spec={SUB}>Every row to</Txt>
         {across.map(({ id, rows }) => (
           <Press
@@ -416,21 +432,35 @@ function GalleryCard({
  * `Stage`: the dialog itself, built from the edited document as main builds it from a run
  * (`galleryModel.ts`). An interaction is `InteractionDialog`: the gate's own surface (`GateSurface`, the
  * side panel's copy) in a `.modal` whose backdrop the stage neutralises — as wide as what is in it, since
- * nothing stretches it. An approval and an agent's question are {@link Uncopied}.
+ * nothing stretches it. An approval and an agent's question are their surfaces in `div.inline-gate`
+ * (`InlineGateBox`), as the desktop's stage draws them.
  *
  *   .modal               --panel, 1px --line, radius 12, padding 18; in the stage no shadow, at most
  *                        the stage's width. `.modal-wide` (a review or an edit): the stage's width.
  *   .reason              --bad, app at 11/12.5
  */
-function Stage({ surface, text, onResult }: { surface: GallerySurface; text: string; onResult: (result: CardState["result"]) => void }): JSX.Element {
+export function Stage({ surface, text, onResult }: { surface: GallerySurface; text: string; onResult: (result: CardState["result"]) => void }): JSX.Element {
   const t = useTokens();
   const parsed = parsedDoc(text);
   const reason = (words: string): JSX.Element => <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>{words}</Txt>;
   if (parsed.doc === undefined) return reason(`Not JSON yet: ${parsed.error ?? ""}`);
-  if (surface.kind === "approval") return <Uncopied name="the approval dialog" height={260} />;
+  if (surface.kind === "approval") {
+    const pending = approvalOf(surface, parsed.doc);
+    return (
+      <InlineGateBox t={t}>
+        <ApprovalSurface pending={pending} onDecide={(decision, scope, extras) => onResult({ value: { decision, scope, ...(extras ?? {}) } as never })} />
+      </InlineGateBox>
+    );
+  }
   if (surface.kind === "question") {
-    if (questionOf(surface, parsed.doc) === null) return reason("A question request needs at least one question.");
-    return <Uncopied name="the question dialog" height={260} />;
+    const pending = questionOf(surface, parsed.doc);
+    if (pending === null) return reason("A question request needs at least one question.");
+    return (
+      <InlineGateBox t={t}>
+        {/* The dismissal is an answer the agent receives, so it is shown as itself. */}
+        <QuestionSurface pending={pending} onSubmit={(answers) => onResult({ value: answers === undefined ? { dismissed: true } : { answers } } as never)} />
+      </InlineGateBox>
+    );
   }
   const { pending, config, inputs } = interactionOf(surface, parsed.doc);
   const component = pending.config?.component;
@@ -446,6 +476,15 @@ function Stage({ surface, text, onResult }: { surface: GallerySurface; text: str
       testID="interaction"
     >
       <GateSurface pending={pending} onSubmit={(value) => onResult(interactionResult(config, value, inputs))} />
+    </View>
+  );
+}
+
+/** `div.inline-gate` round a surface the stage draws in place: a 2px --accent rule on top, 12 above, 8 under it. */
+function InlineGateBox({ t, children }: { t: Tokens; children: ReactNode }): JSX.Element {
+  return (
+    <View marginTop={12} paddingTop={8} {...(edge(t, { top: 2 }, "accent") as object)}>
+      {children}
     </View>
   );
 }

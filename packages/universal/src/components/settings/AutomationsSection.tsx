@@ -23,7 +23,7 @@ import {
 } from "@jaira/ui/automationsModel";
 import { runSchemaOf } from "@jaira/ui/runForm";
 import type { ValueSources } from "@jaira/ui/schemaForm/types";
-import { Txt, edge, useHover } from "../../primitives";
+import { Txt, edge, useHover, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { FormInput } from "../form/inputs";
 import { SchemaForm } from "../form/SchemaForm";
@@ -84,13 +84,12 @@ function useEm(): (n: number) => never {
   return (n) => t.scaled("size-app", BODY * n) as never;
 }
 
-/** `button.link.au-link`, in the words it stands in: the accent, underlined under the pointer. */
-function Link({ children, onPress, disabled = false, title }: { children: string; onPress: () => void; disabled?: boolean; title?: string | undefined }): JSX.Element {
-  const t = useTokens();
+/** `button.link.au-link`, in the words it stands in (`spec`, theirs): the accent, underlined under the pointer. */
+function Link({ children, onPress, disabled = false, title, spec = HINT }: { children: string; onPress: () => void; disabled?: boolean; title?: string | undefined; spec?: FontSpec }): JSX.Element {
   const [hovered, hover] = useHover();
   return (
     <Txt
-      color={t.v("accent") as never}
+      spec={{ ...spec, color: "accent" }}
       {...(disabled ? { opacity: 0.5 } : { onPress, ...hover })}
       {...(title !== undefined ? { title } : {})}
       role="button"
@@ -175,7 +174,9 @@ function FlagLine({ flag, onOpenEvents }: { flag: LineFlag; onOpenEvents: () => 
       {flag.kind === "off" ? (
         <>
           {" "}
-          <Link onPress={onOpenEvents}>Switch it on in Events</Link>
+          <Link spec={DESC} onPress={onOpenEvents}>
+            Switch it on in Events
+          </Link>
         </>
       ) : null}
     </Txt>

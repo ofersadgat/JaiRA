@@ -2,9 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "rea
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { boardCardOrderOf, pickCard, type BoardPick } from "@jaira/ui/boardModel";
+import { openColumnMenu, openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
+import type { AskSpec } from "@jaira/ui/menu";
 import { undoableOn } from "@jaira/ui/taskDrag";
 import { groupOf, groupProjects, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
 import { Board, type Mods } from "../components/Board";
+import { AskDialog } from "../components/files/AskDialog";
+import { ContextMenu, type MenuAt } from "../components/Menu";
+import { copyText } from "../clipboard";
 import { TaskAddressBar } from "../components/TaskAddressBar";
 import { Txt, edge, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
@@ -30,8 +35,12 @@ import { boardAt } from "./viewState";
  *                                   13/12.5 on --dim, padding 8 0, the paragraph's 1em margins
  *
  * Which group the column is scrolled to is `App.tsx`'s `trackBoards`: the last group whose top has
- * reached the column's, told to the title bar through `viewState.boardAt`. Not copied: the right-click
- * menus.
+ * reached the column's, told to the title bar through `viewState.boardAt`.
+ *
+ * The right-click menus — a card's, a selection's, a column's (a long press on a phone) — and the Delete
+ * they ask about are `App.tsx`'s `taskMenu` and `taskAsk`: the items and what each does come from
+ * `boardMenus.ts`, the one builder both shells call; the menu is `Menu.tsx`'s and the dialog
+ * `AskDialog`'s, over everything.
  */
 export function BoardColumn(): JSX.Element {
   const t = useTokens();
@@ -45,6 +54,25 @@ export function BoardColumn(): JSX.Element {
   useEffect(() => {
     setPicked((was) => (was !== null && state.selected !== null && !was.ids.includes(state.selected) ? null : was));
   }, [state.selected]);
+  // The board's right-click menu, and the one confirmation inside it (`App.tsx`'s `taskMenu`, `taskAsk`).
+  const [taskMenu, setTaskMenu] = useState<MenuAt | null>(null);
+  const [taskAsk, setTaskAsk] = useState<AskSpec | null>(null);
+  const menuHost: BoardMenuHost<{ x: number; y: number }> = {
+    actions,
+    boards: state.boards,
+    queue: state.queue,
+    picked,
+    setPicked,
+    setTaskMenu,
+    setTaskAsk,
+    copy: (text) => void copyText(text),
+  };
+  const floats = (
+    <>
+      {taskMenu !== null ? <ContextMenu anchor={taskMenu} onClose={() => setTaskMenu(null)} /> : null}
+      {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
+    </>
+  );
   // `.board-tail` is 100% of the column: the scroller's own height, measured.
   const [height, setHeight] = useState(0);
   const scroller = useRef<ScrollView>(null);
@@ -75,6 +103,7 @@ export function BoardColumn(): JSX.Element {
     return (
       <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never}>
         <RunView context={runContext} />
+        {floats}
       </View>
     );
   }
@@ -166,6 +195,9 @@ export function BoardColumn(): JSX.Element {
                   for (const m of g.members) actions.drillProject(m.project, level);
                 }}
                 onOpenTask={(card) => actions.openTask(card.taskId, own(card), board.level === "" ? card.workflow : board.level)}
+                onTaskMenu={(card, at) => openTaskMenu(menuHost, own(card), card, at)}
+                // The column's own right-click: the place, and every task standing in it.
+                onColumnMenu={(stateId, at) => openColumnMenu(menuHost, g.key, stateId, at)}
                 connect={{
                   onMove: (card, move, confirmed) => void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed === true ? { confirmed: true } : {}) }),
                   undoable: undoableOn(board),
@@ -180,6 +212,7 @@ export function BoardColumn(): JSX.Element {
       })}
       {/* Room to scroll past the end, so the last group can reach the top of the column. */}
       {state.taskFocus === null && groups.length > 1 ? <View flexShrink={0} height={height} /> : null}
+      {floats}
     </ScrollView>
   );
 }

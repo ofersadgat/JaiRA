@@ -311,7 +311,7 @@ export function ChoiceSteps({
  * schema form asks — so what the step accepts is what the run would. A step with no schema, or with
  * nothing answered yet, holds nothing.
  */
-function useTypedStep(choice: Choice, given: string | string[] | undefined): { holds: boolean; problem?: string } {
+export function useTypedStep(choice: Choice, given: string | string[] | undefined): { holds: boolean; problem?: string } {
   const read = choice.schema !== undefined && given !== undefined ? readAnswer(choice.schema, given) : undefined;
   const check = useSchemaCheck(read?.ok === true ? [{ path: "", schema: choice.schema as Schema, value: read.value }] : []);
   if (read === undefined) return { holds: false };

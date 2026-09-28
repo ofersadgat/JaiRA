@@ -8,6 +8,11 @@ import { Press, Txt, edge, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Icon } from "./Icon";
+import { gateBodyOf } from "../floats/GateBodies";
+import { GateTitle } from "../floats/GateTitle";
+
+/** One question, picked from its options alone: what this file's `ChooseOption` draws. */
+const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 1 && choices[0]!.freeText === undefined && choices[0]!.multiple !== true && choices[0]!.requireConfirm !== true;
 
 /**
  * A parked gate, universal (decision 0015): `components.tsx`'s `GateSurface` inside the panel's
@@ -40,9 +45,7 @@ export function InlineGate({ pending, onGate, maxHeight }: { pending: PendingInt
 
 /** `GateSurface`: the author's question, whether answering it resumes the task, and its control. */
 export function GateSurface({ pending, onSubmit }: { pending: PendingInteraction; onSubmit: (value: unknown) => void }): JSX.Element {
-  const t = useTokens();
   const config = pending.config;
-  const size = t.scaled("size-app", 17 / 12.5);
   const body = ((): JSX.Element => {
     if (pending.configError !== undefined) {
       return (
@@ -51,19 +54,15 @@ export function GateSurface({ pending, onSubmit }: { pending: PendingInteraction
         </Txt>
       );
     }
-    if (config?.component === "choose_option" && config.questions === undefined) return <ChooseOption choices={choicesOfConfig(config)} onSubmit={onSubmit} />;
-    return <Uncopied name={`the ${pending.component} gate`} />;
+    if (config?.component === "choose_option" && config.questions === undefined && plainChoice(choicesOfConfig(config))) return <ChooseOption choices={choicesOfConfig(config)} onSubmit={onSubmit} />;
+    // Every other body (`floats/GateBodies.tsx`): a choice with words or several questions, a
+    // confirmation, a form, a tool call, the JSON box. A review and an edit are not copied yet.
+    return gateBodyOf(pending, onSubmit, pending.resumes ? 0 : 8) ?? <Uncopied name={`the ${pending.component} gate`} />;
   })();
   return (
     <>
-      {/* The glyph sits 2px under the baseline (`vertical-align: -2px`): DM Sans' ascent (0.992) and
-          descent (0.31) in a 1.35 line put its top at 1.016 × the size − 14. */}
-      <View flexDirection="row" alignItems="flex-start" marginBottom={8}>
-        {isComponentName(pending.component) ? <Icon name={COMPONENT_ICON[pending.component]} size={16} color={String(t.v("dim"))} box={{ marginTop: typeof size === "number" ? size * 1.016 - 14 : 3.27, marginRight: 4 }} /> : null}
-        <Txt spec={{ voice: "app", scale: 17 / 12.5, weight: 700, lineHeight: 1.35 }} flex={1} minWidth={0}>
-          {` ${config?.prompt ?? pending.component}`}
-        </Txt>
-      </View>
+      {/* The heading and its glyph, placed as Chromium places an inline one (`floats/GateTitle`). */}
+      <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>
       {pending.resumes ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>Answering this continues the task.</Txt> : null}
       {/* Without the line above, the block's 14 collapses into the heading's 8 in the DOM. */}
       <View marginTop={pending.resumes ? 0 : -8}>{body}</View>

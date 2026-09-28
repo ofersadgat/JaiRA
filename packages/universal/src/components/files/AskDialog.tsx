@@ -4,6 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { AskSpec } from "@jaira/ui/menu";
 import { Press, Txt, font, lengthToken, padToken } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { FocusRing } from "../floats/FocusRing";
 import { MenuLayer } from "../MenuLayer";
 import { Button } from "../settings/Button";
 
@@ -21,7 +22,8 @@ import { Button } from "../settings/Button";
  *   .field            12 above; its label app 11/12.5, --dim, 0.04em, uppercase, 4 over the box
  *   input             --bg, 1px --line, radius --control-radius, padding 5 9, the body's font
  *   .options          row, gap 8, 14 above; the confirm `primary` (or `danger`: --bad on nothing, its
- *                     ring --bad at 40% into --line), then Cancel `ghost`
+ *                     ring --bad at 40% into --line), then Cancel `ghost`; with no field the confirm
+ *                     has the focus, and `:focus-visible`'s ring (`floats/FocusRing`)
  */
 export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => void }): JSX.Element {
   const t = useTokens();
@@ -83,11 +85,14 @@ export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => v
             </View>
           ) : null}
           <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
-            {spec.danger ? <DangerButton label={spec.confirmLabel} disabled={!ok} onPress={confirm} /> : (
-              <Button kind="primary" onPress={confirm} disabled={!ok}>
-                {spec.confirmLabel}
-              </Button>
-            )}
+            {/* With nothing to type, the confirm takes the focus (the DOM's `autoFocus`), and its ring. */}
+            <FocusRing radius={lengthToken(t, "control-radius", 7)} autoFocus={!needsValue}>
+              {spec.danger ? <DangerButton label={spec.confirmLabel} disabled={!ok} onPress={confirm} /> : (
+                <Button kind="primary" onPress={confirm} disabled={!ok}>
+                  {spec.confirmLabel}
+                </Button>
+              )}
+            </FocusRing>
             <Button kind="ghost" onPress={onCancel}>
               Cancel
             </Button>

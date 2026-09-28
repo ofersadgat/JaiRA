@@ -45,14 +45,14 @@ import type {
   PermissionSetsView as PermissionSetsData,
   WorkflowLayer,
 } from "@jaira/shared/browser";
-import { isArchivableStatus } from "@jaira/shared/browser";
 import { Board } from "./board";
 import { boardCardOrderOf, pickCard } from "./boardModel";
 import { dragOffersOf, undoableOn } from "./taskDrag";
 import { ChatListPanel, ChatView, chatProjectOf, type ChatSurface } from "./chatPane";
 import { chatSurfaceOf, conversationsAt } from "./chatSurface";
 import { chatTitleOf } from "./chatListModel";
-import { isChatWorkflow } from "./chatWorkflow";
+import { initPromptSpec, orphanApprovalOf } from "./appDialogs";
+import { openColumnMenu as openColumnMenuOf, openTaskMenu as openTaskMenuOf, type BoardMenuHost } from "./boardMenus";
 import { ApprovalDialog, ModuleApprovalDialog, type ApprovalAnswerExtras } from "./components";
 import {
   AskDialog,
@@ -60,7 +60,6 @@ import {
   MENU_WIDTH,
   type AskSpec,
   type MenuAnchor,
-  type MenuItem,
   type MenuPoint,
 } from "./menu";
 import { AppearancePane } from "./appearancePane";
@@ -659,7 +658,7 @@ export default function App(): JSX.Element {
    * An approval no conversation can host: one that names no task. The shell is its caller, and the
    * shell's place for it is a modal. Everything with a task renders where the task is.
    */
-  const orphanApproval = state.approvals.find((a) => a.taskId === undefined) ?? null;
+  const orphanApproval = orphanApprovalOf(state.approvals);
 
   /**
    * The Files tree's folded branches.
@@ -844,254 +843,24 @@ export default function App(): JSX.Element {
     [ui, actions],
   );
 
-  /** "3 tasks", "1 task" — the count a group verb is labelled with. */
-  const plural = (k: number): string => `${k} task${k === 1 ? "" : "s"}`;
-
   /**
-   * The verbs a GROUP of tasks is offered — a multi-selection, or every card in a column.
-   *
-   * One builder for both, because they are the same menu asked for two different ways: a set
-   * somebody gathered by shift-clicking, and a set the board had already drawn as a column. Two
-   * copies of "re-run these, cancel these, delete these" is two copies that stop agreeing about
-   * which of them a running task is exempt from.
-   *
-   * Each verb is labelled with the count it will ACTUALLY touch, and one a member is ineligible for
-   * skips that member and says so in the note — "Re-run 3 tasks" doing something to two of them is
-   * how trust in a menu dies.
+   * The board's right-click menus — a card's, a selection's, a column's — as `boardMenus.ts` builds
+   * them (shared with the universal shell): the items and what each does, from the same state.
    */
-  const groupItems = useCallback(
-    (project: string, cards: readonly BoardCard[]): MenuItem[] => {
-      const n = cards.length;
-      const notRunning = cards.filter((c) => c.status !== "running");
-      const cancelable = cards.filter(
-        (c) => c.status === "queued" || c.status === "running" || c.status === "interrupted",
-      );
-      const archivable = cards.filter((c) => isArchivableStatus(c.status));
-      const archived = cards.filter((c) => c.status === "archived");
-      return [
-        {
-          label: `Re-run ${plural(notRunning.length)}`,
-          disabled: notRunning.length === 0,
-          ...(notRunning.length < n ? { note: "running skipped" } : {}),
-          onSelect: () =>
-            void actions.rerunTasks(
-              notRunning.map((c) => c.taskId),
-              project,
-            ),
-        },
-        {
-          label: `Cancel ${plural(cancelable.length)}`,
-          disabled: cancelable.length === 0,
-          ...(cancelable.length < n ? { note: "finished skipped" } : {}),
-          onSelect: () =>
-            void actions.cancelTasks(
-              cancelable.map((c) => c.taskId),
-              project,
-            ),
-        },
-        // Archive what is finished, or bring back what is archived — whichever the selection holds.
-        archived.length > archivable.length
-          ? {
-              label: `Unarchive ${plural(archived.length)}`,
-              separator: true,
-              note: "back on the board",
-              onSelect: () => void actions.archiveTasks(archived.map((c) => c.taskId), project, true),
-            }
-          : {
-              label: `Archive ${plural(archivable.length)}`,
-              separator: true,
-              disabled: archivable.length === 0,
-              note: archivable.length < n ? "unfinished skipped" : "off the board",
-              onSelect: () => void actions.archiveTasks(archivable.map((c) => c.taskId), project),
-            },
-        {
-          label: "Copy task ids",
-          separator: true,
-          disabled: n === 0,
-          onSelect: () => void navigator.clipboard?.writeText(cards.map((c) => c.taskId).join("\n")),
-        },
-        {
-          label: `Delete ${plural(notRunning.length)}…`,
-          separator: true,
-          danger: true,
-          disabled: notRunning.length === 0,
-          ...(notRunning.length < n ? { note: "running skipped" } : {}),
-          onSelect: () =>
-            setTaskAsk({
-              title: `Delete ${plural(notRunning.length)}?`,
-              note: "This deletes each task, every run it made, and its worktree — uncommitted work included. None of it comes back.",
-              confirmLabel: "Delete",
-              danger: true,
-              onConfirm: () => {
-                setTaskAsk(null);
-                setPicked(null);
-                void actions.deleteTasks(
-                  notRunning.map((c) => c.taskId),
-                  project,
-                );
-              },
-            }),
-        },
-      ];
-    },
-    [actions],
-  );
-
-  const openTaskMenu = useCallback(
-    (project: string, card: BoardCard, at: MenuPoint) => {
-      const set =
-        picked !== null && picked.project === project && picked.ids.length > 1 && picked.ids.includes(card.taskId)
-          ? picked.ids
-          : null;
-
-      if (set !== null) {
-        const byId = new Map(boardCardsOf(project).map((c) => [c.taskId, c] as const));
-        const cards = set.map((id) => byId.get(id)).filter((c): c is BoardCard => c !== undefined);
-        setTaskMenu({ ...at, title: plural(cards.length), items: groupItems(project, cards) });
-        return;
-      }
-
-      // Selecting first, so the panel beside the menu describes the card the menu is about — the
-      // same answer a plain click gives, and the confirmation dialog then names a task whose detail
-      // is on screen.
-      setPicked({ project, ids: [card.taskId], anchor: card.taskId });
-      actions.select(card.taskId, project);
-      const running = card.status === "running";
-      const terminal = card.status === "completed" || card.status === "failed" || card.status === "canceled" || card.status === "archived";
-      // Opening a card follows the same level rule as double-clicking it — see the Board's
-      // `onOpenTask` below.
-      const level = state.boards[project]?.level ?? "";
-      // Waiting for a workspace (decision 0013 §5): sent to one by hand, before it starts (ruled "4a").
-      const waiting = state.queue.some((q) => q.taskId === card.taskId);
-      const runOn: MenuItem[] = waiting
-        ? [
-            {
-              label: "Run on…",
-              note: "choose a workspace",
-              onSelect: () =>
-                void invoke("placement:view", { project }).then((view) =>
-                  setTaskMenu({
-                    ...at,
-                    title: "Run on",
-                    items: view.workspaces.map((w) => ({
-                      label: `${w.label} · ${w.dir}`,
-                      note: w.why ?? "has room",
-                      // Offline, or missing a tag its workflow needs: it could not run there at all.
-                      disabled: w.why === "offline" || (w.why ?? "").startsWith("not "),
-                      onSelect: () => void actions.runQueuedOn(card.taskId, project, w.project),
-                    })),
-                  }),
-                ),
-            },
-          ]
-        : [];
-      const items: MenuItem[] = [
-        ...runOn,
-        {
-          label: "Open",
-          onSelect: () => actions.openTask(card.taskId, project, level === "" ? card.workflow : level),
-        },
-        {
-          // The same distinctions the task panel's button draws, plus the one it cannot: a FINISHED
-          // task reruns as a fresh copy ("task:rerun"), and the label says so rather than letting
-          // "Re-run" quietly mean "make another task".
-          //
-          // A CONVERSATION is the same story arrived at differently. Re-running one in place would
-          // start a second conversation in the same task, and a thread is read from the latest run —
-          // so everything already said would still be in the database and reachable from nowhere.
-          // `task:rerun` copies it instead, and this is where that stops being a surprise.
-          label:
-            card.status === "queued"
-              ? "Start"
-              : terminal || isChatWorkflow(card.workflow)
-                ? "Re-run as a new task"
-                : "Re-run",
-          disabled: running,
-          ...(terminal || isChatWorkflow(card.workflow) ? { note: "fresh copy" } : {}),
-          onSelect: () => void actions.rerunTask(card.taskId, project),
-        },
-        {
-          label: "Cancel",
-          // A terminal task has nothing left to cancel; the item stays, disabled, so the menu keeps
-          // one shape and the reason a verb is unavailable is visible where it would have been.
-          disabled: terminal,
-          onSelect: () => void actions.cancelTask(card.taskId, project),
-        },
-        { label: "Copy task id", separator: true, onSelect: () => void navigator.clipboard?.writeText(card.taskId) },
-        // Archive once it has finished; an archived one comes back (the person, 2026-09-27).
-        ...(card.status === "archived"
-          ? [{ label: "Unarchive", separator: true, note: "back on the board", onSelect: () => void actions.archiveTasks([card.taskId], project, true) }]
-          : isArchivableStatus(card.status)
-            ? [{ label: "Archive", separator: true, note: "off the board", onSelect: () => void actions.archiveTasks([card.taskId], project) }]
-            : []),
-        {
-          label: "Delete…",
-          separator: true,
-          danger: true,
-          disabled: running,
-          onSelect: () =>
-            setTaskAsk({
-              title: `Delete "${card.title}"?`,
-              note: "This deletes the task, every run it made, and its worktree — uncommitted work included. None of it comes back.",
-              confirmLabel: "Delete",
-              danger: true,
-              onConfirm: () => {
-                setTaskAsk(null);
-                void actions.deleteTasks([card.taskId], project);
-              },
-            }),
-        },
-      ];
-      setTaskMenu({ ...at, items });
-    },
-    [actions, boardCardsOf, groupItems, picked, state.boards, state.queue],
-  );
-
-  /**
-   * Right-clicking a COLUMN — the place, and everything standing in it.
-   *
-   * A column already had a left-click meaning (describe the state it stands for) and a double-click
-   * one (open it), and no right-click at all — so the gesture that works on every card in a column
-   * did nothing on the column those cards are in.
-   *
-   * The menu is the column's own two verbs, then "select", then the group's. "Select" is what joins
-   * this to the multi-selection: it fills the same set a shift-click builds, so a column is a way of
-   * GATHERING tasks rather than a second, parallel way of acting on them.
-   */
-  const openColumnMenu = useCallback(
-    (project: string, stateId: string, at: MenuPoint) => {
-      // Every column standing for this state, in the order the board draws its cards — a menu that
-      // said "select 6 tasks" and then picked a different six than the ones under it would be worse
-      // than no menu. `boardCardsOf` is the same order shift-click measures its ranges in.
-      const here = new Set(
-        (state.boards[project]?.columns ?? [])
-          .filter((c) => c.stateId === stateId)
-          .flatMap((c) => c.cards.map((k) => k.taskId)),
-      );
-      const cards = boardCardsOf(project).filter((c) => here.has(c.taskId));
-      setTaskMenu({
-        ...at,
-        title: stateId,
-        items: [
-          { label: "Open", onSelect: () => actions.drillProject(project, stateId) },
-          { label: "Describe", onSelect: () => actions.selectWorkflow(stateId, project) },
-          {
-            label: `Select ${plural(cards.length)}`,
-            separator: true,
-            disabled: cards.length === 0,
-            onSelect: () => {
-              // The ANCHOR is the column's FIRST card, so a shift-click afterwards extends from the
-              // top of what was just selected rather than from wherever the panel is pointing.
-              setPicked({ project, ids: cards.map((c) => c.taskId), anchor: cards[0]!.taskId });
-              actions.select(cards[cards.length - 1]!.taskId, project);
-            },
-          },
-          ...groupItems(project, cards).map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
-        ],
-      });
-    },
-    [actions, boardCardsOf, groupItems, state.boards],
-  );
+  const menuHost: BoardMenuHost<MenuPoint> = {
+    actions,
+    boards: state.boards,
+    queue: state.queue,
+    picked,
+    setPicked,
+    setTaskMenu,
+    setTaskAsk,
+    copy: (text) => void navigator.clipboard?.writeText(text),
+  };
+  const menuHostRef = useRef(menuHost);
+  menuHostRef.current = menuHost;
+  const openTaskMenu = useCallback((project: string, card: BoardCard, at: MenuPoint) => openTaskMenuOf(menuHostRef.current, project, card, at), []);
+  const openColumnMenu = useCallback((project: string, stateId: string, at: MenuPoint) => openColumnMenuOf(menuHostRef.current, project, stateId, at), []);
 
   /**
    * The sidebar's two remembered numbers: how wide, and whether it is showing at all.
@@ -2608,21 +2377,8 @@ export default function App(): JSX.Element {
       {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
       {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
 
-      {/* A folder that is not a project YET. The same dialog every other "are you sure" uses, and
-          deliberately not `danger`: this creates a directory beside the person's work rather than
-          taking anything away, and it is the one gesture that turns a checkout into somewhere JaiRA
-          can run. Dismissing leaves the folder exactly as it was found. */}
-      {state.initPrompt !== null ? (
-        <AskDialog
-          spec={{
-            title: `Set up JaiRA in ${projectName(state.initPrompt)}?`,
-            note: `${state.initPrompt} is not a JaiRA project yet. Setting it up creates a .jaira/ folder there for its workflows, settings and run history. Nothing else in the folder is touched.`,
-            confirmLabel: "Set up project",
-            onConfirm: () => void actions.initProject(),
-          }}
-          onCancel={actions.dismissInit}
-        />
-      ) : null}
+      {/* A folder that is not a project YET — see `initPromptSpec`. */}
+      {state.initPrompt !== null ? <AskDialog spec={initPromptSpec(state.initPrompt, () => void actions.initProject())} onCancel={actions.dismissInit} /> : null}
 
       {/* Right-click on CONTENT — a selection, a picture, a link — anywhere in the window, including
           inside an artifact frame. Mounted once and unconditionally: see `pointerMenu.tsx` on why a

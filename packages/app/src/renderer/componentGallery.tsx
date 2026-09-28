@@ -389,7 +389,7 @@ function GalleryCard({
  * in a real run, in the same place, which is what makes editing the document above a way to learn
  * the contract rather than a way to drive a demo.
  */
-function Stage({
+export function Stage({
   surface,
   doc,
   docError,

@@ -254,7 +254,7 @@ function FaceMenu({
           <TextInput
             value={typed}
             placeholder="another family…"
-            placeholderTextColor={placeholderColor(look.scheme)}
+            placeholderTextColor={placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */}
             onChangeText={setTyped}
             onSubmitEditing={add}
             onBlur={add}

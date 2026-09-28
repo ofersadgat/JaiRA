@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import { hueOf } from "@jaira/ui/pill";
 import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
 import type { SidebarAct, SidebarView } from "@jaira/ui/sidebar";
@@ -9,12 +9,16 @@ import { healthCounts, logUnseen } from "@jaira/ui/updatesModel";
 import { useHealth } from "@jaira/ui/updatesStore";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { settingsPageProblems } from "@jaira/ui/settingsSections";
+import { fixHealthItem, openHealthPage, useForgeOAuth } from "@jaira/ui/settingsShell";
+import type { FloatRect } from "@jaira/ui/floatPlace";
 import { FileTreePanel, type FileTreePanelProps } from "../components/files/FileTreePanel";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../components/Menu";
 import { Sidebar } from "../components/Sidebar";
 import { SettingsSections } from "../components/settings/SettingsSections";
 import { ChatListPanel } from "../components/chat/ChatListPanel";
 import { useChatSurface } from "../components/chat/surface";
+import { anchorRectOf } from "../components/floats/anchor";
+import { HealthPop } from "../components/floats/HealthCard";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
 
@@ -27,6 +31,17 @@ export function ShellSidebar(): JSX.Element {
   const { state, actions, appearance } = useShell();
   const ui = state.settings.ui;
   const health = useHealth();
+  /**
+   * Settings' warnings and errors: the card the Settings and Logs rows' pills open (`App.tsx`'s
+   * `healthPop`), placed beside the pills pressed — and what each item's button does (`settingsShell.ts`).
+   */
+  const [healthAt, setHealthAt] = useState<{ at: FloatRect | null } | null>(null);
+  const openHealthCard = (from: unknown): void => setHealthAt((was) => (was !== null ? null : { at: anchorRectOf(from, "What needs attention") }));
+  // Emptied — dismissed or cleared by itself — the card has nothing to be placed against: its pills are gone.
+  useEffect(() => {
+    if (health.length === 0) setHealthAt(null);
+  }, [health.length]);
+  const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
   const [finding, setFinding] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => groupProjects(state.projects, ui.groupWorkspaces !== false), [state.projects, ui.groupWorkspaces]);
   const projectHues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
@@ -92,12 +107,13 @@ export function ShellSidebar(): JSX.Element {
         ? { ...v, counts: rooms.atChat, onSeen: () => actions.markSeenAll(rooms.seenAtChat), acts: [newChat, find("chat")], panel: <ChatDrawer find={finding.chat === true} /> }
         : { ...v, acts: [newFile, find("files")], panel: <FilesDrawer find={finding.files === true} draft={newDraft} onDraft={setNewDraft} floats={{ menu: setNewMenu }} /> },
   );
-  const footer = FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: logUnseen(health)?.counts ?? {}, seenTitle: "What needs attention" } : row));
+  const footer = FOOTER_VIEWS.map((row) => (row.id === "logs" ? { ...row, counts: logUnseen(health)?.counts ?? {}, onSeen: openHealthCard, seenTitle: "What needs attention" } : row));
   const settings: SidebarView = {
     id: "settings",
     glyph: "⚙",
     label: "Settings",
     counts: healthCounts(health),
+    onSeen: openHealthCard,
     seenTitle: "What needs attention",
     panel: (
       <SettingsSections
@@ -139,6 +155,21 @@ export function ShellSidebar(): JSX.Element {
       }}
     />
     {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
+    {healthAt !== null ? (
+      <HealthPop
+        anchor={healthAt.at}
+        items={health}
+        onClose={() => setHealthAt(null)}
+        onFix={(item) => {
+          setHealthAt(null);
+          fixHealthItem(item, { forgeOAuth, signIn: (name) => void actions.signIn(name), recheck: () => void actions.recheckAvailability(), setView: actions.setView, setSection: actions.setSection });
+        }}
+        onOpenPage={(page) => {
+          setHealthAt(null);
+          openHealthPage(page, actions);
+        }}
+      />
+    ) : null}
     </>
   );
 }

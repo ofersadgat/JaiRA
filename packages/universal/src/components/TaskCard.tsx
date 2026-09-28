@@ -100,7 +100,16 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
           onSelect(e);
         },
         ...(onDrill !== undefined ? { onDoubleClick: onDrill } : {}),
-        ...(onMenu !== undefined ? { onContextMenu: onMenu } : {}),
+        // The card's own menu, and not the column's under it too: the DOM column's guard reads
+        // `closest(".card")`, which a copy (with no classes) never matches — so the event stops here.
+        ...(onMenu !== undefined
+          ? {
+              onContextMenu: (e: ReactMouseEvent) => {
+                e.stopPropagation();
+                onMenu(e);
+              },
+            }
+          : {}),
         onMouseDown: (e: ReactMouseEvent) => (e.shiftKey ? e.preventDefault() : undefined),
         title: tip,
         cursor: onDragStart !== undefined ? "grab" : "pointer",
@@ -196,9 +205,10 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
   );
   if (isWeb) return drawn;
   // A phone: React Native's Pressable, since Tamagui's `onPress` never fires on Android. A tap selects,
-  // a long press opens the run (the desktop's double-click).
+  // a long press opens the card's menu (the desktop's right-click), or with none the run (its double-click).
+  const long = onMenu !== undefined ? (e: unknown) => onMenu(e as never) : onDrill;
   return (
-    <Pressable onPress={() => onSelect(undefined as never)} {...(onDrill !== undefined ? { onLongPress: onDrill } : {})}>
+    <Pressable onPress={() => onSelect(undefined as never)} {...(long !== undefined ? { onLongPress: long } : {})}>
       {drawn}
     </Pressable>
   );

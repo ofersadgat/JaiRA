@@ -1,9 +1,8 @@
 import type { JSX } from "react";
-import { useWindowDimensions } from "react-native";
-import { View } from "@tamagui/core";
 import type { MenuItem } from "@jaira/ui/crumbModel";
 import { Press, Txt, edge } from "../primitives";
 import { useTokens } from "../tokens";
+import { Float, pointRect } from "./floats/Float";
 import { MenuLayer } from "./MenuLayer";
 
 /**
@@ -16,9 +15,11 @@ import { MenuLayer } from "./MenuLayer";
  *   .menu-item.here    weight 600, a "•" in --accent in the gutter (6 wide, -12 left)
  *   .menu-item.sep     a --line above, 4 above that, padding-top 8
  *   .menu-note         --dim, app voice at 11/12.5, at most 45%
- *   .menu-item:disabled  --dim; .danger  --bad (hovered: --bad ground)
+ *   .menu-item:disabled  --dim; .danger  --bad (hovered: --bad ground), and still --bad disabled (it comes later)
+ *   .menu-title        padding 5 12 4, data voice at 9.5/12, 0.09em, uppercase, --dim (`MenuAnchor.title`)
  *
- * Placement is the desktop's `Popover` below-start, kept inside the window.
+ * Placement is the desktop's `Popover` below-start with no gap (`floats/Float.tsx`, the same arithmetic):
+ * kept inside the window, opening upward from the point when there is more room above.
  */
 export const MENU_WIDTH = 232;
 
@@ -26,18 +27,19 @@ export interface MenuAt {
   x: number;
   y: number;
   items: readonly MenuItem[];
+  /** A dim caption above the items (`menu.tsx`'s `MenuAnchor.title`). */
+  title?: string;
 }
 
 export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () => void }): JSX.Element {
   const t = useTokens();
-  const win = useWindowDimensions();
-  const left = Math.max(4, Math.min(anchor.x, win.width - MENU_WIDTH - 4));
   return (
     <MenuLayer onClose={onClose}>
-      <View
-        position="absolute"
-        left={left}
-        top={anchor.y}
+      <Float
+        anchor={pointRect(anchor.x, anchor.y)}
+        side="below"
+        align="start"
+        offset={0}
         width={MENU_WIDTH}
         flexDirection="column"
         paddingVertical={5}
@@ -47,6 +49,11 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
         {...({ boxShadow: t.v("lift") } as object)}
         role="menu"
       >
+        {anchor.title !== undefined ? (
+          <Txt spec={{ voice: "data", scale: 9.5 / 12, ls: 0.09, upper: true, color: "dim" }} paddingTop={5} paddingHorizontal={12} paddingBottom={4}>
+            {anchor.title}
+          </Txt>
+        ) : null}
         {anchor.items.map((item, i) => (
           <Press
             key={`${item.label}-${i}`}
@@ -66,7 +73,8 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
           >
             {({ hovered }) => {
               const lit = hovered && item.disabled !== true;
-              const ink = lit ? "panel" : item.disabled === true ? "dim" : item.danger === true ? "bad" : "text";
+              // `.menu-item.danger` comes after `.menu-item:disabled` (both 0,2,0): a disabled danger item stays --bad.
+              const ink = lit ? "panel" : item.danger === true ? "bad" : item.disabled === true ? "dim" : "text";
               return (
                 <>
                   {item.checked === true ? (
@@ -87,7 +95,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
             }}
           </Press>
         ))}
-      </View>
+      </Float>
     </MenuLayer>
   );
 }

@@ -86,7 +86,7 @@ export function FormInput({
     <RNTextInput
       value={value}
       onChangeText={onChange}
-      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor(look.scheme) } : {})}
+      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */ } : {})}
       editable={!disabled}
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       inputMode={num ? "decimal" : "text"}
@@ -205,7 +205,7 @@ export function TextArea({
       onChangeText={onChange}
       multiline
       numberOfLines={rows}
-      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor(look.scheme) } : {})}
+      {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */ } : {})}
       editable={!disabled}
       onFocus={() => setFocused(true)}
       onBlur={() => setFocused(false)}

@@ -43,6 +43,8 @@ export interface FaceHost {
   startAgain: (taskId: string) => void;
   resume: (taskId: string) => void;
   cancel: (taskId: string) => void;
+  /** "Review these changes" — the task's worktree in the reviewer. */
+  reviewChanges: (taskId: string) => void;
   /** ⇤ — the task's conversation into the main view. */
   adoptTask: (taskId: string, project: string | undefined, workflow: string) => void;
   /** ⇥ — the conversation back out of the main view, into the panel. */
@@ -171,7 +173,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
           case "steps":
             return stepsBody(host, detail, entry, false);
           case "changes":
-            return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} />;
+            return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "outputs":
             return <OutputsView detail={detail} sessions={host.source.sessionHistory} onOpen={(title, value) => pushPreview(host, { title, value })} />;
           case "configuration":
@@ -199,7 +201,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
           case "produced":
             return <ProducedView taskId={detail.taskId} project={project} signal={detail.timeline.length} />;
           case "changes":
-            return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} />;
+            return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "held":
             return <HeldView held={host.held} onOpen={(item) => pushPreview(host, item as PinnedValue)} onDrop={(item) => host.unhold(item as PinnedValue)} dropIcon={(item) => dropIcon(host)(item as PinnedValue)} />;
           case "configuration":

@@ -168,12 +168,36 @@ function FxRules({ children }: { children: ReactNode }): JSX.Element {
 type TableRow = { kind: "group"; label: string } | { kind: "fn"; name: string; sub: boolean; defaults: string; what?: string };
 
 const CELL = { voice: "app", scale: 11.5 / 12.5 } as const;
+/** A sub-row (`tr.sub`) takes the global `.sub` rule's size, 11/12.5, for what inherits it. */
+const SUB = { voice: "app", scale: 11 / 12.5 } as const;
+
+/**
+ * The line box of a cell holding one inline-block (`.fx-cell`, 10.5/12.5 on 1.6) on the row's strut
+ * (its size, on 1.5): Chromium rounds each font's ascent and descent to whole pixels (DM Sans: 0.992
+ * and 0.31 em) and aligns the two baselines. It returns the line's height and the block's top in it,
+ * or nothing where the sizes are CSS (the desktop's own page).
+ */
+function cellLine(t: ReturnType<typeof useTokens>, strutScale: number): { line: number; top: number } | undefined {
+  const strut = t.scaled("size-app", strutScale);
+  const box = t.scaled("size-app", 10.5 / 12.5);
+  if (typeof strut !== "number" || typeof box !== "number") return undefined;
+  const above = (size: number, line: number): number => (line - (Math.round(size * 0.992) + Math.round(size * 0.31))) / 2 + Math.round(size * 0.992);
+  const [sLine, bLine] = [strut * 1.5, box * 1.6];
+  const [sUp, bUp] = [above(strut, sLine), above(box, bLine)];
+  const up = Math.max(sUp, bUp);
+  return { line: up + Math.max(sLine - sUp, bLine - bUp), top: up - bUp };
+}
 
 /** One cell's contents, as the table and its measuring pass both draw it. */
 function HeadCell({ column, first }: { column: SetColumn; first: boolean }): JSX.Element {
   return (
     <View alignItems="center">
-      {first ? <Txt spec={{ voice: "data", scale: (10.5 / 12.5) * (12.5 / 12), weight: 600, lineHeight: 1.5 * (12 / 12.5) }}>{column.bucket}</Txt> : null}
+      {/* The bucket is a block on the th's 1.5 line; the th's own line under it measures a third of a pixel short in Chromium (content 31.17 at 10.5px, not 31.5). */}
+      {first ? (
+        <Txt spec={{ voice: "data", scale: (10.5 / 12.5) * (12.5 / 12), weight: 600, lineHeight: 1.5 }} marginBottom={-1 / 3}>
+          {column.bucket}
+        </Txt>
+      ) : null}
       <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 500, color: "dim" }} numberOfLines={1}>
         {column.name}
       </Txt>
@@ -212,11 +236,11 @@ function FnName({ name, sub, what, onToggle, open }: { name: string; sub: boolea
     <Press onPress={onToggle} {...({ "aria-expanded": open } as object)} flexDirection="row" alignItems="baseline" gap={8} alignSelf="flex-start" {...(sub ? { paddingLeft: 16 } : {})}>
       {({ hovered }) => (
         <>
-          <Txt spec={{ ...CELL, weight: 500, color: hovered ? "accent" : "text" }} numberOfLines={1}>
+          <Txt spec={{ ...(sub ? SUB : CELL), weight: 500, color: hovered ? "accent" : "text" }} numberOfLines={1}>
             {name}
           </Txt>
           {what !== undefined ? (
-            <Txt spec={{ ...CELL, color: "dim" }} numberOfLines={1}>
+            <Txt spec={{ ...(sub ? SUB : CELL), color: "dim" }} numberOfLines={1}>
               {what}
             </Txt>
           ) : null}
@@ -240,6 +264,8 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
   const measured = natural.length === count && natural.every((w) => w !== undefined) && width !== undefined;
   const widths = measured ? shareOut(natural as number[], width) : undefined;
   const pad = { paddingVertical: 4, paddingHorizontal: 7 } as const;
+  const rowLine = cellLine(t, 11.5 / 12.5);
+  const subLine = cellLine(t, 11 / 12.5);
   const rule = (i: number, head = false): object => ({ ...(edge(t, { bottom: 1, ...(i >= 2 && starts[i - 2] ? { left: 1 } : {}) }) as object), ...(head ? { backgroundColor: t.v("panel-2") } : {}) });
   const probe = (i: number, cells: ReactNode[]): JSX.Element => (
     <View
@@ -260,7 +286,7 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
       }}
     >
       {cells.map((cell, k) => (
-        <View key={k} {...pad} {...(i >= 2 && starts[i - 2] ? { borderLeftWidth: 1, borderStyle: "solid", borderColor: "transparent" } : {})}>
+        <View key={k} {...pad} {...(i >= 2 && starts[i - 2] ? (edge(t, { left: 1 }, "transparent") as object) : {})}>
           {cell}
         </View>
       ))}
@@ -305,11 +331,16 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
                       {row.defaults}
                     </Txt>
                   </View>
-                  {columns.map((column, c) => (
-                    <View key={column.id} width={widths[2 + c]} {...pad} {...rule(2 + c)} justifyContent="center">
-                      <Cell column={column} name={row.name} onOpenSet={onOpenSet} />
-                    </View>
-                  ))}
+                  {columns.map((column, c) => {
+                    const line = row.sub ? subLine : rowLine;
+                    return (
+                      <View key={column.id} width={widths[2 + c]} {...pad} {...rule(2 + c)} justifyContent="center">
+                        <View {...(line !== undefined ? { height: line.line, paddingTop: line.top } : {})} alignItems="center">
+                          <Cell column={column} name={row.name} onOpenSet={onOpenSet} />
+                        </View>
+                      </View>
+                    );
+                  })}
                 </View>
                 {open === row.name ? <View {...(edge(t, { bottom: 1 }) as object)}>{detail(row.name)}</View> : null}
               </View>

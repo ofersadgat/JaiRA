@@ -44,7 +44,11 @@ import { claimed, TaskCard } from "./TaskCard";
  *                                cards 210 wide, wrapped with a gap of 8, lanes a row each
  *
  * Not copied: the sticky column heading on a phone (React Native has none; there a column's heading
- * scrolls with it — on web it sticks, as the desktop's does), the drop preview and dragging (v2, the props are kept), and the right-click menus (the desktop's own).
+ * scrolls with it — on web it sticks, as the desktop's does), the drop preview and dragging (v2, the props are kept).
+ *
+ * The right-click menus: a card's (`onTaskMenu`) and a column's (`onColumnMenu`), at the pointer, the
+ * column's only where no card took the click (the DOM's `closest(".card")` guard, read off `claimed`). On
+ * a phone the gesture is a long press, and the menu's Open is what a long press did before.
  */
 
 /** The sets of events a drop needs — kept so the props match the DOM board's; dragging is v2. */
@@ -52,6 +56,20 @@ export type DragProps = {
   dragOffers?: unknown;
   onTaskDrop?: ((requestId: string, card: BoardCard, columnKey: string) => void) | undefined;
 };
+
+/** Where a menu was asked for, in the window's coordinates. */
+export type MenuPoint = { x: number; y: number };
+
+/**
+ * The point of a right-click (web) or a long press (a phone), and the event claimed so the column under
+ * a card does not open its own menu too.
+ */
+export function menuPointOf(e: unknown): MenuPoint {
+  const ev = e as { preventDefault?: () => void; clientX?: number; clientY?: number; nativeEvent?: { pageX?: number; pageY?: number } };
+  ev.preventDefault?.();
+  if (ev.nativeEvent !== undefined && typeof ev.nativeEvent === "object") claimed.add(ev.nativeEvent);
+  return typeof ev.clientX === "number" ? { x: ev.clientX, y: ev.clientY ?? 0 } : { x: ev.nativeEvent?.pageX ?? 0, y: ev.nativeEvent?.pageY ?? 0 };
+}
 
 /** A click's modifiers, where there are any (web); a tap has none. */
 export type Mods = { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean };
@@ -68,9 +86,10 @@ export interface BoardProps extends DragProps {
   onDrill: (stateId: string) => void;
   onOpenTask?: ((card: BoardCard) => void) | undefined;
   onOpenAt?: ((taskId: string, stateId: string | undefined) => void) | undefined;
-  /** Right-click menus are the desktop's own; kept for the props' sake. */
-  onTaskMenu?: unknown;
-  onColumnMenu?: unknown;
+  /** A card's right-click (a long press on a phone), at the point it happened. */
+  onTaskMenu?: ((card: BoardCard, at: MenuPoint) => void) | undefined;
+  /** A column's right-click where no card took it (a long press on a phone). */
+  onColumnMenu?: ((stateId: string, at: MenuPoint) => void) | undefined;
   connect?:
     | {
         ask?: unknown;
@@ -97,6 +116,8 @@ export function Board({
   onDrill,
   onOpenTask,
   onOpenAt,
+  onTaskMenu,
+  onColumnMenu,
   connect,
 }: BoardProps): JSX.Element {
   const t = useTokens();
@@ -133,6 +154,7 @@ export function Board({
         inTray={tray}
         selected={isSelected(card)}
         onSelect={(e) => onSelectTask(card.taskId, modsOf(e))}
+        {...(onTaskMenu !== undefined ? { onMenu: (e: unknown) => onTaskMenu(card, menuPointOf(e)) } : {})}
         onOrigin={(taskId, e, stateId) => (onOpenAt !== undefined ? onOpenAt(taskId, stateId) : onSelectTask(taskId, modsOf(e)))}
         {...(drill !== undefined ? { onDrill: drill } : {})}
         child={column !== null && card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
@@ -154,6 +176,7 @@ export function Board({
       tip={onSelectColumn === undefined ? `double-click to open ${column.stateId}` : `click to describe ${column.stateId}, double-click to open it`}
       onOpen={() => onDrill(column.stateId)}
       {...(onSelectColumn !== undefined ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
+      {...(onColumnMenu !== undefined ? { onMenu: (at: MenuPoint) => onColumnMenu(column.stateId, at) } : {})}
       selected={column.stateId === selectedColumn}
       {...(confirming?.column === column.key
         ? {
@@ -382,6 +405,7 @@ export function Column({
   tip,
   onOpen,
   onSelect,
+  onMenu,
   selected = false,
   confirm,
   children,
@@ -396,6 +420,8 @@ export function Column({
   tip?: string;
   onOpen?: (() => void) | undefined;
   onSelect?: (() => void) | undefined;
+  /** Its right-click (a long press on a phone), where no card took it. */
+  onMenu?: ((at: MenuPoint) => void) | undefined;
   selected?: boolean;
   confirm?: ReactNode;
   children: (select: (() => void) | undefined) => ReactNode;
@@ -469,6 +495,7 @@ export function Column({
       ...hover,
       ...(onSelect !== undefined ? { onClick: (e: ReactMouseEvent) => (claimed.has(e.nativeEvent) ? undefined : onSelect()) } : {}),
       ...(onOpen !== undefined ? { onDoubleClick: onOpen } : {}),
+      ...(onMenu !== undefined ? { onContextMenu: (e: ReactMouseEvent) => (claimed.has(e.nativeEvent) ? undefined : onMenu(menuPointOf(e))) } : {}),
       ...(tip !== undefined ? { title: tip } : {}),
       cursor: "pointer",
     };
@@ -478,9 +505,11 @@ export function Column({
       </View>
     );
   }
-  // A phone: a tap anywhere not on a card describes the column, a long press walks in.
+  // A phone: a tap anywhere not on a card describes the column, a long press opens its menu (or, with
+  // none, walks in — the menu's Open).
+  const long = onMenu !== undefined ? (e: unknown) => onMenu(menuPointOf(e)) : onOpen;
   return (
-    <Pressable {...(onSelect !== undefined ? { onPress: onSelect } : {})} {...(onOpen !== undefined ? { onLongPress: onOpen } : {})} style={box as never}>
+    <Pressable {...(onSelect !== undefined ? { onPress: onSelect } : {})} {...(long !== undefined ? { onLongPress: long } : {})} style={box as never}>
       {contents}
     </Pressable>
   );

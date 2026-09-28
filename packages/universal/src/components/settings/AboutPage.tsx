@@ -650,7 +650,7 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
         value={query}
         onChangeText={onQuery}
         placeholder="Search licenses"
-        placeholderTextColor={placeholderColor(look.scheme)}
+        placeholderTextColor={placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */}
         accessibilityLabel="Search open-source licenses"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -660,7 +660,8 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
         {...({ type: "search" } as object)}
         style={
           {
-            ...(font(t, { voice: "app", scale: 0.96, weight: 450, lineHeight: 1.3, ls: -0.005 }) as object),
+            // `font: inherit` takes the heading's face, weight and line, not its tracking: an input's is `normal`.
+            ...(font(t, { voice: "app", scale: 0.96, weight: 450, lineHeight: 1.3 }) as object),
             width: typeof size === "number" ? 13 * 16 : "13rem",
             paddingVertical: 4,
             paddingHorizontal: 9,

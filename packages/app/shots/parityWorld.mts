@@ -445,7 +445,134 @@ export const SCENES: readonly Scene[] = [
       );
     },
   },
+  // The floats `App.tsx` owns (decision 0015's universal copies of them): the board's right-click menus
+  // and what they ask, and the card the Settings row's pills open.
+  // A card's right-click (a long press on a phone): the parked task's verbs.
+  { name: "card-menu", reach: (app) => boardMenu(app, PARKED, "Copy task id") },
+  // …a finished task's: re-run as a fresh copy, Cancel disabled, Archive.
+  { name: "card-menu-done", reach: (app) => boardMenu(app, "add dark mode", "Archive") },
+  // A column's: the place, and every task standing in it (a caption, the group verbs).
+  { name: "column-menu", reach: (app) => boardMenu(app, "Planning", "Describe") },
+  // Right-clicking inside a multi-selection (a click, then a ctrl-click): the set's verbs, counted.
+  {
+    name: "selection-menu",
+    reach: async (app) => {
+      await app.until(says(PARKED), "the parked card");
+      for (const [title, ctrlKey] of [[PARKED, false], ["add dark mode", true]] as const) {
+        await app.evaluate(`(() => {
+          const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(title)} && e.closest(${ON_BOARD}) !== null);
+          el.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, ctrlKey: ${ctrlKey} }));
+        })()`);
+        await settle(400);
+      }
+      await boardMenu(app, "add dark mode", "Copy task ids");
+    },
+  },
+  // …and a card menu's Delete…: the confirmation, over everything.
+  {
+    name: "card-delete",
+    reach: async (app) => {
+      await boardMenu(app, "add dark mode", "Delete…");
+      await clickFirst(app, "Delete…");
+      await app.until(says('Delete "add dark mode"?'), "the confirmation");
+      await settle(300);
+    },
+  },
+  // The Settings row's pills: the card of everything that needs attention, beside them.
+  {
+    name: "health-card",
+    reach: async (app) => {
+      // By its title on the desktop's page, its accessible name on the copy's.
+      const pills = `document.querySelector('[title="What needs attention"], [aria-label="What needs attention"]')`;
+      await app.until(`${pills} !== null`, "the Settings row's pills");
+      await app.evaluate(`${pills}.click()`);
+      await app.until(says("Dismiss all"), "the needs-attention card");
+      await settle(300);
+    },
+  },
+  // The Components room scrolled to one row, its title at the top of the page, and (where named) that
+  // row slid to one of its variants by its tab: each gate and dialog a run can put in front of you.
+  ...(
+    [
+      ["gallery-choose", "Choose an option", null],
+      ["gallery-choose-comments", "Choose an option", "With a comment"],
+      ["gallery-choose-custom", "Choose an option", "With an answer of your own"],
+      ["gallery-choose-multiple", "Choose an option", "Several at once"],
+      ["gallery-choose-confirm", "Choose an option", "Held until confirmed"],
+      ["gallery-choose-steps", "Choose an option", "Several questions, one at a time"],
+      ["gallery-choose-follow-up", "Choose an option", "With follow-up questions"],
+      ["gallery-choose-typed", "Choose an option", "Typed answers"],
+      ["gallery-review", "Review an artifact", null],
+      ["gallery-edit", "Edit an artifact", null],
+      ["gallery-form", "Fill in a form", null],
+      ["gallery-form-defaults", "Fill in a form", "Pre-answered, all optional"],
+      ["gallery-form-custom", "Fill in a form", "An enum with a way out"],
+      ["gallery-confirm", "Confirm an action", null],
+      ["gallery-confirm-defaults", "Confirm an action", "Defaults"],
+      ["gallery-confirm-remote", "Confirm an action", "Before anything leaves the machine"],
+      ["gallery-reviews", "Review a set of artifacts", null],
+      ["gallery-tool-call", "Approve a tool call, for a function", null],
+      ["gallery-tool-call-input", "Approve a tool call, for a function", "A tool that is not the shell"],
+      ["gallery-unknown", "A gate JaiRA does not know", null],
+      ["gallery-approval", "Approve a command", null],
+      ["gallery-approval-function", "Approve a command", "Parts a function decided"],
+      ["gallery-approval-empty", "Approve a command", "A line nobody took apart"],
+      ["gallery-approval-input", "Approve a command", "Structured input"],
+      ["gallery-question", "Answer an agent's question", null],
+      ["gallery-question-steps", "Answer an agent's question", "Several, in steps"],
+      ["gallery-question-multiple", "Answer an agent's question", "Pick several"],
+    ] as const
+  ).map(
+    ([name, row, variant]): Scene => ({
+      name,
+      reach: async (app) => {
+        await SCENES.find((s) => s.name === "gallery")!.reach(app);
+        await galleryRow(app, row);
+        if (variant !== null) {
+          await app.evaluate(`(() => {
+            const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(variant)});
+            (el.closest("button, [role=button]") ?? el).click();
+          })()`);
+          // The row's track slides to it (animated on /rn).
+          await settle(1500);
+          await galleryRow(app, row);
+        }
+      },
+    }),
+  ),
 ];
+
+/** Scroll the Components page so the row titled `title` stands just under its sticky bar, to a device pixel on both pages. */
+async function galleryRow(app: App, title: string): Promise<void> {
+  await app.evaluate(`(() => {
+    const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+    let el = null;
+    for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.textContent === ${JSON.stringify(title)}) { el = n.parentElement; break; }
+    if (!el) throw new Error("no gallery row " + ${JSON.stringify(title)});
+    let box = el.parentElement;
+    while (box && !(box.scrollHeight > box.clientHeight + 2 && /auto|scroll/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+    box.scrollTop = Math.round((el.getBoundingClientRect().top - box.getBoundingClientRect().top + box.scrollTop - 120) * devicePixelRatio) / devicePixelRatio;
+  })()`);
+  await settle(600);
+}
+
+/** The Tasks room's middle column, on either page (the desktop's by its classes, the copy's by its test id). */
+const ON_BOARD = JSON.stringify('.tasks-view > .col.mid, [data-testid="board-column"]');
+
+/**
+ * Right-click the board's `text` (a card's title or a column's name) where the board draws it, and wait
+ * for the menu to say `shows`.
+ */
+async function boardMenu(app: App, text: string, shows: string): Promise<void> {
+  await app.until(says(text), `${text} on the board`);
+  await app.evaluate(`(() => {
+    const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(text)} && e.closest(${ON_BOARD}) !== null);
+    const box = el.getBoundingClientRect();
+    el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: Math.round(box.left + 20), clientY: Math.round(box.top + 8), button: 2 }));
+  })()`);
+  await app.until(says(shows), "the menu to open");
+  await settle(300);
+}
 
 /** The conversation the `conversation` scene opens. */
 export const CONVERSATION = "explain the sync lint";
