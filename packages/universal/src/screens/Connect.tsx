@@ -1,5 +1,5 @@
 import { useState, type JSX } from "react";
-import { TextInput } from "react-native";
+import { Pressable, TextInput } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { useTokens } from "../tokens";
 
@@ -45,20 +45,21 @@ export function Connect({
         </Text>
         <TextInput value={address} onChangeText={setAddress} autoCapitalize="none" autoCorrect={false} placeholder="ws://desktop:8765/" style={field} />
         <TextInput value={token} onChangeText={setToken} autoCapitalize="none" autoCorrect={false} placeholder="token" style={field} />
-        <View
-          role="button"
-          onPress={() => onConnect(address.trim(), token.trim())}
-          {...((isWeb ? { cursor: "pointer" } : {}) as object)}
-          backgroundColor={t.v("fill-accent") as never}
-          borderRadius={7}
-          paddingVertical={7}
-          alignItems="center"
-          opacity={busy === true ? 0.6 : 1}
-        >
-          <Text {...(app as object)} fontSize={13} fontWeight="600" color={t.v("on-accent") as never}>
-            {busy === true ? "Connecting…" : "Connect"}
-          </Text>
-        </View>
+        {/* Pressable, not Tamagui's onPress, which did not fire from a tap on Android. */}
+        <Pressable role="button" accessibilityLabel="Connect" onPress={() => onConnect(address.trim(), token.trim())}>
+          <View
+            {...((isWeb ? { cursor: "pointer" } : {}) as object)}
+            backgroundColor={t.v("fill-accent") as never}
+            borderRadius={7}
+            paddingVertical={7}
+            alignItems="center"
+            opacity={busy === true ? 0.6 : 1}
+          >
+            <Text {...(app as object)} fontSize={13} fontWeight="600" color={t.v("on-accent") as never}>
+              {busy === true ? "Connecting…" : "Connect"}
+            </Text>
+          </View>
+        </Pressable>
         {problem ? (
           <Text {...(app as object)} fontSize={13} color={t.v("bad") as never}>
             {problem}

@@ -40,16 +40,19 @@ export function CopiesBoard({ boards }: { boards: readonly { name: string; board
   );
 }
 
-/** One project's board: its columns side by side, scrolled sideways. */
+/**
+ * One project's board: its columns wrapped into rows, as the desktop's board wraps them — not scrolled
+ * sideways, which on a phone hid every column past the second.
+ */
 function Board({ board }: { board: BoardView }): JSX.Element {
   const t = useTokens();
   return (
-    <ScrollView horizontal contentContainerStyle={{ padding: 12, gap: 12 }}>
+    <View flexDirection="row" flexWrap="wrap" padding={12} gap={12}>
       {board.columns.map((column) => {
         const { top, beneath } = nestUnder(column.cards);
         const ordered = lanesOf(top).flatMap(({ cards }) => cards.flatMap((card) => [card, ...(beneath.get(card.taskId) ?? [])]));
         return (
-          <View key={column.key} width={260} gap={0}>
+          <View key={column.key} flexGrow={1} flexBasis={170} minWidth={170} gap={0}>
             <Text fontFamily={t.v("font-data") as never} fontWeight="600" fontSize={13} color={t.v("text") as never} marginBottom={8}>
               {column.label ?? column.key} · {column.cards.length}
             </Text>
@@ -59,6 +62,6 @@ function Board({ board }: { board: BoardView }): JSX.Element {
           </View>
         );
       })}
-    </ScrollView>
+    </View>
   );
 }

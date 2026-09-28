@@ -22,3 +22,6 @@ packages/app/shots/.verify/
 packages/client/.expo/
 packages/client/app/routes.d.ts
 packages/client/.native-graph/
+# The native projects `one prebuild` generates from app.json and the plugins (decision 0015): output, not source.
+packages/client/android/
+packages/client/ios/

@@ -1,5 +1,7 @@
-import { useState, type JSX } from "react";
-import { SafeAreaView, useWindowDimensions } from "react-native";
+import { useEffect, useState, type JSX } from "react";
+import { Linking, Pressable, useWindowDimensions } from "react-native";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { IslandsTab } from "./IslandsTab";
 import { WebFrame } from "./WebFrame";
 import { TamaguiProvider, Text, View } from "@tamagui/core";
 import { Connect, CopiesBoard, TokenRoot, config, useTokens } from "@jaira/universal";
@@ -18,7 +20,7 @@ import { socketBridge } from "../../bridges/socketBridge";
  *   over a socket bridge of our own. What it proves is the native path, not a finished screen.
  */
 type Connection = { ws: string; http: string; token: string };
-type Tab = "desktop" | "copies";
+type Tab = "desktop" | "copies" | "islands";
 
 /** In a browser (the `/native` preview), `?address=&token=` fill the form, as a QR code will on a phone. */
 function initialFromLocation(): { address: string; token: string } | undefined {
@@ -29,12 +31,37 @@ function initialFromLocation(): { address: string; token: string } | undefined {
 }
 const initial = initialFromLocation();
 
+/**
+ * On a phone, `jaira:///?address=…&token=…` connects straight away — what a QR code from the desktop
+ * would carry, and how the emulator test drives it. Parsed by hand: React Native's URLSearchParams
+ * implements little of the standard.
+ */
+function connectionFromLink(url: string | null): { address: string; token: string } | undefined {
+  if (url === null) return undefined;
+  const q = Object.fromEntries(
+    (url.split("?")[1] ?? "").split("&").filter(Boolean).map((pair) => pair.split("=").map((s) => decodeURIComponent(s)) as [string, string]),
+  );
+  return q["address"] !== undefined ? { address: q["address"], token: q["token"] ?? "" } : undefined;
+}
+
 export function NativeApp(): JSX.Element {
   const [connection, setConnection] = useState<Connection | null>(null);
   const [problem, setProblem] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [tab, setTab] = useState<Tab>("desktop");
   const window = useWindowDimensions();
+
+  useEffect(() => {
+    if (initial !== undefined) return undefined;
+    const take = (url: string | null): void => {
+      const link = connectionFromLink(url);
+      if (link !== undefined) void connect(link.address, link.token);
+    };
+    void Linking.getInitialURL().then(take);
+    const sub = Linking.addEventListener("url", (e) => take(e.url));
+    return () => sub.remove();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const connect = async (address: string, token: string): Promise<void> => {
     setBusy(true);
@@ -53,9 +80,12 @@ export function NativeApp(): JSX.Element {
   };
 
   return (
+    <SafeAreaProvider>
     <TamaguiProvider config={config} defaultTheme="light">
       <TokenRoot palette="ink" scheme="light">
-        {/* The window's height, not flex alone: in a browser (the `/native` preview) nothing above sizes it. */}
+        {/* The window's height, not flex alone: in a browser (the `/native` preview) nothing above sizes it.
+            react-native-safe-area-context's SafeAreaView, not React Native's, which pads only on iOS: on
+            Android the tabs sat under the status bar. */}
         <SafeAreaView style={{ height: window.height }}>
           {connection === null ? (
             <Connect {...(initial !== undefined ? { initial } : {})} problem={problem} busy={busy} onConnect={(a, t) => void connect(a, t)} />
@@ -64,14 +94,17 @@ export function NativeApp(): JSX.Element {
               <Tabs tab={tab} onTab={setTab} />
               {tab === "desktop" ? (
                 <WebFrame source={{ uri: `${connection.http.replace(/\/?$/, "/")}?token=${connection.token}` }} style={{ flex: 1 }} />
-              ) : (
+              ) : tab === "copies" ? (
                 <Copies />
+              ) : (
+                <IslandsTab />
               )}
             </View>
           )}
         </SafeAreaView>
       </TokenRoot>
     </TamaguiProvider>
+    </SafeAreaProvider>
   );
 }
 
@@ -95,24 +128,21 @@ function Copies(): JSX.Element {
 function Tabs({ tab, onTab }: { tab: Tab; onTab: (next: Tab) => void }): JSX.Element {
   const t = useTokens();
   const button = (value: Tab, label: string): JSX.Element => (
-    <View
-      key={value}
-      role="button"
-      onPress={() => onTab(value)}
-      paddingHorizontal={12}
-      paddingVertical={6}
-      borderRadius={6}
-      backgroundColor={(tab === value ? t.v("tint-accent") : "transparent") as never}
-    >
-      <Text fontFamily={t.v("font-app") as never} fontSize={13} color={(tab === value ? t.v("accent") : t.v("dim")) as never}>
-        {label}
-      </Text>
-    </View>
+    // React Native's Pressable, not Tamagui's onPress: on Android a tap on a Tamagui View's onPress did not
+    // fire (found on the emulator), and Pressable is the touch primitive on every platform.
+    <Pressable key={value} role="button" accessibilityLabel={label} onPress={() => onTab(value)}>
+      <View paddingHorizontal={12} paddingVertical={6} borderRadius={6} backgroundColor={(tab === value ? t.v("tint-accent") : "transparent") as never}>
+        <Text fontFamily={t.v("font-app") as never} fontSize={13} color={(tab === value ? t.v("accent") : t.v("dim")) as never}>
+          {label}
+        </Text>
+      </View>
+    </Pressable>
   );
   return (
     <View flexDirection="row" gap={6} padding={6} borderBottomWidth={1} borderColor={t.v("line") as never} backgroundColor={t.v("panel") as never}>
       {button("desktop", "Desktop UI")}
       {button("copies", "Native copies")}
+      {button("islands", "Islands")}
     </View>
   );
 }

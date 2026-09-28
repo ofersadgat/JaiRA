@@ -20,7 +20,7 @@ function pageOf(component: IslandProps["component"]): string {
   return `${Paths.bundle.uri.replace(/\/?$/, "/")}island/${component}/index.html`;
 }
 
-export function Island({ component, props, height, onEvent }: IslandProps): JSX.Element {
+export function Island({ component, props, height, onEvent, onReport }: IslandProps): JSX.Element {
   const web = useRef<WebView>(null);
   const look = useLook();
   const [measured, setMeasured] = useState(1);
@@ -28,6 +28,7 @@ export function Island({ component, props, height, onEvent }: IslandProps): JSX.
 
   const receive = (e: WebViewMessageEvent): void => {
     const message = JSON.parse(e.nativeEvent.data) as { kind: string; px?: number; name?: string; value?: unknown };
+    onReport?.(message);
     if (message.kind === "ready") web.current?.postMessage(render);
     else if (message.kind === "height" && height === undefined && message.px !== undefined && message.px > 0) setMeasured(message.px);
     else if (message.kind === "event" && message.name !== undefined) onEvent?.(message.name, message.value);

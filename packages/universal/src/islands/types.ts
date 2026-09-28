@@ -6,4 +6,6 @@ export interface IslandProps {
   height?: number;
   /** A callback the component fired (`change`, `modified`). */
   onEvent?: (name: string, value: unknown) => void;
+  /** Every frame the island sent (ready, drawn, height, log…), for a host that measures it (native only). */
+  onReport?: (message: { kind: string; [key: string]: unknown }) => void;
 }

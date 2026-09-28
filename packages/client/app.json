@@ -11,7 +11,9 @@
       "bundleIdentifier": "com.mistlabs.jaira",
       "supportsTablet": true,
       "infoPlist": {
-        "NSAppTransportSecurity": { "NSAllowsLocalNetworking": true },
+        "NSAppTransportSecurity": {
+          "NSAllowsLocalNetworking": true
+        },
         "NSLocalNetworkUsageDescription": "JaiRA connects to a JaiRA desktop on your network."
       }
     },
@@ -19,8 +21,16 @@
       "package": "com.mistlabs.jaira"
     },
     "plugins": [
+      "./plugins/withWorkspaceReactNative.cjs",
       "one/expo-plugin",
-      ["expo-build-properties", { "android": { "usesCleartextTraffic": true } }],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "usesCleartextTraffic": true
+          }
+        }
+      ],
       "./plugins/withIslands.cjs"
     ]
   }

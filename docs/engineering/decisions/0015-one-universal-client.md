@@ -365,7 +365,7 @@ done, as the person asked ("make as much as possible work without native tooling
 | Part | State | Evidence |
 |---|---|---|
 | S0 toolchain (web) | done | `packages/client`, One 1.27.1, SPA; `one build` on Windows after the workarounds below |
-| S0 toolchain (native) | bundles; not yet run | Metro, through `one dev`, builds the Android bundle (1,611 modules) and the iOS one (1,610); `nativeGraph.mjs` (in `typecheck`) proves no DOM-only package reaches them. Running needs Android Studio (installed; not used yet) |
+| S0 toolchain (native) | runs on Android | Metro, through `one dev`, builds the Android bundle (1,611 modules) and the iOS one (1,610); `nativeGraph.mjs` (in `typecheck`) proves no DOM-only package reaches them. `one prebuild` and Gradle build a debug APK that runs on the emulator (below); iOS needs a Mac |
 | S1 One hosts the renderer | done | `shots/parity.mts`: board, task, settings and the Monaco file-types preview pixel-identical to the Vite build; `app:dist` builds the installer and its probe and smoke test pass |
 | S2 throwaway transport | done | `shots/remote.mts`: a headless Chrome loads the client from the desktop's port, draws its board, sees a task the desktop starts appear by push |
 | S3 copies (web) | done: pill, task card, next-move chips | `parity.mts universal`: `/` against `/universal` identical in ink light and dark, classic, classic with the wash, contrast, pastel, blueprint, ink with the wash (18 of 18, one transient column-heading band once); each page reports what it drew, and `/universal` draws no DOM card or pill |
@@ -373,7 +373,7 @@ done, as the person asked ("make as much as possible work without native tooling
 | Native colours | done | `shots/tokens-check.mts`: all 1,616 colour variables of 8 palettes × 2 schemes × {root, sidebar}, replayed for native, equal what Chromium computes |
 | S5 islands (browser) | done | `shots/islands.mts`, a 390×844 Chrome loading the island pages from file:// under strict rules: markdown ready in 58 ms, auto-height; the Monaco diff ready in ~265 ms and drawn in 34–73 ms at 200 / 2,000 / 20,000 lines, grammar-coloured, worker started; palette switch without a reload; typed text back over the bridge from the editable CodeMirror |
 | Phone app (browser) | done | `shots/phone.mts`: `/native` (`NativeApp` through react-native-web) connects, shows the desktop's own UI in its frame, and draws the live boards from the universal cards |
-| On a device | not started | S5's touch, keyboard, IME and memory; the native copies' look; the WebView's desktop viewport |
+| On a device | Android emulator: done | `shots/android.mts` (below): connects by deep link, the Desktop UI in its WebView, the native copies drawing the live board, the three islands on the device, typing into CodeMirror back over the bridge, no errors in logcat. Not yet: a physical phone, iOS |
 
 **The phone, as built (ruling 1).** `NativeApp` is a Connect screen, then two views of one connection:
 - **Desktop UI** is the desktop's own UI in a WebView — the whole app as one island, identical by
@@ -457,12 +457,59 @@ markdown island at 732 KB; only the diff carries Monaco (27 MB).
   modules) and iOS (1,613); the installer, its probe, CLI and smoke test; Monaco on all four surfaces in the
   development build and the installer.
 
+**On the Android emulator (2026-09-27).** A Pixel-sized emulator (`medium_phone`, Android 16 / API 36,
+WebView 133) running the debug APK against Metro, both reaching the desktop through `adb reverse`.
+`shots/android.mts` does the whole thing in one command and passes:
+1. **Connect.** The deep link `jaira:///?address=…&token=…` connects in 50–70 s, most of it the first
+   bundle from Metro.
+2. **Desktop UI.** The desktop's own UI draws in its WebView.
+3. **Native copies.** The live board draws from the Tamagui cards, including both tasks the desktop ran.
+4. **Islands on the device**, in one WebView renderer (heap 141 MB across the three), with no warnings:
+
+   | Island | Ready | Drawn |
+   |---|---|---|
+   | Markdown | 100–117 ms | 11–39 ms |
+   | Monaco diff, 2,000 lines, grammar-coloured | 50–66 ms | 143–171 ms |
+   | CodeMirror editor | 13–16 ms | 27–41 ms |
+
+   The readout's "inks" is counted 250 ms after the first paint, so it undercounts: the screenshot shows
+   the diff fully coloured.
+5. **Typing (v2).** Keys typed into the editable CodeMirror island land in the editor, and each change
+   comes back over the bridge. That is 22 events for 22 characters, the last carrying the whole document.
+   The first time Gboard appears, it opens a "Try out your stylus" tutorial that takes the keys; the rig
+   dismisses it.
+
+What it took:
+- **JDK 17.** Android Studio's bundled JBR 25 fails React Native's `configureCMake` task on a
+  "restricted method" warning. Temurin 17 builds.
+- **React Native where npm hoists it.** The prebuild template's `react { … }` block points at
+  `packages/client/node_modules/react-native`. `plugins/withWorkspaceReactNative.cjs` asks `node` for
+  the real paths. It must be **first** in `app.json`'s plugins: Expo runs `build.gradle` mods in reverse,
+  and One's plugin replaces the whole block.
+- **jsonc-parser's ES-module entry.** Its UMD `main` hides its requires from Metro, and on the device it
+  threw `Unknown named module: "./impl/format"`. `metro.config.cjs` maps it to `lib/esm/main.js`.
+- **Tamagui's `onPress` never fired on Android.** The tabs and the Connect button are React Native
+  `Pressable`s wrapping Tamagui views.
+- **Safe areas.** Without `react-native-safe-area-context`, the tabs sat under the status bar.
+- **The copies' columns wrap,** as the desktop board's do. A sideways scroll hid every column past the
+  second.
+
+What the device showed:
+- **The gesture conflict is real.** A swipe that starts on the Monaco island scrolls Monaco, not the page;
+  over the markdown island it scrolls the page. An island with its own scroll needs a way out (a grab
+  strip, or scrolling only after a tap to focus) before it goes in a scrolling screen.
+- **The copies draw in the system font.** The app fonts are not loaded natively yet (`expo-font`).
+- **Development only:** the Fast Refresh banner and `ONE_SERVER_URL` warnings, which come from running
+  against Metro.
+
 **Still open:**
 - ~~The Monaco preview sometimes never draws its lines.~~ Not an app bug: Windows marks a covered window
   hidden and Chromium draws no frames for it. The rigs launch with `CalculateNativeWinOcclusion` off.
-- **On a device:** `one prebuild` and `one run:android` with the islands plugin; S5's gestures, IME and
-  memory; the Desktop UI view's viewport (desktop width and zoomable, as a WebView gives a page without a
-  viewport tag).
+- **A physical phone and iOS.** The same rig takes `--serial`. iOS needs a Mac.
+- **The islands' scroll gesture** inside a scrolling screen (above), and fonts on native.
+- **The Desktop UI view's viewport:** desktop width and zoomable, as a WebView gives a page without a
+  viewport tag.
+- **A release build.** The bundle is embedded, not served by Metro; not built yet.
 
 ## Native desktop, later
 
