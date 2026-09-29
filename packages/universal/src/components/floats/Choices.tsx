@@ -124,7 +124,9 @@ export function ChoiceList({
                   label={option.label ?? option.value}
                   {...(option.icon !== undefined && option.icon in PATHS ? { icon: option.icon as keyof typeof PATHS } : {})}
                   {...(option.description !== undefined ? { description: option.description } : {})}
-                  primary={i === 0 && option.tone !== "danger" && bare}
+                  // Read-only is a record (`.gate-settled`): only the chosen option keeps its emphasis —
+                  // `.gate-settled .question-option.primary:not(.selected)` draws an unchosen affirmative plain.
+                  primary={i === 0 && option.tone !== "danger" && bare && !(readOnly && !lit(option.value))}
                   danger={option.tone === "danger"}
                   selected={lit(option.value)}
                   checkable={choice.multiple === true}

@@ -55,6 +55,13 @@ export interface FakeRule {
   classification?: "permanent" | "canceled" | "interrupted";
   /** USD cost to report, so cost roll-up is exercised headlessly. */
   cost?: number;
+  /**
+   * The conversation this call adds, when it is more than the prompt and the answer: the provider's
+   * own messages, parts and all — tool calls, their results, reasoning — so a scripted run can leave a
+   * transcript with work in it (the fidelity scenes of decision 0015). Absent ⇒ the prompt, then the
+   * output as the answer.
+   */
+  messages?: JsonValue[];
 }
 
 export function parseFakeRules(raw: unknown): FakeRule[] {
@@ -130,7 +137,7 @@ export class ScriptedFakeExecutor implements Executor<ExecServices, WorkflowMetr
       session: {
         messages: [
           { role: "user", content: op.user ?? "" },
-          { role: "assistant", content: typeof rule.output === "string" ? rule.output : JSON.stringify(rule.output ?? null) },
+          ...(rule.messages ?? [{ role: "assistant", content: typeof rule.output === "string" ? rule.output : JSON.stringify(rule.output ?? null) }]),
         ],
       },
     } as ExecResult<ResolvedValue, WorkflowMetrics>;

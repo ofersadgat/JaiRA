@@ -290,10 +290,12 @@ export function Composer({
               paddingBottom: 6,
               minHeight: 54,
               maxHeight: win.height * 0.4,
-              height: Math.max(54, Math.min(height, win.height * 0.4)),
+              // As tall as what is typed (`field-sizing: content`). On web the rule itself: a textarea's
+              // `scrollHeight` is never less than its own height, so a height fed back from it only grows.
+              ...(isWeb ? {} : { height: Math.max(54, Math.min(height, win.height * 0.4)) }),
               backgroundColor: "transparent",
               borderWidth: 0,
-              ...(isWeb ? { outlineStyle: "none", resize: "none" } : {}),
+              ...(isWeb ? { outlineStyle: "none", resize: "none", fieldSizing: "content" } : {}),
             } as never}
           />
           <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0}>

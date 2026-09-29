@@ -1,6 +1,9 @@
 import { useState, type JSX } from "react";
 import { View } from "@tamagui/core";
-import { choicesOfConfig, isComponentName, type Choice, type PendingInteraction } from "@jaira/shared/browser";
+import { choicesOfConfig, fillFormSchema, isComponentName, type Choice, type PendingInteraction } from "@jaira/shared/browser";
+import type { Schema } from "@jaira/ui/schemaForm/types";
+import { SchemaForm } from "../form/SchemaForm";
+import { Button } from "../settings/Button";
 import { EMPTY_ANSWER, answerOf, answersOfValue, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choices";
 import { ChoiceList, ChoiceSteps } from "../floats/Choices";
 import { COMPONENT_ICON } from "@jaira/ui/gateModel";
@@ -222,7 +225,7 @@ function SettledGateSurface({ pending, settled, error, plain }: { pending: Pendi
           panel (a flex column) nothing collapses, and the answered control is a block of its own. */}
       <View marginTop={plain ? 0 : never ? -10 : -8}>
         {choices === undefined ? (
-          <Uncopied name={`the ${pending.component} gate, as it was answered`} />
+          <SettledBody pending={pending} value={settled.value} />
         ) : config?.component === "choose_option" && config.questions !== undefined ? (
           <ChoiceSteps choices={choices} answers={answers} onAnswer={onAnswer} onSubmit={() => undefined} readOnly />
         ) : (
@@ -250,6 +253,65 @@ function PlainTitle({ pending }: { pending: PendingInteraction }): JSX.Element {
       {isComponentName(pending.component) ? <Icon name={COMPONENT_ICON[pending.component]} size={13} color={String(t.v("dim"))} /> : <View />}
       <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 700, ls: 0.09, upper: true, color: "dim" }} flexShrink={1} textAlign="right">
         {pending.config?.prompt ?? pending.component}
+      </Txt>
+    </View>
+  );
+}
+
+/** What a settled record answered, as a record (`recordOf`). */
+const recordOf = (value: unknown): Record<string, unknown> => (value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
+
+/**
+ * The settled bodies other than `choose_option`'s (`components.tsx` with `settled`): a form as it was
+ * submitted (a field it did not name is "not answered"), a confirmation with the button that was pressed
+ * filled, and anything else's JSON (`pre.outputs`: --bg, 1px --line, radius 8, padding 8, data 11/12,
+ * pre-wrap, at most 220). The artifact reviews answered stay {@link Uncopied}.
+ */
+function SettledBody({ pending, value }: { pending: PendingInteraction; value: unknown }): JSX.Element {
+  const t = useTokens();
+  const config = pending.config;
+  if (config?.component === "fill_form") {
+    const schema = fillFormSchema(config.fields) as Schema;
+    return <SchemaForm schema={schema} value={{ ...recordOf(value) }} onChange={() => undefined} ctx={{ path: "", hidePaths: true, disabled: true, unsetNote: () => "not answered" }} />;
+  }
+  if (config?.component === "confirm_action") {
+    const confirmed = recordOf(value)["confirmed"];
+    const chosen = recordOf(value)["choice"];
+    const details = config.details ?? [];
+    return (
+      <View>
+        {details.length > 0 ? (
+          <View flexDirection="column" gap={3} marginBottom={10}>
+            {details.map((row) => (
+              <View key={row.label} flexDirection="row" gap={12} alignItems="baseline">
+                <Txt spec={{ voice: "app", scale: 1, color: "dim" }} flexShrink={0} numberOfLines={1}>
+                  {row.label}
+                </Txt>
+                <Txt spec={{ voice: "data", scale: 1 }} flexShrink={1} minWidth={0}>
+                  {row.value}
+                </Txt>
+              </View>
+            ))}
+          </View>
+        ) : null}
+        {/* The record keeps its colours: a pressed button filled, none of them live (`.gate-settled button:disabled`). */}
+        <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={details.length > 0 ? 4 : 14}>
+          <Button kind={confirmed === true && chosen === undefined ? "primary" : "plain"}>{config.confirmLabel}</Button>
+          {(config.options ?? []).map((option) => (
+            <Button key={option.value} kind={chosen === option.value ? "primary" : "plain"} {...(option.description !== undefined ? { title: option.description } : {})}>
+              {option.label ?? option.value}
+            </Button>
+          ))}
+          <Button kind={confirmed === false ? "primary" : "ghost"}>{config.cancelLabel}</Button>
+        </View>
+      </View>
+    );
+  }
+  if (config?.component === "review_artifact" || config?.component === "edit_artifact" || config?.component === "review_artifacts") return <Uncopied name={`the ${pending.component} gate, as it was answered`} />;
+  return (
+    <View marginTop={14} padding={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} backgroundColor={t.v("bg") as never} maxHeight={220} {...({ overflow: "auto" } as object)} {...(scrollbarProps(t) as object)}>
+      <Txt spec={{ voice: "data", scale: 11 / 12 }} whiteSpace="pre-wrap">
+        {value === undefined ? "" : JSON.stringify(value, null, 2)}
       </Txt>
     </View>
   );

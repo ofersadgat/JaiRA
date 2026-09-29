@@ -24,7 +24,7 @@ import {
   type WorkRun,
 } from "@jaira/ui/workSummary";
 import type { WorkEntry } from "@jaira/ui/transcript";
-import { Press, Txt, edge } from "../../primitives";
+import { Press, Txt, edge, faceOf } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 import { Pulse } from "../chat/Paper";
@@ -235,7 +235,7 @@ function SaidText({ said }: { said: readonly Said[] }): JSX.Element {
     <>
       {said.map((part, i) =>
         "code" in part ? (
-          <Text key={i} fontFamily={t.v("font-data") as never} fontSize={size as never} color={t.v("dim") as never}>
+          <Text key={i} {...(faceOf(t, "data", 400, size) as object)} fontSize={size as never} color={t.v("dim") as never}>
             {part.shell === true ? <ShellLine line={part.code} /> : part.code}
           </Text>
         ) : (

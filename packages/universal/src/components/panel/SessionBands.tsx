@@ -13,6 +13,7 @@ import { Icon } from "./Icon";
 import { RailedRows } from "./Rail";
 import { OutcomeNote } from "./WorkRows";
 import { Svg } from "./Svg";
+import { OneLine } from "./OneLine";
 
 /**
  * `sessionPanels.tsx`'s `SessionBandsView`, universal (decision 0015): the conversation drawn as one
@@ -216,7 +217,13 @@ export function NoteRow({
           {where}
         </Txt>
       )}
-      {note.kind === "entered" || skipped || note.text.length === 0 ? null : (
+      {note.kind === "entered" || skipped || note.text.length === 0 ? null : note.kind === "transition" && !isWeb ? (
+        // A transition's text is where it went — a state's name, one line on the desktop at any width a
+        // panel has; a phone would wrap it a letter short of its end.
+        <OneLine spec={{ ...words, color: ink }} flexShrink={0}>
+          {collapsed(note.text)}
+        </OneLine>
+      ) : (
         <Txt spec={{ ...words, color: ink }} minWidth={0} flexShrink={1}>
           {collapsed(note.kind === "blocked" ? `: ${note.text}` : note.text)}
         </Txt>
@@ -618,20 +625,23 @@ function Sheet({
     starter !== undefined ? (
       // A pressable TEXT, not a Press: on a solo sheet the whole gutter is the fold, and a button in a button is not allowed.
       <View flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row" justifyContent="center">
-        <Txt onPress={() => onOpenWorkflow?.(starter)} {...({ cursor: "pointer" } as object)} spec={{ voice: "data", scale: 11 / 12, color: "accent" }} flexShrink={0} whiteSpace="nowrap" title={`${starter.node.stateId} — describe this run of it`}>
+        <OneLine onPress={() => onOpenWorkflow?.(starter)} {...({ cursor: "pointer" } as object)} spec={{ voice: "data", scale: 11 / 12, color: "accent" }} flexShrink={0} title={`${starter.node.stateId} — describe this run of it`}>
           {starter.node.stateId}
-        </Txt>
+        </OneLine>
       </View>
     ) : null;
   const span = spanOf(segment);
   const sheet = sheetLookOf(t, useLook());
   // A cut edge is not a corner: the torn side squared (radius 2).
-  const radii = {
-    borderTopLeftRadius: segment.resumed ? 2 : sheet.radius,
-    borderTopRightRadius: segment.resumed ? 2 : sheet.radius,
-    borderBottomLeftRadius: segment.paused ? 2 : sheet.radius,
-    borderBottomRightRadius: segment.paused ? 2 : sheet.radius,
-  };
+  const radii =
+    segment.resumed || segment.paused
+      ? {
+          borderTopLeftRadius: segment.resumed ? 2 : sheet.radius,
+          borderTopRightRadius: segment.resumed ? 2 : sheet.radius,
+          borderBottomLeftRadius: segment.paused ? 2 : sheet.radius,
+          borderBottomRightRadius: segment.paused ? 2 : sheet.radius,
+        }
+      : { borderRadius: sheet.radius };
   return (
     <View flexDirection="column" minWidth={0} {...(side !== undefined ? { "data-fork-place": side.place } : {})}>
       {named && surface && workflow !== null ? (
