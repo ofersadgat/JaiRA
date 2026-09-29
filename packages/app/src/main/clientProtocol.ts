@@ -71,11 +71,15 @@ export function registerClientProtocol(root: string): void {
     const file = normalize(join(root, path));
     // Nothing outside `root`, whatever `..` a URL carries.
     const inside = file === root || file.startsWith(root.endsWith(sep) ? root : root + sep);
-    const target = inside && existsSync(file) && statSync(file).isFile() ? file : index;
+    const isFile = (f: string): boolean => existsSync(f) && statSync(f).isFile();
+    // A route with a page of its own (`/rn` → `rn.html`) gets that page, with only the stylesheets it
+    // links: the universal shell must not stand on the desktop's `styles.css` (decision 0015). Any other
+    // path falls back to `index.html`, as a static SPA host does.
+    const target = !inside ? index : isFile(file) ? file : isFile(`${file}.html`) ? `${file}.html` : index;
     const body = readFileSync(target);
     const type = TYPES[extname(target).toLowerCase()] ?? "application/octet-stream";
     const headers: Record<string, string> = { "Content-Type": type, "X-Content-Type-Options": "nosniff" };
-    if (target === index) headers["Content-Security-Policy"] = policyFor(body.toString("utf8"));
+    if (extname(target).toLowerCase() === ".html") headers["Content-Security-Policy"] = policyFor(body.toString("utf8"));
     return new Response(body, { headers });
   });
 }

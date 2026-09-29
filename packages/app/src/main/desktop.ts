@@ -80,6 +80,12 @@ const RENDERER: "one" | "vite" = process.env.JAIRA_RENDERER === "vite" ? "vite" 
  * desktop (decision 0015). Never in a packaged app: there the window loads only what it shipped with.
  */
 const DEV_CLIENT = !app.isPackaged && process.env.JAIRA_CLIENT_DEV !== undefined && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/$/.test(process.env.JAIRA_CLIENT_DEV) ? process.env.JAIRA_CLIENT_DEV : undefined;
+/**
+ * The universal shell instead of the desktop's own page (`--ui=universal`, or `JAIRA_UI=universal`): the
+ * UI the phone draws, from the copies, on the desktop's own store and bridge (decision 0015). What
+ * `npm run start:universal` opens; `npm run start` opens the desktop's page as it always has.
+ */
+const UNIVERSAL = process.argv.includes("--ui=universal") || process.env.JAIRA_UI === "universal";
 /** The throwaway remote transport (0015 S2), when `JAIRA_SPIKE_WS` asks for it. */
 let spike: SpikeSocket | undefined;
 const PRELOAD = join(DIST, "preload.cjs");
@@ -851,7 +857,7 @@ async function createWindow(): Promise<BrowserWindow> {
     reportCrash("renderer", new Error(at));
   });
 
-  if (RENDERER === "one") await win.loadURL(DEV_CLIENT ?? CLIENT_URL);
+  if (RENDERER === "one") await win.loadURL(`${DEV_CLIENT ?? CLIENT_URL}${UNIVERSAL ? "rn" : ""}`);
   else await win.loadFile(RENDERER_HTML);
   win.show();
   return win;
