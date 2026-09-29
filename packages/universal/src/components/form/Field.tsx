@@ -356,7 +356,11 @@ export function Disclosure({
               ▶
             </Txt>
             <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: hovered ? "text" : "dim" }}>{summary}</Txt>
-            {desc !== undefined && desc !== "" ? <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>{`· ${desc}`}</Txt> : null}
+            {desc !== undefined && desc !== "" ? <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>
+              {/* Two text runs, as the DOM writes them: Blink shapes "· " and the words apart. */}
+              {"· "}
+              {desc}
+            </Txt> : null}
           </>
         )}
       </Press>

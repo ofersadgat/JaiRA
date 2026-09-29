@@ -1,11 +1,13 @@
-import { useMemo, type JSX } from "react";
+import { useEffect, useMemo, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { useNow } from "@jaira/ui/limitsStore";
 import { noticeToShow } from "@jaira/ui/noticesModel";
 import { useNotices } from "@jaira/ui/noticesStore";
 import { hueOf } from "@jaira/ui/pill";
-import { useApp } from "@jaira/ui/store";
+import { lookOf } from "@jaira/ui/appearanceLayer";
+import { invoke, subscribe, useApp } from "@jaira/ui/store";
+import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "@jaira/ui/workSummaryContext";
 import { FOLD, openOf } from "@jaira/ui/uiState";
 import { InboxStrip } from "../components/InboxStrip";
 import { ShellFloats } from "../components/floats/ShellFloats";
@@ -34,11 +36,24 @@ import { Uncopied } from "./Uncopied";
  */
 export function UniversalApp(): JSX.Element {
   const model = useApp();
+  const { state } = model;
+  // What `App.tsx` provides every transcript, however deep: how work between two messages is summarised
+  // (the person's Appearance → Conversation), and the read-only judge that names a phase Changed —
+  // asked of the project the window stands on, forgotten when a permission set changes.
+  const look = useMemo(() => lookOf(state.config), [state.config]);
+  const { workPhases, workRows, workThinking, workNotes } = look.conversation;
+  const workLook = useMemo(() => ({ phases: workPhases, rows: workRows, thinking: workThinking, notes: workNotes }), [workPhases, workRows, workThinking, workNotes]);
+  const readOnlyJudge = useMemo(() => readOnlyJudgeOf((calls) => invoke("permissionSets:judgeReadOnly", { project: state.at ?? SHARED_SESSION, calls })), [state.at]);
+  useEffect(() => subscribe((message) => void (message.type === "store:invalidate" && message.scope === "workflows" && forgetReadOnly(readOnlyJudge))), [readOnlyJudge]);
   return (
     <AppContext.Provider value={model}>
-      <TokenRoot {...model.appearance}>
-        <Frame />
-      </TokenRoot>
+      <WorkLookContext.Provider value={workLook}>
+        <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
+          <TokenRoot {...model.appearance}>
+            <Frame />
+          </TokenRoot>
+        </ReadOnlyJudgeContext.Provider>
+      </WorkLookContext.Provider>
     </AppContext.Provider>
   );
 }
