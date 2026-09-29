@@ -170,6 +170,8 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
     const shots: PNG[] = [];
     const sizes: string[] = [];
     const runs: Run[][] = [];
+    /** The copy's islands, where they stand in the specimen: painted out of both pictures, as a scene's are. */
+    let islands: (Rect & { name: string })[] = [];
     for (const side of ["dom", "rn"]) {
       await app.navigate(`${origin}/specimen-${side}?name=${encodeURIComponent(name)}&look=${lookName(look)}`);
       // Patiently: the shared dev server rebuilds a page's graph after an edit anywhere in it.
@@ -178,6 +180,11 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
       await new Promise((r) => setTimeout(r, 400));
       const r = await app.evaluate<Rect>(`(() => { const r = document.getElementById("specimen").getBoundingClientRect(); return { x: r.x, y: r.y, width: r.width, height: r.height }; })()`);
       sizes.push(`${Math.round(r.width * 100) / 100}×${Math.round(r.height * 100) / 100}`);
+      if (side === "rn") {
+        islands = await app.evaluate<(Rect & { name: string })[]>(
+          `[...document.querySelectorAll("#specimen [data-island]")].map((e) => { const b = e.getBoundingClientRect(); return { name: e.getAttribute("data-island"), x: b.x - ${r.x}, y: b.y - ${r.y}, width: b.width, height: b.height }; })`,
+        );
+      }
       runs.push(await app.evaluate<Run[]>(texts(`document.getElementById("specimen")`)));
       // As `capture` does: a frame asked for first, and the capture asked again if it waits (a studio
       // among several sometimes never answers the first).
@@ -194,6 +201,7 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
       shots.push(PNG.sync.read(Buffer.from(shot.data, "base64")));
     }
     const [dom, rn] = shots as [PNG, PNG];
+    for (const island of islands) for (const png of [dom, rn]) mask(png, island, rn.width / Number(sizes[1]!.split("×")[0]));
     const base = `specimen-${name}-${lookName(look)}`;
     const moved = compareTexts(runs[0]!, runs[1]!);
     writeFileSync(join(OUT, `${base}.dom.png`), PNG.sync.write(dom));
@@ -203,13 +211,13 @@ async function specimen(app: App, name: string, looks: readonly Look[]): Promise
       const w = Math.min(dom.width, rn.width);
       const h = Math.min(dom.height, rn.height);
       const d = differ(crop(dom, { x: 0, y: 0, width: w, height: h }, 1), crop(rn, { x: 0, y: 0, width: w, height: h }, 1), join(OUT, `${base}.diff.png`));
-      console.log(`${base}: DIFFERENT SIZE (dom ${sizes[0]}, rn ${sizes[1]}); over the common part ${verdict(d)}`);
+      console.log(`${base}: DIFFERENT SIZE (dom ${sizes[0]}, rn ${sizes[1]}); over the common part ${verdict(d)}${islands.length > 0 ? `  (islands left out: ${islands.map((i) => i.name).join(", ")})` : ""}`);
       if (moved.length > 0) console.log(`  text that moved (rn − dom):\n${moved.join("\n")}`);
       continue;
     }
     const d = differ(dom, rn, join(OUT, `${base}.diff.png`));
     if (d.differing !== 0) failed = true;
-    console.log(`${base}: ${verdict(d)}  (${sizes[0]})`);
+    console.log(`${base}: ${verdict(d)}  (${sizes[0]})${islands.length > 0 ? `  (islands left out: ${islands.map((i) => i.name).join(", ")})` : ""}`);
     if (moved.length > 0) console.log(`  text that moved (rn − dom):\n${moved.join("\n")}`);
   }
   return failed;

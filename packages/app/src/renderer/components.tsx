@@ -10,16 +10,11 @@
 import { Fragment, Suspense, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { COMPONENT_ICON } from "./gateModel";
 import {
-  artifactOf,
   isComponentName,
   choicesOfConfig,
-  sendBackOption,
   choicesOfQuestions,
-  diffStrategyFor,
-  displayText,
   readAnswer,
   editorKindOf,
-  mimeOfPath,
   type ApproveToolCallConfig,
   type ChooseOptionConfig,
   type ComponentConfig,
@@ -53,6 +48,7 @@ import { SchemaForm } from "./schemaForm/SchemaForm";
 import { useSchemaCheck, useTouched } from "./schemaForm/check";
 import { checkBlocker } from "./schemaForm/model";
 import { formStartsWith, recordOf } from "./gateForms";
+import { artifactChangeOf, artifactReadingOf, artifactShapeOf, notesCount, recordedDraft, reviewAnswerOf, reviewVerdictOf } from "./artifactReview";
 import type { Schema } from "./schemaForm/types";
 import {
   NoteComposer,
@@ -88,19 +84,6 @@ export interface ComponentProps<C extends ComponentConfig> {
  */
 export interface Settled {
   value?: JsonValue | undefined;
-}
-
-/**
- * A draft box that holds what a person SUBMITTED, over what they were shown.
- *
- * The artifact panes read their edit through a {@link DraftBox}, and a settled gate has no live
- * draft — it has the content that came back, when the person changed it. Handing that in as the
- * box's text draws the pane in its changes reading, which is the edit they made, rather than the
- * original with no sign anything happened to it.
- */
-function recordedDraft(seed: string, content: JsonValue | undefined): DraftBox {
-  const text = typeof content === "string" ? content : seed;
-  return { text, dirty: text !== seed, set: () => undefined, revert: () => undefined };
 }
 
 /**
@@ -213,41 +196,20 @@ function ReviewArtifact({
   const author = useAuthor(project);
 
   const value = inputs[config.artifact];
-  const seed = displayText(value);
-  const artifact = artifactOf(value);
-  const mime = artifact?.mime ?? (artifact?.path === undefined ? undefined : mimeOfPath(artifact.path));
+  const { seed, mime } = artifactShapeOf(value);
   const live = useDraftBox(editor?.drafts, editor?.onDraft, docKey("gate", `${requestId}:${config.artifact}`), seed);
   const draft = settled !== undefined ? recordedDraft(seed, recorded["content"]) : live;
 
   const comments = (answers[config.prompt] ?? EMPTY_ANSWER).text.trim();
   /**
-   * The same rule the plural applies across a set, applied to one artifact (decision 0002).
-   *
-   * A review with anything written on it is not an approval — it is a round going back — and the
-   * button has to say so before it is pressed. What it SUBMITS is the author's send-back option
-   * (`sendBackOption`): the gate's transitions read the decision word, and nothing downstream of
-   * the singular reinterprets an approval that happens to carry a comment. Submitting the
-   * affirmative here once walked a commented review straight into publish.
+   * The same rule the plural applies across a set, applied to one artifact (decision 0002) — see
+   * `reviewVerdictOf` (`artifactReview.ts`). A review with anything written on it is a round going
+   * back; submitting the affirmative here once walked a commented review straight into publish.
    */
-  const speaking = comments !== "" || notes.length > 0;
   const choices = choicesOfConfig(config);
-  const sendBack = sendBackOption(choices[0]!.options);
-  /**
-   * A vocabulary with no send-back word (`merged` / `reverted`) cannot collapse to one button
-   * honestly, so the row stays and the comment rides alongside whatever is clicked.
-   */
-  const collapsed = speaking && sendBack !== undefined;
-  const sendBackLabel = sendBack === undefined ? "" : (sendBack.label ?? sendBack.value);
+  const { collapsed, sendBack, verdict } = reviewVerdictOf(choices[0]!.options, comments, notes.length);
 
-  const send = (decision: string): void => {
-    onSubmit({
-      decision,
-      ...(comments === "" ? {} : { comments }),
-      ...(notes.length > 0 ? { notes } : {}),
-      // Only when they actually changed it: content equal to what arrived is not an edit.
-      ...(draft.dirty ? { content: draft.text } : {}),
-    });
-  };
+  const send = (decision: string): void => onSubmit(reviewAnswerOf(decision, comments, notes, draft));
 
   return (
     <>
@@ -287,16 +249,10 @@ function ReviewArtifact({
         {draft.dirty ? <span className="review-count commented">edited</span> : null}
         {notes.length > 0 ? (
           <span className="review-count commented">
-            <Icon name="comment" /> {notes.length === 1 ? "1 note" : `${notes.length} notes`}
+            <Icon name="comment" /> {notesCount(notes.length)}
           </span>
         ) : null}
-        <span className="review-verdict">
-          {collapsed
-            ? `comments left — this goes back as "${sendBackLabel}"`
-            : speaking
-              ? "comments left — your decision goes back with them"
-              : "no comments — your decision stands on its own"}
-        </span>
+        <span className="review-verdict">{verdict}</span>
       </div>
       {/* Comments change the SHAPE of the footer, not only its words — exactly as in the plural.
           A review with notes on it has one outcome: it goes back. Offering "reject" beside "send
@@ -454,16 +410,10 @@ export function ArtifactPane({
   const dirty = draft.dirty;
   // Markdown can show a change without leaving the document, so it never switches views at all.
   // Everything else falls back to the changes reading, which is a different component.
-  const prose = editorKindOf(mime, seed) === "markdown";
+  const reading = artifactReadingOf(mime, seed, dirty);
+  const prose = reading === "prose";
 
-  const change: Change = {
-    id: artifactId,
-    path: artifactId,
-    action: "update",
-    before: seed,
-    after: draft.text,
-    hunks: diffStrategyFor(mime ?? "text/plain").hunks(seed, draft.text),
-  };
+  const change: Change = artifactChangeOf(artifactId, seed, draft.text, mime);
 
   // Reverting is the way back to the document, so it is the only control the changes view needs.
   const actions = dirty ? (
@@ -571,9 +521,7 @@ function EditArtifact({
   editor?: EditorServices | undefined;
 }): JSX.Element {
   const value = config.source === undefined ? undefined : inputs[config.source];
-  const seed = value === undefined ? "" : displayText(value);
-  const artifact = artifactOf(value);
-  const mime = artifact?.mime ?? (artifact?.path === undefined ? undefined : mimeOfPath(artifact.path));
+  const { seed, mime } = artifactShapeOf(value);
   const live = useDraftBox(editor?.drafts, editor?.onDraft, docKey("gate", `${requestId}:${config.source ?? ""}`), seed);
   const draft = settled !== undefined ? recordedDraft(seed, recordOf(settled)["content"]) : live;
   const author = useAuthor(project);

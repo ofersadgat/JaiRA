@@ -41,22 +41,36 @@ async function main(): Promise<void> {
   }
 
   // One's dev server: the web pages the window loads, and Metro for a phone on the same port. Started
-  // here unless another studio already has it running.
-  let running = false;
-  try {
-    running = (await fetch(DEV)).status < 500;
-  } catch {}
-  const one: ChildProcess | undefined = running ? undefined : spawn(process.execPath, [join(CLIENT, "..", "..", "node_modules", "one", "run.mjs"), "dev", "--port", "8081"], {
-    cwd: CLIENT,
-    stdio: ["ignore", "pipe", "pipe"],
-  });
-  let said = "";
-  one?.stdout?.on("data", (d: Buffer) => (said += String(d)));
-  one?.stderr?.on("data", (d: Buffer) => (said += String(d)));
-  for (let i = 0; i < 120; i++) {
+  // here unless another studio already has it running — with a big heap, since several studios' edits
+  // rebuild it all day (it ran out of the default once, and every studio lost its pages).
+  const answering = async (): Promise<boolean> => {
     try {
-      if ((await fetch(DEV)).status < 500) break;
-    } catch {}
+      return (await fetch(DEV)).status < 500;
+    } catch {
+      return false;
+    }
+  };
+  const running = await answering();
+  let one: ChildProcess | undefined;
+  let said = "";
+  const serve = (): void => {
+    one = spawn(process.execPath, ["--max-old-space-size=8192", join(CLIENT, "..", "..", "node_modules", "one", "run.mjs"), "dev", "--port", "8081"], {
+      cwd: CLIENT,
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+    one.stdout?.on("data", (d: Buffer) => (said = (said + String(d)).slice(-20_000)));
+    one.stderr?.on("data", (d: Buffer) => (said = (said + String(d)).slice(-20_000)));
+    // A server that stops is started again rather than taking this studio with it: the other studios
+    // share it. Unless another studio got there first.
+    one.on("exit", (code) => {
+      console.log(`the dev server stopped (${code}); starting it again:\n${said.slice(-2000)}`);
+      one = undefined;
+      void answering().then((up) => (up ? undefined : serve()));
+    });
+  };
+  if (!running) serve();
+  for (let i = 0; i < 120; i++) {
+    if (await answering()) break;
     await new Promise((r) => setTimeout(r, 1000));
   }
 
@@ -72,15 +86,12 @@ async function main(): Promise<void> {
 
   const stop = async (): Promise<void> => {
     await app.close();
+    one?.removeAllListeners("exit");
     one?.kill();
     process.exit(0);
   };
   process.on("SIGINT", () => void stop());
   process.on("SIGTERM", () => void stop());
-  one?.on("exit", (code) => {
-    console.log(`the dev server stopped (${code}):\n${said.slice(-2000)}`);
-    void stop();
-  });
   // Stay up. The app process holds the window; this holds the session that keeps the clock held.
   await new Promise(() => undefined);
 }

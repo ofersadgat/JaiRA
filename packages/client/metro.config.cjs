@@ -46,6 +46,15 @@ const ignored = [
   new RegExp(`^${here}[\\\\/]\\.git[\\\\/].*`),
 ];
 const stubs = { "externalLinesDiffComputer.js": join(__dirname, "native-stubs/externalLinesDiffComputer.js") };
+/**
+ * react-native-gesture-handler (the frame's pinch, `DesktopFrame`) tries `require("react-native-reanimated")`
+ * and drives its gestures through it when it is there. It is there — One installs Reanimated 4 and its
+ * worklets, and autolinking links them — but not set up (no worklets Babel plugin), and the moment its
+ * JavaScript loads, the worklets runtime aborts the app natively (`installUnpacker`: `assertion
+ * "isObject()" failed`). Gesture handler is handed an empty module and uses its own JavaScript
+ * callbacks, as it does in an app without Reanimated.
+ */
+const withoutReanimated = /[\\/]react-native-gesture-handler[\\/]/;
 
 module.exports = (one) => {
   const upstream = one.resolver.resolveRequest;
@@ -60,6 +69,7 @@ module.exports = (one) => {
       resolveRequest: (context, name, platform) => {
         const stub = stubs[name.split("/").pop()];
         if (stub !== undefined && /[\\/]monaco-editor[\\/]/.test(context.originModulePath)) return { type: "sourceFile", filePath: stub };
+        if (name === "react-native-reanimated" && withoutReanimated.test(context.originModulePath)) return { type: "empty" };
         for (const [alias, target] of aliases) {
           if (name === alias) return next(context, target, platform);
           if (name.startsWith(`${alias}/`) && !/\.tsx?$/.test(target)) return next(context, join(target, name.slice(alias.length + 1)), platform);

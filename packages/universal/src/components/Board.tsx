@@ -1,5 +1,5 @@
-import { Fragment, useState, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { Pressable, ScrollView } from "react-native";
+import { Fragment, createContext, useContext, useEffect, useRef, useState, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Animated, Pressable, ScrollView, type View as HostView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { BoardCard, BoardView, MoveConfirm as MoveConfirmKind, NextMove } from "@jaira/shared/browser";
 import { archivedSplitOf, drillTargetOf, LANE_LABEL, laneRunsOf, type LaneEntry } from "@jaira/ui/boardModel";
@@ -43,8 +43,13 @@ import { claimed, TaskCard } from "./TaskCard";
  *   .tray / .tray-cards          "At this level": an uppercase h4 (11/12.5, bold, .09em, 8 below) over
  *                                cards 210 wide, wrapped with a gap of 8, lanes a row each
  *
- * Not copied: the sticky column heading on a phone (React Native has none; there a column's heading
- * scrolls with it — on web it sticks, as the desktop's does), the drop preview and dragging (v2, the props are kept).
+ * The sticky column heading: on web `position: sticky`, as the desktop's. React Native has no sticky
+ * but a ScrollView's direct children (`stickyHeaderIndices`), and a heading here is deep inside a
+ * wrapping row; so on a phone the scroller that holds the board (`BoardColumn`) hands its scroll down
+ * (`StickyScroll`) and each heading (`StickyHead`) is moved by it on the native driver — held at the
+ * scroller's top once its column's top has passed it, and let go at its column's foot, as sticky does.
+ *
+ * Not copied: the drop preview and dragging (v2, the props are kept).
  *
  * The right-click menus: a card's (`onTaskMenu`) and a column's (`onColumnMenu`), at the pointer, the
  * column's only where no card took the click (the DOM's `closest(".card")` guard, read off `claimed`). On
@@ -56,6 +61,49 @@ export type DragProps = {
   dragOffers?: unknown;
   onTaskDrop?: ((requestId: string, card: BoardCard, columnKey: string) => void) | undefined;
 };
+
+/**
+ * A phone's stand-in for `position: sticky` (the header above): what the scroller holding the board gives
+ * its column headings — how far it is scrolled (an `Animated.Value` driven natively by its `onScroll`),
+ * its content view to measure a heading against, and word when that content moved (`moved`, a set of
+ * listeners the scroller calls on a content-size change). None on web, where sticky is sticky.
+ */
+export type StickyScrollValue = {
+  y: Animated.Value;
+  content: () => unknown;
+  moved: Set<() => void>;
+};
+export const StickyScroll = createContext<StickyScrollValue | null>(null);
+
+/**
+ * A column heading on a phone: its offset from the scroller's top is measured, and while the scroller is
+ * past it, it is moved down by as much, but never past its column's foot (`room`: what is under the
+ * heading in the column). Over the cards, which come after it.
+ */
+function StickyHead({ room, children }: { room: number; children: ReactNode }): JSX.Element {
+  const sticky = useContext(StickyScroll);
+  const ref = useRef<HostView>(null);
+  const [top, setTop] = useState<number | null>(null);
+  const measure = (): void => {
+    const content = sticky?.content();
+    if (ref.current === null || content === null || content === undefined) return;
+    ref.current.measureLayout(content as never, (_x, y) => setTop((was) => (was === y ? was : y)), () => undefined);
+  };
+  useEffect(() => {
+    if (sticky === null) return undefined;
+    sticky.moved.add(measure);
+    return () => void sticky.moved.delete(measure);
+  });
+  const shift =
+    sticky === null || top === null || room <= 0
+      ? 0
+      : sticky.y.interpolate({ inputRange: [top, top + room], outputRange: [0, room], extrapolate: "clamp" });
+  return (
+    <Animated.View ref={ref} onLayout={measure} collapsable={false} style={{ zIndex: 1, transform: [{ translateY: shift }] }}>
+      {children}
+    </Animated.View>
+  );
+}
 
 /** Where a menu was asked for, in the window's coordinates. */
 export type MenuPoint = { x: number; y: number };
@@ -427,6 +475,8 @@ export function Column({
   children: (select: (() => void) | undefined) => ReactNode;
 }): JSX.Element {
   const [hovered, hover] = useHover();
+  // How far the heading may travel down its column on a phone (`StickyHead`): the body's height.
+  const [bodyHeight, setBodyHeight] = useState(0);
   const s = columnStyle(t, look, index, selected, hovered);
   const box = {
     flexGrow: 1,
@@ -441,44 +491,57 @@ export function Column({
     borderColor: s.column.border,
     borderRadius: s.column.radius,
   } as const;
+  const head = (
+    <View
+      // Sticky on web, as the desktop's: the heading stays put while a long column scrolls under it
+      // (and Chromium composites it as it does the desktop's, which decides how its text is smoothed).
+      // On a phone `StickyHead` moves it instead.
+      {...((isWeb ? { position: "sticky", top: 0, zIndex: 1 } : {}) as object)}
+      flexDirection="row"
+      alignItems="baseline"
+      gap={7}
+      paddingTop={s.head.padTop}
+      paddingBottom={6}
+      paddingLeft={s.head.padX}
+      paddingRight={s.head.padX}
+      marginBottom={s.head.below}
+      backgroundColor={s.head.ground as never}
+      borderTopLeftRadius={s.head.radius}
+      borderTopRightRadius={s.head.radius}
+      {...(edge(t, { bottom: s.head.ruleWidth }, String(s.head.rule)) as object)}
+    >
+      {seq !== undefined ? (
+        <Txt
+          register="data-num"
+          flexShrink={0}
+          {...((s.head.nameInk ?? s.head.ink) !== undefined ? { color: s.head.nameInk ?? s.head.ink } : {})}
+          {...(s.head.nameInk !== undefined ? { fontWeight: "700" } : {})}
+        >
+          {seq}
+        </Txt>
+      ) : null}
+      <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...((s.head.nameInk ?? s.head.ink) !== undefined ? { color: s.head.nameInk ?? s.head.ink } : {})}>
+        {name}
+      </Txt>
+      <Txt register="app-secondary" spec={{ tabular: true, ...(s.head.ink !== undefined ? { color: String(s.head.ink) } : {}) }} flexShrink={0} marginLeft="auto">
+        {count}
+      </Txt>
+    </View>
+  );
   const contents = (
     <>
+      {isWeb ? head : <StickyHead room={bodyHeight}>{head}</StickyHead>}
       <View
-        // Sticky on web, as the desktop's: the heading stays put while a long column scrolls under it
-        // (and Chromium composites it as it does the desktop's, which decides how its text is smoothed).
-        // A phone has no sticky, and its heading scrolls with the column.
-        {...((isWeb ? { position: "sticky", top: 0, zIndex: 1 } : {}) as object)}
-        flexDirection="row"
-        alignItems="baseline"
-        gap={7}
-        paddingTop={s.head.padTop}
-        paddingBottom={6}
-        paddingLeft={s.head.padX}
-        paddingRight={s.head.padX}
-        marginBottom={s.head.below}
-        backgroundColor={s.head.ground as never}
-        borderTopLeftRadius={s.head.radius}
-        borderTopRightRadius={s.head.radius}
-        {...(edge(t, { bottom: s.head.ruleWidth }, String(s.head.rule)) as object)}
+        flexGrow={1}
+        flexShrink={1}
+        flexDirection="column"
+        minHeight={0}
+        paddingTop={s.body.top}
+        paddingLeft={s.body.x}
+        paddingRight={s.body.x}
+        paddingBottom={s.body.bottom}
+        {...(isWeb ? {} : { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => setBodyHeight(e.nativeEvent.layout.height) })}
       >
-        {seq !== undefined ? (
-          <Txt
-            register="data-num"
-            flexShrink={0}
-            {...((s.head.nameInk ?? s.head.ink) !== undefined ? { color: s.head.nameInk ?? s.head.ink } : {})}
-            {...(s.head.nameInk !== undefined ? { fontWeight: "700" } : {})}
-          >
-            {seq}
-          </Txt>
-        ) : null}
-        <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...((s.head.nameInk ?? s.head.ink) !== undefined ? { color: s.head.nameInk ?? s.head.ink } : {})}>
-          {name}
-        </Txt>
-        <Txt register="app-secondary" spec={{ tabular: true, ...(s.head.ink !== undefined ? { color: String(s.head.ink) } : {}) }} flexShrink={0} marginLeft="auto">
-          {count}
-        </Txt>
-      </View>
-      <View flexGrow={1} flexShrink={1} flexDirection="column" minHeight={0} paddingTop={s.body.top} paddingLeft={s.body.x} paddingRight={s.body.x} paddingBottom={s.body.bottom}>
         {children(onSelect)}
         {count === 0 ? (
           <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingTop={2} paddingLeft={4} paddingRight={4} paddingBottom={6}>

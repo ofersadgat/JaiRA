@@ -10,6 +10,7 @@ import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Icon } from "./Icon";
 import { gateBodyOf } from "../floats/GateBodies";
+import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
 
@@ -19,8 +20,7 @@ const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 
 /**
  * A parked gate, universal (decision 0015): `components.tsx`'s `GateSurface` inside the panel's
  * `section.inline-gate` (`panelFaces.tsx`'s `TaskConversation`), with `choices.tsx`'s `ChoiceList` for
- * a `choose_option` of one question. The other components (a review, an edit, a form, a multi-part
- * question) are drawn {@link Uncopied} for now. The rules, from `styles.css`:
+ * a `choose_option` of one question; every other body is `floats/GateBodies.tsx`'s. The rules, from `styles.css`:
  *
  *   .pv-convo > .inline-gate   flex none, at most 55% tall, scrolls; padding 10 12, a --line on top;
  *                              .inline-gate's margin-top 12
@@ -50,9 +50,30 @@ export function InlineGate({ pending, onGate, maxHeight }: { pending: PendingInt
  * `settled`, the control as it was answered (`.gate-settled`), with "Never answered." over a question
  * nobody got to answer; `error` is the `.reason` line under it.
  */
-export function GateSurface({ pending, onSubmit, settled, error }: { pending: PendingInteraction; onSubmit: (value: unknown) => void; settled?: { value: unknown } | undefined; error?: string | undefined }): JSX.Element {
+export function GateSurface({
+  pending,
+  onSubmit,
+  settled,
+  error,
+  plain = false,
+  flex = false,
+  services,
+}: {
+  pending: PendingInteraction;
+  onSubmit: (value: unknown) => void;
+  settled?: { value: unknown } | undefined;
+  error?: string | undefined;
+  /** Hosted in a state's panel rather than an `.inline-gate`: the heading is the page's plain `h3`. */
+  plain?: boolean;
+  /** Hosted in a flex column (the gallery's `.modal-wide`), where no margin collapses. */
+  flex?: boolean;
+  /** The host's own reach for a gate that mounts the changeset reviewer (`ChangesetGate`'s `services`). */
+  services?: Partial<ComponentServices> | undefined;
+}): JSX.Element {
   const config = pending.config;
-  if (settled !== undefined) return <SettledGateSurface pending={pending} settled={settled} error={error} />;
+  // A flex column collapses no margin: the body's first block keeps all of its own, under the heading's 8.
+  const flat = plain || flex;
+  if (settled !== undefined) return <SettledGateSurface pending={pending} settled={settled} error={error} plain={plain} />;
   const body = ((): JSX.Element => {
     if (pending.configError !== undefined) {
       return (
@@ -63,16 +84,25 @@ export function GateSurface({ pending, onSubmit, settled, error }: { pending: Pe
     }
     if (config?.component === "choose_option" && config.questions === undefined && plainChoice(choicesOfConfig(config))) return <ChooseOption choices={choicesOfConfig(config)} onSubmit={onSubmit} />;
     // Every other body (`floats/GateBodies.tsx`): a choice with words or several questions, a
-    // confirmation, a form, a tool call, the JSON box. A review and an edit are not copied yet.
-    return gateBodyOf(pending, onSubmit, pending.resumes ? 0 : 8) ?? <Uncopied name={`the ${pending.component} gate`} />;
+    // confirmation, a form, a tool call, a review or an edit of an artifact, the JSON box.
+    return gateBodyOf(pending, onSubmit, pending.resumes || flat ? 0 : 8, flat, services) ?? <Uncopied name={`the ${pending.component} gate`} />;
   })();
   return (
     <>
       {/* The heading and its glyph, placed as Chromium places an inline one (`floats/GateTitle`). */}
-      <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>
-      {pending.resumes ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>Answering this continues the task.</Txt> : null}
-      {/* Without the line above, the block's 14 collapses into the heading's 8 in the DOM. */}
-      <View marginTop={pending.resumes ? 0 : -8}>{body}</View>
+      {plain ? <PlainTitle pending={pending} /> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
+      {/* `.gate-resumes`: 4 above, which collapses into the heading's 8 except in a flex column. */}
+      {pending.resumes ? (
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} marginTop={flat ? 4 : 0}>
+          Answering this continues the task.
+        </Txt>
+      ) : null}
+      {/* Without the line above, the block's 14 collapses into the heading's 8 in an `.inline-gate`; in a
+          state's panel or a wide modal (a flex column) nothing collapses. */}
+      {/* In a flex column capped in height (`.modal-wide`), the body gives way: a reviewer's `.mount-host` scrolls. */}
+      <View marginTop={pending.resumes || flat ? 0 : -8} {...(flex ? { flexShrink: 1, minHeight: 0 } : {})}>
+        {body}
+      </View>
     </>
   );
 }
@@ -173,7 +203,7 @@ function Option({ label, icon, description, primary = false, danger = false, sel
  * chooser, inert, with what was picked lit. Only `choose_option` is drawn so; the other gates' settled
  * bodies are the floats' (`GateBodies.tsx`), which take no answer yet.
  */
-function SettledGateSurface({ pending, settled, error }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined }): JSX.Element {
+function SettledGateSurface({ pending, settled, error, plain }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined; plain: boolean }): JSX.Element {
   const t = useTokens();
   const config = pending.config;
   const choices = config?.component === "choose_option" ? choicesOfConfig(config) : undefined;
@@ -182,14 +212,15 @@ function SettledGateSurface({ pending, settled, error }: { pending: PendingInter
   const onAnswer = (question: string, next: Answer): void => setAnswers((prev) => ({ ...prev, [question]: next }));
   return (
     <>
-      <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>
+      {plain ? <PlainTitle pending={pending} /> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
       {never ? (
         <Txt spec={{ voice: "app", scale: 13 / 12.5, italic: true, color: "dim" }} marginBottom={10}>
           Never answered.
         </Txt>
       ) : null}
-      {/* The block's 14 collapses with the heading's 8 (or the line's 10) in the DOM. */}
-      <View marginTop={never ? -10 : -8}>
+      {/* The block's 14 collapses with the heading's 8 (or the line's 10) in an `.inline-gate`; in a state's
+          panel (a flex column) nothing collapses, and the answered control is a block of its own. */}
+      <View marginTop={plain ? 0 : never ? -10 : -8}>
         {choices === undefined ? (
           <Uncopied name={`the ${pending.component} gate, as it was answered`} />
         ) : config?.component === "choose_option" && config.questions !== undefined ? (
@@ -204,5 +235,22 @@ function SettledGateSurface({ pending, settled, error }: { pending: PendingInter
         </Txt>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The page's own `h3`, where a gate stands in a state's panel rather than an `.inline-gate`: a row, the
+ * glyph (13, `.gate-icon`) at one end and the words at the other (`space-between`), gap 8; app 700
+ * 11/12.5, 0.09em, upper case, --dim; 8 under.
+ */
+function PlainTitle({ pending }: { pending: PendingInteraction }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View role="heading" flexDirection="row" alignItems="center" justifyContent="space-between" gap={8} marginBottom={8}>
+      {isComponentName(pending.component) ? <Icon name={COMPONENT_ICON[pending.component]} size={13} color={String(t.v("dim"))} /> : <View />}
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 700, ls: 0.09, upper: true, color: "dim" }} flexShrink={1} textAlign="right">
+        {pending.config?.prompt ?? pending.component}
+      </Txt>
+    </View>
   );
 }

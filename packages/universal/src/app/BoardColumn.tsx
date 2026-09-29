@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "react";
-import { ScrollView } from "react-native";
+import { Animated, ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { boardCardOrderOf, pickCard, type BoardPick } from "@jaira/ui/boardModel";
 import { openColumnMenu, openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
 import type { AskSpec } from "@jaira/ui/menu";
 import { undoableOn } from "@jaira/ui/taskDrag";
 import { groupOf, groupProjects, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
-import { Board, type Mods } from "../components/Board";
+import { Board, StickyScroll, type Mods, type StickyScrollValue } from "../components/Board";
 import { AskDialog } from "../components/files/AskDialog";
 import { ContextMenu, type MenuAt } from "../components/Menu";
 import { copyText } from "../clipboard";
@@ -95,6 +95,29 @@ export function BoardColumn(): JSX.Element {
   }, []);
   // Groups arriving, or being narrowed away, move the boundaries without a scroll (as `App.tsx` re-measures).
   useEffect(track, [track, state.projects, state.boards, state.taskFocus]);
+  // A phone's sticky column headings (`Board.tsx`'s `StickyScroll`): the scroll, driven natively, and the
+  // content to measure against. None on web, where the headings are `position: sticky`.
+  const sticky = useMemo<StickyScrollValue | null>(
+    () =>
+      isWeb
+        ? null
+        : {
+            y: new Animated.Value(0),
+            content: () => (scroller.current as unknown as { getInnerViewRef?: () => unknown } | null)?.getInnerViewRef?.() ?? null,
+            moved: new Set(),
+          },
+    [],
+  );
+  const onScroll = (e: { nativeEvent: { contentOffset: { y: number } } }): void => {
+    scrolled.current = e.nativeEvent.contentOffset.y;
+    track();
+  };
+  const nativeScroll = useMemo(
+    () => (sticky === null ? undefined : Animated.event([{ nativeEvent: { contentOffset: { y: sticky.y } } }], { useNativeDriver: true, listener: onScroll as never })),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [sticky],
+  );
+  const moved = (): void => sticky?.moved.forEach((measure) => measure());
   // What a drilled run reads from (`App.tsx`'s `surfaces`), for `RunView`.
   const runContext = { ...useFileSurfaces(), ...useRunContext() };
 
@@ -122,97 +145,99 @@ export function BoardColumn(): JSX.Element {
       {words}
     </Txt>
   );
+  // On a phone an Animated one, so the headings follow its scroll on the native driver.
+  const Scroller = (sticky === null ? ScrollView : Animated.ScrollView) as typeof ScrollView;
   return (
-    <ScrollView
-      {...(scrollbarProps(t) as object)}
-      // On web it scrolls both ways, as `.col.mid` does.
-      style={{ flex: 1, backgroundColor: t.v("bg") as string, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
-      contentContainerStyle={{ flexGrow: 1, flexDirection: "column" }}
-      scrollEventThrottle={16}
-      onScroll={(e) => {
-        scrolled.current = e.nativeEvent.contentOffset.y;
-        track();
-      }}
-      ref={scroller}
-      testID="board-column"
-      // On web the layout event rounds to whole pixels (`offsetHeight`); the desktop's tail is the exact
-      // height, and half a pixel moves every rule under it on a fractional-scale screen.
-      onLayout={(e) => {
-        const node = isWeb ? (scroller.current as unknown as { getScrollableNode?: () => HTMLElement | null } | null)?.getScrollableNode?.() : null;
-        setHeight(node?.getBoundingClientRect().height ?? e.nativeEvent.layout.height);
-      }}
-    >
-      {state.projects.length === 0 ? empty("Open a project to see its board.") : null}
-      {shown.map((g, i) => {
-        // One board for the project's workspaces, merged by column (decision 0013 §4).
-        const board = markQueued(mergeBoards(g, state.boards), state.queue);
-        const own = (card: { project?: string }): string => card.project ?? g.key;
-        const owner = (taskId: string): string =>
-          [...(board?.columns.flatMap((c) => c.cards) ?? []), ...(board?.atLevel ?? []), ...(board?.finished ?? [])].find((c) => c.taskId === taskId)?.project ?? g.key;
-        const holds = (project: string | null | undefined): boolean => g.members.some((m) => m.project === project);
-        return (
-          <View
-            key={g.key}
-            flexDirection="column"
-            {...(narrowed ? { flexGrow: 1, flexShrink: 1, minHeight: 0 } : { flexShrink: 0 })}
-            {...(edge(t, { bottom: 1 }) as object)}
-            onLayout={(e) => {
-              tops.current.set(g.key, e.nativeEvent.layout.y);
-              track();
-            }}
-          >
-            {/* A header per section but the first, and none when narrowed: the title bar's address is it. */}
-            {i > 0 && state.taskFocus === null ? (
-              <TaskAddressBar
-                place="section"
-                projects={namedProjects}
-                focus={null}
-                at={g.key}
-                boards={state.boards}
-                trail={[]}
-                seen={ui.seen}
-                onSeen={actions.markProjectSeen}
-                onFocus={actions.focusProject}
-                onDrill={actions.drillProject}
-                onWalkBack={actions.walkBackTo}
-                onOpenProject={() => void actions.chooseProject("open")}
-              />
-            ) : null}
-            {board !== null ? (
-              <Board
-                board={board}
-                selected={holds(state.selectedProject) ? state.selected : null}
-                selectedSet={picked !== null && holds(picked.project) ? pickedSet! : undefined}
-                numbered={board.level !== ""}
-                onSelectTask={(taskId, e) => pickTask(owner(taskId), taskId, e)}
-                onOpenAt={(taskId, stateId) => {
-                  setPicked({ project: owner(taskId), ids: [taskId], anchor: taskId });
-                  actions.select(taskId, owner(taskId), stateId ?? null);
-                }}
-                onSelectColumn={(stateId) => actions.selectWorkflow(stateId, g.key)}
-                selectedColumn={state.taskWorkflowProject === g.key ? state.taskWorkflow : null}
-                onDrill={(level) => {
-                  for (const m of g.members) actions.drillProject(m.project, level);
-                }}
-                onOpenTask={(card) => actions.openTask(card.taskId, own(card), board.level === "" ? card.workflow : board.level)}
-                onTaskMenu={(card, at) => openTaskMenu(menuHost, own(card), card, at)}
-                // The column's own right-click: the place, and every task standing in it.
-                onColumnMenu={(stateId, at) => openColumnMenu(menuHost, g.key, stateId, at)}
-                connect={{
-                  onMove: (card, move, confirmed) => void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed === true ? { confirmed: true } : {}) }),
-                  undoable: undoableOn(board),
-                  onUndo: (taskId) => void actions.undoConnect(taskId, owner(taskId)),
-                }}
-              />
-            ) : (
-              empty("No board here yet.")
-            )}
-          </View>
-        );
-      })}
-      {/* Room to scroll past the end, so the last group can reach the top of the column. */}
-      {state.taskFocus === null && groups.length > 1 ? <View flexShrink={0} height={height} /> : null}
-      {floats}
-    </ScrollView>
+    <StickyScroll.Provider value={sticky}>
+      <Scroller
+        {...(scrollbarProps(t) as object)}
+        // On web it scrolls both ways, as `.col.mid` does.
+        style={{ flex: 1, backgroundColor: t.v("bg") as string, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
+        contentContainerStyle={{ flexGrow: 1, flexDirection: "column" }}
+        scrollEventThrottle={16}
+        onScroll={nativeScroll ?? onScroll}
+        {...(sticky !== null ? { onContentSizeChange: moved } : {})}
+        ref={scroller}
+        testID="board-column"
+        // On web the layout event rounds to whole pixels (`offsetHeight`); the desktop's tail is the exact
+        // height, and half a pixel moves every rule under it on a fractional-scale screen.
+        onLayout={(e) => {
+          const node = isWeb ? (scroller.current as unknown as { getScrollableNode?: () => HTMLElement | null } | null)?.getScrollableNode?.() : null;
+          setHeight(node?.getBoundingClientRect().height ?? e.nativeEvent.layout.height);
+        }}
+      >
+        {state.projects.length === 0 ? empty("Open a project to see its board.") : null}
+        {shown.map((g, i) => {
+          // One board for the project's workspaces, merged by column (decision 0013 §4).
+          const board = markQueued(mergeBoards(g, state.boards), state.queue);
+          const own = (card: { project?: string }): string => card.project ?? g.key;
+          const owner = (taskId: string): string =>
+            [...(board?.columns.flatMap((c) => c.cards) ?? []), ...(board?.atLevel ?? []), ...(board?.finished ?? [])].find((c) => c.taskId === taskId)?.project ?? g.key;
+          const holds = (project: string | null | undefined): boolean => g.members.some((m) => m.project === project);
+          return (
+            <View
+              key={g.key}
+              flexDirection="column"
+              {...(narrowed ? { flexGrow: 1, flexShrink: 1, minHeight: 0 } : { flexShrink: 0 })}
+              {...(edge(t, { bottom: 1 }) as object)}
+              onLayout={(e) => {
+                tops.current.set(g.key, e.nativeEvent.layout.y);
+                track();
+              }}
+            >
+              {/* A header per section but the first, and none when narrowed: the title bar's address is it. */}
+              {i > 0 && state.taskFocus === null ? (
+                <TaskAddressBar
+                  place="section"
+                  projects={namedProjects}
+                  focus={null}
+                  at={g.key}
+                  boards={state.boards}
+                  trail={[]}
+                  seen={ui.seen}
+                  onSeen={actions.markProjectSeen}
+                  onFocus={actions.focusProject}
+                  onDrill={actions.drillProject}
+                  onWalkBack={actions.walkBackTo}
+                  onOpenProject={() => void actions.chooseProject("open")}
+                />
+              ) : null}
+              {board !== null ? (
+                <Board
+                  board={board}
+                  selected={holds(state.selectedProject) ? state.selected : null}
+                  selectedSet={picked !== null && holds(picked.project) ? pickedSet! : undefined}
+                  numbered={board.level !== ""}
+                  onSelectTask={(taskId, e) => pickTask(owner(taskId), taskId, e)}
+                  onOpenAt={(taskId, stateId) => {
+                    setPicked({ project: owner(taskId), ids: [taskId], anchor: taskId });
+                    actions.select(taskId, owner(taskId), stateId ?? null);
+                  }}
+                  onSelectColumn={(stateId) => actions.selectWorkflow(stateId, g.key)}
+                  selectedColumn={state.taskWorkflowProject === g.key ? state.taskWorkflow : null}
+                  onDrill={(level) => {
+                    for (const m of g.members) actions.drillProject(m.project, level);
+                  }}
+                  onOpenTask={(card) => actions.openTask(card.taskId, own(card), board.level === "" ? card.workflow : board.level)}
+                  onTaskMenu={(card, at) => openTaskMenu(menuHost, own(card), card, at)}
+                  // The column's own right-click: the place, and every task standing in it.
+                  onColumnMenu={(stateId, at) => openColumnMenu(menuHost, g.key, stateId, at)}
+                  connect={{
+                    onMove: (card, move, confirmed) => void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed === true ? { confirmed: true } : {}) }),
+                    undoable: undoableOn(board),
+                    onUndo: (taskId) => void actions.undoConnect(taskId, owner(taskId)),
+                  }}
+                />
+              ) : (
+                empty("No board here yet.")
+              )}
+            </View>
+          );
+        })}
+        {/* Room to scroll past the end, so the last group can reach the top of the column. */}
+        {state.taskFocus === null && groups.length > 1 ? <View flexShrink={0} height={height} /> : null}
+        {floats}
+      </Scroller>
+    </StickyScroll.Provider>
   );
 }

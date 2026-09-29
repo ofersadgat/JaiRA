@@ -238,3 +238,37 @@ function RnBands(): JSX.Element {
   );
 }
 TRANSCRIPT_SPECIMENS["session-bands"] = { width: 760, dom: DomBands, rn: RnBands };
+
+/**
+ * What a call draws under its row unasked, and the rows that are not a plain call: an agent's question
+ * with its answer, what a workflow tool did, an approval asked and answered, a call stopped while it was
+ * being written.
+ */
+const SHOWN: TranscriptEntry[] = [
+  say("user", "Plan the pause feature with me.", s(0), 0),
+  {
+    kind: "tool",
+    name: "AskUserQuestion",
+    summary: "Which should a pause keep?",
+    at: s(2),
+    callId: "q1",
+    args: { questions: [{ question: "Which should a pause keep?", header: "Pause", options: [{ label: "The worktree", description: "keep the files as they are" }, { label: "Nothing" }] }] },
+    ok: true,
+    result: "User has answered your questions: \"Which should a pause keep?\"=\"The worktree\".",
+  },
+  say("assistant", "Keeping the worktree, then.", s(5), 1),
+  {
+    kind: "tool",
+    name: "start_task",
+    summary: "feature/product",
+    at: s(8),
+    args: { state: "feature/product" },
+    ok: true,
+    result: { ok: true, task: "t-1", key: "product", state: "feature/product", status: "started", mount: "plain", inputs: [{ name: "issue", via: "asked" }] },
+  },
+  say("assistant", "Product is running.", s(9), 2),
+  { kind: "tool", name: "approve_tool_call", summary: "", at: s(10), args: { command: "git push origin main", asker: "smart" }, ok: true, result: "allow", detail: { decision: "allow", scope: "session", by: "person", waitedMs: 4200 } },
+  say("assistant", "Pushed.", s(12), 3),
+  { kind: "writing", name: "Write", path: `${S}/pause.md`, chars: 5400, at: s(13) },
+];
+TRANSCRIPT_SPECIMENS["transcript-shown"] = pair(SHOWN);

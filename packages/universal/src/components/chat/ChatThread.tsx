@@ -8,6 +8,8 @@ import { Press, Txt, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
 import { Composer } from "./Composer";
+import { useMentions } from "@jaira/ui/chatMentions";
+import { invoke } from "@jaira/ui/store";
 import { LiveStatusBar, Paper } from "./Paper";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
@@ -50,6 +52,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const jumpRef = useRef(jump);
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
+  const mentions = useMentions(surface.hasProject, m.project);
   // What the thread follows (`useStickToBottom`'s `follow`): a new thread or a word of the live tail
   // opens a short window in which the content growing is followed; anything else the reader does is not.
   const follow = useRef(true);
@@ -232,6 +235,9 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           placeholder={replyPlaceholder(m.arming)}
           {...(m.plan === null && m.thread === null ? { disabled: "This conversation cannot be continued." } : {})}
           usage={{ context: m.lastContext, onCompact: m.onCompact, cost: m.thread?.costUsd }}
+          onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(m.project !== undefined ? { project: m.project } : {}) })}
+          saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
+          {...mentions}
         />
       </View>
     </View>

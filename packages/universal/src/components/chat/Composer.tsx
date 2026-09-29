@@ -1,37 +1,71 @@
-import { useState, type JSX, type ReactNode } from "react";
-import { Platform, TextInput, useWindowDimensions, type GestureResponderEvent } from "react-native";
+import { useRef, useState, type JSX, type ReactNode } from "react";
+import { Platform, TextInput, View as RNView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { contextFill, formatTokens, isSpent, toneOfContext, type ChatPlanView, type ChatSettings, type ContextReading } from "@jaira/shared/browser";
-import { brandHex, brandMark, brandOf } from "@jaira/ui/brands";
+import {
+  REASONING_EFFORTS,
+  contextFill,
+  declOfPermissionSet,
+  formatTokens,
+  isSpent,
+  parsePermissionSet,
+  permissionSetGlyph,
+  permissionSetHint,
+  permissionSetLabel,
+  toneOfContext,
+  type ChatPlanView,
+  type ChatSettings,
+  type ContextReading,
+  type PermissionSet,
+  type ReasoningEffort,
+  type SavePermissionSetRequest,
+  type WritableLayer,
+} from "@jaira/shared/browser";
+import { fileFromText, mentionAt, permissionsHintOf, withFiles, withMention, type ComposerFile } from "@jaira/ui/composerCards";
 import { useKeptDraft } from "@jaira/ui/composerDrafts";
 import { canSendOf, chipValuesOf, composerFactsOf, routeOf, sendTitleOf } from "@jaira/ui/composerModel";
+import type { Parked } from "@jaira/ui/composerPermissionSet";
+import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
-import { useModelParameters } from "@jaira/ui/modelParameters";
-import { figureOf, type UsageFigure } from "@jaira/ui/usageFigure";
-import { Uncopied } from "../../app/Uncopied";
+import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
+import { modeMeta } from "@jaira/ui/permissionSetWords";
+import { figureOf } from "@jaira/ui/usageFigure";
 import { Press, Txt, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
+import { Float } from "../floats/Float";
 import { Icon, type IconName } from "../panel/Icon";
 import { Svg } from "../panel/Svg";
 import { INK, Ring } from "../usage/Ring";
+import { BrandMark, BucketPicker, CardHint, ChipCard, KeepPermissionSet, Opt, Opts, RouteCascade, ThinkingBody } from "./ComposerCards";
+import { ToolsBody } from "./ComposerTools";
 import { Pulse } from "./Paper";
+import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
 
 /**
  * `composer.tsx`'s `Composer`, universal (decision 0015): the box a message is typed into, what it will
  * run as, and the button that sends it. What the chips say and whether Enter sends are
- * `composerModel.ts`'s; the account's figure is `usageFigure.ts`'s (the desktop's own code). Typing is
- * a native `TextInput`; Enter sends on a keyboard (Shift+Enter breaks the line), the button everywhere.
+ * `composerModel.ts`'s; what the cards compute is `composerCards.ts`' and every edit of the map
+ * `composerPermissionSet.ts`'s; the account's figure is `usageFigure.ts`'s (the desktop's own code).
+ * Typing is a native `TextInput`; Enter sends on a keyboard (Shift+Enter breaks the line), the button
+ * everywhere. Each chip opens its card (`ComposerCards.tsx`, `ComposerTools.tsx`), the figure the
+ * account's and the ring the context's (`UsageCards.tsx`); `@` completes a project path over the box;
+ * the clip attaches files (web — a phone has no picker here yet).
  *
  *   .cx               padding 10 16 14, --bg
  *   .cx-frame         900 at most, centred, padding 1, radius 22, --line (focused: --accent 55% into
- *                     --line) — a ring rather than a border
+ *                     --line; a file over it: --accent) — a ring rather than a border
  *   .cx-shell         column, radius 21, --panel (.cx.off: --panel-2)
+ *   .cx-files         row, wrapping, gap 6, padding 9 12 0; a file a pill: padding 2 4 2 7, 1px --line,
+ *                     --panel-2, at most 260, app 11.5/12.5; the clip 12 --dim; × --dim (hovered --text)
  *   .cx-text          app 13.5/12.5, line 1.55, padding 13 15 6, --text, at least 54 tall, at most
  *                     40% of the window, growing with what is typed; the placeholder --tok-hint
+ *   .cx-mentions      over the box, its width, 4 apart: column, at most 240, padding 4, 1px --line,
+ *                     radius 10, --panel, 0 8 24 rgb(0 0 0 / 18%); a path padding 4 8, radius 6, app
+ *                     12/12.5 (hovered --panel-2)
  *   .cx-foot          row, centred, gap 5, padding 5 7 7 8
  *   .cx-chip          pill, padding 3 9, 1px transparent, gap 5, at most 210, app 11.5/12.5, --dim;
- *                     hovered --fill-ghost-hover and --text; .own --accent; the icon 13, --tok-hint
+ *                     hovered --fill-ghost-hover and --text; open --fill-ghost-selected, a --line edge,
+ *                     --text; .own --accent; the icon 13, --tok-hint (.own --accent)
  *   .um-num           the account's figure: data 500 11/12, line 1, padding 2 5, radius 6, 2 in on
  *                     the left; its tone's colour (--dim for the accent tone)
  *   .um-meter         the context ring: 26 tall, padding 0 5, radius 13, gap 6; the ring 16
@@ -39,16 +73,13 @@ import { Pulse } from "./Paper";
  *   .cx-clip          26 round, the paperclip 15, --dim; hovered --panel-2 and --text
  *   .cx-send          30 round, --accent, the arrow 16 in --panel; disabled --panel-2, --tok-hint, at
  *                     half opacity; .cx-stop --bad, a 10 square (radius 2) of --panel
- *
- * {@link Uncopied}: the cards each chip opens (the route cascade, the levels, the permission sets, the
- * tools), the account's and the context's cards, `@` completion, attaching files, and the spent line.
  */
 export function Composer({
   plan,
   busy,
   joinable,
-  overrides: _overrides,
-  onOverrides: _onOverrides,
+  overrides,
+  onOverrides,
   onSend,
   onStop,
   disabled,
@@ -57,6 +88,10 @@ export function Composer({
   onValue,
   draftKey,
   usage,
+  mentions,
+  readMention,
+  onSavePermissionSet,
+  saveLayers,
 }: {
   plan: ChatPlanView | null;
   busy?: boolean;
@@ -71,6 +106,14 @@ export function Composer({
   onValue?: (next: string) => void;
   draftKey?: string | undefined;
   usage?: { context: ContextReading | null | undefined; onCompact?: ((focus?: string) => void) | undefined; cost?: number | undefined } | undefined;
+  /** Project paths matching a query — what `@` completes against. Absent ⇒ `@` is an ordinary character. */
+  mentions?: ((query: string) => Promise<string[]>) | undefined;
+  /** One mentioned file's text, for inlining. Absent ⇒ a mention stays a path. */
+  readMention?: ((path: string) => Promise<string>) | undefined;
+  /** Keep the map on the cards as a new permission set — the Permissions card's `+`. Absent ⇒ `+` stays dim. */
+  onSavePermissionSet?: ((request: Omit<SavePermissionSetRequest, "project">) => Promise<unknown>) | undefined;
+  /** Where `+` may write. */
+  saveLayers?: readonly WritableLayer[] | undefined;
 }): JSX.Element {
   const t = useTokens();
   const win = useWindowDimensions();
@@ -79,8 +122,17 @@ export function Composer({
   const setDraft = (next: string): void => (onValue !== undefined ? onValue(next) : setOwn(next));
   const [focused, setFocused] = useState(false);
   const [height, setHeight] = useState(54);
-  const facts = composerFactsOf(plan, undefined);
-  const { origin, effective, route, permissionsOrigin, toolsOrigin } = facts;
+  /** What is going with the message: dropped files, and mentioned ones — part of the draft. */
+  const [files, setFiles] = useState<ComposerFile[]>([]);
+  /** The `@` completion: what is being typed after it, where it started, and what matched. */
+  const [mention, setMention] = useState<{ at: number; query: string; paths: string[] } | null>(null);
+  const [caret, setCaret] = useState(0);
+  /** Which bucket the Permissions rows are, once the person has picked one. Else the plan's. */
+  const [picked, setPicked] = useState<string | undefined>(undefined);
+  /** What an unticked tool would run under if ticked again. Never sent. */
+  const [parked, setParked] = useState<Parked>({});
+  const facts = composerFactsOf(plan, picked);
+  const { settings, origin, offered, map, tools, buckets, bucket, rows, matched, effective, route, current, cliRoute, permissionsOrigin, toolsOrigin } = facts;
   const thinking = useModelParameters(effective.model);
   const chips = chipValuesOf(plan, facts, thinking);
   const limits = useLimits();
@@ -89,16 +141,77 @@ export function Composer({
   const spent = account !== undefined && isSpent(account.reading, now);
   const canSend = canSendOf(disabled, busy, joinable);
   const off = disabled !== undefined;
-  /** A card a chip would open — not copied: a note where it would stand. */
-  const [card, setCard] = useState<{ name: string; x: number; y: number } | null>(null);
-  const openCard = (name: string) => (e: GestureResponderEvent) => setCard({ name, x: e.nativeEvent.pageX, y: e.nativeEvent.pageY });
+  /** The card open, and the box it was opened from. */
+  const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Permissions" | "Tools" | "account" | "context"; at: FloatRect } | null>(null);
+  const shell = useRef<RNView | null>(null);
+  const [shellAt, setShellAt] = useState<FloatRect | null>(null);
 
   const send = (): void => {
-    const message = draft.trim();
+    const message = withFiles(draft.trim(), files);
     if (message === "" || !canSend) return;
     onSend(message);
     setDraft("");
+    setFiles([]);
+    setMention(null);
   };
+
+  /** Watch the box for an `@`, and offer paths under the caret (`mentionAt`). */
+  const track = (text: string, at: number): void => {
+    if (mentions === undefined) return;
+    const found = mentionAt(text, at);
+    if (found === null) {
+      setMention(null);
+      return;
+    }
+    shell.current?.measureInWindow((x, y, w, h) => setShellAt({ left: x, top: y, right: x + w, bottom: y + h }));
+    setMention({ at: found.at, query: found.query, paths: [] });
+    void mentions(found.query).then((paths) => setMention((was) => (was !== null && was.at === found.at && was.query === found.query ? { ...was, paths } : was)));
+  };
+  /** Put a path in the box where the `@` was, and attach the file it names. */
+  const pick = (path: string): void => {
+    if (mention === null) return;
+    setDraft(withMention(draft, mention, path));
+    setMention(null);
+    if (readMention === undefined) return;
+    void readMention(path).then(
+      (text) => setFiles((was) => (was.some((f) => f.name === path) ? was : [...was, { name: path, text }])),
+      (e: unknown) => setFiles((was) => [...was, { name: path, note: e instanceof Error ? e.message : "could not be read" }]),
+    );
+  };
+  /** Take files in, from the picker (web: the File API reads them in the renderer, as the desktop's does). */
+  const attach = (): void => {
+    if (!isWeb || typeof document === "undefined") return;
+    const input = document.createElement("input");
+    input.type = "file";
+    input.multiple = true;
+    input.onchange = () => {
+      const list = [...(input.files ?? [])];
+      void Promise.all(list.map(async (file) => fileFromText(file.name, file.size, file.type, file.size > 200_000 ? undefined : await file.text()))).then((taken) => setFiles((was) => [...was, ...taken]));
+    };
+    input.click();
+  };
+
+  const set = (patch: ChatSettings): void => onOverrides({ ...overrides, ...patch });
+  const clear = (key: keyof ChatSettings): void => {
+    const next = { ...overrides };
+    delete next[key];
+    onOverrides(next);
+  };
+  /** Send the WHOLE map: a permission set is one statement. */
+  const write = (next: PermissionSet, nextParked: Parked = parked): void => {
+    setParked(nextParked);
+    set({ permissionSet: declOfPermissionSet(next) });
+  };
+  /** Both cards reset together, because they are one setting. */
+  const resetPermissionSet = (): void => {
+    const next = { ...overrides };
+    delete next.permissionSet;
+    setParked({});
+    setPicked(undefined);
+    onOverrides(next);
+  };
+  const close = (): void => setCard(null);
+  const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
 
   return (
     <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never}>
@@ -110,23 +223,61 @@ export function Composer({
         borderRadius={22}
         backgroundColor={(focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
+        <RNView ref={shell} collapsable={false}>
         <View flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
-          {!off && spent ? <Uncopied name="the spent line" /> : null}
+          {!off ? <SpentLine route={route} /> : null}
+          {files.length > 0 ? (
+            <View flexDirection="row" flexWrap="wrap" gap={6} paddingTop={9} paddingHorizontal={12}>
+              {files.map((file, i) => (
+                <View key={`${file.name}:${i}`} flexDirection="row" alignItems="center" gap={5} maxWidth={260} paddingTop={2} paddingRight={4} paddingBottom={2} paddingLeft={7} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={999} backgroundColor={t.v("panel-2") as never} {...({ title: file.note ?? `${(file.text ?? "").length} characters` } as object)}>
+                  <Icon name="clip" size={12} color={String(t.v("dim"))} />
+                  <Txt spec={{ voice: "app", scale: 11.5 / 12.5 }} ellip minWidth={0} flexShrink={1}>
+                    {file.name}
+                  </Txt>
+                  {file.note !== undefined ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{file.note}</Txt> : null}
+                  <Press onPress={() => setFiles(files.filter((_, at) => at !== i))} label={`Remove ${file.name}`} paddingHorizontal={4} flexShrink={0}>
+                    {({ hovered }) => <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: hovered ? "text" : "dim" }}>×</Txt>}
+                  </Press>
+                </View>
+              ))}
+            </View>
+          ) : null}
           <TextInput
             multiline
             value={draft}
             editable={!off}
             placeholder={disabled ?? placeholder ?? "Ask for more changes…"}
             placeholderTextColor={String(t.v("tok-hint"))}
-            onChangeText={setDraft}
+            onChangeText={(next) => {
+              setDraft(next);
+              track(next, caret + (next.length - draft.length));
+            }}
+            onSelectionChange={(e) => {
+              const at = e.nativeEvent.selection.end;
+              setCaret(at);
+            }}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             onContentSizeChange={(e) => setHeight(e.nativeEvent.contentSize.height)}
             // Enter sends and Shift+Enter breaks the line, as every chat client does — on a keyboard. A
-            // phone's return key is a newline, and the button sends.
+            // phone's return key is a newline, and the button sends. While the `@` list is open, Enter
+            // takes its first path and Escape closes it.
             onKeyPress={(e) => {
               const key = e.nativeEvent as unknown as { key: string; shiftKey?: boolean };
-              if (key.key === "Enter" && key.shiftKey !== true && Platform.OS === "web") {
+              if (Platform.OS !== "web") return;
+              if (mention !== null && mention.paths.length > 0) {
+                if (key.key === "Escape") {
+                  (e as unknown as { preventDefault: () => void }).preventDefault();
+                  setMention(null);
+                  return;
+                }
+                if (key.key === "Enter" && key.shiftKey !== true) {
+                  (e as unknown as { preventDefault: () => void }).preventDefault();
+                  pick(mention.paths[0]!);
+                  return;
+                }
+              }
+              if (key.key === "Enter" && key.shiftKey !== true) {
                 (e as unknown as { preventDefault: () => void }).preventDefault();
                 send();
               }
@@ -146,11 +297,11 @@ export function Composer({
             } as never}
           />
           <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0}>
-            <Chip t={t} lead={<BrandMark t={t} name={routeOf(effective.model ?? "")} />} label="Model" value={chips.model} own={origin.model === "override"} onPress={openCard("the Model card")} />
-            <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} onPress={openCard("the account card")} />
-            <Chip t={t} icon="think" label="Thinking" value={chips.thinking} own={origin.reasoning === "override"} onPress={openCard("the Thinking card")} />
-            <Chip t={t} icon="shield" label="Permissions" value={chips.permissions} own={permissionsOrigin === "override"} onPress={openCard("the Permissions card")} />
-            <Chip t={t} icon="tool" label="Tools" value={chips.tools} own={toolsOrigin === "override"} onPress={openCard("the Tools card")} />
+            <Chip t={t} lead={<BrandMark t={t} name={routeOf(effective.model ?? "")} ink={origin.model === "override" ? "accent" : "tok-hint"} />} label="Model" value={chips.model} own={origin.model === "override"} open={card?.which === "Model"} onOpen={opener("Model")} />
+            <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} />
+            <Chip t={t} icon="think" label="Thinking" value={chips.thinking} own={origin.reasoning === "override"} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
+            <Chip t={t} icon="shield" label="Permissions" value={chips.permissions} own={permissionsOrigin === "override"} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
+            <Chip t={t} icon="tool" label="Tools" value={chips.tools} own={toolsOrigin === "override"} open={card?.which === "Tools"} onOpen={opener("Tools")} />
             {plan !== null && plan.unresolved.length > 0 ? (
               <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} ellip minWidth={0} paddingLeft={4}>
                 {plan.unresolved.map((u) => u.field).join(", ")} {plan.unresolved.length === 1 ? "is" : "are"} an expression here
@@ -165,9 +316,10 @@ export function Composer({
                 </Txt>
               </View>
             ) : null}
-            {usage !== undefined ? <ContextMeter t={t} context={usage.context} route={route} onPress={openCard("the context card")} /> : null}
+            {usage !== undefined ? <ContextMeter t={t} context={usage.context} route={route} open={card?.which === "context"} onOpen={opener("context")} /> : null}
             <Press
-              onPress={openCard("attaching files")}
+              onPress={attach}
+              disabled={off}
               title="Attach files"
               label="Attach files"
               width={26}
@@ -186,29 +338,99 @@ export function Composer({
               </Press>
             ) : null}
             {busy === true && onStop !== undefined && !canSend ? null : (
-              <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy)} disabled={draft.trim() === "" || !canSend} onPress={send} />
+              <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy)} disabled={(draft.trim() === "" && files.length === 0) || !canSend} onPress={send} />
             )}
           </View>
         </View>
+        </RNView>
       </View>
-      {card !== null ? (
-        <MenuLayer onClose={() => setCard(null)}>
-          <View position="absolute" left={Math.max(4, card.x - 120)} top={Math.max(4, card.y - 80)} width={240} backgroundColor={t.v("panel") as never}>
-            <Uncopied name={card.name} height={60} />
-          </View>
+      {mention !== null && mention.paths.length > 0 && shellAt !== null ? (
+        <MenuLayer onClose={() => setMention(null)}>
+          <Float anchor={shellAt} side="above" align="start" offset={4} width={shellAt.right - shellAt.left} maxHeight={240} padding={4} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={10} backgroundColor={t.v("panel") as never} {...({ boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.18)", overflowY: "auto" } as object)}>
+            {mention.paths.slice(0, 8).map((path) => (
+              <Press key={path} onPress={() => pick(path)} paddingVertical={4} paddingHorizontal={8} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : "transparent" })}>
+                <Txt spec={{ voice: "app", scale: 12 / 12.5 }} ellip>
+                  {path}
+                </Txt>
+              </Press>
+            ))}
+          </Float>
         </MenuLayer>
       ) : null}
+      {card?.which === "Model" ? (
+        <ChipCard anchor={card.at} label="Model" origin={origin.model} from={plan?.from} onReset={() => clear("model")} onClose={close}>
+          <RouteCascade routes={plan?.available.routes ?? []} models={plan?.available.models ?? []} current={current} onPick={(model) => set({ model })} />
+        </ChipCard>
+      ) : null}
+      {card?.which === "Thinking" ? (
+        <ChipCard anchor={card.at} label="Thinking" origin={origin.reasoning} from={plan?.from} onReset={() => clear("reasoning")} onClose={close}>
+          <ThinkingBody
+            takes={thinking?.reasoning !== false}
+            levels={thinking?.levels ?? REASONING_EFFORTS.map((level) => ({ level, description: undefined }))}
+            effort={settings.reasoning?.effort}
+            defaultLevel={thinking?.defaultLevel}
+            footer={levelsFooter(thinking)}
+            onPick={(level) => set({ reasoning: { effort: level as ReasoningEffort } })}
+          />
+        </ChipCard>
+      ) : null}
+      {card?.which === "Permissions" ? (
+        <ChipCard
+          anchor={card.at}
+          label="Permissions"
+          origin={permissionsOrigin}
+          from={plan?.from}
+          onReset={resetPermissionSet}
+          onClose={close}
+          lead={<BucketPicker buckets={buckets} bucket={bucket} onPick={setPicked} />}
+          trail={
+            <KeepPermissionSet
+              bucket={bucket}
+              ready={onSavePermissionSet !== undefined && matched === undefined && Object.keys(map.entries).length > 0}
+              layers={saveLayers ?? ["project", "base"]}
+              onKeep={async (name, layer) => {
+                await onSavePermissionSet?.({ bucket, name, layer, permissionSet: declOfPermissionSet(map) });
+                onOverrides({ ...overrides });
+              }}
+            />
+          }
+        >
+          <Opts>
+            {rows.map((choice) => {
+              const permissionSet = parsePermissionSet(choice.decl).permissionSet;
+              return <Opt key={choice.id} on={matched?.id === choice.id} icon={modeMeta(permissionSetGlyph(choice)).icon as IconName} name={permissionSetLabel(choice)} hint={permissionSetHint(choice)} onPick={() => write(permissionSet, {})} />;
+            })}
+          </Opts>
+          <CardHint>{permissionsHintOf(rows.length, matched !== undefined, tools.length, bucket)}</CardHint>
+        </ChipCard>
+      ) : null}
+      {card?.which === "Tools" ? (
+        <ChipCard anchor={card.at} label="Tools" origin={toolsOrigin} from={plan?.from} onReset={resetPermissionSet} onClose={close}>
+          <ToolsBody offered={offered} map={map} parked={parked} cliRoute={cliRoute} write={write} setParked={setParked} />
+        </ChipCard>
+      ) : null}
+      {card?.which === "account" && account !== undefined ? <AccountCard anchor={card.at} account={account} cost={usage?.cost} others={limits.accounts.filter((a) => a.key !== account.key)} onClose={close} /> : null}
+      {card?.which === "context" && usage !== undefined ? <ContextCard anchor={card.at} context={usage.context} route={route} busy={busy} onCompact={usage.onCompact} onClose={close} /> : null}
     </View>
   );
 }
 
-/** `.cx-chip`: one question, its icon and its answer. */
-function Chip({ t, icon, lead, label, value, own, onPress }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; own: boolean; onPress: (e: GestureResponderEvent) => void }): JSX.Element {
+/** Measure a chip's box in the window and hand it to what opens from it. */
+function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNView | null>, () => void] {
+  const ref = useRef<RNView | null>(null);
+  return [ref, () => ref.current?.measureInWindow((x, y, w, h) => onOpen({ left: x, top: y, right: x + w, bottom: y + h }))];
+}
+
+/** `.cx-chip`: one question, its icon and its answer; open, its card's ground and edge. */
+function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
+  const [ref, press] = useOpener(onOpen);
   return (
+    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210 }}>
     <Press
-      onPress={onPress}
+      onPress={press}
       title={`${label}: ${value}`}
       label={label}
+      {...({ "aria-expanded": open } as object)}
       minWidth={0}
       flexShrink={1}
       maxWidth={210}
@@ -220,41 +442,27 @@ function Chip({ t, icon, lead, label, value, own, onPress }: { t: Tokens; icon?:
       borderRadius={999}
       borderWidth={1}
       borderStyle="solid"
-      borderColor="transparent"
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+      box={({ hovered }) => ({ backgroundColor: open ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: open ? t.v("line") : "transparent" })}
     >
       {({ hovered }) => (
         <>
           {lead ?? (icon !== undefined ? <Icon name={icon} size={13} color={String(t.v(own ? "accent" : "tok-hint"))} /> : null)}
-          <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: own ? "accent" : hovered ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
+          <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: own ? "accent" : hovered || open ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
             {value}
           </Txt>
         </>
       )}
     </Press>
+    </RNView>
   );
 }
 
-/** `BrandIcon`: the company's mark (its path, in its colour or the chip's), or its initial on its colour. */
-export function BrandMark({ t, name }: { t: Tokens; name: string }): JSX.Element {
-  const company = brandOf(name);
-  const mark = brandMark(company);
-  const ink = String(t.v("tok-hint"));
-  if (mark !== undefined) {
-    return <Svg width={13} height={13} color={ink} fill={mark.onGround === true ? "currentColor" : mark.hex} strokeWidth={0} shapes={[{ kind: "path", d: mark.path }]} />;
-  }
-  const hex = brandHex(company);
-  return (
-    <View width={13} height={13} borderRadius={3} alignItems="center" justifyContent="center" backgroundColor={(hex ?? t.mix(ink, 18, "transparent")) as never}>
-      <Txt spec={{ voice: "app", scale: 1, weight: 600, color: hex === undefined ? ink : "#fff", lineHeight: { px: 13 } }} fontSize={7}>
-        {company.charAt(0).toUpperCase()}
-      </Txt>
-    </View>
-  );
-}
+// `BrandMark` is `ComposerCards.tsx`'s (the chips and the model menu draw it); exported from here too.
+export { BrandMark };
 
 /** `AllowanceNumber`: the account's figure after the model chip — as a number, a ring, or both. */
-function Allowance({ t, route, model, cost, onPress }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; onPress: (e: GestureResponderEvent) => void }): JSX.Element | null {
+function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element | null {
+  const [ref, press] = useOpener(onOpen);
   const limits = useLimits();
   const mode = useUsageFigures();
   const now = useNow();
@@ -265,32 +473,35 @@ function Allowance({ t, route, model, cost, onPress }: { t: Tokens; route: strin
   const ink = figure.tone === "accent" ? "dim" : INK[figure.tone];
   const face = { voice: "data" as const, scale: 11 / 12, weight: 500, color: ink, tabular: true, lineHeight: 1 };
   // `.um-numwrap` is a block whose line (the body's 13/12.5 at 1.5) holds the button as an inline box on
-  // its baseline — 19.5 tall, the button 3 below its top — and it is the WRAP the row centres.
+  // its baseline — 19.5 tall, the button 2.67 below its top (measured) — and it is the WRAP the row centres.
   const line = Number(t.scaled("size-app", (13 / 12.5) * 1.5));
   return (
     <View flexShrink={0} marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})}>
+    <RNView ref={ref} collapsable={false} style={{ marginTop: 2.67 }}>
     <Press
-      onPress={onPress}
+      onPress={press}
       title={figure.title}
       flexShrink={0}
-      marginTop={3}
+      
       flexDirection="row"
       alignItems="center"
       gap={5}
       paddingVertical={2}
       paddingHorizontal={5}
       borderRadius={6}
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+      box={({ hovered }) => ({ backgroundColor: hovered || open ? t.v("fill-ghost-hover") : "transparent" })}
     >
       {mode !== "number" ? <Ring t={t} pct={figure.pct} tone={figure.tone} size={16} /> : null}
       {mode !== "ring" ? <Txt spec={face}>{figure.text}</Txt> : null}
     </Press>
+    </RNView>
     </View>
   );
 }
 
 /** `ContextMeter`: how full the conversation is — the ring, and its number from 80%. */
-function ContextMeter({ t, context, route, onPress }: { t: Tokens; context: ContextReading | null | undefined; route: string | undefined; onPress: (e: GestureResponderEvent) => void }): JSX.Element {
+function ContextMeter({ t, context, route, open, onOpen }: { t: Tokens; context: ContextReading | null | undefined; route: string | undefined; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
+  const [ref, press] = useOpener(onOpen);
   const fill = context ? contextFill(context, route) : null;
   const tone = context ? toneOfContext(fill) : "none";
   const text = context === null || context === undefined ? null : fill === null ? formatTokens(context.used, true) : fill >= 80 ? `${Math.round(fill)}%` : null;
@@ -304,8 +515,9 @@ function ContextMeter({ t, context, route, onPress }: { t: Tokens; context: Cont
   // descent under it: 26.5 tall, the button at its top — and it is the wrap the row centres.
   return (
     <View flexShrink={0} height={26.5}>
+    <RNView ref={ref} collapsable={false}>
     <Press
-      onPress={onPress}
+      onPress={press}
       title={title}
       flexShrink={0}
       height={26}
@@ -314,11 +526,12 @@ function ContextMeter({ t, context, route, onPress }: { t: Tokens; context: Cont
       gap={6}
       paddingHorizontal={5}
       borderRadius={13}
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+      box={({ hovered }) => ({ backgroundColor: open ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
     >
       <Ring t={t} pct={fill} tone={tone} size={16} />
       {text !== null ? <Txt spec={{ voice: "data", scale: 10.5 / 12, weight: 500, color: INK[tone], tabular: true, lineHeight: 1 }}>{text}</Txt> : null}
     </Press>
+    </RNView>
     </View>
   );
 }

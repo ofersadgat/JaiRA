@@ -8,9 +8,8 @@ import { invoke } from "@jaira/ui/store";
 import { AnsweredForYou } from "./WorkRows";
 import { PendingSend } from "./PendingSend";
 import { paletteOfRun } from "@jaira/ui/rail";
-import { bandsOf, instancesOf, mountPathOf, notesOf, pathFrom, piecesOf, recordAt, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "@jaira/ui/sessionBands";
 import { sessionKey } from "@jaira/ui/sessionCache";
-import { keyOfPiece, metaOf, pageRowsOf, spanOf, summaryOf } from "@jaira/ui/sessionRows";
 import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurface";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
 import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurface";
@@ -18,10 +17,9 @@ import type { CallSurface } from "@jaira/ui/transcriptRows";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
-import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, signatureOf } from "@jaira/ui/transcript";
-import { Press, Txt, edge, scrollbarProps } from "../../primitives";
-import { useLook, useTokens, type Look } from "../../tokens";
-import { Uncopied } from "../../app/Uncopied";
+import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf } from "@jaira/ui/transcript";
+import { Txt, edge, scrollbarProps } from "../../primitives";
+import { useLook, useTokens } from "../../tokens";
 import { GateSurface } from "./Gate";
 import { Icon } from "./Icon";
 import { SessionBands, baselineOf, collapsed, sheetLookOf } from "./SessionBands";
@@ -55,12 +53,11 @@ export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessio
  * them, and the rail beside it all. The page's rows are `pageRowsOf` (`sessionRows.ts`), the same as the
  * DOM's; the pieces, notes and palette are `sessionBands.ts`' and `rail.ts`'s.
  *
- * Copied: a band of one session, its gutter and sheet, a state's letterhead, an entered note, a state
- * that called a function (`SilentState`), and the transcript (`Transcript.tsx`). {@link Uncopied}: a
- * band of several sessions (columns or tabs), a fork mark, the torn edges of a paused or resumed
- * session, a settled gate, a parked transition (`WaitingOn`), a made/asked/moved note, an armed cut,
- * the origin seam, and the rewind and fork buttons (drawn as the room they take, invisible as the
- * DOM's are until a pointer arrives).
+ * The page is `SessionBands.tsx` (bands of one session or several, torn edges, fork marks, the notes —
+ * entered, blocked, made, asked, moved — the origin seam and an armed cut); what a piece says is here:
+ * the transcript (`SessionTranscript.tsx`), a state that called a function (`SilentState`), a gate asked
+ * or settled (and one answered offline), the running agent's approval or question, and a parked
+ * transition (`WaitingOn`).
  *
  *   .run-convo      flex 1, scrolls, follows the live edge
  *   .sb             column, at least the scroller's height, --bg, padding 14 16 22
@@ -130,12 +127,12 @@ export function RunTranscript({
         const outboxId = gate.queued.outboxId;
         return (
           <>
-            <GateSurface pending={gate} onSubmit={() => undefined} settled={{ value: gate.queued.value }} />
+            <GateSurface pending={gate} onSubmit={() => undefined} settled={{ value: gate.queued.value }} plain />
             <PendingSend machine={gate.offline.machine} onTakeBack={() => void invoke("machines:withdraw", { id: outboxId }).catch(() => undefined)} />
           </>
         );
       }
-      return <GateSurface pending={gate} onSubmit={onGate} />;
+      return <GateSurface pending={gate} onSubmit={onGate} plain />;
     }
     // The question once it is no longer being asked: the same control, as it was answered.
     const settledCall = settledGateCallOf(piece.node, records, gate !== undefined && isAsking(piece.node));
@@ -338,23 +335,21 @@ function SettledGate({ call, node, taskId, project }: { call: ReadCall; node: In
   const answered = call.error === undefined && call.result !== undefined;
   return (
     <>
-      <GateSurface key={answered ? "answered" : "open"} pending={pending} onSubmit={() => undefined} settled={answered ? { value: call.result } : { value: undefined }} />
+      <GateSurface key={answered ? "answered" : "open"} pending={pending} onSubmit={() => undefined} settled={answered ? { value: call.result } : { value: undefined }} plain />
       {answered && node.settledBy !== undefined ? (
         <AnsweredForYou
           by={node.settledBy}
           onAnswerYourself={() => void invoke("task:answerYourself", { taskId, at: node.settledBy!.at, ...(project !== undefined && project !== "" ? { project } : {}) }).catch(() => undefined)}
         />
       ) : null}
-      <View marginTop={12} alignItems="flex-start">
-        <Button kind="quiet" onPress={() => setRecord((v) => !v)}>
-          {record ? "Hide the record" : "Show the record"}
-        </Button>
-      </View>
-      {record ? (
-        <View marginTop={6} minWidth={0}>
-          <CallBlock call={call} />
+      <View marginTop={12} minWidth={0}>
+        <View alignItems="flex-start" marginBottom={6}>
+          <Button kind="quiet" onPress={() => setRecord((v) => !v)}>
+            {record ? "Hide the record" : "Show the record"}
+          </Button>
         </View>
-      ) : null}
+        {record ? <CallBlock call={call} /> : null}
+      </View>
     </>
   );
 }

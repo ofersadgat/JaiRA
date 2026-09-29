@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { MachineChipState } from "@jaira/ui/machineChip";
+import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
@@ -30,6 +31,8 @@ export function MachineChip({
   const t = useTokens();
   const size = t.scaled("size-app", 10 / 12.5);
   const ink = state === "off" || state === "none" ? t.v("dim") : t.v("text");
+  // On a phone the stack is no family: the cut face of whichever voice it is (`faceOf`).
+  const face = isWeb ? { fontFamily: voice } : faceOf(t, voice === String(t.v("font-data")) ? "data" : "app", 400, size);
   const dot =
     state === "on"
       ? { backgroundColor: t.v("ok") }
@@ -54,7 +57,7 @@ export function MachineChip({
     >
       <View width={6} height={6} borderRadius={3} flexShrink={0} {...(dot as object)} />
       <Text
-        {...({ fontFamily: voice, fontSize: size, lineHeight: isWeb ? "1.5" : Number(size) * 1.5 } as object)}
+        {...({ ...face, fontSize: size, lineHeight: isWeb ? "1.5" : Number(size) * 1.5 } as object)}
         {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}
         color={ink as never}
       >

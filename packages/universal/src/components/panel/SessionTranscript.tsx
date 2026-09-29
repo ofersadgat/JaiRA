@@ -59,6 +59,7 @@ export function Transcript({
   live,
   working,
   calls,
+  padding = [12, 16, 22, 16],
 }: {
   session: SessionView | null;
   entries: TranscriptEntry[];
@@ -80,6 +81,8 @@ export function Transcript({
   working?: boolean | undefined;
   /** Placement decisions for the call rows (`CallSurface`). */
   calls?: CallSurface | undefined;
+  /** `.ts`'s padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
+  padding?: readonly [number, number, number, number];
 }): JSX.Element {
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
   if (shown.length === 0) return <Empty>{empty ?? session?.empty ?? "Nothing has been said here yet."}</Empty>;
@@ -95,7 +98,7 @@ export function Transcript({
   let lastContext: ContextReading | undefined;
   let compactedSince = false;
   return (
-    <View flexDirection="column" width="100%" paddingTop={12} paddingHorizontal={16} paddingBottom={22} minWidth={0}>
+    <View flexDirection="column" width="100%" paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={padding[3]} minWidth={0}>
       {blocks.map((block, i) => {
         // Once a doomed message has gone by, everything under it goes too.
         const crossed = !doomed && doomedFrom !== undefined && block.kind === "message" && block.turn !== undefined && block.turn >= doomedFrom;

@@ -1,4 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { Pressable } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
@@ -120,10 +121,12 @@ function useHoverCard(linger = 160): {
   const anchor = useRef<unknown>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   const measure = (): void => {
-    const el = anchor.current as { getBoundingClientRect?: () => DOMRect } | null;
+    const el = anchor.current as { getBoundingClientRect?: () => DOMRect; measureInWindow?: (then: (x: number, y: number, w: number, h: number) => void) => void } | null;
     if (el !== null && typeof el.getBoundingClientRect === "function") {
       const r = el.getBoundingClientRect();
       setRect({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
+    } else if (el !== null && typeof el.measureInWindow === "function") {
+      el.measureInWindow((x, y, w, h) => setRect({ left: x, top: y, right: x + w, bottom: y + h }));
     }
   };
   const stay = (): void => {
@@ -187,6 +190,16 @@ function Card({ hover, label, count, children }: { hover: HoverCard; label: stri
   return isWeb ? <HoverLayer>{card}</HoverLayer> : <MenuLayer onClose={hover.close}>{card}</MenuLayer>;
 }
 
+/** On a phone a hover card opens on a press: what is pointed at on web is tapped there. */
+function Tap({ hover, style, children }: { hover: HoverCard; style?: Record<string, unknown>; children: ReactNode }): JSX.Element {
+  if (isWeb) return <>{children}</>;
+  return (
+    <Pressable onPress={hover.press} style={style as never}>
+      {children}
+    </Pressable>
+  );
+}
+
 /** A row in a list of rows: a call a tool made sits under the call that made it (`.ts-called`). */
 export function Nested({ entry, children }: { entry: WorkEntry | undefined; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -241,6 +254,7 @@ function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
   const on = hover.open || hovered;
   return (
     <>
+      <Tap hover={hover} style={{ flexShrink: 0 }}>
       <View
         ref={hover.anchor as never}
         testID="ws-chip"
@@ -265,7 +279,7 @@ function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
                 (hover.bind.onMouseLeave as () => void)();
               },
             }
-          : { onPress: hover.press })}
+          : {})}
       >
         {chip.live ? <Pulse color="accent" /> : <Icon name={chip.icon as IconName} size={12} color={hue} />}
         <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: 500, color: "text", lineHeight: 1 }} numberOfLines={1}>
@@ -277,6 +291,7 @@ function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
           </Txt>
         ) : null}
       </View>
+      </Tap>
       <Card hover={hover} label={chip.label} count={lines(chip.indices.length)}>
         <RowsList indices={chip.indices} rowOf={rowOf} />
       </Card>
@@ -303,6 +318,7 @@ function ThoughtLine({ entries, indices }: { entries: readonly WorkEntry[]; indi
   if (line === undefined) return <View flexGrow={1} flexShrink={1} flexBasis={0} />;
   return (
     <>
+      <Tap hover={hover} style={{ flexGrow: 1, flexShrink: 1, flexBasis: 0, minWidth: 0 }}>
       <View
         ref={hover.anchor as never}
         flexGrow={1}
@@ -316,13 +332,14 @@ function ThoughtLine({ entries, indices }: { entries: readonly WorkEntry[]; indi
         paddingHorizontal={3}
         borderRadius={4}
         backgroundColor={(hover.open ? t.v("fill-ghost-hover") : "transparent") as never}
-        {...(isWeb ? hover.bind : { onPress: hover.press })}
+        {...(isWeb ? hover.bind : {})}
       >
         <Icon name="think" size={11} color={String(t.v("accent"))} />
         <Txt spec={{ voice: "app", scale: 11.5 / 12.5, italic: true, color: hover.open ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
           {line.first}
         </Txt>
       </View>
+      </Tap>
       <Card hover={hover} label="Thinking">
         <Txt spec={{ voice: "app", scale: 12.5 / 12.5, italic: true, color: "text", lineHeight: 1.55 }} whiteSpace="pre-wrap" paddingTop={4} paddingHorizontal={8} paddingBottom={6}>
           {line.full}
@@ -361,7 +378,8 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
           {running ? <Pulse color="dim" /> : <Icon name={kind as IconName} size={13} color={String(t.v(iconInk))} />}
         </View>
         <View flex={1} minWidth={0} flexDirection="row" alignItems="center" gap={6}>
-          <View ref={hover.anchor as never} flexGrow={0} flexShrink={1} minWidth={0} borderRadius={4} {...(isWeb ? hover.bind : { onPress: hover.press })}>
+          <Tap hover={hover} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0 }}>
+          <View ref={hover.anchor as never} flexGrow={0} flexShrink={1} minWidth={0} borderRadius={4} {...(isWeb ? hover.bind : {})}>
             <Txt spec={{ voice: "app", scale: 12 / 12.5, color: wait ? "warn" : "text" }} ellip>
               <SaidText said={said} />
               {doing !== undefined ? (
@@ -371,6 +389,7 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
               ) : null}
             </Txt>
           </View>
+          </Tap>
           {failedCount > 0 ? (
             <View flexShrink={0} paddingHorizontal={5} borderRadius={4} backgroundColor={t.mix(t.v("bad"), 12, "transparent") as never}>
               <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: "bad" }}>{`${failedCount} failed`}</Txt>
@@ -576,12 +595,14 @@ function PhaseName({ name, label, current, indices, rowOf }: Rows & { name: stri
   const hover = useHoverCard();
   return (
     <>
-      <View ref={hover.anchor as never} width={92} flexShrink={0} flexDirection="row" alignItems="center" gap={5} borderRadius={4} {...(isWeb ? hover.bind : { onPress: hover.press })}>
+      <Tap hover={hover} style={{ width: 92, flexShrink: 0 }}>
+      <View ref={hover.anchor as never} width={92} flexShrink={0} flexDirection="row" alignItems="center" gap={5} borderRadius={4} {...(isWeb ? hover.bind : {})}>
         {current ? <Pulse /> : null}
         <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: current ? "accent" : "text" }} numberOfLines={1}>
           {name}
         </Txt>
       </View>
+      </Tap>
       <Card hover={hover} label={label} count={lines(indices.length)}>
         <RowsList indices={indices} rowOf={rowOf} />
       </Card>

@@ -508,10 +508,8 @@ function WorkPreview({ look }: { look: WorkLook }): JSX.Element {
                   {state.note}
                 </Txt>
               </View>
-              {/* The transcript's own padding is 12 16 22; the preview's card holds it at 8 12 10. */}
-              <View marginTop={-4} marginHorizontal={-4} marginBottom={-12} minWidth={0}>
-                <Transcript session={null} entries={state.entries} working={state.working} />
-              </View>
+              {/* The preview's card holds the transcript at 8 12 10 (its own is 12 16 22). */}
+              <Transcript session={null} entries={state.entries} working={state.working} padding={[8, 12, 10, 12]} />
             </View>
           );
         })}

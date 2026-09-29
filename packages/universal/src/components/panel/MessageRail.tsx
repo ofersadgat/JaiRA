@@ -12,6 +12,7 @@ import { useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Icon, type IconName } from "./Icon";
 import { TurnContext } from "./TurnContext";
+import { useValuePanel } from "@jaira/ui/valuePanel";
 
 /**
  * `transcriptView.tsx`'s message rail, universal (decision 0015): what can be done to a message, what it
@@ -30,8 +31,8 @@ import { TurnContext } from "./TurnContext";
  *                  --line); its icon 12; `▾` 8, at .7.   .ts-read the same, 3 in
  *   .ts-clock      data 10.5/12, tabular, --dim, padding 0 4
  *
- * The context reading after a turn is `TurnContext.tsx`. "…" offers "Open in context panel"
- * disabled: this shell has no value panel to open one in yet.
+ * The context reading after a turn is `TurnContext.tsx`. "…" offers "Open in context panel", which the
+ * shell's `ValuePanelContext` pushes on the room's panel stack, as `App.tsx`'s does.
  */
 export function MessageRail({
   entry,
@@ -60,6 +61,7 @@ export function MessageRail({
   };
 }): JSX.Element {
   const t = useTokens();
+  const panel = useValuePanel();
   const [copied, setCopied] = useState(false);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   // The tick goes back to being a copy icon on its own.
@@ -185,9 +187,18 @@ export function MessageRail({
       <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim", tabular: true }} paddingHorizontal={4} numberOfLines={1} {...((isWeb && fullClockOf(entry.at) !== undefined ? { title: fullClockOf(entry.at) } : {}) as object)}>
         {stampOf(entry.at)}
       </Txt>
-      {/* "What else can be done with this": the context panel's, which this shell cannot open a value in yet. */}
+      {/* "What else can be done with this": open it in the context panel (`valuePanel.ts`), as the desktop's. */}
       <Press
-        onPress={(e) => setMenu({ x: e.nativeEvent.pageX - 232, y: e.nativeEvent.pageY + 12, items: [{ label: "Open in context panel", note: "not in this app yet", disabled: true, onSelect: () => undefined }] })}
+        onPress={(e) =>
+          setMenu({
+            x: e.nativeEvent.pageX - 232,
+            y: e.nativeEvent.pageY + 12,
+            items:
+              panel === null
+                ? []
+                : [{ label: "Open in context panel", note: "keeps it on screen while you carry on", onSelect: () => panel.open({ title: entry.output?.name ?? (entry.role === "user" ? "Message" : "Answer"), value, hint: reading.hint }) }],
+          })
+        }
         title="What else can be done with this"
         padding={4}
         borderRadius={radius}

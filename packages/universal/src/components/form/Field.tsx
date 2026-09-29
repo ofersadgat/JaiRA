@@ -1,6 +1,6 @@
 import { Children, createContext, useContext, useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import type { LayoutChangeEvent } from "react-native";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import type { ConfigPath } from "@jaira/shared/browser";
 import type { LayerState } from "@jaira/ui/configWriter";
 import { partIdOf, splitHint } from "@jaira/ui/settingsRows";
@@ -109,27 +109,63 @@ export function FieldGrid({ children, min = 210 }: { children: ReactNode; min?: 
   );
   let before: boolean | undefined;
   const grid = useMemo(() => ({ narrow }), [narrow]);
+  const nested = place.nested && place.direct !== false;
+  const body = items.map((item, i) => {
+    const kind = kinds[i] ?? { hidden: false, field: true };
+    const line = !kind.hidden && kind.field && before === true;
+    if (!kind.hidden) before = kind.field;
+    return (
+      <SlotContext.Provider key={i} value={setters[i]!}>
+        {line ? <View height={0} {...(edge(t, { top: 1 }, row ? "line" : t.mix(t.v("line"), 60, "transparent")) as object)} /> : null}
+        {item}
+      </SlotContext.Provider>
+    );
+  });
+  const onLayout = (e: LayoutChangeEvent): void => setWidth(e.nativeEvent.layout.width);
+  const flex: object = nested ? { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0, marginLeft: 3 } : {};
+  const rule: object = nested ? { paddingLeft: 11, ...edge(t, { left: 2 }) } : {};
+  const inset = place.inset ? { marginVertical: -13 } : {};
   return (
     <GridContext.Provider value={grid}>
-      <View
-        flexDirection="column"
-        onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}
-        {...(place.nested && place.direct !== false ? { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0, marginLeft: 3, paddingLeft: 11, ...edge(t, { left: 2 }) } : {})}
-        {...(place.inset ? { marginVertical: -13 } : {})}
-      >
-        {items.map((item, i) => {
-          const kind = kinds[i] ?? { hidden: false, field: true };
-          const line = !kind.hidden && kind.field && before === true;
-          if (!kind.hidden) before = kind.field;
-          return (
-            <SlotContext.Provider key={i} value={setters[i]!}>
-              {line ? <View height={0} {...(edge(t, { top: 1 }, row ? "line" : t.mix(t.v("line"), 60, "transparent")) as object)} /> : null}
-              {item}
-            </SlotContext.Provider>
-          );
-        })}
-      </View>
+      {isWeb ? (
+        // `container-type: inline-size`: what is in the list gives it no width of its own, so a box that
+        // is as wide as its content (a gate's `.modal`) is as wide as the rest of what it holds.
+        <View flexDirection="column" onLayout={onLayout} {...({ containerType: "inline-size" } as object)} {...flex} {...rule} {...inset}>
+          {body}
+        </View>
+      ) : (
+        <Contained outer={{ ...flex, ...inset }} inner={rule} onLayout={onLayout}>
+          {body}
+        </Contained>
+      )}
     </GridContext.Provider>
+  );
+}
+
+/**
+ * `container-type: inline-size` where there is no CSS (a phone): the list is laid out out of flow, at the
+ * width its box is given, and the box takes its height — so it contributes no width to what holds it.
+ */
+function Contained({ outer, inner, onLayout, children }: { outer: object; inner: object; onLayout: (e: LayoutChangeEvent) => void; children: ReactNode }): JSX.Element {
+  const [height, setHeight] = useState(0);
+  return (
+    <View position="relative" height={height} {...outer}>
+      <View
+        position="absolute"
+        top={0}
+        left={0}
+        right={0}
+        flexDirection="column"
+        {...inner}
+        onLayout={(e: LayoutChangeEvent) => {
+          onLayout(e);
+          const h = e.nativeEvent.layout.height;
+          setHeight((was) => (Math.abs(was - h) < 0.01 ? was : h));
+        }}
+      >
+        {children}
+      </View>
+    </View>
   );
 }
 const GridContext = createContext<{ narrow: boolean }>({ narrow: false });

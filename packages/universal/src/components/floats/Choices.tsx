@@ -47,6 +47,7 @@ export function ChoiceList({
   readOnly = false,
   stepped = false,
   first = true,
+  flat = false,
 }: {
   choices: readonly Choice[];
   answers: Record<string, Answer>;
@@ -59,6 +60,11 @@ export function ChoiceList({
    * collapsed that already (as `GateSurface`'s body does), so the block adds only the difference.
    */
   first?: boolean;
+  /**
+   * The block is a flex item (its host a flex column, as the gallery's wide modal is): a formatting
+   * context of its own, so the options' 12 stays inside it rather than collapsing into its 14.
+   */
+  flat?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const immediate = submitsOnClick(choices, answers);
@@ -109,7 +115,7 @@ export function ChoiceList({
               flexDirection={bare ? "row" : "column"}
               {...(bare ? { flexWrap: "wrap" } : {})}
               gap={8}
-              marginTop={above ? (choice.freeText?.first === true && comment !== null && !heading && choice.description === undefined ? 12 : 4) : 0}
+              marginTop={above ? (choice.freeText?.first === true && comment !== null && !heading && choice.description === undefined ? 12 : 4) : flat ? 12 : 0}
             >
               {choice.freeText?.first === true ? own : null}
               {choice.options.map((option, i) => (

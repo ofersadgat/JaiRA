@@ -1,6 +1,7 @@
 import type { JSX } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { PillSlotProps } from "@jaira/ui/slots";
+import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
@@ -38,7 +39,7 @@ export function Pill({ kind, n, word, title }: PillSlotProps): JSX.Element {
   const active = kind === "running" || kind === "waiting";
   const ink = t.v(INK[kind]);
   const run = {
-    fontFamily: t.v("font-data"),
+    ...faceOf(t, "data", 600, t.scaled("size-data", 0.8)),
     fontSize: t.scaled("size-data", 0.8),
     fontWeight: "600",
     lineHeight: isWeb ? "15px" : 15,

@@ -7,8 +7,8 @@
  * host decides what a component is wired to, so the gallery supplies this instead: the variant's
  * fixture read as a status row, Check now as a fresh read of it, and a reply kept on the card.
  */
-import { parseDuration, type GalleryForge, type RemoteStatusView, type ReviewNote, type ReviewRemote } from "@jaira/shared/browser";
-import type { ComponentServices } from "./changesetReview";
+import { parseDuration, type ComponentConfig, type GalleryForge, type GallerySurface, type RemoteStatusView, type ReviewNote, type ReviewRemote } from "@jaira/shared/browser";
+import type { ComponentServices } from "./changesetReviewModel";
 
 export function galleryRemote(
   remote: ReviewRemote,
@@ -54,5 +54,34 @@ export function galleryRemote(
       }
       return Promise.resolve(rows());
     },
+  };
+}
+
+/**
+ * What the gallery wires a gate to (moved here from `componentGallery.tsx`, so the universal gallery wires the same), laid over the renderer's defaults (see `gateServices`): nothing
+ * that reaches main, because `GALLERY_PROJECT` is a project main has never opened.
+ */
+export function galleryServices(surface: GallerySurface, config: ComponentConfig | undefined): Partial<ComponentServices> {
+  return {
+    // The gallery reads no files. A failing read is already the silent case in the reviewer's
+    // drift check (see `readCurrent`), so this produces no badge rather than a wrong one.
+    readUri: () => Promise.reject(new Error("the gallery reads no files")),
+    // And it compiles none. `GALLERY_PROJECT` is a placeholder for a subtitle, not a project
+    // main can resolve, so the compiler channels would ask about a tree that does not exist and
+    // be refused once per side of every TypeScript change on screen.
+    //
+    // Stated as an explicit `undefined` rather than left out: these services are spread OVER the
+    // renderer defaults (see `gateServices`), so an absent key keeps the default rather than
+    // dropping it. Undefined is the contract's own "no diagnostics here" — the same answer the
+    // CLI gets — which is the honest one for a fixture nothing can type-check.
+    checkFile: undefined,
+    releaseFile: undefined,
+    // Nor does it reach a forge. A gate with a merge request gets its second door wired to main
+    // by default, and main has no project by this name to ask — so the card answers for the forge
+    // from the variant's own fixture, and the strip draws what a live one would.
+    remote:
+      config?.component === "review_artifacts" && config.remote?.number !== undefined
+        ? galleryRemote(config.remote, surface.forge)
+        : undefined,
   };
 }

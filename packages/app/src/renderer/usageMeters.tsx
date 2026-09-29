@@ -41,6 +41,8 @@ import {
   type WaitingItem,
 } from "@jaira/shared/browser";
 import { BrandIcon, Icon } from "./icons";
+// What the cards say — `usageCards.ts`, shared with the universal composer (decision 0015).
+import { capital, modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windowRowsOf } from "./usageCards";
 import { Popover, useHover, usePopover, type FloatAlign, type PopoverHandle } from "./popover";
 import { accountFor, actOnWaiting, refreshAccount, useLimits, useLimitsWatch, useNow, useUsageFigures } from "./limitsStore";
 
@@ -461,13 +463,6 @@ export function AllowanceNumber({
   );
 }
 
-/** Split a window's label into its name and what it counts ("Weekly · Opus" → Weekly, Opus only). */
-function windowName(w: LimitWindow, hasModelWindows: boolean): { name: string; sub?: string } {
-  const [name, model] = w.label.split(" · ");
-  if (model !== undefined) return { name: name!, sub: `${model} only` };
-  return hasModelWindows && w.minutes === 10080 ? { name: w.label, sub: "all models" } : { name: w.label };
-}
-
 /** A money account's own section: the credit used, or what the key spent — never what is left. */
 function MoneyRows({ account, now }: { account: LimitAccountView; now: number }): JSX.Element {
   if (account.kind === "credit" && account.credit !== undefined) {
@@ -534,8 +529,7 @@ export function AccountPopover({
   useLimitsWatch(true);
   const reading = account.reading;
   const money = account.kind !== "subscription";
-  const windows = (reading?.windows ?? []).filter((w) => windowIsCurrent(w, now) || windowStatus(w) === "exhausted");
-  const hasModelWindows = windows.some((w) => w.model !== undefined);
+  const windows = windowRowsOf(account, now);
   const week = account.spent7d ?? 0;
   return (
     <Popover at={at} side="above" align={align} gap={POP_GAP} className={`cx-pop um-pop um-acctpop${className !== undefined ? ` ${className}` : ""}`}>
@@ -572,26 +566,20 @@ export function AccountPopover({
           <p className="um-note">{reading === null ? "No reading yet — it arrives with the first reply, or a refresh." : "The last reading named no windows."}</p>
         ) : (
           <div className="um-rows">
-            {windows.map((w) => {
-              const spent = windowStatus(w) === "exhausted";
-              const pct = spent ? 100 : w.usedPercent;
-              const tone = toneOfPercent(pct);
-              const { name, sub } = windowName(w, hasModelWindows);
-              const passed = !windowIsCurrent(w, now);
-              return (
-                <div key={w.id} className={`um-row${passed ? " is-passed" : ""}`}>
-                  <span className="um-row-name">
-                    <span className="ellip">{name}</span>
-                    {sub !== undefined ? <span className="um-row-sub ellip">{sub}</span> : null}
-                  </span>
-                  <Bar pct={pct} tone={passed ? "none" : tone} />
-                  <span className={`um-row-val um-t-${passed ? "none" : tone}`}>{spent && w.usedPercent === null ? "spent" : pct === null ? "–" : `${round(pct)}%`}</span>
-                  <span className="um-row-reset" title={w.resetsAt !== null ? `${formatUntil(w.resetsAt, now)}` : undefined}>
-                    {w.resetsAt === null ? "" : passed ? `passed ${formatResetAt(w.resetsAt, now)}` : `resets ${formatResetAt(w.resetsAt, now)}`}
-                  </span>
-                </div>
-              );
-            })}
+            {/* The windows, their words and figures — `windowRowsOf` (`usageCards.ts`), shared with the universal card. */}
+            {windowRowsOf(account, now).map((w) => (
+              <div key={w.id} className={`um-row${w.passed ? " is-passed" : ""}`}>
+                <span className="um-row-name">
+                  <span className="ellip">{w.name}</span>
+                  {w.sub !== undefined ? <span className="um-row-sub ellip">{w.sub}</span> : null}
+                </span>
+                <Bar pct={w.pct} tone={w.tone} />
+                <span className={`um-row-val um-t-${w.tone}`}>{w.value}</span>
+                <span className="um-row-reset" title={w.resetTitle !== undefined ? `${formatUntil(w.resetTitle, now)}` : undefined}>
+                  {w.reset}
+                </span>
+              </div>
+            ))}
           </div>
         )}
         {reading?.overage === true ? (
@@ -603,13 +591,7 @@ export function AccountPopover({
         ) : null}
         {account.unavailable !== undefined ? <p className="um-note um-note-warn">{account.unavailable}</p> : null}
         <div className="um-foot">
-          <span className="um-age">
-            {account.kind === "spend"
-              ? "counted from each call's cost"
-              : account.updatedAt === null
-                ? "never read"
-                : `updated ${formatAge(account.updatedAt, now)}${reading !== null ? `, ${account.kind === "credit" ? "asked the provider" : sourceWords(reading.source)}` : ""}`}
-          </span>
+          <span className="um-age">{readingAgeOf(account, account.updatedAt === null ? undefined : formatAge(account.updatedAt, now))}</span>
           <span className="grow" />
           {account.refreshing ? (
             <span className="um-refreshing">
@@ -680,23 +662,6 @@ function OtherAccount({ account, now }: { account: LimitAccountView; now: number
   );
 }
 
-function sourceWords(source: string): string {
-  switch (source) {
-    case "stream":
-      return "from a conversation";
-    case "query":
-      return "asked directly";
-    case "file":
-      return "from codex's session file";
-    case "headers":
-      return "from the last call";
-    default:
-      return source;
-  }
-}
-
-const capital = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
-
 /**
  * Over the composer, while the account has nothing left — or, for a key whose provider reports no
  * balance, once a call on it was refused for an empty one.
@@ -704,37 +669,15 @@ const capital = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase()
 export function SpentNotice({ route }: { route: string | undefined }): JSX.Element | null {
   const limits = useLimits();
   const now = useNow();
-  const account = accountFor(limits, route);
-  if (account === undefined) return null;
-  if (account.kind === "spend" && account.creditRefusedAt !== undefined) {
-    return (
-      <div className="um-limitline" role="status">
-        <Icon name="clock" />
-        <span>
-          <b>{account.brand} refused the last message: the balance is empty.</b> Add credit, then send it again.
-        </span>
-      </div>
-    );
-  }
-  if (!isSpent(account.reading, now)) return null;
-  if (account.kind === "credit") {
-    return (
-      <div className="um-limitline" role="status">
-        <Icon name="clock" />
-        <span>
-          <b>{account.brand}'s credit is used up</b>
-          {account.credit !== undefined ? ` (${formatUsd(account.credit.usedUsd)} used)` : ""}. What you send now waits until credit is added.
-        </span>
-      </div>
-    );
-  }
-  const until = spentUntil(account.reading, now);
+  // What it says — `spentNoticeOf` (`usageCards.ts`), shared with the universal composer.
+  const said = spentNoticeOf(accountFor(limits, route), now);
+  if (said === undefined) return null;
   return (
     <div className="um-limitline" role="status">
       <Icon name="clock" />
       <span>
-        <b>{account.brand} has no usage left</b>
-        {until !== null ? ` until ${formatResetAt(until, now)}` : ""}. What you send now waits until then.
+        <b>{said.bold}</b>
+        {said.rest}
       </span>
     </div>
   );
@@ -951,37 +894,13 @@ export function UsageFiguresPreview({ mode }: { mode: UsageFigures }): JSX.Eleme
 export function RouteLeft({ route }: { route: string }): JSX.Element | null {
   const limits = useLimits();
   const now = useNow();
-  const account = accountFor(limits, route);
-  if (account === undefined) return null;
-  if (account.kind === "spend" || (account.kind === "credit" && account.credit === undefined)) {
-    const week = account.spent7d ?? 0;
-    if (week <= 0 && account.creditRefusedAt === undefined) return null;
-    return (
-      <span className={`um-route um-${account.creditRefusedAt !== undefined ? "bad" : "none"}`} title={`${formatUsd(week)} spent through JaiRA on this key in the last 7 days`}>
-        <span className={`um-route-n um-money-val um-t-${account.creditRefusedAt !== undefined ? "bad" : "none"}`}>{formatUsd(week)}</span>
-      </span>
-    );
-  }
-  if (account.kind === "credit" && account.credit !== undefined) {
-    const pct = isSpent(account.reading, now) ? 100 : creditPercent(account.credit);
-    const tone = toneOfPercent(pct);
-    return (
-      <span className={`um-route um-${tone}`} title={`${formatUsd(account.credit.usedUsd)} of the credit used${pct !== null ? ` (${round(pct)}%)` : ""}`}>
-        <Bar pct={pct} tone={tone} />
-        <span className={`um-route-n um-money-val um-t-${tone}`}>{formatUsd(account.credit.usedUsd)}</span>
-      </span>
-    );
-  }
-  if (account.reading === null) return null;
-  const spent = isSpent(account.reading, now);
-  const pct = usedPercentFor(account.reading, undefined, now);
-  if (pct === null && !spent) return null;
-  const tone = spent ? "bad" : toneOfPercent(pct);
-  const until = spent ? spentUntil(account.reading, now) : null;
+  // What it says — `routeLeftOf` (`usageCards.ts`), shared with the universal model menu.
+  const left = routeLeftOf(accountFor(limits, route), now);
+  if (left === undefined) return null;
   return (
-    <span className={`um-route um-${tone}`} title={spent ? `no usage left until ${formatResetAt(until, now)}` : `${round(pct ?? 0)}% of the tightest window used`}>
-      {spent ? null : <Bar pct={pct} tone={tone} />}
-      <span className={`um-route-n um-t-${tone}`}>{spent ? (until !== null ? formatResetAt(until, now) : "spent") : `${round(pct ?? 0)}%`}</span>
+    <span className={`um-route um-${left.tone}`} title={left.title}>
+      {left.bar === false ? null : <Bar pct={left.bar} tone={left.tone} />}
+      <span className={`um-route-n${left.money ? " um-money-val" : ""} um-t-${left.tone}`}>{left.text}</span>
     </span>
   );
 }
@@ -994,17 +913,12 @@ export function RouteLeft({ route }: { route: string }): JSX.Element | null {
 export function ModelWindow({ route, model }: { route: string; model: string }): JSX.Element | null {
   const limits = useLimits();
   const now = useNow();
-  const account = accountFor(limits, route);
-  const id = model.toLowerCase();
-  const own = (account?.reading?.windows ?? []).filter((w) => w.model !== undefined && id.includes(w.model.toLowerCase()) && windowIsCurrent(w, now));
-  if (own.length === 0) return null;
-  const w = own.reduce((a, b) => ((b.usedPercent ?? 0) > (a.usedPercent ?? 0) ? b : a));
-  const pct = windowStatus(w) === "exhausted" ? 100 : w.usedPercent;
-  const tone = toneOfPercent(pct);
+  const own = modelWindowOf(accountFor(limits, route), model, now);
+  if (own === undefined) return null;
   return (
-    <span className={`um-route um-modelmark um-${tone}`} title={`${w.label}: ${pct === null ? "no figure" : `${round(pct)}% used`}${w.resetsAt !== null ? `, resets ${formatResetAt(w.resetsAt, now)}` : ""}`}>
-      <Bar pct={pct} tone={tone} />
-      <span className={`um-route-n um-t-${tone}`}>{pct === null ? "–" : `${round(pct)}%`}</span>
+    <span className={`um-route um-modelmark um-${own.tone}`} title={own.title}>
+      <Bar pct={own.pct} tone={own.tone} />
+      <span className={`um-route-n um-t-${own.tone}`}>{own.text}</span>
     </span>
   );
 }

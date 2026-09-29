@@ -147,6 +147,20 @@ export const SCENES: readonly Scene[] = [
       },
     }),
   ),
+  // A task whose gate was answered: the question as it was answered, in its state's panel (a settled
+  // gate), and the record behind its toggle. Made here the first time it is reached.
+  {
+    name: "task-answered",
+    reach: async (app) => {
+      await answered(app);
+      // The room the window was last left in is remembered: the board first.
+      await clickFirst(app, "Tasks");
+      await app.until(says(ANSWERED), `${ANSWERED} on the board`);
+      await clickFirst(app, ANSWERED);
+      await app.until(says("Show the record"), "the settled gate in the panel");
+      await settle(1500);
+    },
+  },
   // The finished task and the failed one, opened in the panel: their conversations, the pieces a run
   // that is over draws (settled gates, failed states, what could not be entered).
   ...(
@@ -484,6 +498,21 @@ export const SCENES: readonly Scene[] = [
     },
   },
   {
+    // …with the pointer on one of its summary's chips: the rows it counts, in a hover card.
+    name: "conversation-chip-card",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "conversation-tools")!.reach(app);
+      const at = await app.evaluate<{ x: number; y: number }>(`(() => {
+        const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === "2 files");
+        const r = el.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      })()`);
+      await app.hover(at.x, at.y);
+      await app.until(says("2 lines"), "the chip's card");
+      await settle(600);
+    },
+  },
+  {
     // …and one of its rows opened: the call's arguments and result under it.
     name: "conversation-row",
     reach: async (app) => {
@@ -493,6 +522,28 @@ export const SCENES: readonly Scene[] = [
       await settle(600);
     },
   },
+  // The conversation's composer with one of its chips' cards open (a button titled "<Label>: <value>" on
+  // both pages), and the context ring's card.
+  ...(
+    [
+      ["composer-model", '[title^="Model: "]', "Model"],
+      ["composer-thinking", '[title^="Thinking: "]', "Thinking"],
+      ["composer-permissions", '[title^="Permissions: "]', "Permissions"],
+      ["composer-tools", '[title^="Tools: "]', "Tools"],
+      ["composer-context", '[title^="No reading yet"], [title^="This conversation"]', "Context"],
+    ] as const
+  ).map(
+    ([name, chip, heading]): Scene => ({
+      name,
+      reach: async (app) => {
+        await SCENES.find((s) => s.name === "conversation")!.reach(app);
+        await app.until(`document.querySelector(${JSON.stringify(chip)}) !== null`, `the ${heading} chip`);
+        await app.evaluate(`document.querySelector(${JSON.stringify(chip)}).click()`);
+        await app.until(`[...document.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(heading)}).length > 0`, `the ${heading} card`);
+        await settle(800);
+      },
+    }),
+  ),
   {
     // The same conversation from the root's "All conversations" drawer: its rows carry their project's chip.
     name: "all-conversations",
@@ -560,6 +611,38 @@ export const SCENES: readonly Scene[] = [
         `(() => { const top = document.querySelector(".ft").getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
         "File types to scroll into view",
       );
+    },
+  },
+  // The sidebar collapsed to its rail (the `|◂` toggle): the board beside a strip of glyphs.
+  {
+    name: "sidebar-shut",
+    everyLook: true,
+    reach: async (app) => {
+      await app.until(says("Awaiting you"), "the board");
+      await clickTitled(app, ["Hide the sidebar"]);
+      await app.until(`!!document.querySelector('[aria-label="Show the sidebar"]')`, "the sidebar to fold to its rail");
+    },
+  },
+  // The parked task open, its side panel folded to its rail (the panel's fold button).
+  {
+    name: "task-folded",
+    everyLook: true,
+    reach: async (app) => {
+      await app.clickText(PARKED);
+      await app.until(`!!document.querySelector('[title="Fold the panel to a rail"], [title="Collapse the panel to a rail"]')`, "the task's panel");
+      await clickTitled(app, ["Fold the panel to a rail", "Collapse the panel to a rail"]);
+      await app.until(`!!document.querySelector('[title="Unfold the panel"]')`, "the panel to fold to its rail");
+    },
+  },
+  // Settings, then the sidebar collapsed: the page beside the rail (the rail's ⚙ would open the column
+  // again, so the page is opened first).
+  {
+    name: "settings-shut",
+    everyLook: true,
+    reach: async (app) => {
+      await app.clickText("Settings");
+      await clickTitled(app, ["Hide the sidebar"]);
+      await app.until(`!!document.querySelector('[aria-label="Show the sidebar"]')`, "the sidebar to fold to its rail");
     },
   },
   // The floats `App.tsx` owns (decision 0015's universal copies of them): the board's right-click menus
@@ -701,6 +784,25 @@ async function boardMenu(app: App, text: string, shows: string): Promise<void> {
   await settle(300);
 }
 
+/** The task the `task-answered` scene opens: parked at its gate, and answered. */
+export const ANSWERED = "answer the critique";
+async function answered(app: App): Promise<void> {
+  const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
+  const project = projects.find((p) => p.kind === "user")?.project;
+  const tasks = await app.ipc<Array<{ title: string }>>("task:list", project !== undefined ? { project } : {});
+  if (tasks.some((t) => t.title === ANSWERED)) return;
+  const taskId = await start(app, ANSWERED, blockedAtTheGate());
+  let requestId: string | undefined;
+  for (let i = 0; i < 60 && requestId === undefined; i++) {
+    const pending = await app.ipc<Array<{ requestId: string; taskId: string }>>("interaction:pending", undefined);
+    requestId = pending.find((p) => p.taskId === taskId)?.requestId;
+    if (requestId === undefined) await settle(500);
+  }
+  if (requestId === undefined) throw new Error("the answered task never parked at its gate");
+  await app.ipc("interaction:submit", { requestId, value: { decision: "request_changes" } });
+  await settle(2500);
+}
+
 /** The conversation the `conversation` scene opens. */
 export const CONVERSATION = "explain the sync lint";
 
@@ -787,6 +889,35 @@ async function clickFirst(app: App, text: string): Promise<void> {
   await settle(250);
 }
 
+/** Click the first control whose title or accessible name is one of `titles` (both pages carry them). */
+async function clickTitled(app: App, titles: readonly string[]): Promise<void> {
+  const hit = await app.evaluate<boolean>(`(() => {
+    for (const want of ${JSON.stringify(titles)}) {
+      const el = document.querySelector('[title=' + JSON.stringify(want) + '], [aria-label=' + JSON.stringify(want) + ']');
+      if (el) { el.click(); return true; }
+    }
+    return false;
+  })()`);
+  if (!hit) throw new Error(`nothing to click titled ${titles.join(" or ")}`);
+  await settle(400);
+}
+
+/**
+ * The folds the scenes above change (the sidebar's, the Tasks panel's), put back open before a scene is
+ * reached, so a scene that folded one does not leave the next one folded. Written before the page loads,
+ * which reads them once.
+ */
+const SCENE_FOLDS = ["shell.sidebar", "panel.tasks"] as const;
+async function unfoldForScene(app: App): Promise<void> {
+  const settings = await app.ipc<{ ui?: { open?: Record<string, boolean> } & Record<string, unknown> }>("settings:read", {});
+  const ui = settings.ui ?? {};
+  const open = ui.open ?? {};
+  if (SCENE_FOLDS.every((key) => open[key] !== false)) return;
+  const next = { ...open };
+  for (const key of SCENE_FOLDS) delete next[key];
+  await app.ipc("settings:write", { ui: { ...ui, open: next } });
+}
+
 /**
  * The looks each gate runs in. The first two (the default palette, both modes) take every scene; the
  * rest take the scenes that draw the components copied so far, in the palettes whose rules those
@@ -835,6 +966,7 @@ export async function goTo(app: App, path: string, to: { look?: Look; scene?: Sc
   };
   step("look");
   if (to.look !== undefined) await app.preferLook(to.look);
+  if (to.scene !== undefined) await unfoldForScene(app);
   // Against wherever the window is: `app://jaira` as shipped, the dev server under `studio.mts`.
   const url = (await app.evaluate<string>("location.protocol + '//' + location.host")) + path;
   step("navigate");

@@ -616,11 +616,12 @@ function Sheet({
   // name overflows both sides and is clipped there, with no ellipsis.
   const workflow =
     starter !== undefined ? (
-      <Press onPress={() => onOpenWorkflow?.(starter)} flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row" justifyContent="center">
-        <Txt spec={{ voice: "data", scale: 11 / 12, color: "accent" }} flexShrink={0} whiteSpace="nowrap" title={`${starter.node.stateId} — describe this run of it`}>
+      // A pressable TEXT, not a Press: on a solo sheet the whole gutter is the fold, and a button in a button is not allowed.
+      <View flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row" justifyContent="center">
+        <Txt onPress={() => onOpenWorkflow?.(starter)} {...({ cursor: "pointer" } as object)} spec={{ voice: "data", scale: 11 / 12, color: "accent" }} flexShrink={0} whiteSpace="nowrap" title={`${starter.node.stateId} — describe this run of it`}>
           {starter.node.stateId}
         </Txt>
-      </Press>
+      </View>
     ) : null;
   const span = spanOf(segment);
   const sheet = sheetLookOf(t, useLook());

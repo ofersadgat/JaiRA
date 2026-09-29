@@ -10,6 +10,7 @@ import { Txt, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ChatError } from "./ChatThread";
 import { Composer } from "./Composer";
+import { useMentions } from "@jaira/ui/chatMentions";
 
 /**
  * `chatPane.tsx`'s `ChatStart`, universal (decision 0015): the empty room — say the first thing. The
@@ -25,6 +26,7 @@ export function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
   const [overrides, setOverrides] = useState<ChatSettings>({});
   const [plan, setPlan] = useState<ChatPlanView | null>(null);
   const project = surface.project ?? undefined;
+  const mentions = useMentions(surface.hasProject, project);
   useEffect(() => {
     let live = true;
     void invoke("chat:startPlan", { stateId: CHAT_SESSION, overrides, ...(project !== undefined ? { project } : {}) })
@@ -56,6 +58,10 @@ export function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
           placeholder="Ask for a change, or a question about the code…"
           draftKey={`chat:new:${project ?? ""}`}
           onSend={(message) => void surface.onNew(message, overrides)}
+          onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
+          // With no project open this runs in JaiRA's own root, which has no "this project" to keep in.
+          saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
+          {...mentions}
         />
       </View>
     </ScrollView>

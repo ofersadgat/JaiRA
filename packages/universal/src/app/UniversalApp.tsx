@@ -1,4 +1,4 @@
-import { useEffect, useMemo, type JSX } from "react";
+import { useEffect, useMemo, useRef, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { useNow } from "@jaira/ui/limitsStore";
@@ -8,8 +8,14 @@ import { hueOf } from "@jaira/ui/pill";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { invoke, subscribe, useApp } from "@jaira/ui/store";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "@jaira/ui/workSummaryContext";
-import { FOLD, openOf } from "@jaira/ui/uiState";
+import { FOLD, PANE, openOf, paneDefault, paneOf } from "@jaira/ui/uiState";
+import { MessageTypeContext, type MessageTypeStore } from "@jaira/ui/messageTypes";
+import { PANEL_FOLD, roomOf } from "@jaira/ui/panelHost";
+import { push } from "@jaira/ui/panelStack";
+import { ValuePanelContext, type PinnedValue, type ValuePanel } from "@jaira/ui/valuePanel";
+import { panelOnStack } from "../components/panel/panelBridge";
 import { InboxStrip } from "../components/InboxStrip";
+import { Splitter } from "../components/files/Splitter";
 import { ShellFloats } from "../components/floats/ShellFloats";
 import { edge } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
@@ -45,15 +51,54 @@ export function UniversalApp(): JSX.Element {
   const workLook = useMemo(() => ({ phases: workPhases, rows: workRows, thinking: workThinking, notes: workNotes }), [workPhases, workRows, workThinking, workNotes]);
   const readOnlyJudge = useMemo(() => readOnlyJudgeOf((calls) => invoke("permissionSets:judgeReadOnly", { project: state.at ?? SHARED_SESSION, calls })), [state.at]);
   useEffect(() => subscribe((message) => void (message.type === "store:invalidate" && message.scope === "workflows" && forgetReadOnly(readOnlyJudge))), [readOnlyJudge]);
+  const { actions } = model;
+  // Where a reader's "no, this message is markdown" is kept (`messageTypes.ts`): `ui.modes`, as `App.tsx`
+  // keeps it — cleared by writing "", so a reading switched in a message survives a reload.
+  const ui = state.settings.ui;
+  const messageTypes = useMemo<MessageTypeStore>(
+    () => ({
+      get: (key) => {
+        const held = ui.modes[key];
+        return held === undefined || held === "" ? undefined : held;
+      },
+      set: (key, mime) => actions.setMode(key, mime ?? ""),
+    }),
+    [ui, actions],
+  );
+  // "Open in context panel" from any value (`App.tsx`'s `valuePanel`): PUSHED on the room's stack, which
+  // the panel column holds (`panelBridge.ts`), and the panel unfolds.
+  const at = useRef({ view: state.view, project: state.selectedProject ?? state.at });
+  at.current = { view: state.view, project: state.selectedProject ?? state.at };
+  const valuePanel = useMemo<ValuePanel>(() => {
+    const unfold = (): void => {
+      const room = roomOf(at.current.view);
+      if (room !== null) actions.setFold(PANEL_FOLD[room], true);
+    };
+    return {
+      open: (item: PinnedValue) => {
+        panelOnStack.get()?.((was) => push(was, { kind: "preview", key: `preview:${item.title}`, preview: item }));
+        unfold();
+      },
+      openState: (stateId: string) => {
+        const project = at.current.project;
+        panelOnStack.get()?.((was) => push(was, { kind: "state", key: `state:${project ?? ""}:${stateId}`, stateId, project, tab: "configuration" }));
+        unfold();
+      },
+    };
+  }, [actions]);
   return (
     <AppContext.Provider value={model}>
-      <WorkLookContext.Provider value={workLook}>
-        <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
-          <TokenRoot {...model.appearance}>
-            <Frame />
-          </TokenRoot>
-        </ReadOnlyJudgeContext.Provider>
-      </WorkLookContext.Provider>
+      <ValuePanelContext.Provider value={valuePanel}>
+        <MessageTypeContext.Provider value={messageTypes}>
+          <WorkLookContext.Provider value={workLook}>
+            <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
+              <TokenRoot {...model.appearance}>
+                <Frame />
+              </TokenRoot>
+            </ReadOnlyJudgeContext.Provider>
+          </WorkLookContext.Provider>
+        </MessageTypeContext.Provider>
+      </ValuePanelContext.Provider>
     </AppContext.Provider>
   );
 }
@@ -67,15 +112,21 @@ export function UniversalApp(): JSX.Element {
 function Frame(): JSX.Element {
   const t = useTokens();
   const look = useLook();
-  const { state } = useShell();
+  const { state, actions } = useShell();
   return (
     <View flex={1} flexDirection="row" overflow="hidden" backgroundColor={t.v("bg") as never}>
       <ShellSidebar />
-      {/* `.splitter`: 6 wide, a 2px --line down its middle (`::before`, inset 0 2px). Dragged on the desktop. */}
+      {/* The sidebar's splitter, dragged as the desktop's writes `PANE.shellSidebar` (180–520). None on a
+          collapsed sidebar: the rail is a fixed strip of glyphs. */}
       {openOf(state.settings.ui, FOLD.shellSidebar) ? (
-        <View width={6} flexShrink={0} alignItems="center">
-          <View width={2} flex={1} backgroundColor={t.v("line") as never} />
-        </View>
+        <Splitter
+          label="Resize the sidebar"
+          value={paneOf(state.settings.ui, PANE.shellSidebar)}
+          reset={paneDefault(PANE.shellSidebar)}
+          min={180}
+          max={520}
+          onChange={(size) => actions.setPane(PANE.shellSidebar, size)}
+        />
       ) : null}
       <View flex={1} minWidth={0} minHeight={0} flexDirection="column">
         {/* `.title-bar`: at least 34 tall, --panel, a --line under it — 1.5px of --rule under contrast, a

@@ -484,7 +484,9 @@ export function SplitAddBox({
     <BoxSlot>
       <View {...ADD_BOX} borderRadius={lengthToken(t, "card-radius", 10)} {...(addEdge(t, warn ? "warn" : "plain", false) as object)}>
         {main !== undefined ? (
-          <Press onPress={main.onPress} disabled={disabled} flexDirection="column" alignItems="center" gap={2} {...(disabled ? { opacity: 0.5 } : {})}>
+          // Its box not grown on a phone (`fill`): in a box stretched to its neighbour, Yoga fed the growth
+          // back into the row's height. The pressable is only ever its content's size, as on the desktop.
+          <Press onPress={main.onPress} disabled={disabled} fill={isWeb} flexDirection="column" alignItems="center" gap={2} {...(disabled ? { opacity: 0.5 } : {})}>
             {({ hovered }) => (
               <>
                 <Plus />
@@ -498,7 +500,7 @@ export function SplitAddBox({
           <Plus />
         )}
         {link !== undefined ? (
-          <Press onPress={link.onPress} disabled={disabled} {...(disabled ? { opacity: 0.5 } : {})}>
+          <Press onPress={link.onPress} disabled={disabled} fill={isWeb} {...(disabled ? { opacity: 0.5 } : {})}>
             <Txt spec={PLUS_SUB} textAlign="center" textDecorationLine="underline" {...((isWeb ? { lineHeight: "1.3", style: { textDecorationColor: String(t.v("rule")), textUnderlineOffset: 2 } } : { textDecorationColor: String(t.v("rule")) }) as object)} {...NOWRAP}>
               {link.text}
             </Txt>

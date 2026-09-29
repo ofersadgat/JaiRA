@@ -1,5 +1,5 @@
 import { issueReveal } from "../../app/viewState";
-import type { JSX, ReactNode } from "react";
+import { useContext, type JSX, type ReactNode } from "react";
 import type { PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
 import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
 import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
@@ -21,7 +21,7 @@ import { HeldView, OutputsView, PanelEmpty, ProducedView } from "./PanelViews";
 import { PreviewCard } from "./PreviewCard";
 import { RerunForm, type RerunSurface } from "./RerunForm";
 import type { TranscriptSource } from "./RunTranscript";
-import { SpIcon, type PanelFace } from "./SidePanel";
+import { GlyphSizeContext, SpIcon, type PanelFace } from "./SidePanel";
 import { StateChecks } from "./StateChecks";
 import { RunPanel } from "./RunPanel";
 import type { RunSurface } from "@jaira/ui/runPanel";
@@ -99,20 +99,21 @@ export interface FaceHost {
   automationsOf: (project: string | undefined, onOpenConversation: () => void) => ReactNode;
 }
 
-/** A task's status glyph (`board.tsx`'s `Badge`): 16 wide, 15px, coloured by status. */
+/** A task's status glyph (`board.tsx`'s `Badge`): 16 wide, at the glyph's size (15px in the head, 13 in the rail), coloured by status. */
 function Badge({ status }: { status: string }): JSX.Element {
+  const size = useContext(GlyphSizeContext);
   const hue = status === "running" || status === "interrupted" ? "accent" : status === "waiting_for_user" ? "warn" : status === "completed" ? "ok" : status === "failed" || status === "blocked" || status === "timeout" ? "bad" : "dim";
   return (
-    <Txt spec={{ voice: "app", scale: 1, color: hue, lineHeight: { px: 22.5 } }} fontSize={15} width={16} textAlign="center" flexShrink={0}>
+    <Txt spec={{ voice: "app", scale: 1, color: hue, lineHeight: { px: size * 1.5 } }} fontSize={size} width={16} textAlign="center" flexShrink={0}>
       {BADGE[status] ?? "·"}
     </Txt>
   );
 }
 
-/** `.sp-glyph`'s icon: --dim at 15px. */
+/** `.sp-glyph`'s icon: --dim at the glyph's size (1em: 15px in the head, 13 in the rail). */
 function Glyph({ name }: { name: Parameters<typeof Icon>[0]["name"] }): JSX.Element {
   const t = useTokens();
-  return <Icon name={name} size={15} color={String(t.v("dim"))} />;
+  return <Icon name={name} size={useContext(GlyphSizeContext)} color={String(t.v("dim"))} />;
 }
 
 /** The head's line for a task: its status, its name, and what identifies it (`taskHeadOf`). */

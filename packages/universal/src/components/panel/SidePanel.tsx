@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX, type ReactNode } from "react";
+import { createContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
 import { Platform, ScrollView, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
@@ -64,6 +64,12 @@ type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
  * positioned stacking context, so a copy has to be positioned above it for the same to happen to it.
  * Web only: a phone has one way of drawing text.
  */
+/**
+ * The size a face's glyph is drawn at: the head's `.sp-glyph` sets 15px, the rail's `.sp-rail-glyph` sets
+ * none, so a badge there is the page's 13 on its 1.5 line, and an icon (1em) 13 square.
+ */
+export const GlyphSizeContext = createContext(15);
+
 export const OVER_SCROLLER: Record<string, unknown> = Platform.OS === "web" ? { position: "relative", zIndex: 1 } : {};
 
 /** A length token, as the stylesheet writes `var(--name, fallback)`. */
@@ -249,7 +255,7 @@ function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face
       <View flexDirection="column" alignItems="center" gap={4}>
         {face?.glyph !== undefined ? (
           <View paddingTop={4} paddingBottom={8}>
-            {face.glyph}
+            <GlyphSizeContext.Provider value={13}>{face.glyph}</GlyphSizeContext.Provider>
           </View>
         ) : null}
         {(face?.tabs ?? []).map((tab) => {

@@ -73,7 +73,7 @@ export function Splitter({
     [horizontal],
   );
   return (
-    <RNView {...pan.panHandlers} accessibilityRole={"separator" as never} accessibilityLabel={label} style={{ flexShrink: 0, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none" } as object) : {}) }}>
+    <RNView {...pan.panHandlers} role="separator" accessibilityLabel={label} style={{ flexShrink: 0, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none" } as object) : {}) }}>
       <View {...(hover as object)} flex={1} {...(horizontal ? { paddingVertical: 2 } : { paddingHorizontal: 2 })}>
         <View flex={1} backgroundColor={t.v(hovered || dragging ? "accent" : "line") as never} />
       </View>

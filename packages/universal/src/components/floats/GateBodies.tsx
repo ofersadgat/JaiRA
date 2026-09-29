@@ -1,5 +1,5 @@
 import { Fragment, useMemo, useState, type JSX } from "react";
-import { TextInput } from "react-native";
+import { ScrollView, TextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
 import { choicesOfConfig, fillFormSchema, readAnswer, type ChooseOptionConfig, type ConfirmActionConfig, type FillFormConfig, type PendingInteraction } from "@jaira/shared/browser";
@@ -15,6 +15,8 @@ import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "../settings/Button";
 import { ApprovalSurface } from "./ApprovalSurface";
 import { ChoiceList, ChoiceSteps } from "./Choices";
+import { ChangesetGate, EditArtifactGate, ReviewArtifactGate } from "../artifact/ArtifactGates";
+import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 
 /**
  * `components.tsx`'s gate bodies, universal (decision 0015) — what `GateSurface` draws under the author's
@@ -31,7 +33,7 @@ import { ChoiceList, ChoiceSteps } from "./Choices";
  * (`GateSurface`), so `top` is what the body adds above something with no margin of its own (a step
  * line, the details, the form): 8 under the heading, or 0 under "Answering this continues the task."
  */
-export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknown) => void, top: number): JSX.Element | null {
+export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknown) => void, top: number, flat = false, services?: Partial<ComponentServices>): JSX.Element | null {
   const config = pending.config;
   const inputs = pending.inputs as Record<string, unknown>;
   switch (config?.component) {
@@ -47,14 +49,42 @@ export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknow
           <ApprovalSurface pending={pendingOfPrompt(pending.requestId, config.prompt, inputs["request"])} onDecide={(decision) => onSubmit({ decision })} />
         </View>
       );
+    // The artifact pane and the decision under it (`artifact/ArtifactGates.tsx`); `subjectProject` is the
+    // project a note's author is read in, as the desktop's `GateSurface` joins it.
     case "review_artifact":
+      return <ReviewArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} flat={flat} />;
     case "edit_artifact":
+      return <EditArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} />;
     case "review_artifacts":
-      return null;
+      // `.mount-host`: the reviewer's own box, which scrolls when its host is capped in height (`.modal-wide`).
+      return (
+        <MountHost top={flat ? 0 : top}>
+          <ChangesetGate pending={pending} config={config} inputs={inputs} onSubmit={onSubmit} project={subjectOf(pending)} host={services} />
+        </MountHost>
+      );
     default:
       return <RawJson onSubmit={onSubmit} />;
   }
 }
+
+/** `.mount-host`: overflow auto, no least height — a plain scrolling box on web, a scroller on a phone. */
+function MountHost({ top, children }: { top: number; children: JSX.Element }): JSX.Element {
+  if (isWeb) {
+    return (
+      <View marginTop={top} minHeight={0} flexShrink={1} {...({ overflowY: "auto" } as object)}>
+        {children}
+      </View>
+    );
+  }
+  return (
+    <ScrollView style={{ marginTop: top, minHeight: 0, flexShrink: 1 }} nestedScrollEnabled>
+      {children}
+    </ScrollView>
+  );
+}
+
+/** The project a review is ABOUT (`GateSurface`'s `subjectProject`): an empty one is the focused project. */
+const subjectOf = (pending: PendingInteraction): string | undefined => pending.subjectProject ?? (pending.project === "" ? undefined : pending.project);
 
 /** `ChooseOption`: one authored question or several, answered as the desktop's is. */
 function ChooseOptionGate({ config, onSubmit, top }: { config: ChooseOptionConfig; onSubmit: (value: unknown) => void; top: number }): JSX.Element {
@@ -177,7 +207,8 @@ function FillFormGate({ config, onSubmit, top }: { config: FillFormConfig; onSub
         onChange={(next) => setValue(next as Record<string, unknown>)}
         ctx={{ path: "", hidePaths: true, errors: check.errors, touched, touch, unsetNote: () => "not set — left out of the answer" }}
       />
-      <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={8} marginTop={14}>
+      {/* `.options`: a wrapping row whose items stretch (no `align-items`), the reason at the top of its line. */}
+      <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
         <Button kind="primary" disabled={blocked !== null} {...(blocked !== null ? { title: blocked } : {})} onPress={() => onSubmit(value)}>
           Submit
         </Button>

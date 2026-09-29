@@ -6,7 +6,7 @@ import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
 import type { CardProps } from "@jaira/ui/slots";
 import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
-import { edge } from "../primitives";
+import { edge, faceOf } from "../primitives";
 import { useLook, useTokens } from "../tokens";
 import { CardDom } from "./domFallback";
 import { MachineChip } from "./MachineChip";
@@ -85,8 +85,8 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
         : (card.activeStateId ?? card.status);
 
   // --- type: the data voice, line-height 1.5 as the body sets it and every row inherits ---
-  const line = (factor: number): object => ({
-    fontFamily: t.v("font-data"),
+  const line = (factor: number, weight = 400): object => ({
+    ...faceOf(t, "data", weight, t.scaled("size-data", factor)),
     fontSize: t.scaled("size-data", factor),
     lineHeight: isWeb ? "1.5" : Number(t.scaled("size-data", factor)) * 1.5,
   });
@@ -150,7 +150,7 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
     >
       <View flexDirection="row" alignItems="center" gap={6}>
         <Text
-          {...(line(0.96) as object)}
+          {...(line(0.96, selected ? 600 : 400) as object)}
           {...(oneLine as object)}
           {...(clip as object)}
           {...((isWeb && note !== undefined ? { title: note } : {}) as object)}

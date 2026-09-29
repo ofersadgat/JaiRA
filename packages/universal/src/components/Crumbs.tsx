@@ -1,6 +1,6 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { View as RNView } from "react-native";
-import { Text, View } from "@tamagui/core";
+import { Text, View, isWeb } from "@tamagui/core";
 import { isAllCrumb, type Crumb } from "@jaira/ui/crumbModel";
 import { font, Press, Txt, edge } from "../primitives";
 import { useTokens, type Tokens } from "../tokens";
@@ -141,6 +141,10 @@ function CrumbButton({ crumb, last, t }: { crumb: Crumb; last: boolean; t: Token
   const run = crumb.kind === "run";
   const pending = crumb.pending === true;
   const hue = crumb.hue === undefined ? t.v("p0") : colorOf(t, crumb.hue);
+  // A phone has no `white-space: nowrap`: a text is laid out no wider than its box, and wraps. The
+  // project crumb's name is measured on one line apart (`natural`) and given that width, so a long path
+  // overflows the button on both sides and is clipped there, as on the desktop.
+  const [natural, setNatural] = useState<number | null>(null);
   const spec = {
     voice: all || run ? "app" : "data",
     scale: all ? 0.96 : run ? 12 / 12.5 : project ? 0.96 : 12.5 / 12,
@@ -183,11 +187,18 @@ function CrumbButton({ crumb, last, t }: { crumb: Crumb; last: boolean; t: Token
       ) : null}
       <Txt
         spec={{ ...spec, ...(hovered && crumb.kind === "folder" ? { color: "text" } : {}) }}
-        {...(project && button ? { flexShrink: 0, whiteSpace: "nowrap" } : { ellip: true, flexShrink: 1, minWidth: 0 })}
+        {...(project && button ? { flexShrink: 0, ...(isWeb ? { whiteSpace: "nowrap" } : { numberOfLines: 1, ...(natural !== null ? { width: natural } : {}) }) } : { ellip: true, flexShrink: 1, minWidth: 0 })}
       >
         {run && !button ? <Text {...(font(t, mark) as object)}>{"▸ "}</Text> : null}
         {crumb.text}
       </Txt>
+      {project && button && !isWeb ? (
+        <View position="absolute" left={0} top={0} width={4000} flexDirection="row" opacity={0} pointerEvents="none">
+          <Txt spec={spec} numberOfLines={1} onLayout={(e: { nativeEvent: { layout: { width: number } } }) => setNatural(Math.ceil(e.nativeEvent.layout.width))}>
+            {crumb.text}
+          </Txt>
+        </View>
+      ) : null}
     </>
   );
   if (crumb.go === undefined) {

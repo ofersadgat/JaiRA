@@ -41,7 +41,6 @@ import {
   changeStats,
   changesOf,
   delimiterOf,
-  extensionForMime,
   mediaKindOf,
   mediaSrcOf,
   mimeOfPath,
@@ -79,7 +78,9 @@ import { invoke } from "./store";
 const MonacoDiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 
 // What each view is called on its button lives in `valueViewMeta.ts`, shared with the universal copy.
-import { VIEW_META } from "./valueViewMeta";
+import { VIEW_META, base64Of, fileNameOf } from "./valueViewMeta";
+import { Html } from "./htmlFrame";
+export { Html } from "./htmlFrame";
 
 /**
  * What each renderer is called on its menu, and what the item says it does.
@@ -610,22 +611,6 @@ function itemsOf(schema: unknown): unknown {
   return (schema as Record<string, unknown>)["items"];
 }
 
-/**
- * HTML a model produced, rendered in a sandbox.
- *
- * An `iframe` with no permissions rather than `dangerouslySetInnerHTML`: this is a privileged
- * renderer process, and the markdown path can afford an in-place sanitizer only because its parser
- * is configured to emit no HTML at all. Arbitrary HTML from a model has no such floor — `sandbox`
- * with an empty allow list means no scripts, no forms, no navigation and no same-origin access,
- * which is the only posture under which showing it is a rendering rather than an execution.
- *
- * A `srcdoc` frame also INHERITS this window's CSP, which is `script-src 'self'` — so even were the
- * sandbox opened, nothing in here could run. That is a second floor under the first, and it is the
- * reason {@link InteractiveArtifact} cannot be a variant of this component.
- */
-function Html({ text }: { text: string }): JSX.Element {
-  return <iframe className="vv-html" sandbox="" srcDoc={text} title="Rendered HTML" />;
-}
 
 /**
  * An artifact that RUNS — the interactive case, and the only thing in this app that executes code a
@@ -671,28 +656,6 @@ function InteractiveArtifact({ url, onPrompt }: { url: string; onPrompt?: ((text
   }, [onPrompt]);
 
   return <iframe className="vv-html" ref={frame} sandbox="allow-scripts" src={url} title="Interactive artifact" />;
-}
-
-/**
- * What a value should be called once it is a file on somebody's disk.
- *
- * An artifact already has a name and it is the one the producer chose, so that wins outright. For
- * everything else the name is invented, and the only part of it that carries information is the
- * EXTENSION — `value.md` and `value.json` open in different things, and a download with no extension
- * opens in nothing. The rest is a placeholder, which is honest: this value never had a name.
- */
-function fileNameOf(artifactPath: string | undefined, mime: string | undefined, isText: boolean): string {
-  if (artifactPath !== undefined && artifactPath !== "") return artifactPath.slice(artifactPath.lastIndexOf("/") + 1);
-  const ext = mime === undefined ? undefined : extensionForMime(mime);
-  return `value.${ext ?? (isText ? "txt" : "json")}`;
-}
-
-/** UTF-8 text as base64, which is what `shell:saveFile` takes. */
-function base64Of(text: string): string {
-  const bytes = new TextEncoder().encode(text);
-  let binary = "";
-  for (const byte of bytes) binary += String.fromCharCode(byte);
-  return btoa(binary);
 }
 
 /**

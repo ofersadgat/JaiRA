@@ -37,6 +37,7 @@ import { Pills } from "./Pills";
  *                        filled; pastel(-rail): that row rounder (9); zinc: that row --panel with a
  *                        --line ring, or #191a1d in the dark
  *   .sidebar.shut        the rail: rows 34 wide and centred, no labels or pills, project tiles
+ *   .rail-views          its lists of views: rows 30 tall (the foot's stay 26)
  *   .side-panel          Settings over the column: top 34, padding 4 6 6, --panel-2, --lift
  */
 const ROW_PILL_BUDGET = 96;
@@ -115,7 +116,7 @@ function Column({
   const look = useLook();
   const [openMenu, setOpenMenu] = useState<MenuAt | null>(null);
 
-  const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any", mode?: { back?: () => void; expand?: () => void }): JSX.Element => {
+  const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any", mode?: { back?: () => void; expand?: () => void }, inRail = false): JSX.Element => {
     const inScope = scope === "any" || (scope === "root") === (at === null);
     const here = view === v.id && inScope;
     const drawer = v.panel !== undefined && (here || mode?.back !== undefined) && !collapsed;
@@ -128,7 +129,7 @@ function Column({
     };
     return (
       <Fragment key={v.id}>
-        <Row on={here} rail={collapsed}>
+        <Row on={here} rail={collapsed} tall={inRail}>
           {(hovered) => (
             <>
               {mode?.back !== undefined ? (
@@ -309,7 +310,7 @@ function Column({
       {collapsed ? (
         <View flexDirection="column" alignItems="center" flex={1} minHeight={0} paddingBottom={6}>
           <View flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
-            {roots.map((v) => rowOf(v, false, "root"))}
+            {roots.map((v) => rowOf(v, false, "root", undefined, true))}
           </View>
           <RailSplit />
           <View flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
@@ -321,7 +322,7 @@ function Column({
             <>
               <RailSplit />
               <View flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
-                {views.map((v) => rowOf(v, false))}
+                {views.map((v) => rowOf(v, false, "any", undefined, true))}
               </View>
             </>
           ) : null}
@@ -424,7 +425,7 @@ function Column({
 }
 
 /** A `.side-row`: the ground that says hovered or on, around the row's target and its verbs. */
-function Row({ on, rail, children }: { on: boolean; rail: boolean; children: (hovered: boolean) => ReactNode }): JSX.Element {
+function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean; tall?: boolean; children: (hovered: boolean) => ReactNode }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const [hovered, hover] = useHover();
@@ -446,7 +447,8 @@ function Row({ on, rail, children }: { on: boolean; rail: boolean; children: (ho
       justifyContent={rail ? "center" : "flex-start"}
       gap={4}
       width={rail ? 34 : "100%"}
-      height={26}
+      // `.rail-views .side-row`: 30 tall in the rail's lists of views; 26 everywhere else.
+      height={tall ? 30 : 26}
       flexShrink={0}
       borderRadius={radius}
       backgroundColor={(hovered ? t.v("fill-ghost-hover") : "transparent") as never}

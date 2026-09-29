@@ -1,6 +1,7 @@
 import type { JSX, MouseEvent as ReactMouseEvent } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { NextMove } from "@jaira/shared/browser";
+import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
@@ -71,14 +72,14 @@ export function NextChips({
             {...((disabled ? {} : { hoverStyle: { backgroundColor: t.v("panel-3"), borderColor: t.v("accent"), ...(isWeb ? { color: t.v("accent") } : {}) } }) as object)}
           >
             <Text
-              {...({ fontFamily: t.v("font-data"), fontSize: size, lineHeight, fontWeight: "500" } as object)}
+              {...({ ...faceOf(t, "data", 500, size), fontSize: size, lineHeight, fontWeight: "500" } as object)}
               color={arrowInk as never}
               {...(isWeb ? { "aria-hidden": true } : {})}
             >
               {move.way === "back" ? "↩" : "→"}
             </Text>
             <Text
-              {...({ fontFamily: t.v("font-app"), fontSize: size, lineHeight, fontWeight: "500" } as object)}
+              {...({ ...faceOf(t, "app", 500, size), fontSize: size, lineHeight, fontWeight: "500" } as object)}
               {...((isWeb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : { numberOfLines: 1 }) as object)}
               minWidth={0}
               // The name's ink is the chip's on web, inherited as the DOM chip's span inherits it, so the

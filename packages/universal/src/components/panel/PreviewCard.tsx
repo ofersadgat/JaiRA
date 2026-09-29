@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { View } from "@tamagui/core";
-import type { PinnedValue } from "@jaira/ui/valuePanel";
+import { ValuePanelContext, type PinnedValue } from "@jaira/ui/valuePanel";
 import { ValueView } from "./ValueView";
 
 /**
@@ -21,7 +21,10 @@ export function PreviewCard({ item }: { item: PinnedValue }): JSX.Element {
   }
   return (
     <View flex={1} minHeight={0}>
-      <ValueView value={item.value} {...(item.label !== undefined ? { label: item.label } : {})} />
+      {/* The viewer inside has no panel to open itself in (the provider is cleared), as the desktop's. */}
+      <ValuePanelContext.Provider value={null}>
+        <ValueView value={item.value} {...(item.hint !== undefined ? { hint: item.hint } : {})} {...(item.label !== undefined ? { label: item.label } : {})} />
+      </ValuePanelContext.Provider>
     </View>
   );
 }

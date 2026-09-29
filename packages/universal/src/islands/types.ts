@@ -2,7 +2,7 @@ import type { JairaAppearanceConfig } from "@jaira/shared/browser";
 
 /** An island (decision 0015): one of the renderer's DOM components, hosted where DOM is not. */
 export interface IslandProps {
-  component: "markdown" | "diff" | "markdownEditor" | "code" | "schemaText";
+  component: "markdown" | "diff" | "markdownEditor" | "code" | "schemaText" | "artifact";
   props: Record<string, unknown>;
   /** A fixed height, for an editor, which scrolls inside as on the desktop. Absent: sized to its content. */
   height?: number;

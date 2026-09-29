@@ -1,4 +1,5 @@
 import { useRef, useState, type JSX } from "react";
+import { Pressable } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { contextFill, formatTokens, toneOfContext, type ContextReading } from "@jaira/shared/browser";
 import { colourOf } from "@jaira/ui/contextParts";
@@ -35,11 +36,11 @@ export function TurnContext({ context, before, route }: { context: ContextReadin
   const parts = context.breakdown ?? [];
   const figure = fill === null ? formatTokens(context.used, true) : `${Math.round(fill)}%`;
   const show = (): void => {
-    const el = anchor.current as { getBoundingClientRect?: () => DOMRect } | null;
+    const el = anchor.current as { getBoundingClientRect?: () => DOMRect; measureInWindow?: (then: (x: number, y: number, w: number, h: number) => void) => void } | null;
     if (el?.getBoundingClientRect !== undefined) {
       const r = el.getBoundingClientRect();
       setRect({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
-    }
+    } else el?.measureInWindow?.((x, y, w, h) => setRect({ left: x, top: y, right: x + w, bottom: y + h }));
     setOpen(true);
   };
   const face = { voice: "data" as const, scale: 10.5 / 12, weight: 500, tabular: true, lineHeight: 1 };
@@ -85,8 +86,7 @@ export function TurnContext({ context, before, route }: { context: ContextReadin
       <Txt spec={{ ...words, voice: "data", scale: px(10.5, "data"), color: "dim" }}>{context.model}</Txt>
     </Float>
   );
-  return (
-    <>
+  const badge = (
       <View
         ref={anchor as never}
         flexShrink={0}
@@ -98,13 +98,18 @@ export function TurnContext({ context, before, route }: { context: ContextReadin
         borderRadius={5}
         backgroundColor={(open ? t.v("fill-ghost-hover") : "transparent") as never}
         aria-label={fill === null ? `${formatTokens(context.used)} tokens in context after this reply` : `${Math.round(fill)}% of the context after this reply`}
-        {...(isWeb ? { onMouseEnter: show, onMouseLeave: () => setOpen(false) } : { onPress: show })}
+        {...(isWeb ? { onMouseEnter: show, onMouseLeave: () => setOpen(false) } : {})}
       >
         <Ring t={t} pct={fill} tone={tone} size={12} width={3.2} />
         <Txt spec={{ ...face, color: tone === "warn" ? "warn" : "dim" }} numberOfLines={1}>
           {figure}
         </Txt>
       </View>
+  );
+  return (
+    <>
+      {/* On a phone the badge is pressed (a Tamagui `onPress` does not fire there). */}
+      {isWeb ? badge : <Pressable onPress={show}>{badge}</Pressable>}
       {open ? isWeb ? <HoverLayer>{tip}</HoverLayer> : <MenuLayer onClose={() => setOpen(false)}>{tip}</MenuLayer> : null}
     </>
   );

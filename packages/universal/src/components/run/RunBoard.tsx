@@ -4,7 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { InstanceNode, InstanceStatus, StateChild, TaskStatus } from "@jaira/shared/browser";
 import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
 import { runColumnsOf, runTileWordsOf, runsByChild } from "@jaira/ui/runBoardModel";
-import { scrollbarProps } from "../../primitives";
+import { faceOf, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Column, GraphPaper, graphPaperWeb } from "../Board";
 import { Pill } from "../Pill";
@@ -110,8 +110,8 @@ function RunTile({ node, index, total, last, selected, onSelect, onOpen }: { nod
   const pill = pillKindOf(node.status as TaskStatus | InstanceStatus | undefined);
   const { wash, ground, ring, hoverGround, hoverRing, radius, below } = tileChromeOf(t, look, { pill, selected, last, inTray: false });
   // The data voice at a factor of --size-data, line-height 1.5 as the body sets it (as `TaskCard`'s).
-  const line = (factor: number, lh = 1.5): object => ({
-    fontFamily: t.v("font-data"),
+  const line = (factor: number, lh = 1.5, weight = 400): object => ({
+    ...faceOf(t, "data", weight, t.scaled("size-data", factor)),
     fontSize: t.scaled("size-data", factor),
     lineHeight: isWeb ? String(lh) : Number(t.scaled("size-data", factor)) * lh,
   });
@@ -145,7 +145,7 @@ function RunTile({ node, index, total, last, selected, onSelect, onOpen }: { nod
     >
       <View flexDirection="row" alignItems="center" gap={6}>
         <Text
-          {...(line(0.96) as object)}
+          {...(line(0.96, 1.5, selected ? 600 : 400) as object)}
           {...(oneLine as object)}
           flexGrow={1}
           flexShrink={1}

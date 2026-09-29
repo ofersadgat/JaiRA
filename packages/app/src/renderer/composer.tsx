@@ -107,23 +107,10 @@ import { levelsFooter, useModelParameters } from "./modelParameters";
 import { ROUTE_BORROWS, canSendOf, chipValuesOf, composerFactsOf, routeOf, sendTitleOf } from "./composerModel";
 import type { ContextReading } from "@jaira/shared/browser";
 import type { Schema } from "./schemaForm/types";
-
-/**
- * A file going with the message — dropped on the composer, picked from its clip, or `@`-mentioned.
- *
- * `text` is the file's content when it could be read as text, `note` is why it could not. Both are
- * absent from a file that is empty, which is a fact worth sending rather than an error.
- */
-export interface ComposerFile {
-  /** What it is called — a bare filename from a drop, a project-relative path from a mention. */
-  name: string;
-  text?: string;
-  /** Why this file is a name and not a content — "3.4 MB, too large to inline", "not text". */
-  note?: string;
-}
-
-/** As big a file as goes in a message. Past it the name and the size are the honest content. */
-const FILE_MAX = 200_000;
+// What the cards compute — the cascade, the hints, a file going with the message — `composerCards.ts`,
+// shared with the universal composer (decision 0015).
+import { EFFORT_HINTS, KEEP_WHERE, VENDOR_NAMES, cascadeOf, mentionAt, modalitiesOf, modalityIcon, permissionsHintOf, repoint, tierOf, withFiles, withMention, fileFromText, originWordsOf, type ComposerFile, type PickModel } from "./composerCards";
+export type { ComposerFile };
 
 /**
  * One dropped file, read.
@@ -131,77 +118,11 @@ const FILE_MAX = 200_000;
  * Read in the RENDERER through the File API rather than by path through main: a drop hands over the
  * bytes, so asking main to open the path again would be a second read of a file we already have,
  * through a channel that would then have to be allowed to read anywhere on the disk.
- *
- * Binary files are named, not decoded. `File.text()` on a PNG succeeds and produces replacement
- * characters, and sending sixty kilobytes of those to a model is worse than saying "it is a PNG".
  */
 async function fileOf(file: File): Promise<ComposerFile> {
-  if (file.size > FILE_MAX) return { name: file.name, note: `${Math.round(file.size / 1024)} KB — too large to include` };
-  const text = await file.text();
-  // A NUL byte is the oldest and most reliable "this is not text" test there is, and it costs one
-  // scan of a file we have already read.
-  if (text.includes("\u0000")) return { name: file.name, note: `${file.type || "binary"} — not text` };
-  return { name: file.name, text };
+  return fileFromText(file.name, file.size, file.type, file.size > FILE_MAX_READ ? undefined : await file.text());
 }
-
-/**
- * The message as it is actually sent: what was typed, then each file under a heading.
- *
- * Fenced, with the name on the fence, because the alternative is a model guessing where a pasted
- * file starts and stops. The typed text comes FIRST — it is the instruction, and burying it under
- * four attachments is how an instruction gets skimmed past.
- */
-function withFiles(text: string, files: readonly ComposerFile[]): string {
-  if (files.length === 0) return text;
-  const blocks = files.map((file) =>
-    file.text === undefined
-      ? `Attached: ${file.name} (${file.note ?? "not included"})`
-      : `Attached: ${file.name}\n\`\`\`\n${file.text}\n\`\`\``,
-  );
-  return [text, ...blocks].filter((part) => part !== "").join("\n\n");
-}
-
-
-/**
- * Re-point an id at another route, keeping the model it named — when that route actually has it.
- *
- * "The same model somewhere else" is the common move — one subscription runs out, a provider is
- * down — and retyping the model to make it would be the tax on the thing people do most.
- *
- * But it is a LOOKUP, not string surgery. Routes do not share an id shape: `openrouter` ids carry a
- * vendor tier and `anthropic` ids do not, so splicing a prefix turned `openrouter/openai/gpt-5` into
- * `anthropic/openai/gpt-5` — an id no route serves, offered by a picker whose whole job is to only
- * offer things that exist. Matching on the LEAF instead means a re-point either lands on a real row
- * or reports that it cannot, and the caller drills in rather than inventing one.
- */
-function repoint(route: string, model: string, models: readonly PickModel[]): string | undefined {
-  const leaf = tierOf(model).leaf;
-  if (leaf === "") return undefined;
-  // The borrowed catalog when the route has one, so moving to `claude-cli` finds Anthropic's rows.
-  const from = ROUTE_BORROWS[route] ?? route;
-  const found = models.find((m) => tierOf(m.id).route === from && tierOf(m.id).leaf === leaf);
-  if (found === undefined) return undefined;
-  return ROUTE_BORROWS[route] === undefined ? found.id : `${route}/${found.id.slice(from.length + 1)}`;
-}
-
-/** What each thinking level buys, so the word is not the only thing to go on. */
-const EFFORT_HINTS: Record<string, string> = {
-  none: "no reasoning at all",
-  minimal: "barely any",
-  low: "quickest, least deliberation",
-  medium: "a balance",
-  high: "works the problem",
-  xhigh: "deeper — slower and dearer",
-  max: "as deep as the model goes",
-  ultra: "max, and hands parts off",
-};
-
-/** What granting each tool actually lets the model do. */
-const TOOL_HINTS: Record<string, string> = {
-  bash: "run shell commands, under the policy",
-  read_file: "read files in the workspace",
-  write_file: "create and change files",
-};
+const FILE_MAX_READ = 200_000;
 
 /**
  * One option in a picker: a name, the sentence that explains it, and a tick when it is in force.
@@ -245,52 +166,6 @@ function Opt({
       {on ? <span className="cx-opt-tick">✓</span> : null}
     </button>
   );
-}
-
-/** A model as the picker sees it — the id, and what it can be given and produce. */
-interface PickModel {
-  id: string;
-  input: string[];
-  output: string[];
-  /** An agent's own row: its reasoning levels in a few words (`low–max`). */
-  levels?: string;
-}
-
-/** Whose models an agent route borrows, as a person names them — the divider's words. */
-const VENDOR_NAMES: Record<string, string> = { anthropic: "Anthropic", openai: "OpenAI" };
-
-/**
- * The tier between route and model, when a route HAS one.
- *
- * `openrouter/openai/gpt-5` names a route, then whose model it is, then the model — three parts, so
- * three columns. `anthropic/claude-sonnet-5` has two. The picker follows the id rather than a list of
- * special cases: a route whose ids carry a second slash grows a middle column, and one whose ids do
- * not goes straight to models. Local and any other aggregating route get it for free.
- */
-
-function tierOf(id: string): { route: string; group?: string; leaf: string } {
-  const parts = id.split("/");
-  const route = parts[0] ?? "";
-  if (parts.length >= 3) return { route, group: parts[1]!, leaf: parts.slice(2).join("/") };
-  return { route, leaf: parts.slice(1).join("/") };
-}
-
-/** Every modality any known model mentions, so the filters are the real vocabulary and not a guess. */
-function modalitiesOf(models: readonly PickModel[], side: "input" | "output"): string[] {
-  return [...new Set(models.flatMap((m) => m[side]))].sort();
-}
-
-/**
- * The glyph for one modality.
- *
- * Icons rather than words because these are the least interesting thing on the row and the most
- * repeated: four words twice over crowds out the columns, which are what the menu is for.
- */
-function modalityIcon(mode: string): "read" | "web" | "note" | "think" {
-  if (mode === "image") return "read";
-  if (mode === "audio") return "web";
-  if (mode === "text") return "note";
-  return "think";
 }
 
 /**
@@ -386,36 +261,8 @@ function RouteCascade({
   const [group, setGroup] = useState<string | undefined>(here.group);
   const [needs, setNeeds] = useState<{ input: string[]; output: string[] }>({ input: [], output: [] });
 
-  // AND across ticks: a model has to do everything asked for. OR would widen the list as you narrow
-  // the question, which is the opposite of what a filter is for.
-  const matching = models.filter(
-    (m) => needs.input.every((mode) => m.input.includes(mode)) && needs.output.every((mode) => m.output.includes(mode)),
-  );
-  const borrows = ROUTE_BORROWS[route];
-  const inRoute = matching
-    .filter((m) => tierOf(m.id).route === (borrows ?? route))
-    // Re-prefixed, so picking one names the ROUTE the reader chose rather than the one it was
-    // borrowed from — `claude-cli/claude-sonnet-5`, not `anthropic/claude-sonnet-5`.
-    .map((m) => (borrows === undefined ? m : { ...m, id: `${route}/${m.id.slice(borrows.length + 1)}` }));
-  const groups = [...new Set(inRoute.map((m) => tierOf(m.id).group).filter((g): g is string => g !== undefined))].sort();
-  // The hovered group, or the first — so the third column has something in it the moment the second
-  // appears. Requiring a second hover to see any model made the column read as broken rather than as
-  // waiting, which is exactly how it was reported.
-  const shown = group !== undefined && groups.includes(group) ? group : groups[0];
-  // A route with groups shows that one's models; a route without goes straight to models.
-  const leaves = groups.length === 0 ? inRoute : inRoute.filter((m) => tierOf(m.id).group === shown);
-  // An AGENT's own menu — what the binary said it runs (decision 0009) — first, each with its levels;
-  // its `default` row only lends the default button its levels. The provider's list stays below: the
-  // binary runs any of its vendor's models by id, not only the ones its menu names.
-  const ownRows = borrows === undefined ? [] : matching.filter((m) => tierOf(m.id).route === route);
-  const ownDefault = ownRows.find((m) => tierOf(m.id).leaf === "default");
-  const own = ownRows.filter((m) => m !== ownDefault);
-  const ownIds = new Set(own.map((m) => m.id));
-  const borrowed = leaves.filter((m) => !ownIds.has(m.id));
-
-  // Every route the machine can reach, plus any a known model names. A route with no catalog rows —
-  // an agent that picks its own weights — still belongs here, because choosing it IS the choice.
-  const columns = [...new Set([...routes, ...matching.map((m) => tierOf(m.id).route)])].filter((r) => r !== "").sort();
+  // What the columns hold — `cascadeOf` (`composerCards.ts`), shared with the universal cascade.
+  const { columns, groups, shown, borrows, ownDefault, own, borrowed, leaves } = cascadeOf(routes, models, route, group, needs);
 
   const drill = (r: string): void => {
     setRoute(r);
@@ -547,9 +394,8 @@ function RouteCascade({
 
 /** Where a value came from — what a chip's popover says under its title. */
 function Origin({ origin, from }: { origin: SettingOrigin; from?: string }): JSX.Element {
-  if (origin === "override") return <span className="cx-origin cx-own">your choice for this message</span>;
-  if (origin === "unset") return <span className="cx-origin cx-unset">nothing here sets it</span>;
-  return <span className="cx-origin">{from === undefined ? "inherited" : `inherited from ${from}`}</span>;
+  const words = originWordsOf(origin, from);
+  return <span className={words.tone === "own" ? "cx-origin cx-own" : words.tone === "unset" ? "cx-origin cx-unset" : "cx-origin"}>{words.text}</span>;
 }
 
 /**
@@ -612,9 +458,6 @@ function BucketPicker({
     </div>
   );
 }
-
-/** Where a kept permission set goes, as the form words it. */
-const KEEP_WHERE: Readonly<Record<WritableLayer, string>> = { project: "in this project", base: "for all projects" };
 
 /**
  * `+` — keep the map on the cards as a NEW permission set in this bucket.
@@ -970,14 +813,12 @@ export function Composer({
    */
   const track = (text: string, caret: number): void => {
     if (mentions === undefined) return;
-    const before = text.slice(0, caret);
-    const at = before.lastIndexOf("@");
-    const opens = at === 0 || (at > 0 && /\s/.test(before[at - 1] ?? ""));
-    const query = before.slice(at + 1);
-    if (at === -1 || !opens || /\s/.test(query)) {
+    const found = mentionAt(text, caret);
+    if (found === null) {
       setMention(null);
       return;
     }
+    const { at, query } = found;
     setMention({ at, query, paths: [] });
     void mentions(query).then((paths) =>
       // Still the same query: an answer for a prefix the person has already typed past would replace
@@ -989,7 +830,7 @@ export function Composer({
   /** Put a path in the box where the `@` was, and attach the file it names. */
   const pick = (path: string): void => {
     if (mention === null) return;
-    setDraft(`${draft.slice(0, mention.at)}@${path} ${draft.slice(mention.at + 1 + mention.query.length)}`);
+    setDraft(withMention(draft, mention, path));
     setMention(null);
     if (readMention === undefined) return;
     void readMention(path).then(
@@ -1225,11 +1066,7 @@ export function Composer({
                 })}
               </div>
               <p className="cx-hint">
-                {rows.length === 0
-                  ? `No permission sets in ${bucket} yet. + keeps the tools and modes under Tools as the first.`
-                  : matched === undefined && tools.length > 0
-                    ? `These tools and modes match no permission set in ${bucket} — + keeps them as a new one.`
-                    : "A permission set: which tools are offered, and what happens when each is called. Change any of it under Tools and this becomes custom."}
+                {permissionsHintOf(rows.length, matched !== undefined, tools.length, bucket)}
               </p>
             </Chip>
 

@@ -148,6 +148,34 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   opened from (`.approval-surface .mono`) does not reach them — nor should the copy's.
 - **Floats** are `components/floats/`: `Float` places one as `Popover` does, `Modal` is the backdrop and
   box, `anchor.ts` finds what it hangs from (the element a press handed over, on web).
+- **A block's strut.** A `div` holding an inline span is as tall as the line of its OWN font (the body's
+  13/12.5 on 1.5 = 19.5), not the span's: a copy draws the span in a box that tall, the text moved down
+  by the difference of the two baselines (`RouteCascade`'s divider, the composer's figure).
+- **Flex columns do not collapse margins.** A gate in a state's panel (`.st-block`, a flex column) keeps
+  the heading's 8 and the chooser's 14 apart; the same gate in an `.inline-gate` (a block) collapses them.
+- **`.cx-col { width: 148px }` holds for `.cx-col-last` too**, under its `min-width: 190` — read every
+  rule the element matches, not the one named after it.
+- **`container-type: inline-size` gives a box no width of its own.** `.cfg-fields` is one, so a gate's
+  `.modal` (as wide as what it holds) is as wide as its heading and buttons, and the form inside it stacks
+  under 380. The copy's `FieldGrid` says `containerType` on web and lays its list out of flow on a phone.
+- **A flex item is a formatting context of its own**: margins do not collapse through it. The same gate
+  body collapses its first margin into the heading's in `.inline-gate` (a block) and keeps it in the
+  gallery's `.modal-wide` (a flex column) — `GateSurface`'s `flex`, `ChoiceList`'s `flat`.
+- **A newline in a markdown paragraph is a space** unless something round it says `pre-wrap`; a native
+  `Text` breaks the line. `Markdown`'s (and `ValueView`'s) `softbreak="space"` where the host collapses it.
+- **Found on the device, not on `/rn`** (the emulator pass, `packages/app/shots/android.mts`):
+  - A hand-set `fontFamily: t.v("font-data")` is the whole CSS stack, which Android cannot read and
+    draws in the system font. Go through `Txt`, or `faceOf()` for a font set by hand.
+  - React Native has no `white-space: nowrap`. Text the desktop keeps on one line and clips must say so:
+    `numberOfLines={1}` for an ellipsis, or measure its one-line width and clip, as the project crumb
+    does (`Crumbs.tsx`).
+  - A `Press` inside a stretched box can grow without bound in Yoga (Connections' rows reached a million
+    px): `fill={isWeb}`.
+  - Android dashes a border only when it is set on all four sides with a radius; Tamagui splits it into
+    sides, so dashed borders draw solid there (not fixed yet).
+  - `accessibilityRole` values the web accepts (`separator`) crash Android; use `role`.
+  - Metro stubs `react-native-reanimated` for gesture handler (`metro.config.cjs`); a Metro started
+    before that change crashes the app at launch until restarted.
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
   a region passes in every look.
 
@@ -185,6 +213,22 @@ rules on a specimen page.
   (`Probe.tsx`, whose `useColumn` is a grid's `auto` column). What they say is `connectionsModel.ts`'s.
 - **The usage ring and figures** (`components/usage/`) — `Ring` and `MoneyRing`, shared with the
   composer, and a sign-in card's and a key's figures (`usageFigure.ts`'s words).
+- **The transcript** (`components/panel/`) — `SessionTranscript.tsx`'s `Transcript` (messages, the work
+  between them, pauses, compactions, an armed cut; `padding` for a host that sets another), its rows
+  (`WorkRows.tsx`: a call, a thought, a call being written, a journal fact, `ShellLine`, `OutcomeNote`,
+  `AnsweredForYou`), the summary of a stretch of several steps (`WorkSummary.tsx`, its hover cards in a
+  `HoverLayer`), the marks between blocks (`TranscriptMarks.tsx`: `GapMark`, `CompactionLine`,
+  `DayChip`) and a run's page of panels (`SessionBands.tsx`: bands across, torn edges, `ForkMark`,
+  `OriginMark`, the notes). Fixtures for each: `transcript-*` and `session-bands` specimens.
+- **The composer's cards** (`components/chat/ComposerCards.tsx`, `ComposerTools.tsx`, `UsageCards.tsx`) —
+  `ChipCard` (a chip's `.cx-pop`), `Opt`, `RouteCascade`, `BucketPicker`, `KeepPermissionSet`, the Tools
+  card, and the account's and context's cards; `composer-*` scenes open each.
+- **The artifact gates** (`components/artifact/`) — `review_artifact`, `edit_artifact` and the changeset
+  reviewer (`review_artifacts`); what they decide is `artifactReview.ts`'s and `changesetReviewModel.ts`'s.
+  A note is anchored to a selection on web with the desktop's own code (`reviewSelection.ts`, over the
+  DOM react-native-web draws); a phone lists notes but cannot select a passage. The diff and the markdown
+  editor are islands; an HTML or SVG artifact drawn as a page is the `artifact` island (a WebView on a
+  phone — web content by nature). `pair.mts --specimen` paints islands out, as a scene does.
 - **`PLAIN_SCROLLER`** (`primitives.tsx`) on a `ScrollView`'s style and content style: without it
   react-native-web's `translateZ(0)` and `z-index: 0` composite the scroller and Chromium draws its
   text greyscale, where the DOM's `overflow: auto` keeps subpixel text. That fixed the sidebar's

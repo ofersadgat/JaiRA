@@ -7,7 +7,7 @@ import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, usePanelStacks, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
-import { PANE, SHUT, paneOf, shutOf } from "@jaira/ui/uiState";
+import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { faceOf, type FaceHost } from "../components/panel/faces";
 import { EventsTaskAutomations } from "../components/workflow/ConfigPanel";
@@ -16,6 +16,7 @@ import { NewTaskForm } from "../components/panel/NewTaskForm";
 import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBridge";
 import type { TranscriptSource } from "../components/panel/RunTranscript";
 import { SidePanel } from "../components/panel/SidePanel";
+import { Splitter } from "../components/files/Splitter";
 import { edge } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
@@ -31,7 +32,7 @@ import { newTaskOpener, panelTopKind, runMode } from "./viewState";
  * what an entry says is `faces.tsx`'s (`panelFaces.tsx`'s `faceOf`), over `panelFaceModel.ts`.
  *
  *   .ctx-panel     --panel, a --line on the left (--rule folded), clipped; the column's width
- *   .splitter      6 wide, a 2px --line down its middle
+ *   .splitter      6 wide, a 2px --line down its middle; dragged (`files/Splitter.tsx`)
  */
 export function PanelColumn({ chat }: { chat?: { taskId: string | null; project: string; detail: TaskDetail | null } | undefined } = {}): JSX.Element | null {
   const t = useTokens();
@@ -227,10 +228,18 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   if (top === undefined) return null;
   return (
     <>
+      {/* The side panel's splitter, dragged as the desktop's: the width of the kind on top (`widthKey`),
+          the pane after it sized, so a drag left widens it. */}
       {geometry.open ? (
-        <View width={6} flexShrink={0} alignItems="center">
-          <View width={2} flex={1} backgroundColor={t.v("line") as never} />
-        </View>
+        <Splitter
+          label="Resize the side panel"
+          value={paneOf(ui, geometry.widthKey)}
+          reset={paneDefault(geometry.widthKey)}
+          invert
+          min={PANEL_MIN}
+          max={PANE_WIDE}
+          onChange={(size) => actions.setPane(geometry.widthKey, size)}
+        />
       ) : null}
       <View
         width={geometry.width}

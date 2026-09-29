@@ -1,5 +1,6 @@
+import { galleryServices } from "@jaira/ui/galleryRemote";
 import { useRef, useState, type JSX, type ReactNode } from "react";
-import { ScrollView, type LayoutChangeEvent } from "react-native";
+import { ScrollView, type LayoutChangeEvent, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { GALLERY_GROUPS, schemaById, surfacesOfGroups, type GalleryGroup, type GallerySurface } from "@jaira/shared/browser";
 import {
@@ -36,7 +37,8 @@ import type { Schema } from "@jaira/ui/schemaForm/types";
  * the desktop's. In a card, an interaction's dialog is the gate's own surface (`GateSurface`, the side
  * panel's copy) and its config's form the one form (`form/SchemaForm`); an approval and a question are
  * their surfaces (`floats/ApprovalSurface`, `floats/QuestionSurface`) in `.inline-gate`; a review, an edit
- * and the JSON editor are {@link Uncopied}. The rules, from `styles.css`:
+ * and a changeset review are `artifact/`'s, wired to the gallery's own services (`galleryServices`, which
+ * reach nothing); the JSON editor is {@link Uncopied}. The rules, from `styles.css`:
  *
  *   .gallery-page        --bg, scrolls, padding 12 14, column, gap 18
  *   .gallery-page-head   column, gap 8; h2 700 app at 15/12.5, margin 0; .sub margin 0, ≤ 80ch, line 1.5
@@ -441,6 +443,7 @@ function GalleryCard({
  */
 export function Stage({ surface, text, onResult }: { surface: GallerySurface; text: string; onResult: (result: CardState["result"]) => void }): JSX.Element {
   const t = useTokens();
+  const win = useWindowDimensions();
   const parsed = parsedDoc(text);
   const reason = (words: string): JSX.Element => <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>{words}</Txt>;
   if (parsed.doc === undefined) return reason(`Not JSON yet: ${parsed.error ?? ""}`);
@@ -467,7 +470,7 @@ export function Stage({ surface, text, onResult }: { surface: GallerySurface; te
   const wide = component === "review_artifacts" || component === "edit_artifact" || component === "review_artifact";
   return (
     <View
-      {...(wide ? { alignSelf: "stretch" } : { alignSelf: "flex-start" })}
+      {...(wide ? { alignSelf: "stretch", maxHeight: win.height * 0.9, flexDirection: "column" } : { alignSelf: "flex-start" })}
       maxWidth="100%"
       padding={18}
       borderRadius={12}
@@ -475,7 +478,8 @@ export function Stage({ surface, text, onResult }: { surface: GallerySurface; te
       {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
       testID="interaction"
     >
-      <GateSurface pending={pending} onSubmit={(value) => onResult(interactionResult(config, value, inputs))} />
+      {/* `.modal-wide` is a flex column: nothing in it collapses (`GateSurface`'s `flex`). */}
+      <GateSurface pending={pending} flex={wide} services={galleryServices(surface, config)} onSubmit={(value) => onResult(interactionResult(config, value, inputs))} />
     </View>
   );
 }

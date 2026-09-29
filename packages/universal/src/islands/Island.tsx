@@ -13,6 +13,8 @@ const MarkdownEditor = lazy(() => import("@jaira/ui/markdownEditor").then((m) =>
 const MonacoCodePane = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.MonacoCodePane })));
 const CodeText = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.CodeText })));
 const SchemaTextField = lazy(() => import("@jaira/ui/schemaEditor").then((m) => ({ default: m.SchemaTextField })));
+const MarkdownDocument = lazy(() => import("@jaira/ui/markdownDocument").then((m) => ({ default: m.MarkdownDocument })));
+const Html = lazy(() => import("@jaira/ui/htmlFrame").then((m) => ({ default: m.Html })));
 
 export function Island(props: IslandProps): JSX.Element {
   // Marked, so the fidelity gate can leave it out: an island is the desktop's own component by
@@ -43,6 +45,19 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
         </div>
       );
     case "markdownEditor":
+      // A value view's document (an artifact under review): the desktop's `MarkdownDocument`, which
+      // draws the editor as tall as its words, with a change over it.
+      if (p["document"] === true) {
+        return (
+          <Suspense fallback={null}>
+            <MarkdownDocument
+              text={String(p["text"] ?? "")}
+              {...(p["readOnly"] === false ? { onChange: event("change") } : { readOnly: true })}
+              {...(p["diff"] !== undefined ? { diff: p["diff"] as never } : {})}
+            />
+          </Suspense>
+        );
+      }
       return (
         <div className="file-edit" style={box}>
           <Suspense fallback={null}>
@@ -77,6 +92,13 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
         </div>
       );
     }
+    // An HTML or SVG artifact, drawn as the page it is (`valueView.tsx`'s `Html`).
+    case "artifact":
+      return (
+        <Suspense fallback={null}>
+          <Html text={String(p["text"] ?? "")} />
+        </Suspense>
+      );
     case "schemaText":
       return (
         <div style={box}>

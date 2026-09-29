@@ -1,14 +1,25 @@
 import { useMemo, useState, type JSX, type ReactNode } from "react";
-import { ScrollView } from "react-native";
+import { ScrollView, TextInput } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { artifactOf, delimiterOf, mimeOfFenceLang, parseStructured, structuredFormatOf, viewsFor, type ParsedStructure, type ViewHint, type ViewId } from "@jaira/shared/browser";
 import { highlightJson } from "@jaira/ui/jsonHighlight";
-import { VIEW_META } from "@jaira/ui/valueViewMeta";
+import { VIEW_META, base64Of, fileNameOf } from "@jaira/ui/valueViewMeta";
+import { invoke } from "@jaira/ui/store";
+import { useValuePanel } from "@jaira/ui/valuePanel";
+import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { Uncopied } from "../../app/Uncopied";
-import { PLAIN_SCROLLER, Press, Txt, edge, font, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, edge, font, lengthToken, scrollbarProps } from "../../primitives";
+import { Island } from "../../islands";
 import { useTokens, type Tokens } from "../../tokens";
 import { DataView } from "../files/DataView";
 import { Markdown, registerFenceRenderer } from "../Markdown";
+
+/** A change over a markdown document (`markdownEditor.tsx`'s `MarkdownDiff`, which a phone cannot import). */
+export interface MarkdownDiff {
+  before: string;
+  after: string;
+  hunks: readonly { start: number; end: number; text: string }[];
+}
 
 /**
  * `valueView.tsx`'s `ValueView`, universal (decision 0015) — the one value view: a value in the best
@@ -25,12 +36,14 @@ import { Markdown, registerFenceRenderer } from "../Markdown";
  *   .vv-more         22 wide, padding 1 0 4, a transparent 1px edge, radius 6, app 12/12.5, line 1,
  *                    --tok-hint (hover: --line edge, --panel-2, --text)
  *   .vv-source       data 11.5/12, line 1.55, --dim, pre-wrap, at most 340 tall, scrolls
- *   .vv-json         the source's box, --text, coloured by token (`.tok-*`)
+ *   .vv-json         the source's box, coloured by token (`.tok-*`); plain text --dim (`.vv-source` wins)
  *   .vv-body > .markdown   app 12.5/12.5
  *   .doc-tree        `DataView`
  *
- * {@link Uncopied}: the Files view of a changeset, a media player, rendered HTML, a patch, a table's
- * cells, the Form view, and the Code view's editor (drawn here as its source) — and the ⋯ menu's verbs.
+ * Rendered HTML is the `artifact` island (a page is web content; a WebView on a phone); the editors (with
+ * `edit`) are the markdown and code editors' islands. {@link Uncopied}: the Files view of a changeset, a
+ * media player, a patch, a table's cells, and the Form view. The ⋯ menu's verbs are the
+ * desktop's: Download…, and Open in context panel where a panel is there to open it in (`valuePanel.ts`).
  */
 export function ValueView({
   value,
@@ -40,6 +53,9 @@ export function ValueView({
   inline = false,
   view: controlled,
   chrome = true,
+  edit,
+  diff,
+  softbreak,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -50,6 +66,16 @@ export function ValueView({
   view?: ViewId | undefined;
   /** `false` ⇒ no header at all, for a caller that has somewhere better for the controls. */
   chrome?: boolean;
+  /**
+   * The views made WRITABLE (the desktop's `edit`): markdown becomes the live-preview editor and code
+   * the code editor — both islands, the editors being the one place a phone may differ — and source a
+   * text box.
+   */
+  edit?: ((next: string) => void) | undefined;
+  /** A change drawn over the markdown document (the desktop's `diff`), which takes the editor too. */
+  diff?: MarkdownDiff | undefined;
+  /** What a single newline in a markdown paragraph is (`Markdown`'s): a space where the host collapses white space. */
+  softbreak?: "newline" | "space";
 }): JSX.Element {
   const t = useTokens();
   const views = viewsFor(value, hint ?? {});
@@ -67,7 +93,30 @@ export function ValueView({
   }, [wantsParse, showing, mime]);
 
   const body = ((): ReactNode => {
-    if (view === "markdown") return <Markdown text={String(showing)} scale={12.5 / 12.5} />;
+    if (view === "markdown") {
+      // The DOM's `MarkdownDocument`: the reading renderer, unless there is an edit to take or a change
+      // to draw — then the editor, which on a phone is the markdown editor's island.
+      if (edit === undefined && diff === undefined) return <Markdown text={String(showing)} scale={12.5 / 12.5} {...(softbreak !== undefined ? { softbreak } : {})} />;
+      return (
+        <Island
+          component="markdownEditor"
+          props={{ text: String(showing), document: true, readOnly: edit === undefined, ...(diff !== undefined ? { diff } : {}) }}
+          onEvent={(name, next) => name === "change" && edit?.(String(next))}
+        />
+      );
+    }
+    if (view === "html") {
+      // A page, which is web content by nature: the artifact island (a WebView on a phone), static as the
+      // desktop's is where no grant to run it was made.
+      return <Island component="artifact" props={{ text: String(showing) }} />;
+    }
+    if (view === "code" && edit !== undefined && typeof showing === "string") {
+      return <Island component="code" height={340} props={{ text: showing, mime: mime ?? "text/plain", readOnly: false, view: "write" }} onEvent={(name, next) => name === "change" && edit(String(next))} />;
+    }
+    if (edit !== undefined && typeof showing === "string" && (view === "text" || view === "json")) {
+      // `textarea.code-editor.vv-edit`: the text as written, in the data face, to type into.
+      return <EditSource value={showing} onChange={edit} inline={inline} t={t} />;
+    }
     if (view === "data") {
       if (parsed !== null && !parsed.ok) return <ParseProblem message={parsed.message} spot={parsed.spot} />;
       return <DataView value={parsed?.ok === true ? parsed.value : showing} />;
@@ -76,6 +125,34 @@ export function ValueView({
     if (view === "code" || view === "text") return <Source value={showing} t={t} />;
     return <Uncopied name={`the ${view} view`} />;
   })();
+
+  // The ⋯ menu (`valueView.tsx`'s `openMore`): save it, and — where there is a panel — open it there.
+  const panel = useValuePanel();
+  const [more, setMore] = useState<MenuAt | null>(null);
+  const openMore = (x: number, y: number): void => {
+    const downloadName = fileNameOf(artifact?.path, mime, typeof showing === "string");
+    setMore({
+      x: x - MENU_WIDTH,
+      y,
+      items: [
+        {
+          label: "Download…",
+          note: downloadName,
+          onSelect: () => void invoke("shell:saveFile", { name: downloadName, data: base64Of(jsonTextOf(showing)) }).catch(() => undefined),
+        },
+        ...(panel === null
+          ? []
+          : [
+              {
+                label: "Open in context panel",
+                separator: true,
+                note: "keeps it on screen while you carry on",
+                onSelect: () => panel.open({ title: artifact?.path ?? artifact?.name ?? label ?? "Value", value, ...(hint !== undefined ? { hint } : {}), ...(label !== undefined ? { label } : {}) }),
+              },
+            ]),
+      ],
+    });
+  };
 
   const head = chrome && (label !== undefined || views.length > 1 || actions !== undefined);
   const lifted = inline ? { position: "absolute", zIndex: 2, top: 3, right: 3 } : { marginBottom: 3 };
@@ -111,6 +188,12 @@ export function ValueView({
           ) : null}
           <Press
             title="What else can be done with this"
+            onPress={(e) => {
+              // Under the button and aligned to its right edge, as the desktop's.
+              const el = (e as unknown as { currentTarget?: { getBoundingClientRect?: () => DOMRect } }).currentTarget;
+              const rect = isWeb && typeof el?.getBoundingClientRect === "function" ? el.getBoundingClientRect() : undefined;
+              openMore(rect !== undefined ? rect.right : e.nativeEvent.pageX + 11, rect !== undefined ? rect.bottom + 2 : e.nativeEvent.pageY + 12);
+            }}
             width={22}
             flexShrink={0}
             paddingTop={1}
@@ -130,7 +213,42 @@ export function ValueView({
         </View>
       ) : null}
       <View minWidth={0}>{body}</View>
+      {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
     </View>
+  );
+}
+
+/**
+ * `textarea.code-editor.vv-edit`: the source to type into — data 12/12 on a 1.5 line, --text on --bg, a
+ * 1px --line, radius --control-radius, padding 8 10, at least 40vh tall (inline: as tall as its lines,
+ * at most 24).
+ */
+function EditSource({ value, onChange, inline, t }: { value: string; onChange: (next: string) => void; inline: boolean; t: Tokens }): JSX.Element {
+  const rows = inline ? Math.min(Math.max(value.split("\n").length, 1), 24) : undefined;
+  const size = Number(t.scaled("size-data", 1)) || 12;
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChange}
+      multiline
+      spellCheck={false}
+      {...((rows !== undefined ? { rows, numberOfLines: rows } : {}) as object)}
+      style={
+        {
+          ...(font(t, { voice: "data", scale: 1, color: "text" }) as object),
+          width: "100%",
+          ...(rows !== undefined ? { height: rows * size * 1.5 + 18 } : { minHeight: 240 }),
+          paddingVertical: 8,
+          paddingHorizontal: 10,
+          borderWidth: 1,
+          borderStyle: "solid",
+          borderColor: t.v("line"),
+          borderRadius: lengthToken(t, "control-radius", 7),
+          backgroundColor: t.v("bg"),
+          textAlignVertical: "top",
+        } as never
+      }
+    />
   );
 }
 
@@ -161,7 +279,8 @@ function Source({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
   );
 }
 
-const TOKEN_INK: Record<string, string> = { key: "accent", string: "tok-string", number: "tok-number", literal: "tok-number", punct: "dim", comment: "dim", plain: "text" };
+// Plain text is --dim: `.vv-source` (later in the sheet) outranks `.vv-json`'s --text, measured.
+const TOKEN_INK: Record<string, string> = { key: "accent", string: "tok-string", number: "tok-number", literal: "tok-number", punct: "dim", comment: "dim", plain: "dim" };
 
 /** `JsonView`: the value as JSON, coloured by the one highlighter (`highlightJson`). */
 function JsonSource({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
@@ -171,7 +290,7 @@ function JsonSource({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
   return (
     <SourceBox t={t}>
       {/* The line as the stylesheet writes it (unitless) on web: Blink multiplies it out in float. */}
-      <Txt spec={{ ...base, color: "text" }} {...((isWeb ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: "1.55" } : {}) as object)}>
+      <Txt spec={{ ...base, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: "1.55" } : {}) as object)}>
         {lines.map((line, i) => (
           <Text key={i}>
             {line.tokens.map((token, j) => (

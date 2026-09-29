@@ -155,6 +155,7 @@ export function Press({
   title,
   children,
   box,
+  fill = true,
   ...props
 }: {
   onPress?: (e: GestureResponderEvent) => void;
@@ -167,6 +168,13 @@ export function Press({
   children?: ReactNode | ((state: PressState) => ReactNode);
   /** Box props that depend on the press state (hover ground, pressed tint). */
   box?: (state: PressState) => Record<string, unknown>;
+  /**
+   * The box grows to fill the pressable (the default). `false` where the pressable is only ever its
+   * content's size inside a box whose height is still being settled (a stretched flex line): there Yoga
+   * feeds the growth back into that height, pass after pass, and a row of Connections ran to a million
+   * pixels on a phone.
+   */
+  fill?: boolean;
 } & Record<string, unknown>): JSX.Element {
   const outer: Record<string, unknown> = {};
   const inner: Record<string, unknown> = {};
@@ -184,7 +192,7 @@ export function Press({
         const state = { hovered: s.hovered === true, pressed: s.pressed };
         return (
           // The tooltip on the box: react-native-web's Pressable drops a `title`, and Tamagui hands one to the element.
-          <View flexGrow={1} flexShrink={1} {...((isWeb && title !== undefined ? { title } : {}) as object)} {...(inner as object)} {...((box?.(state) ?? {}) as object)}>
+          <View flexGrow={fill ? 1 : 0} flexShrink={1} {...((isWeb && title !== undefined ? { title } : {}) as object)} {...(inner as object)} {...((box?.(state) ?? {}) as object)}>
             {typeof children === "function" ? children(state) : children}
           </View>
         );
@@ -309,4 +317,15 @@ export function appCh(t: Tokens, scale: number, n: number): number | string {
   if (typeof size !== "number") return `calc(${n}ch)`;
   const zero = size <= 11 ? 0.662 + 0.005 * (size - 10) : 0.667 + 0.0057 * (size - 11);
   return n * size * zero;
+}
+
+/**
+ * The family for a text that writes its own font rather than going through `Txt` (a card's rows, a pill,
+ * a chip): on web the voice's stack, as before (`var(--font-data)`, or the replayed one); on a phone the
+ * cut face `Txt` would pick (`familyOf`) at that weight and size. A CSS stack is no family on Android,
+ * which drew all of these in the system font. Spread it where `fontFamily` was; a `fontWeight` set beside
+ * it stays, and names the weight the face was cut at, so Android fakes nothing.
+ */
+export function faceOf(t: Tokens, voice: Voice, weight: number, size: number | string): Record<string, unknown> {
+  return familyOf(t, voice, weight, typeof size === "number" ? size : 12);
 }
