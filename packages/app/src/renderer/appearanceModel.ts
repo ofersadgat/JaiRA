@@ -218,6 +218,34 @@ export const BATCH_PREVIEW = [
   { session: "reviewer", file: "session.ts", text: "Nothing to change: the lock is taken before the session is written." },
 ] as const;
 
+/**
+ * The Board section's preview (`TaskPreview`): three columns of the board's own tiles — each one's
+ * status, title, where it stands and the far end of its meta line.
+ */
+export const TASK_PREVIEW: ReadonlyArray<{
+  name: string;
+  seq: number;
+  tiles: ReadonlyArray<{ status: string; title: string; selected?: boolean; meta: string; far?: string }>;
+}> = [
+  {
+    name: "draft",
+    seq: 1,
+    tiles: [
+      { status: "running", title: "Rewind a run", selected: true, meta: "feature/ux/draft", far: "2 m" },
+      { status: "completed", title: "Ship each kinds", meta: "feature/ux/draft", far: "1 h ago" },
+    ],
+  },
+  {
+    name: "critique",
+    seq: 2,
+    tiles: [
+      { status: "waiting_for_user", title: "Fork from any point", meta: "feature/ux/critique", far: "gate" },
+      { status: "failed", title: "Bridge race", meta: "exit 1", far: "6 m ago" },
+    ],
+  },
+  { name: "verify", seq: 3, tiles: [{ status: "queued", title: "Pause and stop", meta: "queued" }] },
+];
+
 /** The Text section's preview: a file surface's three runs, and a task row's. */
 export const TEXT_PREVIEW = {
   band: "Files",

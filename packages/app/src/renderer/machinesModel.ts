@@ -176,3 +176,36 @@ export const ADD_SCHEMA = {
   },
   required: ["address", "code"],
 } as const;
+
+/**
+ * Pairing with another machine (`machinesPane.tsx`'s `AddMachine`): the address and code typed, whether
+ * Pair can be pressed, and what it came to — the page's view refreshed, or why not.
+ */
+export function useAddMachine(onView: (v: MachinesView) => void): {
+  value: { address?: string; code?: string };
+  setValue: (next: { address?: string; code?: string }) => void;
+  busy: boolean;
+  error: string | undefined;
+  done: string | undefined;
+  ready: boolean;
+  pair: () => void;
+} {
+  const [value, setValue] = useState<{ address?: string; code?: string }>({});
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [done, setDone] = useState<string | undefined>(undefined);
+  const ready = (value.address ?? "").trim() !== "" && (value.code ?? "").trim() !== "";
+  const pair = (): void => {
+    setBusy(true);
+    setError(undefined);
+    setDone(undefined);
+    invoke("machines:add", { address: value.address!.trim(), code: value.code!.trim() })
+      .then((view) => {
+        onView(view);
+        setValue({});
+        setDone(MACHINES_WORDS.paired);
+      }, (e: unknown) => setError(errorOf(e)))
+      .finally(() => setBusy(false));
+  };
+  return { value, setValue, busy, error, done, ready, pair };
+}

@@ -20,7 +20,6 @@ import { useState, type JSX } from "react";
 import {
   EXECUTOR_STEPS,
   EXECUTOR_STEP_ORDER,
-  BUILTIN_FUNCTIONS,
   executorNode,
   parseFunctionRule,
   type ExecutorStepName,
@@ -33,7 +32,7 @@ import {
 } from "@jaira/shared/browser";
 import { Disclosure, Field, FieldGrid, Level, SelectInput, TextArea, TextInput, type LayerState } from "./controls";
 import { LlmConfigForm, type LlmConfigDoc } from "./llmConfigForm";
-import { activeStepsOf, allowFromText, ownerOf, routesOf, stepPathOf, summarisePromptNode, treeCtxOf, treeLayerOf, withoutModel, type TreeCtx } from "./executorTreeModel";
+import { activeStepsOf, allowFromText, knownFunctionsOf, ownerOf, routesOf, stepPathOf, summarisePromptNode, treeCtxOf, treeLayerOf, withoutModel, type TreeCtx } from "./executorTreeModel";
 import { SchemaForm } from "./schemaForm/SchemaForm";
 
 export interface ExecutorTreeProps {
@@ -56,12 +55,8 @@ export interface ExecutorTreeProps {
 }
 
 export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay, split = false }: ExecutorTreeProps): JSX.Element {
-  // The built-ins JaiRA itself registers, plus every agent runtime this project configures — an agent
-  // is reachable as a FUNCTION too, under the same registry name a model prefix uses.
-  const knownFunctions = [
-    ...BUILTIN_FUNCTIONS,
-    ...agents.map((name) => ({ name, what: "agent — delegate this state to that runtime" })),
-  ];
+  // The built-ins and every agent runtime this project configures (`executorTreeModel.ts`).
+  const knownFunctions = knownFunctionsOf(agents);
   const ctx = treeCtxOf(overlay, locked, onOverlay, split);
 
   return (

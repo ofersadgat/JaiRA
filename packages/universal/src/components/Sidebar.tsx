@@ -1,9 +1,10 @@
-import { Fragment, type JSX, type ReactNode } from "react";
+import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import { parentName } from "@jaira/ui/projects";
 import type { SidebarProject, SidebarView } from "@jaira/ui/sidebar";
 import { Glyph, Press, Txt, edge, useHover } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
+import { ContextMenu, type MenuAt } from "./Menu";
 import { Pills } from "./Pills";
 
 /**
@@ -69,6 +70,9 @@ export type SidebarProps = {
   onChooseProject: (mode: "open" | "init") => void;
   onProjectSettings: (project: SidebarProject) => void;
   update?: ((collapsed: boolean) => ReactNode) | undefined;
+  /** Paired machines a project can be opened or made on (decision 0013 §8). */
+  machines?: ReadonlyArray<{ id: string; label: string; online: boolean }>;
+  onBrowse?: (machineId: string, mode: "open" | "init") => void;
   /** `--sidebar`: the column's width while it is open. */
   width: number;
 };
@@ -103,10 +107,13 @@ function Column({
   onChooseProject,
   onProjectSettings,
   update,
+  machines = [],
+  onBrowse,
   width,
 }: SidebarProps): JSX.Element {
   const t = useTokens();
   const look = useLook();
+  const [openMenu, setOpenMenu] = useState<MenuAt | null>(null);
 
   const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any", mode?: { back?: () => void; expand?: () => void }): JSX.Element => {
     const inScope = scope === "any" || (scope === "root") === (at === null);
@@ -178,7 +185,7 @@ function Column({
                 </Press>
               ))}
               {v.counts !== undefined && !collapsed ? (
-                <Pills counts={v.counts} budget={ROW_PILL_BUDGET - acts.length * ACT_WIDTH} onClear={v.onSeen === undefined ? undefined : () => v.onSeen!(undefined as never)} {...(v.seenTitle !== undefined ? { clearTitle: v.seenTitle } : {})} />
+                <Pills counts={v.counts} budget={ROW_PILL_BUDGET - acts.length * ACT_WIDTH} onClear={v.onSeen === undefined ? undefined : (from) => v.onSeen!(from as never)} {...(v.seenTitle !== undefined ? { clearTitle: v.seenTitle } : {})} />
               ) : null}
             </>
           )}
@@ -326,7 +333,29 @@ function Column({
           </View>
           {projects.map(projectRow)}
           <Press
-            onPress={() => onChooseProject("open")}
+            // `OpenAnother`: a menu under the row — open or make a project here, or on a paired machine.
+            onPress={(e) => {
+              const box = isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
+              const touch = (e as unknown as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
+              setOpenMenu({
+                x: box?.left ?? touch?.pageX ?? 0,
+                y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0),
+                items: [
+                  { label: "Open project…", onSelect: () => onChooseProject("open") },
+                  { label: "New project…", onSelect: () => onChooseProject("init") },
+                  ...machines.flatMap((m, i) => [
+                    {
+                      label: `Open project on ${m.label}…`,
+                      ...(i === 0 ? { separator: true } : {}),
+                      disabled: !m.online,
+                      ...(m.online ? {} : { note: "offline" }),
+                      onSelect: () => onBrowse?.(m.id, "open" as const),
+                    },
+                    { label: `New project on ${m.label}…`, disabled: !m.online, onSelect: () => onBrowse?.(m.id, "init" as const) },
+                  ]),
+                ],
+              });
+            }}
             disabled={busy}
             label="open another project"
             title="open another project"
@@ -389,6 +418,7 @@ function Column({
           </View>
         </View>
       ) : null}
+      {openMenu !== null ? <ContextMenu anchor={openMenu} onClose={() => setOpenMenu(null)} /> : null}
     </View>
   );
 }

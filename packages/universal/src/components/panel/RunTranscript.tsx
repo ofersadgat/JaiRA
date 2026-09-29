@@ -1,34 +1,52 @@
-import { useEffect, useMemo, useRef, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Platform, ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View } from "@tamagui/core";
 import { type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { callsOf, toldOf } from "@jaira/ui/runConversationModel";
+import { callsOf, settledGateCallOf, settledGateOf, toldOf } from "@jaira/ui/runConversationModel";
+import { invoke } from "@jaira/ui/store";
+import { AnsweredForYou } from "./WorkRows";
+import { PendingSend } from "./PendingSend";
 import { paletteOfRun } from "@jaira/ui/rail";
 import { bandsOf, instancesOf, mountPathOf, notesOf, pathFrom, piecesOf, recordAt, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
 import { sessionKey } from "@jaira/ui/sessionCache";
 import { keyOfPiece, metaOf, pageRowsOf, spanOf, summaryOf } from "@jaira/ui/sessionRows";
-import { KIND_ICON, KIND_WORD, askingInstanceOf, headerToneOf, isAsking, surfaceKindOf, type HeaderTone, type SurfaceKind } from "@jaira/ui/stateSurface";
+import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurface";
+import { approvalCallIndex } from "@jaira/ui/approvalCall";
+import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurface";
+import type { CallSurface } from "@jaira/ui/transcriptRows";
+import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
+import { ApprovalSurface } from "../floats/ApprovalSurface";
+import { QuestionSurface } from "../floats/QuestionSurface";
 import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, signatureOf } from "@jaira/ui/transcript";
 import { Press, Txt, edge, scrollbarProps } from "../../primitives";
 import { useLook, useTokens, type Look } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { GateSurface } from "./Gate";
 import { Icon } from "./Icon";
-import { RailedRows } from "./Rail";
+import { SessionBands, baselineOf, collapsed, sheetLookOf } from "./SessionBands";
 import { Transcript } from "./SessionTranscript";
 import { ValueView } from "./ValueView";
 import { Button } from "../settings/Button";
 import { advanceTargetOf } from "@jaira/ui/stateSurface";
 import { durationOf, useElapsed } from "@jaira/ui/runActivityModel";
-import type { PendingUserEvent } from "@jaira/shared/browser";
+import { moveQuestionConfig, parseComponentConfig, type MoveQuestionView, type PendingApproval, type PendingQuestion, type PendingUserEvent, type SettledByView } from "@jaira/shared/browser";
 
 /** What a run's conversation is read from — the store's fields `App.tsx` hands `FileSurfaceContext`. */
-export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessions" | "sessionHistory" | "records" | "liveTurn" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "batches" | "userEvents"> & {
+export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessions" | "sessionHistory" | "records" | "liveTurn" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "batches" | "userEvents"> &
+  Partial<Pick<FileSurfaceContext, "moveQuestions" | "onMoveQuestion" | "onSelectTask">> & {
   /** Whether a cut can be offered — `context.onRewind` and `context.onFork` both there. */
   cuts: boolean;
   /** Answer a parked transition (`WaitingOn`'s button). */
   onDeliverUserEvent?: ((requestId: string) => void) | undefined;
+  /** The project the task stands in — what "Answer it yourself" is asked in. */
+  project?: string | undefined;
+  /** A command the running agent waits to have approved, and how to answer it. */
+  approval?: PendingApproval | undefined;
+  onApproval?: ApprovalSurfaceProps["onDecide"] | undefined;
+  /** A question the running agent put to the person, and how to answer it. */
+  question?: PendingQuestion | undefined;
+  onQuestion?: ((answers: Record<string, string | string[]> | undefined) => void) | undefined;
 };
 
 /**
@@ -70,6 +88,20 @@ export function RunTranscript({
   const rootPath = useMemo(() => (parent === undefined ? "" : mountPathOf(detail.instances, parent.instanceId)), [detail, parent]);
   const askingHere = useMemo(() => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail.instances)), [gate, onGate, detail.instances]);
   const waits = useMemo(() => [...source.userEvents].filter((one) => one.taskId === detail.taskId).sort((a, b) => a.at - b.at), [source.userEvents, detail.taskId]);
+  // Where a running agent's question or approval is drawn: under the leaf whose call is running.
+  const agentHere = useMemo(
+    () => ((source.question !== undefined && source.onQuestion !== undefined) || (source.approval !== undefined && source.onApproval !== undefined) ? runningLeafOf(detail.instances) : undefined),
+    [source.question, source.onQuestion, source.approval, source.onApproval, detail.instances],
+  );
+  // The workflow tools' notes are drawn on the RAIL (`jaira.moved`), and "Answer it yourself" under an
+  // agent's question is the gate's own rewind.
+  const calls = useMemo<CallSurface>(
+    () => ({
+      outcomes: "rail",
+      onAnswerYourself: (by: SettledByView) => void invoke("task:answerYourself", { taskId: detail.taskId, at: by.at, ...(source.project !== undefined && source.project !== "" ? { project: source.project } : {}) }).catch(() => undefined),
+    }),
+    [detail.taskId, source.project],
+  );
 
   // Every panel is open, so every transcript in them is needed — fetched in one round.
   useEffect(() => {
@@ -93,13 +125,21 @@ export function RunTranscript({
 
   const render = (piece: SessionPiece): ReactNode => {
     if (gate !== undefined && onGate !== undefined && isAsking(piece.node)) {
-      if (gate.queued !== undefined && gate.offline !== undefined) return <Uncopied name="a gate answered offline" />;
+      // Answered here for a machine that is offline: drawn as answered, with the answer waiting.
+      if (gate.queued !== undefined && gate.offline !== undefined) {
+        const outboxId = gate.queued.outboxId;
+        return (
+          <>
+            <GateSurface pending={gate} onSubmit={() => undefined} settled={{ value: gate.queued.value }} />
+            <PendingSend machine={gate.offline.machine} onTakeBack={() => void invoke("machines:withdraw", { id: outboxId }).catch(() => undefined)} />
+          </>
+        );
+      }
       return <GateSurface pending={gate} onSubmit={onGate} />;
     }
-    if (surfaceKindOf(piece.node) === "asked" && piece.node.operation !== undefined && !isAsking(piece.node)) {
-      const cut = piece.node.status === "canceled" || piece.node.status === "failed" || piece.node.status === "timeout";
-      if (piece.node.operation.status !== "running" || cut) return <Uncopied name="a settled gate" />;
-    }
+    // The question once it is no longer being asked: the same control, as it was answered.
+    const settledCall = settledGateCallOf(piece.node, records, gate !== undefined && isAsking(piece.node));
+    if (settledCall !== undefined) return <SettledGate call={settledCall} node={piece.node} taskId={detail.taskId} project={source.project} />;
     const silent = piece.sessionId === undefined && surfaceKindOf(piece.node) !== "conversation";
     if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} records={records} />;
     const view = sessions[sessionKey(recordAt(piece))];
@@ -107,12 +147,59 @@ export function RunTranscript({
     const matches =
       liveTurn !== null &&
       (piece.sessionId !== undefined ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq : liveTurn.stateId === piece.node.stateId && piece.node.status === "running");
-    const entries = entriesOfPart(markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), matches ? liveTurn : null), piece.node.answeredQuestions), piece.part);
-    return <Transcript session={view} entries={entries} />;
+    const live = matches ? liveTurn : null;
+    const entries = entriesOfPart(markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions), piece.part);
+    const transcript = <Transcript session={view} entries={entries} live={live} calls={calls} {...(piece.sessionId !== undefined ? { scope: piece.sessionId } : {})} />;
+    // The agent's question or the command it is waiting to run, under what it said before asking.
+    if (piece.node.instanceId !== agentHere) return transcript;
+    const { approval, onApproval, question, onQuestion } = source;
+    // The approval as the step it is: when this piece's conversation holds its call, the work summary
+    // draws the prompt in that step's row (`ApprovalAskContext`) and it is not drawn again here.
+    const inTranscript = approval !== undefined && approvalCallIndex(entries as never, approval.requestId) >= 0;
+    return (
+      <>
+        {approval !== undefined && onApproval !== undefined && inTranscript ? <ApprovalAskContext.Provider value={{ pending: approval, onDecide: onApproval }}>{transcript}</ApprovalAskContext.Provider> : transcript}
+        {approval !== undefined && onApproval !== undefined && !inTranscript ? (
+          <InlineHost>
+            <ApprovalSurface key={approval.requestId} pending={approval} onDecide={onApproval} />
+          </InlineHost>
+        ) : null}
+        {question !== undefined && onQuestion !== undefined ? (
+          <InlineHost>
+            <QuestionSurface key={question.requestId} pending={question} onSubmit={onQuestion} />
+          </InlineHost>
+        ) : null}
+      </>
+    );
   };
 
+  /**
+   * A move's INPUT QUESTION, where the move asked it: the question itself while it is open — answering
+   * it takes the move — and, once it is not, the same question as it was answered.
+   */
+  const moveQuestion = (asked: MoveQuestionView): ReactNode => {
+    const live = source.moveQuestions?.find((pending) => pending.requestId === asked.requestId);
+    if (live !== undefined && source.onMoveQuestion !== undefined) {
+      return (
+        <InlineHost>
+          <GateSurface key={live.requestId} pending={live} onSubmit={(value) => source.onMoveQuestion!(live.requestId, value)} />
+        </InlineHost>
+      );
+    }
+    const inputs = moveQuestionConfig(detail.title ?? "this task", asked.targetLabel ?? asked.target, asked.missing, asked.optional ?? []);
+    const settled: PendingInteraction = { requestId: asked.requestId, taskId: detail.taskId, project: "", component: "choose_option", inputs, config: parseComponentConfig("choose_option", inputs) };
+    return (
+      <InlineHost>
+        <GateSurface
+          pending={settled}
+          onSubmit={() => undefined}
+          settled={{ value: asked.answered !== undefined ? { answers: asked.answered } : undefined }}
+          {...(asked.outcome === "refused" ? { error: `The move could not be taken: ${asked.message ?? "refused"}` } : {})}
+        />
+      </InlineHost>
+    );
+  };
   const empty = bands.length === 0 && notes.length === 0;
-  const page = empty ? undefined : pageRowsOf(bands, notes, rootPath);
   return (
     <ScrollView
       ref={scroller}
@@ -129,29 +216,26 @@ export function RunTranscript({
       }}
     >
       <View flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
-        {page === undefined ? (
+        {empty ? (
           <Empty>This run has not entered a child yet.</Empty>
         ) : (
-          <RailedRows
-            steps={page.steps}
+          <SessionBands
+            bands={bands}
+            notes={notes}
+            root={rootPath}
+            render={render}
             palette={palette}
-            wide={page.bands.some((band) => band.segments.length > 1)}
-            renderStep={(i) => {
-              const row = page.rows[i]!;
-              if (row.kind === "note") return <NoteRow note={row.note} root={rootPath} cuts={source.cuts} />;
-              return (
-                <Band
-                  band={row.band}
-                  starter={(segment) => page.starters.get(segment.key)}
-                  asking={askingHere}
-                  shut={shutStates}
-                  onToggle={onToggleShutState}
-                  onSetShut={onSetShutStates}
-                  scope={detail.taskId}
-                  render={render}
-                />
-              );
-            }}
+            asking={askingHere}
+            shut={shutStates}
+            onToggle={onToggleShutState}
+            onSetShut={onSetShutStates}
+            scope={detail.taskId}
+            cuts={source.cuts}
+            moveQuestion={moveQuestion}
+            {...(source.onSelectTask !== undefined ? { onSelectTask: source.onSelectTask } : {})}
+            // The workflow's own link: describing it beside the run is the Files view's panel, not copied yet.
+            onOpenWorkflow={() => undefined}
+            {...(detail.origin !== undefined ? { origin: detail.origin } : {})}
           />
         )}
         {waits.map((request) => (
@@ -231,11 +315,8 @@ function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDelive
   );
 }
 
-/**
- * Text as `white-space: normal` lays it out: every run of spaces and line breaks one space. A native
- * `Text` keeps a newline as a break, so words the DOM reflows are collapsed before they are drawn.
- */
-export const collapsed = (text: string): string => text.replace(/[ \t\n\r\f]+/g, " ");
+// `collapsed` is `SessionBands.tsx`'s now; exported from here too, where it has been found.
+export { collapsed };
 
 /** `p.empty`: a quiet sentence where there is nothing to draw. */
 export function Empty({ children }: { children: ReactNode }): JSX.Element {
@@ -246,395 +327,35 @@ export function Empty({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** What each kind of note says it is (`sessionPanels.tsx`'s `VERB`). */
-const VERB: Record<BandNote["kind"], string> = { entered: "entered", transition: "entered", blocked: "could not enter", failure: "", made: "made", skipped: "skipped", moved: "", asked: "asked" };
-
 /**
- * `NoteRow`: what happened between the panels — a state entered, a child that could not be. The rewind
- * and fork buttons are the room they take (`.sb-note .ts-rail`, 44 × 21, hidden at rest).
- *
- *   .sb-note          row, baseline, gap 8, padding 4, --size-app × 11.5/12.5, --bad (.step: --dim)
- *   .sb-note-icon     1em, centred; .sb-note-verb, .sb-note-state --dim, the state at most 30%, ellipsed
+ * `SettledGate`: a settled gate in its state's panel — the control as answered, who answered it when the
+ * control conversation did, and the record behind a toggle (`.gate-record`: 12 above, its button 6 over
+ * the record).
  */
-function NoteRow({ note, root, cuts }: { note: BandNote; root: string; cuts: boolean }): JSX.Element {
-  const t = useTokens();
-  if ((note.kind === "made" && note.made !== undefined) || (note.kind === "asked" && note.asked !== undefined) || (note.kind === "moved" && note.moved !== undefined)) return <Uncopied name={`a ${note.kind} note`} />;
-  const moved = note.kind === "entered" || note.kind === "transition";
-  const skipped = note.kind === "skipped";
-  const where =
-    note.keys !== undefined && note.keys.length > 1
-      ? [pathFrom(note.path.includes("/") ? note.path.slice(0, note.path.lastIndexOf("/")) : "", root), note.keys.join(", ")].filter((part) => part !== "").join(" → ")
-      : pathFrom(note.path, root);
-  const ink = moved || skipped ? "dim" : "bad";
-  const size = t.scaled("size-app", 11.5 / 12.5);
-  const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
+function SettledGate({ call, node, taskId, project }: { call: ReadCall; node: InstanceNode; taskId: string; project: string | undefined }): JSX.Element {
+  const [record, setRecord] = useState(false);
+  const pending = useMemo(() => settledGateOf(call, node, taskId, project), [call, node, taskId, project]);
+  const answered = call.error === undefined && call.result !== undefined;
   return (
-    <View role="note" flexDirection="row" alignItems="baseline" gap={8} padding={4} minWidth={0}>
-      <Icon name={moved ? "choice" : skipped ? "workflow" : "alert"} size={typeof size === "number" ? size : 11.5} color={String(t.v(ink))} box={{ alignSelf: "center" }} />
-      {VERB[note.kind] === "" ? null : (
-        <Txt spec={words} flexShrink={0}>
-          {VERB[note.kind]}
-        </Txt>
-      )}
-      {skipped && note.text.length > 0 ? <Txt spec={{ ...words, color: ink }} minWidth={0} flexShrink={1}>{collapsed(note.text)}</Txt> : null}
-      {where === "" ? null : (
-        <Txt spec={words} ellip flexShrink={0} maxWidth="30%" title={note.stateId ?? where}>
-          {where}
-        </Txt>
-      )}
-      {note.kind === "entered" || skipped || note.text.length === 0 ? null : (
-        <Txt spec={{ ...words, color: ink }} minWidth={0} flexShrink={1}>
-          {collapsed(note.kind === "blocked" ? `: ${note.text}` : note.text)}
-        </Txt>
-      )}
-      {cuts && moved ? <View width={44} height={21} marginLeft="auto" alignSelf="center" flexShrink={0} /> : null}
-    </View>
-  );
-}
-
-/** `Band`: one slice of wall clock. A single session is its sheet; several are {@link Uncopied}. */
-function Band({
-  band,
-  starter,
-  asking,
-  shut,
-  onToggle,
-  onSetShut,
-  scope,
-  render,
-}: {
-  band: SessionBand;
-  starter: (segment: SessionSegment) => SessionPiece | undefined;
-  asking: string | undefined;
-  shut: ReadonlySet<string>;
-  onToggle: (key: string) => void;
-  onSetShut: (keys: readonly string[], shut: boolean) => void;
-  scope: string;
-  render: (piece: SessionPiece) => ReactNode;
-}): JSX.Element {
-  if (band.segments.length !== 1) return <Uncopied name="concurrent sessions (columns or tabs)" />;
-  const segment = band.segments[0]!;
-  return (
-    <View position="relative" flexDirection="column" width="100%" minWidth={0}>
-      <Sheet segment={segment} starter={starter(segment)} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />
-    </View>
-  );
-}
-
-/**
- * `Sheet`: one session's panel — its name in the grey above it, then what it said.
- *
- *   .sb-gutter         row, centred, gap 8, padding 0 4 4 (.bare: 2 under); .solo is the fold
- *   .sb-gut-chev       the chevron, turned a quarter when open
- *   .sb-session        --size-app × 11/12.5, --dim, ellipsed
- *   .sb-workflow       button.link: data at --size-data × 11/12, --accent, ellipsed, shrinks
- *   .sb-span           --size-app × 11/12.5, --dim, tabular, pushed right, 8 before
- *   .sb-foldall        padding 3 5, a transparent 1px edge, --size-app × 10.5/12.5, --dim; its word
- *                      hidden (0 wide) until hovered
- *   .sb-sheet          --panel, 1px --line, radius 12, 0 1 3 rgba(15, 20, 30, .06) (dark: 0 0 0 .35)
- *   .sb-body           column, padding 13 15 15
- */
-function Sheet({
-  segment,
-  starter,
-  asking,
-  shut,
-  onToggle,
-  onSetShut,
-  scope,
-  render,
-}: {
-  segment: SessionSegment;
-  starter: SessionPiece | undefined;
-  asking: string | undefined;
-  shut: ReadonlySet<string>;
-  onToggle: (key: string) => void;
-  onSetShut: (keys: readonly string[], shut: boolean) => void;
-  scope: string;
-  render: (piece: SessionPiece) => ReactNode;
-}): JSX.Element {
-  const t = useTokens();
-  const keys = segment.pieces.map((piece) => keyOfPiece(piece, scope));
-  const allShut = keys.length > 0 && keys.every((key) => shut.has(key));
-  const toggleAll = (): void => onSetShut(keys, !allShut);
-  const only = segment.pieces.length === 1 ? segment.pieces[0] : undefined;
-  const solo = only !== undefined && surfaceKindOf(only.node) === "conversation";
-  const surface = only !== undefined && segment.sessionId === undefined && surfaceKindOf(only.node) !== "conversation";
-  const small = { voice: "app" as const, scale: 11 / 12.5, color: "dim" };
-  // The workflow's own link: describing it beside the run is the Files view's panel, not copied yet.
-  // `button.link.sb-workflow.ellip`: a BUTTON, so an inline-flex that centres its text — squeezed, the
-  // name overflows both sides and is clipped there, with no ellipsis (the text is a flex item, which
-  // `text-overflow` does not reach). Drawn the same way here.
-  const workflow =
-    starter !== undefined ? (
-      <View flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row" justifyContent="center">
-        <Txt spec={{ voice: "data", scale: 11 / 12, color: "accent" }} flexShrink={0} whiteSpace="nowrap" title={`${starter.node.stateId} — describe this run of it`}>
-          {starter.node.stateId}
-        </Txt>
+    <>
+      <GateSurface key={answered ? "answered" : "open"} pending={pending} onSubmit={() => undefined} settled={answered ? { value: call.result } : { value: undefined }} />
+      {answered && node.settledBy !== undefined ? (
+        <AnsweredForYou
+          by={node.settledBy}
+          onAnswerYourself={() => void invoke("task:answerYourself", { taskId, at: node.settledBy!.at, ...(project !== undefined && project !== "" ? { project } : {}) }).catch(() => undefined)}
+        />
+      ) : null}
+      <View marginTop={12} alignItems="flex-start">
+        <Button kind="quiet" onPress={() => setRecord((v) => !v)}>
+          {record ? "Hide the record" : "Show the record"}
+        </Button>
       </View>
-    ) : null;
-  const span = spanOf(segment);
-  const sheet = sheetLookOf(t, useLook());
-  return (
-    <View flexDirection="column" minWidth={0}>
-      {surface && workflow !== null ? (
-        <View flexDirection="row" alignItems="center" gap={8} paddingHorizontal={4} paddingBottom={2} minWidth={0}>
-          {workflow}
+      {record ? (
+        <View marginTop={6} minWidth={0}>
+          <CallBlock call={call} />
         </View>
       ) : null}
-      {!surface ? (
-        <Gutter solo={solo} onPress={toggleAll}>
-          {solo ? (
-            <View flexShrink={0} transform={allShut ? [] : [{ rotate: "90deg" }]}>
-              <Icon name="chevron" size={Number(t.scaled("size-app", 13 / 12.5)) || 13} color={String(t.v("dim"))} />
-            </View>
-          ) : null}
-          {segment.sessionId !== undefined ? (
-            <Txt spec={small} ellip minWidth={0} flexShrink={1} title={segment.sessionId}>
-              {segment.sessionId}
-            </Txt>
-          ) : (
-            <Txt spec={{ ...small, italic: true }}>no conversation</Txt>
-          )}
-          {workflow}
-          {span !== "" ? (
-            <Txt spec={{ ...small, tabular: true }} flexShrink={0} marginLeft="auto" paddingLeft={8}>
-              {span}
-            </Txt>
-          ) : null}
-          {solo ? null : (
-            <Press
-              onPress={toggleAll}
-              label={allShut ? "Expand all" : "Collapse all"}
-              flexShrink={0}
-              flexDirection="row"
-              alignItems="center"
-              gap={5}
-              paddingVertical={3}
-              paddingHorizontal={5}
-              borderWidth={1}
-              borderStyle="solid"
-              borderRadius={Number(t.v("control-radius-sm")) || 6}
-              box={({ hovered }) => ({ borderColor: hovered ? t.v("line") : "rgba(0, 0, 0, 0)", backgroundColor: hovered ? t.v("panel-2") : "rgba(0, 0, 0, 0)" })}
-            >
-              {({ hovered }) => (
-                <>
-                  <Icon name={allShut ? "unfold" : "fold"} size={Number(t.scaled("size-app", 10.5 / 12.5)) || 10.5} color={String(hovered ? t.v("text") : t.v("dim"))} />
-                  {hovered ? (
-                    <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "text" }} marginLeft={6} numberOfLines={1}>
-                      {allShut ? "expand all" : "collapse all"}
-                    </Txt>
-                  ) : (
-                    // The word is there at rest, 0 wide: it only takes its line's height.
-                    <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "dim" }} width={0} opacity={0} numberOfLines={1} overflow="hidden">
-                      {allShut ? "expand all" : "collapse all"}
-                    </Txt>
-                  )}
-                </>
-              )}
-            </Press>
-          )}
-        </Gutter>
-      ) : null}
-      {solo && allShut ? null : (
-        <View
-          flexDirection="column"
-          minWidth={0}
-          backgroundColor={t.v("panel") as never}
-          borderWidth={sheet.width}
-          borderStyle="solid"
-          borderColor={t.v(sheet.edge) as never}
-          borderRadius={sheet.radius}
-          overflow="hidden"
-          {...({ boxShadow: sheet.shadow } as object)}
-        >
-          {segment.resumed ? <Uncopied name="a resumed session's torn edge" /> : null}
-          <View flexDirection="column" alignItems="stretch" paddingTop={13} paddingHorizontal={15} paddingBottom={15} minWidth={0}>
-            {segment.pieces.map((piece, i) =>
-              solo ? (
-                <View key={`${piece.node.instanceId}:${piece.seq ?? "—"}`} minWidth={0}>
-                  {render(piece)}
-                </View>
-              ) : (
-                <Piece
-                  key={`${piece.node.instanceId}:${piece.seq ?? "—"}`}
-                  piece={piece}
-                  first={i === 0}
-                  afterShut={i > 0 && shut.has(keyOfPiece(segment.pieces[i - 1]!, scope))}
-                  open={!shut.has(keyOfPiece(piece, scope))}
-                  onToggle={() => onToggle(keyOfPiece(piece, scope))}
-                  render={render}
-                  asking={asking}
-                />
-              ),
-            )}
-          </View>
-          {segment.paused ? <Uncopied name="a paused session's torn edge" /> : null}
-        </View>
-      )}
-    </View>
-  );
-}
-
-/** `.sb-gutter`: the whole line is the fold on a solo sheet (a role=button div), else a plain row. */
-function Gutter({ solo, onPress, children }: { solo: boolean; onPress: () => void; children: ReactNode }): JSX.Element {
-  const box = { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4, paddingBottom: 4, minWidth: 0 } as const;
-  return solo ? (
-    <Press onPress={onPress} {...box}>
-      {children}
-    </Press>
-  ) : (
-    <View {...box}>{children}</View>
-  );
-}
-
-/**
- * `.sb-sheet`'s frame, and the rules the palettes put on it:
- *
- *   :root[data-theme="dark"] .sb-sheet                   0 1 3 rgba(0, 0, 0, .35)
- *   :root[data-palette="contrast"] .sb-sheet             1.5px --rule, 3px 3px 0 --rule, radius 4
- *   :root:is([data-palette="pastel"], …-rail) .sb-sheet  radius 16
- */
-function sheetLookOf(t: ReturnType<typeof useTokens>, look: Look): { width: number; edge: string; radius: number; shadow: string } {
-  if (look.palette === "contrast") return { width: 1.5, edge: "rule", radius: 4, shadow: `3px 3px 0px ${String(t.v("rule"))}` };
-  const shadow = look.scheme === "dark" ? "0px 1px 3px rgba(0, 0, 0, 0.35)" : "0px 1px 3px rgba(15, 20, 30, 0.06)";
-  return { width: 1, edge: "line", radius: look.palette === "pastel" || look.palette === "pastel-rail" ? 16 : 12, shadow };
-}
-
-/**
- * `Piece` → `StateBlock` + `StateHeader`: one state inside a session's panel — its letterhead, and its
- * transcript under it while open.
- *
- *   .lh               row, baseline, gap 9, margin 0 0 11, padding 0 0 7, a --line under; data at
- *                     --size-data × 11/12, --dim (hover --text)
- *   .st-block + .st-block > .lh   20 above (12 after a folded one; 16 for a title block)
- *   .lh.shut          no margin under, 8 padding under
- *   .lh.tb            margin −13 −15 13, padding 9 15, --panel-2 — the title block of a state going on;
- *                     accent: --accent 12% into --panel, its rule --accent 28% into --line, all --accent;
- *                     amber: --warn 14%, a dashed rule --warn 30%; red: --bad 11%, --bad 26%
- *   .lh-chev          centred, turned −90° when shut; .lh-ico centred
- *   .lh-kind          600, 0.09em, upper, --size-data × 10/12
- *   .lh-name          600, --text, --size-data (12/12)
- *   .lh-label         app voice, --size-app × 12/12.5, ellipsed
- *   .lh-meta          pushed right, 10 before, tabular, 0.85 opaque
- */
-function Piece({ piece, first, afterShut, open, onToggle, render, asking }: { piece: SessionPiece; first: boolean; afterShut: boolean; open: boolean; onToggle: () => void; render: (piece: SessionPiece) => ReactNode; asking: string | undefined }): JSX.Element {
-  const t = useTokens();
-  const node = piece.node;
-  const kind = surfaceKindOf(node);
-  const sig = signatureOf(node);
-  const tone = headerToneOf(node, kind, asking !== undefined && asking === node.instanceId);
-  const meta = metaOf(node);
-  const summary = summaryOf(piece);
-  return (
-    <View flexDirection="column" alignItems="stretch" minWidth={0} data-instance={node.instanceId}>
-      <Letterhead
-        open={open}
-        kind={kind}
-        tone={tone}
-        name={sig.name}
-        label={sig.label}
-        summary={summary}
-        meta={meta}
-        status={kind === "conversation" ? node.status : undefined}
-        onToggle={onToggle}
-        above={first ? 0 : tone !== undefined ? 16 : afterShut ? 12 : 20}
-        t={t}
-      />
-      {open ? render(piece) : null}
-    </View>
-  );
-}
-
-function Letterhead({
-  open,
-  kind,
-  tone,
-  name,
-  label,
-  summary,
-  meta,
-  status,
-  onToggle,
-  above,
-  t,
-}: {
-  open: boolean;
-  kind: SurfaceKind | undefined;
-  tone: HeaderTone;
-  name: string;
-  label: string | undefined;
-  summary: string | undefined;
-  meta: string;
-  status: InstanceNode["status"] | undefined;
-  onToggle: () => void;
-  above: number;
-  t: ReturnType<typeof useTokens>;
-}): JSX.Element {
-  const word = kind !== undefined && kind !== "conversation" ? KIND_WORD[kind] : undefined;
-  const glyph = kind !== undefined && kind !== "conversation" ? KIND_ICON[kind] : undefined;
-  const hue = tone === "accent" ? "accent" : tone === "amber" ? "warn" : tone === "red" ? "bad" : undefined;
-  const ground = tone === "accent" ? t.mix(t.v("accent"), 12, t.v("panel")) : tone === "amber" ? t.mix(t.v("warn"), 14, t.v("panel")) : tone === "red" ? t.mix(t.v("bad"), 11, t.v("panel")) : undefined;
-  const rule = tone === "accent" ? t.mix(t.v("accent"), 28, t.v("line")) : tone === "amber" ? t.mix(t.v("warn"), 30, t.v("line")) : tone === "red" ? t.mix(t.v("bad"), 26, t.v("line")) : t.v("line");
-  const size = Number(t.scaled("size-data", 11 / 12)) || 11;
-  return (
-    <Press
-      onPress={onToggle}
-      aria-expanded={open}
-      alignSelf="stretch"
-      flexDirection="row"
-      alignItems="baseline"
-      // A button's `justify-content: center` (the base rule): when the line cannot fit, it overflows
-      // both sides equally rather than only the right.
-      justifyContent="center"
-      gap={9}
-      minWidth={0}
-      {...(tone !== undefined
-        ? { marginTop: above === 0 ? -13 : above, marginHorizontal: -15, marginBottom: open ? 13 : 0, paddingVertical: 9, paddingHorizontal: 15, backgroundColor: ground }
-        : { marginTop: above, marginBottom: open ? 11 : 0, paddingBottom: open ? 7 : 8 })}
-      {...(edge(t, { bottom: 1 }, String(rule), tone === "amber" ? "dashed" : "solid") as object)}
-    >
-      {({ hovered }) => {
-        const ink = hue ?? (hovered ? "text" : "dim");
-        return (
-          <>
-            {/* `.lh-chev` is a block holding the glyph INLINE: it stands on the baseline of a line of the
-                header's own font, and that line is what is centred — not the glyph. */}
-            <View alignSelf="center" flexShrink={0} height={size * 1.5} transform={open ? [] : [{ rotate: "-90deg" }]}>
-              <Icon name="chevron" size={size} color={String(t.v(hue ?? "dim"))} box={{ marginTop: baselineOf(size, 1.02, 0.3) - size }} />
-            </View>
-            {glyph !== undefined ? <Icon name={glyph} size={size} color={String(t.v(ink))} box={{ alignSelf: "center" }} /> : null}
-            {/* `.lh-dot`: 6 round, centred, --dim — its `.ts-dot-<status>` colour loses to `.lh-dot`, which
-                comes later at the same weight, so every status draws the same dot. */}
-            {glyph === undefined && status !== undefined ? <View width={6} height={6} borderRadius={3} alignSelf="center" flexShrink={0} backgroundColor={t.v("dim") as never} /> : null}
-            {word !== undefined ? (
-              <Txt spec={{ voice: "data", scale: 10 / 12, weight: 600, ls: 0.09, upper: true, color: ink }} flexShrink={0}>
-                {word}
-              </Txt>
-            ) : null}
-            <Txt spec={{ voice: "data", scale: 1, weight: 600, color: hue ?? "text" }} flexShrink={0}>
-              {name}
-            </Txt>
-            {open ? (
-              label !== undefined && label.length > 0 ? (
-                <Txt spec={{ voice: "app", scale: 12 / 12.5, color: ink }} ellip minWidth={0} flexShrink={1}>
-                  {label}
-                </Txt>
-              ) : null
-            ) : summary !== undefined && summary.length > 0 ? (
-              <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }} ellip minWidth={0} flexShrink={1}>
-                {summary}
-              </Txt>
-            ) : null}
-            {meta.length > 0 ? (
-              <Txt spec={{ voice: "data", scale: 11 / 12, color: ink, tabular: true }} flexShrink={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
-                {meta}
-              </Txt>
-            ) : null}
-          </>
-        );
-      }}
-    </Press>
+    </>
   );
 }
 
@@ -736,13 +457,6 @@ function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Ele
  * Worked out as Blink does it — each font's ascent and descent rounded to whole pixels (DM Sans
  * 0.992 / 0.31, JetBrains Mono 1.02 / 0.3), the leading split around them.
  */
-/** Where the baseline sits in a line of 1.5 × `size`, as Blink places it (ascent and descent rounded). */
-function baselineOf(size: number, ascent: number, descent: number): number {
-  const a = Math.round(size * ascent);
-  const d = Math.round(size * descent);
-  return (size * 1.5 - (a + d)) / 2 + a;
-}
-
 /**
  * `.prov`: how a value was settled (decision 0005 §4) — bound by wiring, inferred, or asked. A pill 6
  * after the name: data 600 at 10/12.5 on a 1.6 line, padding 0 6, 1px --line (inferred --accent, asked
@@ -785,6 +499,16 @@ function Slots({ slots, gap, marginBottom = 0, provenance }: { slots: [string, u
           </Txt>
         </View>
       ))}
+    </View>
+  );
+}
+
+/** `.inline-gate`: a question or an approval hosted in the conversation — a 2px --accent rule over it, 12 above, 8 in. */
+export function InlineHost({ children }: { children: ReactNode }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View marginTop={12} paddingTop={8} minWidth={0} {...(edge(t, { top: 2 }, "accent") as object)}>
+      {children}
     </View>
   );
 }

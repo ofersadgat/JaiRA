@@ -8,6 +8,7 @@ import { hueOf } from "@jaira/ui/pill";
 import { useApp } from "@jaira/ui/store";
 import { FOLD, openOf } from "@jaira/ui/uiState";
 import { InboxStrip } from "../components/InboxStrip";
+import { ShellFloats } from "../components/floats/ShellFloats";
 import { edge } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
 import { BoardColumn } from "./BoardColumn";
@@ -101,6 +102,8 @@ function Frame(): JSX.Element {
         </View>
         <ShellInbox />
       </View>
+      {/* The dialogs `App.tsx` raises on its own, over any room: module and orphan approvals, the init prompt. */}
+      <ShellFloats />
     </View>
   );
 }

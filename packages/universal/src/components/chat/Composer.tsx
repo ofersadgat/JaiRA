@@ -236,7 +236,7 @@ function Chip({ t, icon, lead, label, value, own, onPress }: { t: Tokens; icon?:
 }
 
 /** `BrandIcon`: the company's mark (its path, in its colour or the chip's), or its initial on its colour. */
-function BrandMark({ t, name }: { t: Tokens; name: string }): JSX.Element {
+export function BrandMark({ t, name }: { t: Tokens; name: string }): JSX.Element {
   const company = brandOf(name);
   const mark = brandMark(company);
   const ink = String(t.v("tok-hint"));

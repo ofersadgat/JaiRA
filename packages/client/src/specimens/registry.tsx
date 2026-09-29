@@ -6,6 +6,7 @@ import { DataView as DomDataView } from "@jaira/ui/valueView";
 import { DataView, FileInspector, Markdown } from "@jaira/universal";
 import { FLOAT_SPECIMENS } from "./floatSpecimens";
 import { FORM_SPECIMENS } from "./formSpecimens";
+import { TRANSCRIPT_SPECIMENS } from "./transcriptSpecimens";
 
 /**
  * The specimens: a DOM component and its universal copy, each drawn from the same fixture, for
@@ -80,6 +81,8 @@ export const SPECIMENS: Record<string, Specimen> = {
   ...FORM_SPECIMENS,
   // The floats and dialogs `App.tsx` owns, and every stage of the Components room (`floatSpecimens.tsx`).
   ...FLOAT_SPECIMENS,
+  // The transcript's pieces: work rows, pauses, compactions and the work summary (`transcriptSpecimens.tsx`).
+  ...TRANSCRIPT_SPECIMENS,
   // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,

@@ -95,6 +95,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     onDeliverUserEvent: actions.deliverUserEvent,
     // `App.tsx` hands the conversation both of a cut's verbs, so its entered rows carry their room.
     cuts: true,
+    project: selectedProject,
+    // The questions MOVES parked in task conversations: each drawn where its move asked it (`App.tsx`).
+    moveQuestions: state.pending.filter((p) => p.moves === true),
+    onMoveQuestion: (requestId: string, value: unknown) => actions.answer(requestId, value),
   };
 
   const host: FaceHost = {

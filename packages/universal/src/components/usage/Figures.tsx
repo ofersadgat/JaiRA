@@ -4,11 +4,12 @@ import { View } from "@tamagui/core";
 import type { LimitAccountView, UsageFigures } from "@jaira/shared/browser";
 import { formatResetAt, formatUntil } from "@jaira/shared/browser";
 import { useNow, useUsageFigures } from "@jaira/ui/limitsStore";
-import { keyFigureOf, weeklyFigureOf, weeklyTitleOf, type UsageFigure } from "@jaira/ui/usageFigure";
+import { USAGE_PREVIEW_EXAMPLES, keyFigureOf, weeklyFigureOf, weeklyTitleOf, type UsageFigure } from "@jaira/ui/usageFigure";
 import { Uncopied } from "../../app/Uncopied";
-import { Press, Txt } from "../../primitives";
+import { Press, Txt, edge } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
+import { BrandMark } from "../chat/Composer";
 import { INK, MoneyRing, Ring } from "./Ring";
 
 /**
@@ -177,5 +178,82 @@ export function KeyUsage({ account }: { account: LimitAccountView | undefined })
       <ResetLine spent={refused}>{under}</ResetLine>
       {card.layer}
     </>
+  );
+}
+
+/**
+ * The setting's preview (`UsageFiguresPreview`): the composer's model chip and its figure, on a
+ * subscription, a key whose provider reports its credit, and a key whose provider does not — drawn in
+ * the mode being chosen. The examples are `usageFigure.ts`'s. The rules:
+ *
+ *   .um-preview          a `.set-preview`: three equal columns, gap 10, padding 12
+ *   .um-preview-cell     column, gap 6 — the cell grows past its column to its content (a grid track
+ *                        of `auto`), as the DOM's does
+ *   .um-preview-n        app 11.5/12.5 --dim
+ *   .cx.um-mini          the composer's frame: --bg, padding 10 16 14; `.cx-frame` padding 1 on --line,
+ *                        radius 22; `.cx-shell` --panel, radius 21; `.cx-foot` row, centred, gap 5,
+ *                        padding 5 7 7 8
+ *   .cx-chip             padding 3 9, 1px transparent, round, gap 5, app 11.5/12.5 --dim; its icon 13;
+ *                        its words at most 96 (`.um-preview .cx-chip .ellip`)
+ *   .um-num              data 500 11/12 on a line of 1, padding 2 5, 2 out on the left, on the body's
+ *                        19.5 line (`.um-numwrap`); --dim for the accent tone (money: --text)
+ */
+export function UsageFiguresPreview({ mode }: { mode: UsageFigures }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View
+      marginTop={10}
+      flexDirection="row"
+      gap={10}
+      padding={12}
+      borderRadius={10}
+      overflow="hidden"
+      backgroundColor={t.v("bg") as never}
+      {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
+      pointerEvents="none"
+      aria-hidden
+    >
+      {USAGE_PREVIEW_EXAMPLES.map((e) => (
+        <View key={e.brand} flex={1} flexBasis={0} minWidth={0} flexDirection="row">
+          <View flexDirection="column" gap={6} minWidth="100%" flexShrink={0}>
+            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>{`${e.brand} · ${e.label}`}</Txt>
+            <MiniComposer brand={e.brand} model={e.model} figure={e.figure} mode={mode} />
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** The composer's frame around its foot: the model chip and the figure, and nothing else. */
+function MiniComposer({ brand, model, figure, mode }: { brand: string; model: string; figure: UsageFigure; mode: UsageFigures }): JSX.Element {
+  const t = useTokens();
+  const line = Number(t.scaled("size-app", (13 / 12.5) * 1.5));
+  // `.um-num.um-t-accent` is --dim; money's accent `--text`, and `none` --dim.
+  const ink = figure.tone === "accent" ? (figure.money ? "text" : "dim") : INK[figure.tone];
+  const face = { voice: "data" as const, scale: 11 / 12, weight: 500, color: ink, tabular: true, lineHeight: 1 };
+  return (
+    <View backgroundColor={t.v("bg") as never} paddingTop={10} paddingHorizontal={16} paddingBottom={14}>
+      <View width="100%" padding={1} borderRadius={22} backgroundColor={t.v("line") as never}>
+        <View flexDirection="column" borderRadius={21} backgroundColor={t.v("panel") as never}>
+          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0}>
+            <View flexDirection="row" alignItems="center" gap={5} paddingVertical={3} paddingHorizontal={9} borderRadius={999} borderWidth={1} borderStyle="solid" borderColor="transparent" maxWidth={210} minWidth={0} flexShrink={0}>
+              <BrandMark t={t} name={brand} />
+              <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} ellip maxWidth={96}>
+                {model}
+              </Txt>
+            </View>
+            {mode !== "off" ? (
+              <View flexShrink={0} marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})}>
+                <View marginTop={3} flexDirection="row" alignItems="center" gap={5} paddingVertical={2} paddingHorizontal={5}>
+                  <FigureFace t={t} figure={figure} mode={mode} text={<Txt spec={face}>{figure.text}</Txt>} />
+                </View>
+              </View>
+            ) : null}
+            <View flex={1} minWidth={0} />
+          </View>
+        </View>
+      </View>
+    </View>
   );
 }

@@ -19,7 +19,8 @@ import { ChatListPanel } from "../components/chat/ChatListPanel";
 import { useChatSurface } from "../components/chat/surface";
 import { anchorRectOf } from "../components/floats/anchor";
 import { HealthPop } from "../components/floats/HealthCard";
-import { ShellFloats } from "../components/floats/ShellFloats";
+import { FolderBrowser } from "../components/floats/FolderBrowser";
+import { useMachines } from "@jaira/ui/machinesModel";
 import { UpdateRow } from "../components/floats/UpdateRow";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
@@ -37,6 +38,9 @@ export function ShellSidebar(): JSX.Element {
    * Settings' warnings and errors: the card the Settings and Logs rows' pills open (`App.tsx`'s
    * `healthPop`), placed beside the pills pressed — and what each item's button does (`settingsShell.ts`).
    */
+  /** The paired machines, and the one being browsed for a project to open or make (`App.tsx`'s `browsing`). */
+  const [machinesView] = useMachines();
+  const [browsing, setBrowsing] = useState<{ machineId: string; mode: "open" | "init" } | null>(null);
   const [healthAt, setHealthAt] = useState<{ at: FloatRect | null } | null>(null);
   const openHealthCard = (from: unknown): void => setHealthAt((was) => (was !== null ? null : { at: anchorRectOf(from, "What needs attention") }));
   // Emptied — dismissed or cleared by itself — the card has nothing to be placed against: its pills are gone.
@@ -154,6 +158,8 @@ export function ShellSidebar(): JSX.Element {
       theme={appearance.scheme}
       onTheme={actions.setTheme}
       onChooseProject={(mode) => void actions.chooseProject(mode)}
+      machines={(machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }))}
+      onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
       // The Update row above Settings (`App.tsx`'s `SidebarUpdateRow`): About, where a failure or a
       // download is said in full — with the release notes, from its menu (`AboutPage` holds their fold).
       update={(collapsed) => <UpdateRow collapsed={collapsed} onOpenAbout={openAbout} onNotes={openAbout} onRetry={checkForUpdate} />}
@@ -164,8 +170,18 @@ export function ShellSidebar(): JSX.Element {
       }}
     />
     {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
-    {/* The dialogs `App.tsx` raises on its own, over any room (drawn here, as this region is always on screen). */}
-    <ShellFloats />
+    {browsing !== null && machinesView !== undefined ? (
+      <FolderBrowser
+        machines={machinesView.machines.filter((m) => m.state === "online").map((m) => ({ id: m.id, label: m.label }))}
+        initial={browsing.machineId}
+        mode={browsing.mode}
+        onClose={() => setBrowsing(null)}
+        onChosen={(machine, dir) => {
+          setBrowsing(null);
+          void actions.openOnMachine(machine.id, dir, browsing.mode);
+        }}
+      />
+    ) : null}
     {healthAt !== null ? (
       <HealthPop
         anchor={healthAt.at}

@@ -4,7 +4,7 @@ import { SECRET_SOURCE_LABELS, SECRET_TARGET_LABELS, type ForgeCheck, type Jaira
 import { layerWriter } from "@jaira/ui/configWriter";
 import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeRowOf, forgesOf, gitToolsSentence, newForgeOf, secretTargetsOf, stateWord } from "@jaira/ui/connectionsModel";
 import type { IntegrationsPaneProps } from "@jaira/ui/integrationsPane";
-import { Press, Txt } from "../../../primitives";
+import { Txt } from "../../../primitives";
 import { SchemaForm } from "../../form/SchemaForm";
 import { Code, Hint, PaneActions } from "../bits";
 import { Button } from "../Button";
@@ -47,22 +47,18 @@ export function ForgeRows(props: IntegrationsPaneProps): JSX.Element {
 /** An opened forge row's first line: what uses this connection, and where those are governed. */
 export function ForgeToolsLine({ onOpenTools }: { onOpenTools?: (() => void) | undefined }): JSX.Element {
   const { lead } = gitToolsSentence();
-  const hint = { voice: "app", scale: 11 / 12.5, lineHeight: 1.4 } as const;
   return (
-    <View flexDirection="row" flexWrap="wrap" alignItems="baseline">
-      <Hint>{`${lead}, on `}</Hint>
+    <Hint>
+      {`${lead}, on `}
       {onOpenTools !== undefined ? (
-        <Press onPress={onOpenTools}>
-          {({ hovered }) => (
-            <Txt spec={{ ...hint, color: "accent" }} {...(hovered ? { textDecorationLine: "underline" } : {})}>
-              Tools → Git
-            </Txt>
-          )}
-        </Press>
+        // `button.link` in the hint's own font (`.conn-tools-line button.link { font: inherit }`), --accent.
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "accent" }} onPress={onOpenTools} role="button">
+          Tools → Git
+        </Txt>
       ) : (
-        <Hint>Tools → Git</Hint>
+        "Tools → Git"
       )}
-    </View>
+    </Hint>
   );
 }
 

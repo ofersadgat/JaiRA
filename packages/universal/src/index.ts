@@ -24,6 +24,9 @@ export { Stage as GalleryStage } from "./components/gallery/GalleryPane";
 export { ApprovalDialog, ModuleApprovalDialog } from "./components/floats/Dialogs";
 export { FolderBrowser } from "./components/floats/FolderBrowser";
 export { UpdateRow } from "./components/floats/UpdateRow";
+// The transcript, for its specimens (`transcriptSpecimens.tsx`).
+export { Transcript } from "./components/panel/SessionTranscript";
+export { SessionBands } from "./components/panel/SessionBands";
 
 /** Every universal copy there is, by the slot it fills. `/universal` and native draw all of them. */
 export const COPIES: Partial<Slots> = { Pill, TaskCard };

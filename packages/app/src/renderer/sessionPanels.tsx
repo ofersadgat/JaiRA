@@ -67,7 +67,7 @@ import {
   type SessionSegment,
 } from "./sessionBands";
 import { RailedRows } from "./railView";
-import { isLiveNode, isSolo, keyOfPiece, metaOf, pageRowsOf, spanOf, stepOfNote, summaryOf } from "./sessionRows";
+import { isLiveNode, isSolo, keyOfPiece, markedRowsOf, sideName, sideOf, metaOf, pageRowsOf, spanOf, stepOfNote, summaryOf } from "./sessionRows";
 import type { RailStep } from "./rail";
 
 /** Nothing folded — the default for a host that does not remember folds. Frozen, so it cannot be
@@ -252,43 +252,8 @@ export function ForkMark({
   );
 }
 
-/**
- * What one side of a fork is CALLED in a run: how that attempt ended.
- *
- * There is nothing else to call them. A chat's sides are named by the message that opens each, which
- * is the thing that differs there; two attempts of one state say the same thing to the same model
- * and differ only in what came back. Absent status reads as the success it always did, which is the
- * same convention `StateSession.outcome` documents for a journal that predates the distinction.
- */
-function sideName(piece: SessionPiece): string {
-  if (piece.status === "error") return "failed";
-  if (piece.status === "interrupted") return "stopped";
-  // The one that is not a verdict at all: this side has not ended, so naming it after any of the
-  // ways a call can finish would be a claim about something that has not happened yet.
-  if (piece.status === "running") return "running";
-  return "finished";
-}
-
-/**
- * Whether this panel is a side of a fork, and which — see {@link forksOf}.
- *
- * At most one piece can be: the sides of one division differ by session and a panel is one session,
- * so the first that matches is the answer.
- */
-function sideOf(
-  segment: SessionSegment,
-  forks: Map<string, SessionPiece[]> | undefined,
-): { place: string; sides: SessionPiece[] } | undefined {
-  if (forks === undefined) return undefined;
-  for (const piece of segment.pieces) {
-    const place = placeOf(piece);
-    const sides = place === undefined ? undefined : forks.get(place);
-    if (place !== undefined && sides !== undefined) return { place, sides };
-  }
-  return undefined;
-}
-
-
+// What a side of a fork is called, and which fork a panel is a side of — `sessionRows.ts`, shared with the
+// universal copy (decision 0015).
 
 /**
  * One state inside a session's panel — its letterhead, and its transcript under it.
@@ -1226,12 +1191,23 @@ export function SessionBandsView({
   // The page as one flat sequence of rows, and the rail's steps beside it — `pageRowsOf`, shared with
   // the universal copy (decision 0015). What each row SAYS is decided here.
   const page = pageRowsOf(given, notes, root);
-  const { bands, bare, starters, forks, noteRows, laneNotes } = page;
-  const steps: RailStep[] = [...page.steps];
-  const ats: number[] = [...page.ats];
+  const { bands, bare, starters, forks, laneNotes } = page;
   const [menu, setMenu] = useState<MenuAnchor | null>(null);
-  const nodes: ReactNode[] = page.rows.map((row) =>
-    row.kind === "note" ? (
+  // The armed cut's counted line and the origin seam, placed among the rows by the clock —
+  // `markedRowsOf` (`sessionRows.ts`), shared with the universal copy (decision 0015).
+  const marked = markedRowsOf(page, notes, armed, origin);
+  const { steps, cutRow, doomedFrom } = marked;
+  const nodes: ReactNode[] = marked.rows.map((item) => {
+    if (item.kind === "cut") {
+      return (
+        <div className="sb-cut" role="note">
+          {item.states} state{item.states === 1 ? "" : "s"} below this line will be deleted
+        </div>
+      );
+    }
+    if (item.kind === "origin") return <OriginMark origin={origin!} {...(origin!.onGo !== undefined ? { onGo: origin!.onGo } : {})} />;
+    const row = page.rows[item.index]!;
+    return row.kind === "note" ? (
       <NoteRow
         note={row.note}
         root={root}
@@ -1255,52 +1231,8 @@ export function SessionBandsView({
         scope={scope}
         render={render}
       />
-    ),
-  );
-
-  /**
-   * The ARMED cut, drawn on the rail.
-   *
-   * The entry's own row keeps its words and takes the ring; the counted line goes right under it,
-   * and everything after fades — the sheet the state opened, the states after it, their lanes. By
-   * the clock when the entry is not a row on this page (a cut armed from the index of a state a
-   * fold has hidden), which is the same order the journal has.
-   */
-  let cutRow = -1;
-  let doomedFrom = -1;
-  if (armed !== undefined) {
-    const own = [...noteRows].find(([, note]) => note.seq === armed.seq)?.[0];
-    const first = own ?? ats.findIndex((at) => at >= armed.at);
-    if (first >= 0) {
-      const states = notes.filter((note) => note.kind === "entered" && note.at >= armed.at).length;
-      const line = (
-        <div className="sb-cut" role="note">
-          {states} state{states === 1 ? "" : "s"} below this line will be deleted
-        </div>
-      );
-      const after = own !== undefined ? first + 1 : first;
-      const beside = steps[first]!;
-      steps.splice(after, 0, { key: `cut${armed.seq}`, stateId: "", at: own !== undefined && beside.opens ? beside.at : beside.opens ? beside.at.slice(0, -1) : beside.at, opens: false });
-      nodes.splice(after, 0, line);
-      ats.splice(after, 0, armed.at);
-      cutRow = own !== undefined ? first : -1;
-      doomedFrom = after + 1;
-    }
-  }
-  /**
-   * The seam a fork carries: after the last row the copy inherited. Placed by the clock, because
-   * the copied rows keep the parent's clocks and the task's own come later — the same coordinate
-   * the origin reports (`boundaryAt`).
-   */
-  if (origin !== undefined) {
-    let k = 0;
-    while (k < ats.length && ats[k]! <= origin.boundaryAt) k += 1;
-    steps.splice(k, 0, { key: "origin", stateId: "", at: [], opens: false });
-    nodes.splice(k, 0, <OriginMark origin={origin} {...(origin.onGo !== undefined ? { onGo: origin.onGo } : {})} />);
-    ats.splice(k, 0, origin.boundaryAt);
-    if (cutRow >= k) cutRow += 1;
-    if (doomedFrom > k) doomedFrom += 1;
-  }
+    );
+  });
   const rowClass = (i: number): string | undefined =>
     i === cutRow ? "is-cut" : doomedFrom >= 0 && i >= doomedFrom ? "doomed" : undefined;
 

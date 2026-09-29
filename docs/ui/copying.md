@@ -126,6 +126,28 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   (`translateZ(0)`) — `will-change: transform` composites too, but rasters the scaled text blurred.
 - **A CSS gradient's hard stop is sampled at each device pixel's centre**, with no anti-aliasing: a
   swatch drawn as views of a device pixel each matches it (`workflow/StateGraph.tsx`'s `Strip`).
+- **Text nodes are shaping boundaries.** `ready — {detail}` in JSX is two text nodes, and Blink shapes each
+  apart: a copy that writes it as one string (`` ` — ${detail}` ``) moves the glyphs after the join by a
+  fraction. Keep the DOM's nodes as separate children (`{" — "}{detail}`) — it took the Connections page
+  from 168 differing pixels to 28.
+- **An inherited `letter-spacing` is a length, not an em.** A heading's `-0.005em` reaches a child set at
+  another size as the heading's pixels (`.settings-recheck` inside `.set-section-title`): scale it
+  (`-0.005 × 1.1 / (11/12.5)`).
+- **A `button`'s words do not wrap, and it is at least as wide as they are** (`white-space: nowrap`,
+  `min-width: auto`): a `+` box whose sub is longer than its 200 runs past it. `whiteSpace: "nowrap"` on
+  the texts and `minWidth: "auto"` on the pressable (`connections/Row.tsx`'s `AddBox`).
+- **`.mono` alone is no rule.** Only some parents give `.mono` the data face (`.cfg-row-title.mono`,
+  `.cfg-input.mono`); `conn-probe-at mono` is the app face. Read the cascade, not the class name.
+- **Inline icons.** A Tamagui `View` inside a `Txt` is not inline on web; use `floats/InlineGlyph`.
+- **Style-only props.** `overflowWrap` and `boxDecorationBreak` go in `style`, or they land on the element
+  as attributes.
+- **Borders snap.** Chromium lays a 1px border out in whole device pixels (0.667px at 1.5×).
+- **Flex items keep their children's margins**: they do not collapse out of a flex column
+  (`.modal-wide`), and each child of a flex button is its own item with its edge spaces dropped.
+- **Portalled floats** (menus, cards, dialogs) are under `<body>`: a rule scoped to where they were
+  opened from (`.approval-surface .mono`) does not reach them — nor should the copy's.
+- **Floats** are `components/floats/`: `Float` places one as `Popover` does, `Modal` is the backdrop and
+  box, `anchor.ts` finds what it hangs from (the element a press handed over, on web).
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
   a region passes in every look.
 
@@ -157,6 +179,12 @@ rules on a specimen page.
   `TextField` (`.cfg-input`), `Button` (`button` and its `ghost`, `quiet`, `primary`, `danger`),
   `LayerPicker`. A section says it is one to `parts.ts`, which is what the sidebar's accordion lists —
   there is no DOM to query for `data-part`.
+- **Connections' rows** (`components/settings/connections/Row.tsx`) — the row every provider, forge
+  and MCP server is (`ConnRow`: what it is | its boxes | its switch and chevron, then what goes across),
+  its boxes (a login card, a key box, the `+` boxes, a waiting box) and the table under a row
+  (`Probe.tsx`, whose `useColumn` is a grid's `auto` column). What they say is `connectionsModel.ts`'s.
+- **The usage ring and figures** (`components/usage/`) — `Ring` and `MoneyRing`, shared with the
+  composer, and a sign-in card's and a key's figures (`usageFigure.ts`'s words).
 - **`PLAIN_SCROLLER`** (`primitives.tsx`) on a `ScrollView`'s style and content style: without it
   react-native-web's `translateZ(0)` and `z-index: 0` composite the scroller and Chromium draws its
   text greyscale, where the DOM's `overflow: auto` keeps subpixel text. That fixed the sidebar's

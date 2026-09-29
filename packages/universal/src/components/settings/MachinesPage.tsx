@@ -3,6 +3,7 @@ import { View } from "@tamagui/core";
 import type { CopyChoice, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
 import { chipStateOf } from "@jaira/ui/machineChip";
 import {
+  ADD_SCHEMA,
   COPY_CHOICES,
   COPY_WORDS,
   MACHINES_WORDS as W,
@@ -14,15 +15,16 @@ import {
   peerWords,
   reachWords,
   sentence,
+  useAddMachine,
   useMachines,
 } from "@jaira/ui/machinesModel";
 import { invoke, subscribe as subscribePush } from "@jaira/ui/store";
 import { useShell } from "../../app/shell";
 import { copyText } from "../../clipboard";
-import { Uncopied } from "../../app/Uncopied";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { MachineChip } from "../MachineChip";
+import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "./Button";
 import { Segmented, Switch } from "./controls";
 import { TextField } from "./fields";
@@ -43,7 +45,7 @@ import { Words } from "./Words";
  *                        4 10, a dashed --line, radius --control-radius
  *   .machine-add         column, gap 10, 6 above; its foot a row, centred, gap 10
  *
- * The Add a machine form is `SchemaForm`'s, which has no copy yet: it stands where the form does.
+ * The Add a machine form is the universal `SchemaForm`, keyed by the schema's own names as the DOM's is.
  */
 export function MachinesPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -64,7 +66,7 @@ export function MachinesPage(): JSX.Element {
             )}
           </SettingsSection>
           <Outbox />
-          <AddMachine />
+          <AddMachine onView={setView} />
           <Copies view={view} onView={setView} />
           <SettingsSection id="projects" title={W.projects.title} info={W.projects.info}>
             <SettingsRow name={W.grouped.name} description={groupedWords(grouped)} control={<Switch on={grouped} label={W.grouped.name} onChange={actions.setGroupWorkspaces} />} />
@@ -262,17 +264,22 @@ function Outbox(): JSX.Element | null {
   );
 }
 
-/** Pairing with another machine: its address and code (the schema form, not copied yet), and Pair. */
-function AddMachine(): JSX.Element {
+/** Pairing with another machine: its address and code (the schema form), and Pair. */
+function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Element {
+  // The form's state and Pair are `machinesModel.ts`'s, as the DOM's are.
+  const { value, setValue, busy, error, done, ready, pair } = useAddMachine(onView);
+  const body = { voice: "app", scale: 13 / 12.5 } as const;
   return (
     <SettingsSection id="add" title={W.add.title} info={W.add.info}>
       <SettingsRow name={W.other.name} full>
         <View gap={10} paddingTop={6}>
-          <Uncopied name="SchemaForm (address, code)" height={153.6667} />
+          <SchemaForm schema={ADD_SCHEMA as never} value={value} onChange={(next) => setValue(next as typeof value)} ctx={{ path: "", labels: "keys", disabled: busy }} />
           <View flexDirection="row" alignItems="center" gap={10}>
-            <View flex={1} />
-            <Button kind="primary" disabled>
-              Pair
+            <View flex={1} minWidth={0}>
+              {error !== undefined ? <Txt spec={{ ...body, color: "bad" }}>{sentence(error)}</Txt> : done !== undefined ? <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>{done}</Txt> : null}
+            </View>
+            <Button kind="primary" disabled={!ready || busy} onPress={pair}>
+              {busy ? "Pairing…" : "Pair"}
             </Button>
           </View>
         </View>

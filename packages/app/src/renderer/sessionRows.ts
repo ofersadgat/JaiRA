@@ -7,7 +7,7 @@ import { addressSegment, segmentKey } from "@jaira/shared/browser";
 import type { InstanceNode } from "@jaira/shared/browser";
 import type { RailStep } from "./rail";
 import { clockOf, durationOf } from "./runActivityModel";
-import { forksOf, placeNotes, segmentsFrom, splitAtNotes, startersOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "./sessionBands";
+import { forksOf, placeNotes, placeOf, segmentsFrom, splitAtNotes, startersOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "./sessionBands";
 
 /**
  * Where one note sits on the rail, and whether it OPENS a lane.
@@ -217,3 +217,91 @@ export function summaryOf(piece: SessionPiece): string | undefined {
   // on the right before the time, folded or open (usage-readings contract).
   return parts.length > 0 ? parts.join(" · ") : undefined;
 }
+
+/** One row as drawn: a page row by its index, the armed cut's counted line, or the origin seam. */
+export type MarkedRow = { kind: "row"; index: number } | { kind: "cut"; states: number } | { kind: "origin" };
+
+/**
+ * The page with the two things placed among its rows by the clock — an ARMED rewind's counted line (and
+ * which rows it rings and fades) and a forked task's origin seam — moved unchanged out of
+ * `sessionPanels.tsx`'s `SessionBandsView`, so the universal copy places them the same way.
+ *
+ * The entry's own row keeps its words and takes the ring; the counted line goes right under it, and
+ * everything after fades — by the clock when the entry is not a row on this page. The seam goes after
+ * the last row the copy inherited: the copied rows keep the parent's clocks, the task's own come later.
+ */
+export function markedRowsOf(
+  page: Pick<PageRows, "steps" | "ats" | "noteRows">,
+  notes: readonly BandNote[],
+  armed: { seq: number; at: number } | undefined,
+  origin: { boundaryAt: number } | undefined,
+): { steps: RailStep[]; rows: MarkedRow[]; cutRow: number; doomedFrom: number } {
+  const steps: RailStep[] = [...page.steps];
+  const ats: number[] = [...page.ats];
+  const rows: MarkedRow[] = page.steps.map((_, index) => ({ kind: "row", index }));
+  let cutRow = -1;
+  let doomedFrom = -1;
+  if (armed !== undefined) {
+    const own = [...page.noteRows].find(([, note]) => note.seq === armed.seq)?.[0];
+    const first = own ?? ats.findIndex((at) => at >= armed.at);
+    if (first >= 0) {
+      const states = notes.filter((note) => note.kind === "entered" && note.at >= armed.at).length;
+      const after = own !== undefined ? first + 1 : first;
+      const beside = steps[first]!;
+      steps.splice(after, 0, { key: `cut${armed.seq}`, stateId: "", at: own !== undefined && beside.opens ? beside.at : beside.opens ? beside.at.slice(0, -1) : beside.at, opens: false });
+      rows.splice(after, 0, { kind: "cut", states });
+      ats.splice(after, 0, armed.at);
+      cutRow = own !== undefined ? first : -1;
+      doomedFrom = after + 1;
+    }
+  }
+  if (origin !== undefined) {
+    let k = 0;
+    while (k < ats.length && ats[k]! <= origin.boundaryAt) k += 1;
+    steps.splice(k, 0, { key: "origin", stateId: "", at: [], opens: false });
+    rows.splice(k, 0, { kind: "origin" });
+    ats.splice(k, 0, origin.boundaryAt);
+    if (cutRow >= k) cutRow += 1;
+    if (doomedFrom > k) doomedFrom += 1;
+  }
+  return { steps, rows, cutRow, doomedFrom };
+}
+
+/**
+ * What one side of a fork is CALLED in a run: how that attempt ended.
+ *
+ * There is nothing else to call them. A chat's sides are named by the message that opens each, which
+ * is the thing that differs there; two attempts of one state say the same thing to the same model
+ * and differ only in what came back. Absent status reads as the success it always did, which is the
+ * same convention `StateSession.outcome` documents for a journal that predates the distinction.
+ */
+export function sideName(piece: SessionPiece): string {
+  if (piece.status === "error") return "failed";
+  if (piece.status === "interrupted") return "stopped";
+  // The one that is not a verdict at all: this side has not ended, so naming it after any of the
+  // ways a call can finish would be a claim about something that has not happened yet.
+  if (piece.status === "running") return "running";
+  return "finished";
+}
+
+/**
+ * Whether this panel is a side of a fork, and which — see {@link forksOf}.
+ *
+ * At most one piece can be: the sides of one division differ by session and a panel is one session,
+ * so the first that matches is the answer.
+ */
+export function sideOf(
+  segment: SessionSegment,
+  forks: Map<string, SessionPiece[]> | undefined,
+): { place: string; sides: SessionPiece[] } | undefined {
+  if (forks === undefined) return undefined;
+  for (const piece of segment.pieces) {
+    const place = placeOf(piece);
+    const sides = place === undefined ? undefined : forks.get(place);
+    if (place !== undefined && sides !== undefined) return { place, sides };
+  }
+  return undefined;
+}
+
+
+

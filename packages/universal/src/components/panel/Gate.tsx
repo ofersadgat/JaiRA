@@ -1,7 +1,8 @@
 import { useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { choicesOfConfig, isComponentName, type Choice, type PendingInteraction } from "@jaira/shared/browser";
-import { EMPTY_ANSWER, answerOf, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import { EMPTY_ANSWER, answerOf, answersOfValue, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import { ChoiceList, ChoiceSteps } from "../floats/Choices";
 import { COMPONENT_ICON } from "@jaira/ui/gateModel";
 import { PATHS } from "@jaira/ui/icons";
 import { Press, Txt, edge, scrollbarProps } from "../../primitives";
@@ -44,9 +45,14 @@ export function InlineGate({ pending, onGate, maxHeight }: { pending: PendingInt
   );
 }
 
-/** `GateSurface`: the author's question, whether answering it resumes the task, and its control. */
-export function GateSurface({ pending, onSubmit }: { pending: PendingInteraction; onSubmit: (value: unknown) => void }): JSX.Element {
+/**
+ * `GateSurface`: the author's question, whether answering it resumes the task, and its control — or,
+ * `settled`, the control as it was answered (`.gate-settled`), with "Never answered." over a question
+ * nobody got to answer; `error` is the `.reason` line under it.
+ */
+export function GateSurface({ pending, onSubmit, settled, error }: { pending: PendingInteraction; onSubmit: (value: unknown) => void; settled?: { value: unknown } | undefined; error?: string | undefined }): JSX.Element {
   const config = pending.config;
+  if (settled !== undefined) return <SettledGateSurface pending={pending} settled={settled} error={error} />;
   const body = ((): JSX.Element => {
     if (pending.configError !== undefined) {
       return (
@@ -158,5 +164,45 @@ function Option({ label, icon, description, primary = false, danger = false, sel
         </Txt>
       ) : null}
     </Press>
+  );
+}
+
+/**
+ * A gate as it was answered (`components.tsx`'s `GateSurface` with `settled`): the heading, "Never
+ * answered." (`.gate-never`: the body's font, italic, --dim, 10 under) when nothing answered it, and the
+ * chooser, inert, with what was picked lit. Only `choose_option` is drawn so; the other gates' settled
+ * bodies are the floats' (`GateBodies.tsx`), which take no answer yet.
+ */
+function SettledGateSurface({ pending, settled, error }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined }): JSX.Element {
+  const t = useTokens();
+  const config = pending.config;
+  const choices = config?.component === "choose_option" ? choicesOfConfig(config) : undefined;
+  const [answers, setAnswers] = useState<Record<string, Answer>>(() => (choices === undefined ? {} : answersOfValue(choices, settled.value as never)));
+  const never = settled.value === undefined;
+  const onAnswer = (question: string, next: Answer): void => setAnswers((prev) => ({ ...prev, [question]: next }));
+  return (
+    <>
+      <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>
+      {never ? (
+        <Txt spec={{ voice: "app", scale: 13 / 12.5, italic: true, color: "dim" }} marginBottom={10}>
+          Never answered.
+        </Txt>
+      ) : null}
+      {/* The block's 14 collapses with the heading's 8 (or the line's 10) in the DOM. */}
+      <View marginTop={never ? -10 : -8}>
+        {choices === undefined ? (
+          <Uncopied name={`the ${pending.component} gate, as it was answered`} />
+        ) : config?.component === "choose_option" && config.questions !== undefined ? (
+          <ChoiceSteps choices={choices} answers={answers} onAnswer={onAnswer} onSubmit={() => undefined} readOnly />
+        ) : (
+          <ChoiceList choices={choices} answers={answers} onAnswer={onAnswer} readOnly />
+        )}
+      </View>
+      {error !== undefined ? (
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} marginTop={Number(t.scaled("size-app", 11 / 12.5)) || 11}>
+          {error}
+        </Txt>
+      ) : null}
+    </>
   );
 }

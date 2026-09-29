@@ -3,7 +3,7 @@
  * router lists, what a route's collapsed line says, who a leaf names, and a node's call settings
  * without its model — in a module of its own so the universal copy (decision 0015) runs the same code.
  */
-import { EXECUTOR_STEP_ORDER, isPinned, pin, type JairaAgentNode, type JairaExecutorSteps, type JairaOperationNode, type JairaPromptNode, type JairaProviderNode, type JairaRouterNode } from "@jaira/shared/browser";
+import { BUILTIN_FUNCTIONS, EXECUTOR_STEP_ORDER, isPinned, pin, type JairaAgentNode, type JairaExecutorSteps, type JairaOperationNode, type JairaPromptNode, type JairaProviderNode, type JairaRouterNode } from "@jaira/shared/browser";
 import type { LayerState } from "./configWriter";
 import { summariseLlmConfig, type LlmConfigDoc } from "./llmConfigModel";
 
@@ -87,4 +87,13 @@ export function allowFromText(text: string): string[] | undefined {
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
   return list.length > 0 ? list : undefined;
+}
+
+/**
+ * The functions a rule can name: the built-ins JaiRA itself registers, plus every agent runtime this
+ * project configures — an agent is reachable as a FUNCTION too, under the same registry name a model
+ * prefix uses.
+ */
+export function knownFunctionsOf(agents: readonly string[]): Array<{ name: string; what: string }> {
+  return [...BUILTIN_FUNCTIONS, ...agents.map((name) => ({ name, what: "agent — delegate this state to that runtime" }))];
 }

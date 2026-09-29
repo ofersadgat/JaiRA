@@ -1,6 +1,6 @@
 import { useMemo, useState, type JSX } from "react";
 import type { LayoutChangeEvent } from "react-native";
-import { View } from "@tamagui/core";
+import { Text, View, isWeb } from "@tamagui/core";
 import { PALETTES, SIZE_LIMITS, surfaceOf, type Appearance, type ConversationLook, type ThemeMode, type WorkNotes, type WorkRows } from "@jaira/shared/browser";
 import { DEFAULT_APP_STACK, DEFAULT_DATA_STACK, SHIPPED_APP_FAMILY, SHIPPED_DATA_FAMILY, isMonospace, shownFamilies, stackOf } from "@jaira/ui/appearance";
 import { lookOf } from "@jaira/ui/appearanceLayer";
@@ -12,6 +12,7 @@ import {
   MODES,
   SUGGESTED_APP,
   SUGGESTED_DATA,
+  TASK_PREVIEW,
   TEXT_PREVIEW,
   USAGE_CHOICES,
   WORK_NOTE_CHOICES,
@@ -23,15 +24,23 @@ import {
   settingsLocked,
 } from "@jaira/ui/appearanceModel";
 import { PALETTE_CARDS } from "@jaira/ui/paletteCardsModel";
+import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
+import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { useShell } from "../../app/shell";
-import { Uncopied } from "../../app/Uncopied";
 import { FileTypesPane } from "../files/FileTypesPane";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
+import { Column, GraphPaper, graphPaperWeb } from "../Board";
 import { Markdown } from "../Markdown";
+import { UsageFiguresPreview } from "../usage/Figures";
+import { Transcript } from "../panel/SessionTranscript";
+import { workPreviewStates } from "@jaira/ui/workPreviewModel";
+import { WorkLookContext, type WorkLook } from "@jaira/ui/workSummaryContext";
+import { tileChromeOf } from "../TaskCard";
 import { Pill } from "../Pill";
 import { Segmented, Switch } from "./controls";
 import { FamilyStack } from "./FamilyStack";
+import { FilesTreeSection } from "./FilesTree";
 import { SelectInput, SizeStep } from "./fields";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
 import { ThemeMini } from "./ThemeMini";
@@ -60,9 +69,9 @@ import { ThemeMini } from "./ThemeMini";
  *   .set-font            a font row's control: the stack and its size, 340 wide, gap 8, stretched
  *   .set-inherit         app at 0.96, --dim
  *
- * Not copied yet, each drawn as an {@link Uncopied} box where it stands: the Board preview (the board's
- * own `Column` and `Tile`), the usage figures' and the work summary's previews, File types and the
- * Files tree.
+ * Its previews are the real pieces: the board's own `Column` and tile chrome, the composer's chip and
+ * figure (`usage/Figures.tsx`), the transcript for the work summary, `FileTypesPane` (its code an island)
+ * and the Files tree section (`FilesTree.tsx`).
  */
 export function AppearancePage(): JSX.Element {
   const { state, actions } = useShell();
@@ -102,7 +111,7 @@ export function AppearancePage(): JSX.Element {
         />
         <SettingsRow {...ROWS.statusWash} layer={rowLayer("statusWash")} control={<Switch on={surface.statusWash} label={ROWS.statusWash.name} disabled={busy} onChange={(statusWash) => onChange({ statusWash })} />} />
         <SettingsRow {...boardPreviewWords(appearance.palette)} full>
-          <Later name="TaskPreview" height={177.6354} />
+          <TaskPreview />
         </SettingsRow>
       </SettingsSection>
 
@@ -129,7 +138,7 @@ export function AppearancePage(): JSX.Element {
           control={<Segmented label={ROWS.usageFigures.name} value={look.conversation.usageFigures} options={USAGE_CHOICES} disabled={busy} onChange={(usageFigures) => onConversation({ usageFigures })} />}
         />
         <SettingsRow {...ROWS.usagePreview} full>
-          <Later name="UsageFiguresPreview" height={111.1667} />
+          <UsageFiguresPreview mode={look.conversation.usageFigures} />
         </SettingsRow>
         <SettingsRow
           {...ROWS.workPhases}
@@ -160,7 +169,7 @@ export function AppearancePage(): JSX.Element {
           control={<SelectInput value={look.conversation.workNotes} options={WORK_NOTE_CHOICES} disabled={busy} onChange={(workNotes) => onConversation({ workNotes: workNotes as WorkNotes })} />}
         />
         <SettingsRow {...ROWS.workPreview} full>
-          <Later name="WorkPreview" height={830.5834} />
+          <WorkPreview look={{ phases: look.conversation.workPhases, rows: look.conversation.workRows, thinking: look.conversation.workThinking, notes: look.conversation.workNotes }} />
         </SettingsRow>
       </SettingsSection>
 
@@ -243,10 +252,15 @@ export function AppearancePage(): JSX.Element {
           onEditor={(kind, patch) => void actions.setEditorLook(kind, patch, layer)}
         />
       </SettingsSection>
+      {/* The look of the tree: what it leaves out (`FilesTree.tsx`, over `filesTreeModel.ts`). */}
       {state.config !== null ? (
-        <SettingsSection id="files-tree" title="Files tree" plain>
-          <Uncopied name="FilesTreeSection" height={795.0834} />
-        </SettingsSection>
+        <FilesTreeSection
+          view={state.config}
+          layer={layer}
+          project={state.at}
+          busy={state.busy || !(layer !== "project" || state.at !== null)}
+          onWrite={(into, doc) => void actions.saveTreeLayer(into, doc)}
+        />
       ) : null}
     </>
   );
@@ -335,7 +349,10 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
                           </View>
                         ) : null}
                       </View>
-                      <Txt spec={{ voice: "app", scale: 0.92, lineHeight: 1.4, color: "dim" }}>{card.note}</Txt>
+                      {/* The line as the stylesheet writes it (unitless) on web: Blink snaps its product to 1/64. */}
+                      <Txt spec={{ voice: "app", scale: 0.92, lineHeight: 1.4, color: "dim" }} {...(isWeb ? { lineHeight: "1.4" } : {})}>
+                        {card.note}
+                      </Txt>
                     </View>
                     {on ? (
                       <View
@@ -366,12 +383,140 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
   );
 }
 
-/** A preview not copied yet, where the DOM's `.set-preview` stands (10 under its row's words). */
-function Later({ name, height }: { name: string; height: number }): JSX.Element {
+/**
+ * What tasks look like — the board's own `Column` and tile chrome (`tileChromeOf`), not a picture of
+ * them, so the window's palette and the three board options reach it as they reach the Tasks view. What
+ * the tiles say is `appearanceModel.ts`'s `TASK_PREVIEW`, as the DOM's is. The rules:
+ *
+ *   .set-preview         10 under the words, 1px --line, radius 10, clipped, --bg, takes no pointer
+ *   .task-preview .board-body   padding 10; `.columns` a row, gap 10, stretched
+ *   .task-preview .column       equal shares of the row (`flex: 1 1 0`), no most
+ */
+function TaskPreview(): JSX.Element {
+  const t = useTokens();
+  const look = useLook();
   return (
-    <View marginTop={10}>
-      <Uncopied name={name} height={height} />
+    <View marginTop={10} borderRadius={10} overflow="hidden" backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} pointerEvents="none" aria-hidden>
+      {/* `.board-body`, with Blueprint's graph paper as the board's (`Board.tsx`). */}
+      <View padding={10} overflow="hidden" flexDirection="row" gap={10} alignItems="stretch" {...((look.palette !== "blueprint" ? {} : isWeb ? graphPaperWeb(t) : { position: "relative" }) as object)}>
+        {look.palette === "blueprint" && !isWeb ? <GraphPaper t={t} /> : null}
+        {TASK_PREVIEW.map((column, index) => (
+          // The column's own box is `flex: 1 0 210px` at most 320; here it takes an equal share.
+          <View key={column.name} flex={1} flexBasis={0} minWidth={0} flexDirection="row" alignItems="stretch">
+            <Column t={t} look={look} index={index} name={column.name} seq={column.seq} count={column.tiles.length} empty="—">
+              {() => column.tiles.map((tile, i) => <PreviewTile key={tile.title} tile={tile} last={i === column.tiles.length - 1} />)}
+            </Column>
+          </View>
+        ))}
+      </View>
     </View>
+  );
+}
+
+/** `board.tsx`'s `Tile`, as the preview draws it: its title and pill, where it stands and its far end. */
+function PreviewTile({ tile, last }: { tile: (typeof TASK_PREVIEW)[number]["tiles"][number]; last: boolean }): JSX.Element {
+  const t = useTokens();
+  const look = useLook();
+  const selected = tile.selected === true;
+  const pill = pillKindOf(tile.status as TaskStatus | InstanceStatus);
+  const { wash, ground, ring, radius, below } = tileChromeOf(t, look, { pill, selected, last, inTray: false });
+  // The data voice at a factor of --size-data, line-height 1.5 as the body sets it (as `TaskCard`'s).
+  const line = (factor: number): object => ({
+    fontFamily: t.v("font-data"),
+    fontSize: t.scaled("size-data", factor),
+    lineHeight: isWeb ? "1.5" : Number(t.scaled("size-data", factor)) * 1.5,
+  });
+  const oneLine = isWeb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : { numberOfLines: 1, ellipsizeMode: "tail" };
+  return (
+    <View
+      position="relative"
+      backgroundColor={ground as never}
+      {...((ring !== undefined ? { boxShadow: ring } : {}) as object)}
+      borderRadius={radius as never}
+      paddingTop={7}
+      paddingRight={9}
+      paddingBottom={6}
+      paddingLeft={9}
+      marginBottom={below}
+    >
+      <View flexDirection="row" alignItems="center" gap={6}>
+        <Text
+          {...(line(0.96) as object)}
+          {...(oneLine as object)}
+          flexGrow={1}
+          flexShrink={1}
+          flexBasis={0}
+          minWidth={0}
+          {...({ letterSpacing: isWeb ? "-0.01em" : Number(t.scaled("size-data", 0.96)) * -0.01 } as object)}
+          fontWeight={selected ? "600" : "400"}
+          color={(wash === "success" ? t.v("dim") : t.v("text")) as never}
+        >
+          {tile.title}
+        </Text>
+        {pill !== null ? <Pill kind={pill} word={PILL_WORD[pill]} title={tile.status} /> : null}
+      </View>
+      <View flexDirection="row" alignItems="center" gap={6} marginTop={2} overflow="hidden">
+        <Text {...(line(0.84) as object)} {...(oneLine as object)} color={t.v("dim") as never} flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0}>
+          {tile.meta}
+        </Text>
+        {tile.far !== undefined ? (
+          <Text {...(line(0.84) as object)} {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)} color={t.v("dim") as never} flexShrink={0}>
+            {tile.far}
+          </Text>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/**
+ * The work summary's preview (`workPreview.tsx`'s `WorkPreview`): one request's work, three times, each
+ * drawn by the transcript itself under the settings being chosen. The moments are
+ * `workPreviewModel.ts`'s, as the DOM's are. The rules:
+ *
+ *   .ws-preview          a `.set-preview` that takes the pointer: a column, gap 12, padding 12
+ *   .ws-preview-card     clipped, 1px --line, radius 10, --panel
+ *   .ws-preview-head     row, centred, gap 8, at least 30 tall, padding 0 12, a --line under, --panel-2,
+ *                        app 600 11.5/12.5 --text; its note pushed right, 400, --dim
+ *   .ws-preview-dot      7 round, --accent in a 3px ring of --accent 18% (done: --ok, no ring)
+ *   .ws-preview-card > .ts   padding 8 12 10
+ */
+function WorkPreview({ look }: { look: WorkLook }): JSX.Element {
+  const t = useTokens();
+  // Timed once, when the preview opens, so the "so far" clocks read as they would in a live turn.
+  const [now] = useState(() => Date.now());
+  const states = useMemo(() => workPreviewStates(now), [now]);
+  const head = { voice: "app", scale: 11.5 / 12.5, weight: 600 } as const;
+  return (
+    <WorkLookContext.Provider value={look}>
+      <View marginTop={10} gap={12} padding={12} overflow="hidden" borderRadius={10} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+        {states.map((state, i) => {
+          const done = state.label === "Finished";
+          return (
+            <View key={i} minWidth={0} overflow="hidden" borderRadius={10} backgroundColor={t.v("panel") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+              <View flexDirection="row" alignItems="center" gap={8} minHeight={30} paddingHorizontal={12} backgroundColor={t.v("panel-2") as never} {...(edge(t, { bottom: 1 }) as object)}>
+                <View
+                  width={7}
+                  height={7}
+                  borderRadius={999}
+                  flexShrink={0}
+                  backgroundColor={t.v(done ? "ok" : "accent") as never}
+                  {...(done ? {} : ({ boxShadow: `0 0 0 3px ${t.mix(t.v("accent"), 18, "transparent")}` } as object))}
+                />
+                <Txt spec={head}>{state.label}</Txt>
+                <Txt spec={{ ...head, weight: 400, color: "dim" }} marginLeft="auto">
+                  {state.note}
+                </Txt>
+              </View>
+              {/* The transcript's own padding is 12 16 22; the preview's card holds it at 8 12 10. */}
+              <View marginTop={-4} marginHorizontal={-4} marginBottom={-12} minWidth={0}>
+                <Transcript session={null} entries={state.entries} working={state.working} />
+              </View>
+            </View>
+          );
+        })}
+      </View>
+    </WorkLookContext.Provider>
   );
 }
 

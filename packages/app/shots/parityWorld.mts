@@ -460,6 +460,40 @@ export const SCENES: readonly Scene[] = [
     },
   },
   {
+    // A conversation with work in it: the fake model reads, searches, runs a failing command and a
+    // passing one, and answers — the tool rows and the work summary above the answer (decision 0015's
+    // transcript copy). Made the first time it is reached, as `conversation` is.
+    name: "conversation-tools",
+    reach: async (app) => {
+      await conversation(app, TOOLS_CONVERSATION);
+      await app.clickText("Chat");
+      await app.until(says(TOOLS_CONVERSATION), "the conversation to be listed");
+      await app.clickText(TOOLS_CONVERSATION);
+      await app.until(says("One rule now covers"), "the answer to be drawn");
+      await settle(800);
+    },
+  },
+  {
+    // The same conversation with its "Every step" open under the summary.
+    name: "conversation-steps",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "conversation-tools")!.reach(app);
+      await clickFirst(app, "Every step");
+      await app.until(says("scrollbar-styling"), "every step to open");
+      await settle(600);
+    },
+  },
+  {
+    // …and one of its rows opened: the call's arguments and result under it.
+    name: "conversation-row",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "conversation-steps")!.reach(app);
+      await clickFirst(app, "Web fetch");
+      await app.until(says("scrollbar-width and scrollbar-color"), "the row to open");
+      await settle(600);
+    },
+  },
+  {
     // The same conversation from the root's "All conversations" drawer: its rows carry their project's chip.
     name: "all-conversations",
     reach: async (app) => {
@@ -674,25 +708,50 @@ export const CONVERSATION = "explain the sync lint";
  * The conversation, made once in the world's project: a chat task (`chat/session`, as the Chat view
  * starts one) whose first message is its run, answered by a fake model. A no-op once it exists.
  */
-async function conversation(app: App): Promise<void> {
+async function conversation(app: App, title = CONVERSATION): Promise<void> {
   const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
   const project = projects.find((p) => p.kind === "user")?.project;
   if (project === undefined) throw new Error("the world has no project to talk in");
   const tasks = await app.ipc<Array<{ title: string }>>("task:list", { project });
-  if (tasks.some((t) => t.title === CONVERSATION)) return;
+  if (tasks.some((t) => t.title === title)) return;
+  const tools = title === TOOLS_CONVERSATION;
   const made = await app.ipc<{ taskId: string }>("task:create", {
-    title: CONVERSATION,
+    title,
     workflow: "chat/session",
-    inputs: { message: "What does the sync lint check?" },
+    inputs: { message: tools ? "Make every scrollbar the same thin rounded one." : "What does the sync lint check?" },
     project,
   });
   await app.ipc("task:start", {
     taskId: made.taskId,
     project,
-    fake: [{ output: "It checks that **every state** a workflow names exists:\n\n- the `sequence` entries\n- each transition's `to`\n\nRun it with `jaira lint`." }],
+    fake: tools ? TOOLS_FAKE : [{ output: "It checks that **every state** a workflow names exists:\n\n- the `sequence` entries\n- each transition's `to`\n\nRun it with `jaira lint`." }],
   });
   await settle(1500);
 }
+
+/** The conversation the `conversation-tools` scene opens. */
+export const TOOLS_CONVERSATION = "tidy the scrollbars";
+const SRC = "packages/app/src/renderer";
+const use = (id: string, name: string, input: unknown): unknown => ({ type: "tool_use", id, name, input });
+const result = (id: string, content: string, error = false): unknown => ({ type: "tool_result", tool_use_id: id, content, ...(error ? { is_error: true } : {}) });
+/** Its answer, and the fake model's turn: it thinks, reads, searches, runs a failing check and a passing one. */
+const TOOLS_ANSWER = "One rule now covers every scrollbar: a thin rounded thumb in `styles.css`, no track.";
+const TOOLS_FAKE = [
+  {
+    output: TOOLS_ANSWER,
+    messages: [
+      { role: "assistant", content: [{ type: "thinking", thinking: "Several columns scroll on their own. Check how each draws its scrollbar before touching the stylesheet." }, use("t1", "Grep", { pattern: "scrollbar" }), use("t2", "Read", { file_path: `${SRC}/styles.css` })] },
+      { role: "user", content: [result("t1", "styles.css:12: scrollbar-width: thin"), result("t2", "/* the stylesheet */")] },
+      { role: "assistant", content: [use("t3", "Read", { file_path: `${SRC}/chatPane.tsx` }), use("t4", "WebFetch", { url: "https://developer.chrome.com/docs/css-ui/scrollbar-styling" })] },
+      { role: "user", content: [result("t3", "export function ChatPane() {}"), result("t4", "scrollbar-width and scrollbar-color")] },
+      { role: "assistant", content: [use("t5", "Edit", { file_path: `${SRC}/styles.css`, old_string: "a", new_string: "b" }), use("t6", "Bash", { command: "npx vitest run floatLayers.test.ts" })] },
+      { role: "user", content: [result("t5", "ok"), result("t6", "1 failed", true)] },
+      { role: "assistant", content: [use("t7", "Bash", { command: "npx vitest run floatLayers.test.ts" })] },
+      { role: "user", content: [result("t7", "1 passed")] },
+      { role: "assistant", content: [{ type: "text", text: TOOLS_ANSWER }] },
+    ],
+  },
+];
 
 /**
  * Drill the parked task's run: a double-click on its card in the board (the middle column — not the

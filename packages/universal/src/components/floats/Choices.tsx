@@ -140,8 +140,27 @@ const BODY: FontSpec = { voice: "app", scale: 13 / 12.5 };
 
 /** `.chip` inside a line of the body's text. */
 function ChipInline({ children }: { children: ReactNode }): JSX.Element {
+  const t = useTokens();
+  // On web an inline box in the line, as the DOM's `span.chip` is: its edge round the words' own height,
+  // on their baseline. A phone's `Text` draws no edge on a run of words, so there it is the chip's box.
+  if (isWeb) {
+    return (
+      <Txt
+        spec={{ voice: "app", scale: 10 / 12.5, color: "dim" }}
+        marginRight={6}
+        paddingHorizontal={6}
+        borderWidth={1}
+        borderStyle="solid"
+        borderColor={t.v("line") as never}
+        borderRadius={999}
+        whiteSpace="nowrap"
+      >
+        {children}
+      </Txt>
+    );
+  }
   return (
-    <Chip spec={{ lineHeight: 1.5 }} marginRight={6} {...((isWeb ? { display: "inline-flex" } : {}) as object)}>
+    <Chip spec={{ lineHeight: 1.5 }} marginRight={6}>
       {children}
     </Chip>
   );

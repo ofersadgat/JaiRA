@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { layoutPills, type PillCounts } from "@jaira/ui/pill";
 import { Press, Txt } from "../primitives";
 import { useTokens } from "../tokens";
@@ -23,7 +23,8 @@ export function Pills({
 }: {
   counts: PillCounts;
   budget: number;
-  onClear?: (() => void) | undefined;
+  /** Handed the pills' own element on web (a card is placed against it); a phone has none to hand. */
+  onClear?: ((from?: HTMLElement) => void) | undefined;
   clearTitle?: string;
 }): JSX.Element | null {
   const t = useTokens();
@@ -47,7 +48,7 @@ export function Pills({
   if (onClear === undefined) return <View {...row}>{inner}</View>;
   void t;
   return (
-    <Press onPress={() => onClear()} title={clearTitle} label={clearTitle} {...row}>
+    <Press onPress={(e) => onClear(isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget : undefined)} title={clearTitle} label={clearTitle} {...row}>
       {inner}
     </Press>
   );

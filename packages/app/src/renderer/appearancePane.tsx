@@ -72,6 +72,7 @@ import {
   MODES,
   SUGGESTED_APP,
   SUGGESTED_DATA,
+  TASK_PREVIEW,
   TEXT_PREVIEW,
   USAGE_CHOICES,
   WORK_NOTE_CHOICES,
@@ -350,21 +351,34 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
  * palette and all three board options reach it exactly as they reach the Tasks view.
  */
 function TaskPreview(): JSX.Element {
+  // What the tiles say is `appearanceModel.ts`'s, shared with the universal copy (decision 0015).
   return (
     <div className="set-preview task-preview" aria-hidden="true">
       <div className="board-body">
         <div className="columns">
-          <Column name="draft" seq={1} count={2} empty="—">
-            <Tile status="running" title="Rewind a run" selected onSelect={noop} meta={<><span className="ellip">feature/ux/draft</span><span className="card-status">2 m</span></>} />
-            <Tile status="completed" title="Ship each kinds" onSelect={noop} meta={<><span className="ellip">feature/ux/draft</span><span className="card-status">1 h ago</span></>} />
-          </Column>
-          <Column name="critique" seq={2} count={2} empty="—">
-            <Tile status="waiting_for_user" title="Fork from any point" onSelect={noop} meta={<><span className="ellip">feature/ux/critique</span><span className="card-status">gate</span></>} />
-            <Tile status="failed" title="Bridge race" onSelect={noop} meta={<><span className="ellip">exit 1</span><span className="card-status">6 m ago</span></>} />
-          </Column>
-          <Column name="verify" seq={3} count={1} empty="—">
-            <Tile status="queued" title="Pause and stop" onSelect={noop} meta={<span className="ellip">queued</span>} />
-          </Column>
+          {TASK_PREVIEW.map((column) => (
+            <Column key={column.name} name={column.name} seq={column.seq} count={column.tiles.length} empty="—">
+              {column.tiles.map((tile) => (
+                <Tile
+                  key={tile.title}
+                  status={tile.status}
+                  title={tile.title}
+                  {...(tile.selected === true ? { selected: true } : {})}
+                  onSelect={noop}
+                  meta={
+                    tile.far !== undefined ? (
+                      <>
+                        <span className="ellip">{tile.meta}</span>
+                        <span className="card-status">{tile.far}</span>
+                      </>
+                    ) : (
+                      <span className="ellip">{tile.meta}</span>
+                    )
+                  }
+                />
+              ))}
+            </Column>
+          ))}
         </div>
       </div>
     </div>

@@ -1,7 +1,6 @@
 import { useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import {
-  BUILTIN_FUNCTIONS,
   EXECUTOR_STEPS,
   EXECUTOR_STEP_ORDER,
   executorNode,
@@ -12,9 +11,8 @@ import {
   type JairaProviderNode,
   type JairaRouterNode,
 } from "@jaira/shared/browser";
-import { activeStepsOf, allowFromText, isRouter, ownerOf, routesOf, stepPathOf, summarisePromptNode, treeCtxOf, treeLayerOf, withoutModel, type TreeCtx } from "@jaira/ui/executorTreeModel";
+import { activeStepsOf, allowFromText, isRouter, knownFunctionsOf, ownerOf, routesOf, stepPathOf, summarisePromptNode, treeCtxOf, treeLayerOf, withoutModel, type TreeCtx } from "@jaira/ui/executorTreeModel";
 import type { LlmConfigDoc } from "@jaira/ui/llmConfigModel";
-import { Uncopied } from "../../app/Uncopied";
 import { Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Disclosure, Field, FieldGrid, Level } from "../form/Field";
@@ -23,6 +21,7 @@ import { LlmConfigForm } from "../form/LlmConfigForm";
 import { SchemaForm } from "../form/SchemaForm";
 import { Hint, Stack, Status } from "./bits";
 import { Button } from "./Button";
+import { RuleList } from "./FunctionsSections";
 
 /**
  * `executorTreePane.tsx`, universal (decision 0015): the executor tree, every level expanded, with only
@@ -52,14 +51,14 @@ export interface ExecutorTreeProps {
 }
 
 export function ExecutorTree({ resolved, overlay, locked, agents, onOverlay, split = false }: ExecutorTreeProps): JSX.Element {
+  // The built-ins and every agent runtime this project configures (`executorTreeModel.ts`).
+  const known = knownFunctionsOf(agents);
   const ctx = treeCtxOf(overlay, locked, onOverlay, split);
-  void agents;
-  void BUILTIN_FUNCTIONS;
   return (
     <Stack>
       <NodeBanner kind="operation" />
       <Level title="Functions" hint={executorNode("function")!.hint} depth={1}>
-        <FunctionNode node={resolved.function ?? {}} ctx={ctx} />
+        <FunctionNode node={resolved.function ?? {}} ctx={ctx} known={known} />
       </Level>
       <Level title="Prompts" hint="How a prompt state is answered." depth={1}>
         <PromptNode node={resolved.prompt ?? { kind: "router" }} path="prompt" ctx={ctx} />
@@ -102,10 +101,24 @@ function NodeBanner({ kind }: { kind: string }): JSX.Element {
   );
 }
 
-function FunctionNode({ node, ctx }: { node: NonNullable<JairaOperationNode["function"]>; ctx: TreeCtx }): JSX.Element {
+function FunctionNode({ node, ctx, known }: { node: NonNullable<JairaOperationNode["function"]>; ctx: TreeCtx; known: Array<{ name: string; what: string }> }): JSX.Element {
+  const rules = node.rules ?? [];
+  const setRules = (next: string[]): void => ctx.set("function.rules", next.length > 0 ? next : undefined);
   return (
     <Stack>
-      {ctx.split === true ? <Hint>Which functions this executor may reach is Settings → Tools → Functions, the available column.</Hint> : <Uncopied name="RuleList (function.rules)" height={60} />}
+      {ctx.split === true ? (
+        <Hint>Which functions this executor may reach is Settings → Tools → Functions, the available column.</Hint>
+      ) : (
+        <Field
+          label="Rules"
+          param="function.rules"
+          hint="Walked in order, last match winning. Start with a baseline — everything or nothing — then add or subtract. Empty means everything the workflow registers."
+          wide
+          layer={treeLayerOf(ctx, "function.rules")}
+        >
+          <RuleList rules={rules} known={known} disabled={ctx.locked} onChange={setRules} />
+        </Field>
+      )}
       <StepStack path="function" steps={node.steps} label="Around every function call" ctx={ctx} />
     </Stack>
   );

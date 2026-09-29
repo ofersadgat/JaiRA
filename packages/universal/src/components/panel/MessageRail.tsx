@@ -1,17 +1,17 @@
 import { useEffect, useState, type JSX } from "react";
-import type { ViewId } from "@jaira/shared/browser";
+import type { ContextReading, ViewId } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { familyIcon } from "@jaira/ui/icons";
 import { READING, copyTextOf, cutTitleOf, fullClockOf, readingMenuOf, stampOf, typeMenuOf, type messageReadingOf } from "@jaira/ui/messageReading";
 import type { MessageEntry } from "@jaira/ui/transcript";
 import type { EditMessage } from "@jaira/ui/transcriptView";
 import { View, isWeb } from "@tamagui/core";
-import { Uncopied } from "../../app/Uncopied";
 import { copyText } from "../../clipboard";
 import { Press, Txt, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Icon, type IconName } from "./Icon";
+import { TurnContext } from "./TurnContext";
 
 /**
  * `transcriptView.tsx`'s message rail, universal (decision 0015): what can be done to a message, what it
@@ -30,7 +30,7 @@ import { Icon, type IconName } from "./Icon";
  *                  --line); its icon 12; `▾` 8, at .7.   .ts-read the same, 3 in
  *   .ts-clock      data 10.5/12, tabular, --dim, padding 0 4
  *
- * {@link Uncopied}: the context reading after a turn (`TurnContext`). "…" offers "Open in context panel"
+ * The context reading after a turn is `TurnContext.tsx`. "…" offers "Open in context panel"
  * disabled: this shell has no value panel to open one in yet.
  */
 export function MessageRail({
@@ -41,6 +41,7 @@ export function MessageRail({
   shown,
   onEdit,
   types,
+  contextBefore,
 }: {
   entry: MessageEntry;
   value: JsonValue;
@@ -48,6 +49,8 @@ export function MessageRail({
   onPick: (view: ViewId) => void;
   shown: boolean;
   onEdit: EditMessage | undefined;
+  /** The reading on the answer before this one — what "+46% since the reply before" is measured from. */
+  contextBefore?: ContextReading | undefined;
   types: {
     own: string | undefined;
     override: string | undefined;
@@ -178,7 +181,7 @@ export function MessageRail({
         </>
       ) : null}
       <View flex={1} minWidth={0} />
-      {entry.context !== undefined ? <Uncopied name="the context after this turn" /> : null}
+      {entry.context !== undefined ? <TurnContext context={entry.context} before={contextBefore} /> : null}
       <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim", tabular: true }} paddingHorizontal={4} numberOfLines={1} {...((isWeb && fullClockOf(entry.at) !== undefined ? { title: fullClockOf(entry.at) } : {}) as object)}>
         {stampOf(entry.at)}
       </Txt>

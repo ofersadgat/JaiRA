@@ -1,15 +1,22 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { Fragment, useContext, useState, type JSX, type ReactNode } from "react";
 import { Platform, Pressable } from "react-native";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import type { SessionView, ViewId } from "@jaira/shared/browser";
 import { messageReadingOf } from "@jaira/ui/messageReading";
 import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
 import type { EditMessage } from "@jaira/ui/transcriptView";
 import { clockOf } from "@jaira/ui/runActivityModel";
-import { blocksOf, endOfBlock, gapBetween, iconOf, startOfBlock, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
+import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, startOfBlock, type LiveTail, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
+import { keptUnderSummary, type CallSurface } from "@jaira/ui/transcriptRows";
+import { isIdle } from "@jaira/ui/workSummary";
+import { WorkLookContext } from "@jaira/ui/workSummaryContext";
+import type { ContextReading } from "@jaira/shared/browser";
 import { Txt, edge, useHover } from "../../primitives";
+import { Pulse } from "../chat/Paper";
+import { CompactionLine, GapMark } from "./TranscriptMarks";
+import { Work, WorkColumn, type TranscriptOf } from "./WorkRows";
+import { WorkSummary } from "./WorkSummary";
 import { useTokens } from "../../tokens";
-import { Uncopied } from "../../app/Uncopied";
 import { ValueView } from "./ValueView";
 import { Markdown } from "../Markdown";
 import { Icon } from "./Icon";
@@ -18,13 +25,14 @@ import { MessageRail } from "./MessageRail";
 
 /**
  * `transcriptView.tsx`'s `Transcript`, universal (decision 0015): what one session said — the messages,
- * and the work between them — over the same model (`entriesOf`, `blocksOf`, `gapBetween`). Copied: a
- * message said to the model (with the badge naming the workflow that wrote it), an answer, a stretch
- * of work that is one event. {@link Uncopied}: a tool call's row (`Tool`), a stretch of several steps
- * (`WorkSummary`), a pause between blocks (`GapMark`), a compaction, and a reading other than prose or
- * rendered markdown (`ValueView`'s code, JSON, form, table, diff …). The message rail — Copy, rewind,
- * fork, the type and reading chips, the clock — is the room it takes: the DOM's is invisible at rest
- * (`opacity: 0`), and its menus are not copied yet.
+ * and the work between them — over the same model (`entriesOf`, `blocksOf`, `gapBetween`). A message
+ * said to the model (with the badge naming the workflow that wrote it), an answer, a line of work of
+ * each kind (`WorkRows.tsx`), a stretch of several steps summarised (`WorkSummary.tsx`), the pause
+ * before a block and a compaction (`TranscriptMarks.tsx`), an armed cut, and the answer being written.
+ * Not copied: a reading other than prose, rendered markdown, JSON, data or source (`ValueView`'s
+ * table, form, diff …). The message rail — Copy, rewind, fork, the type and reading chips, the clock —
+ * is `MessageRail.tsx`; without the host's controls it is only the room it takes (the DOM's is
+ * invisible at rest).
  *
  *   .ts                    column, padding 12 16 22
  *   .ts-msg-user           at the end, at most 78% wide, margin 14 0 10; .ts-msg-sent a column ending right
@@ -36,10 +44,8 @@ import { MessageRail } from "./MessageRail";
  *   .ts-rail               at least 22 tall, 4 above
  *   .ts-msg .vv-source     the app voice at --size-app × 13/12.5, line 1.6, --text, pre-wrap
  *   .vv-body > .markdown   --size-app × 12.5/12.5, line 1.65 in a message, padding 2 2 12, no end margins
- *   .ts-work               column, margin 6 −6 10
- *   .ts-row-line           row, centred, gap 7, padding 3 6, radius 6; .ts-icon 16 wide (the glyph 14);
- *                          .ts-preview flex 1, ellipsed (prose: app voice 12/12.5), --dim; .ts-at data
- *                          11/12 --dim; .ts-chev, .ts-mark 14 wide. muted: the icon --tok-hint
+ *   .ts-text-live          app 13/12.5 on 1.6, pre-wrap, --dim; .ts-live-line row, gap 7, 6 above,
+ *                          app 11/12.5 --dim, a pulse
  */
 export function Transcript({
   session,
@@ -50,6 +56,9 @@ export function Transcript({
   onEdit,
   scope,
   rails = false,
+  live,
+  working,
+  calls,
 }: {
   session: SessionView | null;
   entries: TranscriptEntry[];
@@ -65,16 +74,26 @@ export function Transcript({
   scope?: string | undefined;
   /** Draw each message's rail's controls (the Chat view's thread); otherwise only the room it takes. */
   rails?: boolean | undefined;
-  /** The live tail and whether the record is still being written — taken for the Chat view's call; not drawn yet. */
-  live?: unknown;
+  /** The live tail behind the entries — for the subagents' conversations it streams. */
+  live?: LiveTail | null | undefined;
+  /** The record is still being written: the last stretch of work is drawn as in progress. */
   working?: boolean | undefined;
+  /** Placement decisions for the call rows (`CallSurface`). */
+  calls?: CallSurface | undefined;
 }): JSX.Element {
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
   if (shown.length === 0) return <Empty>{empty ?? session?.empty ?? "Nothing has been said here yet."}</Empty>;
+  const chains = session !== null && session !== undefined ? session.sidechains : undefined;
+  const sidechainOf = chains !== undefined || live?.sidechains !== undefined ? (call: string) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call]) : undefined;
   const blocks = blocksOf(shown);
+  const writing = working ?? session?.status === "running";
   // What an armed cut takes, counted once: the messages at or past the turn, replies included.
   const doomedCount = doomedFrom === undefined ? 0 : shown.filter((entry) => entry.kind === "message" && entry.turn !== undefined && entry.turn >= doomedFrom).length;
   let doomed = false;
+  // The context readings as the conversation goes: the last one seen, and whether a compaction was
+  // drawn since — a reading that DROPS with none between gets a line of its own anyway.
+  let lastContext: ContextReading | undefined;
+  let compactedSince = false;
   return (
     <View flexDirection="column" width="100%" paddingTop={12} paddingHorizontal={16} paddingBottom={22} minWidth={0}>
       {blocks.map((block, i) => {
@@ -84,44 +103,78 @@ export function Transcript({
         const cutLine = crossed ? <CutLine key={`cut-${i}`} count={doomedCount} /> : null;
         const fade = doomed ? { opacity: 0.38 } : {};
         const gap = gapBetween(endOfBlock(blocks[i - 1]), startOfBlock(block));
-        const before = gap === undefined ? null : <Uncopied name={`a pause (${gap.label})`} />;
+        const before = gap === undefined ? null : <GapMark gap={gap} />;
         if (block.kind === "work") {
           return (
-            <View key={i} minWidth={0}>
+            <Fragment key={i}>
               {before}
               {cutLine}
               <View minWidth={0} {...fade}>
-                <Work entries={block.entries} />
+                <WorkBlockView entries={block.entries} working={writing && i === blocks.length - 1} sidechainOf={sidechainOf} narrated={narrated} calls={calls} />
               </View>
-            </View>
+            </Fragment>
           );
         }
-        if (block.kind === "compaction") return <Uncopied key={i} name="a compaction line" />;
-        if (block.kind === "message") {
+        if (block.kind === "compaction") {
+          compactedSince = true;
           return (
-            <View key={i} minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})}>
+            <Fragment key={i}>
               {before}
               {cutLine}
-              <Message
-                entry={block}
-                {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
-                {...(rails ? { rails: { onEdit, scope } } : {})}
-                doomed={doomed}
-              />
-            </View>
+              <CompactionLine trigger={block.trigger} before={block.before} after={block.after} durationMs={block.durationMs} window={lastContext?.window} />
+            </Fragment>
+          );
+        }
+        if (block.kind === "message") {
+          const prior = lastContext;
+          const context = block.context;
+          // A reading far below the one before, with no compaction drawn between.
+          const dropped =
+            context !== undefined && prior !== undefined && !compactedSince && prior.used > 0 && context.used < prior.used * 0.6 ? (
+              <CompactionLine derived before={prior.used} after={context.used} window={context.window ?? prior.window} />
+            ) : null;
+          if (context !== undefined) {
+            lastContext = context;
+            compactedSince = false;
+          }
+          return (
+            <Fragment key={i}>
+              {before}
+              {cutLine}
+              {dropped}
+              <View minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})}>
+                <Message
+                  entry={block}
+                  {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
+                  {...(rails ? { rails: { onEdit, scope } } : {})}
+                  {...(context !== undefined && prior !== undefined ? { contextBefore: prior } : {})}
+                  doomed={doomed}
+                />
+              </View>
+            </Fragment>
           );
         }
         return (
           <View key={i} minWidth={0} marginTop={10} marginBottom={14} {...fade}>
-            <Txt spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6 }} whiteSpace="pre-wrap">
+            {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it. */}
+            <Txt spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)}>
               {block.text}
             </Txt>
+            {writing ? (
+              <View flexDirection="row" alignItems="center" gap={7} marginTop={6}>
+                <Pulse color="dim" />
+                <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>writing…</Txt>
+              </View>
+            ) : null}
           </View>
         );
       })}
     </View>
   );
 }
+
+/** A sub-transcript, for a subagent's conversation under its call (no session: its doors open no further). */
+const Inner: TranscriptOf = ({ entries, working }) => <Transcript session={null} entries={entries} working={working} />;
 
 /**
  * `.ts-cut`: the counted line over what an armed rewind would delete — a dashed rule each side of the
@@ -141,41 +194,31 @@ function CutLine({ count }: { count: number }): JSX.Element {
   );
 }
 
-/** A stretch of work: one line is its own row (`WorkBlockView`); more are summarised — not copied yet. */
-function Work({ entries }: { entries: WorkEntry[] }): JSX.Element {
-  if (entries.length !== 1) return <Uncopied name={`the work summary (${entries.length} steps)`} />;
-  const entry = entries[0]!;
-  if (entry.kind !== "event") return <Uncopied name={`a ${entry.kind} row`} />;
-  return (
-    <View flexDirection="column" minWidth={0} marginTop={6} marginHorizontal={-6} marginBottom={10}>
-      <Row entry={entry} preview={entry.text} tone={entry.tone === "plain" ? "muted" : entry.tone} prose canOpen={entry.detail !== undefined} />
-    </View>
-  );
-}
-
-/** `Row`: one line of work — its glyph, what it was, when, and whether it opens. The body is not copied. */
-function Row({ entry, preview, tone, prose, canOpen }: { entry: WorkEntry; preview: string; tone: "muted" | "warn" | "bad"; prose: boolean; canOpen: boolean }): JSX.Element {
-  const t = useTokens();
-  const ink = tone === "warn" ? "warn" : tone === "bad" ? "bad" : "dim";
-  return (
-    <View borderRadius={6} minWidth={0}>
-      <View flexDirection="row" alignItems="center" gap={7} paddingVertical={3} paddingHorizontal={6} borderRadius={6} width="100%" minWidth={0}>
-        <View width={16} flexShrink={0} alignItems="center" justifyContent="center">
-          <Icon name={iconOf(entry)} size={14} color={String(t.v(tone === "muted" ? "tok-hint" : ink))} />
-        </View>
-        <Txt spec={prose ? { voice: "app", scale: 12 / 12.5, color: ink } : { voice: "data", scale: 11.5 / 12, color: ink }} ellip flex={1} minWidth={0}>
-          {preview}
-        </Txt>
-        <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", tabular: true }} flexShrink={0}>
-          {clockOf(entry.at)}
-        </Txt>
-        <View width={14} flexShrink={0}>
-          {canOpen ? <Icon name="chevron" size={14} color={String(t.v("tok-hint"))} /> : null}
-        </View>
-        <View width={14} flexShrink={0} />
-      </View>
-    </View>
-  );
+/**
+ * `WorkBlockView`: a stretch of work between two messages — one line is its own row, more are
+ * summarised (phases, chips and the latest rows).
+ */
+function WorkBlockView({
+  entries,
+  working,
+  sidechainOf,
+  narrated,
+  calls,
+}: {
+  entries: WorkEntry[];
+  working: boolean;
+  sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined;
+  narrated?: boolean | undefined;
+  calls?: CallSurface | undefined;
+}): JSX.Element | null {
+  const look = useContext(WorkLookContext);
+  const rowOf = (index: number): ReactNode => <Work entry={entries[index]!} open={working} sidechainOf={sidechainOf} narrated={narrated} calls={calls} transcript={Inner} />;
+  // A stretch of nothing but rate limits and notes did no work: hidden, it is not drawn at all.
+  if ((look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
+  // One line has nothing to summarise.
+  if (entries.length === 1) return <WorkColumn>{rowOf(0)}</WorkColumn>;
+  const kept = entries.flatMap((entry, index) => (keptUnderSummary(entry, calls) ? [index] : []));
+  return <WorkSummary entries={entries} working={working} kept={kept} rowOf={rowOf} clock={clockOf} />;
 }
 
 /**
@@ -188,8 +231,11 @@ function Message({
   workflow,
   rails,
   doomed = false,
+  contextBefore,
 }: {
   entry: MessageEntry;
+  /** The reading on the answer before this one (the rail's context badge measures from it). */
+  contextBefore?: ContextReading | undefined;
   workflow?: string | undefined;
   /** The rail's controls, where the host draws them (`MessageRail.tsx`). */
   rails?: { onEdit: EditMessage | undefined; scope: string | undefined } | undefined;
@@ -238,6 +284,7 @@ function Message({
         onPick={setPicked}
         shown={hovered || held}
         onEdit={rails.onEdit}
+        contextBefore={contextBefore}
         types={{
           own,
           override,
@@ -263,6 +310,9 @@ function Message({
   /** Where the pointer and a long press reach the message (only with the host's rail). */
   const reach = rails === undefined ? {} : { ...(hover as object), ...(Platform.OS !== "web" ? { onLongPress: () => setHeld((was) => !was) } : {}) };
 
+  // `data-day`: what the day chip over the scroller reads (web; a phone's chip is not drawn).
+  const day = dayLabelOf(entry.at);
+  const stamped = isWeb && day !== undefined ? { "data-day": day } : {};
   const chip = { voice: "app" as const, scale: 10.5 / 12.5, weight: 500, color: "dim" };
   const source =
     entry.by !== undefined ? (
@@ -302,7 +352,7 @@ function Message({
   if (entry.role === "user") {
     const sent = entry.by !== undefined;
     return (
-      <Reach reach={reach} minWidth={0} marginTop={14} marginBottom={10} {...(doomed ? { opacity: 0.38 } : {})} {...(sent ? { flexDirection: "column", alignItems: "flex-end" } : {})}>
+      <Reach reach={reach} {...stamped} minWidth={0} marginTop={14} marginBottom={10} {...(doomed ? { opacity: 0.38 } : {})} {...(sent ? { flexDirection: "column", alignItems: "flex-end" } : {})}>
         {source}
         <View
           paddingVertical={8}
@@ -325,14 +375,14 @@ function Message({
   }
   if (entry.role === "assistant") {
     return (
-      <Reach reach={reach} minWidth={0} marginTop={10} marginBottom={14} {...(doomed ? { opacity: 0.38 } : {})}>
+      <Reach reach={reach} {...stamped} minWidth={0} marginTop={10} marginBottom={14} {...(doomed ? { opacity: 0.38 } : {})}>
         {said || entry.output !== undefined ? body : <Empty>(no answer was recorded)</Empty>}
         {rail}
       </Reach>
     );
   }
   return (
-    <Reach reach={reach} minWidth={0} marginTop={10} marginBottom={14} paddingTop={1} paddingBottom={1} paddingLeft={12} {...(doomed ? { opacity: 0.38 } : {})} {...(edge(t, { left: 2 }, "rule") as object)}>
+    <Reach reach={reach} {...stamped} minWidth={0} marginTop={10} marginBottom={14} paddingTop={1} paddingBottom={1} paddingLeft={12} {...(doomed ? { opacity: 0.38 } : {})} {...(edge(t, { left: 2 }, "rule") as object)}>
       <Txt spec={{ voice: "app", scale: 10 / 12.5, weight: 600, upper: true, ls: 0.07, color: "warn" }} marginBottom={3}>
         {entry.role}
       </Txt>

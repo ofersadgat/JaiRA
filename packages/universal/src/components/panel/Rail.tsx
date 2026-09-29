@@ -39,6 +39,7 @@ export function RailedRows({
   compact,
   renderGap,
   renderCrumb,
+  rowClass,
 }: {
   steps: readonly RailStep[];
   renderStep: (index: number) => ReactNode;
@@ -60,6 +61,11 @@ export function RailedRows({
   compact?: ((visible: readonly VisibleRow[]) => DisplayItem[]) | undefined;
   renderGap?: ((item: Extract<DisplayItem, { kind: "gap" }>) => ReactNode) | undefined;
   renderCrumb?: ((item: Extract<DisplayItem, { kind: "crumb" }>) => ReactNode) | undefined;
+  /**
+   * What a row is besides a row (`railView.tsx`'s `rowClass`): `is-cut` rings its knot in --bad (an armed
+   * rewind), `doomed` fades it to .35 (`.rail-row.doomed`).
+   */
+  rowClass?: ((index: number) => string | undefined) | undefined;
 }): JSX.Element {
   const t = useTokens();
   const { rows, deepest: reached } = useMemo(() => railOf(steps), [steps]);
@@ -119,8 +125,9 @@ export function RailedRows({
         if (orphan && row.enter === undefined) return null;
         const lobe = row.step === undefined ? undefined : mark?.(row.step);
         const turn = row.turn || lobe !== undefined;
+        const extra = row.step === undefined ? undefined : rowClass?.(row.step);
         return (
-          <View key={`${row.exit?.lane.key ?? ""}|${row.enter?.lane.key ?? ""}|${row.step ?? ""}`} flexDirection="row" alignItems="stretch" minWidth={0} {...(turn ? { height: cap } : {})}>
+          <View key={`${row.exit?.lane.key ?? ""}|${row.enter?.lane.key ?? ""}|${row.step ?? ""}`} flexDirection="row" alignItems="stretch" minWidth={0} {...(turn ? { height: cap } : {})} {...(extra?.includes("doomed") === true ? { opacity: 0.35 } : {})}>
             <Gutter
               row={row}
               centres={centres}
@@ -132,6 +139,7 @@ export function RailedRows({
               {...(lobe !== undefined ? { mark: lobe } : {})}
               hideExit={orphan}
               here={row.step !== undefined && here?.(row.step) === true}
+              cut={extra?.includes("is-cut") === true}
             />
             {content(turn, rolled !== undefined ? (renderRolled?.(rolled, inside.get(rolled.key) ?? 0) ?? null) : row.step === undefined ? null : renderStep(row.step))}
           </View>
@@ -199,6 +207,7 @@ function Gutter({
   mark,
   hideExit,
   here,
+  cut = false,
 }: {
   row: RailRow;
   centres: readonly number[];
@@ -210,6 +219,8 @@ function Gutter({
   mark?: RailLane;
   hideExit: boolean;
   here: boolean;
+  /** An armed rewind cuts at this knot: the danger ring round it. */
+  cut?: boolean;
 }): JSX.Element {
   const width = gutterWidth(centres, Math.max(lanesOf(row), mark === undefined ? 0 : row.open.length + 1));
   const drawn = new Set<number>();
@@ -247,6 +258,7 @@ function Gutter({
       shapes.push({ kind: "circle", cx: cx + 3, cy: MID, r: 4.5, fill: ground, stroke: colour, strokeWidth: 1.5, opacity: 0.7 });
       shapes.push({ kind: "circle", cx, cy: MID, r: 4.5, fill: ground, stroke: colour, strokeWidth: 2 });
     }
+    if (cut) shapes.push({ kind: "circle", cx, cy: MID, r: 7.5, fill: "none", stroke: cssColour(t, "var(--bad)"), strokeWidth: 1.5 });
   }
   return (
     <View width={width} flexShrink={0} alignSelf="stretch" position="relative">

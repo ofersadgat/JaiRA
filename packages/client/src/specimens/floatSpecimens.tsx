@@ -120,7 +120,7 @@ function FootBox({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   return (
-    <View flexDirection="column" gap={1} paddingTop={6} paddingHorizontal={6} paddingBottom={6} backgroundColor={t.v(look.palette === "classic" ? "panel-2" : "chrome") as never} borderTopWidth={1} borderRightWidth={1} borderBottomWidth={0} borderLeftWidth={0} borderStyle="solid" borderColor={t.v("line") as never}>
+    <View flexDirection="column" gap={1} paddingTop={6} paddingHorizontal={6} paddingBottom={6} backgroundColor={t.v(look.palette === "classic" ? "panel-2" : "chrome") as never} borderTopWidth={1} borderBottomWidth={0} borderLeftWidth={0} borderStyle="solid" borderColor={t.v("line") as never} {...(look.palette === "contrast" ? { borderRightWidth: 1.5, borderRightColor: t.v("rule") as never } : { borderRightWidth: 1 })}>
       {children}
     </View>
   );

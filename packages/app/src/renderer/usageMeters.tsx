@@ -71,13 +71,8 @@ function Bar({ pct, tone }: { pct: number | null; tone: string }): JSX.Element {
 
 const round = (n: number): number => Math.round(n);
 
-/** The colour of the n-th category in a breakdown — the rail palette, then the accent. */
-const PART_COLOURS = ["var(--p3)", "var(--p2)", "var(--um-teal)", "var(--p1)", "var(--accent)", "var(--p4, var(--dim))"];
-function colourOf(name: string, index: number): string {
-  const key = name.toLowerCase();
-  if (key.includes("message")) return "var(--accent)";
-  return PART_COLOURS[index % (PART_COLOURS.length - 1)]!;
-}
+// The colour of each category in a breakdown — `contextParts.ts`, shared with the universal copies (decision 0015).
+import { colourOf } from "./contextParts";
 
 // --- the context: composer ring, its popover, the turn badge, the compaction line -------------
 

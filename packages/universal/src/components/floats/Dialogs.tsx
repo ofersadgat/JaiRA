@@ -64,7 +64,11 @@ export function ModuleApprovalDialog({
         // children's margins do not collapse out of it).
         <View key={file.file} flexDirection="column" marginTop={i > 0 ? em : 0}>
           <Txt spec={SUB}>
-            {file.file} — {file.previousHash !== undefined ? "changed since you approved it" : "never approved"}
+            {/* The DOM's text nodes, one for one: Chromium shapes each run apart. */}
+            {file.file}
+            {" —"}
+            {" "}
+            {file.previousHash !== undefined ? "changed since you approved it" : "never approved"}
             {file.symbols !== undefined && file.symbols.length > 0 ? ` · calls ${file.symbols.join(", ")}` : ""}
           </Txt>
           <View

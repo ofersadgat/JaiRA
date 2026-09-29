@@ -18,6 +18,7 @@ import {
   peerWords,
   reachWords,
   sentence,
+  useAddMachine,
   useMachines,
   type WordPart,
 } from "./machinesModel";
@@ -285,23 +286,8 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
 }
 
 function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Element {
-  const [value, setValue] = useState<{ address?: string; code?: string }>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [done, setDone] = useState<string | undefined>(undefined);
-  const ready = (value.address ?? "").trim() !== "" && (value.code ?? "").trim() !== "";
-  const pair = (): void => {
-    setBusy(true);
-    setError(undefined);
-    setDone(undefined);
-    invoke("machines:add", { address: value.address!.trim(), code: value.code!.trim() })
-      .then((view) => {
-        onView(view);
-        setValue({});
-        setDone(W.paired);
-      }, (e: unknown) => setError(errorOf(e)))
-      .finally(() => setBusy(false));
-  };
+  // The form's state and Pair are `machinesModel.ts`'s, shared with the universal copy (decision 0015).
+  const { value, setValue, busy, error, done, ready, pair } = useAddMachine(onView);
   return (
     <SettingsSection id="add" title={W.add.title} info={W.add.info}>
       <SettingsRow name={W.other.name} full>
