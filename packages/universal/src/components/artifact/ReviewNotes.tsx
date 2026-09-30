@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import { anchorNotes, decisionWordOf, shortQuote, type ReviewNote } from "@jaira/shared/browser";
 import { forgeName, repliesOnForge } from "@jaira/ui/remoteStrip";
 import { notesCount } from "@jaira/ui/artifactReview";
-import { Press, Txt, edge, font, lengthToken, placeholderColor, useHover } from "../../primitives";
+import { Press, Txt, edge, faceOf, font, lengthToken, placeholderColor, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Float } from "../floats/Float";
 import { InlineGlyph } from "../floats/InlineGlyph";
@@ -12,6 +12,7 @@ import { TipLayer } from "../floats/TipLayer";
 import { Icon } from "../panel/Icon";
 import { Button } from "../settings/Button";
 import { KEEPS_SELECTION, type PendingSelection } from "./noteSelection";
+import { SourceMark } from "./SourceMark";
 
 /**
  * `reviewNotes.tsx`'s surfaces, universal (decision 0015): the composer that floats at a selected
@@ -212,9 +213,11 @@ function NoteThread({
       {...((isWeb ? { onMouseEnter: onEnter, onMouseLeave: onLeave } : {}) as object)}
     >
       <View flexDirection="row" alignItems="baseline" gap={8}>
-        <Press onPress={onReselect} disabled={orphan} title={orphan ? "this passage is no longer in the artifact" : "show this passage"} flexGrow={1} flexShrink={1} minWidth={0}>
+        {/* `button.note-row-quote`: a BUTTON, an inline-flex that centres its words (its `text-align: left`
+            moves nothing) — squeezed, they overflow both sides and are clipped, with no ellipsis. */}
+        <Press onPress={onReselect} disabled={orphan} title={orphan ? "this passage is no longer in the artifact" : "show this passage"} flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" justifyContent="center" overflow="hidden">
           {({ hovered }) => (
-            <Txt spec={{ ...BODY, italic: !orphan, color: orphan ? "warn" : hovered ? "accent" : "dim" }} ellip {...(hovered && !orphan ? { textDecorationLine: "underline" } : {})}>
+            <Txt spec={{ ...BODY, italic: !orphan, color: orphan ? "warn" : hovered ? "accent" : "dim" }} numberOfLines={1} flexShrink={0} {...(hovered && !orphan ? { textDecorationLine: "underline" } : {})}>
               {orphan ? "text changed" : shortQuote(note.quote)}
             </Txt>
           )}
@@ -233,10 +236,14 @@ function NoteThread({
               <Icon name="comment" size={13} color={String(t.v("dim"))} />
             </InlineGlyph>{" "}
             {message.author}
-            {note.source === undefined ? null : ` ${forgeName(note.source)}`}
+            {note.source === undefined ? null : <SourceMark source={note.source} />}
           </Txt>
-          {/* A message whose whole body is a decision word IS that decision (decision 0004). */}
-          <Txt spec={{ ...BODY, color: "text", ...(note.source !== undefined && decisionWordOf(message.body) !== undefined ? { weight: 600 } : {}) }} whiteSpace="pre-wrap">
+          {/* A message whose whole body is a decision word IS that decision (decision 0004): `.is-word`, the data face in --ok. */}
+          <Txt
+            spec={{ ...BODY, color: note.source !== undefined && decisionWordOf(message.body) !== undefined ? "ok" : "text" }}
+            {...(note.source !== undefined && decisionWordOf(message.body) !== undefined ? faceOf(t, "data", 400, t.scaled("size-app", BODY.scale) as number) : {})}
+            whiteSpace="pre-wrap"
+          >
             {message.body}
           </Txt>
         </View>

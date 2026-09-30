@@ -1,15 +1,15 @@
-import { useState, type JSX, type ReactNode } from "react";
-import type { GestureResponderEvent } from "react-native";
+import { useRef, useState, type JSX, type ReactNode } from "react";
+import { View as RNView } from "react-native";
 import { View } from "@tamagui/core";
 import type { LimitAccountView, UsageFigures } from "@jaira/shared/browser";
 import { formatResetAt, formatUntil } from "@jaira/shared/browser";
-import { useNow, useUsageFigures } from "@jaira/ui/limitsStore";
+import type { FloatRect } from "@jaira/ui/floatPlace";
+import { useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
 import { USAGE_PREVIEW_EXAMPLES, keyFigureOf, weeklyFigureOf, weeklyTitleOf, type UsageFigure } from "@jaira/ui/usageFigure";
-import { Uncopied } from "../../app/Uncopied";
 import { Press, Txt, edge } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { MenuLayer } from "../MenuLayer";
-import { BrandMark } from "../chat/Composer";
+import { AccountCard } from "../chat/UsageCards";
+import { BrandIcon } from "../settings/bits";
 import { INK, MoneyRing, Ring } from "./Ring";
 
 /**
@@ -28,7 +28,8 @@ import { INK, MoneyRing, Ring } from "./Ring";
  *   .um-rs            data 10.5px/1.3 --dim, one line; used up --bad at 500
  *   .um-k-line        4 apart, the button 5 out to the left; `.um-k-when` app 10.5/12.5 --dim
  *
- * The account's card the figure opens (`AccountPopover`) is {@link Uncopied}: a note where it would stand.
+ * The figure opens the account's card (`AccountPopover` in `.um-cpop`: 330 wide, its end on the
+ * button's), the composer's own {@link AccountCard}.
  */
 
 /** The figure's face, in the mode the setting says: the number, the ring, or both. */
@@ -45,19 +46,18 @@ export function FigureFace({ t, figure, mode, text }: { t: Tokens; figure: Usage
   return <>{text}</>;
 }
 
-/** Where an uncopied card would open, and the note that stands there — the composer's way (`Composer.tsx`). */
-export function useUncopiedCard(name: string): { open: (e: GestureResponderEvent) => void; layer: JSX.Element | null } {
-  const t = useTokens();
-  const [at, setAt] = useState<{ x: number; y: number } | null>(null);
+/** The account's card, opened from its figure's button: measured where the button stands when pressed. */
+function useAccountCard(account: LimitAccountView | undefined): { at: React.RefObject<RNView | null>; open: () => void; shown: boolean; layer: JSX.Element | null } {
+  const limits = useLimits();
+  const at = useRef<RNView>(null);
+  const [anchor, setAnchor] = useState<FloatRect | null>(null);
   return {
-    open: (e) => setAt({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY }),
+    at,
+    open: () => at.current?.measureInWindow((x, y, w, h) => setAnchor({ left: x, top: y, right: x + w, bottom: y + h })),
+    shown: anchor !== null && account !== undefined,
     layer:
-      at === null ? null : (
-        <MenuLayer onClose={() => setAt(null)}>
-          <View position="absolute" left={Math.max(4, at.x - 120)} top={Math.max(4, at.y - 80)} width={240} backgroundColor={t.v("panel") as never}>
-            <Uncopied name={name} height={60} />
-          </View>
-        </MenuLayer>
+      anchor === null || account === undefined ? null : (
+        <AccountCard anchor={anchor} account={account} others={limits.accounts.filter((a) => a.key !== account.key)} width={330} align="end" onClose={() => setAnchor(null)} />
       ),
   };
 }
@@ -67,23 +67,23 @@ function inkOf(figure: UsageFigure): string {
   return figure.tone === "accent" ? "text" : INK[figure.tone];
 }
 
-/** `.um-c-ringbtn`: the figure, pressed to open the account. */
-function RingButton({ figure, mode, title, onPress, marginLeft }: { figure: UsageFigure; mode: UsageFigures; title: string; onPress: (e: GestureResponderEvent) => void; marginLeft?: number }): JSX.Element {
+/** `.um-c-ringbtn`: the figure, pressed to open the account; hovered or open (`.on`) its ground lit. */
+function RingButton({ figure, mode, title, at, on, onPress, marginLeft }: { figure: UsageFigure; mode: UsageFigures; title: string; at: React.RefObject<RNView | null>; on: boolean; onPress: () => void; marginLeft?: number }): JSX.Element {
   const t = useTokens();
   const face = { voice: "data" as const, scale: 10.5 / 12, weight: 500, color: inkOf(figure), tabular: true, lineHeight: { px: 10.5 } };
   return (
+    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...(marginLeft !== undefined ? { marginLeft } : {}) }}>
     <Press
       onPress={onPress}
       title={title}
-      flexShrink={0}
-      {...(marginLeft !== undefined ? { marginLeft } : {})}
       flexDirection="row"
       alignItems="center"
       gap={5}
       paddingVertical={2}
       paddingHorizontal={5}
       borderRadius={11}
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-selected") : "transparent" })}
+      {...({ "aria-expanded": on } as object)}
+      box={({ hovered }) => ({ backgroundColor: hovered || on ? t.v("fill-ghost-selected") : "transparent" })}
     >
       <FigureFace
         t={t}
@@ -96,6 +96,7 @@ function RingButton({ figure, mode, title, onPress, marginLeft }: { figure: Usag
         }
       />
     </Press>
+    </RNView>
   );
 }
 
@@ -131,7 +132,7 @@ function ResetLine({ children, spent, title }: { children: ReactNode; spent: boo
 export function AccountAllowance({ account, plan }: { account: LimitAccountView | undefined; plan?: ReactNode }): JSX.Element {
   const mode = useUsageFigures();
   const now = useNow();
-  const card = useUncopiedCard("the account card");
+  const card = useAccountCard(account);
   const { week, spent, pct, figure } = weeklyFigureOf(account);
   return (
     <>
@@ -141,7 +142,7 @@ export function AccountAllowance({ account, plan }: { account: LimitAccountView 
         </Txt>
         {account !== undefined && mode !== "off" ? (
           <RingWrap>
-            <RingButton figure={figure} mode={mode} title={weeklyTitleOf(week, pct)} onPress={card.open} />
+            <RingButton figure={figure} mode={mode} title={weeklyTitleOf(week, pct)} at={card.at} on={card.shown} onPress={card.open} />
           </RingWrap>
         ) : null}
       </View>
@@ -160,14 +161,14 @@ export function AccountAllowance({ account, plan }: { account: LimitAccountView 
 export function KeyUsage({ account }: { account: LimitAccountView | undefined }): JSX.Element | null {
   const mode = useUsageFigures();
   const now = useNow();
-  const card = useUncopiedCard("the account card");
+  const card = useAccountCard(account);
   if (account === undefined || account.kind === "subscription" || mode === "off") return null;
   const { credit, figure, under, refused } = keyFigureOf(account, now);
   return (
     <>
       <View flexDirection="row" alignItems="center" gap={4} minHeight={22} paddingLeft={32}>
         <RingWrap>
-          <RingButton figure={figure} mode={credit ? mode : "number"} title={`${figure.title} — click for more`} onPress={card.open} marginLeft={-5} />
+          <RingButton figure={figure} mode={credit ? mode : "number"} title={`${figure.title} — click for more`} at={card.at} on={card.shown} onPress={card.open} marginLeft={-5} />
         </RingWrap>
         {credit ? null : (
           <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "dim" }} numberOfLines={1} flexShrink={0}>
@@ -238,7 +239,7 @@ function MiniComposer({ brand, model, figure, mode }: { brand: string; model: st
         <View flexDirection="column" borderRadius={21} backgroundColor={t.v("panel") as never}>
           <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0}>
             <View flexDirection="row" alignItems="center" gap={5} paddingVertical={3} paddingHorizontal={9} borderRadius={999} borderWidth={1} borderStyle="solid" borderColor="transparent" maxWidth={210} minWidth={0} flexShrink={0}>
-              <BrandMark t={t} name={brand} />
+              <BrandIcon name={brand} size={13} ink="tok-hint" />
               <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} ellip maxWidth={96}>
                 {model}
               </Txt>

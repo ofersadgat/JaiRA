@@ -52,3 +52,10 @@ export const newTaskOpener = shared<(() => void) | null>(null);
  * click on the same issue mean "show me again". See `FileSurfaceContext.revealIssue`.
  */
 export const issueReveal = shared<{ path: string; nonce: number } | null>(null);
+
+/**
+ * `App.tsx`'s `notesOpen`: About opened from the sidebar's Update row with its release notes showing
+ * (the row's menu, "Release notes"). The sidebar sets it and folds it again once Settings → About is
+ * left; `AboutPage` opens its notes by it — only for that one opening, as the desktop's.
+ */
+export const aboutNotes = shared(false);

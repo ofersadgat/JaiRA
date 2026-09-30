@@ -5,14 +5,17 @@ import type { Schema } from "@jaira/ui/schemaForm/types";
 import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "../settings/Button";
 import { EMPTY_ANSWER, answerOf, answersOfValue, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choices";
-import { ChoiceList, ChoiceSteps } from "../floats/Choices";
+import { ChoiceList, ChoiceSteps, FieldFrame } from "../floats/Choices";
 import { COMPONENT_ICON } from "@jaira/ui/gateModel";
 import { PATHS } from "@jaira/ui/icons";
-import { Press, Txt, edge, scrollbarProps } from "../../primitives";
+import { Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
-import { Icon } from "./Icon";
-import { gateBodyOf } from "../floats/GateBodies";
+import { Icon, type IconName } from "./Icon";
+import { gateBodyOf, subjectOf } from "../floats/GateBodies";
+import { ApprovalSurface } from "../floats/ApprovalSurface";
+import { pendingOfPrompt } from "@jaira/ui/approvalModel";
+import { EditArtifactGate, ReviewArtifactGate } from "../artifact/ArtifactGates";
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
@@ -39,11 +42,11 @@ const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 
  *   .question-option.danger    the label --bad; the edge --bad 45% into --line; no ground (`button.danger`)
  *   .question-option-desc      a `small`: the body's size ÷ 1.2, --dim, 2 under the label
  */
-export function InlineGate({ pending, onGate, maxHeight }: { pending: PendingInteraction; onGate: (value: unknown) => void; maxHeight?: number }): JSX.Element {
+export function InlineGate({ pending, onGate, maxHeight, services }: { pending: PendingInteraction; onGate: (value: unknown) => void; maxHeight?: number; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const t = useTokens();
   return (
-    <View testID="inline-gate" flexShrink={0} {...(maxHeight !== undefined ? { maxHeight } : {})} marginTop={12} paddingVertical={10} paddingHorizontal={12} {...({ overflow: "auto" } as object)} {...(scrollbarProps(t) as object)} {...(edge(t, { top: 1 }) as object)}>
-      <GateSurface pending={pending} onSubmit={onGate} />
+    <View testID="inline-gate" flexShrink={0} {...(maxHeight !== undefined ? { maxHeight } : {})} marginTop={12} paddingVertical={10} paddingHorizontal={12} {...({ overflow: "auto" } as object)} {...(viewScrollbarProps(t) as object)} {...(edge(t, { top: 1 }) as object)}>
+      <GateSurface pending={pending} onSubmit={onGate} services={services} />
     </View>
   );
 }
@@ -76,7 +79,13 @@ export function GateSurface({
   const config = pending.config;
   // A flex column collapses no margin: the body's first block keeps all of its own, under the heading's 8.
   const flat = plain || flex;
-  if (settled !== undefined) return <SettledGateSurface pending={pending} settled={settled} error={error} plain={plain} />;
+  // A form field's frame (`.modal .field`, `.inline-gate .field`): 12 above and a --dim label — not in a state's panel.
+  if (settled !== undefined)
+    return (
+      <FieldFrame.Provider value={!plain}>
+        <SettledGateSurface pending={pending} settled={settled} error={error} plain={plain} />
+      </FieldFrame.Provider>
+    );
   const body = ((): JSX.Element => {
     if (pending.configError !== undefined) {
       return (
@@ -91,9 +100,9 @@ export function GateSurface({
     return gateBodyOf(pending, onSubmit, pending.resumes || flat ? 0 : 8, flat, services) ?? <Uncopied name={`the ${pending.component} gate`} />;
   })();
   return (
-    <>
+    <FieldFrame.Provider value={!plain}>
       {/* The heading and its glyph, placed as Chromium places an inline one (`floats/GateTitle`). */}
-      {plain ? <PlainTitle pending={pending} /> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
+      {plain ? <PlainTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</PlainTitle> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
       {/* `.gate-resumes`: 4 above, which collapses into the heading's 8 except in a flex column. */}
       {pending.resumes ? (
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} marginTop={flat ? 4 : 0}>
@@ -106,7 +115,7 @@ export function GateSurface({
       <View marginTop={pending.resumes || flat ? 0 : -8} {...(flex ? { flexShrink: 1, minHeight: 0 } : {})}>
         {body}
       </View>
-    </>
+    </FieldFrame.Provider>
   );
 }
 
@@ -203,8 +212,8 @@ function Option({ label, icon, description, primary = false, danger = false, sel
 /**
  * A gate as it was answered (`components.tsx`'s `GateSurface` with `settled`): the heading, "Never
  * answered." (`.gate-never`: the body's font, italic, --dim, 10 under) when nothing answered it, and the
- * chooser, inert, with what was picked lit. Only `choose_option` is drawn so; the other gates' settled
- * bodies are the floats' (`GateBodies.tsx`), which take no answer yet.
+ * chooser, inert, with what was picked lit; every other gate's body as it was answered is
+ * {@link SettledBody}'s.
  */
 function SettledGateSurface({ pending, settled, error, plain }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined; plain: boolean }): JSX.Element {
   const t = useTokens();
@@ -215,7 +224,7 @@ function SettledGateSurface({ pending, settled, error, plain }: { pending: Pendi
   const onAnswer = (question: string, next: Answer): void => setAnswers((prev) => ({ ...prev, [question]: next }));
   return (
     <>
-      {plain ? <PlainTitle pending={pending} /> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
+      {plain ? <PlainTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</PlainTitle> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
       {never ? (
         <Txt spec={{ voice: "app", scale: 13 / 12.5, italic: true, color: "dim" }} marginBottom={10}>
           Never answered.
@@ -225,7 +234,7 @@ function SettledGateSurface({ pending, settled, error, plain }: { pending: Pendi
           panel (a flex column) nothing collapses, and the answered control is a block of its own. */}
       <View marginTop={plain ? 0 : never ? -10 : -8}>
         {choices === undefined ? (
-          <SettledBody pending={pending} value={settled.value} />
+          <SettledBody pending={pending} value={settled.value} lift={plain ? 0 : never ? 10 : 8} plain={plain} />
         ) : config?.component === "choose_option" && config.questions !== undefined ? (
           <ChoiceSteps choices={choices} answers={answers} onAnswer={onAnswer} onSubmit={() => undefined} readOnly />
         ) : (
@@ -246,13 +255,13 @@ function SettledGateSurface({ pending, settled, error, plain }: { pending: Pendi
  * glyph (13, `.gate-icon`) at one end and the words at the other (`space-between`), gap 8; app 700
  * 11/12.5, 0.09em, upper case, --dim; 8 under.
  */
-function PlainTitle({ pending }: { pending: PendingInteraction }): JSX.Element {
+function PlainTitle({ icon, children }: { icon?: IconName; children: string }): JSX.Element {
   const t = useTokens();
   return (
     <View role="heading" flexDirection="row" alignItems="center" justifyContent="space-between" gap={8} marginBottom={8}>
-      {isComponentName(pending.component) ? <Icon name={COMPONENT_ICON[pending.component]} size={13} color={String(t.v("dim"))} /> : <View />}
+      {icon !== undefined ? <Icon name={icon} size={13} color={String(t.v("dim"))} /> : <View />}
       <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 700, ls: 0.09, upper: true, color: "dim" }} flexShrink={1} textAlign="right">
-        {pending.config?.prompt ?? pending.component}
+        {children}
       </Txt>
     </View>
   );
@@ -264,10 +273,17 @@ const recordOf = (value: unknown): Record<string, unknown> => (value !== null &&
 /**
  * The settled bodies other than `choose_option`'s (`components.tsx` with `settled`): a form as it was
  * submitted (a field it did not name is "not answered"), a confirmation with the button that was pressed
- * filled, and anything else's JSON (`pre.outputs`: --bg, 1px --line, radius 8, padding 8, data 11/12,
- * pre-wrap, at most 220). The artifact reviews answered stay {@link Uncopied}.
+ * filled, a tool call's approval as it was asked (the same surface, as the DOM draws it: nothing it
+ * presses goes anywhere), an artifact reviewed or edited as it was decided (`artifact/ArtifactGates.tsx`
+ * with `settled`), and anything else's JSON (`pre.outputs`: --bg, 1px --line, radius 8, padding 8, data
+ * 11/12, pre-wrap, at most 220). The changeset reviewer answered (`review_artifacts`) stays
+ * {@link Uncopied}.
+ *
+ * `lift` is what the wrapper above took back (the heading's 8, or "Never answered."'s 10, in an
+ * `.inline-gate`): a body with no margin of its own above it — the approval, whose heading has none —
+ * gives it back, as the DOM's collapse leaves it.
  */
-function SettledBody({ pending, value }: { pending: PendingInteraction; value: unknown }): JSX.Element {
+function SettledBody({ pending, value, lift, plain }: { pending: PendingInteraction; value: unknown; lift: number; plain: boolean }): JSX.Element {
   const t = useTokens();
   const config = pending.config;
   if (config?.component === "fill_form") {
@@ -307,9 +323,24 @@ function SettledBody({ pending, value }: { pending: PendingInteraction; value: u
       </View>
     );
   }
-  if (config?.component === "review_artifact" || config?.component === "edit_artifact" || config?.component === "review_artifacts") return <Uncopied name={`the ${pending.component} gate, as it was answered`} />;
+  if (config?.component === "approve_tool_call") {
+    return (
+      <View marginTop={lift}>
+        {/* In a state's panel its heading is the page's plain `h3` too (`.approval-surface > h3` is the dialog's). */}
+        {plain ? <PlainTitle icon="shield">Approve this command?</PlainTitle> : null}
+        <ApprovalSurface pending={pendingOfPrompt(pending.requestId, config.prompt, (pending.inputs as Record<string, unknown>)["request"])} onDecide={() => undefined} heading={!plain} />
+      </View>
+    );
+  }
+  if (config?.component === "review_artifact") {
+    return <ReviewArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} flat={false} settled={{ value }} />;
+  }
+  if (config?.component === "edit_artifact") {
+    return <EditArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} settled={{ value }} />;
+  }
+  if (config?.component === "review_artifacts") return <Uncopied name={`the ${pending.component} gate, as it was answered`} />;
   return (
-    <View marginTop={14} padding={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} backgroundColor={t.v("bg") as never} maxHeight={220} {...({ overflow: "auto" } as object)} {...(scrollbarProps(t) as object)}>
+    <View marginTop={14} padding={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} backgroundColor={t.v("bg") as never} maxHeight={220} {...({ overflow: "auto" } as object)} {...(viewScrollbarProps(t) as object)}>
       <Txt spec={{ voice: "data", scale: 11 / 12 }} whiteSpace="pre-wrap">
         {value === undefined ? "" : JSON.stringify(value, null, 2)}
       </Txt>

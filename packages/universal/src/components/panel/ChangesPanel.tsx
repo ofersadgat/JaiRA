@@ -5,11 +5,13 @@ import { changeCountOf, ownChangesOf, type ChangeAuthor, type ChangeItem, type F
 import { GROUPS, LETTER, STATE_WORDS, STEP_WORDS, baseOf, fromOf, groupFactsOf, hasAuthored, treeOf, type GroupId } from "@jaira/ui/changesModel";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { invoke } from "@jaira/ui/store";
+import { useValuePanel } from "@jaira/ui/valuePanel";
 import { Press, Txt, font, scrollbarProps, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Button } from "../settings/Button";
 import { Switch } from "../settings/controls";
 import { Icon, type IconName } from "./Icon";
+import { ShellLine } from "./WorkRows";
 
 /**
  * `changesPanel.tsx`'s `ChangesPanel`, universal (decision 0015): what a task changed, as the tool menu
@@ -35,12 +37,14 @@ import { Icon, type IconName } from "./Icon";
  *                   headers --tok-hint
  *   .chg-item       16 | 1fr | auto, gap 8, top-aligned, padding 5 8: the icon (--dim, 2 down), what was
  *                   said (and its detail under it, --dim 11/12.5), when (data 10.5/12 / 1.6 --tok-hint)
+ *   .chg-in         a subject that opens its state's definition: `button.link`'s data 11/12 (its code 0.92
+ *                   of that), --accent, underlined under the pointer
  *   .chg-by         a pill: padding 0 6, --text 6%, app 500 10.5/12.5 / 1.65, --dim
  *   .chg code       data at 0.92em
+ *   .chg .shell-line  a command in its parts' colours (`WorkRows.tsx`'s `ShellLine`), each part padded 0 2
  *
  * The git card (merge requests and the ladder of steps) is drawn from the same rules, less exactly: no
- * scene in the parity world has one yet. A command's parts are one run (`ShellLine`'s colouring is not
- * carried).
+ * scene in the parity world has one yet.
  */
 export function ChangesPanel({ taskId, project, signal, onReview, onOpenTask }: { taskId: string; project?: string | undefined; signal: unknown; onReview?: (() => void) | undefined; onOpenTask?: ((taskId: string) => void) | undefined }): JSX.Element {
   const t = useTokens();
@@ -388,7 +392,9 @@ function GitBody({ git, ctx }: { git: TaskChangeLog["git"]; ctx: Ctx }): JSX.Ele
                 </Txt>
                 {step.kind === "other" && step.command !== undefined ? (
                   <Txt spec={{ voice: "app", scale: 1 }} numberOfLines={1} flexShrink={1}>
-                    <Code t={t}>{step.command}</Code>
+                    <Code t={t}>
+                      <ShellLine line={step.command} />
+                    </Code>
                   </Txt>
                 ) : step.subject !== undefined ? (
                   step.url !== undefined ? (
@@ -454,12 +460,25 @@ function GitBody({ git, ctx }: { git: TaskChangeLog["git"]; ctx: Ctx }): JSX.Ele
 /** `ItemRow`: one change that is not a file — what was said about it, its detail, who, and when. */
 function ItemRow({ item, icon, ctx }: { item: ChangeItem; icon: IconName; ctx: Ctx }): JSX.Element {
   const t = ctx.t;
+  const panel = useValuePanel();
   const task = item.open?.taskId;
+  const stateId = item.open?.stateId;
   const subject =
     item.subject === undefined ? null : item.url !== undefined ? (
       <Out url={item.url} t={t}>
         <Code t={t}>{item.subject}</Code>
       </Out>
+    ) : stateId !== undefined && panel?.openState !== undefined ? (
+      // `button.link.chg-in`: the state's definition in the context panel. `button.link` outranks
+      // `.chg-in`'s `font: inherit` for the face and size (data 11/12), so the code in it is 0.92 of that,
+      // on the inherited 1.5; --accent, underlined under the pointer.
+      <Press onPress={() => panel.openState!(stateId)} title="Open its definition" flexShrink={1} minWidth={0}>
+        {({ hovered }) => (
+          <Txt spec={{ voice: "data", scale: (11 / 12) * 0.92, color: "accent" }} numberOfLines={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+            {item.subject}
+          </Txt>
+        )}
+      </Press>
     ) : (
       <Txt spec={{ voice: "app", scale: 1 }} numberOfLines={1} flexShrink={1}>
         <Code t={t}>{item.subject}</Code>
@@ -486,8 +505,12 @@ function ItemRow({ item, icon, ctx }: { item: ChangeItem; icon: IconName; ctx: C
         {hasSub ? (
           <View flexDirection="row" alignItems="center" gap={6} minWidth={0}>
             {item.command !== undefined ? (
-              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} ellip minWidth={0} flexShrink={1}>
-                <Code t={t} base={11 / 12.5}>{item.command}</Code>
+              // `code.ellip` is the flex item, so the line is the code's own (0.92 of the row's size, on 1.5),
+              // and its ellipsis is in the code's face.
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", lineHeight: 1.5 * 0.92 }} fontFamily={font(t, { voice: "data", scale: 1 })["fontFamily"] as never} fontSize={t.scaled("size-app", (11 / 12.5) * 0.92) as never} ellip minWidth={0} flexShrink={1}>
+                <Code t={t} base={11 / 12.5}>
+                  <ShellLine line={item.command} />
+                </Code>
               </Txt>
             ) : null}
             {item.detail !== undefined ? (

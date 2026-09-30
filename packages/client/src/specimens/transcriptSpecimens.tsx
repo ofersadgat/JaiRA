@@ -103,7 +103,7 @@ const STORY: TranscriptEntry[] = [
   say("assistant", "Every scrollbar now uses one rule in `styles.css`: a thin rounded thumb, no track. `floatLayers.test.ts` needed one exemption; the app suite passes.", s(170), 1),
 ];
 
-/** A value panel that opens nothing: the Chat room has one, so its rails offer "…" (as the copy's always do). */
+/** A value panel that opens nothing: the Chat room has one, so its rails offer "…" — on both pages. */
 const PANEL = { open: () => undefined } as unknown as ValuePanel;
 
 /** `.ts-paper`'s ground, which the transcript is drawn on in the Chat room. */
@@ -116,7 +116,11 @@ function DomSheet({ children }: { children: ReactNode }): JSX.Element {
 }
 function RnSheet({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
-  return <View backgroundColor={t.v("panel") as never}>{children}</View>;
+  return (
+    <ValuePanelContext.Provider value={PANEL}>
+      <View backgroundColor={t.v("panel") as never}>{children}</View>
+    </ValuePanelContext.Provider>
+  );
 }
 
 const pair = (entries: TranscriptEntry[], working = false, width = 640): TranscriptSpecimen => ({
@@ -232,9 +236,11 @@ function DomBands(): JSX.Element {
 function RnBands(): JSX.Element {
   const t = useTokens();
   return (
-    <View backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
-      <SessionBands bands={BANDS} notes={NOTES} root="" scope="t" shut={new Set()} onToggle={() => undefined} onSetShut={() => undefined} render={(piece) => <Transcript session={null} entries={SAID[piece.node.instanceId] ?? []} working={false} rails />} />
-    </View>
+    <ValuePanelContext.Provider value={PANEL}>
+      <View backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
+        <SessionBands bands={BANDS} notes={NOTES} root="" scope="t" shut={new Set()} onToggle={() => undefined} onSetShut={() => undefined} render={(piece) => <Transcript session={null} entries={SAID[piece.node.instanceId] ?? []} working={false} rails />} />
+      </View>
+    </ValuePanelContext.Provider>
   );
 }
 TRANSCRIPT_SPECIMENS["session-bands"] = { width: 760, dom: DomBands, rn: RnBands };
@@ -272,3 +278,24 @@ const SHOWN: TranscriptEntry[] = [
   { kind: "writing", name: "Write", path: `${S}/pause.md`, chars: 5400, at: s(13) },
 ];
 TRANSCRIPT_SPECIMENS["transcript-shown"] = pair(SHOWN);
+
+/** Several questions keep their stepper under the row, Back and Next included (`.ts-asked .options`). */
+TRANSCRIPT_SPECIMENS["transcript-asked-steps"] = pair([
+  say("user", "Plan the pause feature with me.", s(0), 0),
+  {
+    kind: "tool",
+    name: "AskUserQuestion",
+    summary: "Which should a pause keep?",
+    at: s(2),
+    callId: "q2",
+    args: {
+      questions: [
+        { question: "Which should a pause keep?", header: "Pause", options: [{ label: "The worktree", description: "keep the files as they are" }, { label: "Nothing" }] },
+        { question: "When should it resume?", header: "Resume", options: [{ label: "By hand" }, { label: "On a schedule" }] },
+      ],
+    },
+    ok: true,
+    result: "User has answered your questions: \"Which should a pause keep?\"=\"The worktree\", \"When should it resume?\"=\"By hand\".",
+  },
+  say("assistant", "Keeping the worktree, then.", s(5), 1),
+]);

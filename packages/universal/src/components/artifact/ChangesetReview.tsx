@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
-import { Platform, ScrollView, useWindowDimensions } from "react-native";
+import { Linking, Platform, ScrollView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
 import {
@@ -36,7 +36,7 @@ import {
 import { repliesOnForge, stripWords } from "@jaira/ui/remoteStrip";
 import { Uncopied } from "../../app/Uncopied";
 import { Island } from "../../islands";
-import { PLAIN_SCROLLER, Press, Txt, edge, lengthToken, scrollbarProps, useHover } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, edge, lengthToken, scrollbarProps, useHover, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { GateTitle } from "../floats/GateTitle";
 import { ModalBox } from "../floats/Modal";
@@ -313,7 +313,7 @@ export function ChangesetReview({
 function Scroller({ t, maxHeight, box, testID, children }: { t: Tokens; maxHeight?: number | undefined; box: object; testID?: string; children: ReactNode }): JSX.Element {
   if (isWeb) {
     return (
-      <View minHeight={0} overflow="hidden" {...(maxHeight !== undefined ? { maxHeight } : {})} {...(box as object)} {...({ overflowY: "auto" } as object)} {...(scrollbarProps(t) as object)} {...(testID !== undefined ? { testID } : {})}>
+      <View minHeight={0} overflow="hidden" {...(maxHeight !== undefined ? { maxHeight } : {})} {...(box as object)} {...({ overflowY: "auto" } as object)} {...(viewScrollbarProps(t) as object)} {...(testID !== undefined ? { testID } : {})}>
         {children}
       </View>
     );
@@ -426,9 +426,14 @@ function ChangeDetail({
     <View testID={`detail-${change.id}`}>
       <View flexDirection="row" alignItems="baseline" gap={8}>
         <ActionBadge action={change.action} />
-        <Txt spec={{ voice: "data", scale: 1, color: "text" }} fontSize={t.scaled("size-app", 12 / 12.5) as never} lineHeight={(Number(t.scaled("size-app", 12 / 12.5)) || 12) * 1.5} flexShrink={1} minWidth={0}>
-          {pathLabelOf(change)}
-        </Txt>
+        {services.openFile !== undefined ? (
+          // `button.link.change-path`: data 12/12, --accent, underlined under the pointer — into the editor.
+          <PathLink label={pathLabelOf(change)} onPress={() => services.openFile!("project", change.path)} />
+        ) : (
+          <Txt spec={{ voice: "data", scale: 1, color: "text" }} fontSize={t.scaled("size-app", 12 / 12.5) as never} lineHeight={(Number(t.scaled("size-app", 12 / 12.5)) || 12) * 1.5} flexShrink={1} minWidth={0}>
+            {pathLabelOf(change)}
+          </Txt>
+        )}
         <View flexGrow={1} />
         {picture === undefined && change.unshowable === undefined ? (
           <Toggle
@@ -618,7 +623,7 @@ function RemoteStrip({ remote, status, busy, onCheck }: { remote: ReviewRemote; 
         <Txt spec={{ ...size, weight: 600 }}>{words.forge}</Txt>
       </View>
       <View {...(hoverLink as object)}>
-        <Txt spec={{ voice: "data", scale: 1, color: "accent" }} {...(words.href !== undefined && linkHovered ? { textDecorationLine: "underline" } : {})} {...((words.href !== undefined && isWeb ? { href: words.href, hrefAttrs: { target: "_blank", rel: "noreferrer" } } : {}) as object)}>
+        <Txt spec={{ voice: "data", scale: 1, color: "accent" }} {...(words.href !== undefined && linkHovered ? { textDecorationLine: "underline" } : {})} {...((words.href !== undefined ? (isWeb ? { href: words.href, hrefAttrs: { target: "_blank", rel: "noreferrer" } } : { onPress: () => void Linking.openURL(words.href!) }) : {}) as object)}>
           {words.label}
         </Txt>
       </View>
@@ -638,6 +643,19 @@ function RemoteStrip({ remote, status, busy, onCheck }: { remote: ReviewRemote; 
         </Button>
       )}
     </View>
+  );
+}
+
+/** `button.link.change-path`: the changed file's path, which opens it in the Files room. */
+function PathLink({ label, onPress }: { label: string; onPress: () => void }): JSX.Element {
+  return (
+    <Press onPress={onPress} fill={false} flexShrink={1} minWidth={0}>
+      {({ hovered }) => (
+        <Txt spec={{ voice: "data", scale: 12 / 12, color: "accent" }} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+          {label}
+        </Txt>
+      )}
+    </Press>
   );
 }
 

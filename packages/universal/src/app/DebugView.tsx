@@ -13,6 +13,7 @@ export function DebugView(): JSX.Element {
     <DebugPane
       debug={state.debug}
       detail={state.detail}
+      conversation={state.conversation}
       availability={state.availability}
       hasProject={state.at !== null}
       onRun={(options) => void actions.debugRun(options)}

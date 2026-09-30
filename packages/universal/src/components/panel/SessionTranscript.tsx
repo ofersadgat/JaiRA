@@ -1,8 +1,8 @@
-import { Fragment, useContext, useState, type JSX, type ReactNode } from "react";
+import { Fragment, memo, useContext, useState, type JSX, type ReactNode } from "react";
 import { Platform, Pressable } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { SessionView, ViewId } from "@jaira/shared/browser";
-import { messageReadingOf } from "@jaira/ui/messageReading";
+import type { MessageAuthor, SessionView, ViewId } from "@jaira/shared/browser";
+import { MESSAGE_SOURCE, messageReadingOf, workflowSourceTitleOf } from "@jaira/ui/messageReading";
 import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
 import type { EditMessage } from "@jaira/ui/transcriptView";
 import { clockOf } from "@jaira/ui/runActivityModel";
@@ -10,8 +10,9 @@ import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, start
 import { keptUnderSummary, type CallSurface } from "@jaira/ui/transcriptRows";
 import { isIdle } from "@jaira/ui/workSummary";
 import { WorkLookContext } from "@jaira/ui/workSummaryContext";
+import { useValuePanel } from "@jaira/ui/valuePanel";
 import type { ContextReading } from "@jaira/shared/browser";
-import { Txt, edge, useHover } from "../../primitives";
+import { Press, Txt, edge, useHover } from "../../primitives";
 import { Pulse } from "../chat/Paper";
 import { CompactionLine, GapMark } from "./TranscriptMarks";
 import { Work, WorkColumn, type TranscriptOf } from "./WorkRows";
@@ -22,13 +23,16 @@ import { Markdown } from "../Markdown";
 import { Icon } from "./Icon";
 import { Empty } from "./RunTranscript";
 import { MessageRail } from "./MessageRail";
+import { baselineOf } from "./SessionBands";
 
 /**
  * `transcriptView.tsx`'s `Transcript`, universal (decision 0015): what one session said — the messages,
  * and the work between them — over the same model (`entriesOf`, `blocksOf`, `gapBetween`). A message
- * said to the model (with the badge naming the workflow that wrote it), an answer, a line of work of
- * each kind (`WorkRows.tsx`), a stretch of several steps summarised (`WorkSummary.tsx`), the pause
- * before a block and a compaction (`TranscriptMarks.tsx`), an armed cut, and the answer being written.
+ * said to the model (with the badge naming the workflow that wrote it — a button opening its definition
+ * where the shell has a panel for it), an answer, a line of work of each kind (`WorkRows.tsx`), a stretch
+ * of several steps summarised (`WorkSummary.tsx`), the pause before a block and a compaction
+ * (`TranscriptMarks.tsx`), an armed cut, and the answer being written. A subagent's doorway walks into
+ * its conversation where the host has somewhere for it (`onOpenSidechain`).
  * Not copied: a reading other than prose, rendered markdown, JSON, data or source (`ValueView`'s
  * table, form, diff …). The message rail — Copy, rewind, fork, the type and reading chips, the clock —
  * is `MessageRail.tsx`; without the host's controls it is only the room it takes (the DOM's is
@@ -40,14 +44,20 @@ import { MessageRail } from "./MessageRail";
  *   .ts-bubble             padding 8 13, radius 16 16 5 16, --accent 13% into --panel, 1px --accent 24% into
  *                          --line; sent: --accent 5%, a dashed --accent 30% edge
  *   .ts-source             pill: padding 1 7 1 5, 1px --accent 28% into --line on --accent 7% into --panel,
- *                          --dim 500 at --size-app × 10.5/12.5, gap 4, 4 under; the glyph 11, --accent
+ *                          --dim 500 at --size-app × 10.5/12.5, gap 4, 4 under; the glyph 11, --accent;
+ *                          button.ts-source-link hovered: --accent 14% / 45%, --text; in a `.ts-tag`
+ *                          8 after the role on its line, raised 1px
  *   .ts-rail               at least 22 tall, 4 above
  *   .ts-msg .vv-source     the app voice at --size-app × 13/12.5, line 1.6, --text, pre-wrap
  *   .vv-body > .markdown   --size-app × 12.5/12.5, line 1.65 in a message, padding 2 2 12, no end margins
  *   .ts-text-live          app 13/12.5 on 1.6, pre-wrap, --dim; .ts-live-line row, gap 7, 6 above,
  *                          app 11/12.5 --dim, a pulse
+ *
+ * Drawn again only when what it is handed changes (`memo`): the Chat view's box keeps its words in the
+ * thread above it, so every key typed drew the whole conversation again — a long one, a few hundred
+ * milliseconds a key.
  */
-export function Transcript({
+export const Transcript = memo(function Transcript({
   session,
   entries,
   empty,
@@ -59,6 +69,7 @@ export function Transcript({
   live,
   working,
   calls,
+  onOpenSidechain,
   padding = [12, 16, 22, 16],
 }: {
   session: SessionView | null;
@@ -81,6 +92,8 @@ export function Transcript({
   working?: boolean | undefined;
   /** Placement decisions for the call rows (`CallSurface`). */
   calls?: CallSurface | undefined;
+  /** Walk into a subagent's conversation — the call that spawned it, and its name. Absent ⇒ no doorway goes anywhere. */
+  onOpenSidechain?: ((call: string, name: string) => void) | undefined;
   /** `.ts`'s padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
   padding?: readonly [number, number, number, number];
 }): JSX.Element {
@@ -113,7 +126,7 @@ export function Transcript({
               {before}
               {cutLine}
               <View minWidth={0} {...fade}>
-                <WorkBlockView entries={block.entries} working={writing && i === blocks.length - 1} sidechainOf={sidechainOf} narrated={narrated} calls={calls} />
+                <WorkBlockView entries={block.entries} working={writing && i === blocks.length - 1} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} narrated={narrated} calls={calls} />
               </View>
             </Fragment>
           );
@@ -174,10 +187,10 @@ export function Transcript({
       })}
     </View>
   );
-}
+});
 
-/** A sub-transcript, for a subagent's conversation under its call (no session: its doors open no further). */
-const Inner: TranscriptOf = ({ entries, working }) => <Transcript session={null} entries={entries} working={working} />;
+/** A sub-transcript, for a subagent's conversation under its call — its own doorways walk on, as the desktop's do. */
+const Inner: TranscriptOf = ({ entries, working, onOpenSidechain }) => <Transcript session={null} entries={entries} working={working} onOpenSidechain={onOpenSidechain} />;
 
 /**
  * `.ts-cut`: the counted line over what an armed rewind would delete — a dashed rule each side of the
@@ -205,17 +218,19 @@ function WorkBlockView({
   entries,
   working,
   sidechainOf,
+  onOpenSidechain,
   narrated,
   calls,
 }: {
   entries: WorkEntry[];
   working: boolean;
   sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined;
+  onOpenSidechain?: ((call: string, name: string) => void) | undefined;
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
 }): JSX.Element | null {
   const look = useContext(WorkLookContext);
-  const rowOf = (index: number): ReactNode => <Work entry={entries[index]!} open={working} sidechainOf={sidechainOf} narrated={narrated} calls={calls} transcript={Inner} />;
+  const rowOf = (index: number): ReactNode => <Work entry={entries[index]!} open={working} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} narrated={narrated} calls={calls} transcript={Inner} />;
   // A stretch of nothing but rate limits and notes did no work: hidden, it is not drawn at all.
   if ((look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
   // One line has nothing to summarise.
@@ -285,6 +300,7 @@ function Message({
         value={value}
         reading={reading}
         onPick={setPicked}
+        picked={picked !== null}
         shown={hovered || held}
         onEdit={rails.onEdit}
         contextBefore={contextBefore}
@@ -316,47 +332,16 @@ function Message({
   // `data-day`: what the day chip over the scroller reads (web; a phone's chip is not drawn).
   const day = dayLabelOf(entry.at);
   const stamped = isWeb && day !== undefined ? { "data-day": day } : {};
-  const chip = { voice: "app" as const, scale: 10.5 / 12.5, weight: 500, color: "dim" };
-  const source =
-    entry.by !== undefined ? (
-      <View
-        flexDirection="row"
-        alignItems="center"
-        gap={4}
-        marginBottom={4}
-        paddingTop={1}
-        paddingRight={7}
-        paddingBottom={1}
-        paddingLeft={5}
-        borderRadius={999}
-        borderWidth={1}
-        borderStyle="solid"
-        borderColor={t.mix(t.v("accent"), 28, t.v("line")) as never}
-        backgroundColor={t.mix(t.v("accent"), 7, t.v("panel")) as never}
-      >
-        <Icon name={entry.by === "workflow" ? "workflow" : "send"} size={11} color={String(t.v("accent"))} />
-        {/* Flex items, as the DOM's are: "From" and the name are the pill's own children, 4 apart. */}
-        {entry.by === "workflow" && workflow !== undefined ? (
-          <>
-            <Txt spec={chip} numberOfLines={1}>
-              From
-            </Txt>
-            <Txt spec={chip} numberOfLines={1}>
-              {workflow}
-            </Txt>
-          </>
-        ) : (
-          <Txt spec={chip} numberOfLines={1}>
-            {entry.by === "workflow" ? "From the workflow" : "Written by JaiRA"}
-          </Txt>
-        )}
-      </View>
-    ) : null;
+  // The workflow's words open its definition — the file they were written in (`panel.openState`).
+  const panel = useValuePanel();
+  const openState = panel?.openState;
+  const opens = entry.by === "workflow" && workflow !== undefined && openState !== undefined ? () => openState(workflow) : undefined;
+  const source = (tagged: boolean): ReactNode => (entry.by !== undefined ? <Source by={entry.by} workflow={workflow} onOpen={opens} tagged={tagged} /> : null);
   if (entry.role === "user") {
     const sent = entry.by !== undefined;
     return (
       <Reach reach={reach} {...stamped} minWidth={0} marginTop={14} marginBottom={10} {...(doomed ? { opacity: 0.38 } : {})} {...(sent ? { flexDirection: "column", alignItems: "flex-end" } : {})}>
-        {source}
+        {source(false)}
         <View
           paddingVertical={8}
           paddingHorizontal={13}
@@ -386,12 +371,105 @@ function Message({
   }
   return (
     <Reach reach={reach} {...stamped} minWidth={0} marginTop={10} marginBottom={14} paddingTop={1} paddingBottom={1} paddingLeft={12} {...(doomed ? { opacity: 0.38 } : {})} {...(edge(t, { left: 2 }, "rule") as object)}>
-      <Txt spec={{ voice: "app", scale: 10 / 12.5, weight: 600, upper: true, ls: 0.07, color: "warn" }} marginBottom={3}>
-        {entry.role}
-      </Txt>
+      {entry.by !== undefined ? (
+        <TagLine role={entry.role}>{source(true)}</TagLine>
+      ) : (
+        <Txt spec={{ voice: "app", scale: 10 / 12.5, weight: 600, upper: true, ls: 0.07, color: "warn" }} marginBottom={3}>
+          {entry.role}
+        </Txt>
+      )}
       {said ? body : null}
       {rail}
     </Reach>
+  );
+}
+
+/**
+ * `MessageSource`: the badge on a message the person did not type — WHO wrote it, in a word, the rest
+ * on the tooltip (`MESSAGE_SOURCE`, the desktop's words). The workflow's words name the workflow and,
+ * where the shell can open its definition, are a button that does.
+ */
+function Source({ by, workflow, onOpen, tagged }: { by: MessageAuthor; workflow: string | undefined; onOpen: (() => void) | undefined; tagged: boolean }): JSX.Element {
+  const t = useTokens();
+  const said = MESSAGE_SOURCE[by];
+  const named = by === "workflow" && workflow !== undefined;
+  const title = named ? workflowSourceTitleOf(workflow, onOpen !== undefined) : said.title;
+  const pill = (hovered: boolean): Record<string, unknown> => ({
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 4,
+    paddingTop: 1,
+    paddingRight: 7,
+    paddingBottom: 1,
+    paddingLeft: 5,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderStyle: "solid",
+    borderColor: t.mix(t.v("accent"), hovered ? 45 : 28, t.v("line")),
+    backgroundColor: t.mix(t.v("accent"), hovered ? 14 : 7, t.v("panel")),
+  });
+  const words = (hovered: boolean): JSX.Element => {
+    const chip = { voice: "app" as const, scale: 10.5 / 12.5, weight: 500, color: hovered ? "text" : "dim" };
+    return (
+      <>
+        <Icon name={said.icon} size={11} color={String(t.v("accent"))} />
+        {/* Flex items, as the DOM's are: "From" and the name are the pill's own children, 4 apart. */}
+        {named ? (
+          <>
+            <Txt spec={chip} numberOfLines={1}>
+              From
+            </Txt>
+            <Txt spec={chip} numberOfLines={1}>
+              {workflow}
+            </Txt>
+          </>
+        ) : (
+          <Txt spec={chip} numberOfLines={1}>
+            {said.label}
+          </Txt>
+        )}
+      </>
+    );
+  };
+  const place = tagged ? { marginLeft: 8 } : { marginBottom: 4 };
+  if (named && onOpen !== undefined) {
+    return (
+      <Press onPress={onOpen} title={title} flexShrink={0} {...place} box={({ hovered }) => pill(hovered)}>
+        {({ hovered }) => words(hovered)}
+      </Press>
+    );
+  }
+  return (
+    <View {...(pill(false) as object)} {...place} {...({ title } as object)}>
+      {words(false)}
+    </View>
+  );
+}
+
+/**
+ * `.ts-tag` with the badge in it: the role, then the pill 8 after it on the same line, raised 1px
+ * (`vertical-align: 1px`). The two stand on one baseline in a line as tall as the taller of them,
+ * placed as Blink places them: the role's where DM Sans' rounded ascent puts it (`baselineOf`), the
+ * pill's at the foot of its icon — an inline-flex box's baseline is its first item's, and an `svg` has
+ * none of its own; 3 under.
+ */
+function TagLine({ role, children }: { role: string; children: ReactNode }): JSX.Element {
+  const t = useTokens();
+  const tag = Number(t.scaled("size-app", 10 / 12.5)) || 10;
+  const chip = Number(t.scaled("size-app", 10.5 / 12.5)) || 10.5;
+  const tagBase = baselineOf(tag, 0.992, 0.31);
+  // The pill's 11px icon, centred on its text line, inside a 1px border and 1px of padding.
+  const chipBase = 2 + (chip * 1.5 - 11) / 2 + 11;
+  const line = Math.max(tagBase, chipBase + 1);
+  return (
+    <View flexDirection="row" alignItems="flex-start" marginBottom={3} minWidth={0}>
+      <Txt spec={{ voice: "app", scale: 10 / 12.5, weight: 600, upper: true, ls: 0.07, color: "warn" }} marginTop={line - tagBase} flexShrink={0}>
+        {role}
+      </Txt>
+      <View marginTop={line - 1 - chipBase} flexShrink={0}>
+        {children}
+      </View>
+    </View>
   );
 }
 

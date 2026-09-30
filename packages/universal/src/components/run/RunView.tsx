@@ -4,23 +4,22 @@ import type { InstanceNode, StateView } from "@jaira/shared/browser";
 import type { FileSurfaceContext, FileSurfaceProps } from "@jaira/ui/fileTypes";
 import { standingOn } from "@jaira/ui/runBoardModel";
 import { nodeAt } from "@jaira/ui/trail";
-import { Uncopied } from "../../app/Uncopied";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Board } from "../Board";
 import type { TranscriptSource } from "../panel/RunTranscript";
 import { RunBoard } from "./RunBoard";
 import { RunConversation } from "./RunConversation";
+import { SidechainConversation } from "./SidechainConversation";
 
 /**
  * `runViews.tsx`'s `RunView`, universal (decision 0015): one run walked into, in the Tasks room's middle
  * column — its executions as cards (`RunBoard`), or what it said (`RunConversation`), as the title bar's
  * toggle says (`runMode`). A run that declared no children and entered none is a leaf of the walk, and
- * its conversation is the only reading whatever the toggle says.
+ * its conversation is the only reading whatever the toggle says; a subagent's conversation at the tail
+ * of the walk is its own page (`SidechainConversation`).
  *
  *   .composite     column, flex 1
- *
- * Not copied: a subagent's conversation as the tail of the walk (`SidechainConversation`).
  */
 export function RunView({ context }: { context: FileSurfaceContext }): JSX.Element {
   const { detail, trail, trailState, onWalkInto } = context;
@@ -36,7 +35,14 @@ export function RunView({ context }: { context: FileSurfaceContext }): JSX.Eleme
   };
   const board = mode === "board" && (declared.length > 0 || (node?.children.length ?? 0) > 0);
 
-  if (tail?.sidechain !== undefined) return <Uncopied name="a subagent's conversation (SidechainConversation)" flex={1} />;
+  // A sidechain tail is its own kind of place: no board and no children, so the page is that conversation.
+  if (tail?.sidechain !== undefined) {
+    return (
+      <Composite>
+        <SidechainConversation step={tail} detail={detail} source={sourceOf(context)} />
+      </Composite>
+    );
+  }
   if (node === undefined) return <Composite><Empty>This task has not run here yet.</Empty></Composite>;
   return (
     <Composite>
@@ -71,7 +77,14 @@ export function CompositeView({ state, context }: FileSurfaceProps & { state: St
   const setMode = context.onRunMode ?? setOwnMode;
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const at = standingOn(state, context);
-  if (at.sidechain !== undefined) return <Uncopied name="a subagent's conversation (SidechainConversation)" flex={1} />;
+  const tailStep = context.trail?.at(-1);
+  if (at.sidechain !== undefined && tailStep !== undefined) {
+    return (
+      <Composite>
+        <SidechainConversation step={tailStep} detail={detail} source={sourceOf(context)} />
+      </Composite>
+    );
+  }
   const openRun = (node: InstanceNode): void => {
     if (onWalkInto !== undefined) return onWalkInto(node);
     setMode("conversation");
@@ -95,11 +108,13 @@ export function CompositeView({ state, context }: FileSurfaceProps & { state: St
   );
 }
 
-/** The conversation reading, from the context: `RunConversation` with the run's gate, its re-run and resume. */
-function Conversation({ context, parent }: { context: FileSurfaceContext; parent: InstanceNode | undefined }): JSX.Element {
-  const detail = context.detail;
-  if (detail === null) return <Empty>Select a run to see what it said.</Empty>;
-  const source: TranscriptSource = {
+/**
+ * What a run's conversation is read from, out of the context (`RunConversation`'s `context`): the store's
+ * fields, the cut's two verbs, the walks, the workflow's link, the moves' questions, the running agent's
+ * question and approval, and what the shell lends a gate that mounts the changeset reviewer.
+ */
+function sourceOf(context: FileSurfaceContext): TranscriptSource {
+  return {
     conversation: context.conversation,
     sessions: context.sessions,
     sessionHistory: context.sessionHistory,
@@ -112,9 +127,28 @@ function Conversation({ context, parent }: { context: FileSurfaceContext; parent
     batches: context.batches,
     userEvents: context.userEvents,
     onDeliverUserEvent: context.onDeliverUserEvent,
-    cuts: context.onRewind !== undefined && context.onFork !== undefined,
+    project: context.project,
+    onSelectTask: context.onSelectTask,
+    onRewind: context.onRewind,
+    onFork: context.onFork,
+    onWalkIntoSidechain: context.onWalkIntoSidechain,
+    onOpenWorkflow: context.onOpenWorkflow,
+    moveQuestions: context.moveQuestions,
+    onMoveQuestion: context.onMoveQuestion,
+    gateServices: context.runGateServices,
+    ...(context.runApproval !== undefined && context.onRunApproval !== undefined ? { approval: context.runApproval, onApproval: context.onRunApproval } : {}),
+    ...(context.runQuestion !== undefined && context.onRunQuestion !== undefined ? { question: context.runQuestion, onQuestion: context.onRunQuestion } : {}),
   };
+}
+
+/** The conversation reading, from the context: `RunConversation` with the run's gate, its re-run and resume. */
+function Conversation({ context, parent }: { context: FileSurfaceContext; parent: InstanceNode | undefined }): JSX.Element {
+  const detail = context.detail;
+  if (detail === null) return <Empty>Select a run to see what it said.</Empty>;
+  const source = sourceOf(context);
   const gate = context.runGate !== undefined && context.onRunGate !== undefined ? { gate: context.runGate, onGate: context.onRunGate } : {};
+  // A gate, the agent's question and its approval each hold the run WAITING (`RunView`'s `asking`).
+  const asking = (context.runGate !== undefined && context.onRunGate !== undefined) || source.question !== undefined || source.approval !== undefined;
   return (
     <RunConversation
       detail={detail}
@@ -122,7 +156,7 @@ function Conversation({ context, parent }: { context: FileSurfaceContext; parent
       source={source}
       project={context.project}
       {...gate}
-      asking={context.runGate !== undefined && context.onRunGate !== undefined}
+      asking={asking}
       onRerun={context.onRerun}
       onResume={context.onResume}
       composited

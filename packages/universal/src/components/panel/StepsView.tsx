@@ -26,6 +26,8 @@ export interface StepsHost {
   sessions: readonly SessionRef[];
   onOpen: (title: string, value: unknown) => void;
   onConfig: (node: InstanceNode) => void;
+  /** A step's right-click (a long press on a phone): rewind to before it, or fork there (`indexCutOf`). */
+  onCut?: { rewind: (node: InstanceNode) => void; fork: (node: InstanceNode) => void } | undefined;
   boxHeight: number;
   onBoxHeight: (height: number) => void;
 }
@@ -57,6 +59,7 @@ export function StepsBody({ detail, entry, convo, project, host }: { detail: Tas
       fit={fit}
       {...(step !== undefined ? { here: step } : host.current !== undefined ? { here: host.current } : {})}
       {...(asking !== undefined ? { asking } : {})}
+      {...(host.onCut !== undefined ? { onCut: host.onCut } : {})}
       // A row is a way to its card first — the conversation is one link further, on the card.
       onGoTo={(node) => {
         host.onStep(keyOfNode(node));

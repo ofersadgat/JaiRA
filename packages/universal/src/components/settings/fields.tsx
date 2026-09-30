@@ -6,6 +6,7 @@ import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../pri
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { MenulistArrow } from "../form/MenulistArrow";
+import { useReadingForm } from "../form/Field";
 
 /**
  * The settings fields, universal (decision 0015): `controls.tsx`'s `SelectInput` and `editorKnobs.tsx`'s
@@ -47,6 +48,8 @@ export function SelectInput({
   fill?: boolean;
 }): JSX.Element {
   const t = useTokens();
+  // In a reading (`.vv-form .cfg-control select`): no ground or ring, --text; `:disabled`'s 0.55 stays.
+  const reading = useReadingForm();
   const box = useRef<RNView | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const shown = options.find(([, v]) => v === value)?.[0] ?? "";
@@ -72,9 +75,9 @@ export function SelectInput({
         paddingLeft={9 + MENULIST_INSET}
         paddingRight={9 + MENULIST_ROOM}
         borderRadius={lengthToken(t, "control-radius", 7)}
-        backgroundColor={t.v(disabled ? "panel-2" : "bg") as never}
+        backgroundColor={(reading ? "transparent" : t.v(disabled ? "panel-2" : "bg")) as never}
         {...(disabled ? { opacity: 0.55 } : {})}
-        box={({ hovered }) => edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, hovered && !disabled ? "rule" : "line")}
+        box={({ hovered }) => edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, reading ? "rgba(0, 0, 0, 0)" : hovered && !disabled ? "rule" : "line")}
       >
         {/* Every choice, laid out and not drawn: the box is as wide as the widest, as a <select> is. */}
         {options.map(([label]) => (
@@ -83,11 +86,11 @@ export function SelectInput({
           </Txt>
         ))}
         <View minHeight={typeof lineBox === "number" ? Math.ceil(lineBox) : undefined} justifyContent="center">
-          <Txt spec={{ ...text, color: disabled ? "dim" : "text" }} numberOfLines={1}>
+          <Txt spec={{ ...text, color: disabled && !reading ? "dim" : "text" }} numberOfLines={1}>
             {shown}
           </Txt>
         </View>
-        <MenulistArrow color={disabled ? "dim" : "text"} />
+        <MenulistArrow color={disabled && !reading ? "dim" : "text"} />
       </Press>
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </RNView>

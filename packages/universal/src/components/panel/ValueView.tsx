@@ -1,18 +1,41 @@
 import { useMemo, useState, type JSX, type ReactNode } from "react";
-import { ScrollView, TextInput } from "react-native";
+import { ScrollView, TextInput, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
-import { artifactOf, delimiterOf, mimeOfFenceLang, parseStructured, structuredFormatOf, viewsFor, type ParsedStructure, type ViewHint, type ViewId } from "@jaira/shared/browser";
+import {
+  artifactOf,
+  changesOf,
+  delimiterOf,
+  mediaKindOf,
+  mediaSrcOf,
+  mimeOfFenceLang,
+  parseStructured,
+  parseUnifiedDiff,
+  renderersFor,
+  structuredFormatOf,
+  viewsFor,
+  type ParsedStructure,
+  type PatchFile,
+  type RendererId,
+  type ViewHint,
+  type ViewId,
+} from "@jaira/shared/browser";
+import { editorLook } from "@jaira/ui/editorLook";
 import { highlightJson } from "@jaira/ui/jsonHighlight";
-import { VIEW_META, base64Of, fileNameOf } from "@jaira/ui/valueViewMeta";
+import { textRendererFor, useRenderChoice } from "@jaira/ui/renderChoice";
+import type { Schema } from "@jaira/ui/schemaForm/types";
+import { RENDERER_META, VIEW_META, base64Of, fileNameOf, hintText, schemaDescriber } from "@jaira/ui/valueViewMeta";
 import { invoke } from "@jaira/ui/store";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
-import { Uncopied } from "../../app/Uncopied";
-import { PLAIN_SCROLLER, Press, Txt, edge, font, lengthToken, scrollbarProps } from "../../primitives";
+import { Press, Txt, edge, font, lengthToken } from "../../primitives";
 import { Island } from "../../islands";
 import { useTokens, type Tokens } from "../../tokens";
 import { DataView } from "../files/DataView";
+import { ReadingForm } from "../form/Field";
+import { SchemaForm } from "../form/SchemaForm";
 import { Markdown, registerFenceRenderer } from "../Markdown";
+import { Icon } from "./Icon";
+import { ChangesView, EmptyNote, Media, PatchView, Scroll, TableView, type ChangeOutcome } from "./ValueReadings";
 
 /** A change over a markdown document (`markdownEditor.tsx`'s `MarkdownDiff`, which a phone cannot import). */
 export interface MarkdownDiff {
@@ -33,17 +56,30 @@ export interface MarkdownDiff {
  *   .vv-toggle       a 1px --line box, radius 6, clipped; its buttons padding 1 7, a --line between,
  *                    app 10.5/12.5 --tok-hint (hover --text on --fill-ghost-hover; on: --text on
  *                    --fill-ghost-selected, 600)
+ *   .vv-arrow        the ▾ of a view with a second renderer: no rule before it, padding 1 4 1 1,
+ *                    app 8/12.5, line 1 (and `.on` as its view's)
  *   .vv-more         22 wide, padding 1 0 4, a transparent 1px edge, radius 6, app 12/12.5, line 1,
  *                    --tok-hint (hover: --line edge, --panel-2, --text)
  *   .vv-source       data 11.5/12, line 1.55, --dim, pre-wrap, at most 340 tall, scrolls
- *   .vv-json         the source's box, coloured by token (`.tok-*`); plain text --dim (`.vv-source` wins)
+ *   .vv-json         the source's box, coloured by token (`.tok-*`), scrolling sideways too; plain text
+ *                    --dim (`.vv-source` wins); `.line-hint-slot` no width, the hint overflowing it:
+ *                    `.line-hint` --tok-hint, italic, 1.6em before it
  *   .vv-body > .markdown   app 12.5/12.5
- *   .doc-tree        `DataView`
+ *   .vv-body > .monaco-host   an editor 320 tall (`.monaco-fit`, inline: as tall as its text)
+ *   .code-text       the tokenizer's reading before its colours land: data --size-data on 1.5, on --bg,
+ *                    a 1px --line, radius 6, padding 8 10, `pre`, scrolls sideways
+ *   .vv-form         a `ReadingForm` (form/Field.tsx)
+ *   .doc-tree        `DataView`; `.vv-patch`, `.vv-table`, `.vv-media` `ValueReadings.tsx`
  *
  * Rendered HTML is the `artifact` island (a page is web content; a WebView on a phone); the editors (with
- * `edit`) are the markdown and code editors' islands. {@link Uncopied}: the Files view of a changeset, a
- * media player, a patch, a table's cells, and the Form view. The ⋯ menu's verbs are the
- * desktop's: Download…, and Open in context panel where a panel is there to open it in (`valuePanel.ts`).
+ * `edit`) are the markdown and code editors' islands, and so is code's coloured reading on web (the
+ * `code` island's `reading`, the desktop's `CodeText`). On a phone that reading is the plain box the
+ * DOM draws before its colours arrive: colouring is Monaco's tokenizer, and a WebView per fenced block is
+ * too heavy — the one place a phone's code differs, as its editors do. A changeset's Files view opens a
+ * file's diff in the `diff` island. The ⋯ menu's verbs are the desktop's: Download…, and Open in context panel where a
+ * panel is there to open it in (`valuePanel.ts`); the ▾ beside an editable view with a grammar picks
+ * what draws it ("Drawn by": the editor, or the code view), behind the person's Appearance default
+ * (`textRendererFor`).
  */
 export function ValueView({
   value,
@@ -56,6 +92,7 @@ export function ValueView({
   edit,
   diff,
   softbreak,
+  outcomes,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -76,6 +113,8 @@ export function ValueView({
   diff?: MarkdownDiff | undefined;
   /** What a single newline in a markdown paragraph is (`Markdown`'s): a space where the host collapses white space. */
   softbreak?: "newline" | "space";
+  /** How each change fared, by path, when the value is a set of files (the desktop's `outcomes`). */
+  outcomes?: Record<string, ChangeOutcome> | undefined;
 }): JSX.Element {
   const t = useTokens();
   const views = viewsFor(value, hint ?? {});
@@ -84,6 +123,17 @@ export function ValueView({
   const artifact = artifactOf(value);
   const showing = artifact?.content !== undefined && view !== "json" ? artifact.content : value;
   const mime = (view === "json" ? undefined : artifact?.mime) ?? hint?.mime;
+
+  // Which renderer draws each view that has two (the DOM's `drawnBy`), behind this person's standing
+  // answer for the type (Appearance's text renderer): the code view is choosing not to edit.
+  const [drawnBy, setDrawnBy] = useState<Partial<Record<ViewId, RendererId>>>({});
+  const [rendMenu, setRendMenu] = useState<MenuAt | null>(null);
+  const editable = edit !== undefined;
+  const preferred = textRendererFor(mime, useRenderChoice());
+  const renderer: RendererId = drawnBy[view] ?? preferred ?? "monaco";
+  const plainly = renderer === "codeview" && renderersFor(view, mime, editable).length > 1;
+  const writing = plainly ? undefined : edit;
+
   const wantsParse = view === "data" || view === "table" || view === "form";
   const parsed = useMemo<ParsedStructure | null>(() => {
     if (!wantsParse || typeof showing !== "string") return null;
@@ -91,17 +141,26 @@ export function ValueView({
     if (format === undefined) return null;
     return parseStructured(showing, format, delimiterOf(mime));
   }, [wantsParse, showing, mime]);
+  const patch = useMemo<PatchFile[]>(() => (view === "patch" && typeof showing === "string" ? parseUnifiedDiff(showing) : []), [view, showing]);
 
   const body = ((): ReactNode => {
+    // `value`, not `showing`: a set of changes is never an artifact's payload.
+    if (view === "changes") return <ChangesView changes={changesOf(value) ?? []} outcomes={outcomes} />;
+    if (view === "media") {
+      const src = mediaSrcOf(showing, mime);
+      const kind = mediaKindOf(mime);
+      if (src !== undefined && kind !== undefined) return <Media src={src} kind={kind} />;
+      return <Source value={showing} t={t} />;
+    }
     if (view === "markdown") {
       // The DOM's `MarkdownDocument`: the reading renderer, unless there is an edit to take or a change
       // to draw — then the editor, which on a phone is the markdown editor's island.
-      if (edit === undefined && diff === undefined) return <Markdown text={String(showing)} scale={12.5 / 12.5} {...(softbreak !== undefined ? { softbreak } : {})} />;
+      if (writing === undefined && (diff === undefined || plainly)) return <Markdown text={String(showing)} scale={12.5 / 12.5} {...(softbreak !== undefined ? { softbreak } : {})} />;
       return (
         <Island
           component="markdownEditor"
-          props={{ text: String(showing), document: true, readOnly: edit === undefined, ...(diff !== undefined ? { diff } : {}) }}
-          onEvent={(name, next) => name === "change" && edit?.(String(next))}
+          props={{ text: String(showing), document: true, readOnly: writing === undefined, ...(diff !== undefined && !plainly ? { diff } : {}) }}
+          onEvent={(name, next) => name === "change" && writing?.(String(next))}
         />
       );
     }
@@ -110,20 +169,50 @@ export function ValueView({
       // desktop's is where no grant to run it was made.
       return <Island component="artifact" props={{ text: String(showing) }} />;
     }
-    if (view === "code" && edit !== undefined && typeof showing === "string") {
-      return <Island component="code" height={340} props={{ text: showing, mime: mime ?? "text/plain", readOnly: false, view: "write" }} onEvent={(name, next) => name === "change" && edit(String(next))} />;
+    if (view === "code") {
+      // The DOM's `CodeDocument`: read with the tokenizer, edited with the editor (320 tall in a panel,
+      // as tall as its text in a document).
+      const text = String(showing);
+      if (writing === undefined) return <CodeReading text={text} mime={mime ?? "text/plain"} inline={inline} t={t} />;
+      const change = writing;
+      return (
+        <Island
+          component="code"
+          {...(inline ? {} : { height: 320 })}
+          props={{ text, mime: mime ?? "text/plain", view: "write", ...(inline ? { autoHeight: true } : {}) }}
+          onEvent={(name, next) => name === "change" && change(String(next))}
+        />
+      );
     }
-    if (edit !== undefined && typeof showing === "string" && (view === "text" || view === "json")) {
-      // `textarea.code-editor.vv-edit`: the text as written, in the data face, to type into.
-      return <EditSource value={showing} onChange={edit} inline={inline} t={t} />;
+    if (view === "patch") {
+      if (patch.length === 0) return <EmptyNote marginVertical={13}>No hunks in this patch.</EmptyNote>;
+      return <PatchView files={patch} />;
+    }
+    if (view === "table") {
+      if (parsed !== null && !parsed.ok) return <ParseProblem message={parsed.message} spot={parsed.spot} />;
+      return <TableView rows={parsed?.ok === true && Array.isArray(parsed.value) ? (parsed.value as string[][]) : []} />;
     }
     if (view === "data") {
       if (parsed !== null && !parsed.ok) return <ParseProblem message={parsed.message} spot={parsed.spot} />;
       return <DataView value={parsed?.ok === true ? parsed.value : showing} />;
     }
-    if (view === "json") return <JsonSource value={showing} t={t} />;
-    if (view === "code" || view === "text") return <Source value={showing} t={t} />;
-    return <Uncopied name={`the ${view} view`} />;
+    if (view === "form") {
+      // A structured document is filled in from its parse; read-only (`disabled`, `reading`, and
+      // nothing "set here"), as the desktop's.
+      if (parsed !== null && !parsed.ok) return <ParseProblem message={parsed.message} spot={parsed.spot} />;
+      return (
+        <ReadingForm>
+          <SchemaForm schema={(hint?.schema ?? {}) as Schema} value={parsed?.ok === true ? parsed.value : showing} onChange={() => undefined} ctx={{ path: "", disabled: true, reading: true, isSet: () => false }} />
+        </ReadingForm>
+      );
+    }
+    // The coloured reading whether or not it may be changed: the DOM's `JsonView` comes before its edit.
+    if (view === "json") return <JsonSource value={showing} schema={hint?.schema} t={t} />;
+    if (writing !== undefined && typeof showing === "string") {
+      // `textarea.code-editor.vv-edit`: the text as written, in the data face, to type into.
+      return <EditSource value={showing} onChange={writing} inline={inline} t={t} />;
+    }
+    return <Source value={showing} t={t} />;
   })();
 
   // The ⋯ menu (`valueView.tsx`'s `openMore`): save it, and — where there is a panel — open it there.
@@ -153,10 +242,21 @@ export function ValueView({
       ],
     });
   };
+  /** Where a press was: on web the element's box (its `side`, and under it by `dy`); on a phone the finger. */
+  const pressedAt = (e: GestureResponderEvent, side: "left" | "right", dx: number, dy: number): { x: number; y: number } => {
+    const el = (e as unknown as { currentTarget?: { getBoundingClientRect?: () => DOMRect } }).currentTarget;
+    const rect = isWeb && typeof el?.getBoundingClientRect === "function" ? el.getBoundingClientRect() : undefined;
+    return rect !== undefined ? { x: rect[side], y: rect.bottom + dy } : { x: e.nativeEvent.pageX + dx, y: e.nativeEvent.pageY + 12 };
+  };
 
   const head = chrome && (label !== undefined || views.length > 1 || actions !== undefined);
   const lifted = inline ? { position: "absolute", zIndex: 2, top: 3, right: 3 } : { marginBottom: 3 };
   const glass = inline ? t.mix(t.v("panel"), 88, "transparent") : undefined;
+  /** A toggle button's ground and ink: on, under the pointer, or neither. */
+  const toggleInk = (on: boolean, hovered: boolean): { box: Record<string, unknown>; color: string } => ({
+    box: { backgroundColor: on ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent" },
+    color: on || hovered ? "text" : "tok-hint",
+  });
   return (
     <View minWidth={0} {...(inline ? { position: "relative" } : {})}>
       {head ? (
@@ -166,33 +266,74 @@ export function ValueView({
           {actions}
           {views.length > 1 ? (
             <View role="group" aria-label="How to show this" flexDirection="row" flexShrink={0} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} overflow="hidden" {...(glass !== undefined ? { backgroundColor: glass as never } : {})}>
-              {views.map((id, i) => (
-                <Press
-                  key={id}
-                  onPress={() => setPicked(id)}
-                  title={VIEW_META[id].hint}
-                  {...({ "aria-pressed": id === view } as object)}
-                  paddingVertical={1}
-                  paddingHorizontal={7}
-                  {...(edge(t, { left: i === 0 ? 0 : 1 }) as object)}
-                  box={({ hovered }) => ({ backgroundColor: id === view ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
-                >
-                  {({ hovered }) => (
-                    <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: id === view ? 600 : 400, color: id === view || hovered ? "text" : "tok-hint" }} textAlign="center" numberOfLines={1}>
-                      {VIEW_META[id].label}
-                    </Txt>
-                  )}
-                </Press>
-              ))}
+              {views.flatMap((id, i) => {
+                const choices = renderersFor(id, mime, editable);
+                const button = (
+                  <Press
+                    key={id}
+                    onPress={() => {
+                      setPicked(id);
+                      setRendMenu(null);
+                    }}
+                    title={VIEW_META[id].hint}
+                    {...({ "aria-pressed": id === view } as object)}
+                    paddingVertical={1}
+                    paddingHorizontal={7}
+                    {...(edge(t, { left: i === 0 ? 0 : 1 }) as object)}
+                    box={({ hovered }) => toggleInk(id === view, hovered).box}
+                  >
+                    {({ hovered }) => (
+                      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: id === view ? 600 : 400, color: toggleInk(id === view, hovered).color }} textAlign="center" numberOfLines={1}>
+                        {VIEW_META[id].label}
+                      </Txt>
+                    )}
+                  </Press>
+                );
+                // Only where there is a second renderer to pick (`renderersFor`).
+                if (choices.length < 2) return [button];
+                return [
+                  button,
+                  <Press
+                    key={`${id}-arrow`}
+                    title="Which renderer draws this"
+                    label={`Renderer for ${VIEW_META[id].label}`}
+                    {...({ "aria-haspopup": "menu" } as object)}
+                    onPress={(e) => {
+                      // Opening the menu also selects the view: a choice about something not on screen
+                      // is a choice whose result cannot be seen.
+                      setPicked(id);
+                      const chosen = drawnBy[id] ?? preferred ?? "monaco";
+                      const p = pressedAt(e, "left", -8, 3);
+                      setRendMenu({
+                        x: p.x,
+                        y: p.y,
+                        title: "Drawn by",
+                        items: choices.map((how) => ({ label: RENDERER_META[how].label, checked: chosen === how, onSelect: () => setDrawnBy((was) => ({ ...was, [id]: how })) })),
+                      });
+                    }}
+                    justifyContent="center"
+                    paddingTop={1}
+                    paddingRight={4}
+                    paddingBottom={1}
+                    paddingLeft={1}
+                    box={({ hovered }) => toggleInk(id === view, hovered).box}
+                  >
+                    {({ hovered }) => (
+                      <Txt spec={{ voice: "app", scale: 8 / 12.5, weight: id === view ? 600 : 400, color: toggleInk(id === view, hovered).color, lineHeight: 1 }} textAlign="center">
+                        ▾
+                      </Txt>
+                    )}
+                  </Press>,
+                ];
+              })}
             </View>
           ) : null}
           <Press
             title="What else can be done with this"
             onPress={(e) => {
               // Under the button and aligned to its right edge, as the desktop's.
-              const el = (e as unknown as { currentTarget?: { getBoundingClientRect?: () => DOMRect } }).currentTarget;
-              const rect = isWeb && typeof el?.getBoundingClientRect === "function" ? el.getBoundingClientRect() : undefined;
-              openMore(rect !== undefined ? rect.right : e.nativeEvent.pageX + 11, rect !== undefined ? rect.bottom + 2 : e.nativeEvent.pageY + 12);
+              const p = pressedAt(e, "right", 11, 2);
+              openMore(p.x, p.y);
             }}
             width={22}
             flexShrink={0}
@@ -214,6 +355,58 @@ export function ValueView({
       ) : null}
       <View minWidth={0}>{body}</View>
       {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
+      {rendMenu !== null ? <ContextMenu anchor={rendMenu} onClose={() => setRendMenu(null)} /> : null}
+    </View>
+  );
+}
+
+/** What a 1px border is laid out as on this page (in whole device pixels, under the zoom), asked of Chromium once. */
+let HAIRLINE: number | undefined;
+function hairline(): number {
+  if (HAIRLINE !== undefined) return HAIRLINE;
+  if (typeof document === "undefined") return 1;
+  const probe = document.createElement("div");
+  probe.style.cssText = "position:absolute;visibility:hidden;border-top:1px solid;";
+  document.body.appendChild(probe);
+  HAIRLINE = parseFloat(getComputedStyle(probe).borderTopWidth) || 1;
+  probe.remove();
+  return HAIRLINE;
+}
+
+/**
+ * `CodeDocument`'s reading (`CodeText`). On web the tokenizer's coloured text, in the `code` island; on a
+ * phone the box the DOM draws until its colours arrive (`pre.code-text`): the text in --text, not
+ * coloured — Monaco's tokenizer is an island, and a WebView per fenced block is too heavy.
+ *
+ * The web island is given the height of the DOM's box, since on `/rn` it stands without the stylesheet
+ * that draws it: `.code-shiki` (a 1px --line) round `.shiki` (padding 8 10, a line of `code`'s size × 1.5
+ * each, the last one too), inside markdown also `.markdown pre`'s 1px ring, and a 10px scrollbar under
+ * a line wider than the box (`overflow-x: auto`) — a monospace line is its characters × 0.6em.
+ */
+function CodeReading({ text, mime, inline, t }: { text: string; mime: string; inline: boolean; t: Tokens }): JSX.Element {
+  const [room, setRoom] = useState<number | null>(null);
+  // Its lines are `code`'s face: data 11/12 (the global `code` rule), inside markdown `.markdown code`'s 12/12.
+  const face = inline ? 1 : 11 / 12;
+  if (isWeb) {
+    const size = Number(t.scaled("size-data", face)) || 12 * face;
+    const px = hairline();
+    const rings = inline ? 2 : 1;
+    const rows = text.split("\n");
+    const tab = editorLook("code").tabSize;
+    const widest = Math.max(0, ...rows.map((row) => row.replace(/\t/g," ".repeat(tab)).length)) * 0.6 * size;
+    const scroll = room !== null && widest > room - 2 * rings * px - 20 ? 10 : 0;
+    const height = rows.length * size * 1.5 + 16 + 2 * rings * px + scroll;
+    return (
+      <View onLayout={(e: LayoutChangeEvent) => setRoom(e.nativeEvent.layout.width)}>
+        <Island component="code" height={height} props={{ text, mime, reading: true }} />
+      </View>
+    );
+  }
+  return (
+    <View backgroundColor={t.v("bg") as never} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6}>
+      <ScrollView horizontal nestedScrollEnabled contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 10 }}>
+        <Txt spec={{ voice: "data", scale: face, lineHeight: 1.5 }}>{text}</Txt>
+      </ScrollView>
     </View>
   );
 }
@@ -258,39 +451,37 @@ function jsonTextOf(value: unknown): string {
   return JSON.stringify(value, null, 2) ?? "undefined";
 }
 
-/** `.vv-source`'s box: at most 340 tall, scrolling. */
-function SourceBox({ children, t }: { children: ReactNode; t: Tokens }): JSX.Element {
-  return (
-    // `PLAIN_SCROLLER`: the DOM's `pre` scrolls without being composited, and its text is subpixel.
-    <ScrollView {...(scrollbarProps(t) as object)} style={{ maxHeight: 340, ...PLAIN_SCROLLER } as never} contentContainerStyle={PLAIN_SCROLLER as never} nestedScrollEnabled>
-      {children}
-    </ScrollView>
-  );
-}
-
 /** `Source`: the raw form — text as written, or JSON pretty-printed. */
 function Source({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
   return (
-    <SourceBox t={t}>
-      <Txt spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: "1.55" } : {}) as object)}>
+    <Scroll maxHeight={340} t={t}>
+      <Txt spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)}>
         {jsonTextOf(value)}
       </Txt>
-    </SourceBox>
+    </Scroll>
   );
 }
 
 // Plain text is --dim: `.vv-source` (later in the sheet) outranks `.vv-json`'s --text, measured.
 const TOKEN_INK: Record<string, string> = { key: "accent", string: "tok-string", number: "tok-number", literal: "tok-number", punct: "dim", comment: "dim", plain: "dim" };
 
-/** `JsonView`: the value as JSON, coloured by the one highlighter (`highlightJson`). */
-function JsonSource({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
+/**
+ * `JsonView`: the value as JSON, coloured by the one highlighter (`highlightJson`), each key's description
+ * from the schema (`schemaDescriber`) ghosted at the end of its line. On web the hint is the DOM's
+ * zero-width slot, so it never moves where a line breaks and runs past the box's edge, which scrolls. On
+ * a phone a native text cannot hold a box of no width, so the hint follows its line after the gap, and a
+ * long one can wrap it.
+ */
+function JsonSource({ value, schema, t }: { value: unknown; schema: unknown; t: Tokens }): JSX.Element {
   const text = useMemo(() => jsonTextOf(value), [value]);
-  const lines = useMemo(() => highlightJson(text), [text]);
+  const describe = useMemo(() => schemaDescriber(schema), [schema]);
+  const lines = useMemo(() => highlightJson(text, describe), [text, describe]);
   const base = { voice: "data" as const, scale: 11.5 / 12, lineHeight: 1.55 };
+  const ghost = font(t, { ...base, color: "tok-hint", italic: true });
   return (
-    <SourceBox t={t}>
+    <Scroll maxHeight={340} both t={t}>
       {/* The line as the stylesheet writes it (unitless) on web: Blink multiplies it out in float. */}
-      <Txt spec={{ ...base, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", overflowWrap: "anywhere", lineHeight: "1.55" } : {}) as object)}>
+      <Txt spec={{ ...base, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)}>
         {lines.map((line, i) => (
           <Text key={i}>
             {line.tokens.map((token, j) => (
@@ -299,22 +490,47 @@ function JsonSource({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
                 {token.text}
               </Text>
             ))}
+            {line.hint === undefined ? null : isWeb ? (
+              // `.line-hint-slot`: an inline block of no width whose text overflows it, `pre`.
+              <Text style={{ display: "inline-block", width: 0, overflow: "visible", whiteSpace: "pre" } as never}>
+                <Text {...(ghost as object)} lineHeight="inherit" style={{ paddingLeft: "1.6em" } as never}>
+                  {hintText(line.hint)}
+                </Text>
+              </Text>
+            ) : (
+              <Text {...(ghost as object)}>
+                {"   "}
+                {hintText(line.hint)}
+              </Text>
+            )}
             {i < lines.length - 1 ? "\n" : null}
           </Text>
         ))}
       </Txt>
-    </SourceBox>
+    </Scroll>
   );
 }
 
-/** `ParseProblem`: a structured document that does not parse, and where. */
+/**
+ * `ParseProblem`: a structured document that does not parse, and where (`.vv-parse-error`: a row, gap 7,
+ * baseline, padding 8 10, a 1px --line, radius 6, --warn in the data face at 11.5/12; the ⚠ 1em, centred;
+ * where, `.sub`).
+ */
 function ParseProblem({ message, spot }: { message: string; spot?: { line: number; column: number } | undefined }): JSX.Element {
   const t = useTokens();
+  const size = Number(t.scaled("size-data", 11.5 / 12)) || 11.5;
   return (
-    <View backgroundColor={t.v("tint-bad") as never} borderRadius={t.v("control-radius") as never} paddingVertical={7} paddingHorizontal={9}>
-      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>
+    <View flexDirection="row" alignItems="baseline" gap={7} paddingVertical={8} paddingHorizontal={10} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6}>
+      <View flexShrink={0} alignSelf="center">
+        <Icon name="alert" size={size} color={String(t.v("warn"))} />
+      </View>
+      <Txt spec={{ voice: "data", scale: 11.5 / 12, color: "warn" }} flexShrink={1} minWidth={0}>
         {message}
-        {spot !== undefined ? ` — line ${spot.line}, column ${spot.column}` : ""}
+        {spot !== undefined ? (
+          <Txt {...(font(t, { voice: "data", scale: 1, color: "dim" }) as object)} fontSize={t.scaled("size-app", 11 / 12.5) as never}>
+            {" "}— line {spot.line}, column {spot.column}
+          </Txt>
+        ) : null}
       </Txt>
     </View>
   );

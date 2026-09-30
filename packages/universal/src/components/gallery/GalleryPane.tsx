@@ -2,7 +2,7 @@ import { galleryServices } from "@jaira/ui/galleryRemote";
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, type LayoutChangeEvent, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { GALLERY_GROUPS, schemaById, surfacesOfGroups, type GalleryGroup, type GallerySurface } from "@jaira/shared/browser";
+import { GALLERY_GROUPS, schemaById, surfacesOfGroups, type GalleryGroup, type GallerySurface, type ValidateSchemaResult } from "@jaira/shared/browser";
 import {
   approvalOf,
   clampSlide,
@@ -21,7 +21,7 @@ import {
 } from "@jaira/ui/galleryModel";
 import { PLAIN_SCROLLER, Press, Txt, appCh, edge, lengthToken, scrollbarProps, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { Uncopied } from "../../app/Uncopied";
+import { SchemaJsonEditor } from "../files/SchemaEdit";
 import { Button } from "../settings/Button";
 import { GateSurface } from "../panel/Gate";
 import { Outputs } from "../debug/DebugPane";
@@ -38,7 +38,8 @@ import type { Schema } from "@jaira/ui/schemaForm/types";
  * panel's copy) and its config's form the one form (`form/SchemaForm`); an approval and a question are
  * their surfaces (`floats/ApprovalSurface`, `floats/QuestionSurface`) in `.inline-gate`; a review, an edit
  * and a changeset review are `artifact/`'s, wired to the gallery's own services (`galleryServices`, which
- * reach nothing); the JSON editor is {@link Uncopied}. The rules, from `styles.css`:
+ * reach nothing); its JSON view the schema editor (`files/SchemaEdit`'s `SchemaJsonEditor`, the schema
+ * locked), checked by the store's `validateSchema`. The rules, from `styles.css`:
  *
  *   .gallery-page        --bg, scrolls, padding 12 14, column, gap 18
  *   .gallery-page-head   column, gap 8; h2 700 app at 15/12.5, margin 0; .sub margin 0, ≤ 80ch, line 1.5
@@ -64,7 +65,10 @@ import type { Schema } from "@jaira/ui/schemaForm/types";
  *   .gallery-side        at least 320 tall; .gallery-config fills it: column, gap 8, padding 8, 1px
  *                        --line, radius 8, --panel-2, scrolls; its head a row, centred, gap 10
  */
-export function GalleryPane(): JSX.Element {
+/** The schema check, over the bridge — the store's, the same one every JSON editor in the app uses. */
+type Validate = (schemaId: string, text: string) => Promise<ValidateSchemaResult | null>;
+
+export function GalleryPane({ validateSchema }: { validateSchema: Validate }): JSX.Element {
   const t = useTokens();
   return (
     <ScrollView
@@ -82,7 +86,7 @@ export function GalleryPane(): JSX.Element {
           editing the config is editing what you see, and answering it shows what a state&apos;s declared outputs would receive.
         </Txt>
       </View>
-      <ComponentGallery />
+      <ComponentGallery validateSchema={validateSchema} />
     </ScrollView>
   );
 }
@@ -96,7 +100,7 @@ function Code({ children }: { children: ReactNode }): JSX.Element {
 }
 
 /** `ComponentGallery`: the bar, then a row per group. */
-function ComponentGallery({ groups = GALLERY_GROUPS }: { groups?: readonly GalleryGroup[] }): JSX.Element {
+function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?: readonly GalleryGroup[]; validateSchema: Validate }): JSX.Element {
   const t = useTokens();
   const surfaces = surfacesOfGroups(groups);
   const [cards, setCards] = useState<Record<string, CardState>>(() => Object.fromEntries(surfaces.map((s) => [s.id, initialState(s)])));
@@ -190,6 +194,7 @@ function ComponentGallery({ groups = GALLERY_GROUPS }: { groups?: readonly Galle
                     <GalleryCard
                       surface={surface}
                       state={cards[surface.id] ?? initialState(surface)}
+                      validateSchema={validateSchema}
                       onText={(text) => patch(surface.id, { text })}
                       onEditor={(editor) => patch(surface.id, { editor })}
                       onReset={() => patch(surface.id, { ...initialState(surface), result: undefined })}
@@ -327,6 +332,7 @@ function Chip({ children, tone, spec }: { children: ReactNode; tone?: "ok" | "ba
 function GalleryCard({
   surface,
   state,
+  validateSchema,
   onText,
   onEditor,
   onReset,
@@ -334,6 +340,7 @@ function GalleryCard({
 }: {
   surface: GallerySurface;
   state: CardState;
+  validateSchema: Validate;
   onText: (text: string) => void;
   onEditor: (editor: Editor) => void;
   onReset: () => void;
@@ -346,6 +353,11 @@ function GalleryCard({
   // than 720, stacked below that.
   const [width, setWidth] = useState(0);
   const stacked = width > 0 && width <= 720;
+  // The config box's inside height, beside the stage: in the JSON view its content is held to it, so the
+  // editor takes what the head leaves (`.gallery-json`: flex 1 1 auto) — the DOM's box is a flex column of
+  // that height, which shrinks what it holds; a scroller's content would only grow.
+  const [sideHeight, setSideHeight] = useState(0);
+  const heldToBox = state.editor !== "form" && !stacked && sideHeight > 0;
   return (
     <View
       flexDirection="column"
@@ -380,7 +392,8 @@ function GalleryCard({
                 ...PLAIN_SCROLLER,
               } as never
             }
-            contentContainerStyle={{ flexDirection: "column", gap: 8, padding: 8, ...PLAIN_SCROLLER } as never}
+            onLayout={(e: LayoutChangeEvent) => setSideHeight(e.nativeEvent.layout.height - 2)}
+            contentContainerStyle={{ flexDirection: "column", flexGrow: 1, gap: 8, padding: 8, ...(heldToBox ? { height: sideHeight } : {}), ...PLAIN_SCROLLER } as never}
             stickyHeaderIndices={[0]}
             {...scrollbarProps(t)}
           >
@@ -410,7 +423,11 @@ function GalleryCard({
                 <SchemaForm schema={entry.document as Schema} value={parsed.doc} onChange={(next) => onText(JSON.stringify(next, null, 2))} ctx={{ path: "" }} />
               )
             ) : (
-              <Uncopied name="the config's JSON editor" height={240} />
+              // `.gallery-json`: the editor takes what the column has left, never less than 240 — the schema
+              // shown and not offered, since it is the SURFACE's (`fill_form`'s contract or nothing).
+              <View flexDirection="row" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={240}>
+                <SchemaJsonEditor text={state.text} busy={false} onChange={onText} validate={validateSchema} schemaId={surface.schemaId} lockedSchema onSchema={() => undefined} />
+              </View>
             )}
           </ScrollView>
           </View>

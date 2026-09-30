@@ -156,6 +156,7 @@ export function Press({
   children,
   box,
   fill = true,
+  focusable,
   ...props
 }: {
   onPress?: (e: GestureResponderEvent) => void;
@@ -175,6 +176,8 @@ export function Press({
    * pixels on a phone.
    */
   fill?: boolean;
+  /** `false`: out of the Tab order (`tabindex="-1"`), for a control a key handler moves focus to (a rail's tabs). */
+  focusable?: boolean;
 } & Record<string, unknown>): JSX.Element {
   const outer: Record<string, unknown> = {};
   const inner: Record<string, unknown> = {};
@@ -184,6 +187,7 @@ export function Press({
       {...(onPress !== undefined ? { onPress } : {})}
       {...(onLongPress !== undefined ? { onLongPress } : {})}
       {...(disabled !== undefined ? { disabled } : {})}
+      {...(focusable !== undefined ? (isWeb ? { tabIndex: focusable ? 0 : -1 } : { focusable }) : {})}
       role="button"
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       style={{ ...(outer as object), ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
@@ -271,6 +275,16 @@ export function scrollbarProps(t: Tokens): Record<string, unknown> {
   return { dataSet: { scrollbar: id } };
 }
 const SCROLLBARS = new Map<string, string>();
+
+/**
+ * {@link scrollbarProps} for a Tamagui `View` that scrolls itself (`overflow: auto`): Tamagui hands its
+ * props to the element as they are, so `dataSet` would land as `dataset="[object Object]"` — the
+ * attribute is spelled out instead.
+ */
+export function viewScrollbarProps(t: Tokens): Record<string, unknown> {
+  const id = (scrollbarProps(t) as { dataSet?: { scrollbar?: string } }).dataSet?.scrollbar;
+  return id === undefined ? {} : { "data-scrollbar": id };
+}
 
 /**
  * A length token as a number where the replayed cascade has one (`--control-radius` → 7), or the

@@ -1,6 +1,6 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { Linking, TextInput } from "react-native";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { formatLicenseBundles, thirdPartyLicenseEntryKey, withPaths, type JairaEngineConfig, type PluginId, type ThirdPartyLicenseEntry, type UpdateChannel } from "@jaira/shared/browser";
 import {
   ANTHROPIC_TERMS,
@@ -19,13 +19,17 @@ import {
   useEngineStatus,
   useLicenseManifest,
 } from "@jaira/ui/aboutModel";
-import { buildDownloadBytes, checkedAgo, pluginFamilies, publishedWords, sizeWords, waitedFor, type PluginFamily, type PluginRow } from "@jaira/ui/updatesModel";
-import { applyUpdate, checkForUpdate, checkPlugin, installPlugin, removePlugin, usePlugins, useUpdate, type UpdateView } from "@jaira/ui/updatesStore";
+import { buildDownloadBytes, checkedAgo, pluginFamilies, publishedWords, sizeWords, updateMenu, waitedFor, type PluginFamily, type PluginRow } from "@jaira/ui/updatesModel";
+import { applyUpdate, checkForUpdate, checkPlugin, installPlugin, refreshBusy, removePlugin, usePlugins, useUpdate, type UpdateView } from "@jaira/ui/updatesStore";
+import type { FloatRect } from "@jaira/ui/floatPlace";
 import { useShell } from "../../app/shell";
-import { Press, Txt, edge, font, lengthToken, placeholderColor, useHover } from "../../primitives";
+import { aboutNotes } from "../../app/viewState";
+import { Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Icon } from "../panel/Icon";
+import { anchorRectOf } from "../floats/anchor";
+import { UpdateMenuFloat } from "../floats/UpdateRow";
 import { Disclosure } from "../form/Field";
 import { Button } from "./Button";
 import { Segmented, Switch } from "./controls";
@@ -218,18 +222,68 @@ function StatusRow({ view, notesOpen }: { view: UpdateView; notesOpen: boolean }
 }
 
 /**
- * About's Update (`updatesView.tsx`'s `UpdateSplit`): the one click, and the chevron for the other
- * ways — whose menu (the approval card's) has no copy yet, so the chevron updates the same way.
+ * About's Update (`updatesView.tsx`'s `UpdateSplit`): the one click, and the chevron for the other ways —
+ * the sidebar row's menu (`UpdateMenuFloat`, less Release notes, which are right under it), hung below
+ * the split, end aligned. `.split.primary`: `button.primary` square on the inside; the caret 7 either
+ * side, 1 over the main button, its chevron 12, a 1px edge of white at 35% on its left.
  */
-function UpdateSplit({ label }: { label: string }): JSX.Element {
+export function UpdateSplit({ label }: { label: string }): JSX.Element {
+  const t = useTokens();
+  const { update, busy, queued } = useUpdate();
+  const [menuAt, setMenuAt] = useState<FloatRect | null | undefined>(undefined);
+  const open = menuAt !== undefined;
+  const radius = lengthToken(t, "control-radius", 7);
+  const [padV] = padToken(t, "control-pad", [3, 10]);
   return (
-    <View flexDirection="row">
+    <View flexDirection="row" position="relative">
       <Button kind="primary" onPress={() => applyUpdate("wait")} borderTopRightRadius={0} borderBottomRightRadius={0}>
         {label}
       </Button>
-      <Button kind="primary" label="Other ways to update" onPress={() => applyUpdate("wait")} marginLeft={-1} paddingHorizontal={7} borderTopLeftRadius={0} borderBottomLeftRadius={0}>
-        <Icon name="chevron" size={12} color="#fff" />
-      </Button>
+      <Press
+        // Hung from the caret: end aligned below it, the card's right edge is the split's, as the desktop's
+        // (placed against the whole split) is — and the split's box here may be wider than its buttons.
+        onPress={(e) => {
+          if (open) return setMenuAt(undefined);
+          refreshBusy();
+          setMenuAt(anchorRectOf(isWeb ? (e as unknown as { currentTarget: unknown }).currentTarget : undefined));
+        }}
+        label="Other ways to update"
+        {...((isWeb ? { "aria-expanded": open, "aria-haspopup": "menu" } : {}) as object)}
+        marginLeft={-1}
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="center"
+        paddingVertical={padV}
+        paddingHorizontal={7}
+        // As tall as the answer beside it: the split's row stretches it, as `.split`'s inline-flex does.
+        alignSelf="stretch"
+        borderWidth={1}
+        borderStyle="solid"
+        borderTopRightRadius={radius}
+        borderBottomRightRadius={radius}
+        box={({ hovered }) => ({
+          backgroundColor: t.v(hovered ? "fill-accent-hover" : "fill-accent"),
+          borderColor: t.v(hovered ? "fill-accent-hover" : "fill-accent"),
+          borderLeftColor: "rgba(255, 255, 255, 0.35)",
+          boxShadow: t.v("sheen"),
+        })}
+      >
+        <Icon name="chevron" size={12} color={String(t.v("on-accent"))} />
+      </Press>
+      {open && update !== null ? (
+        <UpdateMenuFloat
+          anchor={menuAt ?? null}
+          side="below"
+          align="end"
+          menu={updateMenu(update, busy, "about", queued)}
+          onPick={(choice) => {
+            setMenuAt(undefined);
+            applyUpdate(choice);
+          }}
+          onNotes={() => setMenuAt(undefined)}
+          onClose={() => setMenuAt(undefined)}
+        />
+      ) : null}
     </View>
   );
 }
@@ -239,6 +293,7 @@ function UpdatesSection({ onTrack }: { onTrack: (channel: UpdateChannel | undefi
   const { state: shell } = useShell();
   const config = shell.config;
   const view = useUpdate();
+  const notesOpen = aboutNotes.use();
   const state = view.update;
   const { version, own, channel, stated, back, words } = updateTrackOf(config, state);
   return (
@@ -262,7 +317,8 @@ function UpdatesSection({ onTrack }: { onTrack: (channel: UpdateChannel | undefi
         reset={stated ? { label: back, onReset: () => onTrack(undefined), disabled: config === null } : undefined}
         control={<Segmented label="Update track" value={channel} options={TRACK_CHOICES} disabled={config === null || state?.status === "disabled"} onChange={onTrack} />}
       />
-      <StatusRow view={view} notesOpen={false} />
+      {/* Open by themselves when About was opened for them (the Update row's Release notes). */}
+      <StatusRow view={view} notesOpen={notesOpen} />
     </SettingsSection>
   );
 }

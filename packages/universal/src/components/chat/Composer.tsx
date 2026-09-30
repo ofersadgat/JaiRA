@@ -36,10 +36,12 @@ import { Float } from "../floats/Float";
 import { Icon, type IconName } from "../panel/Icon";
 import { Svg } from "../panel/Svg";
 import { INK, Ring } from "../usage/Ring";
-import { BrandMark, BucketPicker, CardHint, ChipCard, KeepPermissionSet, Opt, Opts, RouteCascade, ThinkingBody } from "./ComposerCards";
+import { BucketPicker, CardHint, ChipCard, KeepPermissionSet, Opt, Opts, RouteCascade, ThinkingBody } from "./ComposerCards";
 import { ToolsBody } from "./ComposerTools";
 import { Pulse } from "./Paper";
 import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
+import { FigureFace } from "../usage/Figures";
+import { BrandIcon } from "../settings/bits";
 
 /**
  * `composer.tsx`'s `Composer`, universal (decision 0015): the box a message is typed into, what it will
@@ -143,8 +145,9 @@ export function Composer({
   const off = disabled !== undefined;
   /** The card open, and the box it was opened from. */
   const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Permissions" | "Tools" | "account" | "context"; at: FloatRect } | null>(null);
-  const shell = useRef<RNView | null>(null);
-  const [shellAt, setShellAt] = useState<FloatRect | null>(null);
+  // The `@` list stands over the box it completes into, at the box's width (`matchWidth`), as the desktop's does.
+  const box = useRef<TextInput | null>(null);
+  const [boxAt, setBoxAt] = useState<FloatRect | null>(null);
 
   const send = (): void => {
     const message = withFiles(draft.trim(), files);
@@ -163,7 +166,7 @@ export function Composer({
       setMention(null);
       return;
     }
-    shell.current?.measureInWindow((x, y, w, h) => setShellAt({ left: x, top: y, right: x + w, bottom: y + h }));
+    box.current?.measureInWindow((x, y, w, h) => setBoxAt({ left: x, top: y, right: x + w, bottom: y + h }));
     setMention({ at: found.at, query: found.query, paths: [] });
     void mentions(found.query).then((paths) => setMention((was) => (was !== null && was.at === found.at && was.query === found.query ? { ...was, paths } : was)));
   };
@@ -178,18 +181,41 @@ export function Composer({
       (e: unknown) => setFiles((was) => [...was, { name: path, note: e instanceof Error ? e.message : "could not be read" }]),
     );
   };
-  /** Take files in, from the picker (web: the File API reads them in the renderer, as the desktop's does). */
+  /** Take files in (web: the File API reads them in the renderer, as the desktop's does). */
+  const take = (list: FileList | null): void => {
+    if (list === null) return;
+    void Promise.all([...list].map(async (file) => fileFromText(file.name, file.size, file.type, file.size > 200_000 ? undefined : await file.text()))).then((taken) => setFiles((was) => [...was, ...taken]));
+  };
+  /** From the picker. */
   const attach = (): void => {
     if (!isWeb || typeof document === "undefined") return;
     const input = document.createElement("input");
     input.type = "file";
     input.multiple = true;
-    input.onchange = () => {
-      const list = [...(input.files ?? [])];
-      void Promise.all(list.map(async (file) => fileFromText(file.name, file.size, file.type, file.size > 200_000 ? undefined : await file.text()))).then((taken) => setFiles((was) => [...was, ...taken]));
-    };
+    input.onchange = () => take(input.files);
     input.click();
   };
+  /** Dropped on the composer (`.cx-drop`: the frame --accent while a file is over it). */
+  const [dropping, setDropping] = useState(false);
+  // The WHOLE composer is the drop target, as the desktop's is: a file aimed at the box and dropped on
+  // the page behind it is one Electron answers by navigating the window to it. `dragover` must be
+  // prevented or the drop never fires.
+  const drop = isWeb
+    ? {
+        onDragOver: (e: DragEvent) => {
+          if (off) return;
+          e.preventDefault();
+          setDropping(true);
+        },
+        onDragLeave: () => setDropping(false),
+        onDrop: (e: DragEvent) => {
+          if (off) return;
+          e.preventDefault();
+          setDropping(false);
+          take(e.dataTransfer?.files ?? null);
+        },
+      }
+    : {};
 
   const set = (patch: ChatSettings): void => onOverrides({ ...overrides, ...patch });
   const clear = (key: keyof ChatSettings): void => {
@@ -214,16 +240,15 @@ export function Composer({
   const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
 
   return (
-    <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never}>
+    <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
       <View
         width="100%"
         maxWidth={900}
         alignSelf="center"
         padding={1}
         borderRadius={22}
-        backgroundColor={(focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
+        backgroundColor={(dropping ? t.v("accent") : focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
-        <RNView ref={shell} collapsable={false}>
         <View flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
           {!off ? <SpentLine route={route} /> : null}
           {files.length > 0 ? (
@@ -243,6 +268,7 @@ export function Composer({
             </View>
           ) : null}
           <TextInput
+            ref={box}
             multiline
             value={draft}
             editable={!off}
@@ -299,7 +325,7 @@ export function Composer({
             } as never}
           />
           <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0}>
-            <Chip t={t} lead={<BrandMark t={t} name={routeOf(effective.model ?? "")} ink={origin.model === "override" ? "accent" : "tok-hint"} />} label="Model" value={chips.model} own={origin.model === "override"} open={card?.which === "Model"} onOpen={opener("Model")} />
+            <Chip t={t} lead={<BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />} label="Model" value={chips.model} own={origin.model === "override"} open={card?.which === "Model"} onOpen={opener("Model")} />
             <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} />
             <Chip t={t} icon="think" label="Thinking" value={chips.thinking} own={origin.reasoning === "override"} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
             <Chip t={t} icon="shield" label="Permissions" value={chips.permissions} own={permissionsOrigin === "override"} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
@@ -344,11 +370,10 @@ export function Composer({
             )}
           </View>
         </View>
-        </RNView>
       </View>
-      {mention !== null && mention.paths.length > 0 && shellAt !== null ? (
+      {mention !== null && mention.paths.length > 0 && boxAt !== null ? (
         <MenuLayer onClose={() => setMention(null)}>
-          <Float anchor={shellAt} side="above" align="start" offset={4} width={shellAt.right - shellAt.left} maxHeight={240} padding={4} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={10} backgroundColor={t.v("panel") as never} {...({ boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.18)", overflowY: "auto" } as object)}>
+          <Float anchor={boxAt} side="above" align="start" offset={4} width={boxAt.right - boxAt.left} maxHeight={240} padding={4} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={10} backgroundColor={t.v("panel") as never} {...({ boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.18)", overflowY: "auto" } as object)}>
             {mention.paths.slice(0, 8).map((path) => (
               <Press key={path} onPress={() => pick(path)} paddingVertical={4} paddingHorizontal={8} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : "transparent" })}>
                 <Txt spec={{ voice: "app", scale: 12 / 12.5 }} ellip>
@@ -459,9 +484,6 @@ function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; i
   );
 }
 
-// `BrandMark` is `ComposerCards.tsx`'s (the chips and the model menu draw it); exported from here too.
-export { BrandMark };
-
 /** `AllowanceNumber`: the account's figure after the model chip — as a number, a ring, or both. */
 function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element | null {
   const [ref, press] = useOpener(onOpen);
@@ -471,8 +493,9 @@ function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: 
   const account = accountFor(limits, route);
   if (account === undefined || mode === "off") return null;
   const figure = figureOf(account, { model, cost, now });
-  // `.um-num.um-t-accent` wins over `.um-t-accent`: the accent tone's number is --dim, not --text.
-  const ink = figure.tone === "accent" ? "dim" : INK[figure.tone];
+  // `.um-num.um-t-accent` wins over `.um-t-accent`: the accent tone's number is --dim, not --text — but
+  // money's (`.um-num.um-money.um-t-accent`) is --text again.
+  const ink = figure.tone === "accent" ? (figure.money ? "text" : "dim") : INK[figure.tone];
   const face = { voice: "data" as const, scale: 11 / 12, weight: 500, color: ink, tabular: true, lineHeight: 1 };
   // `.um-numwrap` is a block whose line (the body's 13/12.5 at 1.5) holds the button as an inline box on
   // its baseline — 19.5 tall, the button 2.67 below its top (measured) — and it is the WRAP the row centres.
@@ -493,8 +516,7 @@ function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: 
       borderRadius={6}
       box={({ hovered }) => ({ backgroundColor: hovered || open ? t.v("fill-ghost-hover") : "transparent" })}
     >
-      {mode !== "number" ? <Ring t={t} pct={figure.pct} tone={figure.tone} size={16} /> : null}
-      {mode !== "ring" ? <Txt spec={face}>{figure.text}</Txt> : null}
+      <FigureFace t={t} figure={figure} mode={mode} text={<Txt spec={face}>{figure.text}</Txt>} />
     </Press>
     </RNView>
     </View>

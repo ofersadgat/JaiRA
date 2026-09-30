@@ -6,7 +6,12 @@ import { DataView as DomDataView } from "@jaira/ui/valueView";
 import { DataView, FileInspector, Markdown } from "@jaira/universal";
 import { FLOAT_SPECIMENS } from "./floatSpecimens";
 import { FORM_SPECIMENS } from "./formSpecimens";
+import { MESSAGE_SOURCE_SPECIMENS } from "./messageSourceSpecimens";
+import { SHELL_SPECIMENS } from "./shellSpecimens";
+import { REVIEW_SPECIMENS } from "./reviewSpecimens";
+import { ROOM_SPECIMENS } from "./roomSpecimens";
 import { TRANSCRIPT_SPECIMENS } from "./transcriptSpecimens";
+import { VALUE_SPECIMENS } from "./valueSpecimens";
 
 /**
  * The specimens: a DOM component and its universal copy, each drawn from the same fixture, for
@@ -83,6 +88,17 @@ export const SPECIMENS: Record<string, Specimen> = {
   ...FLOAT_SPECIMENS,
   // The transcript's pieces: work rows, pauses, compactions and the work summary (`transcriptSpecimens.tsx`).
   ...TRANSCRIPT_SPECIMENS,
+  // The badge on a message the person did not type, over a bubble and beside an aside's role (`messageSourceSpecimens.tsx`).
+  ...MESSAGE_SOURCE_SPECIMENS,
+  // The value view's readings: JSON with its schema's hints, a form, a patch, a table, pictures, code (`valueSpecimens.tsx`).
+  ...VALUE_SPECIMENS,
+  // What the window says about itself (the toast, the crash screen and banner, a lost socket), settled
+  // gates, and a conversation's foot (`shellSpecimens.tsx`).
+  ...SHELL_SPECIMENS,
+  // A review's notes, one from the forge (`reviewSpecimens.tsx`).
+  ...REVIEW_SPECIMENS,
+  // A card's origin line and Undo, the Debug journal, and Files surfaces (`roomSpecimens.tsx`).
+  ...ROOM_SPECIMENS,
   // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,

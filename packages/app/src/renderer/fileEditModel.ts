@@ -5,7 +5,7 @@
  * configuration editor shows and saves.
  */
 import { useEffect } from "react";
-import { isWritableLayer, structuredFormatOf, type ConfigView, type FileSource, type SchemaFormat, type WritableLayer } from "@jaira/shared/browser";
+import { isWritableLayer, structuredFormatOf, type ConfigView, type FileSource, type PatchFile, type SchemaFormat, type WritableLayer } from "@jaira/shared/browser";
 import { docKey } from "./drafts";
 import type { FileSurfaceContext } from "./fileTypes";
 
@@ -41,6 +41,30 @@ export function useSchemaChoice(doc: FileSource, context: FileSurfaceContext): s
     };
   }, [key, chosen, doc.text, doc.path, detectSchema, onSchemaChoice]);
   return chosen;
+}
+
+/**
+ * A patch's first file as the two revisions it is BETWEEN (`PatchSideBySide`): a context line belongs to
+ * both, a removed line to the left only, an added line to the right only — a fold over the hunks, which
+ * loses only what the patch itself left out (the unchanged stretches between hunks). Null for no file.
+ */
+export function patchSidesOf(files: readonly PatchFile[]): { file: PatchFile; before: string; after: string } | null {
+  const file = files[0];
+  if (file === undefined) return null;
+  const before: string[] = [];
+  const after: string[] = [];
+  for (const hunk of file.hunks) {
+    for (const line of hunk.lines) {
+      if (line.kind !== "add") before.push(line.text);
+      if (line.kind !== "del") after.push(line.text);
+    }
+  }
+  return { file, before: before.join("\n"), after: after.join("\n") };
+}
+
+/** What the side-by-side panes say after the file's path under themselves: how many others the patch holds. */
+export function patchSidesMore(files: readonly PatchFile[]): string {
+  return files.length > 1 ? ` — and ${files.length - 1} other ${files.length === 2 ? "file" : "files"} in this patch` : "";
 }
 
 /**

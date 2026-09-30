@@ -5,7 +5,7 @@ import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
 import { projectName } from "@jaira/ui/projects";
 import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
-import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, usePanelStacks, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
+import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, usePanelStacks, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
@@ -15,6 +15,7 @@ import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel
 import { NewTaskForm } from "../components/panel/NewTaskForm";
 import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBridge";
 import type { TranscriptSource } from "../components/panel/RunTranscript";
+import { useRunContext } from "../components/run/runContext";
 import { SidePanel } from "../components/panel/SidePanel";
 import { Splitter } from "../components/files/Splitter";
 import { edge } from "../primitives";
@@ -81,6 +82,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const hold = useCallback((item: PinnedValue) => setHeld((was) => (was.some((one) => one.title === item.title) ? was : [...was, item])), []);
   const unhold = useCallback((item: PinnedValue) => setHeld((was) => was.filter((one) => one.title !== item.title)), []);
 
+  // The run's verbs and links as the middle column has them (`App.tsx` hands both the same context).
+  const run = useRunContext();
+  // ⇤ on a subagent's conversation: into the main view, once its task's run is walked (`App.tsx`'s own).
+  const adoptSubagent = useAdoptSubagent(state, detail, actions);
   const source: TranscriptSource = {
     conversation: state.conversation,
     sessions: state.sessions,
@@ -94,8 +99,13 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     batches: lookOf(state.config).conversation.sequentialBatches,
     userEvents: state.userEvents,
     onDeliverUserEvent: actions.deliverUserEvent,
-    // `App.tsx` hands the conversation both of a cut's verbs, so its entered rows carry their room.
-    cuts: true,
+    // `App.tsx` hands the conversation both of a cut's verbs, the workflow's link and the task links.
+    onRewind: run.onRewind,
+    onFork: run.onFork,
+    onOpenWorkflow: run.onOpenWorkflow,
+    onSelectTask: actions.select,
+    // What the shell lends a gate that mounts the changeset reviewer (`App.tsx`'s `reviewerServices`).
+    gateServices: run.runGateServices,
     project: selectedProject,
     // The questions MOVES parked in task conversations: each drawn where its move asked it (`App.tsx`).
     moveQuestions: state.pending.filter((p) => p.moves === true),
@@ -122,6 +132,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       actions.setView("tasks");
       actions.openTask(taskId, at ?? state.at ?? "", workflow);
     },
+    adoptSubagent,
     ...(conversationInMain && detail !== null
       ? {
           // ⇥: back out of the main view — the board with the task selected, its conversation here.
@@ -170,6 +181,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     ),
     rerunSurface: (task) => rerunSurfaceFor(state, actions, task, selectedProject, onStack),
     onFork: (taskId, seq) => void actions.forkTask(taskId, seq, selectedProject),
+    onRewind: run.onRewind,
     turns: state.conversation?.turns ?? [],
     // The workflow editor's, in a configuration card and a state's Configuration (`App.tsx`'s `config`).
     config: {

@@ -100,7 +100,7 @@ export function FileTypesPane({
   const palette = resolveTheme(at, kind, view, renderers, editorTheme);
 
   return (
-    <View flexDirection="row" minHeight={320} overflow="hidden" borderRadius={lengthToken(t, "card-radius", 12)} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+    <View testID="ft" flexDirection="row" minHeight={320} overflow="hidden" borderRadius={lengthToken(t, "card-radius", 12)} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
       {/* The tree. */}
       <View width={178} flexShrink={0} backgroundColor={t.v("panel-2") as never} padding={5} minWidth={0} {...(edge(t, { right: 1 }) as object)}>
         {PANE_FAMILIES.map((each, i) => {

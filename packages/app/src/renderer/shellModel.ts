@@ -39,6 +39,12 @@ export const FOOTER_VIEWS: readonly SidebarView[] = [
 ];
 
 /**
+ * The views that live INSIDE the settings panel — see `App.tsx`'s `beforeSettings` and the sidebar's
+ * own rule. Leaving Settings returns to the last view that is not one of these.
+ */
+export const PANEL_VIEWS: ReadonlySet<string> = new Set<string>(["settings", ...FOOTER_VIEWS.map((v) => v.id)]);
+
+/**
  * The rooms at the ROOT of the address — every project's work at once.
  *
  * The same two view ids the projects nest, because they are the same rooms seen from one level up:

@@ -1,8 +1,8 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useCallback, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
-import type { InstanceNode, MadeBatch, MadeTask, MoveQuestionView, TaskOrigin } from "@jaira/shared/browser";
+import { formatTokens, type ContextReading, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
 import { pathFrom, placeOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
-import { keyOfPiece, markedRowsOf, metaOf, pageRowsOf, sideName, sideOf, spanOf, summaryOf } from "@jaira/ui/sessionRows";
+import { addedOf, cutNameOf, keyOfPiece, markedRowsOf, metaOf, pageRowsOf, sideName, sideOf, spanOf, summaryOf } from "@jaira/ui/sessionRows";
 import { KIND_ICON, KIND_WORD, headerToneOf, surfaceKindOf, type HeaderTone, type SurfaceKind } from "@jaira/ui/stateSurface";
 import { signatureOf } from "@jaira/ui/transcript";
 import { Press, Txt, appCh, edge, lengthToken, useHover } from "../../primitives";
@@ -37,6 +37,8 @@ import { OneLine } from "./OneLine";
  *                      lower case, --dim; hovered or open --accent 30% into --line, --panel-2, --text;
  *                      glyphs 11, the first and `fork:` (600) --accent 70% into --dim
  *   .sb-cut            as `.ts-cut`, margin 2 4 6; `.rail-row.doomed` .35
+ *   .sb-panel-lit > .sb-sheet   where a fork's "go to the other side" landed: --accent 55% into --line,
+ *                      a 3px ring of --accent 14%, for 1.2s (the dark and contrast sheets' own rules win)
  *   .sb-made           the verb, the runs (links, their standing, "waits for" in a pill), the state
  */
 
@@ -58,11 +60,8 @@ export interface CutOffer {
   fork: (note: BandNote) => void;
 }
 
-/** What a note's state is CALLED in a sentence about it (`cutNameOf`). */
-export function cutNameOf(note: BandNote, root: string): string {
-  const where = pathFrom(note.path, root);
-  return where !== "" ? where : (note.stateId?.split("/").pop() ?? "this state");
-}
+/** What a note's state is CALLED in a sentence about it — `sessionRows.ts`' `cutNameOf`, the desktop's own. */
+export { cutNameOf };
 
 /** The whole conversation: bands down the page, in the order they happened (`SessionBandsView`). */
 export function SessionBands({
@@ -83,6 +82,7 @@ export function SessionBands({
   adopted,
   moveQuestion,
   onOpenWorkflow,
+  readingOf,
   empty,
 }: {
   bands: readonly SessionBand[];
@@ -104,8 +104,11 @@ export function SessionBands({
   moveQuestion?: ((asked: MoveQuestionView) => ReactNode) | undefined;
   /** Describe the workflow a panel's conversation was opened by. Absent ⇒ the gutter names no workflow. */
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
+  /** How full a piece's conversation was after its last turn (`PieceReadingContext`) — each letterhead's `+30k`. */
+  readingOf?: ((piece: SessionPiece) => ContextReading | undefined) | undefined;
   empty?: ReactNode;
 }): JSX.Element {
+  const goTo = useGoTo();
   if (given.length === 0 && notes.length === 0) return <>{empty ?? null}</>;
   const page = pageRowsOf(given, notes, root);
   const marked = markedRowsOf(page, notes, armed, origin);
@@ -123,10 +126,46 @@ export function SessionBands({
         if (item.kind === "origin") return <OriginMark origin={origin!} onGo={origin!.onGo} />;
         const row = page.rows[item.index]!;
         if (row.kind === "note") return <NoteRow note={row.note} root={root} cuts={cuts} onSelectTask={onSelectTask} adopted={adopted} moveQuestion={moveQuestion} />;
-        return <Band band={row.band} starters={page.starters} forks={page.forks} onOpenWorkflow={onOpenWorkflow} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />;
+        return <Band band={row.band} starters={page.starters} forks={page.forks} goTo={goTo} onOpenWorkflow={onOpenWorkflow} readingOf={readingOf} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />;
       }}
     />
   );
+}
+
+/**
+ * Going to the other side of a fork (`SessionBandsView`'s `goTo`): every side is already drawn on the
+ * page, so the mark's job is to take the reader to the one picked — scrolled into view and lit for
+ * 1.2s, since the sides are the same state saying nearly the same thing. The sheets register
+ * themselves by position (`data-fork-place`), which is what a side knows about its siblings.
+ *
+ * Web only for now: a phone has no `scrollIntoView`, and the jump would have to be measured against
+ * the transcript's own scroller (`measureLayout` and its `scrollTo`), which the bands do not hold — so
+ * there the chip offers the sides and goes nowhere.
+ */
+interface GoTo {
+  lit: string | null;
+  place: (place: string, el: unknown) => void;
+  show: (place: string) => void;
+}
+
+function useGoTo(): GoTo {
+  const [lit, setLit] = useState<string | null>(null);
+  const places = useRef(new Map<string, { scrollIntoView?: (options: object) => void }>());
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const place = useCallback((at: string, el: unknown) => {
+    if (el === null) places.current.delete(at);
+    else places.current.set(at, el as { scrollIntoView?: (options: object) => void });
+  }, []);
+  const show = useCallback((at: string) => {
+    if (!isWeb) return;
+    const found = places.current.get(at);
+    if (typeof found?.scrollIntoView !== "function") return;
+    found.scrollIntoView({ block: "start", behavior: "smooth" });
+    setLit(at);
+    if (timer.current !== null) clearTimeout(timer.current);
+    timer.current = setTimeout(() => setLit(null), 1200);
+  }, []);
+  return { lit, place, show };
 }
 
 /** `.sb-cut`: the counted line under an armed rewind's entry — a dashed rule each side of the words. */
@@ -473,7 +512,9 @@ function Band({
   band,
   starters,
   forks,
+  goTo,
   onOpenWorkflow,
+  readingOf,
   asking,
   shut,
   onToggle,
@@ -484,7 +525,9 @@ function Band({
   band: SessionBand;
   starters: Map<string, SessionPiece>;
   forks: Map<string, SessionPiece[]>;
+  goTo: GoTo;
   onOpenWorkflow: ((piece: SessionPiece) => void) | undefined;
+  readingOf: ((piece: SessionPiece) => ContextReading | undefined) | undefined;
   asking: string | undefined;
   shut: ReadonlySet<string>;
   onToggle: (key: string) => void;
@@ -497,7 +540,7 @@ function Band({
   const [tab, setTab] = useState(0);
   const [hovered, hover] = useHover();
   const sheet = (segment: SessionSegment, named = true): JSX.Element => (
-    <Sheet key={segment.key} segment={segment} named={named} starter={onOpenWorkflow === undefined ? undefined : starters.get(segment.key)} onOpenWorkflow={onOpenWorkflow} forks={forks} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />
+    <Sheet key={segment.key} segment={segment} named={named} starter={onOpenWorkflow === undefined ? undefined : starters.get(segment.key)} onOpenWorkflow={onOpenWorkflow} readingOf={readingOf} forks={forks} goTo={goTo} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />
   );
   if (band.segments.length === 1) {
     return (
@@ -589,7 +632,9 @@ function Sheet({
   named,
   starter,
   onOpenWorkflow,
+  readingOf,
   forks,
+  goTo,
   asking,
   shut,
   onToggle,
@@ -601,7 +646,9 @@ function Sheet({
   named: boolean;
   starter: SessionPiece | undefined;
   onOpenWorkflow: ((piece: SessionPiece) => void) | undefined;
+  readingOf: ((piece: SessionPiece) => ContextReading | undefined) | undefined;
   forks: Map<string, SessionPiece[]>;
+  goTo: GoTo;
   asking: string | undefined;
   shut: ReadonlySet<string>;
   onToggle: (key: string) => void;
@@ -617,8 +664,9 @@ function Sheet({
   const only = segment.pieces.length === 1 ? segment.pieces[0] : undefined;
   const solo = only !== undefined && surfaceKindOf(only.node) === "conversation";
   const surface = only !== undefined && segment.sessionId === undefined && surfaceKindOf(only.node) !== "conversation";
+  // What each state ADDED to the conversation — `addedOf`, the desktop's own.
+  const added = addedOf(segment.pieces, readingOf);
   const small = { voice: "app" as const, scale: 11 / 12.5, color: "dim" };
-  // The workflow's own link: describing it beside the run is the Files view's panel, not copied yet.
   // `button.link.sb-workflow.ellip`: a BUTTON, so an inline-flex that centres its text — squeezed, the
   // name overflows both sides and is clipped there, with no ellipsis.
   const workflow =
@@ -631,7 +679,10 @@ function Sheet({
       </View>
     ) : null;
   const span = spanOf(segment);
-  const sheet = sheetLookOf(t, useLook());
+  const look = useLook();
+  const sheet = sheetLookOf(t, look);
+  // Lit where a fork's jump landed; the contrast sheet's frame and the dark one's shadow outrank it.
+  const lit = side !== undefined && goTo.lit === side.place && look.palette !== "contrast";
   // A cut edge is not a corner: the torn side squared (radius 2).
   const radii =
     segment.resumed || segment.paused
@@ -643,7 +694,7 @@ function Sheet({
         }
       : { borderRadius: sheet.radius };
   return (
-    <View flexDirection="column" minWidth={0} {...(side !== undefined ? { "data-fork-place": side.place } : {})}>
+    <View flexDirection="column" minWidth={0} {...(side !== undefined ? { "data-fork-place": side.place, ref: (el: unknown) => goTo.place(side.place, el) } : {})}>
       {named && surface && workflow !== null ? (
         <View flexDirection="row" alignItems="center" gap={8} paddingHorizontal={4} paddingBottom={2} minWidth={0}>
           {workflow}
@@ -676,7 +727,7 @@ function Sheet({
               torn={false}
               sides={side.sides.map((one) => ({ key: placeOf(one)!, label: sideName(one), ...(one.sessionId !== undefined ? { note: one.sessionId } : {}) }))}
               shown={side.place}
-              onShow={() => undefined}
+              onShow={goTo.show}
               note="the position was already taken, so every attempt after the first branched"
             />
           ) : null}
@@ -726,10 +777,11 @@ function Sheet({
           backgroundColor={t.v("panel") as never}
           borderWidth={sheet.width}
           borderStyle="solid"
-          borderColor={t.v(sheet.edge) as never}
+          borderColor={(lit ? t.mix(t.v("accent"), 55, t.v("line")) : t.v(sheet.edge)) as never}
           {...radii}
           overflow="hidden"
-          {...({ boxShadow: sheet.shadow } as object)}
+          {...({ boxShadow: lit && look.scheme !== "dark" ? `0px 0px 0px 3px ${String(t.mix(t.v("accent"), 14, "transparent"))}` : sheet.shadow } as object)}
+          {...(lit && isWeb ? { style: { transition: "box-shadow 0.4s ease-out, border-color 0.4s ease-out" } } : {})}
         >
           {segment.resumed && segment.sessionId !== undefined ? <TearBar kind="resumed" id={segment.sessionId} /> : null}
           <View flexDirection="column" alignItems="stretch" paddingTop={13} paddingHorizontal={15} paddingBottom={15} minWidth={0}>
@@ -748,6 +800,7 @@ function Sheet({
                   onToggle={() => onToggle(keyOfPiece(piece, scope))}
                   render={render}
                   asking={asking}
+                  added={added.get(piece)}
                 />
               ),
             )}
@@ -801,7 +854,7 @@ export function sheetLookOf(t: Tokens, look: Look): { width: number; edge: strin
  *   .lh-label         app voice, --size-app × 12/12.5, ellipsed
  *   .lh-meta          pushed right, 10 before, tabular, 0.85 opaque
  */
-function Piece({ piece, first, afterShut, open, onToggle, render, asking }: { piece: SessionPiece; first: boolean; afterShut: boolean; open: boolean; onToggle: () => void; render: (piece: SessionPiece) => ReactNode; asking: string | undefined }): JSX.Element {
+function Piece({ piece, first, afterShut, open, onToggle, render, asking, added }: { piece: SessionPiece; first: boolean; afterShut: boolean; open: boolean; onToggle: () => void; render: (piece: SessionPiece) => ReactNode; asking: string | undefined; added: number | undefined }): JSX.Element {
   const t = useTokens();
   const node = piece.node;
   const kind = surfaceKindOf(node);
@@ -819,6 +872,7 @@ function Piece({ piece, first, afterShut, open, onToggle, render, asking }: { pi
         label={sig.label}
         summary={summary}
         meta={meta}
+        added={added}
         status={kind === "conversation" ? node.status : undefined}
         onToggle={onToggle}
         above={first ? 0 : tone !== undefined ? 16 : afterShut ? 12 : 20}
@@ -837,6 +891,7 @@ function Letterhead({
   label,
   summary,
   meta,
+  added,
   status,
   onToggle,
   above,
@@ -849,6 +904,8 @@ function Letterhead({
   label: string | undefined;
   summary: string | undefined;
   meta: string;
+  /** Tokens this state added to its conversation — drawn at the right, before the time, open or folded. */
+  added: number | undefined;
   status: InstanceNode["status"] | undefined;
   onToggle: () => void;
   above: number;
@@ -909,10 +966,16 @@ function Letterhead({
                 {summary}
               </Txt>
             ) : null}
-            {meta.length > 0 ? (
-              <Txt spec={{ voice: "data", scale: 11 / 12, color: ink, tabular: true }} flexShrink={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
-                {meta}
-              </Txt>
+            {meta.length > 0 || added !== undefined ? (
+              // `.lh-meta`, with `.lh-added` in it: the data face, --dim whatever the tone, 10 before the time.
+              <View flexDirection="row" alignItems="baseline" flexShrink={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
+                {added !== undefined ? (
+                  <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", tabular: true }} marginRight={10} title={`this state added ${formatTokens(added)} tokens to the conversation`}>
+                    +{formatTokens(added, true)}
+                  </Txt>
+                ) : null}
+                {meta.length > 0 ? <Txt spec={{ voice: "data", scale: 11 / 12, color: ink, tabular: true }}>{meta}</Txt> : null}
+              </View>
             ) : null}
           </>
         );

@@ -239,8 +239,8 @@ export function AppearancePage(): JSX.Element {
         </SettingsRow>
       </SettingsSection>
 
-      {/* A workspace of its own (a tree beside a stage beside a live Monaco): not copied yet, but a
-          section the accordion lists, as the DOM's is. */}
+      {/* A workspace of its own (a tree beside a stage beside a live Monaco), and a section the
+          accordion lists, as the DOM's is. */}
       <SettingsSection id="file-types" title="File types" plain wide layer={rowLayer("renderers", "editors")}>
         {/* `components/files/FileTypesPane.tsx`: the workspace, its preview the real surface (a Monaco island for code). */}
         <FileTypesPane

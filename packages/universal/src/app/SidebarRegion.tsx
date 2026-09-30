@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { hueOf } from "@jaira/ui/pill";
-import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
+import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
 import type { SidebarAct, SidebarView } from "@jaira/ui/sidebar";
 import type { View as AppView } from "@jaira/ui/store";
 import { newItems, standingRoot, type TreeDraft } from "@jaira/ui/filesModel";
@@ -22,8 +22,10 @@ import { HealthPop } from "../components/floats/HealthCard";
 import { FolderBrowser } from "../components/floats/FolderBrowser";
 import { useMachines } from "@jaira/ui/machinesModel";
 import { UpdateRow } from "../components/floats/UpdateRow";
+import { PointerMenus } from "../components/floats/PointerMenus";
 import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
+import { aboutNotes } from "./viewState";
 
 /**
  * The sidebar, with the rows `App.tsx` gives its own: the rooms, their counts (`shellModel.ts`, one
@@ -48,10 +50,24 @@ export function ShellSidebar(): JSX.Element {
     if (health.length === 0) setHealthAt(null);
   }, [health.length]);
   const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
-  const openAbout = (): void => {
+  // About, opened from the Update row — with the release notes showing, from its menu (`App.tsx`'s
+  // `openAbout`). Only for the one opening: About opened from its list later starts with them folded.
+  useEffect(() => {
+    if (state.view !== "settings" || state.section !== "about") aboutNotes.set(false);
+  }, [state.view, state.section]);
+  const openAbout = (notes: boolean): void => {
+    aboutNotes.set(notes);
     actions.setSection("about");
     actions.setView("settings");
   };
+  /**
+   * `App.tsx`'s `beforeSettings`: the room Settings was entered FROM, which is where leaving it goes —
+   * never a view inside the settings panel (Logs, Debug, Components), or the way out would lead back in.
+   */
+  const beforeSettings = useRef<AppView>("files");
+  useEffect(() => {
+    if (!PANEL_VIEWS.has(state.view)) beforeSettings.current = state.view;
+  }, [state.view]);
   const [finding, setFinding] = useState<Record<string, boolean>>({});
   const groups = useMemo(() => groupProjects(state.projects, ui.groupWorkspaces !== false), [state.projects, ui.groupWorkspaces]);
   const projectHues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
@@ -145,7 +161,7 @@ export function ShellSidebar(): JSX.Element {
       roots={roots}
       footer={footer}
       settings={settings}
-      onLeaveSettings={() => actions.setView("tasks")}
+      onLeaveSettings={() => actions.setView(beforeSettings.current)}
       view={state.view}
       onView={(id) => actions.setView(id as AppView)}
       collapsed={!openOf(ui, FOLD.shellSidebar)}
@@ -161,8 +177,8 @@ export function ShellSidebar(): JSX.Element {
       machines={(machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }))}
       onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
       // The Update row above Settings (`App.tsx`'s `SidebarUpdateRow`): About, where a failure or a
-      // download is said in full — with the release notes, from its menu (`AboutPage` holds their fold).
-      update={(collapsed) => <UpdateRow collapsed={collapsed} onOpenAbout={openAbout} onNotes={openAbout} onRetry={checkForUpdate} />}
+      // download is said in full — with the release notes open, from its menu (`aboutNotes`).
+      update={(collapsed) => <UpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />}
       onProjectSettings={(p) => {
         actions.standOn(p.project);
         actions.setConfigLayer(p.kind === "shared" ? "base" : "project");
@@ -170,6 +186,9 @@ export function ShellSidebar(): JSX.Element {
       }}
     />
     {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
+    {/* `App.tsx`'s `PointerMenus`, the window's right-click menu for content (web only): mounted with the
+        sidebar, which the shell always draws, as the desktop mounts it once for the window. */}
+    <PointerMenus />
     {browsing !== null && machinesView !== undefined ? (
       <FolderBrowser
         machines={machinesView.machines.filter((m) => m.state === "online").map((m) => ({ id: m.id, label: m.label }))}

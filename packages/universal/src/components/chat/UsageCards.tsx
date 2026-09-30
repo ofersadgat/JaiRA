@@ -11,11 +11,13 @@ import { Press, Txt, edge, font } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { Float } from "../floats/Float";
+import { MenuLayer } from "../MenuLayer";
 import { Icon } from "../panel/Icon";
 import { HoverLayer } from "../panel/HoverLayer";
 import { BrandIcon } from "../settings/bits";
 import { Button } from "../settings/Button";
 import { ChipCard } from "./ComposerCards";
+import { Turn } from "../Turn";
 
 /**
  * `usageMeters.tsx`'s composer pieces, universal (decision 0015): the line over the box when the account
@@ -175,8 +177,12 @@ function WindowLine({ name, sub, pct, tone, value, reset, passed = false, money 
   );
 }
 
-/** `AccountPopover`: every window of one account, when each resets, how old the reading is — and the other accounts. */
-export function AccountCard({ anchor, account, cost, others, onClose }: { anchor: FloatRect; account: LimitAccountView; cost?: number | undefined; others: readonly LimitAccountView[]; onClose: () => void }): JSX.Element {
+/**
+ * `AccountPopover`: every window of one account, when each resets, how old the reading is — and the
+ * other accounts. The composer's is 370 wide from the chip's start; Connections' (`.um-cpop`) 330 from
+ * the figure's end.
+ */
+export function AccountCard({ anchor, account, cost, others, width = 370, align = "start", onClose }: { anchor: FloatRect; account: LimitAccountView; cost?: number | undefined; others: readonly LimitAccountView[]; width?: number; align?: "start" | "end"; onClose: () => void }): JSX.Element {
   useLimitsWatch(true);
   const t = useTokens();
   const now = useNow();
@@ -192,7 +198,7 @@ export function AccountCard({ anchor, account, cost, others, onClose }: { anchor
     return was;
   };
   return (
-    <ChipCard anchor={anchor} label="Usage" onClose={onClose} width={370} sections offset={8}>
+    <ChipCard anchor={anchor} label="Usage" onClose={onClose} width={width} align={align} sections offset={8}>
       {money && cost !== undefined ? (
         <Section first={isFirst()}>
           <SecHead title="This conversation" />
@@ -236,10 +242,17 @@ export function AccountCard({ anchor, account, cost, others, onClose }: { anchor
           </Txt>
           <View flex={1} />
           {account.refreshing ? (
-            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>refreshing…</Txt>
+            <View flexDirection="row" alignItems="center" gap={6}>
+              <UmSpin />
+              <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>refreshing…</Txt>
+            </View>
           ) : account.refreshable ? (
-            <Button kind="ghost" onPress={() => refreshAccount(account.key)} font={{ scale: 11.5 / 12.5 }} paddingVertical={2} paddingHorizontal={7}>
-              Refresh
+            // `.um-refresh`: the icon at the words' size (`1em`), 5 before them.
+            <Button kind="ghost" onPress={() => refreshAccount(account.key)} paddingVertical={2} paddingHorizontal={7}>
+              <Icon name="refresh" size={Number(t.scaled("size-app", 11.5 / 12.5)) || 11.5} color={String(t.v("text"))} />
+              <Txt spec={{ voice: "app", scale: 11.5 / 12.5 }} numberOfLines={1}>
+                Refresh
+              </Txt>
             </Button>
           ) : null}
         </View>
@@ -258,29 +271,40 @@ export function AccountCard({ anchor, account, cost, others, onClose }: { anchor
   );
 }
 
+/** `.um-spin`: a 10 ring of --dim 30%, its top --accent, stroked 1.6, turning. */
+function UmSpin(): JSX.Element {
+  const t = useTokens();
+  return (
+    <Turn>
+      <View width={10} height={10} borderRadius={999} borderWidth={1.6} borderStyle="solid" borderColor={t.mix(t.v("dim"), 30, "transparent") as never} borderTopColor={t.v("accent") as never} />
+    </Turn>
+  );
+}
+
 /** One line of "Your other accounts": 14 · name · bar 40 · value 34, gap 8, padding 4 6. */
 function OtherAccount({ account, now }: { account: LimitAccountView; now: number }): JSX.Element {
   const words = { voice: "app" as const, scale: 12 / 12.5 };
-  const head = (
+  // `.um-other.is-dim`: a row with no reading is --dim through, its mark's `currentColor` too.
+  const head = (dim = false): JSX.Element => (
     <>
       <View width={14} flexShrink={0}>
-        <BrandIcon name={account.brand} size={13} />
+        <BrandIcon name={account.brand} size={13} ink={dim ? "dim" : "text"} />
       </View>
-      <Txt spec={words} ellip flex={1} minWidth={0}>
+      <Txt spec={{ ...words, color: dim ? "dim" : "text" }} ellip flex={1} minWidth={0}>
         {account.brand}
         {account.who !== undefined ? ` · ${account.who}` : ""}
       </Txt>
     </>
   );
-  const row = (children: JSX.Element, dim = false): JSX.Element => (
-    <View flexDirection="row" alignItems="center" gap={8} paddingVertical={4} paddingHorizontal={6} borderRadius={6} opacity={1} {...(dim ? {} : {})}>
+  const row = (children: JSX.Element): JSX.Element => (
+    <View flexDirection="row" alignItems="center" gap={8} paddingVertical={4} paddingHorizontal={6} borderRadius={6}>
       {children}
     </View>
   );
   if (account.kind === "spend") {
     return row(
       <>
-        {head}
+        {head()}
         <Txt spec={{ ...words, color: "text" }} fontSize={11} textAlign="right">{`${formatUsd(account.spent7d ?? 0)} in the last 7 days`}</Txt>
       </>,
     );
@@ -289,18 +313,17 @@ function OtherAccount({ account, now }: { account: LimitAccountView; now: number
   if (pct === null) {
     return row(
       <>
-        {head}
+        {head(true)}
         <Txt spec={{ ...words, color: "dim" }} fontSize={11} width={82} textAlign="right">
           no reading
         </Txt>
       </>,
-      true,
     );
   }
   const tone = toneOfPercent(pct);
   return row(
     <>
-      {head}
+      {head()}
       <View width={40}>
         <Bar pct={pct} tone={tone} height={5} />
       </View>
@@ -422,7 +445,13 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
                         },
                         onMouseLeave: () => setShown((was) => (was === p.name ? undefined : was)),
                       }
-                    : {})}
+                    : {
+                        // A phone has no hover: a press opens the breakdown, as a hover card opens on one.
+                        onPress: () => {
+                          setShown(p.name);
+                          section.current?.measureInWindow((x, y, w, h) => setBeside({ left: x, top: y, right: x + w, bottom: y + h }));
+                        },
+                      })}
                 >
                   <View width={8} height={8} borderRadius={2} backgroundColor={colorOf(t, colourOf(p.name, k)) as never} />
                   <Txt spec={{ voice: "app", scale: 12 / 12.5, lineHeight: 1.3 }} ellip flex={1} minWidth={0}>
@@ -442,10 +471,16 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
             </View>
           ) : null}
         </Section>
-        {open !== undefined && open.parts !== undefined && open.parts.length > 0 && beside !== null && isWeb ? (
-          <HoverLayer>
-            <PartFlyout part={open} window={window} beside={beside} />
-          </HoverLayer>
+        {open !== undefined && open.parts !== undefined && open.parts.length > 0 && beside !== null ? (
+          isWeb ? (
+            <HoverLayer>
+              <PartFlyout part={open} window={window} beside={beside} />
+            </HoverLayer>
+          ) : (
+            <MenuLayer onClose={() => setShown(undefined)}>
+              <PartFlyout part={open} window={window} beside={beside} />
+            </MenuLayer>
+          )
         ) : null}
       </RNView>
     );

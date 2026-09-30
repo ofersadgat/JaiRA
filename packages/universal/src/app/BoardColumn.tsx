@@ -78,6 +78,9 @@ export function BoardColumn(): JSX.Element {
   const scroller = useRef<ScrollView>(null);
   /** The projects as the address bar names them: a workspace by its group's name. */
   const namedProjects = useMemo(() => state.projects.map((p) => ({ ...p, label: groupOf(groups, p.project)?.label ?? p.label })), [state.projects, groups]);
+  // One board per group, its workspaces merged by column (decision 0013 §4) — kept between draws, since
+  // a merge or a queued mark makes new cards, and a card is drawn again only when it is a new one.
+  const merged = useMemo(() => new Map(groups.map((g) => [g.key, markQueued(mergeBoards(g, state.boards), state.queue)])), [groups, state.boards, state.queue]);
   // `trackBoards`: each group's top in the column's content, and how far the column is scrolled.
   const tops = useRef(new Map<string, number>());
   const scrolled = useRef(0);
@@ -168,8 +171,7 @@ export function BoardColumn(): JSX.Element {
       >
         {state.projects.length === 0 ? empty("Open a project to see its board.") : null}
         {shown.map((g, i) => {
-          // One board for the project's workspaces, merged by column (decision 0013 §4).
-          const board = markQueued(mergeBoards(g, state.boards), state.queue);
+          const board = merged.get(g.key) ?? null;
           const own = (card: { project?: string }): string => card.project ?? g.key;
           const owner = (taskId: string): string =>
             [...(board?.columns.flatMap((c) => c.cards) ?? []), ...(board?.atLevel ?? []), ...(board?.finished ?? [])].find((c) => c.taskId === taskId)?.project ?? g.key;

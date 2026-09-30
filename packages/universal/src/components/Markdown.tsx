@@ -1,9 +1,10 @@
 import { Fragment, useMemo, useState, type JSX, type ReactNode } from "react";
-import { Image, Linking, Platform, ScrollView } from "react-native";
+import { Linking, Platform, ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdown";
 import { Press, Txt, edge, type FontSpec } from "../primitives";
 import { useTokens } from "../tokens";
+import { Picture } from "./Picture";
 
 /**
  * `markdown.tsx`'s `Markdown`, universal (decision 0015): the same parse (`parseMarkdown`, markdown-it
@@ -23,6 +24,7 @@ import { useTokens } from "../tokens";
  *   table                collapsed --line borders, cells 3 7, left-aligned, headers bold
  *   hr                   a --line on top, 14 above and below
  *   a                    --accent, underlined (the browser's)
+ *   img                  at most the width (its own size under it), on its line's baseline
  *
  * **Margins collapse**, as they do between blocks in the DOM: two neighbours are the larger of their
  * margins apart, and a block with no padding on a side shares its first (last) child's margin on that
@@ -222,6 +224,16 @@ function blockOf(node: Node, ctx: Ctx): Block {
   const n = node as Extract<Node, { attrs: unknown }>;
   switch (n.tag) {
     case "p":
+      // A picture is inline in the DOM, on its paragraph's baseline: the paragraph is its runs of text
+      // and its pictures, each picture on a line box of its own (text beside a picture on one line is
+      // not drawn beside it here).
+      if (n.children.some((c) => typeof c !== "string" && c.tag === "img")) {
+        return container(blocksOf(n.children, ctx), { top: 0, bottom: 10 }, (inner, mt, mb, key) => (
+          <View key={key} marginTop={mt} marginBottom={mb}>
+            {inner}
+          </View>
+        ));
+      }
       return { top: 0, bottom: 10, draw: (mt, mb, key) => <Line key={key} ctx={ctx} children_={n.children} marginTop={mt} marginBottom={mb} /> };
     case "h1":
     case "h2":
@@ -259,7 +271,7 @@ function blockOf(node: Node, ctx: Ctx): Block {
     case "hr":
       return { top: 14, bottom: 14, draw: (mt, mb, key) => <Rule key={key} marginTop={mt} marginBottom={mb} /> };
     case "img":
-      return { top: 0, bottom: 0, draw: (mt, mb, key) => <Picture key={key} src={n.attrs["src"]!} alt={n.attrs["alt"] ?? ""} marginTop={mt} marginBottom={mb} /> };
+      return { top: 0, bottom: 0, draw: (mt, mb, key) => <LinePicture key={key} src={n.attrs["src"]!} alt={n.attrs["alt"] ?? ""} ink={ctx.ink} marginTop={mt} marginBottom={mb} /> };
     default:
       return { top: 0, bottom: 0, draw: (mt, mb, key) => <Line key={key} ctx={ctx} children_={n.children} marginTop={mt} marginBottom={mb} /> };
   }
@@ -422,8 +434,19 @@ function Rule({ marginTop, marginBottom }: { marginTop: number; marginBottom: nu
   return <View marginTop={marginTop} marginBottom={marginBottom} height={1} {...(edge(t, { top: 1 }) as object)} />;
 }
 
-function Picture({ src, alt, marginTop, marginBottom }: { src: string; alt: string; marginTop: number; marginBottom: number }): JSX.Element {
-  return <Image source={{ uri: src }} accessibilityLabel={alt} resizeMode="contain" style={{ marginTop, marginBottom, maxWidth: "100%", height: 200 }} />;
+/**
+ * `.markdown img { max-width: 100% }`: a picture at its own size, no wider than the column. It sits on its
+ * line's baseline, so the line box runs on under it by the strut's depth below the baseline — half the
+ * line height less half the face's ascent over its descent (DM Sans, measured: 0.656 em).
+ */
+function LinePicture({ src, alt, ink, marginTop, marginBottom }: { src: string; alt: string; ink: Ink; marginTop: number; marginBottom: number }): JSX.Element {
+  const t = useTokens();
+  const size = Number(t.scaled("size-app", ink.scale ?? 13 / 12.5)) || 13;
+  return (
+    <View marginTop={marginTop} marginBottom={marginBottom}>
+      <Picture src={src} alt={alt} below={(ink.lineHeight * size - 0.656 * size) / 2} />
+    </View>
+  );
 }
 
 /**

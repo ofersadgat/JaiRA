@@ -23,7 +23,7 @@ import { useTouched } from "./schemaForm/check";
 import { SelectInput } from "./controls";
 import { ValueView } from "./valueView";
 import { ValuePanelContext, type PinnedValue } from "./valuePanel";
-import { STEP_ROW, callLine, checksCountOf, countOf, durationWords, pathOf, previewOf, runMetricsOf, stepRowsOf, tookOf, useStepFollow, useStepsFit, valueRowsOf } from "./panelViewsModel";
+import { STEP_ROW, callLine, checksCountOf, countOf, durationWords, pathOf, previewOf, producedValueOf, runMetricsOf, stepRowsOf, tookOf, useStepFollow, useStepsFit, valueRowsOf } from "./panelViewsModel";
 
 // How tall one row of the Steps index is — `.rail.run-index`'s `--rail-cap` — lives in `panelViewsModel.ts`.
 export { STEP_ROW };
@@ -433,7 +433,8 @@ export function ProducedView({
   if (list === undefined) return <p className="empty">Reading what it produced…</p>;
   if (list.length === 0) return <p className="empty">Nothing produced yet.</p>;
   const shown = list.find((row) => row.path === selected);
-  const valueOf = (row: ArtifactSummary, text: string): unknown => ({ path: row.path, mediaType: row.mediaType, content: text, ...(row.interactive ? { interactive: true } : {}) });
+  // `panelViewsModel.ts`' `producedValueOf`, shared with the universal copy.
+  const valueOf = producedValueOf;
   const item = (row: ArtifactSummary, text: string): PinnedValue => ({ title: row.path, value: valueOf(row, text), serve: artifacts.serve, ...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {}) });
   return (
     <>

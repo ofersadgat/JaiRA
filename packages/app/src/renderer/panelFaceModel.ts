@@ -125,3 +125,28 @@ export function chatTabs(held: number): PanelTabSpec[] {
 }
 export const chatPanelTitleOf = (detail: TaskDetail | null): string => detail?.title ?? "This conversation";
 export const CHAT_PANEL_SUB = "beside the conversation";
+
+/**
+ * The Steps index's two verbs on a step (its right-click menu): rewind to before the step was entered,
+ * or fork there — the cut at the journal position of the step's `entered` turn. Absent when the host
+ * cannot do both; a step with no `entered` turn offers nothing to cut at.
+ */
+export function indexCutOf(
+  turns: readonly { kind: string; instanceId?: string | undefined; seq: number }[] | undefined,
+  taskId: string,
+  onRewind: ((taskId: string, seq: number) => void) | undefined,
+  onFork: ((taskId: string, seq: number) => void) | undefined,
+): { rewind: (node: InstanceNode) => void; fork: (node: InstanceNode) => void } | undefined {
+  if (onRewind === undefined || onFork === undefined) return undefined;
+  const seqOf = (node: InstanceNode): number | undefined => turns?.find((turn) => turn.kind === "entered" && turn.instanceId === node.instanceId)?.seq;
+  return {
+    rewind: (node: InstanceNode) => {
+      const seq = seqOf(node);
+      if (seq !== undefined) onRewind(taskId, seq);
+    },
+    fork: (node: InstanceNode) => {
+      const seq = seqOf(node);
+      if (seq !== undefined) onFork(taskId, seq);
+    },
+  };
+}

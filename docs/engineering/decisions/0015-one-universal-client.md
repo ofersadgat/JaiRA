@@ -567,14 +567,32 @@ a pixel perfect ui match before tackling the editor." So:
 - on the desktop they stay the DOM components, drawn inline by the web `Island`;
 - editor work waits until every other surface matches.
 
-**Progress:**
-- The sidebar is identical to the desktop's in all eight looks, apart from one dot's anti-aliasing in two
-  dark ones.
-- The inbox strip is identical.
-- Markdown is identical to the eye in all eight looks.
-- The title bar, the board and the task panel are being copied in parallel.
-- Files, Chat, Settings, Logs, Debug and Components are next.
-- Monaco and CodeMirror stay islands (ruling 5).
+**Progress (2026-09-30).** Every room, float and dialog is copied, and a scene or specimen for each is
+identical, or identical to the eye, in all eight looks; the Android emulator run passed on 2026-09-28. A
+completeness audit on 2026-09-30 compared every DOM component and `styles.css` rule with its copy and
+found mostly interactions not yet wired rather than pixels. The cheap ones are done: the toast, the crash
+screen and the loose-error banner, the offline and disconnected banners, answered and settled gates,
+the run's composer, the message rail and cuts in run transcripts, a subagent's conversation, the value
+view's patch, table, form, image, changes and coloured code, JSON hints, markdown images, the Files
+room's rendered, patch and JSON-form views, the Debug journal, file drop on the composer, and the right-click
+menu on content. Still missing, none cheap:
+- selection-based review notes, line reverts and compiler checks inside the diff island;
+- interactive artifacts (`serve`) — the `artifact` island draws them static;
+- a picture comparison (`imageDiff.tsx`) and the changeset reviewer's read-only mode (a settled
+  `review_artifacts`);
+- adopted history, bookmark focus ("where am I"), the rail's hover, fan, fold and knot menus;
+- drag and drop on the board and the run board, reordering automations, `<datalist>` suggestions;
+- the Files room's delimited, patch-file, leaf and workflow-sync surfaces; the Debug session panel;
+- on a phone only: attaching a file (needs a picker module), the day chip, the fork mark's jump,
+  dashed borders (Android draws them solid) and glyph fallback fonts.
+
+**Performance (2026-09-30), production build, 220 cards and a 120-step conversation.** Typing in a long
+conversation on `/rn` fell from 90 ms a key to 5 ms (the transcript is memoised, so the draft above it
+does not redraw it); selecting a card from ~40 ms to ~22 ms on `/rn` and ~28 ms to ~6 ms on `/` (cards
+memoised); the service's placement timer no longer pushes "tasks changed" every 10 s with nothing queued,
+which redrew every window. Room switches, boot (~600-1000 ms, mostly waiting on IPC) and scrolling were
+already fine; no leak across 150 room switches. Left: any store change still redraws the whole universal
+shell (the context carries the whole model), and `/rn` Settings and Logs take ~50 ms to switch to.
 
 ## Native desktop, later
 

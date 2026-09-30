@@ -2548,6 +2548,10 @@ export class AppService {
   /** Try every waiting task, oldest first, while workspaces have room. */
   tryQueue(): Promise<void> {
     this.queueRunning ??= (async () => {
+      // Whether the queue changed. The timer tries it every 10 s, and an invalidate on every try — with
+      // nothing waiting, or nothing yet with room — had every window re-read its task lists and every
+      // board, and redraw, six times a minute for nothing.
+      let moved = false;
       for (const item of this.placement.queue()) {
         const members = this.workspacesOf(item.identity);
         let status: string | undefined;
@@ -2558,11 +2562,13 @@ export class AppService {
         }
         if (status !== "queued") {
           this.placement.dequeue(item.taskId);
+          moved = true;
           continue;
         }
         const { chosen } = await this.placement.choose(item.identity, members, item.requires, this.fleet.identity().id, item.needs ?? []);
         if (chosen === undefined) continue;
         this.placement.dequeue(item.taskId);
+        moved = true;
         try {
           if (chosen.project === item.project) await this.startTask({ taskId: item.taskId, project: item.project });
           else await this.relocate({ taskId: item.taskId, project: item.project }, chosen);
@@ -2570,7 +2576,7 @@ export class AppService {
           this.log({ level: "warn", source: "machines", message: `a waiting task could not be started: ${(e as Error).message}`, taskId: item.taskId });
         }
       }
-      this.publish({ type: "store:invalidate", scope: "tasks" });
+      if (moved) this.publish({ type: "store:invalidate", scope: "tasks" });
     })().finally(() => {
       this.queueRunning = undefined;
     });

@@ -1,9 +1,11 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import { Platform, ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View } from "@tamagui/core";
 import { type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { callsOf, settledGateCallOf, settledGateOf, toldOf } from "@jaira/ui/runConversationModel";
+import { armedRewindOf, callsOf, lastContextOf, settledGateCallOf, settledGateOf, toldOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
+import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
+import type { EditMessage } from "@jaira/ui/transcriptView";
 import { invoke } from "@jaira/ui/store";
 import { AnsweredForYou } from "./WorkRows";
 import { PendingSend } from "./PendingSend";
@@ -22,7 +24,7 @@ import { Txt, edge, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { GateSurface } from "./Gate";
 import { Icon } from "./Icon";
-import { SessionBands, baselineOf, collapsed, sheetLookOf } from "./SessionBands";
+import { SessionBands, baselineOf, collapsed, sheetLookOf, type CutOffer } from "./SessionBands";
 import { Transcript } from "./SessionTranscript";
 import { ValueView } from "./ValueView";
 import { Button } from "../settings/Button";
@@ -32,9 +34,9 @@ import { moveQuestionConfig, parseComponentConfig, type MoveQuestionView, type P
 
 /** What a run's conversation is read from — the store's fields `App.tsx` hands `FileSurfaceContext`. */
 export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessions" | "sessionHistory" | "records" | "liveTurn" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "batches" | "userEvents"> &
-  Partial<Pick<FileSurfaceContext, "moveQuestions" | "onMoveQuestion" | "onSelectTask">> & {
-  /** Whether a cut can be offered — `context.onRewind` and `context.onFork` both there. */
-  cuts: boolean;
+  Partial<Pick<FileSurfaceContext, "moveQuestions" | "onMoveQuestion" | "onSelectTask" | "onRewind" | "onFork" | "onWalkIntoSidechain" | "onOpenWorkflow">> & {
+  /** What the shell lends a gate that mounts the changeset reviewer (`App.tsx`'s `reviewerServices`). */
+  gateServices?: Partial<ComponentServices> | undefined;
   /** Answer a parked transition (`WaitingOn`'s button). */
   onDeliverUserEvent?: ((requestId: string) => void) | undefined;
   /** The project the task stands in — what "Answer it yourself" is asked in. */
@@ -57,7 +59,10 @@ export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessio
  * entered, blocked, made, asked, moved — the origin seam and an armed cut); what a piece says is here:
  * the transcript (`SessionTranscript.tsx`), a state that called a function (`SilentState`), a gate asked
  * or settled (and one answered offline), the running agent's approval or question, and a parked
- * transition (`WaitingOn`).
+ * transition (`WaitingOn`). An entered row's rewind is ARMED here and asked about under the scroller
+ * (`armed`, `onArm` — the host holds it, as the strip is its); its fork, and the same two verbs on the
+ * message that opened each state's conversation, go straight to the host. A subagent's doorway walks
+ * into its conversation (`onOpenSidechain`, else the trail's `onWalkIntoSidechain`).
  *
  *   .run-convo      flex 1, scrolls, follows the live edge
  *   .sb             column, at least the scroller's height, --bg, padding 14 16 22
@@ -68,6 +73,9 @@ export function RunTranscript({
   source,
   gate,
   onGate,
+  armed,
+  onArm,
+  onOpenSidechain,
 }: {
   detail: TaskDetail;
   /** The run being READ — the trail's tail in the middle column, the task's root in the panel. */
@@ -75,6 +83,12 @@ export function RunTranscript({
   source: TranscriptSource;
   gate?: PendingInteraction;
   onGate?: (value: unknown) => void;
+  /** A rewind armed from an entered row, not yet confirmed: the page fades from it. */
+  armed?: ArmedRewind | null | undefined;
+  /** Arm a rewind — the host's strip asks about it. Absent ⇒ no cut is offered. */
+  onArm?: ((armed: ArmedRewind) => void) | undefined;
+  /** Where "walk in →" on a subagent's doorway goes, for this host. The node is the piece it was in. */
+  onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
   const t = useTokens();
   const { conversation, sessions, sessionHistory, records, liveTurn, onLoadSessions, shutStates, onToggleShutState, onSetShutStates } = source;
@@ -99,6 +113,20 @@ export function RunTranscript({
     }),
     [detail.taskId, source.project],
   );
+  const openSidechain = onOpenSidechain ?? source.onWalkIntoSidechain;
+  /** How full each state's conversation was after its last turn — what its letterhead's `+30k` is worked out from. */
+  const readingOf = (piece: SessionPiece) => lastContextOf(sessions[sessionKey(recordAt(piece))]);
+  // The two verbs of a cut on every entered row: a rewind is armed (the host asks in its strip), a fork
+  // starts at once.
+  const { onRewind, onFork } = source;
+  const onCut = useMemo<CutOffer | undefined>(() => {
+    if (onRewind === undefined || onFork === undefined || onArm === undefined) return undefined;
+    const taskId = detail.taskId;
+    return {
+      rewind: (note) => onArm(armedRewindOf(note, notes, rootPath)),
+      fork: (note) => onFork(taskId, note.seq),
+    };
+  }, [detail.taskId, onRewind, onFork, onArm, notes, rootPath]);
 
   // Every panel is open, so every transcript in them is needed — fetched in one round.
   useEffect(() => {
@@ -106,19 +134,7 @@ export function RunTranscript({
     if (missing.length > 0) onLoadSessions(missing);
   }, [needed, sessions, onLoadSessions]);
 
-  // Follow the live edge (`useStickToBottom`): pinned to the end until the reader scrolls away from it.
-  const scroller = useRef<ScrollView | null>(null);
-  const following = useRef(true);
-  const lastY = useRef(0);
-  // Only a move UP lets go of the edge: content arriving does not move the offset, and the pin's own
-  // scroll goes down — so neither can be mistaken for the reader leaving.
-  const onScroll = (e: NativeSyntheticEvent<NativeScrollEvent>): void => {
-    const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    const y = contentOffset.y;
-    if (y + layoutMeasurement.height >= contentSize.height - 4) following.current = true;
-    else if (y < lastY.current - 1) following.current = false;
-    lastY.current = y;
-  };
+  const follow = useLiveEdge(detail.taskId);
 
   const render = (piece: SessionPiece): ReactNode => {
     if (gate !== undefined && onGate !== undefined && isAsking(piece.node)) {
@@ -127,16 +143,16 @@ export function RunTranscript({
         const outboxId = gate.queued.outboxId;
         return (
           <>
-            <GateSurface pending={gate} onSubmit={() => undefined} settled={{ value: gate.queued.value }} plain />
+            <GateSurface pending={gate} onSubmit={() => undefined} settled={{ value: gate.queued.value }} plain services={source.gateServices} />
             <PendingSend machine={gate.offline.machine} onTakeBack={() => void invoke("machines:withdraw", { id: outboxId }).catch(() => undefined)} />
           </>
         );
       }
-      return <GateSurface pending={gate} onSubmit={onGate} plain />;
+      return <GateSurface pending={gate} onSubmit={onGate} plain services={source.gateServices} />;
     }
     // The question once it is no longer being asked: the same control, as it was answered.
     const settledCall = settledGateCallOf(piece.node, records, gate !== undefined && isAsking(piece.node));
-    if (settledCall !== undefined) return <SettledGate call={settledCall} node={piece.node} taskId={detail.taskId} project={source.project} />;
+    if (settledCall !== undefined) return <SettledGate call={settledCall} node={piece.node} taskId={detail.taskId} project={source.project} services={source.gateServices} />;
     const silent = piece.sessionId === undefined && surfaceKindOf(piece.node) !== "conversation";
     if (silent || piece.node.operation?.status === "failed") return <SilentState node={piece.node} records={records} />;
     const view = sessions[sessionKey(recordAt(piece))];
@@ -146,7 +162,27 @@ export function RunTranscript({
       (piece.sessionId !== undefined ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq : liveTurn.stateId === piece.node.stateId && piece.node.status === "running");
     const live = matches ? liveTurn : null;
     const entries = entriesOfPart(markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions), piece.part);
-    const transcript = <Transcript session={view} entries={entries} live={live} calls={calls} {...(piece.sessionId !== undefined ? { scope: piece.sessionId } : {})} />;
+    // The message that opened this state's conversation is where its entry into the run is: a rewind or
+    // a fork from it cuts at the same journal point as the rail's entered row — for a message typed into
+    // the run, before that message.
+    const entered = onCut !== undefined ? notes.find((note) => note.kind === "entered" && note.instanceId === piece.node.instanceId) : undefined;
+    const opening = entries.find((entry): entry is Extract<typeof entry, { kind: "message" }> => entry.kind === "message" && entry.role === "user")?.turn;
+    const onEdit: EditMessage | undefined =
+      entered !== undefined && onCut !== undefined && opening !== undefined
+        ? { can: () => false, edit: () => undefined, cut: (turn) => (turn === opening ? "before" : undefined), rewind: () => onCut.rewind(entered), fork: () => onCut.fork(entered) }
+        : undefined;
+    const transcript = (
+      <Transcript
+        session={view}
+        entries={entries}
+        live={live}
+        calls={calls}
+        rails
+        onEdit={onEdit}
+        {...(piece.sessionId !== undefined ? { scope: piece.sessionId } : {})}
+        {...(openSidechain !== undefined ? { onOpenSidechain: (call: string, name: string) => openSidechain(piece.node, call, name) } : {})}
+      />
+    );
     // The agent's question or the command it is waiting to run, under what it said before asking.
     if (piece.node.instanceId !== agentHere) return transcript;
     const { approval, onApproval, question, onQuestion } = source;
@@ -198,20 +234,7 @@ export function RunTranscript({
   };
   const empty = bands.length === 0 && notes.length === 0;
   return (
-    <ScrollView
-      ref={scroller}
-      {...(scrollbarProps(t) as object)}
-      style={{ flex: 1, minHeight: 0 }}
-      contentContainerStyle={{ flexGrow: 1 }}
-      onScroll={onScroll}
-      scrollEventThrottle={32}
-      onContentSizeChange={() => {
-        if (following.current) toEnd(scroller.current);
-      }}
-      onLayout={() => {
-        if (following.current) toEnd(scroller.current);
-      }}
-    >
+    <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ flexGrow: 1 }} {...follow}>
       <View flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
         {empty ? (
           <Empty>This run has not entered a child yet.</Empty>
@@ -227,12 +250,13 @@ export function RunTranscript({
             onToggle={onToggleShutState}
             onSetShut={onSetShutStates}
             scope={detail.taskId}
-            cuts={source.cuts}
+            cuts={onCut}
+            {...(armed !== undefined && armed !== null ? { armed: { seq: armed.seq, at: armed.at } } : {})}
             moveQuestion={moveQuestion}
             {...(source.onSelectTask !== undefined ? { onSelectTask: source.onSelectTask } : {})}
-            // The workflow's own link: describing it beside the run is the Files view's panel, not copied yet.
-            onOpenWorkflow={() => undefined}
-            {...(detail.origin !== undefined ? { origin: detail.origin } : {})}
+            {...(source.onOpenWorkflow !== undefined ? { onOpenWorkflow: (piece: SessionPiece) => source.onOpenWorkflow!(piece.node.stateId, piece.node.instanceId) } : {})}
+            readingOf={readingOf}
+            {...(detail.origin !== undefined ? { origin: { ...detail.origin, ...(source.onSelectTask !== undefined ? { onGo: () => source.onSelectTask!(detail.origin!.taskId) } : {}) } } : {})}
           />
         )}
         {waits.map((request) => (
@@ -241,6 +265,45 @@ export function RunTranscript({
       </View>
     </ScrollView>
   );
+}
+
+/**
+ * Follow the live edge (`useStickToBottom`): pinned to the end until the reader scrolls away from it,
+ * and pinned again when `reset` changes (a different run is a different conversation). Spread on the
+ * `ScrollView`.
+ */
+export function useLiveEdge(reset: unknown): {
+  ref: RefObject<ScrollView | null>;
+  onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
+  scrollEventThrottle: number;
+  onContentSizeChange: () => void;
+  onLayout: () => void;
+} {
+  const ref = useRef<ScrollView | null>(null);
+  const following = useRef(true);
+  const lastY = useRef(0);
+  useEffect(() => {
+    following.current = true;
+  }, [reset]);
+  return {
+    ref,
+    // Only a move UP lets go of the edge: content arriving does not move the offset, and the pin's own
+    // scroll goes down — so neither can be mistaken for the reader leaving.
+    onScroll: (e) => {
+      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+      const y = contentOffset.y;
+      if (y + layoutMeasurement.height >= contentSize.height - 4) following.current = true;
+      else if (y < lastY.current - 1) following.current = false;
+      lastY.current = y;
+    },
+    scrollEventThrottle: 32,
+    onContentSizeChange: () => {
+      if (following.current) toEnd(ref.current);
+    },
+    onLayout: () => {
+      if (following.current) toEnd(ref.current);
+    },
+  };
 }
 
 /**
@@ -329,13 +392,13 @@ export function Empty({ children }: { children: ReactNode }): JSX.Element {
  * control conversation did, and the record behind a toggle (`.gate-record`: 12 above, its button 6 over
  * the record).
  */
-function SettledGate({ call, node, taskId, project }: { call: ReadCall; node: InstanceNode; taskId: string; project: string | undefined }): JSX.Element {
+function SettledGate({ call, node, taskId, project, services }: { call: ReadCall; node: InstanceNode; taskId: string; project: string | undefined; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const [record, setRecord] = useState(false);
   const pending = useMemo(() => settledGateOf(call, node, taskId, project), [call, node, taskId, project]);
   const answered = call.error === undefined && call.result !== undefined;
   return (
     <>
-      <GateSurface key={answered ? "answered" : "open"} pending={pending} onSubmit={() => undefined} settled={answered ? { value: call.result } : { value: undefined }} plain />
+      <GateSurface key={answered ? "answered" : "open"} pending={pending} onSubmit={() => undefined} settled={answered ? { value: call.result } : { value: undefined }} plain services={services} />
       {answered && node.settledBy !== undefined ? (
         <AnsweredForYou
           by={node.settledBy}

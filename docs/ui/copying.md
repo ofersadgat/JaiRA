@@ -163,6 +163,12 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   gallery's `.modal-wide` (a flex column) — `GateSurface`'s `flex`, `ChoiceList`'s `flat`.
 - **A newline in a markdown paragraph is a space** unless something round it says `pre-wrap`; a native
   `Text` breaks the line. `Markdown`'s (and `ValueView`'s) `softbreak="space"` where the host collapses it.
+  The same holds for plain text: a schema's description in a field's hint has newlines, which the DOM's
+  `white-space: normal` collapses (`Field` collapses a string hint).
+- **A disabled checkbox is Chromium's own colours, not a faded box**: in light, the ring and a checked
+  box's ground #767676 at 30% and the tick white at 60% (`form/inputs.tsx`'s `Checkbox`).
+- **A roving tab stop** (a rail's tabs, one of them in the Tab order): `Press`'s `focusable` — on web it is
+  react-native-web's `tabIndex`; its `focusable` prop does nothing there.
 - **Found on the device, not on `/rn`** (the emulator pass, `packages/app/shots/android.mts`):
   - A hand-set `fontFamily: t.v("font-data")` is the whole CSS stack, which Android cannot read and
     draws in the system font. Go through `Txt`, or `faceOf()` for a font set by hand.
@@ -176,8 +182,32 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   - `accessibilityRole` values the web accepts (`separator`) crash Android; use `role`.
   - Metro stubs `react-native-reanimated` for gesture handler (`metro.config.cjs`); a Metro started
     before that change crashes the app at launch until restarted.
+- **A box centred by `left: 50%; transform: translateX(-50%)`** (the toast, the crash banner) lands on a
+  fraction of a pixel that flex centring does not: on web place the copy the same way. It is as wide as
+  its words up to what is left of its containing block at 50% — half the window — before any `max-width`.
+- **Something fixed to the window** gets a specimen in a stage that stands in for the window: a DOM box
+  with `contain: layout` (the containing block of what is fixed inside it), and a copy that takes
+  `staged` to be absolute in its box instead (`shellSpecimens.tsx`).
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
   a region passes in every look.
+
+- **The studio's dev server is shared.** A file that stops parsing — a half-written edit, a shell heredoc
+  that turned `"
+"` into a real line break — breaks `/` and `/rn` for every studio at once, and the
+  window then keeps One's "Route failed to load" overlay over both pictures until it reloads. Write a
+  file whole or with exact edits; rerun a comparison that says "gave up waiting … to draw".
+- **Import from `@jaira/universal`, not a path under it.** The client's alias points the package name
+  at `src/index.ts` alone, so `@jaira/universal/components/…` does not resolve on the dev server: export
+  the piece from the index.
+- **`scrollbarProps()` is for a `ScrollView`.** Its `dataSet` becomes `data-scrollbar` on
+  react-native-web's element, but a Tamagui `View` hands it on as `dataset="[object Object]"`; a View
+  that scrolls itself (`overflow: auto`) takes `viewScrollbarProps()`.
+- **A still picture holds only CSS animations.** The shots stop `animation` and `transition`; an
+  `Animated` loop keeps turning. What turns on web (a spinner) is a CSS animation (`Turn.web.tsx`), and
+  the native driver on a phone.
+- **A form field's frame is its host's.** `.modal .field` and `.inline-gate .field` put 12 above a field
+  and dim its label; a bare `.field` (a state's panel, a transcript) has neither — `FieldFrame` says
+  which.
 
 ## A leaf, on its own
 

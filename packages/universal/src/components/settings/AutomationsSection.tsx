@@ -472,7 +472,9 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
               {line.name}
             </Txt>
           )}
-          <SourceTag first>from Shared</SourceTag>
+          <SourceTag first title="A line of Shared's events workflow, read through this project's copy">
+            from Shared
+          </SourceTag>
         </View>
         {editable ? (
           <LineBody line={line} props={props} onLine={(next) => props.onSharedLine(line, next)} />

@@ -51,7 +51,10 @@ import { GateTitle } from "./GateTitle";
  *   .reason-note             app 12/12.5, --warn, 10 above (3 between two)
  *   .options                 row, wrapping, gap 8, 14 above; `Split`s; .reason (--bad, app 11/12.5)
  */
-export function ApprovalSurface({ pending, error, onDecide, initialMenu }: ApprovalSurfaceProps): JSX.Element {
+export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading = true }: ApprovalSurfaceProps & {
+  /** Its heading; not under a work summary's row (`.ws-ask .approval-surface h3`), which says it already. */
+  heading?: boolean;
+}): JSX.Element {
   const t = useTokens();
   // One of the two menus open at a time, anchored to its own split button (`usePopover` in the DOM).
   const [open, setOpen] = useState<{ which: "allow" | "deny"; at: ReturnType<typeof anchorRectOf> } | null>(initialMenu !== undefined ? { which: initialMenu, at: null } : null);
@@ -76,7 +79,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu }: Appro
 
   return (
     <View testID="approval" flexDirection="column">
-      <GateTitle icon="shield">Approve this command?</GateTitle>
+      {heading ? <GateTitle icon="shield">Approve this command?</GateTitle> : null}
       <View flexDirection="row" flexWrap="wrap" alignItems="baseline" {...((isWeb ? { title: pending.tool } : {}) as object)}>
         <Txt spec={SUB}>
           {toolDisplayOf(pending.tool).title}
@@ -364,7 +367,8 @@ function Split({ decision, caret, open, onMain, onCaret }: { decision: "allow" |
   const ink = String(primary ? t.v("on-accent") : t.v("bad"));
   return (
     <View flexDirection="row" position="relative">
-      <Button kind={kind} onPress={onMain} testID={`approval-${decision}`} {...(caret ? { borderTopRightRadius: 0, borderBottomRightRadius: 0 } : {})}>
+      {/* `.split .split-main` is square on the right with or without a caret beside it. */}
+      <Button kind={kind} onPress={onMain} testID={`approval-${decision}`} borderTopRightRadius={0} borderBottomRightRadius={0}>
         {verb}
       </Button>
       {caret ? (

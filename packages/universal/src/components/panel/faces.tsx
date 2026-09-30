@@ -1,7 +1,7 @@
 import { issueReveal } from "../../app/viewState";
 import { useContext, type JSX, type ReactNode } from "react";
-import type { PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
-import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
+import type { ArtifactSummary, InstanceNode, PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
+import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
 import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { View } from "@tamagui/core";
 import type { ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
@@ -9,7 +9,8 @@ import type { ConfigPanelServices } from "@jaira/ui/configPanel";
 import { useEffectiveRead } from "@jaira/ui/configPanelModel";
 import type { UiSurface } from "@jaira/ui/fileTypes";
 import { rerunStartsOf } from "@jaira/ui/panelHost";
-import { checksCountOf } from "@jaira/ui/panelViewsModel";
+import { checksCountOf, producedValueOf } from "@jaira/ui/panelViewsModel";
+import type { TrailStep } from "@jaira/ui/trail";
 import { taskNameOf } from "@jaira/ui/taskName";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { Uncopied } from "../../app/Uncopied";
@@ -27,6 +28,8 @@ import { RunPanel } from "./RunPanel";
 import type { RunSurface } from "@jaira/ui/runPanel";
 import { StepsBody } from "./StepsView";
 import { TaskConversation } from "./TaskConversation";
+import { ValueView } from "./ValueView";
+import { SidechainConversation } from "../run/SidechainConversation";
 import { ConfigCard as WorkflowConfigCard } from "../workflow/ConfigPanel";
 import { StatePanel } from "../workflow/StatePanel";
 
@@ -55,6 +58,8 @@ export interface FaceHost {
   reviewChanges: (taskId: string) => void;
   /** ⇤ — the task's conversation into the main view. */
   adoptTask: (taskId: string, project: string | undefined, workflow: string) => void;
+  /** ⇤ — a subagent's conversation into the main view (`useAdoptSubagent`). */
+  adoptSubagent: (taskId: string, project: string | undefined, step: TrailStep) => void;
   /** ⇥ — the conversation back out of the main view, into the panel. */
   giveBack?: (() => void) | undefined;
   /** Take the main view's conversation to a step; absent when the main view is not the conversation. */
@@ -78,6 +83,8 @@ export interface FaceHost {
   rerunSurface: (detail: TaskDetail) => RerunSurface;
   /** Fork a task at a journal position — a copy that starts before a state it entered. */
   onFork?: ((taskId: string, seq: number) => void) | undefined;
+  /** Rewind a task to a journal position — the Steps index's other verb. */
+  onRewind?: ((taskId: string, seq: number) => void) | undefined;
   /** The conversation's turns, for where a copy may start. */
   turns: readonly { kind: string; instanceId?: string | undefined; seq: number }[];
   /**
@@ -143,6 +150,45 @@ function pushPreview(host: FaceHost, item: PinnedValue): void {
   host.onStack((was) => push(was, { kind: "preview", key: `preview:${item.title}`, preview: item }));
 }
 
+/** A subagent's conversation on top of the panel's stack — where "walk in →" goes in the panel. */
+function openSubagent(host: FaceHost, taskId: string, project: string | undefined, node: InstanceNode, call: string, name: string): void {
+  host.onStack((was) =>
+    push(was, {
+      kind: "subagent",
+      key: `subagent:${node.instanceId}:${call}`,
+      taskId,
+      ...(project !== undefined ? { project } : {}),
+      step: { instanceId: node.instanceId, stateId: node.stateId, sidechain: call, name },
+    }),
+  );
+}
+
+/**
+ * The artifact picked in the Produced tab (`ProducedView`'s `.pv-artifact`): the value viewer, with the
+ * two icons in its head — open it on its own in this panel, hold it in Held. A live artifact's `serve`
+ * is not lent here (interactive artifacts are not copied).
+ *
+ *   .pv-artifact-acts   inline row, gap 1; each an `.sp-icon`
+ */
+function produced(host: FaceHost): (row: ArtifactSummary, text: string) => ReactNode {
+  return (row, text) => {
+    const item: PinnedValue = { title: row.path, value: producedValueOf(row, text) };
+    return (
+      <View minWidth={0}>
+        <ValueView
+          value={item.value as never}
+          actions={
+            <View flexDirection="row" gap={1}>
+              <SpIcon icon="read" label="Open it on its own, in this panel" onPress={() => pushPreview(host, item)} />
+              <SpIcon icon="pin" label="Hold it — keep it in Held" onPress={() => host.hold(item)} />
+            </View>
+          }
+        />
+      </View>
+    );
+  };
+}
+
 const reading = (): JSX.Element => <PanelEmpty>Reading the task…</PanelEmpty>;
 
 /** The Steps tab, for a task or a conversation's context. */
@@ -161,6 +207,11 @@ function stepsBody(host: FaceHost, detail: TaskDetail, entry: { step?: string; p
         asking: host.gate !== undefined,
         sessions: host.source.sessionHistory,
         onOpen: (title, value) => pushPreview(host, { title, value }),
+        // A step's right-click: rewind to before it, or fork there (`indexCutOf`, the desktop's own).
+        ...(() => {
+          const onCut = indexCutOf(host.turns, detail.taskId, host.onRewind, host.onFork);
+          return onCut !== undefined ? { onCut } : {};
+        })(),
         onConfig: (node) =>
           host.onStack((was) =>
             push(was, { kind: "config", key: `config:${node.instanceId}`, stateId: node.stateId, taskId: detail.taskId, instanceId: node.instanceId, ...(entry.project !== undefined ? { project: entry.project } : {}) }),
@@ -208,8 +259,8 @@ function StateConfig({ host, stateId }: { host: FaceHost; stateId: string }): JS
 const dropIcon = (host: FaceHost) => (item: PinnedValue): ReactNode => <SpIcon icon="cross" label="Let go of it" onPress={() => host.unhold(item)} />;
 
 /**
- * The face of any entry (`panelFaces.tsx`'s `faceOf`). {@link Uncopied}: a subagent's conversation, and
- * a task the store is not holding (`OwnRun`).
+ * The face of any entry (`panelFaces.tsx`'s `faceOf`). {@link Uncopied}: a task the store is not holding
+ * (`OwnRun`) — and so a subagent's conversation in one.
  */
 export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
@@ -223,7 +274,16 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
         switch (entry.tab) {
           case "conversation":
             return loaded ? (
-              <TaskConversation detail={detail} project={project} source={host.source} gate={host.gate} onGate={host.onGate} onRerun={host.startAgain} onResume={host.resume} />
+              <TaskConversation
+                detail={detail}
+                project={project}
+                source={host.source}
+                gate={host.gate}
+                onGate={host.onGate}
+                onRerun={host.startAgain}
+                onResume={host.resume}
+                onOpenSidechain={(node, call, name) => openSubagent(host, detail.taskId, project, node, call, name)}
+              />
             ) : (
               <Uncopied name="a task the store is not holding" flex={1} />
             );
@@ -257,7 +317,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
           case "steps":
             return stepsBody(host, detail, entry, true);
           case "produced":
-            return <ProducedView taskId={detail.taskId} project={project} signal={detail.timeline.length} />;
+            return <ProducedView taskId={detail.taskId} project={project} signal={detail.timeline.length} onShow={produced(host)} />;
           case "changes":
             return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "held":
@@ -299,7 +359,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
         tab: entry.tab,
         body:
           entry.tab === "produced" ? (
-            <ProducedView taskId={entry.taskId} project={project} signal={detail?.timeline.length ?? 0} />
+            <ProducedView taskId={entry.taskId} project={project} signal={detail?.timeline.length ?? 0} onShow={produced(host)} />
           ) : entry.tab === "changes" ? (
             <ChangesPanel taskId={entry.taskId} project={project} signal={`${detail?.status}:${detail?.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} />
           ) : (
@@ -376,8 +436,15 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
       return {
         title: name,
         titleText: name,
-        verbs: [],
-        body: <Uncopied name="a subagent's conversation (SidechainConversation)" flex={1} />,
+        verbs: [{ icon: "adopt", label: "Show this conversation in the main view", onClick: () => host.adoptSubagent(entry.taskId, entry.project, entry.step) }],
+        body: !loaded ? (
+          detail === null ? reading() : <Uncopied name="a task the store is not holding" flex={1} />
+        ) : (
+          // `.pv-convo`: the conversation lays itself out to the column; its doorways push further in.
+          <View flex={1} minHeight={0} flexDirection="column">
+            <SidechainConversation step={entry.step} detail={detail} source={host.source} onOpen={(node, call, nested) => openSubagent(host, entry.taskId, entry.project, node, call, nested)} />
+          </View>
+        ),
         scroll: false,
       };
     }

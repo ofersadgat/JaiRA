@@ -109,22 +109,26 @@ export function Status({
   );
 }
 
-/** `.cx-src`: where something comes from, as a small tag. */
-export function SourceTag({ children, first = false }: { children: ReactNode; first?: boolean }): JSX.Element {
+/** `.cx-src`: where something comes from, as a small tag — with its tooltip, where the DOM's has one. */
+export function SourceTag({ children, first = false, title }: { children: ReactNode; first?: boolean; title?: string }): JSX.Element {
   const t = useTokens();
   return (
-    <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 500, color: "tok-hint" }} {...(first ? {} : { marginLeft: 6 })} paddingHorizontal={5} borderRadius={999} backgroundColor={t.v("panel-2") as never} numberOfLines={1}>
+    <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 500, color: "tok-hint" }} {...(first ? {} : { marginLeft: 6 })} {...(title !== undefined ? { title } : {})} paddingHorizontal={5} borderRadius={999} backgroundColor={t.v("panel-2") as never} numberOfLines={1}>
       {children}
     </Txt>
   );
 }
 
-/** `icons.tsx`'s `BrandIcon`: a company's mark in its colour (or the text's), or its initial on its colour. */
-export function BrandIcon({ name, size }: { name: string; size: number }): JSX.Element {
+/**
+ * `icons.tsx`'s `BrandIcon`: a company's mark in its colour (or `currentColor`), or its initial on its
+ * colour. `ink` is that `currentColor`: the text's, or a composer chip's (--tok-hint, --accent on a
+ * value you chose).
+ */
+export function BrandIcon({ name, size, ink: tone = "text" }: { name: string; size: number; ink?: string }): JSX.Element {
   const t = useTokens();
   const company = brandOf(name);
   const mark = brandMark(company);
-  const ink = String(t.v("text"));
+  const ink = String(t.v(tone));
   if (mark !== undefined) {
     return <Svg width={size} height={size} color={ink} fill={mark.onGround === true ? "currentColor" : mark.hex} strokeWidth={0} shapes={[{ kind: "path", d: mark.path }]} />;
   }

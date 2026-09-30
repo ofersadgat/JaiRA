@@ -8,6 +8,7 @@ import {
   mimeOfSchema,
   OFFERED_TYPES,
   typeNameOf,
+  type MessageAuthor,
   viewsFor,
   type ViewHint,
   type ViewId,
@@ -128,6 +129,21 @@ export function typeMenuOf({
 }
 
 /** What each reading is called in the rail, and what its tooltip says it does. */
+/** The badge on a message the person did not type: WHO wrote it, in a word, with the rest on the tooltip. */
+export const MESSAGE_SOURCE: Record<MessageAuthor, { label: string; title: string; icon: "send" | "workflow" }> = {
+  host: { label: "Written by JaiRA", title: "JaiRA wrote and sent this for you — you did not type it", icon: "send" },
+  workflow: { label: "From the workflow", title: "The workflow's words for this call — written by its author, not typed here", icon: "workflow" },
+};
+
+/**
+ * The badge's tooltip when it names the workflow the words came from — and, where it opens that
+ * workflow's definition, says so.
+ */
+export function workflowSourceTitleOf(workflow: string, opens: boolean): string {
+  const title = `Written by the workflow ${workflow} — its author's words, not typed here`;
+  return opens ? `${title}. Open its definition beside the conversation.` : title;
+}
+
 export const READING: Record<ViewId, { label: string; hint: string }> = {
   markdown: { label: "Rendered", hint: "As markdown, rendered" },
   html: { label: "Rendered", hint: "As HTML, rendered" },

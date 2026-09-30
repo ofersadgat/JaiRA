@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { parkedGateOf, startAgainOf } from "@jaira/ui/panelHost";
+import { parkedGateOf, reviewerServicesOf, startAgainOf } from "@jaira/ui/panelHost";
 import { push } from "@jaira/ui/panelStack";
 import { SHUT, shutOf } from "@jaira/ui/uiState";
 import { useShell } from "../../app/shell";
@@ -11,13 +11,15 @@ import { panelOnStack, runFocus, runViewed } from "../panel/panelBridge";
 export type RunFields = Pick<
   FileSurfaceContext,
   | "conversation" | "sessions" | "onLoadSession" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "userEvents" | "onDeliverUserEvent" | "sessionHistory" | "records" | "liveTurn" | "batches"
-  | "onWalkInto" | "onWalkIntoSidechain" | "onOpenWorkflow" | "runFocus" | "onRunFocus" | "onRunHere" | "runGate" | "onRunGate" | "onRerun" | "onResume" | "onRewind" | "onFork"
+  | "onWalkInto" | "onWalkIntoSidechain" | "onOpenWorkflow" | "runFocus" | "onRunFocus" | "onRunHere" | "runGate" | "onRunGate" | "runGateServices" | "onRerun" | "onResume" | "onRewind" | "onFork"
+  | "runQuestion" | "onRunQuestion" | "runApproval" | "onRunApproval" | "moveQuestions" | "onMoveQuestion"
 >;
 
 /**
  * What a RUN is read from — the fields of `App.tsx`'s `surfaces` that `RunView` and `CompositeView` read:
- * the conversation, its sessions and records, the live tail, the folds, the waits, the walks, and the
- * gate the task is parked on (`inlineGate`). The Files room's `useFileSurfaces` carries the rest; laid
+ * the conversation, its sessions and records, the live tail, the folds, the waits, the walks, the gate
+ * the task is parked on (`inlineGate`, with the shell's `reviewerServices`), the running agent's question
+ * and approval (`inlineQuestion`, `inlineApproval`), and the questions moves parked (`moveQuestions`). The Files room's `useFileSurfaces` carries the rest; laid
  * over it, the two are the context the desktop hands a run.
  */
 export function useRunContext(): RunFields {
@@ -28,6 +30,11 @@ export function useRunContext(): RunFields {
   const detail = state.detail;
   // `App.tsx`'s `inlineGate`: in the Tasks room, the gate the selected task is parked on.
   const gate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
+  // …and the agent question and command approval this conversation is holding, hosted the same way.
+  const question = state.view === "tasks" && detail !== null ? state.questions.find((q) => q.taskId === detail.taskId) : undefined;
+  const approval = state.view === "tasks" && detail !== null ? state.approvals.find((a) => a.taskId === detail.taskId) : undefined;
+  // What the shell lends a changeset reviewer (`panelHost.ts`' `reviewerServicesOf`, `App.tsx`'s own).
+  const services = useMemo(() => reviewerServicesOf(state.drafts, actions), [state.drafts, actions]);
   const batches = useMemo(() => lookOf(state.config).conversation.sequentialBatches, [state.config]);
   return {
     conversation: state.conversation,
@@ -54,7 +61,12 @@ export function useRunContext(): RunFields {
     ...(focus !== undefined ? { runFocus: focus } : {}),
     onRunFocus: runFocus.set,
     onRunHere: (instance, onScreen) => runViewed.set({ current: instance, onScreen }),
-    ...(gate !== undefined ? { runGate: gate, onRunGate: (value: unknown) => actions.answer(gate.requestId, value) } : {}),
+    ...(gate !== undefined ? { runGate: gate, onRunGate: (value: unknown) => actions.answer(gate.requestId, value), runGateServices: services } : {}),
+    ...(question !== undefined ? { runQuestion: question, onRunQuestion: (answers: Record<string, string | string[]> | undefined) => actions.answerQuestion(question.requestId, answers) } : {}),
+    ...(approval !== undefined ? { runApproval: approval, onRunApproval: (decision, scope, extras) => actions.decideApproval(approval.requestId, decision, scope, extras) } : {}),
+    // The questions MOVES parked in task conversations: each drawn where its move asked it.
+    moveQuestions: state.pending.filter((p) => p.moves === true),
+    onMoveQuestion: (requestId: string, value: unknown) => actions.answer(requestId, value),
     onRerun: (taskId: string) => startAgainOf(actions, detail, project, taskId),
     onResume: (taskId: string) => void actions.resumeTask(taskId, project),
     onRewind: (taskId: string, seq: number) => void actions.rewindTask(taskId, seq, project),

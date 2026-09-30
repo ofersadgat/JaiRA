@@ -135,7 +135,7 @@ export interface EditMessage {
 
 // How a message is read, its rail's menus and its clock — `messageReading.ts`, shared with the universal
 // copy (decision 0015).
-import { READING, copyTextOf, cutTitleOf, fullClockOf, messageReadingOf, readingMenuOf, stampOf, typeMenuOf } from "./messageReading";
+import { MESSAGE_SOURCE, READING, copyTextOf, cutTitleOf, fullClockOf, messageReadingOf, readingMenuOf, stampOf, typeMenuOf, workflowSourceTitleOf } from "./messageReading";
 
 // `sizeOf`, `thoughtTime` and what the live status line says live in `liveStatusModel.ts`, shared with the
 // universal copy (decision 0015).
@@ -1189,13 +1189,12 @@ export function MessageSource({ by, workflow, onOpen }: { by: MessageAuthor; wor
         From <span className="mono">{workflow}</span>
       </>
     );
-    const title = `Written by the workflow ${workflow} — its author's words, not typed here`;
     return onOpen !== undefined ? (
-      <button type="button" className={`ts-source ts-source-${by} ts-source-link`} title={`${title}. Open its definition beside the conversation.`} onClick={onOpen}>
+      <button type="button" className={`ts-source ts-source-${by} ts-source-link`} title={workflowSourceTitleOf(workflow, true)} onClick={onOpen}>
         {label}
       </button>
     ) : (
-      <span className={`ts-source ts-source-${by}`} title={title}>
+      <span className={`ts-source ts-source-${by}`} title={workflowSourceTitleOf(workflow, false)}>
         {label}
       </span>
     );
@@ -1208,10 +1207,7 @@ export function MessageSource({ by, workflow, onOpen }: { by: MessageAuthor; wor
   );
 }
 
-const MESSAGE_SOURCE: Record<MessageAuthor, { label: string; title: string; icon: "send" | "workflow" }> = {
-  host: { label: "Written by JaiRA", title: "JaiRA wrote and sent this for you — you did not type it", icon: "send" },
-  workflow: { label: "From the workflow", title: "The workflow's words for this call — written by its author, not typed here", icon: "workflow" },
-};
+// `MESSAGE_SOURCE` — what each author is called and why — is `messageReading.ts`', shared with the universal copy.
 
 
 /**

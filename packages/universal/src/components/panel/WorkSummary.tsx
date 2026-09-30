@@ -473,7 +473,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const prompt = (afterRow: boolean): ReactNode =>
     askAt >= 0 && ask !== undefined ? (
       <Ask afterRow={afterRow}>
-        <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} />
+        <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} heading={false} />
       </Ask>
     ) : null;
   let promptPlaced = false;

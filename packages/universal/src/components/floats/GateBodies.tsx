@@ -84,7 +84,7 @@ function MountHost({ top, children }: { top: number; children: JSX.Element }): J
 }
 
 /** The project a review is ABOUT (`GateSurface`'s `subjectProject`): an empty one is the focused project. */
-const subjectOf = (pending: PendingInteraction): string | undefined => pending.subjectProject ?? (pending.project === "" ? undefined : pending.project);
+export const subjectOf = (pending: PendingInteraction): string | undefined => pending.subjectProject ?? (pending.project === "" ? undefined : pending.project);
 
 /** `ChooseOption`: one authored question or several, answered as the desktop's is. */
 function ChooseOptionGate({ config, onSubmit, top }: { config: ChooseOptionConfig; onSubmit: (value: unknown) => void; top: number }): JSX.Element {

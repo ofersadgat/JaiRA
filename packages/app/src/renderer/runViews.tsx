@@ -52,14 +52,14 @@ import { PickStepContext, advanceTargetOf, askingInstanceOf, isAsking, runningLe
 import { isComponentName, parseComponentConfig, readCall, moveQuestionConfig, type ReadCall } from "@jaira/shared/browser";
 import { Icon } from "./icons";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "./sessionBands";
-import { PieceReadingContext, SessionBandsView, cutNameOf, type CutOffer } from "./sessionPanels";
+import { PieceReadingContext, SessionBandsView, type CutOffer } from "./sessionPanels";
 import { paletteOfRun } from "./runIndex";
 import type { FileSurfaceProps } from "./fileTypes";
 import { Composer } from "./composer";
 import { OfflineBanner, PendingSend } from "./offline";
 import { invoke, subscribe } from "./store";
 import { useTaskRun } from "./taskRun";
-import { callsOf, costOfConversation, listed, settledGateCallOf, settledGateOf, toldOf } from "./runConversationModel";
+import { armedRewindOf, callsOf, costOfConversation, lastContextOf, listed, settledGateCallOf, settledGateOf, toldOf, type ArmedRewind } from "./runConversationModel";
 import { NO_RUN_OFFERS, restingOf, runColumnsOf, runDragOffersOf, runTileWordsOf, runsByChild, standingOn } from "./runBoardModel";
 
 // Moved to `trail.ts`, which is where the tree queries live now — it also seeds a walk, and that
@@ -627,8 +627,7 @@ export function RunConversation({
 }): JSX.Element {
   const { conversation, liveTurn, sessions, sessionHistory, records, onLoadSessions, onOpenWorkflow, userEvents, onDeliverUserEvent, shutStates, onToggleShutState, onSetShutStates } = context;
   /** How full each state's conversation was after its last turn — what its header's `+30k` is worked out from. */
-  const readingOf = (piece: SessionPiece): ContextReading | undefined =>
-    [...(sessions[sessionKey(recordAt(piece))]?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context;
+  const readingOf = (piece: SessionPiece): ContextReading | undefined => lastContextOf(sessions[sessionKey(recordAt(piece))]);
   const openSidechain = onOpenSidechain ?? context.onWalkIntoSidechain;
   /**
    * The TASK's conversation, not the newest run's.
@@ -814,15 +813,8 @@ export function RunConversation({
     if (detail === null || onRewind === undefined || onFork === undefined) return undefined;
     const taskId = detail.taskId;
     return {
-      rewind: (note: BandNote) =>
-        setArmed({
-          seq: note.seq,
-          at: note.at,
-          name: cutNameOf(note, rootPath),
-          // Every state entered at or after the cut, named — the sentence in the strip is what makes
-          // "everything after it" a checkable claim.
-          doomed: notes.filter((one) => one.kind === "entered" && one.at >= note.at).map((one) => cutNameOf(one, rootPath)),
-        }),
+      // Every state entered at or after the cut, named (`armedRewindOf`, shared with the universal copy).
+      rewind: (note: BandNote) => setArmed(armedRewindOf(note, notes, rootPath)),
       fork: (note: BandNote) => onFork(taskId, note.seq),
     };
   }, [detail, onRewind, onFork, notes, rootPath]);
@@ -1116,7 +1108,7 @@ export function RunConversation({
         taskId={detail.taskId}
         instanceId={parent?.instanceId}
         // How full the selected conversation is: the reading on its last answer.
-        contextReading={parent?.instanceId !== undefined ? [...(sessions[String(parent.instanceId)]?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context : undefined}
+        contextReading={parent?.instanceId !== undefined ? lastContextOf(sessions[String(parent.instanceId)]) : undefined}
         // What the selected conversation has cost: every call it made, from the rows the panel already holds.
         conversationCost={parent?.instanceId !== undefined ? costOfConversation(sessionHistory, String(parent.instanceId)) : undefined}
         project={context.project}
@@ -1141,15 +1133,8 @@ export function RunConversation({
   return context.onPickStep === undefined ? drawn : <PickStepContext.Provider value={context.onPickStep}>{drawn}</PickStepContext.Provider>;
 }
 
-/** A rewind that is armed and not yet confirmed — what the strip asks about. See `RunConversation`. */
-export interface ArmedRewind {
-  seq: number;
-  at: number;
-  /** The state the cut is before. */
-  name: string;
-  /** Every state the cut deletes, the named one first. */
-  doomed: string[];
-}
+/** A rewind that is armed and not yet confirmed — `runConversationModel.ts`', shared with the universal copy. */
+export type { ArmedRewind };
 
 /**
  * The strip while a rewind is armed: the sentence, and the one filled button in the danger colour.

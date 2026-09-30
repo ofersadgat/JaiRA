@@ -5,7 +5,7 @@
  * {@link WordPart}s, which each side draws in its own way.
  */
 import { useEffect, useState } from "react";
-import { PAIRING_CODE_MS, type CopyChoice, type MachinesView, type PeerView } from "@jaira/shared/browser";
+import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type MachinesView, type PeerView } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 
 /** A run of a sentence: words, a value (`<code>`), an error (`.upd-err`), a quiet note (`.cfg-hint`), or a link. */
@@ -48,6 +48,16 @@ export function useMachines(): [MachinesView | undefined, (next: MachinesView) =
     });
   }, []);
   return [view, setView];
+}
+
+/**
+ * The machine a project belongs to, when it is another machine and that machine is away — what
+ * `offline.tsx`'s `OfflineBanner` (and its universal copy) says. Nothing for this machine's own.
+ */
+export function offlinePeerOf(view: MachinesView | undefined, project: string | undefined): PeerView | undefined {
+  const machineId = parseRemoteProjectKey(project)?.machineId;
+  const peer = machineId === undefined ? undefined : view?.machines.find((m) => m.id === machineId);
+  return peer === undefined || peer.state === "online" ? undefined : peer;
 }
 
 export const errorOf = (e: unknown): string => (e instanceof Error ? e.message : String(e));

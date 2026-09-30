@@ -29,7 +29,7 @@ import { Press, Txt, edge, lengthToken, padToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Switch } from "../settings/controls";
 import { SelectInput } from "../settings/fields";
-import { ErrorLine, Field, FieldGrid, Span, useFormSlot } from "./Field";
+import { Deeper, ErrorLine, Field, FieldGrid, Span, useFormSlot } from "./Field";
 import { BoolField, Chip, FormInput, NumberText, PickWell, TextArea } from "./inputs";
 import { LlmConfigWidget } from "./LlmConfigForm";
 
@@ -586,16 +586,20 @@ function ListNode({ schema, value, onChange, ctx }: { schema: Schema; value: unk
                 </View>
               ) : null}
               {isOpen ? (
-                <SchemaForm
-                  schema={items}
-                  value={item}
-                  onChange={(next) => {
-                    ctx.touch?.(path);
-                    onChange(list.map((held, j) => (j === i ? (next === undefined ? seedFor(items, root) : next) : held)));
-                  }}
-                  ctx={itemContext(ctx, path)}
-                  containerType={items["$type"] as string | undefined}
-                />
+                // `.cfg-list-body > .cfg-fields`: deeper in the list's control than its own child, so no
+                // rule on the left (`.cfg-control > .cfg-fields` does not reach it).
+                <Deeper>
+                  <SchemaForm
+                    schema={items}
+                    value={item}
+                    onChange={(next) => {
+                      ctx.touch?.(path);
+                      onChange(list.map((held, j) => (j === i ? (next === undefined ? seedFor(items, root) : next) : held)));
+                    }}
+                    ctx={itemContext(ctx, path)}
+                    containerType={items["$type"] as string | undefined}
+                  />
+                </Deeper>
               ) : null}
               {!composite && errorAt(ctx, path) !== undefined ? <ErrorLine>{errorAt(ctx, path)}</ErrorLine> : null}
               {(ctx.itemNote?.(ctx.path, item, i) as never) ?? null}

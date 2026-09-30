@@ -62,7 +62,7 @@ export function ModalBox({
   );
   if (staged) return box;
   return (
-    <MenuLayer onClose={onDismiss ?? (() => undefined)}>
+    <MenuLayer onClose={onDismiss ?? (() => undefined)} z={50}>
       <RNView pointerEvents="box-none" style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, alignItems: "center", justifyContent: "center", backgroundColor: String(t.v("scrim")) }}>
         {box}
       </RNView>

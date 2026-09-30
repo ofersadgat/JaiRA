@@ -6,6 +6,7 @@ import { setBridge } from "@jaira/ui/store";
 import "@jaira/ui/styles.css";
 import { readsOnly } from "../bridges/readOnly";
 import { socketBridge } from "../bridges/socketBridge";
+import { DisconnectedBanner } from "./DisconnectedBanner";
 
 // Before the first render, as `packages/app/src/renderer/main.tsx` does it. Guarded because `one build`
 // imports every page in Node to read its exports, even in SPA mode, and there is no window there.
@@ -30,7 +31,7 @@ export function Shell({ slots = {} }: { slots?: Partial<Slots> }) {
   return (
     <div id="root">
       <StrictMode>
-        {lost !== null ? <div style={BANNER}>Disconnected from the desktop: {lost}. Reload to reconnect.</div> : null}
+        {lost !== null ? <DisconnectedBanner lost={lost} /> : null}
         <LooseErrorBanner />
         <CrashBoundary>
           <SlotsProvider slots={slots}>
@@ -41,8 +42,6 @@ export function Shell({ slots = {} }: { slots?: Partial<Slots> }) {
     </div>
   );
 }
-
-const BANNER = { position: "fixed", inset: "0 0 auto 0", zIndex: 1000, padding: "6px 12px", background: "var(--fill-accent, #2563c7)", color: "#fff", font: "12px var(--font-app)" } as const;
 
 function Connect({ onConnected, onLost }: { onConnected: () => void; onLost: (reason: string) => void }) {
   const [address, setAddress] = useState(() => (typeof location === "undefined" ? "" : `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/`));

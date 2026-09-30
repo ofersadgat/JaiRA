@@ -1,5 +1,5 @@
 import { useEffect, useState, type JSX } from "react";
-import type { ContextReading, ViewId } from "@jaira/shared/browser";
+import { typeNameOf, type ContextReading, type ViewId } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { familyIcon } from "@jaira/ui/icons";
 import { READING, copyTextOf, cutTitleOf, fullClockOf, readingMenuOf, stampOf, typeMenuOf, type messageReadingOf } from "@jaira/ui/messageReading";
@@ -9,7 +9,8 @@ import { View, isWeb } from "@tamagui/core";
 import { copyText } from "../../clipboard";
 import { Press, Txt, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { ContextMenu, type MenuAt } from "../Menu";
+import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
+import { anchorRectOf } from "../floats/anchor";
 import { Icon, type IconName } from "./Icon";
 import { TurnContext } from "./TurnContext";
 import { useValuePanel } from "@jaira/ui/valuePanel";
@@ -28,17 +29,20 @@ import { useValuePanel } from "@jaira/ui/valuePanel";
  *   .ts-slot       data 10/12, --dim, 2 right
  *   .ts-type       row, gap 4, padding 2 6, 1px --line, radius --control-radius-sm, --panel, app
  *                  10.5/12.5 line 1.35, --dim (hovered --text; asserted: --accent, --accent 42% into
- *                  --line); its icon 12; `▾` 8, at .7.   .ts-read the same, 3 in
+ *                  --line); its icon 12; `▾` 8, at .7.   .ts-read the same, 3 in (.on once a reading
+ *                  was picked); each opens its menu under it, from its left edge, 3 below
  *   .ts-clock      data 10.5/12, tabular, --dim, padding 0 4
  *
  * The context reading after a turn is `TurnContext.tsx`. "…" offers "Open in context panel", which the
- * shell's `ValuePanelContext` pushes on the room's panel stack, as `App.tsx`'s does.
+ * shell's `ValuePanelContext` pushes on the room's panel stack, as `App.tsx`'s does — and is not drawn
+ * where there is no panel. On a phone there is no element to hang a menu from: it opens at the press.
  */
 export function MessageRail({
   entry,
   value,
   reading,
   onPick,
+  picked,
   shown,
   onEdit,
   types,
@@ -48,6 +52,8 @@ export function MessageRail({
   value: JsonValue;
   reading: ReturnType<typeof messageReadingOf>;
   onPick: (view: ViewId) => void;
+  /** A reading was picked on the rail (`.ts-read.on`). */
+  picked: boolean;
   shown: boolean;
   onEdit: EditMessage | undefined;
   /** The reading on the answer before this one — what "+46% since the reply before" is measured from. */
@@ -74,11 +80,20 @@ export function MessageRail({
   const editable = onEdit !== undefined && entry.turn !== undefined && onEdit.can(entry.turn);
   const cut = onEdit !== undefined && entry.turn !== undefined ? onEdit.cut?.(entry.turn) : undefined;
   const { given, mime, named, views, view } = reading;
+  const asserted = types.override !== undefined;
   const radius = lengthToken(t, "control-radius-sm", 6);
   const copy = (): void => {
     void copyText(copyTextOf(entry, value)).then((took) => took && setCopied(true));
   };
-  const at = (e: { nativeEvent: { pageX: number; pageY: number } }): { x: number; y: number } => ({ x: e.nativeEvent.pageX, y: e.nativeEvent.pageY + 12 });
+  /**
+   * Where a chip's menu opens: under the chip and from its left edge (the "…" menu from its right), 3
+   * below — the menu is about the control. A phone has no element to measure: at the press.
+   */
+  const at = (e: { currentTarget?: unknown; nativeEvent: { pageX: number; pageY: number } }, end = false): { x: number; y: number } => {
+    const box = anchorRectOf(e.currentTarget);
+    if (box === null) return { x: e.nativeEvent.pageX - (end ? MENU_WIDTH : 0), y: e.nativeEvent.pageY + 12 };
+    return { x: end ? box.right - MENU_WIDTH : box.left, y: box.bottom + 3 };
+  };
   const act = (icon: IconName, title: string, label: string, onPress: () => void): JSX.Element => (
     <Press
       key={label}
@@ -122,10 +137,11 @@ export function MessageRail({
             onPress={(e) =>
               setMenu({
                 ...at(e),
+                title: "This text is",
                 items: typeMenuOf({ entry, own: types.own, override: types.override, given, mime, conversation: types.conversation, assert: types.assert, clear: types.clear }),
               })
             }
-            title={`${named.label} — ${mime}`}
+            title={`${named.label} — ${mime}${asserted ? `, set by you (JaiRA said ${typeNameOf(given).label})` : ""}`}
             flexDirection="row"
             alignItems="center"
             gap={4}
@@ -134,11 +150,11 @@ export function MessageRail({
             borderRadius={radius}
             borderWidth={1}
             borderStyle="solid"
-            borderColor={(types.override !== undefined ? t.mix(t.v("accent"), 42, t.v("line")) : t.v("line")) as never}
+            borderColor={(asserted ? t.mix(t.v("accent"), 42, t.v("line")) : t.v("line")) as never}
             backgroundColor={t.v("panel") as never}
           >
             {({ hovered }) => {
-              const ink = types.override !== undefined ? "accent" : hovered ? "text" : "dim";
+              const ink = asserted ? "accent" : hovered ? "text" : "dim";
               return (
                 <>
                   <Icon name={familyIcon(named.family)} size={12} color={String(t.v(ink))} />
@@ -154,7 +170,7 @@ export function MessageRail({
           </Press>
           {views.length > 1 ? (
             <Press
-              onPress={(e) => setMenu({ ...at(e), items: readingMenuOf(views, view, onPick) })}
+              onPress={(e) => setMenu({ ...at(e), title: "Read it as", items: readingMenuOf(views, view, onPick) })}
               title={READING[view].hint}
               marginLeft={3}
               flexDirection="row"
@@ -165,19 +181,23 @@ export function MessageRail({
               borderRadius={radius}
               borderWidth={1}
               borderStyle="solid"
-              borderColor={t.v("line") as never}
+              borderColor={(picked ? t.mix(t.v("accent"), 42, t.v("line")) : t.v("line")) as never}
               backgroundColor={t.v("panel") as never}
             >
-              {({ hovered }) => (
-                <>
-                  <Txt spec={{ ...chip, color: hovered ? "text" : "dim" }} numberOfLines={1}>
-                    {READING[view].label}
-                  </Txt>
-                  <Txt spec={{ ...chip, color: hovered ? "text" : "dim" }} fontSize={8} opacity={0.7}>
-                    ▾
-                  </Txt>
-                </>
-              )}
+              {({ hovered }) => {
+                // `.ts-read.on` comes after `:hover`: a picked reading stays --accent under the pointer.
+                const ink = picked ? "accent" : hovered ? "text" : "dim";
+                return (
+                  <>
+                    <Txt spec={{ ...chip, color: ink }} numberOfLines={1}>
+                      {READING[view].label}
+                    </Txt>
+                    <Txt spec={{ ...chip, color: ink }} fontSize={8} opacity={0.7}>
+                      ▾
+                    </Txt>
+                  </>
+                );
+              }}
             </Press>
           ) : null}
         </>
@@ -187,30 +207,29 @@ export function MessageRail({
       <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim", tabular: true }} paddingHorizontal={4} numberOfLines={1} {...((isWeb && fullClockOf(entry.at) !== undefined ? { title: fullClockOf(entry.at) } : {}) as object)}>
         {stampOf(entry.at)}
       </Txt>
-      {/* "What else can be done with this": open it in the context panel (`valuePanel.ts`), as the desktop's. */}
-      <Press
-        onPress={(e) =>
-          setMenu({
-            x: e.nativeEvent.pageX - 232,
-            y: e.nativeEvent.pageY + 12,
-            items:
-              panel === null
-                ? []
-                : [{ label: "Open in context panel", note: "keeps it on screen while you carry on", onSelect: () => panel.open({ title: entry.output?.name ?? (entry.role === "user" ? "Message" : "Answer"), value, hint: reading.hint }) }],
-          })
-        }
-        title="What else can be done with this"
-        padding={4}
-        borderRadius={radius}
-        flexShrink={0}
-        box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
-      >
-        {({ hovered }) => (
-          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: hovered ? "text" : "dim", lineHeight: 1 }} numberOfLines={1}>
-            …
-          </Txt>
-        )}
-      </Press>
+      {/* "What else can be done with this": open it in the context panel (`valuePanel.ts`), as the
+          desktop's — only where there is a panel to open it in. */}
+      {panel !== null ? (
+        <Press
+          onPress={(e) =>
+            setMenu({
+              ...at(e, true),
+              items: [{ label: "Open in context panel", note: "keeps it on screen while you carry on", onSelect: () => panel.open({ title: entry.output?.name ?? (entry.role === "user" ? "Message" : "Answer"), value, hint: reading.hint }) }],
+            })
+          }
+          title="What else can be done with this"
+          padding={4}
+          borderRadius={radius}
+          flexShrink={0}
+          box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+        >
+          {({ hovered }) => (
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: hovered ? "text" : "dim", lineHeight: 1 }} numberOfLines={1}>
+              …
+            </Txt>
+          )}
+        </Press>
+      ) : null}
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </View>
   );

@@ -1,6 +1,8 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import { parseStructured, type StructuredFormat, type WorkflowSource } from "@jaira/shared/browser";
+import { mimeOfPath, parseStructured, parseUnifiedDiff, schemaById, type StructuredFormat, type WorkflowSource } from "@jaira/shared/browser";
+import { patchSidesMore, patchSidesOf, schemaFormatOf, useSchemaChoice } from "@jaira/ui/fileEditModel";
+import type { Schema } from "@jaira/ui/schemaForm/types";
 import { ReadOnlyContext } from "@jaira/ui/reading";
 import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
@@ -14,7 +16,11 @@ import { Markdown } from "../Markdown";
 import { DataView } from "./DataView";
 import { CodeSourceView, ConfigEdit, TextEdit } from "./CodeEdit";
 import { JsonEdit } from "./SchemaEdit";
-import { EditorActions, ReadingNote, Sub } from "./EditorActions";
+import { EditorActions, EditorActionsRow, FileEdit, ReadingNote, Sub } from "./EditorActions";
+import { IslandBand } from "./CodeEdit";
+import { ValueView } from "../panel/ValueView";
+import { SchemaForm } from "../form/SchemaForm";
+import { ReadingForm } from "../form/Field";
 import { CompositeView } from "../run/RunView";
 import { useRunContext } from "../run/runContext";
 import { WorkflowEditor } from "../workflow/WorkflowEditor";
@@ -193,8 +199,87 @@ function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Ele
   return <ToolsFieldProvider value={toolsFieldData}>{reading ? <ReadOnlyContext.Provider value={true}>{form}</ReadOnlyContext.Provider> : form}</ToolsFieldProvider>;
 }
 
+/**
+ * `fileSurfaces.tsx`'s `RenderedFileView`: an HTML page or an SVG drawing, rendered — the value view, typed
+ * by its path (`mimeOfPath`, the classifier the tree's row used).
+ */
+export function RenderedFileView({ doc }: FileSurfaceProps): JSX.Element {
+  return <ValueView value={doc.text} hint={{ mime: mimeOfPath(doc.path) }} />;
+}
+
+/**
+ * `fileSurfaces.tsx`'s `PatchSideBySide`: a patch as the two revisions it is between, in the panes a review
+ * uses — the diff island (Monaco's, side by side) in `.file-edit`, the band at least 200 tall, and the
+ * file it compares under it in `.pane-actions.pinned` (`.sub`). The fold is `fileEditModel.ts`'s.
+ */
+export function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
+  const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
+  const sides = useMemo(() => patchSidesOf(files), [files]);
+  if (doc.text.trim().length === 0) return <Empty>This file is empty.</Empty>;
+  if (sides === null) return <Notice>not a unified diff — the editor below has the text</Notice>;
+  return (
+    <FileEdit>
+      <IslandBand min={200}>
+        {(height) => (
+          <Island component="diff" height={height} props={{ original: sides.before, modified: sides.after, mime: mimeOfPath(sides.file.path), file: sides.file.path, readOnly: true, sideBySide: true }} />
+        )}
+      </IslandBand>
+      <EditorActionsRow>
+        <Sub>
+          {sides.file.path}
+          {patchSidesMore(files)}
+        </Sub>
+      </EditorActionsRow>
+    </FileEdit>
+  );
+}
+
+/**
+ * `fileSurfaces.tsx`'s `JsonFormView`: a JSON or YAML document as the fields its schema declares — a
+ * READING, not an editor (`disabled`, `reading`, and nothing "set here"), in `.vv-form.file-form`
+ * (`ReadingForm`: padding 8 10, the paths hidden, a nested block's fields stacked, the controls without
+ * their boxes). Which schema is `useSchemaChoice`'s, shared with the editor below it.
+ */
+export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
+  const chosen = useSchemaChoice(doc, context);
+  const entry = chosen === undefined || chosen === "" ? undefined : schemaById(chosen);
+  if (doc.text.trim().length === 0) return <Empty>This file is empty.</Empty>;
+  const parsed = parseStructured(doc.text, schemaFormatOf(doc));
+  if (!parsed.ok) {
+    return (
+      <Notice>
+        does not parse: {parsed.message}
+        {parsed.spot !== undefined ? ` (line ${parsed.spot.line}, column ${parsed.spot.column})` : ""}
+      </Notice>
+    );
+  }
+  if (entry === undefined) {
+    return <Empty>No schema for this document, so there are no fields to draw. Choose one in the editor’s Schema picker, or read it as Data.</Empty>;
+  }
+  return (
+    <ReadingForm file>
+      <SchemaForm schema={entry.document as Schema} value={parsed.value} onChange={() => undefined} ctx={{ path: "", disabled: true, reading: true, isSet: () => false }} />
+    </ReadingForm>
+  );
+}
+
 /** The copies there are, by the table's key. */
-const COPIED: Partial<Record<SurfaceKey, FileSurface>> = { MarkdownView, MarkdownFileEdit, JsonView, YamlView, ConfigEffectiveView, WorkflowRunView, WorkflowEdit, TextEdit, CodeSourceView, ConfigEdit, JsonEdit };
+const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
+  MarkdownView,
+  MarkdownFileEdit,
+  JsonView,
+  JsonFormView,
+  YamlView,
+  ConfigEffectiveView,
+  WorkflowRunView,
+  WorkflowEdit,
+  TextEdit,
+  CodeSourceView,
+  ConfigEdit,
+  JsonEdit,
+  RenderedFileView,
+  PatchSideBySide,
+};
 
 /** The table, registered with the copies — and an {@link Uncopied} box for every surface without one. */
 export const SURFACES = registerSurfaceTable(

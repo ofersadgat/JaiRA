@@ -189,7 +189,8 @@ export function SchemaJsonEditor({
 
       <View flexDirection="row" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={0} minWidth={0} onLayout={(e) => setBodyWidth(e.nativeEvent.layout.width)}>
         <View flexDirection="column" gap={8} flexGrow={1} flexShrink={1} flexBasis="auto" minWidth={0} minHeight={0}>
-          <View flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={140} onLayout={(e) => setHeight(Math.round(e.nativeEvent.layout.height))}>
+          {/* Clipped: the stack scrolls inside itself (`.editor-stack`), and on web its island stands without that rule. */}
+          <View flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={140} overflow="hidden" onLayout={(e) => setHeight(Math.round(e.nativeEvent.layout.height))}>
             {height > 0 ? (
               <Island
                 component="schemaText"

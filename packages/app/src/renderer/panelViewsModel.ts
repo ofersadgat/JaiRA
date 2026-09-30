@@ -5,9 +5,14 @@
  * from the same code. Nothing here draws.
  */
 import { useEffect, useMemo, useRef } from "react";
-import type { InstanceNode, SessionRef, StateView } from "@jaira/shared/browser";
+import type { ArtifactSummary, InstanceNode, SessionRef, StateView } from "@jaira/shared/browser";
 import type { RunIndexFit } from "./runIndexModel";
 import { nodeAt } from "./trail";
+
+/** An artifact picked in the Produced tab, as the value viewer draws it: its path, type and text. */
+export function producedValueOf(row: ArtifactSummary, text: string): unknown {
+  return { path: row.path, mediaType: row.mediaType, content: text, ...(row.interactive ? { interactive: true } : {}) };
+}
 
 /** How long a pick's own jump through the conversation takes to settle — see `StepsView`. */
 export const SETTLE_MS = 1200;

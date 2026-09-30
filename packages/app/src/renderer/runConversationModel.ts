@@ -3,10 +3,13 @@
  * request rebuilt from it, a `notify` call read as the line it told you, what one conversation cost, the
  * states an armed rewind deletes said as a list — moved out of `runViews.tsx` unchanged so the universal
  * copy (decision 0015, `packages/universal/src/components/panel/RunTranscript.tsx`) reads the same run
- * the same way. Nothing here draws.
+ * the same way — and a rewind armed from an entered row, and how full a conversation was after its last
+ * answer. Nothing here draws.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import { isComponentName, parseComponentConfig, readCall, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionRef } from "@jaira/shared/browser";
+import { isComponentName, parseComponentConfig, readCall, type ContextReading, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionRef, type SessionView } from "@jaira/shared/browser";
+import type { BandNote } from "./sessionBands";
+import { cutNameOf } from "./sessionRows";
 import { surfaceKindOf } from "./stateSurface";
 
 /**
@@ -90,4 +93,33 @@ export function costOfConversation(rows: readonly SessionRef[], instanceId: stri
   let total: number | undefined;
   for (const row of rows) if (String(row.instanceId) === instanceId && row.costUsd !== undefined) total = (total ?? 0) + row.costUsd;
   return total;
+}
+
+/** A rewind that is armed and not yet confirmed — what the strip asks about. See `RunConversation`. */
+export interface ArmedRewind {
+  seq: number;
+  at: number;
+  /** The state the cut is before. */
+  name: string;
+  /** Every state the cut deletes, the named one first. */
+  doomed: string[];
+}
+
+/**
+ * The rewind a reader arms from an entered row: its position and clock, the state it is before, and
+ * every state entered at or after the cut, named — the sentence in the strip is what makes
+ * "everything after it" a checkable claim.
+ */
+export function armedRewindOf(note: BandNote, notes: readonly BandNote[], root: string): ArmedRewind {
+  return {
+    seq: note.seq,
+    at: note.at,
+    name: cutNameOf(note, root),
+    doomed: notes.filter((one) => one.kind === "entered" && one.at >= note.at).map((one) => cutNameOf(one, root)),
+  };
+}
+
+/** How full a conversation was after its last answer: the reading on the newest turn that has one. */
+export function lastContextOf(view: SessionView | null | undefined): ContextReading | undefined {
+  return [...(view?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context;
 }

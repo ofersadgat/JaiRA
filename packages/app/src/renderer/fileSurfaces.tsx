@@ -35,7 +35,7 @@ import { docKey, useDraftBox } from "./drafts";
 import { EditorActions, type EditorTab } from "./editorChrome";
 import { isReading, type FileSurfaceContext, type FileSurfaceProps } from "./fileTypes";
 import { registerSurfaceTable } from "./fileSurfaceTable";
-import { configAuthoredText, configSaveOf, isLocatedFile, schemaFormatOf, useSchemaChoice } from "./fileEditModel";
+import { configAuthoredText, configSaveOf, isLocatedFile, patchSidesMore, patchSidesOf, schemaFormatOf, useSchemaChoice } from "./fileEditModel";
 import { ReadOnlyContext } from "./reading";
 import { MarkdownView } from "./fenceRender";
 import { CodeDocument, MarkdownDocument } from "./documents";
@@ -478,21 +478,10 @@ export function PatchFileSurface({ doc }: FileSurfaceProps): JSX.Element {
  * the panes show the hunks rather than the files. A patch of several files shows the first and says
  * how many others there are, because two panes can hold one comparison.
  */
-function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
+export function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
   const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
-  const sides = useMemo(() => {
-    const file = files[0];
-    if (file === undefined) return null;
-    const before: string[] = [];
-    const after: string[] = [];
-    for (const hunk of file.hunks) {
-      for (const line of hunk.lines) {
-        if (line.kind !== "add") before.push(line.text);
-        if (line.kind !== "del") after.push(line.text);
-      }
-    }
-    return { file, before: before.join("\n"), after: after.join("\n") };
-  }, [files]);
+  // The fold over the hunks is `fileEditModel.ts`'s, shared with the universal copy (decision 0015).
+  const sides = useMemo(() => patchSidesOf(files), [files]);
   if (doc.text.trim().length === 0) return <p className="empty">This file is empty.</p>;
   if (sides === null) return <div className="notice bad">not a unified diff — the editor below has the text</div>;
   return (
@@ -509,7 +498,7 @@ function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
       <div className="pane-actions pinned">
         <span className="sub">
           {sides.file.path}
-          {files.length > 1 ? ` — and ${files.length - 1} other ${files.length === 2 ? "file" : "files"} in this patch` : ""}
+          {patchSidesMore(files)}
         </span>
       </div>
     </div>

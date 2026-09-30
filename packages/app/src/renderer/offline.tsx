@@ -3,15 +3,14 @@
  * shows is this machine's copy of it, and what a person answers waits for the machine.
  */
 import type { JSX } from "react";
-import { parseRemoteProjectKey } from "@jaira/shared/browser";
+import { offlinePeerOf } from "./machinesModel";
 import { ago, useMachines } from "./machinesPane";
 
 /** The line at the foot of a conversation whose machine is away. Nothing for this machine's own. */
 export function OfflineBanner({ project }: { project: string | undefined }): JSX.Element | null {
   const [view] = useMachines();
-  const machineId = parseRemoteProjectKey(project)?.machineId;
-  const peer = machineId === undefined ? undefined : view?.machines.find((m) => m.id === machineId);
-  if (peer === undefined || peer.state === "online") return null;
+  const peer = offlinePeerOf(view, project);
+  if (peer === undefined) return null;
   return (
     <div className="cx-doing">
       <div className="run-doing">

@@ -8,11 +8,12 @@
  * the window's pinned stack over them, and the reconciling of a room's stack with its rule.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { JairaUiState, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
+import type { InstanceNode, JairaUiState, PendingInteraction, TaskDetail, WorkflowLayer } from "@jaira/shared/browser";
+import type { ComponentServices } from "./changesetReviewModel";
 import { EMPTY_STACK, push, reconcile, routeChange, shownStack, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
 import type { AppState, View } from "./store";
 import { primaryAct } from "./taskAction";
-import { nodeAt } from "./trail";
+import { nodeAt, type TrailStep } from "./trail";
 import { FOLD, PANE, PANE_WIDE, PANEL_MIN, PANEL_RAIL, openOf, paneOf } from "./uiState";
 import { projectName } from "./projects";
 import { initialRunValues, runValuesOf, settledMarkOf, type RunValues } from "./runForm";
@@ -187,6 +188,57 @@ export function panelRuleOf(
 /** The gate a task is parked on — a move's question is not a state asking (`moveQuestions`). */
 export function parkedGateOf(pending: readonly PendingInteraction[], taskId: string): PendingInteraction | undefined {
   return pending.find((p) => (p.about === taskId || p.taskId === taskId) && p.moves !== true);
+}
+
+/**
+ * ⇤ on a subagent's conversation in the panel: that conversation into the main view — walked into at
+ * once when the task's run is already the one walked, else after the task opens there (the walk waits
+ * for the task to be selected, walked into and loaded).
+ */
+export function useAdoptSubagent(
+  state: Pick<AppState, "selected" | "trail" | "at">,
+  detail: TaskDetail | null,
+  actions: {
+    walkIntoSidechain: (node: InstanceNode, call: string, name: string) => void;
+    setView: (view: View) => void;
+    openTask: (taskId: string, project: string, level: string) => unknown;
+  },
+): (taskId: string, project: string | undefined, step: TrailStep) => void {
+  const [adoptAfter, setAdoptAfter] = useState<{ taskId: string; step: TrailStep } | null>(null);
+  useEffect(() => {
+    if (adoptAfter === null || state.selected !== adoptAfter.taskId || state.trail.length === 0 || detail === null) return;
+    const host = nodeAt(detail.instances, adoptAfter.step.instanceId);
+    if (host !== undefined) actions.walkIntoSidechain(host, adoptAfter.step.sidechain ?? "", adoptAfter.step.name ?? "");
+    setAdoptAfter(null);
+  }, [adoptAfter, state.selected, state.trail.length, detail, actions]);
+  return (taskId, project, step) => {
+    const host = detail !== null && detail.taskId === taskId ? nodeAt(detail.instances, step.instanceId) : undefined;
+    if (host !== undefined && state.trail.length > 0 && state.selected === taskId) {
+      actions.walkIntoSidechain(host, step.sidechain ?? "", step.name ?? "");
+      return;
+    }
+    setAdoptAfter({ taskId, step });
+    actions.setView("tasks");
+    void actions.openTask(taskId, project ?? state.at ?? "", detail?.workflow ?? step.stateId);
+  };
+}
+
+/**
+ * What the shell can lend a changeset reviewer beyond the defaults (CHANGESETS.md §8.2): the
+ * unsaved-edit map, and a way into the editor. Supplied to BOTH hosts — the gate modal and the
+ * conversation view — because a host's reach, not the component, is what decides these exist.
+ */
+export function reviewerServicesOf(
+  drafts: Readonly<Record<string, string>>,
+  actions: { setView: (view: View) => void; openPath: (layer: WorkflowLayer, path: string) => unknown },
+): Pick<ComponentServices, "drafts" | "openFile"> {
+  return {
+    drafts: new Map(Object.entries(drafts)),
+    openFile: (layer: string, path: string) => {
+      actions.setView("files");
+      void actions.openPath(layer as WorkflowLayer, path);
+    },
+  };
 }
 
 /**

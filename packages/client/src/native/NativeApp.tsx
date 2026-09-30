@@ -4,7 +4,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { DesktopFrame } from "./DesktopFrame";
 import { IslandsTab } from "./IslandsTab";
 import { TamaguiProvider } from "@tamagui/core";
-import { Connect, TokenRoot, UniversalApp, config } from "@jaira/universal";
+import { Connect, TokenRoot, UniversalApp, config, connectionLost, installNativeErrorReporting } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
 import { readsOnly } from "../../bridges/readOnly";
 import { socketBridge } from "../../bridges/socketBridge";
@@ -20,6 +20,10 @@ import { socketBridge } from "../../bridges/socketBridge";
  * test (`shots/android.mts`) measures.
  */
 type Connection = { ws: string; token: string };
+
+// Before the first render, as the desktop installs its own: what escapes everything else reaches the
+// shell's banner (`LooseErrorBanner`), and React Native's own handler still runs after it.
+installNativeErrorReporting();
 type Screen = "app" | "islands";
 
 /** In a browser (the `/native` preview), `?address=&token=` fill the form, as a QR code will on a phone. */
@@ -72,6 +76,8 @@ export function NativeApp(): JSX.Element {
     const bridge = socketBridge(ws, token, readsOnly);
     try {
       await bridge.ready;
+      // The shell says so when the desktop goes away (`floats/Disconnected.tsx`), as `Shell.tsx` does.
+      bridge.onClose(connectionLost);
       setBridge(bridge);
       setConnection({ ws, token });
     } catch (e) {

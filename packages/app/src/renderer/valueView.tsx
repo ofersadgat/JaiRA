@@ -78,28 +78,13 @@ import { invoke } from "./store";
 const MonacoDiffPane = lazy(() => import("./monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 
 // What each view is called on its button lives in `valueViewMeta.ts`, shared with the universal copy.
-import { VIEW_META, base64Of, fileNameOf } from "./valueViewMeta";
+import { RENDERER_META, VIEW_META, base64Of, fileNameOf, hintText, schemaDescriber } from "./valueViewMeta";
 import { Html } from "./htmlFrame";
 export { Html } from "./htmlFrame";
 
-/**
- * What each renderer is called on its menu, and what the item says it does.
- *
- * The hint names the CONSEQUENCE rather than the implementation, because that is what somebody
- * opening this menu is choosing between. Nobody wants Monaco or a `<pre>`; they want to type, or
- * they want to drag a selection through the block and copy it.
- *
- * EXPORTED, so the Appearance pane offers these two under the same names with the same explanations.
- * A settings screen that invented its own words for a choice a person also meets on a menu would be
- * two vocabularies for one decision, and the second one is always the one nobody recognises.
- */
-export const RENDERER_META: Record<RendererId, { label: string; hint: string }> = {
-  monaco: { label: "Monaco", hint: "A real editor — typing, a caret, its own selection" },
-  // NOT "CodeMirror": both of these are Monaco. The editor is Monaco's editor and this is
-  // `monaco.editor.colorize`, its tokenizer with no editor behind it — same grammars, same colours,
-  // ordinary DOM. CodeMirror is the markdown editor this block is sitting inside.
-  codeview: { label: "Code view", hint: "Coloured, but not an editor — so a selection can be dragged through it" },
-};
+// What each renderer is called on its menu (`RENDERER_META`) lives in `valueViewMeta.ts` too, and is
+// exported from here as it always was — the Appearance pane offers the two under the same names.
+export { RENDERER_META } from "./valueViewMeta";
 
 /** How a diff is laid out. Two readings of one comparison — see {@link MonacoDiffProps.sideBySide}. */
 type DiffLayout = "inline" | "split";
@@ -547,31 +532,8 @@ export function DataView({ value }: { value: unknown }): JSX.Element {
  */
 function JsonView({ value, schema }: { value: unknown; schema?: unknown }): JSX.Element {
   const text = useMemo(() => jsonTextOf(value), [value]);
-  /**
-   * What each key means, by the path of the object it sits in.
-   *
-   * Walks the schema itself rather than going through the registry the editor uses: this is handed a
-   * schema, not a document type, so there is nothing to look up. Absent members simply answer
-   * `undefined`, which the highlighter reads as "no hint on this line".
-   */
-  const describe = useMemo(() => {
-    if (schema === null || typeof schema !== "object") return undefined;
-    return (path: readonly string[], key: string): string | undefined => {
-      let node: unknown = schema;
-      for (const step of path) {
-        const props = propertiesOf(node);
-        // An array index is a step in the VALUE's path and not in the schema's — the members of an
-        // array all share one declaration, so walking into `items` is how the two stay in step.
-        node = /^\d+$/.test(step) ? itemsOf(node) : props?.[step];
-        if (node === undefined) return undefined;
-      }
-      const target = propertiesOf(node)?.[key];
-      if (target === null || typeof target !== "object") return undefined;
-      const described = (target as Record<string, unknown>)["description"];
-      return typeof described === "string" ? described : undefined;
-    };
-  }, [schema]);
-
+  /** What each key means, by the path of the object it sits in — `valueViewMeta.ts`'s `schemaDescriber`. */
+  const describe = useMemo(() => schemaDescriber(schema), [schema]);
   const lines = useMemo(() => highlightJson(text, describe), [text, describe]);
   return (
     <pre className="vv-source vv-json">
@@ -586,7 +548,7 @@ function JsonView({ value, schema }: { value: unknown; schema?: unknown }): JSX.
             // The slot takes no width, so a description can never change where a line breaks — the
             // same arrangement the schema editor uses, and for the same reason.
             <span className="line-hint-slot">
-              <span className="line-hint">{line.hint.length > 80 ? `${line.hint.slice(0, 80)}…` : line.hint}</span>
+              <span className="line-hint">{hintText(line.hint)}</span>
             </span>
           ) : null}
           {"\n"}
@@ -595,22 +557,6 @@ function JsonView({ value, schema }: { value: unknown; schema?: unknown }): JSX.
     </pre>
   );
 }
-
-/** A schema node's declared members, or `undefined` for anything that has none. */
-function propertiesOf(schema: unknown): Record<string, unknown> | undefined {
-  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return undefined;
-  const props = (schema as Record<string, unknown>)["properties"];
-  return props !== null && typeof props === "object" && !Array.isArray(props)
-    ? (props as Record<string, unknown>)
-    : undefined;
-}
-
-/** What an array's members are declared as. */
-function itemsOf(schema: unknown): unknown {
-  if (schema === null || typeof schema !== "object" || Array.isArray(schema)) return undefined;
-  return (schema as Record<string, unknown>)["items"];
-}
-
 
 /**
  * An artifact that RUNS — the interactive case, and the only thing in this app that executes code a

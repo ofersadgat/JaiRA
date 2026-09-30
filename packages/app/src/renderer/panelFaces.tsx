@@ -47,7 +47,7 @@ import { ChangesPanel } from "./changesPanel";
 import { RunPanel, type RunSurface } from "./runPanel";
 import { RunConversation, SidechainConversation, askingInstanceOf, hasAsking } from "./runViews";
 import type { PanelFace } from "./sidePanel";
-import { CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, isEventsTask, tab, taskTabs as taskTabsOf, taskVerbsOf } from "./panelFaceModel";
+import { CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, tab, taskTabs as taskTabsOf, taskVerbsOf } from "./panelFaceModel";
 import { StatePanel } from "./statePanel";
 import { rerunStartsOf } from "./panelHost";
 import { TaskName } from "./taskName";
@@ -187,19 +187,8 @@ function pushPreview(host: PanelHost, item: PinnedValue): void {
 function stepsBody(host: PanelHost, detail: TaskDetail, entry: { step?: string; project?: string }, convo: boolean): ReactNode {
   const selected = entry.step === undefined ? undefined : nodeAt(detail.instances, entry.step);
   const asking = host.gate !== undefined && detail.instances.some((node) => hasAsking(node)) ? askingInstanceOf(detail.instances) : undefined;
-  const indexCut =
-    host.context.onRewind !== undefined && host.context.onFork !== undefined
-      ? {
-          rewind: (node: InstanceNode) => {
-            const seq = host.context.conversation?.turns.find((turn) => turn.kind === "entered" && turn.instanceId === node.instanceId)?.seq;
-            if (seq !== undefined) host.context.onRewind?.(detail.taskId, seq);
-          },
-          fork: (node: InstanceNode) => {
-            const seq = host.context.conversation?.turns.find((turn) => turn.kind === "entered" && turn.instanceId === node.instanceId)?.seq;
-            if (seq !== undefined) host.context.onFork?.(detail.taskId, seq);
-          },
-        }
-      : undefined;
+  // `panelFaceModel.ts`' `indexCutOf`, shared with the universal copy.
+  const indexCut = indexCutOf(host.context.conversation?.turns, detail.taskId, host.context.onRewind, host.context.onFork);
   return (
     <StepsView
       detail={detail}

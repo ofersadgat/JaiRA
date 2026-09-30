@@ -230,7 +230,7 @@ export function selectionForMenu(live: string, held: string | null): { text: str
   return { text: (held ?? "").trim(), fromField: "" };
 }
 
-function itemsForEvent(event: MouseEvent): MenuItem[] {
+export function itemsForEvent(event: MouseEvent): MenuItem[] {
   const target = event.target;
   if (!(target instanceof Element)) return [];
   // See {@link HELD_QUOTE} for why the held passage is an attribute rather than a shared variable:

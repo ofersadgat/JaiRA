@@ -4,10 +4,10 @@
  * conversation (decision 0015) lays out the same page. Pure: what a row says is the caller's.
  */
 import { addressSegment, segmentKey } from "@jaira/shared/browser";
-import type { InstanceNode } from "@jaira/shared/browser";
+import type { ContextReading, InstanceNode } from "@jaira/shared/browser";
 import type { RailStep } from "./rail";
 import { clockOf, durationOf } from "./runActivityModel";
-import { forksOf, placeNotes, placeOf, segmentsFrom, splitAtNotes, startersOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "./sessionBands";
+import { forksOf, pathFrom, placeNotes, placeOf, segmentsFrom, splitAtNotes, startersOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "./sessionBands";
 
 /**
  * Where one note sits on the rail, and whether it OPENS a lane.
@@ -303,5 +303,30 @@ export function sideOf(
   return undefined;
 }
 
+/** What a note's state is CALLED in a sentence about it: its path from the module being read, or its id. */
+export function cutNameOf(note: BandNote, root: string): string {
+  const where = pathFrom(note.path, root);
+  return where !== "" ? where : (note.stateId?.split("/").pop() ?? "this state");
+}
 
-
+/**
+ * What each state ADDED to the conversation: the reading after its last turn, less the reading the
+ * state before it in this session ended on. The first state in a session added everything it holds.
+ * A piece with no reading is left out — the header's `+30k` is not drawn for it.
+ */
+export function addedOf(
+  pieces: readonly SessionPiece[],
+  readingOf: ((piece: SessionPiece) => ContextReading | undefined) | undefined,
+): Map<SessionPiece, number> {
+  const added = new Map<SessionPiece, number>();
+  if (readingOf !== undefined) {
+    let prior: ContextReading | undefined;
+    for (const piece of pieces) {
+      const reading = readingOf(piece);
+      if (reading === undefined) continue;
+      added.set(piece, Math.max(0, reading.used - (prior?.used ?? 0)));
+      prior = reading;
+    }
+  }
+  return added;
+}

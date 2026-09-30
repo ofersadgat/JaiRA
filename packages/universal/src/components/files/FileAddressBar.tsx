@@ -4,7 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { FileSource, FileTree, WorkflowLayer } from "@jaira/shared/browser";
 import { LAYER_LABEL, ROOT_WORD, crumbInputOf, crumbsOf, folderFactsOf, issueCountsOf, runToggleableOf, stateIdsOf, type CrumbInput, type FileSelection } from "@jaira/ui/filesModel";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { Press, Txt, font, scrollbarProps } from "../../primitives";
+import { Press, Txt, font, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { CrumbBar } from "../Crumbs";
 import { MenuLayer } from "../MenuLayer";
@@ -139,7 +139,7 @@ export function FactsButton({ children }: { children: ReactNode }): JSX.Element 
             maxHeight={win.height * 0.6}
             // `overflow: auto` on web (a scrollbar only when the facts outgrow 60% of the window).
             overflow={(isWeb ? "auto" : "hidden") as never}
-            {...(scrollbarProps(t) as object)}
+            {...(viewScrollbarProps(t) as object)}
             padding={12}
             backgroundColor={t.v("panel") as never}
             borderWidth={1}

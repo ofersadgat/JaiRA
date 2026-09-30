@@ -67,7 +67,7 @@ import {
   type SessionSegment,
 } from "./sessionBands";
 import { RailedRows } from "./railView";
-import { isLiveNode, isSolo, keyOfPiece, markedRowsOf, sideName, sideOf, metaOf, pageRowsOf, spanOf, stepOfNote, summaryOf } from "./sessionRows";
+import { addedOf, cutNameOf, isLiveNode, isSolo, keyOfPiece, markedRowsOf, sideName, sideOf, metaOf, pageRowsOf, spanOf, stepOfNote, summaryOf } from "./sessionRows";
 import type { RailStep } from "./rail";
 
 /** Nothing folded — the default for a host that does not remember folds. Frozen, so it cannot be
@@ -422,17 +422,8 @@ function Sheet({
   const solo = only !== undefined && surfaceKindOf(only.node) === "conversation";
   // What each state ADDED to the conversation: the reading after its last turn, less the reading the
   // state before it in this session ended on. The first state in a session added everything it holds.
-  const readingOf = useContext(PieceReadingContext);
-  const added = new Map<SessionPiece, number>();
-  if (readingOf !== undefined) {
-    let prior: ContextReading | undefined;
-    for (const piece of segment.pieces) {
-      const reading = readingOf(piece);
-      if (reading === undefined) continue;
-      added.set(piece, Math.max(0, reading.used - (prior?.used ?? 0)));
-      prior = reading;
-    }
-  }
+  // `sessionRows.ts`' `addedOf`, shared with the universal copy (decision 0015).
+  const added = addedOf(segment.pieces, useContext(PieceReadingContext));
   /**
    * A SURFACE has no gutter at all — it is the other half of the rule above.
    *
@@ -796,11 +787,8 @@ export function OriginMark({ origin, onGo }: { origin: TaskOrigin; onGo?: (() =>
   );
 }
 
-/** What a note's state is CALLED in a sentence about it: its path from the module being read, or its id. */
-export function cutNameOf(note: BandNote, root: string): string {
-  const where = pathFrom(note.path, root);
-  return where !== "" ? where : (note.stateId?.split("/").pop() ?? "this state");
-}
+/** What a note's state is CALLED in a sentence about it — `sessionRows.ts`', shared with the universal copy. */
+export { cutNameOf };
 
 /**
  * One failure, on the grey between the panels.

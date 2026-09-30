@@ -136,10 +136,10 @@ import { RunModeToggle, RunView } from "./runViews";
 import { SidePanel } from "./sidePanel";
 import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
 import { EMPTY_STACK, push, selectStep, topOf, type PanelEntry, type PanelStack } from "./panelStack";
-import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, roomOf, rerunSurfaceFor, runSurfaceFor, usePanelStacks, useRoomRule } from "./panelHost";
+import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, reviewerServicesOf, roomOf, useAdoptSubagent, rerunSurfaceFor, runSurfaceFor, usePanelStacks, useRoomRule } from "./panelHost";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
-import { FOOTER_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
+import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
 import { primaryAct } from "./taskAction";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
@@ -248,8 +248,8 @@ function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: s
 /** Every nav row, for the lookups that do not care which group a view is in. */
 const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
 
-/** The views that live INSIDE the settings panel — see `beforeSettings` and the sidebar's own rule. */
-const PANEL_VIEWS: ReadonlySet<string> = new Set<string>(["settings", ...FOOTER_VIEWS.map((v) => v.id)]);
+// The views that live INSIDE the settings panel (`PANEL_VIEWS`) are `shellModel.ts`'s, shared with the
+// universal shell's sidebar.
 
 /**
  * The window's name, for the taskbar and the window switcher.
@@ -575,16 +575,8 @@ export default function App(): JSX.Element {
    * unsaved-edit map, and a way into the editor. Supplied to BOTH hosts — the gate modal and the
    * conversation view — because a host's reach, not the component, is what decides these exist.
    */
-  const reviewerServices = useMemo(
-    () => ({
-      drafts: new Map(Object.entries(state.drafts)),
-      openFile: (layer: string, path: string) => {
-        actions.setView("files");
-        actions.openPath(layer as WorkflowLayer, path);
-      },
-    }),
-    [state.drafts, actions],
-  );
+  // `panelHost.ts`' `reviewerServicesOf`, shared with the universal shell.
+  const reviewerServices = useMemo(() => reviewerServicesOf(state.drafts, actions), [state.drafts, actions]);
 
   /**
    * The parked changeset gate whose task's conversation is ON SCREEN — §8.1's default host. `about`
@@ -1117,14 +1109,11 @@ export default function App(): JSX.Element {
   const rule = room === null ? null : panelRuleOf(room, state, { taskId: chat.taskId, project: chatProject }, conversationInMain);
   useRoomRule(room, rule, inlineGate?.requestId, setStacks);
 
-  /** A subagent adopted into the main view before its task's run was on the trail: walked into once it is. */
-  const [adoptAfter, setAdoptAfter] = useState<{ taskId: string; step: TrailStep } | null>(null);
-  useEffect(() => {
-    if (adoptAfter === null || state.selected !== adoptAfter.taskId || state.trail.length === 0 || detail === null) return;
-    const host = nodeAt(detail.instances, adoptAfter.step.instanceId);
-    if (host !== undefined) actions.walkIntoSidechain(host, adoptAfter.step.sidechain ?? "", adoptAfter.step.name ?? "");
-    setAdoptAfter(null);
-  }, [adoptAfter, state.selected, state.trail.length, detail, actions]);
+  /**
+   * A subagent adopted into the main view — walked into once its task's run is on the trail
+   * (`panelHost.ts`' `useAdoptSubagent`, shared with the universal shell).
+   */
+  const adoptSubagent = useAdoptSubagent(state, detail, actions);
 
   const panelTop = topOf(panelStack);
   // A re-run with changes needs its workflow's form, which is read on demand like the New-task form's.
@@ -1243,16 +1232,7 @@ export default function App(): JSX.Element {
           viewed: { current: runHere, onScreen: runOnScreen },
         }
       : {}),
-    adoptSubagent: (taskId, project, step) => {
-      const host = detail !== null && detail.taskId === taskId ? nodeAt(detail.instances, step.instanceId) : undefined;
-      if (host !== undefined && state.trail.length > 0 && state.selected === taskId) {
-        actions.walkIntoSidechain(host, step.sidechain ?? "", step.name ?? "");
-        return;
-      }
-      setAdoptAfter({ taskId, step });
-      actions.setView("tasks");
-      actions.openTask(taskId, project ?? state.at ?? "", detail?.workflow ?? step.stateId);
-    },
+    adoptSubagent,
     rerunSurface: (task): RerunSurface => rerunSurfaceFor(state, actions, task, selectedProject, onStack),
     stateOf: (stateId, project) => {
       if (state.doc?.stateId === stateId && state.stateId === stateId) return { view: state.state, run: runSurface };

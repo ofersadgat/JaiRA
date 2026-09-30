@@ -4,6 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
+import { useReadingForm } from "./Field";
 
 /**
  * The form's controls, universal (decision 0015): `controls.tsx`'s `TextInput`, `NumInput`,
@@ -25,6 +26,8 @@ import { Svg } from "../panel/Svg";
  *                        its chips padding 0 8, app 10.5/12.5 on an 18px line, radius 5
  *   .sf-bool             row, centred, gap 6: Chromium's own checkbox (13 square, margin 3 3 3 4) and
  *                        `.sub` (app 11/12.5, --dim) saying yes or no
+ *   .vv-form .cfg-control input, textarea   in a reading (`ReadingForm`): transparent ground and ring,
+ *                        --text — the 0.55 of `:disabled` stays
  */
 
 /** `:focus-visible` on a box: `.cfg-input:focus-visible` (--accent) and the page's ring (2px --focus-ring, 1 out). */
@@ -82,6 +85,7 @@ export function FormInput({
   const base = plain !== undefined ? ({ voice: "app", scale: plain.scale } as const) : mono ? ({ voice: "data", scale: 1 } as const) : ({ voice: "app", scale: 1 } as const);
   const spec = tight ? { ...base, weight: 600 } : base;
   const ring = bad ? "bad" : focused ? "accent" : hovered && !disabled ? "rule" : "line";
+  const reading = useReadingForm();
   return (
     <RNTextInput
       value={value}
@@ -100,7 +104,7 @@ export function FormInput({
       {...({ onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) } as object)}
       style={
         {
-          ...(font(t, { ...spec, color: disabled ? "dim" : "text" }) as object),
+          ...(font(t, { ...spec, color: disabled && !reading ? "dim" : "text" }) as object),
           width: width ?? "100%",
           minWidth: 0,
           ...(num && plain === undefined ? { maxWidth: 120 } : {}),
@@ -108,9 +112,9 @@ export function FormInput({
           paddingHorizontal: tight ? 8 : 9,
           borderWidth: 1,
           borderStyle: "solid",
-          borderColor: t.v(ring),
+          borderColor: reading && !bad ? "transparent" : t.v(ring),
           borderRadius: lengthToken(t, "control-radius", 7),
-          backgroundColor: t.v(disabled ? "panel-2" : "bg"),
+          backgroundColor: reading ? "transparent" : t.v(disabled ? "panel-2" : "bg"),
           ...(disabled ? { opacity: 0.55 } : {}),
           ...focusRing(t, focused),
         } as never
@@ -199,6 +203,7 @@ export function TextArea({
   const size = t.scaled(`size-${spec.voice}`, 1);
   const line = typeof size === "number" ? size * 1.45 : 18;
   const ring = bad ? "bad" : focused ? "accent" : hovered && !disabled ? "rule" : "line";
+  const reading = useReadingForm();
   return (
     <RNTextInput
       value={value}
@@ -212,7 +217,7 @@ export function TextArea({
       {...({ onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false), rows } as object)}
       style={
         {
-          ...(font(t, { ...spec, color: disabled ? "dim" : "text" }) as object),
+          ...(font(t, { ...spec, color: disabled && !reading ? "dim" : "text" }) as object),
           width: "100%",
           minWidth: 0,
           // On web the textarea's own `rows` size it, as the DOM's; a phone is told its height.
@@ -221,9 +226,9 @@ export function TextArea({
           paddingHorizontal: 9,
           borderWidth: 1,
           borderStyle: "solid",
-          borderColor: t.v(ring),
+          borderColor: reading && !bad ? "transparent" : t.v(ring),
           borderRadius: lengthToken(t, "control-radius", 7),
-          backgroundColor: t.v(disabled ? "panel-2" : "bg"),
+          backgroundColor: reading ? "transparent" : t.v(disabled ? "panel-2" : "bg"),
           textAlignVertical: "top",
           ...(isWeb ? { resize: "vertical" } : {}),
           ...(disabled ? { opacity: 0.55 } : {}),
@@ -240,7 +245,10 @@ export function TextArea({
  * 12-square inside it (0.5 in from the left, flush at the top). Unchecked: a 1px ring rounded 2 on
  * white, #767676 (hovered #4f4f4f). Checked: #0075ff (hovered #005cc8) with a white tick. In a dark
  * `color-scheme`: #3b3b3b inside #858585 (hovered #9c9c9c); checked #99c8ff (hovered #d1e6ff) with a
- * #3b3b3b tick. Drawn as a path, since a border would be snapped to whole device pixels.
+ * #3b3b3b tick. Drawn as a path, since a border would be snapped to whole device pixels. Disabled, in
+ * light: Chromium's own disabled colours rather than a faded box — the ring and a checked box's ground
+ * #767676 at 30%, a white ground and the tick white at 60% (measured off a read-only form); in dark, the
+ * box at half opacity (identical to the eye).
  */
 export function Checkbox({ checked, disabled = false, onChange, label }: { checked: boolean; disabled?: boolean; onChange: (next: boolean) => void; label?: string }): JSX.Element {
   const look = useLook();
@@ -258,18 +266,33 @@ export function Checkbox({ checked, disabled = false, onChange, label }: { check
       marginBottom={3}
       marginLeft={4}
       flexShrink={0}
-      {...(disabled ? { opacity: 0.5 } : {})}
+      {...(disabled && dark ? { opacity: 0.5 } : {})}
     >
       {({ hovered }) => {
         const hover = hovered && !disabled;
-        const fill = checked ? (dark ? (hover ? "#d1e6ff" : "#99c8ff") : hover ? "#005cc8" : "#0075ff") : dark ? "#3b3b3b" : "#ffffff";
-        const ring = dark ? (hover ? "#9c9c9c" : "#858585") : hover ? "#4f4f4f" : "#767676";
+        const faded = disabled && !dark;
+        const fill = faded
+          ? checked
+            ? "rgba(118, 118, 118, 0.3)"
+            : "rgba(255, 255, 255, 0.6)"
+          : checked
+            ? dark
+              ? hover
+                ? "#d1e6ff"
+                : "#99c8ff"
+              : hover
+                ? "#005cc8"
+                : "#0075ff"
+            : dark
+              ? "#3b3b3b"
+              : "#ffffff";
+        const ring = faded ? "rgba(118, 118, 118, 0.3)" : dark ? (hover ? "#9c9c9c" : "#858585") : hover ? "#4f4f4f" : "#767676";
         return (
           <Svg
             width={13}
             height={13}
             viewBox="0 0 13 13"
-            color={dark ? "#3b3b3b" : "#ffffff"}
+            color={dark ? "#3b3b3b" : faded ? "rgba(255, 255, 255, 0.6)" : "#ffffff"}
             strokeWidth={1.6}
             linecap="butt"
             linejoin="miter"

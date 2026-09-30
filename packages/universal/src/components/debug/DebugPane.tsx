@@ -1,7 +1,7 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { AvailabilitySnapshot, TaskDetail, WorkflowLayer } from "@jaira/shared/browser";
+import type { AvailabilitySnapshot, ConversationView, TaskDetail, WorkflowLayer } from "@jaira/shared/browser";
 import { BADGE } from "@jaira/ui/panelFaceModel";
 import { debugFileStatus, debugViewOf, readinessOf, verdictWord } from "@jaira/ui/debugModel";
 import { SELF_TEST_ROOT } from "@jaira/ui/debugWorkflow";
@@ -10,13 +10,14 @@ import { PLAIN_SCROLLER, Press, Txt, appCh, edge, lengthToken, scrollbarProps, u
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Button } from "../settings/Button";
+import { Conversation } from "./Conversation";
 
 /**
  * `debugPane.tsx`'s `DebugPane`, universal (decision 0015): the self-test — what it runs, where its state
  * files come from, the buttons that run it, and its result. What it derives is `debugModel.ts`, shared
- * with the desktop's. The session's transcript and the journal under a result are {@link Uncopied}. The
- * side panel beside it is the shell's (`PanelColumn`), as `App.tsx` hands the desktop's its own. The
- * rules, from `styles.css`:
+ * with the desktop's. The session's transcript under a result is {@link Uncopied}; the journal under it
+ * is `Conversation.tsx` (`detail.tsx`'s). The side panel beside it is the shell's (`PanelColumn`), as
+ * `App.tsx` hands the desktop's its own. The rules, from `styles.css`:
  *
  *   .debug             --bg, scrolls, padding 12 14, column, gap 16; sections column, gap 8
  *   .debug-head h2     700, app at 15/12.5, margin 0 0 4;  .sub margin 0, at most 70ch, line 1.5
@@ -39,6 +40,8 @@ import { Button } from "../settings/Button";
 export interface DebugPaneProps {
   debug: DebugState;
   detail: TaskDetail | null;
+  /** The selected task's journal, read as turns (`state.conversation`). */
+  conversation: ConversationView | null;
   availability: AvailabilitySnapshot;
   hasProject: boolean;
   onRun: (options: { scripted?: boolean; fresh?: boolean }) => void;
@@ -52,7 +55,7 @@ export interface DebugPaneProps {
 
 const SUB: FontSpec = { voice: "app", scale: 11 / 12.5, color: "dim" };
 
-export function DebugPane({ debug, detail, availability, hasProject, onRun, onCancel, onRecheck, onDismissError, onOpenState, panel }: DebugPaneProps): JSX.Element {
+export function DebugPane({ debug, detail, conversation, availability, hasProject, onRun, onCancel, onRecheck, onDismissError, onOpenState, panel }: DebugPaneProps): JSX.Element {
   const t = useTokens();
   const { mine, run, result, running, missing, overridden } = debugViewOf(debug, detail);
   const verdict = verdictWord(result.passed);
@@ -181,7 +184,7 @@ export function DebugPane({ debug, detail, availability, hasProject, onRun, onCa
         ) : null}
         {mine !== null ? (
           <Section title="Journal">
-            <Uncopied name="the journal" height={120} />
+            <Conversation conversation={conversation} />
           </Section>
         ) : null}
       </ScrollView>

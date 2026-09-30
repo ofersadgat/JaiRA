@@ -3,13 +3,15 @@ import { initPromptSpec, orphanApprovalOf } from "@jaira/ui/appDialogs";
 import { useShell } from "../../app/shell";
 import { AskDialog } from "../files/AskDialog";
 import { ApprovalDialog, ModuleApprovalDialog } from "./Dialogs";
+import { Toast } from "./Toast";
 
 /**
  * The dialogs `App.tsx` raises on its own, over whatever room is showing (decision 0015): a workflow's
  * modules to trust before it starts (first — it is asked before any run exists), else a command approval
  * that names no task; and a folder to set up as a project. What they say and when is `appDialogs.ts`'s,
  * shared with the desktop. The folder browser (`FolderBrowser.tsx`) is opened from the sidebar's
- * project chooser, which the universal sidebar does not draw yet.
+ * project chooser, which the universal sidebar does not draw yet. Last, as `App.tsx` mounts it last, the
+ * toast: the store's error, or its notice.
  */
 export function ShellFloats(): JSX.Element {
   const { state, actions } = useShell();
@@ -22,6 +24,7 @@ export function ShellFloats(): JSX.Element {
         <ApprovalDialog pending={orphan} error={state.error} onDecide={(decision, scope, extras) => actions.decideApproval(orphan.requestId, decision, scope, extras)} />
       ) : null}
       {state.initPrompt !== null ? <AskDialog spec={initPromptSpec(state.initPrompt, () => void actions.initProject())} onCancel={actions.dismissInit} /> : null}
+      <Toast error={state.error} notice={state.notice} onDismissError={actions.dismissError} onDismissNotice={actions.dismissNotice} />
     </>
   );
 }

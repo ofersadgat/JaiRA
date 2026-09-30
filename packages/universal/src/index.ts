@@ -8,6 +8,8 @@ export { Island, type IslandProps } from "./islands";
 export { Connect } from "./screens/Connect";
 export { Markdown, registerFenceRenderer } from "./components/Markdown";
 export { DataView } from "./components/files/DataView";
+// The value view, for its specimens (`valueSpecimens.tsx`).
+export { ValueView } from "./components/panel/ValueView";
 export { FileInspector } from "./components/files/FileAddressBar";
 export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
@@ -27,6 +29,17 @@ export { UpdateRow } from "./components/floats/UpdateRow";
 // The transcript, for its specimens (`transcriptSpecimens.tsx`).
 export { Transcript } from "./components/panel/SessionTranscript";
 export { SessionBands } from "./components/panel/SessionBands";
+// What the hosts hand the shell: the socket going away, and a phone's net for what escapes everything.
+export { connectionLost } from "./app/connection";
+export { installNativeErrorReporting } from "./components/floats/CrashScreen";
+// The window's own reports, a settled gate and a conversation's foot, for their specimens (`shellSpecimens.tsx`).
+export { CrashScreen, LooseErrorBanner } from "./components/floats/CrashScreen";
+export { DisconnectedLine } from "./components/floats/Disconnected";
+export { Toast } from "./components/floats/Toast";
+export { GateSurface } from "./components/panel/Gate";
+export { OfflineBanner } from "./components/panel/OfflineBanner";
+export { ChangesPanel } from "./components/panel/ChangesPanel";
+export { NoteList } from "./components/artifact/ReviewNotes";
 
 /** Every universal copy there is, by the slot it fills. `/universal` and native draw all of them. */
 export const COPIES: Partial<Slots> = { Pill, TaskCard };
@@ -36,3 +49,8 @@ export const COPIES: Partial<Slots> = { Pill, TaskCard };
  * original, and then the S1 gate with the desktop switched to it.
  */
 export const SHARED: Partial<Slots> = { Pill, TaskCard };
+// A task card, the Debug room's journal and three of the Files room's surfaces, for their specimens (`boardSpecimens.tsx`).
+export { TaskCard };
+export { Conversation } from "./components/debug/Conversation";
+export { JsonFormView, PatchSideBySide, RenderedFileView } from "./components/files/surfaces";
+export { UpdateSplit as AboutUpdateSplit } from "./components/settings/AboutPage";

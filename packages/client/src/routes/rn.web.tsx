@@ -1,10 +1,15 @@
 import { StrictMode, useEffect, useState } from "react";
 import { TamaguiProvider } from "@tamagui/core";
-import { Replayed, UniversalApp, config } from "@jaira/universal";
+import { Replayed, UniversalApp, config, connectionLost } from "@jaira/universal";
+import { installGlobalErrorReporting } from "@jaira/ui/crashReport";
 import { setBridge } from "@jaira/ui/store";
 import "../rn/fonts.css";
 import { readsOnly } from "../../bridges/readOnly";
 import { socketBridge } from "../../bridges/socketBridge";
+
+// Before the first render, as `Shell.tsx` does it: the shell's banner reports what this catches. Guarded
+// because `one build` imports every page in Node, where there is no window.
+if (typeof window !== "undefined") installGlobalErrorReporting();
 
 /**
  * `/rn`: the phone's app, in a browser (decision 0015). The universal shell drawn by react-native-web,
@@ -23,6 +28,8 @@ export default function Rn() {
     const address = q.get("address") ?? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/`;
     const bridge = socketBridge(address, q.get("token") ?? "", readsOnly);
     void bridge.ready.then(() => {
+      // The shell says so when the desktop goes away (`floats/Disconnected.tsx`), as `Shell.tsx` does.
+      bridge.onClose(connectionLost);
       setBridge(bridge);
       setReady(true);
     });

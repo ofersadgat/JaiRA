@@ -1,5 +1,5 @@
 import { useState, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
 import {
   LIMIT_FIELDS,
@@ -10,6 +10,8 @@ import {
   llmCategoriesOf,
   llmSummariesOf,
   numOf,
+  railMoveOf,
+  railStep,
   reasoningOf,
   reasoningSchemaOf,
   refusedSamplingOf,
@@ -82,8 +84,12 @@ export function TabRail({
   corner?: number;
 }): JSX.Element {
   const t = useTokens();
+  // With nothing chosen the first tab holds the rail's one tab stop, or the rail could not be reached.
+  const tabItems = items.filter((item) => item.heading === undefined);
+  const stop = tabItems.some((item) => item.id === selected) ? selected : tabItems[0]?.id;
   return (
     <View
+      {...(isWeb ? { onKeyDown: (event: RailKey) => railKey(event, tabItems, onSelect) } : {})}
       width={width}
       flexShrink={0}
       flexDirection="column"
@@ -94,6 +100,7 @@ export function TabRail({
       {...(corner !== undefined ? { borderBottomLeftRadius: corner } : {})}
       role="tablist"
       aria-label={label}
+      {...({ "aria-orientation": "vertical" } as object)}
     >
       {items.map((item) =>
         item.heading !== undefined && typeof item.heading !== "string" ? (
@@ -107,6 +114,7 @@ export function TabRail({
             key={item.id}
             onPress={() => onSelect(item.id)}
             {...({ role: "tab", "aria-selected": item.id === selected } as object)}
+            focusable={item.id === stop}
             {...(item.title !== undefined ? { title: item.title } : {})}
             flexDirection="column"
             gap={2}
@@ -134,6 +142,41 @@ export function TabRail({
   );
 }
 
+type RailKey = { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolean; currentTarget: HTMLElement; preventDefault: () => void };
+
+/**
+ * `TabRail`'s `onKeyDown` (web): the keys that run ALONG the rail choose the tab before or after, Home and
+ * End the ends; the pair that runs ACROSS it steps to the rail beside it in the same box (`RailFrame`) —
+ * `llmConfigModel.ts`'s `railMoveOf` and `railStep`, as the desktop's. A tab here is the `role="tab"` box
+ * inside its pressable, which is what takes the focus.
+ */
+function railKey(event: RailKey, tabItems: readonly RailItem[], onSelect: (id: string) => void): void {
+  if (event.altKey || event.ctrlKey || event.metaKey) return;
+  const rail = event.currentTarget;
+  const move = railMoveOf(event.key, getComputedStyle(rail).flexDirection.startsWith("row"));
+  if (move === undefined) return;
+  const focusable = (tab: Element | null | undefined): HTMLElement | null => (tab?.parentElement as HTMLElement | null | undefined) ?? null;
+  if (move === "in" || move === "out") {
+    // The rail beside this one, in the same box. Nothing there is not an error — a lone rail simply has
+    // no "across" — and the key is left alone so the page can still scroll with it.
+    const rails = Array.from(rail.closest("[data-llm-config]")?.querySelectorAll<HTMLElement>('[role="tablist"]') ?? []);
+    const other = rails[rails.indexOf(rail) + (move === "in" ? 1 : -1)];
+    const target = focusable(other?.querySelector('[role="tab"][aria-selected="true"]') ?? other?.querySelector('[role="tab"]'));
+    if (target === null) return;
+    event.preventDefault();
+    target.focus();
+    return;
+  }
+  const tabs = Array.from(rail.querySelectorAll('[role="tab"]')).map(focusable);
+  const next = railStep(tabs.indexOf(document.activeElement as HTMLElement), tabs.length, move);
+  // Headings are in `items` and not among the tabs, so the nth TAB is the nth item that is one.
+  const item = tabItems[next];
+  if (item === undefined) return;
+  event.preventDefault();
+  onSelect(item.id);
+  tabs[next]?.focus();
+}
+
 /** `.llm-config`: the rail and the pane, in their box. */
 export function RailFrame({ card = false, children }: { card?: boolean; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -148,6 +191,8 @@ export function RailFrame({ card = false, children }: { card?: boolean; children
       overflow="hidden"
       // Straight in a card (`.set-group > .llm-config`): the card's padding, inside its own ring.
       {...(card ? { paddingVertical: 13, paddingHorizontal: 16 } : {})}
+      // What a rail's keys look for to find the rail beside it (the DOM's `closest(".llm-config")`).
+      {...({ "data-llm-config": "" } as object)}
       backgroundColor={t.v("panel") as never}
       {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
     >

@@ -16,6 +16,8 @@ import { ValuePanelContext, type PinnedValue, type ValuePanel } from "@jaira/ui/
 import { panelOnStack } from "../components/panel/panelBridge";
 import { InboxStrip } from "../components/InboxStrip";
 import { Splitter } from "../components/files/Splitter";
+import { CrashBoundary, LooseErrorBanner } from "../components/floats/CrashScreen";
+import { Disconnected } from "../components/floats/Disconnected";
 import { ShellFloats } from "../components/floats/ShellFloats";
 import { edge } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
@@ -93,7 +95,13 @@ export function UniversalApp(): JSX.Element {
           <WorkLookContext.Provider value={workLook}>
             <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
               <TokenRoot {...model.appearance}>
-                <Frame />
+                <CrashBoundary>
+                  <Frame />
+                </CrashBoundary>
+                {/* Outside the boundary, as `Shell.tsx` mounts them: a report about a failure must not
+                    go down with what it reports. After the frame, so a phone draws them over it. */}
+                <Disconnected />
+                <LooseErrorBanner />
               </TokenRoot>
             </ReadOnlyJudgeContext.Provider>
           </WorkLookContext.Provider>

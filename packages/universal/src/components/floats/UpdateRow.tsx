@@ -1,7 +1,7 @@
 import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { Linking } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { FloatRect } from "@jaira/ui/floatPlace";
+import type { FloatAlign, FloatRect, FloatSide } from "@jaira/ui/floatPlace";
 import { pressUpdateRow, showsUpdateTip, updateRowTone } from "@jaira/ui/updateRow";
 import { publishedWords, sidebarUpdateOf, updateMenu, type UpdateMenu } from "@jaira/ui/updatesModel";
 import { applyUpdate, dismissUpdate, refreshBusy, useUpdate } from "@jaira/ui/updatesStore";
@@ -188,9 +188,26 @@ function Version({ auto = false, children }: { auto?: boolean; children: ReactNo
 /**
  * `UpdateMenuCard` in its `Popover` (`.cx-submenu.answer-menu.upd-menu`: 300 wide), beside the row, start
  * aligned: what is going in its head (`.upd-menu-head`: padding 5 8 6, 2 below, a --line under, app
- * 11/12.5 --dim), then the choices — the default ticked — and Release notes.
+ * 11/12.5 --dim), then the choices — the default ticked — and Release notes. About's split button hangs
+ * the same card below itself, end aligned (`side`, `align`).
  */
-function UpdateMenuFloat({ anchor, menu, onPick, onNotes, onClose }: { anchor: FloatRect | null; menu: UpdateMenu; onPick: (choice: UpdateRestartChoice) => void; onNotes: () => void; onClose: () => void }): JSX.Element {
+export function UpdateMenuFloat({
+  anchor,
+  menu,
+  onPick,
+  onNotes,
+  onClose,
+  side = "right",
+  align = "start",
+}: {
+  anchor: FloatRect | null;
+  menu: UpdateMenu;
+  onPick: (choice: UpdateRestartChoice) => void;
+  onNotes: () => void;
+  onClose: () => void;
+  side?: FloatSide;
+  align?: FloatAlign;
+}): JSX.Element {
   const t = useTokens();
   const box = {
     width: 300,
@@ -248,7 +265,7 @@ function UpdateMenuFloat({ anchor, menu, onPick, onNotes, onClose }: { anchor: F
           {body}
         </View>
       ) : (
-        <Float anchor={anchor} side="right" align="start" {...box}>
+        <Float anchor={anchor} side={side} align={align} {...box}>
           {body}
         </Float>
       )}

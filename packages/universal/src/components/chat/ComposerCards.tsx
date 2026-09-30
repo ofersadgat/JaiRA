@@ -12,14 +12,14 @@ import { EFFORT_HINTS, KEEP_WHERE, VENDOR_NAMES, cascadeOf, modalitiesOf, modali
 import { ROUTE_BORROWS } from "@jaira/ui/composerModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import type { Schema } from "@jaira/ui/schemaForm/types";
-import { Press, Txt, edge, scrollbarProps } from "../../primitives";
+import { Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { brandHex, brandMark, brandOf } from "@jaira/ui/brands";
 import { Svg } from "../panel/Svg";
 import { MenuLayer } from "../MenuLayer";
 import { Float } from "../floats/Float";
 import { SchemaForm } from "../form/SchemaForm";
 import { Icon, type IconName } from "../panel/Icon";
+import { BrandIcon } from "../settings/bits";
 import { ModelWindow, RouteLeft } from "./UsageCards";
 
 /**
@@ -340,7 +340,7 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
       {...(last ? { width: 148, backgroundColor: t.mix(t.v("panel-2"), 45, "transparent") as never } : { width: first ? 204 : 148, ...edge(t, { right: 1 }) })}
       padding={3}
       {...({ overflowY: "auto" } as object)}
-      {...(scrollbarProps(t) as object)}
+      {...(viewScrollbarProps(t) as object)}
     >
       {children}
     </View>
@@ -369,6 +369,12 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
               live={r === here.route}
               onHover={() => drill(r)}
               onPress={() => {
+                // A phone has no hover to drill with: the first press on another route shows its column,
+                // and the next picks there, as a click does after hovering on the desktop.
+                if (!isWeb && r !== route) {
+                  drill(r);
+                  return;
+                }
                 const there = repoint(r, current, models);
                 if (there !== undefined) onPick(there);
                 else drill(r);
@@ -376,7 +382,7 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
             >
               {(lit) => (
                 <>
-                  <BrandMark t={t} name={r} size={12} />
+                  <BrandIcon name={r} size={12} ink="tok-hint" />
                   <Txt spec={{ ...NAME, color: lit ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
                     {r}
                   </Txt>
@@ -394,7 +400,7 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
                 <ColRow key={g} on={g === shown} live={route === here.route && g === here.group} onHover={() => setGroup(g)} onPress={() => setGroup(g)}>
                   {(lit) => (
                     <>
-                      <BrandMark t={t} name={g} size={12} />
+                      <BrandIcon name={g} size={12} ink="tok-hint" />
                       <Txt spec={{ ...NAME, color: lit ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
                         {g}
                       </Txt>
@@ -651,22 +657,4 @@ export function KeepPermissionSet({ bucket, ready, layers, onKeep }: { bucket: s
   );
 }
 
-/** `BrandIcon`: the company's mark (its path, in its colour or the chip's), or its initial on its colour. */
-export function BrandMark({ t, name, ink: tone = "tok-hint", size = 13 }: { t: Tokens; name: string; ink?: string; size?: number }): JSX.Element {
-  const company = brandOf(name);
-  const mark = brandMark(company);
-  // `currentColor` is the chip icon's: --tok-hint, --accent on a value you chose.
-  const ink = String(t.v(tone));
-  if (mark !== undefined) {
-    return <Svg width={size} height={size} color={ink} fill={mark.onGround === true ? "currentColor" : mark.hex} strokeWidth={0} shapes={[{ kind: "path", d: mark.path }]} />;
-  }
-  const hex = brandHex(company);
-  return (
-    <View width={size} height={size} borderRadius={(6 * size) / 24} alignItems="center" justifyContent="center" backgroundColor={(hex ?? t.mix(ink, 18, "transparent")) as never} {...(hex !== undefined ? { opacity: 0.9 } : {})}>
-      <Txt spec={{ voice: "app", scale: 1, weight: 600, color: hex === undefined ? ink : "#fff", lineHeight: { px: size } }} fontSize={(13 * size) / 24}>
-        {company.charAt(0).toUpperCase()}
-      </Txt>
-    </View>
-  );
-}
 

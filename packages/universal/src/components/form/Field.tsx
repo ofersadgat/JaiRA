@@ -65,12 +65,43 @@ const SpanContext = createContext(false);
 /** A block that takes the whole row (`.cfg-span`); `block` makes a field in it one column (`.cfg-block`). */
 export function Span({ block = false, children }: { block?: boolean; children: ReactNode }): JSX.Element {
   return (
-    <SpanContext.Provider value={true}>
-      <BlockContext.Provider value={block}>{children}</BlockContext.Provider>
-    </SpanContext.Provider>
+    <InSpanContext.Provider value={true}>
+      <SpanContext.Provider value={true}>
+        <BlockContext.Provider value={block}>{children}</BlockContext.Provider>
+      </SpanContext.Provider>
+    </InSpanContext.Provider>
   );
 }
 const BlockContext = createContext(false);
+/** Anywhere inside a `.cfg-span`, however deep (`.file-form .cfg-span .cfg-field`) — never reset. */
+const InSpanContext = createContext(false);
+
+/**
+ * A schema form drawn as a READING of a value (`.vv-form`), or of a whole file in the Files viewer
+ * (`.vv-form.file-form`, `file`). The rules it carries into the fields and controls inside it:
+ *
+ *   .vv-form                      padding 2 0, the width it is given (100%, min 0)
+ *   .file-form                    padding 8 10 (later, so it wins)
+ *   .vv-form .cfg-param           not drawn — there is no layer here and nothing is written; the hint
+ *                                 that held it stays, empty, and keeps its gap
+ *   .vv-form .cfg-span .cfg-field (and .file-form's)   one column: a block's fields, and the block's own, stack
+ *   .vv-form .cfg-control input, textarea, select   transparent ground and ring, --text (`useReadingForm`)
+ */
+const ReadingFormContext = createContext<{ file: boolean } | null>(null);
+export function ReadingForm({ file = false, children }: { file?: boolean; children: ReactNode }): JSX.Element {
+  const look = useMemo(() => ({ file }), [file]);
+  return (
+    <ReadingFormContext.Provider value={look}>
+      <View flexDirection="column" paddingVertical={file ? 8 : 2} paddingHorizontal={file ? 10 : 0} width="100%" minWidth={0} maxWidth="100%">
+        {children}
+      </View>
+    </ReadingFormContext.Provider>
+  );
+}
+/** Inside a {@link ReadingForm}: a control draws without its box (`.vv-form .cfg-control input`). */
+export function useReadingForm(): boolean {
+  return useContext(ReadingFormContext) !== null;
+}
 
 /** A child of a list that draws something other than a field (a map, a note) tells its slot so. */
 export function useFormSlot(hidden: boolean, field: boolean): void {
@@ -206,6 +237,10 @@ export function Field({
   const place = useContext(PlaceContext);
   const { narrow } = useContext(GridContext);
   const block = useContext(BlockContext);
+  const reading = useContext(ReadingFormContext);
+  const inSpan = useContext(InSpanContext);
+  // `.vv-form .cfg-param { display: none }`: the hint box stays, and holds only what else it says.
+  const shownParam = reading === null ? param : undefined;
   const paths: readonly ConfigPath[] | undefined = param !== undefined ? [param] : undefined;
   const layered = useLayerRow(paths, layer?.stated);
   const inherit = useInheritLabel(paths);
@@ -215,7 +250,8 @@ export function Field({
   const split = row && typeof hint === "string" ? splitHint(hint) : undefined;
   const more = split !== undefined ? [split.rest, param !== undefined ? `Writes ${param}.` : ""].filter((s) => s.length > 0).join(" ") : "";
   // Only a settings row goes one column when `wide` (`.set-field.wide`); a plain field keeps its two.
-  const stack = (row && wide) || block || narrow;
+  // `.vv-form .cfg-span .cfg-field, .file-form .cfg-span .cfg-field`: a nested block's fields stack in either reading.
+  const stack = (row && wide) || block || narrow || (reading !== null && inSpan);
   const hintSpec = row ? ({ voice: "app", scale: 1.03, lineHeight: 1.45, color: "dim" } as const) : ({ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" } as const);
   const hintBox = row ? { maxWidth: chOf(t, 62, 1.03) } : {};
   const labelText = row && !mono && label.length > 0 ? label.charAt(0).toUpperCase() + label.slice(1) : label;
@@ -272,12 +308,16 @@ export function Field({
               {split.first}
             </Txt>
           ) : null
+        ) : hint === undefined && param !== undefined && shownParam === undefined ? (
+          // The hint that held only the path: empty, 0 tall, still a flex item with its gap.
+          <View height={0} />
         ) : hint !== undefined || param !== undefined ? (
           <Txt spec={hintSpec} {...hintBox}>
-            {hint}
-            {param !== undefined && !row ? (
+            {/* White space collapses, as the span's `white-space: normal` does (a schema's description has newlines). */}
+            {typeof hint === "string" ? hint.replace(/\s+/g, " ").trim() : hint}
+            {shownParam !== undefined && !row ? (
               <Txt spec={{ voice: "data", scale: 10 / 12, lineHeight: 1.4, color: "dim" }} marginLeft={6} {...({ whiteSpace: "nowrap" } as object)}>
-                {param}
+                {shownParam}
               </Txt>
             ) : null}
           </Txt>

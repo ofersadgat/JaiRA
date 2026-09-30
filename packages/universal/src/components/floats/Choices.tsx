@@ -1,4 +1,4 @@
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type JSX, type ReactNode } from "react";
 import { TextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { Choice } from "@jaira/shared/browser";
@@ -48,6 +48,7 @@ export function ChoiceList({
   stepped = false,
   first = true,
   flat = false,
+  top = 14,
 }: {
   choices: readonly Choice[];
   answers: Record<string, Answer>;
@@ -65,6 +66,8 @@ export function ChoiceList({
    * context of its own, so the options' 12 stays inside it rather than collapsing into its 14.
    */
   flat?: boolean;
+  /** The first block's margin above: 14, or a transcript's asked question's 6 (`.ts-asked .question-block`). */
+  top?: number;
 }): JSX.Element {
   const t = useTokens();
   const immediate = submitsOnClick(choices, answers);
@@ -93,7 +96,7 @@ export function ChoiceList({
         // question (8 under it, so 4 more) or its description (8 under it too).
         const above = heading || choice.description !== undefined || (choice.freeText?.first === true && comment !== null);
         return (
-          <View key={choice.question} flexDirection="column" marginTop={index === 0 && first ? 14 : 14}>
+          <View key={choice.question} flexDirection="column" marginTop={index === 0 ? top : 14}>
             {heading ? (
               <Txt spec={BODY} marginBottom={8}>
                 {/* The DOM's " " after the chip collapses at the line's start without one (a copy's text keeps it). */}
@@ -145,6 +148,12 @@ export function ChoiceList({
 }
 
 const BODY: FontSpec = { voice: "app", scale: 13 / 12.5 };
+
+/**
+ * Whether a field stands in a gate's frame — a `.modal` or an `.inline-gate` (`.modal .field`: 12 above,
+ * its `small` --dim) — or bare, as in a state's panel, where the global `.field` has neither.
+ */
+export const FieldFrame = createContext(true);
 
 /** `.chip` inside a line of the body's text. */
 function ChipInline({ children }: { children: ReactNode }): JSX.Element {
@@ -234,8 +243,11 @@ export function OptionButton({
         const hover = hovered && !disabled;
         return {
           backgroundColor: primary ? (hover ? t.v("fill-accent-hover") : t.v("fill-accent")) : danger ? "transparent" : t.v("bg"),
-          borderColor: primary ? (hover ? t.v("fill-accent-hover") : t.v("fill-accent")) : hover || selected ? accentOr : danger ? t.mix(t.v("bad"), 45, t.v("line")) : t.v("line"),
-          ...(primary ? { boxShadow: t.v("sheen") } : selected ? { boxShadow: `inset 0 0 0 1px ${String(accentOr)}` } : {}),
+          // `.question-option.selected` comes after `.primary` and ties it, so a chosen affirmative takes the
+          // accent edge and ring rather than its fill's (only `.primary:hover` outranks it) — but a record's
+          // keeps its sheen (`.gate-settled button.primary:disabled`).
+          borderColor: primary ? (hover ? t.v("fill-accent-hover") : selected ? accentOr : t.v("fill-accent")) : hover || selected ? accentOr : danger ? t.mix(t.v("bad"), 45, t.v("line")) : t.v("line"),
+          ...(primary && (disabled || !selected) ? { boxShadow: t.v("sheen") } : selected ? { boxShadow: `inset 0 0 0 1px ${String(accentOr)}` } : {}),
         };
       }}
     >
@@ -284,6 +296,9 @@ function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, o
       placeholder={placeholder}
       placeholderTextColor={placeholderColor("light")}
       editable={!readOnly}
+      // A record is not a box to type in: out of the tab order (`tabIndex -1`), and no text cursor
+      // over it (`.gate-settled textarea[readonly]`).
+      focusable={!readOnly}
       {...(onFocus !== undefined ? { onFocus } : {})}
       {...({ onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false), rows, spellCheck: undefined } as object)}
       style={
@@ -303,6 +318,7 @@ function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, o
                 ...(isWeb ? { resize: "vertical" } : { height: rows * line + 12 }),
               }),
           textAlignVertical: "top",
+          ...(isWeb && readOnly ? { cursor: "default" } : {}),
         } as never
       }
     />
@@ -311,11 +327,12 @@ function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, o
 
 /** The `alongside` free text: a comment, drawn before or after the decision (`label.field`). */
 function FreeText({ choice, answer, onAnswer, readOnly }: { choice: Choice; answer: Answer; onAnswer: (question: string, answer: Answer) => void; readOnly: boolean }): JSX.Element | null {
+  const framed = useContext(FieldFrame);
   const field = choice.freeText;
   if (field === undefined) return null;
   return (
-    <View flexDirection="column" gap={4} marginTop={12}>
-      <Txt spec={{ voice: "app", scale: 13 / 12.5 / 1.2, color: "dim" }}>{field.label}</Txt>
+    <View flexDirection="column" gap={4} marginTop={framed ? 12 : 0}>
+      <Txt spec={{ voice: "app", scale: 13 / 12.5 / 1.2, color: framed ? "dim" : "text" }}>{field.label}</Txt>
       <TextArea value={answer.text} rows={3} placeholder={readOnly ? "" : (field.placeholder ?? "")} readOnly={readOnly} onChange={(text) => onAnswer(choice.question, { ...answer, text })} />
     </View>
   );
@@ -377,6 +394,7 @@ export function ChoiceSteps({
   onSubmit,
   extra,
   readOnly = false,
+  asked = false,
 }: {
   choices: readonly Choice[];
   answers: Record<string, Answer>;
@@ -384,6 +402,8 @@ export function ChoiceSteps({
   onSubmit: () => void;
   extra?: JSX.Element | undefined;
   readOnly?: boolean;
+  /** Under a transcript's row (`.ts-asked`): the block 6 above, Back and Next 8, a size down from a gate's. */
+  asked?: boolean;
 }): JSX.Element {
   const [step, setStep] = useState(0);
   const at = Math.min(step, choices.length - 1);
@@ -400,13 +420,13 @@ export function ChoiceSteps({
         {choice.optional === true ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}> · optional</Txt> : null}
       </Txt>
       {/* The step line's 6 below it collapses into the block's 14. */}
-      <ChoiceList choices={[choice]} answers={answers} onAnswer={onAnswer} stepped readOnly={readOnly} />
+      <ChoiceList choices={[choice]} answers={answers} onAnswer={onAnswer} stepped readOnly={readOnly} top={asked ? 6 : 14} />
       {typed.problem !== undefined ? (
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} marginTop={8}>
           {typed.problem}
         </Txt>
       ) : null}
-      <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
+      <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={asked ? 8 : 14}>
         {at > 0 ? (
           <Button kind="ghost" onPress={() => setStep(at - 1)}>
             Back

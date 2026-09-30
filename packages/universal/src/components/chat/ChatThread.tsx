@@ -17,6 +17,7 @@ import { InlineHost } from "../panel/RunTranscript";
 import { ForkMark, OriginMark } from "../panel/SessionBands";
 import { WaitingHost } from "./Waiting";
 import { DayChip } from "../panel/TranscriptMarks";
+import { FootFade } from "./FootFade";
 
 /**
  * `chatPane.tsx`'s `ChatThread`, universal (decision 0015): one conversation — the thread on its sheet,
@@ -192,8 +193,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       {m.waitingHere.length > 0 ? <WaitingHost items={m.waitingHere} /> : null}
 
       <View flexShrink={0} backgroundColor={t.v("bg") as never}>
-        {/* `.chat-foot::before`: the thread fading into the ground the box sits on (web; a phone draws no gradient ground). */}
-        {isWeb ? <View position="absolute" left={0} right={0} top={-18} height={18} pointerEvents="none" {...({ backgroundImage: `linear-gradient(to bottom, transparent, ${String(t.v("bg"))})` } as object)} /> : null}
+        {/* `.chat-foot::before`: the thread fading into the ground the box sits on, over its last 18. */}
+        <FootFade color={String(t.v("bg"))} />
         {m.arming !== null ? (
           <View
             flexDirection="row"
@@ -262,3 +263,4 @@ function ChatFork({ children }: { children: ReactNode }): JSX.Element {
     </View>
   );
 }
+

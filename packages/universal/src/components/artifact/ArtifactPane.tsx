@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { ReviewNote } from "@jaira/shared/browser";
 import type { DraftBox } from "@jaira/ui/drafts";
 import { artifactChangeOf, artifactReadingOf } from "@jaira/ui/artifactReview";
-import { PLAIN_SCROLLER, edge, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";
 import { ValueView } from "../panel/ValueView";
@@ -139,7 +139,7 @@ export function ArtifactWell({ marginTop = 12, wellRef, held, children }: { marg
         padding={10}
         {...box}
         {...({ overflow: "auto" } as object)}
-        {...(scrollbarProps(t) as object)}
+        {...(viewScrollbarProps(t) as object)}
         {...((held !== undefined ? { dataSet: { [dataKey(HELD_QUOTE)]: held } } : {}) as object)}
       >
         {children}

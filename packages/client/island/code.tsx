@@ -11,7 +11,8 @@ import { mountIsland } from "./host";
  *
  * Props: `text`, `mime`, `readOnly` (the editor, refusing typing), `reading` (the code view instead),
  * `view` (which view's palette), `file` (the name Monaco parses by), `reveal` (the caret on the way
- * in), `theme` (the code view's palette, for a preview showing one). Events: `change`, the text.
+ * in), `theme` (the code view's palette, for a preview showing one), `autoHeight` (a fenced block's
+ * editor: as tall as its text, which the page reports as its height, rather than filling the region). Events: `change`, the text.
  * Code intelligence (`file:check` and the rest) stays on the desktop: it asks main, which an island
  * page cannot reach.
  */
@@ -30,8 +31,9 @@ mountIsland({
       );
     }
     const reveal = p["reveal"] as { line: number; column: number } | undefined;
+    const fit = p["autoHeight"] === true;
     return (
-      <div className="file-edit" style={{ height: "100vh" }}>
+      <div className="file-edit" style={fit ? {} : { height: "100vh" }}>
         <MonacoCodePane
           // A different file is a different editor — `documents.tsx`'s `key`, for the same reasons.
           key={file}
@@ -40,6 +42,7 @@ mountIsland({
           onChange={event("change")}
           {...(p["readOnly"] === true ? { readOnly: true } : {})}
           view={(p["view"] as RenderView | undefined) ?? "write"}
+          {...(fit ? { autoHeight: true } : {})}
           {...(file === undefined ? {} : { file })}
           {...(reveal === undefined ? {} : { reveal })}
         />

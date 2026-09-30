@@ -1,11 +1,12 @@
 import { useMemo, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { choicesOfConfig, editorKindOf, type EditArtifactConfig, type PendingInteraction, type ReviewArtifactConfig, type ReviewArtifactsConfig, type ReviewNote } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
 import { gateServices, type ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { invoke } from "@jaira/ui/store";
-import { EMPTY_ANSWER, answerOf, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import { EMPTY_ANSWER, answerOf, answersOfValue, submitsOnClick, type Answer } from "@jaira/ui/choices";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
-import { artifactShapeOf, notesCount, reviewAnswerOf, reviewVerdictOf } from "@jaira/ui/artifactReview";
+import { artifactShapeOf, notesCount, recordedDraft, reviewAnswerOf, reviewVerdictOf } from "@jaira/ui/artifactReview";
 import { useAuthor } from "@jaira/ui/reviewSelection";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -31,15 +32,21 @@ import { ChangesetReview } from "./ChangesetReview";
  *
  * `flat`: the host is a flex column (the gallery's wide modal), where no margin collapses — the
  * question block's options keep their 12 inside it.
+ *
+ * `settled`: the gate as it was answered (`components.tsx`'s `settled`) — seeded with the value that came
+ * back and every control inert: the notes as written, the artifact as edited (`recordedDraft`, so an
+ * edit shows as the change it was), the decision lit.
  */
-export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, project, flat }: { config: ReviewArtifactConfig; inputs: Record<string, unknown>; onSubmit: (value: unknown) => void; requestId: string; project: string | undefined; flat: boolean }): JSX.Element {
+export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, project, flat, settled }: { config: ReviewArtifactConfig; inputs: Record<string, unknown>; onSubmit: (value: unknown) => void; requestId: string; project: string | undefined; flat: boolean; settled?: { value: unknown } | undefined }): JSX.Element {
   const t = useTokens();
-  const [answers, setAnswers] = useState<Record<string, Answer>>({});
-  const [notes, setNotes] = useState<ReviewNote[]>([]);
+  const recorded = recordOf(settled?.value);
+  const [answers, setAnswers] = useState<Record<string, Answer>>(() => (settled !== undefined ? answersOfValue(choicesOfConfig(config), settled.value as never) : {}));
+  const [notes, setNotes] = useState<ReviewNote[]>(() => (Array.isArray(recorded["notes"]) ? (recorded["notes"] as unknown as ReviewNote[]) : []));
   const author = useAuthor(project);
   const value = inputs[config.artifact];
   const { seed, mime } = artifactShapeOf(value);
-  const draft = useDraftBox(undefined, undefined, docKey("gate", `${requestId}:${config.artifact}`), seed);
+  const live = useDraftBox(undefined, undefined, docKey("gate", `${requestId}:${config.artifact}`), seed);
+  const draft = settled !== undefined ? recordedDraft(seed, recorded["content"] as JsonValue | undefined) : live;
   const comments = (answers[config.prompt] ?? EMPTY_ANSWER).text.trim();
   const choices = choicesOfConfig(config);
   const { collapsed, sendBack, verdict } = reviewVerdictOf(choices[0]!.options, comments, notes.length);
@@ -58,11 +65,15 @@ export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, projec
           seed={seed}
           mime={mime}
           draft={draft}
-          editable={config.editable === true}
+          editable={settled === undefined && config.editable === true}
           notes={notes}
-          onNote={(note) => setNotes((prev) => [...prev, note])}
-          onRemoveNote={(i) => setNotes((prev) => prev.filter((_, at) => at !== i))}
-          onReply={(i, body) => setNotes((prev) => prev.map((note, at) => (at === i ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] } : note)))}
+          {...(settled !== undefined
+            ? {}
+            : {
+                onNote: (note: ReviewNote) => setNotes((prev) => [...prev, note]),
+                onRemoveNote: (i: number) => setNotes((prev) => prev.filter((_, at) => at !== i)),
+                onReply: (i: number, body: string) => setNotes((prev) => prev.map((note, at) => (at === i ? { ...note, replies: [...(note.replies ?? []), { author, body, at: new Date().toISOString() }] } : note))),
+              })}
           author={author}
           artifactId={config.artifact}
         />
@@ -82,7 +93,21 @@ export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, projec
         </Txt>
       </View>
       {/* Comments change the SHAPE of the footer: a review with notes on it has one outcome — it goes back. */}
-      {collapsed ? (
+      {settled !== undefined ? (
+        // As it was decided, in the shape it was decided in: a review sent back with comments showed the
+        // comment and one button (drawn lit, `.gate-settled button.primary:disabled`), one decided in
+        // silence the row, with the decision lit.
+        collapsed && recorded["decision"] === sendBack!.value ? (
+          <>
+            <ChoiceList choices={[{ ...choices[0]!, options: [] }]} answers={answers} onAnswer={() => undefined} readOnly flat={flat} />
+            <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
+              <Button kind="primary">Send back with comments</Button>
+            </View>
+          </>
+        ) : (
+          <ChoiceList choices={choices} answers={answers} onAnswer={() => undefined} readOnly flat={flat} />
+        )
+      ) : collapsed ? (
         <>
           <ChoiceList choices={[{ ...choices[0]!, options: [] }]} answers={answers} onAnswer={onAnswer} flat={flat} />
           <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
@@ -112,10 +137,12 @@ export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, projec
  * answer too, so Save is never held for want of an edit. A picture, a sound or a video has nothing to
  * type into: it is shown, said so, and handed back with Done.
  */
-export function EditArtifactGate({ config, inputs, onSubmit, requestId, project }: { config: EditArtifactConfig; inputs: Record<string, unknown>; onSubmit: (value: unknown) => void; requestId: string; project: string | undefined }): JSX.Element {
+export function EditArtifactGate({ config, inputs, onSubmit, requestId, project, settled }: { config: EditArtifactConfig; inputs: Record<string, unknown>; onSubmit: (value: unknown) => void; requestId: string; project: string | undefined; settled?: { value: unknown } | undefined }): JSX.Element {
   const value = config.source === undefined ? undefined : inputs[config.source];
   const { seed, mime } = artifactShapeOf(value);
-  const draft = useDraftBox(undefined, undefined, docKey("gate", `${requestId}:${config.source ?? ""}`), seed);
+  const live = useDraftBox(undefined, undefined, docKey("gate", `${requestId}:${config.source ?? ""}`), seed);
+  // Settled, the text that came back over what was shown: the pane shows the edit that was made.
+  const draft = settled !== undefined ? recordedDraft(seed, recordOf(settled.value)["content"] as JsonValue | undefined) : live;
   const author = useAuthor(project);
   if (editorKindOf(mime, seed) === "readonly") {
     return (
@@ -126,21 +153,26 @@ export function EditArtifactGate({ config, inputs, onSubmit, requestId, project 
         <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "warn" }} marginTop={10}>
           This is {mime ?? "not text"}, so there is nothing here to type into. Submitting hands it back unchanged.
         </Txt>
-        <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
-          <Button kind="primary" onPress={() => onSubmit({ content: seed })}>
-            Done
-          </Button>
-        </View>
+        {settled !== undefined ? null : (
+          <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
+            <Button kind="primary" onPress={() => onSubmit({ content: seed })}>
+              Done
+            </Button>
+          </View>
+        )}
       </>
     );
   }
   return (
     <>
-      <ArtifactPane value={value} seed={seed} mime={mime} draft={draft} editable notes={[]} author={author} artifactId={config.source ?? "content"} />
-      <EditorActions dirty={draft.dirty || undefined} onSave={() => onSubmit({ content: draft.text })} />
+      <ArtifactPane value={value} seed={seed} mime={mime} draft={draft} editable={settled === undefined} notes={[]} author={author} artifactId={config.source ?? "content"} />
+      {settled !== undefined ? null : <EditorActions dirty={draft.dirty || undefined} onSave={() => onSubmit({ content: draft.text })} />}
     </>
   );
 }
+
+/** What a settled record answered, as a record (`components.tsx`'s `recordOf`). */
+const recordOf = (value: unknown): Record<string, unknown> => (value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
 
 /**
  * `ChangesetGate`: the reviewer, wired as the desktop wires it (`gateServices`) — `$WORKTREE` reads scoped

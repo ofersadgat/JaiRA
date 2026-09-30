@@ -2,15 +2,17 @@ import type { JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { TaskDetail } from "@jaira/shared/browser";
 import { activityOf, durationOf, startedAtOf, useElapsed } from "@jaira/ui/runActivityModel";
+import { listed, type ArmedRewind } from "@jaira/ui/runConversationModel";
 import { Press, Txt } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { Uncopied } from "../../app/Uncopied";
+import { Button } from "../settings/Button";
 import { lengthOf } from "./SidePanel";
 
 /**
  * `runViews.tsx`'s `RunActivity` inside its `.cx-doing`, universal (decision 0015): what is happening
  * here and the button that ends it, where a composer would stand. It says what `activityOf` says
- * (`runActivityModel.ts`, shared). The fast-forward strip is {@link Uncopied}. The rules:
+ * (`runActivityModel.ts`, shared), the fast-forward strip (`FastForwardStrip`) among it; an armed
+ * rewind's strip is {@link CutStrip}, in its place. The rules:
  *
  *   .cx-doing            padding 10 16 14, --bg
  *   .run-doing           row, centred, gap 9, padding 6 8 6 13, 1px --line, radius --card-radius,
@@ -24,14 +26,23 @@ import { lengthOf } from "./SidePanel";
  *   button.danger        --bad on nothing, the edge --bad 40% into --line (hover: --tint-bad, 60%);
  *                        button: radius --control-radius, padding --control-pad, the strip's font
  *   .run-doing .primary  --size-app × 11/12.5, 500, padding 3 12, --on-accent on --fill-accent
+ *
+ * `.run-doing.ffwd b + .run-doing-cut { margin-left: 2px }` matches nothing the DOM draws: the `b` is
+ * inside the `.ellip` span and the `·` is that span's sibling, so there is nothing to carry.
  */
-export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined }): JSX.Element | null {
+export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip, lead }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined; /** What the DOM puts in the same `.cx-doing` before the strip (the offline banner). */ lead?: ReactNode }): JSX.Element | null {
   const t = useTokens();
   const activity = activityOf(detail, asking, { rerun: onRerun !== undefined, resume: onResume !== undefined });
   const elapsed = useElapsed(startedAtOf(detail), activity.kind === "going", 1000);
   // A run that did what it was asked says nothing — but `.cx-doing` still stands there, empty: its
   // padding (10 over 14) is the room the DOM keeps under the conversation either way.
-  if (activity.kind === "none") return <View paddingTop={10} paddingBottom={14} backgroundColor={t.v("bg") as never} flexShrink={0} />;
+  if (activity.kind === "none") {
+    return (
+      <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never} flexShrink={0}>
+        {lead}
+      </View>
+    );
+  }
   const base = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
   const at = (where: string): JSX.Element => <Txt spec={{ ...base, weight: 600, color: "text" }}>{where.length > 0 ? where : "this run"}</Txt>;
   const tone = activity.kind === "going" && activity.waiting ? { pct: 42, ground: 7, hue: "warn" } : activity.kind === "stopping" ? { pct: 40, ground: 6, hue: "warn" } : activity.kind === "stopped" && (activity.tone === "bad" || activity.tone === "warn") ? { pct: 40, ground: 6, hue: activity.tone } : undefined;
@@ -145,7 +156,85 @@ export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip 
   }
   return (
     <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never} flexShrink={0}>
+      {lead}
       {body}
+    </View>
+  );
+}
+
+/** `.cx-doing`: the composer's own padded band, on --bg — where the strips stand. */
+export function CxDoing({ children, gap }: { children: ReactNode; gap?: number }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never} flexShrink={0} {...(gap !== undefined ? { gap } : {})}>
+      {children}
+    </View>
+  );
+}
+
+/**
+ * `CutStrip`: the strip while a rewind is armed — the sentence, and the one filled button in the danger
+ * colour — in `RunActivity`'s place, where this task already reports what is happening to it.
+ *
+ *   .run-doing.bad         --bad 40% into --line for the edge, 6% into --panel for the ground
+ *   .cut-strip .ellip      wraps: it names every state that goes
+ *   button.ghost           Cancel, in the strip's font, --text
+ *   .run-doing button.cut  --bad ground and ring, #fff at 600, --sheen; hovered --bad 88% into black
+ */
+export function CutStrip({ armed, onConfirm, onCancel }: { armed: ArmedRewind; onConfirm: () => void; onCancel: () => void }): JSX.Element {
+  const t = useTokens();
+  const gone = armed.doomed.length === 0 ? [armed.name] : armed.doomed;
+  const base = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
+  const [padV, padH] = padOf(t);
+  return (
+    <View
+      role="alertdialog"
+      aria-label={`Rewind to before ${armed.name}`}
+      flexDirection="row"
+      alignItems="center"
+      gap={9}
+      maxWidth={900}
+      width="100%"
+      alignSelf="center"
+      paddingTop={6}
+      paddingRight={8}
+      paddingBottom={6}
+      paddingLeft={13}
+      borderWidth={1}
+      borderStyle="solid"
+      borderRadius={lengthOf(t, "card-radius", 10)}
+      borderColor={t.mix(t.v("bad"), 40, t.v("line")) as never}
+      backgroundColor={t.mix(t.v("bad"), 6, t.v("panel")) as never}
+    >
+      <View width={6} height={6} borderRadius={3} flexShrink={0} backgroundColor={t.v("bad") as never} />
+      <Txt spec={base} flexShrink={1} minWidth={0} overflow="hidden">
+        Rewind to before <Txt spec={{ ...base, weight: 600, color: "text" }}>{armed.name}</Txt> — {listed(gone)} {gone.length === 1 ? "is" : "are"} deleted and the run enters{" "}
+        {armed.name} again. Files edited in the worktree stay as they are.
+      </Txt>
+      <View flex={1} minWidth={0} />
+      <Button kind="ghost" onPress={onCancel} font={{ scale: 11.5 / 12.5 }} flexShrink={0}>
+        Cancel
+      </Button>
+      <Press
+        onPress={onConfirm}
+        flexShrink={0}
+        paddingVertical={padV}
+        paddingHorizontal={padH}
+        borderWidth={1}
+        borderStyle="solid"
+        borderRadius={lengthOf(t, "control-radius", 7)}
+        flexDirection="row"
+        alignItems="center"
+        justifyContent="center"
+        box={({ hovered }) => {
+          const ground = hovered ? t.mix(t.v("bad"), 88, "black") : t.v("bad");
+          return { backgroundColor: ground, borderColor: ground, boxShadow: t.v("sheen") };
+        }}
+      >
+        <Txt spec={{ ...base, weight: 600, color: "#fff" }} numberOfLines={1}>
+          Rewind
+        </Txt>
+      </Press>
     </View>
   );
 }

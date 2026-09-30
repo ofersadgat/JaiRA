@@ -13,7 +13,7 @@ import { askedOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, 
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
-import { ChoiceList, ChoiceSteps } from "../floats/Choices";
+import { ChoiceList, ChoiceSteps, FieldFrame } from "../floats/Choices";
 import { Pulse } from "../chat/Paper";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
@@ -45,7 +45,10 @@ import { ValueView } from "./ValueView";
  */
 
 /** Draws a subagent's conversation — the transcript's own component, handed in (it holds this file). */
-export type TranscriptOf = (props: { entries: TranscriptEntry[]; working?: boolean | undefined }) => JSX.Element;
+export type TranscriptOf = (props: { entries: TranscriptEntry[]; working?: boolean | undefined; onOpenSidechain?: OpenSidechain | undefined }) => JSX.Element;
+
+/** Walk into a subagent's conversation: the call that spawned it, and its name. */
+export type OpenSidechain = (call: string, name: string) => void;
 
 /** A command line in the colours of its parts (`shellLine.tsx`): nested text, so it ellipses as one line. */
 export function ShellLine({ line, padding = 2 }: { line: string; padding?: number }): JSX.Element {
@@ -212,15 +215,16 @@ function EmptyPayload({ children }: { children: string }): JSX.Element {
 }
 
 /** `Tool`: one tool call — a line, both its halves when asked for, and what it made, drawn unasked. */
-function Tool({ entry, open, sidechainOf, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
+function Tool({ entry, open, sidechainOf, onOpenSidechain, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
-  const line = toolLineOf(entry, open, sub !== undefined, calls);
+  // A doorway is drawn for a chain that is here to unfold, or one the host can walk into.
+  const line = toolLineOf(entry, open, sub !== undefined || onOpenSidechain !== undefined, calls);
   const { running, unanswered, pathMime } = line;
   const head = { entry, name: line.name, called: line.called, server: line.server, preview: line.preview, command: line.command, prose: line.prose, tone: line.tone, mark: line.mark };
   // The approval prompt: its line is the whole of it (`Tool`'s first branch).
   if (isApprovalCall(entry)) return <Row {...head} />;
   const shown = ((): ReactNode => {
-    if (line.shown === "sidechain") return <SidechainDoor name={line.chainName} entries={sub} running={running} transcript={transcript} />;
+    if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} />;
     if (line.shown === "outcome") {
       const outcome = workflowOutcomeOf(entry.result!);
       return outcome === undefined ? null : <OutcomeNote outcome={outcome} />;
@@ -303,6 +307,7 @@ export function Work({
   entry,
   open,
   sidechainOf,
+  onOpenSidechain,
   narrated,
   calls,
   transcript,
@@ -310,11 +315,12 @@ export function Work({
   entry: WorkEntry;
   open: boolean;
   sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined;
+  onOpenSidechain?: OpenSidechain | undefined;
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
   transcript: TranscriptOf;
 }): JSX.Element {
-  if (entry.kind === "tool") return <Tool entry={entry} open={open} sidechainOf={sidechainOf} calls={calls} transcript={transcript} />;
+  if (entry.kind === "tool") return <Tool entry={entry} open={open} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} calls={calls} transcript={transcript} />;
   if (entry.kind === "thought") return <Thought entry={entry} open={open} narrated={narrated} />;
   if (entry.kind === "writing") return <Writing entry={entry} open={open} />;
   return (
@@ -339,14 +345,15 @@ export function WorkColumn({ children, ...box }: { children: ReactNode } & Recor
 
 /**
  * `SidechainDoor`: a subagent's conversation under the call that spawned it — a line naming it that
- * unfolds it here (the same transcript, one step further in). Walking into it is the host's: `onOpen`.
+ * unfolds it here (the same transcript, one step further in). Walking into it is the host's: `onOpen`,
+ * handed on to the conversation inside, whose own doorways walk further in.
  *
  *   .ts-sidechain        margin 2 0 6, padding 2 0 2 12 (open: 6 above)
  *   .ts-sidechain-head   row, centred, gap 8, app 11/12.5, upper, 0.04em, --dim; 4 under while open
  *   .ts-sidechain-fold   inline row, centred, gap 4, hovered --text; the chevron turned −90° shut
  *   .ts-sidechain-open   pushed right, padding 0 2, --accent ("walk in →")
  */
-function SidechainDoor({ name, entries, running, transcript: Inner, onOpen }: { name: string; entries: TranscriptEntry[] | undefined; running: boolean; transcript: TranscriptOf; onOpen?: ((name: string) => void) | undefined }): JSX.Element {
+function SidechainDoor({ call, name, entries, running, transcript: Inner, onOpen }: { call: string; name: string; entries: TranscriptEntry[] | undefined; running: boolean; transcript: TranscriptOf; onOpen?: OpenSidechain | undefined }): JSX.Element {
   const t = useTokens();
   const [open, setOpen] = useState(false);
   const messages = entries?.filter((entry) => entry.kind === "message").length ?? 0;
@@ -371,14 +378,14 @@ function SidechainDoor({ name, entries, running, transcript: Inner, onOpen }: { 
           <Txt spec={words}>Subagent conversation</Txt>
         )}
         {onOpen !== undefined ? (
-          <Press onPress={() => onOpen(name)} marginLeft="auto" flexShrink={0} paddingHorizontal={2}>
+          <Press onPress={() => onOpen(call, name)} marginLeft="auto" flexShrink={0} paddingHorizontal={2}>
             <Txt spec={{ ...words, color: "accent" }} numberOfLines={1}>
               walk in →
             </Txt>
           </Press>
         ) : null}
       </View>
-      {open && entries !== undefined ? <Inner entries={entries} working={running} /> : null}
+      {open && entries !== undefined ? <Inner entries={entries} working={running} onOpenSidechain={onOpen} /> : null}
     </View>
   );
 }
@@ -391,14 +398,18 @@ function AskedQuestions({ questions, answers }: { questions: AgentQuestion[]; an
   const choices = useMemo(() => choicesOfQuestions(questions), [questions]);
   const [state, setState] = useState<Record<string, Answer>>(() => answersOfValue(choices, answers === undefined ? undefined : { answers }));
   return (
-    // `.ts-asked .question-block`: 6 above, which collapses with the shown row's 2 — the chooser's own 14 less 8.
-    <View testID="asked" minWidth={0} marginTop={-10}>
+    // `.ts-asked .question-block`: 6 above, which collapses with the shown row's 2 — the chooser's own 14
+    // less 8. Several questions start at their step line, 0 above; the stepper spaces itself (`asked`).
+    // Not in a gate's frame: a field's label is the global `.field`'s, 0 above and --text.
+    <FieldFrame.Provider value={false}>
+    <View testID="asked" minWidth={0} marginTop={choices.length > 1 ? 0 : -10}>
       {choices.length > 1 ? (
-        <ChoiceSteps choices={choices} answers={state} onAnswer={(question, next) => setState((prev) => ({ ...prev, [question]: next }))} onSubmit={() => undefined} readOnly />
+        <ChoiceSteps choices={choices} answers={state} onAnswer={(question, next) => setState((prev) => ({ ...prev, [question]: next }))} onSubmit={() => undefined} readOnly asked />
       ) : (
         <ChoiceList choices={choices} answers={state} onAnswer={(question, next) => setState((prev) => ({ ...prev, [question]: next }))} readOnly />
       )}
     </View>
+    </FieldFrame.Provider>
   );
 }
 

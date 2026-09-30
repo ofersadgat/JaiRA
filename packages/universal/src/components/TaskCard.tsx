@@ -1,4 +1,4 @@
-import type { JSX, MouseEvent as ReactMouseEvent } from "react";
+import { memo, useMemo, useRef, useState, type JSX, type MouseEvent as ReactMouseEvent } from "react";
 import { Pressable } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { chipTip, endedLabel, holdingLabelOf, originLineOf, waitingKindOf } from "@jaira/ui/boardModel";
@@ -6,12 +6,13 @@ import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
 import type { CardProps } from "@jaira/ui/slots";
 import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
-import { edge, faceOf } from "../primitives";
+import { Press, Txt, edge, faceOf } from "../primitives";
 import { useLook, useTokens } from "../tokens";
 import { CardDom } from "./domFallback";
 import { MachineChip } from "./MachineChip";
 import { NextChips } from "./NextChips";
 import { Pill } from "./Pill";
+import { Svg } from "./panel/Svg";
 
 /**
  * `board.tsx`'s `Card` (on its `Tile`), universal (decision 0015). Read that one for what a card says;
@@ -33,10 +34,16 @@ import { Pill } from "./Pill";
  *   .card-head / .card-title / .card-meta  the rows; the title is the data voice, 600 when selected
  *   (block layout)                         .card-next's 1px bottom margin collapses into .card-meta's 2px
  *                                          top; a flex column would add them, so the copy collapses them
+ *   .card-status                           the meta line's far end: which kind of waiting, when it ended —
+ *                                          or `UndoLink` (`button.link`: data 11/12, --accent, no box;
+ *                                          hovered underlined), a moment after a drop made or moved it
+ *   .card-origin                           `OriginLine`: what started the task — row, top-aligned, gap 5, 4
+ *                                          above, --dim, data 0.84, one line; its mark 1em, 2 down, --accent;
+ *                                          a link (`.card-origin-link`) hovered in --text
  *
- * Not copied yet, and drawn by the DOM card on web instead: a card with an undo link (a moment after a
- * drop, so never in v1's read-only reach), and one with an origin line, which is the next thing this
- * copy should learn.
+ * A phone draws the undo link and the origin line from here. On web a card with either is still drawn by
+ * the DOM card (`domFallback.web.tsx`) — the desktop draws this copy too — unless `copied` says otherwise
+ * (the `card-*` specimens compare the two).
  */
 /**
  * The clicks a card (or something on it) took, by their DOM event: a column's own click, which in the DOM
@@ -44,13 +51,61 @@ import { Pill } from "./Pill";
  */
 export const claimed = new WeakSet<object>();
 
-export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
+type TaskCardProps = CardProps & { inTray?: boolean; copied?: boolean };
+type Call<K extends keyof CardProps> = NonNullable<CardProps[K]>;
+
+/**
+ * A card, drawn again only when what it shows has changed ({@link CardFace}). A board is drawn again on
+ * every change to the store — a selection, each word a running task streams — and on a board of a few
+ * hundred cards the cards were nearly all of that work, each drawn again the same. What a board hands a
+ * card to call is a new closure every time, so the face is handed stand-ins that call the latest ones
+ * and never change. The ages a card shows ("3 minutes ago") are read here, on every draw as before, so
+ * a face whose age has moved on is drawn again.
+ */
+export function TaskCard(props: TaskCardProps): JSX.Element {
+  const latest = useRef(props);
+  latest.current = props;
+  const calls = useMemo(
+    () => ({
+      onSelect: (...a: Parameters<Call<"onSelect">>) => latest.current.onSelect(...a),
+      onDrill: () => latest.current.onDrill?.(),
+      onMenu: (...a: Parameters<Call<"onMenu">>) => latest.current.onMenu?.(...a),
+      onDragStart: () => latest.current.onDragStart?.(),
+      onDragEnd: () => latest.current.onDragEnd?.(),
+      onUndo: () => latest.current.onUndo?.(),
+      onMove: (...a: Parameters<Call<"onMove">>) => latest.current.onMove?.(...a),
+      onOrigin: (...a: Parameters<Call<"onOrigin">>) => latest.current.onOrigin?.(...a),
+    }),
+    [],
+  );
+  const { card, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, ...rest } = props;
+  return (
+    <CardFace
+      {...rest}
+      card={card}
+      onSelect={calls.onSelect}
+      {...(onDrill !== undefined ? { onDrill: calls.onDrill } : {})}
+      {...(onMenu !== undefined ? { onMenu: calls.onMenu } : {})}
+      {...(onDragStart !== undefined ? { onDragStart: calls.onDragStart } : {})}
+      {...(onDragEnd !== undefined ? { onDragEnd: calls.onDragEnd } : {})}
+      {...(onUndo !== undefined ? { onUndo: calls.onUndo } : {})}
+      {...(onMove !== undefined ? { onMove: calls.onMove } : {})}
+      {...(onOrigin !== undefined ? { onOrigin: calls.onOrigin } : {})}
+      ages={`${card.endedAt !== undefined ? endedLabel(card.endedAt) : ""}|${card.archived !== undefined ? endedLabel(card.archived.at) : ""}`}
+    />
+  );
+}
+
+/** The card itself; `ages` is only what makes it draw again when an age it shows has moved on. */
+const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string }): JSX.Element {
   const t = useTokens();
   const look = useLook();
-  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, child = false, last = false, inTray = false } = props;
+  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false, copied = false } = props;
+  // On web (where the desktop draws this copy too), a card with an undo link or an origin line is still
+  // the DOM card's, as it was before these were copied — `copied` draws the copy there (its specimen).
   const uncovered = onUndo !== undefined || originLineOf(card) !== undefined;
-  if (uncovered && CardDom !== null) {
-    const { inTray: _tray, ...dom } = props;
+  if (uncovered && CardDom !== null && !copied) {
+    const { inTray: _tray, copied: _copied, ages: _ages, ...dom } = props;
     return <CardDom {...dom} />;
   }
 
@@ -189,7 +244,12 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
         >
           {where}
         </Text>
-        {far !== undefined ? (
+        {onUndo !== undefined ? (
+          // `.card-status`, holding the link in place of the far words; a finished card's still titled when it ended.
+          <View flexShrink={0} {...((isWeb && card.endedAt !== undefined ? { title: new Date(card.endedAt).toLocaleString() } : {}) as object)}>
+            <UndoLink onUndo={onUndo} />
+          </View>
+        ) : far !== undefined ? (
           <Text
             {...(line(0.84) as object)}
             {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}
@@ -201,6 +261,7 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
           </Text>
         ) : null}
       </View>
+      <OriginLine card={card} onGo={onOrigin} />
     </View>
   );
   if (isWeb) return drawn;
@@ -212,6 +273,78 @@ export function TaskCard(props: CardProps & { inTray?: boolean }): JSX.Element {
       {drawn}
     </Pressable>
   );
+});
+
+/**
+ * `board.tsx`'s `UndoLink`: **Undo**, on the card a connect made or moved — a word in the card's own line
+ * (`button.link`). The card under it selects on click and opens on double-click; this is neither, so on
+ * web the click stops at the box round it (after the pressable has taken it), and on a phone the inner
+ * pressable takes the touch from the card's.
+ */
+function UndoLink({ onUndo }: { onUndo: () => void }): JSX.Element {
+  const stop = isWeb ? { onClick: (e: ReactMouseEvent) => e.stopPropagation(), onDoubleClick: (e: ReactMouseEvent) => e.stopPropagation() } : {};
+  return (
+    <View {...(stop as object)}>
+      <Press onPress={onUndo} label="Undo">
+        {({ hovered }) => (
+          <Txt spec={{ voice: "data", scale: 11 / 12, color: "accent" }} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+            Undo
+          </Txt>
+        )}
+      </Press>
+    </View>
+  );
+}
+
+/**
+ * `board.tsx`'s `OriginLine`: "started by events · push_main · git.push a1b2c3d on main" (decision 0010
+ * §4), under the meta line in its voice (`originLineOf` says it). Pressed, it opens the events task at
+ * the automation that started this one — and only that: the press stops here, so the card is not
+ * selected on the way.
+ */
+function OriginLine({ card, onGo }: { card: CardProps["card"]; onGo?: CardProps["onOrigin"] }): JSX.Element | null {
+  const t = useTokens();
+  const [hovered, setHovered] = useState(false);
+  const line = originLineOf(card);
+  if (line === undefined) return null;
+  const link = onGo !== undefined;
+  // The mark is 1em of the line's own size.
+  const em = Number(t.scaled("size-data", 0.84));
+  const web = isWeb
+    ? {
+        title: link ? "Started by the events task — click to open it at the automation that started this" : "Started by the events task",
+        ...(link
+          ? {
+              onClick: (e: ReactMouseEvent) => {
+                e.stopPropagation();
+                onGo(line.taskId, e, line.stateId);
+              },
+              onMouseEnter: () => setHovered(true),
+              onMouseLeave: () => setHovered(false),
+            }
+          : {}),
+      }
+    : {};
+  const drawn = (
+    <View flexDirection="row" alignItems="flex-start" gap={5} marginTop={4} overflow="hidden" {...(web as object)}>
+      <Svg
+        width={em}
+        height={em}
+        color={String(t.v("accent"))}
+        box={{ marginTop: 2 }}
+        shapes={[
+          { kind: "path", d: "M6 3v6a3 3 0 0 0 3 3h7" },
+          { kind: "path", d: "M6 21v-6" },
+          { kind: "path", d: "m13 9 3 3-3 3" },
+        ]}
+      />
+      <Txt spec={{ voice: "data", scale: 0.84, color: hovered ? "text" : "dim" }} ellip flex={1} minWidth={0}>
+        {line.words}
+      </Txt>
+    </View>
+  );
+  if (isWeb || !link) return drawn;
+  return <Pressable onPress={() => onGo(line.taskId, undefined as never, line.stateId)}>{drawn}</Pressable>;
 }
 
 /**

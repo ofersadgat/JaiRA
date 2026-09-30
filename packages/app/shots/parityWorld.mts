@@ -49,9 +49,34 @@ export const TS_SAMPLE = [
 /** A `tsconfig.json`, which the schema-aware editor recognises by its name (`files-schema`): one field it rejects. */
 export const TSCONFIG_SAMPLE = JSON.stringify({ compilerOptions: { target: "ES2022", strict: true, module: 5 }, include: ["src"] }, null, 2);
 
+/** A patch to `lint.ts`, for the Files room's Changes and Side by side renderers (`files-patch-side`). */
+export const PATCH_SAMPLE = [
+  "--- a/lint.ts",
+  "+++ b/lint.ts",
+  "@@ -3,5 +3,6 @@",
+  " ",
+  " export function laneOfCard(card: { status: string; endedAt?: number }): Lane {",
+  '   if (card.status === "running") return "running";',
+  '-  return card.endedAt !== undefined ? "finished" : "not-started";',
+  '+  if (card.endedAt !== undefined) return "finished";',
+  '+  return "not-started";',
+  " }",
+  "",
+].join("\n");
+
+/** A page, for the Files room's Rendered view (`files-html`). */
+export const HTML_SAMPLE = "<!doctype html>\n<html>\n  <body>\n    <h1>Release notes</h1>\n    <p>Cards now keep their lane.</p>\n  </body>\n</html>\n";
+
+/** The files the Files room's scenes open, written into the project by the seed (a world seeded before them needs `--reseed`). */
+export function writeSamples(project: string): void {
+  writeFileSync(join(project, "lint.ts"), TS_SAMPLE);
+  writeFileSync(join(project, "tsconfig.json"), TSCONFIG_SAMPLE);
+  writeFileSync(join(project, "change.patch"), PATCH_SAMPLE);
+  writeFileSync(join(project, "notes.html"), HTML_SAMPLE);
+}
+
 export async function seed(world: World, out: string, port = 9239): Promise<void> {
-  writeFileSync(join(world.project, "lint.ts"), TS_SAMPLE);
-  writeFileSync(join(world.project, "tsconfig.json"), TSCONFIG_SAMPLE);
+  writeSamples(world.project);
   const app = await launch(world, port, out);
   try {
     await start(app, "add dark mode", happyRules());
@@ -119,6 +144,24 @@ export const SCENES: readonly Scene[] = [
       await drillParked(app);
       await clickFirst(app, "Conversation");
       await app.until(says("Produced"), "the run's conversation, and its context in the panel");
+      await settle(1500);
+    },
+  },
+  // A LEAF of the run walked into (its Goals card, double-clicked): a state that holds a conversation,
+  // so under it stands the run's composer (`ChatComposer`) rather than the activity strip.
+  {
+    name: "run-leaf",
+    reach: async (app) => {
+      await drillParked(app);
+      const hit = await app.evaluate<boolean>(`(() => {
+        const own = [...document.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.textContent === "Goals");
+        const card = own.find((e) => { const r = e.getBoundingClientRect(); return r.left > 260 && r.top > 60 && r.right < innerWidth - 420; });
+        if (!card) return false;
+        card.dispatchEvent(new MouseEvent("dblclick", { bubbles: true, cancelable: true, detail: 2 }));
+        return true;
+      })()`);
+      if (!hit) throw new Error("no goals card to walk into");
+      await app.until(`[...document.querySelectorAll("textarea")].length > 0`, "the run's composer");
       await settle(1500);
     },
   },
@@ -598,17 +641,20 @@ export const SCENES: readonly Scene[] = [
       // to, and the page lays out after the preview mounts, undoing a scroll made before that. Monaco
       // draws an editor below the fold perfectly well; what it cannot draw in is a hidden window,
       // which is what used to leave this editor empty (see `launch` in the driver).
-      await app.until(`document.querySelector(".ft-preview-body") !== null`, "the preview to mount");
+      // Either page: the desktop's classes, or on `/rn` the copy's `testID` and its `code` island.
+      const FT = `document.querySelector(".ft, [data-testid=ft]")`;
+      const BODY = `document.querySelector(".ft-preview-body, [data-testid=ft] [data-island=code]")`;
+      await app.until(`${BODY} !== null`, "the preview to mount");
       await app.until(
-        `(document.querySelector(".ft-preview-body").scrollIntoView({ block: "center" }),
-          [...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
+        `(${BODY}.scrollIntoView({ block: "center" }),
+          [...${BODY}.querySelectorAll(".view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
         "the preview's editor to colour itself",
       );
       // Then the section's top, which is what the picture frames: centred on the preview, `.ft` is
       // about as tall as the window and its upper half lay above the fold, unpainted on both pages.
-      await app.evaluate(`document.querySelector(".ft").scrollIntoView({ block: "start" })`);
+      await app.evaluate(`${FT}.scrollIntoView({ block: "start" })`);
       await app.until(
-        `(() => { const top = document.querySelector(".ft").getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
+        `(() => { const top = ${FT}.getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
         "File types to scroll into view",
       );
     },
@@ -748,6 +794,25 @@ export const SCENES: readonly Scene[] = [
       await app.evaluate(`document.querySelector('[aria-label^="Allow: what it covers"]').click()`);
       await app.until(says("Allow once"), "the answer menu");
       await settle(400);
+    },
+  },
+  // A config in its JSON view: the Components room's first form card, its Form | JSON switch on JSON —
+  // the schema editor with the schema locked to the surface's (its text an island).
+  {
+    name: "gallery-form-json",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "gallery-form")!.reach(app);
+      await app.evaluate(`(() => {
+        const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+        let title = null;
+        for (let n = walk.nextNode(); n; n = walk.nextNode()) if (n.textContent === "Fill in a form") { title = n; break; }
+        const all = [...document.querySelectorAll("*")].filter((e) => e.children.length === 0 && e.textContent === "JSON");
+        const el = all.find((e) => title.compareDocumentPosition(e) & Node.DOCUMENT_POSITION_FOLLOWING);
+        (el.closest("button, [role=button]") ?? el).click();
+      })()`);
+      await app.until(says("Add missing fields"), "the JSON editor");
+      await settle(1200);
+      await galleryRow(app, "Fill in a form");
     },
   },
 ];

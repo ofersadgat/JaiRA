@@ -8,7 +8,12 @@ import { Modal, Pressable } from "react-native";
  * (measured on `/rn`: the menu rendered at once and appeared seconds later), so the web half portals
  * into `<body>` itself, as the desktop's `Popover` does.
  */
-export function MenuLayer({ onClose, children }: { onClose: () => void; children: ReactNode }): JSX.Element {
+export function MenuLayer({ onClose, children }: {
+  onClose: () => void;
+  /** The web layer's place in the stack (`MenuLayer.web.tsx`); a phone's `Modal` is always on top. */
+  z?: number;
+  children: ReactNode;
+}): JSX.Element {
   return (
     <Modal transparent visible animationType="none" onRequestClose={onClose}>
       <Pressable onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }} accessibilityLabel="close the menu" />

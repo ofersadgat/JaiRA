@@ -71,6 +71,8 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
       const mime = String(p["mime"] ?? "text/plain");
       const file = typeof p["file"] === "string" ? p["file"] : undefined;
       const reveal = p["reveal"] as { line: number; column: number } | undefined;
+      // `autoHeight`: a fenced block's editor, as tall as its text (`MonacoCodePane`'s), in no band.
+      const fit = p["autoHeight"] === true;
       return (
         <div className="file-edit" style={{ ...box, display: "flex", flexDirection: "column" }}>
           <Suspense fallback={null}>
@@ -84,6 +86,7 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
                 onChange={event("change")}
                 {...(p["readOnly"] === true ? { readOnly: true } : {})}
                 view={(p["view"] as RenderView | undefined) ?? "write"}
+                {...(fit ? { autoHeight: true } : {})}
                 {...(file === undefined ? {} : { file })}
                 {...(reveal === undefined ? {} : { reveal })}
               />
