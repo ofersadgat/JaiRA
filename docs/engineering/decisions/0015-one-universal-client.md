@@ -778,13 +778,13 @@ kept first:
   (`docs/ui/assets/styles.css`), since the app's own is pruned to the tokens and the islands' rules.
 - **`cascade.mts`**, the reading of the cascade a copy was written from. `styles.css` at the tag is the
   record of why a number in a component is what it is.
-- **The project's compiler in the Files room's code editor.** The DOM page handed Monaco the project's
-  own compiler there (`file:check` and its neighbours: underlines from the real `tsconfig`, definitions,
-  references, hover). The universal `CodeEdit.tsx` gives the island no `intel` (its header says so), and
-  the page that did is gone; the changeset reviewer's diff still has it. Monaco's own TypeScript
-  validation is off (`monacoDiff.tsx`), so a file opened there is underlined by nothing.
-  `shots/verifyTypeCheck.mts` and step 2 of `monaco.mts` look for the underline in the Files room. Found
-  by reading the code while re-pointing the docs; no rig was run.
+- **The project's compiler in the Files room's code editor** — and given back the same day. The DOM
+  page handed Monaco the project's own compiler there (`file:check` and its neighbours: underlines from
+  the real `tsconfig`, definitions, references, hover); the universal `CodeEdit.tsx` gave the island no
+  `intel`, so with the page that did gone, nothing was underlined. It passes one now (`codeIntelOf` in
+  `fileEditModel.ts`), and `shots/verifyTypeCheck.mts` and `monaco.mts` pass. Found on the way: a regex
+  that lost a backslash when its logic was moved had every Windows path read as "not a file", and the
+  TypeScript host reused a buffer's version numbers after a release.
 
 **Not yet done at the commit:** the before-and-after comparison of the universal page run to its end,
 the stylesheet's pruning, and the comments that name deleted files. The docs were re-pointed the same
