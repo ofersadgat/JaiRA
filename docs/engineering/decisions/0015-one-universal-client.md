@@ -633,6 +633,20 @@ which redrew every window. Room switches, boot (~600-1000 ms, mostly waiting on 
 already fine; no leak across 150 room switches. Left: any store change still redraws the whole universal
 shell (the context carries the whole model), and `/rn` Settings and Logs take ~50 ms to switch to.
 
+**The desktop opens the universal shell (2026-10-01).** The person, after the gaps were filled: "do 1, 2,
+and the transport switch" — 2 being the switch. `npm run start` and a packaged app open `/rn`; `--ui=dom`
+(or `JAIRA_UI=dom`, `npm run start:dom`) opens the page it replaced, which stays while both exist, and
+the shots that drive that page by its classes launch it so. Switched whole rather than a component at a
+time (S4's plan): the universal shell already runs on the same store, and slotting copies into `App.tsx`
+one by one would have been a third arrangement to keep. Before it: what a desktop does outside its
+components was checked on `/rn` and brought over (window drag regions, the focus ring, keys, the
+window's name, roles), and an island on web was given `styles.css` scoped to itself, without which the
+built page's code editor stood 5 px tall. The DOM components, `slots.tsx`, the Vite build and most of
+`styles.css` are not deleted yet: 33 of the 60 shots scripts find things on that page by class, 33 of
+the 169 app tests render its components, and 51 of its 111 component files are still imported by the
+universal tree (the editors, and exports of logic) — that is its own piece of work, and the person's to
+start.
+
 ## Native desktop, later
 
 The desktop ships as Electron first, from the DOM tree and then from shared components as they are

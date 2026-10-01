@@ -80,11 +80,12 @@ const RENDERER: "one" | "vite" = process.env.JAIRA_RENDERER === "vite" ? "vite" 
  */
 const DEV_CLIENT = !app.isPackaged && process.env.JAIRA_CLIENT_DEV !== undefined && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/$/.test(process.env.JAIRA_CLIENT_DEV) ? process.env.JAIRA_CLIENT_DEV : undefined;
 /**
- * The universal shell instead of the desktop's own page (`--ui=universal`, or `JAIRA_UI=universal`): the
- * UI the phone draws, from the copies, on the desktop's own store and bridge (decision 0015). What
- * `npm run start:universal` opens; `npm run start` opens the desktop's page as it always has.
+ * Which UI the window opens. The universal shell is the default (since 2026-10-01): the UI the phone
+ * draws, from the copies, on the desktop's own store and bridge (decision 0015). `--ui=dom`, or
+ * `JAIRA_UI=dom`, opens the page it replaced, kept while both exist — what `npm run start:dom` opens,
+ * and what the shots that drive that page by its classes launch.
  */
-const UNIVERSAL = process.argv.includes("--ui=universal") || process.env.JAIRA_UI === "universal";
+const UNIVERSAL = !(process.argv.includes("--ui=dom") || process.env.JAIRA_UI === "dom");
 const PRELOAD = join(DIST, "preload.cjs");
 
 let window: BrowserWindow | undefined;

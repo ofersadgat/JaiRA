@@ -67,6 +67,8 @@ export interface Options {
   readonly port?: number;
   /** A phone instead of a window: its viewport and scale, with touch (the island harness, 0015 S5). */
   readonly phone?: { readonly width: number; readonly height: number; readonly scale: number };
+  /** Which UI the launched desktop opens: the page the shots were written for (`dom`, the default here), or the app's own default. */
+  readonly ui?: "dom" | "universal";
   /** Extra switches for a {@link browse}d browser. */
   readonly flags?: readonly string[];
 }
@@ -111,7 +113,9 @@ export class App {
      * lines, for as long as the window stayed covered — and a capture waits for a frame forever.
      * `Page.bringToFront` does not help; it raises the page, not the OS window over what covers it.
      */
-    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
+    // `--ui=dom`: the desktop opens the universal shell by default, and the shots drive the page it
+    // replaced by its classes (`pair.mts` goes to `/rn` itself). `ui: "universal"` for the default.
+    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion", ...(options.ui === "universal" ? [] : ["--ui=dom"])], {
       cwd: world.project,
       env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
       stdio: ["ignore", "pipe", "pipe"],
