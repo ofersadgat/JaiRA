@@ -510,8 +510,8 @@ Two things the live runs settled that are worth not re-deriving:
 
 ## Open inside the universal client, on a phone only (decision 0015)
 
-The desktop's layout, drawn natively on a phone from the universal copies (`packages/universal`). Each
-of these works on the universal page in a browser or Electron (`/rn`) and not yet on a phone. Deferred
+The desktop's layout, drawn natively on a phone from the same components (`packages/universal`). Each
+of these works on the page in a browser or Electron (`/`) and not yet on a phone. Deferred
 by the person on 2026-09-30 ("the Phone only gaps can be left for later"); what was written but never
 run on a device was run on the emulator on 2026-10-01 (`shots/android-check.mts`), and what that
 found is fixed or listed here.
@@ -562,3 +562,31 @@ found is fixed or listed here.
       read; nothing draws or scans one. A device cannot open or make a project (`project:choose` is
       the machine's own dialog), a sign-in page a device's request causes opens on the engine's
       machine, and after a reconnection only the limits watch is replayed, not the current project.
+
+## Open after the DOM renderer was deleted (2026-10-01, decision 0015)
+
+The one UI is `packages/universal`; what the deletion took with it, and what it showed up.
+
+- [ ] **Two end-to-end rigs went with the page they drove.** `event-notices` (a real events run's
+      notices in the inbox strip: dismissing one, a click opening the firing, a restart) needs test ids
+      on the strip before it can be written again; `schemaFiles` (a schema found by FILE NAME for the
+      three YAML kinds, seen in the window). `packages/app/shots/README.md` lists every retired script.
+- [ ] **Logic still inline in components, which no Node test reaches.** The tests that rendered DOM
+      components were re-pointed at the models; what a component decides for itself is uncovered until
+      it moves into a pure module: the permission-set card's open sections and folds, the state face's
+      tab rules (`panel/faces.tsx`), `SessionBands`' standing, verbs and fork index, the transcript's
+      doomed count and open-stretch rule, the work summary's `live`/`currentAt`/`counted`, the waiting,
+      refusal and compaction lines, the inbox strip's items, the table's 500-row cut, the schema form's
+      `errorAt`/`unsetNoteOf`, the value view's mime-to-parse chain, and the decisions inside
+      `useWorkflowEditor`, `useRunIndexModel`, `useTypedStep` and `useToolsField`. No test imports
+      `updateRow.ts`, `valueViewMeta.ts`, `contextParts.ts`, or most of `aboutModel.ts` and `logsModel.ts`.
+- [ ] **Dead code the copies' scaffolding left.** The non-replayed token path (`tokens.tsx`,
+      `app/windowPage.web.ts`: every route is `Replayed`), the `Uncopied` fallbacks (unreachable; the
+      shots still query their test id), `screens/CopiesBoard.tsx`, `settingsParts.ts`' DOM readers,
+      `issues.ts` `anchorFor`, `gateForms.ts` `recordOf`, `linkModel.ts` `LINK_TARGETS_ID`, `fileTypes.ts`'
+      module `REGISTRY`, `AppState.landing`, the reviewer's unreachable `DiscardNotes`, `Choices`' unread
+      `first` prop, and `popover.tsx`'s `usePopover`, `Overlay`, `useHoverCard`, `useHover`.
+- [ ] **The reference pictures are not in git.** `packages/app/shots/goldens` (hundreds of MB) and the
+      world they were taken in (`shots/.world-goldens`) live on the machine that took them. They can be
+      taken again from the tag `dom-renderer-final` (a new world, a new set), and a scene whose look
+      is changed on purpose is re-accepted (`pair.mts --accept`).
