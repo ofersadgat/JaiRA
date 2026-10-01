@@ -129,7 +129,7 @@ Every surface and component is drawn by the universal tree (`packages/universal`
 
 One per state under [assets/](assets/), each linking the app's own stylesheet and carrying `captured` and `reflects` in its head.
 
-They are frozen pictures of the look as of the tag `dom-renderer-final` (2026-10-01), not generated output: the DOM components they were written from and the scripts that rendered some of them are gone (`packages/app/shots/README.md`, "Retired"), so none can be regenerated. Each draws as it was captured only against the stylesheet of that tag (`git show dom-renderer-final:packages/app/src/renderer/styles.css`). What the app draws now is held by the scenes' and specimens' reference pictures.
+They are frozen pictures of the look as of the tag `dom-renderer-final` (2026-10-01), not generated output: the DOM components they were written from and the scripts that rendered some of them are gone (`packages/app/shots/README.md`, "Retired"), so none can be regenerated. Each links `docs/ui/assets/styles.css`, a copy of the stylesheet as it stood at that tag, frozen with them: the app's own `styles.css` holds only the tokens and the islands' rules now. What the app draws now is held by the scenes' and specimens' reference pictures.
 
 | Doc | States captured | Reflects | Captured |
 | --- | --- | --- | --- |

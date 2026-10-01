@@ -774,8 +774,8 @@ kept first:
     card's menu and the Copies section, and of the Changes tab over a real project's history;
   - a way to look at a component with no Electron at all.
 - **The catalog mockups** under `docs/ui/assets/` can no longer be regenerated: they are frozen pictures
-  of the look as of the tag, and they draw as captured only against that tag's `styles.css`, which they
-  link.
+  of the look as of the tag, and they link a copy of that tag's `styles.css` kept beside them
+  (`docs/ui/assets/styles.css`), since the app's own is pruned to the tokens and the islands' rules.
 - **`cascade.mts`**, the reading of the cascade a copy was written from. `styles.css` at the tag is the
   record of why a number in a component is what it is.
 - **The project's compiler in the Files room's code editor.** The DOM page handed Monaco the project's
