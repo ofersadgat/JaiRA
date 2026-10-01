@@ -2,13 +2,13 @@
 id: ui/components/run-value-field
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: []
 serves: [product/complete-record-of-every-run, product/failures-explain-themselves]
 surfaces: [ui/surfaces/context-panel]
 reuses: []
-implemented_by: [packages/app/src/renderer/readValue.tsx, packages/app/src/renderer/reading.ts]
-verified_by: [packages/app/test/configPanel.test.ts]
+implemented_by: [packages/universal/src/components/workflow/Links.tsx, packages/app/src/renderer/reading.ts]
+verified_by: [packages/app/test/configPanel.test.ts, packages/app/shots/parityWorld.mts#task-config]
 mockups: [ui/assets/run-value-field/empty.html, ui/assets/run-value-field/success.html, ui/assets/run-value-field/long.html]
 siblings: [ui/components/value-view, ui/components/slot-table, ui/components/state-form]
 ---

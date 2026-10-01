@@ -2,13 +2,13 @@
 id: ui/components/gate-surface
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask, ux/patterns/absence-is-stated, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/decisions-stay-yours, product/decide-with-the-context-in-front-of-you, product/complete-record-of-every-run, product/pick-up-where-it-left-off]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/choose-option-gate, ui/components/review-artifact-gate, ui/components/edit-artifact-gate, ui/components/fill-form-gate, ui/components/confirm-action-gate, ui/components/changeset-review, ui/components/computed-state-body, ui/components/icon]
-implemented_by: [packages/app/src/renderer/components.tsx, packages/app/src/renderer/runViews.tsx]
-verified_by: [packages/app/test/gateDurability.test.ts, packages/app/test/fastForward.test.ts]
+implemented_by: [packages/universal/src/components/panel/Gate.tsx, packages/universal/src/components/floats/GateBodies.tsx, packages/universal/src/components/floats/GateTitle.tsx, packages/app/src/renderer/gateModel.ts]
+verified_by: [packages/app/test/gateDurability.test.ts, packages/app/test/fastForward.test.ts, packages/app/shots/parityWorld.mts#gate, packages/app/shots/parityWorld.mts#task-answered, packages/app/shots/parityWorld.mts#gallery, packages/app/shots/parityWorld.mts#gallery-unknown, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-review, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-approval]
 mockups: [ui/assets/gate-surface/asking.html, ui/assets/gate-surface/outside-a-sheet.html, ui/assets/gate-surface/error.html, ui/assets/gate-surface/success.html, ui/assets/gate-surface/never-answered.html, ui/assets/gate-surface/unknown-function.html, ui/assets/gate-surface/answered-for-you.html]
 siblings: [ui/components/agent-question, ui/components/command-approval, ui/components/waiting-on-sheet, ui/components/letterhead]
 ---

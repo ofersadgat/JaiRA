@@ -2,13 +2,13 @@
 id: ui/components/markdown-editor
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/draft-belongs-to-the-file, ux/patterns/unsaved-proposal]
 serves: [product/author-processes-without-memorising-the-format, product/keep-process-and-description-in-step, product/decide-with-the-context-in-front-of-you, product/read-comfortably]
 surfaces: [ui/surfaces/files-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/settings-appearance]
 reuses: [ui/components/value-view, ui/components/code-editor]
-implemented_by: [packages/app/src/renderer/markdownEditor.tsx, packages/app/src/renderer/documents.tsx]
-verified_by: [packages/app/test/markdownBands.test.ts, packages/app/test/markdownReading.test.ts, packages/app/test/markdownDiff.test.ts, packages/app/test/longDocument.test.ts, packages/app/test/markdownHighlight.test.ts, packages/app/test/languages.test.ts]
+implemented_by: [packages/app/src/renderer/markdownEditor.tsx, packages/app/src/renderer/markdownDocument.tsx, packages/universal/src/islands/Island.tsx, packages/universal/src/components/files/surfaces.tsx, packages/universal/src/components/panel/ValueView.tsx]
+verified_by: [packages/app/test/markdownBands.test.ts, packages/app/test/markdownReading.test.ts, packages/app/test/markdownDiff.test.ts, packages/app/test/longDocument.test.ts, packages/app/test/markdownHighlight.test.ts, packages/app/test/languages.test.ts, packages/app/test/documents.test.ts, packages/app/shots/islands.mts, packages/app/shots/parityWorld.mts#files-markdown]
 mockups: [ui/assets/markdown-editor/empty.html, ui/assets/markdown-editor/drawn.html, ui/assets/markdown-editor/revealed.html, ui/assets/markdown-editor/changed.html]
 siblings: [ui/components/markdown-view, ui/components/code-editor, ui/components/artifact-pane]
 ---

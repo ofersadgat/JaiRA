@@ -2,13 +2,13 @@
 id: ui/components/composer-setting-chip
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-01
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists]
 serves: [product/chat-with-agents, product/steer-agents-mid-task, product/risky-actions-wait-for-approval, product/agents-act-only-where-allowed, product/bring-your-own-models-and-agents]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/model-cascade, ui/components/icon]
-implemented_by: [packages/app/src/renderer/composer.tsx, packages/app/src/renderer/composerPermissionSet.ts, packages/shared/src/permissionSetBuckets.ts]
-verified_by: [packages/app/test/composer.test.ts, packages/shared/test/permissionSetBuckets.test.ts]
+implemented_by: [packages/universal/src/components/chat/Composer.tsx, packages/universal/src/components/chat/ComposerCards.tsx, packages/universal/src/components/chat/ComposerTools.tsx, packages/app/src/renderer/composerCards.ts, packages/app/src/renderer/composerPermissionSet.ts, packages/shared/src/permissionSetBuckets.ts]
+verified_by: [packages/app/test/composer.test.ts, packages/app/test/runnerGroup.test.ts, packages/shared/test/permissionSetBuckets.test.ts, packages/app/shots/parityWorld.mts#composer-model, packages/app/shots/parityWorld.mts#composer-thinking, packages/app/shots/parityWorld.mts#composer-permissions, packages/app/shots/parityWorld.mts#composer-tools]
 mockups: [ui/assets/composer-setting-chip/resting.html, ui/assets/composer-setting-chip/inherited.html, ui/assets/composer-setting-chip/overridden.html, ui/assets/composer-setting-chip/buckets.html, ui/assets/composer-setting-chip/custom.html, ui/assets/composer-setting-chip/tools.html]
 siblings: [ui/components/composer, ui/components/model-cascade, ui/components/context-menu, ui/components/preset-chips]
 ---

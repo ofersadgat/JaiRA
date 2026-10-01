@@ -2,13 +2,13 @@
 id: ui/components/file-changes-list
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/absence-is-stated, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/read-what-work-produced, product/keep-process-and-description-in-step, product/complete-record-of-every-run, product/review-changes-before-they-land]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/files-view]
 reuses: [ui/components/diff-editor]
-implemented_by: [packages/app/src/renderer/valueView.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/panel/ValueReadings.tsx, packages/universal/src/components/panel/ValueView.tsx]
+verified_by: [packages/client/src/specimens/valueSpecimens.tsx#value-changes]
 mockups: [ui/assets/file-changes-list/empty.html, ui/assets/file-changes-list/success.html, ui/assets/file-changes-list/open.html]
 siblings: [ui/components/changeset-review, ui/components/patch-view, ui/components/diff-editor, ui/components/value-view]
 ---

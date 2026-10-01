@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-appearance
 type: ui-surface
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 kind: screen
 realizes: [ux/patterns/preview-beside-the-setting, ux/patterns/pick-from-what-exists, ux/patterns/one-document-several-readings, ux/patterns/inherited-unless-set-here]
 serves: [product/read-comfortably, product/read-what-work-produced, product/share-processes-across-projects]
@@ -60,7 +60,7 @@ Nothing is saved by a button and nothing is left unsaved. The window paints the 
 ## The previews depart from real surfaces only in taking no clicks
 
 - The task and conversation previews are the app's own components and classes, drawn with fixed sample content and inert.
-- The theme cards are drawn from a colour table (`paletteCards.tsx`), a copy of the stylesheet, because each card shows its own theme while the window is painted in another.
+- The theme cards are drawn from a colour table (`paletteCardsModel.ts`), a copy of the stylesheet's palettes, because each card shows its own theme while the window is painted in another.
 
 ## A person arrives from the Settings panel with or without a project, and leaves by choosing another page
 

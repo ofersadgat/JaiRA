@@ -2,11 +2,11 @@
 id: engineering/contracts/artifact-frame-protocol
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 visibility: internal
 kind: format
 owned_by: [engineering/units/uri-and-artifact-reads, engineering/units/app-shell]
-consumers: ["@jaira/app renderer valueView.tsx InteractiveArtifact, which frames a grant and listens for its message", "@jaira/app renderer components.tsx and chatPane.tsx, which request grants for artifact gates and the chat artifacts strip", "@jaira/app main index.ts registerArtifactProtocol, which serves a token", "@jaira/app renderer index.html, whose frame-src names the scheme", "pages a model writes as interactive artifacts, which post a prompt to the window"]
+consumers: ["@jaira/app renderer interactiveArtifact.tsx InteractiveArtifact, which frames a grant and listens for its message", "@jaira/app renderer chatThreadModel.ts, and @jaira/universal ArtifactGates.tsx and faces.tsx, which request grants for a conversation's produced files, artifact gates and the panel's Produced tab", "@jaira/app main desktop.ts registerArtifactProtocol, which serves a token", "@jaira/service clientFiles.ts clientPolicy, whose frame-src names the scheme", "pages a model writes as interactive artifacts, which post a prompt to the window"]
 siblings: [engineering/contracts/uri-read, engineering/contracts/host-tool-vocabulary, engineering/contracts/ipc-channels]
 ---
 
@@ -62,7 +62,7 @@ The handler takes the URL path with leading slashes stripped as the token. The s
 | --- | --- | --- | --- |
 | frame | `<iframe sandbox="allow-scripts" src={url}>` | yes | the frame has an opaque origin, so it reaches neither the window's DOM nor its storage |
 | framed when | condition | yes | the value's `view` is `html`, the value carries `artifact.interactive: true` and an `artifact.path`, a `serve` callback exists, and the grant answered `interactive: true`; otherwise the static `srcdoc` rendering |
-| `frame-src` | window policy | yes | `jaira-artifact:` in `renderer/index.html`, without which the frame is refused |
+| `frame-src` | window policy | yes | `jaira-artifact:` in the policy the page is served with (`clientPolicy`), without which the frame is refused |
 
 ### A frame posts one message, which fills the composer and never sends
 

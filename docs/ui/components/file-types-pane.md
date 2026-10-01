@@ -2,13 +2,13 @@
 id: ui/components/file-types-pane
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/preview-beside-the-setting, ux/patterns/one-document-several-readings, ux/patterns/inherited-unless-set-here]
 serves: [product/read-comfortably, product/read-what-work-produced]
 surfaces: [ui/surfaces/settings-appearance]
 reuses: [ui/components/switch, ui/components/preset-chips, ui/components/size-stepper, ui/components/code-editor, ui/components/code-view, ui/components/markdown-editor, ui/components/markdown-view, ui/components/schema-json-editor, ui/components/data-tree, ui/components/schema-form, ui/components/table-view, ui/components/patch-view, ui/components/diff-editor, ui/components/workflow-editor, ui/components/workflow-sync-panel, ui/components/task-board]
-implemented_by: [packages/app/src/renderer/fileTypesPane.tsx, packages/app/src/renderer/editorKnobs.tsx, packages/app/src/renderer/fileTypes.ts, packages/app/src/renderer/appearancePane.tsx]
-verified_by: [packages/app/test/fileTypesPane.test.ts, packages/app/test/fileTypes.test.ts]
+implemented_by: [packages/universal/src/components/files/FileTypesPane.tsx, packages/app/src/renderer/fileTypesModel.ts, packages/app/src/renderer/fileTypes.ts, packages/app/src/renderer/editorFront.ts]
+verified_by: [packages/app/test/fileTypesPane.test.ts, packages/app/test/fileTypes.test.ts, packages/app/shots/parityWorld.mts#file-types, packages/app/shots/parityWorld.mts#settings-appearance-file-types]
 mockups: [ui/assets/file-types-pane/success.html, ui/assets/file-types-pane/partial.html, ui/assets/file-types-pane/mixed.html, ui/assets/file-types-pane/editor.html, ui/assets/file-types-pane/off.html, ui/assets/file-types-pane/cannot-show.html, ui/assets/file-types-pane/busy.html]
 siblings: [ui/components/value-view, ui/components/file-panel, ui/components/settings-field, ui/components/llm-config-form]
 ---

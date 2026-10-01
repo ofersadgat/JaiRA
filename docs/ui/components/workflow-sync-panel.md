@@ -2,13 +2,13 @@
 id: ui/components/workflow-sync-panel
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/unsaved-proposal, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/refuse-with-the-reason-and-the-fix, ux/patterns/one-document-several-readings]
 serves: [product/keep-process-and-description-in-step, product/author-processes-without-memorising-the-format, product/review-changes-before-they-land]
 surfaces: [ui/surfaces/files-view]
 reuses: [ui/components/file-changes-list, ui/components/markdown-view]
-implemented_by: [packages/app/src/renderer/syncPanel.tsx, packages/app/src/renderer/syncState.ts]
-verified_by: [packages/app/test/syncState.test.ts, packages/app/test/workflowSync.test.ts, packages/app/test/reviewSync.test.ts]
+implemented_by: [packages/universal/src/components/files/SyncPanel.tsx, packages/universal/src/components/files/surfaces.tsx, packages/app/src/renderer/syncState.ts]
+verified_by: [packages/app/test/syncState.test.ts, packages/app/test/workflowSync.test.ts, packages/app/test/reviewSync.test.ts, packages/app/shots/parityWorld.mts#files-sync, packages/client/src/specimens/formsFilesSpecimens.tsx#sync-report, packages/client/src/specimens/formsFilesSpecimens.tsx#sync-report-document, packages/client/src/specimens/formsFilesSpecimens.tsx#sync-running]
 mockups: [ui/assets/workflow-sync-panel/status.html, ui/assets/workflow-sync-panel/running.html, ui/assets/workflow-sync-panel/error.html, ui/assets/workflow-sync-panel/report.html, ui/assets/workflow-sync-panel/rewritten.html, ui/assets/workflow-sync-panel/declined.html]
 siblings: [ui/components/markdown-view, ui/components/file-panel, ui/components/file-changes-list, ui/components/changeset-review]
 ---

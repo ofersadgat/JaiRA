@@ -2,13 +2,13 @@
 id: ui/components/executor-tree
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/absence-is-stated]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects]
 surfaces: [ui/surfaces/settings-models, ui/surfaces/settings-tools]
 reuses: [ui/components/llm-config-form, ui/components/schema-form, ui/components/settings-field, ui/components/switch]
-implemented_by: [packages/app/src/renderer/executorTreePane.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/settings/ExecutorTree.tsx, packages/app/src/renderer/executorTreeModel.ts, packages/shared/src/executorTree.ts]
+verified_by: [packages/shared/test/executorTree.test.ts, packages/app/shots/parityWorld.mts#settings-models]
 mockups: [ui/assets/executor-tree/derived.html, ui/assets/executor-tree/rules.html, ui/assets/executor-tree/pinned.html, ui/assets/executor-tree/empty.html, ui/assets/executor-tree/disabled.html]
 siblings: [ui/components/provider-row, ui/components/llm-config-form, ui/components/schema-form]
 ---

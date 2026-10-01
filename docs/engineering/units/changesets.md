@@ -2,7 +2,7 @@
 id: engineering/units/changesets
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [product/review-changes-before-they-land, ux/patterns/per-change-review, ux/patterns/comments-turn-a-verdict-into-send-back, ui/components/changeset-review, ui/components/patch-view]
 layer: core
 owns_contracts: []
@@ -39,7 +39,7 @@ It deliberately does not own:
 
 - The `review_artifacts` component. Its config and result are [gate-components](../contracts/gate-components.md), checking an answer against the changeset input is [component-contracts](component-contracts.md), and parking the gate is [interaction-hub](interaction-hub.md). This unit owns only the name `REVIEW_ARTIFACTS` and the workflows that mount it.
 - Producing a review of a task's worktree or of a sync's proposals, and moving the sync baseline: [description-sync](description-sync.md). `jaira changeset review` and the terminal reviewer: [cli](cli.md).
-- Drawing the reviewer, which is renderer code in `changesetReview.tsx`.
+- Drawing the reviewer, which is `ChangesetReview.tsx` in `@jaira/universal` over the renderer's `changesetReviewModel.ts`.
 
 ## The rules are core logic shared by both sides of the boundary, and the functions plug into the engine's registry
 

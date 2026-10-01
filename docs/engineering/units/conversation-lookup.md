@@ -2,7 +2,7 @@
 id: engineering/units/conversation-lookup
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [product/complete-record-of-every-run, product/chat-with-agents, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/components/transcript, ui/components/session-sheet, ux/patterns/choose-a-side-where-it-divided, ux/patterns/absence-is-stated]
 layer: data
 owns_contracts: []
@@ -93,7 +93,7 @@ A typed chat message is recorded on its host's session under instance `chat:<hos
 | An operation that holds no seat is in flight beside an unterminated call, such as a gate waiting on a person | the start and record counts differ, so `interruptedSessions` lists nothing | none; the call is listed once the other operation settles | the in-flight conversation is missing from the history |
 | A composite or a task that never ran is read | `chatThread` answers null; `sessionView` answers `empty: "this state ran no model call, so there is no conversation to show"` | none needed | the stated absence |
 | A listed seat has no record | `sessionView` answers `empty: "no record of this conversation was kept"` | none | that sentence |
-| `chat:thread` answers null or rejects while a thread is on screen | `kept` in `chatPane.tsx` keeps the thread, and the rejection is swallowed | the next read replaces it | the last thread stays |
+| `chat:thread` answers null or rejects while a thread is on screen | `kept` in `chatThreadModel.ts` keeps the thread, and the rejection is swallowed | the next read replaces it | the last thread stays |
 | A reader runs while a call is writing | every query is one SQLite read, so the reader sees a whole state before or after that write; readers write nothing, so two readers cannot conflict | none needed | an `open` turn shows what has streamed so far |
 | The branch a thread's path took at a seam holds no record yet, as just after an edit is sent | `chatThread` cannot place the seam as a turn and drops it from `forks` | none; the seam is reported once the branch's first record lands | no marker for that split until then |
 

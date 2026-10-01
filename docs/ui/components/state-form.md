@@ -2,13 +2,13 @@
 id: ui/components/state-form
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/pick-from-what-exists, ux/patterns/problems-marked-where-they-are, ux/patterns/absence-is-stated, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/author-processes-without-memorising-the-format, product/repeatable-agent-processes, product/catch-process-mistakes-before-running, product/complete-record-of-every-run]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: [ui/components/slot-table, ui/components/operation-fields-editor, ui/components/file-link-field, ui/components/issue-mark, ui/components/run-value-field, ui/components/value-view]
-implemented_by: [packages/app/src/renderer/stateEditor.tsx, packages/app/src/renderer/stateForm.ts, packages/app/src/renderer/completions.ts]
-verified_by: [packages/app/test/stateForm.test.ts, packages/app/test/childBindings.test.ts, packages/app/test/configPanel.test.ts]
+implemented_by: [packages/universal/src/components/workflow/WorkflowEditor.tsx, packages/universal/src/components/workflow/controls.tsx, packages/app/src/renderer/stateForm.ts, packages/app/src/renderer/stateEditorModel.ts, packages/app/src/renderer/completions.ts]
+verified_by: [packages/app/test/stateForm.test.ts, packages/app/test/childBindings.test.ts, packages/app/test/configPanel.test.ts, packages/app/shots/parityWorld.mts#files-state, packages/app/shots/parityWorld.mts#files-plan, packages/app/shots/parityWorld.mts#files-plan-children, packages/app/shots/parityWorld.mts#state-config]
 mockups: [ui/assets/state-form/empty.html, ui/assets/state-form/success.html, ui/assets/state-form/composite.html, ui/assets/state-form/partial.html, ui/assets/state-form/error.html, ui/assets/state-form/reading.html]
 siblings: [ui/components/schema-form, ui/components/schema-json-editor, ui/components/state-graph, ui/components/state-inspector]
 ---

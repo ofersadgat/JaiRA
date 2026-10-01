@@ -2,13 +2,13 @@
 id: ui/components/code-view
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings]
 serves: [product/read-what-work-produced, product/read-comfortably]
 surfaces: [ui/surfaces/files-view, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/context-panel, ui/surfaces/gate-modal, ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/monacoDiff.tsx, packages/app/src/renderer/textmate.ts, packages/app/src/renderer/documents.tsx]
-verified_by: [packages/app/test/textmate.test.ts, packages/app/test/documents.test.ts]
+implemented_by: [packages/app/src/renderer/monacoDiff.tsx, packages/app/src/renderer/textmate.ts, packages/universal/src/islands/Island.tsx, packages/universal/src/components/files/CodeEdit.tsx, packages/universal/src/components/panel/ValueView.tsx]
+verified_by: [packages/app/test/textmate.test.ts, packages/app/shots/monaco.mts, packages/app/shots/parityWorld.mts#file-types, packages/client/src/specimens/valueSpecimens.tsx#value-code]
 mockups: [ui/assets/code-view/empty.html, ui/assets/code-view/loading.html, ui/assets/code-view/plain.html, ui/assets/code-view/coloured.html]
 siblings: [ui/components/code-editor, ui/components/markdown-view, ui/components/value-view]
 ---

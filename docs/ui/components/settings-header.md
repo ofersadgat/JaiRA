@@ -2,13 +2,13 @@
 id: ui/components/settings-header
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/inherited-unless-set-here]
 serves: [product/share-processes-across-projects, product/bring-your-own-models-and-agents, product/read-comfortably]
 surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-appearance, ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-runs, ui/surfaces/settings-data]
 reuses: []
-implemented_by: [packages/app/src/renderer/App.tsx, packages/app/src/renderer/panes.tsx, packages/app/src/renderer/settingsLayout.tsx, packages/app/src/renderer/settingsSections.ts, packages/app/src/renderer/layerLabels.ts]
-verified_by: [packages/app/test/settingsSections.test.ts]
+implemented_by: [packages/universal/src/components/settings/SettingsPage.tsx, packages/universal/src/components/settings/LayerPicker.tsx, packages/universal/src/app/SettingsView.tsx, packages/app/src/renderer/settingsSections.ts, packages/app/src/renderer/layerLabels.ts]
+verified_by: [packages/app/test/settingsSections.test.ts, packages/app/test/projectSettingsDoor.test.ts, packages/app/shots/parityWorld.mts#settings-appearance, packages/app/shots/parityWorld.mts#settings-appearance-you, packages/app/shots/parityWorld.mts#settings-tools]
 mockups: [ui/assets/settings-header/layered.html, ui/assets/settings-header/project.html, ui/assets/settings-header/just-you.html, ui/assets/settings-header/nothing-yours.html, ui/assets/settings-header/no-project.html, ui/assets/settings-header/disabled.html]
 siblings: [ui/components/segmented-control, ui/components/settings-field, ui/components/provider-row]
 ---
@@ -45,7 +45,7 @@ The layer switch at the top-right corner of a settings page's head: three equal 
 | no project | `Just you` · `Shared (all projects)`, the second filled. | [no-project.html](../assets/settings-header/no-project.html) |
 | disabled | While a settings change is being written: every button at half strength and inert, and the page's controls with them. | [disabled.html](../assets/settings-header/disabled.html) |
 
-The mockups are rendered from the real components by `packages/app/shots/settings-header-static.mts`.
+The mockups are pictures of the look as it stood on 2026-09-24; the page itself is photographed by the `settings-appearance`, `settings-appearance-you` and `settings-tools` scenes of `packages/app/shots/parityWorld.mts`.
 
 ## A click on a layer re-reads the page
 

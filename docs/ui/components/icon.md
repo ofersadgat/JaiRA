@@ -2,13 +2,13 @@
 id: ui/components/icon
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: []
 serves: []
 surfaces: [ui/surfaces/chat-view, ui/surfaces/conversation-list, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/module-approval-dialog, ui/surfaces/settings-connections]
 reuses: []
-implemented_by: [packages/app/src/renderer/icons.tsx, packages/app/src/renderer/brands.ts]
-verified_by: []
+implemented_by: [packages/universal/src/components/panel/Icon.tsx, packages/universal/src/components/panel/Svg.web.tsx, packages/universal/src/components/panel/Svg.tsx, packages/universal/src/components/Turn.web.tsx, packages/universal/src/components/settings/bits.tsx, packages/app/src/renderer/iconPaths.ts, packages/app/src/renderer/brands.ts]
+verified_by: [packages/app/shots/parityWorld.mts#task, packages/app/shots/parityWorld.mts#settings, packages/app/shots/parityWorld.mts#composer-model]
 mockups: [ui/assets/icon/line.html, ui/assets/icon/turning.html, ui/assets/icon/vendor.html]
 siblings: [ui/components/status-pill, ui/components/composer-setting-chip, ui/components/work-row]
 ---

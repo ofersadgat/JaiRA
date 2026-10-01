@@ -2,13 +2,13 @@
 id: ui/components/folder-view
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/drill-in-and-back-out, ux/patterns/problems-marked-where-they-are, ux/patterns/absence-is-stated]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running, product/share-processes-across-projects]
 surfaces: [ui/surfaces/files-view]
 reuses: []
-implemented_by: [packages/app/src/renderer/files.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/files/DirectoryPanel.tsx, packages/app/src/renderer/filesModel.ts]
+verified_by: [packages/app/shots/parityWorld.mts#files-folder]
 mockups: [ui/assets/folder-view/success.html, ui/assets/folder-view/root.html, ui/assets/folder-view/empty.html]
 siblings: [ui/components/file-tree, ui/components/file-panel, ui/components/address-bar]
 ---

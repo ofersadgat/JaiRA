@@ -2,13 +2,13 @@
 id: ui/components/size-stepper
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: []
 serves: [product/read-comfortably]
 surfaces: [ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/editorKnobs.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/settings/fields.tsx, packages/app/src/renderer/sizeStep.ts]
+verified_by: [packages/app/shots/parityWorld.mts#settings-appearance-text, packages/app/shots/parityWorld.mts#settings-appearance-file-types]
 mockups: [ui/assets/size-stepper/success.html, ui/assets/size-stepper/at-a-bound.html, ui/assets/size-stepper/disabled.html]
 siblings: [ui/components/preset-chips, ui/components/switch, ui/components/settings-field, ui/components/file-types-pane]
 ---

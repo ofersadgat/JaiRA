@@ -2,13 +2,13 @@
 id: ui/components/task-name
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: []
 serves: [product/keep-track-of-everything, product/hand-work-to-agents]
 surfaces: [ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/debug-view, ui/surfaces/task-context]
 reuses: []
-implemented_by: [packages/app/src/renderer/taskName.tsx]
-verified_by: []
+implemented_by: [packages/app/src/renderer/taskNameModel.ts, packages/universal/src/components/TaskCard.tsx, packages/universal/src/app/TitleBar.tsx]
+verified_by: [packages/app/shots/parityWorld.mts#board, packages/app/shots/parityWorld.mts#task]
 mockups: [ui/assets/task-name/success.html, ui/assets/task-name/loading.html, ui/assets/task-name/error.html]
 siblings: [ui/components/task-card, ui/components/task-panel, ui/components/address-bar]
 ---

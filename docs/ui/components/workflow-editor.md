@@ -2,13 +2,13 @@
 id: ui/components/workflow-editor
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/draft-belongs-to-the-file, ux/patterns/problems-marked-where-they-are, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/inherited-unless-set-here]
 serves: [product/author-processes-without-memorising-the-format, product/see-how-a-process-flows, product/share-processes-across-projects, product/complete-record-of-every-run, product/work-runs-the-process-it-started-with]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel, ui/surfaces/settings-appearance]
 reuses: [ui/components/state-form, ui/components/schema-json-editor, ui/components/state-graph, ui/components/editor-chrome, ui/components/issue-mark]
-implemented_by: [packages/app/src/renderer/stateEditor.tsx, packages/app/src/renderer/builtIn.tsx, packages/app/src/renderer/reading.ts]
-verified_by: [packages/app/test/configPanel.test.ts, packages/app/test/childBindings.test.ts, packages/app/test/builtInStates.test.ts]
+implemented_by: [packages/universal/src/components/workflow/WorkflowEditor.tsx, packages/universal/src/components/workflow/StatePanel.tsx, packages/app/src/renderer/stateEditorModel.ts, packages/app/src/renderer/builtInModel.ts, packages/app/src/renderer/reading.ts]
+verified_by: [packages/app/test/configPanel.test.ts, packages/app/test/childBindings.test.ts, packages/app/test/builtInStates.test.ts, packages/app/shots/parityWorld.mts#files-state, packages/app/shots/parityWorld.mts#files-state-json, packages/app/shots/parityWorld.mts#files-plan, packages/app/shots/parityWorld.mts#files-graph]
 mockups: [ui/assets/workflow-editor/success.html, ui/assets/workflow-editor/new-file.html, ui/assets/workflow-editor/json.html, ui/assets/workflow-editor/graph.html, ui/assets/workflow-editor/error.html, ui/assets/workflow-editor/reading.html, ui/assets/workflow-editor/built-in.html]
 siblings: [ui/components/file-panel, ui/components/schema-json-editor, ui/components/state-inspector, ui/components/schema-form]
 ---

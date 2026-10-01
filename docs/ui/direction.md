@@ -2,7 +2,7 @@
 id: ui/direction
 type: standing
 status: proposed
-updated: 2026-08-18
+updated: 2026-10-01
 ---
 
 # Visual direction
@@ -79,7 +79,8 @@ Three laws:
    already carries it, described as "dimmer than `--dim`", for a hint sitting on
    a line of code.
 
-**Ten registers**, in `styles.css`. No component carries a literal font-size:
+**Ten registers**, `REGISTERS` in `packages/universal/src/primitives.tsx` (a name
+below is what `Txt`'s `register` takes, without the dot). No component carries a literal font-size:
 every register is a multiple of its voice's base (`--size-app`, `--size-data`),
 so one preference moves a whole voice with every ratio intact.
 
@@ -143,3 +144,4 @@ differ beyond colour.
 | --- | --- | --- |
 | 2026-08-04 | Created as a scaffold | The docs tree was created |
 | 2026-08-18 | Typography filled in: two voices, ten registers | SHELL.md §3 — the shell redesign needed a rule that decides the awkward cases, and this is the doc that holds it |
+| 2026-10-01 | The registers are named where they now live (`REGISTERS`), not in `styles.css` | The DOM renderer was deleted (decision 0015): the universal tree draws every surface, and a register is a font spec, not a class |

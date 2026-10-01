@@ -2,7 +2,7 @@
 id: engineering/contracts/gate-components
 type: engineering-contract
 status: proposed
-updated: 2026-09-22
+updated: 2026-10-01
 visibility: public
 kind: api
 owned_by: [engineering/units/interaction-hub]
@@ -323,7 +323,7 @@ would throw away the reviewer's work between rounds.
 ### Icons
 
 Every gate carries a glyph beside the word it illustrates, never instead of it —
-`icons.tsx`'s rule, and the reason a component's icon sits next to its wire name
+the icons' rule (`iconPaths.ts`), and the reason a component's icon sits next to its wire name
 in the dialog's sub-line rather than in the author's prompt.
 
 | Where | Glyph |

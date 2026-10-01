@@ -2,13 +2,13 @@
 id: ui/components/instance-index
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/verbs-on-the-thing-itself, ux/patterns/second-deliberate-step-for-irreversible]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/failures-explain-themselves, product/rewind-to-where-it-went-wrong, product/try-another-direction]
 surfaces: [ui/surfaces/task-context, ui/surfaces/files-view, ui/surfaces/debug-view]
 reuses: [ui/components/state-rail, ui/components/context-menu, ui/components/icon]
-implemented_by: [packages/app/src/renderer/runIndex.tsx, packages/app/src/renderer/sessionPanels.tsx, packages/app/src/renderer/detail.tsx]
-verified_by: [packages/app/test/runIndex.test.ts]
+implemented_by: [packages/universal/src/components/panel/RunIndex.tsx, packages/universal/src/components/panel/StepsView.tsx, packages/app/src/renderer/runIndexModel.ts, packages/app/src/renderer/sessionRows.ts]
+verified_by: [packages/app/test/runIndex.test.ts, packages/app/test/sessionPanels.test.ts, packages/app/shots/parityWorld.mts#task-steps, packages/app/shots/parityWorld.mts#task-step-card, packages/app/shots/parityWorld.mts#run-bookmark]
 mockups: [ui/assets/instance-index/empty.html, ui/assets/instance-index/success.html, ui/assets/instance-index/live.html, ui/assets/instance-index/error.html, ui/assets/instance-index/here.html, ui/assets/instance-index/folded.html]
 siblings: [ui/components/letterhead, ui/components/state-rail, ui/components/task-metrics, ui/components/task-card]
 ---

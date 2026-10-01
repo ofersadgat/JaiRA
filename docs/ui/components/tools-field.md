@@ -2,13 +2,13 @@
 id: ui/components/tools-field
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/pick-from-what-exists, ux/patterns/schema-driven-form, ux/patterns/absence-is-stated]
 serves: [product/agents-act-only-where-allowed, product/share-processes-across-projects]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: [ui/components/permissionSet-card, ui/components/schema-form, ui/components/settings-field]
-implemented_by: [packages/app/src/renderer/toolsField.tsx, packages/app/src/renderer/toolsFieldForm.ts, packages/app/src/renderer/operationFields.tsx]
-verified_by: [packages/app/test/permissionSets.test.ts]
+implemented_by: [packages/universal/src/components/workflow/ToolsField.tsx, packages/app/src/renderer/toolsFieldModel.ts, packages/app/src/renderer/toolsFieldForm.ts, packages/app/src/renderer/permissionSetLinesModel.ts]
+verified_by: [packages/app/test/permissionSets.test.ts, packages/app/test/composer.test.ts, packages/app/shots/parityWorld.mts#files-state-operation]
 mockups: [ui/assets/tools-field/state-field.html, ui/assets/tools-field/state-field-adding.html, ui/assets/tools-field/state-field-none.html]
 siblings: [ui/components/permissionSet-card, ui/components/composer-setting-chip, ui/components/settings-field]
 ---

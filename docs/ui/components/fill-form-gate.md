@@ -2,13 +2,13 @@
 id: ui/components/fill-form-gate
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask, ux/patterns/schema-driven-form]
 serves: [product/decisions-stay-yours, product/decide-with-the-context-in-front-of-you]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/gate-surface, ui/components/schema-form, ui/components/switch]
-implemented_by: [packages/app/src/renderer/components.tsx]
-verified_by: [packages/app/test/components.e2e.test.ts, packages/app/test/schemaFormModel.test.ts]
+implemented_by: [packages/universal/src/components/floats/GateBodies.tsx, packages/universal/src/components/form/SchemaForm.tsx, packages/app/src/renderer/gateForms.ts, packages/app/src/renderer/schemaForm/check.ts]
+verified_by: [packages/app/test/components.e2e.test.ts, packages/app/test/schemaFormModel.test.ts, packages/app/test/schemaCheck.test.ts, packages/app/shots/parityWorld.mts#gallery-form, packages/app/shots/parityWorld.mts#gallery-form-defaults, packages/app/shots/parityWorld.mts#gallery-form-custom]
 mockups: [ui/assets/fill-form-gate/blocked.html, ui/assets/fill-form-gate/ready.html, ui/assets/fill-form-gate/settled.html]
 siblings: [ui/components/choose-option-gate, ui/components/edit-artifact-gate, ui/components/question-stepper]
 ---

@@ -2,12 +2,12 @@
 id: engineering/units/mcp-servers
 type: engineering-unit
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 implements: [product/bring-your-own-models-and-agents, product/agents-act-only-where-allowed, product/risky-actions-wait-for-approval, ui/surfaces/settings-connections, ui/surfaces/settings-tools, ui/components/permissionSet-card, ui/components/command-approval, ux/patterns/checked-status-with-the-fix, ux/patterns/secret-goes-in-never-comes-back]
 layer: core
 owns_contracts: []
 requires: [engineering/units/tool-policy, engineering/units/agent-executors, engineering/units/project-config]
-implemented_by: [packages/shared/src/mcp.ts, packages/shared/src/permissionSets.ts, packages/shared/src/config.ts, packages/runtime/src/mcpServers.ts, packages/runtime/src/agentTools.ts, packages/runtime/src/policy.ts, packages/runtime/src/approval.ts, packages/runtime/src/modelRoutes.ts, packages/runtime/src/agents.ts, packages/runtime/src/agentHanded.ts, packages/service/src/service.ts, packages/app/src/renderer/mcpData.ts, packages/app/src/renderer/mcpServersRows.tsx, packages/app/src/renderer/mcpBucket.tsx, packages/app/src/renderer/mcpBucketModel.ts, packages/app/src/renderer/connectionsPane.tsx, packages/app/src/renderer/permissionSetCard.tsx, packages/app/src/renderer/approvalModel.ts]
+implemented_by: [packages/shared/src/mcp.ts, packages/shared/src/permissionSets.ts, packages/shared/src/config.ts, packages/runtime/src/mcpServers.ts, packages/runtime/src/agentTools.ts, packages/runtime/src/policy.ts, packages/runtime/src/approval.ts, packages/runtime/src/modelRoutes.ts, packages/runtime/src/agents.ts, packages/runtime/src/agentHanded.ts, packages/service/src/service.ts, packages/app/src/renderer/mcpData.ts, packages/app/src/renderer/connectionsModel.ts, packages/app/src/renderer/mcpBucketModel.ts, packages/universal/src/components/settings/connections/McpServerRows.tsx, packages/universal/src/components/settings/permissions/PermissionSetCard.tsx, packages/app/src/renderer/approvalModel.ts]
 verified_by: [packages/shared/test/mcp.test.ts, packages/runtime/test/mcpServers.test.ts, packages/app/test/mcpBucket.test.ts, packages/shared/test/permissionSets.test.ts]
 siblings: [engineering/units/tool-policy, engineering/units/agent-executors, engineering/units/model-routing]
 ---
@@ -111,14 +111,14 @@ tool of it no line names.
   `registerAgentRuntimes`; the CLI's prompt routes get the same.
 - The renderer: `mcpData.ts` asks both channels while Connections or Tools is open, again on a
   configuration change, and on Re-check; a stored secret goes to `secret:set` and re-checks.
-  `mcpServersRows.tsx` is Connections → MCP servers (data-part `mcp-servers`, after Local models): a
+  `McpServerRows.tsx` (`@jaira/universal`) is Connections → MCP servers (the section `mcp-servers`, after Local models): a
   row per server — `ready — HTTP · <url> · answered with N tools`, `ready — stdio · <command> · N
   tools`, `failed — <reason>` with its `cfg-fix`, `not started — …` — a key box per secret it names, the
   enabled switch and the chevron onto its fields through the schema form (`env` and `headers` values are
   a value or a stored secret); then "Add a server", the schema form for a name and a command or an
-  address, and across its width the detection panel in the local servers' markup (`conn-probe`), each
+  address, and across its width the detection panel drawn as the local servers' is (`Probe.tsx`), each
   source's Add writing what it lists that is not configured yet into the page's layer, whichever that
-  is. `mcpBucket.tsx` and `mcpBucketModel.ts` are a permission set's MCP section: one group per
+  is. `McpBucket` in `PermissionSetCard.tsx` and `mcpBucketModel.ts` are a permission set's MCP section: one group per
   configured server (and per server the map names that nothing configures), a fold with the server's
   name, `N tools · M named here; any other <server> tool <mode>` (folded: `N tools · M named
   (<tool> <mode>); the rest <mode>`), a count and the group's own button — the server's line, or `other`

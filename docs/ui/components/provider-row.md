@@ -2,13 +2,13 @@
 id: ui/components/provider-row
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/checked-status-with-the-fix, ux/patterns/secret-goes-in-never-comes-back, ux/patterns/inherited-unless-set-here]
 serves: [product/bring-your-own-models-and-agents]
 surfaces: [ui/surfaces/settings-connections]
 reuses: [ui/components/icon, ui/components/switch, ui/components/settings-field]
-implemented_by: [packages/app/src/renderer/providersPane.tsx, packages/app/src/renderer/integrationsPane.tsx, packages/app/src/renderer/providerSpecs.ts, packages/app/src/renderer/controls.tsx]
-verified_by: [packages/app/test/providerSpecs.test.ts, packages/app/test/executorConfig.test.ts]
+implemented_by: [packages/universal/src/components/settings/connections/Row.tsx, packages/universal/src/components/settings/connections/ProviderRows.tsx, packages/universal/src/components/settings/connections/ForgeRows.tsx, packages/app/src/renderer/connectionsModel.ts, packages/app/src/renderer/providerSpecs.ts]
+verified_by: [packages/app/test/providerSpecs.test.ts, packages/app/test/executorConfig.test.ts, packages/app/test/integrations.test.ts, packages/app/test/settingsPages.test.ts, packages/app/shots/parityWorld.mts#settings]
 mockups: [ui/assets/provider-row/status.html, ui/assets/provider-row/open.html, ui/assets/provider-row/dirty.html, ui/assets/provider-row/disabled.html]
 siblings: [ui/components/executor-tree, ui/components/settings-field, ui/components/status-pill]
 ---

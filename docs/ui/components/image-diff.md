@@ -2,13 +2,13 @@
 id: ui/components/image-diff
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/per-change-review, ux/patterns/absence-is-stated]
 serves: [product/review-changes-before-they-land, product/read-what-work-produced]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: []
-implemented_by: [packages/app/src/renderer/imageDiff.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/artifact/ImageDiff.tsx, packages/universal/src/components/artifact/Toggle.tsx]
+verified_by: [packages/client/src/specimens/changesetSpecimens.tsx#image-diff-overlay, packages/client/src/specimens/changesetSpecimens.tsx#image-diff-split, packages/client/src/specimens/changesetSpecimens.tsx#image-diff-added, packages/client/src/specimens/changesetSpecimens.tsx#changeset-image]
 mockups: [ui/assets/image-diff/empty.html, ui/assets/image-diff/one-version.html, ui/assets/image-diff/overlay.html, ui/assets/image-diff/side-by-side.html]
 siblings: [ui/components/diff-editor, ui/components/changeset-review, ui/components/value-view]
 ---

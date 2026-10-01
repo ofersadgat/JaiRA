@@ -2,7 +2,7 @@
 id: engineering/units/executor-tree
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-01
 implements: [ui/components/executor-tree, ui/surfaces/settings-models, ui/surfaces/settings-tools, product/bring-your-own-models-and-agents, ux/patterns/inherited-unless-set-here]
 layer: core
 owns_contracts: []
@@ -34,7 +34,7 @@ It deliberately does not own:
 
 - Layer `core`. The shared half calls nothing; the runtime half calls only the shared half.
 - Upstream seams: `PromptRouterExecutor`, `createPromptExecutor` and `withRateLimit` from `@declarative-ai/promptop`; `createModelRouter` from `@declarative-ai/llm`; `createOperationExecutor`, `withRetry`, `withMemoize`, `withDeadline`, `AdaptiveRateController`, `finishedHandle` and `permanentFailure` from `@declarative-ai/exec`.
-- Callers: `buildPromptExecutor` builds `tree.prompt`, which the app and the CLI resolve through `defaultExecutorTree`. The app's `computeAvailability` resolves the same tree for the Settings screen, and `executorTreePane.tsx` writes edits with `pin`.
+- Callers: `buildPromptExecutor` builds `tree.prompt`, which the app and the CLI resolve through `defaultExecutorTree`. The app's `computeAvailability` resolves the same tree for the Settings screen, and `executorTreeModel.ts` writes the Settings tree's edits with `pin`.
 - Only `executors.default.prompt` reaches a run. Its nodes' `steps`, `defaults`, `model` and `allow` are built; the root node's `steps`, `function.rules`, `function.steps` and every executor other than `default` are parsed and never built. The app's security floor reads the first non-empty root `scopes` of any executor.
 
 ## The overlay is the only stored fact, and the resolved tree is derived on every use

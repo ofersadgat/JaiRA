@@ -2,13 +2,13 @@
 id: ui/components/preset-chips
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/schema-driven-form]
 serves: []
 surfaces: [ui/surfaces/settings-data, ui/surfaces/settings-appearance, ui/surfaces/settings-models, ui/surfaces/new-task-popover, ui/surfaces/context-panel, ui/surfaces/run-conversation]
 reuses: []
-implemented_by: [packages/app/src/renderer/controls.tsx, packages/app/src/renderer/schemaForm/SchemaForm.tsx, packages/app/src/renderer/configPane.tsx, packages/app/src/renderer/editorKnobs.tsx]
-verified_by: [packages/app/test/schemaForm.test.ts, packages/app/test/schemaFormModel.test.ts]
+implemented_by: [packages/universal/src/components/form/inputs.tsx, packages/universal/src/components/form/SchemaForm.tsx, packages/universal/src/components/settings/ConfigBlocks.tsx, packages/universal/src/components/files/FileTypesPane.tsx]
+verified_by: [packages/app/test/schemaForm.test.ts, packages/app/test/schemaFormModel.test.ts, packages/app/shots/parityWorld.mts#settings-data, packages/app/shots/parityWorld.mts#settings-appearance-file-types, packages/client/src/specimens/formSpecimens.tsx#form-fields]
 mockups: [ui/assets/preset-chips/chosen.html, ui/assets/preset-chips/shape.html, ui/assets/preset-chips/disabled.html]
 siblings: [ui/components/switch, ui/components/size-stepper, ui/components/segmented-control, ui/components/schema-form, ui/components/composer-setting-chip]
 ---

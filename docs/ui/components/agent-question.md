@@ -2,13 +2,13 @@
 id: ui/components/agent-question
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask, ux/patterns/ask-one-or-several-questions, ux/patterns/own-answer-beside-offered-options]
 serves: [product/agents-ask-instead-of-guessing, product/decide-with-the-context-in-front-of-you]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/components-view]
 reuses: [ui/components/choice-list, ui/components/question-stepper, ui/components/icon]
-implemented_by: [packages/app/src/renderer/components.tsx]
-verified_by: [packages/app/test/choices.test.ts]
+implemented_by: [packages/universal/src/components/floats/QuestionSurface.tsx, packages/universal/src/components/floats/Choices.tsx, packages/app/src/renderer/choicesModel.ts, packages/app/src/renderer/questionSurfaceTypes.ts]
+verified_by: [packages/app/test/choices.test.ts, packages/app/shots/parityWorld.mts#gallery-question, packages/app/shots/parityWorld.mts#gallery-question-steps, packages/app/shots/parityWorld.mts#gallery-question-multiple, packages/client/src/specimens/floatSpecimens.tsx#gallery-question-basic]
 mockups: [ui/assets/agent-question/one-tap.html, ui/assets/agent-question/held-for-answer.html, ui/assets/agent-question/several.html]
 siblings: [ui/components/gate-surface, ui/components/command-approval, ui/components/choose-option-gate]
 ---

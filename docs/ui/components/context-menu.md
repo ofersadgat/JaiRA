@@ -2,13 +2,13 @@
 id: ui/components/context-menu
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/verbs-on-the-thing-itself]
 serves: [product/hand-work-to-agents, product/author-processes-without-memorising-the-format, product/chat-with-agents, product/read-what-work-produced]
 surfaces: [ui/surfaces/tasks-view, ui/surfaces/sidebar, ui/surfaces/files-view, ui/surfaces/chat-view, ui/surfaces/conversation-list, ui/surfaces/run-view, ui/surfaces/run-conversation]
 reuses: [ui/components/icon]
-implemented_by: [packages/app/src/renderer/menu.tsx, packages/app/src/renderer/pointerMenu.tsx, packages/app/src/renderer/App.tsx, packages/app/src/renderer/files.tsx]
-verified_by: [packages/app/test/pointerMenu.test.ts, packages/app/test/selectionHold.test.ts]
+implemented_by: [packages/universal/src/components/Menu.tsx, packages/universal/src/components/MenuLayer.web.tsx, packages/universal/src/components/MenuLayer.tsx, packages/universal/src/components/floats/PointerMenus.web.tsx, packages/app/src/renderer/pointerMenuModel.ts, packages/app/src/renderer/boardMenus.ts, packages/app/src/renderer/menuTypes.ts]
+verified_by: [packages/app/test/pointerMenu.test.ts, packages/app/test/selectionHold.test.ts, packages/app/shots/parityWorld.mts#card-menu, packages/app/shots/parityWorld.mts#card-menu-done, packages/app/shots/parityWorld.mts#column-menu, packages/app/shots/parityWorld.mts#selection-menu, packages/app/shots/parityWorld.mts#files-menu]
 mockups: [ui/assets/context-menu/verbs.html, ui/assets/context-menu/partial.html, ui/assets/context-menu/kinds.html, ui/assets/context-menu/pointer.html]
 siblings: [ui/components/address-bar, ui/components/composer-setting-chip, ui/components/model-cascade]
 ---

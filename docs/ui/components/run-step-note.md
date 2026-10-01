@@ -2,13 +2,13 @@
 id: ui/components/run-step-note
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/arm-the-cut-then-confirm, ux/patterns/verbs-on-the-thing-itself, ux/patterns/nested-under-what-caused-it]
 serves: [product/complete-record-of-every-run, product/failures-explain-themselves, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/large-work-splits-into-independent-pieces]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/run-view, ui/surfaces/task-context]
 reuses: [ui/components/icon, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/sessionPanels.tsx, packages/app/src/renderer/sessionBands.ts]
-verified_by: [packages/app/test/sessionPanels.test.ts, packages/app/test/sessionBands.test.ts, packages/app/test/moveQuestionView.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionBands.tsx, packages/app/src/renderer/sessionBands.ts, packages/app/src/renderer/sessionRows.ts]
+verified_by: [packages/app/test/sessionPanels.test.ts, packages/app/test/sessionBands.test.ts, packages/app/test/moveQuestionView.test.ts, packages/app/shots/parityWorld.mts#run-convo, packages/app/shots/parityWorld.mts#task-adopted, packages/client/src/specimens/transcriptSpecimens.tsx#session-bands]
 mockups: [ui/assets/run-step-note/entered.html, ui/assets/run-step-note/failed.html, ui/assets/run-step-note/made.html, ui/assets/run-step-note/rewind-armed.html, ui/assets/run-step-note/skipped.html, ui/assets/run-step-note/moved.html, ui/assets/run-step-note/asked.html, ui/assets/run-step-note/asked-enum.html, ui/assets/run-step-note/asked-boolean.html, ui/assets/run-step-note/asked-refused-in-place.html, ui/assets/run-step-note/asked-answered.html, ui/assets/run-step-note/asked-refused.html, ui/assets/run-step-note/adopted-history.html]
 siblings: [ui/components/session-sheet, ui/components/state-rail, ui/components/fork-mark, ui/components/computed-state-body]
 ---

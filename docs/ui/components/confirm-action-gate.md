@@ -2,13 +2,13 @@
 id: ui/components/confirm-action-gate
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask]
 serves: [product/decisions-stay-yours]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/gate-surface]
-implemented_by: [packages/app/src/renderer/components.tsx]
-verified_by: [packages/app/test/components.e2e.test.ts]
+implemented_by: [packages/universal/src/components/floats/GateBodies.tsx, packages/universal/src/components/panel/Gate.tsx, packages/app/src/renderer/gateModel.ts]
+verified_by: [packages/app/test/components.e2e.test.ts, packages/app/shots/parityWorld.mts#gallery-confirm, packages/app/shots/parityWorld.mts#gallery-confirm-defaults, packages/app/shots/parityWorld.mts#gallery-confirm-remote]
 mockups: [ui/assets/confirm-action-gate/asking.html, ui/assets/confirm-action-gate/settled.html]
 siblings: [ui/components/choose-option-gate, ui/components/fill-form-gate, ui/components/command-approval]
 ---

@@ -1,6 +1,14 @@
 # JaiRA Shell — Multi-Project, Typography, and Status
 
 Status: Design complete — 2026-08-18
+
+> **2026-10-01.** This is the design as it was handed off. The renderer files it names
+> (`App.tsx`, `sidebar.tsx`, `board.tsx`, `settingsLayout.tsx`, …), `index.html` and the
+> `shots/*.mts` scripts of §10 belong to the DOM renderer, which was deleted on 2026-10-01
+> ([decision 0015](docs/engineering/decisions/0015-one-universal-client.md)); the tag
+> `dom-renderer-final` has them. What the design decides still holds, and is drawn by
+> `packages/universal` (`components/Sidebar.tsx`, `components/Pill.tsx`, `primitives.tsx`'s
+> `REGISTERS`, `components/settings/`) over the pure modules in `packages/app/src/renderer`.
 Companion to [DESIGN.md](DESIGN.md) §11.1. Where this document and DESIGN.md
 conflict, this one wins for the shell; everything else in DESIGN.md stands.
 

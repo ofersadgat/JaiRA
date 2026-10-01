@@ -2,13 +2,13 @@
 id: ui/components/computed-state-body
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/absence-is-stated]
 serves: [product/complete-record-of-every-run, product/failures-explain-themselves]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/value-view, ui/components/icon]
-implemented_by: [packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/transcript.ts]
-verified_by: [packages/app/test/callBlock.test.ts]
+implemented_by: [packages/universal/src/components/panel/RunTranscript.tsx, packages/app/src/renderer/runConversationModel.ts, packages/app/src/renderer/transcript.ts]
+verified_by: [packages/app/test/callBlock.test.ts, packages/app/shots/parityWorld.mts#task-failed, packages/app/shots/parityWorld.mts#task-done]
 mockups: [ui/assets/computed-state-body/empty.html, ui/assets/computed-state-body/partial.html, ui/assets/computed-state-body/success.html, ui/assets/computed-state-body/inputs.html, ui/assets/computed-state-body/error.html]
 siblings: [ui/components/letterhead, ui/components/transcript, ui/components/gate-surface, ui/components/run-value-field]
 ---

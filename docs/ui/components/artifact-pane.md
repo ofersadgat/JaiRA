@@ -2,13 +2,13 @@
 id: ui/components/artifact-pane
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/quote-anchored-note, ux/patterns/one-document-several-readings]
 serves: [product/read-what-work-produced, product/decide-with-the-context-in-front-of-you]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/value-view, ui/components/markdown-view, ui/components/markdown-editor, ui/components/file-changes-list, ui/components/review-notes]
-implemented_by: [packages/app/src/renderer/components.tsx, packages/app/src/renderer/reviewNotes.tsx]
-verified_by: [packages/app/test/selectionHold.test.ts]
+implemented_by: [packages/universal/src/components/artifact/ArtifactPane.tsx, packages/universal/src/components/artifact/ReviewNotes.tsx, packages/universal/src/components/artifact/noteSelection.web.ts, packages/app/src/renderer/artifactReview.ts, packages/app/src/renderer/reviewSelection.ts]
+verified_by: [packages/app/test/selectionHold.test.ts, packages/app/shots/parityWorld.mts#gallery-review, packages/app/shots/parityWorld.mts#gallery-edit]
 mockups: [ui/assets/artifact-pane/reading.html, ui/assets/artifact-pane/edited.html, ui/assets/artifact-pane/edited-data.html, ui/assets/artifact-pane/writing-a-note.html, ui/assets/artifact-pane/notes.html]
 siblings: [ui/components/value-view, ui/components/changeset-review, ui/components/diff-editor]
 ---

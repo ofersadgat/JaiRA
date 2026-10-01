@@ -340,7 +340,7 @@ If every step finds nothing, there is no host.
     - `serve --detach`, then a run, `task list`, `task status`, `board`, `prune` and `task cancel` all went through the server.
     - `server stop` drained it.
   - The packaged app's smoke test: `jaira serve --detach` started JaiRA.exe windowless, and `server status` and `server stop` reached it and ended it.
-  - The About page was photographed (`shots/about.mts`, `engine.png`).
+  - The About page was photographed (`shots/about.mts`, `engine.png`). (That script went with the DOM page on 2026-10-01, [0015](0015-one-universal-client.md); the page is the `settings-about` scene of `shots/parityWorld.mts`.)
 - **Not yet exercised:**
   - The contract-mismatch and stuck dialogs by hand.
   - POSIX sockets and the loopback port on a real machine without pipes.

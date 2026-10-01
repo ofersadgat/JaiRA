@@ -2,13 +2,13 @@
 id: ui/components/produced-artifacts
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/one-document-several-readings]
 serves: [product/read-what-work-produced, product/chat-with-agents]
 surfaces: [ui/surfaces/chat-view]
 reuses: [ui/components/value-view, ui/components/icon]
-implemented_by: [packages/app/src/renderer/chatPane.tsx, packages/app/src/renderer/transcriptView.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/panel/PanelViews.tsx, packages/universal/src/components/panel/faces.tsx]
+verified_by: [packages/app/shots/parityWorld.mts#artifact-produced]
 mockups: [ui/assets/produced-artifacts/closed.html, ui/assets/produced-artifacts/open.html, ui/assets/produced-artifacts/selected.html, ui/assets/produced-artifacts/error.html]
 siblings: [ui/components/value-view, ui/components/artifact-pane, ui/components/file-changes-list, ui/components/transcript]
 ---

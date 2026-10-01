@@ -2,13 +2,13 @@
 id: ui/components/choice-list
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/ask-one-or-several-questions, ux/patterns/own-answer-beside-offered-options]
 serves: [product/decide-with-the-context-in-front-of-you, product/decisions-stay-yours, product/agents-ask-instead-of-guessing]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/icon]
-implemented_by: [packages/app/src/renderer/choices.tsx]
-verified_by: [packages/app/test/choices.test.ts]
+implemented_by: [packages/universal/src/components/floats/Choices.tsx, packages/app/src/renderer/choicesModel.ts]
+verified_by: [packages/app/test/choices.test.ts, packages/app/shots/parityWorld.mts#gallery-choose, packages/app/shots/parityWorld.mts#gallery-choose-multiple, packages/app/shots/parityWorld.mts#gallery-choose-custom, packages/app/shots/parityWorld.mts#gallery-choose-comments]
 mockups: [ui/assets/choice-list/words.html, ui/assets/choice-list/cards.html, ui/assets/choice-list/multiple.html, ui/assets/choice-list/own-answer.html, ui/assets/choice-list/read-only.html]
 siblings: [ui/components/question-stepper, ui/components/confirm-action-gate, ui/components/fill-form-gate, ui/components/schema-form]
 ---

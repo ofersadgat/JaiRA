@@ -2,12 +2,12 @@
 id: ui/components/waiting-on-sheet
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/drag-only-where-the-process-allows, ux/patterns/show-the-request-not-the-outcome, ux/patterns/say-what-it-is-doing-and-for-how-long]
 serves: [product/move-work-on-by-hand, product/decisions-stay-yours]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/run-view, ui/surfaces/task-context]
 reuses: [ui/components/letterhead, ui/components/icon]
-implemented_by: [packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/stateSurface.tsx]
+implemented_by: [packages/universal/src/components/panel/RunTranscript.tsx, packages/app/src/renderer/stateSurfaceModel.ts]
 verified_by: [packages/app/test/stateSurface.test.ts]
 mockups: [ui/assets/waiting-on-sheet/waiting.html, ui/assets/waiting-on-sheet/no-target.html]
 siblings: [ui/components/session-sheet, ui/components/letterhead, ui/components/gate-surface, ui/components/activity-strip]

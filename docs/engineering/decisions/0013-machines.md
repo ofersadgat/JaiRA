@@ -550,7 +550,8 @@ the workspace specific stuff remains in the the workspace".
 - **Gates while away** (the person, 2026-09-27: yes), as the approved mockup draws them. An offline
   machine's gates are read from its copy and offered with the rest (`offlineInteractions`). An answer
   routes to the outbox (`Federation.holdOffline`), and the gate then stays drawn as answered, with "Your
-  answer waits for mac-mini … Take it back" (`offline.tsx`). The conversation of an offline machine's
+  answer waits for mac-mini … Take it back" (`offline.tsx`; since 2026-10-01 the universal
+  `panel/PendingSend.tsx` and `panel/OfflineBanner.tsx`, [0015](0015-one-universal-client.md)). The conversation of an offline machine's
   task says "mac-mini is offline · last seen … What it did until then is here."
 - **Verified:**
   - `persistence/test/replica.test.ts`:

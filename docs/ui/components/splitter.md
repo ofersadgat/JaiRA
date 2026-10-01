@@ -2,13 +2,13 @@
 id: ui/components/splitter
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/the-window-remembers-its-arrangement]
 serves: []
 surfaces: [ui/surfaces/app-window, ui/surfaces/files-view, ui/surfaces/tasks-view, ui/surfaces/chat-view, ui/surfaces/context-panel]
 reuses: []
-implemented_by: [packages/app/src/renderer/splitter.tsx, packages/app/src/renderer/uiState.ts, packages/app/src/renderer/App.tsx]
-verified_by: [packages/app/test/uiState.test.ts]
+implemented_by: [packages/universal/src/components/files/Splitter.tsx, packages/app/src/renderer/splitterModel.ts, packages/app/src/renderer/uiState.ts]
+verified_by: [packages/app/test/uiState.test.ts, packages/app/test/windowKeys.test.ts, packages/app/shots/parityWorld.mts#task, packages/app/shots/parityWorld.mts#files-ts]
 mockups: [ui/assets/splitter/idle.html, ui/assets/splitter/absent.html]
 siblings: [ui/components/file-panel, ui/components/schema-json-editor]
 ---

@@ -2,13 +2,13 @@
 id: ui/components/task-panel
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/button-says-what-will-happen, ux/patterns/refuse-with-the-reason-and-the-fix, ux/patterns/nested-under-what-caused-it, ux/patterns/context-beside-what-you-stand-on]
 serves: [product/hand-work-to-agents, product/pick-up-where-it-left-off, product/parallel-work-without-collisions, product/large-work-splits-into-independent-pieces, product/failures-explain-themselves, product/complete-record-of-every-run, product/review-changes-before-they-land]
 surfaces: [ui/surfaces/files-view, ui/surfaces/debug-view, ui/surfaces/task-context]
 reuses: [ui/components/task-name, ui/components/instance-index, ui/components/icon]
-implemented_by: [packages/app/src/renderer/detail.tsx, packages/app/src/renderer/taskAction.ts]
-verified_by: [packages/app/test/runViews.test.ts]
+implemented_by: [packages/universal/src/components/panel/faces.tsx, packages/universal/src/components/panel/StepsView.tsx, packages/universal/src/components/panel/PanelViews.tsx, packages/app/src/renderer/panelFaceModel.ts, packages/app/src/renderer/taskAction.ts]
+verified_by: [packages/app/test/runViews.test.ts, packages/app/test/sidePanel.test.ts, packages/app/shots/parityWorld.mts#task, packages/app/shots/parityWorld.mts#task-steps, packages/app/shots/parityWorld.mts#task-outputs, packages/app/shots/parityWorld.mts#task-done, packages/app/shots/parityWorld.mts#task-failed]
 mockups: [ui/assets/task-panel/empty.html, ui/assets/task-panel/running.html, ui/assets/task-panel/ended.html]
 siblings: [ui/components/task-metrics, ui/components/instance-index, ui/components/task-card, ui/components/state-inspector]
 ---

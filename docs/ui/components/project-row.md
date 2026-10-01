@@ -2,13 +2,13 @@
 id: ui/components/project-row
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/drill-in-and-back-out]
 serves: [product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/keep-track-of-everything]
 surfaces: [ui/surfaces/sidebar]
 reuses: [ui/components/status-pill, ui/components/sidebar-row]
-implemented_by: [packages/app/src/renderer/sidebar.tsx, packages/app/src/renderer/projects.ts, packages/app/src/renderer/pill.tsx, packages/app/src/renderer/App.tsx]
-verified_by: [packages/app/test/projects.test.ts, packages/app/test/pill.test.ts]
+implemented_by: [packages/universal/src/components/Sidebar.tsx, packages/universal/src/app/SidebarRegion.tsx, packages/app/src/renderer/shellModel.ts, packages/app/src/renderer/projects.ts, packages/app/src/renderer/pillModel.ts]
+verified_by: [packages/app/test/projects.test.ts, packages/app/test/pill.test.ts, packages/app/test/windowKeys.test.ts, packages/app/shots/parityWorld.mts#board, packages/app/shots/parityWorld.mts#files, packages/app/shots/parityWorld.mts#sidebar-shut]
 mockups: [ui/assets/project-row/closed.html, ui/assets/project-row/open.html, ui/assets/project-row/partial.html]
 siblings: [ui/components/sidebar-row, ui/components/address-bar, ui/components/conversation-row]
 ---

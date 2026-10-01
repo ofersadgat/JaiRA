@@ -2,13 +2,13 @@
 id: ui/components/markdown-view
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/absence-is-stated]
 serves: [product/read-what-work-produced, product/chat-with-agents, product/keep-process-and-description-in-step]
 surfaces: [ui/surfaces/files-view, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/context-panel, ui/surfaces/gate-modal, ui/surfaces/settings-appearance]
 reuses: [ui/components/value-view, ui/components/code-view]
-implemented_by: [packages/app/src/renderer/markdown.tsx, packages/app/src/renderer/fenceRender.tsx, packages/app/src/renderer/documents.tsx]
-verified_by: [packages/app/test/markdown.test.ts, packages/app/test/fenceRender.test.ts, packages/app/test/documents.test.ts]
+implemented_by: [packages/universal/src/components/Markdown.tsx, packages/app/src/renderer/markdownParse.ts, packages/app/src/renderer/markdown.tsx]
+verified_by: [packages/app/test/markdown.test.ts, packages/app/test/documents.test.ts, packages/app/shots/parityWorld.mts#files-markdown, packages/app/shots/parityWorld.mts#conversation, packages/client/src/specimens/registry.tsx#markdown, packages/client/src/specimens/valueSpecimens.tsx#markdown-images]
 mockups: [ui/assets/markdown-view/empty.html, ui/assets/markdown-view/success.html, ui/assets/markdown-view/front-matter.html]
 siblings: [ui/components/markdown-editor, ui/components/artifact-pane, ui/components/message]
 ---

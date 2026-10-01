@@ -2,7 +2,7 @@
 id: engineering/units/ui-layout-state
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [ux/patterns/the-window-remembers-its-arrangement, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/live-facts-and-unseen-counts, product/see-what-changed-since-you-looked, ui/components/splitter, ui/surfaces/sidebar, ui/components/file-tree, ui/components/file-panel, ui/components/session-sheet]
 layer: ui
 owns_contracts: []
@@ -41,7 +41,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | `AppState.settings.ui` | patched on every gesture; seeded once from `settings:read` | the renderer after hydration | every view reading an id |
 | `ui` in `<base>/user-settings.json` | written whole by `setUi` and `flushUi`; read at startup | the file before hydration | [user-settings](user-settings.md) |
-| `ui.shut["run.states"]` | keys `<taskId>:<instanceId>:<seq>`, built by `keyOfPiece` in `sessionPanels.tsx` | the file | the run conversation's folds |
+| `ui.shut["run.states"]` | keys `<taskId>:<instanceId>:<seq>`, built by `keyOfPiece` in `sessionRows.ts` | the file | the run conversation's folds |
 | `ui.unfolded["files.folders"]` | keys `layer:path`, shared by every project with that path | the file | the Files tree |
 | `ui.seen` | a read clock per task id | the file | unread counts on the sidebar and cards |
 

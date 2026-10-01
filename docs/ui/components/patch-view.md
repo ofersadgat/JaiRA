@@ -2,13 +2,13 @@
 id: ui/components/patch-view
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/absence-is-stated]
 serves: [product/read-what-work-produced]
 surfaces: [ui/surfaces/files-view, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/context-panel, ui/surfaces/settings-appearance]
 reuses: [ui/components/diff-editor, ui/components/icon]
-implemented_by: [packages/app/src/renderer/valueView.tsx, packages/app/src/renderer/fileSurfaces.tsx]
-verified_by: [packages/app/test/patchView.test.ts, packages/app/test/valueViewToggle.test.ts, packages/app/test/fileRegistry.test.ts]
+implemented_by: [packages/universal/src/components/panel/ValueReadings.tsx, packages/universal/src/components/files/surfaces.tsx, packages/app/src/renderer/fileSurfaceTable.ts]
+verified_by: [packages/app/test/patchView.test.ts, packages/app/test/fileRegistry.test.ts, packages/shared/test/unifiedDiff.test.ts, packages/app/shots/parityWorld.mts#files-patch, packages/client/src/specimens/valueSpecimens.tsx#value-patch, packages/client/src/specimens/roomSpecimens.tsx#file-patch-side]
 mockups: [ui/assets/patch-view/empty.html, ui/assets/patch-view/loading.html, ui/assets/patch-view/error.html, ui/assets/patch-view/success.html, ui/assets/patch-view/collapsed.html, ui/assets/patch-view/no-lines.html, ui/assets/patch-view/side-by-side.html]
 siblings: [ui/components/file-changes-list, ui/components/diff-editor, ui/components/changeset-review]
 ---

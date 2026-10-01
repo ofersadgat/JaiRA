@@ -18,7 +18,10 @@ the loop.
 | `@jaira/persistence` | Durable stores: task JSON files, better-sqlite3 DB (task lifecycle, runs, `EngineEvent` journal), content-addressed workflow snapshots, crash recovery, and the board/detail projection |
 | `@jaira/runtime` | The engine harness: capability registry, prompt executor, scripted fake/interaction doubles, the interaction hub, the demo workflow |
 | `@jaira/cli` | Headless `jaira` CLI: project init, ad-hoc workflow runs, task lifecycle, board |
-| `@jaira/app` | Electron main + preload + React renderer (board, task detail, human gates) |
+| `@jaira/service` | The engine a window talks to: the app service, its handler table, and the listener other machines, phones and browsers reach it by |
+| `@jaira/app` | Electron main and preload, and the window's store and pure UI logic (`src/renderer`, imported as `@jaira/ui`) |
+| `@jaira/universal` | The UI itself: one tree of components (Tamagui over react-native) that draws every surface on the desktop, in a browser and on a phone |
+| `@jaira/client` | The One app that hosts that tree: the page Electron's window loads, the page a browser is served, and the phone app |
 
 Engine semantics live in the sibling repo's packages — `@declarative-ai/hw` (the
 workflow engine), `@declarative-ai/exec` (the one execution seam, plus the op
@@ -112,7 +115,7 @@ environment.
 ## The app
 
 ```bash
-npm run app        # build main + renderer, cache the Electron addon if needed, launch Electron
+npm run app        # build main and the client (the window's page), launch Electron; `npm run start` is the same
 ```
 
 The window opens on the project named by `JAIRA_PROJECT`, the first CLI argument,
@@ -124,8 +127,24 @@ run's outputs. When a workflow reaches an interactive state, a dialog asks for t
 decision — that dialog is the *only* way a human answer can enter a run
 (SPEC §11.4), because the interaction hub is reachable only from the IPC layer.
 
-`JAIRA_CAPTURE=<file.png>` screenshots the window once it settles and exits,
-which is how the UI is checked without a human at the keyboard.
+`JAIRA_CAPTURE=<file.png>` screenshots the window once it settles and exits.
+The UI is checked without a human at the keyboard by the rigs in
+`packages/app/shots` ([README](packages/app/shots/README.md)), which drive the
+real app and hold its pictures to reference pictures;
+[docs/ui/building.md](docs/ui/building.md) is how to add or change what it draws.
+
+### A phone or a browser
+
+The same UI runs in a browser tab and on a phone, as a window onto a machine's
+engine. On that machine, Settings → Machines → Pair a machine → **Show a code**
+gives its address and a code that works once. A browser opens the address the
+engine serves and types the code; the phone app's Connect screen takes the
+address and the code, or the link `jaira:///?address=…&code=…` pairs at once.
+The device keeps a token, reconnects by itself, and is listed under "Phones and
+browsers" on that page, where it can be forgotten. A paired device reads and
+writes as a window on the machine does
+([decision 0013](docs/engineering/decisions/0013-machines.md), amended 2026-09-30;
+[decision 0015](docs/engineering/decisions/0015-one-universal-client.md)).
 
 ### Human gates
 

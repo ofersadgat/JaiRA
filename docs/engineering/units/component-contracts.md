@@ -2,7 +2,7 @@
 id: engineering/units/component-contracts
 type: engineering-unit
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 implements: [ui/components/choose-option-gate, ui/components/review-artifact-gate, ui/components/edit-artifact-gate, ui/components/fill-form-gate, ui/components/confirm-action-gate, ui/components/choice-list, ui/components/question-stepper, ui/components/review-notes, ui/components/changeset-review, ui/surfaces/components-view, ux/patterns/quote-anchored-note, ux/patterns/own-answer-beside-offered-options, ux/patterns/ask-one-or-several-questions, ux/patterns/comments-turn-a-verdict-into-send-back, product/decide-with-the-context-in-front-of-you]
 layer: core
 owns_contracts: []
@@ -40,7 +40,7 @@ It deliberately does not own:
 - Layer `core`, package `@jaira/shared`, exported from both `index.ts` and `browser.ts`. It imports `@declarative-ai/json` types, `changeset.ts` and `schemas.ts`, and nothing with side effects beyond the schema registration.
 - Boundary: renderer and main. Main runs `validateComponentResult` as the check that decides. The renderer reduces the config main parsed into choices and schemas, parses a settled call's recorded args to redraw it, and its component gallery parses sample configs and runs the same check on a sample answer.
 - Upstream seam: none. The engine's check of a state's declared output schema is a second, independent gate.
-- Callers: the gateway's `withContract`, `configOf` and `submitInteraction`; runtime `followUp.ts`; persistence `workflows.ts` for lint; the renderer's `components.tsx`, `reviewNotes.tsx`, `runViews.tsx` and `componentGallery.tsx`.
+- Callers: the gateway's `withContract`, `configOf` and `submitInteraction`; runtime `followUp.ts`; persistence `workflows.ts` for lint; the renderer's `choicesModel.ts`, `artifactReview.ts`, `runConversationModel.ts` and `galleryModel.ts`, and the gates `@jaira/universal` draws from them (`GateBodies.tsx`, `ArtifactGates.tsx`, `Gate.tsx`).
 
 ## The unit owns no data and holds no state
 

@@ -2,11 +2,11 @@
 id: engineering/contracts/push-messages
 type: engineering-contract
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 visibility: internal
 kind: event
 owned_by: [engineering/units/ipc-bridge]
-consumers: ["@jaira/app renderer store.ts push handler", "@jaira/app renderer pointerMenu.tsx", "@jaira/app tests that record an AppService publish callback"]
+consumers: ["@jaira/app renderer store.ts push handler", "@jaira/universal PointerMenus.web.tsx", "@jaira/app tests that record an AppService publish callback"]
 since: 2026-07-24
 siblings: [engineering/contracts/session-live-protocol, engineering/contracts/journal-events, engineering/contracts/preload-bridge, engineering/contracts/ipc-channels, engineering/contracts/inbox-channels]
 ---
@@ -90,8 +90,8 @@ The pending shapes are [inbox-channels](inbox-channels.md).
 
 ## A change to a type or field breaks the renderer's handlers at once, and no deprecation path exists
 
-- Adding a `type` is additive: the store's `switch` ignores what it does not name, and `pointerMenu.tsx` ignores everything but `frame:contextMenu`.
-- Renaming or reshaping a type breaks `store.ts` and `pointerMenu.tsx` in the same build, since main and the renderer ship together and no push carries a version.
+- Adding a `type` is additive: the store's `switch` ignores what it does not name, and `PointerMenus.web.tsx` ignores everything but `frame:contextMenu`.
+- Renaming or reshaping a type breaks `store.ts` and `PointerMenus.web.tsx` in the same build, since main and the renderer ship together and no push carries a version.
 - Dropping or changing the top-level `project` stamp breaks the store's rule that ignores another project's invalidations.
 - A change to `session:turn` or its `n` is a change to [session-live-protocol](session-live-protocol.md) and breaks both folds.
 

@@ -2,13 +2,13 @@
 id: ui/components/file-panel
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/the-window-remembers-its-arrangement, ux/patterns/draft-belongs-to-the-file, ux/patterns/absence-is-stated]
 serves: [product/author-processes-without-memorising-the-format, product/read-what-work-produced, product/read-comfortably]
 surfaces: [ui/surfaces/files-view]
 reuses: [ui/components/splitter, ui/components/editor-chrome, ui/components/code-editor, ui/components/markdown-editor, ui/components/schema-json-editor, ui/components/workflow-editor, ui/components/code-view, ui/components/folder-view]
-implemented_by: [packages/app/src/renderer/files.tsx, packages/app/src/renderer/fileSurfaces.tsx, packages/app/src/renderer/fileTypes.ts, packages/app/src/renderer/editorThemes.ts]
-verified_by: [packages/app/test/fileTypes.test.ts, packages/app/test/fileRegistry.test.ts]
+implemented_by: [packages/universal/src/components/files/FilePanel.tsx, packages/universal/src/components/files/surfaces.tsx, packages/universal/src/app/FilesView.tsx, packages/app/src/renderer/fileSurfaceTable.ts, packages/app/src/renderer/fileTypes.ts, packages/app/src/renderer/editorThemes.ts]
+verified_by: [packages/app/test/fileTypes.test.ts, packages/app/test/fileRegistry.test.ts, packages/app/shots/parityWorld.mts#files-markdown, packages/app/shots/parityWorld.mts#files-ts, packages/app/shots/parityWorld.mts#files-json, packages/app/shots/parityWorld.mts#files-plain]
 mockups: [ui/assets/file-panel/empty.html, ui/assets/file-panel/half.html, ui/assets/file-panel/folded.html, ui/assets/file-panel/whole.html, ui/assets/file-panel/error.html]
 siblings: [ui/components/folder-view, ui/components/value-view, ui/components/editor-chrome, ui/components/workflow-editor]
 ---

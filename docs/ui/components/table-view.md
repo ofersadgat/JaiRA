@@ -2,13 +2,13 @@
 id: ui/components/table-view
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/absence-is-stated]
 serves: [product/read-what-work-produced]
 surfaces: [ui/surfaces/files-view, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/context-panel, ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/valueView.tsx, packages/app/src/renderer/fileSurfaces.tsx]
-verified_by: [packages/app/test/tableView.test.ts, packages/app/test/valueViewToggle.test.ts, packages/app/test/fileRegistry.test.ts]
+implemented_by: [packages/universal/src/components/panel/ValueReadings.tsx, packages/universal/src/components/files/surfaces.tsx, packages/app/src/renderer/fileSurfaceTable.ts]
+verified_by: [packages/app/test/fileRegistry.test.ts, packages/shared/test/structured.test.ts, packages/app/shots/parityWorld.mts#files-csv, packages/client/src/specimens/valueSpecimens.tsx#value-table]
 mockups: [ui/assets/table-view/empty.html, ui/assets/table-view/partial.html, ui/assets/table-view/success.html]
 siblings: [ui/components/data-tree, ui/components/code-view, ui/components/value-view]
 ---

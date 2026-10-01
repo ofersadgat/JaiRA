@@ -2,13 +2,13 @@
 id: ui/components/address-bar
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/drill-in-and-back-out, ux/patterns/live-facts-and-unseen-counts, ux/patterns/problems-marked-where-they-are, ux/patterns/nested-under-what-caused-it, ux/patterns/context-beside-what-you-stand-on]
 serves: [product/keep-track-of-everything, product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/complete-record-of-every-run, product/watch-agents-work-live, product/catch-process-mistakes-before-running]
 surfaces: [ui/surfaces/app-window, ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/task-context]
 reuses: [ui/components/context-menu, ui/components/status-pill, ui/components/segmented-control]
-implemented_by: [packages/app/src/renderer/crumbs.tsx, packages/app/src/renderer/taskBar.tsx, packages/app/src/renderer/files.tsx, packages/app/src/renderer/runViews.tsx]
-verified_by: [packages/app/test/trail.test.ts]
+implemented_by: [packages/universal/src/components/Crumbs.tsx, packages/universal/src/components/TaskAddressBar.tsx, packages/universal/src/components/files/FileAddressBar.tsx, packages/universal/src/app/TitleBar.tsx, packages/app/src/renderer/crumbModel.ts, packages/app/src/renderer/taskBarModel.ts, packages/app/src/renderer/trail.ts]
+verified_by: [packages/app/test/trail.test.ts, packages/app/shots/parityWorld.mts#run, packages/app/shots/parityWorld.mts#run-leaf, packages/app/shots/parityWorld.mts#files-markdown, packages/app/shots/parityWorld.mts#files-facts, packages/client/src/specimens/registry.tsx#file-facts]
 mockups: [ui/assets/address-bar/empty.html, ui/assets/address-bar/listing.html, ui/assets/address-bar/walked.html, ui/assets/address-bar/files.html, ui/assets/address-bar/alternatives-open.html, ui/assets/address-bar/subagent-walk.html]
 siblings: [ui/components/segmented-control, ui/components/project-row, ui/components/file-tree, ui/components/instance-index]
 ---

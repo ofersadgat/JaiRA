@@ -2,13 +2,13 @@
 id: ui/components/segmented-control
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/keep-track-of-everything]
 surfaces: [ui/surfaces/files-view, ui/surfaces/tasks-view, ui/surfaces/run-view]
 reuses: []
-implemented_by: [packages/app/src/renderer/runViews.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/RunModeToggle.tsx, packages/universal/src/app/viewState.ts]
+verified_by: [packages/app/shots/parityWorld.mts#run, packages/app/shots/parityWorld.mts#run-convo]
 mockups: [ui/assets/segmented-control/chosen.html]
 siblings: [ui/components/address-bar, ui/components/value-view, ui/components/workflow-editor]
 ---

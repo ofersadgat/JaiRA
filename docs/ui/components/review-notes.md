@@ -2,13 +2,13 @@
 id: ui/components/review-notes
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/quote-anchored-note, ux/patterns/jump-to-the-place-and-mark-it]
 serves: [product/decide-with-the-context-in-front-of-you, product/review-changes-before-they-land]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/icon]
-implemented_by: [packages/app/src/renderer/reviewNotes.tsx]
-verified_by: [packages/app/test/selectionHold.test.ts]
+implemented_by: [packages/universal/src/components/artifact/ReviewNotes.tsx, packages/universal/src/components/artifact/noteSelection.web.ts, packages/universal/src/components/artifact/noteSelection.ts, packages/app/src/renderer/reviewSelection.ts, packages/app/src/renderer/artifactReview.ts]
+verified_by: [packages/app/test/selectionHold.test.ts, packages/client/src/specimens/reviewSpecimens.tsx#review-notes]
 mockups: [ui/assets/review-notes/composing.html, ui/assets/review-notes/threads.html, ui/assets/review-notes/record.html]
 siblings: [ui/components/artifact-pane, ui/components/changeset-review, ui/components/review-artifact-gate]
 ---

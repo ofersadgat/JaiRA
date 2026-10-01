@@ -2,13 +2,13 @@
 id: ui/components/letterhead
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/park-and-ask, ux/patterns/the-window-remembers-its-arrangement]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/decisions-stay-yours, product/failures-explain-themselves, product/know-what-work-costs]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/icon]
-implemented_by: [packages/app/src/renderer/stateSurface.tsx, packages/app/src/renderer/sessionPanels.tsx, packages/app/src/renderer/runViews.tsx]
-verified_by: [packages/app/test/stateSurface.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionBands.tsx, packages/universal/src/components/panel/RunTranscript.tsx, packages/app/src/renderer/stateSurfaceModel.ts]
+verified_by: [packages/app/test/stateSurface.test.ts, packages/app/shots/parityWorld.mts#run-convo, packages/app/shots/parityWorld.mts#task, packages/client/src/specimens/transcriptSpecimens.tsx#session-bands]
 mockups: [ui/assets/letterhead/loading.html, ui/assets/letterhead/success.html, ui/assets/letterhead/computed.html, ui/assets/letterhead/asked.html, ui/assets/letterhead/asking.html, ui/assets/letterhead/error.html, ui/assets/letterhead/folded.html, ui/assets/letterhead/waiting-on-you.html]
 siblings: [ui/components/session-sheet, ui/components/waiting-on-sheet, ui/components/computed-state-body, ui/components/instance-index]
 ---

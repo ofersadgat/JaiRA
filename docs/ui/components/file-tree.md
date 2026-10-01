@@ -2,13 +2,13 @@
 id: ui/components/file-tree
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-01
 realizes: [ux/patterns/filter-in-place, ux/patterns/name-it-where-it-will-live, ux/patterns/draft-belongs-to-the-file, ux/patterns/problems-marked-where-they-are, ux/patterns/the-window-remembers-its-arrangement, ux/patterns/verbs-on-the-thing-itself, ux/patterns/absence-is-stated, ux/patterns/second-deliberate-step-for-irreversible]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running, product/share-processes-across-projects, product/all-projects-in-one-place]
 surfaces: [ui/surfaces/sidebar, ui/surfaces/files-view]
 reuses: [ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/files.tsx, packages/app/src/renderer/builtIn.tsx, packages/app/src/renderer/App.tsx]
-verified_by: [packages/app/test/fileTreePanel.test.ts, packages/app/test/builtInStates.test.ts]
+implemented_by: [packages/universal/src/components/files/FileTreePanel.tsx, packages/universal/src/app/SidebarRegion.tsx, packages/app/src/renderer/filesModel.ts, packages/app/src/renderer/builtInModel.ts]
+verified_by: [packages/app/test/fileTreePanel.test.ts, packages/app/test/builtInStates.test.ts, packages/app/shots/parityWorld.mts#files, packages/app/shots/parityWorld.mts#files-find, packages/app/shots/parityWorld.mts#files-new, packages/app/shots/parityWorld.mts#files-menu]
 mockups: [ui/assets/file-tree/empty.html, ui/assets/file-tree/success.html, ui/assets/file-tree/marked.html, ui/assets/file-tree/filtering.html, ui/assets/file-tree/naming.html, ui/assets/file-tree/built-in.html]
 siblings: [ui/components/folder-view, ui/components/sidebar-row, ui/components/project-row, ui/components/state-rail]
 ---

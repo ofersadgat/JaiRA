@@ -2,11 +2,11 @@
 id: engineering/contracts/session-live-protocol
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 visibility: internal
 kind: event
 owned_by: [engineering/units/live-turns]
-consumers: ["@jaira/app renderer store.ts through liveTurnFold.ts", "@jaira/app renderer views that draw liveTurn: runViews.tsx, chatPane.tsx, fileSurfaces.tsx, session.tsx"]
+consumers: ["@jaira/app renderer store.ts through liveTurnFold.ts", "@jaira/universal views that draw liveTurn: RunTranscript.tsx, SidechainConversation.tsx, LeafPanel.tsx, DebugPane.tsx, and the chat thread through @jaira/app renderer chatSurface.ts"]
 siblings: [engineering/contracts/push-messages, engineering/contracts/chat-channels, engineering/contracts/journal-events]
 ---
 

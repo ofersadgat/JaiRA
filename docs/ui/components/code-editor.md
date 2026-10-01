@@ -2,13 +2,13 @@
 id: ui/components/code-editor
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/problems-marked-where-they-are, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/one-document-several-readings]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running, product/read-what-work-produced, product/read-comfortably]
 surfaces: [ui/surfaces/files-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/monacoDiff.tsx, packages/app/src/renderer/documents.tsx, packages/app/src/renderer/editorThemes.ts, packages/app/src/renderer/editorLook.ts]
-verified_by: [packages/app/test/editorLook.test.ts, packages/app/test/tsProject.test.ts, packages/app/test/documents.test.ts]
+implemented_by: [packages/app/src/renderer/monacoDiff.tsx, packages/universal/src/islands/Island.tsx, packages/universal/src/components/files/CodeEdit.tsx, packages/app/src/renderer/editorThemes.ts, packages/app/src/renderer/editorLook.ts]
+verified_by: [packages/app/test/editorLook.test.ts, packages/app/test/tsProject.test.ts, packages/app/shots/monaco.mts, packages/app/shots/verifyTypeCheck.mts, packages/app/shots/parityWorld.mts#files-ts]
 mockups: [ui/assets/code-editor/loading.html, ui/assets/code-editor/success.html, ui/assets/code-editor/problems.html, ui/assets/code-editor/fitted.html]
 siblings: [ui/components/code-view, ui/components/diff-editor, ui/components/markdown-editor, ui/components/schema-json-editor]
 ---

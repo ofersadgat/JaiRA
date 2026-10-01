@@ -2,13 +2,13 @@
 id: ui/components/schema-form
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/schema-driven-form, ux/patterns/inherited-unless-set-here, ux/patterns/pick-from-what-exists, ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/hand-work-to-agents, product/try-one-step-on-its-own, product/decisions-stay-yours, product/bring-your-own-models-and-agents, product/author-processes-without-memorising-the-format, product/try-a-process-without-spending]
 surfaces: [ui/surfaces/new-task-popover, ui/surfaces/context-panel, ui/surfaces/files-view, ui/surfaces/gate-modal, ui/surfaces/run-conversation, ui/surfaces/settings-runs, ui/surfaces/settings-data, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-connections, ui/surfaces/components-view]
 reuses: [ui/components/settings-field, ui/components/switch, ui/components/preset-chips, ui/components/llm-config-form]
-implemented_by: [packages/app/src/renderer/schemaForm/SchemaForm.tsx, packages/app/src/renderer/schemaForm/model.ts, packages/app/src/renderer/schemaForm/check.ts, packages/app/src/renderer/schemaForm/presentation.ts, packages/app/src/renderer/schemaForm/registry.ts, packages/app/src/renderer/runPanel.tsx, packages/app/src/renderer/runForm.ts]
-verified_by: [packages/app/test/schemaForm.test.ts, packages/app/test/schemaFormModel.test.ts, packages/app/test/runForm.test.ts, packages/app/test/schemaCheck.test.ts]
+implemented_by: [packages/universal/src/components/form/SchemaForm.tsx, packages/universal/src/components/form/Field.tsx, packages/universal/src/components/form/inputs.tsx, packages/app/src/renderer/schemaForm/model.ts, packages/app/src/renderer/schemaForm/check.ts, packages/app/src/renderer/schemaForm/presentation.ts, packages/universal/src/components/panel/RunPanel.tsx, packages/app/src/renderer/runForm.ts]
+verified_by: [packages/app/test/schemaForm.test.ts, packages/app/test/schemaFormModel.test.ts, packages/app/test/runForm.test.ts, packages/app/test/schemaCheck.test.ts, packages/app/shots/parityWorld.mts#gallery-form, packages/app/shots/parityWorld.mts#new-task, packages/client/src/specimens/formSpecimens.tsx#form-fields, packages/client/src/specimens/formSpecimens.tsx#form-lists, packages/client/src/specimens/formSpecimens.tsx#form-rows]
 mockups: [ui/assets/schema-form/success.html, ui/assets/schema-form/error.html, ui/assets/schema-form/layered.html, ui/assets/schema-form/list.html, ui/assets/schema-form/reading.html]
 siblings: [ui/components/settings-field, ui/components/fill-form-gate, ui/components/state-form, ui/components/schema-json-editor, ui/components/llm-config-form]
 ---

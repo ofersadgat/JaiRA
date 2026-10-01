@@ -2,13 +2,13 @@
 id: ui/components/choose-option-gate
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask, ux/patterns/ask-one-or-several-questions, ux/patterns/own-answer-beside-offered-options]
 serves: [product/decisions-stay-yours, product/decide-with-the-context-in-front-of-you]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/gate-surface, ui/components/choice-list, ui/components/question-stepper]
-implemented_by: [packages/app/src/renderer/components.tsx, packages/app/src/renderer/choices.tsx]
-verified_by: [packages/app/test/choices.test.ts, packages/app/test/followUp.test.ts]
+implemented_by: [packages/universal/src/components/floats/GateBodies.tsx, packages/universal/src/components/floats/Choices.tsx, packages/universal/src/components/panel/Gate.tsx, packages/app/src/renderer/choicesModel.ts, packages/app/src/renderer/gateModel.ts]
+verified_by: [packages/app/test/choices.test.ts, packages/app/test/followUp.test.ts, packages/app/shots/parityWorld.mts#gate, packages/app/shots/parityWorld.mts#gallery-choose, packages/app/shots/parityWorld.mts#gallery-choose-confirm, packages/app/shots/parityWorld.mts#gallery-choose-follow-up, packages/app/shots/parityWorld.mts#task-answered]
 mockups: [ui/assets/choose-option-gate/one-tap.html, ui/assets/choose-option-gate/held-for-confirm.html, ui/assets/choose-option-gate/steps.html, ui/assets/choose-option-gate/settled.html]
 siblings: [ui/components/review-artifact-gate, ui/components/confirm-action-gate, ui/components/fill-form-gate, ui/components/agent-question]
 ---

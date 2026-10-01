@@ -2,13 +2,13 @@
 id: ui/components/state-rail
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/arm-the-cut-then-confirm, ux/patterns/verbs-on-the-thing-itself]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/rewind-to-where-it-went-wrong, product/try-another-direction]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view, ui/surfaces/debug-view]
 reuses: [ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/rail.ts, packages/app/src/renderer/railView.tsx]
-verified_by: [packages/app/test/rail.test.ts]
+implemented_by: [packages/app/src/renderer/rail.ts, packages/universal/src/components/panel/Rail.tsx, packages/app/src/renderer/stepCompaction.ts]
+verified_by: [packages/app/test/rail.test.ts, packages/app/test/stepCompaction.test.ts, packages/app/shots/parityWorld.mts#run-rail-hover, packages/app/shots/parityWorld.mts#run-knot-fold, packages/app/shots/parityWorld.mts#run-lane-menu, packages/client/src/specimens/railSpecimens.tsx#rail-deep, packages/client/src/specimens/railSpecimens.tsx#rail-rolled]
 mockups: [ui/assets/state-rail/success.html, ui/assets/state-rail/lobes.html, ui/assets/state-rail/folded.html, ui/assets/state-rail/pointed.html, ui/assets/state-rail/armed-cut.html, ui/assets/state-rail/deep.html]
 siblings: [ui/components/instance-index, ui/components/run-step-note, ui/components/session-sheet, ui/components/file-tree]
 ---

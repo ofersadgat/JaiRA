@@ -2,12 +2,12 @@
 id: engineering/units/renderer-store
 type: engineering-unit
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 implements: [ui/surfaces/app-window, ui/surfaces/error-notice, ui/surfaces/inbox-strip, ux/patterns/waiting-requests-gathered, product/keep-track-of-everything, product/all-projects-in-one-place]
 layer: ui
 owns_contracts: []
 requires: [engineering/units/ipc-bridge, engineering/units/live-turns, engineering/units/drafts, engineering/units/ui-layout-state, engineering/units/address-trail, engineering/units/user-settings, engineering/units/project-config]
-implemented_by: [packages/app/src/renderer/store.ts, packages/app/src/renderer/sessionCache.ts, packages/app/src/renderer/appearanceLayer.ts, packages/app/src/renderer/main.tsx]
+implemented_by: [packages/app/src/renderer/store.ts, packages/app/src/renderer/sessionCache.ts, packages/app/src/renderer/appearanceLayer.ts, packages/universal/src/app/UniversalApp.tsx, packages/universal/src/app/shell.ts]
 verified_by: [packages/app/test/runForm.test.ts, packages/app/test/sessionCache.test.ts, packages/app/test/appearanceLayer.test.ts]
 siblings: [engineering/units/live-turns, engineering/units/drafts, engineering/units/ui-layout-state, engineering/units/address-trail, engineering/units/ipc-bridge]
 ---
@@ -16,15 +16,15 @@ siblings: [engineering/units/live-turns, engineering/units/drafts, engineering/u
 
 ## The store holds the window's copy of everything main serves, and refetches it when a push says it changed
 
-`store.ts` exports one hook, `useApp()`, called once in `App.tsx`, which passes `state` and `actions` down as props. It is neither a context nor a state library:
+`store.ts` exports one hook, `useApp()`, called once in `UniversalApp.tsx` (`@jaira/universal`), which hands `state` and `actions` to every region of the shell through one context (`useShell()` in `app/shell.ts`). The hook is not a state library:
 
 - One `useState<AppState>` with a ref mirror written inside `patch`, so an action that patches and refreshes in the same tick reads its own patch.
 - Every action is built once in a `useMemo` and reached through `actionsRef`.
-- `invoke(channel, request)` and `subscribe(listener)` wrap `window.jaira`; `invoke` throws `the JaiRA bridge is unavailable (preload did not run)` when the preload is absent.
+- `invoke(channel, request)` and `subscribe(listener)` wrap the bridge: the one a host page installed with `setBridge` (a phone, a browser tab), else `window.jaira`; `invoke` throws `the JaiRA bridge is unavailable (preload did not run)` when the preload is absent.
 - `AppState` holds the address in `view`, `at`, `selected`, `selectedProject`, `stateId` and `trail`; a local copy of each projection main serves, the inbox lists, the selected task's `sessions` cache and `liveTurn`, `producing` per task, `settings`, `drafts`, `logs` and `error`.
 - The look is not a slice of its own: `lookOf(state.config)` in `appearanceLayer.ts` reads the effective `appearance` block of the address the window stands on, the defaults before the first read. `writeLook` changes it by writing a few paths into ONE layer's document (`withPaths`) through `saveConfig`, after patching the local `config` so the window changes first. A change made outside Settings, such as the sidebar's theme switch, lands in the strongest layer that states the key, else the personal one (`targetLayerOf`).
 - `sessionCache.ts` keys the session cache by the durable instance id through `sessionKey`, and `withoutSession` drops one entry.
-- `main.tsx` mounts `App` inside `CrashBoundary`, with `LooseErrorBanner` outside it.
+- `UniversalApp.tsx` draws the shell inside `CrashBoundary`, with `LooseErrorBanner` outside it.
 
 It deliberately does not own:
 
@@ -32,8 +32,8 @@ It deliberately does not own:
 - Folding a live turn and the merge rules with its snapshot: [live-turns](live-turns.md).
 - The rules for unsaved edits, remembered layout and the run path: [drafts](drafts.md), [ui-layout-state](ui-layout-state.md), [address-trail](address-trail.md).
 - Validating a person's answer, which main does again: [interaction-gateway](interaction-gateway.md).
-- Every call made outside it. `chatPane.tsx`, `runViews.tsx`, `components.tsx`, `fileSurfaces.tsx`, `valueView.tsx`, `schemaForm/check.ts`, `reviewNotes.tsx` and `pointerMenu.tsx` call `invoke` directly, chat sends and cancels among them, and `pointerMenu.tsx` subscribes to `frame:contextMenu` itself.
-- The board's multi-select set and the run view's mode and focus, which `App.tsx` holds.
+- Every call made outside it. Pure modules beside it (`chatThreadModel.ts`, `chatMentions.ts`, `taskRun.ts`, `panelHost.ts`, `connectionsModel.ts`, `schemaForm/check.ts` among them) and components of `@jaira/universal` (`RunConversation.tsx`, `RunTranscript.tsx`, `ValueView.tsx`, `ArtifactGates.tsx` among them) call `invoke` directly, chat sends and cancels among them, and `PointerMenus.web.tsx` subscribes to `frame:contextMenu` itself.
+- The board's multi-select set, which `BoardColumn.tsx` holds, and the run view's mode and focus, which are small stores of the shell's own (`runMode` in `app/viewState.ts`, `runFocus` in `components/panel/panelBridge.ts`).
 
 ## The store is the renderer's side of the one trust boundary, and reaches main only through the bridge
 

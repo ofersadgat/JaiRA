@@ -2,7 +2,7 @@
 id: engineering/units/uri-and-artifact-reads
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [product/read-what-work-produced, product/review-changes-before-they-land, ui/components/value-view, ui/components/artifact-pane, ui/components/produced-artifacts, ui/components/review-artifact-gate, ui/components/edit-artifact-gate, ui/components/changeset-review, ui/components/composer]
 layer: service
 owns_contracts: [engineering/contracts/uri-read, engineering/contracts/artifact-frame-protocol]
@@ -28,7 +28,7 @@ It deliberately does not own:
 - Registering `jaira-artifact:`, its handler, its headers and the window's `frame-src`: [app-shell](app-shell.md).
 - The source grammar `parseChangesetSource` and building a changeset's before-side: [changesets](changesets.md).
 - Records, positions and session aliases: [operation-record-store](operation-record-store.md). `git show`: [git-cli](git-cli.md).
-- The sandboxed frame and the message it may post, which the renderer's `valueView.tsx` hosts.
+- The sandboxed frame and the message it may post, which the renderer's `interactiveArtifact.tsx` hosts.
 - Reading files by layer and path for editing: [workflow-authoring](workflow-authoring.md).
 
 ## The unit is main-process code on the renderer boundary, and it is the only door from a model's page to project data
@@ -37,7 +37,7 @@ It deliberately does not own:
 - No upstream seam.
 - Boundary: renderer and main. Channels `uri:read`, `artifact:list` and `artifact:serve`. A frame never names a path: it loads a token main minted for a record the renderer named, so the handler resolves nothing itself.
 - A request's `project` resolves through `sessionOf`: a named project that is open, or the one user project when exactly one is open. Anything else refuses with `no project is open`.
-- Callers: the chat artifacts strip and the composer's `@` mentions in `chatPane.tsx`, the reviewer's current side and drift check in `changesetReview.tsx`, and artifact gates in `components.tsx` through `valueView.tsx`.
+- Callers: the Produced tab (`PanelViews.tsx` in `@jaira/universal`) and the composer's `@` mentions in `chatMentions.ts`, the reviewer's current side and drift check in `changesetReviewModel.ts`, and artifact gates (`ArtifactGates.tsx`) through the value view (`ValueView.tsx`).
 
 ## The only data the unit holds is the grant map, and every read goes to its owner's store
 

@@ -2,13 +2,13 @@
 id: ui/components/state-graph
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/context-beside-what-you-stand-on, ux/patterns/drill-in-and-back-out]
 serves: [product/see-how-a-process-flows, product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: []
-implemented_by: [packages/app/src/renderer/stateGraphView.tsx, packages/app/src/renderer/stateGraph.ts]
-verified_by: [packages/app/test/stateGraph.test.ts]
+implemented_by: [packages/universal/src/components/workflow/StateGraph.tsx, packages/app/src/renderer/stateGraph.ts, packages/app/src/renderer/stateGraphViewModel.ts]
+verified_by: [packages/app/test/stateGraph.test.ts, packages/app/shots/parityWorld.mts#files-graph]
 mockups: [ui/assets/state-graph/fitted.html, ui/assets/state-graph/focused.html, ui/assets/state-graph/too-big.html, ui/assets/state-graph/empty.html, ui/assets/state-graph/error.html]
 siblings: [ui/components/workflow-editor, ui/components/state-form, ui/components/schema-json-editor, ui/components/state-inspector]
 ---

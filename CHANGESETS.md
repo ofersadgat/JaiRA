@@ -14,7 +14,10 @@ designed.** What shipped, and where it landed:
   `session_positions`), the read-side projection in `sessionStore.ts`, and the unconditional
   dispatcher recording in `wiring.ts`.
 - §6's split (`GitRead` / `GitLifecycle`) with git-cli as the only backend — the §6.2 build order.
-- §8: the mount contract and reviewer (`packages/app/src/renderer/changesetReview.tsx`), the
+- §8: the mount contract and reviewer (`packages/universal/src/components/artifact/ChangesetReview.tsx`
+  over `packages/app/src/renderer/changesetReviewModel.ts`, since the DOM renderer was deleted on
+  2026-10-01; a renderer `.tsx` named further down is that renderer's, readable at the tag
+  `dom-renderer-final`), the
   anchor-guarded `uri:read` channel, the sync lowered into a changeset producer, and the CLI
   reviewer (`packages/cli/src/changesetReviewer.ts`).
 - The PRODUCT entry points (2026-08-13): **`changeset:review`** — a task's worktree diffed against
@@ -86,7 +89,7 @@ nothing in common:
 - **A sync proposes state files.** `workflow/sync/states` returns complete files with a reason each
   ([`syncWorkflow.ts`](packages/runtime/src/syncWorkflow.ts)), and the app drops them into the
   drafts map so the editor shows them unsaved. What it cannot do is show you *what changed* — the
-  panel lists a reason string and a link ([`syncPanel.tsx`](packages/app/src/renderer/syncPanel.tsx)).
+  panel lists a reason string and a link (`syncPanel.tsx`).
 - **An agent edits code in a worktree.** Every task may be bound to a branch and a directory
   (`TaskDetail.branch`, `TaskDetail.worktreePath`), so the edits exist and are perfectly readable by
   `git diff`. Nothing reads them.
@@ -470,7 +473,7 @@ repository*, and for a WSL project the answer is git-cli through `wsl`.
 
 ### 7.1 A strategy registry, keyed by mime
 
-The same shape as [`fileSurfaces.tsx`](packages/app/src/renderer/fileSurfaces.tsx): register the
+The same shape as `fileSurfaces.tsx`: register the
 most specific type that changes behaviour and let a fallback chain cover the rest.
 
 | Type | Strategy |
@@ -591,7 +594,7 @@ repository. A renderer-reachable channel that resolves arbitrary `file:` URIs is
 | [`sessionStore.ts`](packages/persistence/src/sessionStore.ts) | `RecordStore` backed by op records + positions; the payload-wins projection moves to the read side (§5.1) |
 | [DESIGN.md](DESIGN.md) | §4.2 rewritten to journal-as-truth: `instances`/`transitions` demoted to optional caches, `conversations` struck, "materialized tables are the resume source" reversed (§5.1) |
 | [`components.ts`](packages/shared/src/components.ts) | a sixth component: enum, config type, normalizer, result schema |
-| [`components.tsx`](packages/app/src/renderer/components.tsx) | the mount contract (§8.1); the dialog stops being the only host |
+| `components.tsx` | the mount contract (§8.1); the dialog stops being the only host |
 | [`stateViews.ts`](packages/persistence/src/stateViews.ts) | the new name added to "this is a UI component, not a missing runtime" |
 | [`gate-components.md`](docs/engineering/contracts/gate-components.md) | the new contract documented |
 | [`ipc.ts`](packages/shared/src/ipc.ts) | `uri:read`; `WorkflowSyncEdit` becomes a changeset producer |

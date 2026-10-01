@@ -2,7 +2,7 @@
 id: engineering/units/ts-language-service
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [product/catch-process-mistakes-before-running, product/review-changes-before-they-land, ux/patterns/problems-marked-where-they-are, ui/components/code-editor, ui/components/diff-editor, ui/components/changeset-review]
 layer: service
 owns_contracts: [engineering/contracts/ts-check-worker-protocol]
@@ -25,7 +25,7 @@ Every TypeScript diagnostic the editor draws comes from this unit, syntax includ
 
 It deliberately does not own:
 
-- Monaco models, markers, peeks and hovers: the renderer's `fileSurfaces.tsx` and `changesetReview.tsx`.
+- Monaco models, markers, peeks and hovers: the renderer's `monacoDiff.tsx`, with the compiler the changeset reviewer hands each side of a change (`changesetReviewModel.ts`, `ChangesetReview.tsx`).
 - Building the before-side from a changeset, `baselineOf` in `@jaira/shared`: [changesets](changesets.md).
 - Compiling a workflow's TypeScript functions for a run: [module-approvals](module-approvals.md).
 - Path containment itself: `contained` in [workflow-authoring](workflow-authoring.md). Creating a task's worktree: [task-worktrees](task-worktrees.md).

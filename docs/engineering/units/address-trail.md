@@ -2,12 +2,12 @@
 id: engineering/units/address-trail
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [ui/components/address-bar, ui/surfaces/run-view, ux/patterns/drill-in-and-back-out, ux/patterns/nested-under-what-caused-it, product/keep-track-of-everything]
 layer: ui
 owns_contracts: []
 requires: [engineering/units/renderer-store, engineering/units/board-projection]
-implemented_by: [packages/app/src/renderer/trail.ts, packages/app/src/renderer/crumbs.tsx, packages/app/src/renderer/files.tsx, packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/store.ts]
+implemented_by: [packages/app/src/renderer/trail.ts, packages/app/src/renderer/crumbModel.ts, packages/app/src/renderer/filesModel.ts, packages/app/src/renderer/runBoardModel.ts, packages/app/src/renderer/store.ts]
 verified_by: [packages/app/test/trail.test.ts]
 siblings: [engineering/units/renderer-store, engineering/units/run-rail-geometry, engineering/units/view-addressing]
 ---
@@ -25,8 +25,8 @@ siblings: [engineering/units/renderer-store, engineering/units/run-rail-geometry
 
 Around it:
 
-- `standingOn` in `runViews.tsx` picks what the middle column shows: the trail's last step, or the open state's newest instance when the trail is empty, with the declared children of the state stood on.
-- `crumbsOf` in `files.tsx` joins folders, state segments and `runCrumbs` from `crumbs.tsx` into one address. `runCrumbs` names the base crumb by the task title with the state id prefix dropped by `shortRunName`, a deeper crumb by its name or `#<id>`, and offers the other tasks of the state at the base and the sibling instances below it.
+- `standingOn` in `runBoardModel.ts` picks what the middle column shows: the trail's last step, or the open state's newest instance when the trail is empty, with the declared children of the state stood on.
+- `crumbsOf` in `filesModel.ts` joins folders, state segments and `runCrumbs` from `crumbModel.ts` into one address. `runCrumbs` names the base crumb by the task title with the state id prefix dropped by `shortRunName`, a deeper crumb by its name or `#<id>`, and offers the other tasks of the state at the base and the sibling instances below it.
 - The store owns the list in `AppState.trail` and the declared children of a deeper tail in `trailState`.
 
 It deliberately does not own:

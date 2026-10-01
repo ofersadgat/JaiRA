@@ -2,13 +2,13 @@
 id: ui/components/llm-config-form
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects]
 surfaces: [ui/surfaces/settings-models]
 reuses: [ui/components/settings-field]
-implemented_by: [packages/app/src/renderer/llmConfigForm.tsx, packages/app/src/renderer/schemaForm/widgets/LlmConfigWidget.tsx]
-verified_by: [packages/app/test/llmConfigForm.test.ts, packages/app/test/presetTabs.test.ts]
+implemented_by: [packages/universal/src/components/form/LlmConfigForm.tsx, packages/app/src/renderer/llmConfigModel.ts, packages/app/src/renderer/modelParameters.ts]
+verified_by: [packages/app/test/llmConfigForm.test.ts, packages/app/test/presetTabs.test.ts, packages/app/shots/parityWorld.mts#settings-models]
 mockups: [ui/assets/llm-config-form/empty.html, ui/assets/llm-config-form/set.html, ui/assets/llm-config-form/reasoning-on.html, ui/assets/llm-config-form/conflict.html, ui/assets/llm-config-form/error.html, ui/assets/llm-config-form/disabled.html]
 siblings: [ui/components/schema-form, ui/components/executor-tree, ui/components/settings-field]
 ---

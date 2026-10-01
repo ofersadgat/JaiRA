@@ -2,13 +2,13 @@
 id: ui/components/work-row
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/stream-then-settle, ux/patterns/nested-under-what-caused-it, ux/patterns/drill-in-and-back-out]
 serves: [product/watch-agents-work-live, product/complete-record-of-every-run, product/failures-explain-themselves, product/agents-ask-instead-of-guessing, product/read-what-work-produced]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
 reuses: [ui/components/value-view, ui/components/choice-list, ui/components/question-stepper, ui/components/transcript, ui/components/icon]
-implemented_by: [packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts]
-verified_by: [packages/app/test/transcript.test.ts, packages/app/test/choices.test.ts]
+implemented_by: [packages/universal/src/components/panel/WorkRows.tsx, packages/universal/src/components/panel/WorkSummary.tsx, packages/app/src/renderer/transcriptRows.ts, packages/app/src/renderer/workSummary.ts, packages/app/src/renderer/transcript.ts]
+verified_by: [packages/app/test/transcript.test.ts, packages/app/test/workSummary.test.ts, packages/app/test/stillRunning.test.ts, packages/app/test/choices.test.ts, packages/app/shots/parityWorld.mts#conversation-tools, packages/app/shots/parityWorld.mts#conversation-steps, packages/app/shots/parityWorld.mts#conversation-row, packages/app/shots/parityWorld.mts#conversation-chip-card, packages/client/src/specimens/transcriptSpecimens.tsx#transcript-rows, packages/client/src/specimens/transcriptSpecimens.tsx#transcript-summary, packages/client/src/specimens/transcriptSpecimens.tsx#transcript-shown]
 mockups: [ui/assets/work-row/success.html, ui/assets/work-row/live.html, ui/assets/work-row/error.html, ui/assets/work-row/open.html, ui/assets/work-row/subagent.html, ui/assets/work-row/shown.html, ui/assets/work-row/workflow-tools.html, ui/assets/work-row/answered-for-you.html]
 siblings: [ui/components/message, ui/components/run-step-note, ui/components/computed-state-body, ui/components/agent-question]
 ---

@@ -2,13 +2,13 @@
 id: ui/components/task-board
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/ordered-by-urgency-then-recency, ux/patterns/context-beside-what-you-stand-on, ux/patterns/drill-in-and-back-out, ux/patterns/verbs-on-the-thing-itself, ux/patterns/drag-only-where-the-process-allows, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/absence-is-stated]
 serves: [product/keep-track-of-everything, product/hand-work-to-agents, product/move-work-on-by-hand, product/complete-record-of-every-run]
 surfaces: [ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/run-view]
 reuses: [ui/components/task-card, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/board.tsx, packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/taskDrag.ts, packages/app/src/renderer/connectDrag.ts, packages/app/src/renderer/App.tsx]
-verified_by: [packages/app/test/board.test.ts, packages/app/test/taskDrag.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/runViews.test.ts, packages/app/test/runDragOffers.test.ts]
+implemented_by: [packages/universal/src/components/Board.tsx, packages/universal/src/app/BoardColumn.tsx, packages/universal/src/components/run/RunBoard.tsx, packages/app/src/renderer/boardModel.ts, packages/app/src/renderer/runBoardModel.ts, packages/app/src/renderer/taskDrag.ts, packages/app/src/renderer/connectDrag.ts, packages/app/src/renderer/boardDrag.ts]
+verified_by: [packages/app/test/board.test.ts, packages/app/test/taskDrag.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/boardDrag.test.ts, packages/app/test/runViews.test.ts, packages/app/test/runDragOffers.test.ts, packages/app/shots/parityWorld.mts#board, packages/app/shots/parityWorld.mts#archived, packages/app/shots/parityWorld.mts#board-drag, packages/app/shots/parityWorld.mts#run, packages/client/src/specimens/dragSpecimens.tsx#board-drag-move, packages/client/src/specimens/dragSpecimens.tsx#run-board-drag]
 mockups: [ui/assets/task-board/empty.html, ui/assets/task-board/root-listing.html, ui/assets/task-board/level.html, ui/assets/task-board/dragging.html, ui/assets/task-board/connecting.html, ui/assets/task-board/asking.html, ui/assets/task-board/refused.html, ui/assets/task-board/confirming.html, ui/assets/task-board/after-drop.html, ui/assets/task-board/run-board.html]
 siblings: [ui/components/task-card, ui/components/address-bar, ui/components/instance-index, ui/components/state-graph]
 ---

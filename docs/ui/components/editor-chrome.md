@@ -2,13 +2,13 @@
 id: ui/components/editor-chrome
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/draft-belongs-to-the-file, ux/patterns/refuse-with-the-reason-and-the-fix]
 serves: [product/author-processes-without-memorising-the-format, product/decide-with-the-context-in-front-of-you]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel, ui/surfaces/run-conversation, ui/surfaces/gate-modal]
 reuses: []
-implemented_by: [packages/app/src/renderer/editorChrome.tsx]
-verified_by: [packages/app/test/configPanel.test.ts]
+implemented_by: [packages/universal/src/components/files/EditorActions.tsx]
+verified_by: [packages/app/test/configPanel.test.ts, packages/app/shots/parityWorld.mts#files-ts, packages/app/shots/parityWorld.mts#files-plain, packages/app/shots/parityWorld.mts#files-readme]
 mockups: [ui/assets/editor-chrome/clean.html, ui/assets/editor-chrome/unsaved.html, ui/assets/editor-chrome/error.html, ui/assets/editor-chrome/reading.html]
 siblings: [ui/components/workflow-editor, ui/components/schema-json-editor, ui/components/file-panel, ui/components/edit-artifact-gate]
 ---

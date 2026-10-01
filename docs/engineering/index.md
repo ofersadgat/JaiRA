@@ -117,6 +117,8 @@ Template: [_templates/engineering-contract.md](../_templates/engineering-contrac
 
 Written by hand when a choice departs from the usual way and the reason must outlive the doc it is about. Template: [_templates/decision.md](../_templates/decision.md).
 
+A record is of its date and keeps its history. A renderer file one names (`App.tsx`, `chatPane.tsx`, `runViews.tsx`, a `shots/` script) is the DOM renderer's, deleted on 2026-10-01 ([0015](decisions/0015-one-universal-client.md)): `git show dom-renderer-final:<path>` reads it, its logic is a pure module in `packages/app/src/renderer`, and its drawing is in `packages/universal`.
+
 | # | Decision | Status | Supersedes |
 | --- | --- | --- | --- |
 | [0001](decisions/0001-decision-brief-gates.md) — gates get a decision brief; confidence decides whether to ask | proposed | — |
@@ -126,3 +128,11 @@ Written by hand when a choice departs from the usual way and the reason must out
 | [0005](decisions/0005-connect.md) — `connect(task, target)`: a task moves to any state by finding or making the workflow that relates the two; adoption is mirror rows written after the fact, a dynamic workflow is the one frozen document that may change, a forward move fast-forwards with an autopilot and Skip | built | — |
 | [0006](decisions/0006-built-in-layer.md) — what JaiRA ships is a third, read-only layer at the end of the search path, not files it installs; permission sets are layered fragments a state refers to; `chat/session` and `chat/control` ship there | built | — |
 | [0007](decisions/0007-permissionSets.md) — a permission set is the permission model: subject → mode in buckets, `other` for the rest, no `readOnly` and no `profile`; executors declare their native tools; one shell line is taken apart into requests, with `script` its own permission | built | — |
+| [0008](decisions/0008-side-panels.md) — one side panel per room, from a stack | built | — |
+| [0009](decisions/0009-self-updating-catalog.md) — the model catalog updates itself, one refresher per route | accepted | — |
+| [0010](decisions/0010-git-tools-and-events.md) — git tools, events, and the events task | built | — |
+| [0011](decisions/0011-releases-updates-plugins.md) — release builds, updates, channels, and downloadable plugins | accepted | — |
+| [0012](decisions/0012-local-server.md) — one engine per person, a local server, and how the desktop and CLI find it | accepted | — |
+| [0013](decisions/0013-machines.md) — machines: one fleet, tasks placed across it, and every window seeing all of it; a phone or a browser is a window onto one engine | accepted | — |
+| [0014](decisions/0014-archived-tasks.md) — archived tasks | accepted | — |
+| [0015](decisions/0015-one-universal-client.md) — one client for desktop and mobile: every surface drawn by one universal tree, the editors as islands; the DOM renderer it was copied from is deleted (2026-10-01) | accepted | — |

@@ -2,13 +2,13 @@
 id: ui/components/changeset-review
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/per-change-review, ux/patterns/park-and-ask, ux/patterns/comments-turn-a-verdict-into-send-back, ux/patterns/quote-anchored-note, ux/patterns/button-says-what-will-happen]
 serves: [product/review-changes-before-they-land, product/decisions-stay-yours, product/decide-with-the-context-in-front-of-you, product/keep-process-and-description-in-step, product/parallel-work-without-collisions]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/gate-surface, ui/components/diff-editor, ui/components/image-diff, ui/components/review-notes]
-implemented_by: [packages/app/src/renderer/changesetReview.tsx, packages/app/src/renderer/components.tsx]
-verified_by: [packages/app/test/reviewChanges.test.ts, packages/app/test/reviewSync.test.ts, packages/app/test/componentGallery.test.ts]
+implemented_by: [packages/universal/src/components/artifact/ChangesetReview.tsx, packages/universal/src/components/artifact/ArtifactGates.tsx, packages/app/src/renderer/changesetReviewModel.ts]
+verified_by: [packages/app/test/reviewChanges.test.ts, packages/app/test/reviewSync.test.ts, packages/app/test/componentGallery.test.ts, packages/app/test/galleryRemote.test.ts, packages/app/shots/parityWorld.mts#gallery-reviews, packages/client/src/specimens/changesetSpecimens.tsx#changeset-settled, packages/client/src/specimens/changesetSpecimens.tsx#changeset-settled-forge, packages/client/src/specimens/changesetSpecimens.tsx#changeset-image]
 mockups: [ui/assets/changeset-review/empty.html, ui/assets/changeset-review/error.html, ui/assets/changeset-review/deciding.html, ui/assets/changeset-review/sending-back.html, ui/assets/changeset-review/reverted.html, ui/assets/changeset-review/warned.html, ui/assets/changeset-review/cannot-show.html, ui/assets/changeset-review/settled.html]
 siblings: [ui/components/review-artifact-gate, ui/components/file-changes-list, ui/components/gate-surface, ui/components/patch-view]
 ---

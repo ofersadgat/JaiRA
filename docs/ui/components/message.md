@@ -2,13 +2,13 @@
 id: ui/components/message
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/verbs-on-the-thing-itself, ux/patterns/arm-the-cut-then-confirm]
 serves: [product/chat-with-agents, product/complete-record-of-every-run, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/read-what-work-produced]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
 reuses: [ui/components/value-view, ui/components/markdown-view, ui/components/context-menu, ui/components/icon]
-implemented_by: [packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts, packages/app/src/renderer/messageTypes.ts]
-verified_by: [packages/app/test/transcript.test.ts, packages/app/test/transcriptCut.test.ts, packages/persistence/test/sessionStore.test.ts, packages/app/test/taskConnect.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionTranscript.tsx, packages/universal/src/components/panel/MessageRail.tsx, packages/app/src/renderer/messageReading.ts, packages/app/src/renderer/transcript.ts, packages/app/src/renderer/messageTypes.ts]
+verified_by: [packages/app/test/transcript.test.ts, packages/app/test/transcriptCut.test.ts, packages/persistence/test/sessionStore.test.ts, packages/app/test/taskConnect.test.ts, packages/app/shots/parityWorld.mts#conversation, packages/client/src/specimens/messageSourceSpecimens.tsx#message-source, packages/client/src/specimens/messageSourceSpecimens.tsx#message-source-plain]
 mockups: [ui/assets/message/success.html, ui/assets/message/hovered.html, ui/assets/message/structured.html, ui/assets/message/empty.html, ui/assets/message/doomed.html, ui/assets/message/sent-for-you.html]
 siblings: [ui/components/work-row, ui/components/agent-question, ui/components/run-step-note, ui/components/composer]
 ---

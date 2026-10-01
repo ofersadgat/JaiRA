@@ -2,13 +2,13 @@
 id: ui/components/review-artifact-gate
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask, ux/patterns/comments-turn-a-verdict-into-send-back, ux/patterns/quote-anchored-note]
 serves: [product/decisions-stay-yours, product/decide-with-the-context-in-front-of-you, product/read-what-work-produced]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/gate-surface, ui/components/artifact-pane, ui/components/choice-list, ui/components/review-notes]
-implemented_by: [packages/app/src/renderer/components.tsx]
-verified_by: [packages/app/test/artifactGateReload.test.ts]
+implemented_by: [packages/universal/src/components/artifact/ArtifactGates.tsx, packages/universal/src/components/artifact/ArtifactPane.tsx, packages/app/src/renderer/artifactReview.ts]
+verified_by: [packages/app/test/artifactGateReload.test.ts, packages/app/shots/parityWorld.mts#gallery-review, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-review, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-review-sent-back, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-review-edited]
 mockups: [ui/assets/review-artifact-gate/empty.html, ui/assets/review-artifact-gate/deciding.html, ui/assets/review-artifact-gate/sending-back.html, ui/assets/review-artifact-gate/feedback-alongside.html, ui/assets/review-artifact-gate/settled.html]
 siblings: [ui/components/edit-artifact-gate, ui/components/changeset-review, ui/components/choose-option-gate]
 ---

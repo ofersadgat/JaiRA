@@ -2,13 +2,13 @@
 id: ui/components/data-tree
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/absence-is-stated]
 serves: [product/read-what-work-produced, product/author-processes-without-memorising-the-format]
 surfaces: [ui/surfaces/files-view, ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/context-panel, ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/valueView.tsx, packages/app/src/renderer/fileSurfaces.tsx]
-verified_by: [packages/app/test/valueViewToggle.test.ts, packages/app/test/fileRegistry.test.ts]
+implemented_by: [packages/universal/src/components/files/DataView.tsx, packages/universal/src/components/files/surfaces.tsx, packages/app/src/renderer/fileSurfaceTable.ts]
+verified_by: [packages/app/test/fileRegistry.test.ts, packages/app/shots/parityWorld.mts#files-json, packages/client/src/specimens/registry.tsx#data-view]
 mockups: [ui/assets/data-tree/empty.html, ui/assets/data-tree/error.html, ui/assets/data-tree/success.html, ui/assets/data-tree/data-reading.html]
 siblings: [ui/components/table-view, ui/components/code-view, ui/components/schema-form, ui/components/value-view]
 ---

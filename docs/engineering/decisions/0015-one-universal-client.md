@@ -2,7 +2,7 @@
 id: engineering/decisions/0015-one-universal-client
 type: decision
 status: accepted
-updated: 2026-09-30
+updated: 2026-10-01
 decides_for: [engineering/units/app-shell, engineering/units/ipc-bridge, engineering/units/renderer-store]
 ---
 
@@ -13,6 +13,12 @@ jaira app … use the One framework … an electron build which will build the d
 today and then … mobile apps which will mirror the ui and allow you to interact with other remote jaira
 servers … The UI should look identical … a spike which acts as a proof of concept and allows us to
 gradually migrate from copies of the ui to being able to reuse the same components across both."
+
+**Where this stands (2026-10-01).** The migration is over, and not component by component: every
+surface was copied, the desktop switched to the copies whole, and the DOM renderer was deleted
+([below](#the-dom-renderer-is-deleted-2026-10-01)). There is one implementation of every feature, in
+`packages/universal`. This record keeps what was planned and found on the way; a passage the deletion
+made false is marked where it stands.
 
 ## Context
 
@@ -112,6 +118,19 @@ packages/
   app/         Electron main, preload, packaging; its renderer is now client's dist/client
 ```
 
+**As it stands (2026-10-01).** The tree above was the plan; this is what there is:
+- `packages/app/src/renderer` was never moved (`@jaira/ui` is an alias for it). It holds the store and
+  the bridge seam, the pure modules, the eight DOM components the islands are, `styles.css` and the fonts.
+- `packages/universal/src` holds `app/` (the shell and its regions), `components/`, `islands/`
+  (`Island.tsx` inline on web, `Island.native.tsx` in a WebView), `primitives.tsx` and the tokens.
+- `packages/client` has one page, `/`: `src/routes/index.web.tsx` in Electron and a browser, `index.tsx`
+  on a phone. Beside it are `/native` (the phone app in a browser) and `/specimen-rn`. Its bridge for a
+  window that is not Electron's is `bridges/engineBridge.ts`.
+- There is one tree: a component is drawn by the universal tree or is an island. What the notes below
+  say of two trees, of four states and of a region with no copy yet describes the migration, which is over.
+
+The plan's own notes on it:
+
 - **The bridge becomes injectable.** `bridge()` returns whatever `setBridge()` installed, defaulting to
   `window.jaira`. Nothing else in `store.ts` changes. **Both trees run the same `useApp()`**, so the
   universal tree is a second *view* of the same state, not a second app.
@@ -128,6 +147,11 @@ packages/
   The CSP moves from the `<meta>` to a response header on that protocol, and keeps its directives.
 
 ### Tamagui, generated from the CSS
+
+**As built** (see [What the spike found](#what-the-spike-found)): Tamagui carries no themes and no
+tokens. `packages/universal/scripts/tokens.mjs` generates `cssTokens.generated.ts` from the `:root`
+blocks of `styles.css`, `useTokens()` reads it, and `typecheck` fails when it is stale. Since
+2026-10-01 those blocks are the one thing every surface still takes from the stylesheet.
 
 - `tamagui.config.ts` is **generated** from `styles.css` by a script (like `schemas:sync`), never
   hand-copied:
@@ -150,6 +174,11 @@ packages/
   built it differently; see [What the spike found](#what-the-spike-found).
 
 ### The fidelity gate (ruling 6)
+
+**Superseded (2026-10-01).** There is no DOM tree to render beside the universal one. The gate grades
+the one page against reference pictures of the DOM tree, taken from the tag `dom-renderer-final`
+([below](#the-dom-renderer-is-deleted-2026-10-01)), and no component is waiting to become `shared`. What
+follows is the gate as it was planned.
 
 - The `shots` driver gains a mode that renders the **same seeded state** twice: the DOM tree at `/` and
   the universal tree at `/universal`, in the same browser at the same size, and pixel-diffs them per
@@ -293,6 +322,17 @@ Then a go/no-go for the migration.
 
 ### After the spike: the migration
 
+**Ended (2026-10-01).** Steps 1 to 6 were done as copies (every room, float and dialog, by 2026-09-30),
+and step 7 stands: the editors are islands. The desktop did not switch a component at a time: it
+switched whole, and the DOM tree was then deleted whole. Of the rules below:
+- **the ledger was never built.** No component doc gained `platforms:`, and `docs/ui/index.md` never
+  counted lines of `styles.css`. With one tree there is nothing to count: each component doc's
+  `implemented_by` names the universal files that draw it, or the DOM component and the island that
+  hosts it;
+- **drift** and **short-lived copies** have nothing left to govern.
+
+What follows is the plan as it was.
+
 **The order is the frame first, then leaves, then rooms.** Mobile needs the frame to be native to feel
 like anything, and leaves are cheap to prove.
 
@@ -381,6 +421,10 @@ done, as the person asked ("make as much as possible work without native tooling
 | S5 islands (browser) | done | `shots/islands.mts`, a 390×844 Chrome loading the island pages from file:// under strict rules: markdown ready in 58 ms, auto-height; the Monaco diff ready in ~265 ms and drawn in 34–73 ms at 200 / 2,000 / 20,000 lines, grammar-coloured, worker started; palette switch without a reload; typed text back over the bridge from the editable CodeMirror |
 | Phone app (browser) | done | `shots/phone.mts`: `/native` (`NativeApp` through react-native-web) connects, shows the desktop's own UI in its frame, and draws the live boards from the universal cards |
 | On a device | Android emulator: done | `shots/android.mts` (below): connects by deep link, the Desktop UI in its WebView, the native copies drawing the live board, the three islands on the device, typing into CodeMirror back over the bridge, no errors in logcat. Not yet: a physical phone, iOS |
+
+(Of the evidence above, `shots/parity.mts`, the Vite build it compared with and the `/universal` route
+went with the DOM page on 2026-10-01; `shots/pair.mts` is the gate, and `tokens-check.mts`,
+`islands.mts`, `remote.mts`, `phone.mts` and `android.mts` run against the universal page.)
 
 **The phone, as built (ruling 1).** `NativeApp` is a Connect screen, then two views of one connection:
 - **Desktop UI** is the desktop's own UI in a WebView — the whole app as one island, identical by
@@ -527,7 +571,9 @@ draws `UniversalApp`: `App.tsx`'s frame built from universal copies, running on 
 engine for native that would run the DOM components as they are, the person chose copying.
 
 **How a copy is checked.** Also the person's: "test the migrated components using react-native-web and
-once everything passes there do the final check with the android emulator".
+once everything passes there do the final check with the android emulator". (Since 2026-10-01 `/rn` is
+`/`, `pair.mts` holds it to reference pictures rather than to a second page, and `cascade.mts` is
+retired: [below](#the-dom-renderer-is-deleted-2026-10-01). The list is the method as it was.)
 - **`/rn`** draws the universal shell in a browser, on the native token path (`Replayed`), with no
   `styles.css` on the page — what it matches, it matches the way a phone draws it.
 - **`studio.mts`** keeps a desktop open on a seeded world and on One's dev server, so an edit is on the
@@ -541,15 +587,18 @@ once everything passes there do the final check with the android emulator".
   agree to a sixty-fourth of a pixel, and a stylesheet's floating-point `color-mix()` never matches a
   copy's 8-bit `rgba()` exactly. Exact counts are reported beside it.
 
-`docs/ui/copying.md` is the method, the primitives (`Txt` with the ten registers, `Press`, `useHover`,
-`edge`) and what trips a copy.
+`docs/ui/copying.md` was the method, the primitives (`Txt` with the ten registers, `Press`, `useHover`,
+`edge`) and what trips a copy. Since 2026-10-01 it is [`docs/ui/building.md`](../../ui/building.md): how
+to add or change UI now that there is no original to copy, with what tripped a copy kept where it still
+trips a component.
 
 **What sharing means here.** A copy's LOGIC is never copied. What `App.tsx` or a DOM component derives
 moves unchanged into a pure module both import:
 - `shellModel.ts`: the sidebar's rows and counts;
 - `boardModel.ts`, `markdown.tsx`'s parse and URL rules;
 - the panel's host logic.
-Only the drawing is written twice, until the desktop switches to the copy (S4).
+Only the drawing is written twice, until the desktop switches to the copy (S4). (It switched whole on
+2026-10-01, and the drawing is written once.)
 
 **Fonts on native.** DM Sans has an optical-size axis, which Chromium sets to the font size, and
 Android can pick neither a weight nor an optical size out of one variable file.
@@ -619,8 +668,11 @@ then "do … the transport switch". Done, as 0013's amendment of the same day re
 - **Left:**
   - a phone cannot open or make a project: the folder dialog is the machine's, and the folder browser of
     0013 §8 is drawn only for another machine;
-  - on the emulator a task's conversation does not draw its transcript, so a gate cannot be answered
-    from the phone's panel yet (the strip offers it, by a push); the browser's does;
+  - ~~on the emulator a task's conversation does not draw its transcript, so a gate cannot be answered
+    from the phone's panel yet (the strip offers it, by a push); the browser's does;~~ Fixed 2026-10-01:
+    Yoga's legacy layout gave a child that may grow the height its box was offered (a badge stood
+    27,000 px tall), so the phone's root lays out strictly (`StrictLayout`), and `android.mts` answers
+    the gate from the phone's own panel;
   - the `/native` browser preview has never had the phone's tokens, so it draws unstyled;
   - on an emulator React Native asks the host's port 8081 for its JavaScript whatever `adb reverse`
     says; `android.mts` now tells the debug build to ask its own localhost, so `--metro` is honoured.
@@ -645,16 +697,122 @@ built page's code editor stood 5 px tall. The DOM components, `slots.tsx`, the V
 `styles.css` are not deleted yet: 33 of the 60 shots scripts find things on that page by class, 33 of
 the 169 app tests render its components, and 51 of its 111 component files are still imported by the
 universal tree (the editors, and exports of logic) — that is its own piece of work, and the person's to
-start.
+start. (Started and done the same day: the next section. `/rn`, `--ui=dom`, `JAIRA_UI` and `start:dom`
+are gone with it.)
+
+## The DOM renderer is deleted (2026-10-01)
+
+The person, the same day the desktop switched: "delete it, i dont want to implement every new feature
+twice". So there is **one page, `/`, and it is the universal shell; one implementation of every
+feature.** The last commit that has the DOM page is tagged `dom-renderer-final`
+(`git worktree add ../JaiRA-2-dom dom-renderer-final` checks it out beside this tree).
+
+**What went.**
+- 103 of the renderer's 111 component files: `App.tsx` and every pane, panel, view and form.
+- `index.html` and the Vite build that served them (`build:renderer`, `vite.config.ts`,
+  `JAIRA_RENDERER`). The window's page is One's build alone, and its content policy is the header
+  `clientPolicy` writes (`packages/service/src/clientFiles.ts`), for the window and for a browser alike.
+- The `--ui=dom` flag, `JAIRA_UI` and `npm run start:dom`. `npm run start` is the app.
+- S4's arrangement for switching a component at a time: the slot mechanism (`slots.tsx`, `COPIES`,
+  `SHARED`) and the universal card's fallback to the DOM card.
+- The client's `Shell.tsx` and its `/rn`, `/universal` and `/specimen-dom` routes, and the `dom` half of
+  every specimen.
+- 44 of the 61 shots scripts, each of which drew or drove a DOM component
+  (`packages/app/shots/README.md` names every one and what has its coverage now).
+
+**What stays, and why.**
+- **The logic.** What the deleted files held that was not drawing — types, constants, functions, hooks —
+  moved unchanged into 22 new pure modules beside seven existing models. `packages/app/src/renderer`
+  (`@jaira/ui`) is now the store, the bridge seam and those modules, and the universal tree imports them.
+- **Eight DOM component files**, the islands and what they need: `monacoDiff.tsx`, `markdownEditor.tsx`,
+  `markdownDocument.tsx`, `markdown.tsx`, `schemaEditor.tsx` (its text field alone: the bar, the picker
+  and the reference are the universal `SchemaEdit.tsx`'s), `htmlFrame.tsx`, `interactiveArtifact.tsx`,
+  and `popover.tsx` for the schema editor's completion list. They stay because the editors are the one
+  place the person allows a phone to differ (2026-09-28, above), and on the desktop they are still the
+  DOM components, drawn inline by `Island.tsx`.
+- **`styles.css`**, for two readers: `tokens.mjs`, which takes the `:root` blocks every surface's colours
+  and sizes come from, and the islands, which bring the stylesheet scoped to themselves. It was whole at
+  the commit; every rule that serves neither is dead, and cutting it down to the two is the next step.
+
+**The tests.** Of the app's 171 test files, 33 rendered a DOM component. Four were deleted with their
+subject (`fenceRender`, `forkMark`, `tableView`, `valueViewToggle`); the rest stand on the pure modules
+now, a case kept where a module computes the fact and dropped where the component itself decided it (a
+class, an element, a sentence written in JSX). 4,741 cases pass. What no test reaches is logic the
+universal components carry inline — the state face's rules in `panel/faces.tsx`, `standingOf` and the
+fork's index in `SessionBands.tsx`, the transcript's doomed count, the inbox strip's item list, the
+table's 500-row cut, decisions inside hooks (`useWorkflowEditor`, `useRunIndexModel`, `useTypedStep`).
+Moving each into a model brings its test back.
+
+**The reference pictures.** The fidelity gate compared two pages, and one is gone, so its pictures were
+kept first:
+- `pair.mts --freeze`, run from a checkout of the tag, photographed the DOM page into
+  `packages/app/shots/goldens/` — one picture per scene or specimen and look, with a manifest of what a
+  comparison needs of the page it came from (its regions, every run of text, what the world keeps
+  changing, the window, the world). The folder is not in git.
+- `pair.mts` now has one mode: the page against those pictures, graded as it was graded against the live
+  page. `--freeze` says where the pictures come from and does nothing.
+- A scene's picture holds its world's task ids, times and project path, so the world they were taken in
+  is kept too (`packages/app/shots/.world-goldens`, opened by `studio.mts --goldens-world`, never seeded
+  again), and a scene is compared only there. A specimen has no world.
+- A scene or specimen that is new has no DOM original: `pair.mts --accept` keeps the universal page's
+  own picture, and the manifest records that it was accepted and when. A change to the look that is
+  meant is accepted the same way, by name, after the diff has been looked at
+  ([`docs/ui/building.md`](../../ui/building.md)).
+- `before-after.mts` holds two runs of the page to each other pixel for pixel, over a recorded noise
+  floor, for a change that must not show. The deletion was made under that rule: nothing the universal
+  page draws or does was to change.
+
+**What the deletion took with it.**
+- **Coverage** (`packages/app/shots/README.md`, "Retired"):
+  - event notices end to end in the window — the newest shown with "+1", × reading it, a click opening
+    the events task at the firing. It was found by fourteen classes; a port needs test ids on the strip
+    and the events conversation first;
+  - schema detection by file name, seen in the window, for a Compose file, GitLab CI and a GitHub
+    workflow;
+  - pictures of Settings → Tools → Events over a real repository with an `origin`, of a project's ⚙
+    opening its layer, of a theme picked on Shared showing through a stronger layer, of an archived
+    card's menu and the Copies section, and of the Changes tab over a real project's history;
+  - a way to look at a component with no Electron at all.
+- **The catalog mockups** under `docs/ui/assets/` can no longer be regenerated: they are frozen pictures
+  of the look as of the tag, and they draw as captured only against that tag's `styles.css`, which they
+  link.
+- **`cascade.mts`**, the reading of the cascade a copy was written from. `styles.css` at the tag is the
+  record of why a number in a component is what it is.
+- **The project's compiler in the Files room's code editor.** The DOM page handed Monaco the project's
+  own compiler there (`file:check` and its neighbours: underlines from the real `tsconfig`, definitions,
+  references, hover). The universal `CodeEdit.tsx` gives the island no `intel` (its header says so), and
+  the page that did is gone; the changeset reviewer's diff still has it. Monaco's own TypeScript
+  validation is off (`monacoDiff.tsx`), so a file opened there is underlined by nothing.
+  `shots/verifyTypeCheck.mts` and step 2 of `monaco.mts` look for the underline in the Files room. Found
+  by reading the code while re-pointing the docs; no rig was run.
+
+**Not yet done at the commit:** the before-and-after comparison of the universal page run to its end,
+the stylesheet's pruning, and the comments that name deleted files. The docs were re-pointed the same
+day: each component's `implemented_by` and `verified_by`, the units and contracts, and
+`docs/ui/copying.md`, which became `docs/ui/building.md`.
+
+**What remains of this decision.**
+- **The editors.** Monaco, CodeMirror and the schema text are DOM islands on every platform, and on a
+  phone they may differ from the desktop's (the person, 2026-09-28: "the editor is the one place that
+  I'll allow a divergence on mobile to have for now … I want to complete the process of building a pixel
+  perfect ui match before tackling the editor"). What is left of that match on 2026-10-01 is small —
+  checkbox and select-arrow snapping in six Files scenes, a sticky heading's hairline in three looks, a
+  few scenes under 180 px — and when the editors are taken up is the person's to say.
+- **The mobile UI/UX pass** (ruling 1: "a migration step, not a final step"). A phone still draws the
+  desktop's layout at the desktop's width, fitted to its screen.
+- **What a phone lacks**: `TODO.md`, "Open inside the universal client, on a phone only", deferred by the
+  person on 2026-09-30. A physical phone, iOS and a release build are still untried.
+- **Native desktop**: [below](#native-desktop-later).
 
 ## Native desktop, later
 
 The desktop ships as Electron first, from the DOM tree and then from shared components as they are
-switched (ruling 7). Microsoft's `react-native-windows` and `react-native-macos` are the candidates for
+switched (ruling 7). (From the universal tree alone since 2026-10-01.) Microsoft's `react-native-windows` and `react-native-macos` are the candidates for
 a true native desktop after that. This plan leaves the door open to them without building for them:
 
 - The universal tree is plain React Native plus Tamagui, so it is the tree those targets would run.
-  Every component the migration makes `shared` is one they get for free.
+  Every component the migration makes `shared` is one they get for free. (Since 2026-10-01 that is
+  every component but the islands.)
 - Islands are `react-native-webview` pages, which that library also supports on Windows (WebView2)
   and macOS (WKWebView). The islands' asset-copy plugin is the part that would need a desktop variant.
 - One's environments are web, iOS and Android only, as read on 2026-09-27. A native-desktop build would
@@ -675,8 +833,9 @@ a true native desktop after that. This plan leaves the door open to them without
 
 **Harder:**
 
-- Two implementations of each copied component until it is switched.
-- Two styling systems during the migration, both generated from the same `:root` blocks.
+- Two implementations of each copied component until it is switched. (Ended 2026-10-01: one.)
+- Two styling systems during the migration, both generated from the same `:root` blocks. (Ended
+  2026-10-01: the universal tree's, with `styles.css` kept for the token blocks and the islands' rules.)
 - The toolchain grows by Expo, Metro, EAS, react-native-web and Tamagui, on a framework with one
   maintainer and "early" Windows support.
 
@@ -687,11 +846,12 @@ from a universal tree it can rearrange.
 
 ## Revisit when
 
-- **S0 or S1 fails.** One cannot host the DOM tree in Electron identically, or Windows development is
+- ~~**S0 or S1 fails.** One cannot host the DOM tree in Electron identically, or Windows development is
   not workable. Then fall back to B for mobile, and keep the migration on plain react-native-web inside
-  the existing Vite build.
-- **Copying costs more than about a day per leaf component.** Then mobile leans on islands for longer,
-  and copies are reserved for the frame and the read surfaces.
+  the existing Vite build.~~ Neither failed, and there is no DOM tree or Vite build to fall back to
+  (2026-10-01).
+- ~~**Copying costs more than about a day per leaf component.** Then mobile leans on islands for longer,
+  and copies are reserved for the frame and the read surfaces.~~ Every surface was copied by 2026-09-30.
 - **Islands fail S5 on iOS or Android.** Then the components concerned need native equivalents (a
   read-only diff view first) before v1 can show them.
 - **One publishes a stable 2.** Then move before migration step 3, not during it (see [Version](#version)).

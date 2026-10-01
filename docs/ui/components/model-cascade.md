@@ -2,13 +2,13 @@
 id: ui/components/model-cascade
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/pick-from-what-exists, ux/patterns/inherited-unless-set-here]
 serves: [product/chat-with-agents, product/bring-your-own-models-and-agents]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/icon]
-implemented_by: [packages/app/src/renderer/composer.tsx, packages/app/src/renderer/icons.tsx, packages/app/src/renderer/brands.ts]
-verified_by: []
+implemented_by: [packages/universal/src/components/chat/ComposerCards.tsx, packages/app/src/renderer/composerCards.ts, packages/app/src/renderer/brands.ts]
+verified_by: [packages/app/test/composer.test.ts, packages/app/shots/parityWorld.mts#composer-model]
 mockups: [ui/assets/model-cascade/in-force.html, ui/assets/model-cascade/grouped.html, ui/assets/model-cascade/filtered.html, ui/assets/model-cascade/empty.html]
 siblings: [ui/components/composer-setting-chip, ui/components/context-menu, ui/components/llm-config-form]
 ---

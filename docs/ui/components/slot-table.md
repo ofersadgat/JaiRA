@@ -2,13 +2,13 @@
 id: ui/components/slot-table
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/pick-from-what-exists, ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/problems-marked-where-they-are]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running, product/repeatable-agent-processes]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: [ui/components/file-link-field, ui/components/issue-mark, ui/components/run-value-field, ui/components/value-view]
-implemented_by: [packages/app/src/renderer/slotTable.tsx, packages/app/src/renderer/slotForm.ts]
-verified_by: [packages/app/test/stateForm.test.ts, packages/app/test/configPanel.test.ts]
+implemented_by: [packages/universal/src/components/workflow/SlotTable.tsx, packages/app/src/renderer/slotTableModel.ts, packages/app/src/renderer/slotForm.ts]
+verified_by: [packages/app/test/stateForm.test.ts, packages/app/test/configPanel.test.ts, packages/app/shots/parityWorld.mts#files-state, packages/app/shots/parityWorld.mts#state-config]
 mockups: [ui/assets/slot-table/empty.html, ui/assets/slot-table/success.html, ui/assets/slot-table/produced.html, ui/assets/slot-table/partial.html, ui/assets/slot-table/error.html, ui/assets/slot-table/reading.html]
 siblings: [ui/components/state-form, ui/components/operation-fields-editor, ui/components/schema-form]
 ---

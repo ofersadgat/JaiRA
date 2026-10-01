@@ -2,13 +2,13 @@
 id: ui/components/diff-editor
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/per-change-review, ux/patterns/quote-anchored-note, ux/patterns/problems-marked-where-they-are]
 serves: [product/review-changes-before-they-land, product/read-what-work-produced, product/decide-with-the-context-in-front-of-you, product/read-comfortably]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/chat-view, ui/surfaces/files-view, ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/monacoDiff.tsx, packages/app/src/renderer/editorThemes.ts, packages/app/src/renderer/editorLook.ts]
-verified_by: [packages/app/test/editorLook.test.ts, packages/app/test/tsProject.test.ts]
+implemented_by: [packages/app/src/renderer/monacoDiff.tsx, packages/app/src/renderer/monacoDiffTypes.ts, packages/universal/src/islands/Island.tsx, packages/app/src/renderer/editorThemes.ts, packages/app/src/renderer/editorLook.ts]
+verified_by: [packages/app/test/editorLook.test.ts, packages/app/test/tsProject.test.ts, packages/app/shots/monaco.mts, packages/app/shots/parityWorld.mts#gallery-reviews, packages/app/shots/parityWorld.mts#files-patch]
 mockups: [ui/assets/diff-editor/empty.html, ui/assets/diff-editor/loading.html, ui/assets/diff-editor/inline.html, ui/assets/diff-editor/side-by-side.html, ui/assets/diff-editor/selecting.html]
 siblings: [ui/components/code-editor, ui/components/patch-view, ui/components/image-diff, ui/components/file-changes-list]
 ---

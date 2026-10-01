@@ -2,13 +2,13 @@
 id: ui/components/task-metrics
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/context-beside-what-you-stand-on]
 serves: [product/know-what-work-costs]
 surfaces: [ui/surfaces/files-view]
 reuses: []
-implemented_by: [packages/app/src/renderer/files.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/panel/PanelViews.tsx, packages/app/src/renderer/panelViewsModel.ts]
+verified_by: [packages/app/shots/parityWorld.mts#task-outputs]
 mockups: [ui/assets/task-metrics/partial.html, ui/assets/task-metrics/success.html]
 siblings: [ui/components/task-panel, ui/components/state-inspector, ui/components/letterhead]
 ---

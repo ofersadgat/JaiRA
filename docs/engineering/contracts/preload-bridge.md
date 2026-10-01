@@ -2,11 +2,11 @@
 id: engineering/contracts/preload-bridge
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 visibility: internal
 kind: api
 owned_by: [engineering/units/ipc-bridge]
-consumers: ["@jaira/app renderer store.ts, whose exported invoke and subscribe wrap the bridge", "@jaira/app renderer modules that import invoke from store.ts: App.tsx, chatPane.tsx, components.tsx, fileSurfaces.tsx, pointerMenu.tsx, reviewNotes.tsx, runViews.tsx, schemaForm/check.ts, valueView.tsx", "@jaira/app renderer pointerMenu.tsx, through subscribe"]
+consumers: ["@jaira/app renderer store.ts, whose exported invoke and subscribe wrap the bridge", "@jaira/app renderer modules that import invoke from store.ts: chatThreadModel.ts, chatMentions.ts, taskRun.ts, panelHost.ts, connectionsModel.ts, pointerMenuModel.ts, reviewSelection.ts, schemaForm/check.ts and the other models that read or write", "@jaira/universal components that import invoke from store.ts: RunConversation.tsx, RunTranscript.tsx, ValueView.tsx, ArtifactGates.tsx, ChatStart.tsx among them", "@jaira/universal PointerMenus.web.tsx, through subscribe"]
 siblings: [engineering/contracts/ipc-channels, engineering/contracts/push-messages, engineering/contracts/refusal-errors]
 ---
 
@@ -55,7 +55,7 @@ Refusal and log routing are [refusal-errors](refusal-errors.md).
 ## A change to either function breaks every renderer caller in the same build, and there is no deprecation path
 
 - Adding a channel takes an `IpcContract` entry, an `IPC_CHANNELS` entry and a `handlers` entry. The compiler refuses the build until all three agree: `satisfies` refuses a listed name the contract lacks, `_everyChannelIsListed` names a declared channel the list omits, and the `handlers` table, a record keyed by every `IpcChannel`, refuses a missing handler.
-- Renaming `invoke`, `subscribe`, the `jaira` global or `PUSH_CHANNEL` breaks `store.ts` and `pointerMenu.tsx` at once.
+- Renaming `invoke`, `subscribe`, the `jaira` global or `PUSH_CHANNEL` breaks `store.ts` and `PointerMenus.web.tsx` at once.
 - Main, preload and renderer are bundled and shipped together, so no older caller exists and nothing is versioned.
 
 ## Rejections carry less than the thrown error, and requests are never checked at runtime

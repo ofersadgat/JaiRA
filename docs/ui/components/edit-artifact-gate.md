@@ -2,13 +2,13 @@
 id: ui/components/edit-artifact-gate
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask]
 serves: [product/decisions-stay-yours, product/read-what-work-produced]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal]
 reuses: [ui/components/gate-surface, ui/components/artifact-pane, ui/components/editor-chrome, ui/components/value-view]
-implemented_by: [packages/app/src/renderer/components.tsx, packages/app/src/renderer/editorChrome.tsx]
-verified_by: [packages/app/test/components.e2e.test.ts]
+implemented_by: [packages/universal/src/components/artifact/ArtifactGates.tsx, packages/universal/src/components/artifact/ArtifactPane.tsx, packages/app/src/renderer/artifactReview.ts]
+verified_by: [packages/app/test/components.e2e.test.ts, packages/app/shots/parityWorld.mts#gallery-edit, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-edit]
 mockups: [ui/assets/edit-artifact-gate/editing.html, ui/assets/edit-artifact-gate/dirty.html, ui/assets/edit-artifact-gate/empty.html, ui/assets/edit-artifact-gate/nothing-to-type-into.html, ui/assets/edit-artifact-gate/settled.html]
 siblings: [ui/components/review-artifact-gate, ui/components/fill-form-gate, ui/components/artifact-pane]
 ---

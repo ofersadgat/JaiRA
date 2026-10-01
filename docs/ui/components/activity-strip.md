@@ -2,13 +2,13 @@
 id: ui/components/activity-strip
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-01
 realizes: [ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/button-says-what-will-happen, ux/patterns/arm-the-cut-then-confirm, ux/patterns/follow-the-live-edge]
 serves: [product/watch-agents-work-live, product/pick-up-where-it-left-off, product/rewind-to-where-it-went-wrong, product/decisions-stay-yours, product/chat-with-agents, product/large-work-splits-into-independent-pieces]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/run-view, ui/surfaces/task-context, ui/surfaces/chat-view]
 reuses: []
-implemented_by: [packages/app/src/renderer/runViews.tsx, packages/app/src/renderer/taskAction.ts, packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts]
-verified_by: [packages/app/test/runViews.test.ts, packages/app/test/transcript.test.ts, packages/app/test/fastForward.test.ts]
+implemented_by: [packages/universal/src/components/panel/RunActivity.tsx, packages/universal/src/components/run/RunConversation.tsx, packages/universal/src/components/chat/Paper.tsx, packages/app/src/renderer/runActivityModel.ts, packages/app/src/renderer/liveStatusModel.ts, packages/app/src/renderer/taskAction.ts]
+verified_by: [packages/app/test/runViews.test.ts, packages/app/test/workSummary.test.ts, packages/app/test/fastForward.test.ts, packages/app/shots/parityWorld.mts#run-convo, packages/client/src/specimens/transcriptSpecimens.tsx#transcript-working]
 mockups: [ui/assets/activity-strip/running.html, ui/assets/activity-strip/ended.html, ui/assets/activity-strip/rewind-armed.html, ui/assets/activity-strip/live-line.html, ui/assets/activity-strip/fast-forward.html]
 siblings: [ui/components/composer, ui/components/waiting-on-sheet, ui/components/status-pill, ui/components/letterhead]
 ---

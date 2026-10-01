@@ -2,13 +2,13 @@
 id: ui/components/composer
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/button-says-what-will-happen, ux/patterns/pick-from-what-exists, ux/patterns/arm-the-cut-then-confirm, ux/patterns/second-deliberate-step-for-irreversible]
 serves: [product/chat-with-agents, product/steer-agents-mid-task, product/rewind-to-where-it-went-wrong, product/try-another-direction]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/composer-setting-chip, ui/components/model-cascade, ui/components/icon]
-implemented_by: [packages/app/src/renderer/composer.tsx, packages/app/src/renderer/chatPane.tsx, packages/app/src/renderer/runViews.tsx]
-verified_by: [packages/app/test/composer.test.ts]
+implemented_by: [packages/universal/src/components/chat/Composer.tsx, packages/universal/src/components/run/RunConversation.tsx, packages/app/src/renderer/composerModel.ts, packages/app/src/renderer/composerDrafts.ts]
+verified_by: [packages/app/test/composer.test.ts, packages/app/shots/parityWorld.mts#conversation, packages/app/shots/parityWorld.mts#run-leaf, packages/app/shots/parityWorld.mts#composer-context, packages/app/shots/parityWorld.mts#artifact-prompt]
 mockups: [ui/assets/composer/empty.html, ui/assets/composer/composing.html, ui/assets/composer/busy.html, ui/assets/composer/disabled.html, ui/assets/composer/error.html, ui/assets/composer/armed.html]
 siblings: [ui/components/activity-strip, ui/components/composer-setting-chip, ui/components/transcript]
 ---

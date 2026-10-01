@@ -2,13 +2,13 @@
 id: ui/components/settings-field
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/schema-driven-form, ux/patterns/fold-to-a-summary-expand-in-place]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/agents-act-only-where-allowed, product/read-comfortably]
 surfaces: [ui/surfaces/settings-view, ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-tools, ui/surfaces/settings-runs, ui/surfaces/settings-files, ui/surfaces/settings-data, ui/surfaces/new-task-popover, ui/surfaces/gate-modal, ui/surfaces/context-panel]
 reuses: [ui/components/switch, ui/components/preset-chips]
-implemented_by: [packages/app/src/renderer/controls.tsx]
-verified_by: [packages/app/test/schemaForm.test.ts]
+implemented_by: [packages/universal/src/components/settings/SettingsPage.tsx, packages/universal/src/components/form/Field.tsx, packages/universal/src/components/settings/layers.ts, packages/app/src/renderer/settingsRows.ts]
+verified_by: [packages/app/test/settingsRows.test.ts, packages/app/test/schemaForm.test.ts, packages/app/shots/parityWorld.mts#settings-runs, packages/app/shots/parityWorld.mts#settings-appearance, packages/client/src/specimens/formSpecimens.tsx#form-rows]
 mockups: [ui/assets/settings-field/success.html, ui/assets/settings-field/error.html, ui/assets/settings-field/stacked.html, ui/assets/settings-field/levels.html, ui/assets/settings-field/disclosure.html]
 siblings: [ui/components/schema-form, ui/components/settings-header, ui/components/provider-row, ui/components/switch, ui/components/preset-chips, ui/components/size-stepper]
 ---

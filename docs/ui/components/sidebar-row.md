@@ -2,13 +2,13 @@
 id: ui/components/sidebar-row
 type: ui-component
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/filter-in-place, ux/patterns/drill-in-and-back-out]
 serves: [product/keep-track-of-everything, product/all-projects-in-one-place, product/see-what-changed-since-you-looked, product/chat-with-agents]
 surfaces: [ui/surfaces/sidebar]
 reuses: [ui/components/status-pill, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/sidebar.tsx, packages/app/src/renderer/App.tsx, packages/app/src/renderer/settingsSections.ts]
-verified_by: [packages/app/test/pill.test.ts, packages/app/test/settingsSections.test.ts]
+implemented_by: [packages/universal/src/components/Sidebar.tsx, packages/universal/src/app/SidebarRegion.tsx, packages/app/src/renderer/shellModel.ts, packages/app/src/renderer/settingsSections.ts]
+verified_by: [packages/app/test/pill.test.ts, packages/app/test/settingsSections.test.ts, packages/app/test/windowKeys.test.ts, packages/app/shots/parityWorld.mts#board, packages/app/shots/parityWorld.mts#settings, packages/app/shots/parityWorld.mts#sidebar-shut]
 mockups: [ui/assets/sidebar-row/idle.html, ui/assets/sidebar-row/current.html, ui/assets/sidebar-row/lifted.html, ui/assets/sidebar-row/rail.html, ui/assets/sidebar-row/disabled.html]
 siblings: [ui/components/project-row, ui/components/conversation-row, ui/components/file-tree]
 ---

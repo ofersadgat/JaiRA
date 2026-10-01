@@ -2,12 +2,12 @@
 id: engineering/units/run-rail-geometry
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [ui/components/state-rail, ui/components/instance-index, ui/surfaces/run-conversation, ux/patterns/fold-to-a-summary-expand-in-place, product/complete-record-of-every-run]
 layer: ui
 owns_contracts: []
 requires: [engineering/units/board-projection]
-implemented_by: [packages/app/src/renderer/rail.ts, packages/app/src/renderer/runIndex.tsx]
+implemented_by: [packages/app/src/renderer/rail.ts, packages/app/src/renderer/runIndexModel.ts, packages/app/src/renderer/sessionRows.ts]
 verified_by: [packages/app/test/rail.test.ts, packages/app/test/runIndex.test.ts]
 siblings: [engineering/units/address-trail, engineering/units/ui-layout-state, engineering/units/board-projection]
 ---
@@ -25,26 +25,26 @@ siblings: [engineering/units/address-trail, engineering/units/ui-layout-state, e
 - `gutterWidth(centres, lanes)` is the content indent for a row, and `forkPath`, `joinPath`, `bumpPath` and `lobePath` are the SVG paths of a row's curves.
 - `paletteOf(steps)` hands each distinct state id a hue in order of first appearance, stepped by the golden angle, as `hsl(<hue> var(--rail-s) var(--rail-l))`.
 
-`paletteOfRun(instances)` in `runIndex.tsx` walks a task's instance tree depth first and is the one list every reader of a run passes to `paletteOf`.
+`paletteOfRun(instances)` in `rail.ts` walks a task's instance tree depth first and is the one list every reader of a run passes to `paletteOf`.
 
 It deliberately does not own:
 
-- Drawing the gutter, knots and folds: `railView.tsx`, and which folds are remembered: [ui-layout-state](ui-layout-state.md).
-- Ordering the rows of a conversation, which the run conversation's bands and `sessionPanels.tsx` build.
+- Drawing the gutter, knots and folds: `Rail.tsx` in `@jaira/universal`, and which folds are remembered: [ui-layout-state](ui-layout-state.md).
+- Ordering the rows of a conversation, which the run conversation's bands and `sessionRows.ts` build.
 - The instance tree the palette is built from: [board-projection](board-projection.md).
 
 ## Rail geometry is pure renderer code with no state, no IPC and no persistence
 
 - Layer `ui`, in `packages/app/src/renderer`. `rail.ts` imports nothing.
-- Consumers: `railView.tsx` draws from it, `runIndex.tsx` builds the Instances index and the palette, and `sessionPanels.tsx` builds `RailStep` rows.
+- Consumers: `Rail.tsx` (`@jaira/universal`) draws from it, `runIndexModel.ts` builds the Instances index, and `sessionRows.ts` builds `RailStep` rows.
 - No boundary is crossed and no upstream seam is used.
 
 ## Rail geometry owns no data, and the instance tree is the truth for every colour
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `RailStep` rows | read | the caller's ordered rows | `sessionPanels.tsx`, `runIndex.tsx` |
-| `RailRow` rows, centres and paths | computed per render | derived | `railView.tsx` |
+| `RailStep` rows | read | the caller's ordered rows | `sessionRows.ts`, `runIndexModel.ts` |
+| `RailRow` rows, centres and paths | computed per render | derived | `Rail.tsx` |
 | The state palette | computed from `paletteOfRun(detail.instances)` | the task's instance tree | the run conversation, the Instances index, `SessionPanel` |
 
 ## The invariants keep a live run's rail from lurching, repainting or drawing at the wrong depth
@@ -68,7 +68,7 @@ It deliberately does not own:
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| A rail is drawn with no palette passed | `railView.tsx` derives one from its own rows, so hues follow that row order | pass `paletteOfRun` of the task's instances | a state's colour differs between the conversation and the Instances index |
+| A rail is drawn with no palette passed | `Rail.tsx` derives one from its own rows, so hues follow that row order | pass `paletteOfRun` of the task's instances | a state's colour differs between the conversation and the Instances index |
 | The rows skip a state's entry | the missing lanes open silently at that row, with no fork drawn | none needed | lanes appear without a fork |
 | A run is deep enough that gaps fall under 2 px | shallow lanes share a column painted in their colours in turn | point at the gutter to fan it | striped columns at the shallow end |
 | Two writers, a killed process, a partial read or a retried write | cannot occur: every function is pure and holds nothing between renders | none needed | none |

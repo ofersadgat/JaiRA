@@ -2,13 +2,13 @@
 id: ui/components/state-inspector
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/context-beside-what-you-stand-on, ux/patterns/schema-driven-form, ux/patterns/refuse-with-the-reason-and-the-fix, ux/patterns/problems-marked-where-they-are, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/absence-is-stated]
 serves: [product/try-one-step-on-its-own, product/catch-process-mistakes-before-running, product/work-runs-the-process-it-started-with, product/bring-your-own-models-and-agents, product/see-how-a-process-flows]
 surfaces: [ui/surfaces/context-panel, ui/surfaces/files-view, ui/surfaces/tasks-view]
 reuses: [ui/components/schema-form]
-implemented_by: [packages/app/src/renderer/files.tsx, packages/app/src/renderer/runPanel.tsx, packages/app/src/renderer/runForm.ts, packages/app/src/renderer/board.tsx]
-verified_by: [packages/app/test/configPanel.test.ts, packages/app/test/runForm.test.ts]
+implemented_by: [packages/universal/src/components/panel/RunPanel.tsx, packages/universal/src/components/panel/StateChecks.tsx, packages/universal/src/components/workflow/StatePanel.tsx, packages/universal/src/components/panel/faces.tsx, packages/app/src/renderer/runForm.ts, packages/app/src/renderer/panelFaceModel.ts]
+verified_by: [packages/app/test/configPanel.test.ts, packages/app/test/runForm.test.ts, packages/app/test/sidePanel.test.ts, packages/app/shots/parityWorld.mts#state, packages/app/shots/parityWorld.mts#state-config]
 mockups: [ui/assets/state-inspector/empty.html, ui/assets/state-inspector/success.html, ui/assets/state-inspector/blocked.html, ui/assets/state-inspector/unparsed.html, ui/assets/state-inspector/file-only.html]
 siblings: [ui/components/task-panel, ui/components/task-metrics, ui/components/instance-index, ui/components/file-panel]
 ---

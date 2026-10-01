@@ -2,13 +2,13 @@
 id: ui/components/conversation-row
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/verbs-on-the-thing-itself, ux/patterns/name-it-where-it-will-live]
 serves: [product/chat-with-agents, product/see-what-changed-since-you-looked, product/all-projects-in-one-place, product/try-another-direction]
 surfaces: [ui/surfaces/conversation-list]
 reuses: [ui/components/icon, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/chatPane.tsx, packages/app/src/renderer/icons.tsx]
-verified_by: []
+implemented_by: [packages/universal/src/components/chat/ChatListPanel.tsx, packages/app/src/renderer/chatListModel.ts]
+verified_by: [packages/app/shots/parityWorld.mts#conversation, packages/app/shots/parityWorld.mts#all-conversations, packages/app/shots/parityWorld.mts#chat]
 mockups: [ui/assets/conversation-row/read.html, ui/assets/conversation-row/selected.html, ui/assets/conversation-row/forked.html, ui/assets/conversation-row/at-root.html, ui/assets/conversation-row/renaming.html]
 siblings: [ui/components/task-card, ui/components/sidebar-row, ui/components/project-row, ui/components/file-tree]
 ---

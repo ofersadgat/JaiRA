@@ -2,11 +2,11 @@
 id: engineering/contracts/uri-read
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 visibility: internal
 kind: api
 owned_by: [engineering/units/uri-and-artifact-reads]
-consumers: ["@jaira/app renderer chatPane.tsx, for the artifacts strip and the composer's @ mentions", "@jaira/app renderer changesetReview.tsx rendererServices and readCurrent, for a change's current side and its drift", "@jaira/app main service.ts readUri, which answers it"]
+consumers: ["@jaira/app renderer chatMentions.ts, for the composer's @ mentions", "@jaira/universal PanelViews.tsx, for the Produced tab", "@jaira/app renderer changesetReviewModel.ts rendererServices and readCurrent, for a change's current side and its drift", "@jaira/app main service.ts readUri, which answers it"]
 siblings: [engineering/contracts/artifact-frame-protocol, engineering/contracts/artifact-destination-template, engineering/contracts/ipc-channels]
 ---
 

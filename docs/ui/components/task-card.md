@@ -2,13 +2,13 @@
 id: ui/components/task-card
 type: ui-component
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-01
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/context-beside-what-you-stand-on, ux/patterns/drag-only-where-the-process-allows, ux/patterns/verbs-on-the-thing-itself, ux/patterns/nested-under-what-caused-it]
 serves: [product/keep-track-of-everything, product/hand-work-to-agents, product/move-work-on-by-hand, product/large-work-splits-into-independent-pieces]
 surfaces: [ui/surfaces/tasks-view, ui/surfaces/files-view, ui/surfaces/run-view]
 reuses: [ui/components/task-name, ui/components/status-pill]
-implemented_by: [packages/app/src/renderer/board.tsx, packages/app/src/renderer/pill.tsx, packages/app/src/renderer/runViews.tsx]
-verified_by: [packages/app/test/board.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/pill.test.ts]
+implemented_by: [packages/universal/src/components/TaskCard.tsx, packages/universal/src/components/NextChips.tsx, packages/universal/src/components/MachineChip.tsx, packages/app/src/renderer/boardModel.ts, packages/app/src/renderer/pillModel.ts]
+verified_by: [packages/app/test/board.test.ts, packages/app/test/connectDrag.test.ts, packages/app/test/pill.test.ts, packages/app/test/cardOrigin.test.ts, packages/app/shots/parityWorld.mts#board, packages/app/shots/parityWorld.mts#archived, packages/client/src/specimens/roomSpecimens.tsx#card-origin, packages/client/src/specimens/roomSpecimens.tsx#card-undo]
 mockups: [ui/assets/task-card/loading.html, ui/assets/task-card/queued.html, ui/assets/task-card/holding.html, ui/assets/task-card/running.html, ui/assets/task-card/waiting.html, ui/assets/task-card/stopped.html, ui/assets/task-card/error.html, ui/assets/task-card/success.html, ui/assets/task-card/selected.html, ui/assets/task-card/adopted.html, ui/assets/task-card/undo.html, ui/assets/task-card/next.html, ui/assets/task-card/execution.html]
 siblings: [ui/components/task-board, ui/components/instance-index, ui/components/conversation-row]
 ---

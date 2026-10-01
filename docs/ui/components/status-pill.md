@@ -2,13 +2,13 @@
 id: ui/components/status-pill
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/live-facts-and-unseen-counts]
 serves: [product/see-what-changed-since-you-looked, product/keep-track-of-everything, product/all-projects-in-one-place, product/everything-waiting-on-you-together]
 surfaces: [ui/surfaces/sidebar, ui/surfaces/tasks-view, ui/surfaces/inbox-strip, ui/surfaces/files-view, ui/surfaces/run-view, ui/surfaces/task-context, ui/surfaces/debug-view, ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/pill.tsx, packages/app/src/renderer/board.tsx]
-verified_by: [packages/app/test/pill.test.ts]
+implemented_by: [packages/universal/src/components/Pill.tsx, packages/universal/src/components/Pills.tsx, packages/app/src/renderer/pillModel.ts]
+verified_by: [packages/app/test/pill.test.ts, packages/app/shots/parityWorld.mts#board, packages/app/shots/parityWorld.mts#health-card]
 mockups: [ui/assets/status-pill/empty.html, ui/assets/status-pill/success.html, ui/assets/status-pill/partial.html, ui/assets/status-pill/word.html, ui/assets/status-pill/badge.html]
 siblings: [ui/components/sidebar-row, ui/components/project-row, ui/components/task-card, ui/components/address-bar]
 ---

@@ -2,7 +2,7 @@
 id: engineering/architecture
 type: standing
 status: shipped
-updated: 2026-08-04
+updated: 2026-10-01
 ---
 
 # Architecture
@@ -44,7 +44,7 @@ downward.
 | `data` | `@jaira/persistence` | Task JSON files, the better-sqlite3 DB (lifecycle, runs, the `EngineEvent` journal), content-addressed workflow snapshots, crash recovery, the board/detail projection |
 | `core` | `@jaira/runtime` | The engine harness: capability registry, prompt executor, scripted doubles, the interaction hub |
 | `cli` | `@jaira/cli` | Headless `jaira`: init, ad-hoc runs, task lifecycle, board |
-| `ui` | `@jaira/app` | Electron main + preload + React renderer |
+| `ui` | `@jaira/app`, `@jaira/universal`, `@jaira/client` | Electron main and preload; the window's store and pure logic (`packages/app/src/renderer`, imported as `@jaira/ui`); the universal components that draw every surface for the desktop, a browser and a phone; the One app that hosts them |
 
 ## Boundaries that are load-bearing
 
@@ -90,3 +90,4 @@ These are not conventions. Crossing one is a design change, not a refactor.
 | Date | What changed | What forced it |
 | --- | --- | --- |
 | 2026-08-04 | Seeded from README.md and DESIGN.md | The docs tree was created |
+| 2026-10-01 | The `ui` layer names the universal tree and the One client | The DOM renderer was deleted (decision 0015): one tree draws the UI on every platform |

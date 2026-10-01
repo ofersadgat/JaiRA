@@ -2,13 +2,13 @@
 id: ui/components/concurrent-band
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/nested-under-what-caused-it]
 serves: [product/watch-agents-work-live, product/complete-record-of-every-run, product/large-work-splits-into-independent-pieces, product/read-comfortably]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/run-view, ui/surfaces/task-context]
 reuses: [ui/components/session-sheet, ui/components/icon]
-implemented_by: [packages/app/src/renderer/sessionPanels.tsx, packages/app/src/renderer/sessionBands.ts]
-verified_by: [packages/app/test/sessionPanels.test.ts, packages/app/test/sessionBands.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionBands.tsx, packages/app/src/renderer/sessionBands.ts, packages/app/src/renderer/sessionRows.ts]
+verified_by: [packages/app/test/sessionPanels.test.ts, packages/app/test/sessionBands.test.ts, packages/client/src/specimens/transcriptSpecimens.tsx#session-bands]
 mockups: [ui/assets/concurrent-band/columns.html, ui/assets/concurrent-band/tabs.html]
 siblings: [ui/components/session-sheet, ui/components/run-step-note, ui/components/state-rail]
 ---

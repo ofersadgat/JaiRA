@@ -2,13 +2,13 @@
 id: ui/components/transcript
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/stream-then-settle, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/arm-the-cut-then-confirm, ux/patterns/absence-is-stated, ux/patterns/say-what-it-is-doing-and-for-how-long]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/chat-with-agents, product/rewind-to-where-it-went-wrong]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/files-view]
 reuses: [ui/components/message, ui/components/work-row, ui/components/icon]
-implemented_by: [packages/app/src/renderer/transcriptView.tsx, packages/app/src/renderer/transcript.ts]
-verified_by: [packages/app/test/transcript.test.ts, packages/app/test/transcriptCut.test.ts, packages/app/test/transcriptTime.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionTranscript.tsx, packages/universal/src/components/panel/TranscriptMarks.tsx, packages/app/src/renderer/transcript.ts, packages/app/src/renderer/transcriptRows.ts]
+verified_by: [packages/app/test/transcript.test.ts, packages/app/test/transcriptCut.test.ts, packages/app/test/transcriptTime.test.ts, packages/app/test/stillRunning.test.ts, packages/app/shots/parityWorld.mts#conversation, packages/app/shots/parityWorld.mts#conversation-tools, packages/client/src/specimens/transcriptSpecimens.tsx#transcript-rows, packages/client/src/specimens/transcriptSpecimens.tsx#transcript-working]
 mockups: [ui/assets/transcript/empty.html, ui/assets/transcript/partial.html, ui/assets/transcript/success.html, ui/assets/transcript/time-passed.html, ui/assets/transcript/armed.html, ui/assets/transcript/error.html]
 siblings: [ui/components/session-sheet, ui/components/activity-strip, ui/components/computed-state-body, ui/components/gate-surface]
 ---

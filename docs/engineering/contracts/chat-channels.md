@@ -2,11 +2,11 @@
 id: engineering/contracts/chat-channels
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 visibility: internal
 kind: api
 owned_by: [engineering/units/chat-turns, engineering/units/conversation-lookup]
-consumers: ["@jaira/app renderer chatPane.tsx", "@jaira/app renderer runViews.tsx", "@jaira/app tests chatMessage, chatConversation, chatDurability, chatCut"]
+consumers: ["@jaira/app renderer chatThreadModel.ts", "@jaira/universal ChatStart.tsx and RunConversation.tsx", "@jaira/app tests chatMessage, chatConversation, chatDurability, chatCut"]
 siblings: [engineering/contracts/task-channels, engineering/contracts/session-live-protocol, engineering/contracts/push-messages, engineering/contracts/ipc-channels]
 ---
 

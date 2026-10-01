@@ -2,13 +2,13 @@
 id: ui/components/value-view
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/absence-is-stated]
 serves: [product/read-what-work-produced, product/complete-record-of-every-run, product/read-comfortably]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/chat-view, ui/surfaces/files-view, ui/surfaces/context-panel, ui/surfaces/gate-modal]
 reuses: [ui/components/markdown-view, ui/components/markdown-editor, ui/components/code-view, ui/components/code-editor, ui/components/data-tree, ui/components/table-view, ui/components/file-changes-list, ui/components/patch-view, ui/components/schema-form, ui/components/context-menu]
-implemented_by: [packages/app/src/renderer/valueView.tsx, packages/app/src/renderer/fenceRender.tsx, packages/app/src/renderer/fileSurfaces.tsx, packages/app/src/renderer/valuePanel.ts, packages/app/src/renderer/renderChoice.ts, packages/app/src/renderer/jsonHighlight.ts]
-verified_by: [packages/app/test/valueViewToggle.test.ts, packages/app/test/documents.test.ts, packages/app/test/fenceRender.test.ts, packages/app/test/tableView.test.ts, packages/app/test/jsonHighlight.test.ts]
+implemented_by: [packages/universal/src/components/panel/ValueView.tsx, packages/universal/src/components/panel/ValueReadings.tsx, packages/app/src/renderer/valuePanel.ts, packages/app/src/renderer/valueViewMeta.ts, packages/app/src/renderer/renderChoice.ts, packages/app/src/renderer/jsonHighlight.ts]
+verified_by: [packages/app/test/jsonHighlight.test.ts, packages/app/test/fileTypes.test.ts, packages/shared/test/valueViews.test.ts, packages/client/src/specimens/valueSpecimens.tsx#value-json, packages/client/src/specimens/valueSpecimens.tsx#value-form, packages/client/src/specimens/valueSpecimens.tsx#value-patch, packages/client/src/specimens/valueSpecimens.tsx#value-table, packages/client/src/specimens/valueSpecimens.tsx#value-image, packages/client/src/specimens/valueSpecimens.tsx#value-code, packages/client/src/specimens/valueSpecimens.tsx#value-changes]
 mockups: [ui/assets/value-view/rendered.html, ui/assets/value-view/source.html, ui/assets/value-view/structured.html, ui/assets/value-view/changes.html, ui/assets/value-view/empty.html, ui/assets/value-view/error.html, ui/assets/value-view/inline.html]
 siblings: [ui/components/artifact-pane, ui/components/run-value-field, ui/components/produced-artifacts, ui/components/computed-state-body]
 ---

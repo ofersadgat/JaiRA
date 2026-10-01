@@ -2,13 +2,13 @@
 id: ui/components/session-sheet
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/the-window-remembers-its-arrangement, ux/patterns/choose-a-side-where-it-divided, ux/patterns/jump-to-the-place-and-mark-it, ux/patterns/context-beside-what-you-stand-on]
 serves: [product/complete-record-of-every-run, product/watch-agents-work-live, product/pick-up-where-it-left-off, product/try-another-direction]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/run-view, ui/surfaces/task-context]
 reuses: [ui/components/letterhead, ui/components/fork-mark, ui/components/transcript, ui/components/computed-state-body, ui/components/gate-surface]
-implemented_by: [packages/app/src/renderer/sessionPanels.tsx, packages/app/src/renderer/sessionBands.ts]
-verified_by: [packages/app/test/sessionPanels.test.ts, packages/app/test/sessionBands.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionBands.tsx, packages/universal/src/components/panel/RunTranscript.tsx, packages/app/src/renderer/sessionBands.ts, packages/app/src/renderer/sessionRows.ts]
+verified_by: [packages/app/test/sessionPanels.test.ts, packages/app/test/sessionBands.test.ts, packages/app/shots/parityWorld.mts#run-convo, packages/app/shots/parityWorld.mts#task, packages/client/src/specimens/transcriptSpecimens.tsx#session-bands]
 mockups: [ui/assets/session-sheet/solo.html, ui/assets/session-sheet/several-states.html, ui/assets/session-sheet/folded.html, ui/assets/session-sheet/surface.html, ui/assets/session-sheet/interrupted.html, ui/assets/session-sheet/fork-side.html]
 siblings: [ui/components/concurrent-band, ui/components/letterhead, ui/components/waiting-on-sheet, ui/components/run-step-note]
 ---

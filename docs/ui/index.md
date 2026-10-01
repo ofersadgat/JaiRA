@@ -1,6 +1,8 @@
 # UI
 
-Standing docs: [principles.md](principles.md) and [direction.md](direction.md). Templates: [_templates/ui-surface.md](../_templates/ui-surface.md), [_templates/ui-component.md](../_templates/ui-component.md).
+Standing docs: [principles.md](principles.md) and [direction.md](direction.md). Templates: [_templates/ui-surface.md](../_templates/ui-surface.md), [_templates/ui-component.md](../_templates/ui-component.md). Adding or changing what the app draws: [building.md](building.md).
+
+Every surface and component is drawn by the universal tree (`packages/universal`), on the desktop, in a browser and on a phone; the code editors and frames are islands (decision [0015](../engineering/decisions/0015-one-universal-client.md)). A component's `implemented_by` names the universal files that draw it and the pure modules in `packages/app/src/renderer` that decide what it shows. Its `verified_by` names the tests of those modules and the pictures that hold its look: `packages/app/shots/parityWorld.mts#<scene>` is a scene and `packages/client/src/specimens/<file>.tsx#<specimen>` a specimen, each graded against its reference picture by `packages/app/shots/pair.mts`.
 
 ## Surfaces
 
@@ -126,6 +128,8 @@ Standing docs: [principles.md](principles.md) and [direction.md](direction.md). 
 ## Mockups
 
 One per state under [assets/](assets/), each linking the app's own stylesheet and carrying `captured` and `reflects` in its head.
+
+They are frozen pictures of the look as of the tag `dom-renderer-final` (2026-10-01), not generated output: the DOM components they were written from and the scripts that rendered some of them are gone (`packages/app/shots/README.md`, "Retired"), so none can be regenerated. Each draws as it was captured only against the stylesheet of that tag (`git show dom-renderer-final:packages/app/src/renderer/styles.css`). What the app draws now is held by the scenes' and specimens' reference pictures.
 
 | Doc | States captured | Reflects | Captured |
 | --- | --- | --- | --- |

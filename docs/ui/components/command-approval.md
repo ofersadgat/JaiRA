@@ -2,13 +2,13 @@
 id: ui/components/command-approval
 type: ui-component
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-01
 realizes: [ux/patterns/park-and-ask, ux/patterns/consent-to-exactly-what-was-shown]
 serves: [product/risky-actions-wait-for-approval, product/agents-act-only-where-allowed]
 surfaces: [ui/surfaces/run-conversation, ui/surfaces/task-context, ui/surfaces/gate-modal, ui/surfaces/components-view]
 reuses: [ui/components/icon]
-implemented_by: [packages/app/src/renderer/approvalSurface.tsx, packages/app/src/renderer/approvalModel.ts, packages/app/shots/approval-static.mts]
-verified_by: [packages/app/test/approvalModel.test.ts, packages/app/test/approvalPermissionSet.test.ts, packages/app/test/approvals.test.ts]
+implemented_by: [packages/universal/src/components/floats/ApprovalSurface.tsx, packages/universal/src/components/floats/AnswerMenu.tsx, packages/universal/src/components/floats/Dialogs.tsx, packages/app/src/renderer/approvalModel.ts]
+verified_by: [packages/app/test/approvalModel.test.ts, packages/app/test/approvalPermissionSet.test.ts, packages/app/test/approvals.test.ts, packages/app/shots/parityWorld.mts#gallery-approval, packages/app/shots/parityWorld.mts#gallery-approval-function, packages/app/shots/parityWorld.mts#gallery-approval-menu, packages/client/src/specimens/floatSpecimens.tsx#approval-dialog, packages/client/src/specimens/shellSpecimens.tsx#gate-settled-approval]
 mockups: [ui/assets/command-approval/asking.html, ui/assets/command-approval/answer-menu.html, ui/assets/command-approval/embedded.html, ui/assets/command-approval/outside-a-conversation.html, ui/assets/command-approval/function.html]
 siblings: [ui/components/agent-question, ui/components/gate-surface, ui/components/confirm-action-gate]
 ---

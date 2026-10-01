@@ -2,7 +2,7 @@
 id: engineering/units/drafts
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [ux/patterns/draft-belongs-to-the-file, ux/patterns/unsaved-proposal, ui/components/editor-chrome, ui/components/file-tree]
 layer: ui
 owns_contracts: []
@@ -35,7 +35,7 @@ It deliberately does not own:
 - Layer `ui`, in `packages/app/src/renderer`. It imports only React, for `useDraftBox`.
 - It calls nothing across the renderer and main boundary. No upstream seam.
 - The store clears or moves entries at these points: `refreshDoc` calls `settled` after every `file:read`; the document save clears the entry after its re-read; the config save clears the saved layer's entry; a state rename calls `movedDraft`; a state delete calls `withoutDraftsUnder`; a file or folder delete or rename calls `withoutDraftsUnder` or `movedDraftsUnder`; a description sync writes its proposals in with `withDraft`.
-- `App.tsx` reads the map's keys as the set of dirty files the tree and the editors mark.
+- The shell reads the map's keys as the set of dirty files the tree and the editors mark (`SidebarRegion.tsx` in `@jaira/universal`).
 
 ## The file on disk is the truth, and the map holds only what differs from it
 

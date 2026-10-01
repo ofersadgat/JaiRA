@@ -2,13 +2,13 @@
 id: ui/components/switch
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/schema-driven-form, ux/patterns/inherited-unless-set-here]
 serves: [product/bring-your-own-models-and-agents, product/read-comfortably, product/hand-work-to-agents, product/try-one-step-on-its-own]
 surfaces: [ui/surfaces/settings-connections, ui/surfaces/settings-models, ui/surfaces/settings-runs, ui/surfaces/settings-data, ui/surfaces/settings-files, ui/surfaces/settings-appearance, ui/surfaces/new-task-popover, ui/surfaces/files-view, ui/surfaces/run-conversation, ui/surfaces/gate-modal]
 reuses: []
-implemented_by: [packages/app/src/renderer/controls.tsx, packages/app/src/renderer/editorKnobs.tsx]
-verified_by: [packages/app/test/schemaForm.test.ts]
+implemented_by: [packages/universal/src/components/settings/controls.tsx, packages/universal/src/components/form/inputs.tsx]
+verified_by: [packages/app/shots/parityWorld.mts#settings-appearance, packages/app/shots/parityWorld.mts#settings-appearance-file-types, packages/client/src/specimens/formSpecimens.tsx#form-rows, packages/client/src/specimens/formSpecimens.tsx#form-fields]
 mockups: [ui/assets/switch/off.html, ui/assets/switch/on.html, ui/assets/switch/disabled.html]
 siblings: [ui/components/preset-chips, ui/components/segmented-control, ui/components/settings-field]
 ---

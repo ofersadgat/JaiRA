@@ -10,6 +10,8 @@ page **says**, by a role, a title or accessible name, or a `data-testid` — nev
 `[data-testid=…]`). The one exception is the inside of an island (Monaco, CodeMirror), which is that
 editor's own DOM and is found by that editor's own classes (`.monaco-editor .squiggly-error`).
 
+How to add or change what the page draws, and how a change to its look is accepted: `docs/ui/building.md`.
+
 ## The fidelity gate
 
 ```bash
@@ -71,7 +73,7 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
 | `android.mts` | The phone app on the emulator, end to end: pairs by the desktop's code, reaches each room. | The device check. |
 | `android-check.mts` | The same rig kept up, to drive a phone state by state (`screen`, `tap`, `shot`). | The device loop. |
 | `phone.mts` | The phone app (`/native`) in a phone-sized headless Chrome, paired with a desktop. | The phone's shell without an emulator. |
-| `verifyTypeCheck.mts` | `file:check` over the whole wire: squiggles from the real project, go to definition, peek, references, hover, and a review's two programs. | Behaviour nothing else sees. It always found the editor by Monaco's own classes and the rest by text and test id, so it needed no port. |
+| `verifyTypeCheck.mts` | `file:check` over the whole wire: squiggles from the real project, go to definition, peek, references, hover, and a review's two programs. | Behaviour nothing else sees. It always found the editor by Monaco's own classes and the rest by text and test id, so it needed no port. Its Files scene (and step 2 of `monaco.mts`) looks for the compiler's underline in the Files room's editor, where the universal `CodeEdit.tsx` hands the island no compiler (decision 0015, "What the deletion took with it"): read from the code on 2026-10-01, the rig not run. |
 
 **New**:
 

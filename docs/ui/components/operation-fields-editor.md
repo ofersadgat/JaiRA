@@ -2,13 +2,13 @@
 id: ui/components/operation-fields-editor
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/pick-from-what-exists, ux/patterns/one-document-several-readings, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/problems-marked-where-they-are]
 serves: [product/author-processes-without-memorising-the-format, product/bring-your-own-models-and-agents, product/agents-act-only-where-allowed, product/repeatable-agent-processes]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: [ui/components/slot-table, ui/components/file-link-field, ui/components/issue-mark, ui/components/run-value-field, ui/components/value-view]
-implemented_by: [packages/app/src/renderer/operationFields.tsx, packages/app/src/renderer/operationForm.ts]
-verified_by: [packages/app/test/operationForm.test.ts, packages/app/test/configPanel.test.ts]
+implemented_by: [packages/universal/src/components/workflow/OperationFields.tsx, packages/app/src/renderer/operationFieldsModel.ts, packages/app/src/renderer/operationForm.ts]
+verified_by: [packages/app/test/operationForm.test.ts, packages/app/test/configPanel.test.ts, packages/app/shots/parityWorld.mts#files-state-operation, packages/app/shots/parityWorld.mts#files-state]
 mockups: [ui/assets/operation-fields-editor/prompt.html, ui/assets/operation-fields-editor/function.html, ui/assets/operation-fields-editor/partial.html, ui/assets/operation-fields-editor/model-settings.html, ui/assets/operation-fields-editor/error.html, ui/assets/operation-fields-editor/reading.html]
 siblings: [ui/components/state-form, ui/components/slot-table, ui/components/llm-config-form]
 ---

@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-files
 type: ui-surface
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 kind: panel
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/absence-is-stated, ux/patterns/verbs-on-the-thing-itself, ux/patterns/preview-beside-the-setting]
 serves: [product/share-processes-across-projects, product/find-out-why-the-app-misbehaves, product/keep-track-of-everything]
@@ -13,7 +13,7 @@ siblings: [ui/surfaces/settings-appearance, ui/surfaces/settings-view]
 
 # Settings files
 
-The `Files tree` section, the last section of the [Appearance](settings-appearance.md) page: every rule that decides what the Files tree leaves out, with what each rule hides in THIS root — counted from one walk of it — where it came from, and a switch. It replaced the Files page (2026-09-23), whose chips could say a pattern was a rule but not what it hid: `**/build` stayed a default for months while every folder it hid in this repository was a workflow state's snapshot that `.jaira/system` already hid. It is drawn by `FilesTreeSection` in `filesTreePane.tsx`, and `data-part="files-tree"` is what the sidebar's accordion lists.
+The `Files tree` section, the last section of the [Appearance](settings-appearance.md) page: every rule that decides what the Files tree leaves out, with what each rule hides in THIS root — counted from one walk of it — where it came from, and a switch. It replaced the Files page (2026-09-23), whose chips could say a pattern was a rule but not what it hid: `**/build` stayed a default for months while every folder it hid in this repository was a workflow state's snapshot that `.jaira/system` already hid. It is drawn by `FilesTreeSection` in `packages/universal/src/components/settings/FilesTree.tsx`, and the section's id, `files-tree`, is what the sidebar's accordion lists.
 
 ## The layers add to one list, and the section draws it whole
 

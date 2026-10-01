@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-view
 type: ui-surface
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-01
 kind: screen
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/checked-status-with-the-fix]
 serves: [product/bring-your-own-models-and-agents, product/share-processes-across-projects, product/agents-act-only-where-allowed, product/read-comfortably, product/keep-history-within-bounds]
@@ -27,7 +27,7 @@ The Settings room: one scrolling column right of the [sidebar](sidebar.md) that 
 
 The four layers, weakest first: `Built in` (`$SYSTEM/settings.json`, what JaiRA ships — the presets `simple`, `coder`, `planner` and `agent`, `functions.smart.model: "simple"`, and every event switched on), `Shared (all projects)` (`~/.jaira/settings.json`), `This project` (`.jaira/settings.json`) and `Just you` (`~/.jaira/personal-settings.json`, never in a checkout). `Built in` is read-only and has no segment: a value it holds shows as what a row inherits, and changing it writes the change into the layer being edited ([settings-json](../../engineering/contracts/settings-json.md)).
 
-Photographs of every page in both themes are taken by `packages/app/shots/settings-tabs.mts`; the pages have no catalog mockups of their own, and the head's states are the [settings header](../components/settings-header.md)'s.
+Every page is photographed by a `settings-*` scene of `packages/app/shots/parityWorld.mts` (`pair.mts --scene settings-models --every-look`); the pages have no catalog mockups of their own, and the head's states are the [settings header](../components/settings-header.md)'s.
 
 ## The room changes only the page's head between states, and each page draws its own content
 

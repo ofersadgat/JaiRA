@@ -2,13 +2,13 @@
 id: ui/components/schema-json-editor
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/one-document-several-readings, ux/patterns/pick-from-what-exists, ux/patterns/problems-marked-where-they-are, ux/patterns/the-window-remembers-its-arrangement]
 serves: [product/author-processes-without-memorising-the-format, product/catch-process-mistakes-before-running]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel, ui/surfaces/components-view]
 reuses: [ui/components/splitter, ui/components/editor-chrome]
-implemented_by: [packages/app/src/renderer/schemaEditor.tsx, packages/app/src/renderer/jsonHighlight.ts, packages/app/src/renderer/jsonCursor.ts]
-verified_by: [packages/app/test/jsonHighlight.test.ts, packages/app/test/jsonCursor.test.ts, packages/app/test/completionPipeline.test.ts, packages/app/test/schemas.test.ts]
+implemented_by: [packages/universal/src/components/files/SchemaEdit.tsx, packages/app/src/renderer/schemaEditor.tsx, packages/app/src/renderer/schemaEditorModel.ts, packages/universal/src/islands/Island.tsx, packages/app/src/renderer/jsonHighlight.ts, packages/app/src/renderer/jsonCursor.ts]
+verified_by: [packages/app/test/jsonHighlight.test.ts, packages/app/test/jsonCursor.test.ts, packages/app/test/completionPipeline.test.ts, packages/app/test/schemas.test.ts, packages/app/shots/parityWorld.mts#files-schema, packages/app/shots/parityWorld.mts#gallery-form-json]
 mockups: [ui/assets/schema-json-editor/plain.html, ui/assets/schema-json-editor/success.html, ui/assets/schema-json-editor/error.html, ui/assets/schema-json-editor/completing.html, ui/assets/schema-json-editor/reference.html]
 siblings: [ui/components/state-form, ui/components/schema-form, ui/components/code-editor, ui/components/workflow-editor]
 ---

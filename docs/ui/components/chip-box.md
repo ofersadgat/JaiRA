@@ -2,13 +2,13 @@
 id: ui/components/chip-box
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/preview-beside-the-setting]
 serves: [product/read-comfortably, product/share-processes-across-projects]
 surfaces: [ui/surfaces/settings-appearance]
 reuses: []
-implemented_by: [packages/app/src/renderer/appearancePane.tsx]
-verified_by: [packages/app/test/appearance.test.ts]
+implemented_by: [packages/universal/src/components/settings/FamilyStack.tsx, packages/app/src/renderer/appearance.ts]
+verified_by: [packages/app/test/appearance.test.ts, packages/app/shots/parityWorld.mts#settings-appearance-text]
 mockups: [ui/assets/chip-box/empty.html, ui/assets/chip-box/defaults.html, ui/assets/chip-box/chosen.html, ui/assets/chip-box/warning.html, ui/assets/chip-box/menu-open.html, ui/assets/chip-box/read-only.html]
 siblings: [ui/components/preset-chips, ui/components/size-stepper, ui/components/settings-field]
 ---

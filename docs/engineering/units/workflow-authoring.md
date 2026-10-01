@@ -2,7 +2,7 @@
 id: engineering/units/workflow-authoring
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 implements: [product/author-processes-without-memorising-the-format, product/share-processes-across-projects, ux/patterns/name-it-where-it-will-live, ux/patterns/pick-from-what-exists, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/refuse-with-the-reason-and-the-fix, ui/surfaces/files-view, ui/surfaces/confirm-dialog, ui/components/file-tree, ui/components/file-panel, ui/components/folder-view, ui/components/workflow-editor, ui/components/composer, ui/components/review-notes]
 layer: service
 owns_contracts: []
@@ -96,7 +96,7 @@ It deliberately does not own:
 ## Budgets bound the picker's walk and nothing else
 
 - `FIND_VISIT = 20_000` directory entries per `findFiles` call, in `service.ts`; past it `truncated` is true.
-- `findFiles` returns at most `limit`, default 30, clamped to 1 through 200. The composer in `chatPane.tsx` asks for 20.
+- `findFiles` returns at most `limit`, default 30, clamped to 1 through 200. The composer's `@` mentions (`chatMentions.ts`) ask for 20.
 - No read or write has a size cap.
 
 ## A state write checks only that its text parses, which is less than the trust boundary usually checks

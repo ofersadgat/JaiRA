@@ -2,13 +2,13 @@
 id: ui/components/fork-mark
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/choose-a-side-where-it-divided, ux/patterns/jump-to-the-place-and-mark-it]
 serves: [product/try-another-direction, product/rewind-to-where-it-went-wrong, product/complete-record-of-every-run, product/chat-with-agents]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/context-menu, ui/components/icon]
-implemented_by: [packages/app/src/renderer/sessionPanels.tsx, packages/app/src/renderer/chatPane.tsx]
-verified_by: [packages/app/test/forkMark.test.ts, packages/app/test/sessionPanels.test.ts]
+implemented_by: [packages/universal/src/components/panel/SessionBands.tsx, packages/universal/src/components/chat/ChatThread.tsx, packages/app/src/renderer/sessionBands.ts]
+verified_by: [packages/app/test/sessionPanels.test.ts, packages/client/src/specimens/transcriptSpecimens.tsx#session-bands]
 mockups: [ui/assets/fork-mark/success.html, ui/assets/fork-mark/open.html, ui/assets/fork-mark/origin.html]
 siblings: [ui/components/session-sheet, ui/components/run-step-note, ui/components/letterhead]
 ---

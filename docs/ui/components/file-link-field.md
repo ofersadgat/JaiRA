@@ -2,13 +2,13 @@
 id: ui/components/file-link-field
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/pick-from-what-exists, ux/patterns/fold-to-a-summary-expand-in-place, ux/patterns/problems-marked-where-they-are, ux/patterns/the-window-remembers-its-arrangement]
 serves: [product/author-processes-without-memorising-the-format, product/share-processes-across-projects, product/catch-process-mistakes-before-running]
 surfaces: [ui/surfaces/files-view, ui/surfaces/context-panel]
 reuses: [ui/components/value-view, ui/components/issue-mark]
-implemented_by: [packages/app/src/renderer/links.tsx, packages/app/src/renderer/linkPreview.tsx]
-verified_by: [packages/app/test/operationForm.test.ts, packages/app/test/references.test.ts, packages/app/test/completions.test.ts]
+implemented_by: [packages/universal/src/components/workflow/Links.tsx, packages/app/src/renderer/linkModel.ts, packages/app/src/renderer/completions.ts]
+verified_by: [packages/app/test/operationForm.test.ts, packages/app/test/references.test.ts, packages/app/test/completions.test.ts, packages/app/shots/parityWorld.mts#files-state-operation]
 mockups: [ui/assets/file-link-field/inline.html, ui/assets/file-link-field/empty.html, ui/assets/file-link-field/linked.html, ui/assets/file-link-field/preview.html, ui/assets/file-link-field/folded.html, ui/assets/file-link-field/unresolved.html]
 siblings: [ui/components/operation-fields-editor, ui/components/slot-table, ui/components/state-form, ui/components/issue-mark]
 ---

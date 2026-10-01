@@ -2,12 +2,12 @@
 id: ui/components/issue-mark
 type: ui-component
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-01
 realizes: [ux/patterns/problems-marked-where-they-are, ux/patterns/jump-to-the-place-and-mark-it]
 serves: [product/catch-process-mistakes-before-running, product/author-processes-without-memorising-the-format]
 surfaces: [ui/surfaces/files-view]
 reuses: []
-implemented_by: [packages/app/src/renderer/issues.ts, packages/app/src/renderer/stateEditor.tsx]
+implemented_by: [packages/app/src/renderer/issues.ts, packages/universal/src/components/workflow/controls.tsx, packages/universal/src/components/workflow/WorkflowEditor.tsx]
 verified_by: [packages/app/test/issues.test.ts]
 mockups: [ui/assets/issue-mark/clean.html, ui/assets/issue-mark/marked.html, ui/assets/issue-mark/revealed.html]
 siblings: [ui/components/state-inspector, ui/components/state-form, ui/components/slot-table, ui/components/file-link-field, ui/components/schema-json-editor]
