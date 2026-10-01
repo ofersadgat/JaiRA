@@ -47,6 +47,7 @@ import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
 import { ModalBox } from "../floats/Modal";
 import { Icon } from "../panel/Icon";
+import { OneLine } from "../panel/OneLine";
 import { BrandIcon } from "../settings/bits";
 import { Button } from "../settings/Button";
 import { ImageDiff, type ImageLayout } from "./ImageDiff";
@@ -225,7 +226,8 @@ export function ChangesetReview({
     </Scroller>
   );
   const detail = (
-    <View flexGrow={1} flexShrink={1} flexBasis={narrow ? "auto" : 0} minWidth={0} padding={10} borderRadius={8} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} testID="review-detail">
+    // `.review-detail` scrolls (`overflow: auto`): on web a box that clips, as the desktop's does.
+    <View flexGrow={1} flexShrink={1} flexBasis={narrow ? "auto" : 0} minWidth={0} padding={10} borderRadius={8} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} {...((isWeb ? { overflow: "auto" } : {}) as object)} testID="review-detail">
       {change === undefined ? (
         <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }}>Pick a change on the left.</Txt>
       ) : (
@@ -777,6 +779,17 @@ function RemoteStrip({ remote, status, busy, onCheck }: { remote: ReviewRemote; 
 
 /** `button.link.change-path`: the changed file's path, which opens it in the Files room. */
 function PathLink({ label, onPress }: { label: string; onPress: () => void }): JSX.Element {
+  // A `button`'s words do not wrap and it is at least as wide as they are: in a narrow panel the head
+  // runs past its box and is cut there. A phone's text wraps instead — squeezed to nothing beside the
+  // toggle and Revert it stood a letter a line, and the head was three hundred tall — so there it is
+  // kept on one line at its own width (`OneLine`), and does not shrink.
+  if (!isWeb) {
+    return (
+      <Press onPress={onPress} fill={false} flexShrink={0}>
+        <OneLine spec={{ voice: "data", scale: 12 / 12, color: "accent" }}>{label}</OneLine>
+      </Press>
+    );
+  }
   return (
     <Press onPress={onPress} fill={false} flexShrink={1} minWidth={0}>
       {({ hovered }) => (

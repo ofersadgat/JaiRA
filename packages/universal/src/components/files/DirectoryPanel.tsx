@@ -3,7 +3,7 @@ import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { FileTree, WorkflowLayer } from "@jaira/shared/browser";
 import { KIND_GLYPH, entriesUnder } from "@jaira/ui/filesModel";
-import { Press, Txt, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "./Chip";
 
@@ -51,7 +51,7 @@ export function DirectoryPanel({
     })),
   ];
   return (
-    <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never}>
+    <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never} contentContainerStyle={PLAIN_SCROLLER as never}>
       <View flexDirection="column" paddingVertical={8} paddingHorizontal={10} gap={1} maxHeight={320} overflow="hidden" borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={t.v("control-radius") as never}>
         {rows.map((row, i) => (
           <Press

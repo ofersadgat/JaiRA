@@ -7,7 +7,7 @@ import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, refreshAccount, useLimits, useLimitsWatch, useNow } from "@jaira/ui/limitsStore";
 import { capital, modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windowRowsOf } from "@jaira/ui/usageCards";
 import { creditPercent, isSpent, toneOfPercent, usedPercentFor } from "@jaira/shared/browser";
-import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
+import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { Float } from "../floats/Float";
@@ -357,7 +357,7 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
     const total = window ?? Math.max(context.used, 1);
     const open = parts.find((p) => p.name === shown);
     return (
-      <RNView ref={section} collapsable={false}>
+      <RNView ref={section} collapsable={false} style={PLAIN_SCROLLER as never}>
         <Section first>
           <View flexDirection="row" alignItems="center" gap={7} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 1, weight: 600 }} flexShrink={0}>

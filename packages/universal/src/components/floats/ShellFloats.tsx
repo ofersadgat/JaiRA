@@ -2,6 +2,7 @@ import type { JSX } from "react";
 import { initPromptSpec, orphanApprovalOf } from "@jaira/ui/appDialogs";
 import { useShell } from "../../app/shell";
 import { AskDialog } from "../files/AskDialog";
+import { SuggestHost } from "../form/SuggestLayer";
 import { ApprovalDialog, ModuleApprovalDialog } from "./Dialogs";
 import { Toast } from "./Toast";
 
@@ -25,6 +26,8 @@ export function ShellFloats(): JSX.Element {
       ) : null}
       {state.initPrompt !== null ? <AskDialog spec={initPromptSpec(state.initPrompt, () => void actions.initProject())} onCancel={actions.dismissInit} /> : null}
       <Toast error={state.error} notice={state.notice} onDismissError={actions.dismissError} onDismissNotice={actions.dismissNotice} />
+      {/* A phone's layer for a box's suggestions, over the frame (nothing on web: `SuggestLayer.web.tsx`). */}
+      <SuggestHost />
     </>
   );
 }

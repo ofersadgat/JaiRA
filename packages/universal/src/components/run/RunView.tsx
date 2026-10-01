@@ -172,7 +172,6 @@ function Conversation({ context, parent, bookmarks = false }: { context: FileSur
       asking={asking}
       onRerun={context.onRerun}
       onResume={context.onResume}
-      composited
       {...(bookmarks ? { focus: context.runFocus, onHere: context.onRunHere } : {})}
     />
   );

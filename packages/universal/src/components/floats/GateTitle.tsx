@@ -41,7 +41,10 @@ export function GateTitle({ icon, children }: { icon?: IconName | undefined; chi
   return (
     <View flexDirection="row" alignItems="flex-start" marginBottom={8}>
       {icon !== undefined ? <Icon name={icon} size={16} color={String(t.v("dim"))} box={{ marginTop: baseline + 2 - 16, marginRight: 4 }} /> : null}
-      <Txt spec={spec} flex={1} minWidth={0}>
+      {/* It shrinks from its own width, not grows from none: a dialog as wide as what is in it (the
+          Components room's stage) asks its words how wide they are, and a basis of 0 answers "nothing" —
+          the heading then wrapped inside whatever the buttons under it made the box. */}
+      <Txt spec={spec} flexShrink={1} minWidth={0}>
         {icon !== undefined ? ` ${children}` : children}
       </Txt>
     </View>

@@ -4,6 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import { stateWord, type ProviderState } from "@jaira/ui/connectionsModel";
 import { Press, Txt, edge, lengthToken, useHover, type FontSpec } from "../../../primitives";
 import { useTokens } from "../../../tokens";
+import { isStill } from "../../../motion";
 import { Icon } from "../../panel/Icon";
 import { BrandIcon } from "../bits";
 import { Button } from "../Button";
@@ -384,6 +385,8 @@ export function Spin(): JSX.Element {
   const t = useTokens();
   const turn = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    // Held by a phone's test (`motion.ts`); never on web.
+    if (isStill()) return;
     const loop = Animated.loop(Animated.timing(turn, { toValue: 1, duration: 900, easing: Easing.linear, useNativeDriver: false }));
     loop.start();
     return () => loop.stop();

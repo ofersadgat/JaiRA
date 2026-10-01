@@ -84,8 +84,13 @@ export function SettingsView(): JSX.Element {
     );
 
   return (
-    // The scroll box's frame, which the accordion measures its sections against (`parts.ts`).
-    <RNView ref={box} collapsable={false} style={{ flex: 1, minWidth: 0 }}>
+    // The scroll box's frame, which the accordion measures its sections against (`parts.ts`). No stacking
+    // context of its own on web (`PLAIN_SCROLLER`: react-native-web's View is one, `z-index: 0`): the
+    // desktop's `.settings-body` is none, and Monaco's hidden input (`z-index: -10`, in the File types
+    // preview) is painted under the WHOLE page there — which puts everything else in a layer over it,
+    // where Chromium draws the sidebar's and the inbox strip's text greyscale. Held inside this box it
+    // was painted in the scroller, and the same text came out subpixel.
+    <RNView ref={box} collapsable={false} style={{ flex: 1, minWidth: 0, ...PLAIN_SCROLLER } as never}>
       <ScrollView
         // A new page is a new scroll box, at its top (`useSettingsParts` sets `scrollTop = 0` on a new key).
         key={section}

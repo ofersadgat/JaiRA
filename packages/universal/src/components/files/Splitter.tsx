@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type JSX } from "react";
 import { PanResponder, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { clampSplit, splitKey } from "@jaira/ui/splitter";
-import { useHover } from "../../primitives";
+import { NO_STACK, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 
 /**
@@ -98,7 +98,8 @@ export function Splitter({
       {...(keys as object)}
       role="separator"
       accessibilityLabel={label}
-      style={{ flexShrink: 0, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none", outlineStyle: "none" } as object) : {}) }}
+      // Positioned and no stacking context (`NO_STACK`), as `.splitter` is.
+      style={{ flexShrink: 0, ...NO_STACK, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none", outlineStyle: "none" } as object) : {}) } as never}
     >
       <View {...(hover as object)} flex={1} {...(horizontal ? { paddingVertical: 2 } : { paddingHorizontal: 2 })}>
         <View flex={1} backgroundColor={t.v(hovered || dragging || keyed ? "accent" : "line") as never} />

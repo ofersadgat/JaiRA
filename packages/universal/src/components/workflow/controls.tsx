@@ -6,6 +6,7 @@ import { useReadOnly } from "@jaira/ui/reading";
 import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
+import { ringWidth } from "../artifact/ring";
 import { Checkbox } from "../form/inputs";
 import { selectKeyProps } from "../form/selectKeys";
 import { AUTOFILLED, ListIndicator, SuggestLayer, laidOut, useSuggest, type Suggestion } from "../form/Suggest";
@@ -346,7 +347,9 @@ export function Pick({
                 {o.label}
               </Txt>
             ))}
-        <Txt spec={{ ...text, color: disabled && !reading ? "dim" : "text" }} numberOfLines={1} ellipsizeMode="clip">
+        {/* On web the line is a menulist's own — the font's `normal` line and a device pixel above and below
+            it, in whole device pixels — not the factor's product, a thirty-second of a pixel taller. */}
+        <Txt spec={{ ...text, color: disabled && !reading ? "dim" : "text" }} {...(isWeb && !reading ? { lineHeight: "normal", paddingVertical: ringWidth() } : {})} numberOfLines={1} ellipsizeMode="clip">
           {shown}
         </Txt>
       </Press>
@@ -510,7 +513,8 @@ function Tick({ checked, onChange }: { checked: boolean; onChange: (next: boolea
     const node = box.current as { getBoundingClientRect?: () => DOMRect } | null;
     if (!isWeb || node?.getBoundingClientRect === undefined || typeof window === "undefined") return;
     const r = node.getBoundingClientRect();
-    const k = window.devicePixelRatio || 1;
+    // The scale the page is DRAWN at, read off a border: `devicePixelRatio` says 2 in a window drawn at 1.5.
+    const k = 1 / ringWidth();
     const x0 = Math.round(r.left * k) / k;
     const y0 = Math.round(r.top * k) / k;
     const next = { dx: x0 - r.left, dy: y0 - r.top, w: Math.round((r.left + 13) * k) / k - x0, h: Math.round((r.top + 13) * k) / k - y0 };

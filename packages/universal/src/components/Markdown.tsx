@@ -284,7 +284,10 @@ const markerOf = (depth: number): string => (depth === 0 ? "• " : depth === 1 
 
 function itemOf(li: Extract<Node, { attrs: unknown }>, ctx: Ctx, marker: string): Block {
   return container(blocksOf(li.children, ctx), { top: 2, bottom: 2 }, (children, mt, mb, key) => (
-    <View key={key} marginTop={mt} marginBottom={mb} position="relative">
+    // An `li` is not positioned, and on web neither is this (its marker is hung in the flow, below): a
+    // positioned box is painted after everything that is not, and its marker, painted there, turned the
+    // text of a whole track of gallery cards greyscale where the desktop's is subpixel.
+    <View key={key} marginTop={mt} marginBottom={mb} {...(Platform.OS === "web" ? {} : { position: "relative" })}>
       <Marker marker={marker} ink={ctx.ink} />
       {children}
     </View>
@@ -296,12 +299,25 @@ function itemOf(li: Extract<Node, { attrs: unknown }>, ctx: Ctx, marker: string)
  * trailing space and all). A bullet is not a glyph: Chromium DRAWS disc, circle and square, a third of
  * the way up the ascent — measured, 4px across at 13px, its right edge two-thirds of an em short of the
  * text and its middle 0.45px under the line's.
+ *
+ * On web it is hung in the flow — a box of no size at the item's corner, what it holds running out of it
+ * (a number to the left, from its end) — rather than placed absolutely, so the item is not positioned.
  */
 function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
   const t = useTokens();
   const size = Number(t.scaled("size-app", ink.scale ?? 1));
   const line = ink.lineHeight * size;
+  const hung = Platform.OS === "web";
   if (/^\d/.test(marker)) {
+    if (hung) {
+      return (
+        <View width={0} height={0} flexDirection="row" justifyContent="flex-end" alignItems="flex-start">
+          <Txt spec={{ voice: "app", ...ink }} {...unitless(ink)} flexShrink={0} whiteSpace="pre">
+            {marker}
+          </Txt>
+        </View>
+      );
+    }
     return (
       <Txt spec={{ voice: "app", ...ink }} {...unitless(ink)} position="absolute" right="100%" top={0} whiteSpace="pre">
         {marker}
@@ -321,7 +337,15 @@ function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
     : marker.startsWith("▪")
       ? { backgroundColor: color }
       : { borderRadius: 999, backgroundColor: color };
-  return <View position="absolute" width={d} height={d} left={-(size * (2 / 3) + d)} top={textTop + Math.floor((3 * (ascent - third)) / 2)} {...(shape as object)} />;
+  const [left, top] = [-(size * (2 / 3) + d), textTop + Math.floor((3 * (ascent - third)) / 2)];
+  if (hung) {
+    return (
+      <View width={0} height={0}>
+        <View width={d} height={d} flexShrink={0} marginLeft={left} marginTop={top} {...(shape as object)} />
+      </View>
+    );
+  }
+  return <View position="absolute" width={d} height={d} left={left} top={top} {...(shape as object)} />;
 }
 
 /**
@@ -438,10 +462,14 @@ function Code({ children }: { children: ReactNode }): JSX.Element {
 function Pre({ code, ink, marginTop, marginBottom }: { code: string; ink?: Ink; marginTop: number; marginBottom: number }): JSX.Element {
   const t = useTokens();
   const strut = Number(t.scaled("size-app", ink?.scale ?? 13 / 12.5)) * (ink?.lineHeight ?? 1.6);
+  // On web the same height as a factor of this font's size: Blink snaps a factor's product DOWN to 1/64 of
+  // a device pixel and a length to the nearest, and a block of several lines stood that much taller a line.
+  const size = Number(t.scaled("size-data", 1));
+  const factor = Platform.OS === "web" && t.replayed && size > 0 ? { lineHeight: String(strut / size) } : {};
   return (
     <View marginTop={marginTop} marginBottom={marginBottom} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} borderRadius={6}>
       <ScrollView horizontal contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 10 }}>
-        <Txt spec={{ voice: "data", scale: 1, lineHeight: t.replayed ? { px: strut } : 1.5 }} whiteSpace="pre">
+        <Txt spec={{ voice: "data", scale: 1, lineHeight: t.replayed ? { px: strut } : 1.5 }} {...factor} whiteSpace="pre">
           {code.replace(/\n$/, "")}
         </Txt>
       </ScrollView>
@@ -480,8 +508,16 @@ function LinePicture({ src, alt, ink, marginTop, marginBottom }: { src: string; 
 }
 
 /**
- * A table, `border-collapse: collapse`: drawn column by column, so each column is as wide as its widest
- * cell as the browser's automatic layout makes it, with every cell a --line box sharing its borders.
+ * A table, `border-collapse: collapse`, every cell a --line box sharing its borders.
+ *
+ * On web it is laid out as the desktop's is — the browser's automatic table layout (`display: table`),
+ * which no flex box does: no wider than the block it stands in, the room shared between its columns by
+ * what each holds, cells wrapping, a row as tall as its tallest cell and the others' words at its middle.
+ * (Drawn the other way it ran every cell out on one line: a README's table went off the side of its
+ * pane, and the document under it stood 353px short of the desktop's.)
+ *
+ * A phone has no table layout: there it is still drawn column by column, each column as wide as its
+ * widest cell and nothing wrapping — TODO, a measured layout of its own.
  */
 function Table({ node, ctx, marginTop, marginBottom }: { node: Extract<Node, { attrs: unknown }>; ctx: Ctx; marginTop: number; marginBottom: number }): JSX.Element {
   const t = useTokens();
@@ -497,6 +533,28 @@ function Table({ node, ctx, marginTop, marginBottom }: { node: Extract<Node, { a
   };
   walk(node, false);
   const columns = Math.max(0, ...rows.map((r) => r.cells.length));
+  if (Platform.OS === "web") {
+    return (
+      <View alignSelf="flex-start" marginTop={marginTop} marginBottom={marginBottom} style={{ display: "table", borderCollapse: "collapse" } as never}>
+        {rows.map((row, r) => (
+          <View key={r} style={{ display: "table-row" } as never}>
+            {Array.from({ length: columns }, (_, col) => {
+              const cell = row.cells[col];
+              const ink = { ...ctx.ink, ...(row.head ? { weight: 700 } : {}) };
+              return (
+                <View key={col} paddingVertical={3} paddingHorizontal={7} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} style={{ display: "table-cell", verticalAlign: "middle" } as never}>
+                  {/* A block, so the cell's lines are of this font and not of the page's own. */}
+                  <Txt spec={{ voice: "app", ...ink }} {...unitless(ink)} display="block" textAlign={(cell?.attrs["align"] as never) ?? "left"}>
+                    {cell === undefined ? "" : inlines(cell.children, ink)}
+                  </Txt>
+                </View>
+              );
+            })}
+          </View>
+        ))}
+      </View>
+    );
+  }
   return (
     <View flexDirection="row" alignSelf="flex-start" marginTop={marginTop} marginBottom={marginBottom} {...(edge(t, { top: 1, left: 1 }) as object)}>
       {Array.from({ length: columns }, (_, col) => (

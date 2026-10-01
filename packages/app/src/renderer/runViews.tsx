@@ -720,6 +720,10 @@ export function RunConversation({
   useEffect(
     () => () => {
       if (trackFrame.current !== null) window.cancelAnimationFrame(trackFrame.current);
+      // Forgotten as well as cancelled: a development build mounts every effect twice (StrictMode), and
+      // a frame cancelled but still remembered left `trackSoon` waiting on it for good — the index beside
+      // the conversation never learned where the reader was. A built client mounts once.
+      trackFrame.current = null;
       onHere?.(undefined);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps

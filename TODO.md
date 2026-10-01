@@ -512,7 +512,9 @@ Two things the live runs settled that are worth not re-deriving:
 
 The desktop's layout, drawn natively on a phone from the universal copies (`packages/universal`). Each
 of these works on the universal page in a browser or Electron (`/rn`) and not yet on a phone. Deferred
-by the person on 2026-09-30 ("the Phone only gaps can be left for later").
+by the person on 2026-09-30 ("the Phone only gaps can be left for later"); what was written but never
+run on a device was run on the emulator on 2026-10-01 (`shots/android-check.mts`), and what that
+found is fixed or listed here.
 
 - [ ] **Attaching a file does nothing.** `chat/Composer.tsx`'s `attach()` returns at once off the web,
       but the clip button is drawn and enabled. Needs a picker module (`expo-document-picker`), a
@@ -532,28 +534,31 @@ by the person on 2026-09-30 ("the Phone only gaps can be left for later").
       `jaira-artifact:` scheme, so the value view asks for no grant there and shows the page without
       its script. Needs a transport that serves an artifact over the phone's connection. A pinned
       page is also only as tall as its content, not the whole panel.
-- [ ] **Drag and drop, beyond the task board.** A long press and pan lifts a card (checked on the
-      emulator); the run board's tiles and the automations' grip use the same `Lift` code but were
-      not tried on a device. A drag does not scroll the board near an edge, and the lifted card is
-      hidden rather than dimmed. (A drop was last tried over the read-only spike connection, which
-      refused it; the phone writes now, and a drop has not been tried since.)
-- [ ] **The changeset reviewer's phone half is untried.** The diff island's function calls and
-      command handle, the selection's rect moved by `measureInWindow`, the fade slider's
-      `PanResponder`, and the note composer over the WebView with the keyboard up. A changed `.svg`
-      shows blank: React Native's `Image` cannot draw an SVG data URI.
-- [ ] **Runs and the rail, untried on a device.** Bookmark landing and "where am I" measured with
-      `measureLayout`, the rail's tap-to-fold and long-press lane menu, a stacked column's stripes,
-      and the Steps index's row menu. The rail's hover, name tip and fan are pointer-only by nature.
-- [ ] **Suggestions (`<datalist>`) on a phone.** The list hangs under its box (a `Modal` would take
-      the keyboard), so a scroller round the box clips it; it opens on typing or a second tap, with no
-      arrow keys; blur waits 150 ms so a tap on a row lands — untried on the emulator, taps inside a
-      `ScrollView` included (`keyboardShouldPersistTaps`).
-- [ ] **A task's Conversation tab is empty on the emulator.** The panel draws a tall empty lane where
-      the transcript should be (seen 2026-09-30, after the transport switch), so a gate parked in the
-      conversation cannot be answered from the phone's own panel; the inbox strip still offers it.
+- [ ] **A lift on the run board does not scroll it.** A card held at the task board's top or foot
+      scrolls it (`useEdgeScroll`, checked on the emulator 2026-10-01); the run board's own scroller
+      was not given the same, and neither scrolls sideways. A grip being dragged (Settings › Tools ›
+      Automations) reorders its line but draws no picture under the finger, and its "⋮⋮" is one glyph
+      wide on Android (the −3px letter spacing lays the two over each other).
+- [ ] **A passage in a diff is selected with a mouse, not a finger.** The reviewer's note composer,
+      "Revert these lines" and the compiler's underlines all work over the island's bridge (checked
+      with `adb shell input mouse swipe`), but Monaco gives a finger's drag to scrolling: a double
+      tap should select a word and was not tried, and there is no handle to stretch a selection by.
+      In the panel's default width the change's head runs past its box, as on the desktop, and
+      Revert is out of reach until the panel is widened.
+- [ ] **The Debug session panel's motion was not seen in the Debug room.** The running dot breathes
+      and the writing caret blinks (`debug/motion.tsx`, watched on the emulator in the island harness),
+      but the scripted self-test ends in milliseconds and a live run was not made: nothing held a call
+      open long enough to photograph it there.
+- [ ] **The panel does not slide on a phone.** `panel/panelMotion.ts` is the web's (`sp-in-right`,
+      `sp-in-left`); a phone swaps the panel's page with no motion.
+- [ ] **Small things seen on the emulator.** The run strip's count ("49 m 6 s") wraps to two lines
+      in the panel's default width; a rail's straights show a hairline between rows while the shell
+      is drawn fitted (the rows land on fractions of a device pixel); a development build logs "two
+      children with the same key" with the project's path once several gates are parked in it; a
+      menu is a `Modal`, outside the fitted frame, so it is drawn three times the shell's size and
+      its 220 cut a lane menu's lines short ("Rewind to befor…"); a suggestion list stays where it
+      opened if the page is scrolled under it (the web's shuts on a scroll).
 - [ ] **Pairing has no QR code.** The deep link a code would carry (`jaira:///?address=…&code=…`) is
       read; nothing draws or scans one. A device cannot open or make a project (`project:choose` is
       the machine's own dialog), a sign-in page a device's request causes opens on the engine's
       machine, and after a reconnection only the limits watch is replayed, not the current project.
-- [ ] **The Debug session panel is still on a phone.** The running dot's pulse and the writing
-      caret's blink do not move.

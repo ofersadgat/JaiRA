@@ -740,9 +740,9 @@ export function WorkflowEditor({
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       <LinkReaderProvider value={e.reader}>
-        {/* On the Graph tab the desktop's pane is composited with its canvas (the scroller it stands in
-            takes the canvas's layer), and Chromium draws its text greyscale: a 3D no-op does the same here. */}
-        <View flexDirection="column" gap={8} minHeight={0} {...(fill ? { flexGrow: 1, flexShrink: 1, flexBasis: 0 } : {})} {...(isWeb && tab === "graph" && !e.comparing ? { style: { transform: "translateZ(0)" } } : {})}>
+        {/* Nothing here asks for a layer: on the Graph tab the desktop's pane is greyscale because it is
+            painted after a scroller, and so is this one now that the page is painted in the same order. */}
+        <View flexDirection="column" gap={8} minHeight={0} {...(fill ? { flexGrow: 1, flexShrink: 1, flexBasis: 0 } : {})}>
           <View flexDirection="row" alignItems="center" gap={8} flexShrink={0} minWidth={0}>
             <FilePath path={editorPathOf(source, e.shipped)} title={source.file} />
             <LayerBar model={layerBarOf(source, layerActions?.hasProject === true, e.copyOnEdit)} busy={busy} comparing={e.comparing} onAction={e.onLayerAction} />

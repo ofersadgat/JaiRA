@@ -12,7 +12,7 @@ import { EFFORT_HINTS, KEEP_WHERE, VENDOR_NAMES, cascadeOf, modalitiesOf, modali
 import { ROUTE_BORROWS } from "@jaira/ui/composerModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import type { Schema } from "@jaira/ui/schemaForm/types";
-import { Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
+import { NO_STACK, Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
 import { MenuLayer } from "../MenuLayer";
@@ -243,9 +243,12 @@ function ColRow({ on, live, onPress, onHover, title, children }: { on: boolean; 
   );
 }
 
-/** `.cx-more`: pushed to the edge — or, after a route's figure (`.um-route + .cx-more`), 4 after it. */
-const More = ({ after = false }: { after?: boolean }): JSX.Element => (
-  <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} marginLeft={after ? 4 : "auto"} flexShrink={0}>
+/**
+ * `.cx-more`: pushed to the edge — or, after a route's figure (`.um-route + .cx-more`), 4 after it. Its
+ * weight is where it stands (the bucket's head is 600, and a bold › is 0.3 wider).
+ */
+const More = ({ after = false, weight = 400 }: { after?: boolean; weight?: number }): JSX.Element => (
+  <Txt spec={{ voice: "app", scale: 11 / 12.5, weight, color: "tok-hint" }} marginLeft={after ? 4 : "auto"} flexShrink={0}>
     ›
   </Txt>
 );
@@ -263,7 +266,7 @@ function ModalityFilter({ side, options, value, onChange }: { side: "input" | "o
   const on = value.length > 0;
   const toggle = (mode: string): void => onChange(value.includes(mode) ? value.filter((m) => m !== mode) : [...value, mode]);
   return (
-    <RNView ref={ref} collapsable={false}>
+    <RNView ref={ref} collapsable={false} style={NO_STACK as never}>
       <Press
         onPress={() => (at !== null ? setAt(null) : measure(setAt))}
         title={value.length === 0 ? `any ${side}` : `${side}: ${value.join(" + ")}`}
@@ -323,9 +326,6 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
   const [group, setGroup] = useState<string | undefined>(here.group);
   const [needs, setNeeds] = useState<{ input: string[]; output: string[] }>({ input: [], output: [] });
   const { columns, groups, shown, borrows, ownDefault, own, borrowed, leaves } = cascadeOf(routes, models, route, group, needs);
-  const bodySize = Number(t.scaled("size-app", 13 / 12.5)) || 13;
-  const smallSize = Number(t.scaled("size-app", 10.5 / 12.5)) || 10.5;
-  const strut = bodySize * 1.5;
   const drill = (r: string): void => {
     setRoute(r);
     setGroup(undefined);
@@ -450,10 +450,12 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
             ))}
             {own.length > 0 && borrowed.length > 0 ? (
               <View marginTop={6} marginHorizontal={7} marginBottom={2} paddingTop={7} paddingBottom={1} {...(edge(t, { top: 1 }) as object)}>
-                {/* A block holding an inline span: its line is the body's (13/12.5 on 1.5), the span on its baseline. */}
-                <View height={strut} overflow="visible">
-                  <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "tok-hint", lineHeight: { px: strut } }} marginTop={(bodySize - smallSize) * 0.341} numberOfLines={1}>{`also by id — any ${VENDOR_NAMES[borrows ?? ""] ?? borrows} model`}</Txt>
-                </View>
+                {/* A block holding an inline span: its lines are the body's (13/12.5 on 1.5), the span a run on
+                    their baseline — and it WRAPS, as the desktop's does in a narrow column ("…any Anthropic" /
+                    "model"); held to one line it was cut with an ellipsis and every row under it stood a line high. */}
+                <Txt spec={{ voice: "app", scale: 13 / 12.5 }}>
+                  <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "tok-hint" }}>{`also by id — any ${VENDOR_NAMES[borrows ?? ""] ?? borrows} model`}</Txt>
+                </Txt>
               </View>
             ) : null}
             {leaves.length === 0 && ROUTE_BORROWS[route] === undefined ? (
@@ -494,7 +496,7 @@ export function BucketPicker({ buckets, bucket, onPick }: { buckets: readonly Pe
   const [ref, measure] = useAnchorRect();
   const [at, setAt] = useState<FloatRect | null>(null);
   return (
-    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0 }}>
+    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
       <Press
         onPress={() => (at !== null ? setAt(null) : measure(setAt))}
         title="Which bucket of permission sets these rows are"
@@ -510,7 +512,7 @@ export function BucketPicker({ buckets, bucket, onPick }: { buckets: readonly Pe
       >
         <Icon name="folder" size={12} color={String(t.v("tok-hint"))} />
         <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 600, color: "text" }}>{bucket}</Txt>
-        <More />
+        <More weight={600} />
       </Press>
       {at !== null ? (
         <SubMenu anchor={at} align="start" minWidth={320} onClose={() => setAt(null)}>
@@ -627,7 +629,7 @@ export function KeepPermissionSet({ bucket, ready, layers, onKeep }: { bucket: s
     );
   };
   return (
-    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0 }}>
+    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
       <Press
         onPress={() => (at !== null ? setAt(null) : measure(setAt))}
         disabled={!ready}

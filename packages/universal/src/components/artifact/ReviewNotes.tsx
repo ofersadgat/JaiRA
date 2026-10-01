@@ -9,6 +9,7 @@ import { useTokens, type Tokens } from "../../tokens";
 import { Float } from "../floats/Float";
 import { InlineGlyph } from "../floats/InlineGlyph";
 import { TipLayer } from "../floats/TipLayer";
+import { MenuLayer } from "../MenuLayer";
 import { Icon } from "../panel/Icon";
 import { Button } from "../settings/Button";
 import { KEEPS_SELECTION, type PendingSelection } from "./noteSelection";
@@ -36,8 +37,9 @@ import { SourceMark } from "./SourceMark";
  *   .note-reply          row, gap 6, 6 above, 10 in; the input (the page's: app, padding 5 9) and ghost
  *                        buttons
  *
- * A phone has no selection to anchor a note to, so the composer is web's (`noteSelection.ts`); the
- * threads are drawn on both.
+ * A phone has no selection to anchor a note to in a rendered artifact (`noteSelection.ts` is web's), but
+ * the changeset reviewer's diff hands it one over the island's bridge, so the composer is drawn there too;
+ * the threads are drawn on both.
  */
 
 /** The page's text — the modal's body font (app 13/12.5, line 1.5). */
@@ -52,8 +54,7 @@ export function NoteComposer({ selection, author, onSave, onCancel }: { selectio
     input.current?.focus();
   }, []);
   const said = body.trim();
-  return (
-    <TipLayer>
+  const float = (
       <Float
         anchor={selection.rect}
         side="below"
@@ -105,8 +106,11 @@ export function NoteComposer({ selection, author, onSave, onCancel }: { selectio
           </Button>
         </View>
       </Float>
-    </TipLayer>
   );
+  // A phone has no tip layer (nothing hovers there, so it draws none): the composer stands in the menus'
+  // layer — a `Modal`, which takes the keyboard its box needs — over the diff's WebView, and a press
+  // outside it lets the note go, as a click that drops the selection does on the desktop.
+  return isWeb ? <TipLayer>{float}</TipLayer> : <MenuLayer onClose={onCancel}>{float}</MenuLayer>;
 }
 
 /**

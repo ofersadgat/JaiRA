@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, type JSX } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { publishUsageFigures, useNow } from "@jaira/ui/limitsStore";
 import { noticeToShow } from "@jaira/ui/noticesModel";
@@ -34,7 +34,7 @@ import { AppContext, useShell } from "./shell";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
 import { Uncopied } from "./Uncopied";
-import { usePageRules, useWindowTitle } from "./windowPage";
+import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
 
 /**
  * The desktop's shell, universal (decision 0015): `App.tsx`'s frame drawn from copies, on a phone and in
@@ -131,7 +131,11 @@ function Frame(): JSX.Element {
   useWindowTitle(windowTitle(state.at, state.view, state.doc?.path ?? state.dir?.path ?? null));
   usePageRules(t);
   return (
-    <View flex={1} flexDirection="row" overflow="hidden" backgroundColor={t.v("bg") as never}>
+    // The window's ground (--bg) is the page's own canvas on web, as the desktop's `body` is (`usePageRules`).
+    // Positioned on web, so it is the box of last resort for whatever is placed absolutely with no
+    // positioned box nearer (a hidden probe measuring a table's columns): it clips, where the page
+    // itself would grow a scrollbar and lay the whole window out ten pixels narrower.
+    <View flex={1} flexDirection="row" overflow="hidden" {...((isWeb ? { position: "relative" } : {}) as object)} {...((pageGround(t) ? {} : { backgroundColor: t.v("bg") }) as object)}>
       <ShellSidebar />
       {/* The sidebar's splitter, dragged as the desktop's writes `PANE.shellSidebar` (180–520). None on a
           collapsed sidebar: the rail is a fixed strip of glyphs. */}

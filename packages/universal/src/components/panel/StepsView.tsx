@@ -96,7 +96,7 @@ export function StepsBody({ detail, entry, convo, project, host }: { detail: Tas
             {index}
           </View>
           <Split height={host.boxHeight} onHeight={host.onBoxHeight} />
-          <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 12, paddingBottom: 16 }}>
+          <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never} contentContainerStyle={{ paddingTop: 6, paddingHorizontal: 12, paddingBottom: 16, ...PLAIN_SCROLLER } as never}>
             <StepCard
               detail={detail}
               node={selected!}

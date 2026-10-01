@@ -1,6 +1,6 @@
 import { createContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
-import { Platform, ScrollView, type LayoutChangeEvent } from "react-native";
+import { ScrollView, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
 import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { labelPlan } from "@jaira/ui/panelTabs";
@@ -59,20 +59,10 @@ export interface PanelFace {
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
 
 /**
- * Paint AFTER the conversation's scroller, as the DOM does. There the scroller is in normal flow and
- * composited, and what paints after it and touches it — the tab strip (positioned), the activity strip
- * and the gate — is given a layer by overlap, where Chromium draws text greyscale rather than subpixel
- * and snaps the layer to a device pixel. On `/rn` the scroller (react-native-web's) is itself a
- * positioned stacking context, so a copy has to be positioned above it for the same to happen to it.
- * Web only: a phone has one way of drawing text.
- */
-/**
  * The size a face's glyph is drawn at: the head's `.sp-glyph` sets 15px, the rail's `.sp-rail-glyph` sets
  * none, so a badge there is the page's 13 on its 1.5 line, and an icon (1em) 13 square.
  */
 export const GlyphSizeContext = createContext(15);
-
-export const OVER_SCROLLER: Record<string, unknown> = Platform.OS === "web" ? { position: "relative", zIndex: 1 } : {};
 
 /** A length token, as the stylesheet writes `var(--name, fallback)`. */
 export function lengthOf(t: Tokens, name: string, fallback: number): number | string {
@@ -187,9 +177,10 @@ function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open:
       paddingHorizontal={8}
       flexShrink={0}
       overflow="hidden"
+      // Positioned, as `.sp-tabs` is, and no more: painted after the conversation's scroller, which it
+      // touches, Chromium gives it a layer by overlap (greyscale text) as it gives the desktop's.
       position="relative"
       {...(edge(t, { bottom: 1 }) as object)}
-      {...OVER_SCROLLER}
       onLayout={(e: LayoutChangeEvent) => setStrip(Math.round(e.nativeEvent.layout.width))}
     >
       {tabs.map((tab, i) => {

@@ -6,7 +6,7 @@ import type { ChatSurface } from "@jaira/ui/chatPane";
 import { CHAT_SESSION } from "@jaira/ui/chatWorkflow";
 import { chatStartWhereOf } from "@jaira/ui/chatListModel";
 import { invoke } from "@jaira/ui/store";
-import { Txt, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Txt, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ChatError } from "./ChatThread";
 import { Composer } from "./Composer";
@@ -39,8 +39,8 @@ export function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
   return (
     <ScrollView
       {...(scrollbarProps(t) as object)}
-      style={{ flex: 1, minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never}
-      contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center" }}
+      style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
+      contentContainerStyle={{ flexGrow: 1, alignItems: "center", justifyContent: "center", ...PLAIN_SCROLLER } as never}
     >
       <View width="100%" maxWidth={900} paddingVertical={24}>
         <Txt spec={{ voice: "app", scale: 20 / 12.5, weight: 500 }} paddingHorizontal={16} marginBottom={4}>

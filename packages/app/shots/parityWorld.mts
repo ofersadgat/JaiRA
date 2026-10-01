@@ -831,8 +831,11 @@ export const SCENES: readonly Scene[] = [
       await app.clickText("Components");
       await app.until(says("Every row to"), "the Components room");
       // Every card's form is laid out from its measured width on /rn (react-native-web's onLayout, a frame
-      // or more behind), where the desktop's container queries need none: let both pages settle.
+      // or more behind), where the desktop's container queries need none: let both pages settle — and
+      // hold still: a row is scrolled to by where it stands, and on a busy machine an editor that
+      // mounted after the pause moved every row under it (a scene 18 or 54px out, 70,000 pixels).
       await settle(2500);
+      await app.settled();
     },
   },
   {

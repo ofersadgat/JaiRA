@@ -1,10 +1,11 @@
 import { useRef, useState, type JSX } from "react";
 import { TextInput, View as RNView } from "react-native";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { steppedSize } from "@jaira/ui/sizeStep";
-import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
+import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
+import { ringWidth } from "../artifact/ring";
 import { MenulistArrow } from "../form/MenulistArrow";
 import { selectKeyProps } from "../form/selectKeys";
 import { useReadingForm } from "../form/Field";
@@ -29,9 +30,14 @@ import { useReadingForm } from "../form/Field";
  * Chromium's menulist sets its text 4 in from the padding (measured in a 272-wide one: the text sits a
  * device pixel right of 3), and keeps room for its arrow after it: 40.6 wider than the text in all.
  * Its line is `normal` rounded UP to a whole pixel, the text centred in it.
+ *
+ * On web the width is Chromium's to the device pixel, as the plain select's is (`logs/Select.tsx`): the
+ * widest choice rounded UP to a whole one, then 20 for the inset and the arrow — the Editor palette's
+ * was a fifth of a pixel wide, and its words a device pixel to the left.
  */
 const MENULIST_INSET = 4;
 const MENULIST_ROOM = 40.6 - 18 - 2 - MENULIST_INSET;
+const MENULIST_SNAPPED = 20 - MENULIST_INSET;
 
 /** A closed set of choices — `controls.tsx`'s `SelectInput`. It opens a menu of them. */
 export function SelectInput({
@@ -53,6 +59,10 @@ export function SelectInput({
   const reading = useReadingForm();
   const box = useRef<RNView | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
+  // The widest choice as laid out (web), rounded up to a whole device pixel below.
+  const [widest, setWidest] = useState<number | null>(null);
+  const device = isWeb ? ringWidth() : 1;
+  const snapped = isWeb && !fill && widest !== null && widest > 0 ? Math.ceil(widest / device - 0.01) * device : undefined;
   const shown = options.find(([, v]) => v === value)?.[0] ?? "";
   const text = { voice: "app", scale: 1, lineHeight: 1.3867 } as const;
   const size = t.scaled("size-app", 1);
@@ -66,7 +76,7 @@ export function SelectInput({
       }),
     );
   return (
-    <RNView ref={box} collapsable={false} style={fill ? { width: "100%", minWidth: 0 } : undefined}>
+    <RNView ref={box} collapsable={false} style={{ ...(fill ? { width: "100%", minWidth: 0 } : {}), ...PLAIN_SCROLLER } as never}>
       <Press
         onPress={open}
         disabled={disabled}
@@ -74,20 +84,26 @@ export function SelectInput({
         // A closed `<select>`'s keys: the arrows step it, a letter finds a choice (`selectModel.ts`).
         {...(selectKeyProps(options.map(([label, v]) => ({ label, value: v })), value, onChange) as object)}
         label={shown}
+        // The arrow is placed against it (`MenulistArrow`).
+        position="relative"
         paddingVertical={6}
         paddingLeft={9 + MENULIST_INSET}
-        paddingRight={9 + MENULIST_ROOM}
+        paddingRight={9 + (snapped !== undefined ? MENULIST_SNAPPED : MENULIST_ROOM)}
         borderRadius={lengthToken(t, "control-radius", 7)}
         backgroundColor={(reading ? "transparent" : t.v(disabled ? "panel-2" : "bg")) as never}
         {...(disabled ? { opacity: 0.55 } : {})}
         box={({ hovered }) => edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, reading ? "rgba(0, 0, 0, 0)" : hovered && !disabled ? "rule" : "line")}
       >
         {/* Every choice, laid out and not drawn: the box is as wide as the widest, as a <select> is. */}
-        {options.map(([label]) => (
-          <Txt key={label} spec={text} height={0} overflow="hidden" aria-hidden numberOfLines={1}>
-            {label}
-          </Txt>
-        ))}
+        <View height={0} overflow="hidden" alignSelf="flex-start" aria-hidden {...(snapped !== undefined ? { width: snapped } : {})}>
+          <View alignSelf="flex-start" {...(isWeb ? { onLayout: (e: { nativeEvent: { layout: { width: number } } }) => setWidest(e.nativeEvent.layout.width) } : {})}>
+            {options.map(([label]) => (
+              <Txt key={label} spec={text} numberOfLines={1}>
+                {label}
+              </Txt>
+            ))}
+          </View>
+        </View>
         <View minHeight={typeof lineBox === "number" ? Math.ceil(lineBox) : undefined} justifyContent="center">
           <Txt spec={{ ...text, color: disabled && !reading ? "dim" : "text" }} numberOfLines={1}>
             {shown}

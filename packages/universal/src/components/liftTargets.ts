@@ -75,3 +75,76 @@ export function ghostOf(node: HostView | null, root: HostView | null, rootWidth:
 export function ghostAt(ghost: Ghost, x: number, y: number): Ghost {
   return { ...ghost, dx: (x - ghost.x0) / ghost.scale, dy: (y - ghost.y0) / ghost.scale };
 }
+
+/** The scroller a lifted thing is over, as its host hands it down: where it stands, how far it is scrolled, and a way to move it. */
+export interface EdgeScroller {
+  /** Its box in the window. */
+  measure: (done: (y: number, height: number) => void) => void;
+  offset: () => number;
+  scrollTo: (y: number) => void;
+}
+
+/** How near an edge the finger must be, in the window's units, and how far a step scrolls, in the scroller's. */
+const EDGE = 36;
+const STEP = 14;
+
+/**
+ * A lifted thing held near the top or the foot of its scroller scrolls it, as a browser scrolls what is
+ * under an HTML5 drag held at an edge — on a phone nothing does, so a card could only land in a column
+ * already on screen. While the finger stays in the band the scroller moves a step a frame; `onScrolled`
+ * says by how much it really moved (none at an end), for what was measured when the lift began: the
+ * places to land in have moved in the window, and the picture following the finger is drawn in the
+ * content, which moved under it.
+ */
+export function useEdgeScroll(scroller: EdgeScroller | null, onScrolled: (by: number) => void): { begin: () => void; at: (y: number) => void; end: () => void } {
+  const box = useRef<{ y: number; height: number } | null>(null);
+  const way = useRef(0);
+  const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const last = useRef(0);
+  const told = useRef(onScrolled);
+  told.current = onScrolled;
+  const end = useCallback(() => {
+    if (timer.current !== null) clearInterval(timer.current);
+    timer.current = null;
+    way.current = 0;
+    box.current = null;
+  }, []);
+  const begin = useCallback(() => {
+    end();
+    if (scroller === null) return;
+    last.current = scroller.offset();
+    scroller.measure((y, height) => (box.current = { y, height }));
+  }, [scroller, end]);
+  const at = useCallback(
+    (y: number) => {
+      if (scroller === null || box.current === null) return;
+      // However it came to move since it was last asked — a step of this, or the content growing shorter
+      // under it (a drop preview going away) and the scroller stepping back to its new end.
+      const moved = (): number => {
+        const now = scroller.offset();
+        if (now !== last.current) told.current(now - last.current);
+        last.current = now;
+        return now;
+      };
+      moved();
+      way.current = y < box.current.y + EDGE ? -1 : y > box.current.y + box.current.height - EDGE ? 1 : 0;
+      if (way.current === 0 || timer.current !== null) return;
+      timer.current = setInterval(() => {
+        const now = moved();
+        if (way.current === 0) {
+          if (timer.current !== null) clearInterval(timer.current);
+          timer.current = null;
+          return;
+        }
+        scroller.scrollTo(Math.max(0, now + way.current * STEP));
+      }, 16);
+    },
+    [scroller],
+  );
+  return { begin, at, end };
+}
+
+/** The ghost when the content it is drawn in has scrolled by `by` under a finger that did not move. */
+export function ghostScrolled(ghost: Ghost, by: number): Ghost {
+  return { ...ghost, y0: ghost.y0 - by * ghost.scale, dy: ghost.dy + by };
+}

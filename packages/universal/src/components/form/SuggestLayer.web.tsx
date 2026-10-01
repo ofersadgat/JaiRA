@@ -24,5 +24,10 @@ export function SuggestLayer({ box, popup }: { box: ReactNode; popup: ReactNode 
   );
 }
 
+/** A phone's layer for the popup (`SuggestLayer.tsx`); on web each popup is portalled into `<body>` itself. */
+export function SuggestHost(): null {
+  return null;
+}
+
 /** On web the popup is placed in the window (`placeSuggestions`), from the box's rect. */
 export const PLACED_IN_WINDOW = true;

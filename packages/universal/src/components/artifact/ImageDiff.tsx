@@ -1,9 +1,10 @@
 import { useEffect, useState, type JSX } from "react";
-import { Image, type LayoutChangeEvent } from "react-native";
+import type { LayoutChangeEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { Txt } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Range } from "../form/Range";
+import { Img, naturalSizeOf } from "../Img";
 import { ringWidth } from "./ring";
 import { Toggle } from "./Toggle";
 
@@ -25,7 +26,7 @@ import { Toggle } from "./Toggle";
  *                      inset 0, 100% × 100% — stretched to that height, as the DOM's is.
  *
  * On web the checkerboard is the gradients themselves; on a phone, which has no background images, the
- * squares are views.
+ * squares are views — and a picture that is an SVG is drawn by `react-native-svg` (`Img.native.tsx`).
  */
 export type ImageLayout = "overlay" | "split";
 
@@ -167,7 +168,7 @@ function Framed({ src, alt, width, height }: { src: string; alt: string; width: 
   const t = useTokens();
   return (
     <View width={width} height={height} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={4} overflow="hidden">
-      <Image source={{ uri: src }} accessibilityLabel={alt} resizeMode="stretch" style={{ width: "100%", height: "100%" }} />
+      <Img src={src} alt={alt} style={{ width: "100%", height: "100%" }} />
     </View>
   );
 }
@@ -186,7 +187,7 @@ function useNatural(src: string): { width: number; height: number } | null {
   const [natural, setNatural] = useState<{ width: number; height: number } | null>(null);
   useEffect(() => {
     let live = true;
-    Image.getSize(
+    naturalSizeOf(
       src,
       (width, height) => live && setNatural({ width, height }),
       () => live && setNatural(null),

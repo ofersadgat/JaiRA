@@ -327,6 +327,8 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
                     onPress={() => onPick(option)}
                     disabled={busy}
                     {...({ "aria-pressed": on } as object)}
+                    // The chosen card's ✓ is placed against it (`.theme-card` is `position: relative`).
+                    position="relative"
                     width={cellWidth}
                     borderRadius={12}
                     overflow="hidden"

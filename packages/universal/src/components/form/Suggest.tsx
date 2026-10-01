@@ -255,7 +255,9 @@ function SuggestList({
   const ring = Math.ceil(SUGGEST.border * PixelRatio.get()) / PixelRatio.get();
   return (
     <View
-      {...(place !== null ? { position: "absolute", left: place.left, top: place.top, width: place.width, height: place.height } : { minWidth: "100%" })}
+      // Not placed (a phone): as wide as the box it is given, which is as wide as the field at least
+      // (`SuggestLayer.tsx`) — stretched to it, not a percentage, which Yoga takes of the room on offer.
+      {...(place !== null ? { position: "absolute", left: place.left, top: place.top, width: place.width, height: place.height } : { alignSelf: "stretch" })}
       overflow="hidden"
       padding={SUGGEST.border}
       backgroundColor={c.ground}

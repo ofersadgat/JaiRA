@@ -13,13 +13,17 @@
  * and at its own size; the board scrolled under its column headings, which must stay put; a task opened
  * in the panel, Files, Chat and Settings. Then the phone WRITES: its Dark switch is a settings write on
  * the desktop's engine, and the desktop's own window turns dark; and a gate the desktop's run parks at
- * is offered on the phone's strip by a push. Stopped and opened again with no link, it connects by the
- * token it kept in the keystore. Then, by the same link with `&screen=islands` (its
+ * is offered on the phone's strip by a push, opened from there in the phone's own panel and ANSWERED
+ * there — the desktop's task moves on. Stopped and opened again with no link, it connects by the token
+ * it kept in the keystore. Then, by the same link with `&screen=islands` (its
  * code is spent, so the kept pairing stands), the three islands with their readouts, and text typed
  * into the editable island coming back over the bridge. Last, the desktop forgets the phone, which is
  * dropped and returns to its Connect screen.
  * What the screen says is read from Android's accessibility dump (`uiautomator`), so a tab that shows
- * an error rather than the app is caught.
+ * an error rather than the app is caught. The dump waits for a second in which nothing on screen
+ * changes, and a running task's panel counts its seconds: the link says `&still=1`, which holds the
+ * app's clocks and spinners (`client/src/native/still.ts`). `android-check.mts` is the same rig kept up,
+ * in the fidelity gate's world, for the states a room is rarely in.
  */
 import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -150,11 +154,13 @@ async function main(): Promise<void> {
     // `adb reverse` says — so `--metro` was ignored, and a shared dev server that had stopped answering
     // left the app on a blank screen (2026-09-30). Told to ask its own localhost, it goes through the
     // reverse above, to whichever Metro this run uses. A debug build's setting, in its own preferences.
-    adb("shell", `run-as ${PACKAGE} sh -c 'mkdir -p shared_prefs && echo "<map><string name=\\"debug_http_host\\">localhost:8081</string></map>" > shared_prefs/${PACKAGE}_preferences.xml'`);
+    // Fast Refresh off as well: the sources are shared, and another copier's save reloads the app under a
+    // state this run has just reached.
+    adb("shell", `run-as ${PACKAGE} sh -c 'mkdir -p shared_prefs && echo "<map><string name=\\"debug_http_host\\">localhost:8081</string><boolean name=\\"hot_module_replacement\\" value=\\"false\\" /></map>" > shared_prefs/${PACKAGE}_preferences.xml'`);
     adb("logcat", "-c");
     // The code as its letters and digits alone — however it is typed is read the same — so nothing in
     // the link needs escaping on its way through `adb shell`.
-    const link = `jaira:///?address=${encodeURIComponent(`127.0.0.1:${PORT}`)}&code=${shown.pairing.code.replace(/[^A-Za-z0-9]/g, "")}`;
+    const link = `jaira:///?address=${encodeURIComponent(`127.0.0.1:${PORT}`)}&code=${shown.pairing.code.replace(/[^A-Za-z0-9]/g, "")}&still=1`;
     const started = Date.now();
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}'`, PACKAGE);
 
@@ -232,8 +238,8 @@ async function main(): Promise<void> {
     tap("TASKS");
 
     // A push, about a task: a run on the desktop parks at its gate, and the phone's strip offers it.
-    // (Answered from the desktop: on a phone the conversation's transcript does not draw the gate yet,
-    // and the waiting line's pulse keeps `uiautomator` from ever reading the screen.)
+    // Pressed there it opens in the phone's own panel, the gate drawn where the run stopped in its
+    // conversation, and the phone answers it: the desktop's engine has nothing parked any more.
     const parked = (await desktop.ipc<{ taskId: string }>("task:create", { title: "plan the offline mode", workflow: "feature/plan", inputs: { issue: "# plan the offline mode" } })).taskId;
     await desktop.ipc("task:start", { taskId: parked, fake: blockedAtTheGate() });
     const gates = async (): Promise<Array<{ taskId: string; requestId: string }>> => (await desktop.ipc<Array<{ taskId: string; requestId: string }>>("interaction:pending", undefined)).filter((p) => p.taskId === parked);
@@ -243,14 +249,24 @@ async function main(): Promise<void> {
     await until(() => says("Review the critique result."), "the phone to be offered the gate (a push)", 60);
     quiet();
     shot("6-gate-offered");
-    await desktop.ipc("interaction:submit", { requestId: gate.requestId, value: { decision: "approve" } });
+    tap("Review the critique result.");
+    await until(() => screen().some((n) => n.text === "approve"), "the gate to open in the phone's panel", 60);
+    await sleep(1500);
+    shot("6-gate-in-panel");
+    tap("approve");
+    for (let i = 0; i < 60 && (await gates()).length > 0; i++) await sleep(500);
+    if ((await gates()).length > 0) throw new Error("the phone's answer did not reach the desktop's engine: the gate is still parked");
     await until(() => !says("Review the critique result."), "the phone's strip to let the answered gate go (a push)", 60);
-    console.log("(2) a gate the desktop's run parked at was offered on the phone, and left it when answered");
+    shot("6-gate-answered");
+    console.log("(2) a gate the desktop's run parked at was offered on the phone, opened in its panel and answered there: the desktop's task moved on");
 
     // Stopped, and opened again as a person opens an app — no link: the token kept in the keystore
     // connects it straight away.
     adb("shell", "am", "force-stop", PACKAGE);
-    adb("shell", "monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1");
+    // The launcher's own intent, once the stop has settled: `monkey` sent straight after it was dropped
+    // now and then, and the run waited two minutes at the home screen.
+    await sleep(1500);
+    adb("shell", "am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-n", `${PACKAGE}/.MainActivity`);
     await until(() => says("Open a project"), "the app, opened with no link, to connect by its kept token", 120);
     await sleep(3000);
     quiet();

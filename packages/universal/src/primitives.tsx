@@ -119,9 +119,15 @@ export function Txt({
   const ink = useContext(InkContext);
   const base: FontSpec = { ...(register !== undefined ? REGISTERS[register] : { voice: "app", scale: 1 }), ...spec } as FontSpec;
   if (base.color === undefined && ink !== undefined) base.color = ink;
+  // A factor stays a factor on web, as the stylesheet writes it (`line-height: 1.5`, inherited as a
+  // number): Blink multiplies it out and snaps the product DOWN to a sixty-fourth of a device pixel,
+  // where a length is snapped to the nearest — a title one sixty-fourth taller put a line of JSON far
+  // below it on the other side of a pixel. Not where the size is given apart from the spec (`fontSize`):
+  // there the line is the spec's own size times the factor, as it always was. A phone is told the product.
+  const factor = isWeb && typeof base.lineHeight !== "object" && rest["fontSize"] === undefined ? { lineHeight: String(base.lineHeight ?? 1.5) } : {};
   return (
     // Left unless told otherwise: on web a Pressable is a <button>, which centres the text inside it.
-    <Text {...(font(t, base) as object)} textAlign="left" {...(ellip ? { numberOfLines: 1, ellipsizeMode: "tail" } : {})} {...(rest as object)}>
+    <Text {...(font(t, base) as object)} {...factor} textAlign="left" {...(ellip ? { numberOfLines: 1, ellipsizeMode: "tail" } : {})} {...(rest as object)}>
       {children}
     </Text>
   );
@@ -165,6 +171,16 @@ const onControl = (k: string): boolean => isWeb && (k === "role" || k.startsWith
 const CORNERS = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"] as const;
 
 /**
+ * A pressable as a `<button>` stands in its page: react-native-web's View is positioned and a stacking
+ * context (`position: relative; z-index: 0`), and a page whose every button is one is PAINTED in another
+ * order than the desktop's — the buttons after everything that is not one. Chromium layers a page by
+ * that order: what is painted after a scroller shares a layer with its scrollbar, and the text of such a
+ * layer is greyscale; so a row of tabs, a tree's rows, a gate's buttons came out greyscale where the
+ * desktop's are subpixel, and the other way round. Native keeps its own.
+ */
+const PLAIN_PRESS: Record<string, unknown> = isWeb ? { position: "static", zIndex: "auto" } : {};
+
+/**
  * Something that can be pressed: React Native's `Pressable` around a Tamagui box. The box's props may be
  * a function of the press state, for the stylesheet's `:hover` (web only; a phone has no pointer).
  * Props that size and place it go on the `Pressable`; the box fills it.
@@ -173,6 +189,10 @@ const CORNERS = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", 
  * role="tab">`: on web the element stays the `<button>` react-native-web draws for a button — Space
  * presses it, `disabled` disables it, and it lays out as every other `Press` — and the role is written on
  * it once it is there, since react-native-web picks the element FROM the role and would draw a `div`.
+ *
+ * On web it is no stacking context and not positioned ({@link PLAIN_PRESS}), as a `<button>` is neither.
+ * Something placed absolutely inside a `Press` needs it positioned, as it needs a `<button>` to be: say
+ * `position="relative"` (it is still no stacking context).
  */
 export function Press({
   onPress,
@@ -227,7 +247,7 @@ export function Press({
       role="button"
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       {...(said as object)}
-      style={{ ...(outer as object), ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
+      style={{ ...PLAIN_PRESS, ...(outer as object), ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
     >
       {(s: { hovered?: boolean; pressed: boolean }) => {
         const state = { hovered: s.hovered === true, pressed: s.pressed };
@@ -385,6 +405,13 @@ export function padToken(t: Tokens, name: string, fallback: [number, number]): [
  * glyph an anti-aliasing pair apart. Native keeps its own.
  */
 export const PLAIN_SCROLLER: Record<string, unknown> = isWeb ? { transform: "none", zIndex: "auto", position: "static" } : {};
+
+/**
+ * A react-native-web `View` that stays positioned, as the DOM's box it copies is (`position: relative`),
+ * and is no stacking context, as that box is none: with {@link PLAIN_SCROLLER} (for a box the DOM leaves
+ * static) what keeps the page painted in the desktop's order. In a `style`; nothing on a phone.
+ */
+export const NO_STACK: Record<string, unknown> = isWeb ? { zIndex: "auto" } : {};
 
 /**
  * Enter leaves the focus in a single-line text box, as it does in an `<input>`: react-native-web blurs one

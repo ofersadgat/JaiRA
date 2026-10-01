@@ -16,7 +16,7 @@ import {
   type FileSelection,
   type TreeDraft,
 } from "@jaira/ui/filesModel";
-import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
+import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import type { AskSpec } from "@jaira/ui/menu";
 import { ContextMenu, type MenuAt } from "../Menu";
@@ -155,8 +155,9 @@ export function FileTreePanel({
         />
       ) : null}
       <ScrollView {...(scrollbarProps(t) as object)} // No layer of its own on web: react-native-web's `translateZ(0)` makes one, over a transparent
-        // ground, and Chromium then draws the names in greyscale rather than the page's LCD antialiasing.
-        style={{ flex: 1, minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never} contentContainerStyle={{ flexDirection: "column" }}>
+        // ground, and Chromium then draws the names in greyscale rather than the page's LCD antialiasing —
+        // and no stacking context (`PLAIN_SCROLLER`): `.scroll` is painted where it stands in the page.
+        style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never} contentContainerStyle={{ flexDirection: "column", ...PLAIN_SCROLLER } as never}>
         {tree === null ? (
           <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>
             Open a project to browse its files.
@@ -229,7 +230,7 @@ function AddButton({ label, shown, onNew }: { label: string; shown: boolean; onN
   const t = useTokens();
   const at = useRef<RNView>(null);
   return (
-    <RNView ref={at} collapsable={false} style={{ flexShrink: 0 }}>
+    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...PLAIN_SCROLLER } as never}>
       <Press
         onPress={() => at.current?.measureInWindow((x, y, _w, h) => onNew(x, y + h))}
         title={`new file, folder or workflow in ${label}`}

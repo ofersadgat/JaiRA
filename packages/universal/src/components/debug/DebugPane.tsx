@@ -238,13 +238,25 @@ function Stage({ n, children }: { n: number; children: ReactNode }): JSX.Element
   const space = 0.26 * (typeof size === "number" ? size : 12);
   return (
     // The number is the li's `::marker`, outside: right-aligned in the list's 20px, a space short of the
-    // words (DM Sans's space: 0.26 of the size).
-    <View position="relative">
-      <Txt spec={spec} position="absolute" left={-20} top={0} width={20 - space} textAlign="right" numberOfLines={1}>
-        {`${n}.`}
-      </Txt>
-      <Txt spec={spec}>{children}</Txt>
-    </View>
+    // words (DM Sans's space: 0.26 of the size). On web it is hung in the flow from a box of no size, so
+    // the item is not positioned, as an `li` is not (a positioned box is painted after what is not).
+    isWeb ? (
+      <View>
+        <View width={0} height={0}>
+          <Txt spec={spec} flexShrink={0} marginLeft={-20} width={20 - space} textAlign="right" whiteSpace="nowrap">
+            {`${n}.`}
+          </Txt>
+        </View>
+        <Txt spec={spec}>{children}</Txt>
+      </View>
+    ) : (
+      <View position="relative">
+        <Txt spec={spec} position="absolute" left={-20} top={0} width={20 - space} textAlign="right" numberOfLines={1}>
+          {`${n}.`}
+        </Txt>
+        <Txt spec={spec}>{children}</Txt>
+      </View>
+    )
   );
 }
 function Mono({ children }: { children: ReactNode }): JSX.Element {
@@ -376,8 +388,8 @@ function Disclosure({ summary, children }: { summary: string; children: ReactNod
     <View>
       <Press onPress={() => setOpen((o) => !o)} alignSelf="stretch" flexDirection="row" {...({ "aria-expanded": open } as object)}>
         {/* Chromium's disclosure triangle: filled in the summary's colour, 6 × 8 pointing right (8 × 6
-            down, open), 4.4 below the line's top, in a marker 11.33 wide. */}
-        <View width={11.33} flexShrink={0} position="relative">
+            down, open), 4.4 below the line's top, in a marker 11.11 wide (the words begin 11.11 in). */}
+        <View width={11.11} flexShrink={0} position="relative">
           <View
             position="absolute"
             left={0}

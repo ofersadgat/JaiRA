@@ -78,7 +78,7 @@ export function ChangesHead({ count, added, removed }: { count: number; added: n
 export function Scroll({ maxHeight, both, children, t }: { maxHeight: number; both?: boolean; children: ReactNode; t: Tokens }): JSX.Element {
   if (isWeb) {
     return (
-      <View maxHeight={maxHeight} minWidth={0} position="relative" {...({ overflow: "auto" } as object)} {...viewScrollbarProps(t)}>
+      <View maxHeight={maxHeight} minWidth={0} {...({ overflow: "auto" } as object)} {...viewScrollbarProps(t)}>
         {children}
       </View>
     );

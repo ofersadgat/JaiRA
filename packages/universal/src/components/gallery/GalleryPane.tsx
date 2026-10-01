@@ -167,7 +167,11 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
             <RowHead group={group} at={at} onSlide={(i) => slideTo(group, i)} />
             <ScrollView
               horizontal
-              pagingEnabled
+              // On web the snapping is written here, as `.gallery-track` and `.gallery-slide` write it:
+              // react-native-web's `pagingEnabled` wraps each slide in a view of its own, which is a
+              // stacking context — and a card's pinned Save row (z-index 2) then stood UNDER the sticky bar
+              // (z-index 2 as well), where the desktop's, later in the page, is drawn over it.
+              pagingEnabled={!isWeb}
               showsHorizontalScrollIndicator={false}
               ref={(el) => {
                 tracks.current[group.id] = { scroll: el, width: tracks.current[group.id]?.width ?? 0 };
@@ -182,7 +186,7 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
                 if (i !== (showing[group.id] ?? 0)) setShowing((held) => ({ ...held, [group.id]: i }));
               }}
               scrollEventThrottle={16}
-              style={{ flexGrow: 0, ...PLAIN_SCROLLER } as never}
+              style={{ flexGrow: 0, ...PLAIN_SCROLLER, ...(isWeb ? { scrollSnapType: "x mandatory" } : {}) } as never}
               contentContainerStyle={{ alignItems: "flex-start", ...PLAIN_SCROLLER } as never}
             >
               {/* A slide is the track's width, so none is drawn before the track has one: a percentage of a
@@ -192,7 +196,7 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
                 const surface = surfaces.find((s) => s.group === group.id && s.variant === variant.id)!;
                 const width = showing[`${group.id}#w`];
                 return (
-                  <View key={surface.id} width={width} minWidth={0}>
+                  <View key={surface.id} width={width} minWidth={0} {...((isWeb ? { style: { scrollSnapAlign: "start" } } : {}) as object)}>
                     <GalleryCard
                       surface={surface}
                       state={cards[surface.id] ?? initialState(surface)}
@@ -377,7 +381,11 @@ function GalleryCard({
         </Txt>
       </View>
       <View flexDirection={stacked ? "column" : "row"} gap={10} alignItems="stretch" onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-        <View flex={stacked ? undefined : 1} minWidth={0} padding={12} borderRadius={8} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, "line", "dashed") as object)}>
+        {/* `.gallery-stage` scrolls sideways (`overflow-x: auto`): a box that clips, whether or not it ever
+            does — and Chromium layers what a clip holds apart, which is what keeps a card's words subpixel
+            beside its neighbours'. Sideways only here: a dialog's hidden probes stand below it, and would
+            give the stage a scrollbar of their own. */}
+        <View flex={stacked ? undefined : 1} minWidth={0} padding={12} borderRadius={8} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, "line", "dashed") as object)} {...((isWeb ? { overflowX: "auto", overflowY: "hidden" } : {}) as object)}>
           <Stage surface={surface} text={state.text} onResult={onResult} />
         </View>
         <View {...(stacked ? {} : { width: "34%", minWidth: 280, flexShrink: 0 })} minHeight={stacked ? 0 : 320} position="relative">
@@ -396,10 +404,14 @@ function GalleryCard({
             }
             onLayout={(e: LayoutChangeEvent) => setSideHeight(e.nativeEvent.layout.height - 2)}
             contentContainerStyle={{ flexDirection: "column", flexGrow: 1, gap: 8, padding: 8, ...(heldToBox ? { height: sideHeight } : {}), ...PLAIN_SCROLLER } as never}
-            stickyHeaderIndices={[0]}
+            // On web the head sticks by itself, as `.gallery-config-head` does (`sticky`, `z-index: 1`, and
+            // under the scroller's padding, which here is the content's 8): react-native-web's sticky
+            // header is a box of its own at `z-index: 10`, painted after the page's bar and pinned rows
+            // (2) where the desktop's is painted before them — and its words then stood in another layer.
+            {...(isWeb ? {} : { stickyHeaderIndices: [0] })}
             {...scrollbarProps(t)}
           >
-            <View flexDirection="row" alignItems="center" gap={10} backgroundColor={t.v("panel-2") as never} zIndex={1}>
+            <View flexDirection="row" alignItems="center" gap={10} backgroundColor={t.v("panel-2") as never} zIndex={1} {...((isWeb ? { position: "sticky", top: 8 } : {}) as object)}>
               <Seg
                 options={[
                   { label: "Form", on: state.editor === "form", disabled: entry === undefined, title: entry === undefined ? "no schema declares this document's shape" : "edit it as a form", onPress: () => onEditor("form") },

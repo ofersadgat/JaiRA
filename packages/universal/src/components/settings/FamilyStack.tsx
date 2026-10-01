@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type JSX } from "react";
 import { Platform, TextInput, View as RNView, useWindowDimensions } from "react-native";
 import { View } from "@tamagui/core";
 import { isInstalled, shownFamilies } from "@jaira/ui/appearance";
-import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
+import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 
@@ -61,7 +61,7 @@ export function FamilyStack({
     anchor.current?.measureInWindow((x, y, width, height) => setAt({ x, y: y + height + 3, width }));
   };
   return (
-    <RNView ref={anchor} collapsable={false} style={{ flex: 1, minWidth: 0 }}>
+    <RNView ref={anchor} collapsable={false} style={{ flex: 1, minWidth: 0, ...PLAIN_SCROLLER } as never}>
       <View
         flexGrow={1}
         flexDirection="row"

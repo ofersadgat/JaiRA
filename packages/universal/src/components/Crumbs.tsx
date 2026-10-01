@@ -2,7 +2,7 @@ import { useRef, useState, type JSX, type ReactNode } from "react";
 import { View as RNView } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { isAllCrumb, type Crumb } from "@jaira/ui/crumbModel";
-import { font, Press, Txt, edge } from "../primitives";
+import { PLAIN_SCROLLER, font, Press, Txt, edge } from "../primitives";
 import { useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
 import { colorOf } from "./Sidebar";
@@ -109,7 +109,7 @@ function Chevron({ open, first, onPress }: { open: boolean; first: boolean; onPr
   // stands in the window when pressed.
   const at = useRef<RNView>(null);
   return (
-    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...(first ? { marginRight: 2 } : {}) }}>
+    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...PLAIN_SCROLLER, ...(first ? { marginRight: 2 } : {}) } as never}>
       <Press
         title="what else is at this level"
         label="what else is at this level"

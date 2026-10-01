@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useLayoutEffect } from "react";
 import type { Tokens } from "../tokens";
 
 /**
@@ -19,6 +19,13 @@ export function useWindowTitle(title: string): void {
  * The page's own rules, written into one `<style>` and rewritten when the look changes — on the replayed
  * page only: under `styles.css` (the `/universal` page) the stylesheet's own are already there.
  *
+ *   body                      the window's ground, --bg (`body { background: var(--bg) }`), on the page's
+ *                             own canvas and not on a box of the shell's: Chromium draws text subpixel
+ *                             only in a layer it knows to be opaque, and when something is painted under
+ *                             the whole page (Monaco's hidden input is, `z-index: -10`) everything else
+ *                             goes in a layer over it — one that holds the desktop's canvas ground no
+ *                             longer, so its sidebar and inbox strip are greyscale there. A shell that
+ *                             painted the ground itself kept that layer opaque, and its text subpixel.
  *   :focus-visible            outline 2px solid --focus-ring, 1 outside the box. Without it Chromium rings
  *                             a control reached by the keyboard in its own colour (`-webkit-focus-ring-color
  *                             auto`). A copy that draws its own ring, or none, says so inline and wins.
@@ -33,7 +40,9 @@ export function usePageRules(t: Tokens): void {
   const replayed = t.replayed;
   const ring = replayed ? String(t.v("focus-ring")) : "";
   const text = replayed ? String(t.v("text")) : "";
-  useEffect(() => {
+  const ground = replayed ? String(t.v("bg")) : "";
+  // Before the first paint: the shell draws no ground of its own on this page (`pageGround`).
+  useLayoutEffect(() => {
     if (!replayed) return undefined;
     const ink = (pct: number): string => t.mix(text, pct, "transparent");
     let sheet = document.getElementById(PAGE_RULES) as HTMLStyleElement | null;
@@ -45,6 +54,7 @@ export function usePageRules(t: Tokens): void {
       document.head.insertBefore(sheet, document.head.firstChild);
     }
     sheet.textContent =
+      `body{background:${ground}}` +
       `:focus-visible{outline:2px solid ${ring};outline-offset:1px}` +
       `::-webkit-scrollbar{width:10px;height:10px}` +
       `::-webkit-scrollbar-track,::-webkit-scrollbar-corner{background:transparent}` +
@@ -56,6 +66,9 @@ export function usePageRules(t: Tokens): void {
     return undefined;
     // `t` is the tokens these two values were read from.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [replayed, ring, text]);
+  }, [replayed, ring, text, ground]);
 }
+
+/** Whether the page's own canvas carries the window's ground ({@link usePageRules}), so the shell paints none. */
+export const pageGround = (t: Tokens): boolean => t.replayed;
 const PAGE_RULES = "jaira-page";

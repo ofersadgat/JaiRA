@@ -11,7 +11,7 @@ import { useLook, useTokens, type Look, type Tokens } from "../tokens";
 import { ConnectPop, Kind } from "./ConnectPop";
 import { Button } from "./settings/Button";
 import { Lift } from "./Lift";
-import { ghostAt, ghostOf, useLiftTargets, type Ghost } from "./liftTargets";
+import { ghostAt, ghostOf, ghostScrolled, useEdgeScroll, useLiftTargets, type EdgeScroller, type Ghost } from "./liftTargets";
 import { claimed, TaskCard } from "./TaskCard";
 
 /**
@@ -97,6 +97,8 @@ export type StickyScrollValue = {
   y: Animated.Value;
   content: () => unknown;
   moved: Set<() => void>;
+  /** The scroller itself, for a card held at its edge (`useEdgeScroll`). */
+  edge: EdgeScroller;
 };
 export const StickyScroll = createContext<StickyScrollValue | null>(null);
 
@@ -223,14 +225,22 @@ export function Board({
   const root = useRef<HostView>(null);
   const [rootWidth, setRootWidth] = useState(0);
   const [ghost, setGhost] = useState<(Ghost & { card: BoardCard }) | null>(null);
+  // Held at the scroller's edge, the card scrolls the board: the columns are measured again where they
+  // now stand, and the picture stays under the finger.
+  const edges = useEdgeScroll(useContext(StickyScroll)?.edge ?? null, (by) => {
+    targets.measure();
+    setGhost((g) => (g === null ? g : { ...ghostScrolled(g, by), card: g.card }));
+  });
   const liftOf = (card: BoardCard, hold: ((x: number, y: number) => void) | undefined) => ({
     onLift: (node: HostView | null, x: number, y: number) => {
       pickUp(card);
       targets.measure();
+      edges.begin();
       ghostOf(node, root.current, rootWidth, x, y, (g) => setGhost({ ...g, card }));
     },
     onMove: (x: number, y: number) => {
       targets.move(x, y);
+      edges.at(y);
       setGhost((g) => (g === null ? g : { ...ghostAt(g, x, y), card: g.card }));
     },
     onLand: (x: number, y: number) => {
@@ -238,12 +248,14 @@ export function Board({
       const column = board.columns.find((c) => c.key === key);
       const drop = column !== undefined ? dropFor(column) : undefined;
       targets.clear();
+      edges.end();
       setGhost(null);
       // As a DOM column's `drop`: only a column that would take it lands it; anywhere else it springs back.
       if (drop?.accepts === true) drop.onDrop();
       else putDown();
     },
     onCancel: () => {
+      edges.end();
       if (connecting.current === null && dragging === null) return;
       targets.clear();
       setGhost(null);

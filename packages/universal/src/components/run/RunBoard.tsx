@@ -4,7 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { InstanceNode, InstanceStatus, StateChild, TaskStatus } from "@jaira/shared/browser";
 import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
 import { NO_RUN_OFFERS, restingOf, runColumnsOf, runTileWordsOf, runsByChild } from "@jaira/ui/runBoardModel";
-import { faceOf, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, faceOf, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Column, GraphPaper, graphPaperWeb } from "../Board";
 import { Lift } from "../Lift";
@@ -82,8 +82,12 @@ export function RunBoard({
     <ScrollView
       {...(scrollbarProps(t) as object)}
       // `.board-body` scrolls both ways: a run's columns are a sequence, and run past the column.
-      style={{ flex: 1, minHeight: 0, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
-      contentContainerStyle={{ flexGrow: 1 }}
+      // `PLAIN_SCROLLER`: painted where it stands in the page, as the desktop's is — what is painted
+      // after a scroller shares a layer with its scrollbar, and Chromium draws that layer's text greyscale
+      // (the inbox strip under a run); a stacking context of its own is painted last, and left the strip
+      // subpixel.
+      style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
+      contentContainerStyle={{ flexGrow: 1, ...PLAIN_SCROLLER } as never}
       {...(!isWeb ? { horizontal: false } : {})}
     >
       <View

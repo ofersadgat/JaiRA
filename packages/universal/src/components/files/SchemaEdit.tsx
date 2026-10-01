@@ -250,8 +250,8 @@ function Chip({ tone = "plain", children }: { tone?: "plain" | "ok" | "bad"; chi
  * draws the 13-square box centred in its wide one: 4 in from the label, at the label's middle.
  *
  * Lines at the body's 13/19.5: the first is the checkbox's (its border box above the baseline, 3 of
- * margin, the strut's descent below): 21.5; the second the word's, whose 11px run sits on the strut's
- * baseline, 3.5 below the line's top.
+ * margin, the strut's descent below): 21.5; the second the strut's own 19.5, the word's 11px run on its
+ * baseline (the label is 41 tall, the word's box 24.84 down it).
  */
 function WrapToggle({ on, onChange }: { on: boolean; onChange: (next: boolean) => void }): JSX.Element {
   const t = useTokens();
@@ -271,8 +271,12 @@ function WrapToggle({ on, onChange }: { on: boolean; onChange: (next: boolean) =
           <Checkbox checked={on} onChange={onChange} label="Wrap" />
         </View>
       </View>
-      <Press onPress={() => onChange(!on)} label="Wrap" marginTop={2.4 * s}>
-        <Sub>Wrap</Sub>
+      {/* The second line as the label lays it out: a line of the body's own font, the word a run inside
+          it — so Chromium puts its baseline where it puts the desktop's, to the device pixel. */}
+      <Press onPress={() => onChange(!on)} label="Wrap">
+        <Txt spec={{ voice: "app", scale: 13 / 12.5 }}>
+          <Sub>Wrap</Sub>
+        </Txt>
       </Press>
     </View>
   );

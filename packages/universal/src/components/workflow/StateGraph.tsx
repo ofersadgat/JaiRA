@@ -46,7 +46,7 @@ import {
   type LegendKey,
   type Tier,
 } from "@jaira/ui/stateGraphViewModel";
-import { Press, Txt, edge, lengthToken, type FontSpec } from "../../primitives";
+import { NO_STACK, Press, Txt, edge, lengthToken, type FontSpec } from "../../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../../tokens";
 import { panelOnStack } from "../panel/panelBridge";
 import { Svg, type Shape } from "../panel/Svg";
@@ -733,6 +733,8 @@ function Graph({
         style={
           {
             position: "relative",
+            // Positioned and no stacking context, as `.sg-map` is.
+            ...NO_STACK,
             flexGrow: 1,
             flexShrink: 1,
             flexBasis: 0,
@@ -773,9 +775,9 @@ function Graph({
               width: layout.width,
               height: layout.height,
               transformOrigin: "0 0",
-              // On web a 3D no-op on the end: Chromium then composites the canvas, as it does the desktop's,
-              // and draws its text (and the pills over it) greyscale, at the canvas's scale — as there.
-              transform: [{ translateX: shown.x }, { translateY: shown.y }, { scale: shown.k }, ...(isWeb ? [{ translateZ: 0 }] : [])],
+              // The desktop's own transform and no more (`translate(…) scale(…)`): it is no layer of its
+              // own there, and its text is greyscale by the layer the page puts it in — as here.
+              transform: [{ translateX: shown.x }, { translateY: shown.y }, { scale: shown.k }],
               ...(isWeb ? { userSelect: "none" } : {}),
             } as never
           }

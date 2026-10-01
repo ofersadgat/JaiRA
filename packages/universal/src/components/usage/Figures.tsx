@@ -6,7 +6,7 @@ import { formatResetAt, formatUntil } from "@jaira/shared/browser";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
 import { USAGE_PREVIEW_EXAMPLES, keyFigureOf, weeklyFigureOf, weeklyTitleOf, type UsageFigure } from "@jaira/ui/usageFigure";
-import { Press, Txt, edge } from "../../primitives";
+import { NO_STACK, Press, Txt, edge } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { AccountCard } from "../chat/UsageCards";
 import { BrandIcon } from "../settings/bits";
@@ -72,7 +72,7 @@ function RingButton({ figure, mode, title, at, on, onPress, marginLeft }: { figu
   const t = useTokens();
   const face = { voice: "data" as const, scale: 10.5 / 12, weight: 500, color: inkOf(figure), tabular: true, lineHeight: { px: 10.5 } };
   return (
-    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...(marginLeft !== undefined ? { marginLeft } : {}) }}>
+    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...NO_STACK, ...(marginLeft !== undefined ? { marginLeft } : {}) } as never}>
     <Press
       onPress={onPress}
       title={title}

@@ -5,7 +5,7 @@ import { agoOf, chatRowMenu, controlsOf, deleteAskOf, emptyListText, forkTitleOf
 import type { AskSpec } from "@jaira/ui/menu";
 import { projectName } from "@jaira/ui/projects";
 import { copyText } from "../../clipboard";
-import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ProjectChip } from "../InboxStrip";
 import { ContextMenu, type MenuAt } from "../Menu";
@@ -103,7 +103,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
           {emptyListText(query)}
         </Txt>
       ) : (
-        <ScrollView {...(scrollbarProps(t) as object)} style={{ flexGrow: 1, flexShrink: 1, flexBasis: "auto", minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never} contentContainerStyle={{ flexDirection: "column" }}>
+        <ScrollView {...(scrollbarProps(t) as object)} style={{ flexGrow: 1, flexShrink: 1, flexBasis: "auto", minHeight: 0, ...PLAIN_SCROLLER } as never} contentContainerStyle={{ flexDirection: "column", ...PLAIN_SCROLLER } as never}>
           {shown.map((task) => (
             <Row
               key={task.taskId}

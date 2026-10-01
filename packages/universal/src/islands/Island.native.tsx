@@ -48,6 +48,8 @@ export function Island({ component, props, height, appearance, onEvent, onReport
   const web = useRef<WebView>(null);
   /** The box round the page, measured in the window for a rect the page reports. */
   const box = useRef<View>(null);
+  /** The box's width as it was laid out, before any scale a host draws it at. */
+  const laid = useRef(0);
   const look = useLook();
   const [measured, setMeasured] = useState(1);
   /** Whether the page has said `ready` — before it, a render has nowhere to go. */
@@ -88,12 +90,16 @@ export function Island({ component, props, height, appearance, onEvent, onReport
         onEvent?.(name, message.value);
         return;
       }
-      // A rect is the island page's; what the host places against it (a float) is placed in the window.
-      box.current?.measureInWindow((x: number, y: number) => {
-        rect.top += y;
-        rect.bottom += y;
-        rect.left += x;
-        rect.right += x;
+      // A rect is the island page's; what the host places against it (a float) is placed in the window —
+      // at the window's scale, which is not the page's while the shell is drawn fitted to a phone
+      // (`DesktopFrame` scales it to a third): the box as the window measures it over the box as it was
+      // laid out says by how much.
+      box.current?.measureInWindow((x: number, y: number, width: number) => {
+        const k = laid.current > 0 && width > 0 ? width / laid.current : 1;
+        rect.top = y + rect.top * k;
+        rect.bottom = y + rect.bottom * k;
+        rect.left = x + rect.left * k;
+        rect.right = x + rect.right * k;
         latest.current.onEvent?.(name, message.value);
       });
     } else if (message.kind === "call" && message.id !== undefined) {
@@ -115,7 +121,7 @@ export function Island({ component, props, height, appearance, onEvent, onReport
 
   const page = pageOf(component);
   return (
-    <View ref={box} collapsable={false}>
+    <View ref={box} collapsable={false} onLayout={(e) => (laid.current = e.nativeEvent.layout.width)}>
       <WebView
         ref={web}
         source={{ uri: page }}

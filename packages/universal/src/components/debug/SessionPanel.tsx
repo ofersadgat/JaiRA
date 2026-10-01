@@ -5,6 +5,7 @@ import type { SessionRef, SessionTurn, SessionView } from "@jaira/shared/browser
 import type { JsonValue } from "@declarative-ai/json";
 import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
+import { Breathing, Caret } from "./motion";
 
 /**
  * `session.tsx`'s `SessionPanel`, universal (decision 0015): the conversation a state actually ran, as
@@ -20,7 +21,7 @@ import { useTokens, type Tokens } from "../../tokens";
  *                        hovered --fill-ghost-hover; `.sel` --fill-ghost-selected at 600
  *   .session-row .cost   --dim, app 11/12.5, tabular
  *   .dot                 7 round, --dim; `.success` --ok, `.error` --bad, `.running` --accent (and a
- *                        pulse, `ts-pulse` — not copied: a still picture holds none, and a phone has none)
+ *                        pulse, `ts-pulse`: a phone's breathes, `motion.tsx`; a still picture holds none)
  *   .session-body        column, clipped
  *   .session-head        row, centred, gap 8, padding 6 10, 1px --line under, app 12/12.5; its `.sub`
  *                        --dim at 11/12.5 (`.mono` alone is no rule), one line
@@ -33,7 +34,7 @@ import { useTokens, type Tokens } from "../../tokens";
  *   .part > summary      row, baseline, gap 6, app 11/12.5 (a flex summary has no marker);
  *                        `.part-kind` 10/12.5, 0.04em, uppercase, --dim; `.part-tool` the data face
  *   .part > pre          margin 4 0 6 12, app 11/12.5 in the UA's `monospace`, wraps anywhere, 220 at most
- *   .sturn-live          its role --accent, its text at 0.85, and a "▍" after it (the caret's blink not copied)
+ *   .sturn-live          its role --accent, its text at 0.85, and a "▍" after it (blinking on a phone, `motion.tsx`)
  *   p.empty              --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
  */
 
@@ -136,7 +137,9 @@ function HistoryRow({ row, sel, onPress, t }: { row: SessionRef; sel: boolean; o
 /** `.dot`: 7 round, in the colour of how the call ended. */
 function Dot({ status, t }: { status: string; t: Tokens }): JSX.Element {
   const ink = status === "success" ? "ok" : status === "error" ? "bad" : status === "running" ? "accent" : "dim";
-  return <View width={7} height={7} borderRadius={999} flexShrink={0} backgroundColor={t.v(ink) as never} />;
+  const dot = <View width={7} height={7} borderRadius={999} flexShrink={0} backgroundColor={t.v(ink) as never} />;
+  // Not a verdict: a call that has not ended breathes (`ts-pulse`) — on a phone; a picture holds it still.
+  return status === "running" ? <Breathing>{dot}</Breathing> : dot;
 }
 
 /** `.sturn`: the role in its 46, and the text and the calls beside it. */
@@ -154,7 +157,7 @@ function Turn({ turn, first, live = false, t }: { turn: SessionTurn; first: bool
         {turn.text !== undefined ? (
           <Txt spec={{ voice: "data", scale: 11 / 12, lineHeight: 1.45 }} opacity={live ? 0.85 : 1} {...({ style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } } as object)}>
             {turn.text}
-            {live ? "▍" : null}
+            {live ? <Caret /> : null}
           </Txt>
         ) : null}
         {turn.parts !== undefined ? <Parts parts={turn.parts} t={t} /> : null}

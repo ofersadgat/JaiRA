@@ -4,7 +4,7 @@ import { Text, View, isWeb } from "@tamagui/core";
 import type { FileSource, FileTree, WorkflowLayer } from "@jaira/shared/browser";
 import { LAYER_LABEL, ROOT_WORD, crumbInputOf, crumbsOf, folderFactsOf, issueCountsOf, runToggleableOf, stateIdsOf, type CrumbInput, type FileSelection } from "@jaira/ui/filesModel";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { Press, Txt, font, scrollbarProps, viewScrollbarProps } from "../../primitives";
+import { NO_STACK, PLAIN_SCROLLER, Press, Txt, font, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { CrumbBar } from "../Crumbs";
 import { MenuLayer } from "../MenuLayer";
@@ -87,7 +87,7 @@ function DocBar({
 }): JSX.Element {
   const tools = [children].flat().some((c) => c !== null && c !== undefined && c !== false);
   return (
-    <Pressable onPress={onInspect} {...((isWeb ? { title: LAYER_LABEL[input.layer] } : {}) as object)} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0, flexDirection: "row", ...(isWeb ? ({ cursor: "default" } as object) : {}) }}>
+    <Pressable onPress={onInspect} {...((isWeb ? { title: LAYER_LABEL[input.layer] } : {}) as object)} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0, flexDirection: "row", ...PLAIN_SCROLLER, ...(isWeb ? ({ cursor: "default" } as object) : {}) } as never}>
       <CrumbBar
         crumbs={crumbsOf(input)}
         trailing={
@@ -114,7 +114,8 @@ export function FactsButton({ children }: { children: ReactNode }): JSX.Element 
   const at = useRef<RNView>(null);
   const [open, setOpen] = useState<{ right: number; top: number } | null>(null);
   return (
-    <RNView ref={at} collapsable={false} style={{ flexShrink: 0 }}>
+    // Positioned and no stacking context, as `.facts-wrap` is.
+    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
       <Press
         onPress={() => (open !== null ? setOpen(null) : at.current?.measureInWindow((x, y, w, h) => setOpen({ right: win.width - (x + w), top: y + h + 6 })))}
         title="About this"

@@ -6,6 +6,8 @@ import { IslandsTab } from "./IslandsTab";
 import { TamaguiProvider } from "@tamagui/core";
 import { TokenRoot, UniversalApp, config, installNativeErrorReporting } from "@jaira/universal";
 import { Remote, linkOf, type PairLink } from "../Remote";
+import { holdStill } from "./still";
+import { StrictLayout } from "./StrictLayout";
 
 /**
  * The phone (decision 0015). Ruling 1: "the exact same ui on mobile as there is on desktop", as a
@@ -16,7 +18,8 @@ import { Remote, linkOf, type PairLink } from "../Remote";
  * with no copy yet says so where it stands.
  *
  * `&screen=islands` on the link opens the island harness instead (`IslandsTab`), which the emulator
- * test (`shots/android.mts`) measures.
+ * test (`shots/android.mts`) measures; `&still=1` holds the clocks and spinners so that test can read
+ * the screen at all (`still.ts`).
  */
 
 // Before the first render, as the desktop installs its own: what escapes everything else reaches the
@@ -32,6 +35,7 @@ type Link = Partial<PairLink> & { screen: Screen };
  */
 function readLink(url: string | null | undefined): Link | undefined {
   const { query, ...link } = linkOf(url);
+  if (query["still"] === "1") holdStill();
   if (link.address === undefined && link.code === undefined && query["screen"] === undefined) return undefined;
   return { ...link, screen: query["screen"] === "islands" ? "islands" : "app" };
 }
@@ -59,6 +63,7 @@ export function NativeApp(): JSX.Element {
             react-native-safe-area-context's SafeAreaView, not React Native's, which pads only on iOS: on
             Android the app sat under the status bar. */}
         <SafeAreaView style={{ height: window.height }}>
+          <StrictLayout>
           <Remote
             {...(link !== undefined ? { link } : {})}
             frame={(screen) => (
@@ -77,6 +82,7 @@ export function NativeApp(): JSX.Element {
               </DesktopFrame>
             )}
           </Remote>
+          </StrictLayout>
         </SafeAreaView>
       </TamaguiProvider>
     </SafeAreaProvider>

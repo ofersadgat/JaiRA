@@ -22,7 +22,7 @@ import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
 import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf } from "@jaira/ui/transcript";
-import { Txt, edge, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Txt, edge, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { GateSurface } from "./Gate";
 import { Icon } from "./Icon";
@@ -234,6 +234,10 @@ export function RunTranscript({
   useEffect(
     () => () => {
       if (frame.current !== null) cancelAnimationFrame(frame.current);
+      // Forgotten as well as cancelled: a development build mounts every effect twice (StrictMode), and
+      // a frame cancelled but still remembered left `trackSoon` waiting on it for good — the index beside
+      // the conversation never learned where the reader was. The desktop's own does the same.
+      frame.current = null;
       if (!nested) onHere?.(undefined);
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -402,8 +406,9 @@ export function RunTranscript({
   return (
     <ScrollView
       {...(scrollbarProps(t) as object)}
-      style={{ flex: 1, minHeight: 0 }}
-      contentContainerStyle={{ flexGrow: 1 }}
+      // `PLAIN_SCROLLER`: `.run-convo.scroll` is no stacking context, and is painted where it stands.
+      style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
+      contentContainerStyle={{ flexGrow: 1, ...PLAIN_SCROLLER } as never}
       {...scroller}
       onScroll={(e) => {
         followScroll(e);

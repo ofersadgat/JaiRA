@@ -106,12 +106,38 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
 - **The dev server remembers a missing file.** Import a file before it exists and the shared dev server
   caches the miss; creating the file afterwards does not clear it ("Failed to resolve import"), and it
   breaks `/` and `/rn` for every studio. Rename the IMPORTING file away and back (content unchanged).
-- **Line heights on web.** Blink multiplies a unitless line height out in floating point and snaps to
-  1/64px; `Txt` gives pixels, which drifts a long run of lines by hundredths of a pixel each. Where a
-  column of prose must stay aligned for its whole length, pass the factor the stylesheet uses.
-- **Greyscale text.** Chromium draws text greyscale where it paints over a composited scroller; a copy
-  over react-native-web's scroller must sit where the DOM's text does to match (see `OVER_SCROLLER` in
-  `components/panel/SidePanel.tsx`).
+- **Line heights on web.** Blink multiplies a unitless line height out in floating point and snaps the
+  product DOWN to 1/64 of a device pixel; a length it snaps to the nearest. So `Txt` writes a factor as
+  the factor on web (a phone is told the product): given in pixels, a title came out a sixty-fourth
+  taller, and a line of JSON far below it landed on the other side of a device pixel. A line the
+  stylesheet writes as a length stays `lineHeight: { px }`; one that is another font's (`pre`'s strut)
+  is that height over its own size; and a `Txt` given a `fontSize` apart from its spec keeps the spec's
+  size times the factor, in pixels (`font()` alone always gives pixels).
+- **Greyscale text is the order a page is PAINTED in.** Chromium layers a page by paint order: a scroller
+  is a layer, what is painted after it and touches it (its scrollbar first) is squashed into a layer
+  over it, and later boxes nearby join that layer — whose text is greyscale unless all of it stands on
+  one opaque box in the same layer. So a copy's text is subpixel or greyscale as the desktop's is only
+  if the copy is painted in the desktop's order, which means the same boxes are positioned, are stacking
+  contexts and clip:
+  - react-native-web's `View` is `position: relative; z-index: 0` — a stacking context, painted after
+    everything static. A `ScrollView` takes `PLAIN_SCROLLER`, a `Press` is static by itself
+    (`PLAIN_PRESS`; say `position="relative"` where something is placed against it), a bare `RNView`
+    takes `PLAIN_SCROLLER` (the DOM's box is static) or `NO_STACK` (it is `position: relative`).
+  - A box the desktop positions (`.cx-shell`, `.splitter`) is positioned in the copy, and one that clips
+    without scrolling (`.col.mid`'s `overflow: auto` round a run) clips in the copy.
+  - Nothing asks for a layer by hand (`z-index: 1`, `will-change`, `translateZ(0)`): it was how a copy
+    over a react-native-web scroller used to be matched, and it is wrong once the scroller is plain.
+  - What the desktop draws with a pseudo-element or a marker is not positioned there: a list item's
+    number is hung in the flow on web (`Markdown`'s `Marker`), not placed absolutely in a positioned
+    item — that alone turned a track of gallery cards greyscale.
+  - A hidden probe placed absolutely (a table's columns measured, a crumb's width) needs a positioned box
+    round it; the shell's root is positioned on web as the box of last resort, and clips — without one
+    the probe is the page's, the page grows a scrollbar, and the window is laid out ten pixels narrower.
+  - The window's ground is the page's (`body`, `windowPage.web.ts`), not a box of the shell's: Monaco's
+    hidden input is `z-index: -10`, painted under the whole page, which lifts everything else into a
+    layer of its own — greyscale on the desktop, whose ground stays behind on the canvas.
+  `shots/pair.mts` says "identical to the eye (N px differ only in anti-aliasing…)" with N in the
+  thousands when a region is subpixel on one page and greyscale on the other.
 - **Scrolling to the end on web**: `scrollTo` with a very large y; `scrollToEnd` stops a fraction short.
 - **Icons** are `components/panel/Icon.tsx` (SVG). On web a real `<svg>`; on a phone `react-native-svg`.
 - **A Tamagui `View` is `position: static` on web.** An absolutely placed child needs
@@ -177,6 +203,13 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   `Text` breaks the line. `Markdown`'s (and `ValueView`'s) `softbreak="space"` where the host collapses it.
   The same holds for plain text: a schema's description in a field's hint has newlines, which the DOM's
   `white-space: normal` collapses (`Field` collapses a string hint).
+- **A table is the browser's.** Markdown's tables are `display: table` on web (cells wrap, columns share
+  the width): drawn as flex columns every cell ran out on one line. A phone has no table layout yet.
+- **A menulist is whole device pixels.** A `<select>` is as wide as its widest choice rounded UP to a
+  device pixel plus 59 of them at 1.5× (border, padding, the arrow's room), and its line is the font's
+  `normal` plus a device pixel above and below: `logs/Select.tsx` measures the first and writes
+  `line-height: normal` for the second. A factor (1.3867) is a thirty-second out, and a column of rows
+  under it then rounds to another pixel.
 - **A disabled checkbox is Chromium's own colours, not a faded box**: in light, the ring and a checked
   box's ground #767676 at 30% and the tick white at 60% (`form/inputs.tsx`'s `Checkbox`).
 - **A roving tab stop** (a rail's tabs, one of them in the Tab order): `Press`'s `focusable` — on web it is
@@ -206,6 +239,37 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   - `accessibilityRole` values the web accepts (`separator`) crash Android; use `role`.
   - Metro stubs `react-native-reanimated` for gesture handler (`metro.config.cjs`); a Metro started
     before that change crashes the app at launch until restarted.
+  - **Yoga is not CSS flexbox until it is told to be.** React Native keeps its old layout "errata": a
+    child that may grow takes the height its box was OFFERED, where CSS gives a box sized by its
+    content nothing to grow into — and every `Press` holds such a child. A badge in a transcript stood
+    27,000 tall and the conversation under it was out of reach; the Components room's cards ran to a
+    million. The phone's root is wrapped in `StrictLayout` (`experimental_LayoutConformance`,
+    `mode="strict"`), which turns the errata off, so a copy written against the web lays out the same.
+    `android-check.mts tall` lists any view taller than twenty screens, without waiting for idle.
+  - `flex: 1` is a basis of 0: in a box as wide as what it holds, text given it is 0 wide and wraps a
+    letter a line (`GateTitle`). Say `flexShrink: 1` where the text should shrink from its own width.
+  - A `View` that draws nothing is flattened out of the native tree. Give it a `zIndex` later and
+    Android makes it then, moving its children into it — a `TextInput` among them loses the focus
+    (the suggestion list opened and shut on the first letter). `collapsable={false}` from the start.
+  - A child drawn outside its parent's bounds is seen and cannot be pressed, and a scroller clips it.
+    What floats is drawn in a layer over the frame and placed by `measureInWindow`
+    (`form/SuggestLayer.tsx`'s `SuggestHost`) — or in `MenuLayer`, a `Modal`, where it may take the
+    keyboard (the reviewer's note composer). A `Modal` is outside the fitted frame: what is in it is
+    drawn at the window's scale, three times the shell's.
+  - `measureInWindow` answers in the window's units and the shell is drawn SCALED (`DesktopFrame`):
+    a point from inside it (an island's selection rect, a box's place) is scaled by the view's
+    measured width over its laid-out width before it is used in the window, and back again to place
+    something inside the frame (`Island.native.tsx`, `liftTargets.ts`'s `ghostOf`).
+  - A float with a box in it stands in what the keyboard leaves (`floats/keyboard.native.ts`,
+    `Float`): placed by the whole window it sat behind the keyboard it had raised.
+  - React Native's `Image` draws bitmaps only: an SVG (a changed `.svg` travels as its own source
+    in a `data:` URI) is drawn by `react-native-svg` and sized from its root (`components/Img.native.tsx`).
+  - A span inside a `Text` takes no opacity, and `color: "transparent"` reads as no colour at all:
+    hide it with an ink of `rgba(0, 0, 0, 0.01)` (`debug/motion.tsx`'s caret).
+  - A development build mounts every effect twice (StrictMode): a frame or timer cancelled in a
+    cleanup must be forgotten too, or what waits on "none pending" waits for ever (`RunTranscript`'s
+    `trackSoon`; the desktop's own has the same flaw on its dev server, and no index row is marked).
+  - What moves on its own asks `isStill()` (`motion.ts`): a test holds it (see below).
 - **A box centred by `left: 50%; transform: translateX(-50%)`** (the toast, the crash banner) lands on a
   fraction of a pixel that flex centring does not: on web place the copy the same way. It is as wide as
   its words up to what is left of its containing block at 50% — half the window — before any `max-width`.
@@ -216,6 +280,22 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   a region passes in every look. It pairs the phone with the desktop it launches by the code that
   desktop shows (`machines:pairCode`), over `adb reverse` to the engine's loopback port
   (`MachinesView.self.port`): no token is printed or passed anywhere.
+- **Driving the phone** (`packages/app/shots/android-check.mts`): `up` keeps a desktop on the gate's own
+  world (plus a picture review, a run fifteen states deep and one waiting on a move), a Metro of its
+  own on 8082 and the paired emulator; then `screen [filter]`, `tap "<text>"`, `shot <name> [x,y,w,h]`
+  (a part, three times its size — fitted, the shell is a third of its own), `reload`, `tall`,
+  `desk click|shot` for the same state on the desktop.
+  - `uiautomator dump` waits for a second in which nothing changes and has no way to be told not to:
+    a running task's panel counts its seconds, so the link says `&still=1`
+    (`client/src/native/still.ts`: spinners and pulses stand, a clock faster than five seconds is
+    never started, LogBox is quiet). `reload moving` opens it without, to watch what moves.
+  - Fast Refresh is off in the rig's builds (`hot_module_replacement` in the app's preferences): the
+    sources are shared, and another copier's save reloaded the app under a state just reached.
+  - A long press is `input swipe x y x y 800`; a lift and a drag is `input motionevent DOWN x y`, a
+    pause, `MOVE`s, `UP` in one `adb shell`; a selection in Monaco is `input mouse swipe` (a finger's
+    drag scrolls it). `settings put system user_rotation 1` turns the emulator on its side, where
+    the shell is twice the size and can be read; `show_ime_with_hard_keyboard 1` brings the
+    on-screen keyboard up under `input text` (in landscape it covers the whole screen).
 
 - **The studio's dev server is shared.** A file that stops parsing — a half-written edit, a shell heredoc
   that turned `"
@@ -374,6 +454,5 @@ npx tsx packages/app/shots/pair.mts --freeze --scene board,task --look dark --po
   phone — web content by nature). `pair.mts --specimen` paints islands out, as a scene does.
 - **`PLAIN_SCROLLER`** (`primitives.tsx`) on a `ScrollView`'s style and content style: without it
   react-native-web's `translateZ(0)` and `z-index: 0` composite the scroller and Chromium draws its
-  text greyscale, where the DOM's `overflow: auto` keeps subpixel text. That fixed the sidebar's
-  sections list; a Settings page scrolled away from its top still draws greyscale on `/rn` (the DOM's
-  stays subpixel), for a reason not found yet — `pair.mts` counts it as anti-aliasing.
+  text greyscale, where the DOM's `overflow: auto` keeps subpixel text — and paint it after everything
+  static, which is what decides the rest (see "Greyscale text is the order a page is painted in").

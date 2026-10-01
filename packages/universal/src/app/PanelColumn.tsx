@@ -55,6 +55,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const detail = state.detail;
   const inlineGate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
   useRoomRule(room, rule, inlineGate?.requestId, setStacks);
+  const hostGate = detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
 
   const selectedProject = state.selectedProject ?? undefined;
   const startAgain = useCallback((taskId: string) => startAgainOf(actions, detail, selectedProject, taskId), [actions, detail, selectedProject]);
@@ -159,8 +160,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     project: selectedProject,
     source,
     onStack,
-    gate: inlineGate,
-    onGate: (value) => inlineGate !== undefined && actions.answer(inlineGate.requestId, value),
+    // The selected task's gate in whichever room its panel stands (`App.tsx`'s `panelHost.gate` is
+    // `gateOf(detail.taskId)`): the Files room's panel is parked at it too, not "Running".
+    gate: hostGate,
+    onGate: (value) => hostGate !== undefined && actions.answer(hostGate.requestId, value),
     // The gate a task is parked on, wherever its panel is — not only the selected one's.
     gateOf: (taskId) => {
       const asking = parkedGateOf(state.pending, taskId);

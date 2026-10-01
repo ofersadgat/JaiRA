@@ -29,7 +29,7 @@ import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limits
 import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
 import { modeMeta } from "@jaira/ui/permissionSetWords";
 import { figureOf } from "@jaira/ui/usageFigure";
-import { Press, Txt, font } from "../../primitives";
+import { NO_STACK, PLAIN_SCROLLER, Press, Txt, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 import { Float } from "../floats/Float";
@@ -249,7 +249,8 @@ export function Composer({
         borderRadius={22}
         backgroundColor={(dropping ? t.v("accent") : focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
-        <View flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
+        {/* Positioned, as `.cx-shell` is: painted after the conversation above it, with what else is. */}
+        <View position="relative" flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
           {!off ? <SpentLine route={route} /> : null}
           {files.length > 0 ? (
             <View flexDirection="row" flexWrap="wrap" gap={6} paddingTop={9} paddingHorizontal={12}>
@@ -455,7 +456,7 @@ function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; i
     // `.cx-chip-wrap` is a block that gives way (`min-width: 0`); the chip in it is an inline box, which
     // does not: squeezed, the desktop's chips keep their words and run over one another. Copied on web,
     // where the two are compared; a phone, which is always narrow, cuts each chip's words instead.
-    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...(Platform.OS === "web" ? { alignItems: "flex-start" } : {}) }}>
+    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK, ...(Platform.OS === "web" ? { alignItems: "flex-start" } : {}) } as never}>
     <Press
       onPress={press}
       title={`${label}: ${value}`}
@@ -504,8 +505,8 @@ function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: 
   // its baseline — 19.5 tall, the button 2.67 below its top (measured) — and it is the WRAP the row centres.
   const line = Number(t.scaled("size-app", (13 / 12.5) * 1.5));
   return (
-    <View flexShrink={0} marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})}>
-    <RNView ref={ref} collapsable={false} style={{ marginTop: 2.67 }}>
+    <View flexShrink={0} position="relative" marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})}>
+    <RNView ref={ref} collapsable={false} style={{ marginTop: 2.67, ...PLAIN_SCROLLER } as never}>
     <Press
       onPress={press}
       title={figure.title}
@@ -541,8 +542,8 @@ function ContextMeter({ t, context, route, open, onOpen }: { t: Tokens; context:
   // `.um-wrap` is a block whose line holds the 26px button on its baseline, half a pixel of the line's
   // descent under it: 26.5 tall, the button at its top — and it is the wrap the row centres.
   return (
-    <View flexShrink={0} height={26.5}>
-    <RNView ref={ref} collapsable={false}>
+    <View flexShrink={0} position="relative" height={26.5}>
+    <RNView ref={ref} collapsable={false} style={PLAIN_SCROLLER as never}>
     <Press
       onPress={press}
       title={title}

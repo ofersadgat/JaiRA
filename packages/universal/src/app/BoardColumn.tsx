@@ -11,7 +11,7 @@ import { AskDialog } from "../components/files/AskDialog";
 import { ContextMenu, type MenuAt } from "../components/Menu";
 import { copyText } from "../clipboard";
 import { TaskAddressBar } from "../components/TaskAddressBar";
-import { Txt, edge, scrollbarProps } from "../primitives";
+import { PLAIN_SCROLLER, Txt, edge, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
 import { RunView } from "../components/run/RunView";
@@ -108,6 +108,15 @@ export function BoardColumn(): JSX.Element {
             y: new Animated.Value(0),
             content: () => (scroller.current as unknown as { getInnerViewRef?: () => unknown } | null)?.getInnerViewRef?.() ?? null,
             moved: new Set(),
+            // A card held at the column's top or foot scrolls it (`useEdgeScroll`).
+            edge: {
+              measure: (done) => {
+                const node = (scroller.current as unknown as { getNativeScrollRef?: () => { measureInWindow?: (to: (x: number, y: number, w: number, h: number) => void) => void } | null } | null)?.getNativeScrollRef?.();
+                node?.measureInWindow?.((_x, y, _w, h) => done(y, h));
+              },
+              offset: () => scrolled.current,
+              scrollTo: (y) => scroller.current?.scrollTo({ y, animated: false }),
+            },
           },
     [],
   );
@@ -127,7 +136,10 @@ export function BoardColumn(): JSX.Element {
   // A RUN is on the path, so the column shows that run — its executions as cards, or what it said.
   if (state.trail.length > 0 && state.taskFocus !== null) {
     return (
-      <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never}>
+      // `.col.mid` scrolls (`overflow: auto`) even here, where what it holds never runs past it: the box
+      // clips, and Chromium layers what is inside a clip apart from what is not — without it the run's
+      // composer shared a layer with the side panel, and the conversation above it was greyscale.
+      <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never} {...((isWeb ? { overflow: "auto" } : {}) as object)}>
         <RunView context={runContext} />
         {floats}
       </View>
@@ -154,9 +166,10 @@ export function BoardColumn(): JSX.Element {
     <StickyScroll.Provider value={sticky}>
       <Scroller
         {...(scrollbarProps(t) as object)}
-        // On web it scrolls both ways, as `.col.mid` does.
-        style={{ flex: 1, backgroundColor: t.v("bg") as string, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
-        contentContainerStyle={{ flexGrow: 1, flexDirection: "column" }}
+        // On web it scrolls both ways, as `.col.mid` does — and is no stacking context of its own
+        // (`PLAIN_SCROLLER`): painted where it stands in the page, as the desktop's column is.
+        style={{ flex: 1, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
+        contentContainerStyle={{ flexGrow: 1, flexDirection: "column", ...PLAIN_SCROLLER } as never}
         scrollEventThrottle={16}
         onScroll={nativeScroll ?? onScroll}
         {...(sticky !== null ? { onContentSizeChange: moved } : {})}

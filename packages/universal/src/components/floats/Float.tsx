@@ -2,6 +2,7 @@ import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { FLOAT_GAP, placeFloat, type FloatAlign, type FloatRect, type FloatSide } from "@jaira/ui/floatPlace";
+import { useKeyboardInset } from "./keyboard";
 
 /**
  * `popover.tsx`'s `Popover`, universal (decision 0015): a box placed against an anchor by the desktop's
@@ -30,7 +31,10 @@ export function Float({
   offset?: number;
   children?: ReactNode;
 } & Record<string, unknown>): JSX.Element {
-  const win = useWindowDimensions();
+  const whole = useWindowDimensions();
+  // A phone's keyboard covers the window's foot: the float is placed in what it leaves (nothing on web).
+  const covered = useKeyboardInset();
+  const win = covered > 0 ? { width: whole.width, height: whole.height - covered } : whole;
   const ref = useRef<unknown>(null);
   // The size it WANTS: taken while it is not capped, so a cap does not shrink what it asks for.
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);

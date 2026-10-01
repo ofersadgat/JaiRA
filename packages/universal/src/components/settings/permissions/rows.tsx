@@ -18,7 +18,7 @@ import {
 import { groupModeOf, groupSentence, groupSummary, runnerFallbackOf, runnerRowsOf, type CommandGroup } from "@jaira/ui/composerPermissionSet";
 import { FUNCTION_ICON, MODE_META, RUNNERS_HINT, SCRIPT_HINT, SHELL_HINT, TOOL_ICONS, modeMeta } from "@jaira/ui/permissionSetWords";
 import type { Schema } from "@jaira/ui/schemaForm/types";
-import { Press, Txt, edge, lengthToken, padToken, useHover } from "../../../primitives";
+import { NO_STACK, Press, Txt, edge, lengthToken, padToken, useHover } from "../../../primitives";
 import { useTokens } from "../../../tokens";
 import { MenuLayer } from "../../MenuLayer";
 import { Icon, type IconName } from "../../panel/Icon";
@@ -209,7 +209,7 @@ export function ModePicker({
     setNaming(false);
   };
   return (
-    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0 }}>
+    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
       <Press
         onPress={() => {
           if (readOnly === true) return;
@@ -322,7 +322,7 @@ export function ImplPicker({ value, native, nativeHint, onPick, readOnly }: { va
   ];
   const picked = options.find((o) => o.id === value)!;
   return (
-    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0 }}>
+    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
       <Press
         onPress={() => {
           if (readOnly !== true) measure(setAt);
@@ -585,7 +585,7 @@ export function AddMenu({ label, options, onPick, typed }: { label: string; opti
   if (typing && typed !== undefined) return <AddLine label={typed.label} example={typed.example} onAdd={typed.onAdd} startOpen onClose={() => setTyping(false)} />;
   return (
     <View flexDirection="row" alignItems="center" gap={4}>
-      <RNView ref={ref} collapsable={false}>
+      <RNView ref={ref} collapsable={false} style={NO_STACK as never}>
         <AddButton label={label} open={at !== null} onPress={() => (options.length === 0 ? setTyping(true) : at !== null ? setAt(null) : measure(setAt))} />
       </RNView>
       {at !== null ? (

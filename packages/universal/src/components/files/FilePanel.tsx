@@ -5,7 +5,7 @@ import type { FileSource } from "@jaira/shared/browser";
 import { HALF_GLYPHS, HALF_WORDS, filePanelOf, nextHalf, type FileSelection } from "@jaira/ui/filesModel";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
 import { PANE, paneDefault, type HalfMode } from "@jaira/ui/uiState";
-import { Press, Txt, edge, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { DirectoryPanel } from "./DirectoryPanel";
 import { Splitter } from "./Splitter";
@@ -90,8 +90,10 @@ export function FilePanel({
         <>
           <ScrollView
             {...(scrollbarProps(t) as object)}
-            style={{ ...(shut ? { flexGrow: 1, flexShrink: 1 } : { height: viewerHeight, flexGrow: 0, flexShrink: 1 }), minHeight: 80, ...(isWeb ? { transform: "none" } : {}) } as never}
-            contentContainerStyle={{ flexGrow: 1, flexDirection: "column" }}
+            // `PLAIN_SCROLLER`: `.run-half` is no stacking context — what the page paints after it (the
+            // editor's head, the inbox strip) shares a layer with its scrollbar on the desktop, greyscale.
+            style={{ ...(shut ? { flexGrow: 1, flexShrink: 1 } : { height: viewerHeight, flexGrow: 0, flexShrink: 1 }), minHeight: 80, ...PLAIN_SCROLLER } as never}
+            contentContainerStyle={{ flexGrow: 1, flexDirection: "column", ...PLAIN_SCROLLER } as never}
           >
             <Viewer {...viewProps} />
           </ScrollView>

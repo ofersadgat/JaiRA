@@ -36,6 +36,8 @@ export { RailedRows } from "./components/panel/Rail";
 // escapes everything.
 export { connectionLost, connectionRestored, useConnectionLost } from "./app/connection";
 export { installNativeErrorReporting } from "./components/floats/CrashScreen";
+// What a phone's test holds still so it can read the screen (`&still=1` on the deep link).
+export { isStill, setStill } from "./motion";
 // The window's own reports, a settled gate and a conversation's foot, for their specimens (`shellSpecimens.tsx`).
 export { CrashScreen, LooseErrorBanner } from "./components/floats/CrashScreen";
 export { DisconnectedLine } from "./components/floats/Disconnected";

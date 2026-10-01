@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { ChatSurface } from "@jaira/ui/chatPane";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
-import { Press, Txt, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
 import { Composer } from "./Composer";
@@ -123,8 +123,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       <ScrollView
         ref={scroller}
         {...(scrollbarProps(t) as object)}
-        style={{ flex: 1, minHeight: 0, ...(isWeb ? { transform: "none" } : {}) } as never}
-        contentContainerStyle={{ flexDirection: "column", flexGrow: 1 }}
+        style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
+        contentContainerStyle={{ flexDirection: "column", flexGrow: 1, ...PLAIN_SCROLLER } as never}
         onLayout={(e) => setViewport(e.nativeEvent.layout.height)}
         onScroll={onScroll}
         scrollEventThrottle={32}
@@ -194,7 +194,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
 
       {m.waitingHere.length > 0 ? <WaitingHost items={m.waitingHere} /> : null}
 
-      <View flexShrink={0} backgroundColor={t.v("bg") as never}>
+      {/* Positioned, as `.chat-foot` is: painted after the thread above it, with what else is. */}
+      <View flexShrink={0} position="relative" backgroundColor={t.v("bg") as never}>
         {/* `.chat-foot::before`: the thread fading into the ground the box sits on, over its last 18. */}
         <FootFade color={String(t.v("bg"))} />
         {m.arming !== null ? (

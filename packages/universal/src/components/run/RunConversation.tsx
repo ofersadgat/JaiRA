@@ -10,7 +10,6 @@ import { WaitingLine } from "../chat/Waiting";
 import { OfflineBanner } from "../panel/OfflineBanner";
 import { CutStrip, CxDoing, RunActivity } from "../panel/RunActivity";
 import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
-import { OVER_SCROLLER } from "../panel/SidePanel";
 
 /**
  * `runViews.tsx`'s `RunConversation`, universal (decision 0015): one run's conversation — the transcript's
@@ -35,7 +34,6 @@ export function RunConversation({
   onOpenSidechain,
   foot,
   onLayout,
-  composited = false,
   focus,
   onHere,
 }: {
@@ -54,12 +52,6 @@ export function RunConversation({
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
   foot?: ReactNode;
   onLayout?: ((height: number) => void) | undefined;
-  /**
-   * Give the activity strip under the scroller a layer of its own (web). In the middle column Chromium
-   * composites the desktop's strip — its text is greyscale there — where `OVER_SCROLLER` alone leaves the
-   * copy's subpixel; in the panel `OVER_SCROLLER` already does it. The composer is not composited there.
-   */
-  composited?: boolean;
   /** A state to go to, asked for by the Steps index beside this column — see `RunTranscript`. */
   focus?: { instance: string; at: number } | undefined;
   /** Where the reader is, reported as they scroll, for that index to mark. */
@@ -84,10 +76,11 @@ export function RunConversation({
   return (
     <View flex={1} minHeight={0} flexDirection="column" {...(onLayout !== undefined ? { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => onLayout(e.nativeEvent.layout.height) } : {})}>
       <RunTranscript detail={detail} parent={parent} source={source} {...(gate !== undefined && onGate !== undefined ? { gate, onGate } : {})} armed={armed} onArm={setArmed} onOpenSidechain={onOpenSidechain} focus={focus} onHere={onHere} />
-      {/* What stands under the scroller — the composer's place and the panel's foot — in the one layer
-          the DOM squashes them into (see OVER_SCROLLER). */}
-      <View flexShrink={0} flexDirection="column" {...OVER_SCROLLER}>
-        <RunComposer detail={detail} instanceId={parent?.instanceId} source={source} project={project} asking={asking} onRerun={onRerun} onResume={onResume} cut={cut} composited={composited} />
+      {/* What stands under the scroller — the composer's place and the panel's foot. Nothing here asks
+          for a layer: the scroller above is painted where it stands, as the desktop's is (`PLAIN_SCROLLER`),
+          so Chromium gives these the layer it gives the desktop's — by overlap, where they touch it. */}
+      <View flexShrink={0} flexDirection="column">
+        <RunComposer detail={detail} instanceId={parent?.instanceId} source={source} project={project} asking={asking} onRerun={onRerun} onResume={onResume} cut={cut} />
         {foot}
       </View>
     </View>
@@ -111,7 +104,6 @@ export function RunComposer({
   onRerun,
   onResume,
   cut,
-  composited = false,
 }: {
   detail: TaskDetail;
   instanceId: string | undefined;
@@ -122,8 +114,6 @@ export function RunComposer({
   onResume?: ((taskId: string) => void) | undefined;
   /** A rewind armed above — asked about here, in place of whatever the strip was showing. */
   cut?: { armed: ArmedRewind; onConfirm: () => void; onCancel: () => void } | undefined;
-  /** The strip in a layer of its own (web) — see `RunConversation`'s `composited`. */
-  composited?: boolean;
 }): JSX.Element | null {
   const taskId = detail.taskId;
   const running = detail.status === "running";
@@ -212,7 +202,7 @@ export function RunComposer({
       ) : (
         <RunActivity detail={detail} asking={asking} onStop={stop} onSkip={skip} onRerun={onRerun} onResume={onResume} lead={lead} />
       );
-    return composited && isWeb ? <View {...({ willChange: "transform" } as object)}>{strip}</View> : strip;
+    return strip;
   }
 
   // How full the conversation being continued is, and what it has cost (the rows the panel holds).
