@@ -191,6 +191,20 @@ export function parkedGateOf(pending: readonly PendingInteraction[], taskId: str
 }
 
 /**
+ * The interaction the selected task is parked on, as a leaf's conversation pins it (`waiting`: what it
+ * asks for), and its Answer — which selects the task, where the gate is answered (`onAnswer`).
+ */
+export function leafWaitOf(
+  pending: readonly PendingInteraction[],
+  selected: string | null,
+  select: (taskId: string, project?: string) => void,
+): { waiting?: { component: string }; onAnswer?: () => void } {
+  const waiting = pending.find((p) => p.taskId === selected);
+  if (waiting === undefined) return {};
+  return { waiting: { component: waiting.config?.prompt ?? waiting.component }, onAnswer: () => select(waiting.taskId, waiting.project) };
+}
+
+/**
  * ⇤ on a subagent's conversation in the panel: that conversation into the main view — walked into at
  * once when the task's run is already the one walked, else after the task opens there (the walk waits
  * for the task to be selected, walked into and loaded).

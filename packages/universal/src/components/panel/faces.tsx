@@ -7,13 +7,15 @@ import { View } from "@tamagui/core";
 import type { ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
 import type { ConfigPanelServices } from "@jaira/ui/configPanel";
 import { useEffectiveRead } from "@jaira/ui/configPanelModel";
-import type { UiSurface } from "@jaira/ui/fileTypes";
+import type { FileSurfaceContext, UiSurface } from "@jaira/ui/fileTypes";
+import { useTaskRun } from "@jaira/ui/taskRun";
 import { rerunStartsOf } from "@jaira/ui/panelHost";
 import { checksCountOf, producedValueOf } from "@jaira/ui/panelViewsModel";
 import type { TrailStep } from "@jaira/ui/trail";
 import { taskNameOf } from "@jaira/ui/taskName";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
-import { Uncopied } from "../../app/Uncopied";
+import { invoke } from "@jaira/ui/store";
+import type { ArtifactSurface } from "@jaira/ui/transcriptView";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ChangesPanel } from "./ChangesPanel";
@@ -51,6 +53,8 @@ export interface FaceHost {
   /** The gate the selected task is parked on, and how to answer it. */
   gate: PendingInteraction | undefined;
   onGate: (value: unknown) => void;
+  /** The gate any task is parked on, wherever its panel is — for a task the store is not holding (`OwnRun`). */
+  gateOf?: ((taskId: string) => { gate: PendingInteraction; onGate: (value: unknown) => void } | undefined) | undefined;
   startAgain: (taskId: string) => void;
   resume: (taskId: string) => void;
   cancel: (taskId: string) => void;
@@ -165,18 +169,20 @@ function openSubagent(host: FaceHost, taskId: string, project: string | undefine
 
 /**
  * The artifact picked in the Produced tab (`ProducedView`'s `.pv-artifact`): the value viewer, with the
- * two icons in its head — open it on its own in this panel, hold it in Held. A live artifact's `serve`
- * is not lent here (interactive artifacts are not copied).
+ * two icons in its head — open it on its own in this panel, hold it in Held. A live artifact runs here
+ * (the task's grant, `serveOf`), and keeps its grant where it is opened or held, as the desktop's does.
  *
  *   .pv-artifact-acts   inline row, gap 1; each an `.sp-icon`
  */
-function produced(host: FaceHost): (row: ArtifactSummary, text: string) => ReactNode {
+function produced(host: FaceHost, artifacts: ArtifactSurface): (row: ArtifactSummary, text: string) => ReactNode {
   return (row, text) => {
-    const item: PinnedValue = { title: row.path, value: producedValueOf(row, text) };
+    const item: PinnedValue = { title: row.path, value: producedValueOf(row, text), serve: artifacts.serve, ...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {}) };
     return (
       <View minWidth={0}>
         <ValueView
           value={item.value as never}
+          serve={artifacts.serve}
+          {...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {})}
           actions={
             <View flexDirection="row" gap={1}>
               <SpIcon icon="read" label="Open it on its own, in this panel" onPress={() => pushPreview(host, item)} />
@@ -187,6 +193,24 @@ function produced(host: FaceHost): (row: ArtifactSummary, text: string) => React
       </View>
     );
   };
+}
+
+/**
+ * What lets a task's artifact run in the panel (`App.tsx`'s `serveOf`): a grant against the task that
+ * produced it, in its project. No `onPrompt` — the panel has no composer for a page to write into.
+ *
+ * Kept, one per task: a value view asks for a grant again whenever its `serve` changes, and a new frame
+ * address reloads the page — a fresh function on every draw of the panel would restart it each time.
+ */
+const surfaces = new Map<string, ArtifactSurface>();
+function serveOf(taskId: string, project: string | undefined): ArtifactSurface {
+  const key = `${taskId}\u0000${project ?? ""}`;
+  let surface = surfaces.get(key);
+  if (surface === undefined) {
+    surface = { serve: (path: string) => invoke("artifact:serve", { taskId, path, ...(project !== undefined ? { project } : {}) }) };
+    surfaces.set(key, surface);
+  }
+  return surface;
 }
 
 const reading = (): JSX.Element => <PanelEmpty>Reading the task…</PanelEmpty>;
@@ -259,12 +283,52 @@ function StateConfig({ host, stateId }: { host: FaceHost; stateId: string }): JS
 const dropIcon = (host: FaceHost) => (item: PinnedValue): ReactNode => <SpIcon icon="cross" label="Let go of it" onPress={() => host.unhold(item)} />;
 
 /**
- * The face of any entry (`panelFaces.tsx`'s `faceOf`). {@link Uncopied}: a task the store is not holding
- * (`OwnRun`) — and so a subagent's conversation in one.
+ * `panelFaces.tsx`'s `OwnRun`: an entry about a task the store is NOT holding — a subtask the Changes tab
+ * pushed, an entry left under a pushed card after the selection moved on. It loads the task's run itself
+ * (`taskRun.ts`, the DOM's own) and draws the entry's body over a host that is about THAT task: its tree,
+ * its conversation, its gate. The main view is not showing it, so there is nothing there to go to.
  */
-export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
+function OwnRun({ host, entry, taskId, project }: { host: FaceHost; entry: PanelEntry; taskId: string; project: string | undefined }): JSX.Element {
+  // `useTaskRun` lays the run over a surface context; the transcript's source is the part of one it reads.
+  const run = useTaskRun(taskId, project, host.source as unknown as FileSurfaceContext);
+  if (run.failed !== null) return <PanelEmpty>{"Could not read this task: "}{run.failed}</PanelEmpty>;
+  if (run.detail === null) return reading();
+  const gate = host.gateOf?.(taskId);
+  const { context } = run;
+  const own: FaceHost = {
+    ...host,
+    detail: run.detail,
+    detailOf: (id) => (id === taskId ? run.detail : host.detailOf(id)),
+    project,
+    source: {
+      ...host.source,
+      conversation: context.conversation,
+      sessions: context.sessions,
+      sessionHistory: context.sessionHistory,
+      records: context.records,
+      liveTurn: context.liveTurn,
+      onLoadSessions: context.onLoadSessions,
+      project,
+    },
+    gate: gate?.gate,
+    onGate: gate?.onGate ?? (() => undefined),
+    turns: context.conversation?.turns ?? [],
+    goTo: undefined,
+    viewed: undefined,
+    giveBack: undefined,
+  };
+  return <>{faceOf(own, entry).body}</>;
+}
+
+/** The face of any entry (`panelFaces.tsx`'s `faceOf`). */
+export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): PanelFace {
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
   const loaded = detail !== null && host.detail?.taskId === detail.taskId;
+  // A task-shaped entry whose run is not the loaded one draws its body over its own (`OwnRun`).
+  if (!headOnly && (entry.kind === "task" || entry.kind === "convo" || entry.kind === "subagent" || entry.kind === "rerun") && host.detail?.taskId !== entry.taskId) {
+    const face = faceOf({ ...host, detail }, entry, true);
+    return { ...face, body: <OwnRun host={host} entry={entry} taskId={entry.taskId} project={entry.project ?? host.project} />, scroll: face.scroll };
+  }
   switch (entry.kind) {
     case "task": {
       const head = taskHeadOf(detail, entry.taskId);
@@ -285,7 +349,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
                 onOpenSidechain={(node, call, name) => openSubagent(host, detail.taskId, project, node, call, name)}
               />
             ) : (
-              <Uncopied name="a task the store is not holding" flex={1} />
+              reading()
             );
           case "steps":
             return stepsBody(host, detail, entry, false);
@@ -317,7 +381,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
           case "steps":
             return stepsBody(host, detail, entry, true);
           case "produced":
-            return <ProducedView taskId={detail.taskId} project={project} signal={detail.timeline.length} onShow={produced(host)} />;
+            return <ProducedView taskId={detail.taskId} project={project} signal={detail.timeline.length} onShow={produced(host, serveOf(detail.taskId, project))} />;
           case "changes":
             return <ChangesPanel taskId={detail.taskId} project={project} signal={`${detail.status}:${detail.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} {...(detail.worktreePath !== undefined ? { onReview: () => host.reviewChanges(detail.taskId) } : {})} />;
           case "held":
@@ -359,7 +423,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
         tab: entry.tab,
         body:
           entry.tab === "produced" ? (
-            <ProducedView taskId={entry.taskId} project={project} signal={detail?.timeline.length ?? 0} onShow={produced(host)} />
+            <ProducedView taskId={entry.taskId} project={project} signal={detail?.timeline.length ?? 0} onShow={produced(host, serveOf(entry.taskId, project))} />
           ) : entry.tab === "changes" ? (
             <ChangesPanel taskId={entry.taskId} project={project} signal={`${detail?.status}:${detail?.timeline.length}`} onOpenTask={(taskId) => openTask(host, taskId, project)} />
           ) : (
@@ -438,7 +502,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
         titleText: name,
         verbs: [{ icon: "adopt", label: "Show this conversation in the main view", onClick: () => host.adoptSubagent(entry.taskId, entry.project, entry.step) }],
         body: !loaded ? (
-          detail === null ? reading() : <Uncopied name="a task the store is not holding" flex={1} />
+          reading()
         ) : (
           // `.pv-convo`: the conversation lays itself out to the column; its doorways push further in.
           <View flex={1} minHeight={0} flexDirection="column">
@@ -478,8 +542,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry): PanelFace {
   }
 }
 
-/** The chat entry's glyph, as the Chat room's panel draws it. */
+/** The chat entry's glyph, as the Chat room's panel draws it: `.sp-glyph`'s icon, at the glyph's size. */
 function ChatGlyph(): JSX.Element {
-  const t = useTokens();
-  return <Icon name="comment" size={13} color={String(t.v("dim"))} />;
+  return <Glyph name="comment" />;
 }

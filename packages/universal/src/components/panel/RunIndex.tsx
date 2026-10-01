@@ -1,5 +1,6 @@
-import type { JSX, ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { useState, type JSX, type ReactNode } from "react";
+import type { GestureResponderEvent } from "react-native";
+import { View, isWeb } from "@tamagui/core";
 import type { InstanceNode } from "@jaira/shared/browser";
 import { nameOf } from "@jaira/ui/rail";
 import { keyOfNode, stepsIn, toneOf, useRunIndexModel, type RunIndexFit } from "@jaira/ui/runIndexModel";
@@ -7,6 +8,7 @@ import { metaOf } from "@jaira/ui/sessionRows";
 import type { DisplayItem } from "@jaira/ui/stepCompaction";
 import { Press, Txt, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
+import { ContextMenu, type MenuAt } from "../Menu";
 import { Icon } from "./Icon";
 import { RailedRows, cssColour } from "./Rail";
 import { PanelEmpty } from "./PanelViews";
@@ -37,27 +39,47 @@ import { PanelEmpty } from "./PanelViews";
  *                       9.5px 700, 0.06em, upper; ↻ at 11
  *   .loop-shut          row, centred, gap 7: the cycle's swatches (3 × 11, radius 1, gap 2) and names
  *
- * Not copied: the row's right-click menu (rewind and fork from the index), and the rail's own gutter
- * gestures (see `Rail.tsx`).
+ * A row's right-click (a long press on a phone) is its menu — go to it, rewind to before it, fork there
+ * (`onCut`) — and the gutter folds a lane pressed on its knot, or goes to a state with nothing under it
+ * (`onPick`; see `Rail.tsx`).
  */
 export function RunIndex({
   instances,
   here,
   asking,
   onGoTo,
+  onCut,
   fit,
 }: {
   instances: readonly InstanceNode[];
   here?: string | undefined;
   asking?: string | undefined;
   onGoTo?: ((node: InstanceNode) => void) | undefined;
+  /** The two verbs of a cut (`cut.ts`), on a row's menu. Absent ⇒ a row has no menu. */
+  onCut?: { rewind: (node: InstanceNode) => void; fork: (node: InstanceNode) => void } | undefined;
   fit?: RunIndexFit | undefined;
 }): JSX.Element {
   const t = useTokens();
-  const { steps, rows, palette, shutLanes, toggleFold, toggleLoop, mark, isHere, fitRows, gapOf, expand, byKey, now } = useRunIndexModel({ instances, fit, here });
+  const { steps, rows, palette, shutLanes, toggleFold, toggleLoop, foldable, onShut, mark, isHere, fitRows, gapOf, expand, byKey, now } = useRunIndexModel({ instances, fit, here });
+  const [menu, setMenu] = useState<MenuAt | null>(null);
   const goTop = (key: string): void => {
     const node = byKey.get(key);
     if (node !== undefined) onGoTo?.(node);
+  };
+  /** A lane with nothing under it cannot fold, so its mark does what its label does. */
+  const onPick = goTop;
+  /** A row's menu: go to it, and — not on the root, which nothing rewinds to — the cut's two verbs. */
+  const menuOf = (node: InstanceNode, name: string, x: number, y: number): void => {
+    if (onCut === undefined || node.parentInstanceId === undefined) return;
+    setMenu({
+      x,
+      y,
+      items: [
+        ...(onGoTo !== undefined ? [{ label: `Go to ${name} in the conversation`, onSelect: () => onGoTo(node) }] : []),
+        { label: `Rewind to before ${name}`, note: "deletes it and everything after", separator: onGoTo !== undefined, onSelect: () => onCut.rewind(node) },
+        { label: `Fork before ${name}`, note: "a new task from here", onSelect: () => onCut.fork(node) },
+      ],
+    });
   };
 
   const row = (index: number, folded: boolean): JSX.Element | null => {
@@ -130,8 +152,17 @@ export function RunIndex({
       backgroundColor: ground ?? (hovered && onGoTo !== undefined ? t.v("fill-ghost-hover") : "transparent"),
       ...(ring !== undefined ? { boxShadow: ring } : {}),
     });
+    const cuttable = onCut !== undefined && node.parentInstanceId !== undefined;
     return (
       <View
+        {...((cuttable && isWeb
+          ? {
+              onContextMenu: (e: { preventDefault: () => void; clientX: number; clientY: number }) => {
+                e.preventDefault();
+                menuOf(node, name, e.clientX, e.clientY);
+              },
+            }
+          : {}) as object)}
         flexDirection="row"
         alignItems="center"
         gap={2}
@@ -159,7 +190,14 @@ export function RunIndex({
             {inside(false)}
           </View>
         ) : (
-          <Press onPress={() => onGoTo(node)} title={`go to ${name} in the conversation`} {...go} box={({ hovered }) => paint(hovered)}>
+          <Press
+            onPress={() => onGoTo(node)}
+            // A phone has no right button: a long press opens the row's menu where the finger is.
+            {...(cuttable && !isWeb ? { onLongPress: (e: GestureResponderEvent) => menuOf(node, name, e.nativeEvent.pageX, e.nativeEvent.pageY) } : {})}
+            title={`go to ${name} in the conversation`}
+            {...go}
+            box={({ hovered }) => paint(hovered)}
+          >
             {({ hovered }) => inside(hovered)}
           </Press>
         )}
@@ -221,23 +259,29 @@ export function RunIndex({
 
   if (instances.length === 0) return <PanelEmpty>No run yet.</PanelEmpty>;
   return (
-    <RailedRows
-      steps={steps}
-      index
-      cap={30}
-      renderStep={(index) => row(index, false)}
-      renderRolled={(lane) => {
-        const at = steps.findIndex((step) => step.key === lane.key);
-        return at < 0 ? null : row(at, true);
-      }}
-      mark={mark}
-      here={isHere}
-      palette={palette}
-      shut={shutLanes}
-      compact={fitRows}
-      renderGap={renderGap}
-      renderCrumb={renderCrumb}
-    />
+    <>
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+      <RailedRows
+        steps={steps}
+        index
+        cap={30}
+        renderStep={(index) => row(index, false)}
+        renderRolled={(lane) => {
+          const at = steps.findIndex((step) => step.key === lane.key);
+          return at < 0 ? null : row(at, true);
+        }}
+        mark={mark}
+        here={isHere}
+        palette={palette}
+        shut={shutLanes}
+        onShut={onShut}
+        foldable={foldable}
+        onPick={onPick}
+        compact={fitRows}
+        renderGap={renderGap}
+        renderCrumb={renderCrumb}
+      />
+    </>
   );
 }
 

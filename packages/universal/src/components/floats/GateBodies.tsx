@@ -15,7 +15,7 @@ import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "../settings/Button";
 import { ApprovalSurface } from "./ApprovalSurface";
 import { ChoiceList, ChoiceSteps } from "./Choices";
-import { ChangesetGate, EditArtifactGate, ReviewArtifactGate } from "../artifact/ArtifactGates";
+import { ChangesetGate, EditArtifactGate, ReviewArtifactGate, serveOfGate } from "../artifact/ArtifactGates";
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 
 /**
@@ -52,9 +52,9 @@ export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknow
     // The artifact pane and the decision under it (`artifact/ArtifactGates.tsx`); `subjectProject` is the
     // project a note's author is read in, as the desktop's `GateSurface` joins it.
     case "review_artifact":
-      return <ReviewArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} flat={flat} />;
+      return <ReviewArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} flat={flat} serve={serveOfGate(pending)} />;
     case "edit_artifact":
-      return <EditArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} />;
+      return <EditArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} serve={serveOfGate(pending)} />;
     case "review_artifacts":
       // `.mount-host`: the reviewer's own box, which scrolls when its host is capped in height (`.modal-wide`).
       return (

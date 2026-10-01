@@ -1,10 +1,17 @@
-import { Fragment, createContext, useContext, useEffect, useRef, useState, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
 import { Animated, Pressable, ScrollView, type View as HostView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { BoardCard, BoardView, MoveConfirm as MoveConfirmKind, NextMove } from "@jaira/shared/browser";
+import type { BoardCard, BoardColumn, BoardView, NextMove } from "@jaira/shared/browser";
+import { canPickUp, columnDropOf, connectDragOf, CONFIRM_YES, type ColumnDrop, type ConnectDrop, type MoveQuestion } from "@jaira/ui/boardDrag";
 import { archivedSplitOf, drillTargetOf, LANE_LABEL, laneRunsOf, type LaneEntry } from "@jaira/ui/boardModel";
+import type { ConnectAsk, ConnectDrag } from "@jaira/ui/connectDrag";
+import { NO_DRAG_OFFERS, type DragOffers } from "@jaira/ui/taskDrag";
 import { Press, Txt, edge, useHover } from "../primitives";
 import { useLook, useTokens, type Look, type Tokens } from "../tokens";
+import { ConnectPop, Kind } from "./ConnectPop";
+import { Button } from "./settings/Button";
+import { Lift } from "./Lift";
+import { ghostAt, ghostOf, useLiftTargets, type Ghost } from "./liftTargets";
 import { claimed, TaskCard } from "./TaskCard";
 
 /**
@@ -49,16 +56,34 @@ import { claimed, TaskCard } from "./TaskCard";
  * (`StickyScroll`) and each heading (`StickyHead`) is moved by it on the native driver — held at the
  * scroller's top once its column's top has passed it, and let go at its column's foot, as sticky does.
  *
- * Not copied: the drop preview and dragging (v2, the props are kept).
+ * Dragging a card (decision 0005): picked up where a waiting rule offered it a move (`dragOffers`) or it
+ * can be connected (`connect.ask`), every column that would take it dashed in the accent, the one under
+ * the pointer filled, with the DROP PREVIEW under its cards (`ConnectPop`); the drop answers the wait
+ * (`onTaskDrop`) or commits the connect, or puts the move table's question in that column first. What a
+ * drop means is `boardDrag.ts`'s, the desktop's own. The rules it adds:
+ *
+ *   .column.drop-target          dashed, --accent (the palettes' --accent too; a line bucket's is a 1px
+ *                                dashed box, radius 9, it having no edge of its own)
+ *   .column.drop-over            --fill-ghost-selected — except a line bucket in classic (its clear ground
+ *                                is 0,3,0 over 0,2,0), a named line bucket selected or hovered (later at
+ *                                0,4,0), and lanes (their ground is later at 0,4,0)
+ *   .card-draggable              grab (`TaskCard`)
+ *
+ * On web the gesture is the desktop's HTML5 drag: the card is `draggable` (`TaskCard`) and a column takes
+ * `dragover`/`dragleave`/`drop` as the DOM's does. On a phone it is a long press and a pan (`Lift`): the
+ * columns are measured when the card is lifted, the one under the finger is `over`, a picture of the card
+ * follows the finger over the board, and letting go lands it — or, not having moved, is the long press.
  *
  * The right-click menus: a card's (`onTaskMenu`) and a column's (`onColumnMenu`), at the pointer, the
  * column's only where no card took the click (the DOM's `closest(".card")` guard, read off `claimed`). On
  * a phone the gesture is a long press, and the menu's Open is what a long press did before.
  */
 
-/** The sets of events a drop needs — kept so the props match the DOM board's; dragging is v2. */
+/** What a drop needs, as the DOM board's props say it. */
 export type DragProps = {
-  dragOffers?: unknown;
+  /** The moves waiting transitions are offering, by task (`on_user_event`); none by default. */
+  dragOffers?: DragOffers;
+  /** A card was dropped on a column that was offering it a place. The caller answers the wait. */
   onTaskDrop?: ((requestId: string, card: BoardCard, columnKey: string) => void) | undefined;
 };
 
@@ -140,17 +165,16 @@ export interface BoardProps extends DragProps {
   onColumnMenu?: ((stateId: string, at: MenuPoint) => void) | undefined;
   connect?:
     | {
-        ask?: unknown;
-        onDrop?: unknown;
+        /** The dry run: what a drop of this card on that column would do (`connectDrag.ts`). */
+        ask?: ConnectAsk;
+        /** The commit — `confirmed` once the person said yes to the move table's question. */
+        onDrop?: (card: BoardCard, column: BoardColumn, confirmed?: boolean) => void;
         onMove?: (card: BoardCard, move: NextMove, confirmed?: boolean) => void;
         undoable?: ReadonlySet<string>;
         onUndo?: (taskId: string) => void;
       }
     | undefined;
 }
-
-/** The yes of each ASK cell, as its button says it (`board.tsx`). */
-const CONFIRM_YES: Record<MoveConfirmKind, string> = { "stop-and-rewind": "Stop and go back", "pause-and-move": "Pause and move" };
 
 export function Board({
   board,
@@ -166,13 +190,67 @@ export function Board({
   onOpenAt,
   onTaskMenu,
   onColumnMenu,
+  dragOffers = NO_DRAG_OFFERS,
+  onTaskDrop,
   connect,
 }: BoardProps): JSX.Element {
   const t = useTokens();
   const look = useLook();
   // Archived cards are held at the foot of each Finished lane; one Show here shows them in every column.
   const [showArchived, setShowArchived] = useState(false);
-  const [confirming, setConfirming] = useState<{ column: string; sentence: string; yes: string; go: () => void } | null>(null);
+  const [confirming, setConfirming] = useState<MoveQuestion | null>(null);
+  // The card in the air, and its connect answers (one dry run per column per drag), as `board.tsx` holds
+  // them: what they mean is `boardDrag.ts`'s.
+  const [dragging, setDragging] = useState<BoardCard | null>(null);
+  const connecting = useRef<ConnectDrag | null>(null);
+  const [, answered] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => () => connecting.current?.end(), []);
+  const connectDrop: ConnectDrop | undefined = connect?.ask !== undefined && connect.onDrop !== undefined ? { ask: connect.ask, onDrop: connect.onDrop } : undefined;
+  const pickUp = (card: BoardCard): void => {
+    setDragging(card);
+    connecting.current?.end();
+    connecting.current = connectDragOf(board, card, dragOffers, connectDrop, answered);
+  };
+  const putDown = (): void => {
+    connecting.current?.end();
+    connecting.current = null;
+    setDragging(null);
+  };
+  const dropFor = (column: BoardColumn): ColumnDrop | undefined =>
+    columnDropOf({ card: dragging, column, dragOffers, drag: connecting.current, connect: connectDrop, onTaskDrop, putDown, confirm: setConfirming });
+  // A phone's drag (`Lift`): the columns it may land in, the picture following the finger.
+  const targets = useLiftTargets();
+  const root = useRef<HostView>(null);
+  const [rootWidth, setRootWidth] = useState(0);
+  const [ghost, setGhost] = useState<(Ghost & { card: BoardCard }) | null>(null);
+  const liftOf = (card: BoardCard, hold: ((x: number, y: number) => void) | undefined) => ({
+    onLift: (node: HostView | null, x: number, y: number) => {
+      pickUp(card);
+      targets.measure();
+      ghostOf(node, root.current, rootWidth, x, y, (g) => setGhost({ ...g, card }));
+    },
+    onMove: (x: number, y: number) => {
+      targets.move(x, y);
+      setGhost((g) => (g === null ? g : { ...ghostAt(g, x, y), card: g.card }));
+    },
+    onLand: (x: number, y: number) => {
+      const key = targets.hit(x, y);
+      const column = board.columns.find((c) => c.key === key);
+      const drop = column !== undefined ? dropFor(column) : undefined;
+      targets.clear();
+      setGhost(null);
+      // As a DOM column's `drop`: only a column that would take it lands it; anywhere else it springs back.
+      if (drop?.accepts === true) drop.onDrop();
+      else putDown();
+    },
+    onCancel: () => {
+      if (connecting.current === null && dragging === null) return;
+      targets.clear();
+      setGhost(null);
+      putDown();
+    },
+    ...(hold !== undefined ? { onHold: hold } : {}),
+  });
   /** A chip's move: taken at once, or — where the table asks — once the person said yes. */
   const moveFrom = (card: BoardCard, columnKey: string) =>
     connect?.onMove === undefined
@@ -194,7 +272,9 @@ export function Board({
   const cardOf = (card: BoardCard, last: boolean, column: BoardView["columns"][number] | null, tray = false): ReactNode => {
     const drill = drillOf(card);
     const move = column !== null ? moveFrom(card, column.key) : undefined;
-    return (
+    // Only a card in a column is lifted (the tray's are not, as in the DOM), and only where a drop would mean something.
+    const liftable = column !== null && canPickUp(card, dragOffers, onTaskDrop, connectDrop);
+    const drawn = (
       <TaskCard
         key={card.taskId}
         card={card}
@@ -208,7 +288,16 @@ export function Board({
         child={column !== null && card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
         {...(connect?.onUndo !== undefined && connect.undoable?.has(card.taskId) === true ? { onUndo: () => connect.onUndo!(card.taskId) } : {})}
         {...(move !== undefined ? { onMove: move } : {})}
+        {...(liftable ? { onDragStart: () => pickUp(card), onDragEnd: putDown } : {})}
       />
+    );
+    if (isWeb || !liftable) return drawn;
+    // Held still and let go, a lifted card was long-pressed: what its long press does (`TaskCard`).
+    const hold = onTaskMenu !== undefined ? (x: number, y: number) => onTaskMenu(card, { x, y }) : drill;
+    return (
+      <Lift key={card.taskId} enabled {...liftOf(card, hold)}>
+        {drawn}
+      </Lift>
     );
   };
   const columns = board.columns.map((column, index) => (
@@ -226,6 +315,8 @@ export function Board({
       {...(onSelectColumn !== undefined ? { onSelect: () => onSelectColumn(column.stateId) } : {})}
       {...(onColumnMenu !== undefined ? { onMenu: (at: MenuPoint) => onColumnMenu(column.stateId, at) } : {})}
       selected={column.stateId === selectedColumn}
+      {...(dropFor(column) !== undefined ? { drop: dropFor(column)! } : {})}
+      {...(!isWeb ? { over: targets.over === column.key, host: targets.host(column.key) } : {})}
       {...(confirming?.column === column.key
         ? {
             confirm: (
@@ -243,9 +334,10 @@ export function Board({
           }
         : {})}
     >
-      {(select) => (
+      {(select, followed) => (
         <Lanes
           cards={column.cards}
+          followed={followed}
           archived={{
             shown: showArchived,
             // The foot is a button inside the column, and in the DOM its click goes on to the column.
@@ -262,6 +354,7 @@ export function Board({
   const atLevel = board.atLevel.filter((card) => card.status !== "archived");
   return (
     <View
+      {...(!isWeb ? { ref: root, onLayout: (e: { nativeEvent: { layout: { width: number } } }) => setRootWidth(e.nativeEvent.layout.width) } : {})}
       flexDirection="column"
       gap={14}
       padding={10}
@@ -299,6 +392,19 @@ export function Board({
           </View>
         </View>
       ) : null}
+      {ghost !== null ? <LiftedCard ghost={ghost} /> : null}
+    </View>
+  );
+}
+
+/**
+ * A phone's picture of the card in the air, over the board where the finger is: the browser's drag image,
+ * which is the card itself, see-through.
+ */
+function LiftedCard({ ghost }: { ghost: Ghost & { card: BoardCard } }): JSX.Element {
+  return (
+    <View position="absolute" left={ghost.left} top={ghost.top} width={ghost.width} opacity={0.8} pointerEvents="none" zIndex={10} transform={[{ translateX: ghost.dx }, { translateY: ghost.dy }] as never}>
+      <TaskCard card={ghost.card} selected={false} onSelect={() => undefined} last />
     </View>
   );
 }
@@ -374,7 +480,7 @@ function mixBy(t: Tokens, a: string | number, pctToken: string, b: string | numb
 const CLEAR = "rgba(0, 0, 0, 0)";
 
 /** How a column, its heading and its body are drawn in a look — the cascade above, decided. */
-function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, hovered: boolean) {
+function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, hovered: boolean, target = false, over = false) {
   const named = look.palette !== "classic";
   const line = look.buckets === "line";
   const pastel = look.palette === "pastel" || look.palette === "pastel-rail";
@@ -393,6 +499,20 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
     border = CLEAR;
     radius = 0;
   }
+  let style: "dashed" | "solid" = blueprint ? "dashed" : "solid";
+  let width = contrast ? 1.5 : 1;
+  // A drop target: the accent, dashed (`.column.drop-target`, and the palettes' `border-color`); a line
+  // bucket, with no edge, gets a 1px dashed box of its own.
+  if (target) {
+    border = t.v("accent");
+    style = "dashed";
+    if (line) {
+      width = 1;
+      radius = 9;
+    }
+  }
+  // Under the pointer: the fill the drop would land in — where no later or stronger ground wins (the header).
+  if (over && !(line && (!named || selected || hovered))) ground = t.v("fill-ghost-selected");
   if (lane !== undefined) ground = line ? CLEAR : mixBy(t, lane, "lane-pct", t.v("bg"));
 
   // --- its heading ---
@@ -432,7 +552,7 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
     nameInk = mixBy(t, lane, "lane-ink", t.v("lane-deep"));
   }
   return {
-    column: { ground, border, width: contrast ? 1.5 : 1, style: (blueprint ? "dashed" : "solid") as "dashed" | "solid", radius },
+    column: { ground, border, width, style, radius },
     head: { ground: head, rule, ruleWidth, radius: headRadius, below, padX, padTop: named ? 8 : 6, ink, nameInk, nameWeight: 700 },
     body: line ? { top: 0, x: 1, bottom: 6 } : named ? { top: 4, x: 7, bottom: 8 } : { top: 6, x: 6, bottom: 6 },
   };
@@ -455,6 +575,9 @@ export function Column({
   onSelect,
   onMenu,
   selected = false,
+  drop,
+  over: overHere,
+  host,
   confirm,
   children,
 }: {
@@ -471,13 +594,29 @@ export function Column({
   /** Its right-click (a long press on a phone), where no card took it. */
   onMenu?: ((at: MenuPoint) => void) | undefined;
   selected?: boolean;
+  /** What a card being dragged right now would mean here (`boardDrag.ts`'s `ColumnDrop`); absent while nothing is. */
+  drop?: ColumnDrop | undefined;
+  /** A phone's: the lifted card is over this column (`Lift`). On web the column tracks `dragover` itself. */
+  over?: boolean;
+  /** A phone's: the column's view, measured when a card is lifted (`liftTargets.ts`). */
+  host?: ((node: HostView | null) => void) | undefined;
   confirm?: ReactNode;
-  children: (select: (() => void) | undefined) => ReactNode;
+  /**
+   * The cards, given the column's own click (for what inside it passes the click on) and whether
+   * something follows them in the body — the "—", the preview, a move's question — so the last card is
+   * not the `:last-child` it would otherwise be.
+   */
+  children: (select: (() => void) | undefined, followed: boolean) => ReactNode;
 }): JSX.Element {
   const [hovered, hover] = useHover();
   // How far the heading may travel down its column on a phone (`StickyHead`): the body's height.
   const [bodyHeight, setBodyHeight] = useState(0);
-  const s = columnStyle(t, look, index, selected, hovered);
+  // Whether the pointer is over THIS column — a different fact from whether it would take the card.
+  const [overWeb, setOver] = useState(false);
+  const tracks = drop !== undefined && (drop.accepts || drop.preview !== undefined);
+  const over = (isWeb ? overWeb : overHere === true) && tracks;
+  const accepts = drop?.accepts === true;
+  const s = columnStyle(t, look, index, selected, hovered, accepts, accepts && over);
   const box = {
     flexGrow: 1,
     flexShrink: 0,
@@ -542,12 +681,13 @@ export function Column({
         paddingBottom={s.body.bottom}
         {...(isWeb ? {} : { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => setBodyHeight(e.nativeEvent.layout.height) })}
       >
-        {children(onSelect)}
+        {children(onSelect, count === 0 || (over && drop?.preview !== undefined) || confirm !== undefined)}
         {count === 0 ? (
           <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingTop={2} paddingLeft={4} paddingRight={4} paddingBottom={6}>
             {empty}
           </Txt>
         ) : null}
+        {over && drop?.preview !== undefined ? <ConnectPop preview={drop.preview()} /> : null}
         {confirm}
       </View>
     </>
@@ -560,6 +700,26 @@ export function Column({
       ...(onOpen !== undefined ? { onDoubleClick: onOpen } : {}),
       ...(onMenu !== undefined ? { onContextMenu: (e: ReactMouseEvent) => (claimed.has(e.nativeEvent) ? undefined : onMenu(menuPointOf(e))) } : {}),
       ...(tip !== undefined ? { title: tip } : {}),
+      // `board.tsx`'s drop handlers, as they are: `preventDefault` on drag-over IS the acceptance, and a
+      // column that would refuse still tracks the pointer so it can say why. Leaving for a child is not
+      // leaving (the preview is one).
+      ...(tracks
+        ? {
+            onDragOver: (e: ReactDragEvent) => {
+              if (accepts) e.preventDefault();
+              if (!overWeb) setOver(true);
+            },
+            onDragLeave: (e: ReactDragEvent) => {
+              if (!(e.currentTarget as Element).contains(e.relatedTarget as Node | null)) setOver(false);
+            },
+            onDrop: (e: ReactDragEvent) => {
+              setOver(false);
+              if (!accepts) return;
+              e.preventDefault();
+              drop.onDrop();
+            },
+          }
+        : {}),
       cursor: "pointer",
     };
     return (
@@ -572,7 +732,7 @@ export function Column({
   // none, walks in — the menu's Open).
   const long = onMenu !== undefined ? (e: unknown) => onMenu(menuPointOf(e)) : onOpen;
   return (
-    <Pressable {...(onSelect !== undefined ? { onPress: onSelect } : {})} {...(long !== undefined ? { onLongPress: long } : {})} style={box as never}>
+    <Pressable ref={host} {...(onSelect !== undefined ? { onPress: onSelect } : {})} {...(long !== undefined ? { onLongPress: long } : {})} style={box as never}>
       {contents}
     </Pressable>
   );
@@ -587,16 +747,19 @@ function Lanes({
   render,
   archived,
   tray = false,
+  followed = false,
 }: {
   cards: readonly BoardCard[];
   render: (card: BoardCard, last: boolean) => ReactNode;
   archived?: { shown: boolean; onToggle: () => void } | undefined;
   /** In the "At this level" tray: each lane a full row of its own, wrapping (`.tray-cards .lane`). */
   tray?: boolean;
+  /** Something follows the cards in the column's body (`Column`'s `followed`). */
+  followed?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const { live, held } = archivedSplitOf(cards);
-  const { boxed, runs } = laneRunsOf(live, held.length > 0);
+  const { boxed, runs } = laneRunsOf(live, held.length > 0 || followed);
   const inOrder = (entries: readonly LaneEntry[]): ReactNode[] =>
     entries.map(({ card, last, beneath }) => (
       <Fragment key={card.taskId}>
@@ -627,7 +790,7 @@ function Lanes({
       {held.length > 0 ? (
         <>
           <ArchivedFoot count={held.length} archived={archived} />
-          {archived?.shown === true ? held.map((card, i) => <Fragment key={card.taskId}>{render(card, i === held.length - 1)}</Fragment>) : null}
+          {archived?.shown === true ? held.map((card, i) => <Fragment key={card.taskId}>{render(card, i === held.length - 1 && !followed)}</Fragment>) : null}
         </>
       ) : null}
     </>
@@ -690,8 +853,9 @@ function ArchivedFoot({ count, archived }: { count: number; archived: { shown: b
 /**
  * `board.tsx`'s `MoveConfirm`: the move table's question, in the column the task would land in, under its
  * cards. `.connect-pop.connect-pop-inline.connect-confirm`: --panel, 1px --warn at 55% over --line, radius
- * 10, padding 12, gap 8, --lift, 8 above; the kind (data 600 at 10.5/12.5, 1.3, .04em, upper, --dim), the
- * sentence (1.45), and a primary and a ghost button, gap 6.
+ * 10, padding 12, gap 8, --lift, 8 above; the kind (`ConnectPop`'s: data 600 at `--size-app` × 10.5/12.5), the
+ * sentence (1.45), and a primary and a ghost button (`button.primary`, `button.ghost` at the pop's
+ * `--size-app`), gap 6, `.options`' 14 above.
  */
 function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: string; onYes: () => void; onNo: () => void }): JSX.Element {
   const t = useTokens();
@@ -703,28 +867,6 @@ function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: st
         onDoubleClick: (e: ReactMouseEvent) => e.stopPropagation(),
       }
     : {};
-  const button = (label: string, primary: boolean, onPress: () => void): JSX.Element => (
-    <Press
-      onPress={onPress}
-      flexDirection="row"
-      alignItems="center"
-      justifyContent="center"
-      borderWidth={1}
-      borderStyle="solid"
-      borderRadius={t.v("control-radius")}
-      paddingVertical={4}
-      paddingHorizontal={10}
-      box={({ hovered }) =>
-        primary
-          ? { backgroundColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent"), borderColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent") }
-          : { backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: hovered ? t.v("rule") : t.v("line") }
-      }
-    >
-      <Txt spec={{ voice: "app", scale: 1, weight: primary ? 600 : 400, color: primary ? "on-accent" : "text" }} textAlign="center">
-        {label}
-      </Txt>
-    </Press>
-  );
   return (
     <View
       {...(stop as object)}
@@ -738,11 +880,16 @@ function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: st
       borderRadius={10}
       {...((isWeb ? { boxShadow: t.v("lift"), role: "alertdialog", "aria-label": "Confirm the move" } : {}) as object)}
     >
-      <Txt spec={{ voice: "data", scale: 10.5 / 12.5, weight: 600, ls: 0.04, upper: true, color: "dim", lineHeight: 1.3 }}>Confirm the move</Txt>
+      <Kind t={t}>Confirm the move</Kind>
       <Txt spec={{ voice: "app", scale: 1, lineHeight: 1.45 }}>{sentence}</Txt>
-      <View flexDirection="row" flexWrap="wrap" gap={6}>
-        {button(yes, true, onYes)}
-        {button("Cancel", false, onNo)}
+      {/* `.options`: 14 above, on top of the grid's gap; the buttons in the pop's own size (`font: inherit`). */}
+      <View flexDirection="row" flexWrap="wrap" gap={6} marginTop={14}>
+        <Button kind="primary" font={{ scale: 1 }} onPress={onYes}>
+          {yes}
+        </Button>
+        <Button kind="ghost" font={{ scale: 1 }} onPress={onNo}>
+          Cancel
+        </Button>
       </View>
     </View>
   );

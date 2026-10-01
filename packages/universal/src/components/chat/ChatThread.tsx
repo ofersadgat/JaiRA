@@ -145,6 +145,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             entries={m.split !== null ? m.split.shared : m.seam !== null ? m.seam.shared : m.entries}
             {...(plain ? { live, working: m.answering } : {})}
             empty={m.answering ? "Working…" : "This conversation has not said anything yet."}
+            artifacts={m.artifacts}
             onEdit={m.edit}
             scope={m.taskId}
             rails
@@ -161,7 +162,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             </ChatFork>
             {m.seam.own.length > 0 ? (
               <Paper minHeight={viewport}>
-                <Transcript session={m.thread?.session ?? null} entries={m.seam.own} live={live} working={m.answering} onEdit={m.edit} scope={m.taskId} rails {...narrated} {...doomed} />
+                <Transcript session={m.thread?.session ?? null} entries={m.seam.own} live={live} working={m.answering} artifacts={m.artifacts} onEdit={m.edit} scope={m.taskId} rails {...narrated} {...doomed} />
                 {asking}
               </Paper>
             ) : null}
@@ -176,6 +177,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               <Transcript
                 session={m.thread?.session ?? null}
                 entries={m.shown.entries}
+                artifacts={m.artifacts}
                 rails
                 {...(m.shown.key === KEPT ? { live, working: m.answering, onEdit: m.edit } : {})}
                 {...(m.status !== null && m.shown.key === KEPT ? { narrated: true } : {})}

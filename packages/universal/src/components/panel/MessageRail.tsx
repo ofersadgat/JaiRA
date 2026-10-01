@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX } from "react";
+import { useContext, useEffect, useState, type JSX } from "react";
 import { typeNameOf, type ContextReading, type ViewId } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { familyIcon } from "@jaira/ui/icons";
@@ -13,6 +13,7 @@ import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { anchorRectOf } from "../floats/anchor";
 import { Icon, type IconName } from "./Icon";
 import { TurnContext } from "./TurnContext";
+import { InNoteContext } from "./noteContext";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 
 /**
@@ -68,6 +69,7 @@ export function MessageRail({
 }): JSX.Element {
   const t = useTokens();
   const panel = useValuePanel();
+  const inNote = useContext(InNoteContext);
   const [copied, setCopied] = useState(false);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   // The tick goes back to being a copy icon on its own.
@@ -114,10 +116,8 @@ export function MessageRail({
       flexDirection="row"
       alignItems="center"
       gap={2}
-      marginTop={4}
-      paddingHorizontal={1}
-      minHeight={22}
-      flexWrap="wrap"
+      // Inside a note row (an adopted task's history) the note's own rail rule reaches this one too.
+      {...(inNote ? { marginLeft: "auto", alignSelf: "center", flexWrap: "nowrap" } : { marginTop: 4, paddingHorizontal: 1, minHeight: 22, flexWrap: "wrap" })}
       opacity={shown ? 1 : 0}
       {...(entry.role === "user" ? { justifyContent: "flex-end" } : {})}
     >

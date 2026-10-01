@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
-import { parkedGateOf, reviewerServicesOf, startAgainOf } from "@jaira/ui/panelHost";
+import { leafWaitOf, parkedGateOf, reviewerServicesOf, startAgainOf } from "@jaira/ui/panelHost";
 import { push } from "@jaira/ui/panelStack";
 import { SHUT, shutOf } from "@jaira/ui/uiState";
 import { useShell } from "../../app/shell";
@@ -13,6 +13,8 @@ export type RunFields = Pick<
   | "conversation" | "sessions" | "onLoadSession" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "userEvents" | "onDeliverUserEvent" | "sessionHistory" | "records" | "liveTurn" | "batches"
   | "onWalkInto" | "onWalkIntoSidechain" | "onOpenWorkflow" | "runFocus" | "onRunFocus" | "onRunHere" | "runGate" | "onRunGate" | "runGateServices" | "onRerun" | "onResume" | "onRewind" | "onFork"
   | "runQuestion" | "onRunQuestion" | "runApproval" | "onRunApproval" | "moveQuestions" | "onMoveQuestion"
+  // A leaf's own panel (`files/LeafPanel.tsx`): the conversation on screen, and the interaction it waits on.
+  | "session" | "sessionInstance" | "waiting" | "onAnswer"
 >;
 
 /**
@@ -60,12 +62,22 @@ export function useRunContext(): RunFields {
     },
     ...(focus !== undefined ? { runFocus: focus } : {}),
     onRunFocus: runFocus.set,
-    onRunHere: (instance, onScreen) => runViewed.set({ current: instance, onScreen }),
+    // Only when something moved — a scroll reports on every frame (`App.tsx`'s `onRunHere`).
+    onRunHere: (instance, onScreen) => {
+      const was = runViewed.get();
+      const kept = onScreen !== undefined && was.onScreen !== undefined && was.onScreen.size === onScreen.size && [...onScreen].every((id) => was.onScreen!.has(id)) ? was.onScreen : onScreen;
+      if (was.current !== instance || was.onScreen !== kept) runViewed.set({ current: instance, onScreen: kept });
+    },
     ...(gate !== undefined ? { runGate: gate, onRunGate: (value: unknown) => actions.answer(gate.requestId, value), runGateServices: services } : {}),
     ...(question !== undefined ? { runQuestion: question, onRunQuestion: (answers: Record<string, string | string[]> | undefined) => actions.answerQuestion(question.requestId, answers) } : {}),
     ...(approval !== undefined ? { runApproval: approval, onRunApproval: (decision, scope, extras) => actions.decideApproval(approval.requestId, decision, scope, extras) } : {}),
     // The questions MOVES parked in task conversations: each drawn where its move asked it.
     moveQuestions: state.pending.filter((p) => p.moves === true),
+    // The conversation a leaf shows, and the interaction the selected task is parked on — what the leaf
+    // pins, and pressing Answer selects (`App.tsx`'s `waiting` and `onAnswer`).
+    session: state.session,
+    sessionInstance: state.sessionInstance,
+    ...leafWaitOf(state.pending, state.selected, actions.select),
     onMoveQuestion: (requestId: string, value: unknown) => actions.answer(requestId, value),
     onRerun: (taskId: string) => startAgainOf(actions, detail, project, taskId),
     onResume: (taskId: string) => void actions.resumeTask(taskId, project),

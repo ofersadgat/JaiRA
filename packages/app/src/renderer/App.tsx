@@ -136,7 +136,7 @@ import { RunModeToggle, RunView } from "./runViews";
 import { SidePanel } from "./sidePanel";
 import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
 import { EMPTY_STACK, push, selectStep, topOf, type PanelEntry, type PanelStack } from "./panelStack";
-import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, reviewerServicesOf, roomOf, useAdoptSubagent, rerunSurfaceFor, runSurfaceFor, usePanelStacks, useRoomRule } from "./panelHost";
+import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, leafWaitOf, reviewerServicesOf, roomOf, useAdoptSubagent, rerunSurfaceFor, runSurfaceFor, usePanelStacks, useRoomRule } from "./panelHost";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
 import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
@@ -164,6 +164,7 @@ import {
 import { publishUsageFigures, useNow } from "./limitsStore";
 import { History, NewTask, NewTaskForm } from "./widgets";
 import { invoke, subscribe, useApp, type SettingsSection, type View } from "./store";
+import { syncSurfaceOf } from "./syncState";
 
 /**
  * The layer switch at a settings page's top-right corner — always there, on every page, whatever the
@@ -833,7 +834,8 @@ export default function App(): JSX.Element {
   }, [title]);
 
   // The interaction the selected task is parked on, if any — what the leaf conversation pins.
-  const waiting = pending.find((p) => p.taskId === state.selected);
+  // `panelHost.ts`'s `leafWaitOf`, shared with the universal copy (decision 0015).
+  const leafWait = leafWaitOf(pending, state.selected, actions.select);
 
   /**
    * The open state's declared inputs, read from the SAVED document.
@@ -952,7 +954,7 @@ export default function App(): JSX.Element {
     landing: state.landing,
     liveTurn: state.liveTurn,
     onShowSession: actions.showSession,
-    waiting: waiting ? { component: waiting.config?.prompt ?? waiting.component } : undefined,
+    waiting: leafWait.waiting,
     onSelectTask: actions.select,
     // How a sequential batch's elements are laid out — the reader's own setting.
     batches: look.conversation.sequentialBatches,
@@ -1019,7 +1021,7 @@ export default function App(): JSX.Element {
     // The request's OWN project, not the ambient one. A parked request stamps the project it parked
     // in precisely because the inbox spans projects, and dropping the stamp here left the selection
     // to be reconstructed from whatever happened to be focused — see `projectOfTask` in `store.ts`.
-    onAnswer: waiting ? () => actions.select(waiting.taskId, waiting.project) : undefined,
+    onAnswer: leafWait.onAnswer,
     // The action, not the channel — re-running a finished task answers with a DIFFERENT task, and
     // this is what moves the selection onto it. See `FileSurfaceContext.onRerun`. Routed through
     // {@link primaryAct} so the strip's fallback button starts a task that recorded nothing in
@@ -1058,19 +1060,8 @@ export default function App(): JSX.Element {
     },
     // The description's viewer, and the one surface that can write to files other than the open one
     // — a proposed state file becomes a draft against its own row in the tree.
-    sync: {
-      status: state.sync.status,
-      result: state.sync.result,
-      running: state.sync.running,
-      error: state.sync.error,
-      progress: state.sync.progress,
-      refresh: actions.syncStatus,
-      run: actions.runSync,
-      cancel: actions.cancelSync,
-      openEdit: actions.openSyncEdit,
-      openDocument: actions.openPath,
-      reviewChangeset: actions.reviewSyncChangeset,
-    },
+    // `syncState.ts`'s `syncSurfaceOf`, shared with the universal copy (decision 0015).
+    sync: syncSurfaceOf(state.sync, actions),
     editorTab: state.editorTab,
     onEditorTab: actions.setEditorTab,
     detectSchema: actions.detectSchema,

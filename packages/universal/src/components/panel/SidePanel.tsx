@@ -411,8 +411,13 @@ export function SidePanel({
           <Txt spec={{ voice: "app", scale: 0.95 }} ellip flex={1} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 0.95, weight: 700 }}>{offerName ?? crumbOf(stack.offer)}</Txt> is selected
           </Txt>
-          <Press onPress={() => onStack(acceptOffer)}>
-            <Txt spec={{ voice: "app", scale: 0.95, color: "accent" }}>Show it here</Txt>
+          {/* `button.link`: data at --size-data × 11/12, --accent, underlined under the pointer. */}
+          <Press onPress={() => onStack(acceptOffer)} flexShrink={0}>
+            {({ hovered }) => (
+              <Txt spec={{ voice: "data", scale: 11 / 12, color: "accent" }} numberOfLines={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
+                Show it here
+              </Txt>
+            )}
           </Press>
           <SpIcon icon="cross" label="Dismiss" onPress={() => onStack((was) => ({ ...was, offer: null, motion: "none" }))} />
         </View>

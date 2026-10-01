@@ -3,8 +3,8 @@
  * (a finished task, a failed one, one parked at its gate, one archived), then launched once per look.
  * `parity.mts` runs the gates; `studio.mts` keeps one launched for iterating on a copy.
  */
-import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { mkdirSync, writeFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import { App } from "./driver.mjs";
 import { blockedAtTheGate, type World } from "./world.mjs";
@@ -67,13 +67,32 @@ export const PATCH_SAMPLE = [
 /** A page, for the Files room's Rendered view (`files-html`). */
 export const HTML_SAMPLE = "<!doctype html>\n<html>\n  <body>\n    <h1>Release notes</h1>\n    <p>Cards now keep their lane.</p>\n  </body>\n</html>\n";
 
+/** A table, for the Files room's table view (`files-csv`): a quoted field with a comma in it, and a short row. */
+export const CSV_SAMPLE = ["card,lane,points", 'rebuild the docs site,running,3', '"lint, then test",finished,5', "add dark mode,not-started", ""].join("\n");
+
 /** The files the Files room's scenes open, written into the project by the seed (a world seeded before them needs `--reseed`). */
 export function writeSamples(project: string): void {
   writeFileSync(join(project, "lint.ts"), TS_SAMPLE);
   writeFileSync(join(project, "tsconfig.json"), TSCONFIG_SAMPLE);
   writeFileSync(join(project, "change.patch"), PATCH_SAMPLE);
   writeFileSync(join(project, "notes.html"), HTML_SAMPLE);
+  writeFileSync(join(project, "cards.csv"), CSV_SAMPLE);
+  // A description of `feature/plan`, beside its state file: the Files room's sync panel (`files-sync`).
+  mkdirSync(join(project, ".jaira", "workflows", "feature"), { recursive: true });
+  writeFileSync(join(project, ".jaira", "workflows", "feature", "plan.md"), DESCRIPTION_SAMPLE);
 }
+
+/** What `feature/plan` is for, as its description says — read by the sync panel, rendered under its bar. */
+export const DESCRIPTION_SAMPLE = [
+  "# Plan a feature",
+  "",
+  "Turns an issue into a plan somebody can build from.",
+  "",
+  "- **goals** — what the issue asks for, as a list",
+  "- **context** — what the code already does about it",
+  "- **critique** — a second reading, and a human review before anything is built",
+  "",
+].join("\n");
 
 export async function seed(world: World, out: string, port = 9239): Promise<void> {
   writeSamples(world.project);
@@ -134,6 +153,26 @@ export const SCENES: readonly Scene[] = [
       await app.until(says("retire the old lint"), "the archived card to show");
     },
   },
+  {
+    // A card in the air (decision 0005): "add dark mode" picked up and held over Session, not dropped —
+    // the columns that would take it dashed, Session filled, the host's dry run in its drop preview. Real
+    // DOM drag events on the card and the heading, by their words, which both boards' handlers take.
+    name: "board-drag",
+    reach: async (app) => {
+      await app.until(says("add dark mode"), "the card to lift");
+      const fire = (text: string, types: string[]): string => `(() => {
+        const e = [...document.querySelectorAll("*")].find((e) => [...e.childNodes].some((n) => n.nodeType === 3 && n.textContent === ${JSON.stringify(text)}) && e.getBoundingClientRect().width > 0);
+        if (!e) throw new Error("nothing says " + ${JSON.stringify(text)});
+        window.__drag ??= new DataTransfer();
+        for (const type of ${JSON.stringify(types)}) e.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer: window.__drag }));
+        return true;
+      })()`;
+      await app.evaluate(fire("add dark mode", ["dragstart"]));
+      await settle(800);
+      await app.evaluate(fire("Session", ["dragenter", "dragover"]));
+      await app.until(says("Drop to"), "the drop preview");
+    },
+  },
   // The parked task's run, drilled from its card (a double-click): the Tasks room's middle column is the
   // run's executions as cards, one column per child the workflow declares (`RunView`).
   { name: "run", reach: (app) => drillParked(app) },
@@ -163,6 +202,106 @@ export const SCENES: readonly Scene[] = [
       if (!hit) throw new Error("no goals card to walk into");
       await app.until(`[...document.querySelectorAll("textarea")].length > 0`, "the run's composer");
       await settle(1500);
+    },
+  },
+  // The run's conversation with the pointer on a knot of its rail: the lane lit in every row it crosses,
+  // and its name following the pointer (`.rail-tip`).
+  {
+    name: "run-rail-hover",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "run-convo")!.reach(app);
+      const at = await lastKnot(app);
+      await app.hover(at.x, at.y);
+      await settle(600);
+    },
+  },
+  // …and that knot clicked: its lane folds, and the row says so in place of what it held (`.rail-rolled`).
+  {
+    name: "run-knot-fold",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "run-convo")!.reach(app);
+      const at = await lastKnot(app);
+      await app.hover(at.x, at.y);
+      await app.clickAt(at.x, at.y);
+      // By its text, not its words on screen: the tag is set upper case.
+      await app.until(`document.body.textContent.includes("rolled up")`, "the lane to roll up");
+      await app.hover(2, 2);
+      await settle(800);
+    },
+  },
+  // …and that knot right-clicked: the lane's menu, the entered row's two verbs.
+  {
+    name: "run-lane-menu",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "run-convo")!.reach(app);
+      const at = await lastKnot(app);
+      await app.hover(at.x, at.y);
+      await app.evaluate(`(() => {
+        const el = document.elementFromPoint(${at.x}, ${at.y});
+        el.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: ${at.x}, clientY: ${at.y}, button: 2 }));
+      })()`);
+      await app.until(says("Fork before"), "the lane's menu");
+      await settle(500);
+    },
+  },
+  // …and a step of the Steps index beside it pressed: the step's card in the panel, and the conversation
+  // taken to where the run entered that state (a bookmark), the index marking where the reader now is.
+  {
+    name: "run-bookmark",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "run-convo")!.reach(app);
+      const hit = await app.evaluate<boolean>(`(() => {
+        const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === "goals" && e.getBoundingClientRect().left > innerWidth - 420);
+        if (!el) return false;
+        (el.closest("button, [role=button]") ?? el).click();
+        return true;
+      })()`);
+      if (!hit) throw new Error("no goals step in the index");
+      await app.until(says("How it ran"), "the step's card");
+      await settle(1800);
+    },
+  },
+  // A task that ADOPTED another, opened in the panel: its conversation, where the adoption's line
+  // unfolds the adopted task's own history under it (read by that task's id). Made the first time.
+  {
+    name: "task-adopted",
+    reach: async (app) => {
+      await adopted(app);
+      await clickFirst(app, "Tasks");
+      await app.until(says(ADOPTER), `${ADOPTER} on the board`);
+      await clickFirst(app, ADOPTER);
+      await app.until(`document.body.textContent.includes("adopted")`, "the adoption's line in the panel");
+      await app.until(says("Extract goals from"), "the adopted history to unfold");
+      await settle(1800);
+      // From its top: the history arrives after the page first pinned to its end, and the desktop's
+      // follow waits for the task's own rows to change before it moves again.
+      await scrollPanel(app, 0);
+    },
+  },
+  // The parked task's panel PINNED, and another task selected: the panel keeps the parked task, whose run
+  // the store no longer holds — its conversation read by its own id (`OwnRun`).
+  {
+    name: "task-pinned",
+    reach: async (app) => {
+      await app.clickText(PARKED);
+      await app.until(says("Answering this continues the task."), "the task to open in the panel");
+      await clickTitled(app, ["Pin — keep this while you select other things"]);
+      await app.until(says("add dark mode"), "the finished task on the board");
+      await app.evaluate(`(() => {
+        const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === "add dark mode" && e.getBoundingClientRect().left > 260 && e.getBoundingClientRect().right < innerWidth - 420);
+        (el.closest("button, [role=button]") ?? el).click();
+      })()`);
+      await settle(2500);
+      await app.until(says("Answering this continues the task."), "the pinned task's gate, read by its own run");
+      await settle(1200);
+    },
+  },
+  // …and at its end: the last of the adopted history, and the rows after the line.
+  {
+    name: "task-adopted-end",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "task-adopted")!.reach(app);
+      await scrollPanel(app, 1e9);
     },
   },
   // The parked task's other tabs in the panel: Steps, Changes, Outputs (`{}`) and Configuration (an icon).
@@ -410,6 +549,11 @@ export const SCENES: readonly Scene[] = [
       ["files-plain", [".jaira", ".gitignore"], "Revert"],
       // A document held to a schema: the verdict, the hint, a violation, and "Add missing fields".
       ["files-schema", ["tsconfig.json"], "Add missing fields"],
+      // A patch as the change it describes (`PatchView`), and a CSV as its table (`TableView`).
+      ["files-patch", ["change.patch"], "@@ -3,5 +3,6 @@"],
+      ["files-csv", ["cards.csv"], "lint, then test"],
+      // A workflow's description: the sync panel's bar (never synced, so no recommendation) over the rendering.
+      ["files-sync", [".jaira", "workflows", "feature", "plan.md"], "Turns an issue into a plan somebody can build from."],
     ] as const
   ).map(
     ([name, open, shows]): Scene => ({
@@ -587,6 +731,67 @@ export const SCENES: readonly Scene[] = [
       },
     }),
   ),
+  {
+    // A conversation whose answer is a page that RUNS: `show_artifact` with `interactive`, drawn under its
+    // call in the frame the record grants it (`jaira-artifact:`), its script already at work. Made the
+    // first time it is reached, as `conversation` is; `artifact-prompt` presses its button.
+    name: "conversation-artifact",
+    reach: async (app) => {
+      await artifactConversation(app);
+      await app.clickText("Chat");
+      await app.until(says(ARTIFACT_CONVERSATION), "the conversation to be listed");
+      await app.clickText(ARTIFACT_CONVERSATION);
+      await app.until(says(ARTIFACT_ANSWER), "the answer to be drawn");
+      await app.until(`[...document.querySelectorAll("iframe")].some((f) => f.src.startsWith("jaira-artifact:"))`, "the page to be granted a frame");
+      // The prompt an earlier `artifact-prompt` put in the box is kept with the conversation: emptied, as
+      // a person would, so every scene from here starts from the same box.
+      const kept = await app.evaluate<boolean>(`(() => { const a = [...document.querySelectorAll("textarea")].find((a) => a.value === ${JSON.stringify(ARTIFACT_PROMPT)}); if (!a) return false; a.focus(); a.select(); return true; })()`);
+      if (kept) {
+        await app.press("Backspace", 8);
+        await app.until(`![...document.querySelectorAll("textarea")].some((a) => a.value !== "")`, "the box to empty");
+        await app.evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`);
+      }
+      await settle(1200);
+    },
+  },
+  {
+    // …and its button pressed: what the page posts lands in the composer, to be read and sent (or not).
+    name: "artifact-prompt",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "conversation-artifact")!.reach(app);
+      const at = await app.evaluate<{ x: number; y: number }>(`(() => {
+        const r = [...document.querySelectorAll("iframe")].find((f) => f.src.startsWith("jaira-artifact:")).getBoundingClientRect();
+        return { x: r.left + ${ARTIFACT_BUTTON.x}, y: r.top + ${ARTIFACT_BUTTON.y} };
+      })()`);
+      await app.clickAt(at.x, at.y);
+      await app.until(`[...document.querySelectorAll("textarea")].some((a) => a.value === ${JSON.stringify(ARTIFACT_PROMPT)})`, "the page's prompt in the composer");
+      await app.evaluate(`document.activeElement && document.activeElement.blur && document.activeElement.blur()`);
+      await settle(600);
+    },
+  },
+  {
+    // The conversation's Produced tab with the page picked: its row says it `runs`, and it runs there
+    // too, on the task's own grant (the panel has no composer, so nothing it posts goes anywhere).
+    name: "artifact-produced",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "conversation-artifact")!.reach(app);
+      await clickFirst(app, "Produced");
+      await app.until(says(ARTIFACT_PATH), "the Produced tab to list the page");
+      await clickTitled(app, [ARTIFACT_PATH]);
+      await app.until(`[...document.querySelectorAll("iframe")].filter((f) => f.src.startsWith("jaira-artifact:")).length >= 2`, "the picked page to be granted a frame");
+      await settle(1200);
+    },
+  },
+  {
+    // …opened on its own in the panel (the Preview card): the page full bleed, its grant come with it.
+    name: "artifact-preview",
+    reach: async (app) => {
+      await SCENES.find((s) => s.name === "artifact-produced")!.reach(app);
+      await clickTitled(app, ["Open it on its own, in this panel"]);
+      await app.until(`document.querySelector('[title="Hold it — keep it in Held"], [aria-label="Hold it — keep it in Held"]') !== null && [...document.querySelectorAll("iframe")].some((f) => f.src.startsWith("jaira-artifact:") && f.getBoundingClientRect().height > 400)`, "the page, on its own in the panel");
+      await settle(1500);
+    },
+  },
   {
     // The same conversation from the root's "All conversations" drawer: its rows carry their project's chip.
     name: "all-conversations",
@@ -851,6 +1056,46 @@ async function boardMenu(app: App, text: string, shows: string): Promise<void> {
 
 /** The task the `task-answered` scene opens: parked at its gate, and answered. */
 export const ANSWERED = "answer the critique";
+
+/** The task the `task-adopted` scene opens: a `ship` task that adopted a finished planning task. */
+export const ADOPTER = "ship the adopted plan";
+const ADOPTEE = "plan to be adopted";
+/** `ship`: a workflow that mounts the planning workflow as its one child — what an adoption needs. */
+const SHIP = {
+  label: "Ship",
+  environment: { kind: "prompt", model: "planner" },
+  inputs: { issue: { kind: "blob", schema: { type: "string", contentMediaType: "markdown" } } },
+  children: { plan: { state: "feature/plan", inputs: { issue: ".inputs.issue" } } },
+  sequence: ["plan"],
+};
+/** Scroll the side panel's scroller (the tallest one in it) to `y`. */
+async function scrollPanel(app: App, y: number): Promise<void> {
+  await app.evaluate(`(() => {
+    const boxes = [...document.querySelectorAll("*")].filter((e) => e.scrollHeight > e.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(e).overflowY) && e.getBoundingClientRect().left > innerWidth - 420);
+    const box = boxes.sort((a, b) => b.scrollHeight - a.scrollHeight)[0];
+    if (box) box.scrollTop = ${y};
+  })()`);
+  await settle(900);
+}
+
+async function adopted(app: App): Promise<void> {
+  const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
+  const project = projects.find((p) => p.kind === "user")?.project;
+  const at = project !== undefined ? { project } : {};
+  const tasks = await app.ipc<Array<{ title: string; taskId: string; status: string }>>("task:list", at);
+  if (tasks.some((t) => t.title === ADOPTER)) return;
+  await app.ipc("workflow:write", { stateId: "ship", layer: "project", ...at, text: JSON.stringify(SHIP, null, 2) });
+  let taskId = tasks.find((t) => t.title === ADOPTEE)?.taskId;
+  if (taskId === undefined) taskId = await start(app, ADOPTEE, happyRules());
+  for (let i = 0; i < 60; i++) {
+    const now = await app.ipc<Array<{ taskId: string; status: string }>>("task:list", at);
+    if (now.find((t) => t.taskId === taskId)?.status === "completed") break;
+    await settle(500);
+  }
+  const result = await app.ipc<{ ok: boolean; refusal?: { message: string } }>("task:adopt", { taskId, workflow: "ship", title: ADOPTER, ...at, fake: happyRules() });
+  if (!result.ok) throw new Error(`the adoption was refused: ${result.refusal?.message ?? "?"}`);
+  await settle(2500);
+}
 async function answered(app: App): Promise<void> {
   const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
   const project = projects.find((p) => p.kind === "user")?.project;
@@ -920,6 +1165,62 @@ const TOOLS_FAKE = [
   },
 ];
 
+/** The conversation the `conversation-artifact` scene opens, and what its page says and asks. */
+export const ARTIFACT_CONVERSATION = "sketch the lane picker";
+const ARTIFACT_ANSWER = "The picker is above: press its button and it asks for the move.";
+const ARTIFACT_PATH = "lane-picker.html";
+export const ARTIFACT_PROMPT = "Move the card to Finished.";
+/** Where the page's button is, from the frame's top-left (inside its 1px edge): placed, so a click can find it. */
+const ARTIFACT_BUTTON = { x: 1 + 16 + 110, y: 1 + 64 + 16 };
+const ARTIFACT_PAGE = [
+  "<!doctype html>",
+  '<html><body style="margin:0;font:14px/1.4 sans-serif;color:#222">',
+  '<h1 style="margin:0;padding:16px 16px 0;font-size:18px">Lane picker</h1>',
+  '<p id="state" style="margin:4px 16px 0">inert</p>',
+  '<button id="ask" style="position:absolute;left:16px;top:64px;width:220px;height:32px">Ask to move it to Finished</button>',
+  `<script>document.getElementById("state").textContent = "running";document.getElementById("ask").onclick = () => parent.postMessage({ type: "prompt", text: ${JSON.stringify(ARTIFACT_PROMPT)} }, "*");</script>`,
+  "</body></html>",
+].join("\n");
+
+/**
+ * The conversation, made once: the fake model shows an interactive page (`show_artifact`), then answers.
+ * A scripted model runs no tool, so the record the tool would have written — the one a grant consults —
+ * is put in the artifact map here, through the project's own store opened as a replica (so nothing of the
+ * running window's is recovered or claimed).
+ */
+async function artifactConversation(app: App): Promise<void> {
+  const projects = await app.ipc<Array<{ project: string; kind: string }>>("project:list", {});
+  const project = projects.find((p) => p.kind === "user")?.project;
+  if (project === undefined) throw new Error("the world has no project to talk in");
+  const tasks = await app.ipc<Array<{ title: string; taskId: string }>>("task:list", { project });
+  let taskId = tasks.find((t) => t.title === ARTIFACT_CONVERSATION)?.taskId;
+  if (taskId === undefined) {
+    const envelope = { path: ARTIFACT_PATH, mediaType: "text/html", bytes: Buffer.byteLength(ARTIFACT_PAGE, "utf8"), uri: "", interactive: true, content: ARTIFACT_PAGE };
+    const made = await app.ipc<{ taskId: string }>("task:create", { title: ARTIFACT_CONVERSATION, workflow: "chat/session", inputs: { message: "Sketch a lane picker I can click." }, project });
+    taskId = made.taskId;
+    envelope.uri = `artifact://${taskId}/${ARTIFACT_PATH}`;
+    const fake = [
+      {
+        output: ARTIFACT_ANSWER,
+        messages: [
+          { role: "assistant", content: [use("a1", "show_artifact", { path: ARTIFACT_PATH, content: ARTIFACT_PAGE, interactive: true })] },
+          { role: "user", content: [{ type: "tool_result", tool_use_id: "a1", content: [{ type: "text", text: JSON.stringify(envelope) }] }] },
+          { role: "assistant", content: [{ type: "text", text: ARTIFACT_ANSWER }] },
+        ],
+      },
+    ];
+    await app.ipc("task:start", { taskId, project, fake });
+    await settle(1500);
+  }
+  const { openProject } = await import("@jaira/persistence");
+  const store = openProject(project, { baseDir: join(dirname(project), "home"), replica: true });
+  try {
+    store.artifacts.put({ taskId, logicalPath: ARTIFACT_PATH, content: ARTIFACT_PAGE, hash: "scene", bytes: Buffer.byteLength(ARTIFACT_PAGE, "utf8"), format: "text/html", interactive: true, createdAt: 1 });
+  } finally {
+    store.close();
+  }
+}
+
 /**
  * Drill the parked task's run: a double-click on its card in the board (the middle column — not the
  * inbox strip's or the sidebar's mention of it), as a person opens a run.
@@ -937,6 +1238,23 @@ async function drillParked(app: App): Promise<void> {
   if (!hit) throw new Error("no parked card to drill");
   await app.until(says("not reached") + " || " + says("Human Review"), "the run to open");
   await settle(800);
+}
+
+/**
+ * The centre of the lowest knot on the middle column's rail in view — a fork's knot (r 4.5), an `<svg>`
+ * circle on both pages.
+ */
+async function lastKnot(app: App): Promise<{ x: number; y: number }> {
+  const at = await app.evaluate<{ x: number; y: number } | null>(`(() => {
+    const knots = [...document.querySelectorAll("circle")]
+      .filter((c) => c.getAttribute("r") === "4.5" && c.getAttribute("opacity") === null)
+      .map((c) => c.getBoundingClientRect())
+      .filter((r) => r.width > 0 && r.left > 260 && r.right < innerWidth - 420 && r.top > 60 && r.bottom < innerHeight - 120);
+    const last = knots.sort((a, b) => a.top - b.top).at(-1);
+    return last ? { x: Math.round(last.left + last.width / 2), y: Math.round(last.top + last.height / 2) } : null;
+  })()`);
+  if (at === null) throw new Error("no knot on the rail in view");
+  return at;
 }
 
 /**
@@ -1041,6 +1359,16 @@ export async function goTo(app: App, path: string, to: { look?: Look; scene?: Sc
   // holds every page for several seconds.
   await app.until(drawn, `${url} to draw`, 240);
   await app.hover(2, 2);
+  // A panel a scene pinned (`task-pinned`) stays pinned in the running app across pages, and a pinned
+  // panel ignores the selection every later scene opens a task by: let it go first.
+  if (to.scene !== undefined) {
+    const unpinned = await app.evaluate<boolean>(`(() => {
+      const el = document.querySelector('[title="Unpin — let a new selection replace this"], [aria-label="Unpin — let a new selection replace this"]');
+      if (el) el.click();
+      return el !== null;
+    })()`);
+    if (unpinned) await settle(400);
+  }
   step("scene");
   if (to.scene !== undefined) await to.scene.reach(app);
   step("reached");

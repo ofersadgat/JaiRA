@@ -1,2 +1,2 @@
 export { Island } from "./Island";
-export type { IslandProps } from "./types";
+export type { IslandHandle, IslandProps } from "./types";

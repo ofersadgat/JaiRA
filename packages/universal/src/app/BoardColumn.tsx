@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import { boardCardOrderOf, pickCard, type BoardPick } from "@jaira/ui/boardModel";
 import { openColumnMenu, openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
 import type { AskSpec } from "@jaira/ui/menu";
-import { undoableOn } from "@jaira/ui/taskDrag";
+import { dragOffersOf, undoableOn } from "@jaira/ui/taskDrag";
 import { groupOf, groupProjects, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
 import { Board, StickyScroll, type Mods, type StickyScrollValue } from "../components/Board";
 import { AskDialog } from "../components/files/AskDialog";
@@ -224,7 +224,15 @@ export function BoardColumn(): JSX.Element {
                   onTaskMenu={(card, at) => openTaskMenu(menuHost, own(card), card, at)}
                   // The column's own right-click: the place, and every task standing in it.
                   onColumnMenu={(stateId, at) => openColumnMenu(menuHost, g.key, stateId, at)}
+                  // What the running workflows are waiting for somebody to do, per board (`App.tsx`): a
+                  // drop publishes `task_move`, and main answers the wait or moves the task itself.
+                  dragOffers={dragOffersOf(board, state.userEvents)}
+                  onTaskDrop={(_requestId, card, columnKey) => void actions.moveTask(own(card), card.taskId, columnKey)}
+                  // A column no rule offered: the host finds or makes the workflow relating the two — the
+                  // dry run asked once per column per drag, the drop the commit.
                   connect={{
+                    ask: (card, column) => actions.connectPreview(own(card), card.taskId, column.stateId),
+                    onDrop: (card, column, confirmed) => void actions.connectTask(own(card), card.taskId, column.stateId, confirmed === true ? { confirmed: true } : {}),
                     onMove: (card, move, confirmed) => void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed === true ? { confirmed: true } : {}) }),
                     undoable: undoableOn(board),
                     onUndo: (taskId) => void actions.undoConnect(taskId, owner(taskId)),

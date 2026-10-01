@@ -9,6 +9,7 @@ import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, p
 import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
+import { invoke } from "@jaira/ui/store";
 import { faceOf, type FaceHost } from "../components/panel/faces";
 import { EventsTaskAutomations } from "../components/workflow/ConfigPanel";
 import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
@@ -82,6 +83,36 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const hold = useCallback((item: PinnedValue) => setHeld((was) => (was.some((one) => one.title === item.title) ? was : [...was, item])), []);
   const unhold = useCallback((item: PinnedValue) => setHeld((was) => was.filter((one) => one.title !== item.title)), []);
 
+  /**
+   * The detail of a task the panel shows that is not the selection — a subtask pushed on the stack, an
+   * entry left under a pushed card (`App.tsx`'s `heldDetails`). Fetched once per task and dropped when
+   * nothing shows it.
+   */
+  const [heldDetails, setHeldDetails] = useState<Record<string, TaskDetail>>({});
+  const shownTasks = [...new Set(panelStack.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [`${entry.taskId}\u0000${entry.project ?? ""}`] : [])))]
+    .filter((key) => key.split("\u0000")[0] !== detail?.taskId)
+    .sort();
+  const shownSig = shownTasks.join("|");
+  useEffect(() => {
+    let live = true;
+    const wanted = new Set(shownTasks.map((key) => key.split("\u0000")[0]!));
+    setHeldDetails((was) => {
+      const kept = Object.fromEntries(Object.entries(was).filter(([taskId]) => wanted.has(taskId)));
+      return Object.keys(kept).length === Object.keys(was).length ? was : kept;
+    });
+    for (const key of shownTasks) {
+      const [taskId, project] = key.split("\u0000") as [string, string];
+      if (heldDetails[taskId] !== undefined) continue;
+      void invoke("task:detail", { taskId, ...(project !== "" ? { project } : {}) })
+        .then((found) => live && setHeldDetails((was) => ({ ...was, [taskId]: found })))
+        .catch(() => undefined);
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownSig]);
+
   // The run's verbs and links as the middle column has them (`App.tsx` hands both the same context).
   const run = useRunContext();
   // ⇤ on a subagent's conversation: into the main view, once its task's run is walked (`App.tsx`'s own).
@@ -114,13 +145,19 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
 
   const host: FaceHost = {
     detail,
-    // The selected task's detail; one the store is not holding is read by its own panel (`OwnRun`), not copied.
-    detailOf: (taskId) => (detail?.taskId === taskId ? detail : chat?.detail?.taskId === taskId ? chat.detail : null),
+    // The selected task's detail, else one fetched for the panel (`heldDetails`); its run is read by its
+    // own entry's body (`OwnRun`).
+    detailOf: (taskId) => (detail?.taskId === taskId ? detail : chat?.detail?.taskId === taskId ? chat.detail : (heldDetails[taskId] ?? null)),
     project: selectedProject,
     source,
     onStack,
     gate: inlineGate,
     onGate: (value) => inlineGate !== undefined && actions.answer(inlineGate.requestId, value),
+    // The gate a task is parked on, wherever its panel is — not only the selected one's.
+    gateOf: (taskId) => {
+      const asking = parkedGateOf(state.pending, taskId);
+      return asking === undefined ? undefined : { gate: asking, onGate: (value: unknown) => actions.answer(asking.requestId, value) };
+    },
     startAgain,
     resume: (taskId) => void actions.resumeTask(taskId, selectedProject),
     cancel: (taskId) => actions.cancelTask(taskId, selectedProject),

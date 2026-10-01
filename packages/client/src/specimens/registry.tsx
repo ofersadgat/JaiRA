@@ -4,12 +4,17 @@ import type { FileSource } from "@jaira/shared/browser";
 import { FileInspector as DomFileInspector } from "@jaira/ui/files";
 import { DataView as DomDataView } from "@jaira/ui/valueView";
 import { DataView, FileInspector, Markdown } from "@jaira/universal";
+import { ARTIFACT_SPECIMENS } from "./artifactSpecimens";
+import { DRAG_SPECIMENS } from "./dragSpecimens";
 import { FLOAT_SPECIMENS } from "./floatSpecimens";
 import { FORM_SPECIMENS } from "./formSpecimens";
+import { FORMS_FILES_SPECIMENS } from "./formsFilesSpecimens";
 import { MESSAGE_SOURCE_SPECIMENS } from "./messageSourceSpecimens";
 import { SHELL_SPECIMENS } from "./shellSpecimens";
 import { REVIEW_SPECIMENS } from "./reviewSpecimens";
+import { CHANGESET_SPECIMENS } from "./changesetSpecimens";
 import { ROOM_SPECIMENS } from "./roomSpecimens";
+import { RAIL_SPECIMENS } from "./railSpecimens";
 import { TRANSCRIPT_SPECIMENS } from "./transcriptSpecimens";
 import { VALUE_SPECIMENS } from "./valueSpecimens";
 
@@ -97,8 +102,18 @@ export const SPECIMENS: Record<string, Specimen> = {
   ...SHELL_SPECIMENS,
   // A review's notes, one from the forge (`reviewSpecimens.tsx`).
   ...REVIEW_SPECIMENS,
+  // The changeset reviewer settled, on a picture, and its picture comparison (`changesetSpecimens.tsx`).
+  ...CHANGESET_SPECIMENS,
   // A card's origin line and Undo, the Debug journal, and Files surfaces (`roomSpecimens.tsx`).
   ...ROOM_SPECIMENS,
+  // The rail in the shapes the world never draws: a stacked column, a rolled-up lane (`railSpecimens.tsx`).
+  ...RAIL_SPECIMENS,
+  // The boards with a drag held part-way: the drop targets, the preview, the move's question (`dragSpecimens.tsx`).
+  ...DRAG_SPECIMENS,
+  // A value owning the panel's column, a page in it full bleed (`artifactSpecimens.tsx`).
+  ...ARTIFACT_SPECIMENS,
+  // A box's `<datalist>` type-ahead, the Files room's last surfaces and the Debug session panel (`formsFilesSpecimens.tsx`).
+  ...FORMS_FILES_SPECIMENS,
   // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,

@@ -575,16 +575,19 @@ screen and the loose-error banner, the offline and disconnected banners, answere
 the run's composer, the message rail and cuts in run transcripts, a subagent's conversation, the value
 view's patch, table, form, image, changes and coloured code, JSON hints, markdown images, the Files
 room's rendered, patch and JSON-form views, the Debug journal, file drop on the composer, and the right-click
-menu on content. Still missing, none cheap:
-- selection-based review notes, line reverts and compiler checks inside the diff island;
-- interactive artifacts (`serve`) — the `artifact` island draws them static;
-- a picture comparison (`imageDiff.tsx`) and the changeset reviewer's read-only mode (a settled
-  `review_artifacts`);
-- adopted history, bookmark focus ("where am I"), the rail's hover, fan, fold and knot menus;
-- drag and drop on the board and the run board, reordering automations, `<datalist>` suggestions;
-- the Files room's delimited, patch-file, leaf and workflow-sync surfaces; the Debug session panel;
-- on a phone only: attaching a file (needs a picker module), the day chip, the fork mark's jump,
-  dashed borders (Android draws them solid) and glyph fallback fonts.
+menu on content. The rest, also 2026-09-30:
+- the changeset reviewer's settled mode, picture comparison, and notes and line reverts on a selection
+  inside the diff island, with its compiler checks (the island's bridge carries commands and calls);
+- interactive artifacts on web and in Electron (the page runs, its prompt fills the composer);
+- adopted history, a task the store is not holding, bookmark focus and "where am I", and the rail's
+  hover, name tip, fan, fold and lane menu;
+- drag and drop on the board and the run board (the DOM's drag events on web; a long press and pan on a
+  phone), and reordering automations;
+- `<datalist>` suggestions (a list drawn as Chromium draws its own), the Files room's delimited,
+  patch-file, leaf and workflow-sync surfaces, and the Debug session panel.
+
+What a phone still lacks is in TODO.md ("Open inside the universal client, on a phone only"), deferred
+by the person on 2026-09-30.
 
 **Performance (2026-09-30), production build, 220 cards and a 120-step conversation.** Typing in a long
 conversation on `/rn` fell from 90 ms a key to 5 ms (the transcript is memoised, so the draft above it

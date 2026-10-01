@@ -9,7 +9,12 @@
  *                                              counts the events the host had received when it built
  *                                              these props (see `host.tsx`: a render built before the
  *                                              host saw the island's latest edit is stale, and redraws
- *                                              the look but not the props)
+ *                                              the look but not the props). A function among the
+ *                                              props cannot travel: it is sent as `{"$call": path}`
+ *                                              and the island calls it back (`call` below)
+ *   {kind: "command", name, value}             do what only the drawn component can (the diff's
+ *                                              `revertSelectedLines`); the answer comes back as an event
+ *   {kind: "return", id, value | error}        what a `call` came back with
  * Island → host, through `window.ReactNativeWebView.postMessage` when it exists, else `window.parent`:
  *   {kind: "ready", ms}                        the page has loaded and can take a render
  *   {kind: "drawn", ms, colours}               the component has drawn what the last render asked for;
@@ -17,7 +22,10 @@
  *                                              how a host sees that the syntax grammars ran; `heap` is
  *                                              the island's JS heap in bytes, where the engine reports it
  *   {kind: "height", px}                       the content's height, whenever it changes (auto-sizing)
- *   {kind: "event", name, value}               a callback the component fired (`onChange`, a link)
+ *   {kind: "event", name, value}               a callback the component fired (`onChange`, a link); a
+ *                                              `rect` in it (a selection's) is in the island's page
+ *   {kind: "call", id, fn, args}               call the host's function at `fn` (a `$call` path) — the
+ *                                              diff's compiler checks, `intel.modified.check(text)`
  *   {kind: "log", level, text}                 a console warning or error, so the host can see fallbacks
  *   {kind: "error", message}                   the component threw
  *
@@ -41,10 +49,14 @@ export interface IslandLook {
   appearance?: JairaAppearanceConfig;
 }
 
-export type ToIsland = { kind: "render"; component: IslandComponent; props: Record<string, unknown>; look: IslandLook; echo?: number };
+export type ToIsland =
+  | { kind: "render"; component: IslandComponent; props: Record<string, unknown>; look: IslandLook; echo?: number }
+  | { kind: "command"; name: string; value?: unknown }
+  | { kind: "return"; id: number; value?: unknown; error?: string };
 
 export type FromIsland =
   | { kind: "ready"; ms: number }
+  | { kind: "call"; id: number; fn: string; args: unknown[] }
   | { kind: "drawn"; ms: number; colours: number; heap: number }
   | { kind: "height"; px: number }
   | { kind: "event"; name: string; value: unknown }

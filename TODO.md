@@ -507,3 +507,46 @@ Two things the live runs settled that are worth not re-deriving:
 - [ ] **Pruning does not touch artifacts or conversations.** DESIGN §12 lists
       "conversation artifacts"; there are no such tables yet (see the §4.2 entry above),
       so pruning covers `runs`, `events` and `command_log` only.
+
+## Open inside the universal client, on a phone only (decision 0015)
+
+The desktop's layout, drawn natively on a phone from the universal copies (`packages/universal`). Each
+of these works on the universal page in a browser or Electron (`/rn`) and not yet on a phone. Deferred
+by the person on 2026-09-30 ("the Phone only gaps can be left for later").
+
+- [ ] **Attaching a file does nothing.** `chat/Composer.tsx`'s `attach()` returns at once off the web,
+      but the clip button is drawn and enabled. Needs a picker module (`expo-document-picker`), a
+      native dev-client rebuild and a check on the emulator.
+- [ ] **No day chip over a conversation.** `chat/ChatThread.tsx` draws it on web only: it reads each
+      message's `data-day` from the DOM and sticks with `position: sticky`. A phone needs each message's
+      y reported by `onLayout` from inside the transcript rows, and a chip placed over the scroller.
+- [ ] **The fork mark's "go to the other side" goes nowhere.** `panel/SessionBands.tsx` scrolls to
+      `[data-fork-place]` and lights the sheet on web; a phone needs the sheet's offset measured inside
+      its `ScrollView` (the same machinery as the day chip).
+- [ ] **Dashed borders draw solid on Android.** `edge()` (`primitives.tsx`) states each side's width
+      separately, and Android draws `borderStyle: "dashed"` only on a border of one width all round.
+- [ ] **Symbol glyphs fall back to the system font.** A glyph DM Sans and JetBrains Mono lack (arrows,
+      checks, box-drawing) is drawn by Android from its own fonts, at other metrics than Chromium's
+      fallback. Needs a symbol face bundled with the 96 cuts, or the glyphs drawn as SVG.
+- [ ] **Interactive artifacts draw static.** A phone's WebView cannot load the desktop's
+      `jaira-artifact:` scheme, so the value view asks for no grant there and shows the page without
+      its script. Needs a transport that serves an artifact over the phone's connection. A pinned
+      page is also only as tall as its content, not the whole panel.
+- [ ] **Drag and drop, beyond the task board.** A long press and pan lifts a card (checked on the
+      emulator); the run board's tiles and the automations' grip use the same `Lift` code but were
+      not tried on a device. A drag does not scroll the board near an edge, the lifted card is hidden
+      rather than dimmed, and a drop from a phone cannot write (its connection is read-only: "Cannot
+      move here").
+- [ ] **The changeset reviewer's phone half is untried.** The diff island's function calls and
+      command handle, the selection's rect moved by `measureInWindow`, the fade slider's
+      `PanResponder`, and the note composer over the WebView with the keyboard up. A changed `.svg`
+      shows blank: React Native's `Image` cannot draw an SVG data URI.
+- [ ] **Runs and the rail, untried on a device.** Bookmark landing and "where am I" measured with
+      `measureLayout`, the rail's tap-to-fold and long-press lane menu, a stacked column's stripes,
+      and the Steps index's row menu. The rail's hover, name tip and fan are pointer-only by nature.
+- [ ] **Suggestions (`<datalist>`) on a phone.** The list hangs under its box (a `Modal` would take
+      the keyboard), so a scroller round the box clips it; it opens on typing or a second tap, with no
+      arrow keys; blur waits 150 ms so a tap on a row lands — untried on the emulator, taps inside a
+      `ScrollView` included (`keyboardShouldPersistTaps`).
+- [ ] **The Debug session panel is still on a phone.** The running dot's pulse and the writing
+      caret's blink do not move.

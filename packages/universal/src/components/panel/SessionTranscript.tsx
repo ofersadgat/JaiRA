@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { MessageAuthor, SessionView, ViewId } from "@jaira/shared/browser";
 import { MESSAGE_SOURCE, messageReadingOf, workflowSourceTitleOf } from "@jaira/ui/messageReading";
 import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
-import type { EditMessage } from "@jaira/ui/transcriptView";
+import type { ArtifactSurface, EditMessage } from "@jaira/ui/transcriptView";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, startOfBlock, type LiveTail, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
 import { keptUnderSummary, type CallSurface } from "@jaira/ui/transcriptRows";
@@ -70,6 +70,7 @@ export const Transcript = memo(function Transcript({
   working,
   calls,
   onOpenSidechain,
+  artifacts,
   padding = [12, 16, 22, 16],
 }: {
   session: SessionView | null;
@@ -94,6 +95,8 @@ export const Transcript = memo(function Transcript({
   calls?: CallSurface | undefined;
   /** Walk into a subagent's conversation — the call that spawned it, and its name. Absent ⇒ no doorway goes anywhere. */
   onOpenSidechain?: ((call: string, name: string) => void) | undefined;
+  /** How to show an artifact that RUNS, and where its messages go (`ArtifactSurface`). Absent ⇒ drawn inert. */
+  artifacts?: ArtifactSurface | undefined;
   /** `.ts`'s padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
   padding?: readonly [number, number, number, number];
 }): JSX.Element {
@@ -126,7 +129,7 @@ export const Transcript = memo(function Transcript({
               {before}
               {cutLine}
               <View minWidth={0} {...fade}>
-                <WorkBlockView entries={block.entries} working={writing && i === blocks.length - 1} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} narrated={narrated} calls={calls} />
+                <WorkBlockView entries={block.entries} working={writing && i === blocks.length - 1} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} />
               </View>
             </Fragment>
           );
@@ -190,7 +193,7 @@ export const Transcript = memo(function Transcript({
 });
 
 /** A sub-transcript, for a subagent's conversation under its call — its own doorways walk on, as the desktop's do. */
-const Inner: TranscriptOf = ({ entries, working, onOpenSidechain }) => <Transcript session={null} entries={entries} working={working} onOpenSidechain={onOpenSidechain} />;
+const Inner: TranscriptOf = ({ entries, working, onOpenSidechain, artifacts }) => <Transcript session={null} entries={entries} working={working} onOpenSidechain={onOpenSidechain} artifacts={artifacts} />;
 
 /**
  * `.ts-cut`: the counted line over what an armed rewind would delete — a dashed rule each side of the
@@ -219,6 +222,7 @@ function WorkBlockView({
   working,
   sidechainOf,
   onOpenSidechain,
+  artifacts,
   narrated,
   calls,
 }: {
@@ -226,11 +230,12 @@ function WorkBlockView({
   working: boolean;
   sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined;
   onOpenSidechain?: ((call: string, name: string) => void) | undefined;
+  artifacts?: ArtifactSurface | undefined;
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
 }): JSX.Element | null {
   const look = useContext(WorkLookContext);
-  const rowOf = (index: number): ReactNode => <Work entry={entries[index]!} open={working} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} narrated={narrated} calls={calls} transcript={Inner} />;
+  const rowOf = (index: number): ReactNode => <Work entry={entries[index]!} open={working} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} transcript={Inner} />;
   // A stretch of nothing but rate limits and notes did no work: hidden, it is not drawn at all.
   if ((look.notes === "hide-blocks" || look.notes === "hide") && isIdle(entries, entries.map((_, i) => i))) return null;
   // One line has nothing to summarise.

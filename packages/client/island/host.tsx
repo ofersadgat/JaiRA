@@ -1,4 +1,4 @@
-import { StrictMode, useEffect, useRef, useState, type JSX } from "react";
+import { StrictMode, useEffect, useMemo, useRef, useState, type JSX } from "react";
 import { createRoot } from "react-dom/client";
 import "@jaira/ui/styles.css";
 import type { FromIsland, IslandLook, ToIsland } from "./protocol";
@@ -58,6 +58,31 @@ export interface IslandPage {
    * is drawn, after the palette and scheme are on the root.
    */
   look?(look: IslandLook): void;
+  /** A host's `command` (`protocol.ts`): what only the drawn component can do. Its answer is an event. */
+  command?(name: string, value: unknown, event: (name: string) => (value: unknown) => void): void;
+}
+
+/** The host's answers still owed to calls this island made, by id. */
+const owed = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
+let calls = 0;
+
+/**
+ * A render's props with each `{"$call": path}` made a function again: calling it asks the host to call
+ * its own (`call`), and the promise settles on the host's `return`.
+ */
+function revive(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(revive);
+  if (value === null || typeof value !== "object") return value;
+  const fn = (value as { $call?: unknown }).$call;
+  if (typeof fn === "string") {
+    return (...args: unknown[]) =>
+      new Promise((resolve, reject) => {
+        const id = ++calls;
+        owed.set(id, { resolve, reject });
+        send({ kind: "call", id, fn, args });
+      });
+  }
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).map(([k, v]) => [k, revive(v)]));
 }
 
 function applyLook(look: IslandLook): void {
@@ -70,14 +95,29 @@ function applyLook(look: IslandLook): void {
 }
 
 function Island({ page }: { page: IslandPage }): JSX.Element | null {
-  const [render, setRender] = useState<ToIsland | null>(null);
+  const [render, setRender] = useState<Extract<ToIsland, { kind: "render" }> | null>(null);
   const asked = useRef(0);
   /** How many events this island has sent — what a render's `echo` is measured against. */
   const emitted = useRef(0);
+  const event = (name: string) => (value: unknown) => {
+    emitted.current += 1;
+    send({ kind: "event", name, value });
+  };
 
   useEffect(() => {
     const receive = (e: MessageEvent): void => {
       const message = (typeof e.data === "string" ? JSON.parse(e.data) : e.data) as ToIsland;
+      if (message?.kind === "command") {
+        page.command?.(message.name, message.value, event);
+        return;
+      }
+      if (message?.kind === "return") {
+        const waiting = owed.get(message.id);
+        owed.delete(message.id);
+        if (message.error !== undefined) waiting?.reject(new Error(message.error));
+        else waiting?.resolve(message.value);
+        return;
+      }
       if (message?.kind !== "render") return;
       applyLook(message.look);
       page.look?.(message.look);
@@ -120,11 +160,10 @@ function Island({ page }: { page: IslandPage }): JSX.Element | null {
     return () => cancelAnimationFrame(frame);
   }, [render]);
 
-  if (render === null) return null;
-  return page.draw(render.props, (name) => (value) => {
-    emitted.current += 1;
-    send({ kind: "event", name, value });
-  });
+  // Revived once per render, not per draw: a function's identity holds while its props do.
+  const props = useMemo(() => (render === null ? null : (revive(render.props) as Record<string, unknown>)), [render]);
+  if (props === null) return null;
+  return page.draw(props, event);
 }
 
 /** Mount `page` as this document's island. */

@@ -12,8 +12,9 @@
  * turn the board's shape into something you cannot read left to right.
  */
 import { Fragment, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import type { BoardCard, BoardColumn, BoardView, InstanceStatus, MoveConfirm as MoveConfirmKind, NextMove, TaskStatus } from "@jaira/shared/browser";
-import { canConnect, ConnectDrag, ownColumnOf, previewOf, type ConnectAsk, type ConnectPreview, type Words } from "./connectDrag";
+import type { BoardCard, BoardColumn, BoardView, InstanceStatus, NextMove, TaskStatus } from "@jaira/shared/browser";
+import { canPickUp, columnDropOf, connectDragOf, CONFIRM_YES, type ColumnDrop } from "./boardDrag";
+import { ownColumnOf, type ConnectAsk, type ConnectDrag, type ConnectPreview, type Words } from "./connectDrag";
 import { MachineChip } from "./machineChip";
 import { pointOf, type MenuPoint } from "./menu";
 import { Pill, PILL_WORD, pillKindOf } from "./pill";
@@ -22,7 +23,7 @@ import { archivedSplitOf, chipTip, drillTargetOf, endedAtOf, endedLabel, holding
 
 export { chipTip, drillTargetOf, endedAtOf, endedLabel, holdingLabelOf, LANE_HEADED, LANE_LABEL, laneOf, lanesOf, LANES, originLineOf, waitingKindOf, type Lane };
 import { cardRemoteWord } from "./remoteStrip";
-import { canDrag, requestFor, NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
+import { NO_DRAG_OFFERS, type DragOffers } from "./taskDrag";
 import { TaskName } from "./taskName";
 
 /**
@@ -399,9 +400,6 @@ export function ConnectPop({ preview }: { preview: ConnectPreview | "asking" | u
     </div>
   );
 }
-
-/** The yes of each ASK cell, as its button says it. */
-const CONFIRM_YES: Record<MoveConfirmKind, string> = { "stop-and-rewind": "Stop and go back", "pause-and-move": "Pause and move" };
 
 /**
  * The move table's QUESTION (decision 0005, the rulings of 2026-09-22): a drop — or a chip — whose
@@ -832,16 +830,7 @@ export function Board({
   const pickUp = (card: BoardCard): void => {
     setDragging(card);
     connecting.current?.end();
-    connecting.current = null;
-    if (connect === undefined || !canConnect(card)) return;
-    const drag = new ConnectDrag(card, connect.ask, answered);
-    connecting.current = drag;
-    const own = ownColumnOf(board.columns, card);
-    for (const column of board.columns) {
-      // Its own column is where it IS; a column a waiting rule offers is that rule's to answer.
-      if (column.key === own || requestFor(dragOffers, card.taskId, column.key) !== undefined) continue;
-      drag.resolve(column);
-    }
+    connecting.current = connectDragOf(board, card, dragOffers, connect, answered);
   };
   const putDown = (): void => {
     connecting.current?.end();
@@ -861,49 +850,9 @@ export function Board({
   // belongs on a second row rather than off the right-hand edge. A level BELOW a root is a sequence
   // the engine advances through, and wrapping that would break the one thing the order means.
   const roots = board.level === "";
-  /**
-   * What a drop on this column would do, while a card is in the air.
-   *
-   * `undefined` when nothing is being dragged, so a column that is not part of a gesture in progress
-   * carries no drop handlers at all rather than handlers that decline.
-   */
-  const dropFor = (column: BoardColumn): { accepts: boolean; onDrop: () => void; preview?: () => ConnectPreview | "asking" | undefined } | undefined => {
-    const card = dragging;
-    if (card === null || onTaskDrop === undefined) return undefined;
-    const columnKey = column.key;
-    const requestId = requestFor(dragOffers, card.taskId, columnKey);
-    const drag = connecting.current;
-    if (requestId !== undefined || drag === null || connect === undefined || drag.answer(columnKey) === undefined) {
-      return {
-        accepts: requestId !== undefined,
-        onDrop: () => {
-          putDown();
-          if (requestId !== undefined) onTaskDrop(requestId, card, columnKey);
-        },
-      };
-    }
-    return {
-      accepts: drag.accepts(columnKey),
-      // THE DROP IS THE COMMIT: no dialog, no second step — except where the move table ASKS first,
-      // and then the question is put in the column the task would land in, and yes is the commit.
-      onDrop: () => {
-        const accepted = drag.accepts(columnKey);
-        const preview = previewOf(drag.answer(columnKey), card, column);
-        putDown();
-        if (!accepted) return;
-        const judgement = (() => {
-          const answer = drag.answer(columnKey);
-          return answer?.status === "answered" ? answer.result.plan?.judgement : undefined;
-        })();
-        if (judgement?.confirm !== undefined) {
-          setConfirming({ column: columnKey, sentence: preview?.confirm ?? "Take this move?", yes: CONFIRM_YES[judgement.confirm], go: () => connect.onDrop(card, column, true) });
-          return;
-        }
-        connect.onDrop(card, column);
-      },
-      preview: () => (drag.answer(columnKey)?.status === "asking" ? "asking" : previewOf(drag.answer(columnKey), card, column)),
-    };
-  };
+  /** What a drop on this column would do, while a card is in the air (`boardDrag.ts`, shared with the copy). */
+  const dropFor = (column: BoardColumn): ColumnDrop | undefined =>
+    columnDropOf({ card: dragging, column, dragOffers, drag: connecting.current, connect, onTaskDrop, putDown, confirm: setConfirming });
   return (
     <div className="board-body">
       <div className={`columns${roots ? " wrap" : ""}`}>
@@ -959,9 +908,7 @@ export function Board({
                     child={card.under !== undefined && column.cards.some((other) => other.taskId === card.under)}
                     {...(connect?.onUndo !== undefined && connect.undoable?.has(card.taskId) === true ? { onUndo: () => connect.onUndo!(card.taskId) } : {})}
                     {...(moveFrom(card) !== undefined ? { onMove: moveFrom(card)! } : {})}
-                    {...(onTaskDrop !== undefined && (canDrag(dragOffers, card.taskId) || (connect !== undefined && canConnect(card)))
-                      ? { onDragStart: () => pickUp(card), onDragEnd: putDown }
-                      : {})}
+                    {...(canPickUp(card, dragOffers, onTaskDrop, connect) ? { onDragStart: () => pickUp(card), onDragEnd: putDown } : {})}
                   />
                 );
               }}

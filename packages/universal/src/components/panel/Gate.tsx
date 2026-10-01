@@ -15,7 +15,7 @@ import { Icon, type IconName } from "./Icon";
 import { gateBodyOf, subjectOf } from "../floats/GateBodies";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { pendingOfPrompt } from "@jaira/ui/approvalModel";
-import { EditArtifactGate, ReviewArtifactGate } from "../artifact/ArtifactGates";
+import { ChangesetGate, EditArtifactGate, ReviewArtifactGate, serveOfGate } from "../artifact/ArtifactGates";
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
@@ -34,7 +34,8 @@ const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 
  *                              glyph 16, --dim, 4 right, 2 below the baseline, then a space
  *   .gate-resumes              --size-app × 11/12.5, --dim, margin 4 0 0 (collapses into the h3's 8)
  *   .question-block            margin-top 14; .question-options row, wrapping, gap 8, margin-top 12
- *                              (collapses into the block's 14)
+ *                              (collapses into the block's 14 — except in a state's panel, `.st-block`,
+ *                              a flex column whose items keep their children's margins)
  *   .question-option           padding 8 12, 1px --line, radius 8, --bg; the label the body's font
  *                              (--size-app × 13/12.5, 1.5), --text. Hover: an --accent edge.
  *   .question-option.primary   --fill-accent ground and edge, --sheen; the label 600 --on-accent.
@@ -83,7 +84,7 @@ export function GateSurface({
   if (settled !== undefined)
     return (
       <FieldFrame.Provider value={!plain}>
-        <SettledGateSurface pending={pending} settled={settled} error={error} plain={plain} />
+        <SettledGateSurface pending={pending} settled={settled} error={error} plain={plain} services={services} />
       </FieldFrame.Provider>
     );
   const body = ((): JSX.Element => {
@@ -94,7 +95,7 @@ export function GateSurface({
         </Txt>
       );
     }
-    if (config?.component === "choose_option" && config.questions === undefined && plainChoice(choicesOfConfig(config))) return <ChooseOption choices={choicesOfConfig(config)} onSubmit={onSubmit} />;
+    if (config?.component === "choose_option" && config.questions === undefined && plainChoice(choicesOfConfig(config))) return <ChooseOption choices={choicesOfConfig(config)} onSubmit={onSubmit} inFlex={plain} />;
     // Every other body (`floats/GateBodies.tsx`): a choice with words or several questions, a
     // confirmation, a form, a tool call, a review or an edit of an artifact, the JSON box.
     return gateBodyOf(pending, onSubmit, pending.resumes || flat ? 0 : 8, flat, services) ?? <Uncopied name={`the ${pending.component} gate`} />;
@@ -119,8 +120,12 @@ export function GateSurface({
   );
 }
 
-/** `ChooseOption` for one question: its options, answered on the click (or held for Confirm). */
-function ChooseOption({ choices, onSubmit }: { choices: readonly Choice[]; onSubmit: (value: unknown) => void }): JSX.Element {
+/**
+ * `ChooseOption` for one question: its options, answered on the click (or held for Confirm). `inFlex`:
+ * the block is an item of a flex column (a state's panel, `.st-block`), so it is a formatting context of
+ * its own and `.question-options`' 12 stays inside its 14 rather than collapsing into it.
+ */
+function ChooseOption({ choices, onSubmit, inFlex = false }: { choices: readonly Choice[]; onSubmit: (value: unknown) => void; inFlex?: boolean }): JSX.Element {
   const [answers, setAnswers] = useState<Record<string, Answer>>(() => initialAnswers(choices));
   const only = choices[0];
   if (only === undefined) return <></>;
@@ -140,7 +145,7 @@ function ChooseOption({ choices, onSubmit }: { choices: readonly Choice[]; onSub
   };
   return (
     <View marginTop={14}>
-      <View flexDirection={bare ? "row" : "column"} flexWrap="wrap" gap={8}>
+      <View flexDirection={bare ? "row" : "column"} flexWrap="wrap" gap={8} marginTop={inFlex ? 12 : 0}>
         {only.options.map((option, index) => (
           <Option
             key={option.value}
@@ -215,7 +220,7 @@ function Option({ label, icon, description, primary = false, danger = false, sel
  * chooser, inert, with what was picked lit; every other gate's body as it was answered is
  * {@link SettledBody}'s.
  */
-function SettledGateSurface({ pending, settled, error, plain }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined; plain: boolean }): JSX.Element {
+function SettledGateSurface({ pending, settled, error, plain, services }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined; plain: boolean; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const t = useTokens();
   const config = pending.config;
   const choices = config?.component === "choose_option" ? choicesOfConfig(config) : undefined;
@@ -234,7 +239,7 @@ function SettledGateSurface({ pending, settled, error, plain }: { pending: Pendi
           panel (a flex column) nothing collapses, and the answered control is a block of its own. */}
       <View marginTop={plain ? 0 : never ? -10 : -8}>
         {choices === undefined ? (
-          <SettledBody pending={pending} value={settled.value} lift={plain ? 0 : never ? 10 : 8} plain={plain} />
+          <SettledBody pending={pending} value={settled.value} lift={plain ? 0 : never ? 10 : 8} plain={plain} services={services} />
         ) : config?.component === "choose_option" && config.questions !== undefined ? (
           <ChoiceSteps choices={choices} answers={answers} onAnswer={onAnswer} onSubmit={() => undefined} readOnly />
         ) : (
@@ -276,14 +281,14 @@ const recordOf = (value: unknown): Record<string, unknown> => (value !== null &&
  * filled, a tool call's approval as it was asked (the same surface, as the DOM draws it: nothing it
  * presses goes anywhere), an artifact reviewed or edited as it was decided (`artifact/ArtifactGates.tsx`
  * with `settled`), and anything else's JSON (`pre.outputs`: --bg, 1px --line, radius 8, padding 8, data
- * 11/12, pre-wrap, at most 220). The changeset reviewer answered (`review_artifacts`) stays
- * {@link Uncopied}.
+ * 11/12, pre-wrap, at most 220). The changeset reviewer answered (`review_artifacts`) is the reviewer
+ * read-only (`ChangesetGate` with `settled`), with the host's services as the desktop's mount has them.
  *
  * `lift` is what the wrapper above took back (the heading's 8, or "Never answered."'s 10, in an
  * `.inline-gate`): a body with no margin of its own above it — the approval, whose heading has none —
  * gives it back, as the DOM's collapse leaves it.
  */
-function SettledBody({ pending, value, lift, plain }: { pending: PendingInteraction; value: unknown; lift: number; plain: boolean }): JSX.Element {
+function SettledBody({ pending, value, lift, plain, services }: { pending: PendingInteraction; value: unknown; lift: number; plain: boolean; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const t = useTokens();
   const config = pending.config;
   if (config?.component === "fill_form") {
@@ -333,12 +338,19 @@ function SettledBody({ pending, value, lift, plain }: { pending: PendingInteract
     );
   }
   if (config?.component === "review_artifact") {
-    return <ReviewArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} flat={false} settled={{ value }} />;
+    return <ReviewArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} flat={false} settled={{ value }} serve={serveOfGate(pending)} />;
   }
   if (config?.component === "edit_artifact") {
-    return <EditArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} settled={{ value }} />;
+    return <EditArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} settled={{ value }} serve={serveOfGate(pending)} />;
   }
-  if (config?.component === "review_artifacts") return <Uncopied name={`the ${pending.component} gate, as it was answered`} />;
+  if (config?.component === "review_artifacts") {
+    // `.mount-host` under the heading with no margin of its own: the reviewer gives back what the wrapper took.
+    return (
+      <View marginTop={lift}>
+        <ChangesetGate pending={pending} config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} project={subjectOf(pending)} host={services} settled={{ value }} />
+      </View>
+    );
+  }
   return (
     <View marginTop={14} padding={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} backgroundColor={t.v("bg") as never} maxHeight={220} {...({ overflow: "auto" } as object)} {...(viewScrollbarProps(t) as object)}>
       <Txt spec={{ voice: "data", scale: 11 / 12 }} whiteSpace="pre-wrap">

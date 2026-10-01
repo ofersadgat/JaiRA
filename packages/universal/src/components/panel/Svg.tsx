@@ -2,10 +2,14 @@ import type { JSX } from "react";
 import NativeSvg, { Circle, Path } from "react-native-svg";
 import { View } from "@tamagui/core";
 
-/** One shape of a drawing: a path, a circle or a line, with its own paint where it differs. */
+/**
+ * One shape of a drawing: a path, a circle or a line, with its own paint where it differs. `filter` is a
+ * CSS filter on the shape (the rail's lit lane, `.rail-cap path.rail-lit`) — web only: a phone has no
+ * pointer to light a lane with.
+ */
 export type Shape =
-  | { kind: "path"; d: string; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number; dash?: string; linecap?: "round" | "butt" | "square"; nonScaling?: boolean }
-  | { kind: "circle"; cx: number; cy: number; r: number; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number };
+  | { kind: "path"; d: string; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number; dash?: string; linecap?: "round" | "butt" | "square"; nonScaling?: boolean; filter?: string }
+  | { kind: "circle"; cx: number; cy: number; r: number; fill?: string; stroke?: string; strokeWidth?: number; opacity?: number; filter?: string };
 
 export interface SvgProps {
   width: number;

@@ -133,9 +133,8 @@ async function crashAndReopen(taskId: string): Promise<void> {
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m) });
   const { recovered } = await service.open(dir);
   expect(recovered).toEqual([taskId]);
-  // Request ids are a per-hub counter (`ui-1`, `ui-2`, …), so a fresh service starts the id space
-  // over. Without this the resumed run's first gate arrives as `ui-1` — the id the crashed run gave
-  // its FIRST gate — and reads as one already answered.
+  // The ids a test saw belong to the service that is gone: the resumed run's gates are new questions,
+  // under ids of this process's own.
   seen.clear();
 }
 

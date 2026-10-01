@@ -3,7 +3,7 @@
  * island (decision 0015, `packages/client/island/artifact.tsx`) carries this and nothing of the value
  * view's editors.
  */
-import type { JSX } from "react";
+import type { CSSProperties, JSX } from "react";
 
 /**
  * HTML a model produced, rendered in a sandbox.
@@ -18,6 +18,8 @@ import type { JSX } from "react";
  * sandbox opened, nothing in here could run. That is a second floor under the first, and it is the
  * reason `valueView.tsx`'s `InteractiveArtifact` cannot be a variant of this component.
  */
-export function Html({ text }: { text: string }): JSX.Element {
-  return <iframe className="vv-html" sandbox="" srcDoc={text} title="Rendered HTML" />;
+export function Html({ text, style }: { text: string; style?: CSSProperties | undefined }): JSX.Element {
+  // `style` is for the universal page (decision 0015), which draws this frame without `styles.css` and
+  // so gives `.vv-html`'s box inline; the desktop passes none.
+  return <iframe className="vv-html" sandbox="" srcDoc={text} title="Rendered HTML" style={style} />;
 }

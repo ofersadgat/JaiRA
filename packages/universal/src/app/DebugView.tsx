@@ -14,6 +14,11 @@ export function DebugView(): JSX.Element {
       debug={state.debug}
       detail={state.detail}
       conversation={state.conversation}
+      sessionHistory={state.sessionHistory}
+      session={state.session}
+      sessionInstance={state.sessionInstance}
+      liveTurn={state.liveTurn}
+      onShowSession={actions.showSession}
       availability={state.availability}
       hasProject={state.at !== null}
       onRun={(options) => void actions.debugRun(options)}

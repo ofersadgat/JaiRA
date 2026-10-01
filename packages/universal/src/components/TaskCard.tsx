@@ -27,7 +27,7 @@ import { Svg } from "./panel/Svg";
  *   :root[data-wash] .card[data-pill=…]    the status wash, which beats hover and selection's ground;
  *                                          selection becomes a 2px ring
  *   .card.card-child                       14 in, a 2px rule on the left
- *   .card-draggable                        grab cursor; HTML5 drag on web (native drags in v2)
+ *   .card-draggable                        grab cursor; HTML5 drag on web (a phone's is `Lift`, round the card)
  *   .card.is-archived                      0.62 opacity, back to 1 when hovered or selected; the pill
  *                                          is how it finished, the meta line when it was archived
  *   .mchip in .card-meta                   where it runs, first on the meta line (`MachineChip`)

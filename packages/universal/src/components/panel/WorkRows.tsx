@@ -10,6 +10,7 @@ import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
 import { isApprovalCall } from "@jaira/ui/workSummary";
 import { askedOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
+import type { ArtifactSurface } from "@jaira/ui/transcriptView";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
@@ -45,7 +46,7 @@ import { ValueView } from "./ValueView";
  */
 
 /** Draws a subagent's conversation — the transcript's own component, handed in (it holds this file). */
-export type TranscriptOf = (props: { entries: TranscriptEntry[]; working?: boolean | undefined; onOpenSidechain?: OpenSidechain | undefined }) => JSX.Element;
+export type TranscriptOf = (props: { entries: TranscriptEntry[]; working?: boolean | undefined; onOpenSidechain?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined }) => JSX.Element;
 
 /** Walk into a subagent's conversation: the call that spawned it, and its name. */
 export type OpenSidechain = (call: string, name: string) => void;
@@ -197,11 +198,11 @@ function Note({ live, children }: { live: boolean; children: string }): JSX.Elem
 }
 
 /** `Payload`: a payload block, or the honest statement that the record kept none. */
-function Payload({ label, value, hint }: { label: string; value: JsonValue | undefined; hint?: string | undefined }): JSX.Element {
+function Payload({ label, value, hint, artifacts }: { label: string; value: JsonValue | undefined; hint?: string | undefined; artifacts?: ArtifactSurface | undefined }): JSX.Element {
   if (value === undefined) return <EmptyPayload>{`no ${label} was recorded`}</EmptyPayload>;
   return (
     <View paddingTop={4} paddingBottom={6} minWidth={0}>
-      <ValueView value={value} label={label} {...(hint !== undefined ? { hint: { mime: hint } } : {})} />
+      <ValueView value={value} label={label} {...(hint !== undefined ? { hint: { mime: hint } } : {})} {...served(artifacts)} />
     </View>
   );
 }
@@ -214,8 +215,17 @@ function EmptyPayload({ children }: { children: string }): JSX.Element {
   );
 }
 
+/**
+ * What lets an artifact in a payload RUN (the desktop's `ArtifactSurface`), as a value view's props: the
+ * grant, and where a message from it goes — the second only where the surface has a composer.
+ */
+function served(artifacts: ArtifactSurface | undefined): { serve?: ArtifactSurface["serve"]; onPrompt?: (text: string) => void } {
+  if (artifacts === undefined) return {};
+  return { serve: artifacts.serve, ...(artifacts.onPrompt !== undefined ? { onPrompt: artifacts.onPrompt } : {}) };
+}
+
 /** `Tool`: one tool call — a line, both its halves when asked for, and what it made, drawn unasked. */
-function Tool({ entry, open, sidechainOf, onOpenSidechain, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
+function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
   // A doorway is drawn for a chain that is here to unfold, or one the host can walk into.
   const line = toolLineOf(entry, open, sub !== undefined || onOpenSidechain !== undefined, calls);
@@ -224,7 +234,7 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, calls, transcript }: 
   // The approval prompt: its line is the whole of it (`Tool`'s first branch).
   if (isApprovalCall(entry)) return <Row {...head} />;
   const shown = ((): ReactNode => {
-    if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} />;
+    if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />;
     if (line.shown === "outcome") {
       const outcome = workflowOutcomeOf(entry.result!);
       return outcome === undefined ? null : <OutcomeNote outcome={outcome} />;
@@ -238,7 +248,7 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, calls, transcript }: 
         </>
       );
     }
-    if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} />;
+    if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;
     if (line.shown === "output") return <ValueView value={entry.output!.value} label={entry.output!.name ?? "output"} {...(entry.output!.schema !== undefined ? { hint: { schema: entry.output!.schema } } : {})} />;
     return undefined;
   })();
@@ -248,13 +258,13 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, calls, transcript }: 
       {...(shown !== undefined ? { shown } : {})}
       body={
         <>
-          <Payload label="arguments" value={entry.args} />
+          <Payload label="arguments" value={entry.args} artifacts={artifacts} />
           {unanswered ? (
             <EmptyPayload>{running ? "still running" : "no result was recorded — the conversation went on without this call answering"}</EmptyPayload>
           ) : (
-            <Payload label="result" value={entry.result} hint={pathMime} />
+            <Payload label="result" value={entry.result} hint={pathMime} artifacts={artifacts} />
           )}
-          {entry.detail !== undefined ? <Payload label="record" value={entry.detail} hint={pathMime} /> : null}
+          {entry.detail !== undefined ? <Payload label="record" value={entry.detail} hint={pathMime} artifacts={artifacts} /> : null}
         </>
       }
     />
@@ -308,6 +318,7 @@ export function Work({
   open,
   sidechainOf,
   onOpenSidechain,
+  artifacts,
   narrated,
   calls,
   transcript,
@@ -316,11 +327,13 @@ export function Work({
   open: boolean;
   sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
+  /** How an artifact in a payload runs, and where its messages go (the desktop's `artifacts`). */
+  artifacts?: ArtifactSurface | undefined;
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
   transcript: TranscriptOf;
 }): JSX.Element {
-  if (entry.kind === "tool") return <Tool entry={entry} open={open} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} calls={calls} transcript={transcript} />;
+  if (entry.kind === "tool") return <Tool entry={entry} open={open} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} calls={calls} transcript={transcript} />;
   if (entry.kind === "thought") return <Thought entry={entry} open={open} narrated={narrated} />;
   if (entry.kind === "writing") return <Writing entry={entry} open={open} />;
   return (
@@ -329,7 +342,7 @@ export function Work({
       preview={entry.text}
       tone={entry.tone === "plain" ? "muted" : entry.tone}
       prose
-      {...(entry.detail !== undefined ? { body: <Payload label="detail" value={entry.detail} /> } : {})}
+      {...(entry.detail !== undefined ? { body: <Payload label="detail" value={entry.detail} artifacts={artifacts} /> } : {})}
     />
   );
 }
@@ -353,7 +366,7 @@ export function WorkColumn({ children, ...box }: { children: ReactNode } & Recor
  *   .ts-sidechain-fold   inline row, centred, gap 4, hovered --text; the chevron turned −90° shut
  *   .ts-sidechain-open   pushed right, padding 0 2, --accent ("walk in →")
  */
-function SidechainDoor({ call, name, entries, running, transcript: Inner, onOpen }: { call: string; name: string; entries: TranscriptEntry[] | undefined; running: boolean; transcript: TranscriptOf; onOpen?: OpenSidechain | undefined }): JSX.Element {
+function SidechainDoor({ call, name, entries, running, transcript: Inner, onOpen, artifacts }: { call: string; name: string; entries: TranscriptEntry[] | undefined; running: boolean; transcript: TranscriptOf; onOpen?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined }): JSX.Element {
   const t = useTokens();
   const [open, setOpen] = useState(false);
   const messages = entries?.filter((entry) => entry.kind === "message").length ?? 0;
@@ -385,7 +398,7 @@ function SidechainDoor({ call, name, entries, running, transcript: Inner, onOpen
           </Press>
         ) : null}
       </View>
-      {open && entries !== undefined ? <Inner entries={entries} working={running} onOpenSidechain={onOpen} /> : null}
+      {open && entries !== undefined ? <Inner entries={entries} working={running} onOpenSidechain={onOpen} artifacts={artifacts} /> : null}
     </View>
   );
 }

@@ -1,16 +1,18 @@
-import { useCallback, useRef, useState, type JSX, type ReactNode } from "react";
+import { useCallback, useContext, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import { formatTokens, type ContextReading, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
 import { pathFrom, placeOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
 import { addedOf, cutNameOf, keyOfPiece, markedRowsOf, metaOf, pageRowsOf, sideName, sideOf, spanOf, summaryOf } from "@jaira/ui/sessionRows";
 import { KIND_ICON, KIND_WORD, headerToneOf, surfaceKindOf, type HeaderTone, type SurfaceKind } from "@jaira/ui/stateSurface";
 import { signatureOf } from "@jaira/ui/transcript";
-import { Press, Txt, appCh, edge, lengthToken, useHover } from "../../primitives";
+import { InkContext, Press, Txt, appCh, edge, lengthToken, padToken, useHover } from "../../primitives";
 import { useLook, useTokens, type Look, type Tokens } from "../../tokens";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { anchorRectOf } from "../floats/anchor";
 import { Icon } from "./Icon";
 import { RailedRows } from "./Rail";
+import { InNoteContext } from "./noteContext";
+import { useSpyLit, useSpyRow } from "./rowSpy";
 import { OutcomeNote } from "./WorkRows";
 import { Svg } from "./Svg";
 import { OneLine } from "./OneLine";
@@ -39,7 +41,12 @@ import { OneLine } from "./OneLine";
  *   .sb-cut            as `.ts-cut`, margin 2 4 6; `.rail-row.doomed` .35
  *   .sb-panel-lit > .sb-sheet   where a fork's "go to the other side" landed: --accent 55% into --line,
  *                      a 3px ring of --accent 14%, for 1.2s (the dark and contrast sheets' own rules win)
- *   .sb-made           the verb, the runs (links, their standing, "waits for" in a pill), the state
+ *   .sb-made           the verb, the runs (links, their standing, "waits for" in a pill), the state; an
+ *                      adoption's chevron is a `button`, and its nest the adopted task's history
+ *
+ * A lane's right-click (a long press on a phone) is the entered row's two verbs as a menu (`onContext`),
+ * and the rows a bookmark lands on — an entered row, a letterhead, a solo sheet's body — are filed with
+ * the conversation's spy (`rowSpy.ts`) for it to measure.
  */
 
 /** What each kind of note says it is (`sessionPanels.tsx`'s `VERB`). */
@@ -109,17 +116,37 @@ export function SessionBands({
   empty?: ReactNode;
 }): JSX.Element {
   const goTo = useGoTo();
+  const [menu, setMenu] = useState<MenuAt | null>(null);
   if (given.length === 0 && notes.length === 0) return <>{empty ?? null}</>;
   const page = pageRowsOf(given, notes, root);
   const marked = markedRowsOf(page, notes, armed, origin);
   const { cutRow, doomedFrom } = marked;
   const rowClass = (i: number): string | undefined => (i === cutRow ? "is-cut" : doomedFrom >= 0 && i >= doomedFrom ? "doomed" : undefined);
+  // A lane's menu (a right-click, a long press on a phone): the same two verbs its entered row offers.
+  const offer = typeof cuts === "object" ? cuts : undefined;
+  const onContext =
+    offer === undefined
+      ? undefined
+      : (key: string, point: { x: number; y: number }): void => {
+          const note = page.laneNotes.get(key);
+          if (note === undefined) return;
+          const name = cutNameOf(note, root);
+          setMenu({
+            ...point,
+            items: [
+              { label: `Rewind to before ${name}`, note: "deletes it and everything after", onSelect: () => offer.rewind(note) },
+              { label: `Fork before ${name}`, note: "a new task from here", onSelect: () => offer.fork(note) },
+            ],
+          });
+        };
   return (
+    <>
     <RailedRows
       steps={marked.steps}
       palette={palette}
       wide={page.bands.some((band) => band.segments.length > 1)}
       {...(armed !== undefined || origin !== undefined ? { rowClass } : {})}
+      {...(onContext !== undefined ? { onContext } : {})}
       renderStep={(i) => {
         const item = marked.rows[i]!;
         if (item.kind === "cut") return <CutRow states={item.states} />;
@@ -129,6 +156,8 @@ export function SessionBands({
         return <Band band={row.band} starters={page.starters} forks={page.forks} goTo={goTo} onOpenWorkflow={onOpenWorkflow} readingOf={readingOf} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />;
       }}
     />
+    {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+    </>
   );
 }
 
@@ -218,6 +247,9 @@ export function NoteRow({
 }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
+  // `data-entered`: what a bookmark lands on — the row where the run went INTO the state.
+  const entered = note.kind === "entered" ? note.instanceId : undefined;
+  const spy = useSpyRow(entered, "entered");
   const moved = note.kind === "entered" || note.kind === "transition";
   const skipped = note.kind === "skipped";
   const where =
@@ -239,7 +271,7 @@ export function NoteRow({
   const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
   const offer = typeof cuts === "object" ? cuts : undefined;
   return (
-    <View role="note" flexDirection="row" alignItems="baseline" gap={8} padding={4} minWidth={0} {...(hover as object)}>
+    <View role="note" flexDirection="row" alignItems="baseline" gap={8} padding={4} minWidth={0} {...(hover as object)} {...(entered !== undefined ? { "data-entered": entered } : {})} {...(spy !== undefined ? { ref: spy } : {})}>
       <Icon name={moved ? "choice" : skipped ? "workflow" : "alert"} size={typeof size === "number" ? size : 11.5} color={String(t.v(ink))} box={{ alignSelf: "center" }} />
       {VERB[note.kind] === "" ? null : (
         <Txt spec={words} flexShrink={0}>
@@ -310,7 +342,27 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
   return (
     <View role="note" flexDirection="row" flexWrap="wrap" alignItems="center" gap={8} padding={4} minWidth={0} data-made={others.map((run) => run.taskId).join(" ")}>
       {expands ? (
-        <Press onPress={() => setOpen((v) => !v)} label={open ? `fold ${others[0]!.title}` : `unfold ${others[0]!.title}`} {...({ "aria-expanded": open } as object)} flexShrink={0} transform={open ? [] : [{ rotate: "-90deg" }]}>
+        // `button.lh-chev.sb-made-chev`: a `button` (--panel-2, a --line ring, --control-radius, padding
+        // --control-pad) round the glyph at the note's 1em, the whole of it turned while folded.
+        <Press
+          onPress={() => setOpen((v) => !v)}
+          label={open ? `fold ${others[0]!.title}` : `unfold ${others[0]!.title}`}
+          title={open ? "fold what this task did before it was adopted" : "show what this task did before it was adopted"}
+          {...({ "aria-expanded": open } as object)}
+          flexShrink={0}
+          alignSelf="center"
+          flexDirection="row"
+          alignItems="center"
+          justifyContent="center"
+          paddingVertical={padToken(t, "control-pad", [3, 10])[0]}
+          paddingHorizontal={padToken(t, "control-pad", [3, 10])[1]}
+          borderWidth={1}
+          borderStyle="solid"
+          borderColor={t.v("line") as never}
+          borderRadius={lengthToken(t, "control-radius", 7)}
+          backgroundColor={t.v("panel-2") as never}
+          transform={open ? [] : [{ rotate: "-90deg" }]}
+        >
           <Icon name="chevron" size={size} color={String(t.v("dim"))} />
         </Press>
       ) : (
@@ -347,8 +399,12 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
         </Txt>
       )}
       {expands && open ? (
-        <View flexBasis="100%" minWidth={0} marginTop={4} marginBottom={8} marginLeft={18} paddingLeft={8} {...(edge(t, { left: 2 }, t.mix(t.v("accent"), 45, t.v("line"))) as object)}>
-          {adopted!(others[0]!.taskId)}
+        // `flex-basis: 100%` and its margin on a line of the row: it shrinks to what the margin leaves.
+        <View flexBasis="100%" flexShrink={1} minWidth={0} marginTop={4} marginBottom={8} marginLeft={18} paddingLeft={8} {...(edge(t, { left: 2 }, t.mix(t.v("accent"), 45, t.v("line"))) as object)}>
+          {/* Inside the note: `.sb-note.step`'s --dim reaches every word in the history that sets no colour. */}
+          <InkContext.Provider value="dim">
+            <InNoteContext.Provider value={true}>{adopted!(others[0]!.taskId)}</InNoteContext.Provider>
+          </InkContext.Provider>
         </View>
       ) : null}
     </View>
@@ -679,6 +735,8 @@ function Sheet({
       </View>
     ) : null;
   const span = spanOf(segment);
+  // `.sb-gut-chev` is 1em of what the gutter inherits: the body's 13, or a note's 11.5 around an adoption.
+  const chev = Number(t.scaled("size-app", (useContext(InNoteContext) ? 11.5 : 13) / 12.5)) || 13;
   const look = useLook();
   const sheet = sheetLookOf(t, look);
   // Lit where a fork's jump landed; the contrast sheet's frame and the dark one's shadow outrank it.
@@ -706,11 +764,11 @@ function Sheet({
             // With a fork chip in the gutter the line cannot be one button (a button in a button): the fold is the chevron.
             side !== undefined ? (
               <Press onPress={toggleAll} flexShrink={0} transform={allShut ? [] : [{ rotate: "90deg" }]}>
-                <Icon name="chevron" size={Number(t.scaled("size-app", 13 / 12.5)) || 13} color={String(t.v("dim"))} />
+                <Icon name="chevron" size={chev} color={String(t.v("dim"))} />
               </Press>
             ) : (
               <View flexShrink={0} transform={allShut ? [] : [{ rotate: "90deg" }]}>
-                <Icon name="chevron" size={Number(t.scaled("size-app", 13 / 12.5)) || 13} color={String(t.v("dim"))} />
+                <Icon name="chevron" size={chev} color={String(t.v("dim"))} />
               </View>
             )
           ) : null}
@@ -787,9 +845,9 @@ function Sheet({
           <View flexDirection="column" alignItems="stretch" paddingTop={13} paddingHorizontal={15} paddingBottom={15} minWidth={0}>
             {segment.pieces.map((piece, i) =>
               solo ? (
-                <View key={`${piece.node.instanceId}:${piece.seq ?? "—"}`} minWidth={0} data-instance={piece.node.instanceId}>
+                <Bare key={`${piece.node.instanceId}:${piece.seq ?? "—"}`} id={piece.node.instanceId}>
                   {render(piece)}
-                </View>
+                </Bare>
               ) : (
                 <Piece
                   key={`${piece.node.instanceId}:${piece.seq ?? "—"}`}
@@ -808,6 +866,27 @@ function Sheet({
           {segment.paused && segment.sessionId !== undefined ? <TearBar kind="paused" id={segment.sessionId} /> : null}
         </View>
       )}
+    </View>
+  );
+}
+
+/**
+ * `.sb-bare`: a solo sheet's body, stamped like a letterhead (`data-instance`) so a bookmark to its state
+ * lands somewhere — and lit where one just did (`.sb-bare.sb-panel-lit`: radius 8, a 3px ring of
+ * --accent 14%, for 1.2s).
+ */
+function Bare({ id, children }: { id: string; children: ReactNode }): JSX.Element {
+  const t = useTokens();
+  const spy = useSpyRow(id, "instance");
+  const lit = useSpyLit(id);
+  return (
+    <View
+      minWidth={0}
+      data-instance={id}
+      {...(spy !== undefined ? { ref: spy } : {})}
+      {...(lit ? ({ borderRadius: 8, boxShadow: `0px 0px 0px 3px ${String(t.mix(t.v("accent"), 14, "transparent"))}`, ...(isWeb ? { style: { transition: "box-shadow 0.4s ease-out" } } : {}) } as object) : {})}
+    >
+      {children}
     </View>
   );
 }
@@ -862,8 +941,9 @@ function Piece({ piece, first, afterShut, open, onToggle, render, asking, added 
   const tone = headerToneOf(node, kind, asking !== undefined && asking === node.instanceId);
   const meta = metaOf(node);
   const summary = summaryOf(piece);
+  const spy = useSpyRow(node.instanceId, "instance");
   return (
-    <View flexDirection="column" alignItems="stretch" minWidth={0} data-instance={node.instanceId}>
+    <View flexDirection="column" alignItems="stretch" minWidth={0} data-instance={node.instanceId} {...(spy !== undefined ? { ref: spy } : {})}>
       <Letterhead
         open={open}
         kind={kind}

@@ -1345,7 +1345,13 @@ export class AppService {
    * Per-session counters would each emit `ui-1`, and `submitInteraction` carries nothing but a
    * request id — so two projects with a gate open would answer each other's. The generator is shared
    * and the owner is recorded, which makes the id globally unique and the lookup O(1).
+   *
+   * Unique across processes too: a gate outlives the process that parked it (its durable row), and
+   * this process's first gate numbered from 1 again took the id of a stored one — which the live park
+   * then shadowed in `pendingInteractions` and overwrote in the store. The stamp is this process's
+   * start, so no id this process mints can be one an earlier process left behind.
    */
+  private readonly interactionStamp = Date.now().toString(36);
   private interactionSeq = 0;
   private approvalSeq = 0;
   private questionSeq = 0;
@@ -1733,7 +1739,7 @@ export class AppService {
         this.requestOwner.delete(requestId);
         this.publish({ type: "interaction:resolved", requestId });
       },
-      nextId: this.options.nextInteractionId ?? (() => `ui-${++this.interactionSeq}`),
+      nextId: this.options.nextInteractionId ?? (() => `ui-${this.interactionStamp}-${++this.interactionSeq}`),
     });
     const approvals = new ApprovalHub({
       onRequest: (request) => {

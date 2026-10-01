@@ -1,8 +1,8 @@
-import { Fragment, useMemo, useState, type JSX, type ReactNode } from "react";
+import { Fragment, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Linking, Platform, ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdown";
-import { Press, Txt, edge, type FontSpec } from "../primitives";
+import { InkContext, Press, Txt, edge, type FontSpec } from "../primitives";
 import { useTokens } from "../tokens";
 import { Picture } from "./Picture";
 
@@ -160,11 +160,13 @@ interface Ctx {
 
 const HEADING: Record<string, number> = { h1: 18, h2: 15, h3: 13, h4: 13, h5: 13, h6: 13 };
 
-export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, trimEnd = false, padding = [2, 2, 12, 2], color = "text", softbreak = "newline" }: MarkdownProps): JSX.Element {
+export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, trimEnd = false, padding = [2, 2, 12, 2], color, softbreak = "newline" }: MarkdownProps): JSX.Element {
   const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
   const tree = useMemo(() => treeOf(parseMarkdown(body), softbreak === "space" ? " " : "\n"), [body, softbreak]);
   const drawn = fence ?? DEFAULT_FENCE;
-  const ctx: Ctx = { ink: { scale, lineHeight, color, weight: 400 }, fence: drawn, depth: 0 };
+  // `.markdown` sets no colour: its text is what the box round it gives (`InkContext`), else --text.
+  const inherited = useContext(InkContext);
+  const ctx: Ctx = { ink: { scale, lineHeight, color: color ?? inherited ?? "text", weight: 400 }, fence: drawn, depth: 0 };
   const blocks = blocksOf(tree, ctx);
   return (
     <View paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={padding[3]} minWidth={0}>

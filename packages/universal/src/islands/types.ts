@@ -14,6 +14,17 @@ export interface IslandProps {
   appearance?: JairaAppearanceConfig;
   /** A callback the component fired (`change`, `modified`). */
   onEvent?: (name: string, value: unknown) => void;
+  /**
+   * What the host can ask of the island once it is drawn (the diff's `revertSelectedLines`), handed over
+   * when it can take commands and withdrawn (`null`) when it goes. A command's answer comes back as an
+   * event. On web the component's own imperative actions; on a phone a message over the bridge.
+   */
+  handle?: (handle: IslandHandle | null) => void;
   /** Every frame the island sent (ready, drawn, height, log…), for a host that measures it (native only). */
   onReport?: (message: { kind: string; [key: string]: unknown }) => void;
+}
+
+/** See {@link IslandProps.handle}. */
+export interface IslandHandle {
+  command(name: string, value?: unknown): void;
 }

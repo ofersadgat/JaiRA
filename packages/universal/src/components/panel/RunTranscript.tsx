@@ -1,8 +1,10 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import { Platform, ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View } from "@tamagui/core";
 import { type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
+import { useTaskRun } from "@jaira/ui/taskRun";
+import { RowSpyContext, type RowSpy, type SpiedRow } from "./rowSpy";
 import { armedRewindOf, callsOf, lastContextOf, settledGateCallOf, settledGateOf, toldOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 import type { EditMessage } from "@jaira/ui/transcriptView";
@@ -64,6 +66,15 @@ export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessio
  * message that opened each state's conversation, go straight to the host. A subagent's doorway walks
  * into its conversation (`onOpenSidechain`, else the trail's `onWalkIntoSidechain`).
  *
+ *
+ * Where the reader is goes out (`onHere`: the sheet at the centre of the scroller, or the live step
+ * while the page follows the live edge, and every state with a row on screen) and a bookmark comes in
+ * (`focus`: the row where the run entered the state, else its letterhead, scrolled to the top and lit)
+ * — `runViews.tsx`'s `track` and `sessionPanels.tsx`'s focus effect, over the rows the page files with
+ * its spy (`rowSpy.ts`) rather than a query of the page, which a phone does not have. An ADOPTED task's
+ * history is the same component `nested` under the line that adopted it (`AdoptedHistory`): its own
+ * run, read by its own id (`taskRun.ts`), with no scroller of its own.
+ *
  *   .run-convo      flex 1, scrolls, follows the live edge
  *   .sb             column, at least the scroller's height, --bg, padding 14 16 22
  */
@@ -76,6 +87,9 @@ export function RunTranscript({
   armed,
   onArm,
   onOpenSidechain,
+  focus,
+  onHere,
+  nested = false,
 }: {
   detail: TaskDetail;
   /** The run being READ — the trail's tail in the middle column, the task's root in the panel. */
@@ -89,6 +103,16 @@ export function RunTranscript({
   onArm?: ((armed: ArmedRewind) => void) | undefined;
   /** Where "walk in →" on a subagent's doorway goes, for this host. The node is the piece it was in. */
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
+  /** A state to go to, asked for by the Steps index; `at` changes on every ask. */
+  focus?: { instance: string; at: number } | undefined;
+  /** Where the reader is, as they scroll — the state being viewed, and every state on screen. */
+  onHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
+  /**
+   * Drawn INSIDE another conversation — an adopted task's history under the line that adopted it: only
+   * the history, with no scroller of its own and none of the page's own business (the gate, the waits,
+   * the workflow's link, the origin seam, the cut on its rows).
+   */
+  nested?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const { conversation, sessions, sessionHistory, records, liveTurn, onLoadSessions, shutStates, onToggleShutState, onSetShutStates } = source;
@@ -135,6 +159,121 @@ export function RunTranscript({
   }, [needed, sessions, onLoadSessions]);
 
   const follow = useLiveEdge(detail.taskId);
+
+  // The rows a bookmark lands on, filed by the page as they mount (`rowSpy.ts`); a nested history files
+  // into the page it is drawn in, as the DOM's query of the scroller finds its rows too.
+  const spied = useRef(new Map<unknown, SpiedRow>());
+  const place = useCallback((el: unknown, row: SpiedRow | null, was: unknown) => {
+    if (was !== null && was !== undefined) spied.current.delete(was);
+    if (el !== null && row !== null) spied.current.set(el, row);
+  }, []);
+  const [lit, setLit] = useState<string | null>(null);
+  const spy = useMemo<RowSpy>(() => ({ place, lit }), [place, lit]);
+  const content = useRef<unknown>(null);
+  /** Each filed row's top against the top of the scroller's viewport, and the viewport's height. */
+  const measure = useCallback(async (): Promise<{ rows: { row: SpiedRow; top: number }[]; height: number; scrolled: number } | null> => {
+    const scroller = follow.ref.current as (ScrollView & { getScrollableNode?: () => unknown }) | null;
+    if (scroller === null) return null;
+    const filed = [...spied.current.entries()];
+    if (Platform.OS === "web") {
+      const node = scroller.getScrollableNode?.() as HTMLElement | undefined;
+      if (node === undefined) return null;
+      const box = node.getBoundingClientRect();
+      return { rows: filed.map(([el, row]) => ({ row, top: (el as HTMLElement).getBoundingClientRect().top - box.top })), height: node.clientHeight, scrolled: node.scrollTop };
+    }
+    const at = follow.at.current;
+    const rows = await Promise.all(
+      filed.map(
+        ([el, row]) =>
+          new Promise<{ row: SpiedRow; top: number } | null>((done) => {
+            const host = el as { measureLayout?: (to: unknown, ok: (x: number, y: number) => void, fail: () => void) => void };
+            if (typeof host.measureLayout !== "function" || content.current === null) return done(null);
+            host.measureLayout(content.current, (_x, y) => done({ row, top: y - at.y }), () => done(null));
+          }),
+      ),
+    );
+    return { rows: rows.filter((one): one is { row: SpiedRow; top: number } => one !== null), height: at.height, scrolled: at.y };
+  }, [follow]);
+  /**
+   * Which state the reader is at (`runViews.tsx`'s `track`): following the live edge, the live step — the
+   * last one; scrolled up, the last row whose top has passed the middle line; nothing past it yet ⇒ the
+   * first. With it, every state with a row inside the viewport.
+   */
+  const track = useCallback((): void => {
+    if (onHere === undefined || nested) return;
+    void measure().then((seen) => {
+      if (seen === null) return;
+      const line = seen.height / 2;
+      let at: string | undefined;
+      let first: string | undefined;
+      let last: string | undefined;
+      const onScreen = new Set<string>();
+      for (const { row, top } of [...seen.rows].sort((a, b) => a.top - b.top)) {
+        first ??= row.id;
+        last = row.id;
+        if (top <= line) at = row.id;
+        if (top >= 0 && top <= seen.height) onScreen.add(row.id);
+      }
+      const viewed = follow.following() ? (last ?? at ?? first) : (at ?? first);
+      if (viewed !== undefined) onScreen.add(viewed);
+      onHere(viewed, onScreen);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [onHere, nested, measure]);
+  // Coalesced to a frame: a scroll fires many times per paint, and the answer only changes per paint.
+  const frame = useRef<number | null>(null);
+  const trackSoon = useCallback((): void => {
+    if (frame.current !== null) return;
+    frame.current = requestAnimationFrame(() => {
+      frame.current = null;
+      track();
+    });
+  }, [track]);
+  // Sections arriving, folding, or the pin moving the scroller all move what is under the line.
+  useEffect(trackSoon, [trackSoon, bands, sessions, liveTurn, conversation, shutStates]);
+  useEffect(
+    () => () => {
+      if (frame.current !== null) cancelAnimationFrame(frame.current);
+      if (!nested) onHere?.(undefined);
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [],
+  );
+  // A bookmark takes the reader off the live edge — before it lands, or the next transcript to arrive
+  // would pin the page back to the end.
+  useLayoutEffect(() => {
+    if (focus !== undefined && !nested) follow.unpin();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.instance, focus?.at]);
+  /**
+   * A bookmark landing (`SessionBandsView`'s focus effect): the row where the run entered the state, else
+   * its letterhead (the root has no entered row), scrolled to the top of the scroller and lit for 1.2s.
+   * Retried as the page fills in — the panel is often not drawn yet when the ask arrives — and `served`
+   * keeps a served ask from scrolling the reader again when the next transcript lands.
+   */
+  const served = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (focus === undefined || nested || served.current === focus.at) return;
+    const filed = [...spied.current.entries()];
+    const hit = filed.find(([, row]) => row.kind === "entered" && row.id === focus.instance) ?? filed.find(([, row]) => row.kind === "instance" && row.id === focus.instance);
+    if (hit === undefined) return;
+    served.current = focus.at;
+    const row = hit[1];
+    void measure().then((seen) => {
+      const top = seen?.rows.find((one) => one.row === row)?.top;
+      if (seen === null || top === undefined) return;
+      follow.ref.current?.scrollTo({ y: Math.max(0, seen.scrolled + top), animated: true });
+    });
+    // The ring is the solo sheet's (`.sb-bare.sb-panel-lit`); an entered row or a letterhead draws none.
+    if (row.kind !== "instance") return;
+    setLit(focus.instance);
+    const clear = setTimeout(() => setLit(null), 1200);
+    return () => {
+      clearTimeout(clear);
+      setLit(null);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focus?.instance, focus?.at, bands, notes]);
 
   const render = (piece: SessionPiece): ReactNode => {
     if (gate !== undefined && onGate !== undefined && isAsking(piece.node)) {
@@ -232,10 +371,47 @@ export function RunTranscript({
       </InlineHost>
     );
   };
+  /** An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */
+  const adopted = (taskId: string): ReactNode => <AdoptedHistory taskId={taskId} source={source} />;
   const empty = bands.length === 0 && notes.length === 0;
+  if (nested) {
+    // `.run-convo-nested` holds the page (`.sb`, its ground and padding) and nothing else — or, with
+    // nothing on it, the sentence in its place.
+    if (empty) return <NestedEmpty>This task had not entered a child yet.</NestedEmpty>;
+    return (
+      <View flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22} minWidth={0}>
+        <SessionBands
+          bands={bands}
+          notes={notes}
+          root={rootPath}
+          render={render}
+          palette={palette}
+          shut={shutStates}
+          onToggle={onToggleShutState}
+          onSetShut={onSetShutStates}
+          scope={detail.taskId}
+          moveQuestion={moveQuestion}
+          {...(source.onSelectTask !== undefined ? { onSelectTask: source.onSelectTask } : {})}
+          adopted={adopted}
+          readingOf={readingOf}
+        />
+      </View>
+    );
+  }
+  const { at: _at, following: _following, unpin: _unpin, onScroll: followScroll, ...scroller } = follow;
   return (
-    <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0 }} contentContainerStyle={{ flexGrow: 1 }} {...follow}>
-      <View flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
+    <ScrollView
+      {...(scrollbarProps(t) as object)}
+      style={{ flex: 1, minHeight: 0 }}
+      contentContainerStyle={{ flexGrow: 1 }}
+      {...scroller}
+      onScroll={(e) => {
+        followScroll(e);
+        trackSoon();
+      }}
+    >
+      <View ref={content as never} flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
+        <RowSpyContext.Provider value={spy}>
         {empty ? (
           <Empty>This run has not entered a child yet.</Empty>
         ) : (
@@ -257,13 +433,59 @@ export function RunTranscript({
             {...(source.onOpenWorkflow !== undefined ? { onOpenWorkflow: (piece: SessionPiece) => source.onOpenWorkflow!(piece.node.stateId, piece.node.instanceId) } : {})}
             readingOf={readingOf}
             {...(detail.origin !== undefined ? { origin: { ...detail.origin, ...(source.onSelectTask !== undefined ? { onGo: () => source.onSelectTask!(detail.origin!.taskId) } : {}) } } : {})}
+            adopted={adopted}
           />
         )}
+        </RowSpyContext.Provider>
         {waits.map((request) => (
           <WaitingOn key={request.requestId} request={request} onDeliver={() => source.onDeliverUserEvent?.(request.requestId)} />
         ))}
       </View>
     </ScrollView>
+  );
+}
+
+/**
+ * `runViews.tsx`'s `AdoptedHistory`: an adopted task's own history, drawn inside the conversation of the
+ * task that adopted it (decision 0005). The adopted task keeps its journal and records, so its history is
+ * read from it — its tree, turns, sessions, records and live tail, by ITS id (`taskRun.ts`, the DOM's
+ * own) — and drawn by the same conversation, nested: no scroller, no composer, under the line.
+ */
+function AdoptedHistory({ taskId, source }: { taskId: string; source: TranscriptSource }): JSX.Element {
+  // `useTaskRun` lays the run over a surface context; the transcript's source is the part of one it reads.
+  const { detail, failed, context } = useTaskRun(taskId, source.project, source as unknown as FileSurfaceContext);
+  if (failed !== null) return <NestedEmpty>{"Could not read what this task did: "}{failed}</NestedEmpty>;
+  if (detail === null) return <NestedEmpty>Loading…</NestedEmpty>;
+  const own: TranscriptSource = {
+    ...source,
+    conversation: context.conversation,
+    sessions: context.sessions,
+    sessionHistory: context.sessionHistory,
+    records: context.records,
+    liveTurn: context.liveTurn,
+    onLoadSessions: context.onLoadSessions,
+    project: context.project,
+    // The host's gate, waits and running agent are about ITS task.
+    userEvents: [],
+    approval: undefined,
+    onApproval: undefined,
+    question: undefined,
+    onQuestion: undefined,
+  };
+  // A rewind armed in here has no strip to ask it in, as the desktop's nested conversation has none.
+  return <RunTranscript nested detail={detail} parent={detail.instances[0]} source={own} onArm={() => undefined} />;
+}
+
+/**
+ * `p.empty` inside an adoption's nest: it takes the note's size (`.sb-note`, 11.5/12.5) and a paragraph's
+ * margins of it, --dim, 8 above and below.
+ */
+function NestedEmpty({ children }: { children: ReactNode }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 11.5 / 12.5) as number}>
+      {children}
+    </Txt>
   );
 }
 
@@ -277,33 +499,56 @@ export function useLiveEdge(reset: unknown): {
   onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => void;
   scrollEventThrottle: number;
   onContentSizeChange: () => void;
-  onLayout: () => void;
+  onLayout: (e: { nativeEvent: { layout: { height: number } } }) => void;
+  /** Where the scroller stands and how tall its viewport is, as its events last said. */
+  at: RefObject<{ y: number; height: number }>;
+  /** Whether it is pinned to the live edge. */
+  following: () => boolean;
+  /** Let go of the edge — a bookmark is about to take the reader elsewhere. */
+  unpin: () => void;
 } {
   const ref = useRef<ScrollView | null>(null);
   const following = useRef(true);
   const lastY = useRef(0);
+  const lastSize = useRef(0);
+  const at = useRef({ y: 0, height: 0 });
   useEffect(() => {
     following.current = true;
   }, [reset]);
-  return {
-    ref,
-    // Only a move UP lets go of the edge: content arriving does not move the offset, and the pin's own
-    // scroll goes down — so neither can be mistaken for the reader leaving.
-    onScroll: (e) => {
-      const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-      const y = contentOffset.y;
-      if (y + layoutMeasurement.height >= contentSize.height - 4) following.current = true;
-      else if (y < lastY.current - 1) following.current = false;
-      lastY.current = y;
-    },
-    scrollEventThrottle: 32,
-    onContentSizeChange: () => {
-      if (following.current) toEnd(ref.current);
-    },
-    onLayout: () => {
-      if (following.current) toEnd(ref.current);
-    },
-  };
+  // One object for the scroller's life: what reads it (the Steps spy) keeps its callbacks stable.
+  return useMemo(
+    () => ({
+      ref,
+      // Only a move UP lets go of the edge, and only one the reader made: content arriving does not move
+      // the offset and the pin's own scroll goes down. The DOM re-pins before paint, ahead of any scroll
+      // event; here the new size is reported after, so a scroll that comes WITH a change of the content's
+      // height — the browser keeping what is on screen in place while a transcript above it settles
+      // (scroll anchoring) — is the page moving, not the reader, and the size change re-pins it.
+      onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
+        const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+        const y = contentOffset.y;
+        if (y + layoutMeasurement.height >= contentSize.height - 4) following.current = true;
+        else if (y < lastY.current - 1 && Math.abs(contentSize.height - lastSize.current) < 1) following.current = false;
+        lastY.current = y;
+        lastSize.current = contentSize.height;
+        at.current = { y, height: layoutMeasurement.height };
+      },
+      scrollEventThrottle: 32,
+      onContentSizeChange: () => {
+        if (following.current) toEnd(ref.current);
+      },
+      onLayout: (e: { nativeEvent: { layout: { height: number } } }) => {
+        at.current = { ...at.current, height: e.nativeEvent.layout.height };
+        if (following.current) toEnd(ref.current);
+      },
+      at,
+      following: () => following.current,
+      unpin: () => {
+        following.current = false;
+      },
+    }),
+    [],
+  );
 }
 
 /**

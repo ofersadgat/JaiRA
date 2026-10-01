@@ -20,6 +20,7 @@ import {
   seedFor,
   shortText,
   singleShapeOf,
+  suggestionsOf,
   summaryOf,
   typeHintOf,
 } from "@jaira/ui/schemaForm/model";
@@ -32,6 +33,7 @@ import { SelectInput } from "../settings/fields";
 import { Deeper, ErrorLine, Field, FieldGrid, Span, useFormSlot } from "./Field";
 import { BoolField, Chip, FormInput, NumberText, PickWell, TextArea } from "./inputs";
 import { LlmConfigWidget } from "./LlmConfigForm";
+import { suggestionsFrom } from "./suggestModel";
 
 /**
  * `schemaForm/SchemaForm.tsx`, universal (decision 0015): the one recursive form every typed value is
@@ -628,9 +630,11 @@ function Leaf({ schema, value, onChange, ctx }: { schema: Schema; value: unknown
     case "number":
     case "integer":
       return <NumberText value={typeof value === "number" || typeof value === "string" ? value : undefined} disabled={disabled} bad={bad} onChange={(text) => onChange(numberFromText(text))} />;
-    case "choice":
-      // A box that suggests (`enum`, `examples`); on the desktop its `<datalist>` drops down while typing.
-      return <FormInput value={typeof value === "string" ? value : jsonTextOf(value)} mono disabled={disabled} bad={bad} onChange={onChange} />;
+    case "choice": {
+      // A box that suggests (`enum`, `examples`) — its `<datalist>`, the type-ahead Chromium drops down.
+      const { values, labels } = suggestionsOf(schema);
+      return <FormInput value={typeof value === "string" ? value : jsonTextOf(value)} mono disabled={disabled} bad={bad} onChange={onChange} suggest={suggestionsFrom(values, labels)} />;
+    }
     case "multiline":
       return <TextArea value={typeof value === "string" ? value : ""} rows={4} mono={false} disabled={disabled} bad={bad} onChange={onChange} />;
     case "json":

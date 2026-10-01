@@ -7,6 +7,7 @@ import { Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHov
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Checkbox } from "../form/inputs";
+import { AUTOFILLED, ListIndicator, SuggestLayer, laidOut, useSuggest, type Suggestion } from "../form/Suggest";
 import { Svg } from "../panel/Svg";
 
 /**
@@ -48,19 +49,21 @@ function ring(t: ReturnType<typeof useTokens>, focused: boolean): Record<string,
 }
 
 /**
- * Which of the form's `<datalist>`s have something in them — the ones a box's `list` names. The lists
- * themselves are not drawn here (a phone's keyboard has its own suggestions); the room Chromium keeps
- * for their indicator is ({@link Box}'s `listed`).
+ * The form's `<datalist>`s — the ones a box's `list` names, rendered once by the editor (a datalist id
+ * has to be unique): what each offers, for the type-ahead a box opens (`form/Suggest.tsx`) and the room
+ * Chromium keeps for the list's indicator once a list has something in it ({@link Box}'s `listed`).
  */
 export interface Lists {
-  bindings: boolean;
-  guards: boolean;
-  links: boolean;
-  functions: boolean;
-  childKeys: boolean;
-  childStates: boolean;
+  bindings: readonly Suggestion[];
+  guards: readonly Suggestion[];
+  links: readonly Suggestion[];
+  functions: readonly Suggestion[];
+  childKeys: readonly Suggestion[];
+  childStates: readonly Suggestion[];
+  /** `transition-targets`: the children's keys and the two terminations. */
+  transitions: readonly Suggestion[];
 }
-const NO_LISTS: Lists = { bindings: false, guards: false, links: false, functions: false, childKeys: false, childStates: false };
+const NO_LISTS: Lists = { bindings: [], guards: [], links: [], functions: [], childKeys: [], childStates: [], transitions: [] };
 const ListsContext = createContext<Lists>(NO_LISTS);
 export const ListsProvider = ListsContext.Provider;
 export const useLists = (): Lists => useContext(ListsContext);
@@ -88,17 +91,17 @@ export function Box({
   title,
   label,
   inputMode,
-  listed = false,
+  listed,
   ...layout
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string | undefined;
   /**
-   * The box completes against a `<datalist>` with something in it: Chromium keeps 16 at its end for
-   * the list's indicator, which the text stops short of.
+   * The `<datalist>` the box completes against. With something in it Chromium keeps 16 at the box's end
+   * for the list's indicator, which the text stops short of, and the type-ahead opens under it.
    */
-  listed?: boolean;
+  listed?: readonly Suggestion[] | false;
   size?: ControlSize;
   disabled?: boolean | undefined;
   mark?: Mark;
@@ -126,30 +129,52 @@ export function Box({
     backgroundColor: reading ? "transparent" : t.v(disabled ? "panel-2" : "bg"),
     ...ring(t, focused),
   };
+  const list = useSuggest(listed === false ? undefined : listed, value, onChange, off);
   const input = (style: Record<string, unknown>): JSX.Element => (
     <RNTextInput
+      ref={list.ref as never}
       value={value}
-      onChangeText={onChange}
+      onChangeText={(next) => {
+        list.onChangeText(next);
+        onChange(next);
+      }}
       {...(placeholder !== undefined && !reading ? { placeholder, placeholderTextColor: placeholderColor("light") } : {})}
       editable={!off}
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       inputMode={inputMode ?? "text"}
       spellCheck={false}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
+      onFocus={() => {
+        setFocused(true);
+        list.onFocus();
+      }}
+      onBlur={() => {
+        setFocused(false);
+        list.onBlur();
+      }}
+      {...(list.listed ? { onKeyPress: list.onKeyPress, ...list.input } : {})}
       {...((isWeb ? { onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false), ...(title !== undefined ? { title } : {}) } : {}) as object)}
-      style={{ ...text, minWidth: 0, ...(isWeb && off ? { cursor: reading ? "text" : "not-allowed" } : {}), ...style } as never}
+      style={{ ...text, minWidth: 0, ...(isWeb && off ? { cursor: reading ? "text" : "not-allowed" } : {}), ...style, ...(list.filled ? { color: AUTOFILLED.text } : {}) } as never}
     />
   );
-  if (!listed) {
+  if (!list.listed) {
     return input({ width: "100%", paddingVertical: pv, paddingHorizontal: reading ? 0 : ph, ...box, ...layout });
   }
   // A listed box: the indicator's 16 is room INSIDE the content box, not padding — so the box that flexes
   // (and shrinks by its content box) carries the border and the padding, and the text stops 16 short in it.
+  const face = voice === "data" ? t.scaled("size-data", dataScale ?? 1) : t.scaled("size-app", size.scale);
   return (
-    <View flexDirection="row" width="100%" minWidth={0} paddingHorizontal={reading ? 0 : ph} {...(box as object)} {...layout}>
-      {input({ flexGrow: 1, flexShrink: 1, flexBasis: 0, width: "100%", paddingVertical: pv, paddingLeft: 0, paddingRight: 16, borderWidth: 0, backgroundColor: "transparent", outlineWidth: 0 })}
-    </View>
+    <SuggestLayer
+      layout={layout}
+      box={
+        <View position="relative" flexDirection="row" width="100%" minWidth={0} paddingHorizontal={reading ? 0 : ph} {...(box as object)} {...(list.filled ? { backgroundColor: AUTOFILLED.ground } : {})} {...layout}>
+          {input({ flexGrow: 1, flexShrink: 1, flexBasis: 0, width: "100%", paddingVertical: pv, paddingLeft: 0, paddingRight: 16, borderWidth: 0, backgroundColor: "transparent", outlineWidth: 0 })}
+          {(hovered || focused) && !off ? (
+            <ListIndicator color={list.filled ? AUTOFILLED.text : (text as { color: string }).color} size={typeof face === "number" ? face : 12} end={laidOut(mark !== "" ? 2 : 1) + ph} />
+          ) : null}
+        </View>
+      }
+      popup={list.popup}
+    />
   );
 }
 

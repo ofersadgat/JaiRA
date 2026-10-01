@@ -171,12 +171,15 @@ function monoLine(t: ReturnType<typeof useTokens>): number {
   return Math.round(size * 1.02) + Math.round(size * 0.3);
 }
 
-/** `.chip`: a small word in a pill-shaped rule; `tone` is `-ok`, `-bad` or `-warn`. */
-export function Chip({ children, tone, title }: { children: ReactNode; tone?: "ok" | "bad" | "warn" | undefined; title?: string | undefined }): JSX.Element {
+/**
+ * `.chip`: a small word in a pill-shaped rule; `tone` is `-ok`, `-bad` or `-warn`. `live` is
+ * `.chat-artifact-live`, a page that RUNS: --text on --accent at 22%.
+ */
+export function Chip({ children, tone, title, live = false }: { children: ReactNode; tone?: "ok" | "bad" | "warn" | undefined; title?: string | undefined; live?: boolean }): JSX.Element {
   const t = useTokens();
-  const ink = tone ?? "dim";
+  const ink = live ? "text" : (tone ?? "dim");
   return (
-    <View flexShrink={0} borderWidth={1} borderStyle="solid" borderColor={t.v(tone ?? "line") as never} borderRadius={999} paddingHorizontal={6} {...((title !== undefined ? { title } : {}) as object)}>
+    <View flexShrink={0} borderWidth={1} borderStyle="solid" borderColor={t.v(tone ?? "line") as never} borderRadius={999} paddingHorizontal={6} {...(live ? { backgroundColor: t.mix(t.v("accent"), 22, "transparent") as never } : {})} {...((title !== undefined ? { title } : {}) as object)}>
       <Txt spec={{ voice: "app", scale: 10 / 12.5, color: ink, lineHeight: 1.3333 }} {...({ whiteSpace: "nowrap" } as object)}>
         {children}
       </Txt>
@@ -332,8 +335,13 @@ export function ProducedView({ taskId, project, signal, onShow }: { taskId: stri
             onPress={() => setSelected(row.path === selected ? null : row.path)}
             value={
               <>
-                {row.interactive ? <Chip>runs</Chip> : null}
-                <RowWords> {sizeOf(row.bytes)}</RowWords>
+                {row.interactive ? <Chip live>runs</Chip> : null}
+                {/* The DOM's space after the chip is mid-line, and kept; this run starts a line of its
+                    own, where a plain space would collapse — so after a chip it is one that does not. */}
+                <RowWords>
+                  {row.interactive ? " " : " "}
+                  {sizeOf(row.bytes)}
+                </RowWords>
               </>
             }
           />

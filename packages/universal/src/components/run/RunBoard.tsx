@@ -1,12 +1,14 @@
-import { useMemo, type JSX, type MouseEvent as ReactMouseEvent } from "react";
-import { Pressable, ScrollView } from "react-native";
+import { useMemo, useRef, useState, type JSX, type MouseEvent as ReactMouseEvent } from "react";
+import { Pressable, ScrollView, type View as HostView } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { InstanceNode, InstanceStatus, StateChild, TaskStatus } from "@jaira/shared/browser";
 import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
-import { runColumnsOf, runTileWordsOf, runsByChild } from "@jaira/ui/runBoardModel";
+import { NO_RUN_OFFERS, restingOf, runColumnsOf, runTileWordsOf, runsByChild } from "@jaira/ui/runBoardModel";
 import { faceOf, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Column, GraphPaper, graphPaperWeb } from "../Board";
+import { Lift } from "../Lift";
+import { ghostAt, ghostOf, useLiftTargets, type Ghost } from "../liftTargets";
 import { Pill } from "../Pill";
 import { claimed, tileChromeOf } from "../TaskCard";
 
@@ -26,8 +28,12 @@ import { claimed, tileChromeOf } from "../TaskCard";
  *   .card-meta      data × .84, --dim, row, centred, gap 6, 2 above: how long (`.ellip`, flex 1) and
  *                   the status (`.card-status`, flex none)
  *
- * Not copied: dragging a card to answer a waiting move (the offers are the model's; native drags are
- * v2, as on the task board).
+ * Dragging a card to answer a waiting move (`on_user_event`): the execution the run rests on
+ * (`restingOf`) can be picked up where a wait of this run offers a column (`offers`, `runDragOffersOf`);
+ * the columns that would take it are dashed in the accent and the one under the pointer filled, as the
+ * task board's (`Column`), and the drop answers the wait (`onDrop`). On web the desktop's HTML5 drag
+ * (`draggable`, the column's `dragover`/`drop`); on a phone a long press and a pan (`Lift`), the card's
+ * picture following the finger.
  */
 export function RunBoard({
   declared,
@@ -35,18 +41,43 @@ export function RunBoard({
   openInstance,
   onSelect,
   onOpen,
+  offers = NO_RUN_OFFERS,
+  onDrop,
 }: {
   declared: readonly StateChild[];
   parent: InstanceNode | undefined;
   openInstance: string | null;
   onSelect: (node: InstanceNode) => void;
   onOpen: (node: InstanceNode) => void;
+  /** Column key -> the wait a drop there answers (`runDragOffersOf`); none by default. */
+  offers?: ReadonlyMap<string, string>;
+  /** A card was dropped on a column that was offering it a place. The caller answers the wait. */
+  onDrop?: ((requestId: string) => void) | undefined;
 }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const byChild = useMemo(() => runsByChild(parent), [parent]);
   const columns = runColumnsOf(declared, byChild);
   const blueprint = look.palette === "blueprint";
+  // The card a drag picks up: the execution the run RESTS on (`restingOf`), as `runViews.tsx` has it.
+  const resting = useMemo(() => restingOf(parent), [parent]);
+  const [dragging, setDragging] = useState(false);
+  const draggable = onDrop !== undefined && offers.size > 0;
+  // A phone's drag (`Lift`): the columns it may land in, and the picture following the finger.
+  const targets = useLiftTargets();
+  const root = useRef<HostView>(null);
+  const [rootWidth, setRootWidth] = useState(0);
+  const [ghost, setGhost] = useState<(Ghost & { node: InstanceNode; index: number; total: number }) | null>(null);
+  const dropOf = (key: string) => {
+    const requestId = offers.get(key);
+    return {
+      accepts: requestId !== undefined,
+      onDrop: () => {
+        setDragging(false);
+        if (requestId !== undefined) onDrop?.(requestId);
+      },
+    };
+  };
   return (
     <ScrollView
       {...(scrollbarProps(t) as object)}
@@ -55,7 +86,14 @@ export function RunBoard({
       contentContainerStyle={{ flexGrow: 1 }}
       {...(!isWeb ? { horizontal: false } : {})}
     >
-      <View flexGrow={1} flexDirection="column" gap={14} padding={10} {...((blueprint ? (isWeb ? graphPaperWeb(t) : { position: "relative" }) : {}) as object)}>
+      <View
+        {...(!isWeb ? { ref: root, onLayout: (e: { nativeEvent: { layout: { width: number } } }) => setRootWidth(e.nativeEvent.layout.width) } : {})}
+        flexGrow={1}
+        flexDirection="column"
+        gap={14}
+        padding={10}
+        {...((blueprint ? (isWeb ? graphPaperWeb(t) : { position: "relative" }) : {}) as object)}
+      >
         {blueprint && !isWeb ? <GraphPaper t={t} /> : null}
         <View flexDirection="row" alignItems="stretch" gap={10}>
           {columns.map((child, index) => {
@@ -75,25 +113,70 @@ export function RunBoard({
                 // has nowhere to go.
                 tip={latest !== undefined ? `double-click to walk into ${child.key}` : `${child.key} was not reached`}
                 {...(latest !== undefined ? { onOpen: () => onOpen(latest) } : {})}
+                {...(dragging && onDrop !== undefined ? { drop: dropOf(child.key) } : {})}
+                {...(!isWeb ? { over: targets.over === child.key, host: targets.host(child.key) } : {})}
               >
                 {() =>
-                  runs.map((node, i) => (
-                    <RunTile
-                      key={node.instanceId}
-                      node={node}
-                      index={i}
-                      total={runs.length}
-                      last={i === runs.length - 1}
-                      selected={node.instanceId === openInstance}
-                      onSelect={() => onSelect(node)}
-                      onOpen={() => onOpen(node)}
-                    />
-                  ))
+                  runs.map((node, i) => {
+                    const lifts = draggable && node === resting;
+                    const tile = (
+                      <RunTile
+                        key={node.instanceId}
+                        node={node}
+                        index={i}
+                        total={runs.length}
+                        last={i === runs.length - 1}
+                        selected={node.instanceId === openInstance}
+                        onSelect={() => onSelect(node)}
+                        onOpen={() => onOpen(node)}
+                        {...(lifts ? { onDragStart: () => setDragging(true), onDragEnd: () => setDragging(false) } : {})}
+                      />
+                    );
+                    if (isWeb || !lifts) return tile;
+                    return (
+                      <Lift
+                        key={node.instanceId}
+                        enabled
+                        onLift={(host, x, y) => {
+                          setDragging(true);
+                          targets.measure();
+                          ghostOf(host, root.current, rootWidth, x, y, (g) => setGhost({ ...g, node, index: i, total: runs.length }));
+                        }}
+                        onMove={(x, y) => {
+                          targets.move(x, y);
+                          setGhost((g) => (g === null ? g : { ...g, ...ghostAt(g, x, y) }));
+                        }}
+                        onLand={(x, y) => {
+                          const key = targets.hit(x, y);
+                          targets.clear();
+                          setGhost(null);
+                          // Only a column that would take it lands it; anywhere else it springs back.
+                          if (key !== null && dropOf(key).accepts) dropOf(key).onDrop();
+                          else setDragging(false);
+                        }}
+                        // Held still and let go: the long press it stood in for, which walks in.
+                        onHold={() => onOpen(node)}
+                        onCancel={() => {
+                          targets.clear();
+                          setGhost(null);
+                          setDragging(false);
+                        }}
+                      >
+                        {tile}
+                      </Lift>
+                    );
+                  })
                 }
               </Column>
             );
           })}
         </View>
+        {ghost !== null ? (
+          // The browser's drag image on a phone: the card itself, see-through, where the finger is.
+          <View position="absolute" left={ghost.left} top={ghost.top} width={ghost.width} opacity={0.8} pointerEvents="none" zIndex={10} transform={[{ translateX: ghost.dx }, { translateY: ghost.dy }] as never}>
+            <RunTile node={ghost.node} index={ghost.index} total={ghost.total} last selected={false} onSelect={() => undefined} onOpen={() => undefined} />
+          </View>
+        ) : null}
       </View>
     </ScrollView>
   );
@@ -103,7 +186,28 @@ export function RunBoard({
  * `RunTile`: one execution, on the task card's tile (`tileChromeOf`) — its name and pill, the pass
  * number when there are several, the arguments it was called with, how long it took and its status.
  */
-function RunTile({ node, index, total, last, selected, onSelect, onOpen }: { node: InstanceNode; index: number; total: number; last: boolean; selected: boolean; onSelect: () => void; onOpen: () => void }): JSX.Element {
+function RunTile({
+  node,
+  index,
+  total,
+  last,
+  selected,
+  onSelect,
+  onOpen,
+  onDragStart,
+  onDragEnd,
+}: {
+  node: InstanceNode;
+  index: number;
+  total: number;
+  last: boolean;
+  selected: boolean;
+  onSelect: () => void;
+  onOpen: () => void;
+  /** Present only where a wait offered this run a move: the tile can be picked up (HTML5 drag on web). */
+  onDragStart?: (() => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
+}): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const words = runTileWordsOf(node);
@@ -125,8 +229,21 @@ function RunTile({ node, index, total, last, selected, onSelect, onOpen }: { nod
         onDoubleClick: onOpen,
         onMouseDown: (e: ReactMouseEvent) => (e.shiftKey ? e.preventDefault() : undefined),
         title: words.tip,
-        cursor: "pointer",
+        // `.card-draggable`: grab, where a wait offered the move.
+        cursor: onDragStart !== undefined ? "grab" : "pointer",
         userSelect: "none",
+        ...(onDragStart !== undefined
+          ? {
+              draggable: true,
+              onDragStart: (e: DragEvent) => {
+                // As the DOM's: Firefox refuses a drag with nothing on the transfer.
+                e.dataTransfer?.setData("text/plain", node.instanceId);
+                if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
+                onDragStart();
+              },
+              ...(onDragEnd !== undefined ? { onDragEnd } : {}),
+            }
+          : {}),
       }
     : {};
   const drawn = (

@@ -1,7 +1,8 @@
-import { lazy, Suspense, type JSX } from "react";
+import { lazy, Suspense, useEffect, useRef, type CSSProperties, type JSX } from "react";
 import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
-import type { IslandProps } from "./types";
+import type { DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiff";
+import type { IslandHandle, IslandProps } from "./types";
 
 /**
  * An island on WEB: the DOM component itself, inline. There is no WebView to host it in and no need
@@ -15,6 +16,7 @@ const CodeText = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ defaul
 const SchemaTextField = lazy(() => import("@jaira/ui/schemaEditor").then((m) => ({ default: m.SchemaTextField })));
 const MarkdownDocument = lazy(() => import("@jaira/ui/markdownDocument").then((m) => ({ default: m.MarkdownDocument })));
 const Html = lazy(() => import("@jaira/ui/htmlFrame").then((m) => ({ default: m.Html })));
+const InteractiveArtifact = lazy(() => import("@jaira/ui/interactiveArtifact").then((m) => ({ default: m.InteractiveArtifact })));
 
 export function Island(props: IslandProps): JSX.Element {
   // Marked, so the fidelity gate can leave it out: an island is the desktop's own component by
@@ -22,28 +24,14 @@ export function Island(props: IslandProps): JSX.Element {
   return <div data-island={props.component}>{inline(props)}</div>;
 }
 
-function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Element {
+function inline({ component, props: p, height, onEvent, handle }: IslandProps): JSX.Element {
   const event = (name: string) => (value: unknown) => onEvent?.(name, value);
   const box = height !== undefined ? { height } : undefined;
   switch (component) {
     case "markdown":
       return <Markdown text={String(p["text"] ?? "")} />;
     case "diff":
-      return (
-        <div style={box}>
-          <Suspense fallback={null}>
-            <MonacoDiffPane
-              original={String(p["original"] ?? "")}
-              modified={String(p["modified"] ?? "")}
-              mime={String(p["mime"] ?? "text/plain")}
-              readOnly={p["readOnly"] !== false}
-              sideBySide={p["sideBySide"] === true}
-              {...(typeof p["file"] === "string" ? { file: p["file"] } : {})}
-              {...(p["readOnly"] === false ? { onModified: event("modified") } : {})}
-            />
-          </Suspense>
-        </div>
-      );
+      return <DiffInline p={p} box={box} event={event} {...(handle !== undefined ? { handle } : {})} />;
     case "markdownEditor":
       // A value view's document (an artifact under review): the desktop's `MarkdownDocument`, which
       // draws the editor as tall as its words, with a change over it.
@@ -95,13 +83,26 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
         </div>
       );
     }
-    // An HTML or SVG artifact, drawn as the page it is (`valueView.tsx`'s `Html`).
-    case "artifact":
-      return (
+    // An HTML or SVG artifact, drawn as the page it is (`valueView.tsx`'s `Html`) — or, with a `url` the
+    // record granted it (`artifactFrame.ts`), the frame it RUNS in (`interactiveArtifact.tsx`), whose
+    // messages come back as `prompt` events. Both the desktop's own frames, sandbox and all; `style` is
+    // `.vv-html`'s box, which this page has no stylesheet for, and `strut` the font of the block the
+    // frame stands in: an iframe is inline, on its line's baseline, so the block is the frame and the
+    // line's depth below that baseline (`.vv-body`'s 13/12.5 on 1.5 adds 5.5 to 360).
+    case "artifact": {
+      const style = p["style"] as CSSProperties | undefined;
+      const strut = p["strut"] as CSSProperties | undefined;
+      const frame = (
         <Suspense fallback={null}>
-          <Html text={String(p["text"] ?? "")} />
+          {typeof p["url"] === "string" ? (
+            <InteractiveArtifact url={p["url"]} onPrompt={event("prompt")} style={style} />
+          ) : (
+            <Html text={String(p["text"] ?? "")} style={style} />
+          )}
         </Suspense>
       );
+      return strut === undefined ? frame : <div style={strut}>{frame}</div>;
+    }
     case "schemaText":
       return (
         <div style={box}>
@@ -120,4 +121,51 @@ function inline({ component, props: p, height, onEvent }: IslandProps): JSX.Elem
         </div>
       );
   }
+}
+
+/**
+ * The diff, inline: `MonacoDiffPane` with what the changeset reviewer wires into it. `select` reports the
+ * line selection (`select`: the passage and whether it covers a changed line — what Revert says before
+ * it is pressed); the pane's actions are the handle's `revertSelectedLines`, answered as `reverted`;
+ * `intel` is the compiler on each side, handed straight through. `loading` is the fallback a host draws
+ * while Monaco loads (`.diff-pane-loading`: its words and its box's style); `frame` is what the host's
+ * stylesheet puts on the pane's own box (`.review-detail .monaco-host`: its ring, radius and floor), laid
+ * on the element, since the ancestor that rule needs is not there on `/rn` or in a phone's island page.
+ */
+function DiffInline({ p, box, event, handle }: { p: Record<string, unknown>; box: CSSProperties | undefined; event: (name: string) => (value: unknown) => void; handle?: (handle: IslandHandle | null) => void }): JSX.Element {
+  const actions = useRef<DiffActions | null>(null);
+  // The latest host's, for the handle: it is handed over once, when the pane is made.
+  const live = useRef(event);
+  live.current = event;
+  const loading = p["loading"] as { text: string; style: CSSProperties } | undefined;
+  const wrap = useRef<HTMLDivElement>(null);
+  const frame = p["frame"] as Record<string, string> | undefined;
+  const dress = (): void => {
+    const host = wrap.current?.querySelector<HTMLElement>(".monaco-host");
+    if (host !== null && host !== undefined && frame !== undefined) Object.assign(host.style, frame);
+  };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(dress, [JSON.stringify(frame)]);
+  return (
+    <div style={box} ref={wrap}>
+      <Suspense fallback={loading === undefined ? null : <div style={loading.style}>{loading.text}</div>}>
+        <MonacoDiffPane
+          original={String(p["original"] ?? "")}
+          modified={String(p["modified"] ?? "")}
+          mime={String(p["mime"] ?? "text/plain")}
+          readOnly={p["readOnly"] !== false}
+          sideBySide={p["sideBySide"] === true}
+          {...(typeof p["file"] === "string" ? { file: p["file"] } : {})}
+          {...(p["readOnly"] === false ? { onModified: event("modified") } : {})}
+          {...(p["select"] === true ? { onSelect: (selection) => event("select")({ selection, canRevert: actions.current?.hasChangedSelection() === true }) } : {})}
+          onReady={(ready) => {
+            actions.current = ready;
+            dress();
+            handle?.(ready === null ? null : { command: (name) => name === "revertSelectedLines" && live.current("reverted")(ready.revertSelectedLines()) });
+          }}
+          {...(p["intel"] !== null && typeof p["intel"] === "object" ? { intel: p["intel"] as NonNullable<MonacoDiffProps["intel"]> } : {})}
+        />
+      </Suspense>
+    </div>
+  );
 }

@@ -343,7 +343,18 @@ const diffHeight = (change: Change): number => Math.min(Math.max(((change.before
  * `ChangesView`: a set of file changes, collapsed — the list first, a file's diff (the `diff` island)
  * when its row is opened. Inline or side by side is held by the list, as the desktop's.
  */
-export function ChangesView({ changes, outcomes, empty }: { changes: readonly Change[]; outcomes?: Record<string, ChangeOutcome> | undefined; empty?: string }): JSX.Element {
+export function ChangesView({
+  changes,
+  outcomes,
+  rowAction,
+  empty,
+}: {
+  changes: readonly Change[];
+  outcomes?: Record<string, ChangeOutcome> | undefined;
+  /** An extra control per row, beside its fold (the sync's "Open"). */
+  rowAction?: ((change: Change) => ReactNode) | undefined;
+  empty?: string;
+}): JSX.Element {
   const [layout, setLayout] = useState<DiffLayout>("inline");
   if (changes.length === 0) return <EmptyNote marginVertical={13}>{empty ?? "No files change."}</EmptyNote>;
   const total = totalStats(changes);
@@ -351,7 +362,7 @@ export function ChangesView({ changes, outcomes, empty }: { changes: readonly Ch
     <View minWidth={0}>
       <ChangesHead count={changes.length} {...total} />
       {changes.map((change) => (
-        <ChangeRow key={change.id} change={change} outcome={outcomes?.[change.path]} layout={layout} onLayout={setLayout} />
+        <ChangeRow key={change.id} change={change} outcome={outcomes?.[change.path]} layout={layout} onLayout={setLayout} action={rowAction?.(change)} />
       ))}
     </View>
   );
@@ -363,7 +374,7 @@ const LAYOUTS = [
 ] as const;
 
 /** `ChangeRow`: one file's row, and its diff underneath when opened (mounted only while open). */
-function ChangeRow({ change, outcome, layout, onLayout }: { change: Change; outcome: ChangeOutcome | undefined; layout: DiffLayout; onLayout: (next: DiffLayout) => void }): JSX.Element {
+function ChangeRow({ change, outcome, layout, onLayout, action }: { change: Change; outcome: ChangeOutcome | undefined; layout: DiffLayout; onLayout: (next: DiffLayout) => void; action?: ReactNode }): JSX.Element {
   const t = useTokens();
   const [open, setOpen] = useState(false);
   const stats = changeStats(change);
@@ -401,6 +412,8 @@ function ChangeRow({ change, outcome, layout, onLayout }: { change: Change; outc
             </View>
           )}
         </Press>
+        {/* Beside the fold rather than inside it: opening the diff and acting on the file are two intentions. */}
+        {action ?? null}
       </View>
       {open ? (
         <View paddingTop={4} paddingBottom={8}>

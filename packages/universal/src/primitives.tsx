@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
 import { Platform, Pressable, type GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { useTokens, type Tokens } from "./tokens";
@@ -116,7 +116,9 @@ export function Txt({
   children?: ReactNode;
 } & Record<string, unknown>): JSX.Element {
   const t = useTokens();
+  const ink = useContext(InkContext);
   const base: FontSpec = { ...(register !== undefined ? REGISTERS[register] : { voice: "app", scale: 1 }), ...spec } as FontSpec;
+  if (base.color === undefined && ink !== undefined) base.color = ink;
   return (
     // Left unless told otherwise: on web a Pressable is a <button>, which centres the text inside it.
     <Text {...(font(t, base) as object)} textAlign="left" {...(ellip ? { numberOfLines: 1, ellipsizeMode: "tail" } : {})} {...(rest as object)}>
@@ -124,6 +126,13 @@ export function Txt({
     </Text>
   );
 }
+
+/**
+ * The colour a `Txt` that names none takes: the body's --text, unless a box round it sets another — CSS
+ * inheritance, for the one place a copy needs it (an adopted task's history drawn inside a note row,
+ * `.sb-note.step`, whose --dim reaches every word in it that sets no colour of its own).
+ */
+export const InkContext = createContext<string | undefined>(undefined);
 
 /** A glyph set in the app voice at a size, centred in a fixed width (the sidebar's `.side-glyph`). */
 export function Glyph({ children, width, scale = 1, color = "dim", ...rest }: { children: ReactNode; width?: number; scale?: number; color?: string } & Record<string, unknown>): JSX.Element {

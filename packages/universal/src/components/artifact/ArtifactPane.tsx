@@ -1,7 +1,7 @@
 import { useRef, useState, type JSX } from "react";
 import { ScrollView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { ReviewNote } from "@jaira/shared/browser";
+import type { ReviewNote, ServedArtifact } from "@jaira/shared/browser";
 import type { DraftBox } from "@jaira/ui/drafts";
 import { artifactChangeOf, artifactReadingOf } from "@jaira/ui/artifactReview";
 import { PLAIN_SCROLLER, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
@@ -19,6 +19,9 @@ import { NoteComposer, NoteList, dataKey } from "./ReviewNotes";
  *
  *   .artifact-view   --bg, 1px --line, radius 8, padding 10, 12 above, at most 46vh tall, scrolls
  *
+ * `serve` is how an interactive artifact is served to the frame it runs in (the gate's grant, `serveOfGate`),
+ * handed to the value view as the desktop's pane hands it — not to the changes view of an edit.
+ *
  * Selecting a passage opens the note composer on web (the desktop's own selection code over the DOM
  * react-native-web draws, `noteSelection.web.ts`); a phone has no selection to anchor one to, and lists
  * the notes a review carries.
@@ -35,6 +38,7 @@ export function ArtifactPane({
   onReply,
   author,
   artifactId,
+  serve,
   marginTop = 12,
 }: {
   value: unknown;
@@ -48,6 +52,7 @@ export function ArtifactPane({
   onReply?: ((index: number, body: string) => void) | undefined;
   author: string;
   artifactId: string;
+  serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
   marginTop?: number;
 }): JSX.Element {
   const well = useRef<unknown>(null);
@@ -77,13 +82,14 @@ export function ArtifactPane({
             hint={hint}
             actions={actions}
             softbreak="space"
+            {...(serve !== undefined ? { serve } : {})}
             {...(editable ? { edit: draft.set } : {})}
             {...(dirty ? { diff: { before: seed, after: draft.text, hunks: change.hunks ?? [] } } : {})}
           />
         ) : reading === "changes" ? (
           <ValueView value={{ changes: [change] }} actions={actions} />
         ) : (
-          <ValueView value={value} hint={hint} actions={actions} softbreak="space" {...(editable ? { edit: draft.set } : {})} />
+          <ValueView value={value} hint={hint} actions={actions} softbreak="space" {...(serve !== undefined ? { serve } : {})} {...(editable ? { edit: draft.set } : {})} />
         )}
       </ArtifactWell>
 

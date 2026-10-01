@@ -52,7 +52,7 @@ export function SidechainConversation({
   const liveItems = liveTurn?.sidechains[call];
   const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);
   // Same rule as the thread that spawned it; the call is the reset — a different chain starts at its end.
-  const follow = useLiveEdge(call);
+  const { at: _at, following: _following, unpin: _unpin, ...follow } = useLiveEdge(call);
   // `.ts-page`'s `min-height: 100%`: the scroller's own height.
   const [viewport, setViewport] = useState<number | undefined>(undefined);
 
@@ -66,7 +66,7 @@ export function SidechainConversation({
         {...follow}
         onLayout={(e) => {
           setViewport(e.nativeEvent.layout.height);
-          follow.onLayout();
+          follow.onLayout(e);
         }}
       >
         <Paper minHeight={viewport}>

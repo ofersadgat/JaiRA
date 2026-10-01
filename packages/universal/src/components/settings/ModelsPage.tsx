@@ -95,7 +95,9 @@ export function ModelsPage(): JSX.Element {
 /** `configPane.tsx`'s `ModelDefaults`: the default model and the call settings a state that names nothing gets. */
 function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.Element {
   const { model, knobs } = modelDefaultsOf(effective);
-  void presetNamesOf;
+  // `PresetOptions`: the presets, each marked as one — a list to pick a preset from, in a box that still
+  // takes any model id.
+  const presets = presetNamesOf(effective).map((name) => ({ value: name, label: "preset" }));
   return (
     <SettingsSection
       id="defaults"
@@ -109,7 +111,7 @@ function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.Element {
           hint="A model id, or a preset's name — 'coder' means the model coder chooses. A bare id routes to whatever serves that family here — 'claude-sonnet-5' reaches the CLI agent on a machine with no API key. Prefix it ('claude-cli/sonnet') to insist on one route. Empty leaves the choice to the state."
           layer={layer(`${DEFAULT_ENVIRONMENT}.model`)}
         >
-          <FormInput value={model} mono placeholder="a model id, or a preset" disabled={locked} onChange={(v) => set(`${DEFAULT_ENVIRONMENT}.model`, v === "" ? undefined : v)} />
+          <FormInput value={model} mono placeholder="a model id, or a preset" disabled={locked} suggest={presets} onChange={(v) => set(`${DEFAULT_ENVIRONMENT}.model`, v === "" ? undefined : v)} />
         </Field>
         <Field label="Call settings" hint={summariseLlmConfig(knobs)} wide>
           <LlmConfigForm value={knobs} levelsFor={model === "" ? undefined : model} disabled={locked} onChange={(next) => set(DEFAULT_ENVIRONMENT, mergedDefaultsOf(next, model))} />

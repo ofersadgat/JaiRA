@@ -1172,6 +1172,10 @@ export function SessionBandsView({
     };
   }, [focus?.instance, focus?.at, given, notes]);
 
+  // Before the early return below: a run that goes from nothing said to something said must call the
+  // same hooks on both renders.
+  const [menu, setMenu] = useState<MenuAnchor | null>(null);
+
   // Notes even with no bands, and that is the case worth having: a run whose first child was blocked
   // never opened a conversation at all, so "this run has not said anything yet" was the whole screen
   // — a true sentence standing where the reason belonged.
@@ -1180,7 +1184,6 @@ export function SessionBandsView({
   // the universal copy (decision 0015). What each row SAYS is decided here.
   const page = pageRowsOf(given, notes, root);
   const { bands, bare, starters, forks, laneNotes } = page;
-  const [menu, setMenu] = useState<MenuAnchor | null>(null);
   // The armed cut's counted line and the origin seam, placed among the rows by the clock —
   // `markedRowsOf` (`sessionRows.ts`), shared with the universal copy (decision 0015).
   const marked = markedRowsOf(page, notes, armed, origin);

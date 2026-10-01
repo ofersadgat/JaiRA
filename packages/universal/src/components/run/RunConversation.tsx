@@ -36,6 +36,8 @@ export function RunConversation({
   foot,
   onLayout,
   composited = false,
+  focus,
+  onHere,
 }: {
   detail: TaskDetail;
   /** The run being read. */
@@ -58,6 +60,10 @@ export function RunConversation({
    * copy's subpixel; in the panel `OVER_SCROLLER` already does it. The composer is not composited there.
    */
   composited?: boolean;
+  /** A state to go to, asked for by the Steps index beside this column — see `RunTranscript`. */
+  focus?: { instance: string; at: number } | undefined;
+  /** Where the reader is, reported as they scroll, for that index to mark. */
+  onHere?: ((instance: string | undefined, onScreen?: ReadonlySet<string>) => void) | undefined;
 }): JSX.Element {
   // A rewind the reader has ARMED from an entered row — cleared with the task, since a cut is a
   // question about one journal. A fork needs no arming: it starts at once.
@@ -77,7 +83,7 @@ export function RunConversation({
       : undefined;
   return (
     <View flex={1} minHeight={0} flexDirection="column" {...(onLayout !== undefined ? { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => onLayout(e.nativeEvent.layout.height) } : {})}>
-      <RunTranscript detail={detail} parent={parent} source={source} {...(gate !== undefined && onGate !== undefined ? { gate, onGate } : {})} armed={armed} onArm={setArmed} onOpenSidechain={onOpenSidechain} />
+      <RunTranscript detail={detail} parent={parent} source={source} {...(gate !== undefined && onGate !== undefined ? { gate, onGate } : {})} armed={armed} onArm={setArmed} onOpenSidechain={onOpenSidechain} focus={focus} onHere={onHere} />
       {/* What stands under the scroller — the composer's place and the panel's foot — in the one layer
           the DOM squashes them into (see OVER_SCROLLER). */}
       <View flexShrink={0} flexDirection="column" {...OVER_SCROLLER}>

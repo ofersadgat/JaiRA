@@ -209,6 +209,26 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   and dim its label; a bare `.field` (a state's panel, a transcript) has neither — `FieldFrame` says
   which.
 
+- **The dev server can miss a quick second edit.** Two saves of one file in a row can leave it serving
+  the first: `curl` the module from `127.0.0.1:8081` to see what it serves, and `touch` the file.
+- **An inline iframe adds its line's depth.** In `.vv-body` a 360-tall frame makes a 365.5-tall block
+  (the frame sits on the baseline of a line of the block's font): the copy stands it in a strut.
+- **A space after an inline chip.** A copy's `Txt` that begins a line of its own collapses a leading
+  space the DOM keeps mid-line after a chip; write a no-break space after the chip.
+- **A 1px border is 0.667 in the studio.** Chromium draws it at device pixels while `devicePixelRatio`
+  reads 2 there; where the width is geometry (a picture's frame), measure it on web (`ring.web.ts`).
+- **Chromium splits a line's leading** by giving the ascent half of it rounded down and the descent
+  the rest — the half pixel a baseline-placed box is off by, when it is off.
+- **An island stands without its host's rules.** `.review-detail .monaco-host` (the ring round the
+  diff) is in `styles.css`, which neither `/rn` nor the island page has: the island takes a `frame`.
+
+- **A photograph holds nothing that closes on resize.** `app.shot()` captures beyond the viewport, which
+  resizes the page and so closes a `MenuLayer` or a suggestion list; hold those open another way.
+- **`<datalist>` is a native window.** No page capture shows Chromium's list; it was photographed from a
+  test Electron app, and it follows the OS theme, not the page's look.
+- **A hook after an early return.** A component that returns early for "nothing yet" and declares
+  state below it crashes when the nothing becomes something ("Rendered more hooks"): state first.
+
 ## A leaf, on its own
 
 A component with no place in a scene yet (or one worth checking alone, in every variation) gets a

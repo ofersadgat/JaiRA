@@ -16,18 +16,20 @@ import {
   type ParsedStructure,
   type PatchFile,
   type RendererId,
+  type ServedArtifact,
   type ViewHint,
   type ViewId,
 } from "@jaira/shared/browser";
 import { editorLook } from "@jaira/ui/editorLook";
 import { highlightJson } from "@jaira/ui/jsonHighlight";
 import { textRendererFor, useRenderChoice } from "@jaira/ui/renderChoice";
+import { useArtifactFrame } from "@jaira/ui/artifactFrame";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { RENDERER_META, VIEW_META, base64Of, fileNameOf, hintText, schemaDescriber } from "@jaira/ui/valueViewMeta";
 import { invoke } from "@jaira/ui/store";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
-import { Press, Txt, edge, font, lengthToken } from "../../primitives";
+import { Press, Txt, edge, font, lengthToken, viewScrollbarProps } from "../../primitives";
 import { Island } from "../../islands";
 import { useTokens, type Tokens } from "../../tokens";
 import { DataView } from "../files/DataView";
@@ -71,7 +73,9 @@ export interface MarkdownDiff {
  *   .vv-form         a `ReadingForm` (form/Field.tsx)
  *   .doc-tree        `DataView`; `.vv-patch`, `.vv-table`, `.vv-media` `ValueReadings.tsx`
  *
- * Rendered HTML is the `artifact` island (a page is web content; a WebView on a phone); the editors (with
+ * Rendered HTML is the `artifact` island (a page is web content; a WebView on a phone) — on web the frame
+ * an interactive artifact RUNS in, where the surface lends a `serve` and the record grants it one, its
+ * messages filling the composer through `onPrompt` (`PageFrame`, below); the editors (with
  * `edit`) are the markdown and code editors' islands, and so is code's coloured reading on web (the
  * `code` island's `reading`, the desktop's `CodeText`). On a phone that reading is the plain box the
  * DOM draws before its colours arrive: colouring is Monaco's tokenizer, and a WebView per fenced block is
@@ -93,6 +97,9 @@ export function ValueView({
   diff,
   softbreak,
   outcomes,
+  serve,
+  onPrompt,
+  pinned = false,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -115,6 +122,19 @@ export function ValueView({
   softbreak?: "newline" | "space";
   /** How each change fared, by path, when the value is a set of files (the desktop's `outcomes`). */
   outcomes?: Record<string, ChangeOutcome> | undefined;
+  /**
+   * How to have an artifact SERVED to a frame, for the interactive case (the desktop's `serve`): supplied
+   * by the surface, which knows the task and project a grant takes. Absent ⇒ an interactive artifact is
+   * the static page, its scripts inert. Asked only on web — a phone's WebView cannot load the address.
+   */
+  serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
+  /** Where a message from an interactive artifact goes (the composer, filled, never sent). Absent ⇒ nowhere. */
+  onPrompt?: ((text: string) => void) | undefined;
+  /**
+   * The value owns its column (`.pinned-body > .vv`, the panel's Preview card): the head padded 7 10 0
+   * and 5 over the body, the body taking what is left and scrolling, a page in it full bleed.
+   */
+  pinned?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const views = viewsFor(value, hint ?? {});
@@ -134,6 +154,13 @@ export function ValueView({
   const plainly = renderer === "codeview" && renderersFor(view, mime, editable).length > 1;
   const writing = plainly ? undefined : edit;
 
+  // The address an interactive artifact runs from, once the record granted one (`artifactFrame.ts`, the
+  // desktop's own grant). On web only: the frame is the window's `jaira-artifact:` protocol, which a
+  // phone's WebView cannot load, so a phone asks for nothing and draws the page inert.
+  const frameUrl = useArtifactFrame(artifact, isWeb ? serve : undefined);
+  // `.vv-source`'s 340 ceiling, which a value that owns its column does without (`.pinned-body .vv-source`).
+  const ceiling = pinned ? 1e9 : 340;
+
   const wantsParse = view === "data" || view === "table" || view === "form";
   const parsed = useMemo<ParsedStructure | null>(() => {
     if (!wantsParse || typeof showing !== "string") return null;
@@ -150,7 +177,7 @@ export function ValueView({
       const src = mediaSrcOf(showing, mime);
       const kind = mediaKindOf(mime);
       if (src !== undefined && kind !== undefined) return <Media src={src} kind={kind} />;
-      return <Source value={showing} t={t} />;
+      return <Source value={showing} ceiling={ceiling} t={t} />;
     }
     if (view === "markdown") {
       // The DOM's `MarkdownDocument`: the reading renderer, unless there is an edit to take or a change
@@ -165,9 +192,10 @@ export function ValueView({
       );
     }
     if (view === "html") {
-      // A page, which is web content by nature: the artifact island (a WebView on a phone), static as the
-      // desktop's is where no grant to run it was made.
-      return <Island component="artifact" props={{ text: String(showing) }} />;
+      // A page, which is web content by nature: the artifact island (a WebView on a phone) — the frame
+      // it runs in where one was granted, otherwise the same page, inert, as the desktop's.
+      const onEvent = onPrompt === undefined ? undefined : (name: string, text: unknown): void => void (name === "prompt" && typeof text === "string" && onPrompt(text));
+      return <PageFrame text={String(showing)} url={frameUrl} pinned={pinned} {...(onEvent !== undefined ? { onEvent } : {})} t={t} />;
     }
     if (view === "code") {
       // The DOM's `CodeDocument`: read with the tokenizer, edited with the editor (320 tall in a panel,
@@ -207,12 +235,12 @@ export function ValueView({
       );
     }
     // The coloured reading whether or not it may be changed: the DOM's `JsonView` comes before its edit.
-    if (view === "json") return <JsonSource value={showing} schema={hint?.schema} t={t} />;
+    if (view === "json") return <JsonSource value={showing} schema={hint?.schema} ceiling={ceiling} t={t} />;
     if (writing !== undefined && typeof showing === "string") {
       // `textarea.code-editor.vv-edit`: the text as written, in the data face, to type into.
       return <EditSource value={showing} onChange={writing} inline={inline} t={t} />;
     }
-    return <Source value={showing} t={t} />;
+    return <Source value={showing} ceiling={ceiling} t={t} />;
   })();
 
   // The ⋯ menu (`valueView.tsx`'s `openMore`): save it, and — where there is a panel — open it there.
@@ -236,7 +264,16 @@ export function ValueView({
                 label: "Open in context panel",
                 separator: true,
                 note: "keeps it on screen while you carry on",
-                onSelect: () => panel.open({ title: artifact?.path ?? artifact?.name ?? label ?? "Value", value, ...(hint !== undefined ? { hint } : {}), ...(label !== undefined ? { label } : {}) }),
+                onSelect: () =>
+                  panel.open({
+                    title: artifact?.path ?? artifact?.name ?? label ?? "Value",
+                    value,
+                    ...(hint !== undefined ? { hint } : {}),
+                    ...(label !== undefined ? { label } : {}),
+                    // A live artifact keeps running where it goes: the grant travels with the value.
+                    ...(serve !== undefined ? { serve } : {}),
+                    ...(onPrompt !== undefined ? { onPrompt } : {}),
+                  }),
               },
             ]),
       ],
@@ -250,7 +287,8 @@ export function ValueView({
   };
 
   const head = chrome && (label !== undefined || views.length > 1 || actions !== undefined);
-  const lifted = inline ? { position: "absolute", zIndex: 2, top: 3, right: 3 } : { marginBottom: 3 };
+  // `.pinned-body > .vv > .vv-head`: padded 7 10 0, 5 over the body.
+  const lifted = inline ? { position: "absolute", zIndex: 2, top: 3, right: 3 } : pinned ? { flexShrink: 0, paddingTop: 7, paddingHorizontal: 10, marginBottom: 5 } : { marginBottom: 3 };
   const glass = inline ? t.mix(t.v("panel"), 88, "transparent") : undefined;
   /** A toggle button's ground and ink: on, under the pointer, or neither. */
   const toggleInk = (on: boolean, hovered: boolean): { box: Record<string, unknown>; color: string } => ({
@@ -258,7 +296,7 @@ export function ValueView({
     color: on || hovered ? "text" : "tok-hint",
   });
   return (
-    <View minWidth={0} {...(inline ? { position: "relative" } : {})}>
+    <View minWidth={0} {...(inline ? { position: "relative" } : {})} {...(pinned ? { flex: 1, flexDirection: "column" } : {})}>
       {head ? (
         <View flexDirection="row" alignItems="center" gap={6} minWidth={0} {...(lifted as object)}>
           {label !== undefined ? <Txt spec={{ voice: "app", scale: 10 / 12.5, upper: true, ls: 0.07, color: "tok-hint" }}>{label}</Txt> : null}
@@ -353,7 +391,9 @@ export function ValueView({
           </Press>
         </View>
       ) : null}
-      <View minWidth={0}>{body}</View>
+      <View minWidth={0} {...(pinned ? pinnedBody(view === "html", t) : {})}>
+        {body}
+      </View>
       {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
       {rendMenu !== null ? <ContextMenu anchor={rendMenu} onClose={() => setRendMenu(null)} /> : null}
     </View>
@@ -412,6 +452,46 @@ function CodeReading({ text, mime, inline, t }: { text: string; mime: string; in
 }
 
 /**
+ * `.pinned-body > .vv > .vv-body`: what the column leaves, scrolling inside itself (on web; a phone's
+ * panel scrolls round it), padded 0 10 10 — and, for a page, full bleed and clipped (`:has(> .vv-html)`).
+ */
+function pinnedBody(page: boolean, t: Tokens): Record<string, unknown> {
+  if (page) return { flex: 1, minHeight: 0, overflow: "hidden" };
+  return { flex: 1, minHeight: 0, paddingHorizontal: 10, paddingBottom: 10, ...(isWeb ? { overflow: "auto", ...viewScrollbarProps(t) } : {}) };
+}
+
+/**
+ * The html view's page: the `artifact` island — `iframe.vv-html`, the static page (`Html`, `sandbox=""`)
+ * or, with a granted `url`, the frame it runs in (`InteractiveArtifact`, `sandbox="allow-scripts"`), both
+ * the desktop's own. On web the frame stands without the stylesheet, so its box is given inline:
+ *
+ *   .vv-html                          100% wide, 360 tall, a 1px --line, radius 6, on #fff
+ *   .pinned-body .vv-html             (the Preview card) full bleed: what the column leaves, no edge
+ *
+ * A pinned frame is as tall as the room measured for it (a `flex: 1` box round the island). On a phone
+ * the island page draws the page inert and as tall as its content: `style` and `strut` are web's.
+ */
+function PageFrame({ text, url, pinned, onEvent, t }: { text: string; url: string | null; pinned: boolean; onEvent?: (name: string, value: unknown) => void; t: Tokens }): JSX.Element {
+  const [room, setRoom] = useState<number | null>(null);
+  // Pinned, the body is a flex box and the frame an item of it (`display: flex` on `.vv-body`): no line.
+  const box = pinned
+    ? { width: "100%", height: room ?? 0, border: 0, borderRadius: 0, display: "block" }
+    : { width: "100%", height: 360, border: `1px solid ${String(t.v("line"))}`, borderRadius: 6 };
+  const style = { ...box, background: "#fff", boxSizing: "border-box" };
+  // The line the inline frame sits on: `.vv-body`'s font, the body's 13/12.5 on 1.5.
+  const face = font(t, { voice: "app", scale: 13 / 12.5 });
+  const px = (v: unknown): unknown => (typeof v === "number" ? `${v}px` : v);
+  const strut = pinned ? undefined : { fontFamily: face["fontFamily"], fontSize: px(face["fontSize"]), lineHeight: px(face["lineHeight"]) };
+  const island = <Island component="artifact" props={{ text, ...(url !== null ? { url } : {}), style, ...(strut !== undefined ? { strut } : {}) }} {...(onEvent !== undefined ? { onEvent } : {})} />;
+  if (!pinned) return island;
+  return (
+    <View flex={1} minHeight={0} onLayout={(e: LayoutChangeEvent) => setRoom(e.nativeEvent.layout.height)}>
+      {island}
+    </View>
+  );
+}
+
+/**
  * `textarea.code-editor.vv-edit`: the source to type into — data 12/12 on a 1.5 line, --text on --bg, a
  * 1px --line, radius --control-radius, padding 8 10, at least 40vh tall (inline: as tall as its lines,
  * at most 24).
@@ -452,9 +532,9 @@ function jsonTextOf(value: unknown): string {
 }
 
 /** `Source`: the raw form — text as written, or JSON pretty-printed. */
-function Source({ value, t }: { value: unknown; t: Tokens }): JSX.Element {
+function Source({ value, ceiling, t }: { value: unknown; ceiling: number; t: Tokens }): JSX.Element {
   return (
-    <Scroll maxHeight={340} t={t}>
+    <Scroll maxHeight={ceiling} t={t}>
       <Txt spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)}>
         {jsonTextOf(value)}
       </Txt>
@@ -472,14 +552,14 @@ const TOKEN_INK: Record<string, string> = { key: "accent", string: "tok-string",
  * a phone a native text cannot hold a box of no width, so the hint follows its line after the gap, and a
  * long one can wrap it.
  */
-function JsonSource({ value, schema, t }: { value: unknown; schema: unknown; t: Tokens }): JSX.Element {
+function JsonSource({ value, schema, ceiling, t }: { value: unknown; schema: unknown; ceiling: number; t: Tokens }): JSX.Element {
   const text = useMemo(() => jsonTextOf(value), [value]);
   const describe = useMemo(() => schemaDescriber(schema), [schema]);
   const lines = useMemo(() => highlightJson(text, describe), [text, describe]);
   const base = { voice: "data" as const, scale: 11.5 / 12, lineHeight: 1.55 };
   const ghost = font(t, { ...base, color: "tok-hint", italic: true });
   return (
-    <Scroll maxHeight={340} both t={t}>
+    <Scroll maxHeight={ceiling} both t={t}>
       {/* The line as the stylesheet writes it (unitless) on web: Blink multiplies it out in float. */}
       <Txt spec={{ ...base, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)}>
         {lines.map((line, i) => (

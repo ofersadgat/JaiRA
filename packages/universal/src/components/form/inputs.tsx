@@ -5,6 +5,7 @@ import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../pri
 import { useLook, useTokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
 import { useReadingForm } from "./Field";
+import { AUTOFILLED, ListIndicator, SuggestLayer, laidOut, useSuggest, type Suggestion } from "./Suggest";
 
 /**
  * The form's controls, universal (decision 0015): `controls.tsx`'s `TextInput`, `NumInput`,
@@ -37,8 +38,9 @@ function focusRing(t: ReturnType<typeof useTokens>, focused: boolean): Record<st
 
 /**
  * `.cfg-input`: a text box that takes its column's width (`controls.tsx`'s `TextInput`). `suggest` is the
- * `<datalist>` a choice box offers; on the desktop it drops down only while typing, so it draws nothing
- * here until it does.
+ * `<datalist>` its `list` names: the type-ahead Chromium opens under it (`Suggest.tsx`), the 16 kept at
+ * the box's end for the list's indicator and the ▼ itself while hovered or focused. The box is then
+ * wrapped (as wide as it was) for the indicator to stand in.
  */
 export function FormInput({
   value,
@@ -55,12 +57,15 @@ export function FormInput({
   onBlur,
   onSubmit,
   onEscape,
+  suggest,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string | undefined;
   disabled?: boolean | undefined;
   mono?: boolean;
+  /** The `<datalist>` the box completes against (`list`). */
+  suggest?: readonly Suggestion[] | undefined;
   /** `.num`: at most 120 wide. */
   num?: boolean;
   label?: string | undefined;
@@ -86,39 +91,71 @@ export function FormInput({
   const spec = tight ? { ...base, weight: 600 } : base;
   const ring = bad ? "bad" : focused ? "accent" : hovered && !disabled ? "rule" : "line";
   const reading = useReadingForm();
-  return (
+  const list = useSuggest(suggest, value, onChange, disabled || reading);
+  const padH = tight ? 8 : 9;
+  const outer = { width: width ?? "100%", minWidth: 0, ...(num && plain === undefined ? { maxWidth: 120 } : {}) };
+  const ink = disabled && !reading ? "dim" : "text";
+  const input = (
     <RNTextInput
+      ref={list.ref as never}
       value={value}
-      onChangeText={onChange}
+      onChangeText={(text) => {
+        list.onChangeText(text);
+        onChange(text);
+      }}
       {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */ } : {})}
       editable={!disabled}
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
       inputMode={num ? "decimal" : "text"}
-      onFocus={() => setFocused(true)}
+      onFocus={() => {
+        setFocused(true);
+        list.onFocus();
+      }}
       onBlur={() => {
         setFocused(false);
+        list.onBlur();
         onBlur?.();
       }}
       {...(onSubmit !== undefined ? { onSubmitEditing: onSubmit } : {})}
-      {...((onEscape !== undefined ? { onKeyPress: (e: { nativeEvent: { key: string } }) => e.nativeEvent.key === "Escape" && onEscape() } : {}) as object)}
+      {...((onEscape !== undefined || list.listed
+        ? { onKeyPress: (e: { nativeEvent: { key: string }; preventDefault?: () => void }) => !list.onKeyPress(e) && e.nativeEvent.key === "Escape" && onEscape?.() }
+        : {}) as object)}
       {...({ onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false) } as object)}
+      {...(list.listed ? list.input : {})}
       style={
         {
-          ...(font(t, { ...spec, color: disabled && !reading ? "dim" : "text" }) as object),
-          width: width ?? "100%",
-          minWidth: 0,
-          ...(num && plain === undefined ? { maxWidth: 120 } : {}),
+          ...(font(t, { ...spec, color: ink }) as object),
+          ...(list.listed ? { width: "100%", minWidth: 0 } : outer),
           paddingVertical: tight ? 2 : plain !== undefined ? 5 : 6,
-          paddingHorizontal: tight ? 8 : 9,
+          paddingHorizontal: padH,
+          // The list's indicator keeps 16 at the end of the content box, and the text stops short of it.
+          ...(list.listed ? { paddingRight: padH + 16 } : {}),
           borderWidth: 1,
           borderStyle: "solid",
           borderColor: reading && !bad ? "transparent" : t.v(ring),
           borderRadius: lengthToken(t, "control-radius", 7),
           backgroundColor: reading ? "transparent" : t.v(disabled ? "panel-2" : "bg"),
+          ...(list.filled ? { backgroundColor: AUTOFILLED.ground, color: AUTOFILLED.text } : {}),
           ...(disabled ? { opacity: 0.55 } : {}),
           ...focusRing(t, focused),
         } as never
       }
+    />
+  );
+  if (!list.listed) return input;
+  const size = t.scaled(mono && plain === undefined ? "size-data" : "size-app", plain?.scale ?? 1);
+  return (
+    <SuggestLayer
+      layout={outer}
+      box={
+        <View position="relative" {...(outer as object)}>
+          {input}
+          {(hovered || focused) && !disabled && !reading ? (
+            <ListIndicator color={list.filled ? AUTOFILLED.text : (t.v(ink) as string)} size={typeof size === "number" ? size : 12} end={laidOut() + padH} />
+          ) : null}
+        </View>
+      }
+      popup={list.popup}
     />
   );
 }

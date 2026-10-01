@@ -1,17 +1,22 @@
-import { useRef, useState, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { useRef, useState, type DragEvent as ReactDragEvent, type JSX, type ReactNode } from "react";
+import type { View as HostView } from "react-native";
+import { View, isWeb } from "@tamagui/core";
 import { EVENT_SPECS, isEventName } from "@jaira/shared/browser";
 import { INTO_NAME, badgeFor, newLineOf, useAutomationsHost, type AutomationsPaneProps, type AutomationsViewProps } from "@jaira/ui/automationsHost";
 import {
   automationStateIdOf,
   eventOnAnywhere,
+  eventOptionsOf,
+  workflowOptionsOf,
   eventPicksOf,
   filterFormOf,
   filterOfForm,
   filterSchemaOf,
   flagText,
   freshLineName,
+  lineDropOf,
   lineFlagsOf,
+  LINE_DRAG,
   stepFormOf,
   stepOfForm,
   stepSummary,
@@ -24,6 +29,8 @@ import {
 import { runSchemaOf } from "@jaira/ui/runForm";
 import type { ValueSources } from "@jaira/ui/schemaForm/types";
 import { Txt, edge, useHover, type FontSpec } from "../../primitives";
+import { Lift } from "../Lift";
+import { useLiftTargets, type LiftTargets } from "../liftTargets";
 import { useTokens } from "../../tokens";
 import { FormInput } from "../form/inputs";
 import { SchemaForm } from "../form/SchemaForm";
@@ -39,8 +46,8 @@ import { SettingsSection } from "./SettingsPage";
  * layer's built-in events workflow, each an event, a filter and the steps it runs. What the host reads,
  * holds and writes is `automationsHost.ts`'s, the hook the DOM pane runs; what a line says is
  * `automationsModel.ts`'s. Reordering by dragging is the desktop's alone (the grip is drawn; a line is
- * moved on a phone by editing the file), and so are the `<datalist>` completions of the event and
- * workflow boxes. The rules (`[data-part="automations"]`; the rows' font is the body's, 13/12.5):
+ * moved on a phone by editing the file). The event and workflow boxes complete against their
+ * `<datalist>`s (`eventOptionsOf`, `workflowOptionsOf`) in the type-ahead (`form/Suggest.tsx`). The rules (`[data-part="automations"]`; the rows' font is the body's, 13/12.5):
  *
  *   .au-head             row, centred, gap 8, 8 below; `.au-grip` padding 0 4, -3 tracking, --tok-hint
  *   .au-name 16em        its box padding 2 8, at 600; `.au-name-static` 600
@@ -266,7 +273,7 @@ function StepEditor({
         {step.kind === "start" ? (
           <>
             <View width={em(15)} maxWidth="100%">
-              <FormInput value={step.workflow} mono placeholder="a workflow — feature/review" label={`the workflow step ${index + 1} starts`} disabled={props.locked} onChange={(workflow) => onStep({ ...step, workflow })} />
+              <FormInput value={step.workflow} mono placeholder="a workflow — feature/review" label={`the workflow step ${index + 1} starts`} disabled={props.locked} suggest={workflowOptionsOf(props.workflows)} onChange={(workflow) => onStep({ ...step, workflow })} />
             </View>
             {/* The rulings of 2026-09-25: a started task is the events task's child unless it is asked
                 to stand on its own — then it is not filed under the events task, and its card says so. */}
@@ -324,7 +331,7 @@ function LineBody({ line, props, off = false, onLine }: { line: AutomationLine; 
           When
         </Txt>
         <View width={em(17)} maxWidth="100%">
-          <FormInput value={line.event} mono placeholder="an event — git.push" label="the event this line waits for" disabled={props.locked} onChange={(event) => onLine({ ...line, event, filter: {} })} />
+          <FormInput value={line.event} mono placeholder="an event — git.push" label="the event this line waits for" disabled={props.locked} suggest={eventOptionsOf(props.events)} onChange={(event) => onLine({ ...line, event, filter: {} })} />
         </View>
         {badge !== undefined ? <ConnectionPill first badge={badge} onOpenConnections={props.onOpenConnections} /> : null}
       </View>
@@ -351,9 +358,63 @@ function LineBody({ line, props, off = false, onLine }: { line: AutomationLine; 
 }
 
 /** `.set-row.au-row`: the line on the left, its control at the top right (`.set-row-line`, aligned to the start). */
-function LineRow({ children, control }: { children: ReactNode; control: ReactNode }): JSX.Element {
+/**
+ * `.au-grip`: "⋮⋮", --tok-hint, 0 4 padding, -3px spacing, grab — dragged to reorder the layer's own
+ * lines (the first that matches wins). On web the DOM's HTML5 drag: `draggable` unless locked, the line's
+ * index on the transfer (`LINE_DRAG`), a row's drop reorders (`LineRow`). On a phone a long press and a
+ * pan (`Lift`), landing on the row under the finger.
+ */
+function Grip({ index, locked, targets, onDrop }: { index: number; locked: boolean; targets: LiftTargets; onDrop: (to: string | null) => void }): JSX.Element {
+  const web = isWeb
+    ? {
+        role: "button",
+        tabIndex: 0,
+        draggable: !locked,
+        "aria-label": "drag to reorder",
+        cursor: "grab",
+        userSelect: "none",
+        onDragStart: (e: ReactDragEvent) => e.dataTransfer.setData(LINE_DRAG, String(index)),
+      }
+    : {};
+  const grip = (
+    <Txt spec={{ voice: "app", scale: BODY, lineHeight: 1.5, color: "tok-hint" }} paddingHorizontal={4} letterSpacing={-3} {...({ title: "drag to reorder — the first line that matches wins" } as object)} {...(web as object)}>
+      ⋮⋮
+    </Txt>
+  );
+  if (isWeb) return grip;
   return (
-    <View paddingVertical={13} paddingHorizontal={16}>
+    <Lift
+      enabled={!locked}
+      onLift={() => targets.measure()}
+      onMove={(x, y) => targets.move(x, y)}
+      onLand={(x, y) => {
+        const to = targets.hit(x, y);
+        targets.clear();
+        onDrop(to);
+      }}
+      onCancel={() => targets.clear()}
+    >
+      {grip}
+    </Lift>
+  );
+}
+
+function LineRow({ children, control, onDropFrom, host }: { children: ReactNode; control: ReactNode; onDropFrom?: (from: string) => void; host?: (node: HostView | null) => void }): JSX.Element {
+  // A line of the layer's own takes a dropped grip (`automationsPane.tsx`'s row): `preventDefault` on
+  // drag-over is what lets the drop land; the drop reads the grip's index off the transfer.
+  const web =
+    isWeb && onDropFrom !== undefined
+      ? {
+          onDragOver: (e: ReactDragEvent) => e.preventDefault(),
+          onDrop: (e: ReactDragEvent) => {
+            const from = e.dataTransfer.getData(LINE_DRAG);
+            e.preventDefault();
+            onDropFrom(from);
+          },
+        }
+      : {};
+  return (
+    <View {...(web as object)} {...(!isWeb && host !== undefined ? { ref: host } : {})} paddingVertical={13} paddingHorizontal={16}>
       <View flexDirection="row" alignItems="flex-start" columnGap={32}>
         <View flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0}>
           {children}
@@ -387,6 +448,13 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
   const flags = lineFlagsOf(props.shown, props.events);
   const setLine = (i: number, next: AutomationLine): void => props.onLines(own.map((line, j) => (j === i ? next : line)));
   const hasShared = props.shown.some((shown) => shown.from === "shared");
+  // A phone's reorder (`Grip`): the own rows, measured when a grip is lifted, and the drop by the row's index.
+  const targets = useLiftTargets();
+  const drop = (from: number, to: string | null): void => {
+    if (to === null) return;
+    const next = lineDropOf(own, String(from), Number(to));
+    if (next !== undefined) props.onLines(next);
+  };
 
   /** Where a project page's line runs its steps from, when that is worth saying. */
   const stepsNote = (shown: ShownLine): JSX.Element | null => {
@@ -410,11 +478,17 @@ function AutomationsView(props: AutomationsViewProps): JSX.Element {
     const { line } = shown;
     const off = isEventName(line.event) && !eventOnAnywhere(props.events, line.event);
     return (
-      <LineRow key={`own:${i}`} control={<Remove label="remove this line" disabled={props.locked} onPress={() => props.onLines(own.filter((_, j) => j !== i))} />}>
+      <LineRow
+        key={`own:${i}`}
+        control={<Remove label="remove this line" disabled={props.locked} onPress={() => props.onLines(own.filter((_, j) => j !== i))} />}
+        onDropFrom={(from) => {
+          const next = lineDropOf(own, from, i);
+          if (next !== undefined) props.onLines(next);
+        }}
+        host={targets.host(String(i))}
+      >
         <View flexDirection="row" alignItems="center" gap={8} marginBottom={8}>
-          <Txt spec={{ voice: "app", scale: BODY, lineHeight: 1.5, color: "tok-hint" }} paddingHorizontal={4} letterSpacing={-3} {...({ title: "drag to reorder — the first line that matches wins" } as object)}>
-            ⋮⋮
-          </Txt>
+          <Grip index={i} locked={props.locked} targets={targets} onDrop={(to) => drop(i, to)} />
           {line.raw === undefined ? (
             <NameBox name={line.name} disabled={props.locked} onRename={(name) => setLine(i, { ...line, name })} />
           ) : (

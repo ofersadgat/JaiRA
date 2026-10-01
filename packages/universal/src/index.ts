@@ -10,6 +10,8 @@ export { Markdown, registerFenceRenderer } from "./components/Markdown";
 export { DataView } from "./components/files/DataView";
 // The value view, for its specimens (`valueSpecimens.tsx`).
 export { ValueView } from "./components/panel/ValueView";
+// …and a value owning the panel's column, for its specimens (`artifactSpecimens.tsx`).
+export { PreviewCard } from "./components/panel/PreviewCard";
 export { FileInspector } from "./components/files/FileAddressBar";
 export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
@@ -29,6 +31,7 @@ export { UpdateRow } from "./components/floats/UpdateRow";
 // The transcript, for its specimens (`transcriptSpecimens.tsx`).
 export { Transcript } from "./components/panel/SessionTranscript";
 export { SessionBands } from "./components/panel/SessionBands";
+export { RailedRows } from "./components/panel/Rail";
 // What the hosts hand the shell: the socket going away, and a phone's net for what escapes everything.
 export { connectionLost } from "./app/connection";
 export { installNativeErrorReporting } from "./components/floats/CrashScreen";
@@ -40,6 +43,8 @@ export { GateSurface } from "./components/panel/Gate";
 export { OfflineBanner } from "./components/panel/OfflineBanner";
 export { ChangesPanel } from "./components/panel/ChangesPanel";
 export { NoteList } from "./components/artifact/ReviewNotes";
+export { ImageDiff, type ImageLayout } from "./components/artifact/ImageDiff";
+export { Range } from "./components/form/Range";
 
 /** Every universal copy there is, by the slot it fills. `/universal` and native draw all of them. */
 export const COPIES: Partial<Slots> = { Pill, TaskCard };
@@ -54,3 +59,10 @@ export { TaskCard };
 export { Conversation } from "./components/debug/Conversation";
 export { JsonFormView, PatchSideBySide, RenderedFileView } from "./components/files/surfaces";
 export { UpdateSplit as AboutUpdateSplit } from "./components/settings/AboutPage";
+// The boards, for the specimens that hold a drag part-way (`dragSpecimens.tsx`).
+export { Board } from "./components/Board";
+export { RunBoard } from "./components/run/RunBoard";
+// A box with a `<datalist>` and its type-ahead, and the Debug room's session panel, for their specimens (`formsFilesSpecimens.tsx`).
+export { FormInput } from "./components/form/inputs";
+export { SessionPanel } from "./components/debug/SessionPanel";
+export { DelimitedView, PatchFileSurface, SyncSurface as WorkflowSyncSurface } from "./components/files/surfaces";

@@ -39,6 +39,7 @@ import {
   outputsEmptyMeans,
   savesOf,
   transitionMarksOf,
+  transitionTargetsOf,
   useWorkflowEditor,
   type LayerActions,
 } from "@jaira/ui/stateEditorModel";
@@ -141,6 +142,8 @@ function BindingTable({
   const lists = useLists();
   const table = bindingTableOf(rows, slots, path, issues, REF_HINT);
   const wired = table.childKey === undefined ? undefined : reading?.children?.[table.childKey];
+  // The child's declared slots, the row's own datalist (`child-inputs-<i>`).
+  const slotList = slots.map((slot) => ({ value: slot.name, label: slot.optional ? "optional" : "required" }));
   const edit = (index: number, patch: Partial<BindingRow>): void => onChange(editedRow(rows, index, patch));
   return (
     <Hung inCard>
@@ -161,7 +164,7 @@ function BindingTable({
               <View key={i} flexDirection="column" gap={2}>
                 <FixedGrid tracks={[1, { px: 14 }, 1.4, "auto"]}>
                   {[
-                    <Box key="n" value={row.name} onChange={(name) => edit(i, { name })} placeholder="the child's input" size={ROW} listed={slots.length > 0} mark={view.unwired && view.nameMark === "" ? "warn" : markOf(view.nameMark)} title={view.slot?.description} />,
+                    <Box key="n" value={row.name} onChange={(name) => edit(i, { name })} placeholder="the child's input" size={ROW} listed={slotList} mark={view.unwired && view.nameMark === "" ? "warn" : markOf(view.nameMark)} title={view.slot?.description} />,
                     <Arrow key="a">←</Arrow>,
                     <Box
                       key="v"
@@ -339,7 +342,7 @@ function TransitionsTable({ rows, issues, onChange }: { rows: TransitionRow[]; i
                   title={row.structured === true ? "a lowered guard — edit it on the JSON tab" : undefined}
                 />,
                 <Arrow key="a">→</Arrow>,
-                <Box key="t" value={row.to} onChange={(to) => edit(i, { to })} placeholder="child key or terminate.success" size={ROW} listed mark={markOf(marks.to)} />,
+                <Box key="t" value={row.to} onChange={(to) => edit(i, { to })} placeholder="child key or terminate.success" size={ROW} listed={lists.transitions} mark={markOf(marks.to)} />,
                 ...(readOnly ? [] : [<Reorder key="r" index={i} count={rows.length} onMove={(to) => onChange(moved(rows, i, to))} />]),
                 ...(readOnly
                   ? []
@@ -525,14 +528,16 @@ export function WorkflowEditor({
   });
   const { tab, form, marks, targets, readOnly, editForm } = e;
   const kind = kindMarksOf(form, marks);
-  // Which of the form's datalists have something in them (`Lists`).
+  // The form's datalists (`Lists`), each as the desktop's editor renders it once.
   const lists: Lists = {
-    bindings: e.bindings.length > 0,
-    guards: e.guards.length > 0,
-    links: targets.length > 0,
-    functions: e.functions.length > 0,
-    childKeys: freeChildKeys(childKeyOptions(tree, source.stateId), form.children).length > 0,
-    childStates: childStateOptions(tree, source.stateId).length > 0,
+    bindings: e.bindings.map((path) => ({ value: path })),
+    guards: e.guards.map((path) => ({ value: path })),
+    links: targets.map((ref) => ({ value: ref })),
+    functions: e.functions.map((fn) => ({ value: fn.name, label: fn.note })),
+    // Keys already used are not offered again: a `children` map cannot hold the same key twice.
+    childKeys: freeChildKeys(childKeyOptions(tree, source.stateId), form.children).map((key) => ({ value: key })),
+    childStates: childStateOptions(tree, source.stateId).map((id) => ({ value: id })),
+    transitions: transitionTargetsOf(form.children.map((c) => c.key).filter((k) => k.length > 0)).map((key) => ({ value: key })),
   };
 
   const body = (): ReactNode => {

@@ -271,9 +271,12 @@ function NoteThread({
 /**
  * The page's own `input`/`textarea` (the global rule): the body's font for an input, data 12/12 for a
  * textarea; --text on --bg, 1px --line (hovered --rule), radius --control-radius, padding 5 9.
+ * `readOnly`: a record's (`.gate-settled textarea[readonly]`) — nothing typed, the ring kept at --line
+ * under the pointer, no text cursor over it.
  */
-export const PlainBox = ({ t, app = false, rows, multiline, ref, ...rest }: { t: Tokens; app?: boolean; rows?: number; multiline?: boolean; ref?: Ref<TextInput> } & Record<string, unknown>): JSX.Element => {
-  const [hovered, hover] = useHover();
+export const PlainBox = ({ t, app = false, rows, multiline, readOnly = false, ref, ...rest }: { t: Tokens; app?: boolean; rows?: number; multiline?: boolean; readOnly?: boolean; ref?: Ref<TextInput> } & Record<string, unknown>): JSX.Element => {
+  const [pointed, hover] = useHover();
+  const hovered = pointed && !readOnly;
   const size = Number(t.scaled(app ? "size-app" : "size-data", app ? 13 / 12.5 : 1)) || 13;
   return (
     <View {...(hover as object)}>
@@ -282,6 +285,7 @@ export const PlainBox = ({ t, app = false, rows, multiline, ref, ...rest }: { t:
         {...(multiline === true ? { multiline: true, numberOfLines: rows } : {})}
         {...((rows !== undefined && isWeb ? { rows } : {}) as object)}
         placeholderTextColor={placeholderColor("light")}
+        {...(readOnly ? { editable: false } : {})}
         {...(rest as object)}
         style={
           {
@@ -294,6 +298,7 @@ export const PlainBox = ({ t, app = false, rows, multiline, ref, ...rest }: { t:
             borderColor: t.v(hovered ? "rule" : "line"),
             borderRadius: lengthToken(t, "control-radius", 7),
             backgroundColor: t.v("bg"),
+            ...(readOnly && isWeb ? { cursor: "default" } : {}),
             ...(multiline === true ? { textAlignVertical: "top", ...(isWeb ? { resize: "vertical" } : { height: (rows ?? 2) * size * 1.5 + 12 }) } : {}),
           } as never
         }

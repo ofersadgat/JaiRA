@@ -1,11 +1,12 @@
 import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import { mimeOfPath, parseStructured, parseUnifiedDiff, schemaById, type StructuredFormat, type WorkflowSource } from "@jaira/shared/browser";
+import { delimiterOf, mimeOfPath, parseDelimited, parseStructured, parseUnifiedDiff, schemaById, type StructuredFormat, type WorkflowSource } from "@jaira/shared/browser";
 import { patchSidesMore, patchSidesOf, schemaFormatOf, useSchemaChoice } from "@jaira/ui/fileEditModel";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { ReadOnlyContext } from "@jaira/ui/reading";
 import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
+import { syncSurfaceOf } from "@jaira/ui/syncState";
 import { registerSurfaceTable, newSurfaceRegistry, SURFACE_KEYS, type SurfaceKey } from "@jaira/ui/fileSurfaceTable";
 import { isReading, type FileSurface, type FileSurfaceProps } from "@jaira/ui/fileTypes";
 import { Island } from "../../islands";
@@ -14,11 +15,14 @@ import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";
 import { Markdown } from "../Markdown";
 import { DataView } from "./DataView";
+import { LeafPanel } from "./LeafPanel";
+import { WorkflowSyncPanel } from "./SyncPanel";
 import { CodeSourceView, ConfigEdit, TextEdit } from "./CodeEdit";
 import { JsonEdit } from "./SchemaEdit";
 import { EditorActions, EditorActionsRow, FileEdit, ReadingNote, Sub } from "./EditorActions";
 import { IslandBand } from "./CodeEdit";
 import { ValueView } from "../panel/ValueView";
+import { PatchView, TableView } from "../panel/ValueReadings";
 import { SchemaForm } from "../form/SchemaForm";
 import { ReadingForm } from "../form/Field";
 import { CompositeView } from "../run/RunView";
@@ -128,13 +132,13 @@ function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX
  * `fileSurfaces.tsx`'s `WorkflowRunView`: what a state file IS DOING — its board, or its tasks and their
  * conversation (`CompositeView`, `components/run/RunView.tsx`), exactly what the Tasks room shows for
  * the same state. The run it reads comes from the store (`useRunContext`), over the room's context. A
- * leaf's own panel (`LeafPanel`) is {@link Uncopied}.
+ * leaf has no board: its own panel, its tasks and what they said (`LeafPanel.tsx`).
  */
 function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
   const context = { ...props.context, ...useRunContext() };
   const { state } = context;
   if (state === null) return <Empty>This file does not resolve to a state.</Empty>;
-  if (state.board === null) return <Uncopied name="LeafPanel" flex={1} />;
+  if (state.board === null) return <LeafPanel context={context} />;
   return <CompositeView {...props} context={context} state={state} />;
 }
 
@@ -235,6 +239,28 @@ export function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
 }
 
 /**
+ * `fileSurfaces.tsx`'s `PatchFileSurface`: a `.patch` or `.diff` as the change it describes — the value
+ * view's patch reading (`PatchView`), the one the transcript draws, over the one parse (`parseUnifiedDiff`).
+ */
+export function PatchFileSurface({ doc }: FileSurfaceProps): JSX.Element {
+  const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
+  if (doc.text.trim().length === 0) return <Empty>This file is empty.</Empty>;
+  if (files.length === 0) return <Notice>not a unified diff — the editor below has the text</Notice>;
+  return <PatchView files={files} />;
+}
+
+/**
+ * `fileSurfaces.tsx`'s `DelimitedView`: a CSV or TSV file as a table — the value view's table reading
+ * (`TableView`), over the one parse (`parseDelimited`, its delimiter by the file's type).
+ */
+export function DelimitedView({ doc }: FileSurfaceProps): JSX.Element {
+  const mime = mimeOfPath(doc.path);
+  const rows = useMemo(() => parseDelimited(doc.text, delimiterOf(mime)), [doc.text, mime]);
+  if (doc.text.trim().length === 0) return <Empty>This file is empty.</Empty>;
+  return <TableView rows={rows} />;
+}
+
+/**
  * `fileSurfaces.tsx`'s `JsonFormView`: a JSON or YAML document as the fields its schema declares — a
  * READING, not an editor (`disabled`, `reading`, and nothing "set here"), in `.vv-form.file-form`
  * (`ReadingForm`: padding 8 10, the paths hidden, a nested block's fields stacked, the controls without
@@ -263,6 +289,21 @@ export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
   );
 }
 
+/**
+ * `WorkflowSyncPanel` as the table registers it: over the description rendered. The room's context does
+ * not carry the sync bag yet, so it is built from the store as `App.tsx` builds the desktop's
+ * (`syncSurfaceOf`) — only then, so a host that hands one (a specimen) needs no shell.
+ */
+export function SyncSurface(props: FileSurfaceProps): JSX.Element {
+  const preview = <MarkdownView {...props} />;
+  if (props.context.sync !== undefined) return <WorkflowSyncPanel {...props} preview={preview} />;
+  return <SyncFromStore {...props} preview={preview} />;
+}
+function SyncFromStore(props: FileSurfaceProps & { preview: ReactNode }): JSX.Element {
+  const { state, actions } = useShell();
+  return <WorkflowSyncPanel {...props} context={{ ...props.context, sync: syncSurfaceOf(state.sync, actions) }} />;
+}
+
 /** The copies there are, by the table's key. */
 const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
   MarkdownView,
@@ -279,6 +320,10 @@ const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
   JsonEdit,
   RenderedFileView,
   PatchSideBySide,
+  PatchFileSurface,
+  DelimitedView,
+  // A workflow description: the sync bar, over the report or over the description rendered.
+  WorkflowSyncPanel: SyncSurface,
 };
 
 /** The table, registered with the copies — and an {@link Uncopied} box for every surface without one. */

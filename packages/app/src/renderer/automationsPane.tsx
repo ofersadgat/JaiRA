@@ -16,11 +16,12 @@
  * or name changed there make a line of the project's own of that name, and Shared's is ignored here.
  */
 import { useRef, useState, type DragEvent, type JSX } from "react";
-import { EVENT_NAMES, EVENT_SPECS, isEventName } from "@jaira/shared/browser";
+import { EVENT_SPECS, isEventName } from "@jaira/shared/browser";
 import { INTO_NAME, badgeFor, newLineOf, useAutomationsHost, type AutomationsPaneProps, type AutomationsViewProps } from "./automationsHost";
 import {
   automationStateIdOf,
   eventOnAnywhere,
+  eventOptionsOf,
   eventPicksOf,
   filterFormOf,
   filterOfForm,
@@ -28,11 +29,13 @@ import {
   flagText,
   freshLineName,
   lineFlagsOf,
-  moveLine,
+  lineDropOf,
+  LINE_DRAG,
   stepFormOf,
   stepOfForm,
   stepSummary,
   whenOf,
+  workflowOptionsOf,
   type AutomationLine,
   type AutomationStep,
   type LineFlag,
@@ -47,7 +50,6 @@ import { Segmented, SettingsSection } from "./settingsLayout";
 
 const EVENTS_LIST = "au-events";
 const WORKFLOWS_LIST = "au-workflows";
-const LINE_DRAG = "application/x-jaira-automation";
 
 export { EVENTS_STATE_ID } from "./automationsModel";
 export type { AutomationsChannel, AutomationsPaneProps, AutomationsViewProps } from "./automationsHost";
@@ -280,10 +282,9 @@ export function AutomationsView(props: AutomationsViewProps): JSX.Element {
   const hasShared = props.shown.some((shown) => shown.from === "shared");
 
   const drop = (to: number) => (e: DragEvent): void => {
-    const from = Number(e.dataTransfer.getData(LINE_DRAG));
+    const next = lineDropOf(own, e.dataTransfer.getData(LINE_DRAG), to);
     e.preventDefault();
-    if (!Number.isInteger(from) || from === to) return;
-    props.onLines(moveLine(own, from, to));
+    if (next !== undefined) props.onLines(next);
   };
 
   const rawBody = (line: AutomationLine): JSX.Element => (
@@ -448,17 +449,16 @@ export function AutomationsView(props: AutomationsViewProps): JSX.Element {
       lead="What happens when an event arrives. Each line is a transition of the built-in events task: it waits for the event, starts the task you pick, and goes back to waiting."
     >
       <datalist id={EVENTS_LIST}>
-        {EVENT_NAMES.map((name) => (
-          <option key={name} value={name}>
-            {EVENT_SPECS[name].label}
-            {eventOnAnywhere(props.events, name) ? "" : " · switched off"}
+        {eventOptionsOf(props.events).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </datalist>
       <datalist id={WORKFLOWS_LIST}>
-        {props.workflows.map((workflow) => (
-          <option key={workflow.id} value={workflow.id}>
-            {workflow.label ?? workflow.id}
+        {workflowOptionsOf(props.workflows).map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
           </option>
         ))}
       </datalist>

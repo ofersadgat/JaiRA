@@ -15,6 +15,37 @@
  * guessed against. `suggested` is null, both buttons are offered evenly, and the sentence says why.
  */
 import type { SyncDirection, WorkflowSyncStatus } from "@jaira/shared/browser";
+import type { SyncSurface } from "./fileTypes";
+
+/**
+ * The sync panel's bag (`FileSurfaceContext.sync`) from the store's sync state and the actions behind
+ * each button — `App.tsx`'s own, shared with the universal copy (decision 0015).
+ */
+export function syncSurfaceOf(
+  sync: Pick<SyncSurface, "status" | "result" | "running" | "error" | "progress">,
+  actions: {
+    syncStatus: SyncSurface["refresh"];
+    runSync: SyncSurface["run"];
+    cancelSync: () => void | Promise<void>;
+    openSyncEdit: NonNullable<SyncSurface["openEdit"]>;
+    openPath: NonNullable<SyncSurface["openDocument"]>;
+    reviewSyncChangeset: NonNullable<SyncSurface["reviewChangeset"]>;
+  },
+): SyncSurface {
+  return {
+    status: sync.status,
+    result: sync.result,
+    running: sync.running,
+    error: sync.error,
+    progress: sync.progress,
+    refresh: actions.syncStatus,
+    run: actions.runSync,
+    cancel: () => void actions.cancelSync(),
+    openEdit: actions.openSyncEdit,
+    openDocument: actions.openPath,
+    reviewChangeset: actions.reviewSyncChangeset,
+  };
+}
 
 export interface SyncDrift {
   documentChanged: boolean;

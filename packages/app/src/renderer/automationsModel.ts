@@ -38,6 +38,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import {
   automationStateIdOf,
   automationStateOf,
+  EVENT_NAMES,
   EVENT_SPECS,
   EVENTS_STATE_ID,
   isEventName,
@@ -599,6 +600,16 @@ export function eventOnAnywhere(events: JairaEventsConfig, name: string): boolea
   return setting.enabled || Object.values(setting.remotes ?? {}).some((on) => on);
 }
 
+/** The event box's `<datalist>`: every event, labelled with what it is — and when it is switched off everywhere. */
+export function eventOptionsOf(events: JairaEventsConfig): { value: string; label: string }[] {
+  return EVENT_NAMES.map((name) => ({ value: name, label: `${EVENT_SPECS[name].label}${eventOnAnywhere(events, name) ? "" : " · switched off"}` }));
+}
+
+/** The workflow box's `<datalist>`: every workflow a step can start, by its label where it has one. */
+export function workflowOptionsOf(workflows: ReadonlyArray<{ id: string; label?: string | undefined }>): { value: string; label: string }[] {
+  return workflows.map((workflow) => ({ value: workflow.id, label: workflow.label ?? workflow.id }));
+}
+
 /**
  * What to say under each line, by its position in `lines` — the lines in the order the task reads
  * them (a project's own, then Shared's that it keeps). First match wins, so a later line an earlier
@@ -793,4 +804,18 @@ export function moveLine<T>(list: readonly T[], from: number, to: number): T[] {
   if (moved === undefined) return [...list];
   next.splice(to > from ? to - 1 : to, 0, moved);
   return next;
+}
+
+/** What a line's grip puts on the drag: its index among the layer's own lines, as text. */
+export const LINE_DRAG = "application/x-jaira-automation";
+
+/**
+ * A line dropped on the row at `to`: the lines reordered, or `undefined` for a drop that moves nothing.
+ * `from` is what the drag carried, as it came off the transfer — the pane's and its universal copy's
+ * drop both read it here.
+ */
+export function lineDropOf<T>(list: readonly T[], from: string, to: number): T[] | undefined {
+  const at = Number(from);
+  if (!Number.isInteger(at) || at === to) return undefined;
+  return moveLine(list, at, to);
 }

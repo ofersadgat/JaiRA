@@ -2,7 +2,7 @@ import { useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { InstanceNode, StateView } from "@jaira/shared/browser";
 import type { FileSurfaceContext, FileSurfaceProps } from "@jaira/ui/fileTypes";
-import { standingOn } from "@jaira/ui/runBoardModel";
+import { runColumnsOf, runDragOffersOf, runsByChild, standingOn } from "@jaira/ui/runBoardModel";
 import { nodeAt } from "@jaira/ui/trail";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -57,9 +57,14 @@ export function RunView({ context }: { context: FileSurfaceContext }): JSX.Eleme
             context.onOpenWorkflow?.(child.stateId, child.instanceId);
           }}
           onOpen={openRun}
+          // What this run is waiting for somebody to do, where a column here is the place to do it.
+          offers={runDragOffersOf(detail?.taskId, runColumnsOf(declared, runsByChild(node)), context.userEvents)}
+          onDrop={context.onDeliverUserEvent}
         />
       ) : (
-        <Conversation context={context} parent={node} />
+        // The bookmark the side panel's Steps index sends, and where the reader is for it to mark: this
+        // column is the document when the toggle says Conversation, so it is the column that scrolls.
+        <Conversation context={context} parent={node} bookmarks />
       )}
     </Composite>
   );
@@ -97,7 +102,15 @@ export function CompositeView({ state, context }: FileSurfaceProps & { state: St
         at.node === undefined ? (
           state.board !== null ? <Board board={state.board} selected={selected} trays={false} onSelectTask={(taskId) => onSelectTask(taskId)} onDrill={onDrill} /> : <Empty>No board here yet.</Empty>
         ) : (
-          <RunBoard declared={at.declared} parent={at.node} openInstance={open.size === 1 ? [...open][0]! : null} onSelect={(node) => setOpen(new Set([node.instanceId]))} onOpen={openRun} />
+          <RunBoard
+            declared={at.declared}
+            parent={at.node}
+            openInstance={open.size === 1 ? [...open][0]! : null}
+            onSelect={(node) => setOpen(new Set([node.instanceId]))}
+            onOpen={openRun}
+            offers={runDragOffersOf(detail?.taskId, at.declared, context.userEvents)}
+            onDrop={context.onDeliverUserEvent}
+          />
         )
       ) : detail === null ? (
         <Empty>Select a run to see what it said.</Empty>
@@ -142,7 +155,7 @@ function sourceOf(context: FileSurfaceContext): TranscriptSource {
 }
 
 /** The conversation reading, from the context: `RunConversation` with the run's gate, its re-run and resume. */
-function Conversation({ context, parent }: { context: FileSurfaceContext; parent: InstanceNode | undefined }): JSX.Element {
+function Conversation({ context, parent, bookmarks = false }: { context: FileSurfaceContext; parent: InstanceNode | undefined; bookmarks?: boolean }): JSX.Element {
   const detail = context.detail;
   if (detail === null) return <Empty>Select a run to see what it said.</Empty>;
   const source = sourceOf(context);
@@ -160,6 +173,7 @@ function Conversation({ context, parent }: { context: FileSurfaceContext; parent
       onRerun={context.onRerun}
       onResume={context.onResume}
       composited
+      {...(bookmarks ? { focus: context.runFocus, onHere: context.onRunHere } : {})}
     />
   );
 }
