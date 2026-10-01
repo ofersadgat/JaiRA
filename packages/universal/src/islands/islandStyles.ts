@@ -12,8 +12,12 @@ import type { Look } from "../tokens";
  * lower.
  *
  * So the island gets the stylesheet, and nothing else does: every rule is inside
- * `@scope ([data-island])`, where it reaches the island's own elements and no copy. Three things are
- * changed on the way in:
+ * `@scope ([data-island])`, where it reaches the island's own elements and no copy. (The sheet holds
+ * little else now — the tokens and the islands' rules, `scripts/pruneCss.mjs` — but its base rules,
+ * `button`, `input`, `*`, would still restyle every copy on the page.) A float an island opens is
+ * carried out to `<body>`, where its seat is marked an island of its own and dressed as the one it came
+ * from, so the scope has it too (`popover.tsx`'s `dressSeat`).
+ * Three things are changed on the way in:
  *
  *   :root          `:scope` — the island's own box stands in for the root: it carries the look as the
  *                  root does (`data-theme`, `data-palette`, …, {@link dress}), so a palette's variables

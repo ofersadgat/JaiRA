@@ -1,20 +1,23 @@
 /**
- * `styles.css`'s custom properties, as data the universal tree can resolve on native (decision 0015).
+ * `styles.css`'s custom properties, as data the universal tree resolves them from (decision 0015).
  *
  *   npm --workspace @jaira/universal run tokens          write src/cssTokens.generated.ts
  *   npm --workspace @jaira/universal run tokens -- --check   fail if it is stale (typecheck runs this)
  *
- * On web a universal component never needs this: it writes `var(--accent)` and the browser resolves it
- * against whatever palette, scheme and subtree the DOM app has applied, exactly as the CSS beside it
- * does. React Native has no cascade, so native needs the declarations themselves, with enough of their
- * selectors kept to replay the cascade: which palette, which scheme, which subtree (`.sidebar`), and
- * how specific. `cssTokens.ts` does the replaying.
+ * No page the universal tree draws carries the stylesheet: React Native has no cascade, and the app's
+ * web page loads none either (`tokens.tsx`'s `Replayed`; only an island gets the sheet, scoped to its
+ * own box). So a component cannot write `var(--accent)` and leave it to a browser: it needs the
+ * declarations themselves, with enough of their selectors kept to replay the cascade — which palette,
+ * which scheme, which subtree (`.sidebar`), and how specific. `cssTokens.ts` does the replaying.
+ *
+ * The stylesheet is held to these blocks and the islands' own rules by `pruneCss.mjs`, which keeps a
+ * block this script reads even where no element carries its class any more.
  *
  * Only rules whose selector is one of these shapes are kept, and only their `--` declarations:
  *   :root  [data-theme="dark"]?  [data-palette="p"]? | :is([data-palette="a"], …)  ( .scope)?
  *   .scope                                   (component-local variables, e.g. `.pill-running`)
  * Anything else — a variable set inside `@media`, under a pseudo-class, on a compound selector — is
- * skipped, and listed by `--verbose`, because a universal copy that needs one must say so by hand.
+ * skipped, and listed by `--verbose`, because a universal component that needs one must say so by hand.
  */
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";

@@ -1146,7 +1146,8 @@ export function MonacoCodePane({
    *
    * Supplied by whatever knows where the file lives, which is not this pane. Its absence is the
    * ordinary case and means no diagnostics and no navigation, which is right for every surface
-   * showing code that is not a file in a project. The code island passes none.
+   * showing code that is not a file in a project. The code island passes its host's on (the Files
+   * room's, for a TypeScript or JavaScript file on a disk).
    */
   intel?: CodeIntel | undefined;
   /**

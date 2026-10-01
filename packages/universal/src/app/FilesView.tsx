@@ -7,7 +7,7 @@ import { FactsButton, FileAddressBar, FileInspector, FolderInspector } from "../
 import { FilePanel } from "../components/files/FilePanel";
 import { PanelColumn } from "./PanelColumn";
 import { useShell } from "./shell";
-import { issueReveal, runMode } from "./viewState";
+import { definitionReveal, issueReveal, runMode } from "./viewState";
 
 /**
  * What the Files room's surfaces are handed beyond the file itself: the drafts, the renderer choices,
@@ -19,6 +19,7 @@ export function useFileSurfaces(): FileSurfaceContext {
   const { state, actions } = useShell();
   const mode = runMode.use();
   const reveal = issueReveal.use();
+  const revealAt = definitionReveal.use();
   const look = useMemo(() => lookOf(state.config), [state.config]);
   const renderers = look.renderers;
   const ui = state.settings.ui;
@@ -73,6 +74,15 @@ export function useFileSurfaces(): FileSurfaceContext {
       open: (id, fallback) => ui.open[id] ?? fallback,
       setOpen: actions.setFold,
     },
+    // Following a definition into another file (`CodeEdit.tsx`'s `intel`). The position is kept BEFORE
+    // the open, so it is there when that file's editor is made: the pane reads it once, at creation.
+    // `openPath`, not a tree node: the compiler answered with a path, and the file may be one the tree
+    // does not draw (a `.d.ts` under `node_modules`).
+    onOpenDefinition: (at, caret) => {
+      definitionReveal.set({ path: at.path, line: caret.line, column: caret.column });
+      actions.openPath(at.layer, at.path);
+    },
+    revealAt,
   };
   return partial as FileSurfaceContext;
 }

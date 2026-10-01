@@ -5,9 +5,22 @@
  * configuration editor shows and saves.
  */
 import { useEffect } from "react";
-import { isWritableLayer, structuredFormatOf, type ConfigView, type FileSource, type PatchFile, type SchemaFormat, type WritableLayer } from "@jaira/shared/browser";
+import {
+  isWritableLayer,
+  monacoGrammarOf,
+  structuredFormatOf,
+  type CheckTarget,
+  type ConfigView,
+  type FileSource,
+  type IpcRequest,
+  type IpcResponse,
+  type PatchFile,
+  type SchemaFormat,
+  type WritableLayer,
+} from "@jaira/shared/browser";
 import { docKey } from "./drafts";
 import type { FileSurfaceContext } from "./fileTypes";
+import type { CodeIntel } from "./monacoDiffTypes";
 
 /**
  * Which schema a document answers to, asking the app once if nobody has decided.
@@ -84,7 +97,83 @@ export function schemaFormatOf(doc: FileSource): SchemaFormat {
  * would be a refused round trip per keystroke, in a pane whose subject is a colour scheme.
  */
 export function isLocatedFile(doc: FileSource): boolean {
-  return /^([a-zA-Z]:[\/]|[\/])/.test(doc.file);
+  // Either slash: on Windows a resolved path is `C:\…`, and one that read as "not a file" was given no
+  // name — its model was `inmemory://model/1`, parsed as plain TypeScript, and never checked.
+  return /^([a-zA-Z]:[\\/]|[\\/])/.test(doc.file);
+}
+
+/**
+ * Whether the compiler can be asked about this document.
+ *
+ * TypeScript and JavaScript only, because that is what main can answer about — every other type
+ * would cost a round trip to be told no project covers it — and only a file on a disk (see
+ * {@link isLocatedFile}): the settings preview's sample is neither in a project nor anywhere.
+ */
+export function isCheckableFile(doc: FileSource): boolean {
+  const grammar = monacoGrammarOf(doc.mime);
+  return isLocatedFile(doc) && (grammar === "typescript" || grammar === "javascript");
+}
+
+/**
+ * How the compiler's channels address a document: exactly as the `file:read` that opened it was, which
+ * is what keeps the containment check the same one. One spelling for the check and for the release
+ * that withdraws its buffer (`CheckTarget` says why).
+ */
+export function fileAddressOf(doc: Pick<FileSource, "layer" | "project" | "path">): CheckTarget {
+  return {
+    layer: doc.layer,
+    ...(doc.project === undefined ? {} : { project: doc.project }),
+    path: doc.path,
+  };
+}
+
+/** The compiler's channels, as a host that can reach main hands them over (the store's `invoke`). */
+export type IntelInvoke = <C extends "file:check" | "file:definition" | "file:references" | "file:hover" | "file:source">(
+  channel: C,
+  request: IpcRequest<C>,
+) => Promise<IpcResponse<C>>;
+
+/**
+ * Everything a code pane can ask about its own text, and what it can do with an answer.
+ *
+ * `open` is the half Monaco has no way to perform: a standalone editor holds one model, so
+ * following a definition OUT of this file is navigation only the window can do. A definition main
+ * could not address — one outside the tree it searched — arrives without an `at` and is refused
+ * here, which draws nothing rather than going somewhere plausible and wrong. With no `onDefinition`
+ * (a surface with no shell behind it) the pane offers no cross-file jump at all.
+ */
+export function codeIntelOf(invoke: IntelInvoke, address: () => CheckTarget, onDefinition: FileSurfaceContext["onOpenDefinition"]): CodeIntel {
+  return {
+    check: (text) => invoke("file:check", { ...address(), text }),
+    definitions: (text, at) => invoke("file:definition", { ...address(), text, ...at }),
+    references: (text, at) => invoke("file:references", { ...address(), text, ...at }),
+    hover: (text, at) => invoke("file:hover", { ...address(), text, ...at }),
+    /**
+     * Another file's text, for a peek to preview.
+     *
+     * `file:source` rather than `file:read`, because a definition is not addressed the way an
+     * opened file is: it can resolve outside the tree entirely, and in this repository most of
+     * them do — `@declarative-ai/*` goes through a workspace junction into a sibling checkout. A
+     * read contained to the project root could preview none of those, which would have made peek
+     * work only for the imports that were already the easy case.
+     *
+     * What bounds it instead is the program: main serves the text only for a file the compiler
+     * itself resolved. Failure is answered with nothing, and that result simply loses its preview.
+     */
+    read: async (to) => {
+      const source = await invoke("file:source", { ...address(), file: to.file }).catch(() => undefined);
+      return source?.text;
+    },
+    ...(onDefinition === undefined
+      ? {}
+      : {
+          open: (to) => {
+            if (to.at === undefined) return false;
+            onDefinition(to.at, { line: to.startLine, column: to.startColumn });
+            return true;
+          },
+        }),
+  };
 }
 
 /**

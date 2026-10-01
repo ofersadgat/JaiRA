@@ -190,6 +190,15 @@ describe("checking a file in its project", () => {
     await projects.release(entry);
     expect((await projects.check(entry)).diagnostics).toEqual([]);
   });
+
+  it("checks the text it is given after a release, not the buffer it held before it", async () => {
+    // An editor closed and opened again with nothing asked in between: the second buffer must not
+    // pass for the first one.
+    const entry = put("src/index.ts", "export const n: number = 1;\n");
+    expect((await projects.check(entry, "export const n: number = 'no';\n")).diagnostics).toHaveLength(1);
+    await projects.release(entry);
+    expect((await projects.check(entry, "export const n: number = 2;\n")).diagnostics).toEqual([]);
+  });
 });
 
 /**

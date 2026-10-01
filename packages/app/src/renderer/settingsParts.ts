@@ -45,6 +45,49 @@ export function readingPartOf(
 }
 
 /**
+ * A section asked for from OUTSIDE the Settings page — the events task's panel sending a person to
+ * Tools → Events. The page is not drawn when it is asked, so it is gone to once the section stands on
+ * it; and a page whose sections take their data after they are drawn grows under the place just gone
+ * to, so for a moment after arriving it is gone to again when it has.
+ */
+export interface WantedPart {
+  id: string;
+  /** When it was asked for. */
+  asked: number;
+  /** When it was first gone to; null until it has been. */
+  arrived: number | null;
+  /** How tall the page's content was when it was last gone to. */
+  height: number;
+}
+
+/** How long a section that is not on the page is waited for: one a page never draws is forgotten, not gone to on a later visit. */
+export const WANT_WAIT_MS = 10_000;
+
+/** How long after arriving the page may still move under the section and be followed. */
+export const WANT_SETTLE_MS = 3_000;
+
+/**
+ * What to do about a wanted section now: `go` to it, `wait` (it is not on the page yet, or a scroll to
+ * it is still running, or it is where it was put), or `drop` the request (it never came, or the page
+ * has had its moment to settle). `top` is the section's top from the top of the scroll box, null while
+ * it is not drawn; `holding` is true while a scroll that was asked for is still moving.
+ */
+export function wantedStep(
+  wanted: WantedPart,
+  now: number,
+  page: { top: number | null; contentHeight: number; holding: boolean },
+): "go" | "wait" | "drop" {
+  if (wanted.arrived === null) {
+    if (now - wanted.asked > WANT_WAIT_MS) return "drop";
+    return page.top === null ? "wait" : "go";
+  }
+  if (now - wanted.arrived > WANT_SETTLE_MS) return "drop";
+  if (page.top === null || page.holding) return "wait";
+  // Only when the page itself changed: a person who scrolled away by hand is left where they went.
+  return page.contentHeight !== wanted.height && Math.abs(page.top - PART_MARGIN) > 2 ? "go" : "wait";
+}
+
+/**
  * The sections drawn on the page — not every one in the DOM: under the Just you view's "What you
  * changed" a section with none of its rows left is still there and `display: none`,
  * and a list entry that scrolled to nothing would be a link to nowhere.

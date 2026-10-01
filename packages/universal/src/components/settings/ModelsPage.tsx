@@ -1,5 +1,5 @@
-import { useState, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { View, isWeb } from "@tamagui/core";
 import { DEFAULT_EXECUTOR, type ConfigLayer, type PresetModel } from "@jaira/shared/browser";
 import { SOURCE_BRAND, catalogLastLine, catalogRowOf, useCatalogStatus, type CatalogState } from "@jaira/ui/catalogModel";
 import { configWriter, presetNamesOf, type Writer } from "@jaira/ui/configWriter";
@@ -22,7 +22,7 @@ import { Hint, Mark, PaneActions, SourceTag, Stack, Status } from "./bits";
 import { Button } from "./Button";
 import { Segmented } from "./controls";
 import { ExecutorRoutes, ExecutorTree } from "./ExecutorTree";
-import { SettingsSection } from "./SettingsPage";
+import { SettingsSection, useDrawnRow } from "./SettingsPage";
 
 /**
  * Settings → Models: the defaults a state that names nothing is filled in with, the routes a model
@@ -191,10 +191,24 @@ function Presets({
   const [section, setSection] = useState<CategoryKey>("model");
   const [drafts, setDrafts] = useState<PresetDocs>({});
   const [newName, setNewName] = useState("");
+  // Add, Remove and "Put back the built-in" each take away the button that was just pressed — the pane
+  // it sat in is replaced — and the focus would go with it to nowhere. It is put on the chosen preset's
+  // tab instead, where what just happened is shown. Web: a phone has no focus to lose.
+  const [refocus, setRefocus] = useState(0);
+  useEffect(() => {
+    if (refocus === 0 || !isWeb) return;
+    const rail = document.querySelector<HTMLElement>(`[role="tablist"][aria-label="${PRESETS_RAIL}"]`);
+    // Only when the focus is here or lost: a person who has gone elsewhere while the write was in flight
+    // is not pulled back.
+    const active = document.activeElement;
+    if (active !== null && active !== document.body && rail?.closest("[data-llm-config]")?.contains(active) !== true) return;
+    rail?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')?.focus();
+  }, [refocus]);
   const tabs = presetTabsOf(here, effective, builtIn);
   if (pending !== null && tabs.some((tab) => tab.name === pending)) {
     setPending(null);
     setNewName("");
+    setRefocus((n) => n + 1);
   }
   const dropDraft = (name: string): void =>
     setDrafts((current) => {
@@ -234,7 +248,7 @@ function Presets({
         <TabRail
           width={172}
           ground={t.mix(t.v("text"), 5, t.v("panel-2"))}
-          label="Presets"
+          label={PRESETS_RAIL}
           items={items}
           selected={open === undefined ? NEW_ID : tabId(open.name)}
           onSelect={(id) => setWanted(id === NEW_ID ? "new" : { preset: id.slice(tabId("").length) })}
@@ -272,6 +286,7 @@ function Presets({
             onRemove={(name) => {
               setWanted(choiceAfterRemove(tabs, name, name in others || name in builtIn));
               dropDraft(name);
+              setRefocus((n) => n + 1);
               onWrite(name, undefined);
             }}
           />
@@ -279,6 +294,9 @@ function Presets({
     </RailFrame>
   );
 }
+
+/** The presets rail's accessible name — and how the focus finds it again after an add or a remove. */
+const PRESETS_RAIL = "Presets";
 
 /** The dot after the name of a preset this layer states: 6 round, --accent. */
 function HereDot(): JSX.Element {
@@ -522,6 +540,8 @@ function CatalogRow({ source, now, first }: { source: NonNullable<CatalogState["
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const row = catalogRowOf(source, now);
+  // A source is a row that is always drawn: under "What you changed" the catalog and its Refresh stay.
+  useDrawnRow(true);
   return (
     <View
       flexDirection="column"
@@ -557,6 +577,7 @@ function CatalogRow({ source, now, first }: { source: NonNullable<CatalogState["
             onPress={() => setOpen((v) => !v)}
             label={open ? `hide ${source.name}'s models` : `show ${source.name}'s models`}
             title={open ? "Hide the models" : "Show the models"}
+            {...({ "aria-expanded": open } as object)}
             padding={2}
             // A quiet button: its ring is there, transparent.
             borderWidth={1}

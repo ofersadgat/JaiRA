@@ -7,7 +7,9 @@
  *
  * In one window, against a scratch project holding a TypeScript file with a type error and a `.patch`:
  *   1. the Appearance preview draws, coloured by the TextMate grammars (WASM);
- *   2. the file opens in Monaco, coloured, and the type error is underlined;
+ *   2. the file opens in Monaco, coloured, and the type error is underlined — by the project's own
+ *      compiler, asked over `file:check` (Monaco's validation is off), which is why the project has a
+ *      `tsconfig.json`;
  *   3. typed text lands in the editor's model;
  *   4. the patch opens in Monaco's diff editor, with its insertions and deletions marked;
  * and across all of it, whether Monaco's workers started (Chromium reports each as a target) or it
@@ -119,6 +121,10 @@ class Cdp {
 async function main(): Promise<void> {
   mkdirSync(OUT, { recursive: true });
   const world = buildWorld(join(import.meta.dirname, ".world-monaco"));
+  // The project the file is IN. Monaco's own TypeScript validation is off (`monacoDiff.tsx`): what is
+  // underlined is what the project's compiler says (`file:check`), and with no `tsconfig.json` covering
+  // a file it says nothing about types — a type error then draws no underline, by design.
+  writeFileSync(join(world.project, "tsconfig.json"), JSON.stringify({ compilerOptions: { target: "ES2022", module: "ESNext", strict: true, noEmit: true }, include: ["*.ts"] }, null, 2));
   writeFileSync(
     join(world.project, "broken.ts"),
     [
@@ -202,7 +208,8 @@ async function main(): Promise<void> {
     // From a fresh load: in Settings the sidebar is Settings' own navigation, whose "Files tree" matches too.
     await page.evaluate("location.reload()");
     await sleep(1000);
-    await page.until("document.getElementById('root')?.children.length > 0 && document.querySelector('[role=navigation]') !== null", "the window to draw again", 60);
+    // The sidebar with the project's rooms in it: the landmark is drawn before the project has loaded.
+    await page.until("document.getElementById('root')?.children.length > 0 && (document.querySelector('[role=navigation]')?.textContent ?? '').includes('Files')", "the window to draw again", 60);
     await page.clickText("Files", '[role="navigation"]');
     await page.until(`document.body.innerText.includes("broken.ts")`, "the file tree to list broken.ts");
     await page.clickText("broken.ts");
@@ -215,7 +222,7 @@ async function main(): Promise<void> {
       await page.until(`document.querySelector(".monaco-editor .squiggly-error") !== null`, "the type error to be underlined", 45);
       underlined = true;
     } catch {}
-    say(`2. broken.ts: opened in Monaco, ${inks} inks; the type error ${underlined ? "is underlined (the TypeScript service answered)" : "was NOT underlined within 45 s"}`);
+    say(`2. broken.ts: opened in Monaco, ${inks} inks; the type error ${underlined ? "is underlined (the project's compiler answered)" : "was NOT underlined within 45 s"}`);
     await page.shot("2-code");
 
     // 3. Typing.

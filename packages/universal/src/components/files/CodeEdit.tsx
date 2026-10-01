@@ -1,12 +1,13 @@
-import { useMemo, useState, type JSX, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useState, type JSX, type ReactNode } from "react";
 import { TextInput as RNTextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { hasGrammar, type JairaAppearanceConfig } from "@jaira/shared/browser";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
 import { editorThemeSpec, editorThemeVars } from "@jaira/ui/editorThemes";
-import { configAuthoredText, configSaveOf, isLocatedFile } from "@jaira/ui/fileEditModel";
+import { codeIntelOf, configAuthoredText, configSaveOf, fileAddressOf, isCheckableFile, isLocatedFile } from "@jaira/ui/fileEditModel";
 import { isReading, type FileSurfaceProps } from "@jaira/ui/fileTypes";
+import { invoke } from "@jaira/ui/store";
 import { useShell } from "../../app/shell";
 import { Island } from "../../islands";
 import { Txt, font } from "../../primitives";
@@ -20,8 +21,11 @@ import { EditorActions, EditorActionsRow, FileEdit, ReadingNote, Sub } from "./E
  * around it. The plain box is not Monaco: it is a native text box (a textarea on web). What the
  * surfaces decide is `fileEditModel.ts`'s.
  *
- * Not here: code intelligence (the compiler's diagnostics, definitions, hover), which asks main
- * through the window's bridge; the code island is `MonacoCodePane` without its `intel`.
+ * A TypeScript or JavaScript file on a disk is handed the project's own compiler (`intel`,
+ * `fileEditModel.ts`'s `codeIntelOf`: `file:check` and its neighbours, asked through the bridge): the
+ * underlines, Go to Definition, Peek, Find All References and the hover are Monaco's, drawn inside the
+ * island from what main answers. The functions go to the island as they are on web and as calls over
+ * its bridge on a phone (`Island.native.tsx`).
  */
 
 /** The person's appearance block, for an editor island to draw in (`IslandProps.appearance`). */
@@ -99,6 +103,25 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
   const reading = isReading(context);
   const appearance = useEditorAppearance();
   const text = reading ? doc.text : draft.text;
+  // The compiler, for the types that have one, addressed as the `file:read` that opened the document
+  // was. Rebuilt when the file moves and never otherwise: the pane keeps what it was made with.
+  const checkable = isCheckableFile(doc);
+  const address = useCallback(() => fileAddressOf({ layer: doc.layer, project: doc.project, path: doc.path }), [doc.layer, doc.project, doc.path]);
+  const onDefinition = context.onOpenDefinition;
+  const intel = useMemo(() => codeIntelOf(invoke, address, onDefinition), [address, onDefinition]);
+  // The buffer is withdrawn when this surface goes: the checker holds what is on screen, and one nobody
+  // withdrew goes on shadowing the file on disk — for every other file that imports it too.
+  useEffect(() => {
+    if (!checkable) return undefined;
+    const at = fileAddressOf({ layer: doc.layer, project: doc.project, path: doc.path });
+    return () => {
+      // Closing an editor is not a place to report that a cache could not be cleared.
+      void invoke("file:release", at).catch(() => undefined);
+    };
+  }, [checkable, doc.layer, doc.project, doc.path]);
+  // Where a definition asked for this file to be opened, if that is why it is open: matched by path, so
+  // a position about another document never lands in this one.
+  const reveal = context.revealAt?.path === doc.path ? { line: context.revealAt.line, column: context.revealAt.column } : undefined;
   return (
     <FileEdit>
       {hasGrammar(doc.mime) ? (
@@ -108,7 +131,15 @@ export function TextEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.
               component="code"
               height={height}
               appearance={appearance}
-              props={{ text, mime: doc.mime, readOnly: reading, view: context.view ?? "write", ...(isLocatedFile(doc) ? { file: doc.file } : {}) }}
+              props={{
+                text,
+                mime: doc.mime,
+                readOnly: reading,
+                view: context.view ?? "write",
+                ...(isLocatedFile(doc) ? { file: doc.file } : {}),
+                ...(checkable ? { intel } : {}),
+                ...(reveal === undefined ? {} : { reveal }),
+              }}
               onEvent={(name, value) => {
                 if (name === "change") draft.set(String(value));
               }}

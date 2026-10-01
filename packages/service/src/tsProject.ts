@@ -365,10 +365,22 @@ export class TsProjects {
     this.open.delete(keyOf(ts, file));
   }
 
+  /**
+   * The last buffer version handed out, across every file and never handed out twice.
+   *
+   * A version is how the language service knows a file moved: the same string means the same text,
+   * and it keeps the tree it parsed. Counting per buffer started again at 1 whenever a buffer was
+   * released, so a file checked with one text, released, and checked with another before anything
+   * else was asked came back as `b1` both times — and the answer was about the first text, drawn
+   * on the second.
+   */
+  private versions = 0;
+
   private hold(path: string, text: string | null): void {
     const existing = this.open.get(path);
     if (existing !== undefined && existing.text === text) return;
-    this.open.set(path, { text, version: (existing?.version ?? 0) + 1 });
+    this.versions += 1;
+    this.open.set(path, { text, version: this.versions });
   }
 
   /**

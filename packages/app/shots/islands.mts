@@ -78,9 +78,13 @@ interface Event {
 
 const LOOK = { palette: "ink", theme: "light" } as const;
 
-/** A TypeScript file of about `lines` lines, and the same with every tenth line changed. */
+/**
+ * A TypeScript file of about `lines` lines, and the same with every tenth line changed. Seeded from a
+ * component still in the renderer (the DOM board it was read from is gone); the islands are told it is
+ * `board.tsx`, which is only a name.
+ */
 function sources(lines: number): { original: string; modified: string } {
-  const seed = readFileSync(join(import.meta.dirname, "..", "src", "renderer", "board.tsx"), "utf8").split("\n");
+  const seed = readFileSync(join(import.meta.dirname, "..", "src", "renderer", "monacoDiff.tsx"), "utf8").split("\n");
   const out: string[] = [];
   while (out.length < lines) out.push(...seed);
   const original = out.slice(0, lines);

@@ -165,7 +165,16 @@ export function FileTreePanel({
             const writable = isWritableLayer(root.layer);
             const named = !writable || rootNeedsName(root, project);
             return (
-              <View key={root.dir} flexDirection="column" marginBottom={10}>
+              // The root's own menu hangs off the whole list, not only its heading row: a root with no
+              // heading (the one stood in) still offers "new file here" from the space under its rows.
+              // Every row stops the gesture, so a right-click on a file gets the file's.
+              <View
+                key={root.dir}
+                flexDirection="column"
+                marginBottom={10}
+                {...(rightClick((x, y) => setMenu({ x, y, items: rootItems(root, writable) })) as object)}
+                {...((isWeb && !named ? { title: root.dir } : {}) as object)}
+              >
                 {named ? <RootRow root={root} writable={writable} onNew={(x, y) => openNew(root, "", x, y)} onMenu={(x, y) => setMenu({ x, y, items: rootItems(root, writable) })} /> : null}
                 {draftIn(root, null)}
                 {(filter.length > 0 ? treeMatches(root.nodes, filter) : root.nodes).map((node) => (

@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { AccessibilityInfo, type View } from "react-native";
-import { CLICK_HOLD_MS, PART_MARGIN, readingPartOf, type SettingsPart } from "@jaira/ui/settingsParts";
+import { CLICK_HOLD_MS, PART_MARGIN, readingPartOf, wantedStep, type SettingsPart, type WantedPart } from "@jaira/ui/settingsParts";
 
 /**
  * The sections of the Settings page on screen, and which one is being read: what the sidebar's
@@ -13,6 +13,11 @@ import { CLICK_HOLD_MS, PART_MARGIN, readingPartOf, type SettingsPart } from "@j
  * it would keep its old place). Which one is read is `settingsParts.ts`'s rule (`readingPartOf`), and
  * the list is in the order the sections stand. One Settings page per window: a module store, like
  * `viewState.ts`.
+ *
+ * A section can be asked for from OUTSIDE the page (`wantPart`: the events task's panel sending a person
+ * to Tools → Events): the page is not drawn when it is asked, so it is gone to once the section stands
+ * on it, and again while the page is still taking its data and growing under it (`settingsParts.ts`'
+ * `wantedStep` is the rule).
  */
 interface Entry {
   label: string;
@@ -27,6 +32,8 @@ let box: View | null = null;
 let scrollTo: ((y: number, animated: boolean) => void) | null = null;
 let held: { id: string; until: number } | null = null;
 let pending = false;
+/** The section asked for from outside (`wantPart`), until it is on the page, gone to, and the page has settled. */
+let wanted: WantedPart | null = null;
 
 let snapshot: { parts: SettingsPart[]; active: string | null } = { parts: [], active: null };
 const listeners = new Set<() => void>();
@@ -49,6 +56,25 @@ function recompute(): void {
   for (const on of listeners) on();
 }
 
+/** Go to the section asked for from outside, once it stands on a page that has been measured (`wantedStep`). */
+function arrive(): void {
+  if (wanted === null) return;
+  const measured = scrollTo !== null && scroll.height > 0 && scroll.contentHeight > 0;
+  const now = Date.now();
+  const step = wantedStep(wanted, now, {
+    top: measured ? (entries.get(wanted.id)?.top ?? null) : null,
+    contentHeight: scroll.contentHeight,
+    holding: held !== null && now < held.until,
+  });
+  if (step === "wait") return;
+  if (step === "drop") {
+    wanted = null;
+    return;
+  }
+  wanted = { ...wanted, arrived: wanted.arrived ?? now, height: scroll.contentHeight };
+  scrollToPart(wanted.id);
+}
+
 /** Measure every section against the scroll box, then say which is read — once per frame at most. */
 function remeasure(): void {
   if (pending) return;
@@ -65,7 +91,10 @@ function remeasure(): void {
         entry.view.measureInWindow((_x, y, _w, h) => {
           // A section drawn nowhere (`display: none`) measures as nothing: it is not on the page.
           entry.top = h > 0 ? y - by : null;
-          if (--left === 0) recompute();
+          if (--left === 0) {
+            recompute();
+            arrive();
+          }
         });
       }
     });
@@ -103,8 +132,25 @@ export function newPage(view: View | null, to: ((y: number, animated: boolean) =
   remeasure();
 }
 
-/** Scroll to a section, its heading `PART_MARGIN` below the top, and light it while the scroll runs. */
+/**
+ * Ask for a section from outside the Settings page — any caller that is about to open the page it is
+ * on (`actions.setSection`, `actions.setView("settings")`). It is gone to once it is drawn and measured
+ * (`arrive`), and followed for a moment while the page settles; a section the page never draws is
+ * forgotten. Going to one by hand withdraws it.
+ */
+export function wantPart(id: string): void {
+  wanted = { id, asked: Date.now(), arrived: null, height: 0 };
+  remeasure();
+}
+
+/** Go to a section the person chose (the accordion, a link on the page). It outranks one still wanted from outside. */
 export function goToPart(id: string): void {
+  wanted = null;
+  scrollToPart(id);
+}
+
+/** Scroll to a section, its heading `PART_MARGIN` below the top, and light it while the scroll runs. */
+function scrollToPart(id: string): void {
   const entry = entries.get(id);
   if (entry === undefined || entry.top === null || scrollTo === null) return;
   held = { id, until: Date.now() + CLICK_HOLD_MS };

@@ -1,3 +1,4 @@
+import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -61,5 +62,12 @@ describe("the stylesheet an island brings", () => {
     let depth = 0;
     for (const c of real.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, "")) depth += c === "{" ? 1 : c === "}" ? -1 : 0;
     expect(depth).toBe(0);
+  });
+
+  it("holds no rule that neither an island nor the tokens can use", () => {
+    // `scripts/pruneCss.mjs --check` lists them and fails: a rule for a class no island component carries
+    // is either dead or its class is missing from that script's list.
+    const check = (): string => execFileSync(process.execPath, [join(import.meta.dirname, "..", "scripts", "pruneCss.mjs"), "--check"], { encoding: "utf8", stdio: "pipe" });
+    expect(check).not.toThrow();
   });
 });

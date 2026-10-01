@@ -20,7 +20,7 @@ import { WorkflowSyncPanel } from "./SyncPanel";
 import { CodeSourceView, ConfigEdit, TextEdit } from "./CodeEdit";
 import { JsonEdit } from "./SchemaEdit";
 import { EditorActions, EditorActionsRow, FileEdit, ReadingNote, Sub } from "./EditorActions";
-import { IslandBand } from "./CodeEdit";
+import { IslandBand, useEditorAppearance } from "./CodeEdit";
 import { ValueView } from "../panel/ValueView";
 import { PatchView, TableView } from "../panel/ValueReadings";
 import { SchemaForm } from "../form/SchemaForm";
@@ -102,6 +102,7 @@ export { EditorActions } from "./EditorActions";
 function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
   const reading = isReading(context);
+  const appearance = useEditorAppearance();
   const [height, setHeight] = useState(0);
   return (
     <View flexDirection="column" flexGrow={1} flexShrink={1} flexBasis="auto" gap={8} minHeight={0}>
@@ -109,7 +110,10 @@ function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX
         {height > 0 ? (
           <Island
             component="markdownEditor"
-            props={{ text: reading ? doc.text : draft.text, readOnly: reading }}
+            // The document's own type, for the palette chosen per type and view: a workflow description
+            // is a type of its own, and is not read under plain markdown's key.
+            props={{ text: reading ? doc.text : draft.text, readOnly: reading, mime: doc.mime }}
+            appearance={appearance}
             height={height}
             onEvent={(name, value) => {
               if (name === "change" && !reading) draft.set(String(value));

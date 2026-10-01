@@ -1,6 +1,6 @@
 import { useEffect, useState, type JSX, type ReactNode } from "react";
 import { ScrollView } from "react-native";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { listSchemas, propertiesOf, schemaById, type SchemaEntry, type SchemaFormat, type SchemaProperty, type ValidateSchemaResult } from "@jaira/shared/browser";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
 import { schemaFormatOf, useSchemaChoice } from "@jaira/ui/fileEditModel";
@@ -157,7 +157,7 @@ export function SchemaJsonEditor({
         {lockedSchema ? (
           <View flexDirection="row" alignItems="center" gap={6}>
             <Sub>Schema</Sub>
-            <Chip>{entry?.label ?? plain}</Chip>
+            <Chip {...(entry?.hint ? { title: entry.hint } : {})}>{entry?.label ?? plain}</Chip>
           </View>
         ) : (
           <View flexDirection="row" alignItems="center" gap={6}>
@@ -228,12 +228,12 @@ export function SchemaJsonEditor({
   );
 }
 
-/** A chip: plain, or in --ok or --bad. */
-function Chip({ tone = "plain", children }: { tone?: "plain" | "ok" | "bad"; children: ReactNode }): JSX.Element {
+/** A chip: plain, or in --ok or --bad; `title` is its tooltip (a locked schema's chip says what the schema is for). */
+function Chip({ tone = "plain", title, children }: { tone?: "plain" | "ok" | "bad"; title?: string; children: ReactNode }): JSX.Element {
   const t = useTokens();
   const ink = tone === "plain" ? "dim" : tone;
   return (
-    <View flexShrink={0} borderRadius={999} paddingHorizontal={6} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, tone === "plain" ? "line" : tone) as object)}>
+    <View flexShrink={0} borderRadius={999} paddingHorizontal={6} {...((isWeb && title !== undefined ? { title } : {}) as object)} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, tone === "plain" ? "line" : tone) as object)}>
       <Txt spec={{ voice: "app", scale: 10 / 12.5, color: ink }} numberOfLines={1}>
         {children}
       </Txt>

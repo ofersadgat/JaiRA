@@ -223,7 +223,9 @@ interface Placed {
  */
 let declared: readonly string[] | null = null;
 function declaredTokens(): readonly string[] {
-  if (declared !== null) return declared;
+  // Not kept while it is empty: the universal page adopts the islands' stylesheet when its first island
+  // mounts (`islandStyles.ts`), and a float asked before that would have read a page with no token.
+  if (declared !== null && declared.length > 0) return declared;
   const names = new Set<string>();
   const walk = (list: CSSRuleList): void => {
     for (const rule of Array.from(list)) {
@@ -236,7 +238,8 @@ function declaredTokens(): readonly string[] {
       if ("cssRules" in rule && rule.cssRules instanceof CSSRuleList) walk(rule.cssRules);
     }
   };
-  for (const sheet of Array.from(document.styleSheets)) {
+  // The adopted sheets too: the universal page has the stylesheet nowhere else (`islandStyles.ts`).
+  for (const sheet of [...Array.from(document.styleSheets), ...document.adoptedStyleSheets]) {
     try {
       walk(sheet.cssRules);
     } catch {
@@ -248,12 +251,13 @@ function declaredTokens(): readonly string[] {
 }
 
 /**
- * The tokens the anchor sees differently from `<body>` — an island's look, an editor's theme — so a
- * float carried out to `<body>` keeps the colours of the place it opened from.
+ * The tokens the anchor sees differently from where the float stands (`from`: its seat in `<body>`) —
+ * an editor's theme, a subtree's own palette — so a float carried out to `<body>` keeps the colours of
+ * the place it opened from.
  */
-function tokensOf(element: Element): Array<[string, string]> {
+function tokensOf(element: Element, from: Element): Array<[string, string]> {
   const here = getComputedStyle(element);
-  const base = getComputedStyle(document.body);
+  const base = getComputedStyle(from);
   const out: Array<[string, string]> = [];
   for (const name of declaredTokens()) {
     const value = here.getPropertyValue(name);
@@ -262,6 +266,30 @@ function tokensOf(element: Element): Array<[string, string]> {
   const scheme = here.getPropertyValue("color-scheme");
   if (scheme !== base.getPropertyValue("color-scheme")) out.push(["color-scheme", scheme]);
   return out;
+}
+
+/**
+ * A float's seat in `<body>`, made an island where the float was opened from one.
+ *
+ * On the universal page the stylesheet is scoped to the islands (`islandStyles.ts`:
+ * `@scope ([data-island])`), and a float opened from one has been carried out of the only box its
+ * rules reach: the schema editor's completion list stood in `<body>` unplaced (`.float` is what makes
+ * it fixed), in the browser's own face, with no token to draw from. So the seat is marked an island
+ * itself — a root of that scope, with the card inside it, where every rule matches again — and dressed
+ * as the island it came from is: the same look attributes and the same inline variables, which is what
+ * the scoped token blocks and the inherited colour and face resolve from. The seat draws no box of its
+ * own (`display: contents`), so the card is laid out as if it stood in `<body>` itself.
+ *
+ * On a page that carries the stylesheet — an island's own, on a phone — no anchor stands in such a
+ * box, and the seat stays a bare element.
+ */
+const SEAT = { display: "contents" } as const;
+function dressSeat(seat: HTMLElement, anchor: Element): void {
+  const island = anchor.closest<HTMLElement>("[data-island]");
+  if (island === null) return;
+  for (const [name, value] of Object.entries(island.dataset)) if (value !== undefined) seat.dataset[name] = value;
+  seat.dataset["island"] = "float";
+  for (const name of Array.from(island.style)) if (name.startsWith("--")) seat.style.setProperty(name, island.style.getPropertyValue(name));
 }
 
 // --- the components -------------------------------------------------------------------------------
@@ -328,7 +356,10 @@ export function Popover({ anchor, at, side = "below", align = "start", gap, matc
   useLayoutEffect(() => {
     const element = own.current;
     if (element === null || anchorElement === null) return;
-    for (const [name, value] of tokensOf(anchorElement)) element.style.setProperty(name, value);
+    const seat = element.parentElement ?? document.body;
+    // First the seat (see `dressSeat`): what the anchor sees differently is measured against it.
+    if (seat !== document.body) dressSeat(seat, anchorElement);
+    for (const [name, value] of tokensOf(anchorElement, seat)) element.style.setProperty(name, value);
   }, [anchorElement]);
 
   // Placed on every render, converging: the same place again is the same object, so it settles.
@@ -400,7 +431,8 @@ export function Popover({ anchor, at, side = "below", align = "start", gap, matc
     </div>
   );
   if (typeof document === "undefined") return <div {...rest} className={className} style={style}>{children}</div>;
-  return createPortal(card, document.body);
+  // In a seat that draws no box: see `dressSeat`.
+  return createPortal(<div style={SEAT}>{card}</div>, document.body);
 }
 
 /**

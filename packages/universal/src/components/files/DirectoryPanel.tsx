@@ -3,7 +3,7 @@ import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { FileTree, WorkflowLayer } from "@jaira/shared/browser";
 import { KIND_GLYPH, entriesUnder } from "@jaira/ui/filesModel";
-import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
+import { PLAIN_SCROLLER, Press, Txt, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "./Chip";
 
@@ -12,7 +12,8 @@ import { Chip } from "./Chip";
  * (`entriesUnder`'s order). How it looks:
  *
  *   the panel        takes the file panel's column, scrolling
- *   the list         a column, 1px --line ring, radius --control-radius, at most 320 tall, clipped;
+ *   the list         a column, 1px --line ring, radius --control-radius, at most 320 tall, scrolling
+ *                    inside itself past that (web; a phone's clips, having no box that scrolls itself);
  *                    padding 8 10, gap 1
  *   a row            row, centred, gap 8, padding 6 10, a --line under it (none on the last), --panel,
  *                    app 13/12.5; hovered --panel-2
@@ -50,7 +51,7 @@ export function DirectoryPanel({
   ];
   return (
     <ScrollView {...(scrollbarProps(t) as object)} style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never} contentContainerStyle={PLAIN_SCROLLER as never}>
-      <View flexDirection="column" paddingVertical={8} paddingHorizontal={10} gap={1} maxHeight={320} overflow="hidden" borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={t.v("control-radius") as never}>
+      <View flexDirection="column" paddingVertical={8} paddingHorizontal={10} gap={1} maxHeight={320} {...(isWeb ? ({ overflow: "auto", ...viewScrollbarProps(t) } as object) : { overflow: "hidden" })} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={t.v("control-radius") as never}>
         {rows.map((row, i) => (
           <Press
             key={row.key}

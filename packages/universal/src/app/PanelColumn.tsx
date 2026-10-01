@@ -12,6 +12,7 @@ import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { invoke } from "@jaira/ui/store";
 import { faceOf, type FaceHost } from "../components/panel/faces";
 import { EventsTaskAutomations } from "../components/workflow/ConfigPanel";
+import { wantPart } from "../components/settings/parts";
 import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { NewTaskForm } from "../components/panel/NewTaskForm";
 import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBridge";
@@ -257,15 +258,17 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       },
     },
     // The events task's Configuration tab: Settings' Automations editor on the task's layer. Its links
-    // open Settings on the page, standing on the task's project; they do not scroll to the part within it.
+    // open Settings on the page, standing on the task's project, and at the part within it where one is
+    // named (`parts.ts`' `wantPart`: gone to once the page has drawn it).
     automationsOf: (project, onOpenConversation) => {
       const at = project ?? state.at ?? SHARED_SESSION;
       const shared = at === SHARED_SESSION;
-      const toSettings = (section: Parameters<typeof actions.setSection>[0]): void => {
+      const toSettings = (section: Parameters<typeof actions.setSection>[0], part?: string): void => {
         if (!shared) actions.standOn(at);
         actions.setConfigLayer(shared ? "base" : "project");
         actions.setSection(section);
         actions.setView("settings");
+        if (part !== undefined) wantPart(part);
       };
       return (
         <EventsTaskAutomations
@@ -277,7 +280,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
           onWorkflow={actions.pickWorkflow}
           onOpenConversation={onOpenConversation}
           onEditFile={(layer) => void actions.openWorkflow(EVENTS_STATE_ID, layer)}
-          onOpenEvents={() => toSettings("tools")}
+          onOpenEvents={() => toSettings("tools", "events")}
           onOpenConnections={() => toSettings("connections")}
         />
       );

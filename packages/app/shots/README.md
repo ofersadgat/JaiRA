@@ -73,7 +73,7 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
 | `android.mts` | The phone app on the emulator, end to end: pairs by the desktop's code, reaches each room. | The device check. |
 | `android-check.mts` | The same rig kept up, to drive a phone state by state (`screen`, `tap`, `shot`). | The device loop. |
 | `phone.mts` | The phone app (`/native`) in a phone-sized headless Chrome, paired with a desktop. | The phone's shell without an emulator. |
-| `verifyTypeCheck.mts` | `file:check` over the whole wire: squiggles from the real project, go to definition, peek, references, hover, and a review's two programs. | Behaviour nothing else sees. It always found the editor by Monaco's own classes and the rest by text and test id, so it needed no port. Its Files scene (and step 2 of `monaco.mts`) looks for the compiler's underline in the Files room's editor, where the universal `CodeEdit.tsx` hands the island no compiler (decision 0015, "What the deletion took with it"): read from the code on 2026-10-01, the rig not run. |
+| `verifyTypeCheck.mts` | `file:check` over the whole wire: squiggles from the real project, go to definition, peek, references, hover, and a review's two programs. | Behaviour nothing else sees. It finds the editor by Monaco's own classes, the rest by text and test id, and the file the window is on by the title bar's crumbs. Its Files scene (and step 2 of `monaco.mts`) looks for the compiler's underline in the Files room's editor, which the universal `CodeEdit.tsx` hands the project's compiler (`fileEditModel.ts`' `codeIntelOf`). Both rigs open the BUILT client (`npm --workspace @jaira/app run build` first), or the dev server with `JAIRA_CLIENT_DEV=http://127.0.0.1:8081/` in the environment. |
 
 **New**:
 

@@ -25,7 +25,8 @@ type Rect = { top: number; bottom: number; left: number; right: number };
 
 /**
  * The props as they can travel: each function replaced by `{"$call": path}` and kept in `into`, so the
- * island can call it back (the diff's `intel.modified.check`). Plain objects and arrays are walked.
+ * island can call it back (the diff's `intel.modified.check`, the code editor's `intel.check` and its
+ * neighbours). Plain objects and arrays are walked.
  */
 function encode(value: unknown, path: string, into: Map<string, Fn>): unknown {
   if (typeof value === "function") {

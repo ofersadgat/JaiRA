@@ -60,9 +60,13 @@ export function Splitter({
         onPanResponderGrant: () => {
           const now = Date.now();
           const l = live.current;
-          if (now - lastTap.current < 300) l.onChange(clampSplit(l.reset, l.min, l.max, l.reserve, l.extent));
+          // A second press soon after the first puts the pane back to its size — and a drag that follows
+          // starts from there: starting it from the size before, the first pixel the pointer moved in
+          // that press put the old size back.
+          const reset = now - lastTap.current < 300 ? clampSplit(l.reset, l.min, l.max, l.reserve, l.extent) : undefined;
+          if (reset !== undefined) l.onChange(reset);
           lastTap.current = now;
-          from.current = l.value;
+          from.current = reset ?? l.value;
           setDragging(true);
         },
         onPanResponderMove: (_e, g) => {

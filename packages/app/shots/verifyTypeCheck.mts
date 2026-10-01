@@ -102,6 +102,13 @@ async function build(): Promise<World> {
 /** What the window says, flattened — the cheapest true signal that a state has been reached. */
 const says = (text: string): string => `document.body.innerText.includes(${JSON.stringify(text)})`;
 
+/**
+ * The file the window is on, as its title bar's address says it: the crumbs, joined as a path. Each
+ * crumb is a box of its own, so the path is nowhere in the page's text as one string.
+ */
+const ADDRESS = `(document.querySelector("[role=banner]")?.innerText ?? "").split("\\n").map((s) => s.trim()).filter((s) => s !== "" && s !== "›").join("/")`;
+const onFile = (path: string): string => `${ADDRESS}.endsWith(${JSON.stringify(path)})`;
+
 const world = await build();
 const app = await App.launch(world, { out: OUT, port: 9241, width: 1400, height: 900 });
 const problems: string[] = [];
@@ -111,7 +118,8 @@ const check = (ok: boolean, what: string): void => {
 };
 
 try {
-  await app.until("window.jaira && document.getElementById('root').children.length > 0", "the window to draw");
+  // The shell, not only the page: its navigation is what the scenes below press on.
+  await app.until("window.jaira && document.getElementById('root')?.children.length > 0 && document.querySelector('[role=navigation]') !== null", "the window to draw", 240);
 
   // 1. The channel, end to end: preload → main → worker → back.
   const clean = await app.ipc<{ checked: boolean; diagnostics: unknown[] }>("file:check", {
@@ -157,8 +165,20 @@ try {
     );
   };
 
+  /** The lines an underline is drawn on, as the editor shows them — what a wrong count is about. */
+  const underlined = (): Promise<string> =>
+    app.evaluate<string>(`(() => {
+      const host = document.querySelector(".monaco-host");
+      const lines = [...(host ? host.querySelectorAll(".view-line") : [])];
+      return [...(host ? host.querySelectorAll(".squiggly-error, .squiggly-warning") : [])]
+        .map((mark) => lines.find((line) => Math.abs(line.getBoundingClientRect().top - mark.getBoundingClientRect().top) < 2))
+        .map((line) => (line ? (line.textContent ?? "").replace(/\\u00a0/g, " ") : "?"))
+        .join(" / ");
+    })()`);
+
   const drawnClean = await squiggles("clean.ts");
-  check(drawnClean === 0, `clean.ts draws no squiggles (drew ${drawnClean})`);
+  check(drawnClean === 0, `clean.ts draws no squiggles (drew ${drawnClean}${drawnClean === 0 ? "" : `: ${await underlined()}`})`);
+  if (drawnClean !== 0) await app.shot("typecheck-clean");
   const drawnBroken = await squiggles("broken.ts");
   check(drawnBroken > 0, `broken.ts draws its error (drew ${drawnBroken})`);
   await app.shot("typecheck-broken");
@@ -315,8 +335,9 @@ try {
       await app.press("Escape", 27);
       // And going there does nothing, which is the honest answer: there is no row in the tree for it.
       await app.press("F12", 123);
-      const stayed = await app.evaluate<boolean>(`document.body.innerText.includes("src/uses-outside.ts")`);
-      check(stayed, "and going to it leaves the window where it was");
+      await new Promise((r) => setTimeout(r, 1000));
+      const stayed = await app.evaluate<boolean>(onFile("src/uses-outside.ts"));
+      check(stayed, `and going to it leaves the window where it was (${await app.evaluate<string>(ADDRESS)})`);
     }
 
     // Back to the file the jump is about, and go. Last, because it navigates away.
@@ -325,11 +346,10 @@ try {
     // F12 — Monaco's own binding for the menu item, so this exercises the provider we registered and
     // the editor opener, rather than any path of this script's own.
     await app.press("F12", 123);
-    await app.until(
-      `document.body.innerText.includes("src/service.ts")`,
-      "the window to follow the definition into service.ts",
-      40,
-    );
+    await app.until(onFile("src/service.ts"), "the window to follow the definition into service.ts", 40);
+    // The editor for the new file, with its caret placed: it is made once the file has been read.
+    await app.until(`[...document.querySelectorAll(".monaco-host .view-line")].some((e) => (e.textContent ?? "").includes("spare"))`, "service.ts in the editor", 40);
+    await new Promise((r) => setTimeout(r, 500));
     const landed = await app.evaluate<{ file: string; line: string }>(`(() => {
       const host = document.querySelector(".monaco-host");
       const cursor = host ? host.querySelector(".cursor") : null;
@@ -340,7 +360,7 @@ try {
       );
       // Monaco renders some spaces as non-breaking, so the text it draws is not the text it holds.
       const said = line ? (line.textContent ?? "").replace(/ /g, " ") : "";
-      return { file: document.body.innerText.includes("src/service.ts") ? "service.ts" : "?", line: said };
+      return { file: ${onFile("src/service.ts")} ? "service.ts" : "?", line: said };
     })()`);
     check(landed.file === "service.ts", `the window opened the defining file (${landed.file})`);
     check(landed.line.includes("answer = 42"), `and put the caret on the declaration (${JSON.stringify(landed.line)})`);

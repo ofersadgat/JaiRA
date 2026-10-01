@@ -161,6 +161,24 @@ describe("the editor's rails", () => {
   it("opens an INHERITED preset in the same sections, saying what it holds", () => {
     expect(llmSummariesOf(TABS[2]!.value).reasoning).toBe("xhigh");
   });
+
+  it("opens an inherited preset EDITABLE — its edit is a draft, and saving it is what copies it into this layer", () => {
+    const inherited = TABS[2]!;
+    expect(inherited.origin).toBe("inherited");
+    // Untouched, or put back to what it inherits: nothing to save, and the rail still says where it is from.
+    expect(isDirty(inherited, undefined)).toBe(false);
+    expect(isDirty(inherited, { reasoning: { effort: "xhigh" }, providerOptions: {} })).toBe(false);
+    expect(presetSummary(inherited, { reasoning: { effort: "xhigh" }, providerOptions: {} })).toBe("inherited · reasoning xhigh · +1 more");
+    // Edited: Save and Revert have something to do, and the rail says there is an edit waiting.
+    const edit = { ...inherited.value, reasoning: { effort: "low" } };
+    expect(isDirty(inherited, edit)).toBe(true);
+    expect(presetSummary(inherited, edit)).toBe("unsaved · reasoning low · +1 more");
+    // Saved, the layer states it: the same name is this layer's own, holding the edit, with no draft left.
+    const after = presetTabsOf({ ...HERE, thorough: edit }, { ...EFFECTIVE, thorough: edit });
+    const own = after.find((tab) => tab.name === "thorough")!;
+    expect(own).toMatchObject({ origin: "here", value: edit });
+    expect(isDirty(own, edit)).toBe(false);
+  });
 });
 
 describe("the presets that ship built in", () => {

@@ -9,7 +9,8 @@
     "./*": "./src/*"
   },
   "scripts": {
-    "tokens": "node scripts/tokens.mjs"
+    "tokens": "node scripts/tokens.mjs",
+    "css": "node scripts/pruneCss.mjs"
   },
   "dependencies": {
     "@tamagui/core": "~2.7.7",

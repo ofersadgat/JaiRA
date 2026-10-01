@@ -55,6 +55,13 @@ export const newTaskOpener = shared<(() => void) | null>(null);
 export const issueReveal = shared<{ path: string; nonce: number } | null>(null);
 
 /**
+ * Where a "Go to Definition" asked the caret to land, and in which file. The editor that asks is gone by
+ * the time the file it asked for opens, so the request is kept here, outside both; it carries its path
+ * and is applied only to a file of that path. See `FileSurfaceContext.revealAt` (and why it has no nonce).
+ */
+export const definitionReveal = shared<{ path: string; line: number; column: number } | null>(null);
+
+/**
  * About opened from the sidebar's Update row with its release notes showing (the row's menu, "Release
  * notes"). The sidebar sets it and folds it again once Settings → About is left; `AboutPage` opens its
  * notes by it — only for that one opening.

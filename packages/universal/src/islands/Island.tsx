@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
 import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
-import type { DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiffTypes";
+import type { CodeIntel, DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiffTypes";
 import { useLook } from "../tokens";
 import { dress, islandStyles, islandStylesIn } from "./islandStyles";
 import type { IslandHandle, IslandProps } from "./types";
@@ -61,14 +61,22 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
               text={String(p["text"] ?? "")}
               {...(p["readOnly"] === false ? { onChange: event("change") } : { readOnly: true })}
               {...(p["diff"] !== undefined ? { diff: p["diff"] as never } : {})}
+              {...(typeof p["mime"] === "string" ? { mime: p["mime"] } : {})}
             />
           </Suspense>
         );
       }
+      // A file's editor, in its band. With the file's type (`mime`) it is `MarkdownDocument` too, which
+      // hands the editor the palette chosen for that type and view (`viewTheme`): a workflow description
+      // has its own, and is not read under markdown's.
       return (
         <div className="file-edit" style={box}>
           <Suspense fallback={null}>
-            <MarkdownEditor text={String(p["text"] ?? "")} readOnly={p["readOnly"] !== false} {...(p["readOnly"] === false ? { onChange: event("change") } : {})} />
+            {typeof p["mime"] === "string" ? (
+              <MarkdownDocument text={String(p["text"] ?? "")} mime={p["mime"]} {...(p["readOnly"] === false ? { onChange: event("change") } : { readOnly: true })} />
+            ) : (
+              <MarkdownEditor text={String(p["text"] ?? "")} readOnly={p["readOnly"] !== false} {...(p["readOnly"] === false ? { onChange: event("change") } : {})} />
+            )}
           </Suspense>
         </div>
       );
@@ -80,6 +88,8 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
       const reveal = p["reveal"] as { line: number; column: number } | undefined;
       // `autoHeight`: a fenced block's editor, as tall as its text (`MonacoCodePane`'s), in no band.
       const fit = p["autoHeight"] === true;
+      // The compiler, where the host has one for this file (`CodeEdit.tsx`), handed straight through.
+      const intel = p["intel"] !== null && typeof p["intel"] === "object" ? (p["intel"] as CodeIntel) : undefined;
       return (
         <div className="file-edit" style={{ ...box, display: "flex", flexDirection: "column" }}>
           <Suspense fallback={null}>
@@ -95,6 +105,7 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
                 view={(p["view"] as RenderView | undefined) ?? "write"}
                 {...(fit ? { autoHeight: true } : {})}
                 {...(file === undefined ? {} : { file })}
+                {...(intel === undefined ? {} : { intel })}
                 {...(reveal === undefined ? {} : { reveal })}
               />
             )}

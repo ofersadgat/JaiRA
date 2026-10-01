@@ -50,9 +50,16 @@ export function presetTabsOf(here: PresetDocs, effective: PresetDocs, builtIn: P
   ];
 }
 
-/** Has this preset been edited and not saved? A draft that says what is saved is not one. An inherited preset has no draft. */
+/**
+ * Has this preset been edited and not saved? A draft that says what is saved is not one.
+ *
+ * The same for every origin. A preset this layer only inherits — from another layer, or from what
+ * ships — opens in the same editor and is edited in place, and its edit is a draft like any other:
+ * saving it writes the whole preset into the layer being edited, where it wins. (An inherited one was
+ * once read-only and had no draft; the rule outlived that, and its Save could never be pressed.)
+ */
 export function isDirty(tab: PresetTab, draft: LlmConfigDoc | undefined): boolean {
-  return tab.origin !== "inherited" && draft !== undefined && JSON.stringify(draft) !== JSON.stringify(tab.value);
+  return draft !== undefined && JSON.stringify(draft) !== JSON.stringify(tab.value);
 }
 
 /** What a preset holds, in one line: its model first, then its call settings. */
@@ -69,8 +76,8 @@ export function presetLine(doc: LlmConfigDoc): string {
  * an edit left behind on another tab would otherwise be invisible until it was lost.
  */
 export function presetSummary(tab: PresetTab, draft?: LlmConfigDoc): string {
-  if (tab.origin === "inherited") return `inherited · ${presetLine(tab.value)}`;
-  return isDirty(tab, draft) ? `unsaved · ${presetLine(draft!)}` : presetLine(tab.value);
+  if (isDirty(tab, draft)) return `unsaved · ${presetLine(draft!)}`;
+  return tab.origin === "inherited" ? `inherited · ${presetLine(tab.value)}` : presetLine(tab.value);
 }
 
 /**

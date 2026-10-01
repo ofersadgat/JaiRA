@@ -25,7 +25,10 @@
  *   {kind: "event", name, value}               a callback the component fired (`onChange`, a link); a
  *                                              `rect` in it (a selection's) is in the island's page
  *   {kind: "call", id, fn, args}               call the host's function at `fn` (a `$call` path) — the
- *                                              diff's compiler checks, `intel.modified.check(text)`
+ *                                              compiler, for the diff (`intel.modified.check(text)`)
+ *                                              and the code editor (`intel.check`, `intel.definitions`,
+ *                                              `intel.references`, `intel.hover`, `intel.read`,
+ *                                              `intel.open`)
  *   {kind: "log", level, text}                 a console warning or error, so the host can see fallbacks
  *   {kind: "error", message}                   the component threw
  *
