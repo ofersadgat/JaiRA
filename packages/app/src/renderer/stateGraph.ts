@@ -220,7 +220,7 @@ export type GraphEdgeKind = "sequence" | "mount" | "state";
  *
  * Blue onward, red back, amber for an ending that is not success — the palette's accent, bad and
  * warning hues, which is to say each of the three already means what it is being asked to mean
- * everywhere else in the app. See `--go-*` in the stylesheet.
+ * everywhere else in the app. See the `--go-*` tokens.
  */
 export type EdgeFlow = "onward" | "back" | "abort";
 
@@ -1141,8 +1141,8 @@ export function focusOf(graph: StateGraph, focus: Focus | null): { lit: Set<stri
 /**
  * Geometry, in px.
  *
- * The stylesheet has to agree with the numbers that decide a box's height — see the `.sg-*` rules,
- * which carry the same ones as fixed line heights. That duplication is deliberate and bounded: a box
+ * The drawing has to agree with the numbers that decide a box's height — see `StateGraph.tsx`, which
+ * carries the same ones as fixed line heights. That duplication is deliberate and bounded: a box
  * is positioned AND sized from here, and a port's dot has to land on the line that ends at it.
  */
 const NODE_W = 258;
@@ -1229,7 +1229,7 @@ const GROUP_GAP = 34;
 /**
  * A guard label's box, measured rather than guessed.
  *
- * The label is set in the data voice at a fixed size (see `.sg-label` in the stylesheet), so its
+ * The label is set in the data voice at a fixed size (see `Guard` in `StateGraph.tsx`), so its
  * width is countable. It has to be: labels are centred on their arcs, arcs are stacked into lanes so
  * their labels do not collide, and a stack computed from a guessed width collides anyway.
  */
@@ -1683,7 +1683,7 @@ export function layoutOf(graph: StateGraph): GraphLayout {
     let ins = 0;
     let outs = 0;
     // A port sits on the edge it belongs to, at the middle of its own row — which is where the wire
-    // that ends at it is drawn to, and why both numbers come from here rather than from the CSS.
+    // that ends at it is drawn to, and why both numbers come from here rather than from the drawn box.
     const ports = node.ports.map((p) => {
       const row = p.side === "in" ? ins++ : outs++;
       return { ...p, x: p.side === "in" ? x : x + NODE_W, y: top + row * ROW_H + ROW_H / 2 };

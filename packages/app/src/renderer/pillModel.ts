@@ -1,6 +1,6 @@
 /**
  * Status as two kinds of pill (SHELL.md §4): the vocabulary, the counts, and where the pills go in a
- * row too narrow for all of them. The universal `Pill` and `Pills` draw from it.
+ * row too narrow for all of them. `Pill.tsx` and `Pills.tsx` draw from it.
  *
  * The board had a badge and the sidebar had nothing, so "is anything happening over there" was a
  * question you answered by going there. One vocabulary answers it in both places, and the split that
@@ -261,7 +261,7 @@ export function minusCounts(all: PillCounts, part: PillCounts): PillCounts {
  *
  * Estimated rather than measured: measuring costs a layout pass per row per render, and the only
  * decision resting on it is how many pills to draw — a job an estimate that is a pixel or two out
- * does exactly as well. The numbers are the `.pill` box at the default `--size-data`; a larger data
+ * does exactly as well. The numbers are a pill's box at the default `--size-data`; a larger data
  * size makes real pills wider than this thinks, which costs at most one pill of the fold.
  */
 const PILL_PAD = 13;

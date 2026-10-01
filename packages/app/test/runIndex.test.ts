@@ -1,5 +1,5 @@
 /**
- * The Instances index — see `runIndex.tsx`.
+ * The Instances index — see `runIndexModel.ts`.
  *
  * Two claims, and they are separate. The first is SHAPE: which rows exist, which of them open a lane
  * and which draw a lobe, given an instance tree. The second is the LOOP, which is the only reading

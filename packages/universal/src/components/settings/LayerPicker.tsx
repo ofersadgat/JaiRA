@@ -5,14 +5,13 @@ import { layerSegmentOf } from "@jaira/ui/layerLabels";
 import { Button } from "./Button";
 
 /**
- * `panes.tsx`'s `LayerPicker`, universal (decision 0015): the layer switch, used wherever a write has to
- * name where it lands — at a settings page's top-right corner. Its words and tooltips are
- * `layerSegmentOf`'s, as the DOM's are.
+ * The layer switch, used wherever a write has to name where it lands — at a settings page's top-right
+ * corner. Its words and tooltips are `layerSegmentOf`'s (`layerLabels.ts`).
  *
- *   .layer-picker          row, gap 4; each segment a `button` (flex 1, which in a switch sized by its
+ *   the switch             row, gap 4; each segment a `Button` (flex 1, which in a switch sized by its
  *                          content is each one's own width)
- *   button.ghost           a segment not chosen
- *   button.layer-on        the chosen one: --fill-accent, --on-accent at 600, --sheen (as `primary`)
+ *   a segment not chosen   a ghost button
+ *   the chosen one         a primary button: --fill-accent, --on-accent at 600, --sheen
  */
 export function LayerPicker<L extends WorkflowLayer | ConfigLayer = ConfigLayer>({
   value,

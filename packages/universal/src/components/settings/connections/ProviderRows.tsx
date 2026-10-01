@@ -46,10 +46,10 @@ import { CardActions, ConnRow, ConnRows, EntryBox, KeyBox, LoginCardBox, LoginMa
 import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
 
 /**
- * `providersPane.tsx`'s rows of Connections, universal (decision 0015): one row per agent, model API
- * and local model — what it is and whether it works, who it connects as (its logins and its key, as
- * boxes, with a + box to add one), its switch and its chevron — and, opened, its own form. What each
- * says and writes is `connectionsModel.ts`'s, the functions the DOM's rows call.
+ * The provider rows of Connections: one row per agent, model API and local model — what it is and
+ * whether it works, who it connects as (its logins and its key, as boxes, with a + box to add one),
+ * its switch and its chevron — and, opened, its own form. What each says and writes is
+ * `connectionsModel.ts`'s.
  */
 
 /** One group of provider rows, as the card of a Connections section. */

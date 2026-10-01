@@ -13,27 +13,28 @@ import { Pill } from "../Pill";
 import { claimed, tileChromeOf } from "../TaskCard";
 
 /**
- * `runViews.tsx`'s `RunBoard`, universal (decision 0015): a composite's board as EXECUTIONS — one column
- * per declared child (`Column`, the task board's own), one card per pass (`RunTile`, on the task card's
- * tile). What it derives is `runBoardModel.ts`'s, shared with the DOM. The rules it adds to the board's:
+ * A composite's board as EXECUTIONS — one column per declared child (`Column`, the task board's own),
+ * so the shape is the workflow's even where nothing has run, and one card per pass (`RunTile`, on the
+ * task card's tile), so a loop is visible. What it derives is `runBoardModel.ts`'s. What it adds to
+ * the board's look:
  *
- *   .board-body     column, flex 1, gap 14, padding 10, scrolls both ways (a run's columns do not wrap)
- *   .columns        row, gap 10, stretch
- *   .column-body    "not reached" for a child nothing reached
- *   .card-head      row, centred, gap 6: the title (data × .96, −0.01em, 600 when selected), the pill,
- *                   and — only when a column holds several passes — `.chip`, the pass number (app
+ *   the body        column, flex 1, gap 14, padding 10, scrolls both ways (a run's columns do not wrap)
+ *   the columns     row, gap 10, stretch
+ *   a column        "not reached" for a child nothing reached
+ *   a card's head   row, centred, gap 6: the title (data × .96, −0.01em, 600 when selected), the pill,
+ *                   and — only when a column holds several passes — the pass number in a chip (app
  *                   10/12.5, --dim, 1px --line, radius 999, padding 0 6)
- *   .card-args      data × 10.5/12, --dim, line-height 1.45, 5 above, a line per argument (`.ellip`),
- *                   "+N more" in `.sub` (app 11/12.5 in the args' face)
- *   .card-meta      data × .84, --dim, row, centred, gap 6, 2 above: how long (`.ellip`, flex 1) and
- *                   the status (`.card-status`, flex none)
+ *   its arguments   data × 10.5/12, --dim, line-height 1.45, 5 above, a line per argument (cut with an
+ *                   ellipsis), "+N more" at app 11/12.5 in the arguments' face
+ *   its foot        data × .84, --dim, row, centred, gap 6, 2 above: how long (cut with an ellipsis,
+ *                   flex 1) and the status (never shrinking)
  *
  * Dragging a card to answer a waiting move (`on_user_event`): the execution the run rests on
  * (`restingOf`) can be picked up where a wait of this run offers a column (`offers`, `runDragOffersOf`);
  * the columns that would take it are dashed in the accent and the one under the pointer filled, as the
- * task board's (`Column`), and the drop answers the wait (`onDrop`). On web the desktop's HTML5 drag
- * (`draggable`, the column's `dragover`/`drop`); on a phone a long press and a pan (`Lift`), the card's
- * picture following the finger.
+ * task board's (`Column`), and the drop answers the wait (`onDrop`). On web an HTML5 drag (`draggable`,
+ * the column's `dragover`/`drop`); on a phone a long press and a pan (`Lift`), the card's picture
+ * following the finger.
  */
 export function RunBoard({
   declared,
@@ -59,7 +60,7 @@ export function RunBoard({
   const byChild = useMemo(() => runsByChild(parent), [parent]);
   const columns = runColumnsOf(declared, byChild);
   const blueprint = look.palette === "blueprint";
-  // The card a drag picks up: the execution the run RESTS on (`restingOf`), as `runViews.tsx` has it.
+  // The card a drag picks up: the execution the run RESTS on (`restingOf`).
   const resting = useMemo(() => restingOf(parent), [parent]);
   const [dragging, setDragging] = useState(false);
   const draggable = onDrop !== undefined && offers.size > 0;
@@ -81,11 +82,11 @@ export function RunBoard({
   return (
     <ScrollView
       {...(scrollbarProps(t) as object)}
-      // `.board-body` scrolls both ways: a run's columns are a sequence, and run past the column.
-      // `PLAIN_SCROLLER`: painted where it stands in the page, as the desktop's is — what is painted
-      // after a scroller shares a layer with its scrollbar, and Chromium draws that layer's text greyscale
-      // (the inbox strip under a run); a stacking context of its own is painted last, and left the strip
-      // subpixel.
+      // The body scrolls both ways: a run's columns are a sequence, and run past the column.
+      // `PLAIN_SCROLLER`: painted where it stands in the page, so what is painted after it shares a
+      // layer with its scrollbar, and Chromium draws that layer's text greyscale (the inbox strip under
+      // a run), as the reference pictures have it; a stacking context of its own is painted last, and
+      // left the strip subpixel.
       style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
       contentContainerStyle={{ flexGrow: 1, ...PLAIN_SCROLLER } as never}
       {...(!isWeb ? { horizontal: false } : {})}
@@ -233,14 +234,14 @@ function RunTile({
         onDoubleClick: onOpen,
         onMouseDown: (e: ReactMouseEvent) => (e.shiftKey ? e.preventDefault() : undefined),
         title: words.tip,
-        // `.card-draggable`: grab, where a wait offered the move.
+        // A grab cursor where a wait offered the move.
         cursor: onDragStart !== undefined ? "grab" : "pointer",
         userSelect: "none",
         ...(onDragStart !== undefined
           ? {
               draggable: true,
               onDragStart: (e: DragEvent) => {
-                // As the DOM's: Firefox refuses a drag with nothing on the transfer.
+                // Firefox refuses a drag with nothing on the transfer.
                 e.dataTransfer?.setData("text/plain", node.instanceId);
                 if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
                 onDragStart();

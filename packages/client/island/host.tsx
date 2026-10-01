@@ -6,9 +6,9 @@ import type { FromIsland, IslandLook, ToIsland } from "./protocol";
 /**
  * An island page's host (decision 0015, S5): one of the renderer's DOM components, drawn from props
  * that arrive over the bridge (`protocol.ts`), in a WebView on native and an iframe in the test
- * harness. The component is today's, unchanged; only its host is new. Each component has its own page
- * (`markdown.tsx`, `diff.tsx`, `markdownEditor.tsx`, `code.tsx`, `schemaText.tsx`, `artifact.tsx`), so an island
- * carries only what it draws.
+ * harness. The component is the one the web page draws inline (`islands/Island.tsx`); only its host
+ * differs. Each component has its own page (`markdown.tsx`, `diff.tsx`, `markdownEditor.tsx`, `code.tsx`,
+ * `schemaText.tsx`, `artifact.tsx`), so an island carries only what it draws.
  */
 const start = performance.now();
 

@@ -26,10 +26,9 @@ import { ProbeHead, ProbeList, ProbeRow, RowButton, useColumn } from "./Probe";
 import { AddBox, ConnRow, ConnRows, EntryBox, KeyBox, Problem, RowControls, RowHead, Say, Tag, Wide } from "./Row";
 
 /**
- * `mcpServersRows.tsx`'s rows of Connections → MCP servers, universal (decision 0015): one row per
- * configured server — whether it answered, the secrets it is sent as boxes, its switch and chevron —
- * then "Add a server", with the servers other tools on this machine already run under it. What each
- * says and writes is `connectionsModel.ts`'s.
+ * The rows of Connections → MCP servers: one row per configured server — whether it answered, the
+ * secrets it is sent as boxes, its switch and chevron — then "Add a server", with the servers other
+ * tools on this machine already run under it. What each says and writes is `connectionsModel.ts`'s.
  */
 export function McpServerRows(props: McpServerRowsProps): JSX.Element {
   const { config, layer, busy, editable, mcp, onSave } = props;

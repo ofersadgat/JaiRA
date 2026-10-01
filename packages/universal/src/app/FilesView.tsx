@@ -10,10 +10,10 @@ import { useShell } from "./shell";
 import { issueReveal, runMode } from "./viewState";
 
 /**
- * What the Files room's surfaces are handed beyond the file itself — `App.tsx`'s `surfaces`, for the
- * fields the universal surfaces read (the drafts, the renderer choices, the tree and the ways out of
- * the address bar). The rest of that object serves surfaces not copied yet (a state's board, its
- * conversation, the sync panel), and joins this one as they are.
+ * What the Files room's surfaces are handed beyond the file itself: the drafts, the renderer choices,
+ * the tree, the editors' services and the ways out of the address bar. Not the whole context, hence the
+ * cast: what a RUN is read from is `useRunContext`'s (`components/run/runContext.ts`), laid over this
+ * wherever a run is drawn, and the sync panel's is added from the store where it is drawn (`surfaces.tsx`).
  */
 export function useFileSurfaces(): FileSurfaceContext {
   const { state, actions } = useShell();
@@ -78,11 +78,9 @@ export function useFileSurfaces(): FileSurfaceContext {
 }
 
 /**
- * The Files room (`.files-view`, `App.tsx`): `FilePanel` — the viewer over the editor, or a folder's
- * listing — and the side panel beside it (`PanelColumn`, room-generic: the files room's stack, with the
- * state inspector on it for a state and nothing for a plain file).
- *
- *   .files-view   a grid: the panel (minmax(0, 1fr)), then the side panel's splitter and column
+ * The Files room: `FilePanel` — the viewer over the editor, or a folder's listing — and the side panel
+ * beside it (`PanelColumn`, room-generic: the files room's stack, with the state inspector on it for a
+ * state and nothing for a plain file). A row: the file panel, then the side panel's splitter and column.
  */
 export function FilesView(): JSX.Element {
   const { state, actions } = useShell();
@@ -106,7 +104,7 @@ export function FilesView(): JSX.Element {
   );
 }
 
-/** The file address bar in the title bar (`<FileAddressBar>` in `App.tsx`'s `.title-bar`), with its props. */
+/** The file address bar in the title bar (`FileAddressBar`), on the store. */
 export function FilesAddress(): JSX.Element | null {
   const { state, actions } = useShell();
   const context = useFileSurfaces();

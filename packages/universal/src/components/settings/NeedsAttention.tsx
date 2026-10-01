@@ -12,8 +12,8 @@ import { SettingsLayerContext } from "./layers";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
 
 /**
- * What the Settings pages take from the shell (`App.tsx` hands the DOM's them as props): the health
- * board, what an item's button does, and the forge sign-ins in flight (`settingsShell.ts`).
+ * What the Settings pages take from the shell: the health board, what an item's button does, and the
+ * forge sign-ins in flight (`settingsShell.ts`).
  */
 export interface SettingsShell {
   health: readonly HealthItem[];
@@ -28,13 +28,14 @@ export function useSettingsShell(): SettingsShell {
 }
 
 /**
- * `healthView.tsx`'s `NeedsAttention`, universal (decision 0015): the section a page opens with while
- * the board has something for it. What each item says and its button are `updatesModel.ts`'s. The rules:
+ * The section a page opens with while the health board has something for it. What each item says and
+ * its button are `updatesModel.ts`'s. How a problem looks:
  *
- *   .prob                the row washed --tint-bad (warning: --tint-warn), rounded 11 at the card's ends
- *   .prob-name           row, centred, gap 8: the pill's glyph (`.pill-status`), then the title
- *   .prob-since          --text
- *   .prob-x              a `.set-icon` ↺-sized × at app 15/12.5, shown only while the row is hovered
+ *   its row              washed --tint-bad (warning: --tint-warn), rounded 11 at the card's ends
+ *   its name             row, centred, gap 8: the pill's glyph (`Pill`), then the title
+ *   since when           --text
+ *   the dismiss ×        the ↺'s box (20 square, radius 5), × at app 15/12.5, shown only while the row
+ *                        is hovered
  */
 export function NeedsAttention({ page }: { page: HealthPage }): JSX.Element | null {
   const { health, fixHealth } = useSettingsShell();

@@ -1,5 +1,7 @@
 /**
- * Everything that floats: popovers, submenus, dropdowns, completion lists, hover cards, tooltips.
+ * What floats over a DOM component — a popover, a dropdown, a completion list, a hover card, a
+ * tooltip — for the islands (`schemaEditor.tsx`'s completion list). The page's own menus and tips are
+ * `packages/universal`'s layers (`MenuLayer`, `TipLayer`, `SuggestLayer`), not these.
  *
  * ## Why there is exactly one of these
  *
@@ -30,16 +32,16 @@
  *    the room it has (it scrolls inside), and followed through every scroll and resize;
  *  - **hiding** when the anchor has scrolled out of the box that clips it, rather than pointing at a
  *    row nobody can see;
- *  - **the anchor's palette.** Tokens are re-declared on subtrees — the sidebar has a dark set of
- *    its own, an editor its theme's — and a float moved to `<body>` would otherwise lose them and
- *    paint in the window's colours. The custom properties that differ between the anchor and the
- *    body are copied onto the float;
+ *  - **the anchor's palette.** Tokens are declared on subtrees — an island's box carries its look
+ *    (`islandStyles.ts`), an editor its theme's — and a float moved to `<body>` would otherwise lose
+ *    them. The custom properties that differ between the anchor and the body are copied onto the
+ *    float;
  *  - **dismissal**, through {@link usePopover}: a press outside closes it, where "outside" excludes
  *    the anchor, the float, and every float opened from inside it (they are not its DOM descendants
  *    any more — a context carries them up); Escape closes the innermost open one only.
  *
- * With no document (a server render, which is how the tests and the catalog draw a still picture)
- * a float renders in place, so the markup is what it always was.
+ * With no document (a server render, which is how the tests draw a still picture) a float renders in
+ * place.
  */
 import {
   createContext,
@@ -246,8 +248,8 @@ function declaredTokens(): readonly string[] {
 }
 
 /**
- * The tokens the anchor sees differently from `<body>` — the sidebar's dark set, an editor's theme —
- * so a float carried out to `<body>` keeps the colours of the place it opened from.
+ * The tokens the anchor sees differently from `<body>` — an island's look, an editor's theme — so a
+ * float carried out to `<body>` keeps the colours of the place it opened from.
  */
 function tokensOf(element: Element): Array<[string, string]> {
   const here = getComputedStyle(element);
@@ -282,7 +284,7 @@ export interface PopoverProps extends DivProps {
   gap?: number | undefined;
   /** As wide as the anchor — a dropdown under a field. A `min-width` in its rule still wins. */
   matchWidth?: boolean | undefined;
-  /** The float's own element, for a host that dismisses it by rules of its own (the context menu). */
+  /** The float's own element, for a host that dismisses it by rules of its own. */
   ref?: Ref<HTMLDivElement> | undefined;
   /**
    * Once shown, it STAYS where it opened — against the anchor, which it still follows — and grows

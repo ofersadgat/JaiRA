@@ -18,11 +18,12 @@ export type RunFields = Pick<
 >;
 
 /**
- * What a RUN is read from — the fields of `App.tsx`'s `surfaces` that `RunView` and `CompositeView` read:
+ * What a RUN is read from — the fields of the surfaces' context that `RunView` and `CompositeView` read:
  * the conversation, its sessions and records, the live tail, the folds, the waits, the walks, the gate
- * the task is parked on (`inlineGate`, with the shell's `reviewerServices`), the running agent's question
- * and approval (`inlineQuestion`, `inlineApproval`), and the questions moves parked (`moveQuestions`). The Files room's `useFileSurfaces` carries the rest; laid
- * over it, the two are the context the desktop hands a run.
+ * the task is parked on (`runGate`, with what the shell lends a reviewer, `runGateServices`), the running
+ * agent's question and approval (`runQuestion`, `runApproval`), and the questions moves parked
+ * (`moveQuestions`). The Files room's `useFileSurfaces` carries the rest; laid over it, the two are the
+ * context a run is handed.
  */
 export function useRunContext(): RunFields {
   const { state, actions } = useShell();
@@ -30,12 +31,12 @@ export function useRunContext(): RunFields {
   const focus = runFocus.use();
   const project = state.selectedProject ?? undefined;
   const detail = state.detail;
-  // `App.tsx`'s `inlineGate`: in the Tasks room, the gate the selected task is parked on.
+  // In the Tasks room, the gate the selected task is parked on.
   const gate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
   // …and the agent question and command approval this conversation is holding, hosted the same way.
   const question = state.view === "tasks" && detail !== null ? state.questions.find((q) => q.taskId === detail.taskId) : undefined;
   const approval = state.view === "tasks" && detail !== null ? state.approvals.find((a) => a.taskId === detail.taskId) : undefined;
-  // What the shell lends a changeset reviewer (`panelHost.ts`' `reviewerServicesOf`, `App.tsx`'s own).
+  // What the shell lends a changeset reviewer (`panelHost.ts`' `reviewerServicesOf`).
   const services = useMemo(() => reviewerServicesOf(state.drafts, actions), [state.drafts, actions]);
   const batches = useMemo(() => lookOf(state.config).conversation.sequentialBatches, [state.config]);
   return {
@@ -55,14 +56,14 @@ export function useRunContext(): RunFields {
     onWalkInto: actions.walkInto,
     onWalkIntoSidechain: actions.walkIntoSidechain,
     // The link in a session panel's gutter and a run card's click: describe the workflow in the panel,
-    // scoped to the run — pushed on the panel's stack, as `App.tsx`'s `onOpenWorkflow` does.
+    // scoped to the run — pushed on the panel's stack.
     onOpenWorkflow: (stateId: string, instanceId: string) => {
       actions.inspectWorkflow(stateId, instanceId, project);
       panelOnStack.get()?.((was) => push(was, { kind: "state", key: `state:${state.selectedProject ?? ""}:${stateId}@${instanceId}`, stateId, project: state.selectedProject ?? state.at, tab: "run" }));
     },
     ...(focus !== undefined ? { runFocus: focus } : {}),
     onRunFocus: runFocus.set,
-    // Only when something moved — a scroll reports on every frame (`App.tsx`'s `onRunHere`).
+    // Only when something moved — a scroll reports on every frame.
     onRunHere: (instance, onScreen) => {
       const was = runViewed.get();
       const kept = onScreen !== undefined && was.onScreen !== undefined && was.onScreen.size === onScreen.size && [...onScreen].every((id) => was.onScreen!.has(id)) ? was.onScreen : onScreen;
@@ -74,7 +75,7 @@ export function useRunContext(): RunFields {
     // The questions MOVES parked in task conversations: each drawn where its move asked it.
     moveQuestions: state.pending.filter((p) => p.moves === true),
     // The conversation a leaf shows, and the interaction the selected task is parked on — what the leaf
-    // pins, and pressing Answer selects (`App.tsx`'s `waiting` and `onAnswer`).
+    // pins, and pressing Answer selects (`waiting` and `onAnswer`, from `leafWaitOf`).
     session: state.session,
     sessionInstance: state.sessionInstance,
     ...leafWaitOf(state.pending, state.selected, actions.select),

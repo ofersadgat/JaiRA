@@ -25,25 +25,25 @@ import { ExecutorRoutes, ExecutorTree } from "./ExecutorTree";
 import { SettingsSection } from "./SettingsPage";
 
 /**
- * Settings → Models (`modelsPane.tsx`), universal (decision 0015): the defaults a state that names
- * nothing is filled in with, the routes a model id's prefix dispatches to, the presets a state picks by
- * name, the catalog the routes report, and — under Advanced — the executor tree. What each reads and
- * writes is `modelsPageModel.ts`'s, `presetTabs.tsx`'s pure half, `presetCandidates.ts`'s and
- * `catalogModel.ts`'s, as the DOM's is. The rules it adds:
+ * Settings → Models: the defaults a state that names nothing is filled in with, the routes a model
+ * id's prefix dispatches to, the presets a state picks by name, the catalog the routes report, and —
+ * under Advanced — the executor tree. What each reads and writes is `modelsPageModel.ts`'s,
+ * `presetTabsModel.ts`'s, `presetCandidates.ts`'s and `catalogModel.ts`'s. What it adds to the page's
+ * look:
  *
- *   .llm-config.preset-config   172 | 146 | 1fr (172 | 1fr for a new one); the outer rail --text 5%
+ *   the presets' frame          172 | 146 | 1fr (172 | 1fr for a new one); the outer rail --text 5%
  *                               into --panel-2
- *   .set-here-dot               6 round, --accent, 6 after the name
- *   .preset-rule                row, centred, wraps, gap 8, 8 above the candidates
- *   .preset-candidate           row, centred, wraps, gap 6, 5 below the row
- *   .preset-note                2 in, 8 above
- *   .cfg-rows > li              padding 13 16 in a card, a --line between; the hover wash
- *   .cfg-row-head               row, centred, gap 8; the title app 600 at 13/12.5, growing
- *   .cfg-version                data 10.5/12 --dim
- *   .cfg-say                    30 in, app 11.5/12.5, line 1.45, --dim; its state --text (--bad failed)
- *   .cfg-fix                    app 11/12.5, line 1.4, --accent, 2 above
- *   .catalog-aside              row, centred, gap 10
- *   .catalog-count              data-secondary, tabular, 8 before the pill
+ *   the "set here" dot          6 round, --accent, 6 after the name
+ *   a preset's rule             row, centred, wraps, gap 8, 8 above the candidates
+ *   a candidate's note          row, centred, wraps, gap 6, 5 below the row
+ *   a preset's origin note      2 in, 8 above
+ *   a catalog row               padding 13 16 in a card, a --line between; the hover wash
+ *   its head                    row, centred, gap 8; the title app 600 at 13/12.5, growing
+ *   its version                 data 10.5/12 --dim
+ *   what it says                30 in, app 11.5/12.5, line 1.45, --dim; its state --text (--bad failed)
+ *   its fix                     app 11/12.5, line 1.4, --accent, 2 above
+ *   the catalog's aside         row, centred, gap 10
+ *   a row's count               data-secondary, tabular, 8 before the pill
  */
 export function ModelsPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -92,11 +92,11 @@ export function ModelsPage(): JSX.Element {
   );
 }
 
-/** `configPane.tsx`'s `ModelDefaults`: the default model and the call settings a state that names nothing gets. */
+/** The default model and the call settings a state that names nothing gets. */
 function ModelDefaults({ effective, locked, set, layer }: Writer): JSX.Element {
   const { model, knobs } = modelDefaultsOf(effective);
-  // `PresetOptions`: the presets, each marked as one — a list to pick a preset from, in a box that still
-  // takes any model id.
+  // The presets, each marked as one — a list to pick a preset from, in a box that still takes any
+  // model id.
   const presets = presetNamesOf(effective).map((name) => ({ value: name, label: "preset" }));
   return (
     <SettingsSection
@@ -161,7 +161,7 @@ const NAME_SCHEMA = {
 };
 const NAME_PATH = "models.presets";
 
-/** `presetTabs.tsx`'s `Presets`: the stateful host over the rail of presets and the open one's editor. */
+/** The stateful host over the rail of presets and the open one's editor (`presetTabsModel.ts`). */
 function Presets({
   here,
   effective,
@@ -280,7 +280,7 @@ function Presets({
   );
 }
 
-/** `.set-here-dot`. */
+/** The dot after the name of a preset this layer states: 6 round, --accent. */
 function HereDot(): JSX.Element {
   const t = useTokens();
   return <View display={"inline-flex" as "flex"} width={6} height={6} marginLeft={6} borderRadius={999} backgroundColor={t.v("accent") as never} {...({ title: "set in the layer you are editing", verticalAlign: "middle" } as object)} />;
@@ -358,7 +358,7 @@ function OpenPreset({
       />
     ),
   };
-  // `.cfg-hint.preset-note`: the status pill set in the sentence, as the DOM's inline span is.
+  // A preset's origin note: a hint, the status pill set inline in its sentence.
   const note = (kind: "plain" | "unchecked", word: string, rest: string): ReactNode => (
     <Hint marginTop={8} marginHorizontal={2}>
       <Status kind={kind} inline>
@@ -406,7 +406,7 @@ function OpenPreset({
   );
 }
 
-/** `presetModel.tsx`'s `PresetModelSection`: the rule and the candidates it picks from. */
+/** A preset's Model section: the rule and the candidates it picks from. */
 function PresetModelSection({ value, onChange, disabled, lookup, suggestions }: { value: unknown; onChange: (next: PresetModel | undefined) => void; disabled: boolean; lookup: CandidateLookup; suggestions: readonly string[] }): JSX.Element {
   const { candidates, statuses, lefts, rule, picked, problem } = candidatesViewOf(value, lookup, useLimits());
   return (
@@ -479,8 +479,8 @@ function CandidateNote({ status, picked, left }: { status: CandidateStatus; pick
 }
 
 /**
- * A button in a section's heading takes the heading's font (`button { font: inherit }`): its size,
- * weight and line, not its tracking — `font` does not carry `letter-spacing`, and a button's is `normal`.
+ * A button in a section's heading is set in the heading's font: its size, weight and line, not its
+ * tracking, which stays the heading's own.
  */
 export const SECTION_FONT = { scale: 1.1, weight: 450, lineHeight: 1.3 } as const;
 
@@ -495,7 +495,7 @@ function CatalogSection({ catalog }: { catalog: CatalogState }): JSX.Element {
       info="What this machine's routes say they serve — each model's levels, limits and price. Refreshed by itself after every availability check and hourly; press Refresh after installing a model or updating an agent."
       action={
         <View flexDirection="row" alignItems="center" gap={10}>
-          {/* In the heading, whose font they inherit (`.set-section-title`: 450 at 1.1×, line 1.3). */}
+          {/* In the heading: the words take its line and tracking, the button its font (450 at 1.1×, line 1.3). */}
           {last !== undefined ? <Txt register="app-secondary" spec={{ lineHeight: 1.3, ls: -0.005 }}>{last}</Txt> : null}
           <Button kind="ghost" disabled={busy} onPress={refresh} font={SECTION_FONT}>
             {busy ? "Refreshing…" : "Refresh"}
@@ -506,7 +506,7 @@ function CatalogSection({ catalog }: { catalog: CatalogState }): JSX.Element {
       {view === null ? (
         <Hint card>Reading the catalog…</Hint>
       ) : (
-        // `.cfg-rows`: a column, 2 between rows.
+        // The sources: a column, 2 between rows.
         <View flexDirection="column" gap={2}>
           {view.sources.map((source, i) => (
             <CatalogRow key={source.name} source={source} now={now} first={i === 0} />
@@ -528,7 +528,7 @@ function CatalogRow({ source, now, first }: { source: NonNullable<CatalogState["
       gap={3}
       paddingVertical={13}
       paddingHorizontal={16}
-      // `.cfg-row`'s radius, which rounds the ends of the `li + li` rule too.
+      // The row's radius, which rounds the ends of the rule above it too.
       borderRadius={lengthToken(t, "control-radius", 7)}
       {...(first ? {} : (edge(t, { top: 1 }) as object))}
       backgroundColor={hovered ? (t.v("fill-ghost-hover") as never) : "transparent"}
@@ -558,7 +558,7 @@ function CatalogRow({ source, now, first }: { source: NonNullable<CatalogState["
             label={open ? `hide ${source.name}'s models` : `show ${source.name}'s models`}
             title={open ? "Hide the models" : "Show the models"}
             padding={2}
-            // A `button.quiet`: its ring is there, transparent.
+            // A quiet button: its ring is there, transparent.
             borderWidth={1}
             borderStyle="solid"
             borderColor="transparent"

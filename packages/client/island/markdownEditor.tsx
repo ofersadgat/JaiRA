@@ -4,9 +4,9 @@ import type { MarkdownDiff } from "@jaira/ui/markdownEditorTypes";
 import { mountIsland } from "./host";
 
 /**
- * The markdown editor island: CodeMirror, filling the page (a file's editor) — or, with `document`, the
- * desktop's `MarkdownDocument` as a value view draws it (an artifact under review: as tall as its words,
- * a change drawn over it), sized to its content.
+ * The markdown editor island: CodeMirror, filling the page (a file's editor) — or, with `document`,
+ * `MarkdownDocument` as a value view draws it (an artifact under review: as tall as its words, a change
+ * drawn over it), sized to its content.
  */
 mountIsland({
   drawn: ".cm-content > *",

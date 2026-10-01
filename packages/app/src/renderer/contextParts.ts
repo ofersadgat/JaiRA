@@ -1,7 +1,6 @@
 /**
- * The colour of each category in a context breakdown — moved unchanged out of `usageMeters.tsx`, which
- * imports it, so the universal copies (`TurnContext`, the context card) colour the same categories
- * the same way (decision 0015).
+ * The colour of each category in a context breakdown, in one place so `TurnContext` and the context
+ * card (`UsageCards.tsx`) colour the same categories the same way.
  */
 
 /** The colour of the n-th category in a breakdown — the rail palette, then the accent. */

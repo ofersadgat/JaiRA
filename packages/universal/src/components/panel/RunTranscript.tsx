@@ -34,10 +34,10 @@ import { advanceTargetOf } from "@jaira/ui/stateSurfaceModel";
 import { durationOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { moveQuestionConfig, parseComponentConfig, type MoveQuestionView, type PendingApproval, type PendingQuestion, type PendingUserEvent, type SettledByView } from "@jaira/shared/browser";
 
-/** What a run's conversation is read from — the store's fields `App.tsx` hands `FileSurfaceContext`. */
+/** What a run's conversation is read from — the store's fields, as `FileSurfaceContext` names them. */
 export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessions" | "sessionHistory" | "records" | "liveTurn" | "onLoadSessions" | "shutStates" | "onToggleShutState" | "onSetShutStates" | "batches" | "userEvents"> &
   Partial<Pick<FileSurfaceContext, "moveQuestions" | "onMoveQuestion" | "onSelectTask" | "onRewind" | "onFork" | "onWalkIntoSidechain" | "onOpenWorkflow">> & {
-  /** What the shell lends a gate that mounts the changeset reviewer (`App.tsx`'s `reviewerServices`). */
+  /** What the shell lends a gate that mounts the changeset reviewer (`panelHost.ts`' `reviewerServicesOf`). */
   gateServices?: Partial<ComponentServices> | undefined;
   /** Answer a parked transition (`WaitingOn`'s button). */
   onDeliverUserEvent?: ((requestId: string) => void) | undefined;
@@ -52,10 +52,9 @@ export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessio
 };
 
 /**
- * `runViews.tsx`'s `RunConversation`, its scroller and what is in it, universal (decision 0015): the
- * run's sessions as panels down the page (`sessionPanels.tsx`'s `SessionBandsView`), the notes between
- * them, and the rail beside it all. The page's rows are `pageRowsOf` (`sessionRows.ts`), the same as the
- * DOM's; the pieces, notes and palette are `sessionBands.ts`' and `rail.ts`'s.
+ * A run's conversation — the scroller and what is in it: the run's sessions as panels down the page, the
+ * notes between them, and the rail beside it all. The page's rows are `pageRowsOf` (`sessionRows.ts`);
+ * the pieces, notes and palette are `sessionBands.ts`' and `rail.ts`'s.
  *
  * The page is `SessionBands.tsx` (bands of one session or several, torn edges, fork marks, the notes —
  * entered, blocked, made, asked, moved — the origin seam and an armed cut); what a piece says is here:
@@ -70,13 +69,13 @@ export type TranscriptSource = Pick<FileSurfaceContext, "conversation" | "sessio
  * Where the reader is goes out (`onHere`: the sheet at the centre of the scroller, or the live step
  * while the page follows the live edge, and every state with a row on screen) and a bookmark comes in
  * (`focus`: the row where the run entered the state, else its letterhead, scrolled to the top and lit)
- * — `runViews.tsx`'s `track` and `sessionPanels.tsx`'s focus effect, over the rows the page files with
- * its spy (`rowSpy.ts`) rather than a query of the page, which a phone does not have. An ADOPTED task's
- * history is the same component `nested` under the line that adopted it (`AdoptedHistory`): its own
- * run, read by its own id (`taskRun.ts`), with no scroller of its own.
+ * — `track` and the focus effect below, over the rows the page files with its spy (`rowSpy.ts`) rather
+ * than a query of the page, which a phone does not have. An ADOPTED task's history is the same
+ * component `nested` under the line that adopted it (`AdoptedHistory`): its own run, read by its own id
+ * (`taskRun.ts`), with no scroller of its own.
  *
- *   .run-convo      flex 1, scrolls, follows the live edge
- *   .sb             column, at least the scroller's height, --bg, padding 14 16 22
+ *   the scroller    flex 1, scrolls, follows the live edge
+ *   the page        column, at least the scroller's height, --bg, padding 14 16 22
  */
 export function RunTranscript({
   detail,
@@ -161,7 +160,7 @@ export function RunTranscript({
   const follow = useLiveEdge(detail.taskId);
 
   // The rows a bookmark lands on, filed by the page as they mount (`rowSpy.ts`); a nested history files
-  // into the page it is drawn in, as the DOM's query of the scroller finds its rows too.
+  // into the page it is drawn in.
   const spied = useRef(new Map<unknown, SpiedRow>());
   const place = useCallback((el: unknown, row: SpiedRow | null, was: unknown) => {
     if (was !== null && was !== undefined) spied.current.delete(was);
@@ -195,9 +194,9 @@ export function RunTranscript({
     return { rows: rows.filter((one): one is { row: SpiedRow; top: number } => one !== null), height: at.height, scrolled: at.y };
   }, [follow]);
   /**
-   * Which state the reader is at (`runViews.tsx`'s `track`): following the live edge, the live step — the
-   * last one; scrolled up, the last row whose top has passed the middle line; nothing past it yet ⇒ the
-   * first. With it, every state with a row inside the viewport.
+   * Which state the reader is at: following the live edge, the live step — the last one; scrolled up,
+   * the last row whose top has passed the middle line; nothing past it yet ⇒ the first. With it, every
+   * state with a row inside the viewport.
    */
   const track = useCallback((): void => {
     if (onHere === undefined || nested) return;
@@ -236,7 +235,7 @@ export function RunTranscript({
       if (frame.current !== null) cancelAnimationFrame(frame.current);
       // Forgotten as well as cancelled: a development build mounts every effect twice (StrictMode), and
       // a frame cancelled but still remembered left `trackSoon` waiting on it for good — the index beside
-      // the conversation never learned where the reader was. The desktop's own does the same.
+      // the conversation never learned where the reader was.
       frame.current = null;
       if (!nested) onHere?.(undefined);
     },
@@ -250,10 +249,10 @@ export function RunTranscript({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [focus?.instance, focus?.at]);
   /**
-   * A bookmark landing (`SessionBandsView`'s focus effect): the row where the run entered the state, else
-   * its letterhead (the root has no entered row), scrolled to the top of the scroller and lit for 1.2s.
-   * Retried as the page fills in — the panel is often not drawn yet when the ask arrives — and `served`
-   * keeps a served ask from scrolling the reader again when the next transcript lands.
+   * A bookmark landing: the row where the run entered the state, else its letterhead (the root has no
+   * entered row), scrolled to the top of the scroller and lit for 1.2s. Retried as the page fills in —
+   * the panel is often not drawn yet when the ask arrives — and `served` keeps a served ask from
+   * scrolling the reader again when the next transcript lands.
    */
   const served = useRef<number | undefined>(undefined);
   useEffect(() => {
@@ -268,7 +267,7 @@ export function RunTranscript({
       if (seen === null || top === undefined) return;
       follow.ref.current?.scrollTo({ y: Math.max(0, seen.scrolled + top), animated: true });
     });
-    // The ring is the solo sheet's (`.sb-bare.sb-panel-lit`); an entered row or a letterhead draws none.
+    // The ring is the solo sheet's (`Bare`, `SessionBands.tsx`); an entered row or a letterhead draws none.
     if (row.kind !== "instance") return;
     setLit(focus.instance);
     const clear = setTimeout(() => setLit(null), 1200);
@@ -379,8 +378,8 @@ export function RunTranscript({
   const adopted = (taskId: string): ReactNode => <AdoptedHistory taskId={taskId} source={source} />;
   const empty = bands.length === 0 && notes.length === 0;
   if (nested) {
-    // `.run-convo-nested` holds the page (`.sb`, its ground and padding) and nothing else — or, with
-    // nothing on it, the sentence in its place.
+    // Nested, there is the page (its ground and padding) and nothing else — or, with nothing on it, the
+    // sentence in its place.
     if (empty) return <NestedEmpty>This task had not entered a child yet.</NestedEmpty>;
     return (
       <View flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22} minWidth={0}>
@@ -406,7 +405,7 @@ export function RunTranscript({
   return (
     <ScrollView
       {...(scrollbarProps(t) as object)}
-      // `PLAIN_SCROLLER`: `.run-convo.scroll` is no stacking context, and is painted where it stands.
+      // `PLAIN_SCROLLER`: the scroller is no stacking context, and is painted where it stands.
       style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
       contentContainerStyle={{ flexGrow: 1, ...PLAIN_SCROLLER } as never}
       {...scroller}
@@ -451,10 +450,10 @@ export function RunTranscript({
 }
 
 /**
- * `runViews.tsx`'s `AdoptedHistory`: an adopted task's own history, drawn inside the conversation of the
- * task that adopted it (decision 0005). The adopted task keeps its journal and records, so its history is
- * read from it — its tree, turns, sessions, records and live tail, by ITS id (`taskRun.ts`, the DOM's
- * own) — and drawn by the same conversation, nested: no scroller, no composer, under the line.
+ * An adopted task's own history, drawn inside the conversation of the task that adopted it (decision
+ * 0005). The adopted task keeps its journal and records, so its history is read from it — its tree,
+ * turns, sessions, records and live tail, by ITS id (`taskRun.ts`) — and drawn by the same conversation,
+ * nested: no scroller, no composer, under the line.
  */
 function AdoptedHistory({ taskId, source }: { taskId: string; source: TranscriptSource }): JSX.Element {
   // `useTaskRun` lays the run over a surface context; the transcript's source is the part of one it reads.
@@ -477,13 +476,13 @@ function AdoptedHistory({ taskId, source }: { taskId: string; source: Transcript
     question: undefined,
     onQuestion: undefined,
   };
-  // A rewind armed in here has no strip to ask it in, as the desktop's nested conversation has none.
+  // A rewind armed in here has no strip to ask it in.
   return <RunTranscript nested detail={detail} parent={detail.instances[0]} source={own} onArm={() => undefined} />;
 }
 
 /**
- * `p.empty` inside an adoption's nest: it takes the note's size (`.sb-note`, 11.5/12.5) and a paragraph's
- * margins of it, --dim, 8 above and below.
+ * The quiet sentence inside an adoption's nest: it takes the note's size (11.5/12.5) and a paragraph's
+ * margins of it (1em), --dim, 8 above and below.
  */
 function NestedEmpty({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -495,9 +494,8 @@ function NestedEmpty({ children }: { children: ReactNode }): JSX.Element {
 }
 
 /**
- * Follow the live edge (`useStickToBottom`): pinned to the end until the reader scrolls away from it,
- * and pinned again when `reset` changes (a different run is a different conversation). Spread on the
- * `ScrollView`.
+ * Follow the live edge: pinned to the end until the reader scrolls away from it, and pinned again when
+ * `reset` changes (a different run is a different conversation). Spread on the `ScrollView`.
  */
 export function useLiveEdge(reset: unknown): {
   ref: RefObject<ScrollView | null>;
@@ -525,10 +523,10 @@ export function useLiveEdge(reset: unknown): {
     () => ({
       ref,
       // Only a move UP lets go of the edge, and only one the reader made: content arriving does not move
-      // the offset and the pin's own scroll goes down. The DOM re-pins before paint, ahead of any scroll
-      // event; here the new size is reported after, so a scroll that comes WITH a change of the content's
-      // height — the browser keeping what is on screen in place while a transcript above it settles
-      // (scroll anchoring) — is the page moving, not the reader, and the size change re-pins it.
+      // the offset and the pin's own scroll goes down. A new size is reported after the scroll it causes,
+      // so a scroll that comes WITH a change of the content's height — the browser keeping what is on
+      // screen in place while a transcript above it settles (scroll anchoring) — is the page moving, not
+      // the reader, and the size change re-pins it.
       onScroll: (e: NativeSyntheticEvent<NativeScrollEvent>) => {
         const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
         const y = contentOffset.y;
@@ -557,9 +555,8 @@ export function useLiveEdge(reset: unknown): {
 }
 
 /**
- * To the live edge. On web past it, as the DOM's `scrollTop = scrollHeight` does: the browser clamps to
- * the true (fractional) end, where `scrollToEnd` works it out from whole-pixel heights and stops a
- * fraction short.
+ * To the live edge. On web past it: the browser clamps to the true (fractional) end, where
+ * `scrollToEnd` works it out from whole-pixel heights and stops a fraction short.
  */
 function toEnd(view: ScrollView | null): void {
   if (view === null) return;
@@ -572,8 +569,8 @@ function toEnd(view: ScrollView | null): void {
  * with a dashed --warn edge and no fill, its letterhead the amber title block ("waiting on you", where
  * it would go, for how long), the sentence, and the button that delivers the move.
  *
- *   .sb-sheet.ss-waiting   dashed, --warn 34% into --line, no ground, no shadow
- *   .ss-wait-do            row, centred, gap 10, wrapping, 11 above; `.ss-wait-or` app 12/12.5 --dim
+ *   the sheet              dashed, --warn 34% into --line, no ground, no shadow
+ *   the button's row       row, centred, gap 10, wrapping, 11 above; the words after it app 12/12.5 --dim
  */
 function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDeliver: () => void }): JSX.Element {
   const t = useTokens();
@@ -625,10 +622,10 @@ function WaitingOn({ request, onDeliver }: { request: PendingUserEvent; onDelive
   );
 }
 
-// `collapsed` is `SessionBands.tsx`'s now; exported from here too, where it has been found.
+// `collapsed` is `SessionBands.tsx`'s; exported from here too.
 export { collapsed };
 
-/** `p.empty`: a quiet sentence where there is nothing to draw. */
+/** A quiet sentence where there is nothing to draw. */
 export function Empty({ children }: { children: ReactNode }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8}>
@@ -639,8 +636,7 @@ export function Empty({ children }: { children: ReactNode }): JSX.Element {
 
 /**
  * `SettledGate`: a settled gate in its state's panel — the control as answered, who answered it when the
- * control conversation did, and the record behind a toggle (`.gate-record`: 12 above, its button 6 over
- * the record).
+ * control conversation did, and the record behind a toggle (12 above, its button 6 over the record).
  */
 function SettledGate({ call, node, taskId, project, services }: { call: ReadCall; node: InstanceNode; taskId: string; project: string | undefined; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const [record, setRecord] = useState(false);
@@ -670,16 +666,17 @@ function SettledGate({ call, node, taskId, project, services }: { call: ReadCall
 /**
  * `SilentState`: a state with nothing to read — what it called, or what went wrong, or its inputs.
  *
- *   .ss-call-head      row, centred, gap 7, 8 under; the Σ 13, --dim
- *   .ss-call-name      data 12/12, 600, --text; .ss-call-status data 10/12, 0.08em, upper, --warn
- *   .ss-slots          column, gap 4, 10 under (in a call)
- *   .ss-slot-name      data 11/12, --dim, 2 under; .ss-slot-value data 12/12, --text, ellipsed
+ *   a call's head      row, centred, gap 7, 8 under; the Σ 13, --dim
+ *   its name           the data size (12/12) in the app face, 600, --text; its status data 10/12,
+ *                      0.08em, upper, --warn
+ *   the slots          column, gap 4, 10 under (in a call)
+ *   a slot's name      data 11/12, --dim, 2 under; its value data 12/12, --text, ellipsed
  */
 function SilentState({ node, records }: { node: InstanceNode; records: Record<string, OperationRecordView> }): JSX.Element {
   const t = useTokens();
   const failure = node.operation?.status === "failed" ? node.operation.reason : undefined;
   const calls = useMemo(() => callsOf(node, records), [node, records]);
-  // `.ss-call + .ss-call`: 14 above, 12 inside, a --line over; a told line and a call 10 apart.
+  // A call after a call: 14 above, 12 inside, a --line over; a told line and a call 10 apart.
   const listed = calls.map((call, i) => {
     const told = toldOf(call) !== undefined;
     const before = i === 0 ? undefined : toldOf(calls[i - 1]!) !== undefined || told ? "told" : "call";
@@ -692,7 +689,7 @@ function SilentState({ node, records }: { node: InstanceNode; records: Record<st
   if (failure !== undefined) {
     return (
       <>
-        {/* `p.ss-fail`: the reason in the data voice, --bad, in a line of the body's font. */}
+        {/* The failure: the reason in the data voice, --bad, in a line of the body's font. */}
         <Txt spec={{ voice: "app", scale: 13 / 12.5 }} {...({ overflowWrap: "anywhere" } as object)}>
           <Txt spec={{ voice: "data", scale: 1, color: "bad", lineHeight: 13 / 12.5 * 1.5 * 12.5 / 12 }}>{collapsed(failure)}</Txt>
         </Txt>
@@ -715,7 +712,7 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
     <View minWidth={0}>
       <View flexDirection="row" alignItems="center" gap={7} minWidth={0} marginBottom={8}>
         <Icon name="sigma" size={13} color={String(t.v("dim"))} />
-        {/* `.ss-call-name.mono`: the size is the data voice's, the face the app's (`.mono` sets none). */}
+        {/* The call's name: the size is the data voice's, the face the app's. */}
         <Txt spec={{ voice: "app", scale: 1, weight: 600, color: "text" }} fontSize={t.scaled("size-data", 1)} lineHeight={t.replayed ? Number(t.scaled("size-data", 1.5)) : undefined} minWidth={0} flexShrink={1} title={call.ref ?? call.name}>
           {call.name ?? call.kind ?? "call"}
         </Txt>
@@ -734,8 +731,8 @@ function CallBlock({ call }: { call: ReadCall }): JSX.Element {
 /**
  * `ToldLine`: an events automation's `notify`, settled — what it told you, and what about.
  *
- *   .ss-told        row, wrapping, baseline, gap 2 6; the bell at 0.95em, "told you:" --dim, the text,
- *                   and what it was about (`data-faint`: data 0.84, --tok-hint)
+ *   the line        row, wrapping, baseline, gap 2 6; the bell at 0.95em, "told you:" --dim, the text,
+ *                   and what it was about (the `data-faint` register: data 0.84, --tok-hint)
  */
 function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Element {
   const body = { voice: "app" as const, scale: 13 / 12.5 };
@@ -760,15 +757,15 @@ function ToldLine({ told }: { told: { text: string; about?: string } }): JSX.Ele
 }
 
 /**
- * `.ss-slot-name` is an INLINE-BLOCK in a line of the body's font, so the line it stands in is taller
+ * A slot's name stands in a line of the body's font (`slotLineOf`), so the line it stands in is taller
  * than it: its top sits where the two baselines meet, and the line ends at whichever bottom is lower.
  * Worked out as Blink does it — each font's ascent and descent rounded to whole pixels (DM Sans
  * 0.992 / 0.31, JetBrains Mono 1.02 / 0.3), the leading split around them.
  */
 /**
- * `.prov`: how a value was settled (decision 0005 §4) — bound by wiring, inferred, or asked. A pill 6
- * after the name: data 600 at 10/12.5 on a 1.6 line, padding 0 6, 1px --line (inferred --accent, asked
- * --warn, each 40 / 45% into --line).
+ * How a value was settled (decision 0005 §4) — bound by wiring, inferred, or asked. A pill 6 after the
+ * name: data 600 at 10/12.5 on a 1.6 line, padding 0 6, 1px --line (inferred --accent, asked --warn,
+ * each 40 / 45% into --line).
  */
 function Provenance({ via }: { via: string }): JSX.Element {
   const t = useTokens();
@@ -811,7 +808,7 @@ function Slots({ slots, gap, marginBottom = 0, provenance }: { slots: [string, u
   );
 }
 
-/** `.inline-gate`: a question or an approval hosted in the conversation — a 2px --accent rule over it, 12 above, 8 in. */
+/** A question or an approval hosted in the conversation — a 2px --accent rule over it, 12 above, 8 in. */
 export function InlineHost({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (

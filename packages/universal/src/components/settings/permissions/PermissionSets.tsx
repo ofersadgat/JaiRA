@@ -43,16 +43,18 @@ import { ChipIcon } from "./rows";
 import { PermissionSetCard } from "./PermissionSetCard";
 
 /**
- * `permissionSetsPane.tsx`, universal (decision 0015): Settings → Tools → Permission sets — a rail of
- * buckets beside one permission set, drawn as the composer's Tools card is. What the host holds and
- * every write are `permissionSetsHost.ts`'s, the hook the DOM pane runs too. The rules it adds:
+ * Settings → Tools → Permission sets: a rail of buckets beside one permission set, drawn as the
+ * composer's Tools card is. What the host holds and every write are `permissionSetsHost.ts`'s
+ * (`usePermissionSetsHost`). What it adds to the rail and detail of `LlmConfigForm.tsx`:
  *
- *   .llm-config.set-config   212 | 1fr; the rail's corner 7; a detail at least 330 tall; rail tabs 5 9
- *   .set-rail-label          row, centred, gap 6, padding 9 8 3 (3 at the top), data 600 at 11.5/12.5 on
- *                            1.3, --text; as a fold a button (hovered --text 6%), its › 8 wide --tok-hint
- *                            turned open; its folder 13 --tok-hint; its layer a `.cx-src` at the end
- *   .set-config .llm-detail-title   row, centred, gap 8, wraps
- *   .set-ask, .set-compare   --panel-2 cards, 1px --line, app 11.5/12.5
+ *   the two columns            the rail 212 | the detail; the rail's corner 7; a detail at least 330
+ *                              tall; rail tabs padding 5 9
+ *   a bucket's heading         row, centred, gap 6, padding 9 8 3 (the first: 3 at the top), data 600 at
+ *                              11.5/12.5 on 1.3, --text; as a fold a button (hovered --text 6%), its ›
+ *                              8 wide --tok-hint turned open; its folder 13 --tok-hint; its layer a
+ *                              `SourceTag` at the end
+ *   the detail's title         row, centred, gap 8, wraps
+ *   a question, a comparison   --panel-2 cards, 1px --line, app 11.5/12.5
  */
 export function PermissionSetsSection({
   channel,
@@ -115,7 +117,7 @@ function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
   });
   return (
     <SettingsSection id="permission-sets" title="Permission sets" lead={HEAD_HINT} wide>
-      {/* `.set-group > .llm-config`: the card's padding, inside the box's own ring. */}
+      {/* The rail and the detail's box: the card's padding, inside its own ring. */}
       <View flexDirection="row" alignItems="stretch" borderRadius={8} paddingVertical={13} paddingHorizontal={16} backgroundColor={t.v("panel") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
         <TabRail width={212} pad={[5, 9]} corner={7} label="Permission sets" items={items} selected={tabOfChoice(open !== undefined ? { permissionSet: open.id } : adding ? props.choice : undefined)} onSelect={(id) => props.onChoice(choiceOfTab(id))} />
         {open !== undefined ? (
@@ -176,7 +178,7 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
   const detaching = detachingLines(at, draft);
   const differences = props.comparing && at.lower?.decl !== undefined ? comparePermissionSets(at.lower.decl, declOfPermissionSet(shown)) : [];
   const into = (["base", "project"] as WritableLayer[]).filter((layer) => props.data.layers.includes(layer));
-  // `.mono` has no rule in this pane: a path is in the hint's own face.
+  // A path is in the hint's own face here, not the data face.
   const mono = (text: string): string => text;
   const title = (
     <View flexDirection="row" alignItems="center" gap={8} flexWrap="wrap">
@@ -307,7 +309,7 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
   );
 }
 
-/** `.set-ask`: a question asked in the page, in the actions' place. */
+/** A question asked in the page, in the actions' place. */
 function Ask({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -317,7 +319,7 @@ function Ask({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** A row of `.set-compare`: the line, theirs, ours. */
+/** A row of the comparison: the line, theirs, ours. */
 function CompareRow({ cells, head = false, none = [false, false, false] }: { cells: readonly string[]; head?: boolean; none?: readonly boolean[] }): JSX.Element {
   return (
     <View flexDirection="row" gap={8} alignItems="baseline" paddingVertical={2}>

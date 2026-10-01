@@ -2,20 +2,20 @@ import { createContext, useContext, useEffect, useState, type JSX, type ReactNod
 import { ReplayRoot, ReplayScope, useReplayLook, useReplayTokens, type RootLook } from "./tokensReplay";
 
 /**
- * Tokens on WEB (decision 0015): every value is the CSS variable itself.
+ * Tokens on WEB (decision 0015). `tokens.native.tsx` is the same API for a phone.
  *
- * The browser resolves it against the palette, scheme and subtree the DOM app has applied — the same
- * cascade the CSS beside a copy reads — so a copy cannot drift from it, and a palette switch reaches it
- * with no code at all. `tokens.native.tsx` is the same API over the replayed cascade.
+ * Under {@link Replayed} a web page reads the replayed cascade (`tokensReplay.tsx`), as native does. The
+ * app's page and the specimens' are both drawn so: they load no `styles.css`, and every colour and size
+ * on them is worked out in code.
  *
- * Under {@link Replayed} a web page reads the replayed cascade instead, as native does: that is the
- * `/rn` page, which tests the native path in a browser with no `styles.css` loaded.
+ * Outside it every value is the CSS variable itself (`var(--line)`), for the browser to resolve against
+ * the palette and scheme on the root — which takes a page whose stylesheet declares the variables.
  */
 export interface Tokens {
   /**
-   * Whether these are the replayed cascade (native, and the `/rn` page) — values are numbers and
-   * colours — rather than the CSS variables themselves (the desktop's own page). A copy writes sizes
-   * the same either way; this is for the few places the two need different shapes (`letterSpacing`).
+   * Whether these are the replayed cascade (native, and a web page under `Replayed`) — values are
+   * numbers and colours — rather than the CSS variables themselves. A component writes sizes the same
+   * either way; this is for the few places the two need different shapes (`letterSpacing`).
    */
   readonly replayed: boolean;
   /** `--name`. */
@@ -29,9 +29,9 @@ export interface Tokens {
 }
 
 /**
- * The look a palette-level RULE depends on (`:root[data-palette] .card`, `:root[data-wash] …`): which
- * palette, which scheme, and the board's surface options. Variables need none of this — `v()` already
- * follows them — but a copy that carries a palette's rule by hand has to know when it applies.
+ * The look beyond the variables: which palette, which scheme, and the board's surface options.
+ * Variables need none of this — `v()` already follows them — but a component that draws differently
+ * under a palette or an option (a card under a named palette, a washed card) has to know which it is in.
  */
 export interface Look {
   /** `classic` when the root has no `data-palette`. */
@@ -64,7 +64,7 @@ const readLook = (): Look => {
   };
 };
 
-/** Whether this subtree reads the replayed cascade (the `/rn` page) rather than the CSS variables. */
+/** Whether this subtree reads the replayed cascade rather than the CSS variables. */
 const ReplayedContext = createContext(false);
 
 /** The native path, in a browser. Put a {@link TokenRoot} inside it to say which look. */
@@ -72,7 +72,10 @@ export function Replayed({ children }: { children: ReactNode }): JSX.Element {
   return <ReplayedContext.Provider value={true}>{children}</ReplayedContext.Provider>;
 }
 
-/** On web, the root's attributes, which `applyAppearance` writes and this watches. */
+/**
+ * Replayed, the {@link TokenRoot}'s look. Otherwise the root's attributes, which `applyAppearance`
+ * writes and this watches.
+ */
 export function useLook(): Look {
   const replayed = useContext(ReplayedContext);
   const replay = useReplayLook();
@@ -92,7 +95,10 @@ export function useTokens(): Tokens {
   return replayed ? replay : WEB;
 }
 
-/** On web the DOM already scopes (`.sidebar` sets its own variables); replayed, the scope is recorded. */
+/**
+ * A subtree whose variables override the root's (`sidebar`). Replayed, the scope is recorded; outside
+ * `Replayed` nothing is, the cascade being the browser's.
+ */
 export function TokenScope({ scope, children }: { scope: string; children: ReactNode }): JSX.Element {
   const replayed = useContext(ReplayedContext);
   return replayed ? <ReplayScope scope={scope}>{children}</ReplayScope> : <>{children}</>;

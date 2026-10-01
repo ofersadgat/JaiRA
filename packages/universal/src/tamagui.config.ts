@@ -1,12 +1,12 @@
 import { createTamagui, createTokens } from "@tamagui/core";
 
 /**
- * Tamagui, configured to stay out of the way of `styles.css` (decision 0015).
+ * Tamagui, configured to bring no look of its own (decision 0015).
  *
  * No themes and no colour tokens: Tamagui would publish them as CSS variables named after their keys
  * (`--accent`), redefining the app's own inside every subtree it wraps. Colours come from `useTokens`
- * instead — the CSS variable itself on web, the replayed cascade on native. What Tamagui brings is the
- * component model, `styled()`, and one tree that renders on both.
+ * instead (`tokens.tsx`). What Tamagui brings is the component model, `styled()`, and one tree that
+ * renders on web and natively.
  */
 const tokens = createTokens({ size: {}, space: {}, radius: {}, zIndex: {}, color: {} });
 

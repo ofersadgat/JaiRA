@@ -1,9 +1,8 @@
 /**
- * The changeset reviewer's logic, apart from how it is drawn (CHANGESETS.md §8, decision 0002) — moved
- * out of `changesetReview.tsx` unchanged, so the universal copy (decision 0015,
- * `packages/universal/src/components/artifact/ChangesetReview.tsx`) reads a review, counts it, words it,
- * wires it and answers it with the same code. The mount contract (`ComponentServices`, `MountContext`)
- * is here too, since both hosts supply it.
+ * The changeset reviewer's logic, apart from how it is drawn (CHANGESETS.md §8, decision 0002): reading
+ * a review, counting it, wording it, wiring it and answering it. The reviewer itself is
+ * `packages/universal/src/components/artifact/ChangesetReview.tsx`. The mount contract
+ * (`ComponentServices`, `MountContext`) is here too: it is what a host supplies.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import {
@@ -239,7 +238,7 @@ export async function readCurrent(services: ComponentServices, path: string): Pr
 export type Draft = ReviewDraft & { content?: string };
 export type Drafts = Record<string, Draft>;
 
-/** The glyph beside a change's action word. Beside, never instead — see `icons.tsx`. */
+/** The glyph beside a change's action word. Beside, never instead: a glyph on its own is a guess. */
 const ACTION_ICON = {
   create: "fileAdd",
   delete: "fileDel",

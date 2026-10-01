@@ -1,8 +1,7 @@
 /**
- * What Appearance → Files tree COMPUTES (decision 0015): the rules grouped as they apply, each line's
- * switch and words, the layer's own list and "Show system/", and what the section asks main — moved
- * unchanged out of `filesTreePane.tsx` (which re-exports them), so the desktop's section and the
- * universal copy (`packages/universal/src/components/settings/FilesTree.tsx`) say and write the same.
+ * What Appearance → Files tree COMPUTES: the rules grouped as they apply, each line's switch and
+ * words, the layer's own list and "Show system/", and what the section asks main. The section
+ * (`packages/universal/src/components/settings/FilesTree.tsx`) draws it.
  */
 import { useEffect, useRef, useState } from "react";
 import type { JsonValue } from "@declarative-ai/json";
@@ -55,7 +54,8 @@ export function hiddenIn(doc: JsonValue | null): string[] | null {
 
 /**
  * The layer's whole document with its list replaced. An empty list removes the key — and `files`
- * with it when nothing else is in there — rather than writing `[]`; see the header.
+ * with it when nothing else is in there — rather than writing `[]`: an empty list would read the same
+ * as no list, and a migration once read `[]` as *show everything*.
  */
 export function withHidden(doc: JsonValue | null, list: readonly string[]): JsonValue {
   const next = doc !== null && typeof doc === "object" && !Array.isArray(doc) ? { ...(doc as Record<string, JsonValue>) } : {};
@@ -205,7 +205,7 @@ export function groupSummary(group: RuleGroup, rules: readonly HiddenRuleReport[
     .join(" · ");
 }
 
-/** A sentence in parts: words, and a pattern or path in the data voice (`code.hid-code`). */
+/** A sentence in parts: words, and a pattern or path in the data voice. */
 export type HidPart = { text: string } | { code: string };
 
 /** The sentence under "Why is a path hidden?", in parts. */

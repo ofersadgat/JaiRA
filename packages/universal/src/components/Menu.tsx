@@ -7,20 +7,20 @@ import { Float, pointRect } from "./floats/Float";
 import { MenuLayer } from "./MenuLayer";
 
 /**
- * `menu.tsx`'s `ContextMenu`, universal (decision 0015): a list of items at a point, over everything, gone
- * on any press outside it (or Back, or Escape) — see `MenuLayer`. The rules, from `styles.css`:
+ * A context menu: a flat list of items at a point (one level, no submenus), over everything, gone on any
+ * press outside it (or Back, or Escape) — see `MenuLayer`. How it looks:
  *
- *   .context-menu      column, padding 5 0, --panel, 1px --line, radius 8, --lift; 232 wide (MENU_WIDTH)
- *   .menu-item         row, gap 8, padding 5 12, app voice at 12.5/12.5, --text, one line; hovered:
+ *   the menu           column, padding 5 0, --panel, 1px --line, radius 8, --lift; 232 wide (MENU_WIDTH)
+ *   an item            row, gap 8, padding 5 12, app voice at 12.5/12.5, --text, one line; hovered:
  *                      --accent ground, --panel ink (note and mark too)
- *   .menu-item.here    weight 600, a "•" in --accent in the gutter (6 wide, -12 left)
- *   .menu-item.sep     a --line above, 4 above that, padding-top 8
- *   .menu-note         --dim, app voice at 11/12.5, at most 45%
- *   .menu-item:disabled  --dim; .danger  --bad (hovered: --bad ground), and still --bad disabled (it comes later)
- *   .menu-title        padding 5 12 4, data voice at 9.5/12, 0.09em, uppercase, --dim (`MenuAnchor.title`)
+ *   "you are here"     weight 600, a "•" in --accent in the gutter (6 wide, -12 left)
+ *   after a separator  a --line above, 4 above that, padding-top 8
+ *   an item's note     --dim, app voice at 11/12.5, at most 45%
+ *   disabled / danger  --dim / --bad (hovered: --bad ground), and still --bad when disabled
+ *   the title          padding 5 12 4, data voice at 9.5/12, 0.09em, uppercase, --dim (`MenuAt.title`)
  *
- * Placement is the desktop's `Popover` below-start with no gap (`floats/Float.tsx`, the same arithmetic):
- * kept inside the window, opening upward from the point when there is more room above.
+ * Placement is `Float`'s below-start with no gap (`floats/Float.tsx`): kept inside the window, opening
+ * upward from the point when there is more room above.
  */
 export const MENU_WIDTH = 232;
 
@@ -28,7 +28,7 @@ export interface MenuAt {
   x: number;
   y: number;
   items: readonly MenuItem[];
-  /** A dim caption above the items (`menu.tsx`'s `MenuAnchor.title`). */
+  /** A dim caption above the items, for a menu that answers a question rather than offering verbs. */
   title?: string;
 }
 
@@ -64,7 +64,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
             }}
             disabled={item.disabled === true}
             label={item.label}
-            // `<button role="menuitem">`, as the desktop's rows are (web; a phone's are its own buttons).
+            // `<button role="menuitem">` on web (a phone's are its own buttons).
             {...((Platform.OS === "web" ? { role: "menuitem" } : {}) as object)}
             flexDirection="row"
             alignItems="baseline"
@@ -76,7 +76,7 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
           >
             {({ hovered }) => {
               const lit = hovered && item.disabled !== true;
-              // `.menu-item.danger` comes after `.menu-item:disabled` (both 0,2,0): a disabled danger item stays --bad.
+              // Danger outranks disabled: a disabled danger item stays --bad.
               const ink = lit ? "panel" : item.danger === true ? "bad" : item.disabled === true ? "dim" : "text";
               return (
                 <>

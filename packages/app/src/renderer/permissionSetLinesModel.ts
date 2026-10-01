@@ -1,13 +1,12 @@
 /**
- * What `permissionSetCard.tsx`'s `PermissionSetLines` decides — the lines a state writes over its
- * permission set, what its one add line offers, and what each pick writes — moved here unchanged so the
- * universal copy (`components/workflow/ToolsField.tsx`) offers and writes the same (decision 0015).
+ * What `PermissionSetLines` (`packages/universal/src/components/workflow/ToolsField.tsx`) decides — the
+ * lines a state writes over its permission set, what its one add line offers, and what each pick writes.
  */
 import { MODE_WHEN_UNSET, OTHER_SUBJECT, SCRIPT_SUBJECT, SHELL_TOOL, TOOL_SPEC_BY_NAME, type PermissionSet, type ToolChoice } from "@jaira/shared/browser";
 import { addableScript, commandSubjectOf, withCommand, withOther, withSubject, withToolHeld } from "./composerPermissionSet";
 import { SCRIPT_HINT, SHELL_HINT, TOOL_ICONS } from "./permissionSetWords";
 
-/** One thing the add line offers (`permissionSetRows.tsx`'s `AddOption`). */
+/** One thing the add line offers (an `AddOption`, as `AddMenu` takes it). */
 export interface LineOption {
   subject: string;
   label: string;

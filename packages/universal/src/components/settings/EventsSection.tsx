@@ -11,16 +11,16 @@ import { Switch } from "./controls";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
 
 /**
- * `eventsPane.tsx`'s `EventsSection` and `ConnectionPill`, universal (decision 0015): what JaiRA watches
- * for, per remote of the project's own `.git/config`, and JaiRA's own events. What each row says and
- * what a switch writes are `eventsModel.ts`'s. The rules it adds (scoped to `[data-part="events"]`):
+ * Settings → Tools → Events (`EventsSection`) and the pill that names the connection answering for a
+ * remote (`ConnectionPill`): what JaiRA watches for, per remote of the project's own `.git/config`, and
+ * JaiRA's own events. What each row says and what a switch writes are `eventsModel.ts`'s. How it looks:
  *
- *   .ev-group            padding 9 16 6, --panel-2 70% into --panel, data 600 at 11/12 (no case change)
- *   .ev-name             row, centred, wraps; `.ev-id` data 11/12 --dim at 400, 8 after
- *   .src-conn            row, centred, gap 4, 8 after, padding 0 7 0 5, round, --panel-2, --dim, data 500 at
+ *   a group's heading    padding 9 16 6, --panel-2 70% into --panel, data 600 at 11/12 (no case change)
+ *   a row's name         row, centred, wraps; the event's id data 11/12 --dim at 400, 8 after
+ *   the pill             row, centred, gap 4, 8 after, padding 0 7 0 5, round, --panel-2, --dim, data 500 at
  *                        9.5/12.5 on 1.5; its mark 11; with no connection ringed 1px --line inside, --tok-hint
- *   .ev-unanswered       the name and sentence --dim
- *   .ev-body             column, gap 6, 10 above, padding 8 12 10, 1px --line, radius 10, --bg
+ *   unanswered           the name and sentence --dim
+ *   a row's body         column, gap 6, 10 above, padding 8 12 10, 1px --line, radius 10, --bg
  */
 export function ConnectionPill({ badge, onOpenConnections, first = false }: { badge: ConnectionBadge; onOpenConnections?: (() => void) | undefined; first?: boolean }): JSX.Element {
   const t = useTokens();
@@ -150,7 +150,7 @@ export function EventsSection({
   );
 }
 
-/** `.ev-group`: a group's heading, a band across the card (rounded at its top when first). */
+/** A group's heading, a band across the card (rounded at its top when first). */
 export function EventGroup({ heading, first }: { heading: string; first: boolean }): JSX.Element {
   const t = useTokens();
   return (

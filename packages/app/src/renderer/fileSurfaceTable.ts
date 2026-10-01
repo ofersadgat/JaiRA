@@ -1,8 +1,7 @@
 /**
- * The surface TABLE: which renderers each type has, in order — `fileSurfaces.tsx`'s registrations,
- * moved out unchanged (decision 0015) so the desktop and the universal copy resolve a file to the same
- * renderer. A row names its surface by a key; each shell supplies the components
- * ({@link registerSurfaceTable}): the desktop its DOM surfaces, the universal tree its native copies.
+ * The surface TABLE: which renderers each type has, in order. A row names its surface by a key, so
+ * this module draws nothing; whoever draws supplies the components ({@link registerSurfaceTable}) —
+ * the Files room's are `SURFACES` (`packages/universal/src/components/files/surfaces.tsx`).
  * Ids, order, `writes`, `themed` and `look` — everything resolution reads — are said once, here.
  */
 import { CONFIG_JSON, WORKFLOW_DESCRIPTION, WORKFLOW_JSON, WORKFLOW_YAML } from "@jaira/shared/browser";
@@ -28,8 +27,8 @@ export function surfaceTable(): readonly SurfaceRow[] {
 }
 
 /**
- * Register the whole table with these components — into the app's registry, or into one of a shell's
- * own (`newSurfaceRegistry`), which is how the universal copy resolves without the DOM surfaces.
+ * Register the whole table with these components — into `fileTypes.ts`'s own registry, or into one the
+ * caller made (`newSurfaceRegistry`), which is what the Files room's `SURFACES` is.
  */
 export function registerSurfaceTable(surfaces: Record<SurfaceKey, FileSurface>, into?: SurfaceRegistry): SurfaceRegistry | undefined {
   for (const { mime, kind, renderer } of TABLE) {

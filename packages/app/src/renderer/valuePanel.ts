@@ -18,7 +18,7 @@
  * a `ValueView` rendered in a test, or in a dialog, is not — and `useValuePanel` answering null
  * there is what lets the menu offer the item only where it would work.
  *
- * Types and a context only, with no JSX: `valueView.tsx` imports this, and the shell imports both,
+ * Types and a context only, with no JSX: the value view imports this, and the shell imports both,
  * so anything here that reached back for the viewer would close a cycle between them.
  */
 import { createContext, useContext, type ReactNode } from "react";
@@ -53,7 +53,7 @@ export interface PinnedValue {
    * pinning mechanism beside this one, with its own place in the shell's precedence.
    *
    * It is a SNAPSHOT: its props are whatever they were when it was pinned, so anything it needs to
-   * stay current it has to hold itself. See `statePanel.tsx`, which loads its own document.
+   * stay current it has to hold itself: a state's panel loads its own document.
    */
   node?: ReactNode;
   hint?: ViewHint | undefined;

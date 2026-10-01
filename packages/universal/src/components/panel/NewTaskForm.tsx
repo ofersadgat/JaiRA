@@ -12,15 +12,15 @@ import { SelectInput } from "../settings/fields";
 import { RunInputs } from "./RunPanel";
 
 /**
- * `widgets.tsx`'s `NewTaskForm`, universal (decision 0015): the New-task form, a panel root in the Tasks
- * room — pick a workflow, fill in what it declares, create. What it decides is `newTaskModel.ts`'s
- * (`useNewTaskForm`), the DOM's own. The rules:
+ * The New-task form, a panel root in the Tasks room — pick a workflow, fill in what it declares, create.
+ * What it decides is `newTaskModel.ts`'s (`useNewTaskForm`). How it looks:
  *
- *   .new-task-form     column (a grid), gap 10, padding 2 2 12
- *   .field             column, gap 4; its name app 11/12.5, --dim, 0.04em, upper
- *   .new-task-fields   column, gap 8
- *   .notice.bad/.warn  --tint-bad / --tint-warn, radius --control-radius, padding 7 9, app 11/12.5
- *   .pane-actions      row, centred, wrapping, gap 6: Create (primary), Cancel (ghost), why it is off
+ *   the form           column, gap 10, padding 2 2 12
+ *   a field            column, gap 4; its name app 11/12.5, --dim, 0.04em, upper
+ *   the inputs         column, gap 8
+ *   a notice           bad or warn: --tint-bad / --tint-warn, radius --control-radius, padding 7 9,
+ *                      app 11/12.5
+ *   the actions        row, centred, wrapping, gap 6: Create (primary), Cancel (ghost), why it is off
  */
 export function NewTaskForm({
   workflows,
@@ -51,7 +51,7 @@ export function NewTaskForm({
     // The boxes are held in the store per state id, so starting another finds what was typed.
     onDone();
   };
-  // `<form onSubmit>`: Enter in one of its boxes creates the task, as on the desktop.
+  // A form's implicit submission: Enter in one of its boxes creates the task.
   const box = useEnterSubmits(create);
   return (
     <View ref={box as never} flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>
@@ -102,7 +102,7 @@ export function NewTaskForm({
   );
 }
 
-/** `.notice.bad` / `.notice.warn`: a sentence on a tinted ground. */
+/** A notice, bad or warn: a sentence on a tinted ground. */
 function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (

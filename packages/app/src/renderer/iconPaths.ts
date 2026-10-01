@@ -7,6 +7,10 @@
  * They are all 24×24, all stroked with the current colour, and none of them carries a fill. That is
  * what lets a row say what it is by colouring one span: a failed call turns its icon red without
  * knowing which icon it drew.
+ *
+ * Icons here NEVER appear alone. Every one of them sits beside the word it illustrates — a terminal
+ * next to `bash`, an eye next to `Read` — because a transcript is read at a glance for shape and
+ * then in words for fact, and a glyph on its own is a guess.
  */
 import type { TypeFamily } from "@jaira/shared/browser";
 import type { WorkIconName } from "./transcript";
@@ -82,7 +86,7 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // A speech bubble with a tail — the review note (decision 0002).
   comment: ["M20 4H4a1 1 0 0 0-1 1v10a1 1 0 0 0 1 1h3v4l5-4h8a1 1 0 0 0 1-1V5a1 1 0 0 0-1-1Z"],
 
-  // The kinds a state can be when it is not a conversation — see `stateSurface.tsx`. Three answers
+  // The kinds a state can be when it is not a conversation — see `stateSurfaceModel.ts`. Three answers
   // to "what is this", and each only ever appears beside its own word, for the reason the module
   // note gives about a glyph standing alone.
   /** A summation sign: a value that was worked out rather than said. */

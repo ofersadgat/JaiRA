@@ -9,16 +9,15 @@ import { ChoiceList, ChoiceSteps } from "./Choices";
 import { GateTitle } from "./GateTitle";
 
 /**
- * `components.tsx`'s `QuestionSurface`, universal (decision 0015): a running agent's question
- * (`AskUserQuestion`) — the same control as an authored gate, answered rather than approved, with the
- * one affordance a gate never gets: "Let the agent decide". One question prints itself under the
- * heading (the body's 13/12.5, --text; its 8 below collapses into the block's 14); several are asked
- * one at a time. The rules are `Choices.tsx`'s, and:
+ * A running agent's question (`AskUserQuestion`) — the same control as an authored gate, answered
+ * rather than approved, with the one affordance a gate never gets: "Let the agent decide". One question
+ * prints itself under the heading (the body's 13/12.5, --text; its 8 below collapses into the block's
+ * 14); several are asked one at a time. It looks as `Choices.tsx` says, and:
  *
- *   .question-surface > h3   the heading (`GateTitle`), the comment glyph
- *   .options                 row, wrapping, gap 8, 14 above: Answer (`primary`, while the click is not
+ *   the heading              `GateTitle`, the comment glyph
+ *   the buttons              row, wrapping, gap 8, 14 above: Answer (`primary`, while the click is not
  *                            the answer) and the dismissal (`danger`)
- *   .reason                  --bad, app 11/12.5
+ *   the error                --bad, app 11/12.5
  */
 export function QuestionSurface({ pending, error, onSubmit }: QuestionSurfaceProps): JSX.Element {
   const choices = choicesOfQuestions(pending.questions);

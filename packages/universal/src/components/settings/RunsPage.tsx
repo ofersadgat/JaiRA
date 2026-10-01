@@ -13,26 +13,26 @@ import { Artifacts, ConfigBlockSection, ExecEnvironment } from "./ConfigBlocks";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
 
 /**
- * `settingsPages.tsx`'s two pages made only of blocks, universal (decision 0015): **Runs** (how a run
- * behaves while it is going) and **Data & history** (what a run leaves behind), with the sections they
- * hold that no other page draws — `placementSection.tsx`'s Where tasks run and `widgets.tsx`'s
- * `History`. What each writes goes through `configWriter.ts`, as the DOM's does. The rules they add:
+ * The two pages made only of blocks: **Runs** (how a run behaves while it is going) and **Data &
+ * history** (what a run leaves behind), with the sections they hold that no other page draws — Where
+ * tasks run (`PlacementSection`) and `History`. What each writes goes through `configWriter.ts`. What
+ * they add to the page's look:
  *
- *   .placement-order     18 wide, --dim, tabular
- *   .placement-cap       row, centred, gap 6, --dim; its box 56 wide
- *   .prune-controls      row, centred, gap 8, wraps; app 11/12.5 --dim; its label a row, gap 4; the
+ *   a workspace's place  18 wide, --dim, tabular
+ *   its cap              row, centred, gap 6, --dim; its box 56 wide
+ *   the prune controls   row, centred, gap 8, wraps; app 11/12.5 --dim; its label a row, gap 4; the
  *                        box 56 wide
- *   .set-num             data 1.02×, tabular, --text (after `.data-num`)
+ *   a stored count       the `data-num` register at 1.02×, in --text
  */
 
-/** What `App.tsx` hands a config page: the view, and whether this layer may be written. */
+/** A config page's writer: the view, and whether this layer may be written. */
 function usePageWriter() {
   const { state, actions } = useShell();
   const editable = state.configLayer !== "project" || state.at !== null;
   return state.config === null ? null : configWriter(state.config, state.configLayer, state.busy || !editable, actions.saveConfig);
 }
 
-/** `<p className="empty">`: the page could not be read. */
+/** One --dim line where a page or a section has nothing to draw. */
 function Empty({ children }: { children: string }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8}>
@@ -160,7 +160,7 @@ function PlacementSection({ project }: { project: string | null }): JSX.Element 
   );
 }
 
-/** History pruning (SPEC §13) — `widgets.tsx`'s `History`: what is stored, and a preview before anything goes. */
+/** History pruning (SPEC §13): what is stored, and a preview before anything goes. */
 function History(): JSX.Element {
   const { state, actions } = useShell();
   const size = state.history;

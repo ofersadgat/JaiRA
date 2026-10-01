@@ -6,13 +6,12 @@ import { COLUMNS, PALETTE_CARDS, type MiniColors } from "@jaira/ui/paletteCardsM
 import { useTokens } from "../../tokens";
 
 /**
- * `paletteCards.tsx`'s `ThemeMini`, universal (decision 0015): a palette's task board in miniature, in
- * one theme or split light | dark for `system` — every colour from `paletteCardsModel.ts`'s table, as
- * the DOM's are, and every box placed in percentages of the miniature as the DOM places its spans.
+ * A palette's task board in miniature, in one theme or split light | dark for `system` — every colour
+ * from `paletteCardsModel.ts`'s table, and every box placed in percentages of the miniature.
  *
- * Where the DOM needs CSS a phone has not got, the copy draws it: the blueprint's graph paper
- * (`linear-gradient` 8px squares) is its lines, and
- * `system`'s `clip-path` halves are two boxes that clip, 2px apart, measured from the miniature's width.
+ * It is drawn with what a phone has too, where CSS would have a gradient or a clip path: the
+ * blueprint's graph paper (8px squares) is its lines (`Grid`), and `system`'s halves are two boxes that
+ * clip, 2px apart, measured from the miniature's width.
  */
 export function ThemeMini({ palette, theme, ...box }: { palette: Palette; theme: JairaTheme | "system" } & Record<string, unknown>): JSX.Element {
   const card = PALETTE_CARDS[palette];
@@ -53,7 +52,7 @@ function Pane({ c, buckets, lanes, size }: { c: MiniColors; buckets: BucketStyle
   return (
     <View position="absolute" left={0} top={0} right={0} bottom={0} backgroundColor={c.bg as never}>
       {c.grid !== undefined && size !== null ? <Grid color={c.grid} w={size.w} h={size.h} /> : null}
-      {/* The sidebar's edge is an inset shadow, as the DOM's is: a 1px border would be snapped to a whole device pixel, a shadow is not. */}
+      {/* The sidebar's edge is an inset shadow: a 1px border would be snapped to a whole device pixel, a shadow is not. */}
       <View position="absolute" left={0} top={0} bottom={0} width="21%" backgroundColor={c.chrome as never} {...({ boxShadow: `inset -1px 0 0 ${c.sideEdge ?? "transparent"}` } as object)} />
       {[22, 36, 50].map((top, i) => (
         <View

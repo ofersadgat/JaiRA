@@ -3,10 +3,9 @@ import { AccessibilityInfo, Animated, Easing } from "react-native";
 import { isStill } from "../motion";
 
 /**
- * What turns, as the desktop's spinners do (`.spinner` and `.um-spin`: a turn every 900ms, linear, and
- * still when the person asks for less motion). On a phone the native driver turns it; `Turn.web.tsx`
- * is a CSS animation, which a still picture's `animation: none` holds — as a phone's test holds this one
- * (`motion.ts`).
+ * What turns — a spinner: a turn every 900ms, linear, and still when the person asks for less motion. On
+ * a phone the native driver turns it; `Turn.web.tsx` is a CSS animation, which a still picture's
+ * `animation: none` holds — as a phone's test holds this one (`motion.ts`).
  */
 export function Turn({ ms = 900, children }: { ms?: number; children: ReactNode }): JSX.Element {
   const turn = useRef(new Animated.Value(0)).current;

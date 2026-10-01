@@ -7,14 +7,14 @@ import { useTokens } from "../tokens";
 import { Picture } from "./Picture";
 
 /**
- * `markdown.tsx`'s `Markdown`, universal (decision 0015): the same parse (`parseMarkdown`, markdown-it
- * with `html: false`), the same allowlist of what may be built, the same `safeUrl` — drawn in native
- * views instead of DOM elements. A phone draws a model's answer, a prompt or a document with this; no
- * WebView (the person, 2026-09-27: "replicate the desktop ui, but not in a webview").
+ * Markdown in the page's own views: the same parse (`parseMarkdown`, markdown-it with `html: false`), the
+ * same allowlist of what may be built and the same `safeUrl` as the islands' `markdown.tsx`, drawn in
+ * native views instead of DOM elements. A phone draws a model's answer, a prompt or a document with
+ * this; no WebView (the person, 2026-09-27: "replicate the desktop ui, but not in a webview").
  *
- * The rules it carries, from `styles.css`:
+ * How it looks:
  *
- *   .markdown            padding 2 2 12, app voice at 13/12.5, line-height 1.6; first child 0 on top
+ *   the document         padding 2 2 12, app voice at 13/12.5, line-height 1.6; first child 0 on top
  *   h1 h2 h3 h4          16 above, 6 below, line-height 1.3, bold; 18, 15, 13, 13 /12.5
  *   p ul ol blockquote table   10 below
  *   ul ol                20 in; the marker outside it ("• ", "◦ ", "▪ ", "1. "); li 2 above and below
@@ -23,20 +23,20 @@ import { Picture } from "./Picture";
  *   blockquote           a 3px --line on the left, 10 inside it, --dim
  *   table                collapsed --line borders, cells 3 7, left-aligned, headers bold
  *   hr                   a --line on top, 14 above and below
- *   a                    --accent, underlined (the browser's)
+ *   a                    --accent, underlined
  *   img                  at most the width (its own size under it), on its line's baseline
  *
- * **Margins collapse**, as they do between blocks in the DOM: two neighbours are the larger of their
+ * **Margins collapse**, as they do between blocks in a browser: two neighbours are the larger of their
  * margins apart, and a block with no padding on a side shares its first (last) child's margin on that
  * side. `Block` below carries each block's margins out so its parent can do that sum.
  *
- * Context changes some of it — a transcript message is 13.5/12.5 at 1.65 with neither end's margin
- * (`.ts-msg .markdown`), a value view 12.5/12.5 (`.vv-body > .markdown`) — so those are props.
+ * Context changes some of it — a transcript message is 13.5/12.5 at 1.65 with neither end's margin, a
+ * value view 12.5/12.5 — so those are props.
  */
 export type FenceRenderer = (block: FenceBlock) => ReactNode | undefined;
 
 let DEFAULT_FENCE: FenceRenderer | undefined;
-/** The renderer fenced blocks get unless a caller brings its own — `markdown.tsx`'s registration, here. */
+/** The renderer fenced blocks get unless a caller brings its own. */
 export function registerFenceRenderer(render: FenceRenderer): void {
   DEFAULT_FENCE = render;
 }
@@ -47,15 +47,15 @@ export interface MarkdownProps {
   /** The body's size, as a multiple of `--size-app` (13/12.5 in a panel, 13.5/12.5 in a transcript). */
   scale?: number;
   lineHeight?: number;
-  /** `.ts-msg .markdown > :last-child { margin-bottom: 0 }`. */
+  /** The last block has no margin under it (a transcript message). */
   trimEnd?: boolean;
   /** The container's padding: top, right, bottom, left. */
   padding?: readonly [number, number, number, number];
   color?: string;
   /**
-   * What a single newline in a paragraph is. In the DOM it is whitespace (`breaks: false`), drawn as a
-   * space — unless a container around the markdown says `white-space: pre-wrap`. A native `Text` draws
-   * a newline as a line break, so a host whose DOM original collapses it (the Files viewer) says `space`.
+   * What a single newline in a paragraph is. To markdown it is whitespace (`breaks: false`), which a
+   * browser draws as a space unless something round it says `white-space: pre-wrap`. A `Text` draws a
+   * newline as a line break, so a host that wants it collapsed (the Files viewer) says `space`.
    */
   softbreak?: "newline" | "space";
 }
@@ -164,14 +164,14 @@ export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, tri
   const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
   const tree = useMemo(() => treeOf(parseMarkdown(body), softbreak === "space" ? " " : "\n"), [body, softbreak]);
   const drawn = fence ?? DEFAULT_FENCE;
-  // `.markdown` sets no colour: its text is what the box round it gives (`InkContext`), else --text.
+  // The document sets no colour of its own: its text is what the box round it gives (`InkContext`), else --text.
   const inherited = useContext(InkContext);
   const ctx: Ctx = { ink: { scale, lineHeight, color: color ?? inherited ?? "text", weight: 400 }, fence: drawn, depth: 0 };
   const blocks = blocksOf(tree, ctx);
   return (
     <View paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={padding[3]} minWidth={0}>
       {front !== undefined ? <FrontMatter text={front} fence={drawn} /> : null}
-      {/* `.markdown > :first-child { margin-top: 0 }`, and in a transcript the last child's bottom too. */}
+      {/* The first block has no margin on top, and in a transcript the last none under it. */}
       {stack(blocks, { firstTop: 0, ...(trimEnd ? { lastBottom: 0 } : {}) })}
     </View>
   );
@@ -226,9 +226,9 @@ function blockOf(node: Node, ctx: Ctx): Block {
   const n = node as Extract<Node, { attrs: unknown }>;
   switch (n.tag) {
     case "p":
-      // A picture is inline in the DOM, on its paragraph's baseline: the paragraph is its runs of text
-      // and its pictures, each picture on a line box of its own (text beside a picture on one line is
-      // not drawn beside it here).
+      // A picture is inline in a browser, on its paragraph's baseline: here the paragraph is its runs of
+      // text and its pictures, each picture on a line box of its own (text beside a picture on one line
+      // is not drawn beside it).
       if (n.children.some((c) => typeof c !== "string" && c.tag === "img")) {
         return container(blocksOf(n.children, ctx), { top: 0, bottom: 10 }, (inner, mt, mb, key) => (
           <View key={key} marginTop={mt} marginBottom={mb}>
@@ -243,7 +243,7 @@ function blockOf(node: Node, ctx: Ctx): Block {
     case "h4":
     case "h5":
     case "h6": {
-      // `h3` also takes the app's global heading rule: uppercase, 0.09em apart, --dim.
+      // `h3` is also the app's section heading: uppercase, 0.09em apart, --dim.
       const h3 = n.tag === "h3";
       const heading: Ctx = { ...ctx, ink: { ...ctx.ink, scale: HEADING[n.tag]! / 12.5, weight: 700, lineHeight: 1.3, ...(h3 ? { color: "dim" } : {}) } };
       return { top: 16, bottom: 6, draw: (mt, mb, key) => <Line key={key} ctx={heading} children_={n.children} marginTop={mt} marginBottom={mb} {...(h3 ? { upper: true, ls: 0.09 } : {})} /> };
@@ -284,9 +284,9 @@ const markerOf = (depth: number): string => (depth === 0 ? "• " : depth === 1 
 
 function itemOf(li: Extract<Node, { attrs: unknown }>, ctx: Ctx, marker: string): Block {
   return container(blocksOf(li.children, ctx), { top: 2, bottom: 2 }, (children, mt, mb, key) => (
-    // An `li` is not positioned, and on web neither is this (its marker is hung in the flow, below): a
-    // positioned box is painted after everything that is not, and its marker, painted there, turned the
-    // text of a whole track of gallery cards greyscale where the desktop's is subpixel.
+    // On web the item is not positioned (its marker is hung in the flow, below): a positioned box is
+    // painted after everything that is not, and its marker, painted there, turned the text of a whole
+    // track of gallery cards greyscale where it should be subpixel.
     <View key={key} marginTop={mt} marginBottom={mb} {...(Platform.OS === "web" ? {} : { position: "relative" })}>
       <Marker marker={marker} ink={ctx.ink} />
       {children}
@@ -349,8 +349,8 @@ function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
 }
 
 /**
- * The line height a fenced block's viewer inherits: the document's (`.markdown`'s 1.6, a transcript
- * message's 1.65), not the body's 1.5 — its toggles are a pixel taller for it. Undefined outside a fence.
+ * The line height a fenced block's viewer takes: the document's (1.6, or a transcript message's 1.65),
+ * not the body's 1.5 — its toggles are a pixel taller for it. Undefined outside a fence.
  */
 export const FenceLineContext = createContext<number | undefined>(undefined);
 
@@ -409,9 +409,9 @@ function inlines(children: readonly Child[], ink: Ink): ReactNode[] {
 }
 
 /**
- * On web, the line as the stylesheet writes it (`.markdown { line-height: 1.6 }`, unitless): Blink
- * multiplies it out in floating point and floors it to its layout unit, where a copy's pixels round to
- * the nearest — a hundredth of a pixel a line, which a page of prose adds up to half a pixel by its foot.
+ * On web, the line height written as a unitless factor (`line-height: 1.6`): Blink multiplies it out in
+ * floating point and floors it to its layout unit, where a length in pixels rounds to the nearest — a
+ * hundredth of a pixel a line, which a page of prose adds up to half a pixel by its foot.
  */
 const unitless = (ink: Ink): Record<string, unknown> => (Platform.OS === "web" ? { lineHeight: String(ink.lineHeight) } : {});
 
@@ -429,9 +429,9 @@ function Link({ href, ink, children }: { href: string | undefined; ink: Ink; chi
       spec={{ voice: "app", ...ink, color: "accent" }}
       {...unitless(ink)}
       textDecorationLine="underline"
-      // On web a real `<a target="_blank">`, as the desktop's: reached by Tab, opened by Enter, named by the
-      // right-click menu ("Copy link"), under a pointing hand — and opened by the anchor itself, which the
-      // window hands to the browser, so no press handler opens it a second time. A phone opens it by the press.
+      // On web a real `<a target="_blank">`: reached by Tab, opened by Enter, named by the right-click menu
+      // ("Copy link"), under a pointing hand — and opened by the anchor itself, which the window hands to
+      // the browser, so no press handler opens it a second time. A phone opens it by the press.
       {...(href === undefined ? {} : Platform.OS === "web" ? { render: "a", href, target: "_blank", rel: "noreferrer noopener" } : { onPress: () => void Linking.openURL(href) })}
     >
       {children}
@@ -493,7 +493,7 @@ function Rule({ marginTop, marginBottom }: { marginTop: number; marginBottom: nu
 }
 
 /**
- * `.markdown img { max-width: 100% }`: a picture at its own size, no wider than the column. It sits on its
+ * A picture at its own size, no wider than the column (`max-width: 100%`). It sits on its
  * line's baseline, so the line box runs on under it by the strut's depth below the baseline — half the
  * line height less half the face's ascent over its descent (DM Sans, measured: 0.656 em).
  */
@@ -510,11 +510,11 @@ function LinePicture({ src, alt, ink, marginTop, marginBottom }: { src: string; 
 /**
  * A table, `border-collapse: collapse`, every cell a --line box sharing its borders.
  *
- * On web it is laid out as the desktop's is — the browser's automatic table layout (`display: table`),
- * which no flex box does: no wider than the block it stands in, the room shared between its columns by
- * what each holds, cells wrapping, a row as tall as its tallest cell and the others' words at its middle.
- * (Drawn the other way it ran every cell out on one line: a README's table went off the side of its
- * pane, and the document under it stood 353px short of the desktop's.)
+ * On web it is laid out by the browser's automatic table layout (`display: table`), which no flex box
+ * does: no wider than the block it stands in, the room shared between its columns by what each holds,
+ * cells wrapping, a row as tall as its tallest cell and the others' words at its middle. (Drawn the
+ * other way it ran every cell out on one line: a README's table went off the side of its pane, and the
+ * document under it stood 353px short of its reference picture.)
  *
  * A phone has no table layout: there it is still drawn column by column, each column as wide as its
  * widest cell and nothing wrapping — TODO, a measured layout of its own.

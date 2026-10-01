@@ -9,7 +9,9 @@
  *    a canvas from its own theme registry and can inherit nothing from CSS.
  *  - **The DOM editors** — CodeMirror's live preview, the JSON editor's two layers, the plain box —
  *    take the same colours as custom properties written onto the root by `applyAppearance`, which
- *    the stylesheet maps onto the app's own tokens inside those three containers and nowhere else.
+ *    the stylesheet maps onto the app's own tokens inside the editors' own containers and nowhere
+ *    else. (The plain box — `CodeArea`, `packages/universal/src/components/files/CodeEdit.tsx` — is
+ *    under no stylesheet and takes them from {@link editorThemeVars} itself.)
  *
  * ## This is the SMALL half of a theme, and the reason it still exists
  *
@@ -299,7 +301,7 @@ export function monacoTheme(spec: EditorThemeSpec): {
  * The custom properties a theme publishes for the DOM editors, by the names the stylesheet reads.
  *
  * The mapping onto the app's own tokens (`--bg`, `--tok-string`) happens in CSS rather than here, so
- * that it happens INSIDE the three editor containers and nowhere else — a theme must not repaint the
+ * that it happens INSIDE the editors' containers and nowhere else — a theme must not repaint the
  * window. See the `[data-editor-theme]` rule in `styles.css`.
  */
 export function editorThemeVars(spec: EditorThemeSpec): Record<string, string> {

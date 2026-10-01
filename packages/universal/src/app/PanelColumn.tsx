@@ -26,17 +26,17 @@ import { useShell } from "./shell";
 import { newTaskOpener, panelTopKind, runMode } from "./viewState";
 
 /**
- * A room's side panel (`aside.ctx-panel`, `App.tsx`, `sidePanel.tsx`): the splitter and the panel stack's
- * top entry — a task's run, a conversation's context, a column's state, a value, the new-task form.
- * Nothing while the stack is empty, as `panelColumn` is null there. The Tasks, Files and Chat rooms each
- * stand one here (`roomOf`); the Chat room's rule is its conversation's, which it can hand in (`chat`).
+ * A room's side panel: the splitter and the panel stack's top entry (`SidePanel.tsx`) — a task's run, a
+ * conversation's context, a column's state, a value, the new-task form. Nothing while the stack is
+ * empty. The Tasks, Files, Chat and Debug rooms each stand one here (`roomOf`); the Chat room's rule is
+ * its conversation's, which it can hand in (`chat`).
  *
- * The stack, the room's rule and the column's width are `panelHost.ts`'s, the same code `App.tsx` runs;
- * what an entry says is `faces.tsx`'s (`panelFaces.tsx`'s `faceOf`), over `panelFaceModel.ts`.
+ * The stack, the room's rule and the column's width are `panelHost.ts`'s; what an entry says is
+ * `faces.tsx`'s `faceOf`, over `panelFaceModel.ts`. How it looks:
  *
- *   .ctx-panel     --panel, a --line on the left (--rule folded), clipped; the column's width, eased to
- *                  a new kind's or a fold's (`.view.pane-tween`, `panelMotion.web.ts`)
- *   .splitter      6 wide, a 2px --line down its middle; dragged (`files/Splitter.tsx`)
+ *   the column     --panel, a --line on the left (--rule folded), clipped; the column's width, eased to
+ *                  a new kind's or a fold's (`panelMotion.web.ts`)
+ *   the splitter   6 wide, a 2px --line down its middle; dragged (`files/Splitter.tsx`)
  */
 export function PanelColumn({ chat }: { chat?: { taskId: string | null; project: string; detail: TaskDetail | null } | undefined } = {}): JSX.Element | null {
   const t = useTokens();
@@ -61,7 +61,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const startAgain = useCallback((taskId: string) => startAgainOf(actions, detail, selectedProject, taskId), [actions, detail, selectedProject]);
   const top = topOf(panelStack);
   const geometry = panelGeometryOf(ui, room, top);
-  // The width animates when the kind on top changes or the panel folds, not while it is dragged (`App.tsx`'s `panelTween`).
+  // The width animates when the kind on top changes or the panel folds, not while it is dragged.
   const tween = usePanelTween(geometry.widthKey, geometry.open, top === undefined);
   // The New-task button's side of the stack (`viewState.ts`): what is on top, and how to open the form.
   const topKind = top?.kind ?? null;
@@ -83,15 +83,14 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   }, [onStack]);
   // The step the middle column's conversation is showing, for the Steps index beside it.
   const viewed = runViewed.use();
-  // The values somebody asked to HOLD — the Held tab (`App.tsx`'s `held`).
+  // The values somebody asked to HOLD — the Held tab.
   const [held, setHeld] = useState<PinnedValue[]>([]);
   const hold = useCallback((item: PinnedValue) => setHeld((was) => (was.some((one) => one.title === item.title) ? was : [...was, item])), []);
   const unhold = useCallback((item: PinnedValue) => setHeld((was) => was.filter((one) => one.title !== item.title)), []);
 
   /**
    * The detail of a task the panel shows that is not the selection — a subtask pushed on the stack, an
-   * entry left under a pushed card (`App.tsx`'s `heldDetails`). Fetched once per task and dropped when
-   * nothing shows it.
+   * entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
    */
   const [heldDetails, setHeldDetails] = useState<Record<string, TaskDetail>>({});
   const shownTasks = [...new Set(panelStack.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [`${entry.taskId}\u0000${entry.project ?? ""}`] : [])))]
@@ -119,12 +118,12 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   }, [shownSig]);
 
   // A state the panel shows that the store is not holding — a pinned one, one a value opened here
-  // (`panelHost.ts`' `useHeldStates`, `App.tsx`'s own).
+  // (`panelHost.ts`' `useHeldStates`).
   const heldStates = useHeldStates(panelStack.entries, state, actions.pickWorkflow);
 
-  // The run's verbs and links as the middle column has them (`App.tsx` hands both the same context).
+  // The run's verbs and links as the middle column has them: both read the one context.
   const run = useRunContext();
-  // ⇤ on a subagent's conversation: into the main view, once its task's run is walked (`App.tsx`'s own).
+  // ⇤ on a subagent's conversation: into the main view, once its task's run is walked.
   const adoptSubagent = useAdoptSubagent(state, detail, actions);
   const source: TranscriptSource = {
     conversation: state.conversation,
@@ -139,15 +138,15 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     batches: lookOf(state.config).conversation.sequentialBatches,
     userEvents: state.userEvents,
     onDeliverUserEvent: actions.deliverUserEvent,
-    // `App.tsx` hands the conversation both of a cut's verbs, the workflow's link and the task links.
+    // The conversation gets both of a cut's verbs, the workflow's link and the task links.
     onRewind: run.onRewind,
     onFork: run.onFork,
     onOpenWorkflow: run.onOpenWorkflow,
     onSelectTask: actions.select,
-    // What the shell lends a gate that mounts the changeset reviewer (`App.tsx`'s `reviewerServices`).
+    // What the shell lends a gate that mounts the changeset reviewer (`panelHost.ts`' `reviewerServicesOf`).
     gateServices: run.runGateServices,
     project: selectedProject,
-    // The questions MOVES parked in task conversations: each drawn where its move asked it (`App.tsx`).
+    // The questions MOVES parked in task conversations: each drawn where its move asked it.
     moveQuestions: state.pending.filter((p) => p.moves === true),
     onMoveQuestion: (requestId: string, value: unknown) => actions.answer(requestId, value),
   };
@@ -160,8 +159,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     project: selectedProject,
     source,
     onStack,
-    // The selected task's gate in whichever room its panel stands (`App.tsx`'s `panelHost.gate` is
-    // `gateOf(detail.taskId)`): the Files room's panel is parked at it too, not "Running".
+    // The selected task's gate in whichever room its panel stands: the Files room's panel is parked at
+    // it too, not "Running".
     gate: hostGate,
     onGate: (value) => hostGate !== undefined && actions.answer(hostGate.requestId, value),
     // The gate a task is parked on, wherever its panel is — not only the selected one's.
@@ -194,7 +193,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
           viewed,
         }
       : {}),
-    // The open file's state, the board column's, or one read for the panel (`App.tsx`'s `stateOf`).
+    // The open file's state, the board column's, or one read for the panel.
     stateOf: (stateId, project) => {
       if (state.doc?.stateId === stateId && state.stateId === stateId) return { view: state.state };
       if (state.taskWorkflow === stateId) {
@@ -233,7 +232,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     onFork: (taskId, seq) => void actions.forkTask(taskId, seq, selectedProject),
     onRewind: run.onRewind,
     turns: state.conversation?.turns ?? [],
-    // The workflow editor's, in a configuration card and a state's Configuration (`App.tsx`'s `config`).
+    // The workflow editor's, in a configuration card and a state's Configuration.
     config: {
       tree: state.tree,
       executors: state.executors,
@@ -257,8 +256,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         setOpen: actions.setFold,
       },
     },
-    // The events task's Configuration tab: Settings' Automations editor on the task's layer (`App.tsx`'s
-    // `automationsOf`). Settings is opened on its page; the part it scrolls to is the desktop's alone.
+    // The events task's Configuration tab: Settings' Automations editor on the task's layer. Its links
+    // open Settings on the page, standing on the task's project; they do not scroll to the part within it.
     automationsOf: (project, onOpenConversation) => {
       const at = project ?? state.at ?? SHARED_SESSION;
       const shared = at === SHARED_SESSION;
@@ -290,8 +289,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   if (top === undefined) return null;
   return (
     <>
-      {/* The side panel's splitter, dragged as the desktop's: the width of the kind on top (`widthKey`),
-          the pane after it sized, so a drag left widens it. */}
+      {/* The side panel's splitter: a drag writes the width of the kind on top (`widthKey`) — it sizes
+          the pane after it, so a drag left widens it. */}
       {geometry.open ? (
         <Splitter
           label="Resize the side panel"

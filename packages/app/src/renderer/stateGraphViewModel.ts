@@ -1,8 +1,8 @@
 /**
- * What the graph tab (`stateGraphView.tsx`) computes beyond the drawing's own model (`stateGraph.ts`):
- * the camera's limits and fit, the attention tiers, and the sightlines — the pills at the pane's edge
- * naming what is off it, and where a condition can still be written — moved here unchanged so the
- * universal copy (`components/workflow/StateGraph.tsx`, native SVG) answers the same (decision 0015).
+ * What the graph tab (`StateGraphView`, `packages/universal/src/components/workflow/StateGraph.tsx`)
+ * computes beyond the drawing's own model (`stateGraph.ts`): the camera's limits and fit, the attention
+ * tiers, and the sightlines — the pills at the pane's edge naming what is off it, and where a condition
+ * can still be written.
  */
 import {
   samples,
@@ -39,7 +39,7 @@ export interface Camera {
 
 export const clamp = (k: number): number => Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, k));
 
-/** Whose words a box's heading is — see the two voices in `styles.css`. */
+/** The boxes whose heading is OUR word, in the app's voice; the rest are the author's, in the data voice. */
 export const WORDS_OF_OURS = new Set<GraphNode["kind"]>(["entry", "exit", "any"]);
 
 /** What the reader is pointing at, as the two tiers of emphasis it implies. */
@@ -54,7 +54,7 @@ export function tierOf(attention: Attention, id: string): Tier {
   return "dim";
 }
 
-/** Painted last means painted on top: SVG has no other z-index — see the module header. */
+/** Painted last means painted on top: SVG has no other z-index — see {@link paintOrder}. */
 export function depth(attention: Attention, id: string): number {
   if (!attention.on) return 1;
   if (attention.lit.has(id)) return 3;

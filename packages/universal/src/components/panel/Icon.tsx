@@ -5,8 +5,8 @@ import { Svg } from "./Svg";
 export type IconName = keyof typeof PATHS;
 
 /**
- * `icons.tsx`'s `Icon`, universal: the same path data, stroked with the colour given at 1.7 on a 24 grid,
- * at `size` (the DOM sizes it by CSS: `.sp-icon svg` 15, `.gate-icon` 16 …). Brand marks are filled.
+ * An icon: `iconPaths.ts`'s path data, stroked with the colour given at 1.7 on a 24 grid, at `size`
+ * (each caller states its own). Brand marks are filled.
  */
 export function Icon({ name, size, color, box }: { name: IconName; size: number; color?: string; box?: Record<string, unknown> }): JSX.Element {
   const brand = name === "anthropic" || name === "openai";

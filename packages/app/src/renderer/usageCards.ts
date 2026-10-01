@@ -1,8 +1,7 @@
 /**
  * What the usage cards SAY — the account's windows and their words, the line over the composer when an
- * account has nothing left, and the figures beside a route and a model in the model menu — moved
- * unchanged out of `usageMeters.tsx`, which draws them from here, so the universal composer's cards
- * (decision 0015, `packages/universal/src/components/chat/UsageCards.tsx`) say the same.
+ * account has nothing left, and the figures beside a route and a model in the model menu. The composer's
+ * cards (`packages/universal/src/components/chat/UsageCards.tsx`) draw them from here.
  */
 import {
   creditPercent,
@@ -44,7 +43,7 @@ export function sourceWords(source: string): string {
 
 export const capital = (s: string): string => (s.length === 0 ? s : s[0]!.toUpperCase() + s.slice(1));
 
-/** One window of the account card: its name, bar, figure and reset — `AccountPopover`'s row. */
+/** One window of the account card: its name, bar, figure and reset — `AccountCard`'s row. */
 export interface WindowRow {
   id: string;
   name: string;

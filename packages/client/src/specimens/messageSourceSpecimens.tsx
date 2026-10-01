@@ -6,10 +6,9 @@ import { ValuePanelContext, type ValuePanel } from "@jaira/ui/valuePanel";
 import { Transcript, useTokens } from "@jaira/universal";
 
 /**
- * The badge on a message the person did not type (the copy of `transcriptView.tsx`'s `MessageSource`),
- * in the three places it stands: over a message the workflow wrote (named, and a button
- * opening its definition where the shell can), over one JaiRA wrote, and beside an aside's role on its
- * line (`.ts-tag .ts-source`).
+ * The badge on a message the person did not type, in the three places it stands: over a message the
+ * workflow wrote (named, and a button opening its definition where the shell can), over one JaiRA
+ * wrote, and beside an aside's role on its line.
  *
  *  - `message-source` — with a panel that opens a state's definition: "From <workflow>" is a button.
  *  - `message-source-plain` — with a panel that cannot: the same words, a pill.

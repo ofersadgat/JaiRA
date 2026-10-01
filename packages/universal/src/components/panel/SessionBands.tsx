@@ -18,59 +18,60 @@ import { Svg } from "./Svg";
 import { OneLine } from "./OneLine";
 
 /**
- * `sessionPanels.tsx`'s `SessionBandsView`, universal (decision 0015): the conversation drawn as one
- * panel per session — bands down the page, the notes on the grey between them, the rail beside it all.
- * The page's rows are `pageRowsOf` and `markedRowsOf` (`sessionRows.ts`), what a fork side is called
- * `sideName`, the pieces and notes `sessionBands.ts`' — the DOM's own. The rules, from `styles.css`:
+ * The conversation drawn as one panel per session — bands down the page, the notes on the grey between
+ * them, the rail beside it all. The page's rows are `pageRowsOf` and `markedRowsOf` (`sessionRows.ts`),
+ * what a fork side is called `sideName`, the pieces and notes `sessionBands.ts`'. How it looks:
  *
- *   .sb-band           relative column; .concurrent.tabs also `.tabs` (gap 4), .columns also `.columns`
- *   .sb-columns        the sessions side by side, equal, top-aligned, gap 12
- *   .sb-layout         absolute, top −2, right 0, a 1px --line box, radius 6, clipped, hidden until the
+ *   a band             relative column; several sessions at once are columns, or tabs (its rows 4 apart)
+ *   columns            the sessions side by side, equal, top-aligned, gap 12
+ *   the layout toggle  absolute, top −2, right 0, a 1px --line box, radius 6, clipped, hidden until the
  *                      band is hovered; its buttons padding 3 7 on --panel, --dim (on: --panel-2, --text),
  *                      the glyph 13
- *   .sb-tabs           row, gap 2, 60 right; a tab at most 220, 1px --line but the bottom, radius 8 8 0 0,
+ *   the tabs           row, gap 2, 60 right; a tab at most 220, 1px --line but the bottom, radius 8 8 0 0,
  *                      --bg, padding 4 12, data 11/12 --dim (on: --panel, --text)
- *   .sb-sheet          --panel, 1px --line, radius 12 (a torn side 2), 0 1 3 rgba(15,20,30,.06)
- *   .sb-tear           row, centred, gap 8, padding 3 10, --dim, --accent 5%; a --rule between it and the
+ *   a sheet            --panel, 1px --line, radius 12 (a torn side 2), 0 1 3 rgba(15,20,30,.06)
+ *   a torn edge        row, centred, gap 8, padding 3 10, --dim, --accent 5%; a --rule between it and the
  *                      body; its teeth an 8px path, --accent 45% into --line, 1.25 wide; the label app
  *                      10.5/12.5, 0.02em, lower case (the id data, --text)
- *   .fork-mark         row, centred, gap 10 (torn: margin 14 0 12)
- *   .fork-chip         row, gap 6, padding 2 9, a transparent 1px edge, radius 7, app 10.5/12.5, 0.02em,
+ *   a fork mark        row, centred, gap 10 (torn: margin 14 0 12)
+ *   its chip           row, gap 6, padding 2 9, a transparent 1px edge, radius 7, app 10.5/12.5, 0.02em,
  *                      lower case, --dim; hovered or open --accent 30% into --line, --panel-2, --text;
  *                      glyphs 11, the first and `fork:` (600) --accent 70% into --dim
- *   .sb-cut            as `.ts-cut`, margin 2 4 6; `.rail-row.doomed` .35
- *   .sb-panel-lit > .sb-sheet   where a fork's "go to the other side" landed: --accent 55% into --line,
- *                      a 3px ring of --accent 14%, for 1.2s (the dark and contrast sheets' own rules win)
- *   .sb-made           the verb, the runs (links, their standing, "waits for" in a pill), the state; an
- *                      adoption's chevron is a `button`, and its nest the adopted task's history
+ *   an armed cut       as a transcript's cut line (`SessionTranscript.tsx`), margin 2 4 6; the rows
+ *                      under it at .35
+ *   a lit sheet        where a fork's "go to the other side" landed: --accent 55% into --line,
+ *                      a 3px ring of --accent 14%, for 1.2s (the contrast sheet keeps its frame, the dark
+ *                      one its shadow)
+ *   a made row         the verb, the runs (links, their standing, "waits for" in a pill), the state; an
+ *                      adoption's chevron is a button, and its nest the adopted task's history
  *
  * A lane's right-click (a long press on a phone) is the entered row's two verbs as a menu (`onContext`),
  * and the rows a bookmark lands on — an entered row, a letterhead, a solo sheet's body — are filed with
  * the conversation's spy (`rowSpy.ts`) for it to measure.
  */
 
-/** What each kind of note says it is (`sessionPanels.tsx`'s `VERB`). */
+/** What each kind of note says it is. */
 const VERB: Record<BandNote["kind"], string> = { entered: "entered", transition: "entered", blocked: "could not enter", failure: "", made: "made", skipped: "skipped", moved: "", asked: "asked" };
 
-/** What the machine did to make the runs (`MADE_VERB`). */
+/** What the machine did to make the runs. */
 const MADE_VERB: Record<MadeBatch["kind"], string> = { split: "split off", task: "made", adopt: "adopted", started: "started" };
 
 /**
- * Text as `white-space: normal` lays it out: every run of spaces and line breaks one space. A native
- * `Text` keeps a newline as a break, so words the DOM reflows are collapsed before they are drawn.
+ * Text as `white-space: normal` lays it out: every run of spaces and line breaks one space. A `Text`
+ * keeps a newline as a break, so words meant to reflow are collapsed before they are drawn.
  */
 export const collapsed = (text: string): string => text.replace(/[ \t\n\r\f]+/g, " ");
 
-/** The two verbs of a cut, offered on an entered row (`CutOffer`). */
+/** The two verbs of a cut, offered on an entered row. */
 export interface CutOffer {
   rewind: (note: BandNote) => void;
   fork: (note: BandNote) => void;
 }
 
-/** What a note's state is CALLED in a sentence about it — `sessionRows.ts`' `cutNameOf`, the desktop's own. */
+/** What a note's state is CALLED in a sentence about it — `sessionRows.ts`' `cutNameOf`. */
 export { cutNameOf };
 
-/** The whole conversation: bands down the page, in the order they happened (`SessionBandsView`). */
+/** The whole conversation: bands down the page, in the order they happened. */
 export function SessionBands({
   bands: given,
   notes,
@@ -111,7 +112,7 @@ export function SessionBands({
   moveQuestion?: ((asked: MoveQuestionView) => ReactNode) | undefined;
   /** Describe the workflow a panel's conversation was opened by. Absent ⇒ the gutter names no workflow. */
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
-  /** How full a piece's conversation was after its last turn (`PieceReadingContext`) — each letterhead's `+30k`. */
+  /** How full a piece's conversation was after its last turn — each letterhead's `+30k`. */
   readingOf?: ((piece: SessionPiece) => ContextReading | undefined) | undefined;
   empty?: ReactNode;
 }): JSX.Element {
@@ -162,10 +163,10 @@ export function SessionBands({
 }
 
 /**
- * Going to the other side of a fork (`SessionBandsView`'s `goTo`): every side is already drawn on the
- * page, so the mark's job is to take the reader to the one picked — scrolled into view and lit for
- * 1.2s, since the sides are the same state saying nearly the same thing. The sheets register
- * themselves by position (`data-fork-place`), which is what a side knows about its siblings.
+ * Going to the other side of a fork: every side is already drawn on the page, so the mark's job is to
+ * take the reader to the one picked — scrolled into view and lit for 1.2s, since the sides are the same
+ * state saying nearly the same thing. The sheets register themselves by position (`data-fork-place`),
+ * which is what a side knows about its siblings.
  *
  * Web only for now: a phone has no `scrollIntoView`, and the jump would have to be measured against
  * the transcript's own scroller (`measureLayout` and its `scrollTo`), which the bands do not hold — so
@@ -197,7 +198,7 @@ function useGoTo(): GoTo {
   return { lit, place, show };
 }
 
-/** `.sb-cut`: the counted line under an armed rewind's entry — a dashed rule each side of the words. */
+/** The counted line under an armed rewind's entry — a dashed rule each side of the words. */
 function CutRow({ states }: { states: number }): JSX.Element {
   const t = useTokens();
   const rule = <View flex={1} {...(edge(t, { top: 1 }, t.mix(t.v("bad"), 60, t.v("line")), "dashed") as object)} />;
@@ -212,7 +213,7 @@ function CutRow({ states }: { states: number }): JSX.Element {
   );
 }
 
-/** `.ts-act`: one of a rail's icon buttons — padding 4, radius --control-radius-sm, the glyph 13. */
+/** One of a cut's two icon buttons on an entered row — padding 4, radius --control-radius-sm, the glyph 13. */
 function Act({ icon, label, title, onPress }: { icon: "rewind" | "choice"; label: string; title: string; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -226,9 +227,10 @@ function Act({ icon, label, title, onPress }: { icon: "rewind" | "choice"; label
  * `NoteRow`: what happened between the panels — a state entered, a child that could not be, a skip, and
  * (their own rows) what a fan-out made, a move's question, what a workflow tool did.
  *
- *   .sb-note          row, baseline, gap 8, padding 4, --size-app × 11.5/12.5, --bad (.step: --dim)
- *   .sb-note-icon     1em, centred; .sb-note-verb, .sb-note-state --dim, the state at most 30%, ellipsed
- *   .sb-note .ts-rail the cut's two verbs at the end, shown while the row is hovered
+ *   the row           row, baseline, gap 8, padding 4, --size-app × 11.5/12.5, --bad (a step taken or
+ *                     skipped: --dim)
+ *   its icon          1em, centred; the verb and the state --dim, the state at most 30%, ellipsed
+ *   the cut's verbs   at the end, shown while the row is hovered
  */
 export function NoteRow({
   note,
@@ -258,7 +260,7 @@ export function NoteRow({
       : pathFrom(note.path, root);
   if (note.kind === "made" && note.made !== undefined) return <MadeRow note={note} made={note.made} where={where} onSelectTask={onSelectTask} adopted={adopted} />;
   if (note.kind === "asked" && note.asked !== undefined) {
-    // `.sb-move-question`: the question UI and nothing around it, 8 under.
+    // A move's question: the question UI and nothing around it, 8 under.
     return (
       <View minWidth={0} marginBottom={8} data-asked={note.asked.requestId}>
         {moveQuestion !== undefined ? moveQuestion(note.asked) : null}
@@ -315,7 +317,7 @@ export function NoteRow({
   );
 }
 
-/** A run's standing in words: held, what it is still holding for, or its status (`standingOf`). */
+/** A run's standing in words: held, what it is still holding for, or its status. */
 function standingOf(run: MadeTask): string {
   const waiting = run.holding > 0 ? `waiting for ${run.holding} ${run.holding === 1 ? "task" : "tasks"}` : undefined;
   if (run.held === true) return waiting === undefined ? "held" : `held · ${waiting}`;
@@ -327,10 +329,10 @@ function standingOf(run: MadeTask): string {
  * title as the link, its standing, a pill on each one this task waits for), and the mount. An adoption
  * unfolds the adopted task's history under the line.
  *
- *   .sb-made           wrapping, centred;  .sb-made-runs  row, wrapping, baseline, gap 0 4
- *   .sb-made-wait      0.85em, --dim, 1px --line, round, padding 0 6;  .sb-made-waits link 600
- *   .sb-made-link      at most 24ch, ellipsed, hover underlined;  .sb-made-standing --dim
- *   .sb-made-nest      the whole row wide, margin 4 0 8 18, padding-left 8, 2px --accent 45% into --line
+ *   the row            wrapping, centred;  the runs: row, wrapping, baseline, gap 0 4
+ *   "waits for"        0.85em, --dim, 1px --line, round, padding 0 6;  the link of a run waited for 600
+ *   a run's link       at most 24ch, ellipsed, hover underlined;  its standing --dim
+ *   the nest           the whole row wide, margin 4 0 8 18, padding-left 8, 2px --accent 45% into --line
  */
 function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote; made: MadeBatch; where: string; onSelectTask?: ((taskId: string) => void) | undefined; adopted?: ((taskId: string) => ReactNode) | undefined }): JSX.Element {
   const t = useTokens();
@@ -342,8 +344,8 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
   return (
     <View role="note" flexDirection="row" flexWrap="wrap" alignItems="center" gap={8} padding={4} minWidth={0} data-made={others.map((run) => run.taskId).join(" ")}>
       {expands ? (
-        // `button.lh-chev.sb-made-chev`: a `button` (--panel-2, a --line ring, --control-radius, padding
-        // --control-pad) round the glyph at the note's 1em, the whole of it turned while folded.
+        // The fold: a button (--panel-2, a --line ring, --control-radius, padding --control-pad) round
+        // the glyph at the note's 1em, the whole of it turned while folded.
         <Press
           onPress={() => setOpen((v) => !v)}
           label={open ? `fold ${others[0]!.title}` : `unfold ${others[0]!.title}`}
@@ -377,7 +379,7 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
             {i > 0 ? <Txt spec={words}>,</Txt> : null}
             {run.waitsFor ? (
               <View borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={999} paddingHorizontal={6}>
-                {/* The line as the stylesheet writes it (unitless 1.5) on web: Blink floors its product, and the
+                {/* The line height as a factor (unitless 1.5) on web: Blink floors its product, and the
                     pill's leading then falls under its words (22 device pixels as pixels put half of it above). */}
                 <Txt spec={{ ...words, scale: (11.5 / 12.5) * 0.85 }} {...(isWeb ? { lineHeight: "1.5" } : {})}>
                   waits for
@@ -405,7 +407,7 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
       {expands && open ? (
         // `flex-basis: 100%` and its margin on a line of the row: it shrinks to what the margin leaves.
         <View flexBasis="100%" flexShrink={1} minWidth={0} marginTop={4} marginBottom={8} marginLeft={18} paddingLeft={8} {...(edge(t, { left: 2 }, t.mix(t.v("accent"), 45, t.v("line"))) as object)}>
-          {/* Inside the note: `.sb-note.step`'s --dim reaches every word in the history that sets no colour. */}
+          {/* Inside the note: its --dim reaches every word in the history that sets no colour. */}
           <InkContext.Provider value="dim">
             <InNoteContext.Provider value={true}>{adopted!(others[0]!.taskId)}</InNoteContext.Provider>
           </InkContext.Provider>
@@ -461,9 +463,9 @@ export interface ForkSide {
 }
 
 /**
- * `.fork-chip`: quiet at rest, its box on hover and while its menu is open. `side` is its words as the
- * desktop's JSX has them — `{at + 1} of {sides.length} — {side.label}` is five text nodes, and Blink shapes
- * each apart, so one string here set the glyphs after each join a fraction off.
+ * A fork's chip: quiet at rest, its box on hover and while its menu is open. `side` is its words in
+ * parts, each a text node of its own (`{at + 1} of {sides.length} — {side.label}` is five): Blink shapes
+ * each node apart, and one string set the glyphs after each join a fraction off the reference pictures.
  */
 function ForkChip({ kind, side, open, disabled = false, onPress, chevron, title }: { kind: string; side: readonly string[]; open: boolean; disabled?: boolean; onPress: (from: unknown) => void; chevron: boolean; title: string }): JSX.Element {
   const t = useTokens();
@@ -568,7 +570,7 @@ export function OriginMark({ origin, onGo }: { origin: TaskOrigin; onGo?: (() =>
   );
 }
 
-/** What a tab is called: the session id, or the state that ran in no conversation at all (`tabNameOf`). */
+/** What a tab is called: the session id, or the state that ran in no conversation at all. */
 function tabNameOf(segment: SessionSegment): string {
   return segment.sessionId ?? segment.pieces[0]?.node.childKey ?? segment.pieces[0]?.node.stateId ?? segment.key;
 }
@@ -633,7 +635,7 @@ function Band({
     </Press>
   );
   return (
-    // `.sb-band.concurrent.tabs` is `.tabs` too: its rows 4 apart.
+    // Tabbed, the band's rows (the tabs, the sheet) are 4 apart.
     <View position="relative" flexDirection="column" width="100%" minWidth={0} {...(chosen === "tabs" ? { gap: 4 } : {})} {...(hover as object)}>
       <View position="absolute" top={-2} right={0} zIndex={1} flexDirection="row" borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} overflow="hidden" opacity={hovered || !isWeb ? 1 : 0}>
         {toggle("columns", true)}
@@ -684,14 +686,15 @@ function Band({
  * `Sheet`: one session's panel — its name in the grey above it (with the fork it is a side of), then
  * what it said, between the torn edges of a session another interrupted.
  *
- *   .sb-gutter         row, centred, gap 8, padding 0 4 4 (.bare: 2 under); .solo is the fold
- *   .sb-gut-chev       the chevron, turned a quarter when open
- *   .sb-session        --size-app × 11/12.5, --dim, ellipsed
- *   .sb-workflow       button.link: data at --size-data × 11/12, --accent, ellipsed, shrinks
- *   .sb-span           --size-app × 11/12.5, --dim, tabular, pushed right, 8 before
- *   .sb-foldall        padding 3 5, a transparent 1px edge, --size-app × 10.5/12.5, --dim; its word
+ *   the gutter         row, centred, gap 8, padding 0 4 4 (2 under over a state that ran in no
+ *                      conversation); on a solo sheet the whole line is the fold
+ *   its chevron        turned a quarter when open
+ *   the session id     --size-app × 11/12.5, --dim, ellipsed
+ *   the workflow link  data at --size-data × 11/12, --accent, shrinks; squeezed, clipped at both ends
+ *   the span           --size-app × 11/12.5, --dim, tabular, pushed right, 8 before
+ *   fold all           padding 3 5, a transparent 1px edge, --size-app × 10.5/12.5, --dim; its word
  *                      hidden (0 wide) until hovered
- *   .sb-body           column, padding 13 15 15
+ *   the body           column, padding 13 15 15
  */
 function Sheet({
   segment,
@@ -730,11 +733,11 @@ function Sheet({
   const only = segment.pieces.length === 1 ? segment.pieces[0] : undefined;
   const solo = only !== undefined && surfaceKindOf(only.node) === "conversation";
   const surface = only !== undefined && segment.sessionId === undefined && surfaceKindOf(only.node) !== "conversation";
-  // What each state ADDED to the conversation — `addedOf`, the desktop's own.
+  // What each state ADDED to the conversation (`sessionRows.ts`' `addedOf`).
   const added = addedOf(segment.pieces, readingOf);
   const small = { voice: "app" as const, scale: 11 / 12.5, color: "dim" };
-  // `button.link.sb-workflow.ellip`: a BUTTON, so an inline-flex that centres its text — squeezed, the
-  // name overflows both sides and is clipped there, with no ellipsis.
+  // The workflow's link, centred in its box: squeezed, the name overflows both sides and is clipped
+  // there, with no ellipsis.
   const workflow =
     starter !== undefined ? (
       // A pressable TEXT, not a Press: on a solo sheet the whole gutter is the fold, and a button in a button is not allowed.
@@ -745,7 +748,7 @@ function Sheet({
       </View>
     ) : null;
   const span = spanOf(segment);
-  // `.sb-gut-chev` is 1em of what the gutter inherits: the body's 13, or a note's 11.5 around an adoption.
+  // The gutter's chevron is 1em of the text around it: the body's 13, or a note's 11.5 in an adoption's nest.
   const chev = Number(t.scaled("size-app", (useContext(InNoteContext) ? 11.5 : 13) / 12.5)) || 13;
   const look = useLook();
   const sheet = sheetLookOf(t, look);
@@ -881,9 +884,8 @@ function Sheet({
 }
 
 /**
- * `.sb-bare`: a solo sheet's body, stamped like a letterhead (`data-instance`) so a bookmark to its state
- * lands somewhere — and lit where one just did (`.sb-bare.sb-panel-lit`: radius 8, a 3px ring of
- * --accent 14%, for 1.2s).
+ * A solo sheet's body, stamped like a letterhead (`data-instance`) so a bookmark to its state lands
+ * somewhere — and lit where one just did (radius 8, a 3px ring of --accent 14%, for 1.2s).
  */
 function Bare({ id, children }: { id: string; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -901,7 +903,7 @@ function Bare({ id, children }: { id: string; children: ReactNode }): JSX.Elemen
   );
 }
 
-/** `.sb-gutter`: the whole line is the fold on a solo sheet (a role=button div), else a plain row. */
+/** A sheet's gutter: the whole line is the fold on a solo sheet (one `Press`), else a plain row. */
 function Gutter({ solo, onPress, children }: { solo: boolean; onPress: () => void; children: ReactNode }): JSX.Element {
   const box = { flexDirection: "row", alignItems: "center", gap: 8, paddingHorizontal: 4, paddingBottom: 4, minWidth: 0 } as const;
   return solo ? (
@@ -914,11 +916,11 @@ function Gutter({ solo, onPress, children }: { solo: boolean; onPress: () => voi
 }
 
 /**
- * `.sb-sheet`'s frame, and the rules the palettes put on it:
+ * A sheet's frame, and what a look changes of it:
  *
- *   :root[data-theme="dark"] .sb-sheet                   0 1 3 rgba(0, 0, 0, .35)
- *   :root[data-palette="contrast"] .sb-sheet             1.5px --rule, 3px 3px 0 --rule, radius 4
- *   :root:is([data-palette="pastel"], …-rail) .sb-sheet  radius 16
+ *   dark                   the shadow 0 1 3 rgba(0, 0, 0, .35)
+ *   contrast               1.5px --rule, a hard shadow 3px 3px 0 --rule, radius 4
+ *   pastel, pastel-rail    radius 16
  */
 export function sheetLookOf(t: Tokens, look: Look): { width: number; edge: string; radius: number; shadow: string } {
   if (look.palette === "contrast") return { width: 1.5, edge: "rule", radius: 4, shadow: `3px 3px 0px ${String(t.v("rule"))}` };
@@ -927,21 +929,21 @@ export function sheetLookOf(t: Tokens, look: Look): { width: number; edge: strin
 }
 
 /**
- * `Piece` → `StateBlock` + `StateHeader`: one state inside a session's panel — its letterhead, and its
- * transcript under it while open.
+ * One state inside a session's panel — its letterhead (`Letterhead`), and its transcript under it while
+ * open.
  *
- *   .lh               row, baseline, gap 9, margin 0 0 11, padding 0 0 7, a --line under; data at
+ *   the letterhead    row, baseline, gap 9, margin 0 0 11, padding 0 0 7, a --line under; data at
  *                     --size-data × 11/12, --dim (hover --text)
- *   .st-block + .st-block > .lh   20 above (12 after a folded one; 16 for a title block)
- *   .lh.shut          no margin under, 8 padding under
- *   .lh.tb            margin −13 −15 13, padding 9 15, --panel-2 — the title block of a state going on;
+ *   after another     20 above (12 after a folded one; 16 for a title block)
+ *   shut              no margin under, 8 padding under
+ *   a title block     margin −13 −15 13, padding 9 15 — the letterhead of a state going on;
  *                     accent: --accent 12% into --panel, its rule --accent 28% into --line, all --accent;
  *                     amber: --warn 14%, a dashed rule --warn 30%; red: --bad 11%, --bad 26%
- *   .lh-chev          centred, turned −90° when shut; .lh-ico centred
- *   .lh-kind          600, 0.09em, upper, --size-data × 10/12
- *   .lh-name          600, --text, --size-data (12/12)
- *   .lh-label         app voice, --size-app × 12/12.5, ellipsed
- *   .lh-meta          pushed right, 10 before, tabular, 0.85 opaque
+ *   the chevron       centred, turned −90° when shut; the kind's glyph centred
+ *   the kind          600, 0.09em, upper, --size-data × 10/12
+ *   the name          600, --text, --size-data (12/12)
+ *   the label         app voice, --size-app × 12/12.5, ellipsed
+ *   the meta          pushed right, 10 before, tabular, 0.85 opaque
  */
 function Piece({ piece, first, afterShut, open, onToggle, render, asking, added }: { piece: SessionPiece; first: boolean; afterShut: boolean; open: boolean; onToggle: () => void; render: (piece: SessionPiece) => ReactNode; asking: string | undefined; added: number | undefined }): JSX.Element {
   const t = useTokens();
@@ -1014,8 +1016,8 @@ function Letterhead({
       alignSelf="stretch"
       flexDirection="row"
       alignItems="baseline"
-      // A button's `justify-content: center` (the base rule): when the line cannot fit, it overflows
-      // both sides equally rather than only the right.
+      // Centred, as a button centres what is in it: when the line cannot fit, it overflows both sides
+      // equally rather than only the right.
       justifyContent="center"
       gap={9}
       minWidth={0}
@@ -1028,14 +1030,13 @@ function Letterhead({
         const ink = hue ?? (hovered ? "text" : "dim");
         return (
           <>
-            {/* `.lh-chev` is a block holding the glyph INLINE: it stands on the baseline of a line of the
-                header's own font, and that line is what is centred — not the glyph. */}
+            {/* The chevron stands on the baseline of a line of the header's own font, and that line is
+                what is centred — not the glyph. */}
             <View alignSelf="center" flexShrink={0} height={size * 1.5} transform={open ? [] : [{ rotate: "-90deg" }]}>
               <Icon name="chevron" size={size} color={String(t.v(hue ?? "dim"))} box={{ marginTop: baselineOf(size, 1.02, 0.3) - size }} />
             </View>
             {glyph !== undefined ? <Icon name={glyph} size={size} color={String(t.v(ink))} box={{ alignSelf: "center" }} /> : null}
-            {/* `.lh-dot`: 6 round, centred, --dim — its `.ts-dot-<status>` colour loses to `.lh-dot`, which
-                comes later at the same weight, so every status draws the same dot. */}
+            {/* The status dot: 6 round, centred, --dim — the same dot whatever the status. */}
             {glyph === undefined && status !== undefined ? <View width={6} height={6} borderRadius={3} alignSelf="center" flexShrink={0} backgroundColor={t.v("dim") as never} /> : null}
             {word !== undefined ? (
               <Txt spec={{ voice: "data", scale: 10 / 12, weight: 600, ls: 0.09, upper: true, color: ink }} flexShrink={0}>
@@ -1057,7 +1058,7 @@ function Letterhead({
               </Txt>
             ) : null}
             {meta.length > 0 || added !== undefined ? (
-              // `.lh-meta`, with `.lh-added` in it: the data face, --dim whatever the tone, 10 before the time.
+              // The meta, with the added count in it: the data face, --dim whatever the tone, 10 before the time.
               <View flexDirection="row" alignItems="baseline" flexShrink={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
                 {added !== undefined ? (
                   <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", tabular: true }} marginRight={10} title={`this state added ${formatTokens(added)} tokens to the conversation`}>

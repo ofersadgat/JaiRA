@@ -13,26 +13,26 @@ import { AUTOFILLED, ListIndicator, SuggestLayer, laidOut, useSuggest, type Sugg
 import { Svg } from "../panel/Svg";
 
 /**
- * The plain controls the workflow editor is made of, universal (decision 0015): `styles.css`'s bare
- * `input`, `textarea`, `select`, `button` and `button.sm`, as the state form uses them, and the
- * reading's `fieldset[disabled]` over them. The rules (`cascade.mts '.state-panel'`, `--scene state-config`):
+ * The plain controls the workflow editor is made of — a box, a text area, a select, the small and the
+ * link button, a table's heading and notes — and the reading over them, in which a control is drawn as
+ * what it says and nothing can be changed. How they look:
  *
- *   input, textarea, select   font: inherit (the body's app 13/12.5 on a 1.5 line; `.slot-row` 12/12.5),
- *                             --text on --bg, 1px --line (hovered --rule), radius --control-radius,
- *                             padding 5 9 (`.slot-row` 3 6), width 100%; focused, the page's ring
- *                             (2px --focus-ring, 1 out). A placeholder is Chromium's #757575.
- *   textarea                  data 12/12
- *   :disabled                 --dim on --panel-2
- *   .reading :disabled        (the reading's fieldset) no ground, no ring, --text, no side padding; a
- *                             placeholder not drawn; a select with no arrow; a textarea as tall as its text
- *   button                    `Button`'s; `.sm` padding --control-pad-sm (2 8), radius --control-radius-sm,
- *                             app 11/12.5; `.ghost` transparent (hovered --fill-ghost-hover)
- *   button.link               no ground or ring, --accent, data 11/12; hovered underlined
- *   .sub                      --dim, app 11/12.5
- *   .slot-opt                 row, centred, gap 3, app 10.5/12.5, --dim, one line; its checkbox margin 0
+ *   a box, an area, a select  the font of where they stand (the body's app 13/12.5 on a 1.5 line; in a
+ *                             table's row 12/12.5), --text on --bg, 1px --line (hovered --rule), radius
+ *                             --control-radius, padding 5 9 (in a row 3 6), width 100%; focused, the
+ *                             page's ring (2px --focus-ring, 1 out). A placeholder is Chromium's #757575.
+ *   an area                   data 12/12
+ *   disabled                  --dim on --panel-2
+ *   in a reading              no ground, no ring, --text, no side padding; a placeholder not drawn; a
+ *                             select with no arrow; an area as tall as its text
+ *   a small button            padding --control-pad-sm (2 8), radius --control-radius-sm, app 11/12.5;
+ *                             a ghost transparent (hovered --fill-ghost-hover)
+ *   a link button             no ground or ring, --accent, data 11/12; hovered underlined
+ *   a note                    --dim, app 11/12.5
+ *   a switch                  row, centred, gap 3, app 10.5/12.5, --dim, one line; its checkbox margin 0
  */
 
-/** The font a control inherits from where it stands: the body's (13/12.5), or `.slot-row`'s (12/12.5). */
+/** The font a control takes from where it stands: the body's (13/12.5), or a table row's (12/12.5). */
 export interface ControlSize {
   /** Of `--size-app`. */
   scale: number;
@@ -41,7 +41,10 @@ export interface ControlSize {
 export const BODY: ControlSize = { scale: 13 / 12.5, pad: [5, 9] };
 export const ROW: ControlSize = { scale: 12 / 12.5, pad: [3, 6] };
 
-/** Whether the lint marks a box: `issue-bad` / `issue-warn` (2px, --bad / --warn), or `.unwired` / `.unresolved` (--warn). */
+/**
+ * Whether a box is marked: by the lint (`issue-bad` / `issue-warn`: 2px, --bad / --warn), or as an
+ * unwired slot or a link that names nothing (--warn).
+ */
 export type Mark = "" | "bad" | "warn";
 /** A `fieldClass` answer (` issue-bad`) as a {@link Mark}. */
 export const markOf = (cls: string): Mark => (cls.includes("issue-bad") ? "bad" : cls.includes("issue-warn") ? "warn" : "");
@@ -51,9 +54,9 @@ function ring(t: ReturnType<typeof useTokens>, focused: boolean): Record<string,
 }
 
 /**
- * The form's `<datalist>`s — the ones a box's `list` names, rendered once by the editor (a datalist id
- * has to be unique): what each offers, for the type-ahead a box opens (`form/Suggest.tsx`) and the room
- * Chromium keeps for the list's indicator once a list has something in it ({@link Box}'s `listed`).
+ * The form's completion lists, built once by the editor for every box under it: what each offers, for
+ * the type-ahead a box opens (`form/Suggest.tsx`) and the room a box keeps for the list's indicator once
+ * a list has something in it ({@link Box}'s `listed`).
  */
 export interface Lists {
   bindings: readonly Suggestion[];
@@ -62,7 +65,7 @@ export interface Lists {
   functions: readonly Suggestion[];
   childKeys: readonly Suggestion[];
   childStates: readonly Suggestion[];
-  /** `transition-targets`: the children's keys and the two terminations. */
+  /** Where a transition may go: the children's keys and the two terminations. */
   transitions: readonly Suggestion[];
 }
 const NO_LISTS: Lists = { bindings: [], guards: [], links: [], functions: [], childKeys: [], childStates: [], transitions: [] };
@@ -70,12 +73,12 @@ const ListsContext = createContext<Lists>(NO_LISTS);
 export const ListsProvider = ListsContext.Provider;
 export const useLists = (): Lists => useContext(ListsContext);
 
-/** The reading's fieldset, as a context: every control under it draws as `.reading :disabled`. */
+/** Whether this stands in a reading ({@link ReadingBody}): every control in one draws as what it says. */
 export function useReading(): boolean {
   return useContext(InReading);
 }
 const InReading = createContext(false);
-/** `fieldset.reading[disabled]` around the form's body (`Body` in `stateEditor.tsx`). */
+/** What makes a reading of the form's body — the body alone, so the tab bar above it stays live. */
 export function ReadingBody({ on, children }: { on: boolean; children: ReactNode }): JSX.Element {
   return <InReading.Provider value={on}>{children}</InReading.Provider>;
 }
@@ -100,14 +103,15 @@ export function Box({
   onChange: (v: string) => void;
   placeholder?: string | undefined;
   /**
-   * The `<datalist>` the box completes against. With something in it Chromium keeps 16 at the box's end
-   * for the list's indicator, which the text stops short of, and the type-ahead opens under it.
+   * The list the box completes against. With something in it the box keeps 16 at its end for the list's
+   * indicator (as Chromium's `<input list>` does), which the text stops short of, and the type-ahead
+   * opens under it.
    */
   listed?: readonly Suggestion[] | false;
   size?: ControlSize;
   disabled?: boolean | undefined;
   mark?: Mark;
-  /** `.link-input`: data 11.5/12. */
+  /** A link's box is `data`, at `dataScale` (11.5/12). */
   voice?: "app" | "data";
   dataScale?: number;
   title?: string | undefined;
@@ -181,8 +185,8 @@ export function Box({
 }
 
 /**
- * A plain `textarea` — data 12/12 on a 1.5 line, `rows` tall. In a reading, as tall as its text (the
- * reading's `field-sizing: content`), drawn as the text itself.
+ * A plain `textarea` — data 12/12 on a 1.5 line, `rows` tall. In a reading it is drawn as the text
+ * itself, as tall as that is.
  */
 export function Area({
   value,
@@ -202,7 +206,7 @@ export function Area({
   disabled?: boolean | undefined;
   mark?: Mark;
   title?: string | undefined;
-  /** `.code-editor`: data at --size-editor, padding 8, radius 6. */
+  /** An area that holds code: padding 8, radius 6. */
   code?: boolean;
   minHeight?: number;
 }): JSX.Element {
@@ -273,9 +277,9 @@ const INSET = 4;
 const ARROW_ROOM = 40.6 - 18 - 2 - INSET;
 
 /**
- * A plain `select` (`logs/Select.tsx`'s drawing, stretched as the form's are): its text on the
- * menulist's `normal` line, Chromium's arrow, a menu of its options. In a reading (`appearance: none`,
- * no side padding) it is the chosen option's words on the inherited 1.5 line.
+ * A plain select (`logs/Select.tsx`'s drawing, stretched to the width it is given): its text on a
+ * menulist's `normal` line, Chromium's arrow, a menu of its options. In a reading (no arrow, no side
+ * padding) it is the chosen option's words on the body's 1.5 line.
  */
 export function Pick({
   value,
@@ -291,7 +295,7 @@ export function Pick({
 }: {
   value: string;
   options: readonly PickOption[];
-  /** The weight of where it stands (`font: inherit` — `.slots-head` is 600). */
+  /** The weight of where it stands (a table's heading is 600). */
   weight?: number;
   onChange: (v: string) => void;
   size?: ControlSize;
@@ -378,8 +382,9 @@ function Chevron(): JSX.Element {
 }
 
 /**
- * `button.sm` (and `.ghost`): padding --control-pad-sm, radius --control-radius-sm, app 11/12.5 at the
- * weight of where it stands (`.slots-head` is 600). `quiet` is `.link-toggle`'s 0.7, `on` its accent.
+ * A small button (a ghost unless told otherwise): padding --control-pad-sm, radius --control-radius-sm,
+ * app 11/12.5 at the weight of where it stands (a table's heading is 600). `opacity` is what a ghost
+ * rests at (hovered 1), `accent` its ring and words in --accent.
  */
 export function SmallButton({
   children,
@@ -401,7 +406,7 @@ export function SmallButton({
   weight?: number;
   opacity?: number;
   accent?: boolean;
-  /** `.reorder button`: on a line of 1. */
+  /** The ↑/↓ pair's buttons: on a line of 1. */
   lineOne?: boolean;
 } & Record<string, unknown>): JSX.Element {
   const t = useTokens();
@@ -437,7 +442,7 @@ export function SmallButton({
   );
 }
 
-/** `button.link`: --accent, data 11/12 (or the font it stands in), no ground; hovered underlined. */
+/** A link button: --accent, data 11/12 (or the font it stands in), no ground; hovered underlined. */
 export function LinkButton({ children, onPress, title, disabled = false, spec }: { children: ReactNode; onPress: () => void; title?: string | undefined; disabled?: boolean; spec?: Partial<FontSpec> }): JSX.Element {
   return (
     <Press onPress={onPress} disabled={disabled} {...(title !== undefined ? { title } : {})} flexDirection="row" alignItems="center" gap={5} flexShrink={0} {...(disabled ? { opacity: 0.5 } : {})}>
@@ -450,7 +455,7 @@ export function LinkButton({ children, onPress, title, disabled = false, spec }:
   );
 }
 
-/** `.sub`: --dim, app 11/12.5 (or another colour — `.sub.warn`, `.warn-text`). */
+/** A note: --dim, app 11/12.5 (or another colour — a warning's --warn). */
 export function Sub({ children, color = "dim", ...rest }: { children: ReactNode; color?: string } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, color }} {...rest}>
@@ -459,7 +464,7 @@ export function Sub({ children, color = "dim", ...rest }: { children: ReactNode;
   );
 }
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13). */
+/** An empty place's words: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13). */
 export function Empty({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -469,7 +474,7 @@ export function Empty({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** `.reason`: --bad, app 11/12.5. */
+/** What is wrong, in words: --bad, app 11/12.5. */
 export function Reason({ children, ...rest }: { children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} {...rest}>
@@ -479,9 +484,9 @@ export function Reason({ children, ...rest }: { children: ReactNode } & Record<s
 }
 
 /**
- * `label.slot-opt`: a checkbox and its word — app 10.5/12.5, --dim, gap 3, the box's margin 0 (the
- * form's `Checkbox` carries Chromium's 3 3 3 4, taken back here). In a reading the word alone, said
- * only when true.
+ * A switch in a row: a checkbox and its word — app 10.5/12.5 (`wide` 11/12.5), --dim, gap 3, the box's
+ * margin 0 (the form's `Checkbox` carries Chromium's 3 3 3 4, taken back here). A reading says the word
+ * alone, and only when true ({@link SlotOptWords}).
  */
 export function SlotOpt({ checked, onChange, children, title, wide = false }: { checked: boolean; onChange: (next: boolean) => void; children: string; title?: string | undefined; wide?: boolean }): JSX.Element {
   const scale = (wide ? 11 : 10.5) / 12.5;
@@ -498,15 +503,15 @@ export function SlotOpt({ checked, onChange, children, title, wide = false }: { 
 }
 
 /**
- * Chromium's checkbox in a `.slot-opt` (margin 0): checked, the form's own drawing (`form/inputs.tsx`'s
- * `Checkbox`); unchecked, a ring the whole 13-square, as the desktop paints this one — measured, a device
- * pixel wider and taller than the form's.
+ * A switch's checkbox, drawn as Chromium draws one with no margin: checked, the form's own drawing
+ * (`form/inputs.tsx`'s `Checkbox`); unchecked, a ring the whole 13-square — measured in the reference
+ * pictures, a device pixel wider and taller than the form's.
  */
 function Tick({ checked, onChange }: { checked: boolean; onChange: (next: boolean) => void }): JSX.Element {
   const look = useLook();
   // Chromium paints a native checkbox snapped to device pixels (its edges rounded to the nearest), where a
-  // drawing at a fractional place would be anti-aliased across two: on web the ring is drawn where the
-  // desktop's would be.
+  // drawing at a fractional place would be anti-aliased across two: on web the ring is drawn where a
+  // native one would be.
   const box = useRef<unknown>(null);
   const [snap, setSnap] = useState<{ dx: number; dy: number; w: number; h: number } | null>(null);
   const measure = (): void => {
@@ -557,7 +562,7 @@ function Tick({ checked, onChange }: { checked: boolean; onChange: (next: boolea
   );
 }
 
-/** `span.slot-opt.sub`: what a reading says in place of a switch — only when it is true. */
+/** What a reading says in place of a switch — only when it is true. */
 export function SlotOptWords({ children }: { children: string }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "dim" }} numberOfLines={1} flexShrink={0}>
@@ -567,9 +572,9 @@ export function SlotOptWords({ children }: { children: string }): JSX.Element {
 }
 
 /**
- * `.slots-head`: the heading of one table — app 600 at 11/12.5, 0.09em, uppercase, --dim (its first
- * word --text inside `.slots`), spaced; a `.sub` after it (400, no tracking, pushed right), and its
- * buttons (`.ghost.sm` at the heading's 600).
+ * The heading of one table — app 600 at 11/12.5, 0.09em, uppercase, --text (--dim where it is not
+ * `strong`: a child's Inputs), spaced; a note after it (400, no tracking, pushed right), and its buttons
+ * (small ghosts at the heading's 600).
  */
 export function SlotsHead({ title, sub, strong = true, children }: { title: string; sub?: string | undefined; strong?: boolean; children?: ReactNode }): JSX.Element {
   return (
@@ -587,7 +592,7 @@ export function SlotsHead({ title, sub, strong = true, children }: { title: stri
   );
 }
 
-/** A `.field`'s name over (or, `.inline`, beside) its control: app 11/12.5, --dim, 0.04em, uppercase. */
+/** A field's name, over or beside its control: app 11/12.5, --dim (`accent`: --accent), 0.04em, uppercase. */
 export function FieldName({ children, accent = false, ...rest }: { children: ReactNode; accent?: boolean } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: 0.04, upper: true, color: accent ? "accent" : "dim" }} {...rest}>
@@ -597,9 +602,8 @@ export function FieldName({ children, accent = false, ...rest }: { children: Rea
 }
 
 /**
- * `details` with a `summary` — `.slot-more`'s: app 10.5/12.5 --dim, padding 1 0 1 12, its ▸ (▾ open) at
- * 8/12.5 absolutely 2 in and 4 down; what it holds 4 below. Uncontrolled, as a `details` is: `open` is
- * where it starts.
+ * A fold under its summary: the summary app 10.5/12.5 --dim, padding 1 0 1 12, its ▸ (▾ open) at
+ * 8/12.5 absolutely 2 in and 4 down; what it holds 4 below. Uncontrolled: `open` is where it starts.
  */
 export function Details({ summary, open: initial, children, ...box }: { summary: ReactNode; open: boolean; children: ReactNode } & Record<string, unknown>): JSX.Element {
   const [open, setOpen] = useState(initial);
@@ -616,5 +620,5 @@ export function Details({ summary, open: initial, children, ...box }: { summary:
   );
 }
 
-/** The form's reading flag (`reading.ts`'s `ReadOnlyContext`) — the same context the desktop's form reads. */
+/** The form's reading flag (`reading.ts`'s `ReadOnlyContext`). */
 export { useReadOnly };

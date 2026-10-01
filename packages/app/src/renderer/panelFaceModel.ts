@@ -1,8 +1,7 @@
 /**
  * What a task-shaped panel entry SAYS, as data — its tabs, their counts, its verbs, the line under its
- * name — moved out of `panelFaces.tsx` and `sidePanel.tsx` unchanged so the universal copy of the panel
- * (decision 0015, `packages/universal/src/app/PanelColumn.tsx`) derives the same face from the same
- * rules. Nothing here draws; `panelFaces.tsx` turns it into the DOM's face.
+ * name. Nothing here draws: `faces.tsx` (`packages/universal/src/components/panel`) builds each entry's
+ * face from it, and `SidePanel.tsx` shows the face.
  */
 import type { InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
 import { EVENTS_STATE_ID } from "@jaira/shared/browser";
@@ -48,8 +47,8 @@ export const TAB_ICONS: Record<string, IconKey> = {
 };
 
 /**
- * A status's glyph — the badge before a task's name (`board.tsx`'s `Badge`). Still nine entries wide:
- * a panel describing ONE task is where `timeout` and `failed` are worth telling apart.
+ * A status's glyph — the badge before a task's name. Nine entries wide: a panel describing ONE task is
+ * where `timeout` and `failed` are worth telling apart.
  */
 export const BADGE: Record<string, string> = {
   running: "▶",
@@ -117,8 +116,7 @@ export function taskVerbsOf(host: VerbHost, detail: TaskDetail, project: string 
 
 /**
  * The panel beside a conversation (a `chat` entry): its tabs — what the conversation produced, what it
- * changed, and what has been held out of it — and its head's words. Shared by `panelFaces.tsx` and the
- * universal Chat room (decision 0015).
+ * changed, and what has been held out of it — and its head's words.
  */
 export function chatTabs(held: number): PanelTabSpec[] {
   return [tab("produced", "Produced"), tab("changes", "Changes"), tab("held", "Held", held > 0 ? { count: held } : {})];

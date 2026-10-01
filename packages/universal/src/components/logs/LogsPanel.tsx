@@ -14,35 +14,35 @@ import { BODY, BarInput } from "./Field";
 import { Select, SourceSelect } from "./Select";
 
 /**
- * `logs.tsx`'s `LogsPanel`, universal (decision 0015): the bar of filters, the column heads, the list of
- * entries (newest first, one line each, a row unfolding when pressed), older pages as the list is
- * scrolled, the Configure panel and a process's output. What it derives is `logsModel.ts`, shared with the
- * desktop's. The rules, from `styles.css`:
+ * The Logs room: the bar of filters, the column heads, the list of entries (newest first, one line each,
+ * a row unfolding when pressed), older pages as the list is scrolled, the Configure panel and a
+ * process's output. What it derives is `logsModel.ts`. How it looks:
  *
- *   .logs              column, flex 1; --log-cols 11ch 5ch 22ch minmax(0,1fr) 92px (dated: 10ch first)
- *   .logs-bar          row, gap 8, centred, padding 6 10, a --line under it
- *   .logs-bar select   the plain `select` (see `Select`), min-width 150
- *   .logs-bar input    width 220, padding 5 9, the body's font, --bg, 1px --line (hovered --rule)
- *   .log-unseen-bar    row, gap 6, centred: the pills (budget 140), "not seen" (.sub), Dismiss
- *   .sub               --dim, app at 11/12.5
- *   .logs-head         the tracks, gap 8, padding 4 10, a --line under it; --dim, app at 10/12.5,
+ *   the room           column, flex 1; the tracks 11ch 5ch 22ch, the rest, 92px (dated: 10ch first)
+ *   the bar            row, gap 8, centred, padding 6 10, a --line under it
+ *   its selects        the plain select (see `Select`), at least 150 wide
+ *   its filter         width 220, padding 5 9, the body's font, --bg, 1px --line (hovered --rule)
+ *   the unseen strip   row, gap 6, centred: the pills (budget 140), "not seen" (small words), Dismiss
+ *   small words        --dim, app at 11/12.5
+ *   the column heads   the tracks, gap 8, padding 4 10, a --line under it; --dim, app at 10/12.5,
  *                      uppercase, 0.4px spacing. Its `ch` is DM Sans's at 10px (the head is not mono).
  *                      The date and time heads right-aligned.
- *   .logs-list         flex 1, scrolls, padding 2 0
- *   .log-row           the tracks, gap 8, baseline, padding 2 10; data at 11.5/12, one line, each cell
+ *   the list           flex 1, scrolls, padding 2 0
+ *   a row              the tracks, gap 8, baseline, padding 2 10; data at 11.5/12, one line, each cell
  *                      clipped with an ellipsis. Hovered or open: --panel-2. Unseen: --tint-bad or
- *                      --tint-warn (after the hover rule, so it wins). Open: cells wrap, top-aligned.
- *   .log-day/.log-at   --dim, right-aligned, tabular
- *   .log-level         uppercase, app size × 10/12.5 (still mono); warn --warn, error --bad
- *   .log-source        --dim;  .log-reason --dim;  .log-new ● at 0.8em, 6 right, the level's colour
- *   .log-row .link     --accent, data face at app size × 11/12.5, padding 0 2; hovered underlined
- *   .log-detail        padding 2 10 8 --log-indent (whose `ch` is DM Sans's at 13px: it is resolved on
- *                      the detail, which is not mono); pre: padding 6 8, --panel-2, 1px --line,
- *                      radius 4, data at 11/12, --dim, no wrapping; the fields 4 under the stack
- *   p.empty            --dim, padding 8 0, the p's 13px margins
- *   .console           a --line above, column, at most 45% tall
+ *                      --tint-warn (which wins over both). Open: cells wrap, top-aligned.
+ *   the date and time  --dim, right-aligned, tabular
+ *   the level          uppercase, app size × 10/12.5 (still mono); warn --warn, error --bad
+ *   the source         --dim;  the reason --dim;  the unseen dot ● at 0.8em, 6 right, the level's colour
+ *   a row's links      --accent, data face at app size × 11/12.5, padding 0 2; hovered underlined
+ *   the detail         padding 2 10 8 and, on the left, the indent to the message's track (whose `ch`
+ *                      is DM Sans's at 13px: the detail is not mono); a block: padding 6 8, --panel-2,
+ *                      1px --line, radius 4, data at 11/12, --dim, no wrapping; the fields 4 under the
+ *                      stack
+ *   an empty line      --dim, padding 8 0, a paragraph's 13px margins
+ *   the output         a --line above, column, at most 45% tall
  */
-/** A length in `ch` of the data face (JetBrains Mono, whose `0` is 0.6 of the size), or the stylesheet's own. */
+/** `n` `ch` of the data face (JetBrains Mono, whose `0` is 0.6 of the size) — a `calc()` where the size is one. */
 function monoCh(t: Tokens, scale: number, n: number): number | string {
   const size = t.scaled("size-data", scale);
   return typeof size === "number" ? n * 0.6 * size : `calc(${String(size)} * ${n * 0.6})`;
@@ -76,7 +76,8 @@ export function LogsPanel({
   const [showConfig, setShowConfig] = useState(false);
   const query = useMemo((): LogQuery => logQueryOf(level, source, text), [level, source, text]);
 
-  // Debounced and skipped on the first render, as the desktop's (see `logs.tsx`).
+  // Debounced for the text box's sake (a typed word is twenty changes), and skipped on the first render:
+  // the panel's own arrival already fetched.
   const first = useRef(true);
   useEffect(() => {
     if (first.current) {
@@ -155,7 +156,7 @@ export function LogsPanel({
   );
 }
 
-/** `p.empty`: the body's face in --dim, padding 8 0 and the p's 1em margins. */
+/** An empty line: the body's face in --dim, padding 8 0 and a paragraph's 1em margins. */
 function Empty({ children }: { children: string }): JSX.Element {
   const t = useTokens();
   const em = t.scaled("size-app", 13 / 12.5);
@@ -166,7 +167,7 @@ function Empty({ children }: { children: string }): JSX.Element {
   );
 }
 
-/** `.logs-head`: the column names, on the rows' tracks (in the head's own face's `ch`). */
+/** The column heads: the column names, on the rows' tracks (in the head's own face's `ch`). */
 function Head({ dated }: { dated: boolean }): JSX.Element {
   const t = useTokens();
   const spec: Partial<FontSpec> = { voice: "app", scale: 10 / 12.5, color: "dim", upper: true, ls: 0.04, lineHeight: 1.5 };
@@ -189,7 +190,7 @@ function Head({ dated }: { dated: boolean }): JSX.Element {
 
 const LEVEL_INK: Partial<Record<LogLevel, string>> = { warn: "warn", error: "bad" };
 
-/** One entry: `.log-line`, its row and, when open, what it was hiding. */
+/** One entry: its row and, when open, what it was hiding. */
 function LogLine({
   entry,
   dated,
@@ -225,7 +226,7 @@ function LogLine({
     <View flexDirection="column">
       {/* The whole row is the control, and its links are controls of their own: the press is a layer under
           the cells (which let it through) rather than their parent, so a link is never a button inside a
-          button. The hover is the row's, links and all, as `.log-row:hover` is. */}
+          button. The hover is the row's, links and all. */}
       <View
         position="relative"
         flexDirection="row"
@@ -277,7 +278,7 @@ function LogLine({
   );
 }
 
-/** `.log-row .link`: --accent, the data face at the app size × 11/12.5, padding 0 2; hovered, underlined. */
+/** A row's link: --accent, the data face at the app size × 11/12.5, padding 0 2; hovered, underlined. */
 function RowLink({ words, onPress }: { words: string; onPress: () => void }): JSX.Element {
   const t = useTokens();
   const size = t.scaled("size-app", 11 / 12.5);
@@ -292,12 +293,12 @@ function RowLink({ words, onPress }: { words: string; onPress: () => void }): JS
   );
 }
 
-/** `.log-detail`: the stack, as itself, and the rest of the detail as JSON — nothing when there is neither. */
+/** A row's detail: the stack, as itself, and the rest of the detail as JSON — nothing when there is neither. */
 function Detail({ detail, dated }: { detail: unknown; dated: boolean }): JSX.Element | null {
   const t = useTokens();
   const { stack, rest } = useMemo(() => detailParts(detail), [detail]);
   if (stack === undefined && rest === undefined) return null;
-  // `--log-indent`, resolved where it is used: in the body's face (DM Sans at 13/12.5), not the rows'.
+  // The indent to the message's track, its `ch` the body's face's (DM Sans at 13/12.5), not the rows'.
   const ch = appCh(t, 13 / 12.5, dated ? 48 : 38);
   const indent = typeof ch === "number" ? 10 + ch + (dated ? 32 : 24) : `calc(${ch} + ${dated ? 42 : 34}px)`;
   const pre = (words: string, top: number): JSX.Element => (
@@ -315,7 +316,7 @@ function Detail({ detail, dated }: { detail: unknown; dated: boolean }): JSX.Ele
   );
 }
 
-/** `.console`: a process's captured output, by stream, head and tail with what was dropped marked. */
+/** A process's captured output, by stream, head and tail with what was dropped marked. */
 function Console({ chunks, onClose }: { chunks: JobOutputChunk[]; onClose: () => void }): JSX.Element {
   const t = useTokens();
   const streams = useMemo(() => streamsOf(chunks), [chunks]);

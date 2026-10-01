@@ -8,11 +8,10 @@ import { TaskCard } from "../components/TaskCard";
 import { useTokens } from "../tokens";
 
 /**
- * The board, drawn natively from the copies that exist (decision 0015): today, only the cards (and
- * their pills and chips) are copies, so the columns around them here are PLACEHOLDERS — plain
- * headed stacks, not the desktop's `.column`. What this screen proves is the native path: the store
- * over the socket, the replayed tokens, and the copies drawing live data on a phone. The screen a
- * person sees is the desktop UI itself (`NativeApp`'s whole-app island) until the frame is copied.
+ * Several projects' boards, read only, one under another: each project's name over its columns, a
+ * column a plain headed stack of its cards (`TaskCard`) — lane by lane, a nested card under the one it
+ * hangs from. Nothing here selects or drags. No host draws this screen today (it is only exported):
+ * the shell's board is `components/Board.tsx`.
  */
 export function CopiesBoard({ boards }: { boards: readonly { name: string; board: BoardView | null }[] }): JSX.Element {
   const t = useTokens();
@@ -41,8 +40,8 @@ export function CopiesBoard({ boards }: { boards: readonly { name: string; board
 }
 
 /**
- * One project's board: its columns wrapped into rows, as the desktop's board wraps them — not scrolled
- * sideways, which on a phone hid every column past the second.
+ * One project's board: its columns wrapped into rows — not scrolled sideways, which on a phone hid
+ * every column past the second.
  */
 function Board({ board }: { board: BoardView }): JSX.Element {
   const t = useTokens();

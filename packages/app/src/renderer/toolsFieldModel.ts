@@ -1,7 +1,7 @@
 /**
- * What the state editor's Tools field (`toolsField.tsx`, decision 0007 §6) holds and decides — the data
- * it is handed from outside the document, the picker's schema and what a pick writes — moved here
- * unchanged so the universal copy (`components/workflow/ToolsField.tsx`) runs the same field (decision 0015).
+ * What the state editor's Tools field (decision 0007 §6) holds and decides — the data it is handed from
+ * outside the document, the picker's schema and what a pick writes. `ToolsField`
+ * (`packages/universal/src/components/workflow/ToolsField.tsx`) draws it.
  */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { SHARED_SESSION, permissionSetChoicesAt, permissionSetsAt, type FileTree, type PermissionSetChoice, type PermissionSetsView, type ToolChoice } from "@jaira/shared/browser";
@@ -71,8 +71,8 @@ export const unreadNoteOf = (unread: readonly string[]): string =>
   `${unread.map((key) => `'${key}'`).join(", ")} ${unread.length === 1 ? "is" : "are"} written here and could not be read as a line — kept as written; see the JSON tab.`;
 
 /**
- * The field's data, read (`App.tsx`'s, moved here so the universal shell reads it the same way): the
- * permission sets the project the window stands on can name, and the tools a line can be written for.
+ * The field's data, read by the shell: the permission sets the project the window stands on can name,
+ * and the tools a line can be written for.
  *
  * Read once per project, and again when the TREE is refetched, which is what a `workflows` invalidate
  * does — the scope every permission set write publishes, so the picker never lists a permission set

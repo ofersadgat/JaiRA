@@ -1,6 +1,6 @@
 /**
- * What the live status line says — `transcriptView.tsx`'s `LiveStatusBar` words, and the two
- * formatters it measures with — moved out unchanged so the universal copy (decision 0015) says the same.
+ * What the live status line says — the words of `LiveStatusBar`
+ * (`packages/universal/src/components/chat/Paper.tsx`), and the two formatters it measures with.
  */
 import { APPROVAL_PROMPT_FUNCTION, toolDisplayOf } from "@jaira/shared/browser";
 import type { LiveStatus } from "./transcript";

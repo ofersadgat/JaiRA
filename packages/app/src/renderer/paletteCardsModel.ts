@@ -1,7 +1,8 @@
 /**
- * What each palette is called, and the colours of the miniature task board its card draws — the
- * table `paletteCards.tsx` draws from, in a module of its own so the universal copy (decision 0015)
- * draws from the same one. Why it is a table rather than the stylesheet: see `paletteCards.tsx`.
+ * What each palette is called, and the colours of the miniature task board its card draws
+ * (`ThemeMini.tsx`, Settings → Appearance). A TABLE of colours rather than the tokens themselves: every
+ * card has to show its OWN palette while the window is painted in another, and the tokens in force are
+ * one palette's. So this is a copy of the palettes in `styles.css`, small enough to keep in step by eye.
  */
 import type { Palette } from "@jaira/shared/browser";
 

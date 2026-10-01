@@ -1,7 +1,6 @@
 /**
- * Settings → Tools → Automations' host (`automationsPane.tsx`): the layers' copies it reads, what is
- * edited and not written yet, and the writes — as a hook and pure functions in a module of their own,
- * so the universal copy (decision 0015) holds and does exactly what the DOM pane does.
+ * Settings → Tools → Automations' host (`AutomationsSection.tsx`): the layers' copies it reads, what is
+ * edited and not written yet, and the writes — as a hook and pure functions.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import { EVENT_SPECS, isEventName, type ConfigLayer, type EventsStatusView, type JairaEventsConfig, type WorkflowLayer, type WorkflowSource, type WritableLayer } from "@jaira/shared/browser";
@@ -135,7 +134,7 @@ interface Pending {
 const NOTHING_PENDING: Pending = { shared: {} };
 
 /**
- * The state `AutomationsView` is drawn from, and the writes it asks for (`AutomationsPane`'s body) —
+ * The state `AutomationsView` is drawn from, and the writes it asks for (`AutomationsSection`'s body) —
  * or, until the copies are read (or when they cannot be), what the section says instead.
  */
 export function useAutomationsHost(props: AutomationsPaneProps): { props: AutomationsViewProps } | { waiting: string; warn: boolean } {

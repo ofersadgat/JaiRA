@@ -57,30 +57,29 @@ import { Grid, Hung, RowControls, SlotGroup, SlotTable } from "./SlotTable";
 import { StateGraphView } from "./StateGraph";
 
 /**
- * `stateEditor.tsx`'s `WorkflowEditor`, universal (decision 0015): one state file as a form, its JSON
- * and its graph, over one document. Everything it holds and decides — the drafts, copy-on-edit, the
- * merge, the completions, the children's declared slots, "Compare with what ships" — is
- * `stateEditorModel.ts`'s `useWorkflowEditor`, the hook the desktop's runs; this draws it. The JSON
- * tab's text and the comparison are islands (`schemaText`, `diff`). The rules:
+ * The workflow editor: one state file as a form, its JSON and its graph, over one document. Everything
+ * it holds and decides — the drafts, copy-on-edit, the merge, the completions, the children's declared
+ * slots, "Compare with what ships" — is `stateEditorModel.ts`'s `useWorkflowEditor`; this draws it. The
+ * JSON tab's text and the comparison are islands (`schemaText`, `diff`). How it looks:
  *
- *   .pane.editor           column, gap 8
- *   .edit-bar.editor-top   row, centred, gap 8; `.file-path` a `.sub` cut with … at its START (rtl)
- *   .chip                  app 10/12.5 --dim, 1px --line, round, padding 0 6; `.chip-warn` --warn
- *   .tabs.seg              the tabs joined: padding 2 11, app 11/12.5, radii 5 at the ends, the last 1
- *                          back over its neighbour; `.layer-on` --fill-accent, --on-accent 600, --sheen
- *   .pane.editor > .form   the rest, scrolling (padding 1 1 2) — in a reading the fieldset holds it
- *   .form                  column, gap 8; `.identity` gap 5, `.field.inline` 78 | 1fr, gap 8, centred,
- *                          its name right-aligned
- *   .slot-row.child-row    22 | 1fr | 1.3fr | auto ×4; `.seq` data 10/12 --dim centred, tabular
- *   .child-state           row, centred, gap 5; `.mount-id` data 10.5/12 --dim, cut with …
- *   .slot-row.binding-row  1fr | 14 | 1.4fr | auto; `.transition-row` 1.4fr | 14 | 1fr | auto auto
- *   .slots.children        each child a --panel-2 card (1px --line, radius 6, padding 6 7, 6 apart)
- *   .reorder               row, gap 2; its buttons padding 2 5 on a line of 1
+ *   the editor             column, gap 8
+ *   its top bar            row, centred, gap 8; the file's path a note cut with … at its START (rtl)
+ *   a chip                 app 10/12.5 --dim, 1px --line, round, padding 0 6; a toned one in its tone
+ *   the tabs               joined: padding 2 11, app 11/12.5, radii 5 at the ends, the last 1 back over
+ *                          its neighbour; the one showing --fill-accent, --on-accent 600, --sheen
+ *   the form               the rest, scrolling (padding 1 1 2) — a reading is not scrolled here;
+ *                          column, gap 8; the state's prose gap 5, each of its fields 78 | 1fr, gap 8,
+ *                          centred, its name right-aligned
+ *   a child's row          22 | 1fr | 1.3fr | auto ×4; its number data 10/12 --dim centred, tabular
+ *   a child's state        row, centred, gap 5; the state it runs data 10.5/12 --dim, cut with …
+ *   a wire's row           1fr | 14 | 1.4fr | auto; a transition's 1.4fr | 14 | 1fr | auto auto
+ *   the children           each child a --panel-2 card (1px --line, radius 6, padding 6 7, 6 apart)
+ *   the ↑/↓ pair           row, gap 2; small buttons on a line of 1
  */
 
 /**
- * The ↑/↓ pair, where the order of a table means something — nothing in a reading. `.reorder button`'s
- * padding 2 5 loses to `button.sm`'s 2 8 (equal specificity, later); its line of 1 stands.
+ * The ↑/↓ pair, where the order of a table means something — nothing in a reading. Small buttons, their
+ * arrows on a line of 1.
  */
 function Reorder({ index, count, onMove }: { index: number; count: number; onMove: (to: number) => void }): JSX.Element | null {
   if (useReadOnly()) return null;
@@ -96,7 +95,7 @@ function Reorder({ index, count, onMove }: { index: number; count: number; onMov
   );
 }
 
-/** A dim arrow in its own track (`.slot-row .arrow`), centred. */
+/** A dim arrow in its own track, centred. */
 function Arrow({ children }: { children: string }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} textAlign="center">
@@ -142,7 +141,7 @@ function BindingTable({
   const lists = useLists();
   const table = bindingTableOf(rows, slots, path, issues, REF_HINT);
   const wired = table.childKey === undefined ? undefined : reading?.children?.[table.childKey];
-  // The child's declared slots, the row's own datalist (`child-inputs-<i>`).
+  // The child's declared slots: what a wire's name completes against, this child's own list.
   const slotList = slots.map((slot) => ({ value: slot.name, label: slot.optional ? "optional" : "required" }));
   const edit = (index: number, patch: Partial<BindingRow>): void => onChange(editedRow(rows, index, patch));
   return (
@@ -360,7 +359,7 @@ function TransitionsTable({ rows, issues, onChange }: { rows: TransitionRow[]; i
   );
 }
 
-/** `.chip`: app 10/12.5, --dim, 1px --line, round, padding 0 6 — `.chip-warn` in --warn. */
+/** A chip: app 10/12.5, --dim, 1px --line, round, padding 0 6 — a toned one in its tone's colour. */
 export function Chip({ tone = "plain", title, children }: { tone?: "plain" | "warn" | "bad" | "ok" | "accent"; title?: string | undefined; children: ReactNode }): JSX.Element {
   const t = useTokens();
   const ink = tone === "plain" ? "dim" : tone;
@@ -373,7 +372,7 @@ export function Chip({ tone = "plain", title, children }: { tone?: "plain" | "wa
   );
 }
 
-/** `LayerBar`: which layer supplied the file — a chip — and the buttons that act on that. */
+/** Which layer supplied the file — a chip — and the buttons that act on that. */
 function LayerBar({ model, busy, comparing, onAction }: { model: LayerBarModel | null; busy: boolean; comparing: boolean; onAction: (id: LayerBarAction["id"]) => void }): JSX.Element | null {
   if (model === null) return null;
   return (
@@ -390,7 +389,7 @@ function LayerBar({ model, busy, comparing, onAction }: { model: LayerBarModel |
   );
 }
 
-/** `.tabs.seg`: the readings of the file, joined — the one showing filled with the accent. */
+/** Tabs joined into one control (here the readings of the file), the one showing filled with the accent. */
 export function SegTabs<T extends string>({ tabs, value, words, titles, onPick }: { tabs: readonly T[]; value: T; words: Record<T, string>; titles?: Record<T, string>; onPick: (tab: T) => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -434,8 +433,8 @@ export function SegTabs<T extends string>({ tabs, value, words, titles, onPick }
 }
 
 /**
- * `.sub.file-path`: the file, cut with … at its START (the bar's `direction: rtl`), the path itself
- * isolated so a leading `$` or `.` stays where it is written.
+ * The file's path, a note cut with … at its START (on web by `dir="rtl"`), the path itself isolated
+ * so a leading `$` or `.` stays where it is written.
  */
 function FilePath({ path, title }: { path: string; title: string }): JSX.Element {
   const t = useTokens();
@@ -502,8 +501,8 @@ export function WorkflowEditor({
   readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
   layerActions?: LayerActions;
   /**
-   * Whether the editor fills its box, its form scrolling inside it (`.pane.editor > .form`): the Files
-   * room's half and the state panel. False where its column scrolls it whole (a reading in the panel).
+   * Whether the editor fills its box, its form scrolling inside it: the Files room's half and the state
+   * panel. False where its column scrolls it whole (a reading in the panel).
    */
   fill?: boolean;
 }): JSX.Element {
@@ -528,7 +527,7 @@ export function WorkflowEditor({
   });
   const { tab, form, marks, targets, readOnly, editForm } = e;
   const kind = kindMarksOf(form, marks);
-  // The form's datalists (`Lists`), each as the desktop's editor renders it once.
+  // The form's completion lists (`Lists`), each built once here for every box that names it.
   const lists: Lists = {
     bindings: e.bindings.map((path) => ({ value: path })),
     guards: e.guards.map((path) => ({ value: path })),
@@ -706,7 +705,7 @@ export function WorkflowEditor({
       );
     }
     // The JSON tab.
-    // A reading's document: `textarea.code-editor.tall.reading-doc` — at least 340 tall, scrolling in itself.
+    // A reading's document: at least 340 tall, scrolling in itself.
     if (readOnly)
       return (
         <View minHeight={340} flexGrow={1} flexShrink={1} flexBasis="auto" flexDirection="column">
@@ -740,8 +739,8 @@ export function WorkflowEditor({
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       <LinkReaderProvider value={e.reader}>
-        {/* Nothing here asks for a layer: on the Graph tab the desktop's pane is greyscale because it is
-            painted after a scroller, and so is this one now that the page is painted in the same order. */}
+        {/* Nothing here asks for a layer: on the Graph tab the pane's text is greyscale because it is
+            painted after a scroller, which is how the reference pictures have it. */}
         <View flexDirection="column" gap={8} minHeight={0} {...(fill ? { flexGrow: 1, flexShrink: 1, flexBasis: 0 } : {})}>
           <View flexDirection="row" alignItems="center" gap={8} flexShrink={0} minWidth={0}>
             <FilePath path={editorPathOf(source, e.shipped)} title={source.file} />
@@ -769,7 +768,7 @@ export function WorkflowEditor({
   );
 }
 
-/** `label.field.inline`: its name right-aligned in 78, gap 8, the control the rest, centred. */
+/** A field with its name beside it: the name right-aligned in 78, gap 8, the control the rest, centred. */
 function InlineField({ name, children }: { name: string; children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={8} minWidth={0}>

@@ -10,10 +10,10 @@ export { AUTOFILLED } from "./suggestModel";
 export type { Suggestion } from "./suggestModel";
 
 /**
- * A box's `<datalist>`, universal (decision 0015): the type-ahead Chromium opens under an `<input list>`
- * on the desktop — there a popup WINDOW of Electron's (`autofill_popup_view.cc`), drawn in the OS's
- * light or dark theme whatever the page's look, which a capture of the page never shows; here a float
- * drawn to the same measure (`suggestModel.ts` has the figures, the filter and the placing).
+ * A box's `<datalist>`: the type-ahead Chromium opens under an `<input list>` — in Electron a popup
+ * WINDOW of its own (`autofill_popup_view.cc`), drawn in the OS's light or dark theme whatever the
+ * page's look, which a capture of the page never shows; here a float drawn to the same measure
+ * (`suggestModel.ts` has the figures, the filter and the placing).
  *
  * When it opens and what the keys do are Electron's (`electron_autofill_agent.cc`, `HandleKeyPressEvent`):
  *

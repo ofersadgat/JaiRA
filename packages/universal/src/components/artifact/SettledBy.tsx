@@ -6,14 +6,13 @@ import { useTokens } from "../../tokens";
 import { Icon } from "../panel/Icon";
 
 /**
- * `remoteStripView.tsx`'s `SettledBy`, universal (decision 0015): how a gate answered on the forge says
- * so — nothing at all for one answered here. What it says is `remoteStrip.ts`'s (`settledByLines`). The
- * rules, from `styles.css`:
+ * How a gate answered on the forge says so — nothing at all for one answered here. What it says is
+ * `remoteStrip.ts`'s (`settledByLines`). How it looks:
  *
- *   .gate-settled-by      row, at the top, gap 8, 8 above, padding 8 10, radius --control-radius;
+ *   the box               row, at the top, gap 8, 8 above, padding 8 10, radius --control-radius;
  *                         --ok 9% into --panel, 1px --ok 35% into --line; app 12.5/12.5 on 1.5
- *   .gate-settled-by svg  14, --ok, flex none, 2 down
- *   ul                    4 above, 16 in, --dim; a disc per line (outside); `.warned` --warn
+ *   its check             14, --ok, never shrinking, 2 down
+ *   its lines             4 above, 16 in, --dim; a disc before each, outside it; a warning's --warn
  */
 export function SettledBy({ recorded }: { recorded: Record<string, unknown> }): JSX.Element | null {
   const t = useTokens();

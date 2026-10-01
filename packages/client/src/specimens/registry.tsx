@@ -17,10 +17,9 @@ import { VALUE_SPECIMENS } from "./valueSpecimens";
 
 /**
  * The specimens: a component drawn alone from a fixture, for `pair.mts --specimen <name>`, which holds
- * its picture against the reference picture of the same name (decision 0015). Each was a pair once — the
- * desktop's DOM component and its universal copy, from one fixture; the DOM halves went with the DOM
- * renderer (the tag `dom-renderer-final` has them), and what they drew is the reference picture.
- * Browser-only — imported from the `.web` specimen route.
+ * its picture against the reference picture of the same name (decision 0015). The reference pictures
+ * are of the DOM renderer drawing the same fixtures (the tag `dom-renderer-final` has that half of each
+ * specimen). Browser-only — imported from the `.web` specimen route.
  */
 export interface Specimen {
   /** The box it is drawn in, in CSS pixels, as the component's usual column is wide. */
@@ -86,9 +85,9 @@ const FILE: FileSource = {
 };
 
 export const SPECIMENS: Record<string, Specimen> = {
-  // The schema form's field kinds (`schemaForm/SchemaForm.tsx`): a run's or a gate's form, and Settings rows.
+  // The schema form's field kinds (`formSpecimens.tsx`): a run's or a gate's form, and Settings rows.
   ...FORM_SPECIMENS,
-  // The floats and dialogs `App.tsx` owns, and every stage of the Components room (`floatSpecimens.tsx`).
+  // The shell's floats and dialogs, and every stage of the Components room (`floatSpecimens.tsx`).
   ...FLOAT_SPECIMENS,
   // The transcript's pieces: work rows, pauses, compactions and the work summary (`transcriptSpecimens.tsx`).
   ...TRANSCRIPT_SPECIMENS,
@@ -113,12 +112,12 @@ export const SPECIMENS: Record<string, Specimen> = {
   ...ARTIFACT_SPECIMENS,
   // A box's `<datalist>` type-ahead, the Files room's last surfaces and the Debug session panel (`formsFilesSpecimens.tsx`).
   ...FORMS_FILES_SPECIMENS,
-  // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
+  // The data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,
     rn: () => <DataView value={DATA} />,
   },
-  // The ⓘ popover's contents on the Files address (`.facts-pop`: 320 wide, padding 12 — the box here).
+  // The ⓘ popover's contents on the Files address (the popover is 320 wide, padding 12 — the box here).
   "file-facts": {
     width: 296,
     rn: () => <FileInspector doc={FILE} />,

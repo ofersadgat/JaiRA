@@ -3,9 +3,9 @@ import { View } from "@tamagui/core";
 import Svg, { Defs, LinearGradient, Rect, Stop } from "react-native-svg";
 
 /**
- * `.chat-foot::before`: the thread fading into the ground the box sits on, over its last 18. A phone
+ * Over the chat's foot: the thread fading into the ground the box sits on, over its last 18. A phone
  * has no gradient ground, so the fade is drawn: the ground's colour from none of it to all of it.
- * `FootFade.web.tsx` is the stylesheet's gradient.
+ * `FootFade.web.tsx` is a CSS gradient.
  */
 export function FootFade({ color }: { color: string }): JSX.Element {
   return (

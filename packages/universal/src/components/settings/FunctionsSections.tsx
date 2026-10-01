@@ -46,25 +46,25 @@ import { SelectInput } from "./fields";
 import { SettingsSection } from "./SettingsPage";
 
 /**
- * `functionsPane.tsx`'s `FunctionsSections`, universal (decision 0015): every function a run can call —
- * the table of what each permission set gives a function an agent calls, and the list of the functions a
- * workflow calls with whether a run may reach them. What each row, column and cell says is
- * `functionsModel.ts`'s. The table is an HTML table on the desktop (auto layout, 100% wide): here its
- * columns are measured first, each as wide as its widest cell, and the room left over shared out in
- * proportion, as Chromium's auto table layout does.
+ * Every function a run can call: the table of what each permission set gives a function an agent
+ * calls, and the list of the functions a workflow calls with whether a run may reach them. What each
+ * row, column and cell says is `functionsModel.ts`'s. The table is laid out as a browser lays out an
+ * auto table 100% wide: its columns are measured first, each as wide as its widest cell, and the room
+ * left over shared out in proportion. How it looks:
  *
- *   .fx-table            app 11.5/12.5; every cell padding 4 7, a --line under it, centred, one line
- *   thead th             --panel-2, --dim, 500 at 10.5/12.5, to the bottom; a bucket's name data 600 --text
- *   .fx-bucket-start     a --line on its left
- *   .fx-group th         --panel-2, --dim, 600 at 9.5/12.5, 0.1em, upper, left, 7 above
- *   .fx-fn-button        500, --text; a command's 16 in; `.fx-what` --dim at 400, 8 after
- *   .fx-defaults         left, --dim, 10.5/12.5
- *   .fx-cell             at least 44, padding 0 7, round, 10.5/12.5 on 1.6, --text on --panel-3; allow --ok
+ *   the table            app 11.5/12.5; every cell padding 4 7, a --line under it, centred, one line
+ *   a head cell          --panel-2, --dim, 500 at 10.5/12.5, to the bottom; a bucket's name data 600 --text
+ *   a bucket's first set a --line on its left
+ *   a group's row        --panel-2, --dim, 600 at 9.5/12.5, 0.1em, upper, left, 7 above
+ *   a function's name    500, --text; a command's 16 in; what it is --dim at 400, 8 after
+ *   its defaults         left, --dim, 10.5/12.5
+ *   a cell's pill        at least 44, padding 0 7, round, 10.5/12.5 on 1.6, --text on --panel-3; allow --ok
  *                        on --tint-ok, deny --bad on --tint-bad, a function --accent on --tint-accent, none
- *                        --rule on nothing; here, ringed 1.5 --warn inside
- *   .fx-row.open         --tint-accent
- *   .fx-list-head        grid: minmax(110px, auto) 1fr auto auto 14, centred, gap 12, padding 9 16
- *   .fx-avail            10.5/12.5, padding 0 7, round, line 1.6; yes --ok on --tint-ok, no --bad on --tint-bad
+ *                        --rule on nothing; in a set this layer states, ringed 1.5 --warn inside
+ *   the open row         --tint-accent
+ *   a workflow function  a row: its name (at least 110), what it does (the room left), its defaults,
+ *                        the pill, a 14 chevron; centred, gap 12, padding 9 16
+ *   the available pill   10.5/12.5, padding 0 7, round, line 1.6; yes --ok on --tint-ok, no --bad on --tint-bad
  */
 export function FunctionsSections({
   data,
@@ -155,7 +155,7 @@ export function FunctionsSections({
   );
 }
 
-/** `.fx-rules`: padding 4 16 12, a --line above — the card's own rule between its children, the same border. */
+/** The rules under the list: padding 4 16 12. The --line above them is the card's own, between its children. */
 function FxRules({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View paddingTop={4} paddingHorizontal={16} paddingBottom={12}>
@@ -167,15 +167,15 @@ function FxRules({ children }: { children: ReactNode }): JSX.Element {
 type TableRow = { kind: "group"; label: string } | { kind: "fn"; name: string; sub: boolean; defaults: string; what?: string };
 
 const CELL = { voice: "app", scale: 11.5 / 12.5 } as const;
-/** A sub-row (`tr.sub`) takes the global `.sub` rule's size, 11/12.5, for what inherits it. */
+/** A sub-row (a command's or a runner's, under its tool) is set smaller: 11/12.5. */
 const SUB = { voice: "app", scale: 11 / 12.5 } as const;
 
 /**
- * The line box of a cell holding one inline-block (`.fx-cell`, 10.5/12.5 on 1.6) on the row's strut
+ * The line box of a table cell holding one inline-block (the pill, 10.5/12.5 on 1.6) on the row's strut
  * (its size, on 1.5), as Chromium lays it out — in DEVICE pixels: each font's ascent and descent
  * rounded to whole ones (DM Sans: 0.992 and 0.31 em), the line height floored to a 64th, the half
  * leading above floored to a whole one, and the two baselines aligned. It returns the line's height and
- * the block's top in it, in CSS pixels, or nothing where the sizes are CSS (the desktop's own page).
+ * the block's top in it, in CSS pixels, or nothing where the sizes are CSS lengths, not numbers.
  * Measured: a row's 17.25 and a sub-row's 17.1667, the pill at the line's top in both.
  */
 function cellLine(t: ReturnType<typeof useTokens>, strutScale: number, dpr: number): { line: number; top: number } | undefined {
@@ -198,7 +198,7 @@ function cellLine(t: ReturnType<typeof useTokens>, strutScale: number, dpr: numb
 function HeadCell({ column, first }: { column: SetColumn; first: boolean }): JSX.Element {
   return (
     <View alignItems="center">
-      {/* The bucket is a block on the th's 1.5 line. */}
+      {/* The bucket's name is a line of its own, on the head's 1.5. */}
       {first ? (
         <Txt spec={{ voice: "data", scale: (10.5 / 12.5) * (12.5 / 12), weight: 600, lineHeight: 1.5 }}>
           {column.bucket}
@@ -276,7 +276,7 @@ function CollapsedRule({ side }: { side: "bottom" | "left" }): JSX.Element {
 /**
  * The table: measured once (each column as wide as its widest cell, every cell drawn where nothing
  * sees it), then laid out row by row at those widths, the room left over shared in proportion. Its
- * rules are collapsed borders (`CollapsedRule`, `HALF`), as `.fx-table`'s are.
+ * rules are drawn as collapsed borders are (`CollapsedRule`, `HALF`).
  */
 function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { columns: SetColumn[]; rows: TableRow[]; open: string | null; onToggle: (name: string) => void; onOpenSet: (id: string) => void; detail: (name: string) => JSX.Element }): JSX.Element {
   const t = useTokens();
@@ -287,17 +287,17 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
   const fns = rows.filter((row): row is Extract<TableRow, { kind: "fn" }> => row.kind === "fn");
   const measured = natural.length === count && natural.every((w) => w !== undefined) && width !== undefined;
   const widths = measured ? shareOut(natural as number[], width) : undefined;
-  /** Whether column `i` starts a permission set's bucket (`.fx-bucket-start`, a rule on its left). */
+  /** Whether column `i` starts a permission set's bucket (a rule on its left). */
   const startsAt = (i: number): boolean => i >= 2 && starts[i - 2] === true;
-  /** A cell's padding (`th, td`: 4 7), and the halves of the rules on its sides. */
+  /** A cell's padding (4 7), and the halves of the rules on its sides. */
   const padOf = (i: number, head = false): object => ({
     paddingTop: 4 + (head ? 0 : HALF),
     paddingBottom: 4 + HALF,
     paddingLeft: 7 + (startsAt(i) ? HALF : 0),
     paddingRight: 7 + (startsAt(i + 1) ? HALF : 0),
   });
-  // The device's pixels. In a browser (the `/rn` page) the ones Chromium lays the page out in — the
-  // studio's 1.5, a 1px border drawn ⅔ wide — which `devicePixelRatio` there does not report (it reads 2).
+  // The device's pixels. In a browser, the ones Chromium lays the page out in — the studio's 1.5, a 1px
+  // border drawn ⅔ wide — which `devicePixelRatio` there does not report (it reads 2).
   const dpr = Platform.OS === "web" ? 1.5 : PixelRatio.get();
   const rowLine = cellLine(t, 11.5 / 12.5, dpr);
   const subLine = cellLine(t, 11 / 12.5, dpr);
@@ -345,7 +345,7 @@ function FunctionsTable({ columns, rows, open, onToggle, onOpenSet, detail }: { 
       {widths === undefined ? null : (
         <View flexDirection="column">
           <View flexDirection="row" alignItems="stretch">
-            {/* `th.fx-fn` is left-aligned; the Defaults head keeps the table's centre (only its cells are left). */}
+            {/* The Function head is left-aligned; the Defaults head keeps the table's centre (only its cells are left). */}
             {["Function", "Defaults"].map((word, i) => (
               <View key={word} width={widths[i]} {...padOf(i, true)} position="relative" backgroundColor={t.v("panel-2") as never} justifyContent="flex-end" alignItems={i === 0 ? "flex-start" : "center"}>
                 <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 500, color: "dim" }}>{word}</Txt>
@@ -529,10 +529,7 @@ function WorkflowFunction({
   );
 }
 
-/**
- * `executorTreePane.tsx`'s `RuleList`: an ordered list of `everything` / `nothing` / `+name` / `-name`,
- * last match winning — and a row to add one.
- */
+/** An ordered list of `everything` / `nothing` / `+name` / `-name`, last match winning — and a row to add one. */
 export function RuleList({ rules, known, disabled, onChange }: { rules: string[]; known: Array<{ name: string; what: string }>; disabled: boolean; onChange: (next: string[]) => void }): JSX.Element {
   const t = useTokens();
   const [sign, setSign] = useState<"+" | "-">("-");

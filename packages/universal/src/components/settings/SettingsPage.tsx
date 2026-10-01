@@ -9,32 +9,41 @@ import { SettingsLayerContext, useInheritLabel, useLayerRow } from "./layers";
 import { dropPart, partsMoved, placePart } from "./parts";
 
 /**
- * `settingsLayout.tsx`'s page, section and row, universal (decision 0015): the shape every Settings page
- * is built from. Read that file for what each is for; the rules they carry, from `styles.css`
- * (`cascade.mts '.set-page' --scene settings-appearance` prints them as Chromium applies them):
+ * The shape every Settings page is built from. Three pieces, each there to take a decision away from
+ * the page that uses it:
  *
- *   .set-page            column, gap 26, at most 1040 wide, padding 6 4 36
- *   .set-head            row, space-between, top-aligned, gap 16, never wraps; at most 740 wide
- *   .set-title           app 650 at 1.5×, line 1.2, -0.015em, --text
- *   .set-lead            app 400 at 1.04×, line 1.5, --dim, 5 above; its <b>: 600, --text
- *   .set-under           10 above (the Just you view's "Which rows")
- *   .set-head-aside      flex none, 2 down (the layer switch)
- *   .set-nothing         shown only when "What you changed" leaves nothing: 18 16 inside a dashed
+ *  - a page is a title, one sentence saying WHOSE settings these are, and its sections;
+ *  - a section is a quiet heading over ONE bordered card, and what the sidebar's accordion lists under
+ *    the open page and scrolls to (`parts.ts`);
+ *  - a row is one setting: its name, ONE sentence under it, and its control at the right edge, with a ↺
+ *    beside the name to put it back and an ⓘ holding whatever did not fit in the sentence.
+ *
+ * A row or a section that one layer may or may not state takes a `RowLayer` (`settingsRows.ts`): the
+ * control shows what is in effect and always edits it, the ↺ is there while the page's layer states
+ * it, and under "What you changed" it is drawn only then. How they look:
+ *
+ *   the page             column, gap 26, at most 1040 wide, padding 6 4 36
+ *   its head             row, space-between, top-aligned, gap 16, never wraps; at most 740 wide
+ *   the title            app 650 at 1.5×, line 1.2, -0.015em, --text
+ *   the lead             app 400 at 1.04×, line 1.5, --dim, 5 above; its bold parts: 600, --text
+ *   under the lead       10 above (the Just you view's "Which rows")
+ *   the head's aside     flex none, 2 down (the layer switch)
+ *   the "nothing" line   shown only when "What you changed" leaves nothing: 18 16 inside a dashed
  *                        --line, radius 12, --dim, at most 740 wide
- *   .set-section         column, gap 10, at most 740 wide (not `wide`); hidden under "What you changed"
+ *   a section            column, gap 10, at most 740 wide (not `wide`); hidden under "What you changed"
  *                        when it is not stated and none of its rows are drawn
- *   .set-section-title   row, centred, space-between, gap 12, at least 26 tall, 16 in; app 450 at 1.1×,
+ *   its heading          row, centred, space-between, gap 12, at least 26 tall, 16 in; app 450 at 1.1×,
  *                        line 1.3, -0.005em, --text at 68%; the name a row with its ↺ and ⓘ, gap 6
- *   .set-section-lead    a `.cfg-hint` (app 11/12.5, line 1.4, --dim) 16 in, at most 72ch, 4 closer
- *   .set-group           1px --line, radius 12, --panel, a 0 1 2 shadow at 3%; a --line between its
+ *   its lead             a hint (app 11/12.5, line 1.4, --dim) 16 in, at most 72ch, 4 closer
+ *   a card               1px --line, radius 12, --panel, a 0 1 2 shadow at 3%; a --line between its
  *                        children; under 540 wide its rows stack
- *   .set-row             padding 13 16; the line a row: the words (flex, min 0) and the control
+ *   a row                padding 13 16; the line a row: the words (flex, min 0) and the control
  *                        (its own width), centred, 32 apart
- *   .set-name            row, centred, gap 6, at least 20 tall; app 550 at 1.1×, line 1.3, --text
- *   .set-desc            app at 1.03×, line 1.45, --dim, 3 above, at most 62ch
- *   .set-instead         italic, --dim
- *   .set-ctl             row, centred, right-aligned, gap 8
- *   .set-icon            ↺ and ⓘ: 20 square, centred, radius 5, --dim at 0.96×, line 1; ↺ hovered
+ *   its name             row, centred, gap 6, at least 20 tall; app 550 at 1.1×, line 1.3, --text
+ *   its sentence         app at 1.03×, line 1.45, --dim, 3 above, at most 62ch
+ *   its "instead" line   italic, --dim
+ *   its control          row, centred, right-aligned, gap 8
+ *   ↺ and ⓘ              20 square, centred, radius 5, --dim at 0.96×, line 1; ↺ hovered
  *                        --fill-ghost-hover and --text
  */
 
@@ -50,7 +59,7 @@ export function chOf(t: ReturnType<typeof useTokens>, n: number, scale: number):
 /** Whether "What you changed" left anything on the page: every row and stated section drawn says so. */
 const PageContext = createContext<{ mark: (key: object, drawn: boolean) => void } | null>(null);
 
-/** A row of the page that counts as drawn — `.cfg-field`, `.set-row:not(.full)`, `.cfg-row` in the CSS's `:has()`. */
+/** A row of the page that counts as drawn: a form's field, a `SettingsRow` that is not `full`, a connection's row. */
 export function useDrawnRow(drawn: boolean): void {
   const page = useContext(PageContext);
   const section = useContext(SectionContext);
@@ -172,7 +181,7 @@ export function InheritButton({ label, onInherit, disabled }: { label: string; o
   );
 }
 
-/** `ResetButton`: ↺ — put this setting back to what it would be untouched. */
+/** ↺ — put this setting back to what it would be untouched. */
 export function ResetButton({ label, onReset, disabled }: { label: string; onReset: () => void; disabled?: boolean | undefined }): JSX.Element {
   return <InheritButton label={label} onInherit={onReset} disabled={disabled} />;
 }
@@ -194,7 +203,7 @@ function LayerInherit({ layer }: { layer: RowLayer }): JSX.Element | null {
   return layer.stated ? <InheritButton label={label} onInherit={layer.onInherit} disabled={layer.disabled} /> : null;
 }
 
-/** A section's heading and its `.set-section-lead` lines. */
+/** A section's heading: its name with its ↺ and ⓘ, and what the page puts at its right end. */
 function SectionTitle({ title, info, action, layer }: { title: string; info?: string | undefined; action?: ReactNode; layer?: RowLayer | undefined }): JSX.Element {
   const t = useTokens();
   return (
@@ -209,7 +218,7 @@ function SectionTitle({ title, info, action, layer }: { title: string; info?: st
   );
 }
 
-/** A `.set-section-lead cfg-hint` line under a heading. */
+/** A hint's line under a section's heading. */
 function SectionLead({ children, italic = false }: { children: ReactNode; italic?: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -285,8 +294,8 @@ const GroupContext = createContext<{ narrow: boolean }>({ narrow: false });
 const SlotContext = createContext<((hidden: boolean) => void) | null>(null);
 
 /**
- * `.set-group`: one card, a --line between whatever it holds. A child that draws nothing (a row the
- * Just you view leaves out) says so through its slot, so no line is drawn for it — the DOM's `* + *`.
+ * One card, a --line between whatever it holds. A child that draws nothing (a row the Just you view
+ * leaves out) says so through its slot, so no line is drawn for it.
  */
 export function SettingsGroup({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -322,7 +331,7 @@ export function SettingsGroup({ children }: { children: ReactNode }): JSX.Elemen
           if (!hidden.has(i)) before = true;
           return (
             <SlotContext.Provider key={i} value={setters[i]!}>
-              {/* A border, not a 1px box: Chromium draws a 1px border a whole device pixel wide (⅔ of a px at 1.5×), as the DOM's `border-top` is. */}
+              {/* A border, not a 1px box: Chromium draws a 1px border a whole device pixel wide (⅔ of a px at 1.5×). */}
               {line ? <View height={0} {...(edge(t, { top: 1 }) as object)} /> : null}
               {item}
             </SlotContext.Provider>

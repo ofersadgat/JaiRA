@@ -1,7 +1,6 @@
 /**
- * What each view of a value is called on its button, and what the button's tooltip says it does —
- * `valueView.tsx`'s `VIEW_META`, here so the universal value view (decision 0015,
- * `packages/universal/src/components/panel/ValueView.tsx`) names its views with the same words.
+ * What each view of a value is called on its button, and what the button's tooltip says it does: the
+ * words `ValueView` (`packages/universal/src/components/panel/ValueView.tsx`) names its views with.
  */
 import { extensionForMime, type RendererId, type ViewId } from "@jaira/shared/browser";
 
@@ -61,8 +60,8 @@ export function base64Of(text: string): string {
 }
 
 /**
- * What each key of a value means, by the path of the object it sits in — `JsonView`'s reader of the
- * schema the value was declared against, here so the universal value view ghosts the same words.
+ * What each key of a value means, by the path of the object it sits in — read from the schema the
+ * value was declared against, for the JSON reading to ghost at the end of each key's line.
  *
  * Walks the schema itself rather than going through the registry the editor uses: this is handed a
  * schema, not a document type, so there is nothing to look up. Absent members simply answer
@@ -101,7 +100,7 @@ function itemsOf(schema: unknown): unknown {
   return (schema as Record<string, unknown>)["items"];
 }
 
-/** A line's hint as drawn: the first 80 characters, and `…` past them (`JsonView`). */
+/** A line's hint as drawn: the first 80 characters, and `…` past them. */
 export function hintText(hint: string): string {
   return hint.length > 80 ? `${hint.slice(0, 80)}…` : hint;
 }

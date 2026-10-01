@@ -24,37 +24,36 @@ import { AskDialog } from "./AskDialog";
 import { Chip } from "./Chip";
 
 /**
- * `files.tsx`'s `FileTreePanel`, universal (decision 0015): the Files drawer under the sidebar's Files
- * row — every root's tree, folded as the person left it, the `+` on a folder and on a named root, the
- * row a new name is typed into, and the find field. What each row says is `treeRowOf`, what a `+`
- * offers is `newItems`, where a draft is drawn is `anchorIn` (`filesModel.ts`, the desktop's own).
- * The rules, from `styles.css` (`cascade.mts .file-browser --scene files`):
+ * The Files drawer under the sidebar's Files row — every root's tree, folded as the person left it,
+ * the `+` on a folder and on a named root, the row a new name is typed into, and the find field. What
+ * each row says is `treeRowOf`, what a `+` offers is `newItems`, where a draft is drawn is `anchorIn`
+ * (`filesModel.ts`). How it looks:
  *
- *   .file-browser     column, flex 1, gap 8, padding 2 0 4
- *   .scroll           flex 1, scrolls
- *   .file-tree        12.5/12.5 app, 10 below
- *   .tree-root        row, centred, gap 5, padding 8 6 4, --dim, app 10.5/12.5, uppercase, 0.08em; its
- *                     name data-secondary (the letter spacing and case inherited), taking the slack but
- *                     on Built in (`.is-readonly`), whose chip keeps no case or spacing
- *   .tree-item        row, centred, gap 5, padding 3 6, radius 5; hovered --fill-ghost-hover; selected
- *                     --fill-ghost-selected and 600 (inherited by all of it); inert --dim; shadowed at
- *                     .55 and the name struck through
- *   .tree-guide       13 wide, the row's height (-3 above and below), -5 right (the gap), a 1px rule on
+ *   the drawer        column, flex 1, gap 8, padding 2 0 4
+ *   its scroller      flex 1, scrolls
+ *   a root's tree     12.5/12.5 app, 10 below
+ *   a root's row      row, centred, gap 5, padding 8 6 4, --dim, app 10.5/12.5, uppercase, 0.08em; its
+ *                     name data-secondary (in the row's letter spacing and case), taking the slack but
+ *                     on Built in, whose chip keeps no case or spacing
+ *   a row             row, centred, gap 5, padding 3 6, radius 5; hovered --fill-ghost-hover; selected
+ *                     --fill-ghost-selected and 600 (all of it); inert --dim; shadowed at .55 and the
+ *                     name struck through
+ *   a guide           13 wide, the row's height (-3 above and below), -5 right (the gap), a 1px rule on
  *                     its left: --rule on the last, --line on the ones before it
- *   .glyph            13 wide, centred, app 10/12.5, --dim
- *   .name             data 11.5/12, the slack, one line cut with "…"; --bad with an error, --warn with a
+ *   the glyph         13 wide, centred, app 10/12.5, --dim
+ *   the name          data 11.5/12, the slack, one line cut with "…"; --bad with an error, --warn with a
  *                     warning, at .6 and italic unchecked
- *   .lint-dot         app 8/12.5, line 1; --bad or --warn.   .dirty-dot  the same in --accent
- *   .tree-add         16 square, radius 4, app 12/12.5, line 1, --dim; hidden (opacity 0) until the row
+ *   the lint dot      app 8/12.5, line 1; --bad or --warn.   The unsaved dot  the same in --accent
+ *   the `+`           16 square, radius 4, app 12/12.5, line 1, --dim; hidden (opacity 0) until the row
  *                     is hovered; hovered --text on --fill-ghost-selected
- *   .root-empty       --dim, padding 2 6 6 19, app 11/12.5, line 1.45
- *   .tree-draft       no hover ground; .draft-lead --dim data 11.5/12; .draft-name the same face in
- *                     --text, a --accent rule under it
- *   input.tree-find   --bg, 1px --line (--rule hovered), radius --control-radius, padding 5 9
+ *   an empty root     --dim, padding 2 6 6 19, app 11/12.5, line 1.45
+ *   the draft row     no hover ground; what is missing above it --dim data 11.5/12; the name the same
+ *                     face in --text, a --accent rule under it
+ *   the find field    --bg, 1px --line (--rule hovered), radius --control-radius, padding 5 9
  *
  * A row's and a root's own menu (open, new, rename, duplicate, delete, override, copy path) is
- * `treeMenus` — the desktop's right-click; here a long press, or a right-click on web — with the second
- * ask a refused one makes, in {@link AskDialog}.
+ * `treeMenus` — a right-click on web, a long press on a phone — with the second ask a refused one
+ * makes, in {@link AskDialog}.
  */
 export interface FileTreePanelProps {
   tree: FileTree | null;
@@ -78,10 +77,9 @@ export interface FileTreePanelProps {
   onUnfold: (keys: readonly string[]) => void;
   project?: string | null;
   /**
-   * Where the tree's menus are drawn, when the host draws them: outside the sidebar, as the desktop's
-   * `Popover` portals a menu into `<body>` — so it takes the window's tokens, not the sidebar's
-   * (`.sidebar` redefines --panel, --text …). Drawn here if absent. The ASK is drawn here always: the
-   * desktop's `AskDialog` is not portalled, and wears the sidebar's variables.
+   * Where the tree's menus are drawn, when the host draws them: outside the sidebar — so a menu takes
+   * the window's tokens, not the sidebar's (which redefines --panel, --text …). Drawn here if absent.
+   * The ASK is drawn here always, and wears the sidebar's variables.
    */
   floats?: { menu: (menu: MenuAt | null) => void };
 }
@@ -118,13 +116,13 @@ export function FileTreePanel({
   const setMenu = floats?.menu ?? setOwnMenu;
   const setAsk = setOwnAsk;
 
-  /** Start typing a name, having first made the place it lands visible (`FileTreePanel.startDraft`). */
+  /** Start typing a name, having first made the place it lands visible. */
   const startDraft = (next: TreeDraft): void => {
     const missing = next.reveal.filter((key) => !expanded.has(key));
     if (missing.length > 0) onUnfold(missing);
     onDraft(next);
   };
-  /** What the typed name becomes (`FileTreePanel.commitDraft`). */
+  /** What the typed name becomes. */
   const commitDraft = (name: string): void => {
     if (draft === null) return;
     onDraft(null);
@@ -156,7 +154,7 @@ export function FileTreePanel({
       ) : null}
       <ScrollView {...(scrollbarProps(t) as object)} // No layer of its own on web: react-native-web's `translateZ(0)` makes one, over a transparent
         // ground, and Chromium then draws the names in greyscale rather than the page's LCD antialiasing —
-        // and no stacking context (`PLAIN_SCROLLER`): `.scroll` is painted where it stands in the page.
+        // and no stacking context (`PLAIN_SCROLLER`): the scroller is painted where it stands in the page.
         style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never} contentContainerStyle={{ flexDirection: "column", ...PLAIN_SCROLLER } as never}>
         {tree === null ? (
           <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>
@@ -205,11 +203,11 @@ export function FileTreePanel({
   );
 }
 
-/** `li.tree-root`: a root the drawer is not standing in — its name, and its `+` (or Built in's chip). */
+/** A root the drawer is not standing in — its name, and its `+` (or Built in's chip). */
 function RootRow({ root, writable, onNew, onMenu }: { root: FileRoot; writable: boolean; onNew: (x: number, y: number) => void; onMenu: (x: number, y: number) => void }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
-  // The root's own letter spacing (0.08em of its 10.5/12.5), which its name inherits at a smaller size.
+  // The root row's letter spacing (0.08em of its 10.5/12.5), which its name keeps at its own smaller size.
   const spacing = t.replayed ? Number(t.scaled("size-app", 10.5 / 12.5)) * 0.08 : "calc(var(--size-app) * 10.5 / 12.5 * 0.08)";
   return (
     <View {...(hover as object)} {...(rightClick(onMenu) as object)} {...((isWeb ? { title: root.dir } : {}) as object)} flexDirection="row" alignItems="center" gap={5} paddingTop={8} paddingHorizontal={6} paddingBottom={4}>
@@ -225,7 +223,7 @@ function RootRow({ root, writable, onNew, onMenu }: { root: FileRoot; writable: 
   );
 }
 
-/** `button.tree-add`: a folder's (or a root's) `+`, hidden until its row is hovered. */
+/** A folder's (or a root's) `+`, hidden until its row is hovered. */
 function AddButton({ label, shown, onNew }: { label: string; shown: boolean; onNew: (x: number, y: number) => void }): JSX.Element {
   const t = useTokens();
   const at = useRef<RNView>(null);
@@ -374,7 +372,7 @@ function TreeNode({
   );
 }
 
-/** `li.tree-draft`: the row a new name is typed into, where what it names will be (`DraftRow`). */
+/** The row a new name is typed into, where what it names will be. */
 function DraftRow({ draft, depth, missing, onCommit, onCancel }: { draft: TreeDraft; depth: number; missing: string; onCommit: (name: string) => void; onCancel: () => void }): JSX.Element {
   const t = useTokens();
   const [name, setName] = useState("");
@@ -427,7 +425,7 @@ function DraftRow({ draft, depth, missing, onCommit, onCancel }: { draft: TreeDr
   );
 }
 
-/** `input.tree-find`: the Files row's find verb, a filter over every root's files. */
+/** The Files row's find verb: a filter over every root's files. */
 function FindField({ value, onChange }: { value: string; onChange: (value: string) => void }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
@@ -438,7 +436,7 @@ function FindField({ value, onChange }: { value: string; onChange: (value: strin
         autoFocus
         value={value}
         placeholder="Filter…"
-        // Chromium's own placeholder ink (`::placeholder`: #757575), which the desktop's field keeps.
+        // Chromium's own placeholder ink (`::placeholder`: #757575).
         placeholderTextColor="#757575"
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
@@ -456,7 +454,7 @@ function FindField({ value, onChange }: { value: string; onChange: (value: strin
           borderStyle: "solid",
           borderColor: t.v(hovered ? "rule" : "line"),
           borderRadius: t.v("control-radius"),
-          // `:focus-visible`: a 2px --focus-ring outline, 1 outside the box (web; a phone draws none).
+          // Focused: a 2px --focus-ring outline, 1 outside the box (web; a phone draws none).
           ...(isWeb ? (focused ? { outlineWidth: 2, outlineStyle: "solid", outlineColor: t.v("focus-ring"), outlineOffset: 1 } : { outlineStyle: "none" }) : {}),
         } as never}
       />
@@ -467,8 +465,8 @@ function FindField({ value, onChange }: { value: string; onChange: (value: strin
 
 
 /**
- * The desktop's gesture for a row's menu, on web: a right-click, at the pointer. A phone has none; a
- * row takes a long press instead (a root row's menu is the desktop's only).
+ * The gesture for a row's menu on web: a right-click, at the pointer. A phone has none; a row takes a
+ * long press instead (a root row's menu is web only).
  */
 function rightClick(onMenu: (x: number, y: number) => void): Record<string, unknown> {
   if (!isWeb) return {};

@@ -59,8 +59,7 @@ export const PANE = {
 /**
  * What each pane opens at, and what a double-click on its divider restores.
  *
- * These are the numbers the stylesheet used to hard-code, and then the shell did. `filesViewer` is
- * roughly the 46% the stylesheet gave the viewer on a full-height window.
+ * `filesViewer` is roughly 46% of a full-height window.
  */
 export const PANE_DEFAULTS: Record<string, number> = {
   [PANE.shellSidebar]: 250,
@@ -114,7 +113,7 @@ export const FOLD = {
   /*
    * `shell.files`, `shell.sections` and `shell.chats` were here, one per drawer in the sidebar.
    *
-   * There are no such folds any more (see `sidebar.tsx`): a drawer is shown exactly while its view
+   * There are no such folds any more: a drawer is shown exactly while its view
    * is the one selected, so there is no second state to remember. The ids are named here rather
    * than merely deleted because a settings file written before this still carries them — reading an
    * unknown key costs nothing, and the alternative was giving a future control one of these names
@@ -163,7 +162,7 @@ export const FOLD_DEFAULTS: Record<string, boolean> = {
  */
 export const SHUT = {
   /**
-   * Folded STATES in a run's conversation — see `Sheet` in `sessionPanels.tsx`.
+   * Folded STATES in a run's conversation — see `Sheet` in the universal tree's `SessionBands.tsx`.
    *
    * One bucket for every run in every project rather than one per session, and the keys are what
    * makes that safe: a state is remembered as `run:instance:seq`, which is already the identity the

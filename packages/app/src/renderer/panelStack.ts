@@ -154,7 +154,7 @@ export function forward(stack: PanelStack): PanelStack {
 /**
  * The ways a browser's history is walked, walking a panel's: Alt+← back and Alt+→ forward, and the
  * mouse's own back and forward buttons (3 and 4). The step to take, or `undefined` for a key or a button
- * that is not one of them. Shared with the universal copy.
+ * that is not one of them.
  */
 export function historyKey(event: { altKey: boolean; key: string }): ((stack: PanelStack) => PanelStack) | undefined {
   if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return undefined;

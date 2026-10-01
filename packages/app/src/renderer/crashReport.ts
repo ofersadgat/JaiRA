@@ -1,8 +1,8 @@
 /**
- * What the crash screen reports, apart from how it is drawn — shared by `crashScreen.tsx` and the
- * universal copy a phone draws (`packages/universal/src/components/floats/CrashScreen.tsx`), so the
- * words, the one notification that is not a failure, and the sink the banner listens on are one
- * thing on both. See `crashScreen.tsx`'s header for the two nets and why both exist.
+ * What the crash screen reports, apart from how it is drawn
+ * (`packages/universal/src/components/floats/CrashScreen.tsx`): the words, the one notification that is
+ * not a failure, and the sink the banner listens on. See `CrashScreen.tsx`'s header for the two nets and
+ * why both exist.
  */
 
 /** An error as text worth pasting: the message, and the frames under it. */
@@ -34,7 +34,7 @@ export function isResizeNotification(message: unknown): boolean {
   return message.includes("ResizeObserver loop completed") || message.includes("ResizeObserver loop limit exceeded");
 }
 
-/** A failure with no render to belong to — see `crashScreen.tsx`'s header. */
+/** A failure with no render to belong to — see `CrashScreen.tsx`'s header. */
 export interface LooseError {
   at: number;
   text: string;

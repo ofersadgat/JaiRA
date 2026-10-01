@@ -20,29 +20,29 @@ import { ChipCard } from "./ComposerCards";
 import { Turn } from "../Turn";
 
 /**
- * `usageMeters.tsx`'s composer pieces, universal (decision 0015): the line over the box when the account
- * has nothing left (`SpentNotice`), the account's card (`AccountPopover`), the conversation's context
- * card (`ContextDetail`), and the figures beside a route and a model in the model menu (`RouteLeft`,
- * `ModelWindow`). What each says is `usageCards.ts`'s, the desktop's own. The rules, from `styles.css`:
+ * The composer's usage pieces: the line over the box when the account has nothing left (`SpentLine`),
+ * the account's card (`AccountCard`), the conversation's context card (`ContextCard`), and the figures
+ * beside a route and a model in the model menu (`RouteLeft`, `ModelWindow`). What each says is
+ * `usageCards.ts`'s. How they look:
  *
- *   .um-limitline      row, centred, gap 8, margin 8 8 0, padding 6 10, radius 8, --tint-bad, app 12.5/12.5;
- *                      the clock --bad; `b` 600
- *   .um-pop            no padding; .um-acctpop 370 wide, .um-pop-context 380; its head 10 14 4
- *   .um-sec            column, gap 8, padding 10 14 12; a --line between two
- *   .um-sec-head       row, centred, gap 7; the mark 13; the title app 600 12.5/12.5; the sub pushed
+ *   the spent line     row, centred, gap 8, margin 8 8 0, padding 6 10, radius 8, --tint-bad, app 12.5/12.5;
+ *                      the clock --bad; its lead 600
+ *   a usage card       no padding; the account's 370 wide, the context's 380; its head 10 14 4
+ *   a section          column, gap 8, padding 10 14 12; a --line between two
+ *   its head           row, centred, gap 7; the mark 13; the title app 600 12.5/12.5; the sub pushed
  *                      right, app 11.5/12.5 --dim
- *   .um-big            row, baseline, gap 8; the figure data 600 22/1, −0.02em, tabular; `of` app 12/12.5 --dim
- *   .um-rows           column, gap 7; a row: name (1fr) · bar (≥ 48, .8fr) · value 38 · reset, gap 9,
+ *   the big figure     row, baseline, gap 8; the figure data 600 22/1, −0.02em, tabular; `of` app 12/12.5 --dim
+ *   the windows        column, gap 7; a row: name (1fr) · bar (≥ 48, .8fr) · value 38 · reset, gap 9,
  *                      app 12/12.5; the value data 500 11.5/1 right, the reset 11px --dim
- *   .um-bar            6 tall, radius 3, --dim 16%; its fill the tone's colour
- *   .um-foot           row, centred, gap 8, 2 above, at least 24; the age 11px --dim
- *   .um-route          row, gap 5, pushed right, 6 before; its bar 22 × 4; the figure data 500 10.5/1, ≥ 28
+ *   a bar              6 tall, radius 3, --dim 16%; its fill the tone's colour
+ *   the foot           row, centred, gap 8, 2 above, at least 24; the age 11px --dim
+ *   a route's figure   row, gap 5, pushed right, 6 before; its bar 22 × 4; the figure data 500 10.5/1, ≥ 28
  */
 
 const TONE: Record<string, string> = { accent: "accent", warn: "warn", bad: "bad", none: "rule" };
 const INK: Record<string, string> = { accent: "text", warn: "warn", bad: "bad", none: "dim" };
 
-/** `.um-bar`: how much is used, in the tone's colour. */
+/** A bar: how much is used, in the tone's colour. */
 export function Bar({ pct, tone, width, height = 6 }: { pct: number | null; tone: string; width?: number | string; height?: number }): JSX.Element {
   const t = useTokens();
   return (
@@ -52,7 +52,7 @@ export function Bar({ pct, tone, width, height = 6 }: { pct: number | null; tone
   );
 }
 
-/** `.um-route-n`: data 500 10.5px on a line of 1, tabular, at least 28, right. */
+/** A route's figure: data 500 10.5px on a line of 1, tabular, at least 28, right. */
 function RouteFigure({ text, tone }: { text: string; tone: string }): JSX.Element {
   return (
     <Txt spec={{ voice: "data", scale: 10.5 / 12, weight: 500, color: INK[tone] ?? "dim", tabular: true, lineHeight: { px: 10.5 } }} fontSize={10.5} minWidth={28} textAlign="right">
@@ -93,7 +93,7 @@ export function ModelWindow({ route, model }: { route: string; model: string }):
   );
 }
 
-/** `SpentNotice`: over the composer while the account behind the route has nothing left. */
+/** The line over the composer while the account behind the route has nothing left. */
 export function SpentLine({ route }: { route: string | undefined }): JSX.Element | null {
   const t = useTokens();
   const limits = useLimits();
@@ -113,7 +113,7 @@ export function SpentLine({ route }: { route: string | undefined }): JSX.Element
   );
 }
 
-/** `.um-sec`: one section of a usage card. */
+/** One section of a usage card. */
 function Section({ children, first }: { children: React.ReactNode; first: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -150,7 +150,7 @@ function Big({ n, of, tone }: { n: string; of: string; tone?: string | undefined
   );
 }
 
-/** `.um-row`: name · bar · value · reset. */
+/** A window's row: name · bar · value · reset. */
 function WindowLine({ name, sub, pct, tone, value, reset, passed = false, money = false }: { name: string; sub?: string | undefined; pct?: number | null | undefined; tone: string; value: string; reset: string; passed?: boolean; money?: boolean }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={9} opacity={passed ? 0.6 : 1}>
@@ -178,9 +178,9 @@ function WindowLine({ name, sub, pct, tone, value, reset, passed = false, money 
 }
 
 /**
- * `AccountPopover`: every window of one account, when each resets, how old the reading is — and the
- * other accounts. The composer's is 370 wide from the chip's start; Connections' (`.um-cpop`) 330 from
- * the figure's end.
+ * The account's card: every window of one account, when each resets, how old the reading is — and the
+ * other accounts. The composer's is 370 wide from the chip's start; Connections' 330 from the figure's
+ * end.
  */
 export function AccountCard({ anchor, account, cost, others, width = 370, align = "start", onClose }: { anchor: FloatRect; account: LimitAccountView; cost?: number | undefined; others: readonly LimitAccountView[]; width?: number; align?: "start" | "end"; onClose: () => void }): JSX.Element {
   useLimitsWatch(true);
@@ -247,7 +247,7 @@ export function AccountCard({ anchor, account, cost, others, width = 370, align 
               <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>refreshing…</Txt>
             </View>
           ) : account.refreshable ? (
-            // `.um-refresh`: the icon at the words' size (`1em`), 5 before them.
+            // Refresh: the icon at the words' size, 5 before them.
             <Button kind="ghost" onPress={() => refreshAccount(account.key)} paddingVertical={2} paddingHorizontal={7}>
               <Icon name="refresh" size={Number(t.scaled("size-app", 11.5 / 12.5)) || 11.5} color={String(t.v("text"))} />
               <Txt spec={{ voice: "app", scale: 11.5 / 12.5 }} numberOfLines={1}>
@@ -271,7 +271,7 @@ export function AccountCard({ anchor, account, cost, others, width = 370, align 
   );
 }
 
-/** `.um-spin`: a 10 ring of --dim 30%, its top --accent, stroked 1.6, turning. */
+/** The refreshing spinner: a 10 ring of --dim 30%, its top --accent, stroked 1.6, turning. */
 function UmSpin(): JSX.Element {
   const t = useTokens();
   return (
@@ -284,7 +284,7 @@ function UmSpin(): JSX.Element {
 /** One line of "Your other accounts": 14 · name · bar 40 · value 34, gap 8, padding 4 6. */
 function OtherAccount({ account, now }: { account: LimitAccountView; now: number }): JSX.Element {
   const words = { voice: "app" as const, scale: 12 / 12.5 };
-  // `.um-other.is-dim`: a row with no reading is --dim through, its mark's `currentColor` too.
+  // A row with no reading is --dim through, its mark too.
   const head = (dim = false): JSX.Element => (
     <>
       <View width={14} flexShrink={0}>
@@ -334,7 +334,7 @@ function OtherAccount({ account, now }: { account: LimitAccountView; now: number
   );
 }
 
-/** `ContextDetail` in its card: the figure, the breakdown and its detail on hover, and Compact now. */
+/** The context's card: the figure, the breakdown and its detail on hover, and Compact now. */
 export function ContextCard({ anchor, context, route, busy, onCompact, onClose }: { anchor: FloatRect; context: ContextReading | null | undefined; route?: string | undefined; busy?: boolean | undefined; onCompact?: ((focus?: string) => void) | undefined; onClose: () => void }): JSX.Element {
   const t = useTokens();
   const [shown, setShown] = useState<string | undefined>(undefined);

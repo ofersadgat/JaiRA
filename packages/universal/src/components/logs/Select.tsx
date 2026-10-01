@@ -11,11 +11,11 @@ import { MenulistArrow } from "../form/MenulistArrow";
 import { selectKeyProps } from "../form/selectKeys";
 
 /**
- * A plain `<select>`, universal (decision 0015) — the one `styles.css` styles as `input, textarea,
- * select` with no class, which the Logs room's bar and its Configure panel use. (Settings' `SelectInput`
- * is `select.cfg-input`, a different padding and size.) The rules it carries:
+ * A plain select, its closed box drawn as Chromium draws a `<select>`'s (a menulist) — the one the
+ * Logs room's bar and its Configure panel use. (Settings' `SelectInput` has a different padding and
+ * size.) How it looks:
  *
- *   select               font: inherit (the body's: app at 13/12.5), --text on --bg, 1px --line
+ *   the box              the body's font (app at 13/12.5), --text on --bg, 1px --line
  *                        (hovered --rule), radius --control-radius, padding 5 9. Chromium's menulist
  *                        draws its text on a `normal` line (DM Sans: 1.3867), 3 in from the padding, and
  *                        keeps room for its arrow after it (40.6 wider than the text in all); the arrow
@@ -23,9 +23,9 @@ import { selectKeyProps } from "../form/selectKeys";
  *                        device pixel: the widest choice rounded UP to a whole one, then 20 for the
  *                        inset and the arrow (`MENULIST_SNAPPED`) — measured over eight selects at 1.5×,
  *                        each `ceil(text) + 59` device pixels wide (2 of border, 27 of padding, 30).
- *   .logs-bar select     width auto, flex none, min-width 150
+ *   in the Logs bar      as wide as its widest choice, never shrinking, at least 150
  *
- * Options may come in groups (`<optgroup>`): the menu lists a group's label, disabled, over its entries.
+ * Options may come in groups: the menu lists a group's label, disabled, over its entries.
  */
 export interface SelectOption {
   label: string;
@@ -124,7 +124,7 @@ export function Select({
   );
 }
 
-/** `logs.tsx`'s `SourceSelect`: every source, grouped by its first dot-segment. */
+/** The select of a log source: every source, grouped by its first dot-segment. */
 export function SourceSelect({ value, sources, onChange, label = "Source", minWidth }: { value: string; sources: string[]; onChange: (value: string) => void; label?: string; minWidth?: number }): JSX.Element {
   const groups = useMemo(() => sourceGroups(sources), [sources]);
   const options: (SelectOption | SelectGroup)[] = [

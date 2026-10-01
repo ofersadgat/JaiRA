@@ -7,12 +7,11 @@ import { ApprovalDialog, ModuleApprovalDialog } from "./Dialogs";
 import { Toast } from "./Toast";
 
 /**
- * The dialogs `App.tsx` raises on its own, over whatever room is showing (decision 0015): a workflow's
- * modules to trust before it starts (first — it is asked before any run exists), else a command approval
- * that names no task; and a folder to set up as a project. What they say and when is `appDialogs.ts`'s,
- * shared with the desktop. The folder browser (`FolderBrowser.tsx`) is opened from the sidebar's
- * project chooser, which the universal sidebar does not draw yet. Last, as `App.tsx` mounts it last, the
- * toast: the store's error, or its notice.
+ * The dialogs the shell raises on its own, over whatever room is showing: a workflow's modules to trust
+ * before it starts (first — it is asked before any run exists), else a command approval that names no
+ * task; and a folder to set up as a project. What they say and when is `appDialogs.ts`'s. The folder
+ * browser (`FolderBrowser.tsx`) is not here: the sidebar's project chooser opens it
+ * (`SidebarRegion.tsx`). Last, the toast: the store's error, or its notice.
  */
 export function ShellFloats(): JSX.Element {
   const { state, actions } = useShell();

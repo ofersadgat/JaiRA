@@ -1,7 +1,7 @@
 /**
- * What the Debug room derives, for both shells (decision 0015): the desktop's `DebugPane` (`debugPane.tsx`)
- * and its universal copy (`packages/universal/src/components/debug/`). Moved here from `debugPane.tsx`
- * unchanged; the reasoning behind each is in that file's header.
+ * What the Debug room derives — what a run's outputs prove, which layer a state file loads from, who
+ * could answer the live run. `DebugPane` (`packages/universal/src/components/debug/DebugPane.tsx`)
+ * draws from it.
  */
 import type { AvailabilitySnapshot, TaskDetail } from "@jaira/shared/browser";
 import type { DebugFile, DebugState } from "./store";

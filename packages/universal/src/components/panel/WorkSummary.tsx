@@ -35,45 +35,45 @@ import { Icon, type IconName } from "./Icon";
 import { ShellLine } from "./WorkRows";
 
 /**
- * `workSummaryView.tsx`'s `WorkSummary`, universal (decision 0015): the work between two messages,
- * summarised — a box of phases (a number, a name, a chip per kind of work, the first line of its
- * thinking, how long it took), the latest steps of the phase in progress, and the foot, "Every step",
- * that opens every row in place. Everything that counts something opens the rows it counts in a hover
- * card (web; a press on a phone). What it says is `workSummary.ts`'s; the settings, the read-only judge
- * and the approval its host can answer are `workSummaryContext.ts`'s providers, the desktop's own. The
- * rules, from `styles.css`:
+ * The work between two messages, summarised — a box of phases (a number, a name, a chip per kind of
+ * work, the first line of its thinking, how long it took), the latest steps of the phase in progress,
+ * and the foot, "Every step", that opens every row in place. Everything that counts something opens the
+ * rows it counts in a hover card (web; a press on a phone). What it says is `workSummary.ts`'s; the
+ * settings, the read-only judge and the approval its host can answer are `workSummaryContext.ts`'s
+ * providers. How it looks:
  *
- *   .ws             margin 6 −6 10
- *   .ws-box         column, gap 2, padding 5 6, 1px --line but the bottom, radius 8 8 0 0, --panel-2 55%
- *   .ws-phase       radius 7; .current --accent 5%, 3 under
- *   .ws-head        row, centred, gap 8, at least 28 tall, padding 2 6
- *   .ws-n           14 wide, right, data 600 10/12 (line normal), --tok-hint
- *   .ws-name        92 wide, row, gap 5, app 600 12/12.5, --text (current --accent)
- *   .ws-earlier     app 600 10/12.5 on 1, 0.07em, upper, --dim
- *   .ws-chips       flex 0 1 auto, row, gap 4, clipped
- *   .ws-chip        22 tall, padding 0 8 0 6, round, gap 5, the kind's hue 11% with an inset 1px ring at
+ *   the summary     margin 6 −6 10
+ *   the box         column, gap 2, padding 5 6, 1px --line but the bottom, radius 8 8 0 0, --panel-2 55%
+ *   a phase         radius 7; the current one --accent 5%, 3 under
+ *   its head        row, centred, gap 8, at least 28 tall, padding 2 6
+ *   its number      14 wide, right, data 600 10/12 (line normal), --tok-hint
+ *   its name        92 wide, row, gap 5, app 600 12/12.5, --text (current --accent)
+ *   "Earlier"       app 600 10/12.5 on 1, 0.07em, upper, --dim
+ *   the chips       flex 0 1 auto, row, gap 4, clipped
+ *   a chip          22 tall, padding 0 8 0 6, round, gap 5, the kind's hue 11% with an inset 1px ring at
  *                   22% (live: --accent, 1.5px); app 500 11.5/12.5 on 1, --text; its glyph 12 in the hue
- *   .ws-think       flex 1 1 0, row, gap 5, padding 0 3, radius 4, app 11.5/12.5 italic --dim; the glyph 11
+ *   the thought     flex 1 1 0, row, gap 5, padding 0 3, radius 4, app 11.5/12.5 italic --dim; the glyph 11
  *                   --accent; hovered --text on --fill-ghost-hover
- *   .ws-took        pushed right, 8 before, data 10.5/12 (line normal) --dim (current --accent), tabular
- *   .ws-runs        margin 1 0 0 22
- *   .ws-run         grid auto · 18 · 1fr · auto, gap 6, centred, padding 2 6, radius 6, app 12/12.5 --text;
- *                   live --accent 7%; failed its glyph --bad; wait all --warn
- *   .ws-foot        row, centred, gap 8, padding 3 10, 1px --line, radius 0 0 8 8 (bare 8; open 0; bare
+ *   how long        pushed right, 8 before, data 10.5/12 (line normal) --dim (current --accent), tabular
+ *   the runs        margin 1 0 0 22
+ *   a run           row (the time, 18 for the glyph, the sentence in what is left, how long so far),
+ *                   gap 6, centred, padding 2 6, radius 6, app 12/12.5 --text; live --accent 7%; failed
+ *                   its glyph --bad; wait all --warn
+ *   the foot        row, centred, gap 8, padding 3 10, 1px --line, radius 0 0 8 8 (bare 8; open 0; bare
  *                   and open 8 8 0 0), --panel-2 55%, app 11.5/12.5 (line normal) --dim; hovered --text on
  *                   --panel-2
- *   .ws-all         padding 4 2 6, 1px --line but the top, radius 0 0 8 8
- *   .ws-kept        6 above
- *   .ws-card        at most 560 (the window less 32), padding 6, 1px --line, radius 10, --panel, --lift;
+ *   every row, open padding 4 2 6, 1px --line but the top, radius 0 0 8 8
+ *   the kept rows   6 above
+ *   a hover card    at most 560 (the window less 32), padding 6, 1px --line, radius 10, --panel, --lift;
  *                   its head row, spaced, 4 under, padding 4 8 6, a --line under, app 11/12.5 --dim
- *   .ts-called      22 in, hooked to the call above: 1.5px --line left and bottom, 9 × 17, −13 · −5
+ *   a called row    22 in, hooked to the call above: 1.5px --line left and bottom, 9 × 17, −13 · −5
  */
 
 interface Rows {
   rowOf: (index: number) => ReactNode;
 }
 
-/** `line-height: normal`: the keyword itself on web, where the browser works it out as the desktop's does; the figure below on a phone. */
+/** `line-height: normal`: the keyword itself on web, where the browser works it out; the figure below on a phone. */
 export function normalLineOf(t: Tokens, voice: "app" | "data", scale: number): Record<string, unknown> {
   return isWeb ? { lineHeight: "normal" } : { lineHeight: normalLine(t, voice, scale) };
 }
@@ -84,7 +84,7 @@ export function normalLine(t: Tokens, voice: "app" | "data", scale: number): num
   return voice === "app" ? Math.round(size * 0.992) + Math.round(size * 0.31) : Math.round(size * 1.02) + Math.round(size * 0.3);
 }
 
-/** The hue a kind of work is drawn in (`.ws-k-*`: `--ws-h`). */
+/** The hue a kind of work is drawn in, by token. */
 const HUES: Record<WorkKind, string> = {
   think: "accent",
   read: "ws-read",
@@ -104,8 +104,8 @@ function hueOfKind(t: Tokens, kind: WorkKind): string {
 }
 
 /**
- * A hover card's state (`useHoverCard`): open while the pointer is over the anchor or the card, closed
- * 160 ms after it leaves both. On a phone a press opens it (and a press outside closes it).
+ * A hover card's state: open while the pointer is over the anchor or the card, closed 160 ms after it
+ * leaves both. On a phone a press opens it (and a press outside closes it).
  */
 function useHoverCard(linger = 160): {
   open: boolean;
@@ -160,7 +160,7 @@ function useHoverCard(linger = 160): {
 
 type HoverCard = ReturnType<typeof useHoverCard>;
 
-/** `.ws-card`: the float a hover card is — placed under its anchor, in the layer over everything. */
+/** The float a hover card is — placed under its anchor, in the layer over everything. */
 function Card({ hover, label, count, children }: { hover: HoverCard; label: string; count?: string | undefined; children: ReactNode }): JSX.Element | null {
   const t = useTokens();
   if (!hover.open) return null;
@@ -200,7 +200,7 @@ function Tap({ hover, style, children }: { hover: HoverCard; style?: Record<stri
   );
 }
 
-/** A row in a list of rows: a call a tool made sits under the call that made it (`.ts-called`). */
+/** A row in a list of rows: a call a tool made sits under the call that made it. */
 export function Nested({ entry, children }: { entry: WorkEntry | undefined; children: ReactNode }): JSX.Element {
   const t = useTokens();
   if (entry === undefined || entry.kind !== "tool" || entry.calledBy === undefined) return <View minWidth={0}>{children}</View>;
@@ -212,7 +212,7 @@ export function Nested({ entry, children }: { entry: WorkEntry | undefined; chil
   );
 }
 
-/** The rows a card stands for, as the transcript draws them (`.ws-card .ts-work`: no margins). */
+/** The rows a card stands for, as the transcript draws them, in a column with no margins. */
 function RowsList({ indices, rowOf, entries }: Rows & { indices: readonly number[]; entries?: readonly WorkEntry[] | undefined }): JSX.Element {
   return (
     <View flexDirection="column" minWidth={0}>
@@ -419,7 +419,7 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
   );
 }
 
-/** `.inline-gate.ws-ask`: the approval the step waits on, under its row. */
+/** The approval the step waits on, under its row. */
 function Ask({ children, afterRow }: { children: ReactNode; afterRow: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -590,7 +590,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   );
 }
 
-/** `.ws-name`: the phase's name (a pulse before it while it is the one in progress), and its rows on hover. */
+/** The phase's name (a pulse before it while it is the one in progress), and its rows on hover. */
 function PhaseName({ name, label, current, indices, rowOf }: Rows & { name: string; label: string; current: boolean; indices: readonly number[] }): JSX.Element {
   const hover = useHoverCard();
   return (

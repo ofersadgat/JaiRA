@@ -1,14 +1,12 @@
 import { createContext, useCallback, useContext, useRef } from "react";
 
 /**
- * Where a run's conversation keeps the rows a bookmark can land on — the DOM's `[data-entered]` (the
- * row where the run went into a state) and `[data-instance]` (a letterhead, a solo sheet's body), which
- * `runViews.tsx`'s `track` and `sessionPanels.tsx`'s focus effect query in the page. A copy has no page
- * to query on a phone, so each such row puts its element here as it mounts (`useSpyRow`), and the
+ * Where a run's conversation keeps the rows a bookmark can land on: an `entered` row (where the run
+ * went into a state) and an `instance` row (a letterhead, a solo sheet's body). A phone has no page to
+ * query for them, so each such row puts its element here as it mounts (`useSpyRow`), and the
  * conversation measures them against its own scroller (`RunTranscript.tsx`).
  *
- * `lit` is the instance a bookmark just landed on, for the 1.2s ring a solo sheet's body takes
- * (`.sb-bare.sb-panel-lit`).
+ * `lit` is the instance a bookmark just landed on, for the 1.2s ring a solo sheet's body takes.
  */
 export interface RowSpy {
   place: (el: unknown, row: SpiedRow | null, was: unknown) => void;
@@ -38,7 +36,7 @@ export function useSpyRow(id: string | undefined, kind: SpiedRow["kind"]): ((el:
   return spy === null || id === undefined ? undefined : ref;
 }
 
-/** Whether a bookmark just landed on this instance (`sb-panel-lit`). */
+/** Whether a bookmark just landed on this instance. */
 export function useSpyLit(id: string): boolean {
   return useContext(RowSpyContext)?.lit === id;
 }

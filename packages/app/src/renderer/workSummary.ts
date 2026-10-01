@@ -10,8 +10,8 @@
  * is still working, the phase in progress keeps its latest steps as ROWS, in order, with consecutive
  * calls of one kind merged into one row ("Read 3 files in …/renderer").
  *
- * Pure: entries in, a description out. The view (`workSummaryView.tsx`) draws it; this is tested
- * without a window.
+ * Pure: entries in, a description out. The view (the universal tree's `WorkSummary.tsx`) draws it; this
+ * is tested without a window.
  */
 import { APPROVAL_PROMPT_FUNCTION, toolDisplayOf } from "@jaira/shared/browser";
 import { iconOf, shellLineOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";

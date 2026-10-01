@@ -692,10 +692,10 @@ function takeFront(mime: string, view: RenderView, palette?: PaletteKey): void {
 /**
  * Where a side-by-side pane's palette lives — the `Side by side` renderer's own key.
  *
- * Stated here rather than passed in by the three hosts that mount one, because it is true of all of
- * them: a changeset review, a patch file opened in the panel and a value drawn as a diff are the
+ * Stated here rather than passed in by the hosts that mount one, because it is true of all of
+ * them: a changeset review, a patch file opened in the Files room and a value drawn as a diff are the
  * same rendering of the same kind of thing, and a person who picks a colour scheme under Changes
- * means it for diffs, not for the one of the three they happened to be looking at.
+ * means it for diffs, not for the one they happened to be looking at.
  */
 const DIFF_PALETTE: PaletteKey = { mime: "text/x-diff", kind: "preview", view: "read" };
 
@@ -876,7 +876,7 @@ export function MonacoDiffPane({
     };
     editorRef.current = editor;
     const edits = modifiedModel.onDidChangeContent(() => report.current?.(modifiedModel.getValue()));
-    // Each side against its own tree — see {@link MonacoDiffProps.check}. The base side is asked
+    // Each side against its own tree — see {@link MonacoDiffProps.intel}. The base side is asked
     // once because it cannot change; the proposed side follows the reviewer's edits.
     const checked = [
       followCheck(originalModel, () => ask.current?.original?.check, { live: false }),
@@ -1091,8 +1091,8 @@ export function MonacoDiffPane({
  * It used to be read-only throughout, on the reasoning that every surface editing text had an editor
  * of its own. Those editors turned out to be one `<textarea>`, so a `.ts` file — a type Monaco has a
  * grammar for, in an app that already colours it in three other places — was edited with no
- * highlighting at all. Supplying `onChange` makes this the editor for anything with a grammar; see
- * `documents.tsx`, which is what decides between this and the tokenizer.
+ * highlighting at all. Supplying `onChange` makes this the editor for anything with a grammar; the
+ * code island's host decides between this and the tokenizer ({@link CodeText}, its `reading`).
  */
 export function MonacoCodePane({
   text,
@@ -1107,7 +1107,7 @@ export function MonacoCodePane({
 }: {
   text: string;
   mime: string;
-  /** Somewhere for a change to go. ABSENT means read-only — see `documents.tsx` on why it is absence. */
+  /** Somewhere for a change to go. ABSENT means read-only (`MarkdownDocumentProps.onChange` says why). */
   onChange?: ((text: string) => void) | undefined;
   /**
    * Take the height of the CONTENT rather than of the container.
@@ -1144,9 +1144,9 @@ export function MonacoCodePane({
   /**
    * Who to ask about this text — see {@link CodeIntel}.
    *
-   * Supplied by whatever knows where the file lives, which is not this pane; see `fileSurfaces.tsx`.
-   * Its absence is the ordinary case and means no diagnostics and no navigation, which is right for
-   * every surface showing code that is not a file in a project.
+   * Supplied by whatever knows where the file lives, which is not this pane. Its absence is the
+   * ordinary case and means no diagnostics and no navigation, which is right for every surface
+   * showing code that is not a file in a project. The code island passes none.
    */
   intel?: CodeIntel | undefined;
   /**
@@ -1154,11 +1154,12 @@ export function MonacoCodePane({
    *
    * Only ever applied at creation, and that is enough: a jump within a file is Monaco's own business
    * and never reaches here, so the only way a position arrives from outside is with a file that was
-   * not open a moment ago, and this pane is re-created per file (see `documents.tsx`'s `key`).
+   * not open a moment ago, and this pane is re-created per file (its hosts key it by `file`).
    */
   reveal?: { line: number; column: number } | undefined;
   /**
-   * Mounted, coloured, and refusing every keystroke — see `CodeDocumentProps.readOnly`.
+   * Mounted, coloured, and refusing every keystroke: Monaco is a pick a person can make for a
+   * type's READING, and answering that with the tokenizer would be the renderer they did not choose.
    *
    * Separate from having no `onChange`, because the caller may hold a draft box it still wants
    * bound: what is being said is that THIS mount is a reading of the type, not that there is nowhere

@@ -9,18 +9,17 @@ import { Icon } from "../panel/Icon";
 import { Button } from "../settings/Button";
 
 /**
- * `usageMeters.tsx`'s `WaitingLine` and `WaitingMessage`, universal (decision 0015): a message waiting
- * for the allowance, drawn as the bubble it will be — faded and dashed — with the line under it that
- * says when it goes, and the verbs (send now, try again, delete). What they do is `limitsStore.ts`'s
- * `actOnWaiting`, the desktop's own. The rules, from `styles.css`:
+ * A message waiting for the allowance (`WaitingLine`, `WaitingMessage`), drawn as the bubble it will
+ * be — faded and dashed — with the line under it that says when it goes, and the verbs (send now, try
+ * again, delete). What they do is `limitsStore.ts`'s `actOnWaiting`. How it looks:
  *
- *   .um-waiting-host   column, gap 6, padding 0 16 6, 900 at most, centred
- *   .ts-msg-user       at the end, at most 78%, margin 14 0 10; .um-bubble-wait at .7, its edge dashed
- *   .um-under          row, wrapping, centred, to the end, gap 6 12, 6 above, app 12.5/12.5
- *   .um-under-why      row, gap 6, --dim (refused: --bad); `b` 600 --text; the clock 1em
- *   .um-check          row, gap 7, a 14 checkbox in --accent
- *   button.ghost.um-sm app 12/12.5, padding 3 9
- *   .ts-rail           the rail, shown: "Delete" a `.ts-act` (padding 4, app 11/12.5 on 1, --dim)
+ *   the host           column, gap 6, padding 0 16 6, 900 at most, centred
+ *   the message        at the end, at most 78%, margin 14 0 10; its bubble at .7, its edge dashed
+ *   the line under     row, wrapping, centred, to the end, gap 6 12, 6 above, app 12.5/12.5
+ *   its reason         row, gap 6, --dim (refused: --bad); the time 600 --text; the clock 1em
+ *   the retry tick     row, gap 7, a 14 checkbox in --accent
+ *   a small button     ghost, app 12/12.5, padding 3 9
+ *   the rail           shown: "Delete", padding 4, app 11/12.5 on 1, --dim
  */
 export function WaitingHost({ items }: { items: readonly WaitingItem[] }): JSX.Element {
   return (

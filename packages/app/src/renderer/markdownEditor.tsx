@@ -119,8 +119,8 @@ function describe(grammar: string): LanguageDescription | null {
 /**
  * How each markdown construct is drawn.
  *
- * Classes rather than inline styles, so the palette lives in `styles.css` with every other colour
- * and follows the theme without this file knowing there is one.
+ * Classes rather than inline styles, so the palette lives in the island's stylesheet (`styles.css`),
+ * on the app's tokens, and follows the theme without this file knowing there is one.
  */
 export const LOOK = HighlightStyle.define([
   { tag: tags.heading1, class: "cm-h1" },
@@ -145,9 +145,9 @@ export const LOOK = HighlightStyle.define([
    * like no feature at all.
    *
    * The classes are `tok-*`, which is the same palette `jsonHighlight.ts` and `yamlHighlight.ts`
-   * paint with. That is the point rather than a convenience: the same YAML shown in a transcript, in
-   * a file's front matter and inside a fenced block in a document is now the same colours, because
-   * all three name the same handful of CSS rules instead of each bringing a theme.
+   * paint with. That is the point rather than a convenience: the same YAML shown in the schema
+   * editor, in a file's front matter and inside a fenced block in a document is the same colours,
+   * because all three name the same handful of CSS rules instead of each bringing a theme.
    */
   { tag: [tags.propertyName, tags.attributeName, tags.tagName], class: "tok-key" },
   { tag: [tags.string, tags.special(tags.string), tags.attributeValue], class: "tok-string" },
@@ -290,12 +290,12 @@ const JOIN = Decoration.replace({ widget: new SoftBreak() });
  * A fence is a document embedded in a document: it has a language, that language has a MIME type,
  * and this app already has exactly one place that turns a MIME type into a component — the same
  * route a `.ts` file in the tree takes. Drawing a fence any other way is a second opinion about what
- * a type is worth showing as, which is the mistake `fenceRender.tsx`'s header is written about.
+ * a type is worth showing as, and a second opinion is a thing that can disagree.
  *
- * So this module holds no map. It asks {@link fenceRenderer} for whatever was registered, which is
- * `ValueView` behind a MIME hint — Monaco where Monaco has a grammar, the rendered reading where the
- * type has one, and the source box where it has neither. The toggle comes with it, which is the
- * other thing the editor was missing beside the languages.
+ * So this module holds no map. It asks {@link fenceRenderer} for whatever the page registered, which
+ * decides by the fence's MIME type what draws it — an editor where there is a grammar, a rendered
+ * reading where the type has one. Where nothing is registered, or the renderer declines, the block
+ * is its source.
  *
  * The facet carries the live {@link EditorView}, because {@link marks} is a pure function of state
  * and a widget built there still has to be able to write back. Set once, when the editor is created.
@@ -357,10 +357,10 @@ function fenceHeight(source: string): number {
  *
  * ## Why this may mount a component at all
  *
- * `documents.tsx` used to say an editor cannot host one — "its document is text with decorations
- * over it, not a place to mount a component" — and the same file contradicted it twelve lines later.
- * A block widget IS a place to mount a component. What it costs is the three things below, and each
- * of them is a real defect if it is skipped rather than a tidiness point.
+ * It was once held that an editor cannot host one — "its document is text with decorations over it,
+ * not a place to mount a component". A block widget IS a place to mount a component. What it costs
+ * is the three things below, and each of them is a real defect if it is skipped rather than a
+ * tidiness point.
  *
  * **1. It must not remount.** {@link eq} compares the source, the language and the writability, so
  * typing in a paragraph elsewhere leaves every fence's DOM — and every Monaco instance inside one —

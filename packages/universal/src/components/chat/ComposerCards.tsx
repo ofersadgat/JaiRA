@@ -23,26 +23,25 @@ import { BrandIcon } from "../settings/bits";
 import { ModelWindow, RouteLeft } from "./UsageCards";
 
 /**
- * `composer.tsx`'s cards, universal (decision 0015): what each chip opens — the route → model cascade,
- * the thinking levels, the permission sets of a bucket (with the bucket picker and `+`), and (in
- * `ComposerTools.tsx`) the tools. What they compute is `composerCards.ts`' and `composerModel.ts`'s, the
- * desktop's own. The rules, from `styles.css`:
+ * The composer's cards: what each chip opens — the route → model cascade, the thinking levels, the
+ * permission sets of a bucket (with the bucket picker and `+`), and (in `ComposerTools.tsx`) the tools.
+ * What they compute is `composerCards.ts`' and `composerModel.ts`'s. How they look:
  *
- *   .cx-pop            above the chip, its start edges lined up, 7 apart; at least 250, at most 560 (78% of
+ *   a card             above the chip, its start edges lined up, 7 apart; at least 250, at most 560 (78% of
  *                      the window), as wide as its content; padding 10 12 11, 1px --line, radius 12,
  *                      --panel, --lift
- *   .cx-pop-head       row, baseline, gap 8, 7 under, at least 20 tall, 132 clear on the right; the title
+ *   its head           row, baseline, gap 8, 7 under, at least 20 tall, 132 clear on the right; the title
  *                      app 600 11/12.5 --text; the origin app 10.5/12.5 --tok-hint (yours --accent; unset
  *                      italic); reset pushed right, padding 1 7, round, --panel-2, app 10.5/12.5 --dim
- *   .cx-opts           column, gap 1, margin 0 −4; a row: gap 8, padding 5 7, radius 7, --dim (hovered
+ *   the options        column, gap 1, margin 0 −4; a row: gap 8, padding 5 7, radius 7, --dim (hovered
  *                      --text 7% and --text; in force --accent 13%); its icon 14 --tok-hint (in force
  *                      --accent); name app 500 12/12.5 on 1.25, hint app 10.5/12.5 on 1.3 --tok-hint (in
  *                      force --dim); tag data 600 ×.76 on 1.45 in an --accent 45% pill; ✓ --accent 11/12.5
- *   .cx-hint           at most 320, 7 above, app 10.5/12.5 on 1.5, --tok-hint
- *   .cx-cascade        row, margin 0 −4 8, 1px --line, radius 9, clipped, 208 tall; .cx-col 148 wide,
+ *   the hint           at most 320, 7 above, app 10.5/12.5 on 1.5, --tok-hint
+ *   the cascade        row, margin 0 −4 8, 1px --line, radius 9, clipped, 208 tall; a column 148 wide,
  *                      padding 3, a --line on the right, scrolls; the last at least 190, --panel-2 45%;
- *                      a row as `.cx-opts`'s (on --text 7%, live --accent 13%); icons 12; › and ✓ 11
- *   .cx-filters-row    over the card's head, top 9 right 12; `.cx-filter-btn` padding 2 7, 1px --line,
+ *                      a row as an option's (on --text 7%, live --accent 13%); icons 12; › and ✓ 11
+ *   the filters        over the card's head, top 9 right 12; a filter's button padding 2 7, 1px --line,
  *                      round, --dim; its label 9.5/12.5, upper, 0.06em, --tok-hint (on: --accent, the
  *                      button --accent 16% into --panel, its edge 45%)
  */
@@ -56,7 +55,7 @@ export function useAnchorRect(): [React.MutableRefObject<RNView | null>, (then: 
 const NAME = { voice: "app" as const, scale: 12 / 12.5, weight: 500, lineHeight: 1.25 };
 const HINT = { voice: "app" as const, scale: 10.5 / 12.5, lineHeight: 1.3, color: "tok-hint" };
 
-/** `.cx-pop`: a chip's card — its head (title, what leads, the origin, what trails, reset) and body. */
+/** A chip's card — its head (title, what leads, the origin, what trails, reset) and body. */
 export function ChipCard({
   anchor,
   label,
@@ -80,9 +79,9 @@ export function ChipCard({
   lead?: ReactNode;
   trail?: ReactNode;
   onClose: () => void;
-  /** A card of a fixed width (`.um-pop-context` 380, `.um-acctpop` 370). */
+  /** A card of a fixed width (the context's 380, the account's 370). */
   width?: number | undefined;
-  /** `.um-pop`: no padding of its own — its head padded 10 14 4, its body sections of their own. */
+  /** A usage card: no padding of its own — its head padded 10 14 4, its body sections of their own. */
   sections?: boolean;
   /** Which edges line up (the context ring's card: its end); how far above (a usage card: 8). */
   align?: "start" | "end";
@@ -116,7 +115,7 @@ export function ChipCard({
   );
 }
 
-/** `.cx-pop-head`. */
+/** A card's head. */
 export function CardHead({ label, origin, from, onReset, lead, trail, sections = false }: { label: string; origin?: SettingOrigin | undefined; from?: string | undefined; onReset?: (() => void) | undefined; lead?: ReactNode; trail?: ReactNode; sections?: boolean }): JSX.Element {
   const t = useTokens();
   const words = origin !== undefined ? originWordsOf(origin, from) : undefined;
@@ -141,7 +140,7 @@ export function CardHead({ label, origin, from, onReset, lead, trail, sections =
   );
 }
 
-/** `.cx-hint`. */
+/** A card's hint. */
 export function CardHint({ children }: { children: ReactNode }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 10.5 / 12.5, lineHeight: 1.5, color: "tok-hint" }} marginTop={7} maxWidth={320}>
@@ -150,7 +149,7 @@ export function CardHint({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** `.cx-opts`: the column of options. */
+/** The column of options. */
 export function Opts({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="column" gap={1} marginHorizontal={-4}>
@@ -220,7 +219,7 @@ export function ThinkingBody({ levels, effort, defaultLevel, takes, footer, onPi
   );
 }
 
-/** A 12 row of `.cx-col`: hovered or picked a --text 7% ground, live --accent 13%. */
+/** A row of a cascade column: hovered or picked a --text 7% ground, live --accent 13%. */
 function ColRow({ on, live, onPress, onHover, title, children }: { on: boolean; live: boolean; onPress: () => void; onHover?: (() => void) | undefined; title?: string; children: (hovered: boolean) => ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -244,7 +243,7 @@ function ColRow({ on, live, onPress, onHover, title, children }: { on: boolean; 
 }
 
 /**
- * `.cx-more`: pushed to the edge — or, after a route's figure (`.um-route + .cx-more`), 4 after it. Its
+ * The › of a row with more under it: pushed to the edge — or, after a route's figure, 4 after it. Its
  * weight is where it stands (the bucket's head is 600, and a bold › is 0.3 wider).
  */
 const More = ({ after = false, weight = 400 }: { after?: boolean; weight?: number }): JSX.Element => (
@@ -334,9 +333,9 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
     <View
       flexDirection="column"
       minWidth={last ? 190 : 0}
-      // `.cx-col { flex: none }` comes later than `.cx-col-last`'s `flex: 0 1 auto`, and the first column is 204.
+      // No column gives way, the last included; the first column is 204.
       flexShrink={0}
-      // `.cx-col`'s width 148 holds for the last column too, under its `min-width: 190`: it is 190.
+      // The width 148 holds for the last column too, under its `minWidth` 190: it is 190.
       {...(last ? { width: 148, backgroundColor: t.mix(t.v("panel-2"), 45, "transparent") as never } : { width: first ? 204 : 148, ...edge(t, { right: 1 }) })}
       padding={3}
       {...({ overflowY: "auto" } as object)}
@@ -352,8 +351,8 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
   );
   return (
     <>
-      {/* Over the card's own head, hard right (`.cx-filters-row`: absolute, top 9, right 12). */}
-      {/* Each filter is a block holding its button inline, on the body's strut: the button sits 0.58 down in it (measured). */}
+      {/* Over the card's own head, hard right: absolute, top 9, right 12. */}
+      {/* The 0.58 more: where a button set inline sits on the body's strut (measured). */}
       <View position="absolute" top={9.58} right={12} flexDirection="row" gap={6}>
         {(["input", "output"] as const).map((side) => (
           <ModalityFilter key={side} side={side} options={modalitiesOf(models, side)} value={needs[side]} onChange={(next) => setNeeds({ ...needs, [side]: next })} />
@@ -450,9 +449,9 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
             ))}
             {own.length > 0 && borrowed.length > 0 ? (
               <View marginTop={6} marginHorizontal={7} marginBottom={2} paddingTop={7} paddingBottom={1} {...(edge(t, { top: 1 }) as object)}>
-                {/* A block holding an inline span: its lines are the body's (13/12.5 on 1.5), the span a run on
-                    their baseline — and it WRAPS, as the desktop's does in a narrow column ("…any Anthropic" /
-                    "model"); held to one line it was cut with an ellipsis and every row under it stood a line high. */}
+                {/* An outer text whose lines are the body's (13/12.5 on 1.5), the words a run on their
+                    baseline — and it WRAPS in a narrow column ("…any Anthropic" / "model"); held to one
+                    line it was cut with an ellipsis and every row under it stood a line high. */}
                 <Txt spec={{ voice: "app", scale: 13 / 12.5 }}>
                   <Txt spec={{ voice: "app", scale: 10.5 / 12.5, color: "tok-hint" }}>{`also by id — any ${VENDOR_NAMES[borrows ?? ""] ?? borrows} model`}</Txt>
                 </Txt>
@@ -486,10 +485,10 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
  * `BucketPicker`: the Permissions head's bucket — its folder and name, opening the hierarchy of
  * buckets, each with what it holds and the layer that defines it.
  *
- *   .cx-origin-pick.cx-bucket   row, centred, gap 4, margin −1 −5, padding 1 5, radius 6, --text 600
+ *   the bucket's button         row, centred, gap 4, margin −1 −5, padding 1 5, radius 6, --text 600
  *                               (hovered or open --text 7%); the folder 12
- *   .cx-submenu.cx-from-head    under it, from its start, at least 320
- *   .cx-src                     the layer: 6 in, padding 0 5, round, --panel-2, app 500 9.5/12.5 on 1.5
+ *   its menu                    under it, from its start, at least 320
+ *   a row's layer               6 in, padding 0 5, round, --panel-2, app 500 9.5/12.5 on 1.5
  */
 export function BucketPicker({ buckets, bucket, onPick }: { buckets: readonly PermissionSetBucket[]; bucket: string; onPick: (path: string) => void }): JSX.Element {
   const t = useTokens();
@@ -551,7 +550,7 @@ export function BucketPicker({ buckets, bucket, onPick }: { buckets: readonly Pe
   );
 }
 
-/** `.cx-submenu`: column, gap 1, padding 4, 1px --line, radius 9, --panel, a 0 10 28 shadow at 28%. */
+/** A menu under a card's head: column, gap 1, padding 4, 1px --line, radius 9, --panel, a 0 10 28 shadow at 28%. */
 export function SubMenu({ anchor, align, minWidth, padding = 4, gap = 1, onClose, children }: { anchor: FloatRect; align: "start" | "end"; minWidth: number; padding?: number; gap?: number; onClose: () => void; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -563,7 +562,7 @@ export function SubMenu({ anchor, align, minWidth, padding = 4, gap = 1, onClose
   );
 }
 
-/** A `.cx-submenu` row: gap 8, padding 5 7, radius 7; hovered --text 7%, in force --accent 13%. */
+/** A `SubMenu` row: gap 8, padding 5 7, radius 7; hovered --text 7%, in force --accent 13%. */
 function SubRow({ on, paddingLeft = 7, onPress, children }: { on: boolean; paddingLeft?: number; onPress: () => void; children: (lit: boolean) => ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -589,9 +588,9 @@ function SubRow({ on, paddingLeft = 7, onPress, children }: { on: boolean; paddi
  * `KeepPermissionSet`: `+` — keep the map on the cards as a NEW permission set in this bucket, asked
  * through the schema form (a name, and where it goes).
  *
- *   .cx-set-add         padding 0 7, round, --panel-2, app 11.5/12.5 on 1.5, --dim; ready --accent 13%
+ *   the `+`             padding 0 7, round, --panel-2, app 11.5/12.5 on 1.5, --dim; ready --accent 13%
  *                       and --accent; not ready at .45
- *   .cx-submenu.cx-set-new  gap 7, at least 270, padding 9; the foot's buttons padding 4 13, Add --accent
+ *   its menu            gap 7, at least 270, padding 9; the foot's buttons padding 4 13, Add --accent
  */
 export function KeepPermissionSet({ bucket, ready, layers, onKeep }: { bucket: string; ready: boolean; layers: readonly WritableLayer[]; onKeep: (name: string, layer: WritableLayer) => Promise<void> }): JSX.Element {
   const t = useTokens();

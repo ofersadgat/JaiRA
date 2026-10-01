@@ -1,7 +1,7 @@
 /**
- * What a permission set's lines say (`permissionSetRows.tsx`) — each mode's glyph, word and sentence,
- * a tool's glyph, and the standing sentences of the shell, `script` and the command runners — in a
- * module of their own so the universal copy (decision 0015) says the same.
+ * What a permission set's lines say — each mode's glyph, word and sentence, a tool's glyph, and the
+ * standing sentences of the shell, `script` and the command runners. One table for every place a line is
+ * drawn: Settings' permission sets, a state's Tools field, the composer's Tools card.
  */
 import { SMART_FUNCTION, isFunctionMode, type PermissionMode, type PermissionSetMode } from "@jaira/shared/browser";
 import type { PATHS } from "./iconPaths";

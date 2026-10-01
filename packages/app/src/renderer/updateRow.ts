@@ -1,6 +1,6 @@
 /**
- * What the sidebar's Update row does when it is pressed, and how it is washed — moved out of
- * `updatesView.tsx`'s `SidebarUpdateRow` unchanged, so the universal copy (decision 0015) does the same.
+ * What the sidebar's Update row does when it is pressed, and how it is washed. `UpdateRow`
+ * (`packages/universal/src/components/floats/UpdateRow.tsx`) draws it.
  */
 import type { UpdateState } from "@jaira/shared/browser";
 import type { SidebarUpdate } from "./updatesModel";

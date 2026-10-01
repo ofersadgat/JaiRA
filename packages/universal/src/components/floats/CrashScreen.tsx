@@ -8,23 +8,23 @@ import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";
 
 /**
- * `crashScreen.tsx`'s two nets, universal (decision 0015): {@link CrashBoundary} draws a throw during
- * render in place of the tree, and {@link LooseErrorBanner} says, over a tree that still works, that
- * something with no render to belong to failed. What they say, and the sink the banner listens on, are
- * `crashReport.ts`'s, shared with the desktop; a phone feeds that sink from its global handler
- * (`installNativeErrorReporting`). The rules, from `styles.css`:
+ * The two nets under an interface that stops working, which would otherwise be a blank window with no
+ * message: {@link CrashBoundary} draws a throw during render in place of the tree, and
+ * {@link LooseErrorBanner} says, over a tree that still works, that something with no render to belong
+ * to failed. What they say, and the sink the banner listens on, are `crashReport.ts`'s; a phone feeds
+ * that sink from its global handler (`installNativeErrorReporting`). How they look:
  *
- *   .crash           fixed over the window, the card centred both ways, padding 32, --bg, --text, scrolls
- *   .crash-card      min(860px, 100%) wide, --panel, 1px --line, radius 10, padding 24, column, gap 12
- *   .crash-card h1   1.25rem (20), the UA's bold, margin 0, on the body's 1.5
- *   p.sub            --dim, app 11/12.5, the UA's 1em above and below (kept: the card is a flex column)
- *   .crash-stack     margin 0, at most 46vh, scrolls, padding 12, --panel-2, 1px --line, radius 8,
- *                    --font-data at 12px whatever the size preference, pre-wrap, words broken
- *   .crash-actions   row, gap 8: `button.primary` Reload the window, `button` Copy the error
- *   .crash-banner    fixed, z --z-crash (1000), 16 above the window's foot, centred, at most
+ *   the screen       fixed over the window, the card centred both ways, padding 32, --bg, --text, scrolls
+ *   the card         min(860px, 100%) wide, --panel, 1px --line, radius 10, padding 24, column, gap 12
+ *   its heading      20px, bold, on the body's 1.5
+ *   the words under  --dim, app 11/12.5, 1em above and below (added to the card's gap)
+ *   the stack        at most 46vh, scrolls, padding 12, --panel-2, 1px --line, radius 8, --font-data
+ *                    at 12px whatever the size preference, pre-wrap, words broken
+ *   the actions      row, gap 8: Reload the window (`primary`), Copy the error
+ *   the banner       fixed, z --z-crash (1000), 16 above the window's foot, centred, at most
  *                    min(720px, 100vw − 32px); row, centred, gap 8, padding 8 12, --panel, --text, 1px
- *                    --bad 45% into --line, radius 8, 0 6 24 black at 18%; the words `.grow.ellip`
- *                    (the body's font, one line), then `button` Copy and Dismiss
+ *                    --bad 45% into --line, radius 8, 0 6 24 black at 18%; the words (the body's font,
+ *                    one line, taking the room), then Copy and Dismiss
  *
  * `staged` places either in its box rather than the window's (the specimens).
  */
@@ -35,9 +35,9 @@ interface CrashState {
 }
 
 /**
- * The boundary. Not a retry loop, as the desktop's is not: the reader gets the error and a reload. On a
- * phone there is no window to reload, so Reload draws the tree afresh from the store, which holds what
- * is recorded — the same promise the words make.
+ * The boundary. Not a retry loop, which works by luck or spins and hides the failure either way: the
+ * reader gets the error and a reload. On a phone there is no window to reload, so Reload draws the tree
+ * afresh from the store, which holds what is recorded — the same promise the words make.
  */
 export class CrashBoundary extends Component<{ children: ReactNode }, CrashState> {
   override state: CrashState = { error: undefined };
@@ -130,7 +130,7 @@ export function LooseErrorBanner({ staged = false }: { staged?: boolean }): JSX.
       backgroundColor={t.v("panel") as never}
       {...({ boxShadow: "0 6px 24px rgba(0, 0, 0, 0.18)" } as object)}
       {...(isWeb
-        ? // Placed as the DOM places it — at 50%, translated back — so it lands on the same fraction of a pixel.
+        ? // Centred by its own width: placed at 50% and translated back by half of it.
           { position: staged ? "absolute" : "fixed", left: "50%", bottom: 16, zIndex: 1000, maxWidth: "min(720px, calc(100vw - 32px))", transform: [{ translateX: "-50%" }] }
         : { maxWidth: 720 })}
     >

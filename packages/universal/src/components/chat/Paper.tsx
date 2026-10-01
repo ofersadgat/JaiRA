@@ -7,11 +7,10 @@ import { statusFigureOf, statusVerbOf, statusWhatOf } from "@jaira/ui/liveStatus
 import { useElapsed } from "@jaira/ui/runActivityModel";
 
 /**
- * `transcriptView.tsx`'s `Paper`, universal (decision 0015): the sheet a conversation is printed on, on
- * the grey it floats over. The rules:
+ * The sheet a conversation is printed on, on the grey it floats over. How it looks:
  *
- *   .ts-page    at least the scroller's height, padding 14 16 22, --bg
- *   .ts-paper   900 at most, centred, --panel, 1px --line, radius 12, clipped;
+ *   the page    at least the scroller's height, padding 14 16 22, --bg
+ *   the sheet   900 at most, centred, --panel, 1px --line, radius 12, clipped;
  *               a shadow 0 1 3 rgba(15,20,30,.06) (dark: rgba(0,0,0,.35))
  */
 export function Paper({ children, minHeight }: { children: ReactNode; minHeight?: number | undefined }): JSX.Element {
@@ -24,7 +23,7 @@ export function Paper({ children, minHeight }: { children: ReactNode; minHeight?
   );
 }
 
-/** `.ts-paper` alone — the second and third pages of a thread with a seam, which sit on the same page. */
+/** The sheet alone — the second and third pages of a thread with a seam, which sit on the same page. */
 export function Sheet({ children, dark }: { children: ReactNode; dark: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -44,8 +43,8 @@ export function Sheet({ children, dark }: { children: ReactNode; dark: boolean }
 }
 
 /**
- * `Pulse`: three dots in the current colour (`.ts-pulse`: 4 round, 3 apart). Drawn still, at the
- * opacity the stylesheet rests them at without motion (.55): the desktop breathes them.
+ * `Pulse`: three dots in the colour given, 4 round, 3 apart, at .55. Drawn still: they do not
+ * breathe.
  */
 export function Pulse({ color = "accent" }: { color?: string }): JSX.Element {
   const t = useTokens();
@@ -60,13 +59,13 @@ export function Pulse({ color = "accent" }: { color?: string }): JSX.Element {
 
 /**
  * `LiveStatusBar`: what the model is doing right now, in one fixed place between the record and the
- * box. The words are `liveStatusModel.ts`'s (the desktop's own).
+ * box. The words are `liveStatusModel.ts`'s.
  *
- *   .ts-status          row, centred, gap 8, padding 5 14, a --line above, --accent 5% over transparent,
+ *   the bar             row, centred, gap 8, padding 5 14, a --line above, --accent 5% over transparent,
  *                       app 11.5/12.5, --dim, tabular
- *   .ts-status-verb     600, --accent
- *   .ts-status-what     the data voice, flex 1, one line
- *   .ts-status-jump     --accent, pressed to go back to the live edge
+ *   the verb            600, --accent
+ *   what it is on       the data voice, flex 1, one line
+ *   the jump            --accent, pressed to go back to the live edge
  */
 export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
   const t = useTokens();

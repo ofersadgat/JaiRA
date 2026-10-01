@@ -13,36 +13,35 @@ import { Conversation } from "./Conversation";
 import { SessionPanel } from "./SessionPanel";
 
 /**
- * `debugPane.tsx`'s `DebugPane`, universal (decision 0015): the self-test — what it runs, where its state
- * files come from, the buttons that run it, and its result. What it derives is `debugModel.ts`, shared
- * with the desktop's. What was said under a result is `SessionPanel.tsx` (`session.tsx`'s); the journal
- * under it is `Conversation.tsx` (`detail.tsx`'s). The side panel beside it is the shell's (`PanelColumn`), as
- * `App.tsx` hands the desktop's its own. The rules, from `styles.css`:
+ * The Debug room's page: the self-test — what it runs, where its state files come from, the buttons that
+ * run it, and its result. What it derives is `debugModel.ts`. What was said under a result is
+ * `SessionPanel.tsx`; the journal under it is `Conversation.tsx`. The side panel beside it is the
+ * shell's (`PanelColumn`), handed in by `DebugView.tsx`. How it looks:
  *
- *   .debug             --bg, scrolls, padding 12 14, column, gap 16; sections column, gap 8
- *   .debug-head h2     700, app at 15/12.5, margin 0 0 4;  .sub margin 0, at most 70ch, line 1.5
- *   h3                 700, app at 11/12.5, 0.09em, uppercase, --dim, margin 0 0 8 (not collapsing: a
+ *   the page           --bg, scrolls, padding 12 14, column, gap 16; sections column, gap 8
+ *   its heading        700, app at 15/12.5, 4 below;  the words under it at most 70ch, line 1.5
+ *   a section's head   700, app at 11/12.5, 0.09em, uppercase, --dim, 8 below (not collapsing: a
  *                      flex column)
- *   .debug-stages      padding-left 20, column, gap 6; li app at 12/12.5 on 1.6, its number outside;
- *                      .mono data at 11/12, .sub app at 12/12.5 --dim
- *   .debug-source      summary app at 12/12.5 --dim, a disclosure triangle before it; open: each file's
- *                      name (.sub .mono) and text (.outputs), 8 apart
- *   .notice            --tint-accent, radius --control-radius, padding 7 9, app at 11/12.5, --dim;
+ *   the stages         20 in on the left, column, gap 6; each app at 12/12.5 on 1.6, its number
+ *                      outside; its names data at 11/12, the words between them --dim
+ *   the state files    a summary, app at 12/12.5 --dim, a disclosure triangle before it; open: each
+ *                      file's name (--dim, the data face at app 11/12.5) and text (an output box), 8 apart
+ *   a notice           --tint-accent, radius --control-radius, padding 7 9, app at 11/12.5, --dim;
  *                      warn --tint-warn/--warn, bad --tint-bad/--bad; a clickable one is a button
- *   .debug-file        row, gap 8, centred, padding 4 6, radius 4, app at 12/12.5; hovered --panel-2;
- *                      the dot 7 round (--ok, --bad, --dim); .mono data at 11/12; .chip; button.link
- *   .pane-actions      row, centred, gap 6, wrapping
- *   .debug-verdict     row, gap 10, baseline, padding 10 12, radius --card-radius, the tone's tint; the
+ *   a file's row       row, gap 8, centred, padding 4 6, radius 4, app at 12/12.5; hovered --panel-2;
+ *                      the dot 7 round (--ok, --bad, --dim); its name data at 11/12; a chip; a link
+ *   the actions        row, centred, gap 6, wrapping
+ *   the verdict        row, gap 10, baseline, padding 10 12, radius --card-radius, the tone's tint; the
  *                      word 700 at app 18/12.5, 0.06em, the tone's colour
- *   .field             column, gap 4; its span app at 11/12.5, --dim, 0.04em, uppercase
- *   .outputs           --bg, 1px --line, radius 8, padding 8, data at 11/12, at most 220 tall, pre-wrap
+ *   a field            column, gap 4; its label app at 11/12.5, --dim, 0.04em, uppercase
+ *   an output box      --bg, 1px --line, radius 8, padding 8, data at 11/12, at most 220 tall, pre-wrap
  */
 export interface DebugPaneProps {
   debug: DebugState;
   detail: TaskDetail | null;
   /** The selected task's journal, read as turns (`state.conversation`). */
   conversation: ConversationView | null;
-  /** The states the task ran, the one on screen and the answer being written (`App.tsx`'s own). */
+  /** The states the task ran, the one on screen and the answer being written (the shell's state). */
   sessionHistory: SessionRef[];
   session: SessionView | null;
   sessionInstance: string | null;
@@ -202,7 +201,7 @@ export function DebugPane({
 
         {mine !== null ? (
           <Section title="What was actually said">
-            {/* The prompts and replies verbatim, per state (`.debug-transcript .session`, 320 tall). */}
+            {/* The prompts and replies verbatim, per state (320 tall). */}
             <SessionPanel history={sessionHistory} session={session} showing={sessionInstance} live={liveTurn} onShow={onShowSession} />
           </Section>
         ) : null}
@@ -218,7 +217,7 @@ export function DebugPane({
 }
 
 
-/** A `section`: its `h3`, then what it holds, 8 apart. */
+/** A section: its heading, then what it holds, 8 apart. */
 function Section({ title, children }: { title: string; children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="column" gap={8}>
@@ -230,16 +229,16 @@ function Section({ title, children }: { title: string; children: ReactNode }): J
   );
 }
 
-/** One stage of `ol.debug-stages`: its number outside, its words on a line of 1.6. */
+/** One stage of the numbered list: its number outside, its words on a line of 1.6. */
 function Stage({ n, children }: { n: number; children: ReactNode }): JSX.Element {
   const t = useTokens();
   const spec: FontSpec = { voice: "app", scale: 12 / 12.5, lineHeight: 1.6 };
   const size = t.scaled("size-app", 12 / 12.5);
   const space = 0.26 * (typeof size === "number" ? size : 12);
   return (
-    // The number is the li's `::marker`, outside: right-aligned in the list's 20px, a space short of the
-    // words (DM Sans's space: 0.26 of the size). On web it is hung in the flow from a box of no size, so
-    // the item is not positioned, as an `li` is not (a positioned box is painted after what is not).
+    // The number stands where a list item's outside marker would: right-aligned in the list's 20px, a
+    // space short of the words (DM Sans's space: 0.26 of the size). On web it is hung in the flow from a
+    // box of no size, so the item is not positioned (a positioned box is painted after what is not).
     isWeb ? (
       <View>
         <View width={0} height={0}>
@@ -266,12 +265,12 @@ function StageSub({ children }: { children: ReactNode }): JSX.Element {
   return <Txt spec={{ voice: "app", scale: 12 / 12.5, lineHeight: 1.6, color: "dim" }}>{children}</Txt>;
 }
 
-/** `code` inside a notice: the data face at 11/12, in the notice's colour. */
+/** Code inside a notice: the data face at 11/12, in the notice's colour. */
 function Code({ children }: { children: ReactNode }): JSX.Element {
   return <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }}>{children}</Txt>;
 }
 
-/** `.notice`: a wash and a sentence. */
+/** A notice: a wash and a sentence. */
 function Notice({ tone, children }: { tone?: "warn" | "bad"; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -330,7 +329,7 @@ function FileRow({ file, onOpen }: { file: DebugFile; onOpen: () => void }): JSX
   );
 }
 
-/** `.chip`: app at 10/12.5, --dim, a 1px --line pill, padding 0 6. */
+/** A chip: app at 10/12.5, --dim, a 1px --line pill, padding 0 6. */
 export function Chip({ children, tone }: { children: ReactNode; tone?: "ok" | "bad" | "warn" }): JSX.Element {
   const t = useTokens();
   return (
@@ -342,7 +341,7 @@ export function Chip({ children, tone }: { children: ReactNode; tone?: "ok" | "b
   );
 }
 
-/** `.outputs`: a value as the data face, in a box that scrolls past 220. */
+/** An output box: a value in the data face, in a box that scrolls past 220. */
 export function Outputs({ children }: { children: string }): JSX.Element {
   const t = useTokens();
   return (
@@ -356,7 +355,7 @@ export function Outputs({ children }: { children: string }): JSX.Element {
   );
 }
 
-/** `.field`: a label over a value. */
+/** A field: a label over a value. */
 function Field({ label, children }: { label: string; children: string }): JSX.Element {
   return (
     <View flexDirection="column" gap={4}>
@@ -366,7 +365,7 @@ function Field({ label, children }: { label: string; children: string }): JSX.El
   );
 }
 
-/** `board.tsx`'s `Badge`: a task's status glyph, 16 wide, in the status's colour. */
+/** A task's status glyph (`BADGE`), 16 wide, in the status's colour. */
 function Badge({ status }: { status: string }): JSX.Element {
   const hue = status === "running" || status === "interrupted" ? "accent" : status === "waiting_for_user" ? "warn" : status === "completed" ? "ok" : status === "failed" || status === "blocked" || status === "timeout" ? "bad" : "dim";
   return (
@@ -377,8 +376,8 @@ function Badge({ status }: { status: string }): JSX.Element {
 }
 
 /**
- * `details` with its `summary`: a disclosure triangle and the words, the content under them when open.
- * Chromium's triangle is drawn in the summary's colour, before the words.
+ * A disclosure: a triangle and the words, the content under them when open. The triangle is the one
+ * Chromium draws before a `summary`, in the words' colour.
  */
 function Disclosure({ summary, children }: { summary: string; children: ReactNode }): JSX.Element {
   const t = useTokens();

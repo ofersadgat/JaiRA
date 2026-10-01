@@ -1,7 +1,6 @@
 /**
- * What Chromium does with an `<input list>` on the desktop, as data (decision 0015) — the rules of the
- * type-ahead `Suggest.tsx` draws. There is no renderer code to share here: the DOM hands a `<datalist>`
- * to the browser, and Blink filters it (`HTMLInputElement::FilteredDataListOptions`) and Electron draws
+ * What Chromium does with an `<input list>`, as data — the rules of the type-ahead `Suggest.tsx` draws.
+ * Handed a `<datalist>`, Blink filters it (`HTMLInputElement::FilteredDataListOptions`) and Electron draws
  * it in a popup window of its own (`shell/browser/ui/autofill_popup.cc`, `views/autofill_popup_view.cc`).
  * Every figure below was measured from that popup, photographed on Windows at 1.5×, light and dark.
  */

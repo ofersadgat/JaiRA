@@ -5,10 +5,10 @@ import { subscribe } from "@jaira/ui/store";
 import { ContextMenu, type MenuAt } from "../Menu";
 
 /**
- * `pointerMenu.tsx`'s `PointerMenus`, universal on web (decision 0015): the right-click menu for CONTENT —
- * a selection, a link, a picture, a box being typed in — as opposed to rows, drawn as the app's own menu
- * (`ContextMenu`). What it offers is the desktop's own decision (`itemsForEvent` over the element clicked,
- * `itemsForFrame` over what main forwards from an artifact's sandboxed frame), and the verbs are its.
+ * The right-click menu for CONTENT on web — a selection, a link, a picture, a box being typed in — as
+ * opposed to rows, drawn as the app's own menu (`ContextMenu`). What it offers is `pointerMenuModel.ts`'s
+ * decision (`itemsForEvent` over the element clicked, `itemsForFrame` over what main forwards from an
+ * artifact's sandboxed frame), and the verbs are its.
  *
  * A row with a menu of its own claims the click first (`preventDefault`, or a card's `stopPropagation`),
  * and this listener, on the window, stands down; otherwise it claims it too, since the window has no

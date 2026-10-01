@@ -1,8 +1,7 @@
 /**
  * What the side panel's tabs DERIVE — a value's one-line preview, how long a step took, a step's path,
- * what a run consumed, a state's checks count — moved out of `panelViews.tsx` unchanged so the universal
- * copies of the tabs (decision 0015, `packages/universal/src/components/panel/`) say the same things
- * from the same code. Nothing here draws.
+ * what a run consumed, a state's checks count. Nothing here draws: the tabs
+ * (`packages/universal/src/components/panel/`) do.
  */
 import { useEffect, useMemo, useRef } from "react";
 import type { ArtifactSummary, InstanceNode, SessionRef, StateView } from "@jaira/shared/browser";
@@ -19,7 +18,7 @@ export function producedValueOf(row: ArtifactSummary, text: string): unknown {
 /** How long a pick's own jump through the conversation takes to settle — see `StepsView`. */
 export const SETTLE_MS = 1200;
 
-/** How tall one row of the Steps index is — `.rail.run-index`'s `--rail-cap`. */
+/** How tall one row of the Steps index is — the cap `RunIndex.tsx` gives its rail. */
 export const STEP_ROW = 30;
 
 /** How many rows of the index a box this tall holds (`StepsView`'s measure). */
@@ -27,7 +26,7 @@ export const stepRowsOf = (height: number): number => Math.max(4, Math.floor((he
 
 /**
  * The Steps tab's card goes when the step being viewed moves on (the person's ruling, 2026-09-24) —
- * `StepsView`'s rule, shared with the universal copy.
+ * `StepsView`'s rule.
  *
  * The card is about the step you PICKED: scroll the conversation to another sheet, or let the live step
  * advance, and the card closes — picking a step again opens that one's. The move the pick itself

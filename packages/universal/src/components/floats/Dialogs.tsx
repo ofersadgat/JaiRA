@@ -12,9 +12,8 @@ import { ModalBox } from "./Modal";
 const SUB = { voice: "app", scale: 11 / 12.5, color: "dim" } as const;
 
 /**
- * `approvalSurface.tsx`'s `ApprovalDialog`, universal (decision 0015): a command approval no conversation
- * can host (a request that names no task) in a modal — the task's id over it, when there is one, then
- * the surface. Not dismissed by the scrim: it is answered.
+ * A command approval no conversation can host (a request that names no task) in a modal — the task's id
+ * over it, when there is one, then the surface. Not dismissed by the scrim: it is answered.
  */
 export function ApprovalDialog({ staged = false, ...props }: ApprovalSurfaceProps & { staged?: boolean }): JSX.Element {
   return (
@@ -26,15 +25,14 @@ export function ApprovalDialog({ staged = false, ...props }: ApprovalSurfaceProp
 }
 
 /**
- * `components.tsx`'s `ModuleApprovalDialog`, universal (decision 0015): the js/ts modules a workflow is
- * about to call, before anything has run — each file's source in full, and Approve and run or Cancel.
- * The rules, from `styles.css`:
+ * The js/ts modules a workflow is about to call, before anything has run — each file's source in full,
+ * and Approve and run or Cancel. How it looks:
  *
- *   .modal.modal-wide    the wide dialog (`ModalBox`)
- *   h3 / .sub            the heading with its shield (`GateTitle`); app 11/12.5 --dim
- *   pre.artifact         --bg, 1px --line, radius 8, padding 10, 12 above (its UA 1em below), data 12/12,
+ *   the dialog           the wide one (`ModalBox`)
+ *   its head             the heading with its shield (`GateTitle`); the lines under it app 11/12.5 --dim
+ *   a file's source      --bg, 1px --line, radius 8, padding 10, 12 above (and 1em below), data 12/12,
  *                        pre-wrap, at most 320 tall, scrolling
- *   .options             row, wrapping, gap 8, 14 above: `button`, then `button.danger`; .reason --bad
+ *   the buttons          row, wrapping, gap 8, 14 above: a plain one, then a `danger` one; the error --bad
  */
 export function ModuleApprovalDialog({
   files,
@@ -64,7 +62,7 @@ export function ModuleApprovalDialog({
         // children's margins do not collapse out of it).
         <View key={file.file} flexDirection="column" marginTop={i > 0 ? em : 0}>
           <Txt spec={SUB}>
-            {/* The DOM's text nodes, one for one: Chromium shapes each run apart. */}
+            {/* A text node per piece, as the reference pictures have them: Chromium shapes each run apart. */}
             {file.file}
             {" —"}
             {" "}

@@ -38,8 +38,7 @@ import { StatePanel } from "../workflow/StatePanel";
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
 
 /**
- * Everything a face needs from the shell (`panelFaces.tsx`'s `PanelHost`, as far as the copies read it),
- * built once per render by `PanelColumn.tsx` from the store — as `App.tsx` builds the DOM's.
+ * Everything a face needs from the shell, built once per render by `PanelColumn.tsx` from the store.
  */
 export interface FaceHost {
   /** The SELECTED task's detail — the only one whose run the store has loaded. */
@@ -92,8 +91,7 @@ export interface FaceHost {
   /** The conversation's turns, for where a copy may start. */
   turns: readonly { kind: string; instanceId?: string | undefined; seq: number }[];
   /**
-   * What the workflow editor needs in a configuration card and a state's Configuration (`PanelHost.config`
-   * and the context's `readState`/`saveState`/`ui`).
+   * What the workflow editor needs in a configuration card and a state's Configuration.
    */
   config: {
     tree: FileTree | null;
@@ -110,7 +108,7 @@ export interface FaceHost {
   automationsOf: (project: string | undefined, onOpenConversation: () => void) => ReactNode;
 }
 
-/** A task's status glyph (`board.tsx`'s `Badge`): 16 wide, at the glyph's size (15px in the head, 13 in the rail), coloured by status. */
+/** A task's status glyph: 16 wide, at the glyph's size (15px in the head, 13 in the rail), coloured by status. */
 function Badge({ status }: { status: string }): JSX.Element {
   const size = useContext(GlyphSizeContext);
   const hue = status === "running" || status === "interrupted" ? "accent" : status === "waiting_for_user" ? "warn" : status === "completed" ? "ok" : status === "failed" || status === "blocked" || status === "timeout" ? "bad" : "dim";
@@ -121,20 +119,20 @@ function Badge({ status }: { status: string }): JSX.Element {
   );
 }
 
-/** `.sp-glyph`'s icon: --dim at the glyph's size (1em: 15px in the head, 13 in the rail). */
+/** An icon as a face's glyph: --dim at the glyph's size (15px in the head, 13 in the rail). */
 function Glyph({ name }: { name: Parameters<typeof Icon>[0]["name"] }): JSX.Element {
   const t = useTokens();
   return <Icon name={name} size={useContext(GlyphSizeContext)} color={String(t.v("dim"))} />;
 }
 
-/** The head's line for a task: its status, its name, and what identifies it (`taskHeadOf`). */
+/** The head's line for a task: its status, its name, and what identifies it. */
 function taskHeadOf(detail: TaskDetail | null, taskId: string): Pick<PanelFace, "glyph" | "title" | "titleText" | "sub"> {
   if (detail === null) return { title: taskId, titleText: taskId, glyph: <Badge status="queued" /> };
   return {
     glyph: <Badge status={detail.status} />,
     title: taskNameOf(detail),
     titleText: detail.title,
-    // The id in its own run, as the DOM's `span.mono` is: one run shapes differently at the seam.
+    // The id in its own run: one run for the whole line shapes differently at the seam.
     sub: (
       <>
         <Txt spec={{ voice: "app", scale: 0.92, color: "dim" }}>{detail.taskId}</Txt>
@@ -168,11 +166,9 @@ function openSubagent(host: FaceHost, taskId: string, project: string | undefine
 }
 
 /**
- * The artifact picked in the Produced tab (`ProducedView`'s `.pv-artifact`): the value viewer, with the
- * two icons in its head — open it on its own in this panel, hold it in Held. A live artifact runs here
- * (the task's grant, `serveOf`), and keeps its grant where it is opened or held, as the desktop's does.
- *
- *   .pv-artifact-acts   inline row, gap 1; each an `.sp-icon`
+ * The artifact picked in the Produced tab (`ProducedView`): the value viewer, with the two icons in its
+ * head (a row, gap 1; each an `SpIcon`) — open it on its own in this panel, hold it in Held. A live
+ * artifact runs here (the task's grant, `serveOf`), and keeps its grant where it is opened or held.
  */
 function produced(host: FaceHost, artifacts: ArtifactSurface): (row: ArtifactSummary, text: string) => ReactNode {
   return (row, text) => {
@@ -196,8 +192,8 @@ function produced(host: FaceHost, artifacts: ArtifactSurface): (row: ArtifactSum
 }
 
 /**
- * What lets a task's artifact run in the panel (`App.tsx`'s `serveOf`): a grant against the task that
- * produced it, in its project. No `onPrompt` — the panel has no composer for a page to write into.
+ * What lets a task's artifact run in the panel: a grant against the task that produced it, in its
+ * project. No `onPrompt` — the panel has no composer for a page to write into.
  *
  * Kept, one per task: a value view asks for a grant again whenever its `serve` changes, and a new frame
  * address reloads the page — a fresh function on every draw of the panel would restart it each time.
@@ -231,7 +227,7 @@ function stepsBody(host: FaceHost, detail: TaskDetail, entry: { step?: string; p
         asking: host.gate !== undefined,
         sessions: host.source.sessionHistory,
         onOpen: (title, value) => pushPreview(host, { title, value }),
-        // A step's right-click: rewind to before it, or fork there (`indexCutOf`, the desktop's own).
+        // A step's right-click: rewind to before it, or fork there (`indexCutOf`).
         ...(() => {
           const onCut = indexCutOf(host.turns, detail.taskId, host.onRewind, host.onFork);
           return onCut !== undefined ? { onCut } : {};
@@ -247,17 +243,17 @@ function stepsBody(host: FaceHost, detail: TaskDetail, entry: { step?: string; p
   );
 }
 
-/** The configuration a run resolved against — a card, and a tab (`panelFaces.tsx`'s `ConfigCard`). */
+/** The configuration a run resolved against — a card, and a tab. */
 function ConfigCard({ host, stateId, taskId, instanceId, project }: { host: FaceHost; stateId: string; taskId?: string | undefined; instanceId?: string | undefined; project?: string | null | undefined }): JSX.Element {
   const read = useEffectiveRead(stateId, taskId, instanceId, project ?? host.project ?? null);
   return <WorkflowConfigCard read={read} stateId={stateId} tree={host.config.tree} executors={host.config.executors} services={host.config.services} onOpenState={host.openInFiles} />;
 }
 
-/** A state's configuration, editable — its own copy of the file (`panelFaces.tsx`'s `StateConfig`). */
+/** A state's configuration, editable — its own copy of the file. */
 function StateConfig({ host, stateId }: { host: FaceHost; stateId: string }): JSX.Element {
   const { readState, saveState } = host.config;
   if (readState === undefined) return <PanelEmpty>This state&apos;s file cannot be read here.</PanelEmpty>;
-  // `.sp-body.scroll`'s padding (12 12 18), around a panel that fills it rather than scrolling in it.
+  // The panel's scrolling body's padding (12 12 18), around a panel that fills it rather than scrolling in it.
   return (
     <View flex={1} minHeight={0} flexDirection="column" paddingTop={12} paddingHorizontal={12} paddingBottom={18}>
     <StatePanel
@@ -283,10 +279,10 @@ function StateConfig({ host, stateId }: { host: FaceHost; stateId: string }): JS
 const dropIcon = (host: FaceHost) => (item: PinnedValue): ReactNode => <SpIcon icon="cross" label="Let go of it" onPress={() => host.unhold(item)} />;
 
 /**
- * `panelFaces.tsx`'s `OwnRun`: an entry about a task the store is NOT holding — a subtask the Changes tab
- * pushed, an entry left under a pushed card after the selection moved on. It loads the task's run itself
- * (`taskRun.ts`, the DOM's own) and draws the entry's body over a host that is about THAT task: its tree,
- * its conversation, its gate. The main view is not showing it, so there is nothing there to go to.
+ * `OwnRun`: an entry about a task the store is NOT holding — a subtask the Changes tab pushed, an entry
+ * left under a pushed card after the selection moved on. It loads the task's run itself (`taskRun.ts`)
+ * and draws the entry's body over a host that is about THAT task: its tree, its conversation, its gate.
+ * The main view is not showing it, so there is nothing there to go to.
  */
 function OwnRun({ host, entry, taskId, project }: { host: FaceHost; entry: PanelEntry; taskId: string; project: string | undefined }): JSX.Element {
   // `useTaskRun` lays the run over a surface context; the transcript's source is the part of one it reads.
@@ -320,7 +316,7 @@ function OwnRun({ host, entry, taskId, project }: { host: FaceHost; entry: Panel
   return <>{faceOf(own, entry).body}</>;
 }
 
-/** The face of any entry (`panelFaces.tsx`'s `faceOf`). */
+/** The face of any entry. */
 export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): PanelFace {
   const detail = "taskId" in entry && entry.taskId !== undefined ? host.detailOf(entry.taskId) : null;
   const loaded = detail !== null && host.detail?.taskId === detail.taskId;
@@ -466,8 +462,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         tabs,
         tab: open,
         body: body(),
-        // The state panel fills the body and scrolls its own form (`.state-panel` is flex 1 in the
-        // DOM's scrolling body, which it never overflows), so the body is not a scroller around it.
+        // The state panel fills the body and scrolls its own form, so the body is not a scroller
+        // around it.
         ...(open === "configuration" && view !== undefined && view !== null ? { scroll: false } : {}),
       };
     }
@@ -504,7 +500,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         body: !loaded ? (
           reading()
         ) : (
-          // `.pv-convo`: the conversation lays itself out to the column; its doorways push further in.
+          // The conversation lays itself out to the column; its doorways push further in.
           <View flex={1} minHeight={0} flexDirection="column">
             <SidechainConversation step={entry.step} detail={detail} source={host.source} onOpen={(node, call, nested) => openSubagent(host, entry.taskId, entry.project, node, call, nested)} />
           </View>
@@ -542,7 +538,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
   }
 }
 
-/** The chat entry's glyph, as the Chat room's panel draws it: `.sp-glyph`'s icon, at the glyph's size. */
+/** The chat entry's glyph, as the Chat room's panel draws it: an icon, at the glyph's size. */
 function ChatGlyph(): JSX.Element {
   return <Glyph name="comment" />;
 }

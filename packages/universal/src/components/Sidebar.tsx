@@ -8,37 +8,41 @@ import { ContextMenu, type MenuAt } from "./Menu";
 import { Pills } from "./Pills";
 
 /**
- * `sidebar.tsx`'s `Sidebar`, universal (decision 0015). Read that one for what the column is and why;
- * this one has to look and behave the same. The rules it carries, from `styles.css` (`cascade.mts
- * .sidebar` prints them as Chromium applies them):
+ * The one left column (SHELL.md §5.1), PROJECTS OVER VIEWS: the title row (the collapse button and the
+ * app's name; the window's drag handle on this side), the root rows, the projects — the one the address
+ * stands on expanded, its views nested inside it — and the foot, for what belongs to no project. Which
+ * project is open is derived from the address, never stored. A row with something to browse IS the
+ * accordion for it: its drawer is open exactly while its view is the one selected. A row carries its own
+ * verbs as glyphs at its trailing end. Shut, it is a rail of glyphs and not gone, every view being
+ * reached from here. How it looks:
  *
- *   .sidebar             column, width --sidebar, border-right --line; its own variables (`TokenScope`);
+ *   the column           width --sidebar, a --line on its right; its own variables (`TokenScope`);
  *                        ground --panel-2, or --chrome under any named palette
- *   .side-title          34 tall, padding 0 8, row, gap 8: the toggle (26 square, 11/12.5 app, -0.05em)
+ *   the title row        34 tall, padding 0 8, row, gap 8: the toggle (26 square, 11/12.5 app, -0.05em)
  *                        and the brand (app-label)
- *   .side-nav/.side-foot column, gap 1, padding 0 6 6; the foot 6 on top, under a --line
- *   .side-roots          the root rows, 5 below, under a --line, 3 more below that
- *   .side-row            26 tall, row, gap 4, radius 6; hover --fill-ghost-hover, on --tint-accent
- *   .side-hit            the row's target: flex 1, padding 0 7, gap 8
- *   .side-glyph          15 wide, centred, 12.5/12.5 app, --dim (--text on the row you are on)
- *   .side-label          app-label (or app-secondary on "Open a project…"), one line
- *   .side-act            20 square, radius 5, 11/12.5 app, --dim at half opacity until its row is
+ *   the list, the foot   column, gap 1, padding 0 6 6; the foot 6 on top, under a --line
+ *   the root rows        5 below, under a --line, 3 more below that
+ *   a row                26 tall, row, gap 4, radius 6; hover --fill-ghost-hover, on --tint-accent
+ *   its target           flex 1, padding 0 7, gap 8
+ *   its glyph            15 wide, centred, 12.5/12.5 app, --dim (--text on the row you are on)
+ *   its label            app-label (or app-secondary on "Open a project…"), one line
+ *   a verb               20 square, radius 5, 11/12.5 app, --dim at half opacity until its row is
  *                        hovered or on; hover --fill-ghost-selected, on --accent over --tint-accent
- *   .side-section.open   --panel between two --lines, 4 -6 outside, 0 6 4 inside, takes the height
- *   .side-project-row    padding 0 8 0 0, gap 7; its target 5 0 5 8 (8 0 6 8 when open), gap 7
- *   .side-dot            7 round, the project's hue
- *   .side-name           baseline row, gap 6: the name (data-title open, data-secondary shut) and
+ *   the open project     --panel between two --lines, 4 -6 outside, 0 6 4 inside, takes the height
+ *   a project's row      padding 0 8 0 0, gap 7; its target 5 0 5 8 (8 0 6 8 when open), gap 7
+ *   its dot              7 round, the project's hue
+ *   its name             baseline row, gap 6: the name (data-title open, data-secondary shut) and
  *                        where it is (data-faint, right-aligned, yields first)
- *   .side-views          indented 12, a --rule on the left, 8 inside it, 4 below
- *   .side-drawer         3 0 6 6 outside, a --line on the left, 8 inside
- *   .side-twist          16×20, 9/12.5 app, --dim
- *   .side-project-settings   shown only while the row is hovered (web; a phone has no hover)
+ *   its views            indented 12, a --rule on the left, 8 inside it, 4 below
+ *   a drawer             3 0 6 6 outside, a --line on the left, 8 inside
+ *   the twisty           16×20, 9/12.5 app, --dim
+ *   a project's ⚙        shown only while the row is hovered (web; a phone has no hover)
  *   palettes             contrast: a 1.5px --rule edge, and the row you are on ringed rather than
  *                        filled; pastel(-rail): that row rounder (9); zinc: that row --panel with a
  *                        --line ring, or #191a1d in the dark
- *   .sidebar.shut        the rail: rows 34 wide and centred, no labels or pills, project tiles
- *   .rail-views          its lists of views: rows 30 tall (the foot's stay 26)
- *   .side-panel          Settings over the column: top 34, padding 4 6 6, --panel-2, --lift
+ *   shut (the rail)      rows 34 wide and centred, no labels or pills, project tiles
+ *   the rail's views     rows 30 tall (the foot's stay 26)
+ *   the Settings panel   over the column: top 34, padding 4 6 6, --panel-2, --lift
  */
 const ROW_PILL_BUDGET = 96;
 const OPEN_PILL_BUDGET = 62;
@@ -196,10 +200,10 @@ function Column({
         {drawer ? (
           <View
             flexDirection="column"
-            // In the Settings panel the drawer is as tall as its list and scrolls past that
-            // (`.side-panel > .side-drawer { flex: 0 1 auto; overflow-y: auto }`); in the column it takes the rest —
-            // `flex: 1`, whose 0% basis CSS reads as the content in a section of no set height; Yoga's 0 would
-            // collapse the root's drawer to nothing, so the basis is said as what CSS makes of it.
+            // In the Settings panel the drawer is as tall as its list and scrolls past that (`flex: 0 1 auto`);
+            // in the column it takes the rest — `flex: 1`, whose 0% basis CSS reads as the content in a
+            // section of no set height; Yoga's 0 would collapse the root's drawer to nothing, so the basis
+            // is said as what CSS makes of it.
             {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden" } : { overflow: "hidden" }) } : { flexGrow: 1, flexShrink: 1, flexBasis: "auto" })}
             minHeight={0}
             marginTop={3}
@@ -284,8 +288,8 @@ function Column({
       overflow="hidden"
       position="relative"
     >
-      {/* `.side-title` is the window's drag handle on the desktop (`DRAG_REGION`), inset on the left by what
-          the OS has put there (macOS's traffic lights); its button opts out again (`.side-title button`). */}
+      {/* The title row is the window's drag handle on the desktop (`DRAG_REGION`), inset on the left by what
+          the OS has put there (macOS's traffic lights); its button opts out again (`NO_DRAG`). */}
       <View
         flexDirection="row"
         alignItems="center"
@@ -351,7 +355,7 @@ function Column({
           </View>
           {projects.map(projectRow)}
           <Press
-            // `OpenAnother`: a menu under the row — open or make a project here, or on a paired machine.
+            // Open another: a menu under the row — open or make a project here, or on a paired machine.
             onPress={(e) => {
               const box = isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
               const touch = (e as unknown as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
@@ -442,12 +446,12 @@ function Column({
   );
 }
 
-/** A `.side-row`: the ground that says hovered or on, around the row's target and its verbs. */
+/** A row: the ground that says hovered or on, around the row's target and its verbs. */
 function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean; tall?: boolean; children: (hovered: boolean) => ReactNode }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const [hovered, hover] = useHover();
-  // The row you are on, as each palette draws it (`:root[data-palette=…] .side-row.on`).
+  // The row you are on, as each palette draws it.
   const onStyle: Record<string, unknown> =
     look.palette === "contrast"
       ? { backgroundColor: "transparent", boxShadow: `inset 0 0 0 1.5px ${String(t.v("rule"))}` }
@@ -465,7 +469,7 @@ function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean;
       justifyContent={rail ? "center" : "flex-start"}
       gap={4}
       width={rail ? 34 : "100%"}
-      // `.rail-views .side-row`: 30 tall in the rail's lists of views; 26 everywhere else.
+      // 30 tall in the rail's lists of views; 26 everywhere else.
       height={tall ? 30 : 26}
       flexShrink={0}
       borderRadius={radius}

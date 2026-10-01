@@ -14,15 +14,14 @@ import { NeedsAttention, useSettingsShell } from "./NeedsAttention";
 import { SettingsSection } from "./SettingsPage";
 
 /**
- * Settings → Connections (`connectionsPane.tsx`'s `ConnectionsPage`), universal (decision 0015): what
- * JaiRA can reach, and as whom — the agents, the model APIs, the local models, the MCP servers and the
- * forges, each a card of rows. It is built from the store as `App.tsx` builds the DOM's; what is asked
- * of main (the local ports, the weights, the MCP servers) is `connectionsModel.ts`'s and `mcpData.ts`'s,
- * the hooks the desktop calls. The rule it adds:
+ * Settings → Connections: what JaiRA can reach, and as whom — the agents, the model APIs, the local
+ * models, the MCP servers and the forges, each a card of rows. Its rows are built from the store; what
+ * is asked of main (the local ports, the weights, the MCP servers) is `connectionsModel.ts`'s and
+ * `mcpData.ts`'s. How the re-check line looks:
  *
- *   .settings-recheck    in a section's heading (whose font it inherits: 450 on a 1.3 line): row,
- *                        centred, gap 8, app 11/12.5; when the checks ran (`.sub`, --dim) and Re-check,
- *                        a ghost button in the same font (its tracking `normal`)
+ *   the re-check line    in a section's heading, in its font (450 on a 1.3 line): row, centred, gap 8,
+ *                        app 11/12.5; when the checks ran (--dim) and Re-check, a ghost button in the
+ *                        same font (its tracking `normal`)
  */
 export function ConnectionsPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -115,14 +114,14 @@ export function ConnectionsPage(): JSX.Element {
   );
 }
 
-/** The heading's font, which `.settings-recheck` and its button inherit at 11/12.5 (`.set-section-title`: 450, line 1.3). */
+/** The re-check line's font and its button's: the section heading's (450, line 1.3) at 11/12.5. */
 const RECHECK = { voice: "app", scale: 11 / 12.5, weight: 450, lineHeight: 1.3 } as const;
 
 /** When the checks last ran, and Re-check — at the head of the section they are about. */
 function RecheckLine({ checkedAt, rechecking, busy, onRecheck }: { checkedAt: number; rechecking: boolean; busy: boolean; onRecheck: () => void }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={8} flexShrink={0}>
-      {/* The heading's -0.005em, inherited as its length: at 1.1× that is -0.00625 of this 11/12.5. */}
+      {/* The heading's -0.005em, kept as its length: at 1.1× that is -0.00625 of this 11/12.5. */}
       <Txt spec={{ ...RECHECK, color: "dim", ls: (-0.005 * 1.1) / (11 / 12.5) }}>{checkedAgo(checkedAt)}</Txt>
       <Button kind="ghost" onPress={onRecheck} disabled={busy || rechecking} font={RECHECK}>
         {rechecking ? "checking…" : "Re-check"}

@@ -31,38 +31,40 @@ import { QuestionSurface } from "../floats/QuestionSurface";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 
 /**
- * `galleryPane.tsx`'s `GalleryPane` and `componentGallery.tsx`'s `ComponentGallery`, universal (decision
- * 0015): the page's heading, the bar that slides every row to one variant, and a row per surface — its
- * heading, its tabs and arrows, and a carousel of cards. What it derives is `galleryModel.ts`, shared with
- * the desktop's. In a card, an interaction's dialog is the gate's own surface (`GateSurface`, the side
- * panel's copy) and its config's form the one form (`form/SchemaForm`); an approval and a question are
- * their surfaces (`floats/ApprovalSurface`, `floats/QuestionSurface`) in `.inline-gate`; a review, an edit
- * and a changeset review are `artifact/`'s, wired to the gallery's own services (`galleryServices`, which
- * reach nothing); its JSON view the schema editor (`files/SchemaEdit`'s `SchemaJsonEditor`, the schema
- * locked), checked by the store's `validateSchema`. The rules, from `styles.css`:
+ * The Components room's page (`GalleryPane`) and its gallery (`ComponentGallery`): the page's heading,
+ * the bar that slides every row to one variant, and a row per surface — its heading, its tabs and
+ * arrows, and a carousel of cards. What it derives is `galleryModel.ts`. In a card, an interaction's
+ * dialog is the gate's own surface (`GateSurface`, the side panel's) and its config's form the one form
+ * (`form/SchemaForm`); an approval and a question are their surfaces (`floats/ApprovalSurface`,
+ * `floats/QuestionSurface`) under an accent rule (`InlineGateBox`); a review, an edit and a changeset
+ * review are `artifact/`'s, wired to the gallery's own services (`galleryServices`, which reach
+ * nothing); its JSON view the schema editor (`files/SchemaEdit`'s `SchemaJsonEditor`, the schema
+ * locked), checked by the store's `validateSchema`. How it looks:
  *
- *   .gallery-page        --bg, scrolls, padding 12 14, column, gap 18
- *   .gallery-page-head   column, gap 8; h2 700 app at 15/12.5, margin 0; .sub margin 0, ≤ 80ch, line 1.5
- *   .gallery             column, gap 14
- *   .gallery-common      sticky, row, wrapping, centred, gap 6, padding 8 0, --bg, a --line under it
- *   .gallery-common-btn  `button.chip`: app at 10/12.5, --dim, 1px --line, radius 999, padding 0 6,
- *                        --panel-2 (hovered --panel-3, --rule, --text), gap 5; .mono data 11/12,
- *                        .gallery-jump-n data 10/12 --dim
- *   .gallery-row         column, gap 10;  .gallery-row-head column, gap 8, padding-top 8, a --line above
- *   .gallery-row-title   column, gap 4; h3 (700, app 14/12.5, 0.09em, uppercase, --dim, a row spread
- *                        apart, gap 8) holding the title, a .chip and the component's name (.mono .sub)
- *   .gallery-row-nav     row, centred, spread apart, gap 10, wrapping
- *   .tabs.seg button     padding 2 11, app 11/12.5, the first radius 5 0 0 5, the last 0 5 5 0 and −1
- *                        left; `layer-on` filled (--fill-accent, --on-accent 600, --sheen), else `ghost`
- *   .gallery-arrows      row, centred, gap 4; buttons (ghost) ≥ 28 wide, padding 2 8, app 14/12.5 on a
+ *   the page             --bg, scrolls, padding 12 14, column, gap 18
+ *   its head             column, gap 8; the heading 700 app at 15/12.5; the words ≤ 80ch, line 1.5
+ *   the gallery          column, gap 14
+ *   the bar              sticky, row, wrapping, centred, gap 6, padding 8 0, --bg, a --line under it
+ *   a bar button         a chip that is a button: app at 10/12.5, --dim, 1px --line, radius 999,
+ *                        padding 0 6, --panel-2 (hovered --panel-3, --rule, --text), gap 5; the
+ *                        variant data 11/12, its count of rows data 10/12 --dim
+ *   a row                column, gap 10;  its head column, gap 8, padding-top 8, a --line above
+ *   a row's title        column, gap 4; the heading (700, app 14/12.5, 0.09em, uppercase, --dim, a row
+ *                        spread apart, gap 8) holding the title, a chip and the component's name
+ *                        (the data face, --dim)
+ *   a row's controls     row, centred, spread apart, gap 10, wrapping
+ *   a tab                padding 2 11, app 11/12.5, the first radius 5 0 0 5, the last 0 5 5 0 and −1
+ *                        left; the one showing filled (--fill-accent, --on-accent 600, --sheen), the
+ *                        rest ghost
+ *   the arrows           row, centred, gap 4; buttons (ghost) ≥ 28 wide, padding 2 8, app 14/12.5 on a
  *                        line of 1; the counter data 11/12 --dim, ≥ 3ch, centred
- *   .gallery-track       a row that scrolls sideways, a slide per variant, each the track's width
- *   .gallery-card        column, gap 10, padding 12, 1px --line, radius --card-radius, --panel
- *   .gallery-head        column, gap 3; h4 700 app 12.5/12.5; .sub ≤ 80ch, line 1.5
- *   .gallery-body        the stage (the rest) and the side (≥ 280, 34%), gap 10, stretched; stacked
+ *   the track            a row that scrolls sideways, a slide per variant, each the track's width
+ *   a card               column, gap 10, padding 12, 1px --line, radius --card-radius, --panel
+ *   a card's head        column, gap 3; the title 700 app 12.5/12.5; the note ≤ 80ch, line 1.5
+ *   a card's body        the stage (the rest) and the side (≥ 280, 34%), gap 10, stretched; stacked
  *                        when the card is 720 or narrower
- *   .gallery-stage       padding 12, 1px dashed --line, radius 8, --bg
- *   .gallery-side        at least 320 tall; .gallery-config fills it: column, gap 8, padding 8, 1px
+ *   the stage            padding 12, 1px dashed --line, radius 8, --bg
+ *   the side             at least 320 tall; the config box fills it: column, gap 8, padding 8, 1px
  *                        --line, radius 8, --panel-2, scrolls; its head a row, centred, gap 10
  */
 /** The schema check, over the bridge — the store's, the same one every JSON editor in the app uses. */
@@ -72,8 +74,7 @@ export function GalleryPane({ validateSchema }: { validateSchema: Validate }): J
   const t = useTokens();
   return (
     <ScrollView
-      // On web it scrolls both ways, as `.gallery-page`'s `overflow: auto` does: a row of tabs wider than
-      // the page widens it.
+      // On web it scrolls both ways (`overflow: auto`): a row of tabs wider than the page widens it.
       style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
       contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 14, ...PLAIN_SCROLLER } as never}
       {...scrollbarProps(t)}
@@ -94,7 +95,7 @@ export function GalleryPane({ validateSchema }: { validateSchema: Validate }): J
 const SUB: FontSpec = { voice: "app", scale: 11 / 12.5, color: "dim" };
 
 
-/** `code`: the data face at 11/12. */
+/** Code in the page's words: the data face at 11/12. */
 function Code({ children }: { children: ReactNode }): JSX.Element {
   return <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", lineHeight: 1.5 }}>{children}</Txt>;
 }
@@ -121,9 +122,8 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
   return (
     <View flexDirection="column" gap={14}>
       <View
-        // Sticky on web, as `.gallery-common` is (top 0, over the rows: z-index 2); a phone has no sticky.
-        // `top: 0` holds it under the SCROLLER's padding (`.gallery-page`'s 12), which here is the content's:
-        // the same place is 12 down.
+        // Sticky on web, over the rows (z-index 2); a phone has no sticky. A sticky box is held under its
+        // SCROLLER's padding, and the page's 12 is the content's here: the same place is 12 down.
         {...((isWeb ? { position: "sticky", top: 12, zIndex: 2 } : {}) as object)}
         flexDirection="row"
         flexWrap="wrap"
@@ -167,10 +167,10 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
             <RowHead group={group} at={at} onSlide={(i) => slideTo(group, i)} />
             <ScrollView
               horizontal
-              // On web the snapping is written here, as `.gallery-track` and `.gallery-slide` write it:
-              // react-native-web's `pagingEnabled` wraps each slide in a view of its own, which is a
-              // stacking context — and a card's pinned Save row (z-index 2) then stood UNDER the sticky bar
-              // (z-index 2 as well), where the desktop's, later in the page, is drawn over it.
+              // On web the snapping is written here (the track's `scrollSnapType`, a slide's
+              // `scrollSnapAlign`): react-native-web's `pagingEnabled` wraps each slide in a view of its own,
+              // which is a stacking context — and a card's pinned Save row (z-index 2) then stood UNDER the
+              // sticky bar (z-index 2 as well); unwrapped, it comes later in the page and is drawn over it.
               pagingEnabled={!isWeb}
               showsHorizontalScrollIndicator={false}
               ref={(el) => {
@@ -217,15 +217,15 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
   );
 }
 
-/** `.gallery-row-head`: what the surface is, and the row's own controls. */
+/** A row's head: what the surface is, and the row's own controls. */
 function RowHead({ group, at, onSlide }: { group: GalleryGroup; at: number; onSlide: (index: number) => void }): JSX.Element {
   const t = useTokens();
   const many = group.variants.length > 1;
   return (
     <View flexDirection="column" gap={8} paddingTop={8} {...(edge(t, { top: 1 }) as object)}>
       <View flexDirection="column" gap={4}>
-        {/* The h3 is a flex row spread apart (the base `h3`'s), and what is inside it inherits its weight,
-            its capitals and its spacing — 0.09em of 14px, inherited as the length. */}
+        {/* The heading is a row spread apart, and what is inside it takes its weight, its capitals and its
+            spacing — 0.09em of 14px, as that length whatever its own size. */}
         <View flexDirection="row" alignItems="center" justifyContent="space-between" gap={8}>
           <Txt spec={{ voice: "app", scale: 14 / 12.5, weight: 700, ls: 0.09, upper: true, color: "dim" }}>{group.title}</Txt>
           <Chip spec={{ weight: 700, upper: true, ls: (0.09 * 14) / 10 }}>{group.kind}</Chip>
@@ -236,8 +236,8 @@ function RowHead({ group, at, onSlide }: { group: GalleryGroup; at: number; onSl
         </Txt>
       </View>
       <View flexDirection="row" alignItems="center" justifyContent="space-between" gap={10} flexWrap="wrap">
-        {/* `flex: none` on the tabs outweighs their `flex-wrap`: the row is as wide as all of them, the arrows
-            wrap under it, and a row wider than the page scrolls the page sideways. */}
+        {/* The tabs neither shrink nor wrap: the row is as wide as all of them, the arrows wrap under it,
+            and a row wider than the page scrolls the page sideways. */}
         <Seg options={group.variants.map((v, i) => ({ label: v.title, on: i === at, title: v.note, onPress: () => onSlide(i) }))} />
         {many ? (
           <View flexDirection="row" alignItems="center" gap={4} flexShrink={0}>
@@ -259,7 +259,7 @@ function monoCh(t: Tokens, n: number): number {
   return typeof size === "number" ? n * 0.6 * size : n * 6.6;
 }
 
-/** A `.gallery-arrows` button: ghost, ≥ 28 wide, padding 2 8, the glyph at 14/12.5 on a line of 1. */
+/** An arrow button: ghost, ≥ 28 wide, padding 2 8, the glyph at 14/12.5 on a line of 1. */
 function Arrow({ glyph, label, disabled, onPress }: { glyph: string; label: string; disabled: boolean; onPress: () => void }): JSX.Element {
   const t = useTokens();
   const size = t.scaled("size-app", 14 / 12.5);
@@ -271,8 +271,8 @@ function Arrow({ glyph, label, disabled, onPress }: { glyph: string; label: stri
 }
 
 /**
- * `.tabs.seg`: buttons side by side with no gap, the first rounded on the left, the last on the right and
- * pulled 1 over its neighbour's edge; the one showing is `layer-on`, the rest `ghost`.
+ * Segmented tabs: buttons side by side with no gap, the first rounded on the left, the last on the right
+ * and pulled 1 over its neighbour's edge; the one showing is filled with the accent, the rest ghost.
  */
 function Seg({ options }: { options: { label: string; on: boolean; title?: string; disabled?: boolean; onPress: () => void }[] }): JSX.Element {
   const t = useTokens();
@@ -322,7 +322,7 @@ function Seg({ options }: { options: { label: string; on: boolean; title?: strin
   );
 }
 
-/** `.chip`: app at 10/12.5, --dim, a 1px --line pill, padding 0 6. */
+/** A chip: app at 10/12.5, --dim, a 1px --line pill, padding 0 6. */
 function Chip({ children, tone, spec }: { children: ReactNode; tone?: "ok" | "bad"; spec?: Partial<FontSpec> }): JSX.Element {
   const t = useTokens();
   return (
@@ -355,13 +355,13 @@ function GalleryCard({
   const t = useTokens();
   const entry = surface.schemaId === null ? undefined : schemaById(surface.schemaId);
   const parsed = parsedDoc(state.text);
-  // The body's width, for the container query: two columns while the card's content (the body) is wider
-  // than 720, stacked below that.
+  // The body's width, in place of a container query: two columns while the card's content (the body) is
+  // wider than 720, stacked below that.
   const [width, setWidth] = useState(0);
   const stacked = width > 0 && width <= 720;
   // The config box's inside height, beside the stage: in the JSON view its content is held to it, so the
-  // editor takes what the head leaves (`.gallery-json`: flex 1 1 auto) — the DOM's box is a flex column of
-  // that height, which shrinks what it holds; a scroller's content would only grow.
+  // editor takes what the head leaves (flex 1 1 auto) and shrinks to it; a scroller's content, left to
+  // itself, would only grow.
   const [sideHeight, setSideHeight] = useState(0);
   const heldToBox = state.editor !== "form" && !stacked && sideHeight > 0;
   return (
@@ -381,7 +381,7 @@ function GalleryCard({
         </Txt>
       </View>
       <View flexDirection={stacked ? "column" : "row"} gap={10} alignItems="stretch" onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
-        {/* `.gallery-stage` scrolls sideways (`overflow-x: auto`): a box that clips, whether or not it ever
+        {/* The stage scrolls sideways (`overflow-x: auto`): a box that clips, whether or not it ever
             does — and Chromium layers what a clip holds apart, which is what keeps a card's words subpixel
             beside its neighbours'. Sideways only here: a dialog's hidden probes stand below it, and would
             give the stage a scrollbar of their own. */}
@@ -389,7 +389,7 @@ function GalleryCard({
           <Stage surface={surface} text={state.text} onResult={onResult} />
         </View>
         <View {...(stacked ? {} : { width: "34%", minWidth: 280, flexShrink: 0 })} minHeight={stacked ? 0 : 320} position="relative">
-          {/* `.gallery-config`: the box that scrolls beside the dialog, its head held at the top — out of flow
+          {/* The config box: the box that scrolls beside the dialog, its head held at the top — out of flow
               over the side (a box of its own around the scroller, whose plain style keeps it in flow). */}
           <View {...(stacked ? { maxHeight: 420 } : { position: "absolute", top: 0, right: 0, bottom: 0, left: 0 })} flexDirection="column">
           <ScrollView
@@ -404,10 +404,10 @@ function GalleryCard({
             }
             onLayout={(e: LayoutChangeEvent) => setSideHeight(e.nativeEvent.layout.height - 2)}
             contentContainerStyle={{ flexDirection: "column", flexGrow: 1, gap: 8, padding: 8, ...(heldToBox ? { height: sideHeight } : {}), ...PLAIN_SCROLLER } as never}
-            // On web the head sticks by itself, as `.gallery-config-head` does (`sticky`, `z-index: 1`, and
-            // under the scroller's padding, which here is the content's 8): react-native-web's sticky
-            // header is a box of its own at `z-index: 10`, painted after the page's bar and pinned rows
-            // (2) where the desktop's is painted before them — and its words then stood in another layer.
+            // On web the head sticks by itself (`sticky`, `z-index: 1`, and 8 down: under the scroller's
+            // padding, which here is the content's): react-native-web's sticky header is a box of its own
+            // at `z-index: 10`, painted after the page's bar and pinned rows (2) where this one is painted
+            // before them — and its words then stood in another layer.
             {...(isWeb ? {} : { stickyHeaderIndices: [0] })}
             {...scrollbarProps(t)}
           >
@@ -437,7 +437,7 @@ function GalleryCard({
                 <SchemaForm schema={entry.document as Schema} value={parsed.doc} onChange={(next) => onText(JSON.stringify(next, null, 2))} ctx={{ path: "" }} />
               )
             ) : (
-              // `.gallery-json`: the editor takes what the column has left, never less than 240 — the schema
+              // The JSON view: the editor takes what the column has left, never less than 240 — the schema
               // shown and not offered, since it is the SURFACE's (`fill_form`'s contract or nothing).
               <View flexDirection="row" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={240}>
                 <SchemaJsonEditor text={state.text} busy={false} onChange={onText} validate={validateSchema} schemaId={surface.schemaId} lockedSchema onSchema={() => undefined} />
@@ -463,14 +463,13 @@ function GalleryCard({
 
 /**
  * `Stage`: the dialog itself, built from the edited document as main builds it from a run
- * (`galleryModel.ts`). An interaction is `InteractionDialog`: the gate's own surface (`GateSurface`, the
- * side panel's copy) in a `.modal` whose backdrop the stage neutralises — as wide as what is in it, since
- * nothing stretches it. An approval and an agent's question are their surfaces in `div.inline-gate`
- * (`InlineGateBox`), as the desktop's stage draws them.
+ * (`galleryModel.ts`). An interaction is the gate's own surface (`GateSurface`, the side panel's) in a
+ * dialog's box with no backdrop — as wide as what is in it, since nothing stretches it. An approval
+ * and an agent's question are their surfaces under an accent rule (`InlineGateBox`).
  *
- *   .modal               --panel, 1px --line, radius 12, padding 18; in the stage no shadow, at most
- *                        the stage's width. `.modal-wide` (a review or an edit): the stage's width.
- *   .reason              --bad, app at 11/12.5
+ *   the dialog's box     --panel, 1px --line, radius 12, padding 18; in the stage no shadow, at most
+ *                        the stage's width. Wide (a review or an edit): the stage's width.
+ *   a reason             --bad, app at 11/12.5
  */
 export function Stage({ surface, text, onResult }: { surface: GallerySurface; text: string; onResult: (result: CardState["result"]) => void }): JSX.Element {
   const t = useTokens();
@@ -509,13 +508,13 @@ export function Stage({ surface, text, onResult }: { surface: GallerySurface; te
       {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
       testID="interaction"
     >
-      {/* `.modal-wide` is a flex column: nothing in it collapses (`GateSurface`'s `flex`). */}
+      {/* The wide box is a flex column: nothing in it collapses (`GateSurface`'s `flex`). */}
       <GateSurface pending={pending} flex={wide} services={galleryServices(surface, config)} onSubmit={(value) => onResult(interactionResult(config, value, inputs))} />
     </View>
   );
 }
 
-/** `div.inline-gate` round a surface the stage draws in place: a 2px --accent rule on top, 12 above, 8 under it. */
+/** The box round a surface the stage draws in place: a 2px --accent rule on top, 12 above, 8 under it. */
 function InlineGateBox({ t, children }: { t: Tokens; children: ReactNode }): JSX.Element {
   return (
     <View marginTop={12} paddingTop={8} {...(edge(t, { top: 2 }, "accent") as object)}>

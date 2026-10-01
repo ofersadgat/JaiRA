@@ -12,53 +12,52 @@ import { Switch } from "../controls";
 import { useDrawnRow } from "../SettingsPage";
 
 /**
- * One Connections row and the boxes it is made of (`providersPane.tsx`, `integrationsPane.tsx`,
- * `mcpServersRows.tsx`), universal (decision 0015). The rules, from `styles.css`
- * (`cascade.mts '.conn-row' --scene settings`):
+ * One Connections row and the boxes it is made of: the provider, forge and MCP server rows
+ * (`ProviderRows.tsx`, `ForgeRows.tsx`, `McpServerRows.tsx`) are all built of these. How it looks:
  *
- *   .cfg-rows             column, 2 between rows; in a card each row padding 13 16, a --line above
- *                         all but the first (`li + li`)
- *   .cfg-row              radius --control-radius; hovered --fill-ghost-hover. `.off`: the title and
+ *   the rows              column, 2 between rows; in a card each row padding 13 16, a --line above
+ *                         all but the first
+ *   a row                 radius --control-radius; hovered --fill-ghost-hover. Off: the title and
  *                         the brand mark at .55
- *   .cfg-row.conn-row     grid: what it is (1fr) | its boxes (auto) | its switch and chevron (auto),
- *                         top-aligned, 8 14 apart; `.conn-wide` across all three under them
- *   .conn-main            column, gap 3
- *   .cfg-row-head         row, centred, gap 8; `.cfg-row-title` app 600 at 13/12.5, growing, cut with …
- *                         (`.mono`: the data face at that size)
- *   .cfg-say              30 in, app 11.5/12.5, line 1.45, --dim; its state --text (--bad not working,
- *                         --warn not signed in); `.cfg-fix` a line of its own, app 11/12.5, line 1.4,
+ *   its line              what it is (growing) | its boxes | its switch and chevron, top-aligned,
+ *                         14 apart; what is wide goes across under them, 8 below
+ *   what it is            column, gap 3
+ *   its head              row, centred, gap 8; the title app 600 at 13/12.5, growing, cut with …
+ *                         (mono: the data face at that size)
+ *   its sentence          30 in, app 11.5/12.5, line 1.45, --dim; its state --text (--bad not working,
+ *                         --warn not signed in); the fix a line of its own, app 11/12.5, line 1.4,
  *                         --accent, 2 above
- *   .conn-version         `code.cfg-version`: data 10.5/12 --dim, 30 in
- *   .conn-boxes           row, wraps, to the right, gap 8; each box 200 wide. Empty, it is not there,
- *                         and the controls take its column (the third, empty, keeps its gap)
- *   .conn-controls        row, centred, gap 6, 1 down, at least 52 wide, to the right
- *   .cfg-chevron          `button.quiet`, padding 2, the chevron 14 (turned over when open)
- *   .cfg-login-card       column, gap 2, padding 8 10 9, 1px --line, radius --card-radius, --panel;
- *                         `.active` ringed --accent twice (border and inset); `.refused` --tint-warn,
+ *   the version           data 10.5/12 --dim, 30 in
+ *   the boxes             row, wraps, to the right, gap 8; each box 200 wide. With none they are not
+ *                         there, and the controls stand 14 in from the row's right
+ *   the controls          row, centred, gap 6, 1 down, at least 52 wide, to the right
+ *   the chevron           a quiet button, padding 2, the chevron 14 (turned over when open)
+ *   a login's card        column, gap 2, padding 8 10 9, 1px --line, radius --card-radius, --panel;
+ *                         active ringed --accent twice (border and inset); refused --tint-warn,
  *                         --warn 45% into --line
- *   .um-c-top             row, centred, gap 8; `.um-c-mark` 24 round, --panel-3, app 600 11px --dim
- *   .cfg-login-who        data 11.5/12 --text, one line, cut with …
- *   .cfg-login-tag        app 10.5/12.5 on a 1.6 line, padding 0 7, round; accent --accent on
+ *   its top               row, centred, gap 8; the mark 24 round, --panel-3, app 600 11px --dim
+ *   who                   data 11.5/12 --text, one line, cut with …
+ *   a tag                 app 10.5/12.5 on a 1.6 line, padding 0 7, round; accent --accent on
  *                         --tint-accent, warn --warn on --tint-warn, ok, bad
- *   .um-c-out             `button.ghost`, 24 square, no padding, the logout icon 14 in --dim, 2 out
+ *   log out               a ghost button, 24 square, no padding, the logout icon 14 in --dim, 2 out
  *                         at the top and right
- *   .cfg-login-actions    row, wraps, centred, gap 6, pushed to the bottom, 4 above; its buttons
+ *   a card's actions      row, wraps, centred, gap 6, pushed to the bottom, 4 above; its buttons
  *                         padding 1 8 at app 11/12.5
- *   .cfg-login-add        column, centred, gap 2, at least 82 tall, padding 8, 1.5px dashed --rule,
+ *   a + box               column, centred, gap 2, at least 82 tall, padding 8, 1.5px dashed --rule,
  *                         radius --card-radius, --dim; a button's hovered --accent on --tint-accent; on a
  *                         row not signed in --warn 55% into --rule; waiting a solid --line
- *   .cfg-login-plus       app 17/12.5 on a line of 1, --accent; the title app 600 11.5/12.5 --text;
+ *   its +                 app 17/12.5 on a line of 1, --accent; the title app 600 11.5/12.5 --text;
  *                         the sub app 10.5/12.5 line 1.3 (a link: underlined in --rule, 2 under)
- *   .cfg-key-box          column, 1px --line, radius --card-radius, --panel (the card's padding and
- *                         gap); `.missing` dashed, --bad 40% into --line, on --tint-bad. Its mark 24,
+ *   a key's box           column, 1px --line, radius --card-radius, --panel (the card's padding and
+ *                         gap); missing dashed, --bad 40% into --line, on --tint-bad. Its mark 24,
  *                         radius 6, 4 below, the lock 13; its facts a column, app 11/12.5 --dim
- *   .cfg-key-entry        column, gap 6, at most 420, padding 9, 1px --line, radius 8, --panel-2, 30 in
- *   .cfg-login-spin       12 round, 2px --line, its top --accent, turning every 0.9 s
+ *   a value's entry       column, gap 6, at most 420, padding 9, 1px --line, radius 8, --panel-2, 30 in
+ *   the spinner           12 round, 2px --line, its top --accent, turning every 0.9 s
  */
 
 type Tone = "accent" | "warn" | "ok" | "bad";
 
-/** `.cfg-rows`: the rows of one card — a column, 2 between rows, a --line above all but the first. */
+/** The rows of one card — a column, 2 between rows, a --line above all but the first. */
 export function ConnRows({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="column" gap={2}>
@@ -79,7 +78,7 @@ export function ConnRow({
   first: boolean;
   state: ProviderState;
   main: ReactNode;
-  /** The boxes, or nothing — `.conn-boxes:empty` is not drawn, and the controls take its column. */
+  /** The boxes, or nothing — with none their box is not drawn, and the controls take its place. */
   boxes: ReactNode[];
   controls: ReactNode;
   wide?: ReactNode[];
@@ -119,7 +118,7 @@ export function ConnRow({
   );
 }
 
-/** `.conn-wide`: across the row, under its line — with `.cfg-row-body`'s column (gap 12, 30 in) when `body`. */
+/** Across the row, under its line — as an opened row's body (a column, gap 12, 30 in) when `body`. */
 export function Wide({ body = false, children }: { body?: boolean; children: ReactNode }): JSX.Element {
   return body ? (
     <View flexDirection="column" gap={12} paddingLeft={30} minWidth={0}>
@@ -130,7 +129,7 @@ export function Wide({ body = false, children }: { body?: boolean; children: Rea
   );
 }
 
-/** The mark with its state's dot on the corner, and the row's name — `.cfg-row-head`. */
+/** The row's head: the mark with its state's dot on the corner, and the row's name. */
 export function RowHead({ brand, state, title, mono = false }: { brand: string; state: ProviderState; title: string; mono?: boolean }): JSX.Element {
   const t = useTokens();
   const off = state === "off";
@@ -163,20 +162,20 @@ export function RowHead({ brand, state, title, mono = false }: { brand: string; 
 const SAY = { voice: "app", scale: 11.5 / 12.5, lineHeight: 1.45, color: "dim" } as const;
 
 /**
- * On web, a line as the stylesheet writes it (unitless): Blink multiplies it out and snaps it to 1/64,
- * where a copy's pixels drift a row down by hundredths — and words that break anywhere.
+ * On web, the line height written as a factor (unitless): Blink multiplies it out and snaps it to 1/64,
+ * where a line given in px drifts a row down by hundredths — and words that break anywhere.
  */
 function web(line: string): Record<string, unknown> {
   return isWeb ? { lineHeight: line, style: { overflowWrap: "anywhere" } } : {};
 }
 
-/** `.cfg-say`: the row's state in one sentence, and what would fix it on a line of its own. */
+/** The row's state in one sentence, and what would fix it on a line of its own. */
 export function Say({ state, word, detail, fix }: { state: ProviderState; word: string; detail?: string | undefined; fix?: string | undefined }): JSX.Element {
   return (
     <View flexDirection="column" paddingLeft={30}>
       <Txt spec={SAY} {...(web("1.45") as object)}>
         <Txt spec={{ ...SAY, color: state === "unavailable" ? "bad" : state === "needs-sign-in" ? "warn" : "text" }}>{word}</Txt>
-        {/* The DOM's text nodes, one each: Blink shapes each apart, so " — " and the detail are two. */}
+        {/* " — " and the detail are two text nodes: Blink shapes each apart, as the reference pictures hold them. */}
         {detail !== undefined ? " — " : null}
         {detail !== undefined ? detail : null}
       </Txt>
@@ -190,7 +189,7 @@ export function Say({ state, word, detail, fix }: { state: ProviderState; word: 
   );
 }
 
-/** `code.cfg-version.conn-version`: the build, under the sentence. */
+/** The build, under the sentence. */
 export function Version({ children }: { children: string }): JSX.Element {
   return (
     <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim" }} marginLeft={30} alignSelf="flex-start">
@@ -209,7 +208,7 @@ export function RowControls({ on, label, disabled, onToggle, open, title, onOpen
   );
 }
 
-/** `button.quiet.cfg-chevron`: configure, and Done when open. */
+/** The chevron, a quiet button: configure, and Done when open. */
 export function Chevron({ open, label, onPress }: { open: boolean; label: string; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -237,7 +236,7 @@ export function Chevron({ open, label, onPress }: { open: boolean; label: string
   );
 }
 
-/** A box's outside: `.conn-boxes > li`, 200 wide. */
+/** A box's outside: 200 wide. */
 function BoxSlot({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View width={200} flexDirection="row" alignSelf="stretch">
@@ -246,7 +245,7 @@ function BoxSlot({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** `.cfg-login-tag`. */
+/** A small round tag: its tone's colour on its tint. */
 export function Tag({ tone, children }: { tone: Tone; children: string }): JSX.Element {
   const t = useTokens();
   return (
@@ -256,7 +255,7 @@ export function Tag({ tone, children }: { tone: Tone; children: string }): JSX.E
   );
 }
 
-/** A login's card (`.cfg-login-card.um-c`), for an agent's or a forge's. */
+/** A login's card, for an agent's or a forge's. */
 export function LoginCardBox({ active = false, refused = false, children }: { active?: boolean; refused?: boolean; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -282,7 +281,7 @@ export function LoginCardBox({ active = false, refused = false, children }: { ac
   );
 }
 
-/** `.cfg-login-mark`: an initial in a round (or, for a key, the lock in a rounded square). */
+/** A card's mark: an initial in a round (or, for a key, the lock in a rounded square). */
 export function LoginMark({ initial, lock = false }: { initial?: string; lock?: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -298,7 +297,7 @@ export function LoginMark({ initial, lock = false }: { initial?: string; lock?: 
   );
 }
 
-/** `.cfg-login-who`: who, in the data face, on one line. */
+/** Who, in the data face, on one line. */
 export function Who({ children, grow = false }: { children: string; grow?: boolean }): JSX.Element {
   return (
     <Txt spec={{ voice: "data", scale: 11.5 / 12 }} numberOfLines={1} {...({ title: children } as object)} {...(grow ? { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0 } : { minWidth: 0 })}>
@@ -307,7 +306,7 @@ export function Who({ children, grow = false }: { children: string; grow?: boole
   );
 }
 
-/** `.cfg-login-facts`: a column of small dim lines. */
+/** A card's facts: a column of small dim lines. */
 export function Facts({ lines }: { lines: string[] }): JSX.Element | null {
   return (
     <View flexDirection="column">
@@ -320,7 +319,7 @@ export function Facts({ lines }: { lines: string[] }): JSX.Element | null {
   );
 }
 
-/** `.um-c-out`: log out, as a 24-square ghost button with the icon. */
+/** Log out, as a 24-square ghost button with the icon. */
 export function LogoutButton({ title, disabled, onPress }: { title: string; disabled: boolean; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -347,7 +346,7 @@ export function LogoutButton({ title, disabled, onPress }: { title: string; disa
   );
 }
 
-/** `.cfg-login-actions`: pushed to the card's bottom, 4 above. */
+/** A card's actions: pushed to the card's bottom, 4 above. */
 export function CardActions({ children }: { children?: ReactNode }): JSX.Element {
   return (
     <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} marginTop="auto" paddingTop={4}>
@@ -368,7 +367,7 @@ export function SmallButton({
   kind?: "plain" | "ghost" | "primary";
   disabled?: boolean;
   onPress: () => void;
-  /** The text's font: app 11/12.5, or the box's it stands in (`font-size: inherit`). */
+  /** The text's font: app 11/12.5, or that of the box it stands in. */
   font?: Partial<FontSpec>;
   title?: string;
   children: string;
@@ -380,7 +379,7 @@ export function SmallButton({
   );
 }
 
-/** `.cfg-login-spin`: a turning ring. */
+/** The spinner: a turning ring. */
 export function Spin(): JSX.Element {
   const t = useTokens();
   const turn = useRef(new Animated.Value(0)).current;
@@ -411,7 +410,7 @@ export function Spin(): JSX.Element {
 const PLUS_TITLE = { voice: "app", scale: 11.5 / 12.5, weight: 600 } as const;
 const PLUS_SUB = { voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: "dim" } as const;
 
-/** `.cfg-login-plus`: the + of an add box. */
+/** The + of an add box. */
 function Plus(): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 17 / 12.5, lineHeight: 1, color: "accent" }} textAlign="center">
@@ -429,14 +428,12 @@ function addEdge(t: ReturnType<typeof useTokens>, mode: "plain" | "warn" | "wait
 const ADD_BOX = { flexGrow: 1, flexShrink: 1, flexBasis: "auto", minWidth: 0, flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 2, minHeight: 82, padding: 8 } as const;
 
 /**
- * A `button.cfg-login-add`'s words do not wrap (`button { white-space: nowrap }`), and the button is as
- * wide as they are at least: a long sub runs it past its 200 (`min-width: auto`).
+ * The words of a + box that is a button do not wrap, and the button is as wide as they are at least
+ * (`min-width: auto` on web): a long sub runs it past its 200.
  */
 const NOWRAP: Record<string, unknown> = isWeb ? { whiteSpace: "nowrap" } : { numberOfLines: 1 };
 
-/**
- * `button.cfg-login-add`: one + box that is one button — "Add a key", "Add a host", "Store a secret".
- */
+/** One + box that is one button — "Add a key", "Add a host", "Store a secret". */
 export function AddBox({ title, sub, disabled = false, warn = false, onPress }: { title: string; sub?: string | undefined; disabled?: boolean; warn?: boolean; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -465,8 +462,8 @@ export function AddBox({ title, sub, disabled = false, warn = false, onPress }: 
 }
 
 /**
- * `div.cfg-login-add`: a + box with two ways in — its own button (sign in) and a link under it (a key,
- * a token) — or, with no `main`, only the + and the link.
+ * A + box with two ways in — its own button (sign in) and a link under it (a key, a token) — or, with
+ * no `main`, only the + and the link.
  */
 export function SplitAddBox({
   main,
@@ -488,7 +485,7 @@ export function SplitAddBox({
       <View {...ADD_BOX} borderRadius={lengthToken(t, "card-radius", 10)} {...(addEdge(t, warn ? "warn" : "plain", false) as object)}>
         {main !== undefined ? (
           // Its box not grown on a phone (`fill`): in a box stretched to its neighbour, Yoga fed the growth
-          // back into the row's height. The pressable is only ever its content's size, as on the desktop.
+          // back into the row's height. The pressable is only ever its content's size, as it is on web.
           <Press onPress={main.onPress} disabled={disabled} fill={isWeb} flexDirection="column" alignItems="center" gap={2} {...(disabled ? { opacity: 0.5 } : {})}>
             {({ hovered }) => (
               <>
@@ -518,7 +515,7 @@ export function SplitAddBox({
   );
 }
 
-/** `div.cfg-login-add.waiting`: a sign-in waiting on the browser — the spinner, what to do, Cancel. */
+/** A + box while a sign-in waits on the browser — the spinner, what to do, Cancel. */
 export function WaitingBox({ title, sub, onCancel }: { title: string; sub?: ReactNode; onCancel: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -541,7 +538,7 @@ export function WaitingBox({ title, sub, onCancel }: { title: string; sub?: Reac
   );
 }
 
-/** `.cfg-key-box`: a key, token or secret by its name, where it was found, and what it spent. */
+/** A key, token or secret by its name, where it was found, and what it spent. */
 export function KeyBox({ name, facts, missing = false, children }: { name: string; facts: string[]; missing?: boolean; children?: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -569,7 +566,7 @@ export function KeyBox({ name, facts, missing = false, children }: { name: strin
   );
 }
 
-/** `.cfg-key-entry`, 30 in under the row: where a value is typed, and the store it goes to. */
+/** 30 in under the row: where a value is typed, and the store it goes to. */
 export function EntryBox({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -588,7 +585,7 @@ export function EntryBox({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** A row's own problem, as `.sub.warn-text`: app 11/12.5 in --warn. */
+/** A row's own problem: app 11/12.5 in --warn. */
 export function Problem({ children, indent = false }: { children: string; indent?: boolean }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} {...(indent ? { paddingLeft: 0 } : {})}>

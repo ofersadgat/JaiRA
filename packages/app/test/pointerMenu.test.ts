@@ -1,5 +1,5 @@
 /**
- * What a right-click inside an artifact frame offers (`renderer/pointerMenu.tsx`).
+ * What a right-click inside an artifact frame offers (`renderer/pointerMenuModel.ts`).
  *
  * The frame branch is the one worth pinning down and the one a test can reach. A sandboxed artifact
  * has an opaque origin, so nothing in the renderer can look at what was clicked — the whole decision

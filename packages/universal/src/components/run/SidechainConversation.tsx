@@ -12,15 +12,15 @@ import { Empty, useLiveEdge, type TranscriptSource } from "../panel/RunTranscrip
 import { Transcript } from "../panel/SessionTranscript";
 
 /**
- * `runViews.tsx`'s `SidechainConversation`, universal (decision 0015): a subagent's conversation as a
- * page of its own — what a sidechain step at the end of the walk shows, and the panel's subagent entry.
- * The host instance's session is fetched as any panel's is, the chain behind `step.sidechain` read the
- * way the main thread is (`sidechainEntriesOf`, the desktop's own), the turns still streaming appended
- * from the live tail, and the page follows its live edge. No composer: it is somebody else's
- * conversation. Doorways inside it walk deeper (`onOpen`, else the trail's `onWalkIntoSidechain`).
+ * A subagent's conversation as a page of its own — what a sidechain step at the end of the walk shows,
+ * and the panel's subagent entry. The host instance's session is fetched as any panel's is, the chain
+ * behind `step.sidechain` read the way the main thread is (`sidechainEntriesOf`), the turns still
+ * streaming appended from the live tail, and the page follows its live edge. No composer: it is
+ * somebody else's conversation. Doorways inside it walk deeper (`onOpen`, else the trail's
+ * `onWalkIntoSidechain`).
  *
- *   .run-convo-wrap    column, flex 1; .run-convo flex 1, scrolls
- *   .ts-page           at least the scroller's height, padding 14 16 22, --bg; `.ts-paper` the sheet
+ *   the whole          column, flex 1; the scroller flex 1
+ *   the page           at least the scroller's height, padding 14 16 22, --bg, the sheet on it (`Paper`)
  */
 export function SidechainConversation({
   step,
@@ -32,7 +32,7 @@ export function SidechainConversation({
   step: TrailStep;
   detail: TaskDetail | null;
   source: Pick<TranscriptSource, "sessions" | "onLoadSessions" | "liveTurn" | "onWalkIntoSidechain">;
-  /** Where a nested doorway goes. Defaults to the trail, like the panel this mirrors. */
+  /** Where a nested doorway goes. Defaults to the trail (`onWalkIntoSidechain`). */
   onOpen?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
   const t = useTokens();
@@ -53,7 +53,7 @@ export function SidechainConversation({
   const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);
   // Same rule as the thread that spawned it; the call is the reset — a different chain starts at its end.
   const { at: _at, following: _following, unpin: _unpin, ...follow } = useLiveEdge(call);
-  // `.ts-page`'s `min-height: 100%`: the scroller's own height.
+  // The page is at least as tall as the scroller: the scroller's own height, measured.
   const [viewport, setViewport] = useState<number | undefined>(undefined);
 
   if (step.sidechain === undefined) return <Empty>This step is not a subagent conversation.</Empty>;

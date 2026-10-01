@@ -1,7 +1,6 @@
 /**
- * What the composer SAYS at rest — the facts its chips are read from, and the words on them — moved out
- * of `composer.tsx` unchanged, so the desktop's composer and the universal one (decision 0015) derive
- * them once. The cards that open from the chips stay in `composer.tsx`.
+ * What the composer SAYS at rest — the facts its chips are read from, and the words on them. What the
+ * cards that open from the chips compute is `composerCards.ts`.
  */
 import {
   declaresTools,

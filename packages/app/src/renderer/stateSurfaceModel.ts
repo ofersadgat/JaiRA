@@ -8,14 +8,14 @@
  * waiting or broken, and reverts the moment it settles — so the loud form always means NOW rather
  * than "this kind of thing", and nobody chooses it, so nobody can choose wrong.
  *
- * The kinds, their words and icons, the tone, and which instance is asking are here; the universal
- * `SessionBands` and `RunTranscript` (`packages/universal/src/components/panel/`) draw them.
+ * The kinds, their words and icons, the tone, and which instance is asking are here; `SessionBands`
+ * and `RunTranscript` (`packages/universal/src/components/panel/`) draw them.
  */
 import type { InstanceNode } from "@jaira/shared/browser";
 import type { PATHS } from "./iconPaths";
 
 /**
- * What a state IS — the four answers that used to be one card and one sentence.
+ * What a state IS — the five answers that used to be one card and one sentence.
  *
  * `conversation` is a prompt operation: a model was called and said things. `computed` is a state
  * with no operation at all, whose every output is an expression over values it was handed.

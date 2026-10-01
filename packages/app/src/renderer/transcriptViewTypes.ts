@@ -1,6 +1,6 @@
 /**
  * What a surface LENDS the transcript it shows: the right to replace a message already sent, and a
- * way to run an artifact. A transcript handed neither offers neither. The universal transcript
+ * way to run an artifact. A transcript handed neither offers neither. `Transcript`
  * (`packages/universal/src/components/panel/SessionTranscript.tsx`) takes them. Types only.
  */
 import type { ServedArtifact } from "@jaira/shared/browser";

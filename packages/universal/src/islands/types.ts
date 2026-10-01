@@ -1,23 +1,23 @@
 import type { JairaAppearanceConfig } from "@jaira/shared/browser";
 
-/** An island (decision 0015): one of the renderer's DOM components, hosted where DOM is not. */
+/** An island (decision 0015): one of `@jaira/ui`'s DOM components, inline on web and in a WebView on a phone. */
 export interface IslandProps {
   component: "markdown" | "diff" | "markdownEditor" | "code" | "schemaText" | "artifact";
   props: Record<string, unknown>;
-  /** A fixed height, for an editor, which scrolls inside as on the desktop. Absent: sized to its content. */
+  /** A fixed height, for an editor, which scrolls inside. Absent: sized to its content. */
   height?: number;
   /**
-   * The classes the component stands under on the desktop, outermost first (`["markdown", "md-block"]` for
-   * a fenced block's reading): the rules written for it there — `.markdown pre`, `.markdown code` — name
-   * those ancestors, and the universal tree round an island has none of them. On web each is a box that
+   * The classes the component is to stand under, outermost first (`["markdown", "md-block"]` for a
+   * fenced block's reading): its rules in the island's stylesheet — `.markdown pre`, `.markdown code` —
+   * name those ancestors, and the tree round an island has none of them. On web each is a box that
    * generates no box (`display: contents`), so the rules match and the layout is the island's own. A
    * phone's island page does not take them yet.
    */
   under?: readonly string[];
   /**
    * The person's appearance block (`lookOf(config)`), for an editor island: its fonts and size, the
-   * editors' own palette, each editor's look and the palette per type — what the desktop's store puts
-   * on its root, which an island page is sent instead. On web the page's root has it already.
+   * editors' own palette, each editor's look and the palette per type — what the store puts on a web
+   * page's root (`applyAppearance`), which a phone's island page is sent instead.
    */
   appearance?: JairaAppearanceConfig;
   /** A callback the component fired (`change`, `modified`). */

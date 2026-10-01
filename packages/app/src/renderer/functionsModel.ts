@@ -1,7 +1,7 @@
 /**
- * What Settings → Tools → Functions (`functionsPane.tsx`) works out, as pure functions in a module of
- * their own so the universal copy (decision 0015) draws the same table: the permission sets as
- * columns, the command and runner rows, who uses a function, and what its defaults come to.
+ * What Settings → Tools → Functions works out, as pure functions: the permission sets as columns, the
+ * command and runner rows, who uses a function, and what its defaults come to. `FunctionsSections`
+ * (`packages/universal/src/components/settings/FunctionsSections.tsx`) draws the table from it.
  */
 import {
   BUILTIN_FUNCTIONS,

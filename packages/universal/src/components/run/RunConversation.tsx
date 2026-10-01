@@ -12,14 +12,14 @@ import { CutStrip, CxDoing, RunActivity } from "../panel/RunActivity";
 import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
 
 /**
- * `runViews.tsx`'s `RunConversation`, universal (decision 0015): one run's conversation — the transcript's
- * scroller (`RunTranscript`), and under it what stands where the composer would (`ChatComposer`). The
- * same component reads a task's run in the side panel (`TaskConversation`) and a run walked into in the
- * middle column (`RunView`); `foot` is what the panel adds under it (the gate the tree has no place for).
- * A rewind armed on an entered row is held here: the page fades from it and the strip under the
- * scroller asks about it (`CutStrip`), cleared with the task.
+ * One run's conversation — the transcript's scroller (`RunTranscript`), and under it the composer or
+ * what stands in its place (`RunComposer`). The same component reads a task's run in the side panel
+ * (`TaskConversation`) and a run walked into in the middle column (`RunView`); `foot` is what the panel
+ * adds under it (the gate the tree has no place for). A rewind armed on an entered row is held here:
+ * the page fades from it and the strip under the scroller asks about it (`CutStrip`), cleared with the
+ * task.
  *
- *   .run-convo-wrap    column, flex 1; .run-convo flex 1, scrolls
+ *   the whole          column, flex 1; the transcript flex 1, scrolls
  */
 export function RunConversation({
   detail,
@@ -77,8 +77,8 @@ export function RunConversation({
     <View flex={1} minHeight={0} flexDirection="column" {...(onLayout !== undefined ? { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => onLayout(e.nativeEvent.layout.height) } : {})}>
       <RunTranscript detail={detail} parent={parent} source={source} {...(gate !== undefined && onGate !== undefined ? { gate, onGate } : {})} armed={armed} onArm={setArmed} onOpenSidechain={onOpenSidechain} focus={focus} onHere={onHere} />
       {/* What stands under the scroller — the composer's place and the panel's foot. Nothing here asks
-          for a layer: the scroller above is painted where it stands, as the desktop's is (`PLAIN_SCROLLER`),
-          so Chromium gives these the layer it gives the desktop's — by overlap, where they touch it. */}
+          for a layer: the scroller above is painted where it stands (`PLAIN_SCROLLER`), so Chromium gives
+          these a layer only by overlap, where they touch it. */}
       <View flexShrink={0} flexDirection="column">
         <RunComposer detail={detail} instanceId={parent?.instanceId} source={source} project={project} asking={asking} onRerun={onRerun} onResume={onResume} cut={cut} />
         {foot}
@@ -88,12 +88,12 @@ export function RunConversation({
 }
 
 /**
- * `ChatComposer`: the composer, bound to the run being read — or, over a run that holds no conversation
+ * `RunComposer`: the composer, bound to the run being read — or, over a run that holds no conversation
  * of its own (`chat:plan` answers `null`), the activity strip where the composer would stand. It owns the
  * overrides and asks for the plan again when they change and after each send (a stale plan would show
  * the model and "joins this turn" from before it). The rest stands in the same band: another machine's
  * run while it is away (`OfflineBanner`), a run refused for the allowance (`WaitingLine`, with its Stop),
- * what went wrong (`.cx-error`), and an armed rewind's strip in place of the activity's.
+ * what went wrong (`ChatError`), and an armed rewind's strip in place of the activity's.
  */
 export function RunComposer({
   detail,
@@ -118,7 +118,7 @@ export function RunComposer({
   const taskId = detail.taskId;
   const running = detail.status === "running";
   const [overrides, setOverrides] = useState<ChatSettings>({});
-  // Three states, as the DOM's: `undefined` not asked yet, `null` asked and there is no conversation.
+  // Three states: `undefined` not asked yet, `null` asked and there is no conversation, else the plan.
   const [plan, setPlan] = useState<ChatPlanView | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -172,7 +172,7 @@ export function RunComposer({
   const waitingRun = useWaiting().filter((item) => item.kind === "run" && item.taskId === taskId);
   const waitingLines =
     waitingRun.length > 0 ? (
-      // `.cx-doing.um-waiting-run`: a grid, its lines 4 apart.
+      // A band of their own (`CxDoing`), the lines 4 apart.
       <CxDoing gap={4}>
         {waitingRun.map((item) => (
           <WaitingLine key={item.id} item={item} run onStop={() => actOnWaiting(item.id, "drop")} />
@@ -185,7 +185,7 @@ export function RunComposer({
   const errorLine = error !== null ? <ChatError text={error} /> : null;
 
   if (plan === null && instanceId !== undefined) {
-    // One `.cx-doing`: the offline banner, the waiting lines and the error over the strip (or the cut's).
+    // One band: the offline banner, the waiting lines and the error over the strip (or the cut's).
     const lead = (
       <>
         <OfflineBanner project={project} />

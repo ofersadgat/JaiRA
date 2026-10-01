@@ -3,18 +3,16 @@ import { AccessibilityInfo, type View } from "react-native";
 import { CLICK_HOLD_MS, PART_MARGIN, readingPartOf, type SettingsPart } from "@jaira/ui/settingsParts";
 
 /**
- * The sections of the Settings page on screen, and which one is being read — `settingsParts.ts`'s
- * `useSettingsParts`, universal (decision 0015). What the sidebar's accordion lists under the open
- * page, lights as it is scrolled, and scrolls to when one is clicked.
+ * The sections of the Settings page on screen, and which one is being read: what the sidebar's
+ * accordion lists under the open page, lights as it is scrolled, and scrolls to when one is clicked.
  *
- * The DOM finds its sections by `data-part` in the page it drew and measures them against the scroll
- * box. A native tree has no DOM to query, so each `SettingsSection` copy says it is one here, with its
- * view, and the page's `ScrollView` says when it scrolled; the sections are measured against the box
- * (`measureInWindow`, both of them, as the DOM subtracts one `getBoundingClientRect` from the other —
- * `onLayout` is no use for this: react-native-web reports it only when a box changes SIZE, so a section
- * pushed down by one above it would keep its old place). Which one is read is the same rule
- * (`readingPartOf`), and the list is in the order the sections stand. One Settings page per window, as
- * one `App` has one: a module store, like `viewState.ts`.
+ * A native tree has no DOM to query for its sections, so each `SettingsSection` says it is one here,
+ * with its view, and the page's `ScrollView` says when it scrolled; the sections are measured against
+ * the box (`measureInWindow`, both of them, one top taken from the other — `onLayout` is no use for
+ * this: react-native-web reports it only when a box changes SIZE, so a section pushed down by one above
+ * it would keep its old place). Which one is read is `settingsParts.ts`'s rule (`readingPartOf`), and
+ * the list is in the order the sections stand. One Settings page per window: a module store, like
+ * `viewState.ts`.
  */
 interface Entry {
   label: string;
@@ -96,7 +94,7 @@ export function scrolled(next: Partial<typeof scroll>): void {
   remeasure();
 }
 
-/** A new page: its scroll box and how to move it, back at its top (the DOM's `scrollTop = 0` on a new key). */
+/** A new page: its scroll box and how to move it, back at its top. */
 export function newPage(view: View | null, to: ((y: number, animated: boolean) => void) | null): void {
   box = view;
   scrollTo = to;
@@ -117,7 +115,7 @@ export function goToPart(id: string): void {
   void AccessibilityInfo.isReduceMotionEnabled()
     .catch(() => false)
     .then((still) => go(y, !still));
-  // The hold ends by the clock, as the DOM's does on its next read.
+  // The hold ends by the clock: a scroll that stopped before it did brings no later read.
   setTimeout(remeasure, CLICK_HOLD_MS + 20);
 }
 

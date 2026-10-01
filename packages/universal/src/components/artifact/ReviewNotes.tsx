@@ -16,28 +16,27 @@ import { KEEPS_SELECTION, type PendingSelection } from "./noteSelection";
 import { SourceMark } from "./SourceMark";
 
 /**
- * `reviewNotes.tsx`'s surfaces, universal (decision 0015): the composer that floats at a selected
- * passage, and the notes on an artifact as threads. Which notes still resolve, the quote's shortening and
- * a forge's word for itself are the desktop's (`anchorNotes`, `shortQuote`, `remoteStrip.ts`). The rules,
- * from `styles.css`:
+ * A review's notes: the composer that floats at a selected passage, and the notes on an artifact as
+ * threads. Which notes still resolve, the quote's shortening and a forge's word for itself are
+ * `anchorNotes`', `shortQuote`'s and `remoteStrip.ts`'s. How they look:
  *
- *   .note-composer       --panel, 1px --line, radius 10, --lift, padding 10, column, gap 8; 320 wide,
+ *   the composer         --panel, 1px --line, radius 10, --lift, padding 10, column, gap 8; 320 wide,
  *                        8 below the selection
- *   .note-composer-head  row, centred, gap 6; the comment glyph (13, --dim), `.note-author` 600 --text
- *   .note-quote          padding-left 8, a 2px --warn rule on its left, --dim, italic
- *   textarea             (the page's) data 12/12, --bg, 1px --line (hovered --rule), radius
+ *   its head             row, centred, gap 6; the comment glyph (13, --dim), the author 600 --text
+ *   its quote            8 in, a 2px --warn rule on its left, --dim, italic
+ *   its box              (`PlainBox`) data 12/12, --bg, 1px --line (hovered --rule), radius
  *                        --control-radius, padding 5 9, three rows
- *   .note-list           12 above, 1px --line, radius 8, clipped
- *   .note-list-head      row, centred, gap 6, padding 6 10, --panel-2, --dim
- *   .note-row            padding 8 10, a --line above; `.hot` --fill-ghost-hover
- *   .note-row-quote      the quote, one line, --dim, italic (hovered --accent, underlined); an orphan's
+ *   the list             12 above, 1px --line, radius 8, clipped
+ *   its head             row, centred, gap 6, padding 6 10, --panel-2, --dim
+ *   a thread             padding 8 10, a --line above; hot, --fill-ghost-hover
+ *   its quote            one line, --dim, italic (hovered --accent, underlined); an orphan's
  *                        "text changed" --warn, upright
- *   .note-msg            6 above, a 2px --line on its left, 8 in; `.note-msg-by` --dim 600, the glyph;
- *                        `.note-msg-body` --text, pre-wrap
- *   .note-reply          row, gap 6, 6 above, 10 in; the input (the page's: app, padding 5 9) and ghost
+ *   a message            6 above, a 2px --line on its left, 8 in; the glyph and its author --dim 600;
+ *                        its body --text, pre-wrap
+ *   the reply row        row, gap 6, 6 above, 10 in; the input (`PlainBox`: app, padding 5 9) and ghost
  *                        buttons
  *
- * A phone has no selection to anchor a note to in a rendered artifact (`noteSelection.ts` is web's), but
+ * A phone has no selection to anchor a note to in a rendered artifact (`noteSelection.ts`), but
  * the changeset reviewer's diff hands it one over the island's bridge, so the composer is drawn there too;
  * the threads are drawn on both.
  */
@@ -217,8 +216,8 @@ function NoteThread({
       {...((isWeb ? { onMouseEnter: onEnter, onMouseLeave: onLeave } : {}) as object)}
     >
       <View flexDirection="row" alignItems="baseline" gap={8}>
-        {/* `button.note-row-quote`: a BUTTON, an inline-flex that centres its words (its `text-align: left`
-            moves nothing) — squeezed, they overflow both sides and are clipped, with no ellipsis. */}
+        {/* The quote is a BUTTON, which centres its words — squeezed, they overflow both sides and are
+            clipped, with no ellipsis. */}
         <Press onPress={onReselect} disabled={orphan} title={orphan ? "this passage is no longer in the artifact" : "show this passage"} flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" justifyContent="center" overflow="hidden">
           {({ hovered }) => (
             // One line by `nowrap` on web, not `numberOfLines`: that clips the words at their own box, and an
@@ -244,7 +243,7 @@ function NoteThread({
             {message.author}
             {note.source === undefined ? null : <SourceMark source={note.source} />}
           </Txt>
-          {/* A message whose whole body is a decision word IS that decision (decision 0004): `.is-word`, the data face in --ok. */}
+          {/* A message whose whole body is a decision word IS that decision (decision 0004): the data face in --ok. */}
           <Txt
             spec={{ ...BODY, color: note.source !== undefined && decisionWordOf(message.body) !== undefined ? "ok" : "text" }}
             {...(note.source !== undefined && decisionWordOf(message.body) !== undefined ? faceOf(t, "data", 400, t.scaled("size-app", BODY.scale) as number) : {})}
@@ -277,10 +276,10 @@ function NoteThread({
 }
 
 /**
- * The page's own `input`/`textarea` (the global rule): the body's font for an input, data 12/12 for a
- * textarea; --text on --bg, 1px --line (hovered --rule), radius --control-radius, padding 5 9.
- * `readOnly`: a record's (`.gate-settled textarea[readonly]`) — nothing typed, the ring kept at --line
- * under the pointer, no text cursor over it.
+ * A plain text box, an input or (`multiline`) a textarea: the body's font with `app`, else data 12/12;
+ * --text on --bg, 1px --line (hovered --rule), radius --control-radius, padding 5 9.
+ * `readOnly`: a settled record's — nothing typed, the ring kept at --line under the pointer, no text
+ * cursor over it.
  */
 export const PlainBox = ({ t, app = false, rows, multiline, readOnly = false, ref, ...rest }: { t: Tokens; app?: boolean; rows?: number; multiline?: boolean; readOnly?: boolean; ref?: Ref<TextInput> } & Record<string, unknown>): JSX.Element => {
   const [pointed, hover] = useHover();

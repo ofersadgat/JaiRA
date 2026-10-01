@@ -19,7 +19,7 @@ import type { SyncSurface } from "./fileTypes";
 
 /**
  * The sync panel's bag (`FileSurfaceContext.sync`) from the store's sync state and the actions behind
- * each button — `App.tsx`'s own, shared with the universal copy (decision 0015).
+ * each button.
  */
 export function syncSurfaceOf(
   sync: Pick<SyncSurface, "status" | "result" | "running" | "error" | "progress">,

@@ -7,18 +7,18 @@ import { FormInput, SessionPanel, WorkflowSyncSurface } from "@jaira/universal";
  * Forms, the Files room's remaining surfaces and the Debug room's session panel as specimens
  * (decision 0015), each from a fixture.
  *
- *  - `suggest` — a `.cfg-input.mono` with a `<datalist>`: shut, it is the box with the 16 kept at its
- *    end. Opened (focus it, ↓), the DOM page showed nothing more — Chromium's popup is a window of
- *    Electron's that no capture of the page holds — and the copy draws the type-ahead (`form/Suggest.tsx`),
- *    whose figures were measured from that window's photograph. The options are those the photograph
- *    was taken with, one of them labelled and one wider than the box.
+ *  - `suggest` — a monospace config box with suggestions (`FormInput`): shut, it is the box with the 16
+ *    kept at its end. Opened (focus it, ↓), it draws its own type-ahead (`form/Suggest.tsx`) in place of
+ *    a `<datalist>`, whose popup in Chromium is a window of Electron's that no capture of the page
+ *    holds; its figures were measured from a photograph of that window. The options are those the
+ *    photograph was taken with, one of them labelled and one wider than the box.
  *  - `debug-session`, `debug-session-empty`, `debug-session-none` — the Debug room's "What was actually
- *    said" (`session.tsx`'s `SessionPanel` in `.debug-transcript`): the states down one side (a
+ *    said" (`SessionPanel`): the states down one side (a
  *    success with its cost, a failure, one running), the chosen one's conversation down the other —
  *    a prompt the workflow wrote, a reply, a turn of tool calls (one opened), a tool's result and the
  *    answer being written; a state that ran no model call; no task chosen.
  *  - `sync-report`, `sync-report-document`, `sync-running` — a workflow description's sync panel
- *    (`syncPanel.tsx`) with a report: proposed files (one refused, one to open), notes, every kind of
+ *    (`WorkflowSyncSurface`) with a report: proposed files (one refused, one to open), notes, every kind of
  *    finding and what the document does not describe; a rewritten description; a run in progress,
  *    narrating itself, over the rendering, with an error and both sides moved.
  */

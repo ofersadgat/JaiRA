@@ -7,24 +7,23 @@ import { useLook, useTokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 
 /**
- * `appearancePane.tsx`'s `FamilyStack` and `FaceMenu`, universal (decision 0015): one voice's font
- * stack as numbered chips in one box, tried left to right, and the menu that adds to it. What is shown
- * is `shownFamilies`' (the shipped face, as "ours", while nothing is chosen), as the DOM's is. The rules,
- * from `styles.css`:
+ * One voice's font stack as numbered chips in one box, tried left to right, and the menu that adds to
+ * it (`FaceMenu`). What is shown is `shownFamilies`' (the shipped face, as "ours", while nothing is
+ * chosen). How it looks:
  *
- *   .face-stack          row, wraps, centred, gap 5, padding 4 5, 1px --line (--accent while open),
+ *   the box              row, wraps, centred, gap 5, padding 4 5, 1px --line (--accent while open),
  *                        radius --control-radius, --panel
- *   .face-chip           row, centred, gap 6, padding 2 4 2 6, radius --control-radius-sm,
+ *   a chip               row, centred, gap 6, padding 2 4 2 6, radius --control-radius-sm,
  *                        --fill-ghost-hover (--tint-warn with a warning); "ours": transparent in a dashed
  *                        --line
- *   .face-n              data-num: its place in the stack
- *   .face-name           app-text or data-text, set in the family it names, one line
- *   .face-ours           app-secondary, 2 right
- *   .face-drop           ✕, 17 square, radius 4, --dim at 0.8 on a line of 1; hovered --text on
+ *   its number           data-num: its place in the stack
+ *   its name             app-text or data-text, set in the family it names, one line
+ *   its "ours"           app-secondary, 2 right
+ *   its ✕                17 square, radius 4, --dim at 0.8 on a line of 1; hovered --text on
  *                        --fill-ghost-selected
- *   .face-add            app-secondary, padding 2 6, radius --control-radius-sm; hovered --text on
+ *   "+ add…"             app-secondary, padding 2 6, radius --control-radius-sm; hovered --text on
  *                        --fill-ghost-hover
- *   .face-menu           under the box, as wide (at least 230), padding 4, 1px --line, radius
+ *   the menu             under the box, as wide (at least 230), padding 4, 1px --line, radius
  *                        --control-radius, --panel, --lift; its head app-label 5 8 4; rows 4 8, gap 8,
  *                        radius --control-radius-sm (hovered --fill-ghost-hover, chosen --tint-accent);
  *                        the tick 12 wide, --accent at 0.88; the note app-secondary, pushed right
@@ -163,7 +162,7 @@ function FaceName({ family, fallback, voice, ellip = true }: { family: string; f
   );
 }
 
-/** What can go in the box — `appearancePane.tsx`'s `FaceMenu`, over what is below it. */
+/** What can go in the box — a menu under it, over what is below. */
 function FaceMenu({
   at,
   families,

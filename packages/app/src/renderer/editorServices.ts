@@ -1,6 +1,6 @@
 /**
- * What an editing surface asks of the shell — the services a file's editor is handed by whoever hosts
- * it (`fileTypes.ts`'s surface table passes them through). A type only.
+ * What an editing surface asks of the shell — the services a gate's editor is handed by whoever hosts
+ * it (`FileSurfaceContext.runGateEditor` in `fileTypes.ts` carries them). A type only.
  */
 import type { ValidateSchemaResult } from "@jaira/shared/browser";
 import type { Drafts, SetDraft } from "./drafts";

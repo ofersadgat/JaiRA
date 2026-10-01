@@ -1,7 +1,6 @@
 /**
- * What a transcript's work rows say, worked out once for both trees (decision 0015): moved unchanged out
- * of `transcriptView.tsx`, which re-exports what it always exported, so the universal copy
- * (`packages/universal/src/components/panel/WorkRows.tsx`) draws the same rows from the same reading.
+ * What a transcript's work rows say: the reading `WorkRows`
+ * (`packages/universal/src/components/panel/WorkRows.tsx`) draws its rows from.
  */
 import { artifactOf, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";

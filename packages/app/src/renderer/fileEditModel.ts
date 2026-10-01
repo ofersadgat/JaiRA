@@ -1,7 +1,7 @@
 /**
- * The editing surfaces' logic, apart from their drawing (decision 0015): `fileSurfaces.tsx` draws them
- * in the DOM and the universal copy natively (its editors islands), and both decide from here — which
- * schema a document answers to, which syntax it is in, whether it is a file on a disk, and what the
+ * The editing surfaces' logic, apart from their drawing: the Files room's surfaces
+ * (`packages/universal/src/components/files/`, their editors islands) decide from here — which schema a
+ * document answers to, which syntax it is in, whether it is a file on a disk, and what the
  * configuration editor shows and saves.
  */
 import { useEffect } from "react";

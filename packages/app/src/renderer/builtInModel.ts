@@ -1,8 +1,7 @@
 /**
- * What the renderer says about the built-in layer (decision 0006) — the decisions `builtIn.tsx`'s
- * `LayerBar` draws: which chip a file wears and which layer buttons it offers. Plain functions of plain
- * data, moved here unchanged so the universal copy (`components/workflow/LayerBar.tsx`) draws the same
- * answer the desktop does (decision 0015).
+ * What the renderer says about the built-in layer (decision 0006) — the decisions `LayerBar`
+ * (`WorkflowEditor.tsx`) draws: which chip a file wears and which layer buttons it offers. Plain
+ * functions of plain data.
  */
 import type { BuiltInStanding, WorkflowLayer, WritableLayer } from "@jaira/shared/browser";
 

@@ -21,28 +21,27 @@ import { Icon } from "./Icon";
 import { ValueView } from "./ValueView";
 
 /**
- * `transcriptView.tsx`'s work rows, universal (decision 0015): one line of work — a call, a thought, a
- * call being written, a journal fact — its glyph, what it was, when, whether it worked, and what opens
- * under it. What each line says is `transcriptRows.ts`'s `toolLineOf` (the desktop's own reading), the
- * glyph `transcript.ts`'s `iconOf`. The rules, from `styles.css`:
+ * The transcript's work rows: one line of work — a call, a thought, a call being written, a journal
+ * fact — its glyph, what it was, when, whether it worked, and what opens under it. What each line says
+ * is `transcriptRows.ts`'s `toolLineOf`, the glyph `transcript.ts`'s `iconOf`. How they look:
  *
- *   .ts-work         column, margin 6 −6 10
- *   .ts-row          radius 6
- *   .ts-row-line     row, centred, gap 7, padding 3 6, radius 6, the body's 13/12.5 on 1.5;
+ *   the column       column, margin 6 −6 10
+ *   a row            radius 6
+ *   a row's line     row, centred, gap 7, padding 3 6, radius 6, the body's 13/12.5 on 1.5;
  *                    can-open: hover --accent 9% over transparent
- *   .ts-icon         16 wide, centred, --dim (muted --tok-hint; warn --warn; bad --bad); the glyph 14
- *   .ts-name         flex 0 1 auto, ellipsed, app 12/12.5 600 --text (muted --dim, bad --bad)
- *   .ts-server       padding 0 5, radius 4, --panel-2, app 500 10.5/12.5 on 16, --dim
- *   .ts-preview      flex 1, ellipsed, data 11.5/12 --dim (prose: app 12/12.5; warn/bad their hue)
- *   .ts-note         row, centred, gap 5, app 11/12.5 --dim, tabular; .ts-think-live --accent
- *   .ts-at           data 11/12 --dim, tabular
- *   .ts-chev         14 wide, --tok-hint, the chevron 13 (turned 180° open)
- *   .ts-mark         14 wide, --ok (bad --bad), the glyph 13; "–" for a call that never answered
- *   .ts-row-body     margin 1 0 6 28, padding-left 12, a 1px --rule on the left
- *   .ts-row-shown    margin 2 0 10 28
- *   .ts-payload      padding 4 0 6; -empty app 11.5/12.5 italic --tok-hint
- *   .ts-think-text   padding 4 0 6, app 12.5/12.5 on 1.6, italic, pre-wrap, --dim
- *   .shell-line      a part on its hue at 13% (padding 0 2 in a row), --text; what joins them --tok-hint
+ *   the glyph        16 wide, centred, --dim (muted --tok-hint; warn --warn; bad --bad); the glyph 14
+ *   the name         flex 0 1 auto, ellipsed, app 12/12.5 600 --text (muted --dim, bad --bad)
+ *   the server       padding 0 5, radius 4, --panel-2, app 500 10.5/12.5 on 16, --dim
+ *   the preview      flex 1, ellipsed, data 11.5/12 --dim (prose: app 12/12.5; warn/bad their hue)
+ *   a note           row, centred, gap 5, app 11/12.5 --dim, tabular; live --accent
+ *   the time         data 11/12 --dim, tabular
+ *   the chevron      14 wide, --tok-hint, the chevron 13 (turned 180° open)
+ *   the mark         14 wide, --ok (bad --bad), the glyph 13; "–" for a call that never answered
+ *   the body         margin 1 0 6 28, padding-left 12, a 1px --rule on the left
+ *   what is shown    margin 2 0 10 28
+ *   a payload        padding 4 0 6; none recorded: app 11.5/12.5 italic --tok-hint
+ *   a thought's text padding 4 0 6, app 12.5/12.5 on 1.6, italic, pre-wrap, --dim
+ *   a command line   a part on its hue at 13% (padding 0 2 in a row), --text; what joins them --tok-hint
  */
 
 /** Draws a subagent's conversation — the transcript's own component, handed in (it holds this file). */
@@ -51,7 +50,7 @@ export type TranscriptOf = (props: { entries: TranscriptEntry[]; working?: boole
 /** Walk into a subagent's conversation: the call that spawned it, and its name. */
 export type OpenSidechain = (call: string, name: string) => void;
 
-/** A command line in the colours of its parts (`shellLine.tsx`): nested text, so it ellipses as one line. */
+/** A command line in the colours of its parts: nested text, so it ellipses as one line. */
 export function ShellLine({ line, padding = 2 }: { line: string; padding?: number }): JSX.Element {
   const t = useTokens();
   const segments = useMemo(() => lineSegments(line, takenApartOf(line).requests.map((request) => ({ span: request.span, matched: [] }))), [line]);
@@ -185,7 +184,7 @@ export function Row({
   );
 }
 
-/** `.ts-note` and its two moods: a live count (`.ts-think-live`, a pulse) and a settled figure. */
+/** A row's note and its two moods: a live count (--accent, a pulse) and a settled figure. */
 function Note({ live, children }: { live: boolean; children: string }): JSX.Element {
   return (
     <View flexShrink={0} flexDirection="row" alignItems="center" gap={5}>
@@ -216,8 +215,8 @@ function EmptyPayload({ children }: { children: string }): JSX.Element {
 }
 
 /**
- * What lets an artifact in a payload RUN (the desktop's `ArtifactSurface`), as a value view's props: the
- * grant, and where a message from it goes — the second only where the surface has a composer.
+ * What lets an artifact in a payload RUN (`ArtifactSurface`), as a value view's props: the grant, and
+ * where a message from it goes — the second only where the surface has a composer.
  */
 function served(artifacts: ArtifactSurface | undefined): { serve?: ArtifactSurface["serve"]; onPrompt?: (text: string) => void } {
   if (artifacts === undefined) return {};
@@ -231,7 +230,7 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, tra
   const line = toolLineOf(entry, open, sub !== undefined || onOpenSidechain !== undefined, calls);
   const { running, unanswered, pathMime } = line;
   const head = { entry, name: line.name, called: line.called, server: line.server, preview: line.preview, command: line.command, prose: line.prose, tone: line.tone, mark: line.mark };
-  // The approval prompt: its line is the whole of it (`Tool`'s first branch).
+  // The approval prompt: its line is the whole of it.
   if (isApprovalCall(entry)) return <Row {...head} />;
   const shown = ((): ReactNode => {
     if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />;
@@ -327,7 +326,7 @@ export function Work({
   open: boolean;
   sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined;
   onOpenSidechain?: OpenSidechain | undefined;
-  /** How an artifact in a payload runs, and where its messages go (the desktop's `artifacts`). */
+  /** How an artifact in a payload runs, and where its messages go. */
   artifacts?: ArtifactSurface | undefined;
   narrated?: boolean | undefined;
   calls?: CallSurface | undefined;
@@ -347,7 +346,7 @@ export function Work({
   );
 }
 
-/** `.ts-work`: the column rows stand in, pulled out by their own padding. */
+/** The column rows stand in, pulled out by their own padding. */
 export function WorkColumn({ children, ...box }: { children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
     <View flexDirection="column" minWidth={0} marginTop={6} marginHorizontal={-6} marginBottom={10} {...box}>
@@ -361,10 +360,10 @@ export function WorkColumn({ children, ...box }: { children: ReactNode } & Recor
  * unfolds it here (the same transcript, one step further in). Walking into it is the host's: `onOpen`,
  * handed on to the conversation inside, whose own doorways walk further in.
  *
- *   .ts-sidechain        margin 2 0 6, padding 2 0 2 12 (open: 6 above)
- *   .ts-sidechain-head   row, centred, gap 8, app 11/12.5, upper, 0.04em, --dim; 4 under while open
- *   .ts-sidechain-fold   inline row, centred, gap 4, hovered --text; the chevron turned −90° shut
- *   .ts-sidechain-open   pushed right, padding 0 2, --accent ("walk in →")
+ *   the door             margin 2 0 6, padding 2 0 2 12 (open: 6 above)
+ *   its head             row, centred, gap 8, app 11/12.5, upper, 0.04em, --dim; 4 under while open
+ *   the fold             inline row, centred, gap 4, hovered --text; the chevron turned −90° shut
+ *   "walk in →"          pushed right, padding 0 2, --accent
  */
 function SidechainDoor({ call, name, entries, running, transcript: Inner, onOpen, artifacts }: { call: string; name: string; entries: TranscriptEntry[] | undefined; running: boolean; transcript: TranscriptOf; onOpen?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined }): JSX.Element {
   const t = useTokens();
@@ -405,15 +404,15 @@ function SidechainDoor({ call, name, entries, running, transcript: Inner, onOpen
 
 /**
  * `AskedQuestions`: the agent's question as the person saw it, with what they answered — the same
- * chooser the dialog drew, inert (`.gate-settled.ts-asked`: its first block 0 above, its options 10).
+ * chooser the dialog drew, inert.
  */
 function AskedQuestions({ questions, answers }: { questions: AgentQuestion[]; answers: Record<string, JsonValue> | undefined }): JSX.Element {
   const choices = useMemo(() => choicesOfQuestions(questions), [questions]);
   const [state, setState] = useState<Record<string, Answer>>(() => answersOfValue(choices, answers === undefined ? undefined : { answers }));
   return (
-    // `.ts-asked .question-block`: 6 above, which collapses with the shown row's 2 — the chooser's own 14
-    // less 8. Several questions start at their step line, 0 above; the stepper spaces itself (`asked`).
-    // Not in a gate's frame: a field's label is the global `.field`'s, 0 above and --text.
+    // One question stands 6 under its row: the chooser's own 14 above, less 10, on the shown row's 2.
+    // Several questions start at their step line, 0 above; the stepper spaces itself (`asked`).
+    // Not in a gate's frame: a field's label is bare, 0 above and --text.
     <FieldFrame.Provider value={false}>
     <View testID="asked" minWidth={0} marginTop={choices.length > 1 ? 0 : -10}>
       {choices.length > 1 ? (
@@ -429,9 +428,9 @@ function AskedQuestions({ questions, answers }: { questions: AgentQuestion[]; an
 /**
  * `AnsweredForYou`: a question the control conversation answered — who, how sure, and the way back.
  *
- *   .gate-settled-by            row, gap 8, 8 above, padding 8 10, radius --control-radius, app 12.5/12.5
- *   .by-control                 centred; --accent 8% into --panel, 1px --accent 32% into --line; the
- *                               glyph 14 --accent; `b` 700; `.conf` data at app 11/12.5, --dim
+ *   the line          row, centred, gap 8, 8 above, padding 8 10, radius --control-radius, app 12.5/12.5;
+ *                     --accent 8% into --panel, 1px --accent 32% into --line; the glyph 14 --accent;
+ *                     who answered 700; the confidence data at app 11/12.5, --dim
  */
 export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; onAnswerYourself?: (() => void) | undefined }): JSX.Element {
   const t = useTokens();
@@ -471,9 +470,8 @@ export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; on
 /**
  * `OutcomeNote`: what a `move` or a `start` DID — the note the rail draws, under the call.
  *
- *   .sb-note.step.sb-connected   row, baseline, gap 8, padding 4, app 11.5/12.5, --dim; the glyph 1em,
- *                                centred; `b` 600 --text; the state ellipsed, at most 30% (`.mono`
- *                                names no face of its own)
+ *   the note          row, baseline, gap 8, padding 4, app 11.5/12.5, --dim; the glyph 1em, centred;
+ *                     the name 600 --text; the state ellipsed, at most 30%, in the note's own face
  */
 export function OutcomeNote({ outcome }: { outcome: WorkflowOutcome }): JSX.Element {
   const t = useTokens();

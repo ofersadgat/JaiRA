@@ -3,9 +3,9 @@ import type { ReviewNote } from "@jaira/shared/browser";
 import { NoteList } from "@jaira/universal";
 
 /**
- * A review's notes (the copy of `reviewNotes.tsx`'s `NoteList`), as the changeset reviewer draws them: one written
- * here, one read from the forge with its replies — its source said beside the author (`.note-src`) and
- * a reply that is a decision word drawn as the decision (`.note-msg.is-word`).
+ * A review's notes (`NoteList`), as the changeset reviewer draws them: one written here, one read from
+ * the forge with its replies — its source said beside the author, and a reply that is a decision word
+ * drawn as the decision.
  */
 export interface ReviewSpecimen {
   width: number;

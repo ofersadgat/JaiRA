@@ -5,7 +5,7 @@ import { Txt, type FontSpec } from "../../primitives";
 /**
  * A text on one line whatever its box — `white-space: nowrap`, which React Native does not have. On web
  * the rule itself; on a phone the text is measured on one line apart (in a wide, invisible box) and given
- * that width, so where its box is narrower it overflows and is clipped there, as the desktop's does
+ * that width, so where its box is narrower it overflows and is clipped there, as `nowrap` text is on web
  * (the way `Crumbs.tsx` draws a project's path).
  */
 export function OneLine({ spec, children, ...rest }: { spec: Partial<FontSpec>; children: ReactNode } & Record<string, unknown>): JSX.Element {

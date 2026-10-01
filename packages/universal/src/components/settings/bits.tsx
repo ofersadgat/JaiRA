@@ -6,26 +6,26 @@ import { useTokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
 
 /**
- * Small pieces the settings pages share, universal (decision 0015) — each a `styles.css` rule or two:
+ * Small pieces the settings pages share, and how each looks:
  *
- *   .cfg-hint            app 11/12.5, line 1.4, --dim (a `p` in a card: padding 13 16)
- *   .cfg-stack           column, gap 10
- *   .cfg-status          inline row, centred, gap 5, app 10.5/12.5 --dim on --panel-2, radius
+ *   `Hint`               app 11/12.5, line 1.4, --dim (straight in a card: padding 13 16)
+ *   `Stack`              column, gap 10
+ *   `Status`             inline row, centred, gap 5, app 10.5/12.5 --dim on --panel-2, radius
  *                        --control-radius-sm, padding 2 8 2 7, one line; `available` --ok on --tint-ok,
  *                        `unavailable` --bad on --tint-bad, `unconfigured` --warn on --tint-warn, `here`
  *                        --accent on --accent 12% into --panel
- *   .cfg-dot             6 round, the text's colour (--accent in `here`)
- *   .cfg-mark            20 square, centred; its mark 17 square; the dot 8 round at -2 -2, --dim (ok,
+ *   its dot              6 round, the text's colour (--accent in `here`)
+ *   `Mark`               20 square, centred; its mark 17 square; the dot 8 round at -2 -2, --dim (ok,
  *                        bad, warn by state), ringed 2px --bg
- *   .cx-src              app 500 at 9.5/12.5 on a 1.5 line, --tok-hint on --panel-2, round, padding 0 5,
+ *   `SourceTag`          app 500 at 9.5/12.5 on a 1.5 line, --tok-hint on --panel-2, round, padding 0 5,
  *                        6 after what it follows
- *   .pane-actions        row, centred, gap 6, wraps
- *   code                 data 11/12
+ *   `PaneActions`        row, centred, gap 6, wraps
+ *   `Code`               data 11/12
  */
 
 const HINT = { voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" } as const;
 
-/** `.cfg-hint`, as a line of its own. `card` is one straight in a card (`.set-group > .cfg-hint`: padding 13 16). */
+/** A hint, as a line of its own. `card` is one straight in a card (padding 13 16). */
 export function Hint({ children, card = false, color, ...rest }: { children: ReactNode; card?: boolean; color?: string } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ ...HINT, ...(color !== undefined ? { color } : {}) }} {...(card ? { paddingVertical: 13, paddingHorizontal: 16 } : {})} {...rest}>
@@ -34,7 +34,7 @@ export function Hint({ children, card = false, color, ...rest }: { children: Rea
   );
 }
 
-/** `code`: data 11/12 — inside a hint, at the hint's line. */
+/** Code: data 11/12 — inside a hint, at the hint's line. */
 export function Code({ children, ...rest }: { children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "data", scale: 11 / 12, lineHeight: 1.4, color: "dim" }} {...rest}>
@@ -43,7 +43,7 @@ export function Code({ children, ...rest }: { children: ReactNode } & Record<str
   );
 }
 
-/** `.cfg-stack`. `card` is one straight in a card (padding 13 16). */
+/** A column of pieces, 10 apart. `card` is one straight in a card (padding 13 16). */
 export function Stack({ children, card = false, gap = 10 }: { children: ReactNode; card?: boolean; gap?: number }): JSX.Element {
   return (
     <View flexDirection="column" gap={gap} {...(card ? { paddingVertical: 13, paddingHorizontal: 16 } : {})}>
@@ -52,7 +52,7 @@ export function Stack({ children, card = false, gap = 10 }: { children: ReactNod
   );
 }
 
-/** `.pane-actions`. */
+/** A row of buttons: centred, gap 6, wraps. */
 export function PaneActions({ children, ...rest }: { children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={6} flexWrap="wrap" {...rest}>
@@ -63,7 +63,7 @@ export function PaneActions({ children, ...rest }: { children: ReactNode } & Rec
 
 export type StatusKind = "plain" | "available" | "unavailable" | "unconfigured" | "unchecked" | "here";
 
-/** `.cfg-status`: a state in one word and one colour, with its dot. */
+/** A state in one word and one colour, with its dot. */
 export function Status({
   kind = "plain",
   dot = true,
@@ -109,7 +109,7 @@ export function Status({
   );
 }
 
-/** `.cx-src`: where something comes from, as a small tag — with its tooltip, where the DOM's has one. */
+/** Where something comes from, as a small tag — with a tooltip, where it is given one. */
 export function SourceTag({ children, first = false, title }: { children: ReactNode; first?: boolean; title?: string }): JSX.Element {
   const t = useTokens();
   return (
@@ -120,9 +120,8 @@ export function SourceTag({ children, first = false, title }: { children: ReactN
 }
 
 /**
- * `icons.tsx`'s `BrandIcon`: a company's mark in its colour (or `currentColor`), or its initial on its
- * colour. `ink` is that `currentColor`: the text's, or a composer chip's (--tok-hint, --accent on a
- * value you chose).
+ * A company's mark in its colour (or `currentColor`), or its initial on its colour. `ink` is that
+ * `currentColor`: the text's, or a composer chip's (--tok-hint, --accent on a value you chose).
  */
 export function BrandIcon({ name, size, ink: tone = "text" }: { name: string; size: number; ink?: string }): JSX.Element {
   const t = useTokens();
@@ -143,7 +142,7 @@ export function BrandIcon({ name, size, ink: tone = "text" }: { name: string; si
   );
 }
 
-/** `.cfg-mark`: a mark with its state's dot on the corner. */
+/** A brand's mark with its state's dot on the corner. */
 export function Mark({ brand, state }: { brand: string; state: "available" | "unavailable" | "unconfigured" | "needs-sign-in" | "off" | "unchecked" }): JSX.Element {
   const t = useTokens();
   const dot = state === "available" ? "ok" : state === "unavailable" ? "bad" : state === "needs-sign-in" || state === "unconfigured" ? "warn" : "dim";
@@ -155,7 +154,7 @@ export function Mark({ brand, state }: { brand: string; state: "available" | "un
   );
 }
 
-/** A 1px --line above, for a list's rows (`li + li`). */
+/** A 1px --line between a list's rows. */
 export function RowRule(): JSX.Element {
   const t = useTokens();
   return <View height={0} {...(edge(t, { top: 1 }) as object)} />;

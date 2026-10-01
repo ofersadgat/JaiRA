@@ -14,37 +14,37 @@ import { Icon, type IconName } from "./Icon";
 import { ShellLine } from "./WorkRows";
 
 /**
- * `changesPanel.tsx`'s `ChangesPanel`, universal (decision 0015): what a task changed, as the tool menu
- * groups tools — a card per group that folds from its head. The groups, their heads' words, the file
- * tree and who made each change are `changesModel.ts`'s, shared with the DOM. The rules:
+ * What a task changed, as the tool menu groups tools — a card per group that folds from its head. The
+ * groups, their heads' words, the file tree and who made each change are `changesModel.ts`'s. How it
+ * looks:
  *
- *   .chg            column, flex 1 0 auto, gap 8, bled over the panel's padding (−12 −12 −18) and padded
+ *   the panel       column, flex 1 0 auto, gap 8, bled over the panel's padding (−12 −12 −18) and padded
  *                   10 12 18 on --bg; app 12.5/12.5; icons 14
- *   .chg-bar        row, centred, gap 8, padding 0 2, --dim at 11.5/12.5; the switch pushed right
- *   .chg-empty      p.empty at padding 8 2
- *   .chg-card       1px --text 7%, radius 10, --panel, 0 1 2 --text 5%
- *   .chg-head       row, centred, gap 8, padding 9 10 (5 under while open), radius 10 (10 10 0 0 open);
+ *   the bar         row, centred, gap 8, padding 0 2, --dim at 11.5/12.5; the switch pushed right
+ *   nothing yet     the empty sentence at padding 8 2
+ *   a card          1px --text 7%, radius 10, --panel, 0 1 2 --text 5%
+ *   its head        row, centred, gap 8, padding 9 10 (5 under while open), radius 10 (10 10 0 0 open);
  *                   hover --text 3%. The fold 12 --tok-hint (−90° folded), the icon --dim, the name 600,
  *                   the sum --dim 11/12.5 ellipsed, the count data 500 10.5/12 / 1.7 on --text 7%
- *   .chg-body       padding 0 2 6
- *   .chg-folder     row, centred, gap 6, at least 24 tall, padding 2 8 2 (8 + 14 a level), radius 6;
+ *   its body        padding 0 2 6
+ *   a folder        row, centred, gap 6, at least 24 tall, padding 2 8 2 (8 + 14 a level), radius 6;
  *                   data 11/12 / 1.4 --dim; hover --text 5%
- *   .chg-file       the same, 26 + 14 a level in, data 11.5/12 / 1.4: created --ok, deleted --bad and
+ *   a file          the same, 26 + 14 a level in, data 11.5/12 / 1.4: created --ok, deleted --bad and
  *                   struck, renamed --p1, modified icon and letter --warn; +N --ok, −N --bad; the letter
  *                   12 wide, data 700 10.5/12
- *   .chg-hunks      margin 2 6 6, padding 4 0, 1px --line, radius 6, --bg, data 10.5/12 / 1.5, scrolls
+ *   its hunks       margin 2 6 6, padding 4 0, 1px --line, radius 6, --bg, data 10.5/12 / 1.5, scrolls
  *                   sideways, at most 320; a line padding 0 8 — added --ok 13%, removed --bad 12%,
  *                   headers --tok-hint
- *   .chg-item       16 | 1fr | auto, gap 8, top-aligned, padding 5 8: the icon (--dim, 2 down), what was
+ *   an item         16 | 1fr | auto, gap 8, top-aligned, padding 5 8: the icon (--dim, 2 down), what was
  *                   said (and its detail under it, --dim 11/12.5), when (data 10.5/12 / 1.6 --tok-hint)
- *   .chg-in         a subject that opens its state's definition: `button.link`'s data 11/12 (its code 0.92
- *                   of that), --accent, underlined under the pointer
- *   .chg-by         a pill: padding 0 6, --text 6%, app 500 10.5/12.5 / 1.65, --dim
- *   .chg code       data at 0.92em
- *   .chg .shell-line  a command in its parts' colours (`WorkRows.tsx`'s `ShellLine`), each part padded 0 2
+ *   its subject     where it opens its state's definition: data 11/12 (its code 0.92 of that), --accent,
+ *                   underlined under the pointer
+ *   who made it     a pill: padding 0 6, --text 6%, app 500 10.5/12.5 / 1.65, --dim
+ *   code            data at 0.92em
+ *   a command       in its parts' colours (`WorkRows.tsx`'s `ShellLine`), each part padded 0 2
  *
- * The git card (merge requests and the ladder of steps) is drawn from the same rules, less exactly: no
- * scene in the parity world has one yet.
+ * The git card (merge requests and the ladder of steps) is drawn less exactly: no scene in the parity
+ * world has one yet.
  */
 export function ChangesPanel({ taskId, project, signal, onReview, onOpenTask }: { taskId: string; project?: string | undefined; signal: unknown; onReview?: (() => void) | undefined; onOpenTask?: ((taskId: string) => void) | undefined }): JSX.Element {
   const t = useTokens();
@@ -158,7 +158,7 @@ interface Ctx {
   t: Tokens;
 }
 
-/** `.chg code`: the data face at 0.92 of the words around it (`base`, a factor of --size-app). */
+/** Code among words: the data face at 0.92 of the words around it (`base`, a factor of --size-app). */
 function Code({ children, t, base = 1 }: { children: ReactNode; t: Tokens; base?: number }): JSX.Element {
   // Nested in the words it sits among, so it takes their colour and line; only the face and size are its own.
   return (
@@ -295,7 +295,7 @@ function FileTree({ files, ctx }: { files: readonly FileChange[]; ctx: Ctx }): J
   );
 }
 
-/** `.chg-hunks`: a file's hunks, a line each, coloured by what happened to it. */
+/** A file's hunks, a line each, coloured by what happened to it. */
 function Hunks({ file, t }: { file: FileChange; t: Tokens }): JSX.Element {
   const line: FontSpec = { voice: "data", scale: 10.5 / 12 };
   return (
@@ -469,9 +469,8 @@ function ItemRow({ item, icon, ctx }: { item: ChangeItem; icon: IconName; ctx: C
         <Code t={t}>{item.subject}</Code>
       </Out>
     ) : stateId !== undefined && panel?.openState !== undefined ? (
-      // `button.link.chg-in`: the state's definition in the context panel. `button.link` outranks
-      // `.chg-in`'s `font: inherit` for the face and size (data 11/12), so the code in it is 0.92 of that,
-      // on the inherited 1.5; --accent, underlined under the pointer.
+      // A link to the state's definition in the context panel: the data face at 11/12, so the code in it
+      // is 0.92 of that, on the row's 1.5; --accent, underlined under the pointer.
       <Press onPress={() => panel.openState!(stateId)} title="Open its definition" flexShrink={1} minWidth={0}>
         {({ hovered }) => (
           <Txt spec={{ voice: "data", scale: (11 / 12) * 0.92, color: "accent" }} numberOfLines={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
@@ -505,8 +504,8 @@ function ItemRow({ item, icon, ctx }: { item: ChangeItem; icon: IconName; ctx: C
         {hasSub ? (
           <View flexDirection="row" alignItems="center" gap={6} minWidth={0}>
             {item.command !== undefined ? (
-              // `code.ellip` is the flex item, so the line is the code's own (0.92 of the row's size, on 1.5),
-              // and its ellipsis is in the code's face.
+              // The command is the row's item itself, so the line is the code's own (0.92 of the row's size,
+              // on 1.5), and its ellipsis is in the code's face.
               <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", lineHeight: 1.5 * 0.92 }} fontFamily={font(t, { voice: "data", scale: 1 })["fontFamily"] as never} fontSize={t.scaled("size-app", (11 / 12.5) * 0.92) as never} ellip minWidth={0} flexShrink={1}>
                 <Code t={t} base={11 / 12.5}>
                   <ShellLine line={item.command} />

@@ -1,8 +1,7 @@
 /**
- * What Settings → About (`aboutPane.tsx`, `licensesPane.tsx`) works out, as hooks and pure functions in
- * a module of their own so the universal copy (decision 0015) says and does what the DOM's does: the
- * update track in effect and its ↺, what a downloading update does next, which control a plugin row
- * carries, where the engine runs, the `jaira` command's line, and the licence manifest.
+ * What Settings → About (`AboutPage.tsx`) works out, as hooks and pure functions: the update track in
+ * effect and its ↺, what a downloading update does next, which control a plugin row carries, where the
+ * engine runs, the `jaira` command's line, and the licence manifest.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import {

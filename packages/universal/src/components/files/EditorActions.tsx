@@ -5,16 +5,15 @@ import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";
 
 /**
- * `editorChrome.tsx`'s `EditorActions`: Save and Revert, pinned under the editor. The rules
- * (`cascade.mts '.pane-actions.pinned'`):
+ * Save and Revert, pinned under the editor. How it looks:
  *
- *   .pane-actions.pinned   row, centred, wrapping, gap 6; 8 above, a --line over it, --panel; pushed to
+ *   the row                row, centred, wrapping, gap 6; 8 above, a --line over it, --panel; pushed to
  *                          the foot (margin-top auto); sticky at the foot of what scrolls it, z-index 2 —
  *                          which is also what draws it over the Components room's own sticky bar (equal
  *                          z-index, later in the page) when a card's Save scrolls under it
- *   button.primary/.ghost  `Button`'s; disabled at half opacity
- *   .reason                --bad, app 11/12.5 (why saving is refused)
- *   .sub                   --dim, app 11/12.5
+ *   Save, Revert           `Button`'s `primary` and `ghost`; disabled at half opacity
+ *   the reason             --bad, app 11/12.5 (why saving is refused)
+ *   a note                 --dim, app 11/12.5 (`Sub`)
  */
 export function EditorActions({
   dirty,
@@ -48,7 +47,7 @@ export function EditorActions({
   );
 }
 
-/** `.sub`: --dim, app 11/12.5. */
+/** Secondary words (a note beside the buttons, a label): --dim, app 11/12.5. */
 export function Sub({ children, ...rest }: { children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} {...rest}>
@@ -67,15 +66,15 @@ export function ReadingNote(): JSX.Element {
 }
 
 /**
- * Inside the File types preview the row is not drawn (`.ft-preview-body .pane-actions { display: none }`):
- * the sample's text is thrown away, so a Save there would be a button that does nothing.
+ * Inside the File types preview the row is not drawn: the sample's text is thrown away, so a Save
+ * there would be a button that does nothing.
  */
 const Hidden = createContext(false);
 export function HideEditorActions({ children }: { children: ReactNode }): JSX.Element {
   return <Hidden.Provider value={true}>{children}</Hidden.Provider>;
 }
 
-/** `.pane-actions.pinned`, holding whatever the surface puts in it. */
+/** The pinned row, holding whatever the surface puts in it. */
 export function EditorActionsRow({ children }: { children: ReactNode }): JSX.Element | null {
   const t = useTokens();
   if (useContext(Hidden)) return null;
@@ -86,7 +85,7 @@ export function EditorActionsRow({ children }: { children: ReactNode }): JSX.Ele
   );
 }
 
-/** `.file-edit`: a column, gap 8, taking the half it was given (flex 1 1 auto, may shrink to nothing). */
+/** An editor's box: a column, gap 8, taking the half it was given (flex 1 1 auto, may shrink to nothing). */
 export function FileEdit({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="column" flexGrow={1} flexShrink={1} flexBasis="auto" gap={8} minHeight={0}>

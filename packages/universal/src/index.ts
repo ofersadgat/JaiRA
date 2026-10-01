@@ -16,10 +16,10 @@ export { CopiesBoard } from "./screens/CopiesBoard";
 export { SchemaForm, registerWidget } from "./components/form/SchemaForm";
 export { Field, FieldGrid, FormRowsContext, Level } from "./components/form/Field";
 export { SettingsGroup } from "./components/settings/SettingsPage";
-// The two selects (`select.cfg-input` and the plain one), for the select specimen.
+// The two selects (a settings field's and the plain one), for the select specimen.
 export { SelectInput } from "./components/settings/fields";
 export { Select } from "./components/logs/Select";
-// The floats and dialogs `App.tsx` owns, and the Components room's stage, for the specimens.
+// The shell's floats and dialogs, and the Components room's stage, for the specimens.
 export { Stage as GalleryStage } from "./components/gallery/GalleryPane";
 export { ApprovalDialog, ModuleApprovalDialog } from "./components/floats/Dialogs";
 export { FolderBrowser } from "./components/floats/FolderBrowser";
@@ -44,7 +44,7 @@ export { ChangesPanel } from "./components/panel/ChangesPanel";
 export { NoteList } from "./components/artifact/ReviewNotes";
 export { ImageDiff, type ImageLayout } from "./components/artifact/ImageDiff";
 export { Range } from "./components/form/Range";
-// A task card, the Debug room's journal and three of the Files room's surfaces, for their specimens (`boardSpecimens.tsx`).
+// A task card, the Debug room's journal and three of the Files room's surfaces, for their specimens (`roomSpecimens.tsx`).
 export { TaskCard } from "./components/TaskCard";
 export { Conversation } from "./components/debug/Conversation";
 export { JsonFormView, PatchSideBySide, RenderedFileView } from "./components/files/surfaces";

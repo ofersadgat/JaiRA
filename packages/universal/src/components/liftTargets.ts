@@ -2,12 +2,12 @@ import { useCallback, useRef, useState } from "react";
 import type { View as HostView } from "react-native";
 
 /**
- * Where a lifted thing may land on a phone (`Lift.tsx`), found by the finger's point: the desktop's
- * `dragover` is the browser's hit test, and a phone has none for a gesture, so the places are measured
- * in the window when the lift starts (`measure`) and the finger's point is looked up in them (`hit`).
+ * Where a lifted thing may land on a phone (`Lift.tsx`), found by the finger's point: on web `dragover`
+ * is the browser's hit test, and a phone has none for a gesture, so the places are measured in the window
+ * when the lift starts (`measure`) and the finger's point is looked up in them (`hit`).
  *
- * `over` is the place under the finger, which is what `dragover`/`dragleave` tell a DOM column. A place
- * is registered with `host(key)`, a ref callback kept per key so it does not change between draws.
+ * `over` is the place under the finger, which is what `dragover`/`dragleave` tell a column on web. A
+ * place is registered with `host(key)`, a ref callback kept per key so it does not change between draws.
  */
 type Rect = { x: number; y: number; w: number; h: number };
 

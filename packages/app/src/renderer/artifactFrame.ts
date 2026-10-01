@@ -1,7 +1,6 @@
 /**
- * The grant an interactive artifact is framed from — moved out of `valueView.tsx`'s `ValueView`
- * unchanged, so the universal value view (decision 0015) asks for it the same way and cannot come to
- * a different conclusion about when something may run. The frame itself is `interactiveArtifact.tsx`.
+ * The grant an interactive artifact is framed from, asked for by `ValueView.tsx`. The frame itself is
+ * `interactiveArtifact.tsx`.
  */
 import { useEffect, useState } from "react";
 import type { ArtifactValue, ServedArtifact } from "@jaira/shared/browser";

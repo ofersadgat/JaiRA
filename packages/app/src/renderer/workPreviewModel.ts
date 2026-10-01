@@ -1,7 +1,6 @@
 /**
- * Appearance → Conversation's work preview, as data (decision 0015): one request's work, timed back
- * from `now` — a few calls in, many calls in, and finished with its answer. Moved unchanged out of
- * `workPreview.tsx`, so the desktop's preview and the universal copy draw the same three moments.
+ * Appearance → Conversation's work preview, as data: one request's work, timed back from `now` — a few
+ * calls in, many calls in, and finished with its answer.
  */
 import type { TranscriptEntry } from "./transcript";
 

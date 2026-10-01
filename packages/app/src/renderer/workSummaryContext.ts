@@ -1,8 +1,7 @@
 /**
- * What the work summary reads besides its entries (decision 0015): the three settings, the read-only
- * judge, the approval its host can answer, and a clock — moved unchanged out of `workSummaryView.tsx`
- * (which re-exports them), so the desktop's summary and the universal copy
- * (`packages/universal/src/components/panel/WorkSummary.tsx`) stand under the same providers.
+ * What the work summary reads besides its entries: the three settings, the read-only judge, the
+ * approval its host can answer, and a clock — the providers `WorkSummary`
+ * (`packages/universal/src/components/panel/WorkSummary.tsx`) stands under.
  */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PendingApproval, WorkNotes, WorkRows } from "@jaira/shared/browser";

@@ -1,9 +1,8 @@
 /**
- * The state editor's state and decisions — everything `WorkflowEditor` (`stateEditor.tsx`) holds and
- * derives, moved here unchanged as one hook ({@link useWorkflowEditor}) so the universal copy
- * (`components/workflow/WorkflowEditor.tsx`) runs the same document, the same drafts, the same merge and
- * the same completions as the desktop (decision 0015). Only the drawing — and the desktop's scroll to
- * a revealed issue, which needs the DOM — stays in the components.
+ * The state editor's state and decisions — everything `WorkflowEditor`
+ * (`packages/universal/src/components/workflow/WorkflowEditor.tsx`) holds and derives, as one hook
+ * ({@link useWorkflowEditor}): the document, the drafts, the merge and the completions. Only the drawing
+ * stays in the component.
  *
  * The three views share one source of truth — the document as text — so switching tabs never loses
  * an edit made in another. Every write goes through `applyForm`, which MERGES rather than rebuilds —
@@ -34,8 +33,9 @@ import { bindingTargets, childStateIdOf, functionOptions, guardTargets, linkTarg
  * Here rather than in the editor because three modules that are not React pass it around — the
  * surface registry, the store that holds one per file, and the app that wires them together — and a
  * type imported from a component only so a record can be keyed by it is a dependency none of them
- * need. Two of these EDIT the document and the third only reads it; that asymmetry is deliberate and
- * is spelled out in `stateGraphView.tsx`.
+ * need. Two of these EDIT the document and the third only reads it; that asymmetry is deliberate:
+ * the graph answers what the other two cannot — what runs after what, and where each value comes
+ * from — and a control on every box would cost the room the picture is made of.
  */
 export type EditorTab = "form" | "json" | "graph";
 
@@ -125,7 +125,7 @@ export function seedRequiredBindings(
  */
 export const NO_STATE_SLOTS = async (): Promise<null> => null;
 
-/** What the top bar's layer buttons DO (decision 0006) — see `builtIn.tsx` for which are offered. */
+/** What the top bar's layer buttons DO (decision 0006) — see `builtInModel.ts` for which are offered. */
 export type LayerActions =
   | {
       hasProject: boolean;
@@ -333,8 +333,7 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [tab]);
 
-  // An inspector diagnostic asked to be shown: switch to the form. (Scrolling to it and flashing it is
-  // the drawing's — see `WorkflowEditor`.)
+  // An inspector diagnostic asked to be shown: switch to the form.
   useEffect(() => {
     if (reveal !== null) setTab("form");
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -435,7 +434,7 @@ export function useWorkflowEditor(input: WorkflowEditorInput) {
   }, [declared, childStateId, form.children]);
 
   /**
-   * What a link preview needs, supplied once for the whole form — see `linkPreview.tsx`.
+   * What a link preview needs, supplied once for the whole form — see `useLinkPreview` (`linkModel.ts`).
    *
    * `null` when this editor was given no reader: a form rendered outside the shell shows its links
    * as paths, which is what it can prove.
@@ -510,7 +509,7 @@ export interface BindingRowView {
 }
 
 /**
- * The binding table's rows (`BindingTable` in `stateEditor.tsx`): the child it wires, what the run
+ * The binding table's rows (`BindingTable` in `WorkflowEditor.tsx`): the child it wires, what the run
  * called it with, and each wire's marks — the table's own error ("required child input 'goal' is not
  * wired") goes to the seeded row it is about.
  */

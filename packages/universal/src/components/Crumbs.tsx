@@ -8,35 +8,32 @@ import { ContextMenu, type MenuAt } from "./Menu";
 import { colorOf } from "./Sidebar";
 
 /**
- * `crumbs.tsx`'s `CrumbBar`, universal (decision 0015): an address — each crumb after the chevron that
- * joins it to the level on its left, then the view's annotations and controls. The crumbs are built by
- * the same `crumbModel.ts` the desktop's are. The rules, from `styles.css`:
+ * An address — each crumb after the chevron that joins it to the level on its left, then the view's
+ * annotations and controls. The crumbs are built by `crumbModel.ts`. How it looks:
  *
- *   .doc-bar                 row, centred, gap 3, padding 7 12, min-width 0; --panel with a --line
- *                            under it — in the title bar (`.title-bar > .doc-bar`) neither, and 0 1 auto;
- *                            over a board group (`.board-group > .doc-bar`) a --line above it as well
- *   .crumb-part              row, centred, gap 2
- *   .crumb-sep               "›" in --dim, in the body's font (13, line 1.5)
- *   button.crumb-sep         line 1, padding 1 3, a transparent 1px ring, radius 4; 2 right when first;
- *                            hovered: --panel-2, --line ring, --text; open ("⌄"): the same in --accent,
- *                            but the hover rule (0,3,1) outranks `.open` (0,2,1), so --text under the pointer
- *   .crumb                   padding 2 5, radius 5, no ground, --accent; one line, cut with "…"
- *   .doc-bar .crumb          data voice at 12.5/12, at most 220 wide, line 1.5 (the body's)
- *   .crumb.last              --text, 600 — as `.doc-bar .crumb.last` (0,3,0)
- *   .crumb-folder            --dim (also when last); hovered --text on --panel-2
- *   .crumb-state             --accent (also when last); hovered --panel-2
- *   .crumb-run               app voice at 12/12.5, at most 190, --text (also when last), after a "▸ "
- *                            in its font and --dim (inline in a span; a flex item 5 before it in a button); last: --panel-2 ground, radius 5; hovered (a button) --panel-3,
- *                            as `button:hover:not(:disabled)` (0,2,1) outranks every crumb rule
- *   .crumb-project           row, centred, gap 4, data voice at 0.96, -0.01em, at most 240, --text,
- *                            500 — also when last, since it comes after `.crumb.last` at (0,3,0) —
- *                            its hue at 18% as ground, radius 4, a 5px dot of the hue first;
- *                            hovered: the hue at 30%
- *   .crumb-all               "All projects": app voice at 0.96, 600, no spacing, no ground, no dot;
- *                            hovered --panel-2
- *   .crumb.crumb-pending     italic, --dim — but `.doc-bar .crumb-run.last` (0,3,0) keeps --text
- *   .grow                    the slack, between the path and what follows it
- *   .doc-bar-tools           row, centred, gap 6, flex none
+ *   the bar                  row, centred, gap 3, padding 7 12, min-width 0; in the title bar no ground
+ *                            and no rule, and 0 1 auto; over a board group --panel with a --line above
+ *                            and under it
+ *   a crumb and its chevron  row, centred, gap 2
+ *   the chevron              "›" in --dim, in the body's font (13, line 1.5)
+ *   … with a menu            a button: line 1, padding 1 3, a transparent 1px ring, radius 4; 2 right when
+ *                            first; hovered: --panel-2, --line ring, --text; open ("⌄"): the same in
+ *                            --accent, but --text under the pointer
+ *   a crumb                  padding 2 5, radius 5, no ground; one line, cut with "…"; data voice at
+ *                            12.5/12, at most 220 wide, line 1.5 (the body's)
+ *   the last crumb           --text, 600
+ *   a folder                 --dim (also when last); hovered --text on --panel-2
+ *   a state                  --accent (also when last); hovered --panel-2
+ *   a run                    app voice at 12/12.5, at most 190, --text (also when last), after a "▸ "
+ *                            in its font and --dim (inline where the crumb is text; 5 before the name in
+ *                            a button); last: --panel-2 ground, radius 5; hovered (a button) --panel-3
+ *   a project                row, centred, gap 4, data voice at 0.96, -0.01em, at most 240, --text,
+ *                            500 — also when last — its hue at 18% as ground, radius 4, a 5px dot of the
+ *                            hue first; hovered: the hue at 30%
+ *   "All projects"           app voice at 0.96, 600, no spacing, no ground, no dot; hovered --panel-2
+ *   a pending crumb          italic, --dim — but a run that is last keeps --text
+ *   the slack                between the path and what follows it
+ *   the tools                row, centred, gap 6, flex none
  */
 export function CrumbBar({
   crumbs,
@@ -51,7 +48,7 @@ export function CrumbBar({
   tools?: ReactNode;
   /**
    * Where the bar stands: the window's title bar (no ground, no rule: the title bar has both), or a board
-   * group's header down the Tasks column (`.board-group > .doc-bar`: --panel, a --line above and below).
+   * group's header down the Tasks column (--panel, a --line above and below).
    */
   place?: "title" | "section";
 }): JSX.Element {
@@ -102,11 +99,11 @@ export function CrumbBar({
   );
 }
 
-/** `button.crumb-sep`: the join between two levels, which drops down what else is at this one. */
+/** The join between two levels, as a button that drops down what else is at this one. */
 function Chevron({ open, first, onPress }: { open: boolean; first: boolean; onPress: (x: number, y: number) => void }): JSX.Element {
   const t = useTokens();
-  // The menu opens under the chevron's left edge, 2 below it, as the desktop's does: measured where it
-  // stands in the window when pressed.
+  // The menu opens under the chevron's left edge, 2 below it: measured where it stands in the window
+  // when pressed.
   const at = useRef<RNView>(null);
   return (
     <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...PLAIN_SCROLLER, ...(first ? { marginRight: 2 } : {}) } as never}>
@@ -144,7 +141,7 @@ function CrumbButton({ crumb, last, t }: { crumb: Crumb; last: boolean; t: Token
   const hue = crumb.hue === undefined ? t.v("p0") : colorOf(t, crumb.hue);
   // A phone has no `white-space: nowrap`: a text is laid out no wider than its box, and wraps. The
   // project crumb's name is measured on one line apart (`natural`) and given that width, so a long path
-  // overflows the button on both sides and is clipped there, as on the desktop.
+  // overflows the button on both sides and is clipped there, as on web.
   const [natural, setNatural] = useState<number | null>(null);
   const spec = {
     voice: all || run ? "app" : "data",
@@ -167,16 +164,16 @@ function CrumbButton({ crumb, last, t }: { crumb: Crumb; last: boolean; t: Token
     paddingHorizontal: 5,
     borderRadius: project ? 4 : 5,
     maxWidth: project ? 240 : run ? 190 : 220,
-    // A project crumb is a centred inline-flex button: a name longer than its 240px overflows BOTH
-    // sides and is clipped there — no ellipsis — as `.doc-bar .crumb-project` draws a long path.
+    // A project crumb's button centres its name: one longer than its 240px overflows BOTH sides and is
+    // clipped there — no ellipsis.
     ...(project && crumb.go !== undefined ? { justifyContent: "center" as const } : {}),
     flexShrink: 1,
     minWidth: 0,
     overflow: "hidden",
   } as const;
-  // The run's "▸ " is `::before`, in the crumb's own font but --dim. In a span (the last crumb) it is
-  // inline, one line with the name; in a button it is a flex item of the button's inline-flex, where
-  // its trailing space is dropped at the end of its line and the button's `gap: 5px` stands instead.
+  // The run's "▸ " is in the crumb's own font but --dim. Where the crumb is text it is inline, one line
+  // with the name; in a button it is an item of the button's row, where a trailing space would be
+  // dropped at the end of its line, so it stands 5 before the name instead.
   const mark = { ...spec, color: "dim" } as const;
   const words = (hovered: boolean, button: boolean): JSX.Element => (
     <>

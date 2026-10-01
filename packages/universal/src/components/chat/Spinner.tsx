@@ -3,8 +3,8 @@ import { Svg } from "../panel/Svg";
 import { Turn } from "../Turn";
 
 /**
- * `icons.tsx`'s `Spinner`, universal (decision 0015): a faint ring and a quarter of it, stroked 2.6 on a
- * 24 grid in the colour given, turning (`.spinner`, 900ms a turn).
+ * The spinner: a faint ring and a quarter of it, stroked 2.6 on a 24 grid in the colour given, turning
+ * (`Turn`, 900ms a turn).
  */
 export function Spinner({ size, color }: { size: number; color: string }): JSX.Element {
   return (

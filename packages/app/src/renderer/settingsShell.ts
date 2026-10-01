@@ -1,7 +1,7 @@
 /**
- * What `App.tsx` holds for the Settings pages and hands them — the forge sign-ins in flight, and what a
- * Needs-attention item's button does — as a hook and a function in a module of their own, so the
- * universal shell (decision 0015) holds and does the same.
+ * What the shell holds for the Settings pages and hands them — the forge sign-ins in flight, and what a
+ * Needs-attention item's button does — as a hook and a function (`SettingsView.tsx` and
+ * `SidebarRegion.tsx`, in `packages/universal/src/app`, call them).
  */
 import { useCallback, useEffect, useState } from "react";
 import type { EventsStatusView, ForgeCheck, ForgeSignInPending, HealthItem, HealthPage } from "@jaira/shared/browser";

@@ -4,10 +4,10 @@ import { applyEditorAppearance } from "./editorAppearance";
 import { mountIsland } from "./host";
 
 /**
- * The code island: `documents.tsx`'s `CodeDocument` for a file surface, in the `.file-edit` band it
- * fills on the desktop — the Monaco editor (`MonacoCodePane`: the text surface of most types, editable
- * or a reading with typing off), or with `reading` the tokenizer's coloured text and no editor under
- * it (`CodeText`: the code view). The region is fixed by the host and the editor scrolls inside it.
+ * The code island: a file surface's code, in the `.file-edit` band the stylesheet sizes an editor to —
+ * the Monaco editor (`MonacoCodePane`: the text surface of most types, editable or a reading with
+ * typing off), or with `reading` the tokenizer's coloured text and no editor under it (`CodeText`: the
+ * code view). The region is fixed by the host and the editor scrolls inside it.
  *
  * Props: `text`, `mime`, `readOnly` (the editor, refusing typing), `reading` (the code view instead),
  * `view` (which view's palette), `file` (the name Monaco parses by), `reveal` (the caret on the way
@@ -35,7 +35,7 @@ mountIsland({
     return (
       <div className="file-edit" style={fit ? {} : { height: "100vh" }}>
         <MonacoCodePane
-          // A different file is a different editor — `documents.tsx`'s `key`, for the same reasons.
+          // A different file is a different editor: its model, undo history and caret are not the last one's.
           key={file}
           text={text}
           mime={mime}

@@ -1,10 +1,9 @@
 /**
- * What a card in the air means to the board — the half of `board.tsx`'s `Board` that is not drawing.
+ * What a card in the air means to the board — the half of `Board.tsx`'s `Board` that is not drawing.
  *
- * The desktop's board and its universal copy (decision 0015) both hold a drag: which card is up, the
- * connect answers asked for it, and what a drop on each column would do. The gesture differs (HTML5 drag
- * on a page, a long press and a pan on a phone); what it MEANS must not, so it is here, once, and both
- * boards call it. No React and no DOM.
+ * The board holds a drag: which card is up, the connect answers asked for it, and what a drop on each
+ * column would do. The gesture differs (HTML5 drag on a page, a long press and a pan on a phone); what
+ * it MEANS must not, so it is here, once. No React and no DOM.
  *
  * - {@link canPickUp}: whether a card can be lifted at all — a waiting rule offered it a move
  *   (`taskDrag.ts`), or it can be connected somewhere (`connectDrag.ts`).
@@ -22,7 +21,7 @@ export const CONFIRM_YES: Record<MoveConfirmKind, string> = { "stop-and-rewind":
 /** A move's question, put in the column the task would land in until the person answers it. */
 export type MoveQuestion = { column: string; sentence: string; yes: string; go: () => void };
 
-/** What a drop on a column would do, while a card is in the air (`board.tsx`'s `Column`'s `drop`). */
+/** What a drop on a column would do, while a card is in the air (`Board.tsx`'s `Column`'s `drop`). */
 export type ColumnDrop = { accepts: boolean; onDrop: () => void; preview?: () => ConnectPreview | "asking" | undefined };
 
 /** The board's connect, as a drag needs it: the dry run and the commit. */

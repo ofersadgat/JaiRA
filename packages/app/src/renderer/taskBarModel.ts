@@ -1,10 +1,9 @@
 /**
  * The Tasks address bar's MODEL — which crumbs it has, and whose counts ride at its end.
  *
- * Moved out of `taskBar.tsx` unchanged (decision 0015), so the desktop's `TaskAddressBar` and the
- * universal copy build one address from one function: the phone's bar and the desktop's can never
- * disagree about what the path says, what a chevron offers or where a crumb goes. Nothing here renders;
- * read `taskBar.tsx` for why the bar is what it is.
+ * One function builds the address, so what the path says, what a chevron offers and where a crumb goes
+ * are decided in one place. Nothing here renders: `TaskAddressBar`
+ * (`packages/universal/src/components/TaskAddressBar.tsx`) draws it.
  */
 import type { BoardCard, BoardView, InstanceNode, ProjectSummary } from "@jaira/shared/browser";
 import { alternatives, runCrumbs, type Crumb, type MenuItem } from "./crumbModel";

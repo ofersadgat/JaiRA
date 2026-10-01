@@ -1,9 +1,6 @@
 /**
- * The address bar's crumb MODEL — the part of `crumbs.tsx` that is not drawing.
- *
- * Moved out unchanged (decision 0015) so the desktop's `CrumbBar` and the universal copy build their
- * crumbs from one function: a crumb the phone draws and the same crumb on the desktop can never
- * disagree about what it says, what its chevron offers, or where clicking it goes. Nothing here renders.
+ * The address bar's crumb MODEL — the part of `Crumbs.tsx` that is not drawing: what a crumb says, what
+ * its chevron offers, and where clicking it goes. Nothing here renders; `CrumbBar` draws them.
  */
 import type { BoardCard, InstanceNode } from "@jaira/shared/browser";
 import type { MenuItem } from "./menuTypes";
@@ -41,7 +38,8 @@ export interface Crumb {
   title?: string;
   /**
    * The text is a PLACEHOLDER — a state's label standing in for a computed title still settling
-   * (SPEC §5.2). Drawn the way `TaskName` draws one, so the bar and the board agree on what is final.
+   * (SPEC §5.2). Drawn the way a card's name is (`taskNamePending`), so the bar and the board agree on
+   * what is final.
    */
   pending?: boolean;
   go?: () => void;

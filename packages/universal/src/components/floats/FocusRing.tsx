@@ -3,11 +3,11 @@ import { View, isWeb } from "@tamagui/core";
 import { useTokens } from "../../tokens";
 
 /**
- * `styles.css`'s `:focus-visible` ring (2px --focus-ring, 1 outside the box, following its radius) round a
- * control, for the one a dialog focuses when it opens — the DOM's `autoFocus` on a dialog's confirm,
- * which Chromium rings although the dialog was opened with the mouse. On web the control inside is
- * focused on mount (`autoFocus`) and the ring drawn while focus is within it; a phone has no focus ring,
- * and draws the control alone.
+ * The focus ring (2px --focus-ring, 1 outside the box, following its radius) round a control, for the
+ * one a dialog focuses when it opens — its confirm, which Chromium rings when it is focused that way
+ * although the dialog was opened with the mouse. On web the control inside is focused on mount
+ * (`autoFocus`) and the ring drawn while focus is within it; a phone has no focus ring, and draws the
+ * control alone.
  */
 export function FocusRing({ radius, autoFocus = false, children }: { radius: number | string; autoFocus?: boolean; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -20,8 +20,8 @@ export function FocusRing({ radius, autoFocus = false, children }: { radius: num
     const out = (): void => setFocused(false);
     el.addEventListener("focusin", into);
     el.addEventListener("focusout", out);
-    // The ring is this box's; the browser's own (`-webkit-focus-ring-color auto`, which the page's stylesheet
-    // replaces on the desktop) is taken off the control inside.
+    // The ring is this box's; the browser's own (`-webkit-focus-ring-color auto`) is taken off the
+    // control inside.
     const control = el.querySelector<HTMLElement>("[tabindex], button, input, textarea");
     if (control !== null) control.style.outline = "none";
     if (autoFocus) control?.focus({ preventScroll: true });

@@ -10,12 +10,11 @@ const ASCENT = 0.992;
 const DESCENT = 0.31;
 
 /**
- * A dialog's heading (`.modal h3`, `.inline-gate h3`): app 17/12.5 at 700 on a line of 1.35, --text, 8
- * below, with its glyph first — `.gate-icon`, 16 square, --dim, 4 right, 2 below the baseline (`vertical-
- * align: -2px`), then a space: the DOM writes `<Icon/> words`, and a heading that wraps runs its second
- * line under the glyph.
+ * A dialog's heading (a modal's, an inline gate's): app 17/12.5 at 700 on a line of 1.35, --text, 8
+ * below, with its glyph first — 16 square, --dim, 4 right, 2 below the baseline — then a space: the
+ * glyph is a word of the heading, and a heading that wraps runs its second line under the glyph.
  *
- * On web the glyph is inline in the words, as the DOM's is, so Chromium places both. On a phone a `Text`
+ * On web the glyph is inline in the words, so Chromium places both. On a phone a `Text`
  * cannot hold a picture: the glyph stands in a row beside the words, its top where the baseline puts it
  * (half the leading plus the ascent into the line, less 14), and a second line starts beside it.
  */

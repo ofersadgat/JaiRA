@@ -1,7 +1,6 @@
 /**
- * What `configPanel.tsx` and `statePanel.tsx` compute — the reads each panel makes for itself, and what
- * the reading says about which copy it is showing — moved here unchanged so the universal copies
- * (`components/workflow/ConfigPanel.tsx`) read and say the same (decision 0015).
+ * What `ConfigPanel.tsx` and `StatePanel.tsx` (`packages/universal/src/components/workflow/`) compute —
+ * the reads each panel makes for itself, and what the reading says about which copy it is showing.
  */
 import { useCallback, useEffect, useState } from "react";
 import type { EffectiveState, StateSlots, ValidateSchemaResult, WorkflowLayer, WorkflowSource } from "@jaira/shared/browser";
@@ -68,7 +67,7 @@ export function copyWordsOf(state: Pick<EffectiveState, "from">): string {
 export const readingTitleOf = (state: Pick<EffectiveState, "rootId">): string | undefined => (state.rootId !== undefined ? `in ${state.rootId}` : undefined);
 
 /**
- * One state's file, fetched for a side panel that outlives whatever opened it (`statePanel.tsx`).
+ * One state's file, fetched for a side panel that outlives whatever opened it (`StatePanel.tsx`).
  * `null` while reading, `"missing"` when nothing under either root defines it.
  */
 export function useStateSource(stateId: string, read: (stateId: string) => Promise<WorkflowSource | null>): WorkflowSource | null | "missing" {
@@ -86,7 +85,7 @@ export function useStateSource(stateId: string, read: (stateId: string) => Promi
   return source;
 }
 
-/** A stable `read` for `ConfigPanel`, whose effect re-reads whenever the function changes (`panelViews.tsx`). */
+/** A stable `read` for `ConfigPanel`, whose effect re-reads whenever the function changes (`panel/faces.tsx`). */
 export function useEffectiveRead(stateId: string, taskId?: string, instanceId?: string, project?: string | null): () => ReturnType<typeof invokeEffective> {
   return useCallback(() => invokeEffective(stateId, taskId, instanceId, project), [stateId, taskId, instanceId, project]);
 }

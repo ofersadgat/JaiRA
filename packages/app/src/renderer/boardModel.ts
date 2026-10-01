@@ -1,6 +1,6 @@
 /**
- * The board's pure half (decision 0015): what a card says and where it goes, with no DOM in it — what
- * the universal board and a phone draw from.
+ * The board's pure half: what a card says and where it goes, with no DOM in it — what `Board.tsx` and
+ * `TaskCard.tsx` draw from.
  */
 import type { MouseEvent as ReactMouseEvent } from "react";
 import type { BoardCard, BoardView, NextMove } from "@jaira/shared/browser";
@@ -227,7 +227,7 @@ export function archivedSplitOf(cards: readonly BoardCard[]): { live: readonly B
   return { live, held };
 }
 
-/** One card in a lane, whether it is the last there (`.card:last-child`), and the adopted ones filed beneath it. */
+/** One card in a lane, whether it is the last there, and the adopted ones filed beneath it. */
 export interface LaneEntry {
   card: BoardCard;
   last: boolean;
@@ -235,7 +235,7 @@ export interface LaneEntry {
 }
 
 /**
- * The live cards of a column, as the board draws them (`Lanes` in `board.tsx`, and its universal copy).
+ * The live cards of a column, as the board draws them (`Lanes` in `Board.tsx`).
  *
  * `boxed` false: one lane, drawn with no box and no heading — a rule saying "Finished" over a column of
  * nothing but finished cards says what every card under it says. The lane's OWN cards, not the ones
@@ -246,7 +246,8 @@ export interface LaneEntry {
  * would have put it: what relates the two is not a lane.
  *
  * `trailing`: something follows the lanes (the archived foot), so with one lane the last live card is not
- * the `:last-child` it would otherwise be. With several, each lane is its own box and ends in its card.
+ * the last thing in the column, as it would otherwise be. With several, each lane is its own box and
+ * ends in its card.
  */
 export function laneRunsOf(
   cards: readonly BoardCard[],

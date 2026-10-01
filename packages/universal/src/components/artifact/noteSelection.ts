@@ -6,7 +6,7 @@ import type { PendingSelection } from "@jaira/ui/reviewSelection";
  * On a phone: no selection to anchor a note to. React Native's text reports no selection range, so a
  * passage cannot be picked out of a rendered artifact and the composer never opens; the notes a review
  * already carries are listed all the same (`ReviewNotes.tsx`), anchored against the artifact's text.
- * The web half is `noteSelection.web.ts`: the desktop's own code, over the DOM react-native-web draws.
+ * The web half is `noteSelection.web.ts`: `reviewSelection.ts`, over the DOM react-native-web draws.
  */
 export type { PendingSelection };
 export { HELD_QUOTE, KEEPS_SELECTION } from "@jaira/ui/reviewSelection";

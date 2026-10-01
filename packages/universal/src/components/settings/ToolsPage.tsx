@@ -15,10 +15,9 @@ import { goToPart } from "./parts";
 import { PermissionSetsSection } from "./permissions/PermissionSets";
 
 /**
- * Settings → Tools, universal (decision 0015): the page `App.tsx` builds from `PermissionSetsPane`,
- * `FunctionsSections`, `EventsSection` and `AutomationsPane`. The permission sets and the functions
- * are copied, and so are the events and the automations. The channels and the MCP servers' state are
- * `settingsShell.ts`'s and `mcpData.ts`'s, as the DOM's are.
+ * Settings → Tools: the permission sets, the functions a run can call, the events and the automations
+ * — `PermissionSetsSection`, `FunctionsSections`, `EventsSection` and `AutomationsSection`, wired to
+ * the shell here. The channels and the MCP servers' state are `settingsShell.ts`'s and `mcpData.ts`'s.
  */
 export function ToolsPage(): JSX.Element {
   const { state, actions } = useShell();

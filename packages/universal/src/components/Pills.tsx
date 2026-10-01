@@ -6,12 +6,12 @@ import { useTokens } from "../tokens";
 import { Pill } from "./Pill";
 
 /**
- * `pill.tsx`'s `Pills`, universal (decision 0015): as many pills as `budget` pixels hold, most urgent
- * first, and a `+N` for the rest tinted to the worst thing it hides. The same `layoutPills` decides.
+ * As many pills as `budget` pixels hold, most urgent first, and a `+N` for the rest tinted to the worst
+ * thing it hides. `layoutPills` (`pillModel.ts`) decides.
  *
- *   .pills             inline-flex, centred, gap 3, flex none; a button when it clears (`onClear`)
- *   .pill.pill-more    flat: no ground, padding 1 3, weight 500, colour --pill-c (the worst kind)
- *                      or --tok-hint, line-height 15px, data voice at 0.8, tabular digits
+ *   the row            row, centred, gap 3, flex none; a button when it clears (`onClear`)
+ *   the "+N"           flat: no ground, padding 1 3, weight 500, the worst kind's colour or --tok-hint,
+ *                      line-height 15px, data voice at 0.8, tabular digits
  */
 const INK: Record<string, string> = { running: "accent", waiting: "warn", error: "bad", warning: "warn", success: "ok" };
 

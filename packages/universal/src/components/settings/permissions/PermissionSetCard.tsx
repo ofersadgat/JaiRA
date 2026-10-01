@@ -66,10 +66,9 @@ import { Press } from "../../../primitives";
 import { useTokens } from "../../../tokens";
 
 /**
- * `permissionSetCard.tsx` and `mcpBucket.tsx`, universal (decision 0015): a permission set on the page —
- * its sections, a line per subject with its implementation and its mode, commands grouped under their
- * program, the MCP servers, and `Other` last. Every edit is `composerPermissionSet.ts`'s or
- * `mcpBucketModel.ts`'s, as the DOM's are. `.set-config .llm-detail .cx-cats`: 2 above.
+ * A permission set on the page — its sections, a line per subject with its implementation and its mode,
+ * commands grouped under their program, the MCP servers, and `Other` last. Every edit is
+ * `composerPermissionSet.ts`'s or `mcpBucketModel.ts`'s. The sections stand 2 below what is over them.
  */
 
 const NO_PARKED = {};

@@ -1,10 +1,9 @@
 /**
- * Rendered markdown, in its own module because two surfaces need it.
- *
- * It was part of the built-in surface table until the workflow description grew a viewer of its own
- * (`syncPanel.tsx`) that shows the same preview behind a toggle. Importing it from there would have
- * made the table import the panel and the panel import the table — a cycle that happens to work in
- * ES modules and is a poor thing to depend on. One parser, one component, one file.
+ * Rendered markdown, as DOM elements: the reading an island draws (decision 0015). `Island.tsx`
+ * mounts it inline on web and `packages/client/island/markdown.tsx` in a phone's WebView, and
+ * `markdownDocument.tsx` shows it where a document is only read. The parse and the URL rules are
+ * `markdownParse.ts`'s, shared with the universal tree's own `Markdown`; this module is the fold
+ * into elements, and the seam a fenced block is drawn through.
  *
  * ## Why this builds ELEMENTS rather than a string
  *
@@ -46,11 +45,10 @@ export type FenceRenderer = (block: FenceBlock) => ReactNode | undefined;
 /**
  * The renderer every markdown surface gets unless it says otherwise.
  *
- * A REGISTRATION rather than a required prop, and the reason is the cycle this module's header is
- * about: the thing that knows how to draw a fenced block is `ValueView`, `ValueView` draws markdown
- * and therefore imports this file, so the renderer cannot be imported from here. Injection is the
- * only way round that — and injection through an optional prop is injection a caller can silently
- * skip.
+ * A REGISTRATION rather than a required prop, and the reason is a cycle: the thing that knows how
+ * to draw a fenced block is a value viewer, a value viewer draws markdown and therefore reaches this
+ * file, so the renderer cannot be imported from here. Injection is the only way round that — and
+ * injection through an optional prop is injection a caller can silently skip.
  *
  * Which is exactly what happened. Four surfaces rendered markdown, one passed the prop, and the
  * other three showed a grey `<pre>` where the transcript showed a full reading. Nothing failed:
@@ -59,8 +57,8 @@ export type FenceRenderer = (block: FenceBlock) => ReactNode | undefined;
  * description is prose wrapped around fenced YAML, which made the grey box most of the document.
  *
  * With a default there is nothing to forget. The same shape `fileTypes.ts` uses for surfaces:
- * importing the module that owns the renderer is what installs it, and a module graph that never
- * reaches `fenceRender.tsx` — the parser's own tests, say — gets the bare fold, which is the honest
+ * importing the module that owns the renderer is what installs it, and a module graph in which
+ * nothing registers one — the parser's own tests, say — gets the bare fold, which is the honest
  * behaviour for a caller that has no value viewer in it.
  */
 let DEFAULT_FENCE: FenceRenderer | undefined;
@@ -75,14 +73,12 @@ export function registerFenceRenderer(render: FenceRenderer): void {
  *
  * The live-preview editor is that surface: it has its own parser and its own fold, so it never calls
  * {@link Markdown}, but a fence inside it should reach the same viewer a fence anywhere else does.
- * Reading the registration rather than importing the renderer is what keeps the cycle this module's
- * header describes from closing — see {@link DEFAULT_FENCE}.
+ * Reading the registration rather than importing the renderer is what keeps the cycle from closing
+ * — see {@link DEFAULT_FENCE}.
  */
 export function fenceRenderer(): FenceRenderer | undefined {
   return DEFAULT_FENCE;
 }
-
-// --- urls --------------------------------------------------------------------
 
 // --- attributes --------------------------------------------------------------
 
@@ -247,8 +243,6 @@ function fold(tokens: readonly Token[], fence: FenceRenderer | undefined): React
   return root;
 }
 
-// --- front matter ------------------------------------------------------------
-
 // --- the components ----------------------------------------------------------
 
 /**
@@ -256,9 +250,9 @@ function fold(tokens: readonly Token[], fence: FenceRenderer | undefined): React
  *
  * Front matter is YAML and was drawn as a grey `<pre>`, which made the header of every prompt, skill
  * and workflow description in the shared root the least readable part of the document it opens. It
- * is coloured HERE rather than through the value viewer for the reason `yamlHighlight.ts` opens
- * with: this module renders once per message down a transcript, and the app's other YAML colourer
- * is a lazily-loaded Monaco. Same token classes as the JSON one, so the two never drift apart.
+ * is coloured HERE, by a line scanner, for the reason `yamlHighlight.ts` opens with: this module is
+ * synchronous and dependency-light, and the app's other YAML colourer is a lazily-loaded Monaco.
+ * Same token classes as the JSON one, so the two never drift apart.
  */
 function YamlLines({ text }: { text: string }): JSX.Element {
   const lines = useMemo(() => highlightYaml(text), [text]);
@@ -281,25 +275,11 @@ function YamlLines({ text }: { text: string }): JSX.Element {
 }
 
 /**
- * The markdown preview lives in `fenceRender.tsx`, not here.
- *
- * It has to: a preview worth having draws its fenced blocks as what they are, the thing that knows
- * how to draw one is `ValueView`, and `ValueView` imports this module. The seam below is this
- * module's whole contribution to that — see {@link FenceRenderer}.
- */
-
-/**
- * The same rendering, for text that is not a file.
- *
- * A model's answer is markdown and was being shown as preformatted text, so a plan came back as one
- * long line with literal `#` and `-` in it. Split out rather than duplicated because the parser
- * configuration and the fold are the safety story, and a second copy of a renderer is a second copy
- * to get wrong.
+ * A markdown document, rendered: its front matter folded away, its body as elements.
  *
  * `fence` is how a caller takes over a fenced block — see {@link FenceRenderer}. It is a prop rather
- * than something this module decides, because the module that knows what to DO with a page of HTML
- * is the one drawing the transcript, and having markdown reach for the value viewer would put the
- * cycle back that the header opens by explaining.
+ * than something this module decides, because what to DO with a page of HTML is the host's to know,
+ * and having markdown reach for a value viewer would close the cycle {@link DEFAULT_FENCE} describes.
  */
 export function Markdown({ text, fence }: { text: string; fence?: FenceRenderer | undefined }): JSX.Element {
   const { front, body } = useMemo(() => splitFrontMatter(text), [text]);
@@ -312,11 +292,11 @@ export function Markdown({ text, fence }: { text: string; fence?: FenceRenderer 
       {front === undefined ? null : (
         <details className="md-front">
           <summary>front matter</summary>
-          {/* Front matter IS a YAML document, so it gets exactly what a ```yaml fence gets — the
-              value viewer, with its Code / Data / Source toggle and its parse. It reaches it by
-              being handed to the same renderer under the same name, rather than by this module
-              learning a second way to draw YAML: a header and a fence are the same content in the
-              same file, and two paths to draw them is two things to keep in agreement.
+          {/* Front matter IS a YAML document, so it gets exactly what a ```yaml fence gets — whatever
+              the registered renderer draws for one. It reaches it by being handed to the same
+              renderer under the same name, rather than by this module learning a second way to draw
+              YAML: a header and a fence are the same content in the same file, and two paths to draw
+              them is two things to keep in agreement.
 
               {@link YamlLines} stays as the fallback for a graph with no renderer registered — the
               parser's own tests — which is the same honest degradation the fenced blocks get. */}

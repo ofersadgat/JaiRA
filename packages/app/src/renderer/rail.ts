@@ -14,7 +14,8 @@
  * ## What this module is, and is not
  *
  * It is arithmetic. Lane bookkeeping and lane geometry, both pure, both testable without a DOM. The
- * drawing is `railView.tsx`; the sequence of rows is assembled by whoever is rendering them.
+ * drawing is `Rail.tsx` (`packages/universal/src/components/panel`); the sequence of rows is assembled
+ * by whoever is rendering them.
  *
  * ## Lanes are opened by ENTERING, and closed by inference
  *
@@ -398,8 +399,8 @@ const HUE0 = 18;
  * ⚠️ WHICH LIST IS HANDED IN IS THE WHOLE ANSWER, and two readings of one run must not each build
  * their own. A hue is a POSITION, so a list that omits a state — or orders it differently — moves
  * every hue after it, and the conversation and the index then disagree about what colour `draft` is
- * while both are drawing the same run. `paletteOfRun` in `runIndex.tsx` is the one list; this takes
- * anything with a name so it can be given that rather than a set of rows.
+ * while both are drawing the same run. `paletteOfRun` below is the one list; this takes anything with
+ * a name so it can be given that rather than a set of rows.
  */
 export function paletteOf(steps: readonly { stateId: string }[]): Map<string, string> {
   const hues = new Map<string, number>();

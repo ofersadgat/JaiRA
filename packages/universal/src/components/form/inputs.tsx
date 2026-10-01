@@ -8,39 +8,38 @@ import { useReadingForm } from "./Field";
 import { AUTOFILLED, ListIndicator, SuggestLayer, laidOut, useSuggest, type Suggestion } from "./Suggest";
 
 /**
- * The form's controls, universal (decision 0015): `controls.tsx`'s `TextInput`, `NumInput`,
- * `NumberText`, `TextArea` and `Chip`, the schema form's checkbox (`.sf-bool`) and its shape chips
- * (`.sf-pick`). The rules they carry, from `styles.css` (`cascade.mts` on Settings → Runs and Data):
+ * The form's controls: `FormInput`, `NumInput`, `NumberText`, `TextArea` and `Chip`, the schema form's
+ * checkbox (`BoolField`) and the well its shape chips stand in (`PickWell`). How they look:
  *
- *   .cfg-input           width 100%, min 0; the body's font (line 1.5) at app 12.5/12.5, --text on --bg,
+ *   a box                width 100%, min 0; the body's font (line 1.5) at app 12.5/12.5, --text on --bg,
  *                        1px --line (hovered --rule, focused --accent), radius --control-radius,
  *                        padding 6 9. Disabled: 0.55 opacity, --dim on --panel-2.
- *   .cfg-input.mono      data 12/12
- *   .cfg-input.num       at most 120 wide
- *   textarea.cfg-input   line 1.45, `rows` lines tall
- *   .cfg-field.bad       the box ringed --bad
- *   .cfg-chip            a `button` (inline-flex, centred, the body's line 1.5): padding 3 11, radius
+ *   mono                 data 12/12
+ *   a number's           at most 120 wide
+ *   a text area          line 1.45, `rows` lines tall
+ *   bad                  the box ringed --bad
+ *   a chip               a button (row, centred, the body's line 1.5): padding 3 11, radius
  *                        --control-radius-sm, 1px transparent, app 600 at 11.5/12.5 in --dim; hovered
  *                        --fill-ghost-hover and --text; on: --fill-accent ground and ring, --on-accent,
  *                        --sheen
- *   .sf-pick             inline-flex, wraps, gap 1, padding 1, 1px --line, radius --control-radius, --bg;
+ *   a well of chips      row, wraps, gap 1, padding 1, 1px --line, radius --control-radius, --bg;
  *                        its chips padding 0 8, app 10.5/12.5 on an 18px line, radius 5
- *   .sf-bool             row, centred, gap 6: Chromium's own checkbox (13 square, margin 3 3 3 4) and
- *                        `.sub` (app 11/12.5, --dim) saying yes or no
- *   .vv-form .cfg-control input, textarea   in a reading (`ReadingForm`): transparent ground and ring,
- *                        --text — the 0.55 of `:disabled` stays
+ *   a yes/no             row, centred, gap 6: Chromium's own checkbox (13 square, margin 3 3 3 4) and
+ *                        the word (app 11/12.5, --dim) saying yes or no
+ *   in a reading         (`ReadingForm`) an input or text area: transparent ground and ring,
+ *                        --text — the 0.55 of a disabled one stays
  */
 
-/** `:focus-visible` on a box: `.cfg-input:focus-visible` (--accent) and the page's ring (2px --focus-ring, 1 out). */
+/** A focused box on web: the page's ring (2px --focus-ring, 1 out), round its --accent border. */
 function focusRing(t: ReturnType<typeof useTokens>, focused: boolean): Record<string, unknown> {
   return focused && isWeb ? { outlineWidth: 2, outlineStyle: "solid", outlineColor: t.v("focus-ring"), outlineOffset: 1 } : { outlineWidth: 0 };
 }
 
 /**
- * `.cfg-input`: a text box that takes its column's width (`controls.tsx`'s `TextInput`). `suggest` is the
- * `<datalist>` its `list` names: the type-ahead Chromium opens under it (`Suggest.tsx`), the 16 kept at
- * the box's end for the list's indicator and the ▼ itself while hovered or focused. The box is then
- * wrapped (as wide as it was) for the indicator to stand in.
+ * A text box that takes its column's width. `suggest` is its `<datalist>`: the type-ahead Chromium
+ * opens under an `<input list>` (`Suggest.tsx`), the 16 kept at the box's end for the list's indicator
+ * and the ▼ itself while hovered or focused. The box is then wrapped (as wide as it was) for the
+ * indicator to stand in.
  */
 export function FormInput({
   value,
@@ -64,20 +63,20 @@ export function FormInput({
   placeholder?: string | undefined;
   disabled?: boolean | undefined;
   mono?: boolean;
-  /** The `<datalist>` the box completes against (`list`). */
+  /** The options the box completes against, as a `<datalist>`'s. */
   suggest?: readonly Suggestion[] | undefined;
-  /** `.num`: at most 120 wide. */
+  /** A number's box: at most 120 wide. */
   num?: boolean;
   label?: string | undefined;
-  /** `.cfg-field.bad`: the value has a complaint. */
+  /** The value has a complaint: the box is ringed --bad. */
   bad?: boolean;
   width?: number | string | undefined;
   /**
-   * A plain `input` (no `.cfg-input`): padding 5 9 and the font of the box it stands in — its scale of
-   * the app size (`.prune-controls`: 11/12.5).
+   * A plain input, not a form's box: padding 5 9 and the font of the box it stands in — its scale of
+   * the app size (the pruning row's days, in `RunsPage.tsx`: 11/12.5).
    */
   plain?: { scale: number } | undefined;
-  /** `.au-name .cfg-input`: padding 2 8, at 600. */
+  /** An automation's name (`AutomationsSection.tsx`): padding 2 8, at 600. */
   tight?: boolean;
   onBlur?: (() => void) | undefined;
   onSubmit?: (() => void) | undefined;
@@ -214,7 +213,7 @@ export function NumberText({ value, onChange, disabled, bad }: { value: number |
   );
 }
 
-/** `textarea.cfg-input`: several lines — prose in the app's face, anything else in data voice. */
+/** A text area: several lines — prose in the app's face, anything else in data voice. */
 export function TextArea({
   value,
   onChange,
@@ -257,7 +256,7 @@ export function TextArea({
           ...(font(t, { ...spec, color: disabled && !reading ? "dim" : "text" }) as object),
           width: "100%",
           minWidth: 0,
-          // On web the textarea's own `rows` size it, as the DOM's; a phone is told its height.
+          // On web the textarea's own `rows` size it; a phone is told its height.
           ...(isWeb ? {} : { height: rows * line + 12 + 2 }),
           paddingVertical: 6,
           paddingHorizontal: 9,
@@ -277,8 +276,8 @@ export function TextArea({
 }
 
 /**
- * Chromium's own checkbox, as it draws `<input type="checkbox">` (the stylesheet leaves its look to the
- * browser), measured off the desktop's pictures: a 13-square box with a 3 3 3 4 margin, painted as a
+ * Chromium's own checkbox, as it draws an `<input type="checkbox">` that nothing styles, measured off
+ * the reference pictures (`pair.mts`): a 13-square box with a 3 3 3 4 margin, painted as a
  * 12-square inside it (0.5 in from the left, flush at the top). Unchecked: a 1px ring rounded 2 on
  * white, #767676 (hovered #4f4f4f). Checked: #0075ff (hovered #005cc8) with a white tick. In a dark
  * `color-scheme`: #3b3b3b inside #858585 (hovered #9c9c9c); checked #99c8ff (hovered #d1e6ff) with a
@@ -348,7 +347,7 @@ export function Checkbox({ checked, disabled = false, onChange, label }: { check
   );
 }
 
-/** `.sf-bool`: a checkbox and the word it stands for. */
+/** A yes/no: a checkbox and the word it stands for. */
 export function BoolField({ value, disabled = false, onChange }: { value: boolean; disabled?: boolean; onChange: (next: boolean) => void }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={6}>
@@ -360,7 +359,7 @@ export function BoolField({ value, disabled = false, onChange }: { value: boolea
   );
 }
 
-/** `.cfg-chip`: a pill that is also a choice. `small` is the one inside `.sf-pick`. */
+/** A pill that is also a choice. `small` is the one inside a {@link PickWell}. */
 export function Chip({
   active,
   onPress,
@@ -411,7 +410,7 @@ export function Chip({
   );
 }
 
-/** `.sf-pick`: chips in a well of their own, so they read as ONE choice. */
+/** Chips in a well of their own, so they read as ONE choice. */
 export function PickWell({ label, children, self = false }: { label: string; children: ReactNode; self?: boolean }): JSX.Element {
   const t = useTokens();
   return (

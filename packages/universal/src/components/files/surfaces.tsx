@@ -31,13 +31,13 @@ import { WorkflowEditor } from "../workflow/WorkflowEditor";
 import { useShell } from "../../app/shell";
 
 /**
- * The file surfaces, universal (decision 0015): what draws each half of the Files panel, by the same
- * table the desktop registers (`fileSurfaceTable.ts`) — so a file resolves to the same renderer on both,
- * and only the drawing differs. Viewers are native; an EDITOR is an island (CodeMirror, Monaco), the
- * only WebViews the copy allows. A surface not copied yet is an {@link Uncopied} box where it stands.
+ * The file surfaces: what draws each half of the Files panel. Which renderers a type has, and in what
+ * order, is the table's (`fileSurfaceTable.ts`), which names a surface by a key; these are the
+ * components behind the keys. Viewers are native; an EDITOR (CodeMirror, Monaco) is an island. A key
+ * with no surface here is an {@link Uncopied} box where it stands.
  */
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13). */
+/** An empty note: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13). */
 function Empty({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -47,13 +47,13 @@ function Empty({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** `fenceRender.tsx`'s `MarkdownView`: the file, rendered — `.markdown` at 13/12.5 in the upper half. */
+/** `MarkdownView`: the file, rendered (`Markdown`) in the upper half. */
 function MarkdownView({ doc }: FileSurfaceProps): JSX.Element {
   if (doc.text.trim().length === 0) return <Empty>This file is empty.</Empty>;
   return <Markdown text={doc.text} softbreak="space" />;
 }
 
-/** `.notice.bad`: a parse failure — --tint-bad ground, --bad, app 11/12.5, radius --control-radius, padding 7 9. */
+/** A parse failure, said: --tint-bad ground, --bad, app 11/12.5, radius --control-radius, padding 7 9. */
 function Notice({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -80,7 +80,7 @@ function StructuredView({ text, format }: { text: string; format: StructuredForm
 const JsonView = ({ doc }: FileSurfaceProps): JSX.Element => <StructuredView text={doc.text} format="json" />;
 const YamlView = ({ doc }: FileSurfaceProps): JSX.Element => <StructuredView text={doc.text} format="yaml" />;
 
-/** `ConfigEffectiveView`: both configuration layers merged (`.config-effective`: a column, gap 6, padding 2 2 10). */
+/** `ConfigEffectiveView`: both configuration layers merged (a column, gap 6, padding 2 2 10). */
 function ConfigEffectiveView({ context }: FileSurfaceProps): JSX.Element {
   if (context.config === null) return <Empty>Open a project to see the effective configuration.</Empty>;
   return (
@@ -91,13 +91,13 @@ function ConfigEffectiveView({ context }: FileSurfaceProps): JSX.Element {
   );
 }
 
-// Save and Revert, the reading note and `.file-edit` are `EditorActions.tsx`'s, shared by every editor.
+// Save and Revert, the reading note and the box (`FileEdit`) are `EditorActions.tsx`'s, shared by every editor.
 export { EditorActions } from "./EditorActions";
 
 /**
- * `fileSurfaces.tsx`'s `MarkdownFileEdit`: markdown, edited in the live preview — CodeMirror, an island
- * (`.file-edit`: a column, gap 8; the editor takes the rest, at least 200 tall, and scrolls inside
- * itself), with the same draft box, Save and Revert as the desktop's.
+ * `MarkdownFileEdit`: markdown, edited in the live preview — CodeMirror, an island (`MarkdownEditor`),
+ * in a column, gap 8: the editor takes the rest, at least 200 tall, and scrolls inside itself; under
+ * it the draft box's Save and Revert, as every text editor has.
  */
 function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const draft = useDraftBox(context.drafts, context.onDraft, docKey(doc.layer, doc.path), doc.text);
@@ -129,10 +129,10 @@ function MarkdownFileEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX
 }
 
 /**
- * `fileSurfaces.tsx`'s `WorkflowRunView`: what a state file IS DOING — its board, or its tasks and their
- * conversation (`CompositeView`, `components/run/RunView.tsx`), exactly what the Tasks room shows for
- * the same state. The run it reads comes from the store (`useRunContext`), over the room's context. A
- * leaf has no board: its own panel, its tasks and what they said (`LeafPanel.tsx`).
+ * `WorkflowRunView`: what a state file IS DOING — its board, or its tasks and their conversation
+ * (`CompositeView`, `components/run/RunView.tsx`), exactly what the Tasks room shows for the same
+ * state. The run it reads comes from the store (`useRunContext`), over the room's context. A leaf has
+ * no board: its own panel, its tasks and what they said (`LeafPanel.tsx`).
  */
 function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
   const context = { ...props.context, ...useRunContext() };
@@ -143,14 +143,14 @@ function WorkflowRunView(props: FileSurfaceProps): JSX.Element {
 }
 
 /**
- * `fileSurfaces.tsx`'s `WorkflowEdit`: the authoring form for a state file — the workflow editor
+ * `WorkflowEdit`: the authoring form for a state file — the workflow editor
  * (`components/workflow/WorkflowEditor.tsx`) over the document, saved through the channel that lints it.
  * What the room's context does not carry yet (the children's slots, reading and writing another state,
- * the tab each file was left on) is read from the store, as `App.tsx` hands it to the desktop's.
+ * the tab each file was left on) is read from the store (`useShell`).
  */
 function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Element {
   const { state, actions } = useShell();
-  // The Tools field's permission sets and tools (`App.tsx` reads them for the whole window).
+  // The Tools field's permission sets and tools, read here for the form under it.
   const toolsFieldData = useToolsFieldRead(state.at, state.tree);
   const key = docKey(doc.layer, doc.path);
   const reading = isReading(context);
@@ -204,17 +204,17 @@ function WorkflowEdit({ doc, busy, onSave, context }: FileSurfaceProps): JSX.Ele
 }
 
 /**
- * `fileSurfaces.tsx`'s `RenderedFileView`: an HTML page or an SVG drawing, rendered — the value view, typed
- * by its path (`mimeOfPath`, the classifier the tree's row used).
+ * `RenderedFileView`: an HTML page or an SVG drawing, rendered — the value view, typed by its path
+ * (`mimeOfPath`, the classifier the tree's row used).
  */
 export function RenderedFileView({ doc }: FileSurfaceProps): JSX.Element {
   return <ValueView value={doc.text} hint={{ mime: mimeOfPath(doc.path) }} />;
 }
 
 /**
- * `fileSurfaces.tsx`'s `PatchSideBySide`: a patch as the two revisions it is between, in the panes a review
- * uses — the diff island (Monaco's, side by side) in `.file-edit`, the band at least 200 tall, and the
- * file it compares under it in `.pane-actions.pinned` (`.sub`). The fold is `fileEditModel.ts`'s.
+ * `PatchSideBySide`: a patch as the two revisions it is between, in the panes a review uses — the diff
+ * island (Monaco's, side by side) in a band at least 200 tall, and the file it compares in the pinned
+ * row under it (`EditorActionsRow`). The fold is `fileEditModel.ts`'s.
  */
 export function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
   const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
@@ -239,8 +239,8 @@ export function PatchSideBySide({ doc }: FileSurfaceProps): JSX.Element {
 }
 
 /**
- * `fileSurfaces.tsx`'s `PatchFileSurface`: a `.patch` or `.diff` as the change it describes — the value
- * view's patch reading (`PatchView`), the one the transcript draws, over the one parse (`parseUnifiedDiff`).
+ * `PatchFileSurface`: a `.patch` or `.diff` as the change it describes — the value view's patch reading
+ * (`PatchView`), the one the transcript draws, over the one parse (`parseUnifiedDiff`).
  */
 export function PatchFileSurface({ doc }: FileSurfaceProps): JSX.Element {
   const files = useMemo(() => parseUnifiedDiff(doc.text), [doc.text]);
@@ -250,8 +250,8 @@ export function PatchFileSurface({ doc }: FileSurfaceProps): JSX.Element {
 }
 
 /**
- * `fileSurfaces.tsx`'s `DelimitedView`: a CSV or TSV file as a table — the value view's table reading
- * (`TableView`), over the one parse (`parseDelimited`, its delimiter by the file's type).
+ * `DelimitedView`: a CSV or TSV file as a table — the value view's table reading (`TableView`), over
+ * the one parse (`parseDelimited`, its delimiter by the file's type).
  */
 export function DelimitedView({ doc }: FileSurfaceProps): JSX.Element {
   const mime = mimeOfPath(doc.path);
@@ -261,10 +261,10 @@ export function DelimitedView({ doc }: FileSurfaceProps): JSX.Element {
 }
 
 /**
- * `fileSurfaces.tsx`'s `JsonFormView`: a JSON or YAML document as the fields its schema declares — a
- * READING, not an editor (`disabled`, `reading`, and nothing "set here"), in `.vv-form.file-form`
- * (`ReadingForm`: padding 8 10, the paths hidden, a nested block's fields stacked, the controls without
- * their boxes). Which schema is `useSchemaChoice`'s, shared with the editor below it.
+ * `JsonFormView`: a JSON or YAML document as the fields its schema declares — a READING, not an editor
+ * (`disabled`, `reading`, and nothing "set here"), in a file's `ReadingForm` (padding 8 10, the paths
+ * hidden, a nested block's fields stacked, the controls without their boxes). Which schema is
+ * `useSchemaChoice`'s, shared with the editor below it.
  */
 export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
   const chosen = useSchemaChoice(doc, context);
@@ -291,8 +291,8 @@ export function JsonFormView({ doc, context }: FileSurfaceProps): JSX.Element {
 
 /**
  * `WorkflowSyncPanel` as the table registers it: over the description rendered. The room's context does
- * not carry the sync bag yet, so it is built from the store as `App.tsx` builds the desktop's
- * (`syncSurfaceOf`) — only then, so a host that hands one (a specimen) needs no shell.
+ * not carry the sync bag yet, so it is built from the store (`syncSurfaceOf`) — only then, so a host
+ * that hands one (a specimen) needs no shell.
  */
 export function SyncSurface(props: FileSurfaceProps): JSX.Element {
   const preview = <MarkdownView {...props} />;
@@ -304,7 +304,7 @@ function SyncFromStore(props: FileSurfaceProps & { preview: ReactNode }): JSX.El
   return <WorkflowSyncPanel {...props} context={{ ...props.context, sync: syncSurfaceOf(state.sync, actions) }} />;
 }
 
-/** The copies there are, by the table's key. */
+/** The surfaces there are, by the table's key. */
 const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
   MarkdownView,
   MarkdownFileEdit,
@@ -326,7 +326,7 @@ const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
   WorkflowSyncPanel: SyncSurface,
 };
 
-/** The table, registered with the copies — and an {@link Uncopied} box for every surface without one. */
+/** The table, registered with these surfaces — and an {@link Uncopied} box for any key without one. */
 export const SURFACES = registerSurfaceTable(
   Object.fromEntries(SURFACE_KEYS.map((key) => [key, COPIED[key] ?? ((): JSX.Element => <Uncopied name={key} flex={1} />)])) as Record<SurfaceKey, FileSurface>,
   newSurfaceRegistry(),

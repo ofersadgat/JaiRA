@@ -1,7 +1,7 @@
 /**
- * What a `fill_form` gate opens holding, and a settled gate's recorded answer as a record — moved out of
- * `components.tsx` unchanged, so the universal copy of the gates (decision 0015) starts and reads its
- * answers the same way.
+ * What a `fill_form` gate opens holding — the gate's form
+ * (`packages/universal/src/components/floats/GateBodies.tsx`) starts on it — and a settled gate's
+ * recorded answer as a record.
  */
 import type { FormField } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
@@ -23,7 +23,7 @@ export function formStartsWith(fields: readonly FormField[], schema: Schema): Re
   return out;
 }
 
-/** The recorded value as a record, or nothing — every component reads its answer through this. */
+/** The recorded value as a record, or nothing. */
 export function recordOf(settled: { value?: JsonValue | undefined } | undefined): Record<string, JsonValue> {
   const value = settled?.value;
   if (value === undefined || value === null || typeof value !== "object" || Array.isArray(value)) return {};

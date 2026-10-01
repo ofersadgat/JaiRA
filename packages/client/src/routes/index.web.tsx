@@ -13,7 +13,7 @@ if (typeof window !== "undefined") installGlobalErrorReporting();
  * `/`: the app, in a browser — what Electron's window loads, and what a machine's engine serves a
  * browser tab (decision 0015). The universal shell drawn by react-native-web, on the NATIVE token path
  * (`Replayed`), with no `styles.css` on the page — so every colour, size and rule on it comes from the
- * copies, as on a phone; only an island brings the stylesheet, scoped to itself. `#root` is kept: the
+ * components, as on a phone; only an island brings the stylesheet, scoped to itself. `#root` is kept: the
  * shots' driver waits on it.
  *
  * In Electron it reads the window's own bridge. Anywhere else it is a device, as the phone is: `Remote`

@@ -7,21 +7,21 @@ import { Button } from "../Button";
 import { SmallButton } from "./Row";
 
 /**
- * `.conn-probe` and `.conn-weights`, universal (decision 0015): what answered on the usual local ports,
- * the embedded route's weights, and the MCP servers other tools here already run — a small table under
- * a row. The rules:
+ * The small table under a Connections row: what answered on the usual local ports, the embedded
+ * route's weights, and the MCP servers other tools here already run. How it looks:
  *
- *   .conn-probe          30 in, 1px --line, radius 8, clipped, app 11.5/12.5
- *   .conn-probe-head     row, space-between, wraps, gap 4 12, centred, padding 5 10, --panel-2, --dim,
- *                        app 10.5/12.5; `.conn-probe-when` row, centred, gap 8, its button padding 1 8
- *   .conn-probe-row      grid 8 | 90–130 (MCP 110–190) | 1fr | auto, centred, gap 10, padding 5 10,
- *                        a --line above; `.in-use` on --tint-ok
- *   .conn-probe-dot      8 round, --rule (answering: --ok)
- *   .conn-probe-at       one line, cut with …, --dim (answering: --text)
- *   .conn-weights-row    grid 90–150 | 1fr | auto | auto; no line above the first
+ *   the table            30 in, 1px --line, radius 8, clipped, app 11.5/12.5
+ *   its head             row, space-between, wraps, gap 4 12, centred, padding 5 10, --panel-2, --dim,
+ *                        app 10.5/12.5; the when and its button a row, centred, gap 8, the button
+ *                        padding 1 8
+ *   a row                columns 8 | the name, 130 (MCP 190) | the rest | auto, centred, gap 10,
+ *                        padding 5 10, a --line above; the one in use on --tint-ok
+ *   its dot              8 round, --rule (answering: --ok)
+ *   where it answers     one line, cut with …, --dim (answering: --text)
+ *   a weights row        columns the name, 150 | the rest | auto | auto, no dot; no line above the first
  *
- * A grid's `auto` column is as wide as its widest cell, and every cell is stretched to it: `useColumn`
- * is that column, which each row's cell reports its width to.
+ * An `auto` column is a grid's: as wide as its widest cell, and every cell is stretched to it.
+ * `useColumn` is that column, which each row's cell reports its width to.
  */
 
 /** An `auto` grid column: the widest cell's width, and how a cell reports its own. */
@@ -54,7 +54,7 @@ function AutoCell({ column, id, children }: { column: Column; id: string; childr
   );
 }
 
-/** `.conn-probe` / `.conn-weights`: the table's frame. */
+/** The table's frame. */
 export function ProbeList({ children, weights = false, found = false }: { children: ReactNode; weights?: boolean; found?: boolean }): JSX.Element {
   const t = useTokens();
   void weights;
@@ -67,7 +67,7 @@ export function ProbeList({ children, weights = false, found = false }: { childr
 
 const HEAD = { voice: "app", scale: 10.5 / 12.5, color: "dim" } as const;
 
-/** `.conn-probe-head`: what was asked, and when (with Scan again). */
+/** The table's head: what was asked, and when (with Scan again). */
 export function ProbeHead({ left, right, action }: { left: ReactNode; right: string; action?: { label: string; title: string; disabled: boolean; onPress: () => void } }): JSX.Element {
   const t = useTokens();
   return (
@@ -112,13 +112,13 @@ export function ProbeRow({
   first?: boolean;
   name: ReactNode;
   at: ReactNode;
-  /** The name column: its grid track's most (130, 150; 190 for the MCP servers found). */
+  /** The name column's width: 130, 150 for the weights, 190 for the MCP servers found. */
   nameWidth: number;
   last: Column;
   end: ReactNode;
   after?: Column;
   afterEnd?: ReactNode;
-  /** `.mcp-found .conn-probe-row:not(.up) .conn-probe-name`: --dim. */
+  /** The name in --dim: among the MCP servers found, a row that is not up. */
   dimName?: boolean;
   title?: string | undefined;
   /** Which row this is, for its cells' reports to the `auto` columns. */
@@ -167,7 +167,7 @@ export function ProbeRow({
   );
 }
 
-/** A `button.ghost` in a table row: the control's own padding, the row's font (`font: inherit`, app 11.5/12.5). */
+/** A ghost button in a table row: the control's own padding, the row's font (app 11.5/12.5). */
 export function RowButton({ disabled, onPress, title, children }: { disabled?: boolean; onPress: () => void; title?: string; children: string }): JSX.Element {
   return (
     <Button kind="ghost" disabled={disabled} onPress={onPress} font={ROW} {...(title !== undefined ? { title } : {})}>

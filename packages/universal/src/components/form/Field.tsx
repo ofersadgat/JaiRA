@@ -10,46 +10,45 @@ import { SettingsLayerContext, useInheritLabel, useLayerRow } from "../settings/
 import { InfoIcon, InheritButton, SettingsSection, chOf, useDrawnRow } from "../settings/SettingsPage";
 
 /**
- * `controls.tsx`'s `Field`, `FieldGrid`, `Level` and `Disclosure`, universal (decision 0015): the one
- * shape every typed value in the app is filled in through. On a Settings page (`FormRowsContext`) a
- * field is a settings row; everywhere else (a run's inputs, a gate) it keeps its own, smaller shape.
- * The rules, from `styles.css` (`cascade.mts '.cfg-field' --scene settings-runs`):
+ * `Field`, `FieldGrid`, `Level` and `Disclosure`: the one shape every typed value in the app is filled
+ * in through. On a Settings page (`FormRowsContext`) a field is a settings row; everywhere else (a
+ * run's inputs, a gate) it keeps its own, smaller shape. How they look:
  *
- *   .cfg-fields          column; a container: at most 380 wide, its fields stack
- *   .cfg-field           grid: minmax(0,1fr) minmax(140px,15rem), centred, gap 6 22, padding 7 0;
- *                        after another, a 1px rule of --line at 60%
- *   .set-field           (on a page) minmax(0,1fr) minmax(170px,17rem), gap 10 32, padding 13 16;
+ *   a list of fields     column; a container: at most 380 wide, its fields stack
+ *   a field              a row, centred: what it says, then its control 240 wide (15rem); gap 22
+ *                        (6 when stacked), padding 7 0; after another, a 1px rule of --line at 60%
+ *   a field on a page    its control 272 wide (17rem); gap 32 (10 when stacked), padding 13 16;
  *                        after another in its list, a 1px --line
- *   .set-field.wide,     one column (the control under the name, across the row)
- *   .cfg-block > .cfg-field
- *   .cfg-control .set-field   padding 9 0 (a field inside a field's control)
- *   .cfg-field-say       column, gap 2 (3 on a page)
- *   .cfg-field-head      row, wraps, centred, gap 6
- *   .cfg-label           app 550 at 12/12.5 (on a page 1.1×, line 1.3, first letter up); .mono: data
+ *   wide on a page,      one column (the control under the name, across the row)
+ *   or in a block
+ *   in a field's control (on a page)   padding 9 0
+ *   what it says         column, gap 2 (3 on a page)
+ *   its head             row, wraps, centred, gap 6
+ *   the label            app 550 at 12/12.5 (on a page 1.1×, line 1.3, first letter up); mono: data
  *                        11/12 at 500 (on a page data 1.02× at 550)
- *   .cfg-hint            app 11/12.5, line 1.4, --dim (on a page 1.03×, line 1.45, at most 62ch)
- *   .cfg-param           data 10/12, --dim, 6 after the hint, one line
- *   .cfg-set             app 9.5/12.5, 0.04em, upper, --accent on --tint-accent, radius 4, padding 1 5
- *   .cfg-control         row, wraps, 3 between lines, min 0; `.off` half opacity and out of reach
- *   .cfg-control > .cfg-fields   a nested form: 2px --line on its left, 11 in, 3 out
- *   .reason.cfg-error    --bad, app 11/12.5, a line of its own
- *   .cfg-level           column, gap 8; at depth 1–2 a 2px --line on its left, 12 in, 3 out (4 above
+ *   the hint             app 11/12.5, line 1.4, --dim (on a page 1.03×, line 1.45, at most 62ch)
+ *   the key it writes    data 10/12, --dim, 6 after the hint, one line
+ *   "set here"           app 9.5/12.5, 0.04em, upper, --accent on --tint-accent, radius 4, padding 1 5
+ *   the control          row, wraps, 3 between lines, min 0; off: half opacity and out of reach
+ *   a list straight in a control   a nested form: 2px --line on its left, 11 in, 3 out
+ *   the error            --bad, app 11/12.5, a line of its own
+ *   a level              column, gap 8; at depth 1–2 a 2px --line on its left, 12 in, 3 out (4 above
  *                        and below on a page)
- *   .cfg-level-title     app 600 at 11/12.5, 0.06em, upper, --dim; its hint under it (gap 2)
- *   .cfg-level-body      column, gap 10 (0 on a page, where the card's padding is 13 16 and the fields
+ *   a level's title      app 600 at 11/12.5, 0.06em, upper, --dim; its hint under it (gap 2)
+ *   a level's body       column, gap 10 (0 on a page, where the card's padding is 13 16 and the fields
  *                        take no inset of their own)
  */
 
-/** Whether a {@link Field} is drawn on a Settings page — `SettingsRowsContext`. */
+/** Whether a {@link Field} is drawn on a Settings page: `SettingsView.tsx` provides it round the page. */
 export const FormRowsContext = createContext(false);
 
-/** Where a field stands: inside another field's control (`.cfg-control .set-field`), or in a level's card body. */
+/** Where a field stands: inside another field's control, or in a level's card body. */
 const PlaceContext = createContext<{ nested: boolean; inset: boolean; direct?: boolean }>({ nested: false, inset: false });
 
 /**
  * Around a form that sits deeper in a field's control than its own list (a call-settings pane): its
- * fields are still a field's (`.cfg-control .set-field`), but its list is not the control's own child,
- * so it takes no rule on its left (`.cfg-control > .cfg-fields`).
+ * fields are still a field's (padding 9 0 on a page), but its list is not the control's own child,
+ * so it takes no rule on its left.
  */
 export function Deeper({ children }: { children: ReactNode }): JSX.Element {
   const place = useContext(PlaceContext);
@@ -59,10 +58,10 @@ export function Deeper({ children }: { children: ReactNode }): JSX.Element {
 /** What a list says about each direct child: drawn or not, and whether it is a field (a rule goes between two). */
 type SlotReport = (hidden: boolean, field: boolean) => void;
 const SlotContext = createContext<SlotReport | null>(null);
-/** A child wrapped as `.cfg-span` is not a `.cfg-field` of the list, so no rule is drawn beside it. */
+/** A child wrapped in a {@link Span} is not one of the list's fields, so no rule is drawn beside it. */
 const SpanContext = createContext(false);
 
-/** A block that takes the whole row (`.cfg-span`); `block` makes a field in it one column (`.cfg-block`). */
+/** A block that takes the whole row; `block` makes a field in it one column. */
 export function Span({ block = false, children }: { block?: boolean; children: ReactNode }): JSX.Element {
   return (
     <InSpanContext.Provider value={true}>
@@ -73,19 +72,19 @@ export function Span({ block = false, children }: { block?: boolean; children: R
   );
 }
 const BlockContext = createContext(false);
-/** Anywhere inside a `.cfg-span`, however deep (`.file-form .cfg-span .cfg-field`) — never reset. */
+/** Anywhere inside a {@link Span}, however deep — never reset. */
 const InSpanContext = createContext(false);
 
 /**
- * A schema form drawn as a READING of a value (`.vv-form`), or of a whole file in the Files viewer
- * (`.vv-form.file-form`, `file`). The rules it carries into the fields and controls inside it:
+ * A schema form drawn as a READING of a value, or of a whole file in the Files viewer (`file`). What
+ * it changes in the fields and controls inside it:
  *
- *   .vv-form                      padding 2 0, the width it is given (100%, min 0)
- *   .file-form                    padding 8 10 (later, so it wins)
- *   .vv-form .cfg-param           not drawn — there is no layer here and nothing is written; the hint
+ *   the form                      padding 2 0, the width it is given (100%, min 0)
+ *   a file's                      padding 8 10
+ *   the key a field writes        not drawn — there is no layer here and nothing is written; the hint
  *                                 that held it stays, empty, and keeps its gap
- *   .vv-form .cfg-span .cfg-field (and .file-form's)   one column: a block's fields, and the block's own, stack
- *   .vv-form .cfg-control input, textarea, select   transparent ground and ring, --text (`useReadingForm`)
+ *   a field inside a span         one column: a block's fields, and the block's own, stack
+ *   an input, text area, select   transparent ground and ring, --text (`useReadingForm`)
  */
 const ReadingFormContext = createContext<{ file: boolean } | null>(null);
 export function ReadingForm({ file = false, children }: { file?: boolean; children: ReactNode }): JSX.Element {
@@ -98,7 +97,7 @@ export function ReadingForm({ file = false, children }: { file?: boolean; childr
     </ReadingFormContext.Provider>
   );
 }
-/** Inside a {@link ReadingForm}: a control draws without its box (`.vv-form .cfg-control input`). */
+/** Inside a {@link ReadingForm}: a control draws without its box. */
 export function useReadingForm(): boolean {
   return useContext(ReadingFormContext) !== null;
 }
@@ -115,8 +114,8 @@ export function useFormSlot(hidden: boolean, field: boolean): void {
 
 /**
  * `FieldGrid`: fields one under another, a rule between two. A child that draws nothing tells its slot,
- * so no rule is drawn for it — the DOM's `.set-field + .set-field`. At most 380 wide (or `min` 180 and
- * under) every field in it stacks.
+ * so no rule is drawn for it: a rule stands only between two fields that are drawn. At most 380 wide
+ * (or `min` 180 and under) every field in it stacks.
  */
 export function FieldGrid({ children, min = 210 }: { children: ReactNode; min?: number }): JSX.Element {
   const t = useTokens();
@@ -160,7 +159,7 @@ export function FieldGrid({ children, min = 210 }: { children: ReactNode; min?: 
     <GridContext.Provider value={grid}>
       {isWeb ? (
         // `container-type: inline-size`: what is in the list gives it no width of its own, so a box that
-        // is as wide as its content (a gate's `.modal`) is as wide as the rest of what it holds.
+        // is as wide as its content (a gate's modal) is as wide as the rest of what it holds.
         <View flexDirection="column" onLayout={onLayout} {...({ containerType: "inline-size" } as object)} {...flex} {...rule} {...inset}>
           {body}
         </View>
@@ -202,7 +201,7 @@ function Contained({ outer, inner, onLayout, children }: { outer: object; inner:
 const GridContext = createContext<{ narrow: boolean }>({ narrow: false });
 
 /**
- * One setting: its name, the key it writes, what it means, and its control — `controls.tsx`'s `Field`.
+ * One setting: its name, the key it writes, what it means, and its control.
  * On a Settings page the hint is one sentence under the name, and the rest with the key behind an ⓘ.
  */
 export function Field({
@@ -239,7 +238,7 @@ export function Field({
   const block = useContext(BlockContext);
   const reading = useContext(ReadingFormContext);
   const inSpan = useContext(InSpanContext);
-  // `.vv-form .cfg-param { display: none }`: the hint box stays, and holds only what else it says.
+  // A reading does not draw the key: the hint box stays, and holds only what else it says.
   const shownParam = reading === null ? param : undefined;
   const paths: readonly ConfigPath[] | undefined = param !== undefined ? [param] : undefined;
   const layered = useLayerRow(paths, layer?.stated);
@@ -249,8 +248,8 @@ export function Field({
   if (layered.hidden) return null;
   const split = row && typeof hint === "string" ? splitHint(hint) : undefined;
   const more = split !== undefined ? [split.rest, param !== undefined ? `Writes ${param}.` : ""].filter((s) => s.length > 0).join(" ") : "";
-  // Only a settings row goes one column when `wide` (`.set-field.wide`); a plain field keeps its two.
-  // `.vv-form .cfg-span .cfg-field, .file-form .cfg-span .cfg-field`: a nested block's fields stack in either reading.
+  // Only a settings row goes one column when `wide`; a plain field keeps its two.
+  // Inside a span of a reading (a value's or a file's) a nested block's fields stack.
   const stack = (row && wide) || block || narrow || (reading !== null && inSpan);
   const hintSpec = row ? ({ voice: "app", scale: 1.03, lineHeight: 1.45, color: "dim" } as const) : ({ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" } as const);
   const hintBox = row ? { maxWidth: chOf(t, 62, 1.03) } : {};
@@ -277,7 +276,7 @@ export function Field({
           {lead}
           <Txt spec={{ ...labelSpec, color: off && row ? "dim" : "text" }}>
             {row && !mono && labelText.length > 1 ? (
-              // `::first-letter` is a box of its own in the DOM, so the first letter is not kerned with the next.
+              // A run of its own, as `::first-letter` makes one: the first letter is not kerned with the next.
               <>
                 <Txt spec={{ ...labelSpec, color: off && row ? "dim" : "text" }}>{labelText.charAt(0)}</Txt>
                 {labelText.slice(1)}
@@ -313,7 +312,7 @@ export function Field({
           <View height={0} />
         ) : hint !== undefined || param !== undefined ? (
           <Txt spec={hintSpec} {...hintBox}>
-            {/* White space collapses, as the span's `white-space: normal` does (a schema's description has newlines). */}
+            {/* White space collapses, as under `white-space: normal` (a schema's description has newlines). */}
             {typeof hint === "string" ? hint.replace(/\s+/g, " ").trim() : hint}
             {shownParam !== undefined && !row ? (
               <Txt spec={{ voice: "data", scale: 10 / 12, lineHeight: 1.4, color: "dim" }} marginLeft={6} {...({ whiteSpace: "nowrap" } as object)}>
@@ -353,7 +352,7 @@ const NESTED = { nested: true, inset: false };
 const DEEPER = { nested: true, inset: false, direct: false };
 const INSET = { nested: false, inset: true };
 
-/** `.reason.cfg-error`: what is wrong, on a line of its own under the control. */
+/** What is wrong, on a line of its own under the control. */
 export function ErrorLine({ children }: { children: ReactNode }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} flexBasis="100%" width="100%">
@@ -363,9 +362,9 @@ export function ErrorLine({ children }: { children: ReactNode }): JSX.Element {
 }
 
 /**
- * One level of a configuration's type hierarchy — `controls.tsx`'s `Level`. At depth 0 it is a section
- * of its Settings page (a heading over one card, listed in the sidebar's accordion); below that a band
- * with an uppercase title, ruled on its left.
+ * One level of a configuration's type hierarchy. At depth 0 it is a section of its Settings page (a
+ * heading over one card, listed in the sidebar's accordion); below that a band with an uppercase title,
+ * ruled on its left.
  */
 export function Level({ title, hint, depth = 0, children }: { title: string; hint?: ReactNode; depth?: number; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -401,11 +400,11 @@ export function Level({ title, hint, depth = 0, children }: { title: string; hin
 /**
  * `Disclosure`: a rule and a caret over the settings most projects never touch.
  *
- *   .cfg-disclosure        1px --line above, 2 in
- *   .cfg-disclosure-head   row, centred, gap 8, padding 7 4, --dim (hovered --text); the caret app
- *                          9/12.5 turned a quarter when open; the title app 600 at 12/12.5; its desc a
- *                          `.cfg-hint` after "· "
- *   .cfg-disclosure-body   padding 4 4 11 17
+ *   the box                1px --line above, 2 in
+ *   its head               row, centred, gap 8, padding 7 4, --dim (hovered --text); the caret app
+ *                          9/12.5 turned a quarter when open; the title app 600 at 12/12.5; its desc
+ *                          as a field's hint, after "· "
+ *   its body               padding 4 4 11 17
  */
 export function Disclosure({
   summary,
@@ -418,7 +417,7 @@ export function Disclosure({
   desc?: string;
   children: ReactNode;
   defaultOpen?: boolean;
-  /** Straight in a card (`.set-group > .cfg-disclosure`): padding 13 16, its rule still at its top. */
+  /** Straight in a card: padding 13 16, its rule still at its top. */
   card?: boolean;
 }): JSX.Element {
   const t = useTokens();
@@ -433,7 +432,7 @@ export function Disclosure({
             </Txt>
             <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: hovered ? "text" : "dim" }}>{summary}</Txt>
             {desc !== undefined && desc !== "" ? <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>
-              {/* Two text runs, as the DOM writes them: Blink shapes "· " and the words apart. */}
+              {/* Two text runs, so that Blink shapes "· " and the words apart. */}
               {"· "}
               {desc}
             </Txt> : null}

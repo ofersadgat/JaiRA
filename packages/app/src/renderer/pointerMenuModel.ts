@@ -17,8 +17,8 @@
  * `navigator.clipboard`, and an inline SVG is serialised and rasterised here, because until this code
  * runs it is not a file.
  *
- * The universal page draws the menu (`packages/universal/src/components/floats/PointerMenus.web.tsx`);
- * this is a browser's module — it reads the DOM — and no phone imports it.
+ * `PointerMenus.web.tsx` (`packages/universal/src/components/floats`) draws the menu; this is a
+ * browser's module — it reads the DOM — and no phone imports it.
  */
 import type { FrameContextMenu } from "@jaira/shared/browser";
 import type { MenuItem } from "./menuTypes";
@@ -110,10 +110,10 @@ function editItems(flags: FrameContextMenu["editFlags"], field?: HTMLElement): M
   const run =
     (verb: "cut" | "copy" | "paste" | "selectAll") => () => {
       // The verb acts on whatever has focus, and the flags above were decided about `field` — so the
-      // two agree only if `field` is what is focused. `ContextMenu` no longer takes focus away from
-      // it, which is what makes that true in the ordinary case; this covers the rest, where the
-      // right-click reached an element Chromium did not focus for it. Absent on the frame route,
-      // where there is no element to name and the focused frame is already the right answer.
+      // two agree only if `field` is what is focused. Where it is not — a press on the menu took the
+      // focus, or the right-click reached an element Chromium did not focus for it — it is put back
+      // first. Absent on the frame route, where there is no element to name and the focused frame
+      // is already the right answer.
       if (field !== undefined && document.activeElement !== field) field.focus({ preventScroll: true });
       void invoke("shell:edit", { verb }).catch(() => undefined);
     };
@@ -253,7 +253,7 @@ export function itemsForEvent(event: MouseEvent): MenuItem[] {
 
   /*
    * `aria-hidden` is the app's own word for "this is a glyph beside a word, not a picture" — see
-   * `icons.tsx`, where it is set on every icon in the app for exactly that reason. Offering to
+   * `Svg.web.tsx`, which sets it on every glyph the app draws for exactly that reason. Offering to
    * download a 14px chevron as a PNG is the kind of menu item that makes people stop opening menus,
    * and this marker is what separates one from a diagram somebody would actually want.
    */

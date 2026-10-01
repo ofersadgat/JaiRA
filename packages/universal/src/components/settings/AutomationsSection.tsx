@@ -42,28 +42,29 @@ import { AddButton } from "./permissions/rows";
 import { SettingsSection } from "./SettingsPage";
 
 /**
- * `automationsPane.tsx`, universal (decision 0015): Settings → Tools → Automations — the lines of a
- * layer's built-in events workflow, each an event, a filter and the steps it runs. What the host reads,
- * holds and writes is `automationsHost.ts`'s, the hook the DOM pane runs; what a line says is
- * `automationsModel.ts`'s. Reordering by dragging is the desktop's alone (the grip is drawn; a line is
- * moved on a phone by editing the file). The event and workflow boxes complete against their
- * `<datalist>`s (`eventOptionsOf`, `workflowOptionsOf`) in the type-ahead (`form/Suggest.tsx`). The rules (`[data-part="automations"]`; the rows' font is the body's, 13/12.5):
+ * Settings → Tools → Automations (and the events task's own panel, `workflow/ConfigPanel.tsx`): the
+ * lines of a layer's built-in events workflow, each an event, a filter and the steps it runs. What the
+ * host reads, holds and writes is `automationsHost.ts`'s; what a line says is `automationsModel.ts`'s.
+ * A line of the layer's own is reordered by its grip (`Grip`). The event and workflow boxes complete
+ * against `eventOptionsOf` and `workflowOptionsOf` in the type-ahead (`form/Suggest.tsx`). How it looks
+ * (the rows' font is the body's, 13/12.5):
  *
- *   .au-head             row, centred, gap 8, 8 below; `.au-grip` padding 0 4, -3 tracking, --tok-hint
- *   .au-name 16em        its box padding 2 8, at 600; `.au-name-static` 600
- *   .au-when, .au-action-head   row, wraps, centred, gap 6 8; `.au-word` --dim, one line
- *   .au-event 17em, .au-wf 15em, .au-note grows from 16em
- *   .au-filter, .au-order, .au-add-action, .au-inputs-note   6 above, 2em in
- *   .au-actions          column, gap 8, 8 above; each 4 above; `.au-n` 1.4em round, --panel-2, --dim,
+ *   a line's head        row, centred, gap 8, 8 below; the grip padding 0 4, -3 tracking, --tok-hint
+ *   its name             a box 16em wide, padding 2 8, at 600; written by hand, words at 600
+ *   When, a step's head  row, wraps, centred, gap 6 8; their words --dim, one line
+ *   the boxes            the event 17em, a workflow 15em, what to tell grows from 16em
+ *   the filter, the notes, "then…"   6 above, 2em in
+ *   the steps            column, gap 8, 8 above; each 4 above; its number 1.4em round, --panel-2, --dim,
  *                        data 600 at 0.85 on 1
- *   .au-inputs           8 above, 2em in, padding 2 12, 1px --line, radius 10, --bg
- *   .au-remove           padding 0 7, 1.1em; `.au-flag` 8 above; `.au-link` the font it stands in
- *   .au-off .au-when     0.7; `.au-ignored` name, When and steps struck through, --tok-hint, 0.7
- *   .set-row.au-add 6 12, .set-row.au-foot 10 16; `.au-foot p`, `.au-empty`, `.au-problem`, `.au-told`
- *                        padding 10 16; `.au-ask` (a `.set-ask`) 10 16 around
+ *   a step's inputs      8 above, 2em in, padding 2 12, 1px --line, radius 10, --bg
+ *   ×                    padding 0 7, 1.1em; a flag 8 above; a link the font it stands in
+ *   an event that is off its When at 0.7; an ignored line's name, When and steps struck through,
+ *                        --tok-hint, 0.7
+ *   the add row 6 12, the foot 10 16; the foot's words and the empty, problem and told notes padding
+ *                        10 16; the question of where a change goes 10 16 around
  *
- * The card's first two children are the `<datalist>`s, so every child drawn takes the `* + *` rule,
- * the first too, and no `.ev-group` is ever the card's first child (its top is never rounded).
+ * Every child of the card has a --line above it, the first too, and a group's heading here is never the
+ * rounded one (`EventGroup`'s `first`): the page is held to its reference pictures (`pair.mts`).
  */
 export function AutomationsSection(props: AutomationsPaneProps): JSX.Element {
   const host = useAutomationsHost(props);
@@ -91,7 +92,7 @@ function useEm(): (n: number) => never {
   return (n) => t.scaled("size-app", BODY * n) as never;
 }
 
-/** `button.link.au-link`, in the words it stands in (`spec`, theirs): the accent, underlined under the pointer. */
+/** A link, in the words it stands in (`spec`, theirs): the accent, underlined under the pointer. */
 function Link({ children, onPress, disabled = false, title, spec = HINT }: { children: string; onPress: () => void; disabled?: boolean; title?: string | undefined; spec?: FontSpec }): JSX.Element {
   const [hovered, hover] = useHover();
   return (
@@ -107,7 +108,7 @@ function Link({ children, onPress, disabled = false, title, spec = HINT }: { chi
   );
 }
 
-/** A `.cfg-hint` paragraph 2em in: `.au-order`, `.au-inputs-note`. */
+/** A hint paragraph 2em in: a note under a line or one of its steps. */
 function Note({ children, color }: { children: ReactNode; color?: string }): JSX.Element {
   const em = useEm();
   return (
@@ -190,7 +191,7 @@ function FlagLine({ flag, onOpenEvents }: { flag: LineFlag; onOpenEvents: () => 
   );
 }
 
-/** `.au-n`: a step's number. */
+/** A step's number, in its round. */
 function StepNumber({ n }: { n: number }): JSX.Element {
   const t = useTokens();
   const size = t.scaled("size-data", 0.85 * 1.4) as never;
@@ -203,7 +204,7 @@ function StepNumber({ n }: { n: number }): JSX.Element {
   );
 }
 
-/** `.au-remove`: a quiet ×. */
+/** A quiet ×: removes a line or a step. */
 function Remove({ label, disabled, onPress }: { label: string; disabled: boolean; onPress: () => void }): JSX.Element {
   return (
     <Button kind="quiet" title={label} label={label} disabled={disabled} onPress={onPress} paddingVertical={0} paddingHorizontal={7} font={{ scale: BODY * 1.1 }}>
@@ -357,12 +358,11 @@ function LineBody({ line, props, off = false, onLine }: { line: AutomationLine; 
   );
 }
 
-/** `.set-row.au-row`: the line on the left, its control at the top right (`.set-row-line`, aligned to the start). */
 /**
- * `.au-grip`: "⋮⋮", --tok-hint, 0 4 padding, -3px spacing, grab — dragged to reorder the layer's own
- * lines (the first that matches wins). On web the DOM's HTML5 drag: `draggable` unless locked, the line's
- * index on the transfer (`LINE_DRAG`), a row's drop reorders (`LineRow`). On a phone a long press and a
- * pan (`Lift`), landing on the row under the finger.
+ * The grip: "⋮⋮", --tok-hint, 0 4 padding, -3px spacing, grab — dragged to reorder the layer's own
+ * lines (the first that matches wins). On web HTML5 drag: `draggable` unless locked, the line's index
+ * on the transfer (`LINE_DRAG`), a row's drop reorders (`LineRow`). On a phone a long press and a pan
+ * (`Lift`), landing on the row under the finger.
  */
 function Grip({ index, locked, targets, onDrop }: { index: number; locked: boolean; targets: LiftTargets; onDrop: (to: string | null) => void }): JSX.Element {
   const web = isWeb
@@ -399,9 +399,10 @@ function Grip({ index, locked, targets, onDrop }: { index: number; locked: boole
   );
 }
 
+/** A line's row: the line on the left, its control at the top right (aligned to the start). */
 function LineRow({ children, control, onDropFrom, host }: { children: ReactNode; control: ReactNode; onDropFrom?: (from: string) => void; host?: (node: HostView | null) => void }): JSX.Element {
-  // A line of the layer's own takes a dropped grip (`automationsPane.tsx`'s row): `preventDefault` on
-  // drag-over is what lets the drop land; the drop reads the grip's index off the transfer.
+  // A line of the layer's own takes a dropped grip: `preventDefault` on drag-over is what lets the drop
+  // land; the drop reads the grip's index off the transfer.
   const web =
     isWeb && onDropFrom !== undefined
       ? {
@@ -427,7 +428,7 @@ function LineRow({ children, control, onDropFrom, host }: { children: ReactNode;
   );
 }
 
-/** `.au-when` with a line's event as written (`code.au-raw`). */
+/** A line's When with its event as written, in the data face. */
 function WhenRaw({ when, badge, props, look = {}, strike = {} }: { when: string; badge?: ReturnType<typeof badgeFor>; props: AutomationsViewProps; look?: object; strike?: object }): JSX.Element {
   return (
     <View flexDirection="row" flexWrap="wrap" alignItems="center" rowGap={6} columnGap={8} {...look}>

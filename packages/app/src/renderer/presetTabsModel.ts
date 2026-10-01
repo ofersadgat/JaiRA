@@ -1,7 +1,7 @@
 /**
  * Presets as tabs: what the rail lists, which tab is chosen after a save, an add or a remove, what a
  * preset says of itself without being opened, and whether a name may be used — everything about the
- * Models page's presets that can be got wrong. The universal `ModelsPage`
+ * Models page's presets that can be got wrong. `ModelsPage`
  * (`packages/universal/src/components/settings/ModelsPage.tsx`) draws from it.
  *
  * Three kinds of preset share the rail: the layer's OWN; one only another layer states; and a BUILT-IN

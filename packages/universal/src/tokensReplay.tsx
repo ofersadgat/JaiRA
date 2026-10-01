@@ -4,8 +4,8 @@ import type { Look, Tokens } from "./tokens";
 
 /**
  * Tokens REPLAYED (decision 0015): `styles.css`'s cascade worked out for where a component stands, with
- * no browser to do it. Native always reads these (`tokens.native.tsx`). On web they are what the `/rn`
- * page reads, so that a browser can test the native path: that page loads no `styles.css`, and every
+ * no browser to do it. Native always reads these (`tokens.native.tsx`). On web they are what a page
+ * under `Replayed` reads (`tokens.tsx`) — the app's page is one: it loads no `styles.css`, and every
  * colour and size on it comes from here, as on a phone.
  */
 export interface ReplayWhere extends Where {
@@ -46,7 +46,7 @@ export function useReplayLook(): Look {
   return { palette, scheme, wash, buckets, lanes };
 }
 
-/** Inside `.sidebar` and its like, whose variables override the root's for everything within. */
+/** Inside a scope (`sidebar` and its like), whose variables override the root's for everything within. */
 export function ReplayScope({ scope, children }: { scope: string; children: ReactNode }): JSX.Element {
   const outer = useContext(WhereContext);
   const where = useMemo(() => ({ ...outer, scopes: [...(outer.scopes ?? []), scope] }), [outer, scope]);

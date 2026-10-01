@@ -1,14 +1,14 @@
 /**
  * Settings → Machines' model (decision 0013 §1–§3): what its rows say and the fleet it reads — the
- * words and the reading `machinesPane.tsx` draws, in a module of its own so the universal copy
- * (decision 0015) says and reads the same. A sentence that holds a link or a value is a list of
- * {@link WordPart}s, which each side draws in its own way.
+ * words and the reading `MachinesPage` (`packages/universal/src/components/settings/MachinesPage.tsx`)
+ * draws. A sentence that holds a link or a value is a list of {@link WordPart}s, which the page draws
+ * run by run (`Words.tsx`).
  */
 import { useEffect, useState } from "react";
 import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachinesView, type PeerView } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 
-/** A run of a sentence: words, a value (`<code>`), an error (`.upd-err`), a quiet note (`.cfg-hint`), or a link. */
+/** A run of a sentence: words, a value (drawn as code), an error, a quiet note, or a link. */
 export type WordPart = string | { code: string } | { error: string } | { hint: string } | { link: string; href: string };
 
 /** Bytes, for the On disk row. */
@@ -52,7 +52,7 @@ export function useMachines(): [MachinesView | undefined, (next: MachinesView) =
 
 /**
  * The machine a project belongs to, when it is another machine and that machine is away — what
- * `offline.tsx`'s `OfflineBanner` (and its universal copy) says. Nothing for this machine's own.
+ * `OfflineBanner` says. Nothing for this machine's own.
  */
 export function offlinePeerOf(view: MachinesView | undefined, project: string | undefined): PeerView | undefined {
   const machineId = parseRemoteProjectKey(project)?.machineId;
@@ -201,7 +201,7 @@ export const ADD_SCHEMA = {
 } as const;
 
 /**
- * Pairing with another machine (`machinesPane.tsx`'s `AddMachine`): the address and code typed, whether
+ * Pairing with another machine (`MachinesPage.tsx`'s `AddMachine`): the address and code typed, whether
  * Pair can be pressed, and what it came to — the page's view refreshed, or why not.
  */
 export function useAddMachine(onView: (v: MachinesView) => void): {

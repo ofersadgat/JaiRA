@@ -3,19 +3,18 @@ import { Press, Txt, lengthToken, padToken, type FontSpec } from "../../primitiv
 import { useTokens } from "../../tokens";
 
 /**
- * `styles.css`'s `button` and its variants, universal (decision 0015) — the settings pages' buttons
- * (the layer switch, Re-check, Add). The rules it carries:
+ * The settings pages' button (the layer switch, Re-check, Add), in its kinds. How each looks:
  *
- *   button              --panel-2 ground, 1px --line ring, radius --control-radius (7), padding
+ *   plain               --panel-2 ground, 1px --line ring, radius --control-radius (7), padding
  *                       --control-pad (3 10), row, centred, gap 5; the text the body's (app, 13/12.5,
  *                       line 1.5), --text, one line. Hovered: --panel-3 ground, --rule ring.
  *                       Disabled: half opacity, no shadow.
- *   button.ghost        transparent, no shadow; hovered --fill-ghost-hover (the ring still --rule)
- *   button.quiet        transparent, no ring, --dim; hovered --fill-ghost-hover and --text
- *   button.danger       transparent, --bad text, ring --bad 40% into --line; hovered --tint-bad and
+ *   ghost               transparent, no shadow; hovered --fill-ghost-hover (the ring still --rule)
+ *   quiet               transparent, no ring, --dim; hovered --fill-ghost-hover and --text
+ *   danger              transparent, --bad text, ring --bad 40% into --line; hovered --tint-bad and
  *                       --bad 60% into --line
- *   button.primary      --fill-accent ground and ring, --on-accent at 600, --sheen; hovered
- *   button.layer-on       --fill-accent-hover ground and ring
+ *   primary             --fill-accent ground and ring, --on-accent at 600, --sheen; hovered
+ *                       --fill-accent-hover ground and ring
  */
 export type ButtonKind = "plain" | "ghost" | "quiet" | "primary" | "danger";
 

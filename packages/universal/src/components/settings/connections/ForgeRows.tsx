@@ -13,14 +13,14 @@ import { SettingsLayerContext } from "../layers";
 import { AddBox, CardActions, ConnRow, ConnRows, EntryBox, Facts, KeyBox, LoginCardBox, LoginMark, Problem, RowControls, RowHead, Say, SmallButton, SplitAddBox, Tag, WaitingBox, Who, Wide } from "./Row";
 
 /**
- * `integrationsPane.tsx`'s forge rows of Connections, universal (decision 0015): one row per
- * connection — who it acts as, the + box to sign in with the forge or paste a token — then "Another
- * host". What each says and writes is `connectionsModel.ts`'s; every typed field is the schema form.
- * The rule it adds:
+ * The forge rows of Connections: one row per connection — who it acts as, the + box to sign in with
+ * the forge or paste a token — then "Another host". What each says and writes is
+ * `connectionsModel.ts`'s; every typed field is the schema form. What it adds to a row's look
+ * (`Row.tsx`):
  *
- *   .cfg-login-top       a forge's login card: row, centred, space-between, 2 below — the mark and the
- *                        tag; the name and the facts under it
- *   .conn-tools-line     an opened row's first line, a `.cfg-hint` whose link takes its font
+ *   a forge's login card   its top a row, centred, space-between, 2 below — the mark and the tag;
+ *                          the name and the facts under it
+ *   the tools line         an opened row's first line, a hint whose link takes its font
  */
 
 /** The forges, as the card of Connections → Forges: one row per connection, then "Another host". */
@@ -51,7 +51,7 @@ export function ForgeToolsLine({ onOpenTools }: { onOpenTools?: (() => void) | u
     <Hint>
       {`${lead}, on `}
       {onOpenTools !== undefined ? (
-        // `button.link` in the hint's own font (`.conn-tools-line button.link { font: inherit }`), --accent.
+        // A link in the hint's own font, --accent.
         <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "accent" }} onPress={onOpenTools} role="button">
           Tools → Git
         </Txt>

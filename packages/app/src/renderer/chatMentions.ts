@@ -1,6 +1,6 @@
 /**
- * What `@` completes against and how a mentioned file is read — moved unchanged out of `chatPane.tsx`,
- * so the desktop's composer and the universal one (decision 0015) ask main the same questions.
+ * What `@` completes against and how a mentioned file is read: the questions the composer's hosts
+ * (`ChatStart.tsx`, `ChatThread.tsx`) ask main.
  */
 import { useMemo } from "react";
 import { invoke } from "./store";

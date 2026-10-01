@@ -1,8 +1,6 @@
 /**
  * What the run INDEX derives — its rows, its folds, its loops, the fitting to a box, the clock its live
- * rows read — moved out of `runIndex.tsx` unchanged so the universal copy of the index (decision 0015,
- * `packages/universal/src/components/panel/RunIndex.tsx`) folds and fits the same rows by the same code.
- * `runIndex.tsx` draws them for the DOM. Nothing here touches the DOM.
+ * rows read. Nothing here draws: `RunIndex.tsx` (`packages/universal/src/components/panel`) does.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InstanceNode } from "@jaira/shared/browser";
@@ -239,7 +237,7 @@ interface Span {
   loop: boolean;
 }
 
-/** What a placeholder row names — see {@link RunIndexModel.gapOf}. */
+/** What a placeholder row names — see `gapOf` in {@link useRunIndexModel}. */
 export interface GapWords {
   count: number;
   /** The outermost states it passes over, at most three, each a way to the top of it. */
@@ -250,7 +248,7 @@ export interface GapWords {
 /**
  * Everything the index draws from, worked out once per render: the rows (folds applied), the rail's
  * rows over them, the palette, the folds and the gestures that change them, the clock, and the fitted
- * rows. `runIndex.tsx` draws it for the DOM; the universal copy draws the same.
+ * rows.
  */
 export function useRunIndexModel({ instances, fit, here }: { instances: readonly InstanceNode[]; fit?: RunIndexFit | undefined; here?: string | undefined }) {
   const [ownLanes, setOwnLanes] = useState<ReadonlySet<string>>(() => new Set());

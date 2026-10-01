@@ -1,9 +1,8 @@
 /**
  * What the New-task form DECIDES — which workflow is picked, what its boxes hold, which slots take their
- * value from a task, and why the button is off — moved out of `widgets.tsx`'s `NewTaskForm` unchanged so
- * the universal copy (decision 0015, `packages/universal/src/components/panel/NewTaskForm.tsx`) runs the
- * same form. Also `useRunCheck`, the check every run form's values get, out of `runPanel.tsx`. Nothing
- * here draws.
+ * value from a task, and why the button is off — and the same for a re-run with changes. Also
+ * `useRunCheck`, the check every run form's values get. Nothing here draws: `NewTaskForm.tsx`,
+ * `RerunForm.tsx` and `RunPanel.tsx` (`packages/universal/src/components/panel`) do.
  */
 import { useState } from "react";
 import type { InputSourcesResponse, WorkflowEntry } from "@jaira/shared/browser";
@@ -17,7 +16,7 @@ export function useRunCheck(fields: readonly RunField[] | null | undefined, valu
   return useSchemaCheck(runChecksOf(fields ?? [], values, sources), missingOf(fields ?? [], values, sources));
 }
 
-/** The New-task form's state and derivations — `NewTaskForm`'s, for either drawing of it. */
+/** The New-task form's state and derivations — `NewTaskForm`'s. */
 export function useNewTaskForm({
   workflows,
   forms,
@@ -34,7 +33,7 @@ export function useNewTaskForm({
   onPick: (stateId: string) => void;
 }) {
   const [workflow, setWorkflow] = useState("");
-  /** Which slots take their value from a task, per workflow — the popover's own, like the pick itself. */
+  /** Which slots take their value from a task, per workflow — the form's own, like the pick itself. */
   const [taken, setTaken] = useState<Record<string, RunSources>>({});
 
   const picked = workflows.find((entry) => entry.rootId === workflow);
@@ -71,7 +70,7 @@ export function useNewTaskForm({
   return { workflow, pick, picked, errors, fields, form, from, fromTask, check, touched, touch, blocked, filled };
 }
 
-/** What a re-run with changes is handed (`panelViews.tsx`'s `RerunSurface`, as far as the form reads it). */
+/** What a re-run with changes is handed (`RerunSurface`, as far as the form reads it). */
 export interface RerunFormSurface {
   workflow: string;
   fields: RunField[] | null | undefined;

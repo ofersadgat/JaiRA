@@ -1,7 +1,6 @@
 /**
- * What Settings → Models (`modelsPane.tsx`) reads out of the configuration, as pure functions — the
- * executor overlays and presets a document states, what a candidate's box suggests, a layer in a word
- * — in a module of its own so the universal copy (decision 0015) reads the same.
+ * What Settings → Models (`ModelsPage.tsx`) reads out of the configuration, as pure functions — the
+ * executor overlays and presets a document states, what a candidate's box suggests, a layer in a word.
  */
 import { DEFAULT_EXECUTOR, pin, type ConfigLayer, type ConfigView, type JairaOperationNode } from "@jaira/shared/browser";
 import { LAYER_LABELS } from "./layerLabels";

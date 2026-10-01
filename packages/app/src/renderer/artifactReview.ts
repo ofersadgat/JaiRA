@@ -1,8 +1,7 @@
 /**
- * What `review_artifact` and `edit_artifact` decide, apart from how they are drawn — moved out of
- * `components.tsx` unchanged, so the universal copy of the artifact gates (decision 0015,
- * `packages/universal/src/components/artifact/`) reads the artifact, reads the edit, words the verdict
- * and shapes the answer with the same code.
+ * What `review_artifact` and `edit_artifact` decide, apart from how they are drawn: reading the
+ * artifact, reading the edit, wording the verdict and shaping the answer. The artifact gates
+ * (`packages/universal/src/components/artifact/`) draw from it.
  */
 import {
   artifactOf,

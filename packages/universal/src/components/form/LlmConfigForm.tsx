@@ -31,28 +31,28 @@ import { FormInput, NumInput, TextArea } from "./inputs";
 import { SchemaForm } from "./SchemaForm";
 
 /**
- * `llmConfigForm.tsx`'s call-settings form and its `TabRail`, universal (decision 0015): a rail of
- * categories, each with its live one-line summary, beside the pane that edits the chosen one. What it
- * says and does is `llmConfigModel.ts`'s, the functions the DOM form calls. The rules, from `styles.css`:
+ * The call-settings form and its `TabRail`: a rail of categories, each with its live one-line summary,
+ * beside the pane that edits the chosen one. What it says and does is `llmConfigModel.ts`'s. How it
+ * looks:
  *
- *   .llm-config          grid 168 | 1fr, 1px --line, radius 8, clipped, --panel
- *   .llm-rail            column, gap 2, padding 6, --panel-2, a --line on its right
- *   .llm-rail-item       column, gap 2, start-aligned, padding 7 9, 1px transparent (hovered --line),
+ *   the box              the rail 168 wide | the pane taking the rest; 1px --line, radius 8, clipped, --panel
+ *   the rail             column, gap 2, padding 6, --panel-2, a --line on its right
+ *   a tab                column, gap 2, start-aligned, padding 7 9, 1px transparent (hovered --line),
  *                        radius 6; on: --panel and --line. Its label app 550 at 12.5/12.5 in --dim
  *                        (on: --text); its summary app 10.5/12.5 --dim, one line, cut with …
- *   .llm-detail          column, gap 12, padding 13 15
- *   .llm-detail-head     column, gap 3: the title app 600 at 13/12.5, its hints `.cfg-hint` (70ch)
- *   .notice.warn         --tint-warn ground, --warn text, radius --control-radius, padding 7 9, app 11/12.5
- *   .pane-actions        row, centred, gap 6, wraps
+ *   the pane             column, gap 12, padding 13 15
+ *   the pane's head      column, gap 3: the title app 600 at 13/12.5, its hints as a field's (70ch)
+ *   a warning            --tint-warn ground, --warn text, radius --control-radius, padding 7 9, app 11/12.5
+ *   a row of actions     row, centred, gap 6, wraps
  */
 
-/** One tab of a {@link TabRail} (`RailItem`): a name over a one-line summary, or a heading between tabs. */
+/** One tab of a {@link TabRail}: a name over a one-line summary, or a heading between tabs. */
 export interface RailItem {
   id: string;
   label?: ReactNode;
   summary: ReactNode;
   mono?: boolean;
-  /** `.set-rail-add`: the `+ preset` tab, its summary in --tok-hint. */
+  /** The `+ preset` tab: its summary in --tok-hint. */
   add?: boolean;
   title?: string;
   heading?: ReactNode;
@@ -75,12 +75,12 @@ export function TabRail({
   items: readonly RailItem[];
   selected: string | undefined;
   onSelect: (id: string) => void;
-  /** The rail's ground where a host darkens it (`.preset-rail`). */
+  /** The rail's ground where a host darkens it (the presets' rail, `ModelsPage.tsx`). */
   ground?: string;
   width: number;
-  /** A tab's padding (`.set-config .llm-rail-item`: 5 9). */
+  /** A tab's padding (the permission sets' rail: 5 9). */
   pad?: [number, number];
-  /** The rail's bottom-left corner (`.set-config .llm-rail`: 7), in a box that does not clip. */
+  /** The rail's bottom-left corner (the permission sets' rail: 7), in a box that does not clip. */
   corner?: number;
 }): JSX.Element {
   const t = useTokens();
@@ -147,7 +147,7 @@ type RailKey = { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolea
 /**
  * `TabRail`'s `onKeyDown` (web): the keys that run ALONG the rail choose the tab before or after, Home and
  * End the ends; the pair that runs ACROSS it steps to the rail beside it in the same box (`RailFrame`) —
- * `llmConfigModel.ts`'s `railMoveOf` and `railStep`, as the desktop's.
+ * `llmConfigModel.ts`'s `railMoveOf` and `railStep`.
  */
 function railKey(event: RailKey, tabItems: readonly RailItem[], onSelect: (id: string) => void): void {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
@@ -177,7 +177,7 @@ function railKey(event: RailKey, tabItems: readonly RailItem[], onSelect: (id: s
   tabs[next]?.focus();
 }
 
-/** `.llm-config`: the rail and the pane, in their box. */
+/** The rail and the pane, in their box. */
 export function RailFrame({ card = false, children }: { card?: boolean; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -189,9 +189,9 @@ export function RailFrame({ card = false, children }: { card?: boolean; children
       width="100%"
       borderRadius={8}
       overflow="hidden"
-      // Straight in a card (`.set-group > .llm-config`): the card's padding, inside its own ring.
+      // Straight in a card: the card's padding, inside its own ring.
       {...(card ? { paddingVertical: 13, paddingHorizontal: 16 } : {})}
-      // What a rail's keys look for to find the rail beside it (the DOM's `closest(".llm-config")`).
+      // What a rail's keys look for to find the rail beside it (`railKey`'s `closest`).
       {...({ "data-llm-config": "" } as object)}
       backgroundColor={t.v("panel") as never}
       {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
@@ -201,7 +201,7 @@ export function RailFrame({ card = false, children }: { card?: boolean; children
   );
 }
 
-/** `.llm-detail` with its head. */
+/** The pane beside the rail, with its head. */
 export function RailDetail({
   title,
   hints,
@@ -213,7 +213,7 @@ export function RailDetail({
   hints: readonly string[];
   /** A line of the host's under the title, before the hints. */
   line?: ReactNode;
-  /** `.set-config .llm-detail`: at least 330 tall. */
+  /** The least the pane stands (a permission set's: 330). */
   minHeight?: number;
   children?: ReactNode;
 }): JSX.Element {
@@ -245,7 +245,7 @@ function chWidth(t: ReturnType<typeof useTokens>, n: number): number | string {
   return typeof size === "number" ? n * (541.1354 / 62 / 12.875) * size : `${n}ch`;
 }
 
-/** `.notice.warn`. */
+/** A warning: --warn on a --tint-warn ground. */
 export function WarnNotice({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -280,7 +280,7 @@ export function LlmConfigForm({
   railWidth = 168,
 }: {
   levelsFor?: string | undefined;
-  /** The sections rail's width (`.preset-config`: 146). */
+  /** The sections rail's width (a preset's config, `ModelsPage.tsx`: 146). */
   railWidth?: number;
   value: LlmConfigDoc;
   onChange: (next: LlmConfigDoc) => void;
@@ -391,7 +391,7 @@ export function LlmConfigForm({
   return unframed ? body : <RailFrame>{body}</RailFrame>;
 }
 
-/** `.cfg-set`: this layer states it. */
+/** "set here": this layer states it. */
 function SetHere(): JSX.Element {
   const t = useTokens();
   return (
@@ -401,7 +401,7 @@ function SetHere(): JSX.Element {
   );
 }
 
-/** The `llm-config` widget of the schema form (`LlmConfigWidget`). */
+/** The `llm-config` widget of the schema form. */
 export function LlmConfigWidget({ value, onChange, ctx }: WidgetProps): JSX.Element {
   return <LlmConfigForm value={(value ?? {}) as LlmConfigDoc} disabled={ctx.disabled === true} onChange={(next) => onChange(Object.keys(next).length === 0 ? undefined : next)} />;
 }

@@ -1,11 +1,9 @@
 /**
- * The Files room's MODEL — the part of `files.tsx` that is not drawing.
+ * The Files room's MODEL — the part of it that is not drawing.
  *
- * Moved out unchanged (decision 0015) so the desktop's tree, address bar and panel and their universal
- * copies (`packages/universal/src/components/files/`) derive everything from one place: which rows a
- * tree shows and what each says, what the `+` menus offer and where a new row lands, which crumbs an
- * address has, how the panel splits. Nothing here renders; `files.tsx` re-exports what it always
- * exported, so its importers are unchanged.
+ * The tree, the address bar and the panel (`packages/universal/src/components/files/`) derive
+ * everything from here: which rows a tree shows and what each says, what the `+` menus offer and where
+ * a new row lands, which crumbs an address has, how the panel splits. Nothing here renders.
  */
 import type { BoardCard, FileMutationResult, FileNode, FileRoot, FileSource, FileTree, InstanceNode, MoveWorkflowRequest, StateView, WorkflowLayer, WorkflowMutationResult } from "@jaira/shared/browser";
 import { isTextMime, isWritableLayer } from "@jaira/shared/browser";
@@ -565,7 +563,7 @@ export function crumbsOf(input: CrumbInput): Crumb[] {
   );
   return out;
 }
-// --- what the components derive, shared with the universal copies --------------
+// --- what the components derive ------------------------------------------------
 
 /** One row of the tree, as {@link FileTreePanel}'s `TreeNode` draws it — every fact the row shows. */
 export interface TreeRow {
@@ -577,7 +575,7 @@ export interface TreeRow {
   isSelected: boolean;
   /** Unsaved edits: this file, or — a directory — anything below it. */
   unsaved: boolean;
-  /** The row's lint colour, worst first — as a class suffix, which is what the DOM row wears. */
+  /** The row's lint colour, worst first — a word (with its leading space) the row reads into an ink. */
   tone: "" | " has-error" | " has-warning" | " unchecked";
   /** Not text, so nothing here can open it as text. */
   inert: boolean;
@@ -749,8 +747,8 @@ export interface PanelSurfaceProps {
 
 /**
  * The open file's panel: which renderer draws each half, where the lower half stands, and the props
- * each half is mounted with — `FilePanel`'s resolution, for it and for the universal copy (which passes
- * its own registry of native surfaces).
+ * each half is mounted with — `FilePanel`'s resolution (it passes its own registry of surfaces,
+ * `SURFACES`).
  */
 export function filePanelOf(props: PanelSurfaceProps, half: HalfMode, from?: SurfaceRegistry) {
   const { doc, context } = props;
@@ -828,8 +826,7 @@ export interface TreeVerbs {
 
 /**
  * The tree's right-click menus: a row's verbs (`itemsFor`) and a root's (`rootItems`), with the second
- * ask a refused move or delete makes. `FileTreePanel`'s own, moved out unchanged so the universal copy
- * offers the same verbs (a long press on a phone).
+ * ask a refused move or delete makes. `FileTreePanel` opens them (a long press on a phone).
  */
 export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: FileRoot) => MenuItem[]; rootItems: (root: FileRoot, writable: boolean) => MenuItem[] } {
   const { hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, setAsk, startDraft } = verbs;

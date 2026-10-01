@@ -1,7 +1,7 @@
 /**
- * Settings → Tools → Permission sets' host (`permissionSetsPane.tsx`): the state the view is drawn from,
- * the writes it asks main for, and what the rail lists — as a hook and pure functions in a module of
- * their own, so the universal copy (decision 0015) holds and does exactly what the DOM pane does.
+ * Settings → Tools → Permission sets' host: the state the view is drawn from, the writes it asks main
+ * for, and what the rail lists — as a hook and pure functions. Nothing here draws: `PermissionSets.tsx`
+ * (`packages/universal/src/components/settings/permissions`) does.
  */
 import { useCallback, useEffect, useState } from "react";
 import {
@@ -196,7 +196,7 @@ interface HeldChange {
 }
 
 /**
- * The state the view is drawn from, and the writes it asks for (`PermissionSetsPane`'s body).
+ * The state the view is drawn from, and the writes it asks for.
  *
  * Drafts are kept PER LAYER AND PERMISSION_SET, so that looking at another permission set loses
  * nothing. The selection is an id, not an index, which is the whole of "the selection survives a

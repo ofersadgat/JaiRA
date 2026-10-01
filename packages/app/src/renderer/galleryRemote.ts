@@ -58,7 +58,7 @@ export function galleryRemote(
 }
 
 /**
- * What the gallery wires a gate to (moved here from `componentGallery.tsx`, so the universal gallery wires the same), laid over the renderer's defaults (see `gateServices`): nothing
+ * What the gallery wires a gate to, laid over the renderer's defaults (see `gateServices`): nothing
  * that reaches main, because `GALLERY_PROJECT` is a project main has never opened.
  */
 export function galleryServices(surface: GallerySurface, config: ComponentConfig | undefined): Partial<ComponentServices> {

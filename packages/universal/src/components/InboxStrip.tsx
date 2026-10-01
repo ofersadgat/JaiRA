@@ -10,19 +10,23 @@ import { Pill } from "./Pill";
 import { colorOf } from "./Sidebar";
 
 /**
- * `inboxStrip.tsx`'s `InboxStrip`, universal (decision 0015): what is awaiting you, and the newest unread
- * notice at the right end. Read that one for what it says and in what order; the rules, from `styles.css`:
+ * The inbox strip at the foot of the window: what is awaiting you, and the newest unread notice at the
+ * right end (decision 0010 §4). Questions come first, then command approvals, then workflow gates — an
+ * agent's loop is blocked until its question or approval is answered, a gate is a state politely
+ * waiting — three in all, each saying whose task it is, since the list is across projects. A notice asks
+ * nothing of anyone, so it sits apart and is not counted; the strip is drawn for a notice alone too,
+ * then without the label and its pill. How it looks:
  *
- *   .strip                   40 tall, row, gap 12, padding 0 14, --panel, a --line on top
- *   .strip-label             app-title at 11.5/12.5
- *   .strip-item              row, gap 6, at most 320 wide; a "·" (--tok-hint, 2 right) before every one
+ *   the strip                40 tall, row, gap 12, padding 0 14, --panel, a --line on top
+ *   "Awaiting you"           app-title at 11.5/12.5
+ *   an item                  row, gap 6, at most 320 wide; a "·" (--tok-hint, 2 right) before every one
  *                            but the first
- *   .chip.strip-project      .chip wins the tie (it is later): 1px --line ring, round, padding 0 6,
- *                            10/12.5 app size in the data face, --dim, 15 line; the project's hue at 16%
- *                            as ground and as a 5px dot before the name (gap 4)
- *   .strip .ellip            data-text at 0.875 × --size-data
- *   .strip .more             app-secondary, pushed to the far end
- *   .strip-notice            after a spacer: 🔔, the chip, the text (app 12/12.5, --text), its meta
+ *   its project chip         1px --line ring, round, padding 0 6, 10/12.5 app size in the data face,
+ *                            --dim, 15 line; the project's hue at 16% as ground and as a 5px dot before
+ *                            the name (gap 4)
+ *   its text                 data-text at 0.875 × --size-data
+ *   "+N more"                app-secondary, pushed to the far end
+ *   the notice               after a spacer: 🔔, the chip, the text (app 12/12.5, --text), its meta
  *                            (data-faint at 0.8), "+N", and ×; the open button ghost-hovers
  */
 export function InboxStrip({
@@ -116,7 +120,7 @@ export function InboxStrip({
   );
 }
 
-/** `.chip.strip-project`: the project's name on its hue, with the hue as a dot before it. */
+/** A project's chip: its name on its hue, with the hue as a dot before it. */
 export function ProjectChip({ label, hue }: { label: string; hue: string }): JSX.Element {
   const t = useTokens();
   const color = colorOf(t, hue);

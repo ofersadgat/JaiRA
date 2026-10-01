@@ -5,18 +5,20 @@ import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
- * `pill.tsx`'s `Pill`, universal (decision 0015, S3). Read that one for what a pill says; this one
- * only has to look the same. Every value below is the `.pill` rule in `styles.css`, line for line:
+ * A status pill (SHELL.md §4): a glyph, then a count or a word. An ACTIVE pill (running, waiting) states
+ * a live fact and is FILLED with a tint of its own colour; a STATUS pill (error, warning, success) is an
+ * unseen count and is FLAT — fill is the second channel, so hue is never the only one. Which pill a
+ * status is, and how many fit, is `pillModel.ts`'s. How it looks:
  *
- *   .pill          inline-flex, centred, gap 3, padding 1 6 1 5, radius 999, line-height 15px,
+ *   the pill       inline-flex, centred, gap 3, padding 1 6 1 5, radius 999, line-height 15px,
  *                  nowrap, flex none, data voice at 0.8 × --size-data, 600, tabular digits
- *   .pill-glyph    0.78 × --size-data, line-height 1
- *   .pill-<kind>   --pill-c: accent | warn | bad | warn | ok
- *   .pill-active   ground: --pill-c at 15% over transparent (running, waiting)
- *   .pill-status   no ground, padding 3 either side
+ *   its glyph      0.78 × --size-data, line-height 1
+ *   its colour     by kind: accent | warn | bad | warn | ok (`INK`)
+ *   active         ground: its colour at 15% over transparent (running, waiting)
+ *   status         no ground, padding 3 either side
  *
- * The two text runs are separate `Text`s because React Native has no text outside a `Text`; the DOM's
- * inline-flex already makes each run its own flex item, so the geometry is the same.
+ * The two text runs are separate `Text`s because React Native has no text outside a `Text`; on web an
+ * inline-flex makes each run its own flex item anyway, so the geometry is the same.
  */
 const INK: Record<PillSlotProps["kind"], string> = {
   running: "accent",

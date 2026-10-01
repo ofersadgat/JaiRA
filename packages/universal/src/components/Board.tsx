@@ -15,71 +15,75 @@ import { ghostAt, ghostOf, ghostScrolled, useEdgeScroll, useLiftTargets, type Ed
 import { claimed, TaskCard } from "./TaskCard";
 
 /**
- * `board.tsx`'s `Board`, universal (decision 0015): child states as columns, the tasks in them as cards
- * (`TaskCard`), split into lanes, archived ones held at each column's foot. Read that one for what the
- * board means; this one only has to look and act the same. The rules it carries, from `styles.css`,
- * with the contests `cascade.mts` settled:
+ * A board level (DESIGN §11.1): child states as columns, the tasks in them as cards (`TaskCard`), split
+ * into lanes, archived ones held at each column's foot. The columns stand in the order the children RUN
+ * in, never the transitions': a guard that jumps backwards must not reorder what is read left to right.
+ * `numbered` is off for the root listing, whose workflows are siblings with no order; `trays` is off
+ * where a level should not list work that is in none of its columns. A column is a box and a card is not:
+ * a column is a place a task moves between, a card one item in it. How it looks, look by look
+ * (`columnStyle` decides it):
  *
- *   .board-body                  column, gap 14, padding 10 (overflow visible while every project is listed)
- *   .columns / .columns.wrap     row, gap 10, stretch; the root listing wraps with a 12 row gap
- *   .column                      flex 1 0 210, at most 320; --panel-2, 1px --line, radius 9; hover --rule,
+ *   the body                     column, gap 14, padding 10
+ *   the columns                  row, gap 10, stretch; the root listing wraps with a 12 row gap
+ *   a column                     flex 1 0 210, at most 320; --panel-2, 1px --line, radius 9; hover --rule,
  *                                selected --accent
- *   .column h4                   row, baseline, gap 7, padding 6 10, --panel-3, 1px --line under, radius 8 8 0 0
- *   .column.sel > h4             --fill-ghost-selected (0,2,1: every palette's h4 rule beats it)
- *   .column-body                 column, flex 1, padding 6; `.empty` "—" --dim, padding 2 4 6
- *   .col-name / .count / .seq    data-title, ellipsised / app-secondary, tabular, pushed right / data-num
- *   :root[data-palette] …        the track: --track ground, --track-edge; the h4 on --track with no rule
- *                                under it and 8 above; the body 4 7 8
- *   [data-palette="hairline"]    the h4 keeps a --line rule, 4 below
- *   [data-palette="contrast"]    square, 1.5 edge; unless line buckets or lanes, the h4 an inverted band
- *   pastel, pastel-rail          radius 16, the h4 16 16 0 0
- *   [data-palette="blueprint"]   dashed, radius 2; the h4 on --bg over a 1px --rule, 2 2 0 0; the body
- *                                on 16px graph paper (--grid)
- *   [data-buckets="line"]        no box (transparent, square, hover and selected alike); the h4 on --bg
- *                                over a 2px --line (--rule hovered, --accent selected), 3 either side, 6
- *                                below; the body 0 1 6
- *   [data-lanes]                 each column its lane colour (nth-child 6n+k): the ground and the h4 at
- *                                --lane-pct over --bg, the h4's rule 35% over --line, the name and seq in
- *                                --lane-ink over --lane-deep, 700; with line buckets, the ground clear and
- *                                the rule the lane's own
- *   .lane / .lane h5             a box per lane; the heading a row, centred, gap 8, 10 above 6 below: the
+ *   its heading                  row, baseline, gap 7, padding 6 10, --panel-3, 1px --line under, radius
+ *                                8 8 0 0; selected --fill-ghost-selected (classic only: a named palette's
+ *                                heading keeps its own ground)
+ *   its body                     column, flex 1, padding 6; empty, a "—" in --dim, padding 2 4 6
+ *   name / count / number        data-title, ellipsised / app-secondary, tabular, pushed right / data-num
+ *   any named palette            the track: --track ground, --track-edge; the heading on --track with no
+ *                                rule under it and 8 above; the body 4 7 8
+ *   hairline                     the heading keeps a --line rule, 4 below
+ *   contrast                     square, 1.5 edge; unless line buckets or lanes, the heading an inverted
+ *                                band
+ *   pastel, pastel-rail          radius 16, the heading 16 16 0 0
+ *   blueprint                    dashed, radius 2; the heading on --bg over a 1px --rule, 2 2 0 0; the
+ *                                board's body on 16px graph paper (--grid)
+ *   line buckets                 no box (transparent, square, hover and selected alike); the heading on
+ *                                --bg over a 2px --line (--rule hovered, --accent selected), 3 either
+ *                                side, 6 below; the body 0 1 6
+ *   lanes                        each column its lane colour (six, in turn): the ground and the heading at
+ *                                --lane-pct over --bg, the heading's rule 35% over --line, the name and
+ *                                number in --lane-ink over --lane-deep, 700; with line buckets, the ground
+ *                                clear and the rule the lane's own
+ *   a lane and its heading       a box per lane; the heading a row, centred, gap 8, 10 above 6 below: the
  *                                label (app-label), a 1px --line rule taking the slack, the count (data-num
- *                                at 400, `.count` wins); finished and not-started lanes 0.72, 1 hovered
- *   .lane-archived               the foot: a row, gap 8, 2 above, padding 4 2, --dim at 11.5/12.5,
- *                                "N archived", a --line rule, Show/Hide; hovered --fill-ghost-hover, --text
- *   .tray / .tray-cards          "At this level": an uppercase h4 (11/12.5, bold, .09em, 8 below) over
- *                                cards 210 wide, wrapped with a gap of 8, lanes a row each
+ *                                at 400); finished and not-started lanes 0.72, 1 hovered
+ *   the archived foot            a row, gap 8, 2 above, padding 4 2, --dim at 11.5/12.5, "N archived", a
+ *                                --line rule, Show/Hide; hovered --fill-ghost-hover, --text
+ *   the tray                     "At this level": an uppercase heading (11/12.5, bold, .09em, 8 below)
+ *                                over cards 210 wide, wrapped with a gap of 8, lanes a row each
  *
- * The sticky column heading: on web `position: sticky`, as the desktop's. React Native has no sticky
- * but a ScrollView's direct children (`stickyHeaderIndices`), and a heading here is deep inside a
- * wrapping row; so on a phone the scroller that holds the board (`BoardColumn`) hands its scroll down
- * (`StickyScroll`) and each heading (`StickyHead`) is moved by it on the native driver — held at the
- * scroller's top once its column's top has passed it, and let go at its column's foot, as sticky does.
+ * The sticky column heading: on web `position: sticky`. React Native has no sticky but a ScrollView's
+ * direct children (`stickyHeaderIndices`), and a heading here is deep inside a wrapping row; so on a
+ * phone the scroller that holds the board (`BoardColumn`) hands its scroll down (`StickyScroll`) and each
+ * heading (`StickyHead`) is moved by it on the native driver — held at the scroller's top once its
+ * column's top has passed it, and let go at its column's foot, as sticky does.
  *
  * Dragging a card (decision 0005): picked up where a waiting rule offered it a move (`dragOffers`) or it
  * can be connected (`connect.ask`), every column that would take it dashed in the accent, the one under
  * the pointer filled, with the DROP PREVIEW under its cards (`ConnectPop`); the drop answers the wait
  * (`onTaskDrop`) or commits the connect, or puts the move table's question in that column first. What a
- * drop means is `boardDrag.ts`'s, the desktop's own. The rules it adds:
+ * drop means is `boardDrag.ts`'s. How it shows:
  *
- *   .column.drop-target          dashed, --accent (the palettes' --accent too; a line bucket's is a 1px
- *                                dashed box, radius 9, it having no edge of its own)
- *   .column.drop-over            --fill-ghost-selected — except a line bucket in classic (its clear ground
- *                                is 0,3,0 over 0,2,0), a named line bucket selected or hovered (later at
- *                                0,4,0), and lanes (their ground is later at 0,4,0)
- *   .card-draggable              grab (`TaskCard`)
+ *   a column that would take it  dashed, --accent, in every palette (a line bucket's is a 1px dashed box,
+ *                                radius 9, it having no edge of its own)
+ *   the one under the pointer    --fill-ghost-selected — except a line bucket in classic, a named line
+ *                                bucket selected or hovered, and lanes, which keep their own ground
+ *   a card that can be lifted    grab (`TaskCard`)
  *
- * On web the gesture is the desktop's HTML5 drag: the card is `draggable` (`TaskCard`) and a column takes
- * `dragover`/`dragleave`/`drop` as the DOM's does. On a phone it is a long press and a pan (`Lift`): the
- * columns are measured when the card is lifted, the one under the finger is `over`, a picture of the card
- * follows the finger over the board, and letting go lands it — or, not having moved, is the long press.
+ * On web the gesture is HTML5 drag: the card is `draggable` (`TaskCard`) and a column takes
+ * `dragover`/`dragleave`/`drop`. On a phone it is a long press and a pan (`Lift`): the columns are
+ * measured when the card is lifted, the one under the finger is `over`, a picture of the card follows the
+ * finger over the board, and letting go lands it — or, not having moved, is the long press.
  *
  * The right-click menus: a card's (`onTaskMenu`) and a column's (`onColumnMenu`), at the pointer, the
- * column's only where no card took the click (the DOM's `closest(".card")` guard, read off `claimed`). On
- * a phone the gesture is a long press, and the menu's Open is what a long press did before.
+ * column's only where no card took the click (`claimed`). On a phone the gesture is a long press, and the
+ * menu's Open is what a long press did before.
  */
 
-/** What a drop needs, as the DOM board's props say it. */
+/** What a drop needs. */
 export type DragProps = {
   /** The moves waiting transitions are offering, by task (`on_user_event`); none by default. */
   dragOffers?: DragOffers;
@@ -201,8 +205,8 @@ export function Board({
   // Archived cards are held at the foot of each Finished lane; one Show here shows them in every column.
   const [showArchived, setShowArchived] = useState(false);
   const [confirming, setConfirming] = useState<MoveQuestion | null>(null);
-  // The card in the air, and its connect answers (one dry run per column per drag), as `board.tsx` holds
-  // them: what they mean is `boardDrag.ts`'s.
+  // The card in the air, and its connect answers (one dry run per column per drag): what they mean is
+  // `boardDrag.ts`'s.
   const [dragging, setDragging] = useState<BoardCard | null>(null);
   const connecting = useRef<ConnectDrag | null>(null);
   const [, answered] = useReducer((n: number) => n + 1, 0);
@@ -250,7 +254,7 @@ export function Board({
       targets.clear();
       edges.end();
       setGhost(null);
-      // As a DOM column's `drop`: only a column that would take it lands it; anywhere else it springs back.
+      // As a column's `drop` on web: only a column that would take it lands it; anywhere else it springs back.
       if (drop?.accepts === true) drop.onDrop();
       else putDown();
     },
@@ -284,7 +288,7 @@ export function Board({
   const cardOf = (card: BoardCard, last: boolean, column: BoardView["columns"][number] | null, tray = false): ReactNode => {
     const drill = drillOf(card);
     const move = column !== null ? moveFrom(card, column.key) : undefined;
-    // Only a card in a column is lifted (the tray's are not, as in the DOM), and only where a drop would mean something.
+    // Only a card in a column is lifted (the tray's are not), and only where a drop would mean something.
     const liftable = column !== null && canPickUp(card, dragOffers, onTaskDrop, connectDrop);
     const drawn = (
       <TaskCard
@@ -352,7 +356,7 @@ export function Board({
           followed={followed}
           archived={{
             shown: showArchived,
-            // The foot is a button inside the column, and in the DOM its click goes on to the column.
+            // The foot is a button inside the column, and claims its own click: it selects the column itself.
             onToggle: () => {
               setShowArchived((v) => !v);
               select?.();
@@ -379,8 +383,8 @@ export function Board({
           {board.columns.length === 0 ? <NoChildren /> : null}
         </View>
       ) : isWeb ? (
-        // A level below a root is a sequence and does not wrap. On web the row runs past the body, as the
-        // desktop's does, and the column (`BoardColumn`, which scrolls both ways) scrolls sideways.
+        // A level below a root is a sequence and does not wrap. On web the row runs past the body, and the
+        // column (`BoardColumn`, which scrolls both ways) scrolls sideways.
         <View flexDirection="row" alignItems="stretch" gap={10}>
           {columns}
           {board.columns.length === 0 ? <NoChildren /> : null}
@@ -426,7 +430,7 @@ function modsOf(e: unknown): Mods | undefined {
   return m !== undefined && typeof m === "object" && "shiftKey" in m ? { shiftKey: m.shiftKey === true, ctrlKey: m.ctrlKey === true, metaKey: m.metaKey === true } : undefined;
 }
 
-/** `<p class="empty">` in `.columns`: the body's 13/12.5, --dim, padding 8 0 and the paragraph's 1em margins. */
+/** What a level with no child states says: the body's 13/12.5, --dim, padding 8 0 and a paragraph's 1em margins. */
 function NoChildren(): JSX.Element {
   const t = useTokens();
   const size = t.scaled("size-app", 13 / 12.5);
@@ -438,8 +442,8 @@ function NoChildren(): JSX.Element {
 }
 
 /**
- * Blueprint's graph paper (`:root[data-palette="blueprint"] .board-body`): two 1px `--grid` gradients
- * tiled at 16px from the body's corner, the horizontal one over the vertical. On web, those gradients;
+ * Blueprint's graph paper, the ground of the board's body: two 1px `--grid` gradients tiled at 16px
+ * from the body's corner, the horizontal one over the vertical. On web, those gradients;
  * on a phone, which has no background images, the lines are views under everything else, laid when the
  * body's size is known.
  */
@@ -491,7 +495,7 @@ function mixBy(t: Tokens, a: string | number, pctToken: string, b: string | numb
 
 const CLEAR = "rgba(0, 0, 0, 0)";
 
-/** How a column, its heading and its body are drawn in a look — the cascade above, decided. */
+/** How a column, its heading and its body are drawn in a look — the table above, decided. */
 function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, hovered: boolean, target = false, over = false) {
   const named = look.palette !== "classic";
   const line = look.buckets === "line";
@@ -513,8 +517,8 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
   }
   let style: "dashed" | "solid" = blueprint ? "dashed" : "solid";
   let width = contrast ? 1.5 : 1;
-  // A drop target: the accent, dashed (`.column.drop-target`, and the palettes' `border-color`); a line
-  // bucket, with no edge, gets a 1px dashed box of its own.
+  // A drop target: the accent, dashed, in every palette; a line bucket, with no edge, gets a 1px dashed
+  // box of its own.
   if (target) {
     border = t.v("accent");
     style = "dashed";
@@ -523,7 +527,7 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
       radius = 9;
     }
   }
-  // Under the pointer: the fill the drop would land in — where no later or stronger ground wins (the header).
+  // Under the pointer: the fill the drop would land in — except where the column keeps its own ground (the header).
   if (over && !(line && (!named || selected || hovered))) ground = t.v("fill-ghost-selected");
   if (lane !== undefined) ground = line ? CLEAR : mixBy(t, lane, "lane-pct", t.v("bg"));
 
@@ -571,8 +575,8 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
 }
 
 /**
- * A board column (`board.tsx`'s `Column`): the track, its heading, and whatever was put in it. A click
- * anywhere that is not a card describes the column; a double-click (a long press on a phone) walks in.
+ * A board column: the track, its heading, and whatever was put in it. A click anywhere that is not a
+ * card describes the column; a double-click (a long press on a phone) walks in.
  */
 export function Column({
   t,
@@ -616,7 +620,7 @@ export function Column({
   /**
    * The cards, given the column's own click (for what inside it passes the click on) and whether
    * something follows them in the body — the "—", the preview, a move's question — so the last card is
-   * not the `:last-child` it would otherwise be.
+   * not the body's last child (`TaskCard`'s `last`).
    */
   children: (select: (() => void) | undefined, followed: boolean) => ReactNode;
 }): JSX.Element {
@@ -644,9 +648,9 @@ export function Column({
   } as const;
   const head = (
     <View
-      // Sticky on web, as the desktop's: the heading stays put while a long column scrolls under it
-      // (and Chromium composites it as it does the desktop's, which decides how its text is smoothed).
-      // On a phone `StickyHead` moves it instead.
+      // Sticky on web: the heading stays put while a long column scrolls under it (and how Chromium
+      // composites a sticky box decides how its text is smoothed). On a phone `StickyHead` moves it
+      // instead.
       {...((isWeb ? { position: "sticky", top: 0, zIndex: 1 } : {}) as object)}
       flexDirection="row"
       alignItems="baseline"
@@ -712,9 +716,9 @@ export function Column({
       ...(onOpen !== undefined ? { onDoubleClick: onOpen } : {}),
       ...(onMenu !== undefined ? { onContextMenu: (e: ReactMouseEvent) => (claimed.has(e.nativeEvent) ? undefined : onMenu(menuPointOf(e))) } : {}),
       ...(tip !== undefined ? { title: tip } : {}),
-      // `board.tsx`'s drop handlers, as they are: `preventDefault` on drag-over IS the acceptance, and a
-      // column that would refuse still tracks the pointer so it can say why. Leaving for a child is not
-      // leaving (the preview is one).
+      // The drop handlers: `preventDefault` on drag-over IS the acceptance, and a column that would
+      // refuse still tracks the pointer so it can say why. Leaving for a child is not leaving (the
+      // preview is one).
       ...(tracks
         ? {
             onDragOver: (e: ReactDragEvent) => {
@@ -751,8 +755,8 @@ export function Column({
 }
 
 /**
- * `board.tsx`'s `Lanes`: a column's cards under a heading per lane (`laneRunsOf`), and the archived ones
- * held at the foot behind one line saying how many.
+ * A column's cards under a heading per lane (`laneRunsOf`: none where every card is in the same lane),
+ * and the archived ones held at the foot behind one line saying how many.
  */
 function Lanes({
   cards,
@@ -764,7 +768,7 @@ function Lanes({
   cards: readonly BoardCard[];
   render: (card: BoardCard, last: boolean) => ReactNode;
   archived?: { shown: boolean; onToggle: () => void } | undefined;
-  /** In the "At this level" tray: each lane a full row of its own, wrapping (`.tray-cards .lane`). */
+  /** In the "At this level" tray: each lane a full row of its own, wrapping. */
   tray?: boolean;
   /** Something follows the cards in the column's body (`Column`'s `followed`). */
   followed?: boolean;
@@ -809,7 +813,7 @@ function Lanes({
   );
 }
 
-/** `.lane`: a box per lane; finished and not-started ones at 0.72 until the pointer is on them. */
+/** A box per lane; finished and not-started ones at 0.72 until the pointer is on them. */
 function Lane({ dimmed, tray, children }: { dimmed: boolean; tray: boolean; children: ReactNode }): JSX.Element {
   const [hovered, hover] = useHover();
   return (
@@ -824,7 +828,7 @@ function Lane({ dimmed, tray, children }: { dimmed: boolean; tray: boolean; chil
   );
 }
 
-/** `.lane-archived`: "N archived", a rule, Show/Hide — the foot of a column that holds archived tasks. */
+/** "N archived", a rule, Show/Hide — the foot of a column that holds archived tasks. */
 function ArchivedFoot({ count, archived }: { count: number; archived: { shown: boolean; onToggle: () => void } | undefined }): JSX.Element {
   const t = useTokens();
   const on = archived !== undefined;
@@ -863,11 +867,11 @@ function ArchivedFoot({ count, archived }: { count: number; archived: { shown: b
 }
 
 /**
- * `board.tsx`'s `MoveConfirm`: the move table's question, in the column the task would land in, under its
- * cards. `.connect-pop.connect-pop-inline.connect-confirm`: --panel, 1px --warn at 55% over --line, radius
- * 10, padding 12, gap 8, --lift, 8 above; the kind (`ConnectPop`'s: data 600 at `--size-app` × 10.5/12.5), the
- * sentence (1.45), and a primary and a ghost button (`button.primary`, `button.ghost` at the pop's
- * `--size-app`), gap 6, `.options`' 14 above.
+ * The move table's question (decision 0005): a drop — or a chip — whose move stops or pauses a working
+ * task asks first, in the column the task would land in, under its cards. The drop preview's box with a
+ * warning edge: --panel, 1px --warn at 55% over --line, radius 10, padding 12, gap 8, --lift, 8 above; the
+ * kind (`ConnectPop`'s `Kind`: data 600 at `--size-app` × 10.5/12.5), the sentence (1.45), and a primary
+ * and a ghost button at the box's `--size-app`, gap 6, 14 above.
  */
 function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: string; onYes: () => void; onNo: () => void }): JSX.Element {
   const t = useTokens();
@@ -894,7 +898,7 @@ function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: st
     >
       <Kind t={t}>Confirm the move</Kind>
       <Txt spec={{ voice: "app", scale: 1, lineHeight: 1.45 }}>{sentence}</Txt>
-      {/* `.options`: 14 above, on top of the grid's gap; the buttons in the pop's own size (`font: inherit`). */}
+      {/* The answers: 14 above, on top of the box's gap; the buttons in the box's own size. */}
       <View flexDirection="row" flexWrap="wrap" gap={6} marginTop={14}>
         <Button kind="primary" font={{ scale: 1 }} onPress={onYes}>
           {yes}

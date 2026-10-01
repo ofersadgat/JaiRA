@@ -7,11 +7,11 @@ import { Icon } from "../panel/Icon";
 import type { ChatListSurface } from "./ChatListPanel";
 
 /**
- * The open conversation's name in the title bar (`App.tsx`'s `span.chat-title`), universal (decision
- * 0015): where the other rooms put their address, set as the address's last crumb is. The rules:
+ * The open conversation's name in the title bar: where the other rooms put their address, set as the
+ * address's last crumb is. How it looks:
  *
- *   .chat-title         row, centred, gap 7, padding 0 16; app 600 13/12.5, line 1.3, --text
- *   .chat-title-glyph   14 square, --dim
+ *   the title           row, centred, gap 7, padding 0 16; app 600 13/12.5, line 1.3, --text
+ *   its glyph           14 square, --dim
  */
 export function ChatTitle({ surface }: { surface: Pick<ChatListSurface, "conversations" | "taskId"> }): JSX.Element {
   const t = useTokens();

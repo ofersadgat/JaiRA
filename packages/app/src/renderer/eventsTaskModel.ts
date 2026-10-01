@@ -1,8 +1,8 @@
 /**
- * What the events task's Automations panel (`eventsTaskPanel.tsx`) reads for itself — the settings in
- * effect at the task's layer, the watcher's word on the remotes, and the channel the automations are
- * read and written through — moved here unchanged, so the universal copy (`components/workflow/`,
- * over Settings' `AutomationsSection`) edits the same lines the same way (decision 0015).
+ * What the events task's Automations panel reads for itself — the settings in effect at the task's
+ * layer, the watcher's word on the remotes, and the channel the automations are read and written
+ * through. The panel (`packages/universal/src/components/workflow/ConfigPanel.tsx`) hands the result to
+ * Settings' `AutomationsSection`, so a task's automations are edited by the editor Settings has.
  *
  * It reads for itself what Settings reads from the store at the page's layer, because the panel can
  * show a task of a project the window is not standing on.

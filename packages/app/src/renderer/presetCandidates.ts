@@ -1,7 +1,7 @@
 /**
- * What a preset's Model section (`presetModel.tsx`) works out, as pure functions — where each candidate
- * stands on this machine, which one is picked now, what the rail line says and what the parser would
- * refuse — in a module of its own so the universal copy (decision 0015) runs the same code.
+ * What a preset's Model section works out, as pure functions — where each candidate stands on this
+ * machine, which one is picked now, what the rail line says and what the parser would refuse.
+ * `ModelsPage.tsx` (`packages/universal/src/components/settings`) draws from it.
  */
 import {
   accountOfRoute,

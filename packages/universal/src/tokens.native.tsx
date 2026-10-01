@@ -3,7 +3,8 @@ import { ReplayRoot, ReplayScope, useReplayLook, useReplayTokens } from "./token
 
 /**
  * Tokens on NATIVE (decision 0015): `styles.css`'s cascade replayed for where the component stands
- * (`tokensReplay.tsx`). The same API as `tokens.tsx`, which on web returns the CSS variables themselves.
+ * (`tokensReplay.tsx`). The same API as `tokens.tsx`, the web's, which reads the same replay under
+ * `Replayed`.
  */
 export type { Look, Tokens } from "./tokens";
 

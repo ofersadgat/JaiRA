@@ -1,6 +1,6 @@
 /**
- * What a gate's heading says beside the author's question — moved out of `components.tsx` unchanged so
- * the universal copy of the gate (decision 0015) draws the same glyph. Pure.
+ * What a gate's heading says beside the author's question: the glyph of its component. Pure;
+ * `GateSurface` (`packages/universal/src/components/panel/Gate.tsx`) draws it.
  */
 import type { ComponentName } from "@jaira/shared/browser";
 import type { PATHS } from "./iconPaths";

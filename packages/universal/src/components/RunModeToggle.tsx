@@ -6,14 +6,13 @@ import { useTokens } from "../tokens";
 type RunMode = "board" | "conversation";
 
 /**
- * `runViews.tsx`'s `RunModeToggle`, universal (decision 0015): which reading of a drilled run is on screen,
- * its board or its conversation — two words in one ring. The rules, from `styles.css`:
+ * Which reading of a drilled run is on screen, its board or its conversation — two words in one ring.
+ * How it looks:
  *
- *   .run-mode            row, 1px --line ring, radius 6, clipped
- *   .run-mode button     no ring, no radius, no ground, app voice at 12/12.5 (line 1.5), padding 4 11,
- *                        --dim; hovered: --panel-3 (`button:hover:not(:disabled)`, (0,2,1), outranks it)
- *   .run-mode button.on  --panel-2 ground, --text — later than the hover rule at the same (0,2,1), so
- *                        the one that is on keeps its ground under the pointer
+ *   the ring             row, 1px --line ring, radius 6, clipped
+ *   a word               no ring, no radius, no ground, app voice at 12/12.5 (line 1.5), padding 4 11,
+ *                        --dim; hovered: --panel-3
+ *   the one that is on   --panel-2 ground, --text, and it keeps its ground under the pointer
  */
 export function RunModeToggle({ mode, onMode }: { mode: RunMode; onMode: (mode: RunMode) => void }): JSX.Element {
   const t = useTokens();

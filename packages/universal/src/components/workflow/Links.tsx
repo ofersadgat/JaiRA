@@ -9,19 +9,18 @@ import { ValueView } from "../panel/ValueView";
 import { Box, FieldName, Sub, useLists, useReadOnly, type ControlSize, type Mark } from "./controls";
 
 /**
- * `links.tsx`, `linkPreview.tsx` and `readValue.tsx`, universal (decision 0015): the link toggle, the
- * box a linked value shows instead of its own control, what the linked file says under it, and the
- * value a run put through a slot. What they say and decide is `linkModel.ts`'s. The rules:
+ * A linked value in the workflow editor: the link toggle, the box a linked value shows instead of its
+ * own control, what the linked file says under it, and the value a run put through a slot. What they
+ * say and decide is `linkModel.ts`'s. How they look:
  *
- *   .link-toggle          a `.ghost.sm` at app 10/12.5, padding 1 5, 6 in from what it follows, at 0.7
- *                         (hovered 1); `.on` --accent ring and text at 1
- *   .link-input           data 11.5/12; `.unresolved` ringed --warn, and `.sub.warn` under it
- *   .link-preview         column, 4 above, a 2px --rule on its left, 8 in; `.link-preview-bar` row,
- *                         centred, gap 5, padding 1 4, 4 out to the left, radius 5 (hovered
- *                         --fill-ghost-hover); its `.half-caret` app 10/12.5 --dim; `.link-preview-body`
- *                         padding 4 0 2, at most 320 tall
- *   .field.run-value      the field, its name in --accent; `.value-box` data 11.5/12, pre-wrap, padding
- *                         6 9, 1px --line, radius --control-radius, --panel-2, at most 260 tall
+ *   the toggle            a small ghost button, app 11/12.5, padding 2 8, 6 in from what it follows, at
+ *                         0.7 (hovered 1); linked, an --accent ring and text at 1
+ *   the linked box        data 11.5/12; naming nothing, ringed --warn with a --warn note under it
+ *   the preview           column, 4 above, a 2px --rule on its left, 8 in; its bar a row, centred,
+ *                         gap 5, padding 1 4, 4 out to the left, radius 5 (hovered --fill-ghost-hover);
+ *                         the bar's caret app 10/12.5 --dim; its body padding 4 0 2, at most 320 tall
+ *   the run's value       a field, its name in --accent; the box at the data size × 11.5/12, pre-wrap,
+ *                         padding 6 9, 1px --line, radius --control-radius, --panel-2, at most 260 tall
  */
 
 /** The link/unlink toggle — a chain glyph and the word. Nothing in a reading. */
@@ -49,7 +48,7 @@ export function LinkToggle({ linked, disabled = false, onToggle }: { linked: boo
         borderColor: t.v(linked ? "accent" : hovered && !disabled ? "rule" : "line"),
       })}
     >
-      {/* `.link-toggle`'s 10/12.5 and 1 5 lose to `button.sm`'s 11/12.5 and 2 8 (more specific). */}
+      {/* A small button's face and padding: app 11/12.5, and 2 8 on the box above. */}
       <Txt spec={{ voice: "app", scale: 11 / 12.5, color: linked ? "accent" : "text" }} numberOfLines={1}>
         {linkToggleWords(linked)}
       </Txt>
@@ -147,7 +146,7 @@ export function ReadValue({ value, ...layout }: { value: JsonValue | undefined }
         backgroundColor={t.v("panel-2") as never}
         {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
       >
-        {/* `.value-box.mono`: `.mono` sets nothing here, so the text is the app voice at the data size. */}
+        {/* The value: the data SIZE (× 11.5/12) in the app voice, not the data face. */}
         <Txt spec={{ voice: "app", scale: (11.5 / 12) * (12 / 12.5) }} {...({ style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } } as object)}>
           {valueTextOf(value)}
         </Txt>

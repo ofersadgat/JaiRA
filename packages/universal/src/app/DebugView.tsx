@@ -4,8 +4,8 @@ import { PanelColumn } from "./PanelColumn";
 import { useShell } from "./shell";
 
 /**
- * The Debug room (`DebugPane`), as `App.tsx` draws it in `.viewport` (decision 0015), with the props
- * `App.tsx` hands its own and the shell's side panel beside it.
+ * The Debug room: `DebugPane` (the self-test) on the store — the run, what it said, and the verbs that
+ * start, cancel and recheck it — with the shell's side panel beside it.
  */
 export function DebugView(): JSX.Element {
   const { state, actions } = useShell();

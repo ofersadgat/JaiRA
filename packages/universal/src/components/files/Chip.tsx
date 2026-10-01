@@ -4,16 +4,17 @@ import { Txt, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 
 /**
- * `.chip`, as the Files room wears it (the tree's lint counts, "shadowed", "override", the Built in
- * root's "edits copy to Shared"; the address bar's error counts and "built in"). The rules, from
- * `styles.css`:
+ * A word or a count in a pill, as the Files room wears it (the tree's lint counts, "shadowed",
+ * "override", the Built in root's "edits copy to Shared"; the address bar's error counts and "built
+ * in"). How it looks:
  *
- *   .chip        10/12.5 of --size-app, --dim, 1px --line, radius 999, padding 0 6, nowrap, flex none
- *   .chip-bad    --bad, and its ring
- *   .chip-warn   --warn, and its ring
+ *   the pill     10/12.5 of --size-app, --dim, 1px --line, radius 999, padding 0 6, one line, never
+ *                growing or shrinking
+ *   `bad`        --bad, and its ring
+ *   `warn`       --warn, and its ring
  *
- * The family, weight and line height are inherited in the DOM (the tree's rows: the app voice at 1.5,
- * 600 on the selected row), so they come in as `spec`.
+ * The weight and line height are those of the row it stands in (the tree's: the app voice at 1.5, 600
+ * on the selected row), so they come in as `spec`.
  */
 export function Chip({
   tone,

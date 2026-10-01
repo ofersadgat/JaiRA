@@ -11,19 +11,18 @@ import { selectKeyProps } from "../form/selectKeys";
 import { useReadingForm } from "../form/Field";
 
 /**
- * The settings fields, universal (decision 0015): `controls.tsx`'s `SelectInput` and `editorKnobs.tsx`'s
- * `SizeStep`. The rules they carry, from `styles.css`:
+ * The settings fields: `SelectInput`, `SizeStep` and `TextField`. How the first two look (the text
+ * box's is at `TextField`):
  *
- *   select.cfg-input     1px --line (hovered --rule), radius --control-radius, --bg, padding 6 9, app
+ *   the select           1px --line (hovered --rule), radius --control-radius, --bg, padding 6 9, app
  *                        at 12.5/12.5 in --text on a `normal` line (DM Sans: 1.3867); as wide as its
  *                        widest choice plus the menulist's arrow (`MenulistArrow`, the plain select's
- *                        too). Disabled (`select:disabled`, then `.cfg-input:disabled`): --dim on
- *                        --panel-2, at 0.55.
- *   .size-box            row, centred, gap 5, padding 3 4 3 9, 1px --line, radius --control-radius,
+ *                        too). Disabled: --dim on --panel-2, at 0.55.
+ *   the size's box       row, centred, gap 5, padding 3 4 3 9, 1px --line, radius --control-radius,
  *                        --panel
- *   .size-n              34 wide, right-aligned, data-num (data 600 at 0.79, tabular) in --text
+ *   its number           34 wide, right-aligned, data-num (data 600 at 0.79, tabular) in --text
  *   the unit             data-faint
- *   .size-step button    15×10, ▲ ▼ at 7px on a line of 1, --dim (hovered --text); at a limit 0.35
+ *   a step's arrow       15×10, ▲ ▼ at 7px on a line of 1, --dim (hovered --text); at a limit 0.35
  */
 
 /**
@@ -39,7 +38,7 @@ const MENULIST_INSET = 4;
 const MENULIST_ROOM = 40.6 - 18 - 2 - MENULIST_INSET;
 const MENULIST_SNAPPED = 20 - MENULIST_INSET;
 
-/** A closed set of choices — `controls.tsx`'s `SelectInput`. It opens a menu of them. */
+/** A closed set of choices. It opens a menu of them. */
 export function SelectInput({
   value,
   options,
@@ -51,11 +50,11 @@ export function SelectInput({
   options: ReadonlyArray<readonly [label: string, value: string]>;
   onChange: (v: string) => void;
   disabled?: boolean | undefined;
-  /** `width: 100%`, as a `.cfg-input` in a field's control is. */
+  /** `width: 100%`, for one that is a field's control. */
   fill?: boolean;
 }): JSX.Element {
   const t = useTokens();
-  // In a reading (`.vv-form .cfg-control select`): no ground or ring, --text; `:disabled`'s 0.55 stays.
+  // In a reading (`useReadingForm`): no ground or ring, --text; a disabled one's 0.55 stays.
   const reading = useReadingForm();
   const box = useRef<RNView | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
@@ -116,7 +115,7 @@ export function SelectInput({
   );
 }
 
-/** A size as a number and a stepper — `editorKnobs.tsx`'s `SizeStep`. */
+/** A size as a number and a stepper. */
 export function SizeStep({
   value,
   limits,
@@ -169,7 +168,7 @@ export function SizeStep({
           if (text.trim() !== "" && Number.isFinite(n)) onChange(n);
         }}
         onBlur={() => setDraft(null)}
-        // `type="number"`: ↑ and ↓ step it, as the arrows beside it do (a keyboard's; a phone has the arrows).
+        // As in a number box, ↑ and ↓ step it, as the arrows beside it do (a keyboard's; a phone has the arrows).
         onKeyPress={(e) => {
           const key = e.nativeEvent.key;
           if (disabled || (key !== "ArrowUp" && key !== "ArrowDown")) return;
@@ -189,10 +188,10 @@ export function SizeStep({
 }
 
 /**
- * `controls.tsx`'s `TextInput`: a plain text box (`.cfg-input`) — app at 12.5/12.5 on the body's 1.5
- * line, --text on --bg, 1px --line (hovered --rule), radius --control-radius, padding 6 9. With no width
- * it is an <input>'s own: 20 characters, 152 wide at 12.5px (10.56 × the size, and the padding and border). Disabled: 0.55 opacity,
- * --dim on --panel-2.
+ * A plain text box — app at 12.5/12.5 on the body's 1.5 line, --text on --bg, 1px --line (hovered
+ * --rule), radius --control-radius, padding 6 9. With no width it is an <input>'s own: 20 characters,
+ * 152 wide at 12.5px (10.56 × the size, and the padding and border). Disabled: 0.55 opacity, --dim on
+ * --panel-2.
  */
 export function TextField({
   value,

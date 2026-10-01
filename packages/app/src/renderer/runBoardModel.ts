@@ -1,8 +1,7 @@
 /**
  * What a run's BOARD derives — the columns, the executions in each, the drags a waiting transition
- * offers, and what each execution's card says — moved out of `runViews.tsx` unchanged so the universal
- * copy (decision 0015, `packages/universal/src/components/run/`) draws the same board from the same
- * reading. Nothing here touches the DOM.
+ * offers, and what each execution's card says. Nothing here draws: `RunBoard.tsx` and `RunView.tsx`
+ * (`packages/universal/src/components/run/`) do.
  */
 import { MOVE_EVENTS, type InstanceNode, type PendingUserEvent, type StateChild, type StateView } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "./fileTypes";

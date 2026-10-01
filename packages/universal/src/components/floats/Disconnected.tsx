@@ -5,13 +5,13 @@ import { useTokens } from "../../tokens";
 import { useConnectionLost } from "../../app/connection";
 
 /**
- * `Shell.tsx`'s "Disconnected" line, universal (decision 0015): the connection to the machine went
- * away, said across the top of the window over everything until the bridge is welcomed again (it tries
- * by itself, with growing waits). Its style is inline on the DOM page (`BANNER`), not a `styles.css` rule:
+ * The "Disconnected" line: the connection to the machine went away, said across the top of the window
+ * over everything until the bridge is welcomed again (it tries by itself, with growing waits). How it
+ * looks:
  *
- *   fixed across the top (inset 0 0 auto 0), z 1000; padding 6 12; --fill-accent (which every look sets),
- *   #fff; `font: 12px var(--font-app)` — 12px whatever the size preference, 400, on a `normal` line
- *   (DM Sans's: 12 + 4, Chromium rounding its ascent and descent apart)
+ *   fixed across the top, z 1000; padding 6 12; --fill-accent (which every look sets), #fff; the app
+ *   face at 12px whatever the size preference, 400, on a line of 16 (DM Sans's `normal` at 12: 12 + 4,
+ *   Chromium rounding its ascent and descent apart)
  *
  * `staged` places it in its box rather than the window's (the specimens).
  */

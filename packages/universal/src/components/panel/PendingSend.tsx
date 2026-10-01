@@ -5,12 +5,12 @@ import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";
 
 /**
- * `offline.tsx`'s `PendingSend`, universal (decision 0015): a gate answered here for a machine that is
- * offline — the answer waits in the outbox, said under the gate, with a way to take it back.
+ * A gate answered here for a machine that is offline — the answer waits in the outbox, said under the
+ * gate, with a way to take it back.
  *
- *   .pending-send    row, centred, gap 10, 10 above, padding 8 10, radius --control-radius, --tint-warn,
+ *   the strip        row, centred, gap 10, 10 above, padding 8 10, radius --control-radius, --tint-warn,
  *                    app 12/12.5
- *   .pending-dot     8 round, a 1.5px --warn ring
+ *   its dot          8 round, a 1.5px --warn ring
  */
 export function PendingSend({ machine, onTakeBack }: { machine: string; onTakeBack: () => void }): JSX.Element {
   const t = useTokens();

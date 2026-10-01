@@ -9,25 +9,24 @@ import { MenuLayer } from "../MenuLayer";
 import { Float } from "./Float";
 
 /**
- * The approval's answer menu (`approvalSurface.tsx`'s `Popover` of `.cx-submenu.answer-menu`), universal
- * (decision 0015): what the answer covers — a segmented choice per distinct set of widths among the
- * asking parts, each by its part's colour — then how far it reaches, the default ticked, then why
- * something is not offered. Below its split button, start-aligned, over everything. The rules:
+ * The approval's answer menu: what the answer covers — a segmented choice per distinct set of widths
+ * among the asking parts, each by its part's colour — then how far it reaches, the default ticked, then
+ * why something is not offered. Below its split button, start-aligned, over everything. How it looks:
  *
- *   .cx-submenu            column, gap 1, padding 4, 1px --line, radius 9, --panel, a 0 10 28 shadow at
- *                          28% black; .answer-menu 390 to 460 wide (at most 86% of the window)
- *   .answer-what           column, gap 4, padding 4 7 6; its label a .cx-opt-hint; a row per choice
+ *   the card               column, gap 1, padding 4, 1px --line, radius 9, --panel, a 0 10 28 shadow at
+ *                          28% black; 390 to 460 wide (at most 86% of the window)
+ *   what it covers         column, gap 4, padding 4 7 6; its label set as a hint; a row per choice
  *                          (centred, gap 7): the swatch (9, radius 3) when there are several, then
- *                          .verdict-seg — 1px --line, radius --control-radius, --panel, clipped; its
- *                          buttons share the width, centred, padding 4 9, app 11/12.5 at 500 (650 on; the
- *                          widths' `.mono` is `.approval-surface`'s, so out here it is the same face),
- *                          --dim, a --line between; on: --accent at 13%, --text
- *   .answer-rule           1 tall, 3 4 margins, --line
- *   .cx-submenu button     a row from the top left, gap 8, padding 5 7, radius 7, --dim; hovered --text
- *                          at 7% and --text; on: --accent at 13% and --text
- *   .cx-tick               10 wide, --ok, app 11/12.5;  .cx-opt-text column, gap 1
- *   .cx-opt-name           app 12/12.5 at 500, line 1.25;  .cx-opt-hint app 10.5/12.5, line 1.3, --tok-hint
- *   .answer-note           padding 4 7 5, app 10.5/12.5, line 1.4, --tok-hint
+ *                          the segmented choice — 1px --line, radius --control-radius, --panel, clipped;
+ *                          its buttons share the width, centred, padding 4 9, app 11/12.5 at 500 (650 on;
+ *                          the widths in the same face as the words round them), --dim, a --line
+ *                          between; on: --accent at 13%, --text
+ *   a rule                 1 tall, 3 4 margins, --line
+ *   a reach                a row from the top left, gap 8, padding 5 7, radius 7, --dim; hovered --text
+ *                          at 7% and --text; the default: --accent at 13% and --text
+ *   its tick               10 wide, --ok, app 11/12.5;  its words a column, gap 1
+ *   its name               app 12/12.5 at 500, line 1.25;  a hint app 10.5/12.5, line 1.3, --tok-hint
+ *   a note                 padding 4 7 5, app 10.5/12.5, line 1.4, --tok-hint
  */
 export function AnswerMenuCard({
   anchor,
@@ -182,13 +181,13 @@ export function AnswerMenuCard({
 
 const HINT = { voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: "tok-hint" } as const;
 
-/** `.answer-rule`: a --line, 1 tall, 3 above and below, 4 in. */
+/** The rule between the menu's parts: a --line, 1 tall, 3 above and below, 4 in. */
 function Rule(): JSX.Element {
   const t = useTokens();
   return <View height={1} marginVertical={3} marginHorizontal={4} backgroundColor={t.v("line") as never} />;
 }
 
-/** A hint is words, and the text that will be written set in the data face. */
+/** A hint is words, and the text that will be written set in bold. */
 export function Hint({ hint, spec }: { hint: readonly HintPiece[]; spec: Record<string, unknown> }): JSX.Element {
   const t = useTokens();
   return (
@@ -197,7 +196,7 @@ export function Hint({ hint, spec }: { hint: readonly HintPiece[]; spec: Record<
         typeof piece === "string" ? (
           <Fragment key={at}>{piece}</Fragment>
         ) : (
-          // `b.mono`, outside `.approval-surface`: bold in the hint's own face.
+          // Bold in the hint's own face, not the data face.
           <Text key={at} {...(font(t, { voice: "app", scale: (spec["scale"] as number) ?? 1, lineHeight: (spec["lineHeight"] as number) ?? 1.5, weight: 700, color: spec["color"] as string }) as object)}>
             {piece.code}
           </Text>

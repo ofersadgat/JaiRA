@@ -1,7 +1,7 @@
 /**
  * The conversation's PAGE as rows — which notes and bands, in what order, and where each sits on the
- * rail — moved out of `sessionPanels.tsx`'s `SessionBandsView` unchanged so the universal copy of the
- * conversation (decision 0015) lays out the same page. Pure: what a row says is the caller's.
+ * rail. Pure: what a row says is the caller's (`SessionBands`,
+ * `packages/universal/src/components/panel/SessionBands.tsx`).
  */
 import { addressSegment, segmentKey } from "@jaira/shared/browser";
 import type { ContextReading, InstanceNode } from "@jaira/shared/browser";
@@ -44,7 +44,7 @@ export function stepOfNote(note: BandNote, root: string): RailStep {
 /**
  * Whether the whole view is ONE operation — in which case none of the chrome above is earned.
  *
- * The chrome rule (see `transcriptView.tsx`) is that a card marks the boundary between one operation
+ * The chrome rule is that a card marks the boundary between one operation
  * and the next. A view holding a single piece has no next, so its card is a fold, a status dot and a
  * call signature wrapped around the only thing on the page — and it reads as a CHILD of what you are
  * looking at rather than as what you are looking at. Walking into a leaf run and being shown its
@@ -127,7 +127,7 @@ export function pageRowsOf(given: readonly SessionBand[], notes: readonly BandNo
       {
         key: `b${i}`,
         // The CHILD KEY where there is one, which is what `paletteOfRun` keys its hues by — see
-        // `laneColour` in `railView.tsx`.
+        // `laneColour` in the universal tree's `Rail.tsx`.
         stateId: lead === undefined ? "" : (lead.node.childKey ?? lead.node.stateId),
         at: lead === undefined ? [] : atPiece(lead),
         opens: false,
@@ -223,8 +223,7 @@ export type MarkedRow = { kind: "row"; index: number } | { kind: "cut"; states: 
 
 /**
  * The page with the two things placed among its rows by the clock — an ARMED rewind's counted line (and
- * which rows it rings and fades) and a forked task's origin seam — moved unchanged out of
- * `sessionPanels.tsx`'s `SessionBandsView`, so the universal copy places them the same way.
+ * which rows it rings and fades) and a forked task's origin seam.
  *
  * The entry's own row keeps its words and takes the ring; the counted line goes right under it, and
  * everything after fades — by the clock when the entry is not a row on this page. The seam goes after

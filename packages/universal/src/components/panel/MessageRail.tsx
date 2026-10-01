@@ -17,26 +17,25 @@ import { InNoteContext } from "./noteContext";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 
 /**
- * `transcriptView.tsx`'s message rail, universal (decision 0015): what can be done to a message, what it
- * is, and when it was said — invisible at rest, shown under the pointer (or, on a phone, after a long
- * press on the message). The menus' rows, the tooltips and the clock are `messageReading.ts`'s, the
- * desktop's own. The rules:
+ * A message's rail: what can be done to a message, what it is, and when it was said — invisible at
+ * rest, shown under the pointer (or, on a phone, after a long press on the message). The menus' rows,
+ * the tooltips and the clock are `messageReading.ts`'s. How it looks:
  *
- *   .ts-rail       row, centred, gap 2, 4 above, padding 0 1, at least 22 tall, wraps, --dim; opacity 0
+ *   the rail       row, centred, gap 2, 4 above, padding 0 1, at least 22 tall, wraps, --dim; opacity 0
  *                  at rest; a user message's to the right
- *   .ts-act        padding 4, radius --control-radius-sm, the icon 13, --dim; hovered
+ *   an action      padding 4, radius --control-radius-sm, the icon 13, --dim; hovered
  *                  --fill-ghost-hover and --text
- *   .ts-rail-cut   1 wide, the row's height less 3 each end, 5 each side, --line
- *   .ts-slot       data 10/12, --dim, 2 right
- *   .ts-type       row, gap 4, padding 2 6, 1px --line, radius --control-radius-sm, --panel, app
+ *   the divider    1 wide, the row's height less 3 each end, 5 each side, --line
+ *   the slot       an output's name: data 10/12, --dim, 2 right
+ *   the type chip  row, gap 4, padding 2 6, 1px --line, radius --control-radius-sm, --panel, app
  *                  10.5/12.5 line 1.35, --dim (hovered --text; asserted: --accent, --accent 42% into
- *                  --line); its icon 12; `▾` 8, at .7.   .ts-read the same, 3 in (.on once a reading
- *                  was picked); each opens its menu under it, from its left edge, 3 below
- *   .ts-clock      data 10.5/12, tabular, --dim, padding 0 4
+ *                  --line); its icon 12; `▾` 8, at .7. The reading chip the same, 3 in (lit once a
+ *                  reading was picked); each opens its menu under it, from its left edge, 3 below
+ *   the clock      data 10.5/12, tabular, --dim, padding 0 4
  *
  * The context reading after a turn is `TurnContext.tsx`. "…" offers "Open in context panel", which the
- * shell's `ValuePanelContext` pushes on the room's panel stack, as `App.tsx`'s does — and is not drawn
- * where there is no panel. On a phone there is no element to hang a menu from: it opens at the press.
+ * shell's `ValuePanelContext` pushes on the room's panel stack — and is not drawn where there is no
+ * panel. On a phone there is no element to hang a menu from: it opens at the press.
  */
 export function MessageRail({
   entry,
@@ -53,7 +52,7 @@ export function MessageRail({
   value: JsonValue;
   reading: ReturnType<typeof messageReadingOf>;
   onPick: (view: ViewId) => void;
-  /** A reading was picked on the rail (`.ts-read.on`). */
+  /** A reading was picked on the rail: its chip is lit. */
   picked: boolean;
   shown: boolean;
   onEdit: EditMessage | undefined;
@@ -116,7 +115,7 @@ export function MessageRail({
       flexDirection="row"
       alignItems="center"
       gap={2}
-      // Inside a note row (an adopted task's history) the note's own rail rule reaches this one too.
+      // Inside a note row (an adopted task's history) the rail is the note's: at the row's end, on one line.
       {...(inNote ? { marginLeft: "auto", alignSelf: "center", flexWrap: "nowrap" } : { marginTop: 4, paddingHorizontal: 1, minHeight: 22, flexWrap: "wrap" })}
       opacity={shown ? 1 : 0}
       {...(entry.role === "user" ? { justifyContent: "flex-end" } : {})}
@@ -142,7 +141,7 @@ export function MessageRail({
               })
             }
             title={`${named.label} — ${mime}${asserted ? `, set by you (JaiRA said ${typeNameOf(given).label})` : ""}`}
-            // Each of the rail's three menus says it is one and whether it is open, as the desktop's buttons do.
+            // Each of the rail's three menus says it is one and whether it is open.
             {...({ "aria-haspopup": "menu", "aria-expanded": menu?.title === "This text is" } as object)}
             flexDirection="row"
             alignItems="center"
@@ -188,7 +187,7 @@ export function MessageRail({
               backgroundColor={t.v("panel") as never}
             >
               {({ hovered }) => {
-                // `.ts-read.on` comes after `:hover`: a picked reading stays --accent under the pointer.
+                // A picked reading stays --accent under the pointer.
                 const ink = picked ? "accent" : hovered ? "text" : "dim";
                 return (
                   <>
@@ -210,8 +209,8 @@ export function MessageRail({
       <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim", tabular: true }} paddingHorizontal={4} numberOfLines={1} {...((isWeb && fullClockOf(entry.at) !== undefined ? { title: fullClockOf(entry.at) } : {}) as object)}>
         {stampOf(entry.at)}
       </Txt>
-      {/* "What else can be done with this": open it in the context panel (`valuePanel.ts`), as the
-          desktop's — only where there is a panel to open it in. */}
+      {/* "What else can be done with this": open it in the context panel (`valuePanel.ts`) — only where
+          there is a panel to open it in. */}
       {panel !== null ? (
         <Press
           onPress={(e) =>

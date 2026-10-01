@@ -1,7 +1,7 @@
 /**
- * The frame an interactive artifact runs in — moved out of `valueView.tsx` unchanged, so the `artifact`
- * island on web (decision 0015, the universal page's `Island.tsx`) draws this very frame and nothing of
- * the value view's editors. What grants it an address is `artifactFrame.ts`.
+ * The frame an interactive artifact runs in, in a file of its own so the `artifact` island on web
+ * (decision 0015, `packages/universal/src/islands/Island.tsx`) draws this frame and carries no editor.
+ * What grants it an address is `artifactFrame.ts`.
  */
 import { useEffect, useRef, type CSSProperties, type JSX } from "react";
 
@@ -48,6 +48,6 @@ export function InteractiveArtifact({ url, onPrompt, style }: { url: string; onP
     return () => window.removeEventListener("message", onMessage);
   }, [onPrompt]);
 
-  // `style`: `.vv-html`'s box, inline, for the universal page, which has no `styles.css` (as `Html`'s).
+  // `style`: the frame's box, stated inline by the host (`Island.tsx`), as `Html`'s is.
   return <iframe className="vv-html" ref={frame} sandbox="allow-scripts" src={url} title="Interactive artifact" style={style} />;
 }

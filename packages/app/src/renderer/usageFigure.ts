@@ -1,5 +1,5 @@
 /**
- * The account figure the composer shows after the model chip — moved out of `usageMeters.tsx` unchanged (decision 0015).
+ * The account figure the composer shows after the model chip.
  */
 import {
   creditPercent,

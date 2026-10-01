@@ -4,16 +4,16 @@ import { Pressable, View } from "react-native";
 import { NO_DRAG } from "../primitives";
 
 /**
- * `.float`'s `no-drag`, for whatever a layer holds: the desktop's drag strips are hit-tested by the OS, so
- * a press on a float lying over one would move the window and never reach the page. The property inherits,
- * and this box has none of its own (`display: contents`): each float punches its own shape out of the
- * strip, and the rest of the strip still moves the window, as beside a `.float`.
+ * `no-drag`, for whatever a layer holds: the desktop's drag strips are hit-tested by the OS, so a press
+ * on a float lying over one would move the window and never reach the page. The property inherits, and
+ * this box has none of its own (`display: contents`): each float punches its own shape out of the strip,
+ * and the rest of the strip still moves the window.
  */
 export const FLOATS: Record<string, unknown> = { display: "contents", ...NO_DRAG };
 
 /**
- * The layers that are open, oldest first. Escape closes the one on TOP and no other, as the desktop's
- * popovers do (`popover.tsx`'s stack): a menu opened from a card closes, and the card stays.
+ * The layers that are open, oldest first. Escape closes the one on TOP and no other: a menu opened from
+ * a card closes, and the card stays.
  */
 const OPEN: { close: () => void }[] = [];
 
@@ -26,9 +26,9 @@ const typedInBox = (target: EventTarget | null): boolean => {
 /**
  * Escape, for the layer on top. Heard as the event goes DOWN to its target: react-native-web's text boxes
  * stop a key from bubbling past them, so a listener on the window's way up never heard Escape while one
- * had the focus — a right-click menu opened over the composer, a card with a box in it — where the
- * desktop's `window` listener closes both. A key typed into a box is its box's first (the composer's `@`
- * list, a suggestion list): the layer closes after the box has had it, unless the box took it.
+ * had the focus (a right-click menu opened over the composer, a card with a box in it). A key typed into
+ * a box is its box's first (the composer's `@` list, a suggestion list): the layer closes after the box
+ * has had it, unless the box took it.
  */
 function onEscape(event: KeyboardEvent): void {
   if (event.key !== "Escape") return;
@@ -42,8 +42,8 @@ function onEscape(event: KeyboardEvent): void {
 
 /**
  * The web half of `MenuLayer.tsx`: a fixed layer in `<body>`, out of every stacking context and
- * `overflow` round the row it was opened from (the desktop's `Popover` does the same). Closed by a press
- * outside the menu, Escape, or the window resizing — the desktop menu's rules.
+ * `overflow` round the row it was opened from. Closed by a press outside the menu, Escape, or the window
+ * resizing.
  */
 export function MenuLayer({ onClose, z = 1000, children }: {
   onClose: () => void;
@@ -70,7 +70,7 @@ export function MenuLayer({ onClose, z = 1000, children }: {
   }, [onClose]);
   return createPortal(
     <View style={{ position: "fixed" as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: z }}>
-      {/* Out of the Tab order: the desktop's menu is closed by a press anywhere else, which is no control at all. */}
+      {/* Out of the Tab order: a menu is closed by a press anywhere else, which is no control at all. */}
       <Pressable tabIndex={-1} onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, cursor: "default" as never }} accessibilityLabel="close the menu" />
       <View style={FLOATS as never}>{children}</View>
     </View>,

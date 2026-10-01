@@ -665,9 +665,10 @@ const RENDERER_CONSOLE_LIMIT = 50;
 /**
  * How tall the strip along the top of the window is, in px.
  *
- * One number, and the renderer must not disagree with it: the OS draws the minimise/maximise/close
- * buttons into a band of exactly this height, and the app reads the band back out of the
- * `titlebar-area-*` CSS environment variables rather than repeating it — see `styles.css`.
+ * One number, and the page must not disagree with it: the OS draws the minimise/maximise/close
+ * buttons into a band of exactly this height. The page's top row is the same 34, and keeps clear of
+ * the buttons by the `titlebar-area-*` CSS environment variables — see `WINDOW_GUTTER`
+ * (`packages/universal/src/primitives.tsx`).
  */
 const TITLE_BAR_HEIGHT = 34;
 

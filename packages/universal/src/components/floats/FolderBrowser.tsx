@@ -12,21 +12,20 @@ import { Segmented } from "../settings/controls";
 import { ModalBox } from "./Modal";
 
 /**
- * `folderBrowser.tsx`'s `FolderBrowser`, universal (decision 0015): choosing a folder on a paired machine,
- * read by that machine's engine (`files:browse`) — the machine switcher, the roots and where it is, the
- * folders (a click goes in), and Open (or Make a project) naming the folder and the machine. The rules,
- * from `styles.css` (two sets of `.folder-list` and `.folder-row` rules; the later wins where both say):
+ * Choosing a folder on a paired machine, read by that machine's engine (`files:browse`) — the machine
+ * switcher, the roots and where it is, the folders (a click goes in), and Open (or Make a project)
+ * naming the folder and the machine. How it looks:
  *
- *   .folder-browser        the dialog, 560 wide (or 90% of the window), a column, gap 10
- *   .folder-browser-title  the heading, no margin: app 17/12.5 700, line 1.35
- *   .folder-crumbs         row, wrapping, centred, gap 4: each root a `ghost` button, then where it is
- *                          (`code.folder-at`: data 11/12, --dim, 6 in, one line)
- *   .folder-list           at most 320 tall, scrolling; 1px --line, radius --control-radius; padding
- *                          8 10, gap 1 (the earlier rule's)
- *   .folder-row            row, centred, gap 8, padding 6 10, --panel, a --line under all but the last;
+ *   the dialog             560 wide (or 90% of the window), a column, gap 10
+ *   its title              the heading, no margin: app 17/12.5 700, line 1.35
+ *   the roots              row, wrapping, centred, gap 4: each root a `ghost` button, then where it is
+ *                          (data 11/12, --dim, 6 in, one line)
+ *   the list               at most 320 tall, scrolling; 1px --line, radius --control-radius; padding
+ *                          8 10, gap 1
+ *   a folder               row, centred, gap 8, padding 6 10, --panel, a --line under all but the last;
  *                          app 13/12.5; hovered --panel-2; a project on --tint-accent; its glyph --dim, 12
- *   .cfg-hint              app 11/12.5, line 1.4, --dim; an error in --bad
- *   .folder-foot           row, centred, gap 8: the rest, Cancel (`ghost`), Open (`primary`)
+ *   the hint               app 11/12.5, line 1.4, --dim; an error in --bad
+ *   the foot               row, centred, gap 8: the rest, Cancel (`ghost`), Open (`primary`)
  */
 export function FolderBrowser({
   machines,

@@ -5,7 +5,7 @@
  * ("could not get idle state"). The deep link's `&still=1` sets this before the shell mounts
  * (`NativeApp.tsx`), and every endless animation on a phone asks it — `Turn`, Connections' `Spin`, the
  * Debug session's pulse and caret (`debug/motion.tsx`). The desktop's pictures hold still another way
- * (`holdStill` in `shots/driver.mts`: the CSS animations off), so nothing on web reads this.
+ * (`holdStill` in `shots/driver.mts`: the CSS animations off), so nothing on web sets this.
  */
 let still = false;
 

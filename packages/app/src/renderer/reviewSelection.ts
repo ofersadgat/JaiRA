@@ -2,9 +2,18 @@
  * Anchored review notes, the part that is not drawing
  * ([decision 0002](../../../../docs/engineering/decisions/0002-one-gate-vocabulary.md)): reading a
  * selection inside an artifact in flattened-text offsets, painting the notes over it, hit-testing the
- * pointer against them, and who a note is signed as. Split out of `reviewNotes.tsx` so the universal
- * artifact pane (decision 0015) runs the same code over the DOM react-native-web draws — it is pure of
- * DOM COMPONENTS, and touches the document only in effects. See `reviewNotes.tsx` for the module note.
+ * pointer against them, and who a note is signed as. It runs over the DOM react-native-web draws
+ * (`ArtifactPane.tsx`, through `noteSelection.web.ts`): no DOM COMPONENTS here, and the document is
+ * touched only in effects.
+ *
+ * Offsets count into the rendered `textContent`, not the source: a person selects words on the page,
+ * whatever produced them. A view that reformats (JSON re-indented) moves them, which is what a note's
+ * quote is for.
+ *
+ * The marks are painted with the Custom Highlight API. Wrapping ranges in `<mark>` would mutate a
+ * subtree React owns; `CSS.highlights` paints the same ranges without touching the DOM, so it can sit
+ * over any rendered content. Where it is absent nothing is painted and nothing else is lost. A highlight
+ * is not hit-testable, so the notes list is the way in: clicking a row re-selects the passage.
  */
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type RefObject } from "react";
 import { anchorNotes, type ReviewNote } from "@jaira/shared/browser";
@@ -87,7 +96,7 @@ export const KEEPS_SELECTION = "data-keeps-selection";
  * selected". Right-clicking the passage you had just dragged over offered no menu at all, because
  * `itemsForEvent` asks `window.getSelection()` and the textarea had already taken it.
  *
- * An ATTRIBUTE rather than a shared variable, because that is how `pointerMenu.tsx` asks every other
+ * An ATTRIBUTE rather than a shared variable, because that is how `itemsForEvent` asks every other
  * question it asks: it is handed an element and walks up from it (`closest("img")`, `closest("a")`,
  * `closest("input, textarea")`). A module-level "current selection" would be a second source of
  * truth about a thing the DOM can carry, readable from anywhere and stale the moment a second
@@ -158,7 +167,7 @@ export function maySurrenderSelection(activeInKeeper: boolean, secondary: boolea
 
 export function useSelectionInside(ref: RefObject<HTMLElement | null>): [PendingSelection | null, () => void] {
   const [selection, setSelection] = useState<PendingSelection | null>(null);
-  /** The last range seen, held until the gesture ends. See the module note. */
+  /** The last range seen, held until the gesture ends. See the hook's note. */
   const pending = useRef<PendingSelection | null>(null);
   const clear = useCallback(() => {
     pending.current = null;
@@ -234,7 +243,7 @@ export function useSelectionInside(ref: RefObject<HTMLElement | null>): [Pending
       setSelection((shown) => (shown === null ? null : pending.current));
     };
 
-    /** The pointer was released — show what was tracked. See the module note on why not the keyboard. */
+    /** The pointer was released — show what was tracked. See the hook's note on why not the keyboard. */
     const commit = (): void => {
       if (pending.current !== null) setSelection(pending.current);
     };

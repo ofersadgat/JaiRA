@@ -15,25 +15,24 @@ import { SidechainConversation } from "../run/SidechainConversation";
 import { Button } from "../settings/Button";
 
 /**
- * `fileSurfaces.tsx`'s `LeafPanel`, universal (decision 0015): a leaf state opened in the Files room —
- * the tasks in it down the side, and what the selected one said beside them, the one stream of the
- * state's words (`entriesOf` over its journal, `transcript.ts`) printed on its sheet. Standing on a
- * sidechain step, the panel is that subagent's conversation (`SidechainConversation`), as a composite's
- * is. The rules, from `styles.css` (`cascade.mts '.leaf' --scene files-state`):
+ * A leaf state opened in the Files room — the tasks in it down the side, and what the selected one
+ * said beside them, the one stream of the state's words (`entriesOf` over its journal,
+ * `transcript.ts`) printed on its sheet. Standing on a sidechain step, the panel is that subagent's
+ * conversation (`SidechainConversation`), as a composite's is. How it looks:
  *
- *   .leaf              flex 1; grid 190 | minmax(0, 1fr)
- *   .leaf-list         --panel, 1px --line on its right, padding 11, column, gap 3, scrolls down
- *   .leaf-list h3      margin 6 0 4 (kept: a flex column); `h3`'s app 700 at 11/12.5, 0.09em, uppercase,
- *                      --dim, a row spaced between, centred, gap 8; its `.count` 400
- *   .leaf-row          row, centred, gap 6, padding 5 7, radius 6, app 12.5/12.5; hovered
- *                      --fill-ghost-hover; `.sel` --fill-ghost-selected at 600
- *   .badge             16 wide, centred, the row's font; its status's colour (`.badge-<status>`; none
- *                      for a status without a rule, which keeps the row's)
- *   .task-name         grows, one line, …; `-pending` italic --dim; `-fallback` underlined dotted --dim
- *   .leaf-convo        column, CLIPPED (its `overflow: hidden` wins over `.scroll`'s): the sheet does not scroll
- *   .ts-page           at least the column's height (`Paper`)
- *   .waiting-on        row, centred, gap 9, padding 9 11, 1px --warn, radius 8, --bg, --warn; not in the flow
- *   p.empty            --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
+ *   the panel          flex 1; two tracks: 190 and the rest
+ *   the list           --panel, 1px --line on its right, padding 11, column, gap 3, scrolls down
+ *   a list heading     6 above and 4 below; app 700 at 11/12.5, 0.09em, uppercase, --dim, a row spaced
+ *                      between, centred, gap 8; its count 400
+ *   a task's row       row, centred, gap 6, padding 5 7, radius 6, app 12.5/12.5; hovered
+ *                      --fill-ghost-hover; selected --fill-ghost-selected at 600
+ *   its badge          16 wide, centred, the row's font; its status's colour (`BADGE_INK`; a status
+ *                      without one keeps the row's)
+ *   its name           grows, one line, …; pending italic --dim; a fallback underlined dotted --dim
+ *   the conversation   column, CLIPPED: the sheet does not scroll
+ *   the sheet          at least the column's height (`Paper`)
+ *   "Waiting on you"   row, centred, gap 9, padding 9 11, 1px --warn, radius 8, --bg, --warn; not in the flow
+ *   an empty note      --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
  */
 export function LeafPanel({ context }: { context: FileSurfaceContext }): JSX.Element {
   const t = useTokens();
@@ -46,7 +45,7 @@ export function LeafPanel({ context }: { context: FileSurfaceContext }): JSX.Ele
     () => markAnsweredQuestions(entriesOf(session, journalFor(conversation?.turns ?? [], state?.stateId), liveTurn), marks),
     [session, conversation, state?.stateId, liveTurn, marks],
   );
-  // `.ts-page`'s `min-height: 100%`: the column's own height.
+  // The sheet's least height: the column's own.
   const [height, setHeight] = useState<number | undefined>(undefined);
   const onWalkIntoSidechain = context.onWalkIntoSidechain;
   const tail = context.trail?.at(-1);
@@ -127,7 +126,7 @@ export function LeafPanel({ context }: { context: FileSurfaceContext }): JSX.Ele
   );
 }
 
-/** `.leaf-list h3`: 6 above and 4 below (a flex column keeps them), spaced between. */
+/** A heading in the list: 6 above and 4 below, its words and its count spaced between. */
 function Head({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" justifyContent="space-between" gap={8} marginTop={6} marginBottom={4}>
@@ -136,7 +135,7 @@ function Head({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** `.leaf-row`: the task's badge and its name, pressed to show what it said. */
+/** A task in the list: its badge and its name, pressed to show what it said. */
 function LeafRow({ card, status, sel, onPress, t }: { card: BoardCard; status: string; sel: boolean; onPress: () => void; t: Tokens }): JSX.Element {
   const spec: FontSpec = { voice: "app", scale: 1, weight: sel ? 600 : 400 };
   const pending = taskNamePending(card);
@@ -168,7 +167,7 @@ function LeafRow({ card, status, sel, onPress, t }: { card: BoardCard; status: s
   );
 }
 
-/** The statuses `styles.css` colours a `.badge` for; any other keeps the colour it stands in. */
+/** The statuses a badge has a colour for; any other keeps the colour it stands in. */
 const BADGE_INK: Record<string, string> = {
   running: "accent",
   interrupted: "accent",
@@ -181,7 +180,7 @@ const BADGE_INK: Record<string, string> = {
   queued: "dim",
 };
 
-/** `board.tsx`'s `Badge`: a task's status glyph, 16 wide, in the font it stands in and its status's colour. */
+/** A task's status glyph (`BADGE`), 16 wide, in the font it stands in and its status's colour. */
 function Badge({ status, spec }: { status: string; spec: FontSpec }): JSX.Element {
   const ink = BADGE_INK[status];
   return (
@@ -191,7 +190,7 @@ function Badge({ status, spec }: { status: string; spec: FontSpec }): JSX.Elemen
   );
 }
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13). */
+/** An empty note: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13). */
 function Empty({ children, t }: { children: ReactNode; t: Tokens }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>

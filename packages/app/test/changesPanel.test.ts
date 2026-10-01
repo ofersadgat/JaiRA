@@ -1,5 +1,5 @@
 /**
- * The Changes tab's reading of a record (main's `changeLog.ts`) and its file tree (`changesPanel.tsx`):
+ * The Changes tab's reading of a record (main's `changeLog.ts`) and its file tree (`changesModel.ts`):
  * calls paired with their results, a subagent's calls attributed to it, a shell line judged part by
  * part, and folders that hold only a folder merged into one row.
  */

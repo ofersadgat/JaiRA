@@ -4,19 +4,18 @@ import { Press, Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
 
 /**
- * The settings controls, universal (decision 0015): `controls.tsx`'s `Switch` and `settingsLayout.tsx`'s
- * `Segmented`. The rules they carry, from `styles.css`:
+ * The settings controls: `Switch` and `Segmented`. How they look:
  *
- *   .cfg-switch          30×18, round, 1px --line, --panel-2; hovered --rule and --panel-3. On:
+ *   the switch           30×18, round, 1px --line, --panel-2; hovered --rule and --panel-3. On:
  *                        --fill-accent ground and ring. Disabled: half opacity.
- *   .cfg-switch-knob     12 round, centred, 5 left of centre in --dim; on, 5 right in --on-accent
- *   .set-seg             row, gap 2, padding 2, 1px --line, radius 9, --panel-2
- *   .set-seg button      no ring, radius 7, padding 4 12, the body's text (app 13/12.5, line 1.5) at
+ *   its knob             12 round, centred, 5 left of centre in --dim; on, 5 right in --on-accent
+ *   the segments' box    row, gap 2, padding 2, 1px --line, radius 9, --panel-2
+ *   a segment            no ring, radius 7, padding 4 12, the body's text (app 13/12.5, line 1.5) at
  *                        500 in --dim; hovered --fill-ghost-hover and --text; chosen: --panel, --text,
  *                        ringed 1px --line with a 0 1 2 shadow at 6%. Disabled: half opacity.
  */
 
-/** On or off, as a switch — `controls.tsx`'s `Switch`. */
+/** On or off, as a switch. */
 export function Switch({ on, label, disabled = false, onChange }: { on: boolean; label: string; disabled?: boolean | undefined; onChange: (next: boolean) => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -47,7 +46,7 @@ export function Switch({ on, label, disabled = false, onChange }: { on: boolean;
   );
 }
 
-/** Two to four choices side by side, the chosen one raised — `settingsLayout.tsx`'s `Segmented`. */
+/** Two to four choices side by side, the chosen one raised. */
 export function Segmented<T extends string>({
   value,
   options,

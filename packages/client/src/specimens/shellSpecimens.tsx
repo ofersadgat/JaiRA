@@ -16,7 +16,7 @@ import { ChangesPanel, CrashScreen, DisconnectedLine, GateSurface, LooseErrorBan
  *    under a render that threw; `disconnected` — the line of a lost socket. Each is fixed to the window,
  *    so each is drawn in a stage of its own that stands in for it, and takes `staged` (placed in its
  *    box rather than the window).
- *  - `gate-settled-<gate>` — a gate as it was answered, in a state's panel (`.st-block`, the copy `plain`):
+ *  - `gate-settled-<gate>` — a gate as it was answered, in a state's panel (the gate drawn `plain`):
  *    a tool call's approval, an artifact reviewed (decided in silence, sent back with a comment, approved
  *    edited) and an artifact edited, each from its gallery card.
  *  - `offline-banner` — the foot of a conversation whose machine is away; `changes-commands`,

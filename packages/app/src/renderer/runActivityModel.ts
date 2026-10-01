@@ -1,8 +1,7 @@
 /**
- * What the activity strip under a conversation SAYS (`runViews.tsx`'s `RunActivity`) and the clock it
- * counts with — moved out of `runViews.tsx` and `transcriptView.tsx` unchanged so the universal copy
- * (decision 0015) says the same thing at the same moment. Pure but for {@link useElapsed}, a React hook
- * with no DOM in it.
+ * What the activity strip under a conversation SAYS (`RunActivity`,
+ * `packages/universal/src/components/panel/RunActivity.tsx`) and the clock it counts with. Pure but for
+ * {@link useElapsed}, a React hook with no DOM in it.
  */
 import { useEffect, useState } from "react";
 import type { TaskDetail } from "@jaira/shared/browser";
@@ -56,9 +55,9 @@ export type Activity =
   | { kind: "none" };
 
 /**
- * The strip's reading of a task — see `RunActivity` for why each case says what it says. `where` is the
- * whole active path (`plan → critique → human_review`), empty when there is none; `going` tells the
- * caller to count, from {@link startedAtOf}.
+ * The strip's reading of a task — `RunActivity` draws each case. `where` is the whole active path
+ * (`plan → critique → human_review`), empty when there is none; `going` tells the caller to count, from
+ * {@link startedAtOf}.
  */
 export function activityOf(detail: TaskDetail, asking: boolean, can: { rerun: boolean; resume: boolean }): Activity {
   if (detail.fastForward !== undefined) return { kind: "forward" };

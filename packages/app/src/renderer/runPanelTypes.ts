@@ -1,7 +1,7 @@
 /**
- * What running a state from the Files inspector needs of its host — the surface the universal
- * `RunPanel` (`packages/universal/src/components/panel/RunPanel.tsx`) is handed and `panelHost.ts`
- * builds. Everything with a decision in it is in `runForm.ts`. A type only.
+ * What running a state from the side panel needs of its host — the surface `RunPanel`
+ * (`packages/universal/src/components/panel/RunPanel.tsx`) is handed and `panelHost.ts` builds.
+ * Everything with a decision in it is in `runForm.ts`. A type only.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { TaskSummary } from "@jaira/shared/browser";
@@ -11,19 +11,19 @@ import type { SettledMark } from "./schemaForm/types";
 /**
  * Everything the two sections need beyond the state itself.
  *
- * One bag rather than a dozen props, and optional at the call site: {@link StateInspector} is also
- * rendered in places with no host to start a task from, and a Run button that cannot run is worse
- * than no Run button.
+ * One bag rather than a dozen props, and optional where it is handed over: a state is also shown in
+ * places with no host to start a task from, and a Run button that cannot run is worse than no Run
+ * button.
  *
- * `values` lives in the store rather than in this component, for the reason every other per-document
- * thing in this view does: the inspector unmounts the moment you click another file, and a paragraph
+ * `values` lives in the store rather than in the component, for the reason every other per-document
+ * thing in this view does: the panel unmounts the moment you click another file, and a paragraph
  * of instruction typed into an input slot is exactly as losable as a draft.
  */
 export interface RunSurface {
   /**
    * The state's declared inputs, read from the SAVED document. `null` when it does not parse.
    *
-   * Read by the host rather than here so that both sections and the store agree on one reading —
+   * Read by the host rather than the panel so that both sections and the store agree on one reading —
    * and so the parse happens once per file opened, not once per keystroke in a box.
    */
   fields: RunField[] | null;

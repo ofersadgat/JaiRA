@@ -6,13 +6,12 @@ import { useTokens } from "../../tokens";
 import { BrandIcon } from "../settings/bits";
 
 /**
- * `reviewNotes.tsx`'s `SourceMark`, universal (decision 0015): where a message was written, beside its
- * author — the forge's mark and name in a pill. The rules:
+ * Where a message was written, beside its author — the forge's mark and name in a pill. How it looks:
  *
- *   .note-src      inline-flex, centred, gap 4, 6 after the author, padding 1 6, round, 1px --line;
+ *   the pill       a row in the line, centred, gap 4, 6 after the author, padding 1 6, round, 1px --line;
  *                  data 500 at --size-data × 10.5/12, line 1.5, --dim; its mark 10
  *
- * On a phone a `View` inside the line's `Text`; `SourceMark.web.tsx` is the inline box the DOM draws.
+ * On a phone a `View` inside the line's `Text`; on web an inline box (`SourceMark.web.tsx`).
  */
 export function SourceMark({ source }: { source: string }): JSX.Element {
   const t = useTokens();

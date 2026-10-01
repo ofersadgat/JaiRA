@@ -20,41 +20,38 @@ import { useFileSurfaces } from "./FilesView";
 import { boardAt } from "./viewState";
 
 /**
- * The Tasks room's middle column (`.tasks-view > .col.mid`, `App.tsx`): one board per project group,
- * each after its own address bar but the first, or the run the address has drilled into (`RunView`,
- * `components/run/`).
- * The props each board gets are the ones `App.tsx` hands its own, from the same store.
+ * The Tasks room's middle column: one board per project group, each after its own address bar but the
+ * first, or the run the address has drilled into (`RunView`, `components/run/`). How it looks:
  *
- *   .tasks-view .col.mid            a column on --bg that scrolls (both ways) while every project is listed
- *   .board-group                    column, a --line under it; its own height while listing (`flex: none`),
- *                                   the column's when narrowed to one project
- *   .board-group > .doc-bar         the group's address bar: `TaskAddressBar` standing on that group
- *                                   (`place="section"`), every group's but the first, and none when narrowed
- *   .board-tail                     a column's height of room past the last group, while there are several
- *   p.empty                         "Open a project to see its board." / "No board here yet.": the body's
- *                                   13/12.5 on --dim, padding 8 0, the paragraph's 1em margins
+ *   the column                      on --bg; scrolls (both ways) while every project is listed
+ *   a group                         column, a --line under it; its own height while listing, the column's
+ *                                   when narrowed to one project
+ *   a group's address bar           `TaskAddressBar` standing on that group (`place="section"`), every
+ *                                   group's but the first, and none when narrowed
+ *   the tail                        a column's height of room past the last group, while there are several
+ *   the empty words                 "Open a project to see its board." / "No board here yet.": the body's
+ *                                   13/12.5 on --dim, padding 8 0, a paragraph's 1em margins
  *
- * Which group the column is scrolled to is `App.tsx`'s `trackBoards`: the last group whose top has
- * reached the column's, told to the title bar through `viewState.boardAt`.
+ * Which group the column is scrolled to (`track`) is the last group whose top has reached the column's,
+ * told to the title bar through `viewState.boardAt`.
  *
  * The right-click menus — a card's, a selection's, a column's (a long press on a phone) — and the Delete
- * they ask about are `App.tsx`'s `taskMenu` and `taskAsk`: the items and what each does come from
- * `boardMenus.ts`, the one builder both shells call; the menu is `Menu.tsx`'s and the dialog
- * `AskDialog`'s, over everything.
+ * they ask about (`taskMenu`, `taskAsk`): the items and what each does come from `boardMenus.ts`; the
+ * menu is `Menu.tsx`'s and the dialog `AskDialog`'s, over everything.
  */
 export function BoardColumn(): JSX.Element {
   const t = useTokens();
   const { state, actions } = useShell();
   const ui = state.settings.ui;
   const groups = useMemo(() => groupProjects(state.projects, ui.groupWorkspaces !== false), [state.projects, ui.groupWorkspaces]);
-  // The board's selection, one task or a set (`pickCard`), as `App.tsx` keeps it.
+  // The board's selection, one task or a set (`pickCard`).
   const [picked, setPicked] = useState<BoardPick>(null);
   const pickedSet = useMemo(() => (picked === null ? null : new Set(picked.ids)), [picked]);
   // A selection made somewhere other than the board replaces the set.
   useEffect(() => {
     setPicked((was) => (was !== null && state.selected !== null && !was.ids.includes(state.selected) ? null : was));
   }, [state.selected]);
-  // The board's right-click menu, and the one confirmation inside it (`App.tsx`'s `taskMenu`, `taskAsk`).
+  // The board's right-click menu, and the one confirmation inside it.
   const [taskMenu, setTaskMenu] = useState<MenuAt | null>(null);
   const [taskAsk, setTaskAsk] = useState<AskSpec | null>(null);
   const menuHost: BoardMenuHost<{ x: number; y: number }> = {
@@ -73,7 +70,7 @@ export function BoardColumn(): JSX.Element {
       {taskAsk !== null ? <AskDialog spec={taskAsk} onCancel={() => setTaskAsk(null)} /> : null}
     </>
   );
-  // `.board-tail` is 100% of the column: the scroller's own height, measured.
+  // The tail is as tall as the column: the scroller's own height, measured.
   const [height, setHeight] = useState(0);
   const scroller = useRef<ScrollView>(null);
   /** The projects as the address bar names them: a workspace by its group's name. */
@@ -81,7 +78,7 @@ export function BoardColumn(): JSX.Element {
   // One board per group, its workspaces merged by column (decision 0013 §4) — kept between draws, since
   // a merge or a queued mark makes new cards, and a card is drawn again only when it is a new one.
   const merged = useMemo(() => new Map(groups.map((g) => [g.key, markQueued(mergeBoards(g, state.boards), state.queue)])), [groups, state.boards, state.queue]);
-  // `trackBoards`: each group's top in the column's content, and how far the column is scrolled.
+  // What `track` reads: each group's top in the column's content, and how far the column is scrolled.
   const tops = useRef(new Map<string, number>());
   const scrolled = useRef(0);
   const track = useCallback(() => {
@@ -96,7 +93,7 @@ export function BoardColumn(): JSX.Element {
     }
     boardAt.set(at);
   }, []);
-  // Groups arriving, or being narrowed away, move the boundaries without a scroll (as `App.tsx` re-measures).
+  // Groups arriving, or being narrowed away, move the boundaries without a scroll.
   useEffect(track, [track, state.projects, state.boards, state.taskFocus]);
   // A phone's sticky column headings (`Board.tsx`'s `StickyScroll`): the scroll, driven natively, and the
   // content to measure against. None on web, where the headings are `position: sticky`.
@@ -130,13 +127,13 @@ export function BoardColumn(): JSX.Element {
     [sticky],
   );
   const moved = (): void => sticky?.moved.forEach((measure) => measure());
-  // What a drilled run reads from (`App.tsx`'s `surfaces`), for `RunView`.
+  // What a drilled run reads from, for `RunView`: the Files room's context, and the run's own over it.
   const runContext = { ...useFileSurfaces(), ...useRunContext() };
 
   // A RUN is on the path, so the column shows that run — its executions as cards, or what it said.
   if (state.trail.length > 0 && state.taskFocus !== null) {
     return (
-      // `.col.mid` scrolls (`overflow: auto`) even here, where what it holds never runs past it: the box
+      // The column scrolls (`overflow: auto`) even here, where what it holds never runs past it: the box
       // clips, and Chromium layers what is inside a clip apart from what is not — without it the run's
       // composer shared a layer with the side panel, and the conversation above it was greyscale.
       <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never} {...((isWeb ? { overflow: "auto" } : {}) as object)}>
@@ -166,8 +163,8 @@ export function BoardColumn(): JSX.Element {
     <StickyScroll.Provider value={sticky}>
       <Scroller
         {...(scrollbarProps(t) as object)}
-        // On web it scrolls both ways, as `.col.mid` does — and is no stacking context of its own
-        // (`PLAIN_SCROLLER`): painted where it stands in the page, as the desktop's column is.
+        // On web it scrolls both ways — and is no stacking context of its own (`PLAIN_SCROLLER`): painted
+        // where it stands in the page and not composited apart, which would draw its text greyscale.
         style={{ flex: 1, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER, ...(isWeb ? { overflowX: "auto" } : {}) } as never}
         contentContainerStyle={{ flexGrow: 1, flexDirection: "column", ...PLAIN_SCROLLER } as never}
         scrollEventThrottle={16}
@@ -175,8 +172,8 @@ export function BoardColumn(): JSX.Element {
         {...(sticky !== null ? { onContentSizeChange: moved } : {})}
         ref={scroller}
         testID="board-column"
-        // On web the layout event rounds to whole pixels (`offsetHeight`); the desktop's tail is the exact
-        // height, and half a pixel moves every rule under it on a fractional-scale screen.
+        // On web the layout event rounds to whole pixels (`offsetHeight`); the tail is the exact height,
+        // since half a pixel moves every rule under it on a fractional-scale screen.
         onLayout={(e) => {
           const node = isWeb ? (scroller.current as unknown as { getScrollableNode?: () => HTMLElement | null } | null)?.getScrollableNode?.() : null;
           setHeight(node?.getBoundingClientRect().height ?? e.nativeEvent.layout.height);
@@ -237,8 +234,8 @@ export function BoardColumn(): JSX.Element {
                   onTaskMenu={(card, at) => openTaskMenu(menuHost, own(card), card, at)}
                   // The column's own right-click: the place, and every task standing in it.
                   onColumnMenu={(stateId, at) => openColumnMenu(menuHost, g.key, stateId, at)}
-                  // What the running workflows are waiting for somebody to do, per board (`App.tsx`): a
-                  // drop publishes `task_move`, and main answers the wait or moves the task itself.
+                  // What the running workflows are waiting for somebody to do, per board: a drop
+                  // publishes `task_move`, and main answers the wait or moves the task itself.
                   dragOffers={dragOffersOf(board, state.userEvents)}
                   onTaskDrop={(_requestId, card, columnKey) => void actions.moveTask(own(card), card.taskId, columnKey)}
                   // A column no rule offered: the host finds or makes the workflow relating the two — the

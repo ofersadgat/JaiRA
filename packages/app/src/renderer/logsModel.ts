@@ -1,7 +1,9 @@
 /**
- * What the Logs room derives, for both shells (decision 0015): the desktop's `LogsPanel` (`logs.tsx`) and
- * its universal copy (`packages/universal/src/components/logs/`). Moved here from `logs.tsx` unchanged, so
- * the two derive every row, column and filter once. The reasoning behind each is in `logs.tsx`'s header.
+ * What the Logs room derives: every row, column and filter `LogsPanel`
+ * (`packages/universal/src/components/logs/`) draws. The room is ONE list of what the app did and what
+ * went wrong, because its sources answer one question — what happened, and where to look next — and a
+ * row's pointers (`taskId`, `jobId`) are what make it useful. One line per entry, newest first; a row
+ * unfolds in place, and older pages are asked for as the list is scrolled rather than held in memory.
  */
 import {
   LOG_SOURCES,
@@ -32,7 +34,8 @@ export function detailParts(detail: unknown): { stack?: string; rest?: unknown }
 }
 
 /**
- * When it happened, as TWO columns: the date is its own cell and is empty for today (see `logs.tsx`).
+ * When it happened, as TWO columns: the date is its own cell and is empty for today. An entry paged in
+ * from last Tuesday has to say so, and one column that sometimes carries a date is ragged.
  */
 export function stamp(at: number): { day: string; time: string } {
   const when = new Date(at);

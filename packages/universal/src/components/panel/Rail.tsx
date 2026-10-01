@@ -10,37 +10,38 @@ import { TipLayer } from "../floats/TipLayer";
 import { Svg, type Shape } from "./Svg";
 
 /**
- * `railView.tsx`'s `RailedRows`, universal (decision 0015): the conversation with its hierarchy drawn
- * beside it — the same rows (`railOf`), the same spacing (`centresFor`) and the same curves
- * (`forkPath`, `joinPath`, `lobePath`, `bumpPath`), drawn with the universal `Svg`. It carries the
- * index's parts too (`runIndex.tsx`): a state's lobe (`mark`), the halo on the row the reader is on,
- * rolled-up lanes (`shut`, `renderRolled`, else the standing `.rail-rolled` line) and the fitted rows'
- * placeholders and breadcrumb (`compact`); a stacked column is painted in `stackPaint`'s stripes.
+ * The conversation with its hierarchy drawn beside it: the rows (`railOf`), their spacing
+ * (`centresFor`) and their curves (`forkPath`, `joinPath`, `lobePath`, `bumpPath`) are `rail.ts`'s, drawn
+ * with `Svg`. It carries the run index's parts too (`RunIndex.tsx`): a state's lobe (`mark`), the halo on
+ * the row the reader is on, rolled-up lanes (`shut`, `renderRolled`, else the standing `Rolled` line) and
+ * the fitted rows' placeholders and breadcrumb (`compact`); a stacked column is painted in `stackPaint`'s
+ * stripes.
  *
  * And the gutter's gestures. What is under the pointer is worked out from the geometry (`hitOf`), not
  * asked of the drawing, so a phone's press finds the same lane a mouse does: a knot or a line pressed
  * folds its lane (`foldable`, else `onPick`), and a right-click — a long press on a phone — is the
  * host's menu about it (`onContext`). On web the lane under the pointer is lit in every row it crosses,
- * its name follows the pointer (`.rail-tip`), and a squeezed gutter fans to full pitch while the
- * pointer is in it. As on the desktop, the pointer is handled once, on the rail, and what is lit is
- * what a click folds (the lanes move when the gutter fans: a fresh aim would fold whichever slid under
- * the pointer). The rows' contents are built once per change of the rows, so lighting and fanning
- * redraw the gutters and nothing else. The rules, from `styles.css`:
+ * its name follows the pointer (`RailTip`), and a squeezed gutter fans to full pitch while the pointer
+ * is in it. The pointer is handled once, on the rail, and what is lit is what a click folds (the lanes
+ * move when the gutter fans: a fresh aim would fold whichever slid under the pointer). The rows'
+ * contents are built once per change of the rows, so lighting and fanning redraw the gutters and
+ * nothing else. How it looks:
  *
- *   .rail            column, full width, at most 1052, centred (--rail-cap 34; .run-index 30, no cap)
- *   .rail-row        row, stretch; .rail-turn is exactly one cap tall
- *   .rail-gut        as wide as its lanes (`gutterWidth`), relative
- *   .rail-seg        2 wide, top to bottom, at the lane's centre − 1, in the lane's colour; its hit area
- *                    6 either side (`::after`); .rail-stack 4 wide, striped
- *   .rail-cap        the row's curves over the gutter, stretched to the row: paths 2 wide whatever the
- *                    stretch (non-scaling), no fill; knots r 4.5 on --bg, 2 wide; a lobe's knot r 3.5;
- *                    the halo r 7.5, 1.5 --accent; a placeholder's lane dots (2.5, round, 0 5); only
- *                    what is painted takes the pointer, and a knot's target (`.rail-hit`) is r 11 (9)
- *   .rail-lit        brightness(1.4) saturate(1.4)
- *   .rail-content    column, flex 1, centred, padding 7 0 7 10 (no top or bottom in a turn)
- *   .rail-rolled     row, centred, gap 9, app 11.5/12.5, --dim; the name 600 --text; the tag 10px,
+ *   the rail         column, full width, at most 1052, centred (a cap of 34; the run index 30, and no
+ *                    measure)
+ *   a row            row, stretch; a turn's is exactly one cap tall
+ *   its gutter       as wide as its lanes (`gutterWidth`), relative
+ *   a straight       2 wide, top to bottom, at the lane's centre − 1, in the lane's colour; its hit area
+ *                    6 either side; a stack 4 wide, striped
+ *   the cap          the row's curves over the gutter (`Cap`): paths 2 wide whatever the stretch
+ *                    (non-scaling), no fill; knots r 4.5 on --bg, 2 wide; a lobe's knot r 3.5; the halo
+ *                    r 7.5, 1.5 --accent; a placeholder's lane dots (2.5, round, 0 5); only what is
+ *                    painted takes the pointer, and a knot's target is r 11 (a lobe's 9)
+ *   a lit lane       brightness(1.4) saturate(1.4)
+ *   the content      column, flex 1, centred, padding 7 0 7 10 (no top or bottom in a turn)
+ *   rolled up        row, centred, gap 9, app 11.5/12.5, --dim; the name 600 --text; the tag 10px,
  *                    0.07em, upper, padding 3 7, radius 3, --panel-2
- *   .rail-tip        a float at the pointer, translate(−50%, −150%): --text ground, --bg ink, data 11px
+ *   the tip          a float at the pointer, translate(−50%, −150%): --text ground, --bg ink, data 11px
  *                    500 on a line of 1, padding 5 8, radius 5, one line
  */
 export function RailedRows({
@@ -67,9 +68,9 @@ export function RailedRows({
   renderStep: (index: number) => ReactNode;
   palette?: ReadonlyMap<string, string> | undefined;
   wide?: boolean;
-  /** `--rail-cap`: 34 in a conversation, 30 in the run index. */
+  /** A turn row's height: 34 in a conversation, 30 in the run index. */
   cap?: number;
-  /** `.rail.run-index`: no measure, the column's whole width. */
+  /** The run index's rail: no measure, the column's whole width. */
   index?: boolean;
   /** A step that opens a lane and closes it again in its own row, drawn as a lobe. */
   mark?: ((index: number) => RailLane | undefined) | undefined;
@@ -84,15 +85,15 @@ export function RailedRows({
   onPick?: ((key: string) => void) | undefined;
   /** A right-click (a long press on a phone) on a lane in the gutter: its key and where the pointer was. */
   onContext?: ((key: string, point: { x: number; y: number }) => void) | undefined;
-  /** What a rolled-up lane says in place of its contents. Absent ⇒ the standing `.rail-rolled` line. */
+  /** What a rolled-up lane says in place of its contents. Absent ⇒ the standing `Rolled` line. */
   renderRolled?: ((lane: RailLane, held: number) => ReactNode) | undefined;
   /** Fit the rows to a height — see `stepCompaction.ts`. */
   compact?: ((visible: readonly VisibleRow[]) => DisplayItem[]) | undefined;
   renderGap?: ((item: Extract<DisplayItem, { kind: "gap" }>) => ReactNode) | undefined;
   renderCrumb?: ((item: Extract<DisplayItem, { kind: "crumb" }>) => ReactNode) | undefined;
   /**
-   * What a row is besides a row (`railView.tsx`'s `rowClass`): `is-cut` rings its knot in --bad (an armed
-   * rewind), `doomed` fades it to .35 (`.rail-row.doomed`).
+   * What a row is besides a row, in words: `is-cut` rings its knot in --bad (an armed rewind), `doomed`
+   * fades it to .35.
    */
   rowClass?: ((index: number) => string | undefined) | undefined;
 }): JSX.Element {
@@ -182,8 +183,8 @@ export function RailedRows({
     });
   };
 
-  // Web: the pointer on the rail, handled once (`railView.tsx`'s container listeners). The gutter under
-  // it is found in the page react-native-web draws, and the lane in its geometry.
+  // Web: the pointer on the rail, handled once. The gutter under it is found in the page
+  // react-native-web draws, and the lane in its geometry.
   const pointed = (e: WebPointer): { hit: Hit | null; inGutter: boolean } => {
     const gut = (e.target as { closest?: (s: string) => Element | null } | null)?.closest?.("[data-rail-gut]") ?? null;
     if (gut === null) return { hit: null, inGutter: false };
@@ -203,7 +204,7 @@ export function RailedRows({
         },
         onPointerLeave: (e: WebPointer & { currentTarget: { getBoundingClientRect: () => DOMRect } }) => {
           // A float laid over the page (a lane's menu) takes the pointer without it having left the rail:
-          // the desktop's menu has no such layer, and keeps the lane lit and named under it.
+          // the lane stays lit and named under it.
           const box = e.currentTarget.getBoundingClientRect();
           if (e.clientX > box.left && e.clientX < box.right && e.clientY > box.top && e.clientY < box.bottom) return;
           setHot(null);
@@ -271,7 +272,7 @@ export function RailedRows({
 
 const NONE: ReadonlySet<string> = new Set();
 
-/** `.rail-seg.rail-lit` and its curves: the lane under the pointer, in every row it crosses. */
+/** The lane under the pointer, in every row it crosses: its straights and its curves, brightened. */
 const LIT = "brightness(1.4) saturate(1.4)";
 
 /** A row's gutter, as the hit test and the drawing both read it. */
@@ -292,7 +293,7 @@ interface Drawn {
 
 type WebPointer = { target: unknown; clientX: number; clientY: number };
 
-/** The lane under a point of a gutter, what `data-name` calls it, and whether it is a stacked column. */
+/** The lane under a point of a gutter, what the tip calls it, and whether it is a stacked column. */
 interface Hit {
   lane: string;
   name: string;
@@ -300,10 +301,10 @@ interface Hit {
 }
 
 /**
- * What the desktop's `closest("[data-lane]")` finds at (`x`, `y`) in a gutter — the topmost painted
- * thing with a lane on it, in the DOM's paint order: the cap's pieces over the straights (only what the
- * cap paints takes the pointer), a knot's target over its knot over its curve, and a deeper straight
- * over a shallower one, each straight with its 6px of hit area either side.
+ * The lane at (`x`, `y`) in a gutter — the topmost painted thing with a lane on it, in paint order: the
+ * cap's pieces over the straights (only what the cap paints takes the pointer), a knot's target over its
+ * knot over its curve, and a deeper straight over a shallower one, each straight with its 6px of hit
+ * area either side.
  */
 function hitOf(geo: Geo, centres: readonly number[], columns: Map<number, number[]>, x: number, y: number): Hit | null {
   const near = (cx: number, r: number): boolean => Math.hypot(x - cx, y - MID) <= r;
@@ -401,8 +402,9 @@ function laneColour(t: Tokens, lane: RailLane, root: boolean, palette: ReadonlyM
 }
 
 /**
- * A colour the stylesheet would resolve — `var(--rule)`, `hsl(208 var(--rail-s) var(--rail-l))` — as
- * the replayed tokens give it, in `rgb()`. On the desktop's page (not replayed) it is left to CSS.
+ * A colour written as CSS — `var(--rule)`, `hsl(208 var(--rail-s) var(--rail-l))` — as the replayed
+ * tokens give it, in `rgb()`. Where the tokens are the CSS variables themselves (not replayed) it is left
+ * to CSS.
  */
 export function cssColour(t: Tokens, css: string): string {
   if (!t.replayed) return css;
@@ -431,7 +433,7 @@ function Straight({ left, colour, width = 2, top = 0, lit = false }: { left: num
 }
 
 /**
- * `.rail-seg.rail-stack`: several lanes sharing a column, striped in their colours — `stackPaint`'s
+ * A stack: several lanes sharing a column, striped in their colours — `stackPaint`'s
  * repeating gradient on web; on a phone, which has no gradients, the stripes are views laid down the
  * row once its height is known (9 of colour, 3 of nothing, lane after lane).
  */
@@ -461,9 +463,8 @@ function Stack({ left, colours, lit }: { left: number; colours: readonly string[
 }
 
 /**
- * `.rail-cap`: the row's curves over the gutter. `inset: 0` on an `<svg>` with no size of its own gives it
- * the gutter's width and its viewBox's aspect — so it is one conversation cap tall (34) whatever the row
- * is, and in the index's 30px rows it runs 4px into the next: drawn so here too.
+ * The cap: the row's curves over the gutter — the gutter's width and one conversation cap tall (34)
+ * whatever the row is, so in the index's 30px rows it runs 4px into the next.
  */
 function Cap({ width, shapes }: { width: number; shapes: readonly Shape[] }): JSX.Element {
   return <Svg width={width} height={CAP} viewBox={`0 0 ${width} ${CAP}`} strokeWidth={2} linecap="butt" linejoin="miter" shapes={shapes} box={{ position: "absolute", top: 0, left: 0, pointerEvents: "none" }} />;
@@ -486,7 +487,7 @@ function GutterOf({ geo, here, cut, ...rest }: GutterProps & { geo: Geo; here: b
   return <Gutter row={geo.row} folded={geo.folded} {...(geo.mark !== undefined ? { mark: geo.mark } : {})} hideExit={geo.hideExit} here={here} cut={cut} {...rest} />;
 }
 
-/** One row's gutter: the lanes crossing it, and the fork, join or lobe inside it (`RailGutter`). */
+/** One row's gutter: the lanes crossing it, and the fork, join or lobe inside it. */
 function Gutter({
   row,
   centres,
@@ -564,7 +565,7 @@ function Gutter({
   );
 }
 
-/** A placeholder's gutter (`RailGap`): the lanes straight, the innermost a column of dots. */
+/** A placeholder's gutter: the lanes straight, the innermost a column of dots. */
 function GapGutter({ lanes, centres, palette, t, lit, box }: GutterProps & { lanes: readonly RailLane[] }): JSX.Element {
   const width = gutterWidth(centres, Math.max(lanes.length, 1));
   const inner = lanes.length - 1;
@@ -579,7 +580,7 @@ function GapGutter({ lanes, centres, palette, t, lit, box }: GutterProps & { lan
   );
 }
 
-/** The breadcrumb's gutter (`RailCrumb`): each folded parent a knot at mid-height, its lane running on down. */
+/** The breadcrumb's gutter: each folded parent a knot at mid-height, its lane running on down. */
 function CrumbGutter({ lanes, centres, palette, t, lit, box }: GutterProps & { lanes: readonly RailLane[] }): JSX.Element {
   const width = gutterWidth(centres, Math.max(lanes.length, 1));
   const ground = cssColour(t, "var(--bg)");
@@ -596,7 +597,7 @@ function CrumbGutter({ lanes, centres, palette, t, lit, box }: GutterProps & { l
   );
 }
 
-/** `.rail-rolled`: what a rolled-up lane says in place of everything it holds — its name, the tag, the count. */
+/** What a rolled-up lane says in place of everything it holds — its name, the tag, the count. */
 function Rolled({ lane, held }: { lane: RailLane; held: number }): JSX.Element {
   const t = useTokens();
   const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
@@ -623,7 +624,7 @@ interface TipHandle {
   show: (at: { name: string; x: number; y: number } | null) => void;
 }
 
-/** `.rail-tip`: the lane's name, following the pointer, over everything (web; a phone has no pointer). */
+/** The tip: the lane's name, following the pointer, over everything (web; a phone has no pointer). */
 const RailTip = forwardRef<TipHandle>(function RailTip(_props, ref) {
   const [at, setAt] = useState<{ name: string; x: number; y: number } | null>(null);
   useImperativeHandle(ref, () => ({ show: setAt }), []);

@@ -5,12 +5,11 @@ import { CrumbBar } from "./Crumbs";
 import { Pills } from "./Pills";
 
 /**
- * `taskBar.tsx`'s `TaskAddressBar`, universal (decision 0015): the Tasks room's address — the project, the
- * workflow levels drilled into, the runs walked into — with the section's pills at its end while the
- * column lists every project. Which crumbs, and whose pills, is `taskAddressOf` (`taskBarModel.ts`), the
- * desktop's own function; the drawing is {@link CrumbBar}.
+ * The Tasks room's address — the project, the workflow levels drilled into, the runs walked into — with
+ * the section's pills at its end while the column lists every project. Which crumbs, and whose pills, is
+ * `taskAddressOf` (`taskBarModel.ts`); the drawing is {@link CrumbBar}.
  *
- * The same control heads every board group but the first down the Tasks column (`App.tsx`,
+ * The same control heads every board group but the first down the Tasks column (`app/BoardColumn.tsx`,
  * `i > 0 && state.taskFocus === null`): there it is `place="section"`, standing on that group
  * (`focus={null}`, `at={group}`, `trail={[]}`), with no tools.
  */

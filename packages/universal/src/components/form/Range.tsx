@@ -5,9 +5,9 @@ import { lengthToken } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 
 /**
- * `input[type="range"]` on a phone: there is no such control, so it is drawn — the page's global `input`
+ * `input[type="range"]` on a phone: there is no such control, so it is drawn — a plain input's
  * box (--bg, 1px --line, radius --control-radius, padding 5 9, the UA's 2 round it) holding Chromium's
- * slider as it draws one with no `accent-color`, in the root's `color-scheme` (measured off the desktop's):
+ * slider as it draws one with no `accent-color`, in the look's scheme (measured off the element on web):
  * a 16 thumb on an 8 track, the thumb's colour up to it and the rest past it under a 1px ring — light
  * #0075ff, #efefef, #767676; dark #99c8ff, #3b3b3b, #858585. A press on the track
  * jumps the thumb there and a drag moves it, snapped to `step`, as the element's own. The web's is the

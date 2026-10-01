@@ -2,7 +2,7 @@ import type { Tokens } from "../tokens";
 
 /**
  * The native half of `windowPage.web.ts`: a phone has no window to name, no keyboard focus ring and no
- * scrollbar gutter, so the desktop's page-wide rules have nothing to apply to.
+ * scrollbar gutter, so the page-wide rules have nothing to apply to.
  */
 export function useWindowTitle(_title: string): void {}
 

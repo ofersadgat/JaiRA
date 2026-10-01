@@ -35,21 +35,22 @@ import { Box, Details, FieldName, Pick, ROW, SlotOpt, SlotOptWords, SlotsHead, S
 import { LinkInput, LinkPreview, LinkToggle, ReadValue } from "./Links";
 
 /**
- * `slotTable.tsx`, universal (decision 0015): one table for `inputs`, `outputs` and an operation's
- * `input`/`output` — a row per slot (name, type, binding, optional, ✕), its default & description
- * under it, and in a reading the value the run put through it. What each row says and which box a
- * diagnostic marks is `slotTableModel.ts`'s. The rules (`cascade.mts '.slots'`):
+ * The workflow editor's one table for `inputs`, `outputs` and an operation's `input`/`output` — a row
+ * per slot (name, type, binding, optional, ✕), its default & description under it, and in a reading
+ * the value the run put through it. What each row says and which box a diagnostic marks is
+ * `slotTableModel.ts`'s. How it looks:
  *
- *   .slots              column, gap 5, 8 above a --line; every child but the head 11 in
- *   .slot-row           a grid: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.4fr) auto [auto], gap 5,
+ *   the table           column, gap 5, a --line over it and 8 under that; every child but the heading 11 in
+ *   a row               a grid: minmax(0, 1fr) minmax(0, 1.3fr) minmax(0, 1.4fr) auto [auto], gap 5,
  *                       centred — drawn as a row of {@link Grid} tracks, an empty track still spaced
- *   .slot-row.slot-head app 10/12.5, 0.06em, upper, --dim, 1 under; each cell one line, cut with …
- *   .slot-row input     padding 3 6, app 12/12.5
- *   .slot-type          row, centred, gap 4; its select shrinks (flex 1 1 auto), `.media-type` 1 1 60
- *   .slot-type-custom   data 11/12, --dim, one line (a reading: wraps)
- *   .slot-group         column, gap 3, 4 under; after another, a --line over it and 6 more above
- *   .slot-more          (under a group) 8 in, 9 more, a 2px --dim 30% rule on its left
- *   .row-controls       row, centred, gap 5; each 1 1 auto (a `.field` 1 1 0), min 0
+ *   the columns' heads  app 10/12.5, 0.06em, upper, --dim, 1 under; each cell one line, cut with …
+ *   a row's boxes       padding 3 6, app 12/12.5
+ *   the type            row, centred, gap 4; its select grows and shrinks from the whole width, the
+ *                       media type's box 1 1 60
+ *   a type in words     data 11/12, --dim, one line (a reading: wraps)
+ *   a slot's group      column, gap 3, 4 under; after another, a --line over it and 6 more above
+ *   what hangs under    8 in, 9 more, a 2px --dim 30% rule on its left
+ *   a row of controls   row, centred, gap 5; each 1 1 auto (a field 1 1 0), min 0
  */
 
 /** One track of a {@link Grid}: a share of what is left (`minmax(0, Nfr)`), or as wide as it is (`auto`). */
@@ -75,7 +76,7 @@ export function Grid({ tracks, children, gap = 5, ...box }: { tracks: readonly T
 
 const SLOT_TRACKS = (optional: boolean): Track[] => (optional ? [1, 1.3, 1.4, "auto", "auto"] : [1, 1.3, 1.4, "auto"]);
 
-/** `span.slot-type-custom`: a type in words, data 11/12 --dim — one line, or wrapping in a reading. */
+/** A type in words: data 11/12 --dim — one line, or wrapping in a reading. */
 function TypeWords({ children, title, mark = "" }: { children: string; title?: string | undefined; mark?: Mark }): JSX.Element {
   const reading = useReading();
   return (
@@ -85,7 +86,7 @@ function TypeWords({ children, title, mark = "" }: { children: string; title?: s
   );
 }
 
-/** `SlotTypePicker`: the vocabulary, a `list of` toggle and an artifact's media type — or the type in words. */
+/** A slot's type: the vocabulary, a `list of` toggle and an artifact's media type — or the type in words. */
 export function SlotTypePicker({
   row,
   targets,
@@ -148,11 +149,11 @@ export function SlotTypePicker({
   );
 }
 
-/** `.slot-group`: one row and what hangs under it; after the first, a --line over it. */
+/** A slot's group: one row and what hangs under it; after the first, a --line over it. */
 export function SlotGroup({ first, children, box = false }: { first: boolean; children: ReactNode; box?: boolean }): JSX.Element {
   const t = useTokens();
   if (box) {
-    // `.slots.children > .slot-group`: a --panel-2 card, 1px --line, radius 6, padding 6 7; 6 apart.
+    // A child's group is a card: --panel-2, 1px --line, radius 6, padding 6 7; 6 apart.
     return (
       <View flexDirection="column" gap={3} paddingVertical={6} paddingHorizontal={7} borderRadius={6} backgroundColor={t.v("panel-2") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} {...(first ? {} : { marginTop: 6 })}>
         {children}
@@ -166,7 +167,7 @@ export function SlotGroup({ first, children, box = false }: { first: boolean; ch
   );
 }
 
-/** `.slot-group > .slot-more` / `.bindings`: 8 in (4 on a child's card), 9 more, a 2px --dim 30% rule. */
+/** What hangs under a group's row: 8 in (4 on a child's card), 9 more, a 2px --dim 30% rule on its left. */
 export function Hung({ children, inCard = false }: { children: ReactNode; inCard?: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -176,7 +177,7 @@ export function Hung({ children, inCard = false }: { children: ReactNode; inCard
   );
 }
 
-/** `.row-controls`: a row, centred, gap 5; each control 1 1 auto (a field 1 1 0), min 0. */
+/** Controls side by side: a row, centred, gap 5; each control 1 1 auto (a field 1 1 0), min 0. */
 export function RowControls({ children, fields = [] }: { children: ReactNode; fields?: readonly boolean[] }): JSX.Element {
   const cells = Children.toArray(children);
   return (
@@ -190,7 +191,7 @@ export function RowControls({ children, fields = [] }: { children: ReactNode; fi
   );
 }
 
-/** A control with its name over it in a reading (`.field`: a grid, gap 4), and bare in a form. */
+/** A control with its name over it in a reading (a field: a column, gap 4), and bare in a form. */
 function Boxed({ readOnly, label, children }: { readOnly: boolean; label: string; children: ReactNode }): JSX.Element {
   return readOnly ? (
     <View flexDirection="column" gap={4} minWidth={0}>
@@ -229,7 +230,8 @@ export function SlotTable({
   const reading = useRunReading();
   const lists = useLists();
   const edit = (index: number, patch: Partial<SlotRow>): void => onChange(rows.map((row, i) => (i === index ? { ...row, ...patch } : row)));
-  // A table with nothing in it, in a reading, is a heading over the word "none" — see the desktop's.
+  // A table with nothing in it would be a heading over the word "none": a form needs that (it is where
+  // the first row is added), a reading is better off not mentioning the table.
   if (readOnly && rows.length === 0) return null;
   const tracks = SLOT_TRACKS(optional);
   return (
@@ -334,7 +336,7 @@ export function SlotTable({
   );
 }
 
-/** `.slot-row.slot-head > span`: app 10/12.5, 0.06em, upper, --dim, one line, cut with …. */
+/** A column's head: app 10/12.5, 0.06em, upper, --dim, one line, cut with …. */
 function Head({ children }: { children: string }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 10 / 12.5, ls: 0.06, upper: true, color: "dim" }} numberOfLines={1} ellipsizeMode="tail">

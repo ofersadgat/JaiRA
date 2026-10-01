@@ -13,23 +13,22 @@ import { BrandIcon } from "../settings/bits";
 import { INK, MoneyRing, Ring } from "./Ring";
 
 /**
- * `usageMeters.tsx`'s figures on Connections, universal (decision 0015): {@link AccountAllowance} (a
- * sign-in card's weekly figure and when it resets) and {@link KeyUsage} (what an API key has spent).
- * What each says is `usageFigure.ts`'s, as the desktop's is; the ring is the composer's (`Ring.tsx`).
- * The rules:
+ * The usage figures on Connections: {@link AccountAllowance} (a sign-in card's weekly figure and when
+ * it resets) and {@link KeyUsage} (what an API key has spent). What each says is `usageFigure.ts`'s;
+ * the ring is the composer's (`Ring.tsx`). How they look:
  *
- *   .um-c-line        row, centred, gap 6, at least 22 tall, 32 in, app 11/12.5
- *   .um-c-line2       0 in, to the right, 3 closer, no least height
- *   .um-c-plan        --dim, one line
- *   .um-c-ringwrap    to the right (`margin-left: auto`)
- *   .um-c-ringbtn     row, centred, gap 5, padding 2 5, radius 11, data 500 10.5px/1, tabular; hovered
- *                     --fill-ghost-selected; the tone's colour (`.um-t-*`; accent --text); money with
+ *   the line          row, centred, gap 6, at least 22 tall, 32 in, app 11/12.5
+ *   the line under    0 in, to the right, 3 closer, no least height
+ *   the plan          --dim, one line
+ *   the ring's wrap   to the right (`margin-left: auto`)
+ *   the ring button   row, centred, gap 5, padding 2 5, radius 11, data 500 10.5px/1, tabular; hovered
+ *                     --fill-ghost-selected; the tone's colour (`INK`; accent --text); money with
  *                     the accent tone --text, `none` --dim
- *   .um-rs            data 10.5px/1.3 --dim, one line; used up --bad at 500
- *   .um-k-line        4 apart, the button 5 out to the left; `.um-k-when` app 10.5/12.5 --dim
+ *   the reset words   data 10.5px/1.3 --dim, one line; used up --bad at 500
+ *   a key's line      4 apart, the button 5 out to the left; "in the last 7 days" app 10.5/12.5 --dim
  *
- * The figure opens the account's card (`AccountPopover` in `.um-cpop`: 330 wide, its end on the
- * button's), the composer's own {@link AccountCard}.
+ * The figure opens the account's card (330 wide, its end on the button's), the composer's own
+ * {@link AccountCard}.
  */
 
 /** The figure's face, in the mode the setting says: the number, the ring, or both. */
@@ -62,12 +61,12 @@ function useAccountCard(account: LimitAccountView | undefined): { at: React.RefO
   };
 }
 
-/** The colour of a ring button's number: `.um-t-*`, with `.um-c-ringbtn.um-t-accent` (and money's) --text. */
+/** The colour of a ring button's number: the tone's (`INK`), with the accent tone (and money's) --text. */
 function inkOf(figure: UsageFigure): string {
   return figure.tone === "accent" ? "text" : INK[figure.tone];
 }
 
-/** `.um-c-ringbtn`: the figure, pressed to open the account; hovered or open (`.on`) its ground lit. */
+/** The ring button: the figure, pressed to open the account; hovered or open its ground lit. */
 function RingButton({ figure, mode, title, at, on, onPress, marginLeft }: { figure: UsageFigure; mode: UsageFigures; title: string; at: React.RefObject<RNView | null>; on: boolean; onPress: () => void; marginLeft?: number }): JSX.Element {
   const t = useTokens();
   const face = { voice: "data" as const, scale: 10.5 / 12, weight: 500, color: inkOf(figure), tabular: true, lineHeight: { px: 10.5 } };
@@ -101,7 +100,7 @@ function RingButton({ figure, mode, title, at, on, onPress, marginLeft }: { figu
 }
 
 /**
- * `.um-c-ringwrap`: a block on the line's baseline — its height the line of the app face at 11/12.5,
+ * The ring button's wrap: a block on the line's baseline — its height the line of the app face at 11/12.5,
  * the button 0.65 down in it, where the mono number's baseline meets the line's (measured).
  */
 function RingWrap({ children, auto = true }: { children: ReactNode; auto?: boolean }): JSX.Element {
@@ -114,7 +113,7 @@ function RingWrap({ children, auto = true }: { children: ReactNode; auto?: boole
   );
 }
 
-/** `.um-rs`: when the week resets, or what a key's figure is. */
+/** The line under a figure: when the week resets, or what a key's figure is. */
 function ResetLine({ children, spent, title }: { children: ReactNode; spent: boolean; title?: string | undefined }): JSX.Element {
   return (
     <View flexDirection="row" justifyContent="flex-end" alignItems="center" marginTop={-3}>
@@ -185,19 +184,19 @@ export function KeyUsage({ account }: { account: LimitAccountView | undefined })
 /**
  * The setting's preview (`UsageFiguresPreview`): the composer's model chip and its figure, on a
  * subscription, a key whose provider reports its credit, and a key whose provider does not — drawn in
- * the mode being chosen. The examples are `usageFigure.ts`'s. The rules:
+ * the mode being chosen. The examples are `usageFigure.ts`'s. How it looks:
  *
- *   .um-preview          a `.set-preview`: three equal columns, gap 10, padding 12
- *   .um-preview-cell     column, gap 6 — the cell grows past its column to its content (a grid track
- *                        of `auto`), as the DOM's does
- *   .um-preview-n        app 11.5/12.5 --dim
- *   .cx.um-mini          the composer's frame: --bg, padding 10 16 14; `.cx-frame` padding 1 on --line,
- *                        radius 22; `.cx-shell` --panel, radius 21; `.cx-foot` row, centred, gap 5,
+ *   the preview          --bg, 1px --line, radius 10, 10 above it: three equal columns, gap 10,
+ *                        padding 12
+ *   a cell               column, gap 6 — at least its column wide, and past it to its content
+ *   its name             app 11.5/12.5 --dim
+ *   the mini composer    the composer's frame: --bg, padding 10 16 14; the frame padding 1 on --line,
+ *                        radius 22; the shell --panel, radius 21; the foot a row, centred, gap 5,
  *                        padding 5 7 7 8
- *   .cx-chip             padding 3 9, 1px transparent, round, gap 5, app 11.5/12.5 --dim; its icon 13;
- *                        its words at most 96 (`.um-preview .cx-chip .ellip`)
- *   .um-num              data 500 11/12 on a line of 1, padding 2 5, 2 out on the left, on the body's
- *                        19.5 line (`.um-numwrap`); --dim for the accent tone (money: --text)
+ *   the model chip       padding 3 9, 1px transparent, round, gap 5, app 11.5/12.5 --dim; its icon 13;
+ *                        its words at most 96
+ *   the number           data 500 11/12 on a line of 1, padding 2 5, 2 out on the left, on the body's
+ *                        19.5 line; --dim for the accent tone (money: --text)
  */
 export function UsageFiguresPreview({ mode }: { mode: UsageFigures }): JSX.Element {
   const t = useTokens();
@@ -230,7 +229,7 @@ export function UsageFiguresPreview({ mode }: { mode: UsageFigures }): JSX.Eleme
 function MiniComposer({ brand, model, figure, mode }: { brand: string; model: string; figure: UsageFigure; mode: UsageFigures }): JSX.Element {
   const t = useTokens();
   const line = Number(t.scaled("size-app", (13 / 12.5) * 1.5));
-  // `.um-num.um-t-accent` is --dim; money's accent `--text`, and `none` --dim.
+  // The number in the accent tone is --dim; money's accent --text, and `none` --dim.
   const ink = figure.tone === "accent" ? (figure.money ? "text" : "dim") : INK[figure.tone];
   const face = { voice: "data" as const, scale: 11 / 12, weight: 500, color: ink, tabular: true, lineHeight: 1 };
   return (

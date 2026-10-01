@@ -13,16 +13,16 @@ import { Ring } from "../usage/Ring";
 import { HoverLayer } from "./HoverLayer";
 
 /**
- * `usageMeters.tsx`'s `TurnContext`, universal (decision 0015): on an answer's rail, how full the
- * conversation was after it — the ring and its figure, and the breakdown on hover (a press on a phone).
- * The colours of the breakdown are `contextParts.ts`'s, the desktop's own. The rules:
+ * On an answer's rail, how full the conversation was after it — the ring and its figure, and the
+ * breakdown on hover (a press on a phone). The colours of the breakdown are `contextParts.ts`'s. How it
+ * looks:
  *
- *   .um-turn        row, centred, gap 4, padding 3 4, radius 5, data 500 10.5/12 on 1, tabular, --dim
+ *   the badge       row, centred, gap 4, padding 3 4, radius 5, data 500 10.5/12 on 1, tabular, --dim
  *                   (warn: the figure --warn); hovered --fill-ghost-hover. The ring 12, 3.2 wide.
- *   .um-tip         280 wide, column, gap 7, padding 10 12, --panel, 1px --line, radius 9,
+ *   the tip         280 wide, column, gap 7, padding 10 12, --panel, 1px --line, radius 9,
  *                   0 6 18 rgba(18,21,48,.14), app 12/12.5 on 1.4, --text; above the badge, at its end
- *   .um-stack       7 tall, radius 4, clipped, --dim 16%, gap 1
- *   .um-tip-row     --dim, 11.5px (.mono data 10.5px)
+ *   the stack       7 tall, radius 4, clipped, --dim 16%, gap 1
+ *   a tip's line    --dim, 11.5px (the model data 10.5px)
  */
 export function TurnContext({ context, before, route }: { context: ContextReading; before?: ContextReading | undefined; route?: string | undefined }): JSX.Element {
   const t = useTokens();

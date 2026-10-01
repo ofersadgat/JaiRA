@@ -36,24 +36,24 @@ import { LlmConfigWidget } from "./LlmConfigForm";
 import { suggestionsFrom } from "./suggestModel";
 
 /**
- * `schemaForm/SchemaForm.tsx`, universal (decision 0015): the one recursive form every typed value is
- * filled in through — Settings' config blocks, a run's inputs, a gate's form. Every decision with a rule
- * in it is `schemaForm/model.ts`'s, the same functions the DOM's form calls; what is here is which view
- * draws each. The rules it adds to the fields', from `styles.css`:
+ * The one recursive form every typed value is filled in through — Settings' config blocks, a run's
+ * inputs, a gate's form. Every decision with a rule in it is `schemaForm/model.ts`'s; what is here is
+ * which view draws each. What it adds to the fields' look (`Field.tsx`):
  *
- *   .sf-req              --bad, 700: the `*` of a required member
- *   .sf-type             data 10/12, --dim: what the value may be
- *   .prov                how a recorded value was settled: a pill, data 600 at 10/12.5 on a 1.6 line,
+ *   a required member    --bad, 700: its `*`
+ *   the type hint        data 10/12, --dim: what the value may be
+ *   provenance           how a recorded value was settled: a pill, data 600 at 10/12.5 on a 1.6 line,
  *                        padding 0 6, 1px --line (inferred --accent, asked --warn, each 40–45% into
- *                        --line); `.conf` data 11/12.5 --dim
- *   .sf-union            column, gap 6, grows; its chips at the start
- *   .sf-absent           app 11/12.5 --dim, padding 5 9, a dashed --line, radius --control-radius
- *   .cfg-list            column, gap 6, grows; a row: row, top-aligned, gap 8, padding 6 8, 1px --line,
- *                        radius 8, --panel; its buttons `quiet`, padding 2 7, gap 2
- *   .sf-row-head         row, centred, gap 6, 6 above the fields (none when closed); the caret a quiet
+ *                        --line); its confidence data 11/12.5 --dim
+ *   a union              column, gap 6, grows; its chips at the start
+ *   no value             app 11/12.5 --dim, padding 5 9, a dashed --line, radius --control-radius
+ *   a list               column, gap 6, grows; a row: row, top-aligned, gap 8, padding 6 8, 1px --line,
+ *                        radius 8, --panel; its buttons quiet, padding 2 7, gap 2
+ *   a list row's head    row, centred, gap 6, 6 above the fields (none when closed); the caret a quiet
  *                        button, padding 0 4, app 10/12.5 on an 18px line (--bad while the row has a
- *                        problem); `.sf-index` data 10.5/12 --dim; closed, the row's summary `.sub ellip`
- *   .sf-map              column, gap 6; a row the key (0.8), the value (1.2) and ✕, gap 6, top-aligned
+ *                        problem); its index data 10.5/12 --dim; closed, the row's summary (app
+ *                        11/12.5 --dim, cut with …)
+ *   a map                column, gap 6; a row the key (0.8), the value (1.2) and ✕, gap 6, top-aligned
  */
 
 const isRecord = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
@@ -85,8 +85,8 @@ function useShape(branches: readonly Schema[] | undefined, value: unknown, root:
 }
 
 /**
- * The `$type` widgets (`schemaForm/registry.ts`): `llm-config` is the call-settings form. A host may
- * register another.
+ * The `$type` widgets: `llm-config` is the call-settings form. A host may register another
+ * (`registerWidget`).
  */
 const WIDGETS: Record<string, ComponentType<WidgetProps>> = {
   // Reached at render time only: the form's module imports this one.
@@ -110,7 +110,7 @@ function ShapeChips({ branches, index, disabled, onPick, self = false }: { branc
   );
 }
 
-/** `.sf-absent`: where a value would go, and why there is none. */
+/** Where a value would go, and why there is none. */
 function Absent({ children }: { children: string }): JSX.Element {
   const t = useTokens();
   return (
@@ -434,7 +434,7 @@ function KeyBox({ name, disabled, onRename }: { name: string; disabled: boolean;
   return <FormInput value={draft ?? name} mono label="key" disabled={disabled} onChange={setDraft} onBlur={commit} onSubmit={commit} onEscape={() => setDraft(null)} />;
 }
 
-/** `button.quiet` in a list row's actions (`.cfg-list-acts button`: padding 2 7). */
+/** A quiet button in a list row's actions (padding 2 7). */
 function QuietButton({
   title,
   disabled,
@@ -450,7 +450,7 @@ function QuietButton({
   children: string;
   caret?: boolean;
   bad?: boolean;
-  /** A `button.quiet` outside a list's actions: the button's own padding (`--control-pad`). */
+  /** A quiet button outside a list's actions: a button's own padding (--control-pad). */
   own?: boolean;
 }): JSX.Element {
   const t = useTokens();
@@ -482,7 +482,7 @@ function QuietButton({
   );
 }
 
-/** `button.ghost`: the list's and the map's add. */
+/** A ghost button: the list's and the map's add. */
 function GhostButton({ disabled, onPress, children }: { disabled: boolean; onPress: () => void; children: string }): JSX.Element {
   const t = useTokens();
   return (
@@ -588,8 +588,8 @@ function ListNode({ schema, value, onChange, ctx }: { schema: Schema; value: unk
                 </View>
               ) : null}
               {isOpen ? (
-                // `.cfg-list-body > .cfg-fields`: deeper in the list's control than its own child, so no
-                // rule on the left (`.cfg-control > .cfg-fields` does not reach it).
+                // A row's fields: deeper in the list's control than its own child, so no rule on the
+                // left (`Deeper`).
                 <Deeper>
                   <SchemaForm
                     schema={items}

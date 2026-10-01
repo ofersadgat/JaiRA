@@ -6,13 +6,10 @@ import { InlineGate } from "./Gate";
 import type { TranscriptSource } from "./RunTranscript";
 
 /**
- * A task's conversation in the panel, universal (decision 0015): `panelFaces.tsx`'s `TaskConversation`
- * over `runViews.tsx`'s `RunConversation` (`components/run/RunConversation.tsx`) — the transcript's
- * scroller, what stands where the composer would, and the gate the task is parked on at the foot when
- * the tree has no place for it. A subagent's doorway walks into its conversation on the panel's own
- * stack (`onOpenSidechain`), not the trail.
- *
- *   .pv-convo          column, flex 1
+ * A task's conversation in the panel: `RunConversation` (`components/run/RunConversation.tsx`) — the
+ * transcript's scroller and what stands where the composer would, a column taking the body's height —
+ * with the gate the task is parked on at the foot when the tree has no place for it. A subagent's
+ * doorway walks into its conversation on the panel's own stack (`onOpenSidechain`), not the trail.
  */
 export function TaskConversation({
   detail,
@@ -34,8 +31,8 @@ export function TaskConversation({
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
 }): JSX.Element {
   const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node));
-  // `.pv-convo > .inline-gate`'s `max-height: 55%` is of the conversation's height; the gate now stands
-  // in the layer's box, so the height is measured and handed down.
+  // The gate at the foot is at most 55% of the conversation's height. It stands in the box under the
+  // scroller, where a percentage has nothing to resolve against, so the height is measured and handed down.
   const [height, setHeight] = useState<number | undefined>(undefined);
   return (
     <RunConversation

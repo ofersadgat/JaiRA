@@ -15,25 +15,23 @@ import { Float } from "./Float";
 import { TipLayer } from "./TipLayer";
 
 /**
- * `updatesView.tsx`'s `SidebarUpdateRow`, universal (decision 0015): the sidebar's Update row above
- * Settings, drawn only while there is something to do (`sidebarUpdateOf`) — the one click (download if
- * needed, then Wait + update; `updateRow.ts` decides), the × on hover that hides this version, ↻ after a
- * failure, and the chevron for the other ways (`UpdateMenuCard`, beside the row). Hovered, the full
- * version and when it was published stand beside it. In the collapsed rail it is its glyph alone. The
- * rules, from `styles.css`:
+ * The sidebar's Update row above Settings, drawn only while there is something to do
+ * (`sidebarUpdateOf`) — the one click (download if needed, then Wait + update; `updateRow.ts` decides),
+ * the × on hover that hides this version, ↻ after a failure, and the chevron for the other ways
+ * (`UpdateMenuFloat`, beside the row). Hovered, the full version and when it was published stand beside
+ * it. In the collapsed rail it is its glyph alone. How it looks:
  *
- *   .side-row             26 tall, row, centred, gap 4, radius 6; hovered --fill-ghost-hover; .ready
+ *   the row               26 tall, row, centred, gap 4, radius 6; hovered --fill-ghost-hover; ready
  *                         --tint-accent
- *   .side-hit             the rest of the row: gap 8, padding 0 7; the glyph 15 wide, the label
- *                         app-label — in --accent, --text once ready, --bad after a failure
- *   .upd-side-ver         data 11/12 on a line of 1, --dim, pushed right, at most 58%, one line
- *   .upd-side-bar         44 wide, radius 3, --dim at 16%, filled in --accent to the percent; 6 tall
- *                         (`.um-bar`'s height comes later than the row's 4 and wins)
- *   .side-act             20 square, radius 5, app 11/12.5; .upd-caret / .upd-retry 3 before the edge,
- *                         the chevron 12 (on: --text on --fill-ghost-selected); .upd-dismiss app 14/12.5,
- *                         shown only while the row is under the pointer
- *   .upd-tip              250 wide, padding 8 10, 1px --line, radius 8, --panel, --lift, column gap 3;
- *                         app 11.5/12.5 on 1.4, --dim; its code data 11.5/12 --text, its b --text 600
+ *   its hit               the rest of the row: gap 8, padding 0 7; the glyph 15 wide, in --accent (--bad
+ *                         after a failure); the label app-label
+ *   the version           data 11/12 on a line of 1, --dim, pushed right, at most 58%, one line
+ *   a download's bar      44 wide, 6 tall, radius 3, --dim at 16%, filled in --accent to the percent
+ *   an act                20 square, radius 5, app 11/12.5; the chevron and ↻ 3 before the edge, the
+ *                         chevron 12 (on: --text on --fill-ghost-selected); the × app 14/12.5, shown
+ *                         only while the row is under the pointer
+ *   the tip               250 wide, padding 8 10, 1px --line, radius 8, --panel, --lift, column gap 3;
+ *                         app 11.5/12.5 on 1.4, --dim; the version data 11.5/12 --text, its × --text 600
  */
 export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collapsed: boolean; onOpenAbout: () => void; onNotes: () => void; onRetry: () => void }): JSX.Element | null {
   const t = useTokens();
@@ -46,8 +44,8 @@ export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collap
   const next = update.available;
   const open = menuAt !== undefined;
   const tone = updateRowTone(row);
-  // The label keeps `.app-label`'s --dim whatever the row's state (its own colour beats the hit's); the
-  // glyph takes the hit's: --accent, --bad after a failure (`.upd-side.bad .side-glyph`).
+  // The label keeps the app-label register's --dim whatever the row's state; the glyph is in --accent,
+  // --bad after a failure.
   const glyphInk = tone === "bad" ? "bad" : "accent";
   const click = (): void =>
     pressUpdateRow(row, next, { openUrl: (url) => void (isWeb ? window.open(url, "_blank", "noopener") : Linking.openURL(url)), apply: () => applyUpdate("wait"), onOpenAbout });
@@ -176,7 +174,7 @@ export function UpdateRow({ collapsed, onOpenAbout, onNotes, onRetry }: { collap
 
 const TIP = { voice: "app", scale: 11.5 / 12.5, lineHeight: 1.4, color: "dim" } as const;
 
-/** `.upd-side-ver`: data 11/12 on a line of 1, --dim, one line, at most 58%. */
+/** The version at the row's end: data 11/12 on a line of 1, --dim, one line, at most 58%. */
 function Version({ auto = false, children }: { auto?: boolean; children: ReactNode }): JSX.Element {
   return (
     <Txt spec={{ voice: "data", scale: 11 / 12, lineHeight: 1, color: "dim" }} ellip flexShrink={1} minWidth={0} maxWidth="58%" {...(auto ? { marginLeft: "auto" } : {})}>
@@ -186,10 +184,10 @@ function Version({ auto = false, children }: { auto?: boolean; children: ReactNo
 }
 
 /**
- * `UpdateMenuCard` in its `Popover` (`.cx-submenu.answer-menu.upd-menu`: 300 wide), beside the row, start
- * aligned: what is going in its head (`.upd-menu-head`: padding 5 8 6, 2 below, a --line under, app
- * 11/12.5 --dim), then the choices — the default ticked — and Release notes. About's split button hangs
- * the same card below itself, end aligned (`side`, `align`).
+ * The update menu in its float (the answer menu's card, 300 wide), beside the row, start aligned: what
+ * is going in its head (padding 5 8 6, 2 below, a --line under, app 11/12.5 --dim), then the choices —
+ * the default ticked — and Release notes. About's split button hangs the same card below itself, end
+ * aligned (`side`, `align`).
  */
 export function UpdateMenuFloat({
   anchor,

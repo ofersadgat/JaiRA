@@ -14,10 +14,10 @@ import { useChatSurface } from "../components/chat/surface";
 import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
 
 /**
- * What stands in the title bar (`.title-bar`, `App.tsx`): the ADDRESS of what is open. In Tasks, the
- * task address bar (`taskBar.tsx`, with `crumbs.tsx`), given what `App.tsx` gives its own; in Files, the
- * file address bar; in Chat, the conversation's name. Then `.title-drag` ({@link TitleDrag}). The bar
- * itself — 34 tall at least, `--panel`, a `--line` under it — is `UniversalApp`'s.
+ * What stands in the title bar: the ADDRESS of what is open. In Tasks, the task address bar
+ * (`TaskAddressBar.tsx`, with `Crumbs.tsx`); in Files, the file address bar; in Chat, the conversation's
+ * name. Then the drag filler ({@link TitleDrag}). The bar itself — 34 tall at least, `--panel`, a
+ * `--line` under it — is `UniversalApp`'s.
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
@@ -30,7 +30,7 @@ export function ShellTitleBar(): JSX.Element {
       </>
     );
   }
-  // Settings, Logs, Debug and Components have no address: the desktop's bar is its filler alone.
+  // Settings, Logs, Debug and Components have no address: the bar is its filler alone.
   if (state.view !== "tasks") return <TitleDrag />;
   return (
     <>
@@ -41,16 +41,16 @@ export function ShellTitleBar(): JSX.Element {
 }
 
 /**
- * `.title-drag`: the filler the desktop moves its window by — flex 1, at least 8 and the gutter the OS
- * draws its window buttons into (`--wco-right`), a drag region whose words cannot be selected. A separate
- * box and not the row, as on the desktop: a drag region swallows presses, and the crumbs beside it are
- * places to go. On a phone it is the filler alone.
+ * The filler the desktop's window is moved by — flex 1, at least 8 and the gutter the OS draws its
+ * window buttons into (`WINDOW_GUTTER.right`), a drag region whose words cannot be selected. A separate
+ * box and not the row: a drag region swallows presses, and the crumbs beside it are places to go. On a
+ * phone it is the filler alone.
  */
 function TitleDrag(): JSX.Element {
   return <View flex={1} minWidth={WINDOW_GUTTER.right(8) as never} style={DRAG_REGION as never} />;
 }
 
-/** The `<TaskAddressBar>` inside `<header className="title-bar">`, with `App.tsx`'s props. */
+/** In Tasks, `TaskAddressBar` on the store, with the run's reading toggle and New task as its tools. */
 function TasksAddress(): JSX.Element {
   const { state, actions } = useShell();
   const ui = state.settings.ui;
@@ -59,7 +59,7 @@ function TasksAddress(): JSX.Element {
   const namedProjects = useMemo(() => state.projects.map((p) => ({ ...p, label: groupOf(groups, p.project)?.label ?? p.label })), [state.projects, groups]);
   /**
    * `atProject`: the group the column is scrolled to. The column reports it (`viewState.boardAt`); until
-   * it has, the first group it draws, which is what the desktop measures with the column at its top.
+   * it has, the first group it draws, which is the one at the top of an unscrolled column.
    */
   const scrolled = boardAt.use();
   const atProject = scrolled ?? groups.find((g) => state.taskFocus === null || g.members.some((m) => m.project === state.taskFocus))?.key ?? null;
@@ -74,7 +74,7 @@ function TasksAddress(): JSX.Element {
   const opener = newTaskOpener.use();
   const openNewTask = (): void => {
     if (opener !== null) return opener();
-    // No panel column to push the form onto yet: unfold it, as `openNewTask` does after pushing.
+    // No panel column to push the form onto yet: unfold it, as `openNewTaskWith` does after pushing.
     actions.setFold(FOLD.panelTasks, true);
   };
   return (
@@ -108,7 +108,7 @@ function TasksAddress(): JSX.Element {
   );
 }
 
-/** In Chat, the conversation's name (`span.chat-title`), then `.title-drag`. */
+/** In Chat, the conversation's name, then the drag filler. */
 function ChatAddress(): JSX.Element {
   return (
     <>

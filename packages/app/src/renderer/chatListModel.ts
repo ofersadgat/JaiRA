@@ -1,7 +1,6 @@
 /**
- * What the conversation list says about each row — `ChatListPanel`'s rules, pure, so the desktop's drawer
- * and the universal one (decision 0015) derive them once: which rows, in what order, which dot, what the
- * right edge says, and what a row's menu offers.
+ * What the conversation list says about each row — `ChatListPanel`'s rules, pure: which rows, in what
+ * order, which dot, what the right edge says, and what a row's menu offers.
  */
 import type { TaskSummary } from "@jaira/shared/browser";
 import type { AskSpec, MenuItem } from "./menuTypes";

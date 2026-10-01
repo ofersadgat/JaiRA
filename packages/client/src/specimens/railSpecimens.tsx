@@ -4,12 +4,12 @@ import type { RailStep } from "@jaira/ui/rail";
 import { RailedRows, useTokens } from "@jaira/universal";
 
 /**
- * The conversation's rail on its own (`components/panel/Rail.tsx`, the copy of `railView.tsx`'s `RailedRows`),
- * on the page's grey (`.sb`'s --bg), in the shapes the seeded world never draws:
+ * The conversation's rail on its own (`RailedRows`, `components/panel/Rail.tsx`), on the page's grey
+ * (--bg), in the shapes the seeded world never draws:
  *
  *  - `rail-deep` — a run sixteen states deep, whose shallow lanes fall under two pixels apart and are
  *    drawn as ONE striped column (`stackPaint`), the deepest lanes kept at full pitch;
- *  - `rail-rolled` — a lane folded with no host to say what it holds: the standing `.rail-rolled` line
+ *  - `rail-rolled` — a lane folded with no host to say what it holds: the standing rolled-up line
  *    (its name, the tag, how many states it holds) and the knot's stack of rings.
  */
 export interface RailSpecimen {

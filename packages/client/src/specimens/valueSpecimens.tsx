@@ -4,7 +4,7 @@ import { Markdown, ValueView } from "@jaira/universal";
 
 /**
  * The value view's readings as specimens (decision 0015): `ValueView`
- * (`components/panel/ValueView.tsx`, the copy of `valueView.tsx`'s), each from a value and a hint.
+ * (`components/panel/ValueView.tsx`), each from a value and a hint.
  *
  *  - `value-json` — a structured value with a schema: coloured, each key's description ghosted at the
  *    end of its line; `value-json-edit` — the same, editable (it keeps the coloured reading).

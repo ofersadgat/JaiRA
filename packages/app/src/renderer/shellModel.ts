@@ -1,9 +1,6 @@
 /**
  * The shell's derivations that are not drawing: which rows the sidebar has and what each one counts.
- *
- * Pulled out of `App.tsx` (decision 0015) so the desktop's shell and the universal one derive them once
- * — a project row on the phone and the same row on the desktop can never disagree about how much is
- * waiting. Nothing here renders; the drawers the rows open onto stay each shell's own.
+ * Nothing here renders: the shell's regions (`packages/universal/src/app`) draw from it.
  */
 import type { ProjectSummary, ProjectTask } from "@jaira/shared/browser";
 import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, type PillCounts } from "./pillModel";
@@ -20,7 +17,7 @@ export const VIEWS: readonly SidebarView[] = [
   { id: "files", glyph: "❏", label: "Files" },
   { id: "tasks", glyph: "▶", label: "Tasks" },
   // The third activity, and the newest: TALKING. Files designs, Tasks operates, and this is the one
-  // you open when what you want is a conversation rather than a workflow — see `chatPane.tsx`.
+  // you open when what you want is a conversation rather than a workflow.
   { id: "chat", glyph: "✎", label: "Chat" },
 ];
 
@@ -41,8 +38,8 @@ export const FOOTER_VIEWS: readonly SidebarView[] = [
 ];
 
 /**
- * The views that live INSIDE the settings panel — see `App.tsx`'s `beforeSettings` and the sidebar's
- * own rule. Leaving Settings returns to the last view that is not one of these.
+ * The views that live INSIDE the settings panel — see `SidebarRegion.tsx`'s `beforeSettings` and the
+ * sidebar's own rule. Leaving Settings returns to the last view that is not one of these.
  */
 export const PANEL_VIEWS: ReadonlySet<string> = new Set<string>(["settings", ...FOOTER_VIEWS.map((v) => v.id)]);
 

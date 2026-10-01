@@ -14,30 +14,29 @@ import { RailedRows, cssColour } from "./Rail";
 import { PanelEmpty } from "./PanelViews";
 
 /**
- * `runIndex.tsx`'s `RunIndex`, universal (decision 0015): the run's instances on the conversation's own
- * rail, one row per state — the letterheads stacked. Its rows, folds, loops and fitting are
- * `runIndexModel.ts`'s (`useRunIndexModel`), the same code the DOM's runs. The rules, from `styles.css`:
+ * The run's instances on the conversation's own rail, one row per state — the letterheads stacked. Its
+ * rows, folds, loops and fitting are `runIndexModel.ts`'s (`useRunIndexModel`). How it looks:
  *
- *   .rail.run-index     --rail-cap 30, no measure
- *   .rail-mark          row, centred, gap 2, full width, a 2px transparent edge on the left (a loop's
+ *   the rail            a cap of 30, no measure
+ *   a row               row, centred, gap 2, full width, a 2px transparent edge on the left (a loop's
  *                       pass: --accent 30%), radius 5; data 11/12, --dim
- *   .rail-mark-chev     15 square, centred, radius 3, --dim (hover --text); open: turned 90°; the
+ *   its chevron         15 square, centred, radius 3, --dim (hover --text); open: turned 90°; the
  *                       glyph 11. A leaf keeps the slot, hidden
- *   .rail-mark-go       the bookmark: flex 1, row, centred, gap 7, padding 3 6, radius 4, clipped;
- *                       hover --fill-ghost-hover and --text
- *   .rail-mark-dot      6 round, --dim
- *   .rail-mark-name     data 12/12, 600, --text; .gone struck through at 0.5 (the row at 0.72)
- *   .rail-mark-why      app 11/12.5, --bad, ellipsed, flex 1
- *   .rail-mark-count    8 before, padding 1 6, radius 3, --panel-2, --dim, 9.5px, 0.05em, upper
- *   .rail-mark-meta     data 10/12, tabular, 0.85, pushed right, 10 before, ellipsed, gives way first
- *   .rail-mark.tb.*     the letterhead's tones: accent --accent 12% into --panel, the name --accent;
+ *   its bookmark        flex 1, row, centred, gap 7, padding 3 6, radius 4, clipped; hover
+ *                       --fill-ghost-hover and --text
+ *   the dot             6 round, --dim
+ *   the name            data 12/12, 600, --text; superseded: struck through at 0.5 (the row at 0.72)
+ *   why it failed       app 11/12.5, --bad, ellipsed, flex 1
+ *   the steps count     8 before, padding 1 6, radius 3, --panel-2, --dim, 9.5px, 0.05em, upper
+ *   the meta            data 10/12, tabular, 0.85, pushed right, 10 before, ellipsed, gives way first
+ *   a toned row         the letterhead's tones: accent --accent 12% into --panel, the name --accent;
  *                       amber --warn 14%, an inset 1px --warn 30% into --line, the name --warn; red
  *                       --bad 11%, the name --bad
- *   .rail-mark.here     --accent 15% into --panel, an inset 1.5px --accent 42%; the name --accent. On a
+ *   the reader's row    --accent 15% into --panel, an inset 1.5px --accent 42%; the name --accent. On a
  *                       toned row the tone keeps the fill and the ring is --accent 62%
- *   .loop-tag           pill: padding 2 8, 1px --accent 32% into --line, --accent 9%, --accent; data
+ *   a loop's tag        pill: padding 2 8, 1px --accent 32% into --line, --accent 9%, --accent; data
  *                       9.5px 700, 0.06em, upper; ↻ at 11
- *   .loop-shut          row, centred, gap 7: the cycle's swatches (3 × 11, radius 1, gap 2) and names
+ *   a folded loop       row, centred, gap 7: the cycle's swatches (3 × 11, radius 1, gap 2) and names
  *
  * A row's right-click (a long press on a phone) is its menu — go to it, rewind to before it, fork there
  * (`onCut`) — and the gutter folds a lane pressed on its knot, or goes to a state with nothing under it
@@ -113,9 +112,8 @@ export function RunIndex({
     const on = here === keyOfNode(node);
     const toneInk = tone === "accent" ? "accent" : tone === "amber" ? "warn" : tone === "red" ? "bad" : undefined;
     const fill = tone === "accent" ? t.mix(t.v("accent"), 12, t.v("panel")) : tone === "amber" ? t.mix(t.v("warn"), 14, t.v("panel")) : tone === "red" ? t.mix(t.v("bad"), 11, t.v("panel")) : undefined;
-    // `.rail-mark.rolled .rail-mark-go` — a folded state is a TILE: --panel, a --line ring and a soft
-    // shadow, radius 6. It comes last, so it beats the tone and the here-chip at equal weight; only
-    // `.rail-mark.here.tb` (one class heavier) keeps its fill and ring over it.
+    // A folded state is a TILE: --panel, a --line ring and a soft shadow, radius 6. It beats the tone and
+    // the here-chip; only a toned row the reader is on keeps its fill and ring over it.
     const heavy = on && fill !== undefined;
     const ground = folded && !heavy ? t.v("panel") : (fill ?? (on ? t.mix(t.v("accent"), 15, t.v("panel")) : undefined));
     const ring = folded && !heavy ? `0px 0px 0px 1px ${String(t.v("line"))}, 0px 1px 2px rgba(0, 0, 0, 0.06)` : on ? `inset 0px 0px 0px 1.5px ${t.mix(t.v("accent"), fill !== undefined ? 62 : 42, "transparent")}` : tone === "amber" ? `inset 0px 0px 0px 1px ${t.mix(t.v("warn"), 30, t.v("line"))}` : undefined;
@@ -285,7 +283,7 @@ export function RunIndex({
   );
 }
 
-/** `.loop-tag`: a cycle's passes, and the control that folds them into one row. */
+/** A loop's tag: a cycle's passes, and the control that folds them into one row. */
 function LoopTag({ times, onToggle, t }: { times: number; onToggle: () => void; t: Tokens }): JSX.Element {
   const words: FontSpec = { voice: "data", scale: 1, weight: 700, upper: true, color: "accent" };
   return (

@@ -1,11 +1,11 @@
 /**
  * A draggable divider's arithmetic: the size a drag or a key asks for, held between the pane's
- * limits. The gesture is the universal `Splitter`'s (`packages/universal/src/components/files/Splitter.tsx`).
+ * limits. The gesture is `Splitter`'s (`packages/universal/src/components/files/Splitter.tsx`).
  */
 
 /**
  * A dragged size, held between `min` and `max` — and, with a `reserve`, to what leaves the rest of the
- * container that much (`extent` is the container along the drag). Shared with the universal copy.
+ * container that much (`extent` is the container along the drag).
  */
 export function clampSplit(next: number, min: number, max: number, reserve: number | undefined, extent: number): number {
   let ceiling = max;
@@ -18,7 +18,7 @@ export function clampSplit(next: number, min: number, max: number, reserve: numb
 /**
  * Where a key moves a divider from `value`, unclamped — or `undefined` for a key that is not its to take.
  * The pair of keys follows the axis: arrows across a divider that only moves up and down are arrows that
- * appear to do nothing. Shift moves it four times as far. Shared with the universal copy.
+ * appear to do nothing. Shift moves it four times as far.
  */
 export function splitKey(key: string, shift: boolean, value: number, horizontal: boolean, invert: boolean): number | undefined {
   const step = shift ? 48 : 12;

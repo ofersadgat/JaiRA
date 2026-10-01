@@ -13,16 +13,16 @@ import { Empty, LinkButton } from "./controls";
 import { WorkflowEditor } from "./WorkflowEditor";
 
 /**
- * `configPanel.tsx`, universal (decision 0015): one state's configuration as a run had it — the same
- * workflow editor, as a READING (nothing that would change anything is drawn, and the bindings have
- * the run's values under them), with the line that says which copy of the file it is. The read it
- * makes for itself and what that line says are `configPanelModel.ts`'s. Also the panel's config card
- * (`panelFaces.tsx`'s `ConfigCard`) and the events task's Automations. The rules:
+ * One state's configuration as a run had it — the same workflow editor, as a READING (nothing that
+ * would change anything is drawn, and the bindings have the run's values under them), with the line
+ * that says which copy of the file it is. The read it makes for itself and what that line says are
+ * `configPanelModel.ts`'s. Also the panel's config card ({@link ConfigCard}) and the events task's
+ * Automations. How it looks:
  *
- *   .pv-config                column, gap 10; `.pv-actions` row, centred, gap 8
- *   .pane.config-panel        column, the rest, gap 8, padding 10 12 12
- *   .config-panel > .sb-gutter  row, centred, gap 8: the id (`.sb-session`, app 11/12.5 --dim), which
- *                             copy (`.sub`, --warn when the workflow moved), `open ↗` (`button.link`)
+ *   the card                  column, gap 10; its actions a row, centred, gap 8
+ *   the reading               column, the rest, gap 8, padding 10 12 12
+ *   its top line              row, centred, gap 8: the id (app 11/12.5 --dim), which copy (a note,
+ *                             --warn when the workflow moved), `open ↗` (a link button)
  */
 export function ConfigPanel({
   read,
@@ -94,7 +94,7 @@ export function ConfigReading({
   );
 }
 
-/** `panelFaces.tsx`'s `ConfigCard`: "Open in the Files view", over the configuration a run resolved against. */
+/** The side panel's config card: "Open in the Files view", over the configuration a run resolved against. */
 export function ConfigCard({
   read,
   stateId,
@@ -130,7 +130,7 @@ export function ConfigCard({
   );
 }
 
-/** `eventsTaskPanel.tsx`'s `EventsTaskAutomations`: Settings' Automations editor, on the task's layer. */
+/** The events task's Automations: Settings' Automations editor, on the task's layer. */
 export function EventsTaskAutomations(props: EventsTaskAutomationsProps): JSX.Element {
   return <AutomationsFor key={props.project} {...props} />;
 }

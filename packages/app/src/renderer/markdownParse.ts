@@ -2,8 +2,8 @@
  * Markdown, read: the one parser for the whole app, its token type, what a fenced block is handed to
  * its renderer as, the URL rules, and a document's front matter split from its body.
  *
- * Both markdown components fold the same tokens — the DOM one (`markdown.tsx`, an island now: decision
- * 0015) and the universal copy (`packages/universal/src/components/Markdown.tsx`) — so the parse and
+ * Both markdown components fold the same tokens — the DOM one an island draws (`markdown.tsx`, decision
+ * 0015) and the universal tree's (`packages/universal/src/components/Markdown.tsx`) — so the parse and
  * the safety rules are here once, and nothing here draws.
  *
  * ## What happened to the sanitizer
@@ -36,7 +36,7 @@ const MARKDOWN = new MarkdownIt({ html: false, linkify: true, breaks: false });
  */
 export type Token = ReturnType<typeof MARKDOWN.parse>[number];
 
-/** The one parse, for the universal copy (`packages/universal/src/components/Markdown.tsx`, decision 0015). */
+/** The one parse, which both components fold. */
 export function parseMarkdown(text: string): Token[] {
   return MARKDOWN.parse(text, {});
 }
@@ -53,9 +53,9 @@ export interface FenceBlock {
    * Where a change to the block's contents goes, when the surface drawing it permits one.
    *
    * ABSENT means read-only, which is the same way every other document in this app says it — see
-   * `documents.tsx`. A reading surface never supplies it, so a fence in a transcript is exactly what
-   * it always was; the live-preview editor does, which is what lets a ```ts block inside a markdown
-   * file be edited by the same Monaco that would edit the `.ts` file itself.
+   * `MarkdownDocumentProps.onChange`. A reading surface never supplies it, so a fence in a transcript
+   * is exactly what it always was; the live-preview editor does, which is what lets a ```ts block
+   * inside a markdown file be edited by the same Monaco that would edit the `.ts` file itself.
    */
   edit?: ((next: string) => void) | undefined;
 }
@@ -100,7 +100,7 @@ export function safeUrl(raw: string | null, allowed: ReadonlySet<string>): strin
  * One attribute, as a string or not at all.
  *
  * `attrGet` is typed `string | number | null` — a plugin may set a numeric attribute — and every
- * consumer below wants text. Narrowed once here rather than at four call sites.
+ * consumer wants text. Narrowed once here rather than at each call site.
  */
 export function attr(token: Token, name: string): string | null {
   const value = token.attrGet(name);

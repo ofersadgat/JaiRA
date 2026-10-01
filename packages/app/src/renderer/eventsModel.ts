@@ -1,7 +1,8 @@
 /**
  * Settings → Tools → Events, as data (decision 0010 §2): which rows the section draws, what each
- * switch writes, and the line under an event that is on. Pure — `eventsPane.tsx` draws it and the
- * tests read it without a DOM.
+ * switch writes, and the line under an event that is on. Pure — `EventsSection`
+ * (`packages/universal/src/components/settings/EventsSection.tsx`) draws it and the tests read it
+ * without a DOM.
  *
  * ## Which rows
  *

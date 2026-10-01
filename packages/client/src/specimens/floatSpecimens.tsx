@@ -11,7 +11,7 @@ import { ApprovalDialog, FolderBrowser, GalleryStage as Stage, ModuleApprovalDia
  * (decision 0015), each from a fixture.
  *
  *  - `gallery-<row>-<variant>` — every card's stage in the Components room: `GalleryPane.tsx`'s `Stage`
- *    in the gallery's dashed box (`.gallery-stage`), from the variant's own config. The room scrolls a
+ *    in the gallery's dashed box (`RnStage`), from the variant's own config. The room scrolls a
  *    card into view at a fraction of a pixel; here each is drawn at the top of its box.
  *  - `approval-dialog`, `module-approval`, `folder-browser` — the shell's own dialogs, drawn where they
  *    stand as the room's stage draws a dialog (no backdrop; they take `staged`): a command approval
@@ -28,7 +28,7 @@ export interface FloatSpecimen {
 /** The stage's width in the room at the studio's window: the card's body less the side column. */
 const STAGE = 624;
 
-/** `.gallery-stage`: padding 12, a dashed --line, radius 8, --bg. */
+/** The gallery's stage: padding 12, a dashed --line, radius 8, --bg. */
 function RnStage({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -94,7 +94,7 @@ function WithUpdate({ state, children }: { state: UpdateState; children: ReactNo
   return <>{children}</>;
 }
 
-/** The sidebar's foot, where the row stands (`.side-foot` in `.sidebar`): its ground, 6 on top under a --line, the sidebar's --line on the right. */
+/** The sidebar's foot, where the row stands: its ground, 6 on top under a --line, the sidebar's --line on the right. */
 function RnFoot({ children }: { children: ReactNode }): JSX.Element {
   return (
     <TokenScope scope="sidebar">

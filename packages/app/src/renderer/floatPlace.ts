@@ -1,6 +1,6 @@
 /**
- * Where a float goes against its anchor — `popover.tsx`'s placement, pure, so the universal copies
- * (decision 0015) place their floats by the same arithmetic: on the side asked for, flipped to the other
+ * Where a float goes against its anchor, pure — the arithmetic `popover.tsx` and the universal floats
+ * (`packages/universal/src/components/floats/`) place by: on the side asked for, flipped to the other
  * when that has more room, clamped inside the window, its height capped to the room it has.
  */
 /** Room kept between a float and its anchor, and between a float and the window's edge. */

@@ -1,7 +1,7 @@
 /**
  * How a message in a transcript is READ — what the app says it is, what it is read as, the two menus on
- * its rail that change either, and the clock beside them — `transcriptView.tsx`'s `Message` rules,
- * moved out unchanged so the universal copy (decision 0015) reads a message the same way.
+ * its rail that change either, and the clock beside them. `Message` (`SessionTranscript.tsx`) and its
+ * rail (`MessageRail.tsx`) draw from it.
  */
 import {
   detectedMime,
@@ -128,7 +128,6 @@ export function typeMenuOf({
   ];
 }
 
-/** What each reading is called in the rail, and what its tooltip says it does. */
 /** The badge on a message the person did not type: WHO wrote it, in a word, with the rest on the tooltip. */
 export const MESSAGE_SOURCE: Record<MessageAuthor, { label: string; title: string; icon: "send" | "workflow" }> = {
   host: { label: "Written by JaiRA", title: "JaiRA wrote and sent this for you — you did not type it", icon: "send" },
@@ -144,6 +143,7 @@ export function workflowSourceTitleOf(workflow: string, opens: boolean): string 
   return opens ? `${title}. Open its definition beside the conversation.` : title;
 }
 
+/** What each reading is called in the rail, and what its tooltip says it does. */
 export const READING: Record<ViewId, { label: string; hint: string }> = {
   markdown: { label: "Rendered", hint: "As markdown, rendered" },
   html: { label: "Rendered", hint: "As HTML, rendered" },

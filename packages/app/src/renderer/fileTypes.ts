@@ -93,7 +93,7 @@ export type FileAction = "view" | "edit";
  * rendered without it degrades to a markdown preview, which is what the file was before.
  *
  * Nothing here writes to disk. {@link SyncSurface.run} produces a proposal, and the store turns it
- * into drafts — see `syncPanel.tsx`.
+ * into drafts — see `SyncPanel.tsx`.
  */
 export interface SyncSurface {
   /** Which side has moved since the two last agreed. Null until the first answer arrives. */
@@ -216,7 +216,7 @@ export interface FileSurfaceContext {
   /**
    * Where a click asked the task's conversation to LAND: one run of one state — an event notice's
    * `notify` firing. Set by `select` when it is handed an instance, and a stamp (`at`) so the same ask
-   * twice scrolls twice; the conversation serves it once (`SessionBandsView`'s focus effect).
+   * twice is two asks, each to be served once.
    */
   landing?: { taskId: string; instance: string; at: number } | null | undefined;
   /** The answer being written right now, when there is one — text and thinking tails, every stream item. */
@@ -345,7 +345,7 @@ export interface FileSurfaceContext {
    * Set by the task panel's Instances index when the middle column IS the conversation (`runMode`
    * says so), because that column is the document and the panel's own conversation is not on
    * screen. `at` is a stamp rather than a flag — pressing the same label twice is two asks, and the
-   * conversation serves each once (see `SessionBandsView`'s focus effect).
+   * conversation serves each once (see `RunTranscript`'s focus effect).
    */
   runFocus?: { instance: string; at: number } | undefined;
   onRunFocus?: ((focus: { instance: string; at: number }) => void) | undefined;
@@ -448,7 +448,7 @@ export interface FileSurfaceContext {
    */
   readState?: ((stateId: string) => Promise<WorkflowSource | null>) | undefined;
   saveState?: ((source: WorkflowSource, text: string) => void) | undefined;
-  /** Any file's text, for showing what a LINKED property says — see `linkPreview.tsx`. */
+  /** Any file's text, for showing what a LINKED property says — see `linkModel.ts`. */
   readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
   /**
    * What the state editor's layer buttons do about the built-in layer (decision 0006).
@@ -692,7 +692,8 @@ export interface FileRenderer {
 }
 
 /**
- * `mime` → kind → the renderers registered for it, in order. Populated by `fileSurfaces.tsx`.
+ * `mime` → kind → the renderers registered for it, in order. Populated by `registerSurfaceTable`
+ * (`fileSurfaceTable.ts`).
  *
  * A LIST rather than one component, and the order is the meaning: the first is what draws the type
  * when nobody has said otherwise. Everything after it is an alternative a person may pick in
@@ -703,9 +704,9 @@ export type SurfaceRegistry = Map<string, Partial<Record<RenderKind, FileRendere
 const REGISTRY: SurfaceRegistry = new Map();
 
 /**
- * A registry of a shell's own — the universal copy's, which registers the same table
- * (`fileSurfaceTable.ts`) with its native surfaces. Every lookup below takes one as its last
- * argument and defaults to the app's.
+ * A registry of the caller's own — the Files room's (`SURFACES`, `surfaces.tsx` in the universal
+ * tree), which registers the table (`fileSurfaceTable.ts`) with its surfaces. Every lookup below that
+ * takes one takes it as its last argument and defaults to this module's.
  */
 export function newSurfaceRegistry(): SurfaceRegistry {
   return new Map();
@@ -1062,7 +1063,7 @@ export function registeredMimes(): string[] {
 /**
  * Every type-and-kind a person actually has a choice about — what the Appearance pane draws.
  *
- * Derived rather than declared, so a renderer added to the table below shows up in settings with
+ * Derived rather than declared, so a renderer added to the table shows up in settings with
  * nothing else to write, and one removed cannot leave behind a row that sets a preference nothing
  * reads. Kinds with a single renderer are left out: a menu of one is a statement dressed as a
  * question.

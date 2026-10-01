@@ -5,9 +5,8 @@ import { LogsPanel } from "../components/logs/LogsPanel";
 import { useShell } from "./shell";
 
 /**
- * The Logs room (`.logs-view`: `LogsPanel`), as `App.tsx` draws it in `.viewport` (decision 0015), with
- * the props `App.tsx` hands its own: the pages read so far, the policy, a process's output, the ways out
- * to a task, and the errors and warnings not seen yet.
+ * The Logs room: `LogsPanel` on the store — the pages read so far, the policy, a process's output, the
+ * ways out to a task, and the errors and warnings not seen yet.
  */
 export function LogsView(): JSX.Element {
   const { state, actions } = useShell();

@@ -9,33 +9,29 @@ import { Button } from "../settings/Button";
 import { lengthOf } from "./SidePanel";
 
 /**
- * `runViews.tsx`'s `RunActivity` inside its `.cx-doing`, universal (decision 0015): what is happening
- * here and the button that ends it, where a composer would stand. It says what `activityOf` says
- * (`runActivityModel.ts`, shared), the fast-forward strip (`FastForwardStrip`) among it; an armed
- * rewind's strip is {@link CutStrip}, in its place. The rules:
+ * What is happening here and the button that ends it, in the band where a composer would stand. It says
+ * what `activityOf` says (`runActivityModel.ts`), the fast-forward strip among it; an armed rewind's
+ * strip is {@link CutStrip}, in its place. How it looks:
  *
- *   .cx-doing            padding 10 16 14, --bg
- *   .run-doing           row, centred, gap 9, padding 6 8 6 13, 1px --line, radius --card-radius,
+ *   the band             padding 10 16 14, --bg
+ *   the strip            row, centred, gap 9, padding 6 8 6 13, 1px --line, radius --card-radius,
  *                        --panel, --dim at --size-app × 11.5/12.5, at most 900 wide, centred
- *   .run-doing.waiting   --warn 42% into --line for the edge, 7% into --panel for the ground; the
+ *   waiting              --warn 42% into --line for the edge, 7% into --panel for the ground; the
  *                        pulse's three 4px dots still, --warn at 0.75
- *   .run-doing.warn/.bad the same at 40% / 6%
- *   .run-doing b         600, --text
- *   .run-doing-cut       0.5 opaque; .run-doing-el data, --size-data × 10.5/12, tabular
- *   .run-doing-mark      a 6px dot, --rule (--bad, --warn by tone)
- *   button.danger        --bad on nothing, the edge --bad 40% into --line (hover: --tint-bad, 60%);
- *                        button: radius --control-radius, padding --control-pad, the strip's font
- *   .run-doing .primary  --size-app × 11/12.5, 500, padding 3 12, --on-accent on --fill-accent
- *
- * `.run-doing.ffwd b + .run-doing-cut { margin-left: 2px }` matches nothing the DOM draws: the `b` is
- * inside the `.ellip` span and the `·` is that span's sibling, so there is nothing to carry.
+ *   warn or bad          the same at 40% / 6%
+ *   a name in it         600, --text
+ *   the `·`              0.5 opaque; the clock data, --size-data × 10.5/12, tabular
+ *   the mark             a 6px dot, --rule (--bad, --warn by tone)
+ *   a danger button      --bad on nothing, the edge --bad 40% into --line (hover: --tint-bad, 60%);
+ *                        a button's radius --control-radius, padding --control-pad, the strip's font
+ *   the primary button   --size-app × 11/12.5, 500, padding 3 12, --on-accent on --fill-accent
  */
-export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip, lead }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined; /** What the DOM puts in the same `.cx-doing` before the strip (the offline banner). */ lead?: ReactNode }): JSX.Element | null {
+export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip, lead }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined; /** What stands in the same band before the strip (the offline banner). */ lead?: ReactNode }): JSX.Element | null {
   const t = useTokens();
   const activity = activityOf(detail, asking, { rerun: onRerun !== undefined, resume: onResume !== undefined });
   const elapsed = useElapsed(startedAtOf(detail), activity.kind === "going", 1000);
-  // A run that did what it was asked says nothing — but `.cx-doing` still stands there, empty: its
-  // padding (10 over 14) is the room the DOM keeps under the conversation either way.
+  // A run that did what it was asked says nothing — but the band still stands there, empty: its
+  // padding (10 over 14) is the room kept under the conversation either way.
   if (activity.kind === "none") {
     return (
       <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never} flexShrink={0}>
@@ -83,7 +79,7 @@ export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip,
   const mark = (hue: string): JSX.Element => <View width={6} height={6} borderRadius={3} flexShrink={0} backgroundColor={t.v(hue) as never} />;
   let body: JSX.Element;
   if (activity.kind === "forward") {
-    // `FastForwardStrip`: "Fast-forwarding to X · at Y · 1 of 3", Skip to X beside Stop. No clock:
+    // The fast-forward strip: "Fast-forwarding to X · at Y · 1 of 3", Skip to X beside Stop. No clock:
     // what it counts is states, not seconds.
     const forward = detail.fastForward!;
     const of = forward.through.length;
@@ -162,7 +158,7 @@ export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip,
   );
 }
 
-/** `.cx-doing`: the composer's own padded band, on --bg — where the strips stand. */
+/** The composer's own padded band, on --bg — where the strips stand. */
 export function CxDoing({ children, gap }: { children: ReactNode; gap?: number }): JSX.Element {
   const t = useTokens();
   return (
@@ -176,10 +172,10 @@ export function CxDoing({ children, gap }: { children: ReactNode; gap?: number }
  * `CutStrip`: the strip while a rewind is armed — the sentence, and the one filled button in the danger
  * colour — in `RunActivity`'s place, where this task already reports what is happening to it.
  *
- *   .run-doing.bad         --bad 40% into --line for the edge, 6% into --panel for the ground
- *   .cut-strip .ellip      wraps: it names every state that goes
- *   button.ghost           Cancel, in the strip's font, --text
- *   .run-doing button.cut  --bad ground and ring, #fff at 600, --sheen; hovered --bad 88% into black
+ *   the strip              --bad 40% into --line for the edge, 6% into --panel for the ground
+ *   the sentence           wraps: it names every state that goes
+ *   Cancel                 a ghost button, in the strip's font, --text
+ *   Rewind                 --bad ground and ring, #fff at 600, --sheen; hovered --bad 88% into black
  */
 export function CutStrip({ armed, onConfirm, onCancel }: { armed: ArmedRewind; onConfirm: () => void; onCancel: () => void }): JSX.Element {
   const t = useTokens();
@@ -269,7 +265,7 @@ function StripButton({ kind, words, title, onPress, t }: { kind: "danger" | "qui
             ? { backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: "transparent" }
             : kind === "plain"
               ? { backgroundColor: t.v(hovered ? "panel-3" : "panel-2"), borderColor: t.v(hovered ? "rule" : "line") }
-            : // `button.primary`'s --sheen stays: `.run-doing .primary` sets no shadow of its own.
+            : // The primary keeps a primary button's --sheen: the strip gives it no shadow of its own.
               { backgroundColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent"), borderColor: "transparent", boxShadow: t.v("sheen") }
       }
     >

@@ -5,19 +5,18 @@ import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
- * `board.tsx`'s `NextChips`, universal (decision 0015): one chip per move out of where the task
- * stands. Each chip is a `<button>` on web, so it takes the base `button` rule first and `.move-chip`
- * over it; the contests that matter:
+ * A card's NEXT TRANSITIONS (decision 0005): one chip per move the task's workflow defines out of where
+ * it stands, each a legal move — pressing one takes it, as a drop on that column would. Each chip is a
+ * `<button>` on web. How it looks:
  *
- *   button                              inline-flex, centred, nowrap, pointer; the rest is overridden
- *   .move-chip                          gap 3, padding 1 7 1 5, 1px --line, radius 999, --panel ground,
- *                                       --text ink, 500 at 10.5/12.5 of --size-app, line-height 1.5
- *   button:hover:not(:disabled)  0,2,1  ground --panel-3 — WINS over .move-chip's ground (0,1,0)
- *   .move-chip:hover:not(:disabled) 0,3,0  border and ink --accent
- *   .move-chip.is-event                 border accent 60% over --line, ground --tint-accent
- *   .move-chip:disabled / button:disabled   --dim ink, dashed, half opacity
- *   .move-chip-arrow                    --accent (--dim when back or disabled), data voice
- *   .card-next                          wrap, gap 4, margin 5 0 1; swallows clicks so the card is not selected
+ *   a chip                              inline-flex, centred, nowrap, pointer; gap 3, padding 1 7 1 5, 1px
+ *                                       --line, radius 999, --panel ground, --text ink, 500 at 10.5/12.5
+ *                                       of --size-app, line-height 1.5
+ *   hovered                             ground --panel-3, border and ink --accent
+ *   a move a rule is waiting on         border accent 60% over --line, ground --tint-accent
+ *   blocked                             --dim ink, dashed, half opacity, and no hover
+ *   its arrow                           --accent (--dim when back or blocked), data voice
+ *   the row of chips                    wrap, gap 4, margin 5 0 1; swallows clicks so the card is not selected
  */
 export function NextChips({
   moves,
@@ -29,8 +28,8 @@ export function NextChips({
   onMove: (move: NextMove) => void;
   tip: (move: NextMove, name: string) => string;
   /**
-   * The top margin of what follows. In the DOM card (a block) `.card-next`'s 1px bottom margin
-   * COLLAPSES into it; a flex column adds the two instead, so the copy takes the larger itself.
+   * The top margin of what follows. The row's 1px bottom margin is to COLLAPSE into it, as block margins
+   * do; a flex column adds the two instead, so the row keeps only what its own exceeds the other by.
    */
   collapsesInto?: number;
 }): JSX.Element {
@@ -82,9 +81,9 @@ export function NextChips({
               {...({ ...faceOf(t, "app", 500, size), fontSize: size, lineHeight, fontWeight: "500" } as object)}
               {...((isWeb ? { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" } : { numberOfLines: 1 }) as object)}
               minWidth={0}
-              // The name's ink is the chip's on web, inherited as the DOM chip's span inherits it, so the
-              // chip's hover reaches it. Not `group`/`$group-hover`: a Tamagui group is a size-contained
-              // container (`container-type: inline-size`), and the chip then sizes as if it had no name.
+              // The name's ink is the chip's on web, inherited, so the chip's hover reaches it. Not
+              // `group`/`$group-hover`: a Tamagui group is a size-contained container
+              // (`container-type: inline-size`), and the chip then sizes as if it had no name.
               {...((isWeb ? {} : { color: ink }) as object)}
             >
               {name}

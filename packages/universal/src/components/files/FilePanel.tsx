@@ -11,27 +11,26 @@ import { DirectoryPanel } from "./DirectoryPanel";
 import { Splitter } from "./Splitter";
 import { SURFACES } from "./surfaces";
 
-/** How tall the viewer opens, and what a double-press on the divider restores (`files.tsx`'s). */
+/** How tall the viewer opens, and what a double-press on the divider restores. */
 const VIEWER_HEIGHT = paneDefault(PANE.filesViewer);
 
 /**
- * `files.tsx`'s `FilePanel`, universal (decision 0015): the open file — what it IS above, what it SAYS
- * below — or a folder's listing, or nothing yet. Which renderer draws each half, where the lower half
- * stands and what each half is mounted with is `filePanelOf` (`filesModel.ts`), resolved against the
- * universal registry of surfaces (`surfaces.tsx`). The rules, from `styles.css`
- * (`cascade.mts .files-view --scene files-markdown`):
+ * The open file — what it IS above, what it SAYS below — or a folder's listing, or nothing yet. Which
+ * renderer draws each half, where the lower half stands and what each half is mounted with is
+ * `filePanelOf` (`filesModel.ts`), resolved against the registry of surfaces (`surfaces.tsx`). How it
+ * looks:
  *
- *   .col.mid              a column, --bg, clipped
- *   .run-half             the viewer: --viewer-height tall (320), at least 80, may shrink, scrolls;
- *                         folded lower half: it takes the rest instead
- *   .splitter.horizontal  6 tall, a 2px --line across its middle; gone while the lower half is folded
- *   .config-half          the rest (flex 1 1 0), at least 140, a column, gap 8, padding 10 15 14, a
- *                         --line above, --panel, clipped; `.whole` (no viewer, or `full`) no line;
- *                         `.shut` only its bar: padding 6 15, gap 0
- *   .half-bar             row, centred, gap 7, padding 3 6, -2 -6 0 outside, radius 6; hovered --panel-2
- *   .half-caret           app 10/12.5, --dim.   .half-label  app 12/12.5, 600, --dim, uppercase, 0.07em
- *   .dirty-dot            app 8/12.5, line 1, --accent
- *   p.empty               --dim, 8 above and below, a paragraph's margins
+ *   the column            --bg, clipped
+ *   the viewer            `viewerHeight` tall (320 to start), at least 80, may shrink, scrolls; with the
+ *                         lower half folded it takes the rest instead
+ *   the divider           6 tall, a 2px --line across its middle; gone while the lower half is folded
+ *   the lower half        the rest (flex 1 1 0), at least 140, a column, gap 8, padding 10 15 14, a
+ *                         --line above, --panel, clipped; whole (no viewer, or `full`) no line;
+ *                         shut only its bar: padding 6 15, gap 0
+ *   its bar               row, centred, gap 7, padding 3 6, -2 -6 0 outside, radius 6; hovered --panel-2
+ *   the bar's caret       app 10/12.5, --dim.   Its label  app 12/12.5, 600, --dim, uppercase, 0.07em
+ *   the unsaved dot       app 8/12.5, line 1, --accent
+ *   an empty note         --dim, 8 above and below, a paragraph's margins
  */
 export function FilePanel({
   doc,
@@ -90,8 +89,8 @@ export function FilePanel({
         <>
           <ScrollView
             {...(scrollbarProps(t) as object)}
-            // `PLAIN_SCROLLER`: `.run-half` is no stacking context — what the page paints after it (the
-            // editor's head, the inbox strip) shares a layer with its scrollbar on the desktop, greyscale.
+            // `PLAIN_SCROLLER`: the viewer is no stacking context — what the page paints after it (the
+            // editor's head, the inbox strip) shares a layer with its scrollbar, greyscale.
             style={{ ...(shut ? { flexGrow: 1, flexShrink: 1 } : { height: viewerHeight, flexGrow: 0, flexShrink: 1 }), minHeight: 80, ...PLAIN_SCROLLER } as never}
             contentContainerStyle={{ flexGrow: 1, flexDirection: "column", ...PLAIN_SCROLLER } as never}
           >

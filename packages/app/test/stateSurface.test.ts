@@ -1,5 +1,5 @@
 /**
- * What a state IS, and how loudly its header says so — see `stateSurface.tsx`.
+ * What a state IS, and how loudly its header says so — see `stateSurfaceModel.ts`.
  *
  * Both answers are LOOKUPS against fields the projection already writes, and that is the whole point
  * of testing them together: the kind and the tone are read off the same node, so a change that makes

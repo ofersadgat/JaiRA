@@ -9,22 +9,22 @@ import { BarInput } from "./Field";
 import { Select, SourceSelect } from "./Select";
 
 /**
- * `logs.tsx`'s `ConfigPanel`, universal (decision 0015): what the app KEEPS, as distinct from what the
- * bar filters — the level kept everywhere, the rules that override it, and a row to add one. The rules,
- * from `styles.css`:
+ * The Logs room's Configure panel: what the app KEEPS, as distinct from what the bar filters — the level
+ * kept everywhere, the rules that override it, and a row to add one. How it looks:
  *
- *   .log-config        a --line under it, --panel-2, padding 8 10 10, column, gap 8
- *   .log-config-head   row, gap 10, baseline, wrapping: "Keep" and its select (.field-inline: gap 6,
- *                      centred), then the sentence (.sub)
- *   .log-rules         the whole width, app at 12/12.5; th left, 600, --dim, app at 10/12.5, uppercase,
- *                      0.4px spacing, padding 2 8 4 0, a --line under it; td padding 3 8 3 0, middle
- *   .log-rule-key      the data face;  input[type=number] 62 wide
- *   .log-config-add    row, gap 8, centred, wrapping; its second select and its input at least 240
+ *   the panel          a --line under it, --panel-2, padding 8 10 10, column, gap 8
+ *   its head           row, gap 10, baseline, wrapping: "Keep" and its select (gap 6, centred), then
+ *                      the sentence (--dim, app at 11/12.5)
+ *   the rules' table   the whole width, app at 12/12.5; a head left, 600, --dim, app at 10/12.5,
+ *                      uppercase, 0.4px spacing, padding 2 8 4 0, a --line under it; a cell padding
+ *                      3 8 3 0, middle
+ *   a rule             its key the data face; its sampling field 62 wide
+ *   the add row        row, gap 8, centred, wrapping; its second select and its input at least 240
  *
- * The table's columns are an auto-layout table's on the desktop, sized by what is in them. Here they are
- * fixed shares of the width (a table's layout is not in React Native): the shares the desktop settles on
- * with no rules (274.92, 169.53, 206.94, 303.49 and 49.13 of 1004), which is where the panel opens. With
- * rules in it the desktop's columns move to fit their controls, and these do not.
+ * The table's columns are fixed shares of the width (a table's layout is not in React Native): the
+ * shares an auto-layout table settles on with no rules in it (274.92, 169.53, 206.94, 303.49 and 49.13
+ * of 1004), which is where the panel opens. They do not move to fit a rule's controls, as such a
+ * table's would.
  */
 const COLUMNS = [274.92, 169.53, 206.94, 303.49, 49.13].map((w) => w / 1004);
 

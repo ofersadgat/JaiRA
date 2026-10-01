@@ -3,7 +3,8 @@
  *
  * The strip, the settled-by line and the board card's status word are all sentences computed from
  * data, and this renderer has no DOM test infrastructure. So the sentences live here as pure
- * functions, where a test can read them, and the components in `remoteStripView.tsx` only place them.
+ * functions, where a test can read them, and the components that draw them
+ * (`packages/universal/src/components/artifact`) only place them.
  */
 import { FORGE_LABELS, type ForgeProviderKind, type InReview, type RemoteStatusView, type ReviewNote, type ReviewRemote } from "@jaira/shared/browser";
 

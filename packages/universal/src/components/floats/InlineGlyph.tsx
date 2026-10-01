@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { View } from "react-native";
 
 /**
- * A picture inside a run of text, as the DOM's inline `<svg>` sits in a line: `size` square, its bottom
+ * A picture inside a run of text, as an inline `<svg>` sits in a line: `size` square, its bottom
  * `drop` below the baseline (`vertical-align`), `after` of room before the next word. React Native lays a
  * `View` inside a `Text` out inline; the web half (`InlineGlyph.web.tsx`) is an inline box Chromium places.
  */

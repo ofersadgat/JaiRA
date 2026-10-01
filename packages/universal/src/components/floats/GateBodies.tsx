@@ -19,12 +19,12 @@ import { ChangesetGate, EditArtifactGate, ReviewArtifactGate, serveOfGate } from
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
 
 /**
- * `components.tsx`'s gate bodies, universal (decision 0015) — what `GateSurface` draws under the author's
- * question for each built-in component, with `panel/Gate.tsx` drawing the heading around them:
+ * The gate bodies — what `GateSurface` draws under the author's question for each built-in component,
+ * with `panel/Gate.tsx` drawing the heading around them:
  *
  *  - `choose_option` — one question (its options, a comment beside it, an answer of one's own, several
  *    at once, Confirm when the click is not the answer) or several, one at a time (`Choices.tsx`);
- *  - `confirm_action` — the details (`dl.publish-what`) and the buttons that say what they do;
+ *  - `confirm_action` — the details (`Details`) and the buttons that say what they do;
  *  - `fill_form` — the one form (`form/SchemaForm`) and Submit, held while the run's check refuses it;
  *  - `approve_tool_call` — the approval it is (`ApprovalSurface`);
  *  - anything else — the JSON box (`RawJson`).
@@ -50,13 +50,13 @@ export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknow
         </View>
       );
     // The artifact pane and the decision under it (`artifact/ArtifactGates.tsx`); `subjectProject` is the
-    // project a note's author is read in, as the desktop's `GateSurface` joins it.
+    // project a note's author is read in.
     case "review_artifact":
       return <ReviewArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} flat={flat} serve={serveOfGate(pending)} />;
     case "edit_artifact":
       return <EditArtifactGate config={config} inputs={inputs} onSubmit={onSubmit} requestId={pending.requestId} project={subjectOf(pending)} serve={serveOfGate(pending)} />;
     case "review_artifacts":
-      // `.mount-host`: the reviewer's own box, which scrolls when its host is capped in height (`.modal-wide`).
+      // The reviewer's own box, which scrolls when its host is capped in height (the wide dialog).
       return (
         <MountHost top={flat ? 0 : top}>
           <ChangesetGate pending={pending} config={config} inputs={inputs} onSubmit={onSubmit} project={subjectOf(pending)} host={services} />
@@ -67,7 +67,7 @@ export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknow
   }
 }
 
-/** `.mount-host`: overflow auto, no least height — a plain scrolling box on web, a scroller on a phone. */
+/** The reviewer's box: overflow auto, no least height — a plain box on web, a scroller on a phone. */
 function MountHost({ top, children }: { top: number; children: JSX.Element }): JSX.Element {
   const t = useTokens();
   if (isWeb) {
@@ -85,10 +85,10 @@ function MountHost({ top, children }: { top: number; children: JSX.Element }): J
   );
 }
 
-/** The project a review is ABOUT (`GateSurface`'s `subjectProject`): an empty one is the focused project. */
+/** The project a review is ABOUT (`subjectProject`, else the gate's): an empty one is the focused project. */
 export const subjectOf = (pending: PendingInteraction): string | undefined => pending.subjectProject ?? (pending.project === "" ? undefined : pending.project);
 
-/** `ChooseOption`: one authored question or several, answered as the desktop's is. */
+/** `choose_option`: one authored question, or several asked one at a time. */
 function ChooseOptionGate({ config, onSubmit, top }: { config: ChooseOptionConfig; onSubmit: (value: unknown) => void; top: number }): JSX.Element {
   const choices = choicesOfConfig(config);
   const [answers, setAnswers] = useState<Record<string, Answer>>(() => initialAnswers(choices));
@@ -132,7 +132,7 @@ function ChooseOptionGate({ config, onSubmit, top }: { config: ChooseOptionConfi
 }
 
 /**
- * `ConfirmAction`: what it will do (`dl.publish-what` — a grid of the label, --dim, and the value in the
+ * `confirm_action`: what it will do (`Details` — two columns, the label, --dim, and the value in the
  * data face; gap 3 12, 10 below) and the buttons: the confirm (filled when it has alternatives beside
  * it), each alternative, and the cancel (`ghost`).
  */
@@ -142,7 +142,7 @@ function ConfirmActionGate({ config, onSubmit, top }: { config: ConfirmActionCon
   return (
     <View marginTop={top}>
       {details.length > 0 ? <Details rows={details} /> : null}
-      {/* `.options`' 14 collapses with the details' 10 below them. */}
+      {/* The buttons' 14 above collapses with the details' 10 below them. */}
       <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={details.length > 0 ? 4 : 14 - top}>
         <Button kind={several ? "primary" : "plain"} onPress={() => onSubmit({ confirmed: true })}>
           {config.confirmLabel}
@@ -160,7 +160,7 @@ function ConfirmActionGate({ config, onSubmit, top }: { config: ConfirmActionCon
   );
 }
 
-/** `dl.publish-what`: label and value a row each, the labels' column as wide as the widest. */
+/** The details: label and value a row each, the labels' column as wide as the widest. */
 function Details({ rows }: { rows: ReadonlyArray<{ label: string; value: string }> }): JSX.Element {
   const [widths, setWidths] = useState<Record<number, number>>({});
   const column = Math.max(0, ...Object.values(widths));
@@ -194,7 +194,7 @@ function Details({ rows }: { rows: ReadonlyArray<{ label: string; value: string 
   );
 }
 
-/** `FillForm`: the form a state declared, and Submit — held, with the reason beside it, while the check refuses it. */
+/** `fill_form`: the form a state declared, and Submit — held, with the reason beside it, while the check refuses it. */
 function FillFormGate({ config, onSubmit, top }: { config: FillFormConfig; onSubmit: (value: unknown) => void; top: number }): JSX.Element {
   const schema = useMemo(() => fillFormSchema(config.fields) as Schema, [config.fields]);
   const [value, setValue] = useState<Record<string, unknown>>(() => formStartsWith(config.fields, schema));
@@ -209,7 +209,7 @@ function FillFormGate({ config, onSubmit, top }: { config: FillFormConfig; onSub
         onChange={(next) => setValue(next as Record<string, unknown>)}
         ctx={{ path: "", hidePaths: true, errors: check.errors, touched, touch, unsetNote: () => "not set — left out of the answer" }}
       />
-      {/* `.options`: a wrapping row whose items stretch (no `align-items`), the reason at the top of its line. */}
+      {/* The buttons: a wrapping row whose items stretch (no `alignItems`), the reason at the top of its line. */}
       <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
         <Button kind="primary" disabled={blocked !== null} {...(blocked !== null ? { title: blocked } : {})} onPress={() => onSubmit(value)}>
           Submit
@@ -225,8 +225,8 @@ function FillFormGate({ config, onSubmit, top }: { config: FillFormConfig; onSub
 }
 
 /**
- * `RawJson`: the fallback for a function nothing implements — `label.field` ("RESPONSE (JSON)": app
- * 11/12.5, --dim, 0.04em, uppercase, 4 over the box; 12 above) with a six-row `textarea`, and Submit.
+ * `RawJson`: the fallback for a function nothing implements — a labelled field ("RESPONSE (JSON)": app
+ * 11/12.5, --dim, 0.04em, uppercase, 4 over the box; 12 above) with a six-row textarea, and Submit.
  */
 function RawJson({ onSubmit }: { onSubmit: (value: unknown) => void }): JSX.Element {
   const t = useTokens();

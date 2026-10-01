@@ -12,19 +12,19 @@ import { HELD_QUOTE, reselect, useFlatText, useHoveredNote, useNoteHighlights, u
 import { NoteComposer, NoteList, dataKey } from "./ReviewNotes";
 
 /**
- * `components.tsx`'s `ArtifactPane`, universal (decision 0015): one artifact, read and — where the state
- * allows it — written, with the review's notes on top. Which reading is on screen and what the edit is as
- * a change are `artifactReview.ts`'s, the desktop's own: markdown shows a change without leaving the
- * document; anything else shows the edit as a change once there is one. The rules, from `styles.css`:
+ * One artifact, read and — where the state allows it — written, with the review's notes on top. Which
+ * reading is on screen and what the edit is as a change are `artifactReview.ts`'s: markdown shows a
+ * change without leaving the document; anything else shows the edit as a change once there is one. How
+ * it looks:
  *
- *   .artifact-view   --bg, 1px --line, radius 8, padding 10, 12 above, at most 46vh tall, scrolls
+ *   the well         --bg, 1px --line, radius 8, padding 10, 12 above, at most 46vh tall, scrolls
  *
  * `serve` is how an interactive artifact is served to the frame it runs in (the gate's grant, `serveOfGate`),
- * handed to the value view as the desktop's pane hands it — not to the changes view of an edit.
+ * handed to the value view — not to the changes view of an edit.
  *
- * Selecting a passage opens the note composer on web (the desktop's own selection code over the DOM
- * react-native-web draws, `noteSelection.web.ts`); a phone has no selection to anchor one to, and lists
- * the notes a review carries.
+ * Selecting a passage opens the note composer on web (`reviewSelection.ts` over the DOM react-native-web
+ * draws, `noteSelection.web.ts`); a phone has no selection to anchor one to, and lists the notes a
+ * review carries.
  */
 export function ArtifactPane({
   value,
@@ -123,9 +123,9 @@ export function ArtifactPane({
 }
 
 /**
- * `.artifact-view`: the framed, scrollable well a value is drawn in. On web a plain `overflow: auto` box,
- * as the DOM's is (a react-native-web scroller is composited, and its text drawn greyscale); `held` is the
- * passage the composer is holding (`HELD_QUOTE`), for the window's right-click menu.
+ * The framed, scrollable well a value is drawn in. On web a plain `overflow: auto` box (a
+ * react-native-web scroller is composited, and its text drawn greyscale); `held` is the passage the
+ * composer is holding (`HELD_QUOTE`), for the window's right-click menu.
  */
 export function ArtifactWell({ marginTop = 12, wellRef, held, children }: { marginTop?: number; wellRef?: { current: unknown }; held?: string; children: JSX.Element }): JSX.Element {
   const t = useTokens();

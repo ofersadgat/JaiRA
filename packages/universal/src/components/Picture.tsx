@@ -4,7 +4,7 @@ import { View } from "@tamagui/core";
 import { Img, naturalSizeOf } from "./Img";
 
 /**
- * An image as the DOM's `img` with `max-width: 100%` (and a `max-height`): its natural size, scaled down
+ * An image as a browser's `img` with `max-width: 100%` (and a `max-height`): its natural size, scaled down
  * to the width it is given, keeping its shape. Nothing until its size is known, as an `img` still loading.
  */
 export function Picture({ src, alt, maxHeight, box, below = 0 }: { src: string; alt?: string; maxHeight?: number; box?: Record<string, unknown>; /** Space under it: the rest of its line box, for an image in a line of text. */ below?: number }): JSX.Element {

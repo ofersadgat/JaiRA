@@ -4,8 +4,8 @@ import type { Schema, SchemaFormContext } from "@jaira/ui/schemaForm/types";
 import { FormRowsContext, SchemaForm, Select, SelectInput, SettingsGroup } from "@jaira/universal";
 
 /**
- * The schema form's field kinds as specimens (decision 0015): the copy of `schemaForm/SchemaForm.tsx`,
- * drawn from a fixture and holding its own value, so every kind can be seen and pressed.
+ * The schema form's field kinds as specimens (decision 0015): `SchemaForm`, drawn from a fixture and
+ * holding its own value, so every kind can be seen and pressed.
  *
  *  - `form-fields` — a form as a run's inputs or a gate draws it: required marks, the switch of an
  *    optional member (one left out), every leaf control, a union's shape chips, and a complaint under
@@ -13,8 +13,8 @@ import { FormRowsContext, SchemaForm, Select, SelectInput, SettingsGroup } from 
  *    and nested object.
  *  - `form-rows` — the same renderer on a Settings page: layered (no switches, a ↺ where the layer
  *    states a value), each field a settings row inside a card.
- *  - `selects` — Chromium's menulist, as `select.cfg-input` (`width: 100%`: of the column, of a field,
- *    disabled) and as the plain `<select>` the Logs bar uses: the text's inset and line, and
+ *  - `selects` — Chromium's menulist, as a config box (`SelectInput` with `fill`: as wide as the column,
+ *    as a field, disabled) and as the plain `Select` the Logs bar uses: the text's inset and line, and
  *    the arrow (`MenulistArrow`), one for both.
  */
 
@@ -143,7 +143,7 @@ function RnSelects(): JSX.Element {
         <SelectInput value={value} options={CHOICES} onChange={setValue} fill />
       </div>
       <SelectInput value={value} options={CHOICES} onChange={setValue} disabled fill />
-      {/* As the Logs bar sets it: `.logs-bar select` — width auto, min-width 150. */}
+      {/* As the Logs bar sets it: as wide as its words, 150 at least. */}
       <Select value={value} options={plain} onChange={setValue} minWidth={150} />
     </div>
   );
@@ -163,12 +163,12 @@ export const FORM_SPECIMENS = {
     width: 440,
     rn: () => <RnLists />,
   },
-  // The menulists: `select.cfg-input` three ways, and the plain `<select>`.
+  // The menulists: the config box three ways, and the plain `Select`.
   selects: {
     width: 400,
     rn: () => <RnSelects />,
   },
-  // A Settings page's card of rows (`.set-group`), at the page's readable width.
+  // A Settings page's card of rows (`SettingsGroup`), at the page's readable width.
   "form-rows": {
     width: 740,
     rn: () => <RnRows />,

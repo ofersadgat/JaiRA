@@ -42,21 +42,20 @@ import { RowControls, SlotTable } from "./SlotTable";
 import { ToolsFieldControl } from "./ToolsField";
 
 /**
- * `operationFields.tsx`, universal (decision 0015): one `operation` or `environment` block — its
- * simple fields from the shared table (`SIMPLE_FIELDS`), the Tools field, the operation's inputs and
- * output, the session, the conversation and, folded, the model's knobs. Which fields show and what an
- * edit writes are `operationFieldsModel.ts`'s. The rules:
+ * One `operation` or `environment` block of the workflow editor — its simple fields from the shared
+ * table (`SIMPLE_FIELDS`), the Tools field, the operation's inputs and output, the session, the
+ * conversation and, folded, the model's knobs. Which fields show and what an edit writes are
+ * `operationFieldsModel.ts`'s. How it looks:
  *
- *   .op-block            column, gap 8
- *   .field               a grid, gap 4: its name (`.field > span`, app 11/12.5 --dim 0.04em upper) over
- *                        the control
- *   .slot-opt.wide       the fork switch, app 11/12.5
- *   .model-knobs         `details`: its summary app 11/12.5 --dim, padding 4 0, Chromium's disclosure
- *                        marker; open, a 2px --line on its left, 8 in, 2 out
- *   .cfg-hint            the reasoning's footer, app 11/12.5 --dim
+ *   the block            column, gap 8
+ *   a field              a column, gap 4: its name (app 11/12.5 --dim 0.04em upper) over the control
+ *   the fork switch      app 11/12.5
+ *   the model's knobs    a fold: its summary app 11/12.5 --dim, padding 4 0, a ▸ (▾ open) before the
+ *                        words; open, a 2px --line on its left, 8 in, 2 out
+ *   the reasoning's foot app 11/12.5 --dim
  */
 
-/** A `.field`: its name over its control, and what hangs under it. */
+/** A field: its name over its control, and what hangs under it. */
 export function Field({ name, children, gap = 4 }: { name: ReactNode; children: ReactNode; gap?: number }): JSX.Element {
   return (
     <View flexDirection="column" gap={gap} minWidth={0}>
@@ -162,8 +161,8 @@ function ConversationControl({ value, onChange }: { value: ConversationForm; onC
 }
 
 /**
- * `details.model-knobs`: "Model settings", folded — Chromium's own disclosure marker before the words
- * (the summary keeps its `list-item` display), and open, a --line down its left.
+ * "Model settings", folded — a ▸ (▾ open) before the words, and open, a --line down its left.
+ * Uncontrolled: `open` is where it starts.
  */
 function ModelKnobs({ open: initial, children }: { open: boolean; children: ReactNode }): JSX.Element {
   const t = useTokens();

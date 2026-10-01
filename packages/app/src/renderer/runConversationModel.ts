@@ -1,10 +1,9 @@
 /**
  * What a run's CONVERSATION derives beside its bands — the call a settled gate is drawn from and the
  * request rebuilt from it, a `notify` call read as the line it told you, what one conversation cost, the
- * states an armed rewind deletes said as a list — moved out of `runViews.tsx` unchanged so the universal
- * copy (decision 0015, `packages/universal/src/components/panel/RunTranscript.tsx`) reads the same run
- * the same way — and a rewind armed from an entered row, and how full a conversation was after its last
- * answer. Nothing here draws.
+ * states an armed rewind deletes said as a list, a rewind armed from an entered row, and how full a
+ * conversation was after its last answer. Nothing here draws: `RunTranscript.tsx` and `RunActivity.tsx`
+ * (`packages/universal/src/components/panel`) and `run/RunConversation.tsx` do.
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { isComponentName, parseComponentConfig, readCall, type ContextReading, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionRef, type SessionView } from "@jaira/shared/browser";

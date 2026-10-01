@@ -1,8 +1,7 @@
 /**
  * What the composer's CARDS compute — the route → model cascade, the words beside a thinking level and
- * a tool, where a value came from, and a mentioned or attached file — moved unchanged out of
- * `composer.tsx`, so the desktop's cards and the universal ones (decision 0015,
- * `packages/universal/src/components/chat/ComposerCards.tsx`) draw them from one reading.
+ * a tool, where a value came from, and a mentioned or attached file. The cards themselves are
+ * `packages/universal/src/components/chat/ComposerCards.tsx`.
  */
 import { ROUTE_BORROWS } from "./composerModel";
 
@@ -148,7 +147,7 @@ export function cascadeOf(
   return { columns, groups, shown, borrows, ownDefault, own, borrowed, leaves };
 }
 
-/** Where a value came from — what a chip's card says under its title (`Origin`). */
+/** Where a value came from — what a chip's card says in its head (`CardHead`). */
 export function originWordsOf(origin: "override" | "unset" | "inherited" | string, from?: string): { text: string; tone: "own" | "unset" | "plain" } {
   if (origin === "override") return { text: "your choice for this message", tone: "own" };
   if (origin === "unset") return { text: "nothing here sets it", tone: "unset" };

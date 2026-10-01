@@ -2,8 +2,8 @@ import { useEffect, useRef, type RefObject } from "react";
 import { isWeb } from "@tamagui/core";
 
 /**
- * A `<form onSubmit>`'s implicit submission, for a copy that is a column of boxes and a button: Enter in
- * a single-line box submits, as it does in the desktop's form (a text area takes Enter as a line, a button
+ * A `<form onSubmit>`'s implicit submission, for a form that is a column of boxes and a button: Enter in
+ * a single-line box submits, as it does in a real `<form>` (a text area takes Enter as a line, a button
  * as its own press). The ref goes on the box that stands for the `<form>`.
  *
  * Listened for on the element itself: react-native-web's text boxes stop a key from reaching a React

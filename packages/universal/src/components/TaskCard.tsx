@@ -14,37 +14,37 @@ import { Pill } from "./Pill";
 import { Svg } from "./panel/Svg";
 
 /**
- * `board.tsx`'s `Card` (on its `Tile`), universal (decision 0015). Read that one for what a card says;
- * this one only has to look the same, and every rule below is one `styles.css` applies to a card,
- * with the specificity contest it wins or loses worked out by hand — a copy has no cascade to do it:
+ * A task's card on a board: its name and its status pill, the moves out of where it stands (`NextChips`),
+ * a meta line and what started it. It has no box (SHELL.md §5.3): a task is selected rather than pressed,
+ * and the ground carries both states. The pill is a word rather than a count, a card being one task, and
+ * `queued` has none. How it looks, and which wins where two apply:
  *
- *   .card                                  ghost ground, radius --control-radius-sm, padding 7 9 6, 4 below
- *   .card:last-child                       0 below — LOSES to any palette's margin (0,2,0 < 0,3,0)
- *   .card:hover / .card-selected           ghost-selected / --tint-accent
- *   :root[data-palette] .card(:hover|-selected)   the tile: its ground, edge ring and shadow; 6 below
- *   :root[data-palette="contrast"|pastel|blueprint] .card   radius 2 | 11 | 1; contrast 8 below
- *   :root[data-wash] .card[data-pill=…]    the status wash, which beats hover and selection's ground;
- *                                          selection becomes a 2px ring
- *   .card.card-child                       14 in, a 2px rule on the left
- *   .card-draggable                        grab cursor; HTML5 drag on web (a phone's is `Lift`, round the card)
- *   .card.is-archived                      0.62 opacity, back to 1 when hovered or selected; the pill
+ *   the card                               ghost ground, radius --control-radius-sm, padding 7 9 6, 4 below
+ *   the last in its lane                   0 below — in classic only: a named palette's margin stands
+ *   hovered / selected                     ghost-selected / --tint-accent
+ *   any named palette                      the tile: its ground, edge ring and shadow, hovered and
+ *                                          selected too; 6 below
+ *   contrast | pastel | blueprint          radius 2 | 11 | 1; contrast 8 below
+ *   the status wash                        the pill's colour as ground and ring, which beats hover and
+ *                                          selection's ground; selection becomes a 2px ring
+ *   a child card                           14 in, a 2px rule on the left
+ *   a card that can be dragged             grab cursor; HTML5 drag on web (a phone's is `Lift`, round the card)
+ *   an archived card                       0.62 opacity, back to 1 when hovered or selected; the pill
  *                                          is how it finished, the meta line when it was archived
- *   .mchip in .card-meta                   where it runs, first on the meta line (`MachineChip`)
- *   .card-head / .card-title / .card-meta  the rows; the title is the data voice, 600 when selected
- *   (block layout)                         .card-next's 1px bottom margin collapses into .card-meta's 2px
- *                                          top; a flex column would add them, so the copy collapses them
- *   .card-status                           the meta line's far end: which kind of waiting, when it ended —
- *                                          or `UndoLink` (`button.link`: data 11/12, --accent, no box;
- *                                          hovered underlined), a moment after a drop made or moved it
- *   .card-origin                           `OriginLine`: what started the task — row, top-aligned, gap 5, 4
+ *   the machine chip                       where it runs, first on the meta line (`MachineChip`)
+ *   the head, the title, the meta line     the rows; the title is the data voice, 600 when selected
+ *   the chips over the meta line           the chips' 1px below and the meta line's 2px above are 2 in
+ *                                          all, not 3 (`NextChips`' `collapsesInto`)
+ *   the meta line's far end                which kind of waiting, when it ended — or `UndoLink` (data
+ *                                          11/12, --accent, no box; hovered underlined), a moment after a
+ *                                          drop made or moved it
+ *   the origin line                        `OriginLine`: what started the task — row, top-aligned, gap 5, 4
  *                                          above, --dim, data 0.84, one line; its mark 1em, 2 down, --accent;
- *                                          a link (`.card-origin-link`) hovered in --text
- *
- * The undo link and the origin line are drawn from here on every platform (the `card-*` specimens).
+ *                                          a link is hovered in --text
  */
 /**
- * The clicks a card (or something on it) took, by their DOM event: a column's own click, which in the DOM
- * reads `closest(".card")` off the target, reads this instead — the copies have no classes.
+ * The clicks a card (or something on it) took, by their DOM event: a column's own click reads this, so
+ * that a click on a card does not describe the column too (`Board.tsx`).
  */
 export const claimed = new WeakSet<object>();
 
@@ -99,7 +99,7 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
   const look = useLook();
   const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false } = props;
 
-  // An ARCHIVED card wears the pill of how it finished, as the DOM card does.
+  // An ARCHIVED card wears the pill of how it finished.
   const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);
   const archived = card.archived !== undefined;
   const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
@@ -129,7 +129,7 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
         ? "double-click to open this run"
         : (card.activeStateId ?? card.status);
 
-  // --- type: the data voice, line-height 1.5 as the body sets it and every row inherits ---
+  // --- type: the data voice, on the body's line height of 1.5 in every row ---
   const line = (factor: number, weight = 400): object => ({
     ...faceOf(t, "data", weight, t.scaled("size-data", factor)),
     fontSize: t.scaled("size-data", factor),
@@ -145,8 +145,7 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
           onSelect(e);
         },
         ...(onDrill !== undefined ? { onDoubleClick: onDrill } : {}),
-        // The card's own menu, and not the column's under it too: the DOM column's guard reads
-        // `closest(".card")`, which a copy (with no classes) never matches — so the event stops here.
+        // The card's own menu, and not the column's under it too: the event stops here.
         ...(onMenu !== undefined
           ? {
               onContextMenu: (e: ReactMouseEvent) => {
@@ -163,7 +162,7 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
           ? {
               draggable: true,
               onDragStart: (e: DragEvent) => {
-                // As the DOM card does: Firefox refuses a drag with nothing on the transfer.
+                // Firefox refuses a drag with nothing on the transfer.
                 e.dataTransfer?.setData("text/plain", card.taskId);
                 if (e.dataTransfer) e.dataTransfer.effectAllowed = "move";
                 onDragStart();
@@ -235,7 +234,7 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
           {where}
         </Text>
         {onUndo !== undefined ? (
-          // `.card-status`, holding the link in place of the far words; a finished card's still titled when it ended.
+          // The far end, holding the link in place of the far words; a finished card's still titled when it ended.
           <View flexShrink={0} {...((isWeb && card.endedAt !== undefined ? { title: new Date(card.endedAt).toLocaleString() } : {}) as object)}>
             <UndoLink onUndo={onUndo} />
           </View>
@@ -266,10 +265,10 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
 });
 
 /**
- * `board.tsx`'s `UndoLink`: **Undo**, on the card a connect made or moved — a word in the card's own line
- * (`button.link`). The card under it selects on click and opens on double-click; this is neither, so on
- * web the click stops at the box round it (after the pressable has taken it), and on a phone the inner
- * pressable takes the touch from the card's.
+ * **Undo**, on the card a connect made or moved — a link, not a button: a word in the card's own line.
+ * The card under it selects on click and opens on double-click; this is neither, so on web the click
+ * stops at the box round it (after the pressable has taken it), and on a phone the inner pressable takes
+ * the touch from the card's.
  */
 function UndoLink({ onUndo }: { onUndo: () => void }): JSX.Element {
   const stop = isWeb ? { onClick: (e: ReactMouseEvent) => e.stopPropagation(), onDoubleClick: (e: ReactMouseEvent) => e.stopPropagation() } : {};
@@ -287,10 +286,10 @@ function UndoLink({ onUndo }: { onUndo: () => void }): JSX.Element {
 }
 
 /**
- * `board.tsx`'s `OriginLine`: "started by events · push_main · git.push a1b2c3d on main" (decision 0010
- * §4), under the meta line in its voice (`originLineOf` says it). Pressed, it opens the events task at
- * the automation that started this one — and only that: the press stops here, so the card is not
- * selected on the way.
+ * "started by events · push_main · git.push a1b2c3d on main" (decision 0010 §4): a task the events task
+ * started says so, under the meta line in its voice (`originLineOf` says it). Pressed, it opens the
+ * events task at the automation that started this one — and only that: the press stops here, so the card
+ * is not selected on the way.
  */
 function OriginLine({ card, onGo }: { card: CardProps["card"]; onGo?: CardProps["onOrigin"] }): JSX.Element | null {
   const t = useTokens();
@@ -338,9 +337,9 @@ function OriginLine({ card, onGo }: { card: CardProps["card"]; onGo?: CardProps[
 }
 
 /**
- * A tile's chrome (`board.tsx`'s `Tile`): its ground, ring and shadow, their hovered forms, its radius
- * and the room under it, in the order the cascade decides them (see the rules above). Shared by the task
- * card and the run board's execution card (`components/run/RunBoard.tsx`), which are the same tile.
+ * A tile's chrome: its ground, ring and shadow, their hovered forms, its radius and the room under it,
+ * each later case overriding the ones before (see the table above). Shared by the task card and the run
+ * board's execution card (`components/run/RunBoard.tsx`), which are the same tile.
  */
 export function tileChromeOf(
   t: ReturnType<typeof useTokens>,
@@ -350,7 +349,7 @@ export function tileChromeOf(
   const named = look.palette !== "classic";
   const wash = look.wash && pill !== null ? pill : null;
 
-  // --- the ground, ring and shadow, in the order the cascade decides them ---
+  // --- the ground, ring and shadow: each later case overrides the ones before ---
   const tile = t.v("tile");
   let ground: string | number = named ? tile : t.v("fill-ghost-hover");
   let ring: string | undefined = named ? `0 0 0 1px ${t.v("tile-edge")}, ${t.v("tile-shadow")}` : undefined;
@@ -376,13 +375,13 @@ export function tileChromeOf(
               ? ["transparent", `0 0 0 1px ${t.v("line")}`]
               : [ground, ring];
     if (selected) ring = `0 0 0 2px ${t.v("accent")}`;
-    // The wash rules come later at equal specificity, so hovering changes nothing.
+    // The wash stands over hover too: hovering changes nothing.
     hoverGround = ground;
     hoverRing = ring;
   }
   const radius =
     look.palette === "contrast" ? 2 : look.palette === "pastel" || look.palette === "pastel-rail" ? 11 : look.palette === "blueprint" ? 1 : t.v("control-radius-sm");
-  // `.tray-cards .card` (0,2,0): 210 wide, no margin — which every palette's margin (0,3,0) beats.
+  // A card in the tray: 210 wide (`CardFace`), no margin — except a named palette's, which stands.
   const below = look.palette === "contrast" ? 8 : named ? 6 : last || inTray ? 0 : 4;
 
   return { wash, ground, ring, hoverGround, hoverRing, radius, below };

@@ -1,7 +1,7 @@
 /**
- * What the Components room derives, for both shells (decision 0015): the desktop's `ComponentGallery`
- * (`componentGallery.tsx`) and its universal copy (`packages/universal/src/components/gallery/`). Moved
- * here from `componentGallery.tsx` unchanged; the reasoning behind each is in that file.
+ * What the Components room derives: a card's document and what it parses to, the request or gate a
+ * card stages from it, and which slide each row's variants are on. `GalleryPane`
+ * (`packages/universal/src/components/gallery/GalleryPane.tsx`) draws from it.
  */
 import {
   GALLERY_VARIANT_ORDER,

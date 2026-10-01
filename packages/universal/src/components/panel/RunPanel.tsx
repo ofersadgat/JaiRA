@@ -13,20 +13,19 @@ import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "../settings/Button";
 
 /**
- * `runPanel.tsx`'s `RunPanel`, universal (decision 0015): a state's Run tab — a box per declared input
- * and the button (the one schema form, `components/form/SchemaForm.tsx`), then every previous run in the
- * two groups a run can belong to. Everything with a decision in it is `runForm.ts`'s, the DOM's own. The
- * rules (`cascade.mts .sp-body --scene state`):
+ * A state's Run tab — a box per declared input and the button (the one schema form,
+ * `components/form/SchemaForm.tsx`), then every previous run in the two groups a run can belong to.
+ * Everything with a decision in it is `runForm.ts`'s. How it looks:
  *
- *   section          blocks (the sections are not flex: their gap does nothing)
- *   h3               row, centred, spaced, gap 8, 8 under; app 11/12.5, 0.09em, upper, --dim; the
- *                    name 700, `.count` 400
- *   .run-target      app 11/12.5 --dim, 2 under; `b` 600 --text
- *   .run-inputs      column, gap 6
- *   .run-actions     row, centred, wrapping, gap 6, 2 above; a primary Run and why it is off (`.sub`)
- *   .run-group       app 10/12.5 --dim, 0.06em, upper, 5 above (collapsing into the h3's 8)
- *   .run-row         row, centred, gap 6, padding 4 6, radius 6, app 12/12.5: the badge (16 wide), the
- *                    title (ellipsed), where it is now (`.sub`)
+ *   the sections     blocks, one under the other with no gap between them
+ *   a heading        row, centred, spaced, gap 8, 8 under; app 11/12.5, 0.09em, upper, --dim; the
+ *                    name 700, the count 400
+ *   the target       app 11/12.5 --dim, 2 under; its name 600 --text
+ *   the inputs       column, gap 6
+ *   the actions      row, centred, wrapping, gap 6, 2 above; a primary Run and why it is off (`SUB`)
+ *   a group's name   app 10/12.5 --dim, 0.06em, upper, 5 above (collapsing into the heading's 8)
+ *   a run            row, centred, gap 6, padding 4 6, radius 6, app 12/12.5: the badge (16 wide), the
+ *                    title (ellipsed), where it is now (`SUB`)
  */
 export function RunPanel({ state, run }: { state: StateView | null; run: RunSurface }): JSX.Element {
   const history = runHistoryOf(state?.stateId ?? "", run.tasks, state);
@@ -38,7 +37,7 @@ export function RunPanel({ state, run }: { state: StateView | null; run: RunSurf
   );
 }
 
-/** `h3`: a section's name and its count. */
+/** A section's heading: its name and its count. */
 function Heading({ name, count }: { name: string; count?: ReactNode }): JSX.Element {
   const base: FontSpec = { voice: "app", scale: 11 / 12.5, ls: 0.09, upper: true, color: "dim" };
   return (
@@ -49,7 +48,7 @@ function Heading({ name, count }: { name: string; count?: ReactNode }): JSX.Elem
   );
 }
 
-/** `.notice`: a sentence on a tinted ground. */
+/** A notice: a sentence on a tinted ground. */
 function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -96,7 +95,7 @@ function RunSection({ state, run, startedHere }: { state: StateView | null; run:
   );
 }
 
-/** `RunInputsForm`: a workflow's declared inputs, as the one schema form. */
+/** `RunInputs`: a workflow's declared inputs, as the one schema form. */
 export function RunInputs({
   fields,
   values,

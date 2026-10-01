@@ -58,54 +58,52 @@ import { SourceMark } from "./SourceMark";
 import { Toggle } from "./Toggle";
 
 /**
- * `changesetReview.tsx`'s reviewer, universal (decision 0015): a chooser of the set's changes and the
- * one under review — its diff, its notes, a comment on it and what will happen to its file — then a
- * comment on the whole review, what it will do in four numbers, and the button. Everything it decides
- * is `changesetReviewModel.ts`'s and `@jaira/shared`'s (`deriveDecisions` reads the gestures; there
- * are no decision buttons), the desktop's own; what is here is the drawing. The rules, from
- * `styles.css`:
+ * The changeset reviewer: a chooser of the set's changes and the one under review — its diff, its
+ * notes, a comment on it and what will happen to its file — then a comment on the whole review, what
+ * it will do in four numbers, and the button. Everything it decides is `changesetReviewModel.ts`'s
+ * and `@jaira/shared`'s (`deriveDecisions` reads the gestures; there are no decision buttons); what is
+ * here is the drawing. How it looks:
  *
- *   .review-artifacts   column, gap 8; a container: at most 720 wide, one column (the chooser at most
- *                       30vh tall, over the detail), else the chooser 180–260 beside it, gap 10
- *   .review-head        app 12/12.5 --dim; its `code` data 11/12
- *   .review-chooser     --bg, 1px --line, radius 8, scrolls; a row: centred, a --line under it (not the
+ *   the reviewer        column, gap 8; at most 720 wide, one column (the chooser at most 30vh tall,
+ *                       over the detail), else the chooser 260 wide beside it, gap 10
+ *   its head            app 12/12.5 --dim; the source data 11/12
+ *   the chooser         --bg, 1px --line, radius 8, scrolls; a row: centred, a --line under it (not the
  *                       last), selected --fill-ghost-selected; its pick padding 6 8, gap 6, hovered
  *                       --fill-ghost-hover; the path app 13/12.5, one line, cut at its START (`rtl`);
  *                       excluded, struck through in --dim; notes --warn, ⚠ --warn, • --accent,
  *                       "reverted" --bad 8 in from the right
- *   .change-action      app 700 at 11/12.5, 0.04em, upper, padding 1 6, 1px --line, radius 4, --dim
+ *   an action badge     app 700 at 11/12.5, 0.04em, upper, padding 1 6, 1px --line, radius 4, --dim
  *                       (create --ok, delete --bad); the glyph 13, gap 5
- *   .review-detail      --bg, 1px --line, radius 8, padding 10
- *   .detail-head        row, baseline, gap 8: the action, the path (data at app 12/12.5), the layout
- *                       toggle (`.vv-toggle`), Revert (`danger`) or Put it back, Undo my edits
- *   .change-reason      app 12/12.5 --dim, 4 above;  .change-drift --warn, 6 above
- *   .change-unshowable  --warn, app 12/12.5, 8 above
- *   .review-detail .monaco-host   the diff's box: 1px --line, radius 6, at least 120 (the island's `frame`)
- *   .field              12 above in a modal or an inline gate (`FieldFrame`), gap 4; its label app
- *                       11/12.5, 0.04em, upper, --dim; the textarea
- *                       (the page's) data 12/12, two rows — `.change-comment` 8 more above it
- *   .change-files-note  app 11/12.5 --dim, 6 above, at least 14 tall
- *   .review-foot        a --line above, 8 in
- *   .review-summary     row, wrapping, baseline, gap 10, 8 above, --dim; a count: glyph 13, gap 5;
+ *   the detail          --bg, 1px --line, radius 8, padding 10
+ *   its head            row, baseline, gap 8: the action, the path (data at app 12/12.5), the layout
+ *                       toggle (`Toggle`), Revert (`danger`) or Put it back, Undo my edits
+ *   the reason          app 12/12.5 --dim, 4 above; a drift or unsaved-edits warning --warn, 6 above
+ *   an unshowable one   --warn, app 12/12.5, 8 above
+ *   the diff's box      1px --line, radius 6, at least 120 (the island's `frame`)
+ *   a field             12 above in a modal or an inline gate (`FieldFrame`), gap 4; its label app
+ *                       11/12.5, 0.04em, upper, --dim; the textarea (`PlainBox`) data 12/12, two rows —
+ *                       a change's comment 8 more above it
+ *   the file's note     app 11/12.5 --dim, 6 above, at least 14 tall
+ *   the foot            a --line above, 8 in
+ *   the summary         row, wrapping, baseline, gap 10, 8 above, --dim; a count: glyph 13, gap 5;
  *                       removed --bad, commented --warn, unopened --accent 600; the verdict italic, a
  *                       line of its own
- *   .options            row, wrapping, gap 8, 14 above
- *   .review-remote      row, centred, wrapping, gap 10, padding 7 10, 1px --line (an error: --bad 50%),
+ *   the buttons         row, wrapping, gap 8, 14 above
+ *   the remote strip    row, centred, wrapping, gap 10, padding 7 10, 1px --line (an error: --bad 50%),
  *                       radius --control-radius, --panel-2, app 12.5; the forge 600 with its mark 14;
  *                       the request data (--accent), the branch data 11.5 --dim; the window --warn
  *                       with a clock 13; checked at the data size × 11.5/12 in the strip's face,
- *                       --dim; Check now in the strip's 12.5 (`button { font: inherit }`)
+ *                       --dim; Check now in the strip's 12.5
  *
- * The diff is the `diff` island (Monaco, the editor exception), wired as the desktop wires its pane: a
- * line selection in it opens the note composer and turns Revert into "Revert these lines" (`select`,
- * `revertSelectedLines`), and a change of code is checked by the compiler on each side (`intel`), its
- * buffer withdrawn when the change closes. A picture's two versions are `ImageDiff`.
+ * The diff is the `diff` island (Monaco, the editor exception): a line selection in it opens the note
+ * composer and turns Revert into "Revert these lines" (`select`, `revertSelectedLines`), and a change
+ * of code is checked by the compiler on each side (`intel`), its buffer withdrawn when the change
+ * closes. A picture's two versions are `ImageDiff`.
  *
- * `settled`: the review as it was answered (`readOnly` in the DOM) — the decisions, the notes and the
- * comments the record spells, the forge's word on it (`SettledBy`), and nothing that can change them:
- * no Revert, Put it back or Undo my edits, no replies, the fields read-only and the buttons as they read
- * when pressed (`.gate-settled button:disabled`: full strength, a primary keeping its --sheen). Nothing
- * is polled, merged or drift-checked for a record.
+ * `settled`: the review as it was answered — the decisions, the notes and the comments the record
+ * spells, the forge's word on it (`SettledBy`), and nothing that can change them: no Revert, Put it back
+ * or Undo my edits, no replies, the fields read-only and the buttons as they read when pressed (full
+ * strength, a primary keeping its --sheen). Nothing is polled, merged or drift-checked for a record.
  */
 export function ChangesetReview({
   config,
@@ -201,10 +199,10 @@ export function ChangesetReview({
   const submit = (level?: string): void => onSubmit(changesetAnswerOf(decisions, level, reviewComment));
   const change = changeset.changes.find((c) => c.id === selected);
   const confirmingChange = changeset.changes.find((c) => c.id === confirming);
-  // `@container (max-width: 720px)`: one column, the chooser capped at 30vh.
+  // At most 720 wide: one column, the chooser capped at 30vh.
   const narrow = width === undefined || width <= 720;
   const dim = String(t.v("dim"));
-  // `.gate-settled button:disabled`: a record's buttons at full strength, a primary keeping its --sheen.
+  // A record's buttons: disabled, yet at full strength, a primary keeping its --sheen.
   const pressed = (kind: "primary" | "danger" | "ghost", press: () => void): Record<string, unknown> =>
     readOnly ? { disabled: true, opacity: 1, ...(kind === "primary" ? { boxShadow: t.v("sheen") } : {}) } : { onPress: press };
 
@@ -226,12 +224,12 @@ export function ChangesetReview({
     </Scroller>
   );
   const detail = (
-    // `.review-detail` scrolls (`overflow: auto`): on web a box that clips, as the desktop's does.
+    // The detail scrolls on web (`overflow: auto`), so it is a box that clips.
     <View flexGrow={1} flexShrink={1} flexBasis={narrow ? "auto" : 0} minWidth={0} padding={10} borderRadius={8} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} {...((isWeb ? { overflow: "auto" } : {}) as object)} testID="review-detail">
       {change === undefined ? (
         <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }}>Pick a change on the left.</Txt>
       ) : (
-        // Not keyed by the change, as the desktop's is not: the layout chosen holds from one change to the next.
+        // Not keyed by the change: the layout chosen holds from one change to the next.
         <ChangeDetail
           change={change}
           tree={config.tree}
@@ -351,7 +349,7 @@ export function ChangesetReview({
   );
 }
 
-/** A scrolling box: on web a plain `overflow: auto` one, as the DOM's is (a react-native-web scroller is composited). */
+/** A scrolling box: on web a plain `overflow: auto` one (a react-native-web scroller is composited). */
 function Scroller({ t, maxHeight, box, testID, children }: { t: Tokens; maxHeight?: number | undefined; box: object; testID?: string; children: ReactNode }): JSX.Element {
   if (isWeb) {
     return (
@@ -369,7 +367,7 @@ function Scroller({ t, maxHeight, box, testID, children }: { t: Tokens; maxHeigh
   );
 }
 
-/** `.change-action`: the action word in a small ringed badge, its glyph beside it. */
+/** The action word in a small ringed badge, its glyph beside it. */
 function ActionBadge({ action, short = false }: { action: Change["action"]; short?: boolean }): JSX.Element {
   const t = useTokens();
   const ink = action === "create" ? "ok" : action === "delete" ? "bad" : "dim";
@@ -500,7 +498,7 @@ function ChangeDetail({
   const small = { voice: "app", scale: 12 / 12.5 } as const;
   // A REVERTED change has no diff: showing the proposal anyway would claim what was just refused.
   const modified = draft.excluded === true ? (change.before ?? "") : (draft.content ?? change.after ?? "");
-  // A phone's island needs a height: the desktop's pane takes its text's, 120 to 620 (`MonacoDiffPane`).
+  // A phone's island needs a height: on web the pane takes its text's, 120 to 620 (`MonacoDiffPane`).
   const lines = (change.before ?? "").split("\n").length + modified.split("\n").length;
   const size = Number(t.scaled("size-app", 13 / 12.5)) || 13;
   const refuse = (): void => onDraft({ excluded: true, content: undefined, comment: "", notes: [] });
@@ -509,7 +507,7 @@ function ChangeDetail({
       <View flexDirection="row" alignItems="baseline" gap={8}>
         <ActionBadge action={change.action} />
         {services.openFile !== undefined ? (
-          // `button.link.change-path`: data 12/12, --accent, underlined under the pointer — into the editor.
+          // The path as a link: data 12/12, --accent, underlined under the pointer — into the editor.
           <PathLink label={pathLabelOf(change)} onPress={() => services.openFile!("project", change.path)} />
         ) : (
           <Txt spec={{ voice: "data", scale: 1, color: "text" }} fontSize={t.scaled("size-app", 12 / 12.5) as never} lineHeight={(Number(t.scaled("size-app", 12 / 12.5)) || 12) * 1.5} flexShrink={1} minWidth={0}>
@@ -584,9 +582,9 @@ function ChangeDetail({
             sideBySide: layout === "split",
             select: !readOnly,
             ...(intel === undefined ? {} : { intel }),
-            // `.review-detail .monaco-host`: the pane's ring, radius and floor (its height is its own `fit`).
+            // On the pane's own box (`.monaco-host`): its ring, radius and floor (its height is its own `fit`).
             frame: { minHeight: "120px", border: `1px solid ${String(t.v("line"))}`, borderRadius: "6px", overflow: "hidden", boxSizing: "border-box" },
-            // `.diff-pane-loading` while Monaco loads: centred, --dim, on the body's line.
+            // What stands there while Monaco loads: centred, --dim, on the body's line.
             loading: { text: "loading the diff editor…", style: { display: "grid", placeItems: "center", color: String(t.v("dim")), fontFamily: String(t.v("font-app")), fontSize: `${size}px`, lineHeight: `${size * 1.5}px` } },
           }}
           handle={setDiff}
@@ -629,7 +627,7 @@ function ChangeDetail({
         author={author}
         hovered={hotThread}
         onHover={setHotThread}
-        // The desktop's reselects in a well Monaco owns, which holds none of the note's words: nothing.
+        // Nothing to reselect in: the diff's text is Monaco's own, and no well here holds the note's words.
         onReselect={() => undefined}
         {...(readOnly
           ? {}
@@ -644,7 +642,7 @@ function ChangeDetail({
       />
       <Field
         label={
-          // Three text runs, as the DOM writes them (Blink shapes each apart).
+          // Three text runs, not one string: Blink shapes each apart, as in the reference pictures.
           <>
             {"Comment on this "}
             {change.unshowable !== undefined ? "change" : "whole file"}
@@ -672,8 +670,8 @@ function ChangeDetail({
 }
 
 /**
- * `label.field`: gap 4, its label app 11/12.5, 0.04em, upper case, --dim; 12 above where its host frames
- * a field (`.modal .field`, `.inline-gate .field` — `FieldFrame`), none in a state's panel.
+ * A labelled field: gap 4, its label app 11/12.5, 0.04em, upper case, --dim; 12 above where its host
+ * frames a field (a modal, an inline gate — `FieldFrame`), none in a state's panel.
  */
 function Field({ label, children }: { label: ReactNode; children: ReactNode }): JSX.Element {
   const framed = useContext(FieldFrame);
@@ -685,7 +683,7 @@ function Field({ label, children }: { label: ReactNode; children: ReactNode }): 
   );
 }
 
-/** `.review-count`: a glyph and its number, gap 5. */
+/** One of the summary's counts: a glyph and its number, gap 5. */
 function Count({ icon, color, weight = 400, title, children }: { icon: "check" | "cross" | "comment" | "alert"; color: string; weight?: 400 | 600; title?: string; t: Tokens; children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={5} {...(title !== undefined ? { title } : {})}>
@@ -695,7 +693,7 @@ function Count({ icon, color, weight = 400, title, children }: { icon: "check" |
   );
 }
 
-/** The confirm that stands between an X and somebody's words. */
+/** The confirm that stands between removing a change and somebody's words. */
 function DiscardNotes({ change, notes, hasComment, onCancel, onDiscard }: { change: Change; notes: number; hasComment: boolean; onCancel: () => void; onDiscard: () => void }): JSX.Element {
   return (
     <ModalBox onDismiss={onCancel} testID="discard-notes" label="Remove this change and discard what you wrote?">
@@ -716,7 +714,7 @@ function DiscardNotes({ change, notes, hasComment, onCancel, onDiscard }: { chan
   );
 }
 
-/** `remoteStripView.tsx`'s `RemoteStrip`: where the request lives, who has spoken there, and the quiet window. */
+/** The remote strip: where the request lives, who has spoken there, and the quiet window. */
 function RemoteStrip({ remote, status, busy, onCheck }: { remote: ReviewRemote; status: RemoteStatusView | undefined; busy: boolean; onCheck?: () => void }): JSX.Element {
   const t = useTokens();
   const [now, setNow] = useState(() => Date.now());
@@ -761,14 +759,14 @@ function RemoteStrip({ remote, status, busy, onCheck }: { remote: ReviewRemote; 
           <Txt spec={{ ...size, color: warnOrBad, tabular: true }}>{words.error ?? words.window?.text}</Txt>
         </View>
       ) : null}
-      {/* `.rr-checked`: the data SIZE (× 11.5/12) in the strip's own face — no rule gives it the data face. */}
+      {/* When it was checked: the data SIZE (× 11.5/12) in the strip's own face, not the data face. */}
       {words.checked !== undefined ? (
         <Txt spec={{ voice: "app", scale: 1, color: "dim", lineHeight: { px: checkedSize * 1.5 } }} fontSize={checkedSize}>
           {words.checked}
         </Txt>
       ) : null}
       {onCheck === undefined ? null : (
-        // `button { font: inherit }`: the strip's 12.5, not the body's 13.
+        // In the strip's 12.5, not the body's 13 a button has elsewhere.
         <Button kind="ghost" disabled={busy} onPress={onCheck} font={{ scale: 1 }}>
           Check now
         </Button>
@@ -777,7 +775,7 @@ function RemoteStrip({ remote, status, busy, onCheck }: { remote: ReviewRemote; 
   );
 }
 
-/** `button.link.change-path`: the changed file's path, which opens it in the Files room. */
+/** The changed file's path as a link, which opens it in the Files room. */
 function PathLink({ label, onPress }: { label: string; onPress: () => void }): JSX.Element {
   // A `button`'s words do not wrap and it is at least as wide as they are: in a narrow panel the head
   // runs past its box and is cut there. A phone's text wraps instead — squeezed to nothing beside the
@@ -810,7 +808,7 @@ function ReviewThread({ notes }: { notes: readonly ReviewNote[] }): JSX.Element 
     <View flexDirection="column" gap={6} marginBottom={8} testID="review-thread">
       {notes.map((note, i) => (
         <View key={`${note.at}-${i}`} marginTop={6} paddingLeft={8} {...(edge(t, { left: 2 }) as object)}>
-          {/* `.note-msg-by`: the glyph inline on the baseline (no rule lowers it here, as `.note-row`'s does), a
+          {/* The author's line: the glyph inline on the baseline (not lowered, as a note thread's is), a
               space, the author and where it was written (`SourceMark`). */}
           <Txt spec={{ ...body, weight: 600, color: "dim" }}>
             <InlineGlyph size={13}>

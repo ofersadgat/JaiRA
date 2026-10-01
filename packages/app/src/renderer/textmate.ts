@@ -314,9 +314,9 @@ async function start(): Promise<void> {
   highlighter = (await createHighlighterCore({
     themes: [],
     langs: [],
-    // The INLINED build. The alternative fetches `onig.wasm` at runtime, which is a request this app
-    // cannot make: the renderer is loaded from `file://`, and a packaged Electron app has no origin
-    // to resolve it against.
+    // The INLINED build. The alternative fetches `onig.wasm` at runtime, which is a request an island
+    // page on a phone cannot make: it is loaded from `file://`, an opaque origin that may fetch no
+    // other file.
     engine: createOnigurumaEngine(import("shiki/wasm")),
   })) as unknown as typeof highlighter;
 }

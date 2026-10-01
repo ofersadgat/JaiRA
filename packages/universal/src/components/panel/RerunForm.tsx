@@ -17,10 +17,9 @@ export interface RerunSurface extends RerunFormSurface {
 }
 
 /**
- * `panelViews.tsx`'s `RerunForm`, universal (decision 0015): a copy of a task with its inputs changed —
- * the form its workflow declares, opening on the values the task was called with — or, started before a
- * state the task entered, a fork there. What it decides is `newTaskModel.ts`'s (`useRerunForm`). The
- * rules are the New-task form's (`NewTaskForm.tsx`).
+ * A copy of a task with its inputs changed — the form its workflow declares, opening on the values the
+ * task was called with — or, started before a state the task entered, a fork there. What it decides is
+ * `newTaskModel.ts`'s (`useRerunForm`). It looks as the New-task form does (`NewTaskForm.tsx`).
  */
 export function RerunForm({ run, onCancel }: { run: RerunSurface; onCancel: () => void }): JSX.Element {
   const t = useTokens();
@@ -31,7 +30,7 @@ export function RerunForm({ run, onCancel }: { run: RerunSurface; onCancel: () =
     if (forking) run.onFork?.(Number(from));
     else run.onRun(runInputsOf(run.fields ?? [], run.values));
   };
-  // `<form onSubmit>`: Enter in one of its boxes starts the copy, as on the desktop.
+  // A form's implicit submission: Enter in one of its boxes starts the copy.
   const form = useEnterSubmits(start);
   return (
     <View ref={form as never} flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>

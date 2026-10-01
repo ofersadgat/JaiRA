@@ -1,7 +1,11 @@
 /**
- * The markdown half of `documents.tsx` — moved out unchanged (see that module's note on why one place
- * decides which component draws a document), so a page that draws only markdown documents (the markdown
- * editor's island, decision 0015) does not carry the code editor behind `CodeDocument`.
+ * A markdown document on screen, and the one place that decides which of two DOM components draws it:
+ * the reading (`markdown.tsx`, markdown-it folded into elements) or the live-preview editor
+ * (`markdownEditor.tsx`, CodeMirror). A caller says what it has and what may be done with it — here is
+ * the text, here is where a change goes if one is allowed, here is a change to draw over it — and never
+ * reaches for a renderer itself, which is how a read-only document once landed in the editor. The
+ * markdown editor's island (decision 0015) hosts it for a value view's document: `Island.tsx` on web,
+ * `packages/client/island/markdownEditor.tsx` on a phone.
  */
 import { lazy, Suspense, type JSX } from "react";
 import type { RenderView } from "@jaira/shared/browser";
@@ -51,8 +55,8 @@ export interface MarkdownDocumentProps {
   /**
    * Which type this document IS, for the palette — see {@link viewTheme}.
    *
-   * Absent means markdown itself, which is what almost every caller has. The one that must say is
-   * the file panel: a workflow description is its own type and carries its own palette, and asking
+   * Absent means markdown itself, which is what almost every caller has. A caller showing a type
+   * of its own must say: a workflow description is one and carries its own palette, and asking
    * under `text/markdown` would read a key its owner never wrote to.
    */
   mime?: string | undefined;
@@ -61,8 +65,8 @@ export interface MarkdownDocumentProps {
 /**
  * Draw it.
  *
- * The whole decision is the first line, and it is deliberately the only one in the app: everything
- * above is why, and everything below is delegation.
+ * The whole decision is the first line: everything above is why, and everything below is
+ * delegation.
  */
 export function MarkdownDocument({ text, onChange, diff, readOnly, mime }: MarkdownDocumentProps): JSX.Element {
   /**
@@ -70,13 +74,13 @@ export function MarkdownDocument({ text, onChange, diff, readOnly, mime }: Markd
    *
    * Here rather than at each host, because the editor is CodeMirror: it takes its colours from CSS,
    * the root can hold ONE palette (`applyAppearance`), and a theme is per type and per view. Every
-   * host that draws a markdown document goes through this function — a file panel, a value in a
-   * transcript, a gate's approval document — so this is the one place that can give all of them the
-   * palette without each of them learning what a palette is.
+   * value view that edits a markdown document, or draws a change over one, goes through this
+   * function — an artifact under review, wherever it stands — so this is the one place that can
+   * give all of them the palette without each of them learning what a palette is.
    *
-   * Handed DOWN rather than wrapped around: the panel gives `.md-editor` its band with a child
-   * combinator, so an element in between costs the editor its height and CodeMirror its scroller.
-   * See `MarkdownEditor`'s `paint`.
+   * Handed DOWN rather than wrapped around: a host's `.file-edit` gives `.md-editor` its band with a
+   * child combinator, so an element in between costs the editor its height and CodeMirror its
+   * scroller. See `MarkdownEditor`'s `paint`.
    *
    * The reading needs none: it is markdown-it in the app's own tokens, which is what the `rendered`
    * renderer is and why it declares no theme.

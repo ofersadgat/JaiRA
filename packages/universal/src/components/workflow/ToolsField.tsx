@@ -12,14 +12,14 @@ import { AddMenu, SubjectRow, ToolRow, type AddOption } from "../settings/permis
 import { Sub } from "./controls";
 
 /**
- * `toolsField.tsx`, universal (decision 0015): the state editor's ONE Tools field — the permission set
- * the state starts from, asked through the schema form, and beneath it the lines the state writes over it
- * (`permissionSetCard.tsx`'s `PermissionSetLines`, drawn with Settings' own rows). What it offers and
- * writes is `toolsFieldModel.ts`'s and `permissionSetLinesModel.ts`'s. The rules:
+ * The state editor's ONE Tools field — the permission set the state starts from, asked through the
+ * schema form, and beneath it the lines the state writes over it ({@link PermissionSetLines}, drawn with
+ * Settings' own rows). What it offers and writes is `toolsFieldModel.ts`'s and
+ * `permissionSetLinesModel.ts`'s. How it looks:
  *
- *   .cfg-span.cfg-block.set-tools-field   a column; its `.set-card` 6 above
- *   .set-card                             at most 560 wide, padding 10 12 11, 1px --line, radius 12, --panel
- *   .cx-cat-body.set-flat                 no rule, no indent: the lines one under another
+ *   the field           a column; the card of lines 6 under the set's picker
+ *   the card            at most 560 wide, padding 10 12 11, 1px --line, radius 12, --panel
+ *   the lines           no rule, no indent: one under another
  */
 export function ToolsFieldControl({
   value,

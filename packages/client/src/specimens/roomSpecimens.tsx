@@ -11,7 +11,7 @@ import { AboutUpdateSplit, Conversation, JsonFormView, PatchSideBySide, Rendered
  *  - `card-origin`, `card-undo`, `card-undo-ended` — the board's card with its origin line (a task the
  *    events task started; pressing it opens that task) and with **Undo** (a moment after a drop), running
  *    and finished.
- *  - `debug-journal` — the Debug room's journal under a result (`detail.tsx`'s `Conversation`): every kind
+ *  - `debug-journal` — the Debug room's journal under a result (`Conversation`): every kind
  *    of turn, a tool turn in the data face, a failure.
  *  - `file-patch-side`, `file-html`, `file-json-form`, `file-json-form-package` — the Files viewer's
  *    Side by side (the diff an island, painted out), Rendered (the page an island) and Form surfaces.

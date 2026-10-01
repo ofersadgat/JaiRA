@@ -1,6 +1,6 @@
 /**
  * What a permission set's MCP bucket DOES — every edit and every sentence, as pure functions of the map
- * (the rows are `mcpBucket.tsx`).
+ * (the rows are `McpBucket`, in `PermissionSetCard.tsx`).
  *
  * A configured server is a GROUP, as a program is under Execution (decision 0007 §5): its own line,
  * `mcp__figma`, is the mode for any tool of it no line names, and a line per named tool

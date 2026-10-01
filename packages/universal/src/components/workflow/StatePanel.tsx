@@ -11,13 +11,13 @@ import { Empty } from "./controls";
 import { WorkflowEditor } from "./WorkflowEditor";
 
 /**
- * `statePanel.tsx`, universal (decision 0015): one state's configuration in the side panel — its own
- * copy of the file (`useStateSource`, `configPanelModel.ts`), the same editor on Form and JSON only,
- * and the way out to the editor. The rules:
+ * One state's configuration in the side panel — its own copy of the file (`useStateSource`,
+ * `configPanelModel.ts`), the workflow editor on Form and JSON only, and the way out to the file's own
+ * editor. How it looks:
  *
- *   .state-panel        column, the rest, gap 8, padding 10 12 12, scrolling sideways
- *   .state-panel > *    at least 460 wide (the column is narrower: it scrolls)
- *   .state-panel-go     a row, its button (`.ghost`) at the end
+ *   the panel           column, the rest, gap 8, padding 10 12 12, scrolling sideways
+ *   each child          at least 460 wide (the column is narrower: it scrolls)
+ *   the way out         a row, its button (a ghost) at the end
  */
 export function StatePanel({
   stateId,

@@ -1,5 +1,5 @@
 /**
- * What an agent's question is drawn from — the props the universal `QuestionSurface`
+ * What an agent's question is drawn from — the props `QuestionSurface`
  * (`packages/universal/src/components/floats/QuestionSurface.tsx`) takes. A type only.
  */
 import type { PendingQuestion } from "@jaira/shared/browser";

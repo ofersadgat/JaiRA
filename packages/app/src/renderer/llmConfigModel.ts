@@ -1,7 +1,7 @@
 /**
- * What `llmConfigForm.tsx`'s call-settings form decides, as pure functions — its categories and their
- * one-line summaries, the fields each draws, the rail's keys, and what the Advanced box's text means —
- * in a module of its own so the universal copy (decision 0015) runs the same code the DOM form does.
+ * What the call-settings form decides, as pure functions — its categories and their one-line
+ * summaries, the fields each draws, the rail's keys, and what the Advanced box's text means.
+ * `LlmConfigForm` (`packages/universal/src/components/form/LlmConfigForm.tsx`) draws from it.
  */
 import { REASONING_EFFORTS, type ModelParametersView } from "@jaira/shared/browser";
 import type { Schema } from "./schemaForm/types";

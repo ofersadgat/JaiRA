@@ -5,10 +5,10 @@ import { PreviewCard } from "@jaira/universal";
 
 /**
  * A value that owns the panel's column — `PreviewCard` (`components/panel/PreviewCard.tsx`, the value
- * view's `pinned`; the copy of what `panelViews.tsx` drew), in a stage as tall as a panel's body
- * (decision 0015). What the interactive artifact adds is the grant (`serve`) and the bridge
- * (`onPrompt`), which only a real task's record can answer: the `conversation-artifact`,
- * `artifact-prompt`, `artifact-produced` and `artifact-preview` scenes run one.
+ * view's `pinned`), in a stage as tall as a panel's body (decision 0015). What the interactive artifact
+ * adds is the grant (`serve`) and the bridge (`onPrompt`), which only a real task's record can answer:
+ * the `conversation-artifact`, `artifact-prompt`, `artifact-produced` and `artifact-preview` scenes run
+ * one.
  *
  *  - `preview-page` — an HTML artifact (inert, no grant): the page full bleed under the head.
  *  - `preview-source` — a long JSON value: the head padded 7 10 0, the body 0 10 10, no 340 ceiling.
@@ -31,7 +31,7 @@ const LONG = Object.fromEntries(Array.from({ length: 40 }, (_, i) => [`step_${St
 const PAGE_ITEM: PinnedValue = { title: "lane-picker.html", value: { path: "lane-picker.html", mediaType: "text/html", content: PAGE } };
 const SOURCE_ITEM: PinnedValue = { title: "steps", value: LONG, label: "output" };
 
-/** The panel's body, as tall as the studio's: `.sp-body`, a flex column the Preview card fills. */
+/** The panel's body, as tall as the studio's: a flex column the Preview card fills. */
 const HEIGHT = 520;
 function RnStage({ children }: { children: ReactNode }): JSX.Element {
   return <View height={HEIGHT}>{children}</View>;

@@ -8,34 +8,32 @@ import { useTokens, type Tokens } from "../../tokens";
 import { Breathing, Caret } from "./motion";
 
 /**
- * `session.tsx`'s `SessionPanel`, universal (decision 0015): the conversation a state actually ran, as
- * the Debug room's "What was actually said" draws it (`.debug-transcript .session`) — the task's states
- * down one side, the chosen state's turns verbatim down the other. The rules, from `styles.css`:
+ * The conversation a state actually ran, as the Debug room's "What was actually said" draws it — the
+ * task's states down one side, the chosen state's turns verbatim down the other. How it looks:
  *
- *   .debug-transcript .session   320 tall, 1px --line round, radius 8, clipped
- *   .session             grid 200 | minmax(0, 1fr)
- *   .session-history     scrolls; 1px --line on its right; padding 6
- *   .session-history h3  row, baseline, gap 6 (`h3`'s space-between stays), margin 2 4 6; app 700 at
- *                        11/12.5, 0.04em, uppercase, --dim; its `.count` 400
- *   .session-row         row, centred, gap 6, padding 4 6, radius --control-radius-sm, app 12/12.5;
- *                        hovered --fill-ghost-hover; `.sel` --fill-ghost-selected at 600
- *   .session-row .cost   --dim, app 11/12.5, tabular
- *   .dot                 7 round, --dim; `.success` --ok, `.error` --bad, `.running` --accent (and a
- *                        pulse, `ts-pulse`: a phone's breathes, `motion.tsx`; a still picture holds none)
- *   .session-body        column, clipped
- *   .session-head        row, centred, gap 8, padding 6 10, 1px --line under, app 12/12.5; its `.sub`
- *                        --dim at 11/12.5 (`.mono` alone is no rule), one line
- *   .sturns              scrolls; padding 6 10
- *   .sturn               row, gap 8, padding 5 0, 1px --line above (none on the first) — its
- *                        `--line-faint` is declared nowhere, so the fallback is what draws
- *   .sturn-role          46 wide, app 10/12.5, 0.04em, uppercase, --dim, 2 above
- *   .sturn-text          data 11/12 on 1.45, wraps anywhere, as written (`pre-wrap`)
- *   .turn-parts          column, gap 3, 4 above
- *   .part > summary      row, baseline, gap 6, app 11/12.5 (a flex summary has no marker);
- *                        `.part-kind` 10/12.5, 0.04em, uppercase, --dim; `.part-tool` the data face
- *   .part > pre          margin 4 0 6 12, app 11/12.5 in the UA's `monospace`, wraps anywhere, 220 at most
- *   .sturn-live          its role --accent, its text at 0.85, and a "▍" after it (blinking on a phone, `motion.tsx`)
- *   p.empty              --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
+ *   the panel            320 tall, 1px --line round, radius 8, clipped; 200 | the rest
+ *   the states           scroll; 1px --line on their right; padding 6
+ *   their heading        row, baseline, space-between, gap 6, margin 2 4 6; app 700 at 11/12.5, 0.04em,
+ *                        uppercase, --dim; its count 400
+ *   a state's row        row, centred, gap 6, padding 4 6, radius --control-radius-sm, app 12/12.5;
+ *                        hovered --fill-ghost-hover; chosen --fill-ghost-selected at 600
+ *   its cost             --dim, app 11/12.5, tabular
+ *   a dot                7 round, --dim; a success --ok, an error --bad, running --accent (and
+ *                        breathing on a phone, `motion.tsx`; a still picture holds none)
+ *   the body             column, clipped
+ *   its head             row, centred, gap 8, padding 6 10, 1px --line under, app 12/12.5; the agent's
+ *                        handle --dim at 11/12.5 (the app face, not mono), one line
+ *   the turns            scroll; padding 6 10
+ *   a turn               row, gap 8, padding 5 0, 1px --line above (none on the first)
+ *   its role             46 wide, app 10/12.5, 0.04em, uppercase, --dim, 2 above
+ *   its text             data 11/12 on 1.45, wraps anywhere, as written (`pre-wrap`)
+ *   its parts            column, gap 3, 4 above
+ *   a part's head        row, baseline, gap 6, no disclosure marker; the kind app 10/12.5, 0.04em,
+ *                        uppercase, --dim; the tool's name the data face at app 11/12.5
+ *   a part, open         margin 4 0 6 12, app 11/12.5 in the UA's `monospace`, wraps anywhere, 220 at most
+ *   the turn in writing  its role --accent, its text at 0.85, and a "▍" after it (blinking on a phone,
+ *                        `motion.tsx`)
+ *   an empty line        --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
  */
 
 /** A role chip. `user` is what the workflow sent; everything else is what came back. */
@@ -106,7 +104,7 @@ export function SessionPanel({ history, session, showing, live, onShow }: Sessio
   );
 }
 
-/** `.session-row`: its dot, the state, and what the call cost. */
+/** A state's row: its dot, the state, and what the call cost. */
 function HistoryRow({ row, sel, onPress, t }: { row: SessionRef; sel: boolean; onPress: () => void; t: Tokens }): JSX.Element {
   const weight = sel ? 600 : 400;
   return (
@@ -134,20 +132,20 @@ function HistoryRow({ row, sel, onPress, t }: { row: SessionRef; sel: boolean; o
   );
 }
 
-/** `.dot`: 7 round, in the colour of how the call ended. */
+/** A call's dot: 7 round, in the colour of how the call ended. */
 function Dot({ status, t }: { status: string; t: Tokens }): JSX.Element {
   const ink = status === "success" ? "ok" : status === "error" ? "bad" : status === "running" ? "accent" : "dim";
   const dot = <View width={7} height={7} borderRadius={999} flexShrink={0} backgroundColor={t.v(ink) as never} />;
-  // Not a verdict: a call that has not ended breathes (`ts-pulse`) — on a phone; a picture holds it still.
+  // Not a verdict: a call that has not ended breathes (`motion.tsx`) — on a phone; on web it stands still.
   return status === "running" ? <Breathing>{dot}</Breathing> : dot;
 }
 
-/** `.sturn`: the role in its 46, and the text and the calls beside it. */
+/** A turn: the role in its 46, and the text and the calls beside it. */
 function Turn({ turn, first, live = false, t }: { turn: SessionTurn; first: boolean; live?: boolean; t: Tokens }): JSX.Element {
   const role = live ? "writing" : ROLE_LABEL[turn.role] ?? turn.role;
   return (
     <View flexDirection="row" gap={8} paddingVertical={5} {...(first ? {} : (edge(t, { top: 1 }) as object))}>
-      {/* A word longer than the 46 runs past it, as in the DOM: no breaking inside a word. */}
+      {/* A word longer than the 46 runs past it: no breaking inside a word. */}
       <Txt spec={{ voice: "app", scale: 10 / 12.5, ls: 0.04, upper: true, color: live ? "accent" : "dim" }} width={46} flexShrink={0} paddingTop={2} {...({ style: { overflowWrap: "normal" } } as object)}>
         {role}
         {/* Not typed by the person — the record's own mark (`MessageAuthor`). */}
@@ -166,7 +164,7 @@ function Turn({ turn, first, live = false, t }: { turn: SessionTurn; first: bool
   );
 }
 
-/** `.turn-parts`: a turn's tool calls and results, each a `details` shut until pressed. */
+/** A turn's tool calls and results, each shut until pressed. */
 function Parts({ parts, t }: { parts: JsonValue; t: Tokens }): JSX.Element | null {
   const list = Array.isArray(parts) ? parts : [];
   const calls = list.filter((p) => typeof (p as { type?: unknown })?.type === "string" && (p as { type: string }).type !== "text");
@@ -199,14 +197,14 @@ function Part({ part, t }: { part: { type: string; toolName?: string; args?: unk
   );
 }
 
-/** A size the stylesheet states against the app voice, as a scale of the data voice. */
+/** A size stated against the app voice, as a scale of the data voice. */
 function dataOfApp(t: Tokens, f: number): number {
   const app = t.v("size-app");
   const data = t.v("size-data");
   return typeof app === "number" && typeof data === "number" && data > 0 ? (f * app) / data : (f * 12.5) / 12;
 }
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13). */
+/** An empty line: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13). */
 function Empty({ children, t }: { children: ReactNode; t: Tokens }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>

@@ -1,6 +1,5 @@
 /**
- * How a settings form writes into ONE layer's document — the logic of `configPane.tsx`'s writers, in a
- * module of its own so the universal copies (decision 0015) write through the same code the DOM's do.
+ * How a settings form writes into ONE layer's document — the writers the Settings pages save through.
  */
 import { withPaths, type ConfigLayer, type ConfigView } from "@jaira/shared/browser";
 

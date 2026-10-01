@@ -7,9 +7,8 @@ import { dress, islandStyles, islandStylesIn } from "./islandStyles";
 import type { IslandHandle, IslandProps } from "./types";
 
 /**
- * An island on WEB: the DOM component itself, inline. There is no WebView to host it in and no need
- * for one, and inline is what keeps the universal tree pixel-identical to the DOM tree around it.
- * `Island.native.tsx` is the WebView.
+ * An island on WEB: the DOM component itself (one of `@jaira/ui`'s), inline in the page. There is no
+ * WebView to host it in and no need for one. `Island.native.tsx` is the WebView.
  */
 const MonacoDiffPane = lazy(() => import("@jaira/ui/monacoDiff").then((m) => ({ default: m.MonacoDiffPane })));
 const MarkdownEditor = lazy(() => import("@jaira/ui/markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
@@ -35,8 +34,8 @@ export function Island(props: IslandProps): JSX.Element {
   }, [styled]);
   // The look on the island's box, where the scoped stylesheet reads it (`:root` there is this box).
   useLayoutEffect(() => dress(box.current, look), [styled, look.palette, look.scheme, look.wash, look.buckets, look.lanes]);
-  // Marked, so the fidelity gate can leave it out: an island is the desktop's own component by
-  // construction, and what it draws inside its box is the desktop's to draw.
+  // Marked: the stylesheet is scoped to this box (`@scope ([data-island])`), and `pair.mts` paints it
+  // out of a comparison — what stands inside is a DOM component, not this tree's drawing.
   return (
     <div ref={box} data-island={props.component}>
       {styled ? (props.under ?? []).reduceRight((inner, classes) => <div className={classes} style={{ display: "contents" }}>{inner}</div>, inline(props)) : null}
@@ -53,8 +52,8 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
     case "diff":
       return <DiffInline p={p} box={box} event={event} {...(handle !== undefined ? { handle } : {})} />;
     case "markdownEditor":
-      // A value view's document (an artifact under review): the desktop's `MarkdownDocument`, which
-      // draws the editor as tall as its words, with a change over it.
+      // A value view's document (an artifact under review): `MarkdownDocument`, which draws the
+      // editor as tall as its words, with a change over it.
       if (p["document"] === true) {
         return (
           <Suspense fallback={null}>
@@ -103,12 +102,12 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
         </div>
       );
     }
-    // An HTML or SVG artifact, drawn as the page it is (`valueView.tsx`'s `Html`) — or, with a `url` the
+    // An HTML or SVG artifact, drawn as the page it is (`htmlFrame.tsx`'s `Html`) — or, with a `url` the
     // record granted it (`artifactFrame.ts`), the frame it RUNS in (`interactiveArtifact.tsx`), whose
-    // messages come back as `prompt` events. Both the desktop's own frames, sandbox and all; `style` is
-    // `.vv-html`'s box, which this page has no stylesheet for, and `strut` the font of the block the
-    // frame stands in: an iframe is inline, on its line's baseline, so the block is the frame and the
-    // line's depth below that baseline (`.vv-body`'s 13/12.5 on 1.5 adds 5.5 to 360).
+    // messages come back as `prompt` events. Each brings its own sandbox; `style` is the frame's box,
+    // stated by the host (`ValueView.tsx`'s `PageFrame`), and `strut` the font of the block the frame
+    // stands in: an iframe is inline, on its line's baseline, so the block is the frame and the line's
+    // depth below that baseline (a value's body, 13/12.5 on 1.5, adds 5.5 to 360).
     case "artifact": {
       const style = p["style"] as CSSProperties | undefined;
       const strut = p["strut"] as CSSProperties | undefined;
@@ -148,9 +147,9 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
  * line selection (`select`: the passage and whether it covers a changed line — what Revert says before
  * it is pressed); the pane's actions are the handle's `revertSelectedLines`, answered as `reverted`;
  * `intel` is the compiler on each side, handed straight through. `loading` is the fallback a host draws
- * while Monaco loads (`.diff-pane-loading`: its words and its box's style); `frame` is what the host's
- * stylesheet puts on the pane's own box (`.review-detail .monaco-host`: its ring, radius and floor), laid
- * on the element, since the ancestor that rule needs is not there on `/rn` or in a phone's island page.
+ * while Monaco loads (its words and its box's style); `frame` is the look a host gives the pane's own
+ * box (`.monaco-host` — the changeset reviewer's ring, radius and floor), laid on the element itself: the
+ * host stands outside the island and cannot style what is inside it any other way.
  */
 function DiffInline({ p, box, event, handle }: { p: Record<string, unknown>; box: CSSProperties | undefined; event: (name: string) => (value: unknown) => void; handle?: (handle: IslandHandle | null) => void }): JSX.Element {
   const actions = useRef<DiffActions | null>(null);

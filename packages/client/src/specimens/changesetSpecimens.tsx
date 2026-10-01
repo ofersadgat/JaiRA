@@ -6,15 +6,15 @@ import { initialState, interactionOf, parsedDoc } from "@jaira/ui/galleryModel";
 import { GalleryStage, GateSurface, ImageDiff, useTokens, type ImageLayout } from "@jaira/universal";
 
 /**
- * The changeset reviewer (the copy of `changesetReview.tsx`) where the gallery's cards do not reach it, as
- * specimens (decision 0015), each from a fixture.
+ * The changeset reviewer where the gallery's cards do not reach it, as specimens (decision 0015), each
+ * from a fixture.
  *
- *  - `image-diff-overlay`, `image-diff-split`, `image-diff-added` — `imageDiff.tsx`'s comparison of two
+ *  - `image-diff-overlay`, `image-diff-split`, `image-diff-added` — `ImageDiff`'s comparison of two
  *    versions of a picture: stacked with the fader, side by side, and one side only (a create).
  *  - `changeset-image` — the reviewer open on a change of a picture (the gallery's stage, a changeset
  *    whose first change is an SVG redrawn), and a create of one beside it.
  *  - `changeset-settled`, `changeset-settled-forge` — the reviewer as it was answered, in a state's panel
- *    (`.st-block`, the copy `plain`), over the picture set: decided here with a note, a comment and a
+ *    (the gate drawn `plain`), over the picture set: decided here with a note, a comment and a
  *    change reverted; and settled on the forge, with the request's strip, its thread and the forge's
  *    word (`SettledBy`).
  */
@@ -40,7 +40,7 @@ function RnImages({ before, after, layout }: { before?: string; after?: string; 
   return <ImageDiff before={before} after={after} layout={now} onLayout={setNow} />;
 }
 
-/** `.detail`'s text: the body's, as the reviewer's pane has it (the copy states its own). */
+/** The ground the reviewer's pane stands on (--bg); the comparison states its own text. */
 function RnBody({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return <View backgroundColor={t.v("bg") as never}>{children}</View>;
@@ -70,7 +70,7 @@ const IMAGE_CHANGESET: Changeset = {
 const surfaceOf = (id: string): GallerySurface => GALLERY_SURFACES.find((s) => s.id === id)!;
 const IMAGE_SURFACE: GallerySurface = { ...surfaceOf("review_artifacts/basic"), id: "review_artifacts/image", variant: "image", inputs: { changeset: IMAGE_CHANGESET as unknown as JsonValue } };
 
-/** The gallery's stage (`.gallery-stage`: the dashed box). */
+/** The gallery's stage: the dashed box. */
 function RnStage({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (

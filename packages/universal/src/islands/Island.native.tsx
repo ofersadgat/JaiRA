@@ -7,7 +7,7 @@ import type { IslandProps } from "./types";
 
 /**
  * An island on NATIVE (decision 0015, S5): the island page for `component`, bundled with the app by
- * `plugins/withIslands.js` and loaded from `file://`, driven over the bridge in
+ * `plugins/withIslands.cjs` and loaded from `file://`, driven over the bridge in
  * `packages/client/island/protocol.ts`.
  *
  * The page is built classic (one IIFE, no modules, fonts inlined, blob workers) precisely so that it

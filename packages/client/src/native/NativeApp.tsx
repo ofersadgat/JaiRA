@@ -13,9 +13,9 @@ import { StrictLayout } from "./StrictLayout";
  * The phone (decision 0015). Ruling 1: "the exact same ui on mobile as there is on desktop", as a
  * migration step — and not in a WebView (the person, 2026-09-27: "the goal is to replicate the desktop
  * ui, but not in a webview"). Pair and connect (`Remote`), then the universal shell (`UniversalApp`):
- * the desktop's frame drawn natively from the copies, region by region, on a machine's engine over its
- * own transport (decision 0013, amended 2026-09-30) — at a desktop's width in `DesktopFrame`. A region
- * with no copy yet says so where it stands.
+ * the desktop's frame drawn natively, region by region, on a machine's engine over its own transport
+ * (decision 0013, amended 2026-09-30) — at a desktop's width in `DesktopFrame`. A region not drawn yet
+ * says so where it stands (`Uncopied`).
  *
  * `&screen=islands` on the link opens the island harness instead (`IslandsTab`), which the emulator
  * test (`shots/android.mts`) measures; `&still=1` holds the clocks and spinners so that test can read

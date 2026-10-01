@@ -7,15 +7,15 @@ import { useLook, useTokens } from "../../tokens";
 import { Icon } from "./Icon";
 
 /**
- * The marks between a transcript's blocks, universal (decision 0015): the pause before a block
- * (`transcriptView.tsx`'s `GapMark`), a compaction (`usageMeters.tsx`'s `CompactionLine`) and the day
- * chip over the scroller (`DayChip`). The rules, from `styles.css`:
+ * The marks between a transcript's blocks: the pause before a block (`GapMark`), a compaction
+ * (`CompactionLine`) and the day chip over the scroller (`DayChip`). How they look:
  *
- *   .ts-gap          centred, data 10/12, 0.05em, --dim at .66;  -mins margin 20 0 16;  -hours 34 0 28;
- *                    -day 52 0 44, .82, 500, 0.09em, upper
- *   .um-compact      row, wrapping, centred, gap 8, margin 6 0, padding 6 10, dashed --rule over and
- *                    under, app 12/12.5 --dim; the fold 1em; `b` data 500 11.5px --text; the sub 11.5px
- *   .ts-daychip      padding 3 12, 1px --line, round, --panel 88% (blurred behind), data 10/12, tabular,
+ *   a gap            centred, data 10/12, 0.05em, --dim at .66;  minutes margin 20 0 16;  hours 34 0 28;
+ *                    a day 52 0 44, .82, 500, 0.09em, upper
+ *   a compaction     row, wrapping, centred, gap 8, margin 6 0, padding 6 10, dashed --rule over and
+ *                    under, app 12/12.5 --dim; the fold 1em; the figures data 500 11.5px --text; the
+ *                    sub 11.5px
+ *   the day chip     padding 3 12, 1px --line, round, --panel 88% (blurred behind), data 10/12, tabular,
  *                    0.05em, --dim, 0 2 10 rgba(20,26,38,.08) (dark 0 2 12 rgba(0,0,0,.45)), 4 down;
  *                    at .34 at rest, whole while the reader scrolls
  */
@@ -68,7 +68,7 @@ export function CompactionLine({
         : `compacted automatically${before !== undefined ? ` at ${formatTokens(before, true)}` : ""}${durationMs !== undefined ? ` · took ${round(durationMs / 1000)} s` : ""}`;
   const size = Number(t.scaled("size-app", 12 / 12.5)) || 12;
   const words = { voice: "app" as const, scale: 12 / 12.5, color: "dim" };
-  // `11.5px` as the stylesheet writes it: not a scale of the app's size.
+  // A fixed 11.5px, not a scale of the app's size.
   const px = 11.5 / (Number(t.scaled("size-app", 1)) || 12.5);
   return (
     <View

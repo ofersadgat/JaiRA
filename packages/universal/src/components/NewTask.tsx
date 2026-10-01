@@ -3,11 +3,10 @@ import { Press, Txt } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
- * `widgets.tsx`'s `NewTask`, universal (decision 0015): the plain `button` of `styles.css`, which opens the
- * New-task form in the side panel. Open or not it looks the same — no rule dresses `button.on` or
- * `[aria-pressed]` outside the toolbars that have their own.
+ * The "+ New task" button: a plain button, which opens the New-task form in the side panel. Open or not
+ * it looks the same; only `aria-pressed` says which.
  *
- *   button          --panel-2 ground, 1px --line ring, radius --control-radius (7), padding
+ *   the button      --panel-2 ground, 1px --line ring, radius --control-radius (7), padding
  *                   --control-pad (3 10), the body's font (app voice, 13, line 1.5), --text, one line;
  *                   hovered: --panel-3 ground, --rule ring
  */

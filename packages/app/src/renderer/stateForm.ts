@@ -1,10 +1,9 @@
 /**
  * The state form's model, and the two pure functions that move a document in and out of it.
  *
- * Extracted from the editor component so the MERGE can be tested. This is the code most able to
+ * Apart from the editor's drawing so the MERGE can be tested. This is the code most able to
  * destroy someone's work silently — a form that rebuilt a document from its own fields would drop
- * every field it does not render — and it had no coverage while it lived inside a `.tsx` that the
- * node-environment test runner could not reach.
+ * every field it does not render — so it lives where a test can call it without rendering anything.
  *
  * The contract, in one sentence: the form reads what it understands, writes back only what it
  * understands, and leaves everything else exactly where it found it.

@@ -1,5 +1,5 @@
 /**
- * What Settings → Connections' provider rows are drawn from — the props the universal `ProviderRows`
+ * What Settings → Connections' provider rows are drawn from — the props `ProviderRows`
  * (`packages/universal/src/components/settings/connections/ProviderRows.tsx`) takes. A type only.
  */
 import type {

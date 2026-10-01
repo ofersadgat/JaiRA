@@ -1,6 +1,6 @@
 import type { JSX, ReactNode } from "react";
 
-/** The keyframes, once per page: `/rn` carries no stylesheet of the desktop's. */
+/** The keyframes, once per page: the page carries no stylesheet to hold them. */
 let planted = false;
 function plant(): void {
   if (planted || typeof document === "undefined") return;
@@ -11,8 +11,8 @@ function plant(): void {
 }
 
 /**
- * `Turn.tsx` on web: a CSS animation (`.spinner`'s `spin 900ms linear infinite`), so a still picture's
- * `animation: none` holds it where the desktop's stops, and reduced motion stills it as `.spinner`'s does.
+ * `Turn.tsx` on web: a CSS animation (a turn every `ms`, linear, for ever), so a still picture's
+ * `animation: none` holds it, and reduced motion stills it (`.jaira-turn`'s media rule).
  */
 export function Turn({ ms = 900, children }: { ms?: number; children: ReactNode }): JSX.Element {
   plant();

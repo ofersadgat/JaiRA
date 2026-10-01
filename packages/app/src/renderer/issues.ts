@@ -83,15 +83,17 @@ export function formIssues(issues: readonly LintIssue[]): FormIssues {
 export const NO_ISSUES: FormIssues = formIssues([]);
 
 /**
- * The class the BOX holding a bad value wears.
+ * The mark the BOX holding a bad value wears, as a class name — the workflow form's boxes read it
+ * into their border (`markOf`, `packages/universal/src/components/workflow/controls.tsx`).
  *
- * A leading space, so it appends to an existing `className` without one more template literal at
- * every call site. The worst severity decides, which is why {@link formIssues} orders them.
+ * A leading space, so it appends to a class list without one more template literal; a caller that
+ * wants the bare word trims it. The worst severity decides, which is why {@link formIssues} orders
+ * them.
  *
  * The mark goes on the input, never on the row or the table around it. A container outline says "one
  * of these five boxes is wrong" and leaves the reader to work out which; it also collides with the
  * file tree, which has its own `has-error` for a file that does not lint. `issue-bad` is a red
- * border on the box itself — the same language `.unwired` and `.link-input.unresolved` already
+ * border on the box itself — the same language an unwired slot and a link that names nothing already
  * speak, one field further along.
  */
 export function classOf(list: readonly LintIssue[]): string {

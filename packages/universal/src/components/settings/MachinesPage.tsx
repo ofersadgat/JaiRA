@@ -35,20 +35,19 @@ import { SettingsRow, SettingsSection } from "./SettingsPage";
 import { Words } from "./Words";
 
 /**
- * Settings → Machines (`machinesPane.tsx`'s `MachinesPane`), universal (decision 0015): this machine's
- * name, tags and reach, pairing, the machines it is paired with, the phones and browsers that are
- * windows onto it, and copies of the machines' work. What every
- * row says, and the fleet it reads, are `machinesModel.ts`'s, as the DOM's are; its reads and writes go
- * through the same `invoke` calls. The rules it adds to the page's, from `styles.css`:
+ * Settings → Machines: this machine's name, tags and reach, pairing, the machines it is paired with,
+ * the phones and browsers that are windows onto it, and copies of the machines' work. What every row
+ * says, and the fleet it reads, are `machinesModel.ts`'s; its reads and writes are `invoke` calls.
+ * What it adds to the page's look:
  *
- *   .machine-tags        row, wraps, centred, gap 6; the OS a dashed `.chip` (app 10/12.5, --dim, 1px
- *                        --line, round, padding 0 6), each tag a `.chip` with its × (padding 0 0 0 4, --dim)
- *   .machine-tag-add     an 80-wide `.cfg-input`
- *   .pair-code-row       the row on --tint-accent; .pair-code the data face at 15/12.5, 0.08em, padding
+ *   a machine's tags     row, wraps, centred, gap 6; the OS a dashed chip (app 10/12.5, --dim, 1px
+ *                        --line, round, padding 0 6), each tag a chip with its × (padding 0 0 0 4, --dim)
+ *   the box adding one   a text box 80 wide
+ *   the pairing code     its row on --tint-accent; the code the data face at 15/12.5, 0.08em, padding
  *                        4 10, a dashed --line, radius --control-radius
- *   .machine-add         column, gap 10, 6 above; its foot a row, centred, gap 10
+ *   Add a machine        column, gap 10, 6 above; its foot a row, centred, gap 10
  *
- * The Add a machine form is the universal `SchemaForm`, keyed by the schema's own names as the DOM's is.
+ * The Add a machine form is a `SchemaForm`, keyed by the schema's own names.
  */
 export function MachinesPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -88,10 +87,10 @@ export function MachinesPage(): JSX.Element {
 }
 
 /**
- * A machine's chip as a row's name. In the DOM the chip is an inline box in the name's own line
- * (`.set-name`: the app voice at 550, 1.1× on 1.3), which it inherits its weight and line height from —
- * and it sits on that line's baseline by its dot's foot, not centred in it: 3.17 px under the line's top
- * at the default size, measured in Chromium. So the line is drawn, and the chip placed in it.
+ * A machine's chip as a row's name. It takes the name's weight and line (the app voice at 550, 1.1× on
+ * 1.3) and sits where an inline box does on that line — on its baseline by its dot's foot, not centred
+ * in it: 3.17 px under the line's top at the default size, measured in Chromium. So the line is drawn,
+ * and the chip placed in it.
  */
 function NameChip({ label, state }: { label: string; state: MachineChipState }): JSX.Element {
   const t = useTokens();
@@ -104,7 +103,7 @@ function NameChip({ label, state }: { label: string; state: MachineChipState }):
   );
 }
 
-/** An error as `.upd-err`, in a row's sentence. */
+/** An error in a row's sentence, in --bad (`Words`). */
 function ErrorWords({ error }: { error: string }): JSX.Element {
   return <Words parts={[{ error: sentence(error) }]} />;
 }
@@ -261,7 +260,7 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
   );
 }
 
-/** A phone or a browser paired with this machine (`DeviceRow`): what it is, whether it is there, and Forget. */
+/** A phone or a browser paired with this machine: what it is, whether it is there, and Forget. */
 function DeviceRow({ device, onView }: { device: DeviceView; onView: (v: MachinesView) => void }): JSX.Element {
   const t = useTokens();
   const [confirming, setConfirming] = useState(false);
@@ -328,7 +327,7 @@ function Outbox(): JSX.Element | null {
 
 /** Pairing with another machine: its address and code (the schema form), and Pair. */
 function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Element {
-  // The form's state and Pair are `machinesModel.ts`'s, as the DOM's are.
+  // The form's state and Pair are `machinesModel.ts`'s (`useAddMachine`).
   const { value, setValue, busy, error, done, ready, pair } = useAddMachine(onView);
   const body = { voice: "app", scale: 13 / 12.5 } as const;
   return (

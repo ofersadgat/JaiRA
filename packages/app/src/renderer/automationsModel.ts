@@ -2,7 +2,7 @@
  * Settings → Tools → Automations, as data (decision 0010 §4, the rulings of 2026-09-25): the lines of a
  * layer's events workflow (`workflows/system/events.json`) and the state each runs
  * (`workflows/system/events/<name>.json`), read out of the files and written back into them. Pure —
- * the section (`automationsPane.tsx`) draws what this says and the tests read it without a DOM.
+ * the section (`AutomationsSection.tsx`) draws what this says and the tests read it without a DOM.
  *
  * ## The files' shape
  *
@@ -811,8 +811,7 @@ export const LINE_DRAG = "application/x-jaira-automation";
 
 /**
  * A line dropped on the row at `to`: the lines reordered, or `undefined` for a drop that moves nothing.
- * `from` is what the drag carried, as it came off the transfer — the pane's and its universal copy's
- * drop both read it here.
+ * `from` is what the drag carried, as it came off the transfer.
  */
 export function lineDropOf<T>(list: readonly T[], from: string, to: number): T[] | undefined {
   const at = Number(from);

@@ -1,5 +1,5 @@
 /**
- * What a card in the air means (`boardDrag.ts`), shared by the desktop's board and its universal copy:
+ * What a card in the air means (`boardDrag.ts`), for a pointer's drag and a phone's long press alike:
  * which cards lift, which columns a connect asks about, and what a drop on a column does.
  */
 import { describe, expect, it, vi } from "vitest";

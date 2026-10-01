@@ -13,31 +13,31 @@ import { InlineGlyph } from "./InlineGlyph";
 import { Button } from "../settings/Button";
 
 /**
- * `choices.tsx`'s `ChoiceList` and `ChoiceSteps`, universal (decision 0015): the ONE control behind an
- * authored gate (`choose_option`) and an agent's question — its options, the own-answer block said in
- * words (`instead`), the comment beside a decision (`alongside`), several at once, and several questions
- * one at a time. What an answer IS (`answerOf`, `submitsOnClick`, `settled`, `readAnswer`) is
- * `choices.tsx`'s and `@jaira/shared`'s, shared with the desktop. The rules, from `styles.css`:
+ * `ChoiceList` and `ChoiceSteps`: the ONE control behind an authored gate (`choose_option`) and an
+ * agent's question — its options, the own-answer block said in words (`instead`), the comment beside a
+ * decision (`alongside`), several at once, and several questions one at a time. What an answer IS
+ * (`answerOf`, `submitsOnClick`, `settled`, `readAnswer`) is `choicesModel.ts`'s and `@jaira/shared`'s.
+ * How it looks:
  *
- *   .question-block          14 above (it collapses with the heading's 8, or the step line's 6)
- *   .question-text           the body's 13/12.5, --text, 8 below; a header `.chip` 6 before the words
- *   .question-desc           app 12/12.5, line 1.5, --dim, ≤ 80ch; −4 above (so 4 under the question),
+ *   a question's block       14 above (it collapses with the heading's 8, or the step line's 6)
+ *   the question             the body's 13/12.5, --text, 8 below; a header chip 6 before the words
+ *   its description          app 12/12.5, line 1.5, --dim, ≤ 80ch; −4 above (so 4 under the question),
  *                            8 below
- *   .question-options        12 above; a wrapping row, gap 8, while no option explains itself, else a
+ *   the options              12 above; a wrapping row, gap 8, while no option explains itself, else a
  *                            column of cards, gap 8
- *   .question-option         padding 8 12, --bg, 1px --line, radius 8; the label the body's 13/12.5 in
+ *   an option                padding 8 12, --bg, 1px --line, radius 8; the label the body's 13/12.5 in
  *                            --text; hovered and selected an --accent edge, selected an inset --accent ring
- *   .question-option.primary --fill-accent ground and edge, --sheen; its label --on-accent at 600;
+ *   the affirmative          --fill-accent ground and edge, --sheen; its label --on-accent at 600;
  *                            hovered --fill-accent-hover
- *   .question-option.danger  the label --bad, the edge --bad 45% into --line, no ground (`button.danger`)
- *   .question-option-desc    `small`: the body's size ÷ 1.2, --dim, 2 under the label
- *   .checkable               the label (and its description) beside a box: 16 square, 1px --rule, radius 3;
+ *   a dangerous one          the label --bad, the edge --bad 45% into --line, no ground
+ *   an option's description  the body's size ÷ 1.2, --dim, 2 under the label
+ *   one of several to tick   the label (and its description) beside a box: 16 square, 1px --rule, radius 3;
  *                            on, --fill-accent with an 11 tick in --on-accent
- *   .question-option.own     the whole row wide; the label, then a textarea of the option's own face, 4
+ *   an answer of one's own   the whole row wide; the label, then a textarea of the option's own face, 4
  *                            above, padding 2 0, no edge, as tall as its words
- *   .field                   12 above, column, gap 4; its `small` label --dim; `textarea` (the global
- *                            rule): data 12/12, --bg, 1px --line, radius --control-radius, padding 5 9
- *   .question-step           --dim, 6 below;  .options  row, wrapping, gap 8, 14 above
+ *   the comment's field      12 above, column, gap 4; its label (the body's size ÷ 1.2) --dim; its
+ *                            textarea: data 12/12, --bg, 1px --line, radius --control-radius, padding 5 9
+ *   the step line            --dim, 6 below;  the buttons  row, wrapping, gap 8, 14 above
  */
 export function ChoiceList({
   choices,
@@ -66,7 +66,7 @@ export function ChoiceList({
    * context of its own, so the options' 12 stays inside it rather than collapsing into its 14.
    */
   flat?: boolean;
-  /** The first block's margin above: 14, or a transcript's asked question's 6 (`.ts-asked .question-block`). */
+  /** The first block's margin above: 14, or a transcript's asked question's 6. */
   top?: number;
 }): JSX.Element {
   const t = useTokens();
@@ -99,7 +99,7 @@ export function ChoiceList({
           <View key={choice.question} flexDirection="column" marginTop={index === 0 ? top : 14}>
             {heading ? (
               <Txt spec={BODY} marginBottom={8}>
-                {/* The DOM's " " after the chip collapses at the line's start without one (a copy's text keeps it). */}
+                {/* The " " after the chip is written only with one: a `Text` keeps a space at the line's start. */}
                 {choice.header !== undefined ? (
                   <>
                     <ChipInline>{choice.header}</ChipInline>{" "}
@@ -127,8 +127,8 @@ export function ChoiceList({
                   label={option.label ?? option.value}
                   {...(option.icon !== undefined && option.icon in PATHS ? { icon: option.icon as keyof typeof PATHS } : {})}
                   {...(option.description !== undefined ? { description: option.description } : {})}
-                  // Read-only is a record (`.gate-settled`): only the chosen option keeps its emphasis —
-                  // `.gate-settled .question-option.primary:not(.selected)` draws an unchosen affirmative plain.
+                  // Read-only is a record: only the chosen option keeps its emphasis — an unchosen
+                  // affirmative is drawn plain.
                   primary={i === 0 && option.tone !== "danger" && bare && !(readOnly && !lit(option.value))}
                   danger={option.tone === "danger"}
                   selected={lit(option.value)}
@@ -150,16 +150,16 @@ export function ChoiceList({
 const BODY: FontSpec = { voice: "app", scale: 13 / 12.5 };
 
 /**
- * Whether a field stands in a gate's frame — a `.modal` or an `.inline-gate` (`.modal .field`: 12 above,
- * its `small` --dim) — or bare, as in a state's panel, where the global `.field` has neither.
+ * Whether a field stands in a gate's frame — a dialog or an inline gate (12 above, its label --dim) —
+ * or bare, as in a state's panel, where it has neither.
  */
 export const FieldFrame = createContext(true);
 
-/** `.chip` inside a line of the body's text. */
+/** A chip inside a line of the body's text. */
 function ChipInline({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
-  // On web an inline box in the line, as the DOM's `span.chip` is: its edge round the words' own height,
-  // on their baseline. A phone's `Text` draws no edge on a run of words, so there it is the chip's box.
+  // On web an inline box in the line: its edge round the words' own height, on their baseline. A
+  // phone's `Text` draws no edge on a run of words, so there it is the chip's box.
   if (isWeb) {
     return (
       <Txt
@@ -183,7 +183,7 @@ function ChipInline({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** One `.question-option`: an option to pick, or (with `checkable`) one of several to tick. */
+/** One option to pick, or (with `checkable`) one of several to tick. */
 export function OptionButton({
   label,
   icon,
@@ -243,9 +243,8 @@ export function OptionButton({
         const hover = hovered && !disabled;
         return {
           backgroundColor: primary ? (hover ? t.v("fill-accent-hover") : t.v("fill-accent")) : danger ? "transparent" : t.v("bg"),
-          // `.question-option.selected` comes after `.primary` and ties it, so a chosen affirmative takes the
-          // accent edge and ring rather than its fill's (only `.primary:hover` outranks it) — but a record's
-          // keeps its sheen (`.gate-settled button.primary:disabled`).
+          // A chosen affirmative takes the accent edge and ring rather than its fill's (only its hovered
+          // edge outranks that) — but a record's keeps its sheen.
           borderColor: primary ? (hover ? t.v("fill-accent-hover") : selected ? accentOr : t.v("fill-accent")) : hover || selected ? accentOr : danger ? t.mix(t.v("bad"), 45, t.v("line")) : t.v("line"),
           ...(primary && (disabled || !selected) ? { boxShadow: t.v("sheen") } : selected ? { boxShadow: `inset 0 0 0 1px ${String(accentOr)}` } : {}),
         };
@@ -276,12 +275,12 @@ export function OptionButton({
   );
 }
 
-/** The box's tick: `check` at 11, stroked at 3 (`.question-box svg`). */
+/** The box's tick: `check` at 11, stroked at 3. */
 function CheckTick({ color }: { color: string }): JSX.Element {
   return <Svg width={11} height={11} color={color} strokeWidth={3} shapes={PATHS.check.map((d) => ({ kind: "path" as const, d }))} />;
 }
 
-/** The global `textarea`: data 12/12 on the body's 1.5, --bg, 1px --line (--rule hovered), radius --control-radius, padding 5 9. */
+/** A textarea: data 12/12 on the body's 1.5, --bg, 1px --line (--rule hovered), radius --control-radius, padding 5 9. */
 function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, onFocus }: { value: string; onChange: (text: string) => void; rows: number; placeholder: string; readOnly: boolean; own?: boolean; onFocus?: () => void }): JSX.Element {
   const t = useTokens();
   const [hovered, setHovered] = useState(false);
@@ -297,7 +296,7 @@ function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, o
       placeholderTextColor={placeholderColor("light")}
       editable={!readOnly}
       // A record is not a box to type in: out of the tab order (`tabIndex -1`), and no text cursor
-      // over it (`.gate-settled textarea[readonly]`).
+      // over it.
       focusable={!readOnly}
       {...(onFocus !== undefined ? { onFocus } : {})}
       {...({ onMouseEnter: () => setHovered(true), onMouseLeave: () => setHovered(false), rows, spellCheck: undefined } as object)}
@@ -325,7 +324,7 @@ function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, o
   );
 }
 
-/** The `alongside` free text: a comment, drawn before or after the decision (`label.field`). */
+/** The `alongside` free text: a comment, drawn before or after the decision. */
 function FreeText({ choice, answer, onAnswer, readOnly }: { choice: Choice; answer: Answer; onAnswer: (question: string, answer: Answer) => void; readOnly: boolean }): JSX.Element | null {
   const framed = useContext(FieldFrame);
   const field = choice.freeText;
@@ -402,7 +401,7 @@ export function ChoiceSteps({
   onSubmit: () => void;
   extra?: JSX.Element | undefined;
   readOnly?: boolean;
-  /** Under a transcript's row (`.ts-asked`): the block 6 above, Back and Next 8, a size down from a gate's. */
+  /** Under a transcript's row: the block 6 above, Back and Next 8, a size down from a gate's. */
   asked?: boolean;
 }): JSX.Element {
   const [step, setStep] = useState(0);

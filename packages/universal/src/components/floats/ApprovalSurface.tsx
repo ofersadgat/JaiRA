@@ -26,37 +26,38 @@ import { AnswerMenuCard } from "./AnswerMenu";
 import { GateTitle } from "./GateTitle";
 
 /**
- * `approvalSurface.tsx`'s `ApprovalSurface`, universal (decision 0015): a command awaiting approval, as
- * the requests its line is made of — the line in its parts' colours, a row per part, why it asks, and
- * one Allow and one Deny, each a split button whose caret asks what the answer covers and how far it
- * reaches (`AnswerMenu.tsx`). What it draws is `approvalModel.ts`'s, shared with the desktop's. The
- * rules, from `styles.css`:
+ * A command awaiting approval, as the requests its line is made of — the line in its parts' colours, a
+ * row per part, why it asks, and one Allow and one Deny, each a split button whose caret asks what the
+ * answer covers and how far it reaches (`AnswerMenu.tsx`). What it draws is `approvalModel.ts`'s. How it
+ * looks:
  *
- *   .approval-surface > h3   the dialog heading (`GateTitle`): app 17/12.5 700, line 1.35, the shield 16
+ *   the heading              the dialog heading (`GateTitle`): app 17/12.5 700, line 1.35, the shield 16
  *                            --dim; 8 below
- *   .sub                     app 11/12.5, --dim; the tool's title, " · asked by " and `FunctionBy`
- *   .approval-surface .mono  data 11.5/12
- *   pre.artifact.shell-line  --bg, 1px --line, radius 8, padding 10, 12 above (its UA 1em below
- *                            collapses with what follows), data 12/12, pre-wrap, at most 320 tall
- *   .shell-line .part-c      the part's hue at 13% (26% hot), radius 4, padding 1 3, cloned per line;
- *                            .part-m 600 with a 2px inset underline of the hue at 75%; .op --tok-hint
- *   .approval-parts          column, gap 2, 8 above; app 11.5/12.5
- *   .approval-parts .part    a row on the baseline, gap 8, padding 4 8, radius --control-radius-sm, 17 in
+ *   the line under it        app 11/12.5, --dim; the tool's title, " · asked by " and `FunctionBy`
+ *   data among the words     data 11.5/12
+ *   the command's box        --bg, 1px --line, radius 8, padding 10, 12 above (its 1em below collapses
+ *                            with what follows), data 12/12, pre-wrap, at most 320 tall
+ *   a part in the line       the part's hue at 13% (26% hot), radius 4, padding 1 3, cloned per line;
+ *                            matched words 600 with a 2px inset underline of the hue at 75%; what joins
+ *                            the parts --tok-hint
+ *   the parts                column, gap 2, 8 above; app 11.5/12.5
+ *   a part's row             a row on the baseline, gap 8, padding 4 8, radius --control-radius-sm, 17 in
  *                            per depth: swatch (9, radius 3, centred) | the part's text (data 11/12, one
  *                            line, 1.2fr) | → (--tok-hint) | the subject (data 600, one line) over its note
  *                            (app 10.5/12.5, --tok-hint), 1fr | the verdict pill (app 10.5/12.5 600 on a
  *                            line of 1.6, padding 0 7, --panel-2, --dim); hot: the hue at 9%; asks
- *                            (later, so it wins): --tint-warn, the pill --warn on --warn 18% into --panel;
- *                            denied: the pill --bad on --tint-bad
- *   .reason-note             app 12/12.5, --warn, 10 above (3 between two)
- *   .options                 row, wrapping, gap 8, 14 above; `Split`s; .reason (--bad, app 11/12.5)
+ *                            (which wins over hot): --tint-warn, the pill --warn on --warn 18% into
+ *                            --panel; denied: the pill --bad on --tint-bad
+ *   a reason                 app 12/12.5, --warn, 10 above (3 between two)
+ *   the answers              row, wrapping, gap 8, 14 above; `Split`s; the error under them (--bad, app
+ *                            11/12.5)
  */
 export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading = true }: ApprovalSurfaceProps & {
-  /** Its heading; not under a work summary's row (`.ws-ask .approval-surface h3`), which says it already. */
+  /** Its heading; not under a work summary's row, which says it already. */
   heading?: boolean;
 }): JSX.Element {
   const t = useTokens();
-  // One of the two menus open at a time, anchored to its own split button (`usePopover` in the DOM).
+  // One of the two menus open at a time, anchored to its own split button.
   const [open, setOpen] = useState<{ which: "allow" | "deny"; at: ReturnType<typeof anchorRectOf> } | null>(initialMenu !== undefined ? { which: initialMenu, at: null } : null);
   const [chosen, setChosen] = useState<ChosenWidths>({});
   /** The part under the pointer, lit on the line and in its row. */
@@ -109,7 +110,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
               ),
             )}
           </Artifact>
-          {/* The pre's 1em below collapses with the list's 8 above. */}
+          {/* The command box's 1em below collapses with the list's 8 above. */}
           <View testID="approval-parts" flexDirection="column" gap={2} marginTop={Math.max(em, 8)}>
             {rows.map((row) => {
               const hue = colorOf(t, row.hue);
@@ -125,7 +126,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
       )}
 
       {reasons.map((line, at) => (
-        // 10 above the first — or the pre's 1em, which collapses with it — and 3 between two.
+        // 10 above the first — or the command box's 1em, which collapses with it — and 3 between two.
         <Reason key={at} line={line} marginTop={at > 0 ? 3 : drawn ? 10 : Math.max(em, 10)} />
       ))}
 
@@ -138,7 +139,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
             caret={pending.asker === undefined}
             open={open?.which === decision}
             onMain={() => decide(decision, "once")}
-            // Placed against the whole split, as the desktop's `pop.anchor` is (the caret's parent on web).
+            // Placed against the whole split (the caret's parent on web).
             onCaret={(from) => setOpen(open?.which === decision ? null : { which: decision, at: anchorRectOf((from as { parentElement?: unknown } | undefined)?.parentElement) })}
           />
         ))}
@@ -165,7 +166,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
 const SUB = { voice: "app", scale: 11 / 12.5, color: "dim" } as const;
 
 /**
- * One `.approval-parts .part`: row 1 on the baseline — swatch, the part's text (1.2fr), →, the subject
+ * One part's row: row 1 on the baseline — swatch, the part's text (1.2fr), →, the subject
  * (1fr), the verdict — and the note in row 2 under the subject, in its column: where the subject was laid
  * out in row 1 is measured, and the note is placed there at its width.
  */
@@ -185,8 +186,9 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
         ? { x: b.getBoundingClientRect().left - a.getBoundingClientRect().left, width: b.getBoundingClientRect().width }
         : { x: e.nativeEvent.layout.x, width: e.nativeEvent.layout.width };
     setColumn((was) => (was !== null && Math.abs(was.x - next.x) < 0.01 && Math.abs(was.width - next.width) < 0.01 ? was : next));
-    // What the row's grid asks of a box sized to its content (a dialog, a stage's card): each fr column
-    // as wide as the widest of its words per fr, the others as they are (web; a phone's rows fill).
+    // What the row asks of a box sized to its content (a dialog, a stage's card), as a grid of its
+    // columns would: each fr column as wide as the widest of its words per fr, the others as they are
+    // (web; a phone's rows fill).
     const text = words.current;
     if (!isWeb || a === null || b === null || text === null || typeof document === "undefined") return;
     const full = (el: HTMLElement): number => {
@@ -238,7 +240,7 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
   );
 }
 
-/** `pre.artifact`: the line (or the command, or the input) in the data face. */
+/** The command's box: the line (or the command, or the input) in the data face. */
 function Artifact({ t, testID, children }: { t: Tokens; testID: string; children: ReactNode }): JSX.Element {
   return (
     <View
@@ -258,7 +260,7 @@ function Artifact({ t, testID, children }: { t: Tokens; testID: string; children
   );
 }
 
-/** A part's words, the ones its permission-set line matched underlined in its hue (`.part-m`). */
+/** A part's words, the ones its permission-set line matched underlined in its hue. */
 function Pieces({ t, pieces, hue }: { t: Tokens; pieces: readonly Piece[]; hue: string }): JSX.Element {
   return (
     <>
@@ -295,9 +297,9 @@ function Verdict({ t, verdict, by }: { t: Tokens; verdict: PartRow["verdict"]; b
 }
 
 /**
- * `FunctionBy`: which function decided — a star and its name. In the `.sub` line it is inline (the star
- * 1em of the line's 11, a space, the name in the data face); in a verdict pill `.part-by`, a row, gap 3,
- * 6 before the verdict, at 500.
+ * Which function decided — a star and its name. In the line under the heading it is inline (the star
+ * 1em of the line's 11, a space, the name in the data face); in a verdict pill, a row, gap 3, 6 before
+ * the verdict, at 500.
  */
 export function FunctionBy({ name, inVerdict = false, spec }: { name: string; inVerdict?: boolean; spec?: { voice: "app"; scale: number; weight: number; lineHeight: number; color: string } }): JSX.Element {
   const t = useTokens();
@@ -355,9 +357,9 @@ function Reason({ line, marginTop }: { line: ReasonLine; marginTop: number }): J
 }
 
 /**
- * `.split.primary` / `.split.danger`: the answer, and the caret that opens its menu — `button.primary`
- * (or `button.danger`) square on the inside; the caret 7 either side, 1 over the main button, its chevron
- * 12, and under primary a 1px edge of white at 35% on its left.
+ * A split button: the answer, and the caret that opens its menu — a `primary` (or `danger`) `Button`
+ * square on the inside; the caret 7 either side, 1 over the main button, its chevron 12, and under
+ * primary a 1px edge of white at 35% on its left.
  */
 function Split({ decision, caret, open, onMain, onCaret }: { decision: "allow" | "deny"; caret: boolean; open: boolean; onMain: () => void; onCaret: (from: unknown) => void }): JSX.Element {
   const t = useTokens();
@@ -367,7 +369,7 @@ function Split({ decision, caret, open, onMain, onCaret }: { decision: "allow" |
   const ink = String(primary ? t.v("on-accent") : t.v("bad"));
   return (
     <View flexDirection="row" position="relative">
-      {/* `.split .split-main` is square on the right with or without a caret beside it. */}
+      {/* The answer is square on the right with or without a caret beside it. */}
       <Button kind={kind} onPress={onMain} testID={`approval-${decision}`} borderTopRightRadius={0} borderBottomRightRadius={0}>
         {verb}
       </Button>
@@ -395,7 +397,7 @@ function CaretButton({ kind, verb, ink, open, testID, onPress }: { kind: "primar
       justifyContent="center"
       paddingVertical={padV}
       paddingHorizontal={7}
-      // As tall as the answer beside it: the split's row stretches it, as `.split`'s inline-flex does.
+      // As tall as the answer beside it: the split's row stretches it.
       alignSelf="stretch"
       borderWidth={1}
       borderStyle="solid"

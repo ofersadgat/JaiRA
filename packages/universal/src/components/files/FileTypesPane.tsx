@@ -15,49 +15,49 @@ import { HideEditorActions } from "./EditorActions";
 import { SURFACES } from "./surfaces";
 
 /**
- * `fileTypesPane.tsx`'s `FileTypesPane`, universal (decision 0015): the Appearance page's File types
- * workspace — the tree of families and types, the stage with its mode strip, the menu being arranged,
- * the palette, the knobs of the surface chosen, and the preview, which is the REAL surface (the
- * universal one: a Monaco island for code) drawn over a sample. Every answer is `fileTypesModel.ts`'s,
- * asked of the universal registry (`SURFACES`), whose ids and labels are the desktop's. The rules, from
- * `styles.css` (`cascade.mts '.ft' --scene settings-appearance-file-types`):
+ * The Appearance page's File types workspace — the tree of families and types, the stage with its
+ * mode strip, the menu being arranged, the palette, the knobs of the surface chosen, and the preview,
+ * which is the REAL surface (a Monaco island for code) drawn over a sample. Every answer is
+ * `fileTypesModel.ts`'s, asked of the registry of surfaces (`SURFACES`). How it looks:
  *
- *   .ft               two tracks: the tree (178) and the stage; 1px --line, radius --card-radius,
+ *   the workspace     two tracks: the tree (178) and the stage; 1px --line, radius --card-radius,
  *                     clipped, at least 320 tall
- *   .ft-tree          --panel-2, 5 in, a --line on its right; groups 1 apart
- *   .ft-row           row, centred, gap 7, padding 4 8, radius --control-radius-sm; hovered
- *                     --fill-ghost-hover, selected --fill-ghost-selected at 500; a family's 500, a
- *                     type's 400 (even selected: `.ft-kids .ft-row` is later) and 3 8
- *   .ft-kids          column, gap 1, 8 in from a --rule on its left, 2 0 5 12 outside
- *   .ft-caret         9 wide, --dim.  .ft-count data-faint, at the end.  .ft-dot 5 round --accent
- *   .ft-stage         column, --panel
- *   .ft-head          row, baseline, gap 8, padding 9 12, a --line under: app-title, app-secondary
- *   .ft-modes         three equal tracks, --panel-2, a --line under
- *   .ft-mode          column, gap 1, padding 6 10 5, a --line right (not the last), 2 transparent
+ *   the tree          --panel-2, 5 in, a --line on its right; groups 1 apart
+ *   a tree row        row, centred, gap 7, padding 4 8, radius --control-radius-sm; hovered
+ *                     --fill-ghost-hover, selected --fill-ghost-selected; a family's 500, a type's
+ *                     400 (even selected) and 3 8
+ *   a family's types  column, gap 1, 8 in from a --rule on its left, 2 0 5 12 outside
+ *   in a row          the caret 9 wide, --dim.  The count data-faint, at the end.  The "set" dot 5
+ *                     round --accent
+ *   the stage         column, --panel
+ *   its head          row, baseline, gap 8, padding 9 12, a --line under: app-title, app-secondary
+ *   the mode strip    three equal tracks, --panel-2, a --line under
+ *   a mode            column, gap 1, padding 6 10 5, a --line right (not the last), 2 transparent
  *                     under; hovered --fill-ghost-hover; chosen --panel and --accent under; disabled
  *                     0.55. Its bulb 6 round --ok (off: --rule), app-label; its reading data 0.92
  *                     --dim (chosen --text), italic where the types disagree
- *   .ft-body          column, gap 9, padding 11 12 13
- *   .ft-arranging     row, centred, gap 9: app-label and `.ft-seg` (--panel-3, radius
+ *   the body          column, gap 9, padding 11 12 13
+ *   "arranging"       row, centred, gap 9: app-label and the two-way switch (--panel-3, radius
  *                     --control-radius, 2 in, gap 2; its buttons app 0.88 --dim, padding 1 8, radius
  *                     --control-radius-sm; pressed --panel, --text, 500)
- *   .ft-menu          1px --rule, radius --control-radius, --panel, --lift, clipped, at most 520
- *   .ft-menu-head     row, baseline, gap 8, padding 5 11, --panel-2, a --line under
- *   .ft-mm-row        leading --fill-ghost-selected, partly leading --accent 6%; hovered
+ *   the menu          1px --rule, radius --control-radius, --panel, --lift, clipped, at most 520
+ *   its head          row, baseline, gap 8, padding 5 11, --panel-2, a --line under
+ *   a menu row        leading --fill-ghost-selected, partly leading --accent 6%; hovered
  *                     --fill-ghost-hover. Its pick: row, centred, gap 9, padding 5 4 5 11; tick 13
  *                     wide, --accent, app 0.9; name a column (dimmed rows at 0.45); ✕ padding 0 11,
  *                     --dim (hovered --text), app 0.9
- *   .ft-mm-sep        1 --line, 3 above.  .ft-mm-foot app-label, padding 5 11 2
- *   .ft-theme         row, centred, gap 10, wrapping, padding 8 10, 1px --line, radius
- *                     --control-radius, --panel-2; the select at most 220; swatches 12 square, radius
- *                     3, 1px --line, 3 apart
- *   .ft-knobs         column, gap 2, padding 7 10 8, 1px --line, radius --control-radius; its head a
- *                     row, baseline, gap 9, 5 under a --line, 3 below it; `.ap-toggle` rows (row,
+ *   "not offered"     a 1 --line rule, 3 above; then the words, app-label, padding 5 11 2
+ *   the theme row     row, centred, gap 10, wrapping, padding 8 10, 1px --line, radius
+ *                     --control-radius, --panel-2; the select 220; swatches 12 square, radius 3, 1px
+ *                     --line, 3 apart
+ *   the knobs         column, gap 2, padding 7 10 8, 1px --line, radius --control-radius; its head a
+ *                     row, baseline, gap 9, 5 under a --line, 3 below it; then toggle rows (row,
  *                     centred, gap 10, at least 26 tall, at most 560)
- *   .ft-preview       1px --line, radius --control-radius, clipped; its bar row, baseline, gap 8,
- *                     padding 4 9, --panel-2, a --line under; `.ft-tag` data 0.85 --dim on --panel-3,
- *                     round, padding 0 8; its body 190 tall, the surface filling it, no Save row
- *   .ft-preview-note  padding 22 14, centred, line 1.6, app-secondary
+ *   the preview       1px --line, radius --control-radius, clipped; its bar row, baseline, gap 8,
+ *                     padding 4 9, --panel-2, a --line under; the view's tag data 0.85 --dim on
+ *                     --panel-3, round, padding 0 8; its body 190 tall, the surface filling it, no
+ *                     Save row
+ *   a preview note    padding 22 14, centred, line 1.6, app-secondary
  */
 
 const MODEL = fileTypesModel(SURFACES);
@@ -88,8 +88,8 @@ export function FileTypesPane({
   const list = offeredFor(at, kind);
   const subjectMime = subjectMimeOf(at, kind, view, renderers);
   const named = at.mime === null ? null : typeNameOf(at.mime);
-  // The palette in front, as the desktop's pane claims it (`editorFront.ts`) — for the web page's own
-  // Monaco; an island's is its own.
+  // The palette in front, claimed for the pane's subject (`editorFront.ts`) — for the web page's own
+  // Monaco; a phone's island page has its own.
   useEffect(() => {
     takeEditorFront({ mime: subjectMime, view, palette: { mime: subjectMime, kind, view } });
   }, [subjectMime, kind, view, renderers]);
@@ -106,7 +106,7 @@ export function FileTypesPane({
         {PANE_FAMILIES.map((each, i) => {
           const isOpen = open === each.id;
           return (
-            // `.ft-group + .ft-group`'s 1 collapses into the 5 under an open group's kids (blocks, in the DOM).
+            // Groups are 1 apart, but not under an open one: its types' 5 below is the whole gap.
             <View key={each.id} {...(i > 0 && open !== PANE_FAMILIES[i - 1]!.id ? { marginTop: 1 } : {})}>
               <TreeRow
                 label={each.label}
@@ -181,8 +181,7 @@ export function FileTypesPane({
                 flexBasis={0}
                 minWidth={0}
                 flexDirection="column"
-                // A `button`, and the base rule centres a button's content: `.ft-mode` turns it into a column
-                // and leaves `align-items: center` standing, so the bulb's row and the reading sit mid-tab.
+                // A column whose content is centred: the bulb's row and the reading sit mid-tab.
                 alignItems="center"
                 gap={1}
                 paddingTop={6}
@@ -190,7 +189,7 @@ export function FileTypesPane({
                 paddingBottom={5}
                 {...(!has ? { opacity: 0.55 } : {})}
                 box={({ hovered }) => ({
-                  // The base `button`'s radius, which `.ft-mode` leaves standing: the accent under the chosen tab turns up at its ends.
+                  // A button's radius, on a tab too: the accent under the chosen one turns up at its ends.
                   borderRadius: lengthToken(t, "control-radius", 7),
                   ...edge(t, { right: i < RENDER_KINDS.length - 1 ? 1 : 0 }),
                   borderBottomWidth: 2,
@@ -242,7 +241,7 @@ export function FileTypesPane({
               {palette !== null ? (
                 <View flexDirection="row" alignItems="center" gap={10} flexWrap="wrap" minWidth={0} paddingVertical={8} paddingHorizontal={10} borderRadius={lengthToken(t, "control-radius", 7)} backgroundColor={t.v("panel-2") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
                   <Txt register="app-label">theme</Txt>
-                  {/* `.cfg-input`'s `width: 100%`, which `.ft-theme > select`'s `max-width: 220px` stops at: 220, whatever its options. */}
+                  {/* The select fills a box of 220, whatever its options. */}
                   <View flexShrink={0} width={220}>
                     <SelectInput
                       fill
@@ -322,7 +321,7 @@ function TreeRow({ label, selected, title, lead, trail, group = false, onPress }
       box={({ hovered }) => ({ backgroundColor: selected ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent" })}
     >
       {lead}
-      {/* A family's row is 500; a type's stays 400 even chosen (`.ft-kids .ft-row` comes later). */}
+      {/* A family's row is 500; a type's stays 400 even chosen. */}
       <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: group ? 500 : 400 }} ellip flexShrink={1}>
         {label}
       </Txt>
@@ -420,7 +419,7 @@ function Menu({
   );
 }
 
-/** `.ft-mm-row`: the pick (tick and name) and the ✕ beside it, sharing one hover. */
+/** One row of the menu: the pick (tick and name) and the ✕ beside it, sharing one hover. */
 function MenuRow({
   tone,
   dim,
@@ -475,7 +474,7 @@ function MenuRow({
         </View>
       </Press>
       <Press onPress={onX} disabled={busy} title={xTitle} flexShrink={0} paddingHorizontal={11} justifyContent="center">
-        {/* `font: inherit`, then `font-size: calc(var(--size-app) * 0.9)`: 0.9 of the base, not of the body's 13. */}
+        {/* 0.9 of the base size (--size-app), not of the body's 13. */}
         {({ hovered: over }) => <Txt spec={{ voice: "app", scale: 0.9, color: over && !busy ? "text" : "dim" }}>{x}</Txt>}
       </Press>
     </View>
@@ -496,7 +495,7 @@ function Swatches({ theme }: { theme: string | null }): JSX.Element | null {
   );
 }
 
-/** `editorKnobs.tsx`'s `EditorLookFields`: the knobs the surface can answer, as `.ap-toggle` rows. */
+/** The knobs the surface can answer (`editorKnobApplies`), as toggle rows. */
 function EditorLookFields({ kind, look, busy, onChange }: { kind: EditorKind; look: EditorLook; busy: boolean; onChange: (patch: Partial<EditorLook>) => void }): JSX.Element {
   return (
     <>
@@ -538,7 +537,7 @@ function EditorLookFields({ kind, look, busy, onChange }: { kind: EditorKind; lo
   );
 }
 
-/** `.ap-toggle`: the control, its name, and what it is worth at the right-hand end. */
+/** A toggle row: the control, its name, and what it is worth at the right-hand end. */
 function ToggleRow({ lead, label, children }: { lead: ReactNode; label: string; children: ReactNode }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={10} minHeight={26} maxWidth={560}>
@@ -553,7 +552,7 @@ function ToggleRow({ lead, label, children }: { lead: ReactNode; label: string; 
   );
 }
 
-/** `.ft-preview-note`. */
+/** What the preview says when there is no surface to draw. */
 function PreviewNote({ children }: { children: ReactNode }): JSX.Element {
   return (
     <Txt register="app-secondary" spec={{ lineHeight: 1.6 }} paddingVertical={22} paddingHorizontal={14} textAlign="center">
@@ -562,7 +561,7 @@ function PreviewNote({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** A surface that threw, said rather than crashed — the desktop's `PreviewBoundary`. */
+/** A surface that threw, said rather than crashed. */
 class PreviewBoundary extends Component<{ children: ReactNode; label: string }, { failed: boolean }> {
   constructor(props: { children: ReactNode; label: string }) {
     super(props);
@@ -579,8 +578,8 @@ class PreviewBoundary extends Component<{ children: ReactNode; label: string }, 
 }
 
 /**
- * The chosen renderer, drawing the chosen type — the REAL surface (the universal one) against the inert
- * context, over the type's sample, 190 tall with no Save row. The text is local and thrown away.
+ * The chosen renderer, drawing the chosen type — the REAL surface against the inert context, over the
+ * type's sample, 190 tall with no Save row. The text is local and thrown away.
  */
 function RendererPreview({ mime, renderer, view }: { mime: string; renderer: FileRenderer | null; view: RenderView }): JSX.Element {
   const t = useTokens();
@@ -596,8 +595,8 @@ function RendererPreview({ mime, renderer, view }: { mime: string; renderer: Fil
   const Surface = renderer.surface;
   const doc: FileSource = { layer: "project", path: "sample", file: "sample", mime, text, exists: true };
   return (
-    // `.ft-preview-body` scrolls (`overflow: auto`): an editor is at least 200 tall, ten more than this box,
-    // so the desktop's has a scrollbar down its side and the surface is that much narrower. A phone clips.
+    // The body scrolls on web (`overflow: auto`): an editor is at least 200 tall, ten more than this box,
+    // so it has a scrollbar down its side and the surface is that much narrower. A phone clips.
     <View height={190} flexDirection="column" {...((isWeb ? { overflow: "auto", ...viewScrollbarProps(t) } : { overflow: "hidden" }) as object)}>
       <PreviewBoundary label={renderer.label}>
         <HideEditorActions>

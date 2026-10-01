@@ -5,22 +5,22 @@ import { Txt, faceOf, type FontSpec } from "../primitives";
 import { useTokens, type Tokens } from "../tokens";
 
 /**
- * `board.tsx`'s `ConnectPop`, universal (decision 0015): the DROP PREVIEW — what a drop on the column
- * under the pointer will do, drawn in that column under its cards while a card is over it. What it says
- * is `connectDrag.ts`'s `previewOf`; this only draws it. The rules, with the contests settled:
+ * The DROP PREVIEW of a board drag — what a drop on the column under the pointer will do, drawn in that
+ * column under its cards while a card is over it. What it says is `connectDrag.ts`'s `previewOf`; this
+ * only draws it. How it looks:
  *
- *   .connect-pop                 a grid, gap 8, padding 12, --panel, 1px --line, radius 10, --lift,
- *                                `--size-app`; never a target (`pointer-events: none`)
- *   .connect-pop-inline          width auto (the column's), 8 above
- *   .connect-kind                data 600 at `--size-app` × 10.5/12.5 on 1.3, .04em, upper, --dim
- *   .connect-say                 the app voice at `--size-app` on 1.45, wrapping anywhere; `b` bolder (700),
- *                                `code` the data voice at `--size-data` (`.connect-say code` beats `code`)
- *   .connect-facts               a list with no marks, gap 3, --dim at `--size-app` × 11.5/12.5; `b` --text
- *                                600; `code` is the page's (`code`: data at `--size-data` × 11/12)
- *   .connect-drop / .connect-no  data 600 at `--size-app` × 11/12.5 on 1.3, --accent / --dim
+ *   the box                      a column, gap 8, padding 12, --panel, 1px --line, radius 10, --lift,
+ *                                `--size-app`; never a target (`pointer-events: none`); as wide as its
+ *                                column, 8 under the cards
+ *   the kind                     data 600 at `--size-app` × 10.5/12.5 on 1.3, .04em, upper, --dim
+ *   what it says                 the app voice at `--size-app` on 1.45, wrapping anywhere; strong parts
+ *                                700, code the data voice at `--size-data`
+ *   the facts                    a list with no marks, gap 3, --dim at `--size-app` × 11.5/12.5; strong
+ *                                parts --text 600; code the data voice at `--size-data` × 11/12
+ *   the drop / the refusal       data 600 at `--size-app` × 11/12.5 on 1.3, --accent / --dim
  *
- * The fonts that are the data face at the APP size (`font: … var(--size-app) … var(--font-data)`) are
- * `Txt`s in the app voice's size given the data face ({@link dataAtApp}).
+ * The lines that are the data face at the APP size are `Txt`s in the app voice's size given the data
+ * face ({@link dataAtApp}).
  */
 export function ConnectPop({ preview }: { preview: ConnectPreview | "asking" | undefined }): JSX.Element | null {
   const t = useTokens();
@@ -67,18 +67,17 @@ export function ConnectPop({ preview }: { preview: ConnectPreview | "asking" | u
   );
 }
 
-/** `.connect-facts li`: --dim at `--size-app` × 11.5/12.5, on the body's 1.5. */
+/** A fact's line: --dim at `--size-app` × 11.5/12.5, on the body's 1.5. */
 const FACT: FontSpec = { voice: "app", scale: 11.5 / 12.5, color: "dim" };
 
 /**
- * The data face at a factor of `--size-app`, as `font: … calc(var(--size-app) * k) / lh var(--font-data)`
- * writes it: sized and spaced as the app voice, drawn in the data face.
+ * The data face at a factor of `--size-app`: sized and spaced as the app voice, drawn in the data face.
  */
 export function dataAtApp(t: Tokens, spec: FontSpec): Record<string, unknown> {
   return faceOf(t, "data", spec.weight ?? 400, t.scaled("size-app", spec.scale));
 }
 
-/** `.connect-kind`. */
+/** The kind line that heads a preview (and the move table's question, `Board.tsx`). */
 export function Kind({ t, children }: { t: Tokens; children: string }): JSX.Element {
   const spec: FontSpec = { voice: "app", scale: 10.5 / 12.5, weight: 600, ls: 0.04, upper: true, color: "dim", lineHeight: 1.3 };
   return (
@@ -88,7 +87,7 @@ export function Kind({ t, children }: { t: Tokens; children: string }): JSX.Elem
   );
 }
 
-/** `.connect-drop`, and `.connect-no` in --dim. */
+/** What the drop does, in --accent; or why it is refused, in --dim. */
 function Drop({ t, color, children }: { t: Tokens; color: string; children: string }): JSX.Element {
   const spec: FontSpec = { voice: "app", scale: 11 / 12.5, weight: 600, color, lineHeight: 1.3 };
   return (
@@ -99,8 +98,8 @@ function Drop({ t, color, children }: { t: Tokens; color: string; children: stri
 }
 
 /**
- * `WordsView`: a run of words with the parts drawn strong or as code. Each part is its own run, as each
- * is its own element in the DOM (a text node is a shaping boundary).
+ * `WordsView`: a run of words with the parts drawn strong or as code. Each part is its own run: on web
+ * its own element, and a text node is a shaping boundary.
  */
 function WordsView({ words, base, bold, boldColor, code }: { words: Words; base: FontSpec; bold: number; boldColor?: string; code: FontSpec }): JSX.Element {
   return (

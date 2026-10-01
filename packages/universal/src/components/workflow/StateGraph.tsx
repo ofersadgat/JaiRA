@@ -55,34 +55,33 @@ import { StatePanel } from "./StatePanel";
 import { Chip, SegTabs } from "./WorkflowEditor";
 
 /**
- * `stateGraphView.tsx`, universal (decision 0015): the graph tab — the state's children as boxes, the
- * values between them as wires and its moves as arrows, on a map you pan and zoom — drawn NATIVELY:
- * the boxes are views and the lines `react-native-svg` paths (`components/panel/Svg.tsx`). What the
- * picture says is `stateGraph.ts`'s (the graph, its layout and the attention model) and
- * `stateGraphViewModel.ts`'s (the camera, the tiers, the pills at the pane's edge), the desktop's own.
- * An arrowhead is drawn as its own filled path where the desktop's `<marker>` puts it (`orient="auto"`,
- * sized by the stroke), and pointing at a line is found by distance to it, since a stroke is not a
- * target. The rules (`styles.css` `.sg*`, in the `.sg` token scope):
+ * The workflow editor's graph tab — the state's children as boxes, the values between them as wires and
+ * its moves as arrows, on a map you pan and zoom — drawn NATIVELY: the boxes are views and the lines
+ * `react-native-svg` paths (`components/panel/Svg.tsx`). What the picture says is `stateGraph.ts`'s (the
+ * graph, its layout and the attention model) and `stateGraphViewModel.ts`'s (the camera, the tiers, the
+ * pills at the pane's edge). An arrowhead is its own filled path, placed and turned as an SVG `<marker>`
+ * would be (`orient="auto"`, sized by the stroke), and pointing at a line is found by distance to it,
+ * since a stroke is not a target. How it looks (its variables are the `sg` token scope's):
  *
- *   .sg               column, the rest, gap 6
- *   .sg-bar           the bar, wrapping, gap 10; `.sg-key` app 11/12.5 --dim, gap 5, its swatch 20 × 2
- *   .sg-map           the rest, clipped, --bg, 1px --line, radius --card-radius
- *   .sg-canvas        absolutely at 0 0, scaled from its corner
- *   .sg-frame         a 2px dashed --rule, radius 10, --dim 7%, padding 3 10; its name app 11, scope 10
- *   .sg-flow          --wire-idle 1.7 round at 0.62; expr dashed 7 4, produced/guard 1.5 4 (a guard
- *                     1.5 at 0.35); `.sg-step` 2 in --go-onward/back/abort, `state` dashed 7 5, the
+ *   the tab           column, the rest, gap 6
+ *   the bar           wrapping, gap 10; a legend key app 11/12.5 --dim, gap 5, its swatch 20 × 2
+ *   the map           the rest, clipped, --bg, 1px --line, radius --card-radius
+ *   the canvas        absolutely at 0 0, scaled from its corner
+ *   a session's frame a 2px dashed --rule, radius 10, --dim 7%, padding 3 10; its name app 11, scope 10
+ *   a line            a wire --wire-idle 1.7 round at 0.62; expr dashed 7 4, produced/guard 1.5 4 (a
+ *                     guard 1.5 at 0.35); a move 2 in --go-onward/back/abort, `state` dashed 7 5, the
  *                     sequence --go-spine 2.5, nowait 2 5; lit 3.2 at 1, near 0.6, dim 0.07
- *   .sg-node          padding 9 10, --panel, 1px --line, radius --card-radius (entry --panel-2, exit
+ *   a box             padding 9 10, --panel, 1px --line, radius --card-radius (entry --panel-2, exit
  *                     --tint-ok, operation --rule on --tint-accent, aside/any dashed on nothing,
  *                     outcome/missing --go-abort on --tint-bad); lit --accent and --lift, near 0.45,
  *                     dim 0.12
- *   .sg-title 20, .sg-subtitle 15, .sg-node-session / .sg-row / .sg-port 17, .sg-node-chips 21 tall
- *   .sg-port          row (out reversed), gap 5, radius 4; its dot 8 round, 1.5 --rule on --panel with a
+ *   in a box          the title 20 tall, the subtitle 15, the session, a row and a port 17, the chips 21
+ *   a port            row (out reversed), gap 5, radius 4; its dot 8 round, 1.5 --rule on --panel with a
  *                     2px --panel ring, 15 out past the box's edge (lit 1.35 ×)
- *   .sg-label         translated to its centre, at most 460, padding 6 8, --panel, 1px --go-* with a
- *                     3px left, radius --control-radius, data × 0.86 on a 15 line
- *   .sg-edge-mark     a pill at the pane's edge: 22 tall, padding 1 8, --panel, 1px --line, round,
- *                     --lift, gap 6, at most 56% wide; its names data-text, `+`-separated by a --line
+ *   a move's label    centred on its point, at most 460, padding 6 8, --panel, 1px --go-* with a
+ *                     3px left, radius --control-radius, its guard on a 15 line
+ *   an edge's pill    at the pane's edge: 22 tall, padding 1 8, --panel, 1px --line, round, --lift,
+ *                     gap 6, at most 56% wide; its names data-text, each after the first behind a --line
  */
 
 // --- colour ---------------------------------------------------------------------------
@@ -100,8 +99,8 @@ function dashCover(x0: number, x1: number): number {
 }
 
 /**
- * A 20 × 2 swatch painted a device pixel at a time — what a CSS gradient comes to — so its stops fall where
- * the desktop's do at any pixel ratio.
+ * A 20 × 2 swatch painted a device pixel at a time — what a CSS gradient comes to, its stops in the same
+ * place at any pixel ratio.
  */
 function Strip({ paint, radius }: { paint: (x0: number, x1: number) => { color: string; alpha: number }; radius: number }): JSX.Element {
   const ratio = PixelRatio.get();
@@ -137,7 +136,7 @@ function oklch(L: number, C: number, H: number): { r: number; g: number; b: numb
 const rgb = (c: { r: number; g: number; b: number }): string => `rgb(${Math.round(c.r)}, ${Math.round(c.g)}, ${Math.round(c.b)})`;
 const pct = (v: string | number): number => (typeof v === "number" ? v : String(v).trim().endsWith("%") ? parseFloat(String(v)) / 100 : parseFloat(String(v)));
 
-/** The drawing's inks, from the `.sg` scope: a value's colour by hue, the idle grey and the moves'. */
+/** The drawing's inks, from the `sg` token scope: a value's colour by hue, the idle grey and the moves'. */
 interface Inks {
   hue: (h: number) => string;
   idle: string;
@@ -205,7 +204,7 @@ function Swatch({ kind, inks }: { kind: LegendKey["swatch"]; inks: Inks }): JSX.
   return <View width={20} height={2} borderRadius={1} backgroundColor={inks.go[kind] as never} />;
 }
 
-/** `.chip` with the graph's tones (`sg-chip-on` in --accent). */
+/** A box's chip, in its tone; only the last of a box's may shrink. */
 function GraphChipView({ chip, last }: { chip: GraphChip; last: boolean }): JSX.Element {
   return (
     <View {...(last ? { flexShrink: 1, minWidth: 0 } : { flexShrink: 0 })}>
@@ -319,7 +318,7 @@ function Box({
       ))}
     </View>
   );
-  // Click asks what this box IS; a second click straight after goes to it (the desktop's double-click).
+  // Click asks what this box IS; a second click straight after goes to it (a double-click).
   const press = (): void => {
     const now = Date.now();
     const twice = now - last.current < 400;
@@ -449,8 +448,8 @@ function Guard({ edge: e, tierOf: wireTier, onFocus }: { edge: GraphEdge; tierOf
 }
 
 /**
- * Something drawn centred on a point — the desktop's `transform: translate(-50%, -50%)`, which a
- * transform's percentages still say (of the box's own size, whatever scale the canvas is drawn at).
+ * Something drawn centred on a point — `translate(-50%, -50%)`: a transform's percentages are of the
+ * box's own size, whatever scale the canvas is drawn at.
  */
 function Centred({ x, y, children, ...box }: { x: number; y: number; children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
@@ -462,7 +461,7 @@ function Centred({ x, y, children, ...box }: { x: number; y: number; children: R
 
 // --- the arrowhead and the line's paint ---------------------------------------------------
 
-/** The desktop's `<marker>` (viewBox 0 0 8 8, ref 7 4, 7 × 7 stroke widths, orient auto), as a filled path. */
+/** An arrowhead as a filled path: an SVG `<marker>`'s (viewBox 0 0 8 8, ref 7 4, 7 × 7 stroke widths, orient auto). */
 function headPath(placed: PlacedEdge, width: number): string | null {
   const c = placed.curves.at(-1);
   if (c === undefined) return null;
@@ -511,7 +510,7 @@ function lineShapes(placed: PlacedEdge | PlacedWire, tier: Tier, inks: Inks): Sh
   ];
 }
 
-/** How near a point is to a line, in canvas units — what the desktop's 14-wide invisible stroke answers. */
+/** The line nearest a point and within 7 canvas units of it — a 14-wide target along every line. */
 function nearest(lines: readonly { id: string; placed: PlacedEdge | PlacedWire }[], x: number, y: number): { placed: PlacedEdge | PlacedWire } | null {
   let best: { placed: PlacedEdge | PlacedWire } | null = null;
   let score = 7;
@@ -688,7 +687,7 @@ function Graph({
     drag.current = null;
   };
 
-  // Pointing at a line (web): the nearest within the desktop's 14-wide target, in canvas units.
+  // Pointing at a line (web): the nearest within its 14-wide target, in canvas units.
   const lineUnder = (e: { nativeEvent: { offsetX?: number; offsetY?: number; clientX?: number; clientY?: number } }, target: HTMLElement | null): void => {
     if (target === null) return;
     const rect = target.getBoundingClientRect();
@@ -733,7 +732,7 @@ function Graph({
         style={
           {
             position: "relative",
-            // Positioned and no stacking context, as `.sg-map` is.
+            // Positioned, and no stacking context (`NO_STACK`).
             ...NO_STACK,
             flexGrow: 1,
             flexShrink: 1,
@@ -750,7 +749,7 @@ function Graph({
         }
         onLayout={(e: LayoutChangeEvent) => {
           const { width, height } = e.nativeEvent.layout;
-          // The desktop's `clientWidth`/`clientHeight`: inside the border (a device pixel), rounded to whole pixels.
+          // The room inside the border (a device pixel), in whole pixels: on web, `clientWidth`/`clientHeight`.
           const node = map.current as unknown as { clientWidth?: number; clientHeight?: number } | null;
           if (isWeb && typeof node?.clientWidth === "number" && typeof node.clientHeight === "number") setRoom({ w: node.clientWidth, h: node.clientHeight });
           else setRoom({ w: Math.max(0, Math.round(width - 2 * hairline())), h: Math.max(0, Math.round(height - 2 * hairline())) });
@@ -775,8 +774,8 @@ function Graph({
               width: layout.width,
               height: layout.height,
               transformOrigin: "0 0",
-              // The desktop's own transform and no more (`translate(…) scale(…)`): it is no layer of its
-              // own there, and its text is greyscale by the layer the page puts it in — as here.
+              // A translate and a scale and no more: the canvas is no layer of its own, and its text is
+              // greyscale by the layer the page puts it in.
               transform: [{ translateX: shown.x }, { translateY: shown.y }, { scale: shown.k }],
               ...(isWeb ? { userSelect: "none" } : {}),
             } as never

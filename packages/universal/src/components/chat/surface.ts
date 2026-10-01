@@ -5,8 +5,8 @@ import { hueOf } from "@jaira/ui/pillModel";
 import { useShell } from "../../app/shell";
 
 /**
- * The Chat room's surface, as `App.tsx` assembles its own (`chatSurface.ts`, the desktop's code): the
- * conversations here, the open one, and the verbs on them. For the room, its drawers and its title.
+ * The Chat room's surface, assembled from the shell's state (`chatSurface.ts`): the conversations
+ * here, the open one, and the verbs on them. For the room, its drawers and its title.
  */
 export function useChatSurface(): ChatSurface {
   const { state, actions } = useShell();

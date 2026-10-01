@@ -29,28 +29,26 @@ import { EditorActions, Sub } from "./EditorActions";
 import { Splitter } from "./Splitter";
 
 /**
- * `fileSurfaces.tsx`'s `JsonEdit` and the `SchemaJsonEditor` it draws, universal (decision 0015). The
- * text — the coloured layer, the textarea over it, the hints and the completion list — is the
- * desktop's own `SchemaTextStack`, an island (`client/island/schemaText.tsx`); the chrome around it is
- * drawn here, from `schemaEditorModel.ts` (the verdict, the words, the reference's shape) and
- * `fileEditModel.ts` (which schema, which syntax). The rules, from `styles.css`
- * (`cascade.mts '.schema-edit' --scene files-json`):
+ * `JsonEdit` and the `SchemaJsonEditor` it draws: a JSON or YAML document edited against a schema. The
+ * text — the coloured layer, the textarea over it, the hints and the completion list — is an island
+ * (`SchemaTextField`, `schemaEditor.tsx`; `client/island/schemaText.tsx` on a phone); the chrome around
+ * it is drawn here, from `schemaEditorModel.ts` (the verdict, the words, the reference's shape) and
+ * `fileEditModel.ts` (which schema, which syntax). How it looks:
  *
- *   .file-edit.schema-edit   a column, gap 8, the half's height
- *   .edit-bar.schema-bar     row, centred, gap 8, wrapping
- *   .schema-pick             row, centred, gap 6: `.sub` "Schema" and a plain `select` (at most 200)
- *   .toggle.wrap-toggle      a label, inline: Chromium's checkbox at the label's width (its margins
- *                            3 3 3 4, so the box is drawn centred 4 in), and `.sub` "Wrap" wrapped
- *                            under it — the label is as wide as both on one line
- *   .chip                    app 10/12.5, --dim, 1px --line, round, padding 0 6; -ok/-bad in --ok/--bad
- *   .schema-hint             `.sub`, 4 closer to the bar (margin-top -4)
- *   .schema-body             row, the rest; .schema-main a column, gap 8, the rest
- *   .editor-stack            (the island) at least 140 tall
- *   .reason                  --bad, app 11/12.5
- *   .notice.bad.violation    --tint-bad, --bad, app 11/12.5, radius --control-radius, padding 7 9; its
+ *   the surface              a column, gap 8, the half's height
+ *   the bar                  row, centred, gap 8, wrapping
+ *   the schema's pick        row, centred, gap 6: "Schema" (`Sub`) and a plain select
+ *   the Wrap toggle          the checkbox centred over the word "Wrap" (`Sub`), as wide as both on one
+ *                            line (see {@link WrapToggle})
+ *   a chip                   app 10/12.5, --dim, 1px --line, round, padding 0 6; ok/bad in --ok/--bad
+ *   the schema's hint        `Sub`, 4 closer to the bar (margin-top -4)
+ *   the body                 row, the rest; its main part a column, gap 8, the rest
+ *   the text                 (the island) at least 140 tall
+ *   a parse error            --bad, app 11/12.5
+ *   a violation              --tint-bad, --bad, app 11/12.5, radius --control-radius, padding 7 9; its
  *                            path in bold data voice
- *   .schema-reference        the width the splitter writes (300), padding-left 10, scrolling; h4 700
- *                            at the body's size, 0 0 4 margin; its fields `dl.kv.schema-fields`
+ *   the field reference      the width the splitter writes (300 to start), padding-left 10, scrolling;
+ *                            its title 700 at the body's size, 4 under it; its fields {@link FieldList}
  */
 
 /** `JsonEdit`: the editor with a draft, a save path, the schema choice and its remembered layout. */
@@ -127,7 +125,7 @@ export function SchemaJsonEditor({
 
   const wrapping = wrap ?? localWrap;
   const setWrapping = (next: boolean): void => (onWrap ? onWrap(next) : setLocalWrap(next));
-  // `schemaReferenceProps`, read through the same remembered layout.
+  // The field reference's fold and width, read through the remembered layout where there is one.
   const showReference = ui !== undefined ? ui.open(FOLD.schemaReference, false) : localReference;
   const setShowReference = (next: boolean): void => (ui !== undefined ? ui.setOpen(FOLD.schemaReference, next) : setLocalReference(next));
   const width = ui !== undefined ? ui.pane(PANE.schemaReference, REFERENCE_WIDTH) : localWidth;
@@ -135,7 +133,7 @@ export function SchemaJsonEditor({
 
   const entry = schemaId === null ? undefined : schemaById(schemaId);
 
-  // The check, once the draft has stopped moving — the desktop's debounce.
+  // The check, once the draft has stopped moving (`VALIDATE_DEBOUNCE_MS`).
   useEffect(() => {
     if (entry === undefined) {
       setResult(null);
@@ -189,7 +187,7 @@ export function SchemaJsonEditor({
 
       <View flexDirection="row" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={0} minWidth={0} onLayout={(e) => setBodyWidth(e.nativeEvent.layout.width)}>
         <View flexDirection="column" gap={8} flexGrow={1} flexShrink={1} flexBasis="auto" minWidth={0} minHeight={0}>
-          {/* Clipped: the stack scrolls inside itself (`.editor-stack`), and on web its island stands without that rule. */}
+          {/* Clipped: the island is given this box's height, and its stack scrolls inside itself (`.editor-stack`). */}
           <View flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={140} overflow="hidden" onLayout={(e) => setHeight(Math.round(e.nativeEvent.layout.height))}>
             {height > 0 ? (
               <Island
@@ -230,7 +228,7 @@ export function SchemaJsonEditor({
   );
 }
 
-/** `.chip`, and its -ok and -bad. */
+/** A chip: plain, or in --ok or --bad. */
 function Chip({ tone = "plain", children }: { tone?: "plain" | "ok" | "bad"; children: ReactNode }): JSX.Element {
   const t = useTokens();
   const ink = tone === "plain" ? "dim" : tone;
@@ -244,14 +242,13 @@ function Chip({ tone = "plain", children }: { tone?: "plain" | "ok" | "bad"; chi
 }
 
 /**
- * `label.toggle.wrap-toggle`: an inline label holding the checkbox and "Wrap". It is as wide as the two
- * on one line (the checkbox's 20 with its margins, and the word), and the checkbox, `width: 100%` from
- * `input`'s rule, takes that whole width plus its margins — so the word wraps under it, and Chromium
- * draws the 13-square box centred in its wide one: 4 in from the label, at the label's middle.
+ * The Wrap toggle: the checkbox and, under it, the word "Wrap" — the shape the reference pictures hold.
+ * It is as wide as the two would be on one line (20 for the checkbox with its margins, and the word),
+ * and the 13-square box is drawn at the middle of that width.
  *
  * Lines at the body's 13/19.5: the first is the checkbox's (its border box above the baseline, 3 of
- * margin, the strut's descent below): 21.5; the second the strut's own 19.5, the word's 11px run on its
- * baseline (the label is 41 tall, the word's box 24.84 down it).
+ * margin, the line's descent below): 21.5; the second the line's own 19.5, the word's 11px run on its
+ * baseline (the toggle is 41 tall, the word's box 24.84 down it).
  */
 function WrapToggle({ on, onChange }: { on: boolean; onChange: (next: boolean) => void }): JSX.Element {
   const t = useTokens();
@@ -259,9 +256,9 @@ function WrapToggle({ on, onChange }: { on: boolean; onChange: (next: boolean) =
   const s = typeof size === "number" ? size / 12.5 : 1;
   return (
     // A box, not a button: the checkbox is its own button, and a button inside a button is markup a
-    // browser rebuilds (and a press that toggles twice). The word beside it is the label's other half.
+    // browser rebuilds (and a press that toggles twice). The word under it is the toggle's other half.
     <View flexShrink={0} flexDirection="column" alignItems="flex-start" {...({ title: "wrap long lines instead of scrolling sideways" } as object)}>
-      {/* The label's width: both on one line, laid out and not drawn. */}
+      {/* The toggle's width: both on one line, laid out and not drawn. */}
       <View flexDirection="row" height={0} overflow="hidden" aria-hidden>
         <View width={20} />
         <Sub numberOfLines={1}>Wrap</Sub>
@@ -271,8 +268,8 @@ function WrapToggle({ on, onChange }: { on: boolean; onChange: (next: boolean) =
           <Checkbox checked={on} onChange={onChange} label="Wrap" />
         </View>
       </View>
-      {/* The second line as the label lays it out: a line of the body's own font, the word a run inside
-          it — so Chromium puts its baseline where it puts the desktop's, to the device pixel. */}
+      {/* The second line: a line of the body's own font, the word a run inside it — so Chromium puts
+          the word on that line's baseline, to the device pixel. */}
       <Press onPress={() => onChange(!on)} label="Wrap">
         <Txt spec={{ voice: "app", scale: 13 / 12.5 }}>
           <Sub>Wrap</Sub>
@@ -312,9 +309,9 @@ function SchemaReference({ entry, width }: { entry: SchemaEntry; width: number }
 }
 
 /**
- * `dl.kv.schema-fields`: a grid of two tracks — the names at least 118 and as wide as the widest, the
- * rest after — gap 4 10, app 12/12.5. The first track is shared by every row, so the names are laid
- * out once unseen to find it.
+ * The reference's fields: two tracks — the names at least 118 and as wide as the widest, the rest
+ * after — gap 4 10, app 12/12.5. The first track is shared by every row, so the names are laid out
+ * once unseen to find it.
  */
 function FieldList({ entry, path, open, onToggle, nested = false }: { entry: SchemaEntry; path: string[]; open: ReadonlySet<string>; onToggle: (at: string) => void; nested?: boolean }): JSX.Element {
   const properties = propertiesOf(entry, path);
@@ -334,7 +331,7 @@ function FieldList({ entry, path, open, onToggle, nested = false }: { entry: Sch
   );
 }
 
-/** A `dt`: --dim, 3 above, never wrapping; ★ for an expected field, and the name — disclosing, when it holds more. */
+/** A field's name: --dim, 3 above, never wrapping; ★ for an expected field, and the name — disclosing, when it holds more. */
 function FieldName({ entry, path, property, open, onToggle }: { entry: SchemaEntry; path: string[]; property: SchemaProperty; open: ReadonlySet<string>; onToggle: (at: string) => void }): JSX.Element {
   const { at, hasChildren } = fieldInside(entry, path, property);
   const expanded = open.has(at);
@@ -374,17 +371,17 @@ function FieldRow({ entry, path, property, open, onToggle, track }: { entry: Sch
         <View width={track} flexShrink={0}>
           <FieldName entry={entry} path={path} property={property} open={open} onToggle={onToggle} />
         </View>
-        {/* The `dd`: row, baseline, gap 6, wrapping. */}
+        {/* What the field is: row, baseline, gap 6, wrapping. */}
         <View flex={1} minWidth={0} flexDirection="row" alignItems="baseline" gap={6} flexWrap="wrap">
           {property.type ? <Chip>{property.type}</Chip> : null}
-          {/* `code.sub`: the data face at `.sub`'s size (the app's 11/12.5). */}
+          {/* Its values: the data face at `Sub`'s size (the app's 11/12.5). */}
           {property.values ? <Txt spec={{ voice: "data", scale: appAt(t, 11 / 12.5), color: "dim" }}>{property.values.join(" · ")}</Txt> : null}
-          {/* A flex item's leading space collapses, as the DOM's " description" does. */}
+          {/* The description, an item of the row: no space before it but the gap. */}
           {property.description ? <Sub>{property.description}</Sub> : null}
         </View>
       </View>
       {expanded ? (
-        // `dd.nested`: the whole row, 2 0 6 10 outside, 8 in from a --line on its left.
+        // The nested block: the whole row, 2 0 6 10 outside, 8 in from a --line on its left.
         <View marginTop={2} marginBottom={6} marginLeft={10} paddingLeft={8} {...(edge(t, { left: 1 }) as object)}>
           {perEntry.length > 0 ? (
             <>

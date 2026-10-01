@@ -39,19 +39,19 @@ import { AddLine, ChipIcon, CommandGroupRow, Count, FoldBody, ImplPicker, ModePi
 import { CardHint } from "./ComposerCards";
 
 /**
- * The composer's Tools card, universal (decision 0015): `composer.tsx`'s categories — each a fold with
- * the mode its tools share, its tools ticked in or out with their mode and implementation, Execution's
- * commands under their program, `script`, the line that adds a command — and `Other`. Every edit is
- * `composerPermissionSet.ts`'s, the desktop's own; the rows are `settings/permissions/rows.tsx`'s parts
- * where they are the same, and a tick where the composer's line is one.
+ * The composer's Tools card: the categories — each a fold with the mode its tools share, its tools
+ * ticked in or out with their mode and implementation, Execution's commands under their program,
+ * `script`, the line that adds a command — and `Other`. Every edit is `composerPermissionSet.ts`'s;
+ * the rows are `settings/permissions/rows.tsx`'s parts where they are the same, and a tick where the
+ * composer's line is one.
  *
- *   .cx-cats           column
- *   .cx-cat            a --line above (not the first); .cx-cat-head row, centred, gap 4
- *   .cx-cat-fold       row, gap 6, grows, padding 5 4, radius 5 (hovered --panel-2): › 10 wide (turned a
+ *   the categories     column
+ *   a category         a --line above (not the first); its head row, centred, gap 4
+ *   its fold           row, gap 6, grows, padding 5 4, radius 5 (hovered --panel-2): › 10 wide (turned a
  *                      quarter open), the words, the count
- *   .cx-cat-empty, .cx-cat-other   the head padded 5 0 5 20; empty: its name --tok-hint
- *   .cx-tool           row, centred, gap 4, radius 7; hovered --text 7%; ticked --accent 13%
- *   .cx-tool-grant     row, gap 8, padding 5 7, grows; ✓ 10 wide (--ok); its words --dim (ticked or
+ *   empty, and Other   the head padded 5 0 5 20; empty: its name --tok-hint
+ *   a tool             row, centred, gap 4, radius 7; hovered --text 7%; ticked --accent 13%
+ *   its tick           row, gap 8, padding 5 7, grows; ✓ 10 wide (--ok); its words --dim (ticked or
  *                      hovered --text)
  */
 export function ToolsBody({
@@ -168,7 +168,7 @@ export function ToolsBody({
   );
 }
 
-/** A head with nothing to fold (`.cx-cat-empty`, `.cx-cat-other`): padding 5 0 5 20. */
+/** A head with nothing to fold (an empty category, and Other): padding 5 0 5 20. */
 function PlainCat({ first, name, hint, dim = false, control }: { first: boolean; name: string; hint: string; dim?: boolean; control?: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -215,7 +215,7 @@ function CxCategory({ first, category, granted, mode, open, onOpen, onMode, chil
   );
 }
 
-/** `.cx-tool` with its tick: a line of the map the composer offers or not. */
+/** A tool's row with its tick: a line of the map the composer offers or not. */
 function TickLine({ on, onPress, icon, name, hint, title, trail }: { on: boolean; onPress: () => void; icon: IconName; name: string; hint: string; title: string; trail: ReactNode }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();

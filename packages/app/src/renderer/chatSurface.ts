@@ -1,6 +1,6 @@
 /**
- * The Chat view's surface, assembled from the store — what `App.tsx` hands `ChatView` and
- * `ChatListPanel`, moved here unchanged so the universal shell (decision 0015) builds the same one.
+ * The Chat view's surface, assembled from the store — what the Chat room, its drawers and its title
+ * draw from (`useChatSurface`, `packages/universal/src/components/chat/surface.ts`).
  */
 import type { AppState, useApp } from "./store";
 import { chatProjectOf, conversationsOf } from "./chatWorkflow";
@@ -16,7 +16,7 @@ import type {
 import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import type { LiveTail } from "./transcript";
 
-/** What the Chat view needs from the shell. Assembled in `App.tsx`, like every other pane's. */
+/** What the Chat view needs from the shell. Assembled by {@link chatSurfaceOf}. */
 export interface ChatSurface {
   /**
    * Every conversation this window can show — already filtered to the chat workflows.

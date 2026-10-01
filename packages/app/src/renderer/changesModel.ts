@@ -1,8 +1,7 @@
 /**
  * What the side panel's Changes tab DERIVES — the groups and what each one's head says, who made a change,
- * the files as a tree — moved out of `changesPanel.tsx` unchanged so the universal copy (decision 0015,
- * `packages/universal/src/components/panel/ChangesPanel.tsx`) groups and names the same changes from
- * the same code. Nothing here draws.
+ * the files as a tree. Nothing here draws: `packages/universal/src/components/panel/ChangesPanel.tsx`
+ * does.
  */
 import type { ChangeAuthor, FileChange, GitStep, MergeRequestView, TaskChangeLog } from "@jaira/shared/browser";
 import type { PATHS } from "./iconPaths";

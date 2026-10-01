@@ -1,14 +1,14 @@
 /**
  * What a settings row does in the layers, as pure functions of the layer a page edits — the logic of
- * `controls.tsx`'s `useLayerRow` and `useInheritLabel`, and of a row's hint, in a module of its own so
- * the universal copies (decision 0015) run the same code the DOM rows do.
+ * `useLayerRow` and `useInheritLabel` (`packages/universal/src/components/settings/layers.ts`), and of
+ * a row's hint.
  */
 import { inheritedValue, pathKeys, statesPath, type ConfigLayer, type ConfigPath, type ConfigView } from "@jaira/shared/browser";
 import { SOURCE_WORDS } from "./layerLabels";
 
 /**
  * The layer a Settings page is editing, as every row on it needs to know it — see
- * `SettingsLayerContext` in `controls.tsx`.
+ * `SettingsLayerContext` in the universal tree's `settings/layers.ts`.
  */
 export interface SettingsLayerView {
   layer: ConfigLayer;

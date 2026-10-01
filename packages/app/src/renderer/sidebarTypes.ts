@@ -1,7 +1,7 @@
 /**
  * What the one left column is drawn from (SHELL.md §5.1): its projects, the views nested in the one
  * the address stands on, and the verbs a row carries. `shellModel.ts` builds them from the store and
- * the universal `Sidebar` draws them. Types only.
+ * `Sidebar` (`packages/universal/src/components/Sidebar.tsx`) draws them. Types only.
  */
 import type { ReactNode } from "react";
 import type { PillCounts } from "./pillModel";

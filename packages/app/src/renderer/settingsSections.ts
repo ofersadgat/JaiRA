@@ -19,7 +19,7 @@ import { projectName } from "./projects";
 import { healthCounts } from "./updatesModel";
 import type { SettingsSection } from "./store";
 
-/** The glyph each page wears in the sidebar — `App.tsx` draws them. */
+/** The glyph each page wears in the sidebar (`SettingsSections.tsx` draws them). */
 export type SettingsIconName = "appearance" | "connections" | "machines" | "models" | "tools" | "runs" | "data" | "about";
 
 export interface SettingsPageMeta {
@@ -63,10 +63,10 @@ export function settingsLayersFor(hasProject: boolean): ConfigLayer[] {
 }
 
 /**
- * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models and
+ * One glyph per page, in the icon set's own hand (`iconPaths.ts`: 24-unit strokes at 1.7). Models and
  * Tools borrow its model and tool; the other five are its own: a disc half filled (how a thing looks),
  * a plug (what it connects to), a play mark (a run), stacked disks (stored), an i in a circle (about
- * this build). Path data only, so the sidebar's list (`App.tsx`) and its universal copy draw the same.
+ * this build). Path data only: a phone strokes the same paths with `react-native-svg`.
  */
 export const SETTINGS_ICONS: Record<SettingsIconName, string[]> = {
   appearance: ["M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18Z", "M12 3v18"],

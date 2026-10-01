@@ -1,8 +1,7 @@
 /**
  * The Tasks board's right-click menus — a card's, a multi-selection's and a column's — and the one
- * confirmation inside them, as items and their actions. Moved unchanged out of `App.tsx` so the
- * universal shell (`packages/universal/src/app/BoardColumn.tsx`, decision 0015) offers the same verbs
- * with the same labels, notes and exemptions; each shell draws the menu and the dialog itself.
+ * confirmation inside them, as items and their actions. The shell
+ * (`packages/universal/src/app/BoardColumn.tsx`) draws the menu and the dialog.
  *
  * The menu is the card's VERBS — open, run again, cancel, delete — which all existed before it
  * did, as a double-click, a button on the panel, or nothing at all. Right-click is where people
@@ -23,7 +22,7 @@ import { invoke, type useApp } from "./store";
 type Actions = ReturnType<typeof useApp>["actions"];
 type State = ReturnType<typeof useApp>["state"];
 
-/** Where a menu opens — the desktop's `MenuPoint`, or the universal shell's point. */
+/** Where a menu opens — the board's `MenuPoint`. */
 export interface MenuPlace {
   x: number;
   y: number;

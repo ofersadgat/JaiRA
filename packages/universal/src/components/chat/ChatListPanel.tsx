@@ -13,7 +13,7 @@ import { Icon } from "../panel/Icon";
 import { AskDialog } from "../files/AskDialog";
 import { Spinner } from "./Spinner";
 
-/** What the list needs from the shell — `ChatSurface`'s list half (`chatPane.tsx`). */
+/** What the list needs from the shell — `ChatSurface`'s list half (`chatSurface.ts`). */
 export interface ChatListSurface {
   conversations: readonly ChatRow[];
   taskId: string | null;
@@ -28,27 +28,26 @@ export interface ChatListSurface {
 }
 
 /**
- * `chatPane.tsx`'s `ChatListPanel`, universal (decision 0015): the Chat row's drawer — the conversations,
- * newest first, the search field the row's ⌕ reveals, a row's menu (right-click, or a long press on a
- * phone), and the rename typed in place. Which rows, the dot, the right edge and the menu are
- * `chatListModel.ts`'s, the desktop's own. The rules, from `styles.css` (`cascade.mts .chat-list`):
+ * The Chat row's drawer: the conversations, newest first, the search field the row's ⌕ reveals, a
+ * row's menu (right-click, or a long press on a phone), and the rename typed in place. Which rows, the
+ * dot, the right edge and the menu are `chatListModel.ts`'s. How it looks:
  *
- *   .chat-list         column, flex 1, gap 4, padding 4 0
- *   .chat-search       padding 4 8, 1px --line, radius 8, --bg, app 12/12.5
- *   .chat-rows         flex 1, scrolls
- *   .chat-rows li      row, centred, gap 6, padding 4 8, radius 6, app 12.5/12.5; hovered --panel-2;
- *                      .sel --accent 14% over transparent
- *   .chat-row-mark     7 round, 1px --line; .unread --accent filled
- *   .chat-row-title    flex 1, one line; a fork's glyph 11 square, 4 right, --accent 70% into --dim
- *   .prov              padding 0 6, 1px --line, pill, data 600 10/12.5 line 1.6, --dim
- *   .chat-row-when     app 11/12.5, --dim; answering: the spinner, 12, --accent
- *   .chat-rename       flex 1, padding 2 4, 1px --accent, radius 4, --bg, app 12.5/12.5
- *   p.empty            --dim, padding 8 0 (and a paragraph's 1em margins)
+ *   the list           column, flex 1, gap 4, padding 4 0
+ *   the search field   padding 4 8, 1px --line, radius 8, --bg, app 12/12.5
+ *   the rows           flex 1, scrolls
+ *   a row              row, centred, gap 6, padding 4 8, radius 6, app 12.5/12.5; hovered --panel-2;
+ *                      selected --accent 14% over transparent
+ *   its dot            7 round, 1px --line; unread --accent filled
+ *   its title          flex 1, one line; a fork's glyph 11 square, 4 right, --accent 70% into --dim
+ *   what it controls   padding 0 6, 1px --line, pill, data 600 10/12.5 line 1.6, --dim
+ *   when               app 11/12.5, --dim; answering: the spinner, 12, --accent
+ *   the rename         flex 1, padding 2 4, 1px --accent, radius 4, --bg, app 12.5/12.5
+ *   empty              --dim, padding 8 0 (and a paragraph's 1em margins)
  */
 export function ChatListPanel({ surface, find = false }: { surface: ChatListSurface; find?: boolean }): JSX.Element {
   const t = useTokens();
   const [query, setQuery] = useState("");
-  // Dropped when the field goes away, as the desktop's.
+  // Dropped when the field goes away.
   useEffect(() => {
     if (!find) setQuery("");
   }, [find]);
@@ -75,7 +74,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
       }),
     });
   return (
-    // `flex: 1` as the stylesheet means it where the drawer's height is its content's (the root's
+    // `flex: 1` as CSS means it where the drawer's height is its content's (the root's
     // drawer): grow from the content's height rather than from nothing, which Yoga would collapse to 0.
     <View flexDirection="column" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={0} gap={4} paddingVertical={4}>
       {find ? (
@@ -98,7 +97,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
         />
       ) : null}
       {shown.length === 0 ? (
-        // `p.empty`: the body's own size (13/12.5), --dim, padding 8 0, a paragraph's 1em above and below.
+        // The empty line: the body's own size (13/12.5), --dim, padding 8 0, a paragraph's 1em above and below.
         <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>
           {emptyListText(query)}
         </Txt>
@@ -124,7 +123,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
   );
 }
 
-/** `.chat-rows li`: the dot, the name, what it controls, its project (at the root), and when — or the rename. */
+/** A row: the dot, the name, what it controls, its project (at the root), and when — or the rename. */
 function Row({
   task,
   surface,
@@ -180,7 +179,7 @@ function Row({
       </View>
     );
   }
-  // The data voice at the APP size, as `.prov`'s `font` shorthand writes it.
+  // What it controls, in its pill: the data voice at the APP size.
   const provSize = t.scaled("size-app", 10 / 12.5);
   return (
     <Press

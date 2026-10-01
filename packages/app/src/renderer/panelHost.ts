@@ -1,11 +1,10 @@
 /**
  * The side panel's HOST logic — which stack each room shows, what the room's rule puts at its root, and
- * how wide the column is — moved out of `App.tsx` unchanged so the universal shell (decision 0015,
- * `packages/universal/src/app/PanelColumn.tsx`) runs the same panel from the same store rather than a
- * copy of it. The DOM frame and the universal one both call these; nothing here touches the DOM.
+ * how wide the column is. Nothing here draws: `PanelColumn.tsx` (`packages/universal/src/app`) runs the
+ * panel from it, off the store.
  *
- * The stack's own rules are `panelStack.ts`; this is the part that was `App.tsx`'s: one stack per room,
- * the window's pinned stack over them, and the reconciling of a room's stack with its rule.
+ * The stack's own rules are `panelStack.ts`; this is the shell's part: one stack per room, the window's
+ * pinned stack over them, and the reconciling of a room's stack with its rule.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { InstanceNode, JairaUiState, PendingInteraction, StateView, TaskDetail, WorkflowLayer } from "@jaira/shared/browser";
@@ -272,7 +271,7 @@ export function panelGeometryOf(ui: JairaUiState, room: PanelRoom | null, top: P
  * A state a panel shows that the store is not holding — the open file's and the board column's are
  * held there; a pinned state is still shown after both have moved on, and so is one a value opened in
  * the panel. Read by its own id, and its run form asked for the way a column's is. Keyed
- * `stateId\u0000project`. Shared with the universal shell.
+ * `stateId\u0000project`.
  */
 export function useHeldStates(
   entries: readonly PanelEntry[],
@@ -308,7 +307,7 @@ export function useHeldStates(
 /**
  * Whether the column's width is animating: for a moment after the KIND on top changes, the panel folds or
  * unfolds, or it comes or goes — never while its splitter is dragged, which must follow the pointer.
- * `.view.pane-tween`'s 220ms transition is on while this says so (260ms, the transition and a margin).
+ * The column's 220ms width transition is on while this says so (260ms, the transition and a margin).
  */
 export function usePanelTween(widthKey: string, open: boolean, empty: boolean): boolean {
   const [panelTween, setPanelTween] = useState(false);
@@ -348,8 +347,7 @@ export function openNewTaskWith(onStack: (next: (stack: PanelStack) => PanelStac
 }
 
 /**
- * A state's run form and history, as a board column (or a conversation's gutter) opens it in the panel —
- * `App.tsx`'s `runSurfaceOf`, moved here unchanged so the universal panel builds the same surface.
+ * A state's run form and history, as a board column (or a conversation's gutter) opens it in the panel.
  *
  * What the boxes hold: reached from a board column, the state's own defaults with whatever has been
  * typed over them — a form for the NEXT run. Reached from a conversation's gutter, the panel is
@@ -402,8 +400,7 @@ export function runSurfaceFor(
 
 /**
  * Where a re-run with changes starts: the task's workflow as a run form, opening on what the task was
- * called with — `App.tsx`'s `rerunSurface`, moved here unchanged so the universal panel builds the same.
- * Starting it makes a NEW task and closes the card (the stack back to its root).
+ * called with. Starting it makes a NEW task and closes the card (the stack back to its root).
  */
 export function rerunSurfaceFor(
   state: Pick<AppState, "workflowForms" | "runValues" | "busy">,
@@ -430,8 +427,8 @@ export function rerunSurfaceFor(
 
 /**
  * Every state the task entered, as a place a copy can start — its entry's journal position (the
- * re-run card's "Start from", `panelFaces.tsx`). The root has nothing before it: starting there is
- * starting from the beginning.
+ * re-run card's "Start from"). The root has nothing before it: starting there is starting from the
+ * beginning.
  */
 export function rerunStartsOf(detail: TaskDetail, turns: readonly { kind: string; instanceId?: string | undefined; seq: number }[]): { seq: number; label: string }[] {
   return turns.flatMap((turn) => {

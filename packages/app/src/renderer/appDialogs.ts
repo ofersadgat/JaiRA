@@ -1,6 +1,5 @@
 /**
- * The dialogs `App.tsx` raises on its own — what they say and when — moved out of it unchanged so the
- * universal shell (decision 0015) raises the same ones with the same words.
+ * The dialogs the shell raises on its own (`ShellFloats.tsx`): what they say and when.
  */
 import type { PendingApproval } from "@jaira/shared/browser";
 import type { AskSpec } from "./menuTypes";

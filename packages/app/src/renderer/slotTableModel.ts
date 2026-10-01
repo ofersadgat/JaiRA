@@ -1,7 +1,7 @@
 /**
- * What `slotTable.tsx`'s rows compute — which box answers for which lint path, what an empty binding
- * means, what a type says in words — moved here unchanged so the universal copy
- * (`components/workflow/SlotTable.tsx`) draws the same table from the same answers (decision 0015).
+ * What the slot table's rows compute — which box answers for which lint path, what an empty binding
+ * means, what a type says in words. `SlotTable`
+ * (`packages/universal/src/components/workflow/SlotTable.tsx`) draws the table from these answers.
  */
 import { ANY_TYPE, OWNED_KEYWORDS, SLOT_TYPES, type SlotType } from "@jaira/shared/browser";
 import { fieldClass, type FormIssues } from "./issues";

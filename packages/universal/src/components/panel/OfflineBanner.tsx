@@ -6,14 +6,13 @@ import { useTokens } from "../../tokens";
 import { lengthOf } from "./SidePanel";
 
 /**
- * `offline.tsx`'s `OfflineBanner`, universal (decision 0015): at the foot of a conversation whose machine
- * is away, that it is, since when, and that what is shown is this machine's copy. Which machine, and
- * whether it is away, is `machinesModel.ts`'s `offlinePeerOf`, shared. Nothing for this machine's own. The
- * rules (a `.run-doing` strip in its `.cx-doing`, as `RunActivity.tsx` draws one):
+ * At the foot of a conversation whose machine is away: that it is, since when, and that what is shown is
+ * this machine's copy. Which machine, and whether it is away, is `machinesModel.ts`'s `offlinePeerOf`.
+ * Nothing for this machine's own. It is a strip in the composer's band, as `RunActivity.tsx` draws one:
  *
- *   .cx-doing    padding 10 16 14, --bg
- *   .run-doing   row, centred, gap 9, padding 6 8 6 13, 1px --line, radius --card-radius, --panel, --dim
- *                at app 11.5/12.5, at most 900 wide, centred; the words `.ellip`, then a `.grow`
+ *   the band     padding 10 16 14, --bg
+ *   the strip    row, centred, gap 9, padding 6 8 6 13, 1px --line, radius --card-radius, --panel, --dim
+ *                at app 11.5/12.5, at most 900 wide, centred; the words ellipsed, then a spacer
  */
 export function OfflineBanner({ project }: { project: string | undefined }): JSX.Element | null {
   const t = useTokens();
@@ -40,7 +39,7 @@ export function OfflineBanner({ project }: { project: string | undefined }): JSX
         borderColor={t.v("line") as never}
         backgroundColor={t.v("panel") as never}
       >
-        {/* The words as the JSX writes them — the label, then the rest — so each shapes as the DOM's. */}
+        {/* The words in pieces — the label, then the rest — each shaped on its own, as the goldens have it. */}
         <Txt spec={words} ellip flexShrink={1} minWidth={0}>
           {peer.label}
           {" is offline · "}

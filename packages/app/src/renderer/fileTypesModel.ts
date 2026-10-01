@@ -1,11 +1,11 @@
 /**
- * The File types screen's logic, apart from its drawing (decision 0015): `fileTypesPane.tsx` draws it
- * in the DOM and the universal copy natively, and both ask these — what a family's types agree on,
- * what one gesture writes, which palette a view is in, and what each type is shown holding.
+ * The File types screen's logic, apart from its drawing: `FileTypesPane`
+ * (`packages/universal/src/components/files/FileTypesPane.tsx`) asks these — what a family's types
+ * agree on, what one gesture writes, which palette a view is in, and what each type is shown holding.
  *
- * A factory over a surface registry, because the two shells register the same table with their own
+ * A factory over a surface registry, because whoever draws registers the table with its own
  * components (`fileSurfaceTable.ts`): everything read here (ids, labels, `writes`, `themed`, `look`)
- * is the table's and so the same in both, and the preview draws the shell's own `surface`.
+ * is the table's, and the preview draws the registry's own `surface`.
  */
 import {
   PANE_TYPES,
@@ -61,7 +61,7 @@ export interface Subject {
   mime: string | null;
 }
 
-/** The screen's questions, answered against one registry (the app's own when none is given). */
+/** The screen's questions, answered against one registry (`fileTypes.ts`'s own when none is given). */
 export function fileTypesModel(from?: SurfaceRegistry) {
   const fileRenderers = (mime: string, kind: RenderKind): readonly FileRenderer[] => renderersIn(mime, kind, from);
   const enabledRenderers = (mime: string, kind: RenderKind, chosen?: RendererChoices): readonly FileRenderer[] => enabledIn(mime, kind, chosen, from);

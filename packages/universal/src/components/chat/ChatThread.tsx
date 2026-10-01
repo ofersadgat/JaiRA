@@ -20,16 +20,16 @@ import { DayChip } from "../panel/TranscriptMarks";
 import { FootFade } from "./FootFade";
 
 /**
- * `chatPane.tsx`'s `ChatThread`, universal (decision 0015): one conversation — the thread on its sheet,
- * the live status line, and the box under it. Everything it holds and derives is `chatThreadModel.ts`'s
- * `useChatThread`, the hook the desktop's runs; this only draws it, and scrolls. The rules:
+ * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
+ * holds and derives is `chatThreadModel.ts`'s `useChatThread`; this only draws it, and scrolls. How it
+ * looks:
  *
- *   .chat-thread     column, flex 1
- *   .chat-scroll     flex 1, scrolls, follows the live edge while the reader is on it
- *   .chat-foot       --bg, and an 18px fade into --bg over the thread's last pixels (`::before`)
- *   .chat-editing    row, centred, gap 8, 900 at most, 8 above, padding 5 12, radius 8, --accent 10%
- *                    over transparent, app 12/12.5, --dim (.danger: --bad's)
- *   .cx-error        900 at most, 6 below, padding 6 12, radius 8, --bad 12% over transparent, --bad,
+ *   the thread       column, flex 1
+ *   its scroller     flex 1, scrolls, follows the live edge while the reader is on it
+ *   the foot         --bg, and an 18px fade into --bg over the thread's last pixels (`FootFade`)
+ *   what is armed    row, centred, gap 8, 900 at most, 8 above, padding 5 12, radius 8, --accent 10%
+ *                    over transparent, app 12/12.5, --dim (a rewind: --bad's)
+ *   an error         900 at most, 6 below, padding 6 12, radius 8, --bad 12% over transparent, --bad,
  *                    app 12/12.5
  *
  * With it: the approval and question asked inline (`InlineHost`), a message waiting for the allowance
@@ -40,7 +40,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const scroller = useRef<ScrollView | null>(null);
-  /** Whether the reader is at the live edge — `useStickToBottom`'s pin, on a native scroller. */
+  /** Whether the reader is at the live edge. */
   const pinned = useRef(true);
   const [away, setAway] = useState(false);
   const [viewport, setViewport] = useState<number | undefined>(undefined);
@@ -54,8 +54,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
   const mentions = useMentions(surface.hasProject, m.project);
-  // What the thread follows (`useStickToBottom`'s `follow`): a new thread or a word of the live tail
-  // opens a short window in which the content growing is followed; anything else the reader does is not.
+  // What the thread follows: a new thread or a word of the live tail opens a short window in which the
+  // content growing is followed; anything else the reader does is not.
   const follow = useRef(true);
   useEffect(() => {
     follow.current = true;
@@ -92,7 +92,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       idle.current = setTimeout(() => setMoving(false), 900);
     }
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
-    // `nearBottom`'s rule: within 24px of the end is at it.
+    // Within 24px of the end is at it.
     const at = contentSize.height - contentOffset.y - layoutMeasurement.height <= 24;
     pinned.current = at;
     setAway((was) => (was === !at ? was : !at));
@@ -130,13 +130,13 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         scrollEventThrottle={32}
         // Follow the live edge while the reader is standing on it.
         onContentSizeChange={() => {
-          // Only what `useStickToBottom` follows moves the pin: the thread and the live tail — not a row
+          // Only what `follow` covers moves the pin: the thread and the live tail — not a row
           // opened, or a summary unfolded, by the reader.
           if (pinned.current && follow.current) scroller.current?.scrollTo({ y: 1e9, animated: false });
           if (isWeb) readDay();
         }}
       >
-        {/* Which day you are reading, floating over the thread (`.ts-daychip-hold`: sticky, 0 tall). */}
+        {/* Which day you are reading, floating over the thread (sticky, 0 tall). */}
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
         <ApprovalAskContext.Provider value={m.askValue}>
         <Paper minHeight={viewport}>
@@ -194,9 +194,9 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
 
       {m.waitingHere.length > 0 ? <WaitingHost items={m.waitingHere} /> : null}
 
-      {/* Positioned, as `.chat-foot` is: painted after the thread above it, with what else is. */}
+      {/* Positioned: painted after the thread above it, with what else is. */}
       <View flexShrink={0} position="relative" backgroundColor={t.v("bg") as never}>
-        {/* `.chat-foot::before`: the thread fading into the ground the box sits on, over its last 18. */}
+        {/* The thread fading into the ground the box sits on, over its last 18. */}
         <FootFade color={String(t.v("bg"))} />
         {m.arming !== null ? (
           <View
@@ -248,7 +248,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   );
 }
 
-/** `.cx-error`: what went wrong, over the box. */
+/** What went wrong, over the box. */
 export function ChatError({ text }: { text: string }): JSX.Element {
   const t = useTokens();
   return (
@@ -258,7 +258,7 @@ export function ChatError({ text }: { text: string }): JSX.Element {
   );
 }
 
-/** `.chat-fork`: a mark between two pages of the thread — the page's width, 900 at most, centred. */
+/** A mark between two pages of the thread — the page's width, 900 at most, centred. */
 function ChatFork({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View width="100%" maxWidth={900} alignSelf="center">

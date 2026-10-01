@@ -9,21 +9,20 @@ import { MenuLayer } from "../MenuLayer";
 import { Button } from "../settings/Button";
 
 /**
- * `menu.tsx`'s `AskDialog`, universal (decision 0015): ask before something irreversible, and ask for a
- * name when one is needed — the tree's rename, duplicate and delete, and the second ask a refused one
- * makes. Not portalled on the desktop, so it wears the variables of where it is opened (the sidebar's,
- * from the tree); it takes the tokens of where it is drawn here too. The rules, from `styles.css`:
+ * Ask before something irreversible, and ask for a name when one is needed — the tree's rename,
+ * duplicate and delete, and the second ask a refused one makes. It wears the variables of where it is
+ * opened (the sidebar's, from the tree), not the window's. How it looks:
  *
- *   .modal-backdrop   over everything, --scrim, the dialog centred
- *   .modal            --panel, 1px --line, radius 12, padding 18, 380 to 720 wide, --lift
- *   .modal h3         app 17/12.5, line 1.35, --text
- *   .notice(.bad)     --tint-accent (--tint-bad) ground, radius --control-radius, padding 7 9, app 11/12.5,
+ *   the backdrop      over everything, --scrim, the dialog centred
+ *   the dialog        --panel, 1px --line, radius 12, padding 18, 380 to 720 wide, --lift
+ *   its title         app 17/12.5, 700, line 1.35, --text, 8 under it
+ *   the note          --tint-accent (--tint-bad) ground, radius --control-radius, padding 7 9, app 11/12.5,
  *                     --dim (--bad)
- *   .field            12 above; its label app 11/12.5, --dim, 0.04em, uppercase, 4 over the box
- *   input             --bg, 1px --line, radius --control-radius, padding 5 9, the body's font
- *   .options          row, gap 8, 14 above; the confirm `primary` (or `danger`: --bad on nothing, its
+ *   the field         12 above; its label app 11/12.5, --dim, 0.04em, uppercase, 4 over the box
+ *   its box           --bg, 1px --line, radius --control-radius, padding 5 9, the body's font
+ *   the buttons       row, gap 8, 14 above; the confirm `primary` (or danger: --bad on nothing, its
  *                     ring --bad at 40% into --line), then Cancel `ghost`; with no field the confirm
- *                     has the focus, and `:focus-visible`'s ring (`floats/FocusRing`)
+ *                     has the focus, and the keyboard's ring (`floats/FocusRing`)
  */
 export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => void }): JSX.Element {
   const t = useTokens();
@@ -78,14 +77,14 @@ export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => v
                   borderRadius: lengthToken(t, "control-radius", 7),
                   paddingVertical: 5,
                   paddingHorizontal: 9,
-                  // `:focus-visible`: a 2px --focus-ring outline, 1 outside the box (web).
+                  // Focused: a 2px --focus-ring outline, 1 outside the box (web).
                   ...(isWeb ? (focused ? { outlineWidth: 2, outlineStyle: "solid", outlineColor: t.v("focus-ring"), outlineOffset: 1 } : { outlineStyle: "none" }) : {}),
                 } as never}
               />
             </View>
           ) : null}
           <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
-            {/* With nothing to type, the confirm takes the focus (the DOM's `autoFocus`), and its ring. */}
+            {/* With nothing to type, the confirm takes the focus, and its ring. */}
             <FocusRing radius={lengthToken(t, "control-radius", 7)} autoFocus={!needsValue}>
               {spec.danger ? <DangerButton label={spec.confirmLabel} disabled={!ok} onPress={confirm} /> : (
                 <Button kind="primary" onPress={confirm} disabled={!ok}>
@@ -103,7 +102,7 @@ export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => v
   );
 }
 
-/** `button.danger`: --bad on nothing, its ring --bad at 40% into --line; hovered --tint-bad, the ring at 60%. */
+/** The danger confirm: --bad on nothing, its ring --bad at 40% into --line; hovered --tint-bad, the ring at 60%. */
 function DangerButton({ label, disabled, onPress }: { label: string; disabled: boolean; onPress: () => void }): JSX.Element {
   const t = useTokens();
   const [padV, padH] = padToken(t, "control-pad", [3, 10]);

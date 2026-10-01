@@ -11,14 +11,14 @@ import { SelectInput } from "./fields";
 import { SettingsSection } from "./SettingsPage";
 
 /**
- * `configPane.tsx`'s sections, universal (decision 0015): one declared block of `settings.json` as a
- * section of rows (`ConfigBlockSection`, over the schema form), and the two blocks with a control of
- * their own — where commands run, and where artifacts land. They write through `configWriter.ts`, the
- * same writer the DOM's use. The rules they add (`cascade.mts '[data-part="artifacts"] .cfg-field'`):
+ * Settings' config sections: one declared block of `settings.json` as a section of rows
+ * (`ConfigBlockSection`, over the schema form), and the two blocks with a control of their own — where
+ * commands run, and where artifacts land. They write through `configWriter.ts`. How the artifacts'
+ * destination looks:
  *
- *   .cfg-stack           column, gap 10, as wide as its widest line (the chips)
- *   .cfg-chips           row, wraps, gap 6
- *   p.cfg-hint code      data 11/12
+ *   its stack            column, gap 10, as wide as its widest line (the chips)
+ *   the chips            row, wraps, gap 6
+ *   a variable           data 11/12, in the hint under the box
  */
 
 /** One declared block (`CONFIG_SECTIONS`) as a section of rows; each field is written at its own path. */

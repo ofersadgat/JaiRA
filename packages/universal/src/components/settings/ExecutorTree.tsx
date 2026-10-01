@@ -24,18 +24,18 @@ import { Button } from "./Button";
 import { RuleList } from "./FunctionsSections";
 
 /**
- * `executorTreePane.tsx`, universal (decision 0015): the executor tree, every level expanded, with only
- * what changed written down — the Routes section's cards and Advanced's whole tree. Which routes there
- * are, what a card says and what a write pins are `executorTreeModel.ts`'s. The rules it adds:
+ * The executor tree, every level expanded, with only what changed written down — the Routes section's
+ * cards and Advanced's whole tree (Settings → Models). Which routes there are, what a card says and
+ * what a write pins are `executorTreeModel.ts`'s. How it looks:
  *
- *   .cfg-node-banner     row, baseline, gap 8, wraps, padding 6 9, radius --control-radius,
- *                        --tint-accent; its kind app 700 at 11/12.5, 0.06em, upper, --accent; the class
- *                        it builds a `.cfg-param`; its hint grows from 260
- *   .cfg-route           1px --line (dashed while derived), radius 8, --panel, padding 8 10, column,
+ *   a node's banner      row, baseline, gap 8, wraps, padding 6 9, radius 7, --tint-accent; its kind
+ *                        app 700 at 11/12.5, 0.06em, upper, --accent; the class it builds data 10/12
+ *                        --dim, one line; its hint grows from 260
+ *   a route's card       1px --line (dashed while derived), radius 8, --panel, padding 8 10, column,
  *                        gap 4; its head a row, centred, gap 8, wraps: the prefix data 600 at 12/12, a
  *                        hint (grows from 200, one line), its status, Configure; its body 6 below, 9
  *                        in, a --line above
- *   .cfg-step            1px --line, radius 8, --panel-2, padding 9 11, column, gap 4, at 72%; on:
+ *   a step               1px --line, radius 8, --panel-2, padding 9 11, column, gap 4, at 72%; on:
  *                        --panel, --accent 40% into --line, whole. Its head a row, centred, gap 8: the
  *                        index an 18 circle ringed --line (--accent on), app 10/12.5 --dim (--accent);
  *                        the title app 600 at 12.5/12.5, growing; its body 6 below, 9 in, a --line above

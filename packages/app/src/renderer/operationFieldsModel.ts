@@ -1,8 +1,7 @@
 /**
- * What `operationFields.tsx` computes for one `operation` or `environment` block — which fields a
- * block shows, which lint path each answers for, whether the model knobs were tuned, the reasoning
- * value SchemaForm edits — moved here unchanged so the universal copy
- * (`components/workflow/OperationFields.tsx`) draws the same block (decision 0015).
+ * What `OperationFields.tsx` (`packages/universal/src/components/workflow`) works out for one
+ * `operation` or `environment` block — which fields a block shows, which lint path each answers for,
+ * whether the model knobs were tuned, the reasoning value SchemaForm edits. Nothing here draws.
  */
 import {
   JSON_FIELDS,

@@ -83,7 +83,7 @@ export type SchemaSplice = (from: number, to: number, inserted: string) => void;
 /**
  * The editor itself: the coloured layer, the textarea over it, and the completion list at the caret —
  * everything of the schema editor that is typed INTO, apart from the bar, the verdict and the
- * reference around it. Its own component so the universal tree (decision 0015) can host exactly this
+ * reference around it. Its own component so the universal tree (decision 0015) hosts exactly this
  * as an island, inside native chrome (a fragment: `.schema-main` holds the stack, then the list).
  *
  * `edit` is handed the stack's `splice`, for the one edit the bar makes ("Add missing fields"): through
@@ -471,7 +471,7 @@ export function SchemaTextStack({
 }
 
 /**
- * {@link SchemaTextStack} on its own, for a host that draws the chrome itself — the universal copy's
+ * {@link SchemaTextStack} on its own, for a host that draws the chrome itself — the universal tree's
  * island (decision 0015), in a WebView on a phone and inline on web. It gives the stack what it needs
  * beside the text: the palette on the element the mapping reads, and "Add missing fields" as a count
  * the host bumps (`fill`), made through the stack's own path so it is one undoable step.

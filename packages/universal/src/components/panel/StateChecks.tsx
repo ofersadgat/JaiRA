@@ -6,12 +6,12 @@ import { useTokens } from "../../tokens";
 import { Chip, NoneRow, PanelRow, PanelSection, RowWords, SectionCount } from "./PanelViews";
 
 /**
- * `panelViews.tsx`'s `StateChecks`, universal (decision 0015): a state's Checks tab — whether it lints,
- * what it runs on, where it goes next, what it is made of, who it names and who names it, and whether
- * tasks are pinned to an older copy. One section each, in the panel's settings shape (`PanelViews.tsx`).
+ * A state's Checks tab — whether it lints, what it runs on, where it goes next, what it is made of, who
+ * it names and who names it, and whether tasks are pinned to an older copy. One section each, in the
+ * panel's settings shape (`PanelViews.tsx`).
  *
- *   .notice          --tint-accent, radius --control-radius, padding 7 9, app 11/12.5 --dim
- *   .pv-bad/.pv-warn the name in --bad / --warn
+ *   the notice       --tint-accent, radius --control-radius, padding 7 9, app 11/12.5 --dim
+ *   an issue         its name in --bad (an error) or --warn
  */
 export function StateChecks({
   state,

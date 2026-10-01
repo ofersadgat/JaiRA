@@ -5,8 +5,8 @@ import { useTokens } from "../../tokens";
 import { BrandIcon } from "../settings/bits";
 
 /**
- * The web half of `SourceMark.tsx`: an inline-flex box in the author's line, which Chromium places on
- * that line exactly as it places the DOM's `span.note-src` (its baseline the mark's foot).
+ * The web half of `SourceMark.tsx`: an inline-flex `span` in the author's line, which Chromium places
+ * on that line itself (its baseline the mark's foot).
  */
 export function SourceMark({ source }: { source: string }): JSX.Element {
   const t = useTokens();

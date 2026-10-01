@@ -6,8 +6,8 @@
  * declarations that would apply, in specificity-then-source order as a browser would, and evaluates
  * what React Native cannot: `var()` references, `color-mix(in srgb, …)` and `calc()`.
  *
- * Only native reads this. On web a universal component writes `var(--name)` and lets the browser do
- * all of it, against the palette the DOM app has actually applied.
+ * Native reads this, and so does a web page under `Replayed` (`tokens.tsx`), which carries no stylesheet
+ * for a browser to resolve `var(--name)` against.
  */
 import { BLOCKS } from "./cssTokens.generated";
 

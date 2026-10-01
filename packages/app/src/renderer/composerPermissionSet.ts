@@ -6,7 +6,7 @@
  * what leaves the composer is the WHOLE map (`ChatSettings.permission set`), so every function here takes a
  * `Permission set` and returns the next one, and the component only draws and calls.
  *
- * Kept out of `composer.tsx` for the reason `taskAction.ts` is out of its view: there is no DOM
+ * Kept out of the component for the reason `taskAction.ts` is out of its view: there is no DOM
  * harness in this repository, so logic that lives in a component is logic nothing asserts.
  */
 import {

@@ -1,7 +1,6 @@
 /**
  * Settings → Appearance's model: its choices, what its rows are called and say, how a value of the
- * look is spelt, and a row's place in the layers — everything `appearancePane.tsx` draws FROM, in a
- * module of its own so the universal copy (decision 0015) draws from the same.
+ * look is spelt, and a row's place in the layers — everything `AppearancePage.tsx` draws FROM.
  */
 import { statesPath, type Appearance, type BucketStyle, type ConfigLayer, type ConfigView, type SequentialBatchLayout, type ThemeMode, type UsageFigures, type WorkNotes, type WorkRows } from "@jaira/shared/browser";
 import { EDITOR_THEMES, EDITOR_THEME_APP } from "./editorThemes";

@@ -5,7 +5,7 @@ import { publishRenderChoices } from "@jaira/ui/renderChoice";
 import type { IslandLook } from "./protocol";
 
 /**
- * What the desktop's store does to its root for an editor, done to the island page's (decision 0015):
+ * What the store does to a web page's root for an editor, done to the island page's (decision 0015):
  * the typography and the editors' own palette (`applyAppearance`), how each editor is drawn
  * (`applyEditors`) and the palette chosen per type (`publishRenderChoices`) — the three channels
  * Monaco, CodeMirror and the schema editor follow while they are open. The same functions, with the

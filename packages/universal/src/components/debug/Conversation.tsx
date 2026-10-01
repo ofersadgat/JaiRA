@@ -7,23 +7,21 @@ import { useTokens, type Tokens } from "../../tokens";
 import { Button } from "../settings/Button";
 
 /**
- * `detail.tsx`'s `Conversation`, universal (decision 0015): the journal read as turns — what the Debug
- * room's self-test shows under its run. The rules, from `styles.css`:
+ * The journal read as turns — what the Debug room's self-test shows under its run. How it looks:
  *
- *   .convo           column, gap 8, padding 12 14, the rest of its column
- *   h3               app 700 at 11/12.5, 0.09em, uppercase, --dim; a row, space-between, gap 8, 8 below
- *                    (kept: `.convo` is a flex column); its `.sub` takes all of that, at the same size
- *   .turns           column, gap 7
- *   .turn            grid 62 | minmax(0, 1fr), gap 0 10, top-aligned
- *   .turn .role      app 10/12.5, 0.06em, uppercase, --dim, right-aligned, 2 above
- *   .turn-body       row, wraps, baseline, gap 6, app 12.5/12.5
- *   .turn-state      data 11/12, --accent;  .turn-tool (the span) the same in --dim
- *   .turn-text       wraps anywhere;  .turn-data  data 10.5/12, --dim, wraps anywhere
- *   .turn-tool       a TOOL turn's row matches `.turn-state, .turn-tool` too: the data face through it
- *                    (the role and the text keep their sizes), in --dim
- *   .turn-policy .turn-text, .turn-bad .turn-text   --bad;  .turn-output .turn-body  --ok
- *   .waiting-on      row, centred, gap 9, padding 9 11, 1px --warn, radius 8, --bg, --warn
- *   p.empty          --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
+ *   the block        column, gap 8, padding 12 14, the rest of its column
+ *   its heading      app 700 at 11/12.5, 0.09em, uppercase, --dim; a row, space-between, gap 8, 8 below
+ *                    (kept: the block is a flex column); the count at its end is written the same
+ *   the turns        column, gap 7
+ *   a turn           62 | the rest, 10 apart, top-aligned
+ *   its role         app 10/12.5, 0.06em, uppercase, --dim, right-aligned, 2 above
+ *   its body         row, wraps, baseline, gap 6, app 12.5/12.5
+ *   the state        data 11/12, --accent;  the tool's name the same in --dim
+ *   the text         wraps anywhere;  the data  data 10.5/12, --dim, wraps anywhere
+ *   a TOOL turn      the data face through its row (the role and the text keep their sizes), in --dim
+ *   a policy or a failed turn's text  --bad;  an output turn's  --ok
+ *   waiting on you   row, centred, gap 9, padding 9 11, 1px --warn, radius 8, --bg, --warn
+ *   an empty line    --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
  */
 
 /** How each turn kind introduces itself. Short, because the column is narrow and repeated. */
@@ -85,9 +83,9 @@ export function Conversation({ conversation, waiting, onAnswer }: { conversation
   );
 }
 
-/** One `.turn`: its role in the 62 track, and what it said beside it. */
+/** One turn: its role in the 62 track, and what it said beside it. */
 function Turn({ turn, t }: { turn: ConversationTurn; t: Tokens }): JSX.Element {
-  // A tool turn's row is `.turn-tool` too: the data face, --dim, for everything that does not set its own.
+  // A tool turn's row: the data face, --dim, for everything that does not set its own.
   const tool = turn.kind === "tool";
   const text = turn.kind === "policy" || turn.ok === false ? "bad" : tool ? "dim" : turn.kind === "output" ? "ok" : "text";
   const role: FontSpec = tool ? { voice: "data", scale: appAt(t, 10 / 12.5), ls: 0.06, upper: true, color: "dim" } : { voice: "app", scale: 10 / 12.5, ls: 0.06, upper: true, color: "dim" };
@@ -116,7 +114,7 @@ function Turn({ turn, t }: { turn: ConversationTurn; t: Tokens }): JSX.Element {
   );
 }
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13). */
+/** An empty line: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13). */
 function Empty({ children }: { children: string }): JSX.Element {
   const t = useTokens();
   return (

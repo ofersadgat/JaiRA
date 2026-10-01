@@ -1,7 +1,7 @@
 /**
- * What `executorTreePane.tsx` works out about the executor tree, as pure functions — the routes a
- * router lists, what a route's collapsed line says, who a leaf names, and a node's call settings
- * without its model — in a module of its own so the universal copy (decision 0015) runs the same code.
+ * What the executor tree (`packages/universal/src/components/settings/ExecutorTree.tsx`) works out, as
+ * pure functions — the routes a router lists, what a route's collapsed line says, who a leaf names, and
+ * a node's call settings without its model.
  */
 import { BUILTIN_FUNCTIONS, EXECUTOR_STEP_ORDER, isPinned, pin, type JairaAgentNode, type JairaExecutorSteps, type JairaOperationNode, type JairaPromptNode, type JairaProviderNode, type JairaRouterNode } from "@jaira/shared/browser";
 import type { LayerState } from "./configWriter";

@@ -20,7 +20,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 // The `/entry` subpath, not the package: llm's barrel re-exports `weights.js` and `localServer.js`,
-// which import `node:fs` and `node:child_process` — the renderer build fails on them. `entry.js` has
+// which import `node:fs` and `node:child_process` — a browser bundle fails on them. `entry.js` has
 // no imports at all, so the one implementation the capture side drops `text` against is the one that
 // puts it back here, with no restatement to drift.
 import { renderToolResult } from "@declarative-ai/llm/entry";
@@ -268,7 +268,7 @@ export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[]
  * What a line of work IS, as far as a reader skimming the left margin is concerned.
  *
  * Declared here rather than beside the paths, because this is a fact about the transcript and not
- * about SVG: `icons.tsx` imports it and will not compile until it can draw every member.
+ * about SVG: `iconPaths.ts` imports it and will not compile until it has a path for every member.
  */
 export type WorkIconName = ToolIconName | "think" | "note" | "alert" | "shield";
 
@@ -606,7 +606,7 @@ const EVENT_TONE: Record<TurnKind, EventEntry["tone"] | undefined> = {
   // What a conversation's workflow tool did is the rail's row too (`jaira.moved`), and the call's own
   // row is already in this transcript.
   moved: undefined,
-  // A move's input question is drawn by the grey where it was asked (`MoveQuestionRow`), as a gate.
+  // A move's input question is drawn by the grey where it was asked (`RunTranscript.tsx`), as a gate.
   asked: undefined,
 };
 

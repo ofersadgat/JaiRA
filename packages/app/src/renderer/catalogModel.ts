@@ -1,6 +1,5 @@
 /**
- * Settings → Models → Catalog's reading and words (`catalogPane.tsx`), as a hook and pure functions in
- * a module of their own so the universal copy (decision 0015) reads and says what the DOM's does.
+ * Settings → Models → Catalog's reading and words (`ModelsPage.tsx`), as a hook and pure functions.
  */
 import { useEffect, useState } from "react";
 import type { CatalogSourceView, CatalogStatusView } from "@jaira/shared/browser";
@@ -77,7 +76,7 @@ export function useCatalogStatus(stamp: number): CatalogState {
   return { view, now, busy: refreshing || view?.refreshing === true, refresh };
 }
 
-/** The four states a catalog source's row can be in, as a provider row's (`ProviderState`). */
+/** The three states a catalog source's row can be in, as a provider row's (`ProviderState`). */
 export type CatalogRowState = "available" | "unavailable" | "unconfigured";
 
 /** What one source's row says: its state, the line after the state word, and when it is asked next. */

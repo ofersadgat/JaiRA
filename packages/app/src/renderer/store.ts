@@ -483,7 +483,7 @@ export interface AppState {
 
   // --- the shell ------------------------------------------------------------
 
-  /** Which of the three views the rail has selected. */
+  /** Which view the sidebar has selected. */
   view: View;
   /** Both layer roots as trees — the Files view's left panel. */
   tree: FileTree | null;
@@ -543,7 +543,7 @@ export interface AppState {
   /**
    * Where a click asked the task's conversation to LAND: one run of one state — an event notice's
    * `notify` firing. Set by `select` when it is handed an instance, and a stamp (`at`) so the same ask
-   * twice scrolls twice; the conversation serves it once (`SessionBandsView`'s focus effect).
+   * made twice is two asks.
    */
   landing: { taskId: string; instance: string; at: number } | null;
   /**
@@ -605,7 +605,7 @@ export interface AppState {
   /**
    * Which project the Tasks view is NARROWED to, or null for the listing of all of them.
    *
-   * The first segment of the Tasks address (see `taskBar.tsx`), and the only thing that decides how
+   * The first segment of the Tasks address (see `taskBarModel.ts`), and the only thing that decides how
    * many groups the column draws. Null is a real place rather than "nothing chosen" — it is the level
    * above every project, the same way the layer root is a place to stand in the Files view.
    *
@@ -801,20 +801,13 @@ export interface ChatState {
   error: string | null;
 }
 
-/** The destinations on the activity rail. */
+/** The rooms — the destinations the sidebar lists. */
 export type View = "files" | "tasks" | "chat" | "logs" | "debug" | "gallery" | "settings";
 
 /**
- * Sections of the Settings view — everything that was never one of the two activities.
- *
- * `providers`, `executors` and `config` are read at the layer {@link AppState.configLayer} names;
- * `history` is a project's run journal and has no layer to pick — nor anything to show without a
- * project, which is why the shell hides it on an empty window rather than rendering it empty.
- */
-/**
- * The Settings pages, in the sidebar's one list (2026-09-23) — see `SECTIONS` in App.tsx. Every one of
- * them is layered; the raw `settings.json` page and the Files page are gone (the Files tree's patterns
- * are the last section of Appearance).
+ * The Settings pages, in the sidebar's one list (2026-09-23) — see `SECTIONS` in `settingsSections.ts`,
+ * which says which of them are layered. The raw `settings.json` page and the Files page are gone (the
+ * Files tree's patterns are the last section of Appearance).
  */
 export type SettingsSection = "appearance" | "connections" | "machines" | "models" | "tools" | "runs" | "data" | "about";
 
@@ -965,12 +958,13 @@ function engineLine(raw: unknown): string {
 /**
  * The window's state and the actions that move it.
  *
- * **One call site, and the views must not become a second** (SHELL.md §9.4). Every view component —
- * `Board`, `FileTreePanel`, `ChatView`, `ChatListPanel`, `TaskAddressBar`, `Sidebar` — takes its
- * address as PROPS and reaches for nothing global, which is what keeps them instanceable. The split
- * pane is wanted: authoring a state while watching it run is a different job from navigating, and one
- * pane cannot be in two places at once. A view that called this directly would bind itself to the
- * window and cost a rewrite to unbind.
+ * **One call site, and the views must not become a second** (SHELL.md §9.4): `UniversalApp` calls
+ * this once and hands it down by context (`useShell`). The view components — `Board`,
+ * `FileTreePanel`, `ChatListPanel`, `TaskAddressBar`, `Sidebar` — take their address as PROPS and
+ * reach for nothing global, which is what keeps them instanceable. The split pane is wanted:
+ * authoring a state while watching it run is a different job from navigating, and one pane cannot be
+ * in two places at once. A view that called this directly would bind itself to the window and cost
+ * a rewrite to unbind.
  *
  * What is still per-window is the ADDRESS this holds — {@link AppState.at}, `view`, `doc`. Splitting
  * the pane means making those per-pane; the components are already ready for it.
@@ -2170,7 +2164,7 @@ export function useApp() {
   //
   // Every piece of the look below is the EFFECTIVE `appearance` block of the address the window is
   // standing on (`lookOf`): a project may state a look of its own, and the person's own layer is
-  // over every one. Before the first read it is the defaults, which is what `index.html` stamps.
+  // over every one. Before the first read it is the defaults.
   const systemDark = useSystemDark();
   const look = useMemo(() => lookOf(state.config), [state.config]);
   // No document on native (decision 0015): there the look is read from `appearance` below instead.
@@ -2204,7 +2198,7 @@ export function useApp() {
   }, [look.editors, hasDocument]);
 
   /**
-   * The look as three facts, for a host with no root element to read it from — the native universal
+   * The look as plain facts, for a host with no root element to read it from — the native universal
    * tree (decision 0015), whose tokens replay `styles.css` for a palette and a scheme it has to be told.
    */
   const appearance = useMemo(() => {
@@ -2948,8 +2942,8 @@ export function useApp() {
        * generates it ({@link runTitle}), from the runs this workflow has already had here, so a task
        * made from either surface reads the same on the board. Renaming one is a row's own menu item.
        *
-       * In the FOCUSED project, which is the only project the button is offered in (see `App.tsx`)
-       * and the one whose board the new card appears on.
+       * In the FOCUSED project, which is the only project the button is offered in and the one whose
+       * board the new card appears on.
        */
       createTask: async (workflow: string, inputs: Record<string, JsonValue>, sources: RunSources = {}) => {
         patch({ busy: true, error: null });
@@ -3654,8 +3648,8 @@ export function useApp() {
         // Same for arriving at Chat by any other door: the list it draws is fetched by nothing else.
         if (view === "chat") void refreshAllConversations();
         if (view === "logs") void refreshLogs();
-        // What the pane leads with is whether the self-test is installed, so it has to be true when
-        // the pane appears rather than after the first click.
+        // What the pane leads with is which copy of each self-test state loads, so it has to be true
+        // when the pane appears rather than after the first click.
         if (view === "debug") void refreshDebugFiles();
       },
       setSection: (section: SettingsSection) => {
@@ -3919,7 +3913,7 @@ export function useApp() {
 
       /**
        * Write a layer's WHOLE document for the Files tree section — what the tree leaves out — and
-       * re-read the tree. The section builds the document itself (`filesTreePane.tsx`: a layer's
+       * re-read the tree. The section builds the document itself (`filesTreeModel.ts`: a layer's
        * `files.hidden` is what it ADDS, and it is never written `[]`).
        */
       saveTreeLayer: async (layer: ConfigLayer, doc: JsonValue) => {

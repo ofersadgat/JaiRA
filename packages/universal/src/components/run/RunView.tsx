@@ -13,13 +13,13 @@ import { RunConversation } from "./RunConversation";
 import { SidechainConversation } from "./SidechainConversation";
 
 /**
- * `runViews.tsx`'s `RunView`, universal (decision 0015): one run walked into, in the Tasks room's middle
- * column — its executions as cards (`RunBoard`), or what it said (`RunConversation`), as the title bar's
- * toggle says (`runMode`). A run that declared no children and entered none is a leaf of the walk, and
- * its conversation is the only reading whatever the toggle says; a subagent's conversation at the tail
- * of the walk is its own page (`SidechainConversation`).
+ * One run walked into, in the Tasks room's middle column — its executions as cards (`RunBoard`), or
+ * what it said (`RunConversation`), as the title bar's toggle says (`runMode`). A run that declared no
+ * children and entered none is a leaf of the walk, and its conversation is the only reading whatever
+ * the toggle says; a subagent's conversation at the tail of the walk is its own page
+ * (`SidechainConversation`).
  *
- *   .composite     column, flex 1
+ *   its box        column, flex 1 (`Composite`)
  */
 export function RunView({ context }: { context: FileSurfaceContext }): JSX.Element {
   const { detail, trail, trailState, onWalkInto } = context;
@@ -71,9 +71,9 @@ export function RunView({ context }: { context: FileSurfaceContext }): JSX.Eleme
 }
 
 /**
- * `runViews.tsx`'s `CompositeView`, universal: what a state file IS DOING, in the Files room — the same
- * two readings of wherever the trail stands (`standingOn`), or, with no run walked into, the workflow's
- * own shape from the task board. What `fileSurfaces.tsx`'s `WorkflowRunView` draws for a composite.
+ * What a state file IS DOING, in the Files room — the same two readings of wherever the trail stands
+ * (`standingOn`), or, with no run walked into, the workflow's own shape from the task board. What
+ * `WorkflowRunView` (`files/surfaces.tsx`) draws for a composite.
  */
 export function CompositeView({ state, context }: FileSurfaceProps & { state: StateView }): JSX.Element {
   const { detail, selected, onSelectTask, onDrill, onWalkInto } = context;
@@ -122,7 +122,7 @@ export function CompositeView({ state, context }: FileSurfaceProps & { state: St
 }
 
 /**
- * What a run's conversation is read from, out of the context (`RunConversation`'s `context`): the store's
+ * What a run's conversation is read from, out of the context (`RunConversation`'s `source`): the store's
  * fields, the cut's two verbs, the walks, the workflow's link, the moves' questions, the running agent's
  * question and approval, and what the shell lends a gate that mounts the changeset reviewer.
  */
@@ -160,7 +160,7 @@ function Conversation({ context, parent, bookmarks = false }: { context: FileSur
   if (detail === null) return <Empty>Select a run to see what it said.</Empty>;
   const source = sourceOf(context);
   const gate = context.runGate !== undefined && context.onRunGate !== undefined ? { gate: context.runGate, onGate: context.onRunGate } : {};
-  // A gate, the agent's question and its approval each hold the run WAITING (`RunView`'s `asking`).
+  // A gate, the agent's question and its approval each hold the run WAITING (`RunConversation`'s `asking`).
   const asking = (context.runGate !== undefined && context.onRunGate !== undefined) || source.question !== undefined || source.approval !== undefined;
   return (
     <RunConversation
@@ -177,7 +177,7 @@ function Conversation({ context, parent, bookmarks = false }: { context: FileSur
   );
 }
 
-/** `.composite`: a column taking the middle column's height. */
+/** A run view's box: a column taking the middle column's height. */
 function Composite({ children }: { children: ReactNode }): JSX.Element {
   return (
     <View flex={1} minHeight={0} flexDirection="column">
@@ -186,7 +186,7 @@ function Composite({ children }: { children: ReactNode }): JSX.Element {
   );
 }
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13). */
+/** An empty view's words: --dim, padded 8 above and below, in a paragraph's margins (1em of the body's 13). */
 function Empty({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (

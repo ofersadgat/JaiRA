@@ -1,6 +1,6 @@
 /**
  * What an approval surface is handed, and what its answer may carry beside the yes or the no — the props
- * the universal `ApprovalSurface` and the approval dialogs take (`packages/universal/src/components/floats/`).
+ * `ApprovalSurface` and the approval dialogs take (`packages/universal/src/components/floats/`).
  * Types only, so a module that passes them along imports no component.
  */
 import type { ApprovalScope, PendingApproval, WritableLayer } from "@jaira/shared/browser";

@@ -149,14 +149,16 @@ export function useSystemDark(): boolean {
 /**
  * The window's palette and the board's three surface options, as ATTRIBUTES on the root.
  *
- * Attributes rather than custom properties because each one selects a block of rules, not a value:
- * a palette is thirty tokens and a handful of rules in `styles.css`, and a bucket style is a
- * different way of drawing a column. Classic removes `data-palette`, so the stylesheet's own `:root`
- * is what paints it (`index.html` stamps the default, ink, for the first paint), and each option is
- * written only when it differs from the classic board — so the rules only ever describe a departure.
+ * Attributes rather than custom properties because each one selects a way of drawing, not a value:
+ * a palette is thirty tokens in `styles.css` and whatever is drawn differently under it, and a bucket
+ * style is a different way of drawing a column. Classic removes `data-palette`, so the stylesheet's
+ * own `:root` is what paints it (the page's `_layout.tsx` and the island page's `index.html` stamp the
+ * default, ink, for the first paint), and each option is written only when it differs from the classic
+ * board — so a reader only ever sees a departure.
  *
  * The options are written as DECIDED (`surfaceOf`), not as stored: a palette's own defaults are
- * resolved here, which keeps the stylesheet free of "ink, unless the person said otherwise" rules.
+ * resolved here, which keeps whatever reads them (the stylesheet, `useLook`) free of "ink, unless the
+ * person said otherwise" rules.
  */
 function applySurface(root: HTMLElement, a: Appearance): void {
   const mark = (name: string, value: string | null): void => {

@@ -9,21 +9,20 @@ import { ringWidth } from "./ring";
 import { Toggle } from "./Toggle";
 
 /**
- * `imageDiff.tsx`'s `ImageDiff`, universal (decision 0015): two versions of a picture, compared — side
- * by side (what each IS) or stacked with the new one fading in over the old (WHERE they differ). What
- * it is for is the desktop's; this is the drawing. The rules, from `styles.css`:
+ * Two versions of a picture, compared — side by side (what each IS) or stacked with the new one fading
+ * in over the old (WHERE they differ). How it looks:
  *
- *   .vv-diff-bar       row, at its end, 4 under: the toggle (`.vv-toggle`) and, stacked, the fader
- *   .img-diff-mix      inline-flex, centred, gap 6: "before" and "after" (`.sub`: --dim, app 11/12.5)
- *                      round the page's `input[type=range]`, 140 wide
- *   .img-diff-split    a grid of two equal columns, gap 10
- *   figure             margin 0, a column, gap 4, at its start; figcaption --dim in the body's font
- *   img                at most as wide as its box, 1px --line, radius 4 (border-box: the ring is inside
+ *   the bar            row, at its end, 4 under: the toggle (`Toggle`) and, stacked, the fader
+ *   the fader          row, centred, gap 6: "before" and "after" (--dim, app 11/12.5) round a `Range`,
+ *                      140 wide
+ *   side by side       two equal columns, gap 10
+ *   a figure           a column, gap 4, at its start; its caption --dim in the body's font
+ *   a picture          at most as wide as its box, 1px --line, radius 4 (border-box: the ring is inside
  *                      the 100%)
- *   .img-diff-stack    inline-block, relative, over a checkerboard: 8 squares of --panel-2 tiled at 16
- *                      (four 45° gradients). The old picture is in its line, so the box is as tall as the
- *                      picture PLUS the strut's descent under the baseline; the new one is absolute,
- *                      inset 0, 100% × 100% — stretched to that height, as the DOM's is.
+ *   stacked            over a checkerboard: 8 squares of --panel-2 tiled at 16 (four 45° gradients).
+ *                      The box is the line an inline picture stands in: as tall as the old picture PLUS
+ *                      the strut's descent under the baseline; the new one lies over the whole box,
+ *                      stretched to that height (as the reference pictures have it).
  *
  * On web the checkerboard is the gradients themselves; on a phone, which has no background images, the
  * squares are views — and a picture that is an SVG is drawn by `react-native-svg` (`Img.native.tsx`).
@@ -90,7 +89,7 @@ export function ImageDiff({ before, after, layout, onLayout }: { before?: string
   );
 }
 
-/** One of the split's two equal columns (`1fr`), measured so its picture knows the room it has. */
+/** One of the split's two equal columns, measured so its picture knows the room it has. */
 function Column({ src, caption }: { src: string; caption: string }): JSX.Element {
   const [room, setRoom] = useState<number | null>(null);
   return (
@@ -100,7 +99,7 @@ function Column({ src, caption }: { src: string; caption: string }): JSX.Element
   );
 }
 
-/** `figure`: the picture over its caption, 4 apart, both at the start. */
+/** A figure: the picture over its caption, 4 apart, both at the start. */
 function Figure({ src, alt, caption, room }: { src: string; alt: string; caption: string; room: number | null }): JSX.Element {
   const natural = useNatural(src);
   const size = natural === null || room === null ? null : fitted(natural, room);
@@ -112,13 +111,13 @@ function Figure({ src, alt, caption, room }: { src: string; alt: string; caption
   );
 }
 
-/** `.img-diff-stack`: the old picture in its line over the checkerboard, the new one over it at `mix`. */
+/** The stack: the old picture in its line over the checkerboard, the new one over it at `mix`. */
 function Stack({ before, after, mix, room, t }: { before: string; after: string; mix: number; room: number | null; t: Tokens }): JSX.Element {
   const natural = useNatural(before);
   if (natural === null || room === null) return <View />;
   const img = fitted(natural, room);
-  // The line the picture sits in: its bottom on the baseline, the strut's half-leading and descent under
-  // it, and the strut's top over it when the picture is shorter than that.
+  // The line an inline picture sits in: its bottom on the baseline, the strut's half-leading and descent
+  // under it, and the strut's top over it when the picture is shorter than that.
   // Chromium gives the ascent the leading's half floored to a whole pixel and the descent the rest.
   const s = Number(t.scaled("size-app", 13 / 12.5)) || 13;
   const line = 1.5 * s;
@@ -173,7 +172,7 @@ function Framed({ src, alt, width, height }: { src: string; alt: string; width: 
   );
 }
 
-/** `max-width: 100%` on a border-box `img`: its natural size and ring, no wider than the room. */
+/** A picture's box: its natural size and ring, no wider than the room. */
 function fitted(natural: { width: number; height: number }, room: number): { width: number; height: number } {
   // The ring as Chromium lays it out (whole device pixels: 0.667 at 1.5×), not the 1 it was asked for.
   const ring = ringWidth();

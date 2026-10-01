@@ -13,8 +13,8 @@
  * coloured?", and that was being answered TWICE: here, by whether a grammar exists, and in
  * `isCodeMime`, by a heuristic (is it text, is it not plain, is it not markdown). The two disagreed
  * about four types — TOML, CSV, TSV and diff — each of which offered a Code button that produced
- * text identical to Source, because no grammar was ever found for it. A control that can only be
- * pressed to no effect is the specific failure `valueView.tsx` opens by warning about.
+ * text identical to Source, because no grammar was ever found for it: a control that could only be
+ * pressed to no effect.
  *
  * So the table is the single fact, and both the view list and the editors read it. It is the same
  * kind of thing `typeNames.ts` already keeps in this package: data ABOUT a type, no imports.

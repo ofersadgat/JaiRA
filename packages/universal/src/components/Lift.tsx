@@ -3,9 +3,9 @@ import { View, type View as HostView } from "react-native";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 /**
- * Picking something up on a phone (decision 0015): the desktop's HTML5 drag (`draggable`, `dragstart`,
- * `dragover`, `drop`), as React Native Gesture Handler's pan. The web's is `Lift.web.tsx`, which draws its
- * child and nothing else — there the thing held says `draggable` itself, as the DOM's does.
+ * Picking something up on a phone (decision 0015): what HTML5 drag (`draggable`, `dragstart`,
+ * `dragover`, `drop`) is on web, as React Native Gesture Handler's pan. The web's is `Lift.web.tsx`, which
+ * draws its child and nothing else — there the thing held says `draggable` itself.
  *
  * A one-finger drag on a phone belongs to the scroller under it (and two fingers to the frame's zoom,
  * `DesktopFrame`), so a lift starts on a LONG PRESS: held still for {@link HOLD} ms, the pan activates,

@@ -5,17 +5,16 @@ import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 
 /**
- * `machineChip.tsx`'s `MachineChip`, universal (decision 0013): where something runs. The rules it
- * takes, in the order they win (all one class, so the later rule in the file wins a tie):
+ * Where something runs (decision 0013): a machine's name after a dot that says its state. How it looks:
  *
- *   .chip            10/12.5 of --size-app, --dim, 1px --line, radius 999, padding 0 6, nowrap, flex none
- *   .mchip           inline-flex, centred, gap 5, --text (over .chip's --dim: later in the file)
- *   .mchip-off/none  --dim; none is dashed
- *   .mchip-dot       6×6 round, --ok; hollow (1px --dim) off, --warn warn, dashed hollow none
+ *   the chip         inline-flex, centred, gap 5; 10/12.5 of --size-app, --text, 1px --line, radius 999,
+ *                    padding 0 6, nowrap, flex none
+ *   off / none       --dim; none is dashed
+ *   the dot          6×6 round, --ok; hollow (1px --dim) off, --warn warn, dashed hollow none
  *
- * The family, the weight and the line height are inherited in the DOM, so they are passed in here: a
- * card's meta line is the data voice at 400 on 1.5 (the defaults); a settings row's name (`.set-name`)
- * is the app voice at 550 on 1.3.
+ * The family, the weight and the line height are those of the line it sits in, so they are passed in: a
+ * card's meta line is the data voice at 400 on 1.5 (the defaults); a settings row's name is the app voice
+ * at 550 on 1.3.
  */
 export function MachineChip({
   label,
@@ -30,7 +29,7 @@ export function MachineChip({
   title?: string;
   /** The family the chip sits in (`--font-data` in a card's meta line). */
   voice: string;
-  /** The weight and line height it inherits there. */
+  /** The weight and line height of the line it sits in. */
   weight?: number;
   line?: number;
 }): JSX.Element {

@@ -44,37 +44,37 @@ import { FigureFace } from "../usage/Figures";
 import { BrandIcon } from "../settings/bits";
 
 /**
- * `composer.tsx`'s `Composer`, universal (decision 0015): the box a message is typed into, what it will
- * run as, and the button that sends it. What the chips say and whether Enter sends are
- * `composerModel.ts`'s; what the cards compute is `composerCards.ts`' and every edit of the map
- * `composerPermissionSet.ts`'s; the account's figure is `usageFigure.ts`'s (the desktop's own code).
- * Typing is a native `TextInput`; Enter sends on a keyboard (Shift+Enter breaks the line), the button
- * everywhere. Each chip opens its card (`ComposerCards.tsx`, `ComposerTools.tsx`), the figure the
- * account's and the ring the context's (`UsageCards.tsx`); `@` completes a project path over the box;
- * the clip attaches files (web — a phone has no picker here yet).
+ * The composer: the box a message is typed into, what it will run as, and the button that sends it.
+ * What the chips say and whether Enter sends are `composerModel.ts`'s; what the cards compute is
+ * `composerCards.ts`' and every edit of the map `composerPermissionSet.ts`'s; the account's figure is
+ * `usageFigure.ts`'s. Typing is a native `TextInput`; Enter sends on a keyboard (Shift+Enter breaks
+ * the line), the button everywhere. Each chip opens its card (`ComposerCards.tsx`,
+ * `ComposerTools.tsx`), the figure the account's and the ring the context's (`UsageCards.tsx`); `@`
+ * completes a project path over the box; the clip attaches files (web — a phone has no picker here
+ * yet).
  *
- *   .cx               padding 10 16 14, --bg
- *   .cx-frame         900 at most, centred, padding 1, radius 22, --line (focused: --accent 55% into
+ *   the composer      padding 10 16 14, --bg
+ *   its frame         900 at most, centred, padding 1, radius 22, --line (focused: --accent 55% into
  *                     --line; a file over it: --accent) — a ring rather than a border
- *   .cx-shell         column, radius 21, --panel (.cx.off: --panel-2)
- *   .cx-files         row, wrapping, gap 6, padding 9 12 0; a file a pill: padding 2 4 2 7, 1px --line,
+ *   its shell         column, radius 21, --panel (off: --panel-2)
+ *   the files         row, wrapping, gap 6, padding 9 12 0; a file a pill: padding 2 4 2 7, 1px --line,
  *                     --panel-2, at most 260, app 11.5/12.5; the clip 12 --dim; × --dim (hovered --text)
- *   .cx-text          app 13.5/12.5, line 1.55, padding 13 15 6, --text, at least 54 tall, at most
+ *   the text          app 13.5/12.5, line 1.55, padding 13 15 6, --text, at least 54 tall, at most
  *                     40% of the window, growing with what is typed; the placeholder --tok-hint
- *   .cx-mentions      over the box, its width, 4 apart: column, at most 240, padding 4, 1px --line,
+ *   the `@` list      over the box, its width, 4 apart: column, at most 240, padding 4, 1px --line,
  *                     radius 10, --panel, 0 8 24 rgb(0 0 0 / 18%); a path padding 4 8, radius 6, app
  *                     12/12.5 (hovered --panel-2)
- *   .cx-foot          row, centred, gap 5, padding 5 7 7 8
- *   .cx-chip          pill, padding 3 9, 1px transparent, gap 5, at most 210, app 11.5/12.5, --dim;
+ *   the foot          row, centred, gap 5, padding 5 7 7 8
+ *   a chip            pill, padding 3 9, 1px transparent, gap 5, at most 210, app 11.5/12.5, --dim;
  *                     hovered --fill-ghost-hover and --text; open --fill-ghost-selected, a --line edge,
- *                     --text; .own --accent; the icon 13, --tok-hint (.own --accent)
- *   .um-num           the account's figure: data 500 11/12, line 1, padding 2 5, radius 6, 2 in on
+ *                     --text; overridden --accent; the icon 13, --tok-hint (overridden --accent)
+ *   the figure        the account's figure: data 500 11/12, line 1, padding 2 5, radius 6, 2 in on
  *                     the left; its tone's colour (--dim for the accent tone)
- *   .um-meter         the context ring: 26 tall, padding 0 5, radius 13, gap 6; the ring 16
- *   .cx-live          row, gap 6, app 11/12.5, --accent (waiting: --dim)
- *   .cx-clip          26 round, the paperclip 15, --dim; hovered --panel-2 and --text
- *   .cx-send          30 round, --accent, the arrow 16 in --panel; disabled --panel-2, --tok-hint, at
- *                     half opacity; .cx-stop --bad, a 10 square (radius 2) of --panel
+ *   the meter         the context ring: 26 tall, padding 0 5, radius 13, gap 6; the ring 16
+ *   the live note     row, gap 6, app 11/12.5, --accent (waiting: --dim)
+ *   the clip          26 round, the paperclip 15, --dim; hovered --panel-2 and --text
+ *   send              30 round, --accent, the arrow 16 in --panel; disabled --panel-2, --tok-hint, at
+ *                     half opacity; stop --bad, a 10 square (radius 2) of --panel
  */
 export function Composer({
   plan,
@@ -145,7 +145,7 @@ export function Composer({
   const off = disabled !== undefined;
   /** The card open, and the box it was opened from. */
   const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Permissions" | "Tools" | "account" | "context"; at: FloatRect } | null>(null);
-  // The `@` list stands over the box it completes into, at the box's width (`matchWidth`), as the desktop's does.
+  // The `@` list stands over the box it completes into, at the box's width.
   const box = useRef<TextInput | null>(null);
   const [boxAt, setBoxAt] = useState<FloatRect | null>(null);
 
@@ -181,7 +181,7 @@ export function Composer({
       (e: unknown) => setFiles((was) => [...was, { name: path, note: e instanceof Error ? e.message : "could not be read" }]),
     );
   };
-  /** Take files in (web: the File API reads them in the renderer, as the desktop's does). */
+  /** Take files in (web: the File API reads them in the page). */
   const take = (list: FileList | null): void => {
     if (list === null) return;
     void Promise.all([...list].map(async (file) => fileFromText(file.name, file.size, file.type, file.size > 200_000 ? undefined : await file.text()))).then((taken) => setFiles((was) => [...was, ...taken]));
@@ -195,11 +195,11 @@ export function Composer({
     input.onchange = () => take(input.files);
     input.click();
   };
-  /** Dropped on the composer (`.cx-drop`: the frame --accent while a file is over it). */
+  /** Dropped on the composer: the frame is --accent while a file is over it. */
   const [dropping, setDropping] = useState(false);
-  // The WHOLE composer is the drop target, as the desktop's is: a file aimed at the box and dropped on
-  // the page behind it is one Electron answers by navigating the window to it. `dragover` must be
-  // prevented or the drop never fires.
+  // The WHOLE composer is the drop target: a file aimed at the box and dropped on the page behind it
+  // is one Electron answers by navigating the window to it. `dragover` must be prevented or the drop
+  // never fires.
   const drop = isWeb
     ? {
         onDragOver: (e: DragEvent) => {
@@ -249,7 +249,7 @@ export function Composer({
         borderRadius={22}
         backgroundColor={(dropping ? t.v("accent") : focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
-        {/* Positioned, as `.cx-shell` is: painted after the conversation above it, with what else is. */}
+        {/* Positioned: painted after the conversation above it, with what else is. */}
         <View position="relative" flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
           {!off ? <SpentLine route={route} /> : null}
           {files.length > 0 ? (
@@ -317,7 +317,7 @@ export function Composer({
               paddingBottom: 6,
               minHeight: 54,
               maxHeight: win.height * 0.4,
-              // As tall as what is typed (`field-sizing: content`). On web the rule itself: a textarea's
+              // As tall as what is typed (`field-sizing: content`). On web the property itself: a textarea's
               // `scrollHeight` is never less than its own height, so a height fed back from it only grows.
               ...(isWeb ? {} : { height: Math.max(54, Math.min(height, win.height * 0.4)) }),
               backgroundColor: "transparent",
@@ -449,13 +449,13 @@ function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNV
   return [ref, () => ref.current?.measureInWindow((x, y, w, h) => onOpen({ left: x, top: y, right: x + w, bottom: y + h }))];
 }
 
-/** `.cx-chip`: one question, its icon and its answer; open, its card's ground and edge. */
+/** A chip: one question, its icon and its answer; open, its card's ground and edge. */
 function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
   const [ref, press] = useOpener(onOpen);
   return (
-    // `.cx-chip-wrap` is a block that gives way (`min-width: 0`); the chip in it is an inline box, which
-    // does not: squeezed, the desktop's chips keep their words and run over one another. Copied on web,
-    // where the two are compared; a phone, which is always narrow, cuts each chip's words instead.
+    // The wrap gives way (`minWidth: 0`); on web the chip in it does not: squeezed, the chips keep their
+    // words and run over one another, which is what the reference pictures hold (`pair.mts`). A phone,
+    // which is always narrow, cuts each chip's words instead.
     <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK, ...(Platform.OS === "web" ? { alignItems: "flex-start" } : {}) } as never}>
     <Press
       onPress={press}
@@ -488,7 +488,7 @@ function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; i
   );
 }
 
-/** `AllowanceNumber`: the account's figure after the model chip — as a number, a ring, or both. */
+/** The account's figure after the model chip — as a number, a ring, or both. */
 function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element | null {
   const [ref, press] = useOpener(onOpen);
   const limits = useLimits();
@@ -497,12 +497,11 @@ function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: 
   const account = accountFor(limits, route);
   if (account === undefined || mode === "off") return null;
   const figure = figureOf(account, { model, cost, now });
-  // `.um-num.um-t-accent` wins over `.um-t-accent`: the accent tone's number is --dim, not --text — but
-  // money's (`.um-num.um-money.um-t-accent`) is --text again.
+  // The accent tone's number is --dim here, not `INK`'s --text — but money's is --text again.
   const ink = figure.tone === "accent" ? (figure.money ? "text" : "dim") : INK[figure.tone];
   const face = { voice: "data" as const, scale: 11 / 12, weight: 500, color: ink, tabular: true, lineHeight: 1 };
-  // `.um-numwrap` is a block whose line (the body's 13/12.5 at 1.5) holds the button as an inline box on
-  // its baseline — 19.5 tall, the button 2.67 below its top (measured) — and it is the WRAP the row centres.
+  // The wrap is one line of the body's type tall (13/12.5 at 1.5: 19.5), the button 2.67 below its top —
+  // where an inline button sits on that line's baseline (measured) — and it is the WRAP the row centres.
   const line = Number(t.scaled("size-app", (13 / 12.5) * 1.5));
   return (
     <View flexShrink={0} position="relative" marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})}>
@@ -539,8 +538,8 @@ function ContextMeter({ t, context, route, open, onOpen }: { t: Tokens; context:
       : fill === null
         ? `This conversation holds ${formatTokens(context.used)} tokens`
         : `This conversation: ${Math.round(fill)}% of the context (${formatTokens(context.used)} of ${formatTokens(context.window ?? 0)} tokens)`;
-  // `.um-wrap` is a block whose line holds the 26px button on its baseline, half a pixel of the line's
-  // descent under it: 26.5 tall, the button at its top — and it is the wrap the row centres.
+  // The wrap is 26.5 tall, the 26px button at its top — an inline button on its line's baseline, with
+  // half a pixel of the line's descent under it — and it is the wrap the row centres.
   return (
     <View flexShrink={0} position="relative" height={26.5}>
     <RNView ref={ref} collapsable={false} style={PLAIN_SCROLLER as never}>
@@ -564,7 +563,7 @@ function ContextMeter({ t, context, route, open, onOpen }: { t: Tokens; context:
   );
 }
 
-/** `.cx-send`: the arrow (a clock while the account has nothing left). */
+/** Send: the arrow (a clock while the account has nothing left). */
 function SendButton({ t, spent, title, disabled, onPress }: { t: Tokens; spent: boolean; title: string; disabled: boolean; onPress: () => void }): JSX.Element {
   return (
     <Press

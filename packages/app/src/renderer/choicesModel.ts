@@ -5,7 +5,7 @@
  * `choose_option` and `AskUserQuestion` differ in where the answer goes and whether it is checked
  * against a declared enum, and in nothing a person can see, so both normalize into {@link Choice} and
  * are answered here: what is picked and typed, when that is settled, what a click submits, and the
- * answers read back out of what was stored. The universal `Choices`
+ * answers read back out of what was stored. `Choices`
  * (`packages/universal/src/components/floats/Choices.tsx`) and the gates draw from it; nothing here draws.
  */
 import { answerText, readAnswer, type Choice } from "@jaira/shared/browser";

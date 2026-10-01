@@ -14,7 +14,7 @@ import { NoneRow, PanelRow, PanelSection, valueRows } from "./PanelViews";
 import { RunIndex } from "./RunIndex";
 import { SpIcon } from "./SidePanel";
 
-/** What the Steps tab needs from the panel's host (`panelFaces.tsx`'s `stepsBody`). */
+/** What the Steps tab needs from the panel's host (`faces.tsx`'s `stepsBody`). */
 export interface StepsHost {
   onStep: (step: string | undefined) => void;
   current?: string | undefined;
@@ -33,17 +33,16 @@ export interface StepsHost {
 }
 
 /**
- * `panelViews.tsx`'s `StepsView`, universal (decision 0015): the run's index in a box that FITS
- * (`stepCompaction.ts`), and under it the card of the step that is selected. With no step selected the
- * index takes the whole column. What decides when the card closes and how the index fits is
- * `panelViewsModel.ts`'s (`useStepFollow`, `useStepsFit`), the DOM's own. The rules:
+ * The Steps tab: the run's index in a box that FITS (`stepCompaction.ts`), and under it the card of the
+ * step that is selected. With no step selected the index takes the whole column. What decides when the
+ * card closes and how the index fits is `panelViewsModel.ts`'s (`useStepFollow`, `useStepsFit`).
  *
- *   .pv-steps          column, flex 1
- *   .pv-blocked        a `.notice.warn` per blocked state: --tint-warn, --warn at 11/12.5, padding 7 9
- *   .pv-steps-box      padding 4 8 4 10, clipped, at least 128 tall; .fill takes the column and scrolls
- *   .pv-steps-split    9 tall, 0 10 either side: a 1px --line at 4, a 34 × 5 --rule handle at 2
+ *   the tab            column, flex 1
+ *   blocked states     a warning notice each: --tint-warn, --warn at 11/12.5, padding 7 9
+ *   the index's box    padding 4 8 4 10, clipped, at least 128 tall; alone, it takes the column and scrolls
+ *   the divider        9 tall, 0 10 either side: a 1px --line at 4, a 34 × 5 --rule handle at 2
  *                      (radius 3); dragging it sets the box's height (web)
- *   .pv-steps-card     flex 1, scrolls, padding 6 12 16
+ *   the card           flex 1, scrolls, padding 6 12 16
  */
 export function StepsBody({ detail, entry, convo, project, host }: { detail: TaskDetail; entry: { step?: string }; convo: boolean; project: string | undefined; host: StepsHost }): JSX.Element {
   const t = useTokens();
@@ -83,7 +82,7 @@ export function StepsBody({ detail, entry, convo, project, host }: { detail: Tas
       {step === undefined ? (
         <ScrollView
           {...(scrollbarProps(t) as object)}
-          // `PLAIN_SCROLLER`: the DOM's `overflow-y: auto` box is not composited, and its text is subpixel.
+          // `PLAIN_SCROLLER`: the index's scroller is not composited, so its text stays subpixel.
           style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
           contentContainerStyle={{ paddingTop: 4, paddingRight: 8, paddingBottom: 4, paddingLeft: 10, ...PLAIN_SCROLLER } as never}
           onLayout={(e) => setRows(stepRowsOf(e.nativeEvent.layout.height))}
@@ -114,7 +113,7 @@ export function StepsBody({ detail, entry, convo, project, host }: { detail: Tas
   );
 }
 
-/** `.pv-steps-split`: the divider between the index and the card, dragged to size the index (web). */
+/** The divider between the index and the card, dragged to size the index (web). */
 function Split({ height, onHeight }: { height: number; onHeight: (height: number) => void }): JSX.Element {
   const t = useTokens();
   const [hot, setHot] = useState(false);
@@ -144,7 +143,7 @@ function Split({ height, onHeight }: { height: number; onHeight: (height: number
   );
 }
 
-/** A status's glyph (`board.tsx`'s `Badge`) in a line of the panel's text. */
+/** A status's glyph (`panelFaceModel.ts`' `BADGE`) in a line of the panel's text. */
 function Badge({ status }: { status: string }): JSX.Element {
   const hue = status === "running" || status === "interrupted" ? "accent" : status === "waiting_for_user" ? "warn" : status === "completed" ? "ok" : status === "failed" || status === "blocked" || status === "timeout" ? "bad" : "dim";
   return (
@@ -155,11 +154,11 @@ function Badge({ status }: { status: string }): JSX.Element {
 }
 
 /**
- * `panelViews.tsx`'s `StepCard`: one step, densely — what went in and came out first, then how it ran.
+ * One step, densely — what went in and came out first, then how it ran.
  *
- *   .pv-card        column, gap 10
- *   .pv-card-head   row, centred, gap 7: the badge, the name (600, --text), the path (data 10/12,
- *                   --dim, right-aligned, ellipsed, flex 1), and the card's two icons
+ *   the card        column, gap 10
+ *   its head        row, centred, gap 7: the badge, the name (600, --text), the path (the data size
+ *                   10/12, --dim, right-aligned, ellipsed, flex 1), and the card's two icons
  */
 function StepCard({
   detail,
@@ -203,7 +202,7 @@ function StepCard({
     <View flexDirection="column" gap={10} minWidth={0}>
       <View flexDirection="row" alignItems="center" gap={7} minWidth={0}>
         <Badge status={node.status} />
-        {/* `.mono` sets nothing here: the name is the body's 13/12.5 at 600, the path the app face at
+        {/* Neither is in the data face: the name is the body's 13/12.5 at 600, the path the app face at
             the data voice's 10/12. */}
         <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} flexShrink={0}>
           {name}

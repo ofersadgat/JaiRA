@@ -10,35 +10,35 @@ import { Picture } from "../Picture";
 import { Icon } from "./Icon";
 
 /**
- * The value view's readings that are more than a run of text (`valueView.tsx`'s `Stats`, `ChangesView`,
- * `PatchView`, `TableView` and `Media`), universal (decision 0015). `ValueView.tsx` picks which; these draw them.
- * The rules they carry, from `styles.css`:
+ * The value view's readings that are more than a run of text: `Stats`, `ChangesView`, `PatchView`,
+ * `TableView` and `Media`. `ValueView.tsx` picks which; these draw them. How they look:
  *
- *   .vv-stats        inline row, gap 5, data 11/12: `.vv-add` --ok, `.vv-del` --bad, `.vv-same` --tok-hint
- *   .vv-changes-head row, baseline, gap 8, padding 2 0 5; its count `.sub` (app 11/12.5, --dim)
- *   .vv-change       a --line on top; its line a row, centred, gap 4; `.vv-change-head` a row, centred,
- *                    gap 7, grows, padding 4 2, radius 4, app 12/12.5 (hover --panel-2): `.ts-chev` 14 wide,
- *                    --tok-hint, its 13px chevron turned 90° while open; the action a `.chip` (app 10/12.5,
- *                    --dim, a 1px --line, round, padding 0 6); `.vv-path` data 11.5/12, one line, …; the
- *                    counts; `.vv-mark` 14 (✓ --ok, ✕ --bad)
- *   .vv-change-body  padding 4 0 8: `.vv-diff-bar` (right, 4 under) with its own toggle, the diff (the
- *                    `diff` island, which draws its ring, as tall as its text: 120 to 620), `.vv-reason`
- *                    `.sub`, 5 2 0 around it
- *   .vv-patch        at most 460 tall, scrolls; `.vv-patch-file + .vv-patch-file` 8 above
- *   .vv-patch-head   a row, centred, gap 7, the whole width, padding 4 6, a 1px --line (hover: --accent
+ *   the counts       inline row, gap 5, data 11/12: added --ok, removed --bad, "no change" --tok-hint
+ *   the changes' head  row, baseline, gap 8, padding 2 0 5; its count app 11/12.5, --dim
+ *   a change         a --line on top; its line a row, centred, gap 4; the fold a row, centred, gap 7,
+ *                    grows, padding 4 2, radius 4, app 12/12.5 (hover --panel-2): the chevron's box 14
+ *                    wide, --tok-hint, its 13px chevron turned 90° while open; the action a chip (app
+ *                    10/12.5, --dim, a 1px --line, round, padding 0 6); the path data 11.5/12, one line,
+ *                    …; the counts; the outcome's mark 14 (✓ --ok, ✕ --bad)
+ *   a change's body  padding 4 0 8: the layout toggle's bar (right, 4 under), the diff (the `diff`
+ *                    island, which draws its ring, as tall as its text: 120 to 620), the reason app
+ *                    11/12.5 --dim, 5 2 0 around it
+ *   a patch          at most 460 tall, scrolls; a file after a file 8 above
+ *   a file's head    a row, centred, gap 7, the whole width, padding 4 6, a 1px --line (hover: --accent
  *                    40% into --line), radius 5, in the body's font (app 13/12.5); its chevron 1em --dim,
- *                    turned -90° while closed; `.vv-patch-act` app 10.5/12.5, upper, 0.04em, --dim
- *                    (create --tok-string, delete --bad); `.vv-patch-path` data 11.5/12, anywhere
- *   .vv-patch-body   data 11.5/12 on 1.5, scrolls sideways; a hunk after a hunk: a dashed --line on top
- *   .vv-patch-at     row, gap 10, padding 3 6, --dim on --dim at 8%; its section at 0.75, one line, …
- *   .vv-patch-line   a row, `pre`; add on --tok-string at 14%, del on --bad at 13% (the sign in each)
- *   .vv-patch-no     4.2em, 8 right, right-aligned, --dim at 0.6, tabular; `.vv-patch-sign` 1.4em, centred
- *   .empty           --dim, padding 8 0 (in a patch's body, 6 0 0 8 around it)
- *   .vv-table-wrap   at most 340 tall, scrolls both ways
- *   .vv-table        collapsed, data 11.5/12 on 1.5; cells a 1px --line, padding 2 7, one line (`pre`),
- *                    at most 320, …; `th` sticky, --panel, --dim, 500; `.vv-table-cut` `.sub`, 6 above
- *   .vv-media        a block, at most the width and 420 tall, radius 6, on --panel-2
- *   .vv-audio        the width, at most 420, 36 tall
+ *                    turned -90° while closed; the action app 10.5/12.5, upper, 0.04em, --dim
+ *                    (create --tok-string, delete --bad); the path data 11.5/12, breaking anywhere
+ *   a file's hunks   data 11.5/12 on 1.5, scrolls sideways; a hunk after a hunk: a dashed --line on top
+ *   a hunk's head    row, gap 10, padding 3 6, --dim on --dim at 8%; its section at 0.75, one line, …
+ *   a patch's line   a row, `pre`; add on --tok-string at 14%, del on --bad at 13% (the sign in each)
+ *   a line number    4.2em, 8 right, right-aligned, --dim at 0.6, tabular; the sign 1.4em, centred
+ *   an empty note    --dim, padding 8 0 (in a patch's body, 6 0 0 8 around it)
+ *   the table's box  at most 340 tall, scrolls both ways
+ *   the table        collapsed, data 11.5/12 on 1.5; cells a 1px --line, padding 2 7, one line (`pre`),
+ *                    at most 320, …; the header sticky, --panel, --dim, 500; the cut's note app 11/12.5
+ *                    --dim, 6 above
+ *   a picture, a clip  a block, at most the width and 420 tall, radius 6, on --panel-2
+ *   a track          the width, at most 420, 36 tall
  */
 
 /** `Stats`: `+12` in green and `−3` in red, or the honest nothing for a change that moved no lines. */
@@ -61,11 +61,11 @@ export function Stats({ added, removed }: { added: number; removed: number }): J
   );
 }
 
-/** `.vv-changes-head`: how many files, and the counts. */
+/** The head over a set of changes: how many files, and the counts. */
 export function ChangesHead({ count, added, removed }: { count: number; added: number; removed: number }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="baseline" gap={8} paddingTop={2} paddingBottom={5}>
-      {/* Two text nodes, as the DOM's (`{n} {files}`), which Blink shapes apart. */}
+      {/* The count and its word as separate text nodes (`{n} {files}`), which Blink shapes apart. */}
       <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>
         {count} {count === 1 ? "file" : "files"}
       </Txt>
@@ -74,7 +74,7 @@ export function ChangesHead({ count, added, removed }: { count: number; added: n
   );
 }
 
-/** A box that scrolls where the DOM's `overflow: auto` does: on web the element itself, on a phone scroll views. */
+/** A box that scrolls past `maxHeight`: on web the element itself (`overflow: auto`), on a phone scroll views. */
 export function Scroll({ maxHeight, both, children, t }: { maxHeight: number; both?: boolean; children: ReactNode; t: Tokens }): JSX.Element {
   if (isWeb) {
     return (
@@ -96,7 +96,7 @@ export function Scroll({ maxHeight, both, children, t }: { maxHeight: number; bo
   );
 }
 
-/** `p.empty`: a sentence saying there is nothing to draw. */
+/** A sentence saying there is nothing to draw. */
 export function EmptyNote({ children, voice = "app", ...rest }: { children: ReactNode; voice?: "app" | "data" } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice, scale: voice === "app" ? 13 / 12.5 : 11.5 / 12, color: "dim" }} paddingVertical={8} {...rest}>
@@ -121,8 +121,8 @@ export function PatchView({ files }: { files: readonly PatchFile[] }): JSX.Eleme
 }
 
 /**
- * `.sub` inside the data face: the app's 11/12.5 in the face around it (the family is inherited), on the
- * inherited unitless 1.5 of its own size.
+ * A dim aside inside the data face (a renamed file's old path, "no newline at end of file"): the app's
+ * 11/12.5 size in the data family around it, on a line 1.5 × its own size.
  */
 function subInDataOf(t: Tokens): Record<string, unknown> {
   const size = t.scaled("size-app", 11 / 12.5);
@@ -181,7 +181,7 @@ function PatchFileView({ file, first, t }: { file: PatchFile; first: boolean; t:
   );
 }
 
-/** `.vv-patch-body`: the hunks, which scroll sideways inside the patch rather than widen what holds it. */
+/** A file's hunks, which scroll sideways inside the patch rather than widen what holds it. */
 function PatchBody({ file, t }: { file: PatchFile; t: Tokens }): JSX.Element {
   const data = { voice: "data" as const, scale: 11.5 / 12, lineHeight: 1.5 };
   const subInData = subInDataOf(t);
@@ -327,7 +327,7 @@ export function Media({ src, kind }: { src: string; kind: MediaKind }): JSX.Elem
   return <EmptyNote>{kind === "video" ? "A clip" : "A track"} — played on the desktop. Its source is under Source.</EmptyNote>;
 }
 
-/** How a change fared after it was produced (`valueView.tsx`'s `ChangeOutcome`): the mark at the end of its row. */
+/** How a change fared after it was produced: the mark at the end of its row. */
 export interface ChangeOutcome {
   ok: boolean;
   /** Why, when it is not ok. */
@@ -336,12 +336,12 @@ export interface ChangeOutcome {
 
 type DiffLayout = "inline" | "split";
 
-/** A phone's diff island's height: the desktop's pane takes its text's, 120 to 620 (`MonacoDiffPane`), estimated by lines. */
+/** A phone's diff island's height: on web the pane takes its text's, 120 to 620 (`MonacoDiffPane`); here it is estimated by lines. */
 const diffHeight = (change: Change): number => Math.min(Math.max(((change.before ?? "").split("\n").length + (change.after ?? "").split("\n").length) * 19 + 8, 120), 620);
 
 /**
  * `ChangesView`: a set of file changes, collapsed — the list first, a file's diff (the `diff` island)
- * when its row is opened. Inline or side by side is held by the list, as the desktop's.
+ * when its row is opened. Inline or side by side is held by the list: one choice for every file's diff.
  */
 export function ChangesView({
   changes,
@@ -444,7 +444,7 @@ function ChangeRow({ change, outcome, layout, onLayout, action }: { change: Chan
                 </View>
               </View>
               {/* Read-only: this view takes no decisions. The pane takes its text's height, 120 to 620
-                  (`MonacoDiffPane`'s fit, over the stylesheet's 320); a phone's island is told it. */}
+                  (`MonacoDiffPane`'s fit); a phone's island is told it. */}
               <Island component="diff" {...(isWeb ? {} : { height: diffHeight(change) })} props={{ original: change.before ?? "", modified: change.after ?? "", mime: mimeOfPath(change.path), sideBySide: layout === "split", readOnly: true }} />
             </>
           )}

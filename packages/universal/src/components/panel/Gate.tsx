@@ -24,24 +24,24 @@ import { InlineGlyph } from "../floats/InlineGlyph";
 const plainChoice = (choices: readonly Choice[]): boolean => choices.length === 1 && choices[0]!.freeText === undefined && choices[0]!.multiple !== true && choices[0]!.requireConfirm !== true;
 
 /**
- * A parked gate, universal (decision 0015): `components.tsx`'s `GateSurface` inside the panel's
- * `section.inline-gate` (`panelFaces.tsx`'s `TaskConversation`), with `choices.tsx`'s `ChoiceList` for
- * a `choose_option` of one question; every other body is `floats/GateBodies.tsx`'s. The rules, from `styles.css`:
+ * A parked gate in the panel: `GateSurface` in a section under a task's conversation
+ * (`TaskConversation.tsx`). A `choose_option` of one plain question is this file's `ChooseOption`; every
+ * other body is `floats/GateBodies.tsx`'s. How it looks:
  *
- *   .pv-convo > .inline-gate   flex none, at most 55% tall, scrolls; padding 10 12, a --line on top;
- *                              .inline-gate's margin-top 12
- *   .inline-gate h3            700 (h3), --size-app × 17/12.5, line 1.35, --text, margin 0 0 8; the
- *                              glyph 16, --dim, 4 right, 2 below the baseline, then a space
- *   .gate-resumes              --size-app × 11/12.5, --dim, margin 4 0 0 (collapses into the h3's 8)
- *   .question-block            margin-top 14; .question-options row, wrapping, gap 8, margin-top 12
- *                              (collapses into the block's 14 — except in a state's panel, `.st-block`,
- *                              a flex column whose items keep their children's margins)
- *   .question-option           padding 8 12, 1px --line, radius 8, --bg; the label the body's font
+ *   the section                flex none, at most 55% tall, scrolls; padding 10 12, a --line on top;
+ *                              12 above
+ *   the heading                700, --size-app × 17/12.5, line 1.35, --text, 8 under; the glyph 16,
+ *                              --dim, 4 right, 2 below the baseline, then a space
+ *   the resumes line           --size-app × 11/12.5, --dim, 4 above (collapses into the heading's 8)
+ *   the question               14 above; its options a row, wrapping, gap 8, 12 above (collapses into
+ *                              the question's 14 — except in a state's panel, a flex column whose items
+ *                              keep their children's margins)
+ *   an option                  padding 8 12, 1px --line, radius 8, --bg; the label the body's font
  *                              (--size-app × 13/12.5, 1.5), --text. Hover: an --accent edge.
- *   .question-option.primary   --fill-accent ground and edge, --sheen; the label 600 --on-accent.
+ *   the primary option         --fill-accent ground and edge, --sheen; the label 600 --on-accent.
  *                              Hover: --fill-accent-hover.
- *   .question-option.danger    the label --bad; the edge --bad 45% into --line; no ground (`button.danger`)
- *   .question-option-desc      a `small`: the body's size ÷ 1.2, --dim, 2 under the label
+ *   a danger option            the label --bad; the edge --bad 45% into --line; no ground
+ *   an option's description    the body's size ÷ 1.2, --dim, 2 under the label
  */
 export function InlineGate({ pending, onGate, maxHeight, services }: { pending: PendingInteraction; onGate: (value: unknown) => void; maxHeight?: number; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const t = useTokens();
@@ -54,8 +54,8 @@ export function InlineGate({ pending, onGate, maxHeight, services }: { pending: 
 
 /**
  * `GateSurface`: the author's question, whether answering it resumes the task, and its control — or,
- * `settled`, the control as it was answered (`.gate-settled`), with "Never answered." over a question
- * nobody got to answer; `error` is the `.reason` line under it.
+ * `settled`, the control as it was answered, with "Never answered." over a question nobody got to
+ * answer; `error` is the reason under it, in --bad.
  */
 export function GateSurface({
   pending,
@@ -70,9 +70,9 @@ export function GateSurface({
   onSubmit: (value: unknown) => void;
   settled?: { value: unknown } | undefined;
   error?: string | undefined;
-  /** Hosted in a state's panel rather than an `.inline-gate`: the heading is the page's plain `h3`. */
+  /** Hosted in a state's panel rather than an `InlineGate`: the heading is `PlainTitle`. */
   plain?: boolean;
-  /** Hosted in a flex column (the gallery's `.modal-wide`), where no margin collapses. */
+  /** Hosted in a flex column (the gallery's wide modal), where no margin collapses. */
   flex?: boolean;
   /** The host's own reach for a gate that mounts the changeset reviewer (`ChangesetGate`'s `services`). */
   services?: Partial<ComponentServices> | undefined;
@@ -80,7 +80,7 @@ export function GateSurface({
   const config = pending.config;
   // A flex column collapses no margin: the body's first block keeps all of its own, under the heading's 8.
   const flat = plain || flex;
-  // A form field's frame (`.modal .field`, `.inline-gate .field`): 12 above and a --dim label — not in a state's panel.
+  // A form field's frame (in a modal or an `InlineGate`): 12 above and a --dim label — not in a state's panel.
   if (settled !== undefined)
     return (
       <FieldFrame.Provider value={!plain}>
@@ -104,15 +104,15 @@ export function GateSurface({
     <FieldFrame.Provider value={!plain}>
       {/* The heading and its glyph, placed as Chromium places an inline one (`floats/GateTitle`). */}
       {plain ? <PlainTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</PlainTitle> : <GateTitle {...(isComponentName(pending.component) ? { icon: COMPONENT_ICON[pending.component] } : {})}>{config?.prompt ?? pending.component}</GateTitle>}
-      {/* `.gate-resumes`: 4 above, which collapses into the heading's 8 except in a flex column. */}
+      {/* The resumes line: 4 above, which collapses into the heading's 8 except in a flex column. */}
       {pending.resumes ? (
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} marginTop={flat ? 4 : 0}>
           Answering this continues the task.
         </Txt>
       ) : null}
-      {/* Without the line above, the block's 14 collapses into the heading's 8 in an `.inline-gate`; in a
+      {/* Without the line above, the block's 14 collapses into the heading's 8 in an `InlineGate`; in a
           state's panel or a wide modal (a flex column) nothing collapses. */}
-      {/* In a flex column capped in height (`.modal-wide`), the body gives way: a reviewer's `.mount-host` scrolls. */}
+      {/* In a flex column capped in height (the wide modal), the body gives way: a reviewer in it scrolls. */}
       <View marginTop={pending.resumes || flat ? 0 : -8} {...(flex ? { flexShrink: 1, minHeight: 0 } : {})}>
         {body}
       </View>
@@ -122,8 +122,8 @@ export function GateSurface({
 
 /**
  * `ChooseOption` for one question: its options, answered on the click (or held for Confirm). `inFlex`:
- * the block is an item of a flex column (a state's panel, `.st-block`), so it is a formatting context of
- * its own and `.question-options`' 12 stays inside its 14 rather than collapsing into it.
+ * the block is an item of a flex column (a state's panel), so it is a formatting context of its own and
+ * the options' 12 stays inside its 14 rather than collapsing into it.
  */
 function ChooseOption({ choices, onSubmit, inFlex = false }: { choices: readonly Choice[]; onSubmit: (value: unknown) => void; inFlex?: boolean }): JSX.Element {
   const [answers, setAnswers] = useState<Record<string, Answer>>(() => initialAnswers(choices));
@@ -168,7 +168,7 @@ function ChooseOption({ choices, onSubmit, inFlex = false }: { choices: readonly
   );
 }
 
-/** One `.question-option`. */
+/** One option of a question. */
 function Option({ label, icon, description, primary = false, danger = false, selected = false, disabled = false, onPress }: { label: string; icon?: keyof typeof PATHS; description?: string; primary?: boolean; danger?: boolean; selected?: boolean; disabled?: boolean; onPress: () => void }): JSX.Element {
   const t = useTokens();
   const accentOr = t.replayed ? t.v("accent") : "var(--accent, var(--text))";
@@ -185,14 +185,14 @@ function Option({ label, icon, description, primary = false, danger = false, sel
       borderStyle="solid"
       {...(disabled ? { opacity: 0.45 } : {})}
       box={({ hovered }) => ({
-        // A danger option is also `button.danger`, whose `background: none` outranks `.question-option`'s --bg.
+        // A danger option has no ground of its own, where the others stand on --bg.
         backgroundColor: primary ? (hovered ? t.v("fill-accent-hover") : t.v("fill-accent")) : danger ? "transparent" : t.v("bg"),
         borderColor: primary ? (hovered ? t.v("fill-accent-hover") : t.v("fill-accent")) : hovered || selected ? accentOr : danger ? t.mix(t.v("bad"), 45, t.v("line")) : t.v("line"),
         ...(primary ? { boxShadow: t.v("sheen") } : selected ? { boxShadow: `inset 0 0 0 1px ${String(accentOr)}` } : {}),
       })}
     >
       <View flexDirection="row" alignItems="center">
-        {/* `<AuthoredIcon/> {label}`: the glyph (13, 2 under the baseline) inline in the label, a space after it. */}
+        {/* The authored glyph (13, 2 under the baseline) inline in the label, a space after it. */}
         <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: primary ? 600 : 400, color: primary ? "on-accent" : danger ? "bad" : "text" }} numberOfLines={1}>
           {icon !== undefined ? (
             <>
@@ -204,7 +204,7 @@ function Option({ label, icon, description, primary = false, danger = false, sel
           {label}
         </Txt>
       </View>
-      {/* `small.question-option-desc`: the UA's `smaller` (the body's size ÷ 1.2) on the inherited 1.5, 2 below. */}
+      {/* The description: the body's size ÷ 1.2 on the same 1.5, 2 below the label. */}
       {description !== undefined && description.length > 0 ? (
         <Txt spec={{ voice: "app", scale: 13 / 12.5 / 1.2, color: "dim" }} marginTop={2}>
           {description}
@@ -215,10 +215,9 @@ function Option({ label, icon, description, primary = false, danger = false, sel
 }
 
 /**
- * A gate as it was answered (`components.tsx`'s `GateSurface` with `settled`): the heading, "Never
- * answered." (`.gate-never`: the body's font, italic, --dim, 10 under) when nothing answered it, and the
- * chooser, inert, with what was picked lit; every other gate's body as it was answered is
- * {@link SettledBody}'s.
+ * A gate as it was answered (`GateSurface` with `settled`): the heading, "Never answered." (the body's
+ * font, italic, --dim, 10 under) when nothing answered it, and the chooser, inert, with what was picked
+ * lit; every other gate's body as it was answered is {@link SettledBody}'s.
  */
 function SettledGateSurface({ pending, settled, error, plain, services }: { pending: PendingInteraction; settled: { value: unknown }; error?: string | undefined; plain: boolean; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const t = useTokens();
@@ -235,7 +234,7 @@ function SettledGateSurface({ pending, settled, error, plain, services }: { pend
           Never answered.
         </Txt>
       ) : null}
-      {/* The block's 14 collapses with the heading's 8 (or the line's 10) in an `.inline-gate`; in a state's
+      {/* The block's 14 collapses with the heading's 8 (or the line's 10) in an `InlineGate`; in a state's
           panel (a flex column) nothing collapses, and the answered control is a block of its own. */}
       <View marginTop={plain ? 0 : never ? -10 : -8}>
         {choices === undefined ? (
@@ -256,9 +255,9 @@ function SettledGateSurface({ pending, settled, error, plain, services }: { pend
 }
 
 /**
- * The page's own `h3`, where a gate stands in a state's panel rather than an `.inline-gate`: a row, the
- * glyph (13, `.gate-icon`) at one end and the words at the other (`space-between`), gap 8; app 700
- * 11/12.5, 0.09em, upper case, --dim; 8 under.
+ * A state's panel's own heading, where a gate stands there rather than in an `InlineGate`: a row, the
+ * glyph (13) at one end and the words at the other (`space-between`), gap 8; app 700 11/12.5, 0.09em,
+ * upper case, --dim; 8 under.
  */
 function PlainTitle({ icon, children }: { icon?: IconName; children: string }): JSX.Element {
   const t = useTokens();
@@ -276,17 +275,17 @@ function PlainTitle({ icon, children }: { icon?: IconName; children: string }): 
 const recordOf = (value: unknown): Record<string, unknown> => (value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
 
 /**
- * The settled bodies other than `choose_option`'s (`components.tsx` with `settled`): a form as it was
- * submitted (a field it did not name is "not answered"), a confirmation with the button that was pressed
- * filled, a tool call's approval as it was asked (the same surface, as the DOM draws it: nothing it
- * presses goes anywhere), an artifact reviewed or edited as it was decided (`artifact/ArtifactGates.tsx`
- * with `settled`), and anything else's JSON (`pre.outputs`: --bg, 1px --line, radius 8, padding 8, data
- * 11/12, pre-wrap, at most 220). The changeset reviewer answered (`review_artifacts`) is the reviewer
- * read-only (`ChangesetGate` with `settled`), with the host's services as the desktop's mount has them.
+ * The settled bodies other than `choose_option`'s: a form as it was submitted (a field it did not name is
+ * "not answered"), a confirmation with the button that was pressed filled, a tool call's approval as it
+ * was asked (the same surface: nothing it presses goes anywhere), an artifact reviewed or edited as it
+ * was decided (`artifact/ArtifactGates.tsx` with `settled`), and anything else's JSON (--bg, 1px --line,
+ * radius 8, padding 8, data 11/12, pre-wrap, at most 220). The changeset reviewer answered
+ * (`review_artifacts`) is the reviewer read-only (`ChangesetGate` with `settled`), given the host's
+ * services.
  *
  * `lift` is what the wrapper above took back (the heading's 8, or "Never answered."'s 10, in an
- * `.inline-gate`): a body with no margin of its own above it — the approval, whose heading has none —
- * gives it back, as the DOM's collapse leaves it.
+ * `InlineGate`): a body with no margin of its own above it — the approval, whose heading has none —
+ * gives it back.
  */
 function SettledBody({ pending, value, lift, plain, services }: { pending: PendingInteraction; value: unknown; lift: number; plain: boolean; services?: Partial<ComponentServices> | undefined }): JSX.Element {
   const t = useTokens();
@@ -315,7 +314,7 @@ function SettledBody({ pending, value, lift, plain, services }: { pending: Pendi
             ))}
           </View>
         ) : null}
-        {/* The record keeps its colours: a pressed button filled, none of them live (`.gate-settled button:disabled`). */}
+        {/* The record keeps its colours: a pressed button filled, none of them live. */}
         <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={details.length > 0 ? 4 : 14}>
           <Button kind={confirmed === true && chosen === undefined ? "primary" : "plain"}>{config.confirmLabel}</Button>
           {(config.options ?? []).map((option) => (
@@ -331,7 +330,7 @@ function SettledBody({ pending, value, lift, plain, services }: { pending: Pendi
   if (config?.component === "approve_tool_call") {
     return (
       <View marginTop={lift}>
-        {/* In a state's panel its heading is the page's plain `h3` too (`.approval-surface > h3` is the dialog's). */}
+        {/* In a state's panel its heading is the panel's plain one too (the surface's own is the dialog's). */}
         {plain ? <PlainTitle icon="shield">Approve this command?</PlainTitle> : null}
         <ApprovalSurface pending={pendingOfPrompt(pending.requestId, config.prompt, (pending.inputs as Record<string, unknown>)["request"])} onDecide={() => undefined} heading={!plain} />
       </View>
@@ -344,7 +343,7 @@ function SettledBody({ pending, value, lift, plain, services }: { pending: Pendi
     return <EditArtifactGate config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} requestId={pending.requestId} project={subjectOf(pending)} settled={{ value }} serve={serveOfGate(pending)} />;
   }
   if (config?.component === "review_artifacts") {
-    // `.mount-host` under the heading with no margin of its own: the reviewer gives back what the wrapper took.
+    // The reviewer stands under the heading with no margin of its own: it gives back what the wrapper took.
     return (
       <View marginTop={lift}>
         <ChangesetGate pending={pending} config={config} inputs={pending.inputs as Record<string, unknown>} onSubmit={() => undefined} project={subjectOf(pending)} host={services} settled={{ value }} />

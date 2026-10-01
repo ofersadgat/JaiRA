@@ -13,36 +13,35 @@ import { Switch } from "./controls";
 import { SettingsSection } from "./SettingsPage";
 
 /**
- * `filesTreePane.tsx`'s Files tree section, universal (decision 0015): what the Files tree leaves out,
- * rule by rule, with what each rule does HERE — the layer's own list, the table of rules in the groups
- * they apply in (each with its count, first matches and switch), the add line with its preview, "Why
- * is a path hidden?" and "Show system/". What it says, writes and asks main is `filesTreeModel.ts`'s,
- * as the DOM's is. The rules, from `styles.css`:
+ * Settings → Appearance → Files tree: what the Files tree leaves out, rule by rule, with what each rule
+ * does HERE — the layer's own list, the table of rules in the groups they apply in (each with its
+ * count, first matches and switch), the add line with its preview, "Why is a path hidden?" and "Show
+ * system/". What it says, writes and asks main is `filesTreeModel.ts`'s. How it looks:
  *
- *   .set-group > .hid-body   column, gap 10, padding 13 16
- *   .hid-box             1px --line, radius --control-radius, --panel, clipped; columns 8–12rem | 1fr |
+ *   the body             column, gap 10, padding 13 16
+ *   the table            1px --line, radius --control-radius, --panel, clipped; columns 8–12rem | 1fr |
  *                        6.5rem | 2.6rem, gap 4 12
- *   .hid-cols            padding 6 10, app 600 at 0.8, 0.04em, upper, --dim, --panel-2, a --line under
- *   .hid-group + .hid-group   a --line between
- *   .hid-fold            row, baseline, gap 8, padding 7 10, the body's 13/12.5; hovered
- *                        --fill-ghost-hover; `.hid-chev` › at 1.25 on a line of 1, 0.8em wide, --dim,
+ *   its head             padding 6 10, app 600 at 0.8, 0.04em, upper, --dim, --panel-2, a --line under
+ *   a group              a --line between two
+ *   its fold             row, baseline, gap 8, padding 7 10, the body's 13/12.5; hovered
+ *                        --fill-ghost-hover; the chevron › at 1.25 on a line of 1, 0.8em wide, --dim,
  *                        turned a quarter when open; the name 600 --text; the sum app-secondary
- *   .hid-lines           4 under the last line; `.hid-line` padding 6 10, centred, a --line at 60%
+ *   its lines            4 under the last line; a line padding 6 10, centred, a --line at 60%
  *                        between two, hovered --fill-ghost-hover
- *   .hid-pat-cell        row, wraps, gap 6, 0.8em + 8 in; the pattern data-text (struck, --dim, off);
+ *   a line's pattern     row, wraps, gap 6, 0.8em + 8 in; the pattern data-text (struck, --dim, off);
  *                        its `!` 700 --ok
- *   .hid-what            column, gap 2: the count app 0.95 --text, the samples data-secondary on one
+ *   what it hides        column, gap 2: the count app 0.95 --text, the samples data-secondary on one
  *                        line; "nothing here" app-absent at 0.92, 0.85 opacity; the off note 0.92
  *                        --dim; a note padding 1 6, radius --control-radius-sm, --warn on --tint-warn,
  *                        0.86
- *   .hid-chip            padding 0 6, 1px --line, round, app 0.8 on 1.6, --dim, one line; `.hid-puts`
+ *   a chip               padding 0 6, 1px --line, round, app 0.8 on 1.6, --dim, one line; "puts back"
  *                        --ok on --tint-ok, its ring --ok 40%; the layer being edited --accent on
  *                        --tint-accent, its ring --accent 45%
- *   .hid-code            data at 0.92em, --text
- *   .hid-add             row, wraps, centred, gap 6 8: the box (flex 1 1 16rem), Add, and the preview
+ *   code in words        data at 0.92em, --text
+ *   the add line         row, wraps, centred, gap 6 8: the box (flex 1 1 16rem), Add, and the preview
  *                        on a line of its own (data-secondary, one line)
- *   .hid-ask             column, gap 6; `.hid-why` app 0.95 --dim (a failure --bad)
- *   @container ≤ 520     the head goes, and a line is the pattern, its chip and its switch, what it
+ *   the question         column, gap 6; its answer app 0.95 --dim (a failure --bad)
+ *   520 wide or less     the head goes, and a line is the pattern, its chip and its switch, what it
  *                        hides under them, 0.8em + 8 in
  */
 export function FilesTreeSection(props: {
@@ -164,7 +163,7 @@ function FilesTreeView(props: ReturnType<typeof useFilesTree>): JSX.Element {
   );
 }
 
-/** Words, and a pattern or path as `code.hid-code` (the data face at 0.92 of the words around it, --text). */
+/** Words, and a pattern or path in them as code (the data face at 0.92 of the words around it, --text). */
 function HidWords({ parts, scale }: { parts: readonly HidPart[]; scale: number }): JSX.Element {
   return (
     <>

@@ -4,12 +4,14 @@ import { Text, View, isWeb } from "@tamagui/core";
 import { useTokens, type Tokens } from "./tokens";
 
 /**
- * What every copy stands on (decision 0015): the things `styles.css` does once for the whole page and a
- * copy has to do for itself, written once here instead of in every copy.
+ * What every component of this tree stands on (decision 0015). The tree is drawn by react-native-web in a
+ * browser (the desktop's window is one) and natively on a phone, and its page carries no stylesheet: what
+ * a stylesheet does once for a whole page, a component has to do for itself — written once here instead
+ * of in every component.
  *
- * - **Type.** On the desktop's page a word inherits its font from `body` and its register's class. On
- *   native nothing inherits into a `Text` from a `View`, so every `Text` states its whole font:
- *   {@link font} builds it, and {@link REGISTERS} are `styles.css`'s ten registers (SHELL.md §3.3).
+ * - **Type.** Nothing gives a word a font from outside: on native nothing inherits into a `Text` from a
+ *   `View`, and on web there is no `body` rule to inherit from. So every `Text` states its whole font:
+ *   {@link font} builds it, and {@link REGISTERS} are the ten registers (SHELL.md §3.3).
  * - **Pressing.** React Native's `Pressable`, because Tamagui's `onPress` never fired on Android (found on
  *   the emulator); {@link Press} puts a Tamagui box inside it and hands the box its hover and press state.
  */
@@ -23,7 +25,7 @@ export interface FontSpec {
   scale: number;
   weight?: number;
   italic?: boolean;
-  /** Letter spacing in em, as the stylesheet writes it. */
+  /** Letter spacing in em. */
   ls?: number;
   upper?: boolean;
   /** A colour token name (`dim`) or a colour. */
@@ -34,8 +36,8 @@ export interface FontSpec {
 }
 
 /**
- * A `Text`'s whole font, from a spec: family, size, weight, spacing, case, colour and line height — what
- * a DOM word inherits and a native one must be told.
+ * A `Text`'s whole font, from a spec: family, size, weight, spacing, case, colour and line height — all
+ * of which it must be told, since it inherits none.
  */
 export function font(t: Tokens, spec: FontSpec): Record<string, unknown> {
   const size = t.scaled(`size-${spec.voice}`, spec.scale);
@@ -49,8 +51,8 @@ export function font(t: Tokens, spec: FontSpec): Record<string, unknown> {
     // After the weight: on native a cut face says `normal`, since the weight is in the face itself.
     ...familyOf(t, spec.voice, weight, px ?? 12),
     ...(spec.italic === true ? { fontStyle: "italic" } : {}),
-    // Replayed, sizes are numbers and so must spacing and line height be; on the desktop's page they
-    // stay relative, as the stylesheet writes them, so a size preference moves them with the text.
+    // Replayed, sizes are numbers and so must spacing and line height be; where the tokens are CSS
+    // variables they stay relative (`em`, a factor), so a size preference moves them with the text.
     ...(spec.ls !== undefined ? { letterSpacing: px !== undefined ? spec.ls * px : `${spec.ls}em` } : {}),
     ...(spec.upper === true ? { textTransform: "uppercase" } : {}),
     lineHeight: typeof lh === "object" ? (px !== undefined ? lh.px : `${lh.px}px`) : px !== undefined ? lh * px : String(lh),
@@ -60,8 +62,8 @@ export function font(t: Tokens, spec: FontSpec): Record<string, unknown> {
 }
 
 /**
- * The family, as each platform names it. On web the stack (`var(--font-app)`, or the replayed stack
- * the `/rn` page registers with `@font-face`). On native a single family: the bundled face cut at the
+ * The family, as each platform names it. On web the stack (the replayed one, whose faces the page
+ * registers with `@font-face`, or `var(--font-app)`). On native a single family: the bundled face cut at the
  * nearest weight — and for DM Sans the nearest optical size, which Chromium sets to the font size —
  * since Android can pick neither out of one variable file (`scripts/fonts.py` cuts them).
  */
@@ -84,7 +86,7 @@ function nativeFamily(family: string, weight: number, size: number): string {
   return family;
 }
 
-/** `styles.css`'s ten registers (SHELL.md §3.3), as font specs. Data never takes a transform. */
+/** The ten registers (SHELL.md §3.3), as font specs. Data never takes a transform. */
 export const REGISTERS = {
   "app-title": { voice: "app", scale: 1.05, weight: 700, ls: -0.012, color: "text" },
   "app-label": { voice: "app", scale: 0.8, weight: 700, upper: true, ls: 0.1, color: "dim" },
@@ -100,8 +102,7 @@ export const REGISTERS = {
 export type Register = keyof typeof REGISTERS;
 
 /**
- * A run of text in a register (or a spec), with overrides. `ellip` is the stylesheet's `.ellip`: one
- * line, cut with an ellipsis.
+ * A run of text in a register (or a spec), with overrides. `ellip`: one line, cut with an ellipsis.
  */
 export function Txt({
   register,
@@ -119,10 +120,10 @@ export function Txt({
   const ink = useContext(InkContext);
   const base: FontSpec = { ...(register !== undefined ? REGISTERS[register] : { voice: "app", scale: 1 }), ...spec } as FontSpec;
   if (base.color === undefined && ink !== undefined) base.color = ink;
-  // A factor stays a factor on web, as the stylesheet writes it (`line-height: 1.5`, inherited as a
-  // number): Blink multiplies it out and snaps the product DOWN to a sixty-fourth of a device pixel,
-  // where a length is snapped to the nearest — a title one sixty-fourth taller put a line of JSON far
-  // below it on the other side of a pixel. Not where the size is given apart from the spec (`fontSize`):
+  // A factor stays a factor on web (`line-height: 1.5`, a number): Blink multiplies it out and snaps
+  // the product DOWN to a sixty-fourth of a device pixel, where a length is snapped to the nearest — a
+  // title one sixty-fourth taller put a line of JSON far below it on the other side of a pixel from
+  // its reference picture. Not where the size is given apart from the spec (`fontSize`):
   // there the line is the spec's own size times the factor, as it always was. A phone is told the product.
   const factor = isWeb && typeof base.lineHeight !== "object" && rest["fontSize"] === undefined ? { lineHeight: String(base.lineHeight ?? 1.5) } : {};
   return (
@@ -135,12 +136,12 @@ export function Txt({
 
 /**
  * The colour a `Txt` that names none takes: the body's --text, unless a box round it sets another — CSS
- * inheritance, for the one place a copy needs it (an adopted task's history drawn inside a note row,
- * `.sb-note.step`, whose --dim reaches every word in it that sets no colour of its own).
+ * inheritance, for the one place the tree needs it (an adopted task's history drawn inside a step's
+ * note row, whose --dim reaches every word in it that sets no colour of its own).
  */
 export const InkContext = createContext<string | undefined>(undefined);
 
-/** A glyph set in the app voice at a size, centred in a fixed width (the sidebar's `.side-glyph`). */
+/** A glyph set in the app voice at a size, centred in a fixed width (a sidebar row's glyph). */
 export function Glyph({ children, width, scale = 1, color = "dim", ...rest }: { children: ReactNode; width?: number; scale?: number; color?: string } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale, color }} textAlign="center" {...(width !== undefined ? { width, flexShrink: 0 } : {})} {...rest}>
@@ -160,10 +161,9 @@ const OUTER = new Set(["flex", "flexGrow", "flexShrink", "flexBasis", "alignSelf
 /**
  * What says a control's kind and state to someone not looking at it (`role`, `aria-expanded`,
  * `aria-selected`, `aria-pressed`, …) and what follows its focus (`onKeyDown`, `onFocus`, `onBlur`): on
- * web they belong on the element that TAKES the focus, the `Pressable`, as the desktop writes them on its
- * `<button>` — on the box inside it a tab's `aria-selected` described a `div` nobody can reach, and a key
- * handler heard nothing. A phone keeps them where they were, on the box: React Native reads its own
- * accessibility props there, and has no keyboard.
+ * web they belong on the element that TAKES the focus, the `Pressable` (a `<button>`) — on the box inside
+ * it a tab's `aria-selected` described a `div` nobody can reach, and a key handler heard nothing. A phone
+ * keeps them on the box: React Native reads its own accessibility props there, and has no keyboard.
  */
 const onControl = (k: string): boolean => isWeb && (k === "role" || k.startsWith("aria-") || k === "onKeyDown" || k === "onFocus" || k === "onBlur");
 
@@ -171,24 +171,24 @@ const onControl = (k: string): boolean => isWeb && (k === "role" || k.startsWith
 const CORNERS = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"] as const;
 
 /**
- * A pressable as a `<button>` stands in its page: react-native-web's View is positioned and a stacking
- * context (`position: relative; z-index: 0`), and a page whose every button is one is PAINTED in another
- * order than the desktop's — the buttons after everything that is not one. Chromium layers a page by
- * that order: what is painted after a scroller shares a layer with its scrollbar, and the text of such a
+ * A pressable as a plain `<button>` stands in a page: react-native-web's View is positioned and a
+ * stacking context (`position: relative; z-index: 0`), and a page whose every button is one is PAINTED
+ * out of document order — the buttons after everything that is not one. Chromium layers a page by that
+ * order: what is painted after a scroller shares a layer with its scrollbar, and the text of such a
  * layer is greyscale; so a row of tabs, a tree's rows, a gate's buttons came out greyscale where the
- * desktop's are subpixel, and the other way round. Native keeps its own.
+ * reference pictures have subpixel text, and the other way round. Native keeps its own.
  */
 const PLAIN_PRESS: Record<string, unknown> = isWeb ? { position: "static", zIndex: "auto" } : {};
 
 /**
  * Something that can be pressed: React Native's `Pressable` around a Tamagui box. The box's props may be
- * a function of the press state, for the stylesheet's `:hover` (web only; a phone has no pointer).
+ * a function of the press state, for what CSS writes as `:hover` (web only; a phone has no pointer).
  * Props that size and place it go on the `Pressable`; the box fills it.
  *
- * A `role` other than a button's (`tab`, `switch`, `checkbox`, `menuitem`) is the desktop's `<button
- * role="tab">`: on web the element stays the `<button>` react-native-web draws for a button — Space
- * presses it, `disabled` disables it, and it lays out as every other `Press` — and the role is written on
- * it once it is there, since react-native-web picks the element FROM the role and would draw a `div`.
+ * A `role` other than a button's (`tab`, `switch`, `checkbox`, `menuitem`) is a `<button role="tab">`:
+ * on web the element stays the `<button>` react-native-web draws for a button — Space presses it,
+ * `disabled` disables it, and it lays out as every other `Press` — and the role is written on it once
+ * it is there, since react-native-web picks the element FROM the role and would draw a `div`.
  *
  * On web it is no stacking context and not positioned ({@link PLAIN_PRESS}), as a `<button>` is neither.
  * Something placed absolutely inside a `Press` needs it positioned, as it needs a `<button>` to be: say
@@ -273,9 +273,9 @@ export function useHover(): [boolean, Record<string, unknown>] {
 }
 
 /**
- * A border on some sides only, as the stylesheet writes `border-bottom: 1px solid var(--line)`. Every
- * side's width is stated: on web Tamagui leaves the rest at the browser's `medium` (3px) once a style is
- * set, which drew a frame around boxes that have one rule.
+ * A border on some sides only (CSS's `border-bottom: 1px solid var(--line)`). Every side's width is
+ * stated: on web Tamagui leaves the rest at the browser's `medium` (3px) once a style is set, which drew
+ * a frame around boxes that have one rule.
  */
 export function edge(
   t: Tokens,
@@ -294,29 +294,31 @@ export function edge(
 }
 
 /**
- * `-webkit-app-region: drag` with `user-select: none` (`.title-drag`, `.side-title`): where the desktop's
- * frameless window is grabbed and moved. The OS hit-tests it, not the page, so a press there never
- * reaches a handler — and the property INHERITS, so anything clickable inside a strip stands in a box
- * that says {@link NO_DRAG} (`.side-title button`), as does a float lying over one (`.float`). In a
- * `style`; nothing on a phone, whose window is not moved.
+ * `-webkit-app-region: drag` with `user-select: none` (the title bar's empty stretch, the sidebar's
+ * head): where the desktop's frameless window is grabbed and moved. The OS hit-tests it, not the page,
+ * so a press there never reaches a handler — and the property INHERITS, so anything clickable inside a
+ * strip stands in a box that says {@link NO_DRAG} (the sidebar head's button), as does a float lying
+ * over one (`FLOATS`). In a `style`; nothing on a phone, whose window is not moved.
  */
 export const DRAG_REGION: Record<string, unknown> = isWeb ? { WebkitAppRegion: "drag", userSelect: "none" } : {};
 export const NO_DRAG: Record<string, unknown> = isWeb ? { WebkitAppRegion: "no-drag" } : {};
 
 /**
- * A region of the window by what it is — the desktop's `<nav>` (the sidebar), `<header>` (the title bar),
- * `<aside>` (the side panel) and `<footer>` (the inbox strip) — as the role each element has, for a
- * reader moving by landmark. Web only: a phone's screen reader has no landmarks to move by, and a role
- * React Native does not know has crashed Android before (`separator`).
+ * A region of the window by what it is — the sidebar (`navigation`, a `<nav>`'s role), the title bar
+ * (`banner`, a `<header>`'s), the side panel (`complementary`, an `<aside>`'s) and the inbox strip
+ * (`contentinfo`, a `<footer>`'s) — for a reader moving by landmark. Web only: a phone's screen reader
+ * has no landmarks to move by, and a role React Native does not know has crashed Android before
+ * (`separator`).
  */
 export const landmark = (role: "navigation" | "banner" | "complementary" | "contentinfo"): Record<string, unknown> => (isWeb ? { role } : {});
 
 /**
  * The gutters the OS draws the window's buttons into (`--wco-left`: macOS's traffic lights; `--wco-right`:
  * minimise, maximise and close on Windows and Linux — from Chromium's `titlebar-area-*` environment
- * variables), added to a padding or a least width: what the desktop's top row keeps clear of them. CSS
+ * variables), added to a padding or a least width: what the window's top row keeps clear of them. CSS
  * on web, where a plain browser resolves each to no gutter at all; a phone has no such buttons. The
- * band's height (`--wco-height`) is the 34 the copies already write: `titleBarOverlay` asks for exactly it.
+ * band's height (`--wco-height`) is the 34 the top row already stands at: `titleBarOverlay` asks for
+ * exactly it.
  */
 export const WINDOW_GUTTER: { left: (pad: number) => number | string; right: (pad: number) => number | string } = isWeb
   ? {
@@ -326,11 +328,11 @@ export const WINDOW_GUTTER: { left: (pad: number) => number | string; right: (pa
   : { left: (pad) => pad, right: (pad) => pad };
 
 /**
- * `styles.css`'s ONE scrollbar (`::-webkit-scrollbar`: a 10px gutter, a rounded thumb inset 2px, drawn
- * from `--text` at 16%, 26% over the box that scrolls, 40% under the pointer, 50% held), for a copy's
+ * The app's ONE scrollbar (`::-webkit-scrollbar`: a 10px gutter, a rounded thumb inset 2px, drawn
+ * from `--text` at 16%, 26% over the box that scrolls, 40% under the pointer, 50% held), for a
  * `ScrollView` on web. A pseudo-element has no inline style, so the rules are written once per colour
  * into a `<style>` of their own and the box is pointed at them by `data-scrollbar`. Only scrollbar
- * rules: nothing else on the `/rn` page comes from a stylesheet. Native draws its own overlay
+ * rules: no component takes anything else from a stylesheet. Native draws its own overlay
  * indicator, with no gutter, and gets nothing.
  */
 export function scrollbarProps(t: Tokens): Record<string, unknown> {
@@ -377,7 +379,8 @@ export function viewScrollbarProps(t: Tokens): Record<string, unknown> {
 
 /**
  * A length token as a number where the replayed cascade has one (`--control-radius` → 7), or the
- * variable itself on the desktop's page, which resolves it (`var(--control-radius, 7px)`).
+ * variable itself where the tokens are CSS variables, for the browser to resolve
+ * (`var(--control-radius, 7px)`).
  */
 export function lengthToken(t: Tokens, name: string, fallback: number): number | string {
   if (!t.replayed) return `var(--${name}, ${fallback}px)`;
@@ -387,8 +390,8 @@ export function lengthToken(t: Tokens, name: string, fallback: number): number |
 }
 
 /**
- * A two-length padding token (`--control-pad: 3px 10px`) as `[vertical, horizontal]` numbers. A
- * padding cannot be a `var()` on native, so the desktop's page takes the stylesheet's own values.
+ * A two-length padding token (`--control-pad: 3px 10px`) as `[vertical, horizontal]` numbers. Where
+ * the tokens are CSS variables there is no number to read: the fallback, the token's default, is returned.
  */
 export function padToken(t: Tokens, name: string, fallback: [number, number]): [number, number] {
   if (!t.replayed) return fallback;
@@ -401,15 +404,16 @@ export function padToken(t: Tokens, name: string, fallback: [number, number]): [
 /**
  * A `ScrollView`'s style on web without what react-native-web gives every scroller — `translateZ(0)`
  * and a `z-index: 0` stacking context — either of which lets Chromium composite the scroller, where it
- * draws text greyscale instead of the subpixel text the DOM's own `overflow: auto` boxes get: every
- * glyph an anti-aliasing pair apart. Native keeps its own.
+ * draws text greyscale instead of the subpixel text a plain `overflow: auto` box gets: every glyph an
+ * anti-aliasing pair apart from its reference picture. Native keeps its own.
  */
 export const PLAIN_SCROLLER: Record<string, unknown> = isWeb ? { transform: "none", zIndex: "auto", position: "static" } : {};
 
 /**
- * A react-native-web `View` that stays positioned, as the DOM's box it copies is (`position: relative`),
- * and is no stacking context, as that box is none: with {@link PLAIN_SCROLLER} (for a box the DOM leaves
- * static) what keeps the page painted in the desktop's order. In a `style`; nothing on a phone.
+ * A react-native-web `View` that stays positioned (`position: relative`, for what is placed against it)
+ * and is no stacking context: with {@link PLAIN_SCROLLER} (for a box that can be static) what keeps the
+ * page painted in document order, by which Chromium layers it ({@link PLAIN_PRESS}). In a `style`;
+ * nothing on a phone.
  */
 export const NO_STACK: Record<string, unknown> = isWeb ? { zIndex: "auto" } : {};
 
@@ -421,14 +425,14 @@ export const NO_STACK: Record<string, unknown> = isWeb ? { zIndex: "auto" } : {}
  */
 export const ENTER_KEEPS_FOCUS: Record<string, unknown> = isWeb ? { blurOnSubmit: false } : {};
 
-/** Chromium's own placeholder colour (`::placeholder`, which `styles.css` leaves alone): #757575, or #a9a9a9 in a dark scheme. */
+/** Chromium's own placeholder colour (an unstyled `::placeholder`), the app's too: #757575, or #a9a9a9 in a dark scheme. */
 export const placeholderColor = (scheme: "light" | "dark"): string => (scheme === "dark" ? "#a9a9a9" : "#757575");
 
 /**
- * A length the stylesheet writes in `ch` of the app voice (DM Sans), at a scale of `--size-app`: `n` widths
- * of its `0`. The `0` widens with the optical size, which Chromium sets to the font size — measured on the
- * desktop's page at 0.662 of the size at 10px, 0.667 at 11px and 0.6784 at 13px, and read between and
- * beyond those as lines through them. On the desktop's page (not replayed) it is the stylesheet's `ch`.
+ * A length in `ch` of the app voice (DM Sans), at a scale of `--size-app`: `n` widths of its `0`. The
+ * `0` widens with the optical size, which Chromium sets to the font size — measured in Chromium at
+ * 0.662 of the size at 10px, 0.667 at 11px and 0.6784 at 13px, and read between and beyond those as
+ * lines through them. Not replayed, it is CSS's own `ch`.
  */
 export function appCh(t: Tokens, scale: number, n: number): number | string {
   const size = t.scaled("size-app", scale);
@@ -439,10 +443,10 @@ export function appCh(t: Tokens, scale: number, n: number): number | string {
 
 /**
  * The family for a text that writes its own font rather than going through `Txt` (a card's rows, a pill,
- * a chip): on web the voice's stack, as before (`var(--font-data)`, or the replayed one); on a phone the
+ * a chip): on web the voice's stack (the replayed one, or `var(--font-data)`); on a phone the
  * cut face `Txt` would pick (`familyOf`) at that weight and size. A CSS stack is no family on Android,
- * which drew all of these in the system font. Spread it where `fontFamily` was; a `fontWeight` set beside
- * it stays, and names the weight the face was cut at, so Android fakes nothing.
+ * which drew all of these in the system font. Spread it in place of a `fontFamily`; a `fontWeight` set
+ * beside it stays, and names the weight the face was cut at, so Android fakes nothing.
  */
 export function faceOf(t: Tokens, voice: Voice, weight: number, size: number | string): Record<string, unknown> {
   return familyOf(t, voice, weight, typeof size === "number" ? size : 12);

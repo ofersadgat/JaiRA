@@ -4,10 +4,13 @@
  * indented under the tab and as you scroll each section highlights, and clicking a section will
  * scroll to that section").
  *
- * Read off the DOM rather than declared by each pane. A section says it is one with `data-part` and
- * `data-part-label` (`SettingsSection`, and a top-level `Level`), and this finds whatever the page
- * drew — so a pane that adds a section, or draws one only when a project is open, is listed without
- * anybody keeping a second list in step with the first.
+ * The rule is here: which section is the one being read (`readingPartOf`) and the figures a click's
+ * scroll goes by. The Settings page keeps the list itself — each section says it is one as it is drawn
+ * (`packages/universal/src/components/settings/parts.ts`), so a page that adds a section, or draws one
+ * only when a project is open, is listed without anybody keeping a second list in step with the first.
+ *
+ * `useSettingsParts` below reads the sections off a DOM page instead, by `data-part` and
+ * `data-part-label`. No page writes those attributes and nothing calls it.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
 
@@ -43,7 +46,7 @@ export function readingPartOf(
 
 /**
  * The sections drawn on the page — not every one in the DOM: under the Just you view's "What you
- * changed" a section with none of its rows left is still there and `display: none` (`styles.css`),
+ * changed" a section with none of its rows left is still there and `display: none`,
  * and a list entry that scrolled to nothing would be a link to nowhere.
  */
 function partsIn(body: HTMLElement): HTMLElement[] {

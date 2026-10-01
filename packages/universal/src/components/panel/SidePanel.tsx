@@ -10,39 +10,39 @@ import { Icon } from "./Icon";
 import { bodyMotion } from "./panelMotion";
 
 /**
- * `sidePanel.tsx`'s `SidePanel`, universal (decision 0015): the frame every panel entry is drawn in —
- * the head, the offer bar, the tabs, the body, and the folded rail. What each entry says is its FACE,
- * handed in (`PanelColumn.tsx` builds it from `panelFaceModel.ts`, as `panelFaces.tsx` does for the DOM).
- * The rules it carries, from `styles.css`:
+ * The frame every panel entry is drawn in — the head, the offer bar, the tabs, the body, and the folded
+ * rail. What each entry says is its FACE, handed in (`faces.tsx` builds it over `panelFaceModel.ts`).
+ * How it looks:
  *
- *   .sp                  column, the column's height
- *   .sp-head             row, centred, gap 8, at least 44 tall, padding 7 8 7 12, a --line under
- *   .sp-glyph            --dim at 15px, inline-flex
- *   .sp-titles           column, gap 1, flex 1; .sp-name-line row, baseline, gap 8
- *   .sp-name             600, --size-app × 1.08, line 1.3, --text, ellipsed
- *   .sp-kind, .sp-sub    --size-app × 0.92, --dim (the body's 1.5 line)
- *   .sp-sub-pushed       padding 4 12, a --line under
- *   .sp-trail            row, baseline, gap 3, --size-app × 0.9; crumbs --dim (--accent underlined on
+ *   the frame            column, the column's height
+ *   the head             row, centred, gap 8, at least 44 tall, padding 7 8 7 12, a --line under
+ *   its glyph            --dim at 15px
+ *   the titles           column, gap 1, flex 1; the name's line row, baseline, gap 8
+ *   the name             600, --size-app × 1.08, line 1.3, --text, ellipsed
+ *   the kind, the sub    --size-app × 0.92, --dim (the body's 1.5 line)
+ *   the sub, pushed      padding 4 12, a --line under
+ *   the trail            row, baseline, gap 3, --size-app × 0.9; crumbs --dim (--accent underlined on
  *                        hover), at most 140, padding 0 2; the › --tok-hint
- *   .sp-verbs            row, gap 1; .sp-controls the same after a --line, padding-left 6, margin-left 2
- *   .sp-icon             26 square, radius --control-radius-sm (5), --dim; the glyph 15. Hover:
- *                        --fill-ghost-hover, --text. .on --accent over --tint-accent; .primary
- *                        --on-accent over --accent (hover --fill-accent-hover); :disabled at 0.4
- *   .sp-offer            row, gap 8, padding 6 8 6 12, --tint-accent, a --line under, --size-app × 0.95
- *   .sp-guard            padding 6 12, --tint-warn, a --line under
- *   .sp-tabs             row, stretch, gap 2, padding 0 8, a --line under, clipped
- *   .sp-tab              row, centred, gap 6, padding 8 8 7, 2px transparent under (--accent when
+ *   the verbs            row, gap 1; pin, fold and close the same after a --line, padding-left 6,
+ *                        margin-left 2
+ *   an icon button       26 square, radius --control-radius-sm (5), --dim; the glyph 15. Hover:
+ *                        --fill-ghost-hover, --text. On: --accent over --tint-accent; primary:
+ *                        --on-accent over --accent (hover --fill-accent-hover); disabled at 0.4
+ *   the offer bar        row, gap 8, padding 6 8 6 12, --tint-accent, a --line under, --size-app × 0.95
+ *   the guard            padding 6 12, --tint-warn, a --line under
+ *   the tabs             row, stretch, gap 2, padding 0 8, a --line under, clipped
+ *   a tab                row, centred, gap 6, padding 8 8 7, 2px transparent under (--accent when
  *                        open), margin-bottom -1; 500 --size-app × 0.98 / 1.2, --dim (--text open or
  *                        hovered). The icon 15.
- *   .sp-tab-count        at least 16, padding 0 5, radius 8, --panel-2; 600 10px/16px data, centred,
+ *   a tab's count        at least 16, padding 0 5, radius 8, --panel-2; 600 10px/16px data, centred,
  *                        --dim; amber --warn on --tint-warn, accent --accent on --tint-accent, red
  *                        --bad on --tint-bad
- *   .sp-body             flex 1, column; .scroll pads 12 12 18 and scrolls; .fill clips; it comes in as
- *                        the stack moved (`.sp-motion-*`, `panelMotion.web.ts`)
- *   .sp-rail             column, spaced, padding 10 6, --panel-2; its tabs 17px icons over 9.5px names
+ *   the body             flex 1, column; scrolling, it pads 12 12 18; filling, it clips; it comes in as
+ *                        the stack moved (`data-spmotion`, `panelMotion.web.ts`)
+ *   the folded rail      column, spaced, padding 10 6, --panel-2; its tabs 17px icons over 9.5px names
  */
 
-/** What an entry says: the frame asks for it and draws the rest (`sidePanel.tsx`'s `PanelFace`). */
+/** What an entry says: the frame asks for it and draws the rest. */
 export interface PanelFace {
   glyph?: ReactNode;
   title: ReactNode;
@@ -59,12 +59,12 @@ export interface PanelFace {
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
 
 /**
- * The size a face's glyph is drawn at: the head's `.sp-glyph` sets 15px, the rail's `.sp-rail-glyph` sets
- * none, so a badge there is the page's 13 on its 1.5 line, and an icon (1em) 13 square.
+ * The size a face's glyph is drawn at: 15px in the head; the folded rail sets none, so a badge there is
+ * the page's 13 on its 1.5 line, and an icon (1em) 13 square.
  */
 export const GlyphSizeContext = createContext(15);
 
-/** A length token, as the stylesheet writes `var(--name, fallback)`. */
+/** A length token with a fallback, as CSS writes `var(--name, fallback)`. */
 export function lengthOf(t: Tokens, name: string, fallback: number): number | string {
   if (!t.replayed) return `var(--${name}, ${fallback}px)`;
   const v = t.v(name);
@@ -72,15 +72,15 @@ export function lengthOf(t: Tokens, name: string, fallback: number): number | st
   return Number.isFinite(n) ? n : fallback;
 }
 
-/** A colour token with a fallback, as the stylesheet writes `var(--name, var(--other))`. */
+/** A colour token with a fallback, as CSS writes `var(--name, var(--other))`. */
 export function colourOr(t: Tokens, name: string, fallback: string): string {
   if (!t.replayed) return `var(--${name}, var(--${fallback}))`;
   const v = t.v(name);
   return v === "" || v === undefined ? String(t.v(fallback)) : String(v);
 }
 
-/** `.sp-icon`: a 26px target, the glyph at 15. */
-export function SpIcon({ icon, label, onPress, on = false, toggle = false, primary = false, danger = false, disabled = false, flip = false }: { icon: PanelVerb["icon"]; label: string; onPress: () => void; on?: boolean; /** A toggle (the pin): says `aria-pressed`, as the desktop's does. */ toggle?: boolean; primary?: boolean; danger?: boolean; disabled?: boolean; flip?: boolean }): JSX.Element {
+/** The panel's icon button: a 26px target, the glyph at 15. */
+export function SpIcon({ icon, label, onPress, on = false, toggle = false, primary = false, danger = false, disabled = false, flip = false }: { icon: PanelVerb["icon"]; label: string; onPress: () => void; on?: boolean; /** A toggle (the pin): says `aria-pressed`. */ toggle?: boolean; primary?: boolean; danger?: boolean; disabled?: boolean; flip?: boolean }): JSX.Element {
   const t = useTokens();
   return (
     <Press
@@ -112,7 +112,7 @@ export function SpIcon({ icon, label, onPress, on = false, toggle = false, prima
   );
 }
 
-/** `.sp-tab-count`: a count or a short figure after a tab's label. */
+/** A count or a short figure after a tab's label. */
 function TabCount({ tab }: { tab: PanelTabSpec }): JSX.Element | null {
   const t = useTokens();
   if (tab.count === undefined || tab.count === 0 || tab.count === "") return null;
@@ -127,7 +127,7 @@ function TabCount({ tab }: { tab: PanelTabSpec }): JSX.Element | null {
   );
 }
 
-/** One `.sp-tab`'s insides: icon, label while it fits, count. */
+/** One tab's insides: icon, label while it fits, count. */
 function TabInside({ tab, labelled, color }: { tab: PanelTabSpec; labelled: boolean; color: string }): JSX.Element {
   return (
     <>
@@ -142,13 +142,13 @@ function TabInside({ tab, labelled, color }: { tab: PanelTabSpec; labelled: bool
   );
 }
 
-/** The box of an `.sp-tab`, for the strip and the ruler alike. */
+/** A tab's box, for the strip and the ruler alike. */
 const TAB_BOX = { flexDirection: "row", alignItems: "center", gap: 6, paddingTop: 8, paddingHorizontal: 8, paddingBottom: 7, flexShrink: 0 } as const;
 
 /**
- * The tab strip, labelled as far as the width allows ({@link labelPlan}). Measured, as the DOM's is: a
- * hidden ruler draws each tab bare and labelled, and the strip's own width decides. Widths are rounded
- * as `offsetWidth` and `clientWidth` round them, so both plans agree to the pixel.
+ * The tab strip, labelled as far as the width allows ({@link labelPlan}). Measured: a hidden ruler
+ * draws each tab bare and labelled, and the strip's own width decides. Widths are rounded to whole
+ * pixels, as `offsetWidth` and `clientWidth` are — what the plan in the reference pictures was made from.
  */
 function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open: string | undefined; onTab: (id: string) => void }): JSX.Element {
   const t = useTokens();
@@ -177,8 +177,8 @@ function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open:
       paddingHorizontal={8}
       flexShrink={0}
       overflow="hidden"
-      // Positioned, as `.sp-tabs` is, and no more: painted after the conversation's scroller, which it
-      // touches, Chromium gives it a layer by overlap (greyscale text) as it gives the desktop's.
+      // Positioned, and no more: painted after the conversation's scroller, which it touches, Chromium
+      // gives it a layer by overlap (greyscale text), as the reference pictures show.
       position="relative"
       {...(edge(t, { bottom: 1 }) as object)}
       onLayout={(e: LayoutChangeEvent) => setStrip(Math.round(e.nativeEvent.layout.width))}
@@ -218,7 +218,7 @@ function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open:
   );
 }
 
-/** pin, fold, close — or pin and ✕-that-folds beside a conversation (`FrameControls`). */
+/** pin, fold, close — or pin and ✕-that-folds beside a conversation. */
 function FrameControls({ stack, onStack, onFold, closeFolds }: { stack: PanelStack; onStack: OnStack; onFold: () => void; closeFolds: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -242,7 +242,7 @@ function FrameControls({ stack, onStack, onFold, closeFolds }: { stack: PanelSta
   );
 }
 
-/** `.sp-rail`: the root's tabs as a column of icons, each named, and pin and unfold at the foot. */
+/** The folded rail: the root's tabs as a column of icons, each named, and pin and unfold at the foot. */
 function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face: PanelFace | undefined; onStack: OnStack; onUnfold: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -320,9 +320,9 @@ export function SidePanel({
   const t = useTokens();
   /**
    * The mouse's own back and forward buttons, and Alt+← / Alt+→, while the pointer or the focus is in the
-   * panel (`panelStack.ts`' `historyButton` and `historyKey`, the desktop's). Listened for on the element
-   * itself: react-native-web's text boxes stop a key from reaching a React handler above them, and Alt+←
-   * in a box in the panel goes back on the desktop.
+   * panel (`panelStack.ts`' `historyButton` and `historyKey`). Listened for on the element itself:
+   * react-native-web's text boxes stop a key from reaching a React handler above them, and Alt+← in a
+   * box in the panel has to go back too.
    */
   const frame = useRef<unknown>(null);
   const live = useRef(onStack);
@@ -434,7 +434,7 @@ export function SidePanel({
           <Txt spec={{ voice: "app", scale: 0.95 }} ellip flex={1} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 0.95, weight: 700 }}>{offerName ?? crumbOf(stack.offer)}</Txt> is selected
           </Txt>
-          {/* `button.link`: data at --size-data × 11/12, --accent, underlined under the pointer. */}
+          {/* A link: data at --size-data × 11/12, --accent, underlined under the pointer. */}
           <Press onPress={() => onStack(acceptOffer)} flexShrink={0}>
             {({ hovered }) => (
               <Txt spec={{ voice: "data", scale: 11 / 12, color: "accent" }} numberOfLines={1} {...(hovered ? { textDecorationLine: "underline" } : {})}>
@@ -465,9 +465,9 @@ export function SidePanel({
           key={`${top.key}|${"tab" in top ? top.tab : ""}`}
           {...(scrollbarProps(t) as object)}
           {...((isWeb ? { dataSet: { ...(scrollbarProps(t) as { dataSet?: object }).dataSet, spmotion: bodyMotion(stack.motion) } } : {}) as object)}
-          // `PLAIN_SCROLLER`: the DOM's `.sp-body.scroll` is not composited, and its text is subpixel.
+          // `PLAIN_SCROLLER`: the body's scroller is not composited, so its text stays subpixel.
           style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
-          // `.sp-body.scroll`: a column the scroller's height at least (a body that fills it, as Changes
+          // The scrolling body: a column the scroller's height at least (a body that fills it, as Changes
           // does, grows into it), padded 12 12 18, 14 between its blocks.
           contentContainerStyle={{ flexGrow: 1, flexDirection: "column", gap: 14, paddingTop: 12, paddingHorizontal: 12, paddingBottom: 18, ...PLAIN_SCROLLER } as never}
         >

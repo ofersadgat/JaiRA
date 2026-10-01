@@ -1,7 +1,7 @@
 /**
- * What the state editor's link controls and value boxes compute — moved unchanged out of `links.tsx`,
- * `linkPreview.tsx` and `readValue.tsx`, so the universal copies (`components/workflow/`) say and do
- * what the desktop's do (decision 0015). The components draw; this decides.
+ * What the state editor's link controls and value boxes compute: the link toggle's words, whether a
+ * typed reference names a file, what a link's preview shows, and a value as its box shows it. The
+ * components (`packages/universal/src/components/workflow/Links.tsx`) draw; this decides.
  */
 import { createContext, useContext, useEffect, useState } from "react";
 import type { JsonValue } from "@declarative-ai/json";
@@ -9,7 +9,7 @@ import type { WorkflowLayer } from "@jaira/shared/browser";
 import type { UiSurface } from "./fileTypes";
 import { isKnownRef } from "./completions";
 
-// --- links.tsx -------------------------------------------------------------------
+// --- the link control --------------------------------------------------------------
 
 /**
  * The datalist every link control completes against.
@@ -40,7 +40,7 @@ export const UNRESOLVED_NOTE = "no file here yet — the linter will call this u
 /** A link box's placeholder when its caller names none. */
 export const LINK_PLACEHOLDER = "$/prompts/feature_goals.md";
 
-// --- linkPreview.tsx ---------------------------------------------------------------
+// --- a link's preview --------------------------------------------------------------
 
 export interface LinkReader {
   /** The file a reference names, or `null` when this window cannot see one. */
@@ -55,7 +55,7 @@ const LinkReaderContext = createContext<LinkReader | null>(null);
 
 export const LinkReaderProvider = LinkReaderContext.Provider;
 
-/** One link's preview, as far as this window can show one — see `LinkPreview` in `linkPreview.tsx`. */
+/** One link's preview, as far as this window can show one — what `LinkPreview` (`Links.tsx`) draws. */
 export interface LinkPreviewState {
   at: { layer: WorkflowLayer; path: string };
   /** The target's text, `"reading"` while it is fetched, `null` when nothing readable is there. */
@@ -113,7 +113,7 @@ export function useLinkPreview(reference: string): LinkPreviewState | null {
 /** The preview bar's tooltip. */
 export const linkPreviewTitle = (path: string, open: boolean): string => `${path} — click to ${open ? "hide" : "show"} what it says`;
 
-// --- readValue.tsx -----------------------------------------------------------------
+// --- a run's value -----------------------------------------------------------------
 
 /**
  * A value as the box under a slot shows it.

@@ -8,17 +8,15 @@ import { useTokens } from "../../tokens";
 import { Chip } from "./Chip";
 
 /**
- * `files.tsx`'s `DirectoryPanel`, universal (decision 0015): a folder, one level, as a file explorer
- * shows one — `..` first, then the folders, then the files (`entriesUnder`, the desktop's own order).
- * The rules, from `styles.css` — two blocks share these classes (the panel's, and the folder picker's
- * further down the file), and the later one wins where they overlap:
+ * A folder, one level, as a file explorer shows one — `..` first, then the folders, then the files
+ * (`entriesUnder`'s order). How it looks:
  *
- *   .folder          a column taking the panel, scrolling
- *   .folder-list     a grid, 1px --line ring, radius --control-radius, at most 320 tall (the picker's);
- *                    padding 8 10, gap 1 (the panel's)
- *   .folder-row      row, centred, gap 8, padding 6 10, a --line under it (none on the last), --panel,
+ *   the panel        takes the file panel's column, scrolling
+ *   the list         a column, 1px --line ring, radius --control-radius, at most 320 tall, clipped;
+ *                    padding 8 10, gap 1
+ *   a row            row, centred, gap 8, padding 6 10, a --line under it (none on the last), --panel,
  *                    app 13/12.5; hovered --panel-2
- *   .folder-row .glyph  14 wide, centred, app 10/12.5 (as `.glyph` says), --dim.   .dir .grow 600.   .up --dim
+ *   its glyph        14 wide, centred, app 10/12.5, --dim.   A folder's name 600.   `..` --dim
  */
 export function DirectoryPanel({
   layer,

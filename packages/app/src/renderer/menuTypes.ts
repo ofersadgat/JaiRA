@@ -1,7 +1,7 @@
 /**
  * A context menu's item and the one dialog a menu needs, as the models that BUILD them see them
  * (`boardMenus.ts`, `filesModel.ts`, `chatListModel.ts`, `crumbModel.ts`): one level, no submenus — a
- * flat list of verbs, or of kinds, each optionally wearing an icon. The universal `Menu` and
+ * flat list of verbs, or of kinds, each optionally wearing an icon. `ContextMenu` (`Menu.tsx`) and
  * `AskDialog` draw them. Types only.
  */
 import type { PATHS } from "./iconPaths";

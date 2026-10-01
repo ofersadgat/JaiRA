@@ -2,10 +2,10 @@ import { isWeb } from "@tamagui/core";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 
 /**
- * The box a float is placed against: the element a press was on, as the DOM's handlers hand theirs over
- * (`e.currentTarget`). A caller that was handed nothing (a copy whose parent drops the event) finds it
- * from the event being dispatched, by the control's accessible name; on a phone there is no element to
- * ask, and it is `null` — the caller places the float by a rule of its own.
+ * The box a float is placed against: the element a press was on (`e.currentTarget`). A caller that was
+ * handed nothing (its parent drops the event) finds it from the event being dispatched, by the control's
+ * accessible name; on a phone there is no element to ask, and it is `null` — the caller places the float
+ * by a rule of its own.
  */
 export function anchorRectOf(from: unknown, label?: string): FloatRect | null {
   if (!isWeb) return null;

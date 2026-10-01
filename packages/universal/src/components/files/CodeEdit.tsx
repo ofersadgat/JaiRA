@@ -14,14 +14,14 @@ import { useTokens } from "../../tokens";
 import { EditorActions, EditorActionsRow, FileEdit, ReadingNote, Sub } from "./EditorActions";
 
 /**
- * The code surfaces, universal (decision 0015): `fileSurfaces.tsx`'s `TextEdit`, `CodeSourceView` and
- * `ConfigEdit`. Monaco (the editor, and the tokenizer's reading) is an island — `client/island/code.tsx`,
- * the desktop's own `MonacoCodePane` and `CodeText` — in the band the DOM surface gives it, inside the
- * chrome drawn natively around it. The plain box (`textarea.code-editor`) is not Monaco: it is a native
- * text box here, as the desktop's is a textarea. What the surfaces decide is `fileEditModel.ts`'s.
+ * The code surfaces: `TextEdit`, `CodeSourceView` and `ConfigEdit`. Monaco (the editor, and the
+ * tokenizer's reading) is an island — `MonacoCodePane` and `CodeText` (`monacoDiff.tsx`), inline on web
+ * and `client/island/code.tsx` on a phone — in a band of the surface, inside the chrome drawn natively
+ * around it. The plain box is not Monaco: it is a native text box (a textarea on web). What the
+ * surfaces decide is `fileEditModel.ts`'s.
  *
- * Not on a phone: code intelligence (the compiler's diagnostics, definitions, hover), which asks main
- * through the window's bridge; the island's editor is the desktop's without its `intel`.
+ * Not here: code intelligence (the compiler's diagnostics, definitions, hover), which asks main
+ * through the window's bridge; the code island is `MonacoCodePane` without its `intel`.
  */
 
 /** The person's appearance block, for an editor island to draw in (`IslandProps.appearance`). */
@@ -31,9 +31,9 @@ export function useEditorAppearance(): JairaAppearanceConfig {
 }
 
 /**
- * The band an editor island fills — the DOM's `.file-edit > .monaco-host` (flex 1 1 auto, at least
- * `min` tall; its border and radius are drawn inside the island, by the island's own stylesheet) —
- * measured, since an island is given a fixed height and scrolls inside it.
+ * The band an editor island fills (flex 1 1 auto, at least `min` tall; its border and radius are drawn
+ * inside the island, by the island's own stylesheet: `.file-edit > .monaco-host`) — measured, since an
+ * island is given a fixed height and scrolls inside it.
  */
 export function IslandBand({ min, children }: { min: number; children: (height: number) => ReactNode }): JSX.Element {
   const [height, setHeight] = useState(0);
@@ -45,14 +45,13 @@ export function IslandBand({ min, children }: { min: number; children: (height: 
 }
 
 /**
- * `textarea.code-editor`, in `.file-edit` (`cascade.mts '.code-editor'`): the plain box a type with no
- * grammar falls back to, and the configuration editor.
+ * The plain box a type with no grammar falls back to, and the configuration editor. How it looks:
  *
- *   .code-editor               editor size / --ed-code-lh (1.5) in the data face, --text on --bg, 1px
- *                              --line, radius 6, padding 8, full width, tab --ed-code-tab (2)
- *   .file-edit > .code-editor  flex 1 1 auto, at least 120 tall, no resize handle
- *   :root[data-editor-theme] .code-editor
- *                              the editors' own palette (`editorThemeVars`): --ed-text on --ed-bg,
+ *   the box                    the editor size in the data face, at the code editor's line height (1.5
+ *                              unless set), --text on --bg, 1px --line, radius 6, padding 8, full width,
+ *                              the code editor's tab size (2 unless set)
+ *   in its surface             flex 1 1 auto, at least 120 tall, no resize handle
+ *   under an editor theme      the editors' own palette (`editorThemeVars`): --ed-text on --ed-bg,
  *                              --ed-line — unless the palette is "follows the app"
  */
 export function CodeArea({ value, readOnly, onChange, appearance }: { value: string; readOnly: boolean; onChange: (text: string) => void; appearance: JairaAppearanceConfig }): JSX.Element {

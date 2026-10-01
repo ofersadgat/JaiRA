@@ -28,19 +28,18 @@ import { Uncopied } from "./Uncopied";
 import { aboutNotes } from "./viewState";
 
 /**
- * The sidebar, with the rows `App.tsx` gives its own: the rooms, their counts (`shellModel.ts`, one
- * derivation for both shells), their verbs, and the drawers each opens onto. A drawer with no copy yet is
- * an {@link Uncopied} box where it stands.
+ * The sidebar on the store: the rooms, their counts (`shellModel.ts`), their verbs, and the drawers each
+ * opens onto — with the floats its rows raise: the `+` menu, the health card, the folder browser.
  */
 export function ShellSidebar(): JSX.Element {
   const { state, actions, appearance } = useShell();
   const ui = state.settings.ui;
   const health = useHealth();
   /**
-   * Settings' warnings and errors: the card the Settings and Logs rows' pills open (`App.tsx`'s
-   * `healthPop`), placed beside the pills pressed — and what each item's button does (`settingsShell.ts`).
+   * Settings' warnings and errors: the card the Settings and Logs rows' pills open, placed beside the
+   * pills pressed — and what each item's button does (`settingsShell.ts`).
    */
-  /** The paired machines, and the one being browsed for a project to open or make (`App.tsx`'s `browsing`). */
+  /** The paired machines, and the one being browsed for a project to open or make. */
   const [machinesView] = useMachines();
   const [browsing, setBrowsing] = useState<{ machineId: string; mode: "open" | "init" } | null>(null);
   const [healthAt, setHealthAt] = useState<{ at: FloatRect | null } | null>(null);
@@ -50,8 +49,8 @@ export function ShellSidebar(): JSX.Element {
     if (health.length === 0) setHealthAt(null);
   }, [health.length]);
   const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
-  // About, opened from the Update row — with the release notes showing, from its menu (`App.tsx`'s
-  // `openAbout`). Only for the one opening: About opened from its list later starts with them folded.
+  // About, opened from the Update row — with the release notes showing, from its menu. Only for the
+  // one opening: About opened from its list later starts with them folded.
   useEffect(() => {
     if (state.view !== "settings" || state.section !== "about") aboutNotes.set(false);
   }, [state.view, state.section]);
@@ -61,8 +60,8 @@ export function ShellSidebar(): JSX.Element {
     actions.setView("settings");
   };
   /**
-   * `App.tsx`'s `beforeSettings`: the room Settings was entered FROM, which is where leaving it goes —
-   * never a view inside the settings panel (Logs, Debug, Components), or the way out would lead back in.
+   * The room Settings was entered FROM, which is where leaving it goes — never a view inside the
+   * settings panel (Logs, Debug, Components), or the way out would lead back in.
    */
   const beforeSettings = useRef<AppView>("files");
   useEffect(() => {
@@ -89,8 +88,8 @@ export function ShellSidebar(): JSX.Element {
     },
   };
   /**
-   * The `+` on the Files row: the menu it drops, and the row in the tree it starts — `App.tsx`'s
-   * `newMenu` and `newDraft`, held here because the row and the drawer are both this region's.
+   * The `+` on the Files row: the menu it drops, and the row in the tree it starts — held here because
+   * the row and the drawer are both this region's.
    */
   // The tree's own right-click menus are drawn here too: outside the sidebar, in the window's tokens.
   const [newMenu, setNewMenu] = useState<MenuAt | null>(null);
@@ -102,7 +101,8 @@ export function ShellSidebar(): JSX.Element {
     onAct: (from) => {
       const root = standingRoot(state.tree, state.at);
       if (root === null) return;
-      // Right-aligned under the button, as `App.tsx` places it.
+      // Right-aligned under the button: hung off the far end of the column, a menu has nowhere to go
+      // but back over it.
       const box = anchorBox(from, "new file, folder or workflow");
       setNewMenu({
         x: Math.max(4, box.right - MENU_WIDTH),
@@ -176,8 +176,8 @@ export function ShellSidebar(): JSX.Element {
       onChooseProject={(mode) => void actions.chooseProject(mode)}
       machines={(machinesView?.machines ?? []).map((m) => ({ id: m.id, label: m.label, online: m.state === "online" }))}
       onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
-      // The Update row above Settings (`App.tsx`'s `SidebarUpdateRow`): About, where a failure or a
-      // download is said in full — with the release notes open, from its menu (`aboutNotes`).
+      // The Update row above Settings (`UpdateRow`). It opens About, where a failure or a download is
+      // said in full — with the release notes open, from its menu (`aboutNotes`).
       update={(collapsed) => <UpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />}
       onProjectSettings={(p) => {
         actions.standOn(p.project);
@@ -186,8 +186,8 @@ export function ShellSidebar(): JSX.Element {
       }}
     />
     {newMenu !== null ? <ContextMenu anchor={newMenu} onClose={() => setNewMenu(null)} /> : null}
-    {/* `App.tsx`'s `PointerMenus`, the window's right-click menu for content (web only): mounted with the
-        sidebar, which the shell always draws, as the desktop mounts it once for the window. */}
+    {/* The window's right-click menu for content (web only): mounted with the sidebar, which the shell
+        always draws, so it is there once for the window whatever room is open. */}
     <PointerMenus />
     {browsing !== null && machinesView !== undefined ? (
       <FolderBrowser
@@ -221,9 +221,9 @@ export function ShellSidebar(): JSX.Element {
 }
 
 /**
- * Where the row's `+` stands, for the menu it drops. On web `Sidebar` hands the act its button, as the
- * DOM sidebar does (the label lookup is a fallback); a phone has no element to hand, and the menu hangs
- * from the top of the column.
+ * Where the row's `+` stands, for the menu it drops. On web `Sidebar` hands the act its button (the
+ * label lookup is a fallback); a phone has no element to hand, and the menu hangs from the top of the
+ * column.
  */
 function anchorBox(from: unknown, label: string): { right: number; bottom: number } {
   const el =
@@ -237,7 +237,7 @@ function anchorBox(from: unknown, label: string): { right: number; bottom: numbe
   return { right: box.right, bottom: box.bottom };
 }
 
-/** The Files drawer (`FileTreePanel`), with the props `App.tsx` gives its own. */
+/** The Files drawer: `FileTreePanel` on the store — the tree, what is open or unsaved, the file verbs. */
 function FilesDrawer({ find, draft, onDraft, floats }: { find: boolean; draft: TreeDraft | null; onDraft: (draft: TreeDraft | null) => void; floats: FileTreePanelProps["floats"] }): JSX.Element {
   const { state, actions } = useShell();
   const ui = state.settings.ui;
@@ -270,7 +270,7 @@ function FilesDrawer({ find, draft, onDraft, floats }: { find: boolean; draft: T
   );
 }
 
-/** The Chat drawer (`ChatListPanel`), with the surface `App.tsx` gives its own. */
+/** The Chat drawer: `ChatListPanel` on the room's surface (`useChatSurface`). */
 function ChatDrawer({ find }: { find: boolean }): JSX.Element {
   return <ChatListPanel surface={useChatSurface()} find={find} />;
 }

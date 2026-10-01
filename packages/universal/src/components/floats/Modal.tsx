@@ -5,19 +5,17 @@ import { useTokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 
 /**
- * `.modal-backdrop` and `.modal`, universal (decision 0015): a dialog over everything, on the scrim,
- * centred — in the one layer the menus use (`MenuLayer`: portalled into `<body>` on web, a transparent
- * `Modal` on a phone). The rules, from `styles.css`:
+ * A dialog over everything, on the scrim, centred — in the one layer the menus use (`MenuLayer`:
+ * portalled into `<body>` on web, a transparent `Modal` on a phone). How it looks:
  *
- *   .modal-backdrop   fixed over the window, --scrim, the dialog centred
- *   .modal            --panel, 1px --line, radius 12, padding 18, 380 wide at least, at most 720 (or 90%
+ *   the scrim         over the whole window, --scrim, the dialog centred
+ *   the dialog        --panel, 1px --line, radius 12, padding 18, 380 wide at least, at most 720 (or 90%
  *                     of the window), --lift
- *   .modal-wide       1100 wide (or 94% of the window), at most 90% of its height, a column
+ *   `wide`            1100 wide (or 94% of the window), at most 90% of its height, a column
  *
- * `onDismiss` is what a press on the scrim does, and Escape or Back: nothing, for a dialog the DOM does
- * not let go of that way (an approval, a module to trust). `staged` draws the box alone, where it
- * stands, as the Components room's stage neutralises the backdrop (`.gallery-stage .modal-backdrop`:
- * static; `.modal`: no least width, at most its place's, no shadow).
+ * `onDismiss` is what a press on the scrim does, and Escape or Back: nothing, for a dialog that is not
+ * let go of that way (an approval, a module to trust). `staged` draws the box alone, where it stands
+ * (the specimens): no scrim, no least width, at most its place's, no shadow.
  */
 export function ModalBox({
   wide = false,
@@ -28,7 +26,7 @@ export function ModalBox({
   width,
   children,
 }: {
-  /** The dialog's own width, where its class sets one (`.folder-browser`: min(560px, 90vw)). */
+  /** The dialog's own width, where it has one (the folder browser's min(560px, 90vw)). */
   width?: number | string;
   wide?: boolean;
   staged?: boolean;

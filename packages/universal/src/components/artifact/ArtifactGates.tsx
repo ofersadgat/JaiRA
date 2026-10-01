@@ -19,25 +19,25 @@ import { ArtifactPane, ArtifactWell } from "./ArtifactPane";
 import { ChangesetReview } from "./ChangesetReview";
 
 /**
- * `components.tsx`'s `ReviewArtifact` and `EditArtifact`, universal (decision 0015): an artifact shown
- * beside the decision about it, and an artifact handed back edited. The verdict's words, whether a review
- * with something written on it collapses to one "send back" button, and the answer's shape are
- * `artifactReview.ts`'s, the desktop's own. The rules, from `styles.css`:
+ * The gates on one artifact: an artifact shown beside the decision about it (`ReviewArtifactGate`), and
+ * an artifact handed back edited (`EditArtifactGate`). The verdict's words, whether a review with
+ * something written on it collapses to one "send back" button, and the answer's shape are
+ * `artifactReview.ts`'s. How they look:
  *
- *   .review-summary    row, wrapping, baseline, gap 10, 8 above, --dim, the body's 13/12.5
- *   .review-count      inline-flex, centred, gap 5, the glyph 13; `.commented` --warn
- *   .review-verdict    the whole line, italic
- *   .options           row, wrapping, gap 8, 14 above
- *   .reason-note       --warn, app 12/12.5, 10 above
+ *   the summary        row, wrapping, baseline, gap 10, 8 above, --dim, the body's 13/12.5
+ *   a count            row, centred, gap 5, the glyph 13; "edited" and the notes' count --warn
+ *   the verdict        the whole line, italic
+ *   the buttons        row, wrapping, gap 8, 14 above
+ *   "nothing to type"  --warn, app 12/12.5, 10 above
  *
  * `flat`: the host is a flex column (the gallery's wide modal), where no margin collapses — the
  * question block's options keep their 12 inside it.
  *
  * `serve`: how an interactive artifact under review is served to its frame (`serveOfGate`).
  *
- * `settled`: the gate as it was answered (`components.tsx`'s `settled`) — seeded with the value that came
- * back and every control inert: the notes as written, the artifact as edited (`recordedDraft`, so an
- * edit shows as the change it was), the decision lit.
+ * `settled`: the gate as it was answered — seeded with the value that came back and every control
+ * inert: the notes as written, the artifact as edited (`recordedDraft`, so an edit shows as the change
+ * it was), the decision lit.
  */
 export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, project, flat, settled, serve }: { config: ReviewArtifactConfig; inputs: Record<string, unknown>; onSubmit: (value: unknown) => void; requestId: string; project: string | undefined; flat: boolean; settled?: { value: unknown } | undefined; serve?: ((path: string) => Promise<ServedArtifact>) | undefined }): JSX.Element {
   const t = useTokens();
@@ -85,7 +85,7 @@ export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, projec
       <View flexDirection="row" flexWrap="wrap" alignItems="baseline" gap={10} marginTop={8} testID="review-verdict">
         {draft.dirty ? <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "warn" }}>edited</Txt> : null}
         {notes.length > 0 ? (
-          // `.review-count`: inline-flex, the glyph and the words 5 apart.
+          // The notes' count: the glyph and the words 5 apart.
           <View flexDirection="row" alignItems="center" gap={5}>
             <Icon name="comment" size={13} color={warn} />
             <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "warn" }}>{notesCount(notes.length)}</Txt>
@@ -98,8 +98,8 @@ export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, projec
       {/* Comments change the SHAPE of the footer: a review with notes on it has one outcome — it goes back. */}
       {settled !== undefined ? (
         // As it was decided, in the shape it was decided in: a review sent back with comments showed the
-        // comment and one button (drawn lit, `.gate-settled button.primary:disabled`), one decided in
-        // silence the row, with the decision lit.
+        // comment and one button (a primary drawn lit, with nothing to press), one decided in silence the
+        // row, with the decision lit.
         collapsed && recorded["decision"] === sendBack!.value ? (
           <>
             <ChoiceList choices={[{ ...choices[0]!, options: [] }]} answers={answers} onAnswer={() => undefined} readOnly flat={flat} />
@@ -136,7 +136,7 @@ export function ReviewArtifactGate({ config, inputs, onSubmit, requestId, projec
 }
 
 /**
- * `EditArtifact`: the same pane, permanently writable, and Save — handing the text back unchanged is an
+ * `EditArtifactGate`: the same pane, permanently writable, and Save — handing the text back unchanged is an
  * answer too, so Save is never held for want of an edit. A picture, a sound or a video has nothing to
  * type into: it is shown, said so, and handed back with Done.
  */
@@ -175,10 +175,10 @@ export function EditArtifactGate({ config, inputs, onSubmit, requestId, project,
 }
 
 /**
- * `GateSurface`'s `serve` (`components.tsx`): an artifact under review RUNS against a grant for the task
- * that produced it — the one the gate is ABOUT, else the gate's own — in that task's project (an empty
- * project is the focused one). Kept, one per task and project, as `faces.tsx`'s `serveOf` is: a value view
- * asks for a grant again whenever its `serve` changes, and a new frame address reloads the page.
+ * A gate's `serve`: an artifact under review RUNS against a grant for the task that produced it — the
+ * one the gate is ABOUT, else the gate's own — in that task's project (an empty project is the focused
+ * one). Kept, one per task and project, as `faces.tsx`'s `serveOf` is: a value view asks for a grant
+ * again whenever its `serve` changes, and a new frame address reloads the page.
  */
 const serves = new Map<string, (path: string) => Promise<ServedArtifact>>();
 export function serveOfGate(pending: PendingInteraction): (path: string) => Promise<ServedArtifact> {
@@ -193,14 +193,14 @@ export function serveOfGate(pending: PendingInteraction): (path: string) => Prom
   return serve;
 }
 
-/** What a settled record answered, as a record (`components.tsx`'s `recordOf`). */
+/** What a settled record answered, as a record. */
 const recordOf = (value: unknown): Record<string, unknown> => (value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {});
 
 /**
- * `ChangesetGate`: the reviewer, wired as the desktop wires it (`gateServices`) — `$WORKTREE` reads scoped
- * to the task under review, the second door when the gate has one, and the host's own services over both
- * (the gallery's, which reach nothing). Mounted afresh for another request or another author, as the
- * desktop's mount is keyed. `settled`: the review as it was answered (the mount's `settled`).
+ * `ChangesetGate`: the reviewer and what it is wired to (`gateServices`) — `$WORKTREE` reads scoped to
+ * the task under review, the second door when the gate has one, and the host's own services over both
+ * (the gallery's, which reach nothing). Mounted afresh for another request or another author (its
+ * `key`). `settled`: the review as it was answered.
  */
 export function ChangesetGate({ pending, config, inputs, onSubmit, project, host, settled }: { pending: PendingInteraction; config: ReviewArtifactsConfig; inputs: Record<string, unknown>; onSubmit: (value: unknown) => void; project: string | undefined; host?: Partial<ComponentServices> | undefined; settled?: { value: unknown } | undefined }): JSX.Element {
   const author = useAuthor(project);

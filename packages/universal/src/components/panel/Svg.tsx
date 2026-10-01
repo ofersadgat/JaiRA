@@ -4,7 +4,7 @@ import { View } from "@tamagui/core";
 
 /**
  * One shape of a drawing: a path, a circle or a line, with its own paint where it differs. `filter` is a
- * CSS filter on the shape (the rail's lit lane, `.rail-cap path.rail-lit`) — web only: a phone has no
+ * CSS filter on the shape (the rail's lane lit under the pointer, `Rail.tsx`) — web only: a phone has no
  * pointer to light a lane with.
  */
 export type Shape =
@@ -28,10 +28,9 @@ export interface SvgProps {
 }
 
 /**
- * A line drawing — the renderer's inline SVGs (`icons.tsx`'s `Icon`, the rail's caps), universal
- * (decision 0015). On web it is the `<svg>` itself (`Svg.web.tsx`), so it draws exactly as the DOM's
- * does; on a phone the same shapes through `react-native-svg`, with the same defaults: stroked in the
- * current colour, round caps and joins, no fill unless a shape asks.
+ * A line drawing — the icons (`Icon.tsx`), the rail's caps and curves (`Rail.tsx`). On web it is the
+ * `<svg>` itself (`Svg.web.tsx`); on a phone the same shapes through `react-native-svg`, with the same
+ * defaults: stroked in the current colour, round caps and joins, no fill unless a shape asks.
  */
 export function Svg({ width, height, viewBox = "0 0 24 24", color = "#000", fill = "none", strokeWidth = 1.7, linecap = "round", linejoin = "round", shapes, box }: SvgProps): JSX.Element {
   const paint = (value: string | undefined): string | undefined => (value === "currentColor" ? color : value);

@@ -38,35 +38,34 @@ import { NeedsAttention } from "./NeedsAttention";
 import { SettingsRow, SettingsSection } from "./SettingsPage";
 
 /**
- * Settings → About (`aboutPane.tsx`, `licensesPane.tsx`), universal (decision 0015): the build running,
- * how it updates, its plugins, where the engine runs, the `jaira` command, and the third-party notices.
- * What each row says and which control it carries are `aboutModel.ts`'s and `updatesModel.ts`'s; the
- * reads and writes are `updatesStore.ts`'s, as the DOM's are. The rules it adds:
+ * Settings → About: the build running, how it updates, its plugins, where the engine runs, the `jaira`
+ * command, and the third-party notices. What each row says and which control it carries are
+ * `aboutModel.ts`'s and `updatesModel.ts`'s; the reads and writes are `updatesStore.ts`'s. How it looks:
  *
- *   .upd-running         row, centred, gap 8; its code data 11.5/12 --text
- *   .upd-chan            app 11/12.5 on an 18px line, --dim, 1px --line, round, padding 0 8
- *   .upd-err             --bad
- *   .upd-under           10 above; the notes `pre` data 11/12 on a 1.6 line, padding 10 12, radius 8,
+ *   the version          row, centred, gap 8; its number data 11.5/12 --text
+ *   its track            app 11/12.5 on an 18px line, --dim, 1px --line, round, padding 0 8
+ *   a failure            --bad
+ *   the release notes    10 above; their text data 11/12 on a 1.6 line, padding 10 12, radius 8,
  *                        --panel-2
- *   .plg-ok              row, centred, gap 2, --ok, app 12/12.5, one line; its code --text data 11.5/12
+ *   installed (✓)        row, centred, gap 2, --ok, app 12/12.5, one line; its version --text data 11.5/12
  *                        (0.35em after the words)
- *   .plg-size            data 11/12 --dim
- *   .plg-old             --warn
- *   .plg-check           a `button.ghost.sm`: padding 2 8, radius --control-radius-sm, app 11/12.5
- *   .plg-more            a `button.quiet.sm` 24 square, app 14/12.5 on a line of 1
- *   .plg-prog            row, centred, gap 10; the bar 120 × 6 (`.um-bar`: --dim 16%, radius 3)
- *   .plg-err             6 above, --bad, app 12/12.5, line 1.45
- *   .plg-vars            14 in, 10 above; each build 7 0 with a --line above; its line a row,
+ *   a download's size    data 11/12 --dim
+ *   out of date          --warn
+ *   Check                a small ghost button: padding 2 8, radius --control-radius-sm, app 11/12.5
+ *   ⋯                    a quiet button 24 square, app 14/12.5 on a line of 1
+ *   progress             row, centred, gap 10; the bar 120 × 6 (--dim 16%, radius 3)
+ *   a plugin's error     6 above, --bad, app 12/12.5, line 1.45
+ *   a plugin's builds    14 in, 10 above; each build 7 0 with a --line above; its line a row,
  *                        space-between, wraps, gap 6 16, at least 26 tall
- *   .plg-tag             app 10.5/12.5 on 17px, padding 0 7, round, --accent on --tint-accent
- *   .lic-head            row, centred, gap 10: the count app 0.96× --dim, the search 13rem, padding 4 9,
+ *   "suggested"          app 10.5/12.5 on 17px, padding 0 7, round, --accent on --tint-accent
+ *   the notices' head    row, centred, gap 10: the count app 0.96× --dim, the search 13rem, padding 4 9,
  *                        1px --line, radius 7, --panel, app 0.96×
- *   .lic-row + .lic-row  a --line between; the line hovered --fill-ghost-hover; the toggle a row,
+ *   a notice's row       a --line between two; the line hovered --fill-ghost-hover; the toggle a row,
  *                        baseline, gap 8, padding 9 16: › 10 wide --dim (turned open), the name 550 one
  *                        line, the version data at 0.9× of the app size --dim, the meta at 0.94× --dim at
  *                        the end (at most 45%); ↗ 22 square, 12 in from the right, radius 5, --dim
- *   .lic-notice          padding 2 16 16 34, data at 0.9× of the app size on a 1.55 line, --text 82%
- *   .lic-empty           padding 18 16, --dim
+ *   its text             padding 2 16 16 34, data at 0.9× of the app size on a 1.55 line, --text 82%
+ *   no match             padding 18 16, --dim
  */
 export function AboutPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -95,7 +94,7 @@ export function AboutPage(): JSX.Element {
 
 const DESC = { voice: "app", scale: 1.03, lineHeight: 1.45, color: "dim" } as const;
 
-/** `code.upd-ver` in a row's sentence. */
+/** A version in a row's sentence, in the data face. */
 function Ver({ children }: { children: string }): JSX.Element {
   return <Txt spec={{ voice: "data", scale: (11 / 12) * (13 / 12.875) * (12.875 / 13), lineHeight: 1.45, color: "dim" }}>{children}</Txt>;
 }
@@ -105,7 +104,7 @@ function Say({ children, bad = false }: { children: ReactNode; bad?: boolean }):
   return <Txt spec={{ ...DESC, ...(bad ? { color: "bad" } : {}) }}>{children}</Txt>;
 }
 
-/** A progress bar (`.um-bar.um-accent`). */
+/** A progress bar: --accent over --dim at 16%. */
 function Bar({ percent, width }: { percent: number; width: number }): JSX.Element {
   const t = useTokens();
   return (
@@ -222,10 +221,10 @@ function StatusRow({ view, notesOpen }: { view: UpdateView; notesOpen: boolean }
 }
 
 /**
- * About's Update (`updatesView.tsx`'s `UpdateSplit`): the one click, and the chevron for the other ways —
- * the sidebar row's menu (`UpdateMenuFloat`, less Release notes, which are right under it), hung below
- * the split, end aligned. `.split.primary`: `button.primary` square on the inside; the caret 7 either
- * side, 1 over the main button, its chevron 12, a 1px edge of white at 35% on its left.
+ * About's Update: the one click, and the chevron for the other ways — the sidebar row's menu
+ * (`UpdateMenuFloat`, less Release notes, which are right under it), hung below the split, end aligned.
+ * The split: a primary button square on the inside; the caret 7 either side, 1 over the main button,
+ * its chevron 12, a 1px edge of white at 35% on its left.
  */
 export function UpdateSplit({ label }: { label: string }): JSX.Element {
   const t = useTokens();
@@ -240,8 +239,8 @@ export function UpdateSplit({ label }: { label: string }): JSX.Element {
         {label}
       </Button>
       <Press
-        // Hung from the caret: end aligned below it, the card's right edge is the split's, as the desktop's
-        // (placed against the whole split) is — and the split's box here may be wider than its buttons.
+        // Hung from the caret: end aligned below it, the card's right edge is the split's — and the
+        // split's own box may be wider than its buttons.
         onPress={(e) => {
           if (open) return setMenuAt(undefined);
           refreshBusy();
@@ -255,7 +254,7 @@ export function UpdateSplit({ label }: { label: string }): JSX.Element {
         justifyContent="center"
         paddingVertical={padV}
         paddingHorizontal={7}
-        // As tall as the answer beside it: the split's row stretches it, as `.split`'s inline-flex does.
+        // As tall as the answer beside it: the split's row stretches it.
         alignSelf="stretch"
         borderWidth={1}
         borderStyle="solid"
@@ -327,7 +326,7 @@ function UpdatesSection({ onTrack }: { onTrack: (channel: UpdateChannel | undefi
 function Ok({ words, version, title }: { words?: string; version?: string | undefined; title?: string }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={2} flexShrink={0} {...(title !== undefined ? ({ title } as object) : {})}>
-      {/* Each its own item of the inline-flex row, as the DOM's `<span>✓ </span>` and the words are. */}
+      {/* The ✓ and the words are each an item of the row, so its gap stands between them. */}
       <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "ok" }} numberOfLines={1}>
         ✓
       </Txt>
@@ -368,7 +367,7 @@ function Progress({ row }: { row: PluginRow }): JSX.Element {
   );
 }
 
-/** A `button.sm` (padding --control-pad-sm, radius --control-radius-sm, app 11/12.5). */
+/** A small button: radius --control-radius-sm, app 11/12.5; `pad` where it is tighter than a button's. */
 function Small({ kind = "plain", onPress, title, children, pad }: { kind?: "plain" | "ghost" | "primary"; onPress: () => void; title?: string; children: string; pad?: [number, number] }): JSX.Element {
   const t = useTokens();
   return (
@@ -650,7 +649,7 @@ function EngineSection({ onEngine }: { onEngine: (patch: Partial<Record<keyof Ja
   );
 }
 
-/** `licensesPane.tsx`'s `ThirdPartyNotices`: every notice JaiRA ships, searchable, each opening onto its text. */
+/** Every notice JaiRA ships, searchable, each opening onto its text. */
 function ThirdPartyNotices(): JSX.Element {
   const [query, setQuery] = useState("");
   const [openKey, setOpenKey] = useState<string | null>(null);
@@ -698,7 +697,7 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
   const size = t.scaled("size-app", 0.96);
   return (
     <View flexDirection="row" alignItems="center" gap={10}>
-      {/* In the heading, whose font they inherit (450, line 1.3, -0.005em). */}
+      {/* In the section's heading, in its font (450, line 1.3, -0.005em). */}
       <Txt spec={{ voice: "app", scale: 0.96, weight: 450, lineHeight: 1.3, ls: -0.005, color: "dim", tabular: true }} numberOfLines={1}>
         {licenseCountWords(shown, total)}
       </Txt>
@@ -716,7 +715,7 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
         {...({ type: "search" } as object)}
         style={
           {
-            // `font: inherit` takes the heading's face, weight and line, not its tracking: an input's is `normal`.
+            // The heading's face, weight and line, not its tracking: an input's is `normal`.
             ...(font(t, { voice: "app", scale: 0.96, weight: 450, lineHeight: 1.3 }) as object),
             width: typeof size === "number" ? 13 * 16 : "13rem",
             paddingVertical: 4,

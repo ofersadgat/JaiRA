@@ -26,30 +26,30 @@ import { SchemaForm } from "../../form/SchemaForm";
 import { Button } from "../Button";
 
 /**
- * `permissionSetRows.tsx`, universal (decision 0015): the lines a permission set is drawn as — a tool,
- * a command, a program's fold, the command runners, a section's fold, the mode and implementation
- * menus, and the line that adds one. What each says and every edit are `composerPermissionSet.ts`'s and
- * `permissionSetWords.ts`'s, as the DOM's are. The rules, from `styles.css`:
+ * The lines a permission set is drawn as — a tool, a command, a program's fold, the command runners,
+ * a section's fold, the mode and implementation menus, and the line that adds one. What each says and
+ * every edit are `composerPermissionSet.ts`'s and `permissionSetWords.ts`'s. How they look:
  *
- *   .cx-tool             row, centred, gap 4, radius 7; hovered --text 7%; a held line on a page has no
- *                        ground (`.set-config .cx-tool.on`)
- *   .cx-tool-grant       row, centred, gap 8, padding 5 7, radius 7, grows; --text
- *   .cx-chip-icon        13 square, --tok-hint (a mode's: --bad deny, --ok allow)
- *   .cx-opt-text         column, gap 1; its name app 500 at 12/12.5 on 1.25; its hint app 10.5/12.5 on 1.3
+ *   a line               row, centred, gap 4, radius 7; hovered --text 7%; a held line on a page has no
+ *                        ground
+ *   its words            row, centred, gap 8, padding 5 7, radius 7, grows; --text
+ *   an icon              13 square, --tok-hint (a mode's: --bad deny, --ok allow)
+ *   a name over a hint   column, gap 1; its name app 500 at 12/12.5 on 1.25; its hint app 10.5/12.5 on 1.3
  *                        --tok-hint; each one line
- *   .cx-tool-mode        a `button`: --panel-2, 1px --line, radius --control-radius, padding 4 6, gap 5,
- *                        app 11/12.5 (the body's line 1.5), --tok-hint; its › at half strength
- *   .cx-mode-custom      dashed
- *   .cx-tool-impl        row, gap 3, padding 2 5, at most 92, 1px --line, radius 5, --tok-hint, app 10.5/12.5
- *   .set-minus           17 round, 1px --tok-hint, − app 600 at 13 on a line of 1, 2 up; margin 0 2 0 4;
+ *   the mode             a button: --panel-2, 1px --line, radius --control-radius, padding 4 6, gap 5,
+ *                        app 11/12.5, --tok-hint; its › at half strength
+ *   a custom mode        dashed
+ *   the implementation   row, gap 3, padding 2 5, at most 92, 1px --line, radius 5, --tok-hint, app 10.5/12.5
+ *   the minus            17 round, 1px --tok-hint, − app 600 at 13 on a line of 1, 2 up; margin 0 2 0 4;
  *                        hovered --bad on --bad 12%
- *   .cx-cat              a --line above (not the first); its head a row, centred, gap 4; its fold a row,
+ *   a section            a --line above (not the first); its head a row, centred, gap 4; its fold a row,
  *                        gap 6, padding 5 4, radius 5 (hovered --panel-2): › 10 wide (turned open), the
- *                        words, the count (app 10/12.5, --panel on --accent, radius 8, padding 0 4, 16 wide)
- *   .cx-cat-body         9 in, 7 more, a --line on its left
- *   .cx-sub              a program's fold: no rule, head padding 1 0, fold 3 4, body 18 in
- *   .set-add             row, centred, gap 9, padding 4 6 4 4, radius 7; + a dashed --tok-hint 17 circle
- *   .cx-submenu          column, gap 1, at least 190, padding 4, 1px --line, radius 9, --panel, a 0 10 28
+ *                        words, the count (app 10/12.5, --panel on --accent, radius 8, padding 0 4, at
+ *                        least 16 wide)
+ *   a section's body     9 in, 7 more, a --line on its left
+ *   a program's fold     no line above, head padding 1 0, fold 3 4, body 18 in
+ *   the + line           row, centred, gap 9, padding 4 6 4 4, radius 7; + a dashed --tok-hint 17 circle
+ *   a menu               column, gap 1, at least 190, padding 4, 1px --line, radius 9, --panel, a 0 10 28
  *                        shadow at 28%; each a row, gap 8, padding 5 7, radius 7, --dim (hovered --text 7%,
  *                        chosen --accent 13%); ✓ 10 wide --ok app 11/12.5; icons 14
  */
@@ -57,17 +57,17 @@ import { Button } from "../Button";
 const NAME = { voice: "app", scale: 12 / 12.5, weight: 500, lineHeight: 1.25 } as const;
 const HINT = { voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: "tok-hint" } as const;
 
-/** `.cx-chip-icon`: a 13 icon in its colour. */
+/** A 13 icon in its colour. */
 export function ChipIcon({ name, color = "tok-hint", size = 13 }: { name: IconName; color?: string; size?: number }): JSX.Element {
   const t = useTokens();
   return <Icon name={name} size={size} color={String(/^[a-z-]+$/.test(color) ? t.v(color) : color)} box={{ flexShrink: 0 }} />;
 }
 
-/** `.cx-opt-text`: a name over a one-line hint. */
+/** A name over a one-line hint. */
 export function OptText({ name, hint, mono: _mono = false, nameColor = "text", grow = false }: { name: ReactNode; hint?: ReactNode; mono?: boolean; nameColor?: string; grow?: boolean }): JSX.Element {
   return (
     <View flexDirection="column" gap={1} minWidth={0} flexShrink={1} {...(grow ? { flexGrow: 1 } : {})}>
-      {/* `.mono` has no rule of its own here: a command's name is in the app face, as the DOM's is. */}
+      {/* `mono` changes nothing here: a command's name is in the app face too. */}
       <Txt spec={{ ...NAME, color: nameColor }} ellip>
         {name}
       </Txt>
@@ -80,7 +80,7 @@ export function OptText({ name, hint, mono: _mono = false, nameColor = "text", g
   );
 }
 
-/** A floating `.cx-submenu`, below the box it was opened from and against one of its edges. */
+/** A floating menu, below the box it was opened from and against one of its edges. */
 function SubMenu({ at, align, width, children, onClose }: { at: { x: number; y: number; w: number }; align: "start" | "end"; width: number; children: ReactNode; onClose: () => void }): JSX.Element {
   const t = useTokens();
   const win = useWindowDimensions();
@@ -107,7 +107,7 @@ function SubMenu({ at, align, width, children, onClose }: { at: { x: number; y: 
   );
 }
 
-/** One row of a `.cx-submenu`: ✓, an icon, a name over a hint. */
+/** One row of a menu: ✓, an icon, a name over a hint. */
 function MenuRow({ on = false, icon, name, hint, mono = false, title, onPress }: { on?: boolean; icon?: IconName; name: ReactNode; hint?: string; mono?: boolean; title?: string; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
@@ -191,9 +191,8 @@ export function ModePicker({
   readOnly?: boolean | undefined;
   faded?: boolean;
   /**
-   * In a fold's head or `Other`'s, not a line (`.cx-tool .cx-tool-mode` does not reach it): the plain
-   * `button` — padding --control-pad, the body's 13/12.5 in --text, hovered --panel-3 and --rule — its
-   * glyph --tok-hint whatever the mode, its › whole.
+   * In a fold's head or `Other`'s, not a line: the plain button — padding --control-pad, app 13/12.5 in
+   * --text, hovered --panel-3 and --rule — its glyph --tok-hint whatever the mode, its › whole.
    */
   head?: boolean;
 }): JSX.Element {
@@ -371,7 +370,7 @@ export function ImplPicker({ value, native, nativeHint, onPick, readOnly }: { va
   );
 }
 
-/** A line's box (`.cx-tool`): hovered, a --text 7% wash. */
+/** A line's box: hovered, a --text 7% wash. */
 function Line({ children, pad }: { children: ReactNode; pad?: number }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
@@ -382,7 +381,7 @@ function Line({ children, pad }: { children: ReactNode; pad?: number }): JSX.Ele
   );
 }
 
-/** `.cx-tool-grant` as a line of a permission set on the page: a glyph, a name, a hint. */
+/** The words of a line of a permission set on the page: a glyph, a name, a hint. */
 function Grant({ icon, name, hint, mono = false, title }: { icon: IconName; name: string; hint: string; mono?: boolean; title?: string }): JSX.Element {
   return (
     <View flexDirection="row" alignItems="center" gap={8} paddingVertical={5} paddingHorizontal={7} borderRadius={7} flexGrow={1} flexShrink={1} flexBasis="auto" minWidth={0} {...(title !== undefined ? ({ title } as object) : {})}>
@@ -446,7 +445,7 @@ export function SubjectRow({
   onMode: (next: PermissionSetMode) => void;
   onRemove?: (() => void) | undefined;
   readOnly?: boolean | undefined;
-  /** A runner with no line of its own (`.set-runner-follows`): 23 in, its mode faded. */
+  /** A runner with no line of its own: 23 in, its mode faded. */
   follows?: boolean;
   mono?: boolean;
   icon?: IconName;
@@ -461,7 +460,7 @@ export function SubjectRow({
   );
 }
 
-/** `.cx-cat-count`. */
+/** The count at the end of a fold's head. */
 export function Count({ n }: { n: number }): JSX.Element {
   const t = useTokens();
   return (
@@ -500,7 +499,7 @@ function Fold({ open, onOpen, icon, name, hint, mono = false, count, sub = false
   );
 }
 
-/** `.cx-cat-body`. */
+/** What is under a fold: in from it, a --line on its left. */
 export function FoldBody({ children, sub = false }: { children: ReactNode; sub?: boolean }): JSX.Element {
   const t = useTokens();
   return (
@@ -546,7 +545,7 @@ export interface AddOption {
 }
 
 /** The `+` line that opens the section's own menu of what it does not hold yet. */
-/** `.set-add`: a dashed + and a word (`.cx-opt-hint`). */
+/** A dashed + and a word, in a hint's font. */
 export function AddButton({ label, open = false, disabled = false, onPress }: { label: string; open?: boolean; disabled?: boolean; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (

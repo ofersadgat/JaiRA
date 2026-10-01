@@ -1,9 +1,7 @@
 /**
- * What Settings → Connections COMPUTES — moved unchanged out of `providersPane.tsx`,
- * `integrationsPane.tsx`, `mcpServersRows.tsx`, `connectionsPane.tsx` and `App.tsx` (decision 0015), so
- * the desktop's rows and the universal copy's (`packages/universal/src/components/settings/connections/`)
- * say and write the same things. No DOM here: the words a row says, its state, the schemas its forms
- * are drawn from, and what its buttons write.
+ * What Settings → Connections COMPUTES, for the rows in
+ * `packages/universal/src/components/settings/connections/`. No DOM here: the words a row says, its
+ * state, the schemas its forms are drawn from, and what its buttons write.
  */
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -190,7 +188,7 @@ export interface ProviderWrites {
 }
 
 /**
- * A provider row's form and what it writes (`providersPane.tsx`'s `ProviderRow`): its blocks, the
+ * A provider row's form and what it writes (`ProviderRows.tsx`'s `ProviderRow`): its blocks, the
  * boxes' text against what is saved, and Save. The document moved under the form — usually because
  * this row just saved — and untouched boxes follow it, edited ones are kept, so a save never discards
  * typing that has not been sent yet.
@@ -318,7 +316,7 @@ export function localServerSaid(server: LocalServerProbe): string {
 /**
  * What answered on the usual local ports and whether each embedded model's weights are there, asked
  * while Connections is open — when it opens, after every availability check and configuration change,
- * and on Scan again (`App.tsx`'s, moved unchanged).
+ * and on Scan again.
  */
 export function useLocalModels(active: boolean, checkedAt: number, config: unknown): {
   localServers: LocalServerProbe[] | undefined;

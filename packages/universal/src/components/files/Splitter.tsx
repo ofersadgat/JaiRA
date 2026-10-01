@@ -6,18 +6,16 @@ import { NO_STACK, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 
 /**
- * `splitter.tsx`'s `Splitter`, universal (decision 0015): the divider between two panes, dragged to
- * resize the one before it (the size clamped by `clampSplit`, the desktop's own). The rules, from
- * `styles.css`:
+ * The divider between two panes, dragged to resize the one before it (the size clamped by
+ * `clampSplit`, `splitterModel.ts`). How it looks:
  *
- *   .splitter              6 wide, a 2px --line down its middle (`::before`, inset 0 2px); --accent hovered
- *                          or reached by the keyboard (`:focus-visible`), where it draws no outline
- *   .splitter.horizontal   6 tall, the line across (inset 2px 0)
+ *   the divider            6 wide, a 2px --line down its middle (2 in from each side); --accent hovered,
+ *                          dragged or reached by the keyboard (`:focus-visible`), where it draws no outline
+ *   horizontal             6 tall, the line across (2 in from above and below)
  *
- * `extent` is the container along the drag, for `reserve` — the parent measures it (the DOM one reads
- * its parent element). A double-press restores `reset`, as a double-click does on the desktop. On web it
- * is a tab stop the arrow keys move, as the desktop's (`splitKey`): a divider that can only be dragged is
- * one some people cannot move.
+ * `extent` is the container along the drag, for `reserve` — the parent measures it. A double-press
+ * restores `reset`. On web it is a tab stop the arrow keys move (`splitKey`): a divider that can only be
+ * dragged is one some people cannot move.
  */
 export function Splitter({
   value,
@@ -40,7 +38,7 @@ export function Splitter({
   extent?: number;
   label: string;
   reset: number;
-  /** The pane AFTER the divider is the one sized (the DOM's `invert`): a drag right narrows it. */
+  /** The pane AFTER the divider is the one sized: a drag right narrows it. */
   invert?: boolean;
 }): JSX.Element {
   const t = useTokens();
@@ -98,7 +96,7 @@ export function Splitter({
       {...(keys as object)}
       role="separator"
       accessibilityLabel={label}
-      // Positioned and no stacking context (`NO_STACK`), as `.splitter` is.
+      // Positioned and no stacking context (`NO_STACK`).
       style={{ flexShrink: 0, ...NO_STACK, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none", outlineStyle: "none" } as object) : {}) } as never}
     >
       <View {...(hover as object)} flex={1} {...(horizontal ? { paddingVertical: 2 } : { paddingHorizontal: 2 })}>

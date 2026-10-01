@@ -46,28 +46,27 @@ import { SettingsRow, SettingsSection } from "./SettingsPage";
 import { ThemeMini } from "./ThemeMini";
 
 /**
- * Settings → Appearance (`appearancePane.tsx`'s `AppearancePane`, with what `App.tsx` hands it),
- * universal (decision 0015). Its rows, choices and words are `appearanceModel.ts`'s, as the DOM's are;
- * the rules it carries, from `styles.css`:
+ * Settings → Appearance: the mode, the theme, the board's and the conversation's options, the text, the
+ * file types and the Files tree. Its rows, choices and words are `appearanceModel.ts`'s. How it looks:
  *
- *   .mode-tiles          three equal columns, gap 10, padding 12 (the card's one child)
- *   .mode-tile           column, gap 6, padding 7, 1px --line, radius 12, --panel, --dim; hovered a
+ *   the mode tiles       three equal columns, gap 10, padding 12 (the card's one child)
+ *   a mode tile          column, gap 6, padding 7, 1px --line, radius 12, --panel, --dim; hovered a
  *                        --rule ring; chosen an --accent ring doubled by a 1px --accent shadow, --text,
  *                        on --accent at 5% over --panel
- *   .mode-tile > mini    70 tall, 1px --line, radius 8
- *   .mode-tile-name      centred, the body's text (13/12.5, line 1.5) at 500
- *   .theme-grid          columns of at least 196 filling the row, gap 10, padding 12
- *   .theme-card          column, 1px --line, radius 12, clipped, --panel, --text; hovered and chosen
+ *   its miniature        70 tall, 1px --line, radius 8
+ *   its name             centred, the body's text (13/12.5, line 1.5) at 500
+ *   the theme cards      columns of at least 196 filling the row, gap 10, padding 12
+ *   a theme card         column, 1px --line, radius 12, clipped, --panel, --text; hovered and chosen
  *                        as a tile (no ground change)
- *   .theme-card > mini   96 tall, a --line under it
- *   .theme-meta          column, gap 2, padding 8 10 10
- *   .theme-name          row, centred, gap 6, 600
- *   .theme-tag           padding 2 5, radius 4, --panel-3, --dim, app 700 at 0.68, line 1, 0.08em, upper
- *   .theme-desc          0.92, line 1.4, --dim
- *   .theme-check         18 round at 7 7 from the top right, --fill-accent, --on-accent 800 at 0.84,
+ *   its miniature        96 tall, a --line under it
+ *   its words            column, gap 2, padding 8 10 10
+ *   its name             row, centred, gap 6, 600
+ *   its "default"        padding 2 5, radius 4, --panel-3, --dim, app 700 at 0.68, line 1, 0.08em, upper
+ *   its note             0.92, line 1.4, --dim
+ *   its ✓ (chosen)       18 round at 7 7 from the top right, --fill-accent, --on-accent 800 at 0.84,
  *                        a 0 1 3 shadow at 25%
- *   .set-font            a font row's control: the stack and its size, 340 wide, gap 8, stretched
- *   .set-inherit         app at 0.96, --dim
+ *   a font row's control the stack and its size, 340 wide, gap 8, stretched
+ *   "follows the data font"   app at 0.96, --dim
  *
  * Its previews are the real pieces: the board's own `Column` and tile chrome, the composer's chip and
  * figure (`usage/Figures.tsx`), the transcript for the work summary, `FileTypesPane` (its code an island)
@@ -85,7 +84,7 @@ export function AppearancePage(): JSX.Element {
   const onConversation = (patch: Partial<ConversationLook>): void => void actions.setConversation(patch, layer);
   const appearance = look as unknown as Appearance;
   const surface = surfaceOf(appearance);
-  // Which chosen data faces are not monospaced — measured where a canvas can say (web), as the DOM does.
+  // Which chosen data faces are not monospaced — measured where a canvas can say (web).
   const proportional = useMemo(() => {
     if (typeof document === "undefined") return new Set<string>();
     const ctx = document.createElement("canvas").getContext("2d");
@@ -240,7 +239,7 @@ export function AppearancePage(): JSX.Element {
       </SettingsSection>
 
       {/* A workspace of its own (a tree beside a stage beside a live Monaco), and a section the
-          accordion lists, as the DOM's is. */}
+          accordion lists. */}
       <SettingsSection id="file-types" title="File types" plain wide layer={rowLayer("renderers", "editors")}>
         {/* `components/files/FileTypesPane.tsx`: the workspace, its preview the real surface (a Monaco island for code). */}
         <FileTypesPane
@@ -327,7 +326,7 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
                     onPress={() => onPick(option)}
                     disabled={busy}
                     {...({ "aria-pressed": on } as object)}
-                    // The chosen card's ✓ is placed against it (`.theme-card` is `position: relative`).
+                    // The chosen card's ✓ is placed against it.
                     position="relative"
                     width={cellWidth}
                     borderRadius={12}
@@ -351,7 +350,7 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
                           </View>
                         ) : null}
                       </View>
-                      {/* The line as the stylesheet writes it (unitless) on web: Blink snaps its product to 1/64. */}
+                      {/* The line height written as a factor (unitless) on web: Blink snaps its product to 1/64. */}
                       <Txt spec={{ voice: "app", scale: 0.92, lineHeight: 1.4, color: "dim" }} {...(isWeb ? { lineHeight: "1.4" } : {})}>
                         {card.note}
                       </Txt>
@@ -388,18 +387,18 @@ function ThemeCards({ palette, mode, busy, onPick }: { palette: Appearance["pale
 /**
  * What tasks look like — the board's own `Column` and tile chrome (`tileChromeOf`), not a picture of
  * them, so the window's palette and the three board options reach it as they reach the Tasks view. What
- * the tiles say is `appearanceModel.ts`'s `TASK_PREVIEW`, as the DOM's is. The rules:
+ * the tiles say is `appearanceModel.ts`'s `TASK_PREVIEW`. How it looks:
  *
- *   .set-preview         10 under the words, 1px --line, radius 10, clipped, --bg, takes no pointer
- *   .task-preview .board-body   padding 10; `.columns` a row, gap 10, stretched
- *   .task-preview .column       equal shares of the row (`flex: 1 1 0`), no most
+ *   the preview          10 under the words, 1px --line, radius 10, clipped, --bg, takes no pointer
+ *   its board            padding 10; the columns a row, gap 10, stretched
+ *   a column             an equal share of the row (`flex: 1 1 0`), no most
  */
 function TaskPreview(): JSX.Element {
   const t = useTokens();
   const look = useLook();
   return (
     <View marginTop={10} borderRadius={10} overflow="hidden" backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} pointerEvents="none" aria-hidden>
-      {/* `.board-body`, with Blueprint's graph paper as the board's (`Board.tsx`). */}
+      {/* The board's body, with Blueprint's graph paper as the board's (`Board.tsx`). */}
       <View padding={10} overflow="hidden" flexDirection="row" gap={10} alignItems="stretch" {...((look.palette !== "blueprint" ? {} : isWeb ? graphPaperWeb(t) : { position: "relative" }) as object)}>
         {look.palette === "blueprint" && !isWeb ? <GraphPaper t={t} /> : null}
         {TASK_PREVIEW.map((column, index) => (
@@ -415,14 +414,14 @@ function TaskPreview(): JSX.Element {
   );
 }
 
-/** `board.tsx`'s `Tile`, as the preview draws it: its title and pill, where it stands and its far end. */
+/** A task's tile, as the preview draws it: its title and pill, where it stands and its far end. */
 function PreviewTile({ tile, last }: { tile: (typeof TASK_PREVIEW)[number]["tiles"][number]; last: boolean }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const selected = tile.selected === true;
   const pill = pillKindOf(tile.status as TaskStatus | InstanceStatus);
   const { wash, ground, ring, radius, below } = tileChromeOf(t, look, { pill, selected, last, inTray: false });
-  // The data voice at a factor of --size-data, line-height 1.5 as the body sets it (as `TaskCard`'s).
+  // The data voice at a factor of --size-data, line-height 1.5 (as `TaskCard`'s).
   const line = (factor: number): object => ({
     fontFamily: t.v("font-data"),
     fontSize: t.scaled("size-data", factor),
@@ -472,16 +471,16 @@ function PreviewTile({ tile, last }: { tile: (typeof TASK_PREVIEW)[number]["tile
 }
 
 /**
- * The work summary's preview (`workPreview.tsx`'s `WorkPreview`): one request's work, three times, each
- * drawn by the transcript itself under the settings being chosen. The moments are
- * `workPreviewModel.ts`'s, as the DOM's are. The rules:
+ * The work summary's preview: one request's work, three times, each drawn by the transcript itself
+ * under the settings being chosen. The moments are `workPreviewModel.ts`'s. How it looks:
  *
- *   .ws-preview          a `.set-preview` that takes the pointer: a column, gap 12, padding 12
- *   .ws-preview-card     clipped, 1px --line, radius 10, --panel
- *   .ws-preview-head     row, centred, gap 8, at least 30 tall, padding 0 12, a --line under, --panel-2,
+ *   the preview          10 under the words, 1px --line, radius 10, clipped, --bg, and it takes the
+ *                        pointer: a column, gap 12, padding 12
+ *   a moment's card      clipped, 1px --line, radius 10, --panel
+ *   its head             row, centred, gap 8, at least 30 tall, padding 0 12, a --line under, --panel-2,
  *                        app 600 11.5/12.5 --text; its note pushed right, 400, --dim
- *   .ws-preview-dot      7 round, --accent in a 3px ring of --accent 18% (done: --ok, no ring)
- *   .ws-preview-card > .ts   padding 8 12 10
+ *   its dot              7 round, --accent in a 3px ring of --accent 18% (done: --ok, no ring)
+ *   its transcript       padding 8 12 10
  */
 function WorkPreview({ look }: { look: WorkLook }): JSX.Element {
   const t = useTokens();
@@ -520,7 +519,7 @@ function WorkPreview({ look }: { look: WorkLook }): JSX.Element {
   );
 }
 
-/** A font row's words: its sentence, and the stack the stylesheet receives (`Resolved`) — one line, cut. */
+/** A font row's words: its sentence, and the stack the voice is drawn in — one line, cut. */
 function FontWords({ words, families, voice, fallback }: { words: string; families: readonly string[]; voice: "app" | "data"; fallback: string }): JSX.Element {
   return (
     <>
@@ -533,12 +532,12 @@ function FontWords({ words, families, voice, fallback }: { words: string; famili
 }
 
 /**
- * The Text section's preview: a file surface beside a task row (`appearancePane.tsx`'s `Preview`).
+ * The Text section's preview: a file surface beside a task row.
  *
- *   .ap-preview          1px --line, radius --card-radius, clipped, 10 under the row's words
- *   .ap-preview-band     app-label on --panel-3, a --line under, padding 5 9
- *   .ap-preview-files    column, flex 1, start, gap 3, padding 7 9, --panel-2; its runs one line each
- *   .ap-preview-task     the same on --bg
+ *   the preview          1px --line, radius --card-radius, clipped, 10 under the row's words
+ *   its band             app-label on --panel-3, a --line under, padding 5 9
+ *   the file's side      column, flex 1, start, gap 3, padding 7 9, --panel-2; its runs one line each
+ *   the task's side      the same on --bg
  */
 function TextPreview(): JSX.Element {
   const t = useTokens();
@@ -575,18 +574,17 @@ function TextPreview(): JSX.Element {
 }
 
 /**
- * Two elements of one fan-out, in the conversation's own sheet, laid out as chosen
- * (`appearancePane.tsx`'s `ConversationPreview`). The rules, from `styles.css`:
+ * Two elements of one fan-out, in the conversation's own sheet, laid out as chosen. How it looks:
  *
- *   .convo-preview       a `.set-preview` (1px --line, radius 10, --bg, 10 under the words), column,
+ *   the preview          1px --line, radius 10, --bg, 10 under the words, takes no pointer; column,
  *                        gap 10, padding 12
- *   .sb-columns          side by side: equal columns, top-aligned, gap 12
- *   .sb-gutter           row, centred, gap 8, padding 0 4 4: the session (app 11/12.5, --dim, one line)
+ *   side by side         equal columns, top-aligned, gap 12
+ *   a panel's gutter     row, centred, gap 8, padding 0 4 4: the session (app 11/12.5, --dim, one line)
  *                        and the span (the same, tabular, pushed right, 8 before it)
- *   .sb-sheet            --panel, 1px --line, radius 12, 0 1 3 rgba(15, 20, 30, .06) — dark: 0 1 3 at
+ *   its sheet            --panel, 1px --line, radius 12, 0 1 3 rgba(15, 20, 30, .06) — dark: 0 1 3 at
  *                        35% black; contrast: 1.5px --rule, a 3 3 0 --rule shadow, radius 4;
- *                        pastel(-rail): radius 16 (as `RunTranscript.tsx`'s `sheetLookOf`)
- *   .sb-body             padding 13 15 15; the message 10 above, 14 below; its markdown at 13.5/12.5,
+ *                        pastel(-rail): radius 16 (as `SessionBands.tsx`'s `sheetLookOf`)
+ *   the sheet's body     padding 13 15 15; the message 10 above, 14 below; its markdown at 13.5/12.5,
  *                        line 1.65, padding 2 2 12
  */
 function ConversationPreview({ layout }: { layout: "stacked" | "band" }): JSX.Element {

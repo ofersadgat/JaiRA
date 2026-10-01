@@ -23,23 +23,22 @@ import { useShell } from "./shell";
 import { Uncopied } from "./Uncopied";
 
 /**
- * The Settings room (`.settings-view`: `SettingsFrame` around the open section's page), as `App.tsx`
- * draws it in `.viewport` (decision 0015): one scrolling column (`.col.mid.settings-body`: padding
- * 14 16 on --bg) holding the page — its title, whose settings these are, the layer switch and, on the
- * personal layer, "Which rows" — around the open section's own sections. What the frame says is
- * `settingsSections.ts`'s, as the DOM's is; a page with no copy yet is an {@link Uncopied} box inside it.
+ * The Settings room: one scrolling column (padding 14 16 on --bg) holding the page — its title, whose
+ * settings these are, the layer switch and, on the personal layer, "Which rows" — around the open
+ * section's own sections. What the frame says is `settingsSections.ts`'s. A section with no page here
+ * would be an {@link Uncopied} box inside the frame; every section has one today.
  */
 export function SettingsView(): JSX.Element {
   const t = useTokens();
   const { state, actions } = useShell();
-  // `App.tsx`'s `justYou`: which of the Just you view's readings is on.
+  // Which of the Just you view's readings is on.
   const [justYou, setJustYou] = useState<JustYouView>("changed");
   const section = state.section;
   const layer = state.configLayer;
   const frame = settingsFrameOf(section, layer, justYou);
   const layerView = useMemo(() => ({ layer, view: state.config, onlyStated: frame.onlyStated }), [layer, state.config, frame.onlyStated]);
   const project = settingsProjectLabel(state.projects, state.at);
-  // What `App.tsx` holds for the pages: the health board, its fixes, and the forge sign-ins in flight.
+  // What the room holds for its pages: the health board, its fixes, and the forge sign-ins in flight.
   const health = useHealth();
   const forgeOAuth = useForgeOAuth(state.availability.forges, actions.readAvailability);
   const shell: SettingsShell = {
@@ -85,14 +84,15 @@ export function SettingsView(): JSX.Element {
 
   return (
     // The scroll box's frame, which the accordion measures its sections against (`parts.ts`). No stacking
-    // context of its own on web (`PLAIN_SCROLLER`: react-native-web's View is one, `z-index: 0`): the
-    // desktop's `.settings-body` is none, and Monaco's hidden input (`z-index: -10`, in the File types
-    // preview) is painted under the WHOLE page there — which puts everything else in a layer over it,
-    // where Chromium draws the sidebar's and the inbox strip's text greyscale. Held inside this box it
-    // was painted in the scroller, and the same text came out subpixel.
+    // context of its own on web (`PLAIN_SCROLLER`: react-native-web's View is one, `z-index: 0`), which
+    // decides how the page's text is smoothed: with none, Monaco's hidden input (`z-index: -10`, in the
+    // File types preview) is painted under the WHOLE page — which puts everything else in a layer over
+    // it, where Chromium draws the sidebar's and the inbox strip's text greyscale, as the reference
+    // pictures hold it (`pair.mts`). Held inside this box it was painted in the scroller, and the same
+    // text came out subpixel.
     <RNView ref={box} collapsable={false} style={{ flex: 1, minWidth: 0, ...PLAIN_SCROLLER } as never}>
       <ScrollView
-        // A new page is a new scroll box, at its top (`useSettingsParts` sets `scrollTop = 0` on a new key).
+        // A new page is a new scroll box, at its top.
         key={section}
         ref={scroller}
         style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER } as never}

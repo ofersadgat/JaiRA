@@ -3,13 +3,13 @@ import { View } from "@tamagui/core";
 import { useTokens } from "../../tokens";
 
 /**
- * Chromium's menulist arrow — every `<select>`'s, the plain one (`logs/Select.tsx`) and `select.cfg-input`
- * (`settings/fields.tsx`) alike — measured on the desktop's page: a right-angled chevron (its arms at
+ * Chromium's menulist arrow, for every select — the plain one (`logs/Select.tsx`) and a form's
+ * (`settings/fields.tsx`) alike — measured off real `<select>`s: a right-angled chevron (its arms at
  * 45°) whose centre line is 8.2 wide and 4.1 tall, its right end 4.61 in from the box's right edge
  * and its middle 0.235 above the box's, stroked 1.5, in the text's colour; the same in every select,
- * whatever its font or height (measured in the Logs bar's, a settings page's `.cfg-input` and the
- * New-task form's: pixel for pixel alike). Drawn as its two strokes, meeting at the point — their square
- * ends make the miter's tip — so a phone draws it too.
+ * whatever its font or height (measured in the Logs bar's, a settings page's and the New-task form's:
+ * pixel for pixel alike). Drawn as its two strokes, meeting at the point — their square ends make the
+ * miter's tip — so a phone draws it too.
  */
 export function MenulistArrow({ color = "text" }: { color?: string }): JSX.Element {
   const t = useTokens();

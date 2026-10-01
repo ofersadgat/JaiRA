@@ -1,7 +1,7 @@
 /**
- * A closed `<select>`'s keys, for the copies that draw one as a box that opens a menu (`settings/fields.tsx`,
- * `logs/Select.tsx`, `workflow/controls.tsx`) — what Chromium does with the list shut, which the desktop's
- * real `<select>`s get for nothing:
+ * A closed `<select>`'s keys, for the selects drawn as a box that opens a menu (`settings/fields.tsx`,
+ * `logs/Select.tsx`, `workflow/controls.tsx`) — what Chromium does with the list shut, which a real
+ * `<select>` gets for nothing:
  *
  *   ↓ →            the next choice          ↑ ←            the one before
  *   Home, PageUp   the first                End, PageDown  the last

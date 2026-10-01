@@ -12,33 +12,32 @@ import { Button } from "../settings/Button";
 import { LinkButton } from "../workflow/controls";
 
 /**
- * `syncPanel.tsx`'s `WorkflowSyncPanel`, universal (decision 0015): a workflow description's viewer —
- * whether the description and the workflows still agree, the two buttons that bring them back
- * together, and the report a sync leaves (or the description rendered, `preview`). What it says is
- * `syncState.ts`'s; the panel's bag is `context.sync` (the store's, `syncSurfaceOf`,
- * `App.tsx`'s own). The rules, from `styles.css` (`cascade.mts '.sync-panel' --scene files-sync`):
+ * A workflow description's viewer — whether the description and the workflows still agree, the two
+ * buttons that bring them back together, and the report a sync leaves (or the description rendered,
+ * `preview`). What it says is `syncState.ts`'s; the panel's bag is `context.sync` (built from the
+ * store by `syncSurfaceOf`). How it looks:
  *
- *   .sync-panel          column, flex 1 1 auto, padding 10 15 0
- *   .sync-head           column, gap 6, padding 2 2 8, 1px --line under
- *   .sync-line           row, baseline, gap 8, app 13/12.5; its `.sub` 11/12.5 --dim
- *   .sync-actions        row, centred, gap 6, wraps; `button` / `button.ghost` (disabled 0.5);
- *                        `.sync-toggle` pushed to the end
- *   .sync-delegated      `.sub`, 2px --line on its left, padding-left 8, line 1.5; `b` 600;
- *                        `button.link` inline: data 11/12, --accent
- *   .sync-progress       column, gap 4; `.sync-steps` data 11/12, --dim, as written, 140 at most
- *   .sync-body           the rest, scrolls, 8 above
- *   .sync-section        14 under; its h3 a row spaced between (`h3`), baseline, gap 6, 6 under, app 700
- *                        at 11/12.5, 0.06em, uppercase, --dim; `.count` 400; `.count-bad` --bad on
+ *   the panel            column, flex 1 1 auto, padding 10 15 0
+ *   its head             column, gap 6, padding 2 2 8, 1px --line under
+ *   the sentence         row, baseline, gap 8, app 13/12.5; "last synced" 11/12.5 --dim
+ *   the buttons          row, centred, gap 6, wraps; `Button` plain or `ghost` (disabled 0.5); the
+ *                        Report/Preview toggle pushed to the end
+ *   what is delegated    11/12.5 --dim, 2px --line on its left, padding-left 8, line 1.5; a root's
+ *                        name 600; a document's an inline link: data 11/12, --accent
+ *   the progress         column, gap 4; the steps data 11/12, --dim, as written, 140 at most
+ *   the body             the rest, scrolls, 8 above
+ *   a section            14 under; its heading a row spaced between, baseline, gap 6, 6 under, app 700
+ *                        at 11/12.5, 0.06em, uppercase, --dim; a count 400; a bad count --bad on
  *                        12% of it
- *   .sync-verdict        row, centred, gap 8, 10 under
- *   .sync-finding, .sync-change   padding 5 2, 1px --line above, app 12/12.5; their heads a row,
- *                        baseline, gap 6; `b` 700
- *   .sync-states         data 11/12
- *   .chip                app 10/12.5, --dim, 1px --line, radius 999, padding 0 6, one line; `-ok`,
- *                        `-warn`, `-bad` in their colour, ring and all
- *   .notice              --tint-accent, radius --control-radius, padding 7 9, app 11/12.5, --dim, wraps
- *                        anywhere; `.warn`, `.bad` their tint and colour
- *   p.empty              --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
+ *   the verdict          row, centred, gap 8, 10 under
+ *   a finding, a change  padding 5 2, 1px --line above, app 12/12.5; their heads a row, baseline,
+ *                        gap 6; a finding's id 700
+ *   the states           data 11/12
+ *   a chip               app 10/12.5, --dim, 1px --line, radius 999, padding 0 6, one line; ok, warn
+ *                        and bad in their colour, ring and all
+ *   a notice             --tint-accent, radius --control-radius, padding 7 9, app 11/12.5, --dim, wraps
+ *                        anywhere; warn and bad their tint and colour
+ *   an empty note        --dim, 8 above and below, a paragraph's margins (1em of the body's 13)
  */
 
 const DIRECTIONS: SyncDirection[] = ["document", "states"];
@@ -164,7 +163,7 @@ export function WorkflowSyncPanel({ doc, busy, context, preview }: FileSurfacePr
   );
 }
 
-/** A `.sync-section`: its h3 (the words, then the counts, spread across as `h3` spreads them), and what it holds. */
+/** A section of the report: its heading (the words, then the counts, spread across), and what it holds. */
 function Section({ title, counts, children }: { title: string; counts?: ReactNode; children: ReactNode }): JSX.Element {
   const h3: FontSpec = { voice: "app", scale: 11 / 12.5, weight: 700, ls: 0.06, upper: true, color: "dim" };
   return (
@@ -178,7 +177,7 @@ function Section({ title, counts, children }: { title: string; counts?: ReactNod
   );
 }
 
-/** `.count` in a section's h3: --dim at 400; `.count-bad` --bad on a 12% wash of it. */
+/** A count in a section's heading: --dim at 400; a bad one --bad on a 12% wash of it. */
 function Count({ children, bad = false, t }: { children: ReactNode; bad?: boolean; t: Tokens }): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: 0.06, upper: true, color: bad ? "bad" : "dim" }} {...(bad ? { backgroundColor: t.tint("bad", 12) } : {})}>
@@ -249,7 +248,7 @@ function Findings({ result, t }: { result: WorkflowSyncResult; t: Tokens }): JSX
   const sorted = [...result.findings].sort((a, b) => STATUS_ORDER.indexOf(a.status) - STATUS_ORDER.indexOf(b.status));
   return (
     <Section title="Requirements" counts={<Count t={t}>{String(result.findings.length)}</Count>}>
-      {/* A section is a block: the paragraph's margins collapse into the h3's 6 above and the section's 14 below. */}
+      {/* The note's margins collapse into the heading's 6 above it and the section's 14 below (`collapsed`). */}
       {sorted.length === 0 ? <Empty t={t} collapsed>The check returned no findings.</Empty> : null}
       {sorted.map((finding) => (
         <Row key={finding.id} t={t}>
@@ -328,8 +327,8 @@ function Edits({ edits, changeset, onOpen, t }: { edits: WorkflowSyncEdit[]; cha
 }
 
 /**
- * `button.link` standing in a line of text (`.sync-delegated`): data 11/12 in --accent, underlined while
- * hovered — a run of the line rather than a box, so it keeps the line's baseline as the inline-flex does.
+ * A link standing in a line of text ("Described elsewhere"): data 11/12 in --accent, underlined while
+ * hovered — a run of the line rather than a box, so it keeps the line's baseline.
  */
 function InlineLink({ children, onPress }: { children: string; onPress: () => void }): JSX.Element {
   const [hovered, setHovered] = useState(false);
@@ -344,7 +343,7 @@ function InlineLink({ children, onPress }: { children: string; onPress: () => vo
   );
 }
 
-/** `.sync-finding` / `.sync-change`: padding 5 2, a rule above, app 12/12.5. */
+/** A finding or a change in the report: padding 5 2, a rule above, app 12/12.5. */
 function Row({ children, t }: { children: ReactNode; t: Tokens }): JSX.Element {
   return (
     <View paddingVertical={5} paddingHorizontal={2} {...(edge(t, { top: 1 }) as object)}>
@@ -353,7 +352,7 @@ function Row({ children, t }: { children: ReactNode; t: Tokens }): JSX.Element {
   );
 }
 
-/** `.chip` (and `-ok`, `-warn`, `-bad`): a word in a pill, in its tone's colour. */
+/** A word in a pill, in its tone's colour (ok, warn, bad; --dim without one). */
 function Chip({ tone, children, t }: { tone: Tone; children: ReactNode; t: Tokens }): JSX.Element {
   return (
     <View flexShrink={0} paddingHorizontal={6} borderRadius={999} borderWidth={1} borderStyle="solid" borderColor={t.v(tone ?? "line") as never}>
@@ -364,7 +363,7 @@ function Chip({ tone, children, t }: { tone: Tone; children: ReactNode; t: Token
   );
 }
 
-/** `.notice` (and `.warn`, `.bad`). */
+/** A notice, on its tone's tint (accent, warn or bad). */
 function Notice({ tone, children, t }: { tone?: "warn" | "bad"; children: ReactNode; t: Tokens }): JSX.Element {
   return (
     <View borderRadius={lengthToken(t, "control-radius", 7)} paddingVertical={7} paddingHorizontal={9} backgroundColor={t.v(tone === "warn" ? "tint-warn" : tone === "bad" ? "tint-bad" : "tint-accent") as never}>
@@ -375,7 +374,7 @@ function Notice({ tone, children, t }: { tone?: "warn" | "bad"; children: ReactN
   );
 }
 
-/** `p.empty`: --dim, 8 above and below, and the paragraph's margins (1em of the body's 13) — or those collapsed. */
+/** An empty note: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13) — or those collapsed. */
 function Empty({ children, t, collapsed = false }: { children: ReactNode; t: Tokens; collapsed?: boolean }): JSX.Element {
   const em = t.scaled("size-app", 13 / 12.5) as number;
   return (

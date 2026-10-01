@@ -8,15 +8,14 @@ import { SessionBands, Transcript, useTokens } from "@jaira/universal";
 
 /**
  * The transcript's pieces as specimens (decision 0015): `Transcript`
- * (`components/panel/SessionTranscript.tsx`, the copy of `transcriptView.tsx`'s), on the sheet a
- * conversation is printed on (`.ts-paper`'s --panel).
+ * (`components/panel/SessionTranscript.tsx`), on the sheet a conversation is printed on (--panel).
  *
  *  - `transcript-rows` — a stretch of work of one line each kind draws: a call that worked, one that
  *    failed, a shell line in its parts' colours, another server's tool, a thought and how long it took,
  *    a journal fact, a call the record left unanswered — with the pauses between them (minutes, hours,
  *    a day) and a compaction, reported and worked out.
- *  - `transcript-summary` — a stretch of many steps, finished: `workSummaryView.tsx`'s phases, chips,
- *    thinking lines and the foot, over `workPreview.tsx`'s story.
+ *  - `transcript-summary` — a stretch of many steps, finished: the work summary's phases, chips,
+ *    thinking lines and the foot, over the story the work preview tells (`workPreviewModel.ts`).
  */
 export interface TranscriptSpecimen {
   width: number;
@@ -63,7 +62,7 @@ const ROWS: TranscriptEntry[] = [
 ];
 
 const WITHHELD = "(withheld by the provider)";
-/** `workPreview.tsx`'s story, on the fixed clock. */
+/** The work preview's story (`workPreviewModel.ts`), on the fixed clock. */
 const STORY: TranscriptEntry[] = [
   say("user", "Make every scrollbar the same thin rounded one.", s(0), 0),
   { kind: "event", at: s(0), tone: "plain", text: "Hook ran: SessionStart (0.4 s)" },
@@ -103,7 +102,7 @@ const STORY: TranscriptEntry[] = [
 /** A value panel that opens nothing: the Chat room has one, so its rails offer "…". */
 const PANEL = { open: () => undefined } as unknown as ValuePanel;
 
-/** `.ts-paper`'s ground, which the transcript is drawn on in the Chat room. */
+/** The sheet's ground (--panel), which the transcript is drawn on in the Chat room. */
 function RnSheet({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -142,7 +141,7 @@ export const TRANSCRIPT_SPECIMENS: Record<string, TranscriptSpecimen> = {
   "transcript-working": { ...pair([], true), rn: () => <RnSheet><Transcript session={null} entries={working()} working rails /></RnSheet> },
 };
 
-// --- a run's conversation as panels (`sessionPanels.tsx`) --------------------------------------------
+// --- a run's conversation as panels (`SessionBands`) -------------------------------------------------
 
 const node = (id: string, key: string, at: number, end: number): InstanceNode => ({
   instanceId: id,
@@ -257,7 +256,7 @@ const SHOWN: TranscriptEntry[] = [
 ];
 TRANSCRIPT_SPECIMENS["transcript-shown"] = pair(SHOWN);
 
-/** Several questions keep their stepper under the row, Back and Next included (`.ts-asked .options`). */
+/** Several questions keep their stepper under the row, Back and Next included. */
 TRANSCRIPT_SPECIMENS["transcript-asked-steps"] = pair([
   say("user", "Plan the pause feature with me.", s(0), 0),
   {

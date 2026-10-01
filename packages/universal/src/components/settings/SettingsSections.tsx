@@ -10,19 +10,18 @@ import { Svg } from "../panel/Svg";
 import { useSettingsParts } from "./parts";
 
 /**
- * The Settings panel in the sidebar — `App.tsx`'s `settingsRow.panel`, universal (decision 0015): ONE
- * list of pages, in the order a person sets things up (`settingsSections.ts`), each with its glyph; under
- * the open page, its own sections (`parts.ts`), lit as the page is scrolled past them. The rules, from
- * `styles.css` (`cascade.mts '.sections.icons' --scene settings`):
+ * The Settings panel in the sidebar: ONE list of pages, in the order a person sets things up
+ * (`settingsSections.ts`), each with its glyph; under the open page, its own sections (`parts.ts`), lit
+ * as the page is scrolled past them. How it looks:
  *
- *   .side-drawer .sections   padding 2 0 4, scrolls; app at 12.5/12.5
- *   .sections li             row, centred, gap 9, padding 6 8, radius --control-radius-sm; hovered
- *                            --fill-ghost-hover; .sel --fill-ghost-selected, --text at 600
- *   .sections-icon           15 square, --dim (--text on the open page), strokes 1.7
- *   .sections-label          one line, cut with an ellipsis
- *   .prob-li-pills           what needs attention on the page, at the row's right end
- *   .section-parts           2 0 6 30 outside, a --line on the left
- *   .section-parts li        padding 3 8 3 11, 1 left over the line, a 2px edge (--accent when being
+ *   the list                 padding 2 0 4, scrolls; app at 12.5/12.5
+ *   a page's row             row, centred, gap 9, padding 6 8, radius --control-radius-sm; hovered
+ *                            --fill-ghost-hover; the open page's --fill-ghost-selected, --text at 600
+ *   its glyph                15 square, --dim (--text on the open page), strokes 1.7
+ *   its label                one line, cut with an ellipsis
+ *   its pills                what needs attention on the page, at the row's right end
+ *   the open page's sections 2 0 6 30 outside, a --line on the left
+ *   a section's row          padding 3 8 3 11, 1 left over the line, a 2px edge (--accent when being
  *                            read), radius 0 6 6 0, app at 0.94, --dim; hovered --text on
  *                            --fill-ghost-hover; being read --text at 600
  */

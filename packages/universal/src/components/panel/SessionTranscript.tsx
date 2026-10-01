@@ -26,31 +26,28 @@ import { MessageRail } from "./MessageRail";
 import { baselineOf } from "./SessionBands";
 
 /**
- * `transcriptView.tsx`'s `Transcript`, universal (decision 0015): what one session said — the messages,
- * and the work between them — over the same model (`entriesOf`, `blocksOf`, `gapBetween`). A message
- * said to the model (with the badge naming the workflow that wrote it — a button opening its definition
- * where the shell has a panel for it), an answer, a line of work of each kind (`WorkRows.tsx`), a stretch
- * of several steps summarised (`WorkSummary.tsx`), the pause before a block and a compaction
- * (`TranscriptMarks.tsx`), an armed cut, and the answer being written. A subagent's doorway walks into
- * its conversation where the host has somewhere for it (`onOpenSidechain`).
- * Not copied: a reading other than prose, rendered markdown, JSON, data or source (`ValueView`'s
- * table, form, diff …). The message rail — Copy, rewind, fork, the type and reading chips, the clock —
- * is `MessageRail.tsx`; without the host's controls it is only the room it takes (the DOM's is
- * invisible at rest).
+ * What one session said — the messages, and the work between them — over `transcript.ts`' model
+ * (`entriesOf`, `blocksOf`, `gapBetween`). A message said to the model (with the badge naming the
+ * workflow that wrote it — a button opening its definition where the shell has a panel for it), an
+ * answer, a line of work of each kind (`WorkRows.tsx`), a stretch of several steps summarised
+ * (`WorkSummary.tsx`), the pause before a block and a compaction (`TranscriptMarks.tsx`), an armed cut,
+ * and the answer being written. A subagent's doorway walks into its conversation where the host has
+ * somewhere for it (`onOpenSidechain`). The message rail — Copy, rewind, fork, the type and reading
+ * chips, the clock — is `MessageRail.tsx`; without the host's controls it is only the room it takes.
  *
- *   .ts                    column, padding 12 16 22
- *   .ts-msg-user           at the end, at most 78% wide, margin 14 0 10; .ts-msg-sent a column ending right
- *   .ts-msg-assistant      margin 10 0 14; .ts-msg-aside the same, 12 in, a 2px --rule on the left
- *   .ts-bubble             padding 8 13, radius 16 16 5 16, --accent 13% into --panel, 1px --accent 24% into
+ *   the column             padding 12 16 22
+ *   a user's message       at the end, at most 78% wide, margin 14 0 10; one sent for them a column ending right
+ *   an answer              margin 10 0 14; an aside the same, 12 in, a 2px --rule on the left
+ *   the bubble             padding 8 13, radius 16 16 5 16, --accent 13% into --panel, 1px --accent 24% into
  *                          --line; sent: --accent 5%, a dashed --accent 30% edge
- *   .ts-source             pill: padding 1 7 1 5, 1px --accent 28% into --line on --accent 7% into --panel,
+ *   the source badge       pill: padding 1 7 1 5, 1px --accent 28% into --line on --accent 7% into --panel,
  *                          --dim 500 at --size-app × 10.5/12.5, gap 4, 4 under; the glyph 11, --accent;
- *                          button.ts-source-link hovered: --accent 14% / 45%, --text; in a `.ts-tag`
- *                          8 after the role on its line, raised 1px
- *   .ts-rail               at least 22 tall, 4 above
- *   .ts-msg .vv-source     the app voice at --size-app × 13/12.5, line 1.6, --text, pre-wrap
- *   .vv-body > .markdown   --size-app × 12.5/12.5, line 1.65 in a message, padding 2 2 12, no end margins
- *   .ts-text-live          app 13/12.5 on 1.6, pre-wrap, --dim; .ts-live-line row, gap 7, 6 above,
+ *                          a button, hovered: --accent 14% / 45%, --text; beside an aside's role
+ *                          8 after it on its line, raised 1px
+ *   the rail               at least 22 tall, 4 above
+ *   plain text             the app voice at --size-app × 13/12.5, line 1.6, --text, pre-wrap
+ *   markdown               --size-app × 12.5/12.5, line 1.65 in a message, padding 2 2 12, no end margins
+ *   the answer arriving    app 13/12.5 on 1.6, pre-wrap, --dim; "writing…" under it a row, gap 7, 6 above,
  *                          app 11/12.5 --dim, a pulse
  *
  * Drawn again only when what it is handed changes (`memo`): the Chat view's box keeps its words in the
@@ -75,7 +72,7 @@ export const Transcript = memo(function Transcript({
 }: {
   session: SessionView | null;
   entries: TranscriptEntry[];
-  /** What to say when there is nothing (`Transcript`'s `empty`). */
+  /** What to say when there is nothing. */
   empty?: string | undefined;
   /** A live status line is saying what is happening: the row for a call being written goes. */
   narrated?: boolean | undefined;
@@ -97,7 +94,7 @@ export const Transcript = memo(function Transcript({
   onOpenSidechain?: ((call: string, name: string) => void) | undefined;
   /** How to show an artifact that RUNS, and where its messages go (`ArtifactSurface`). Absent ⇒ drawn inert. */
   artifacts?: ArtifactSurface | undefined;
-  /** `.ts`'s padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
+  /** The column's padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
   padding?: readonly [number, number, number, number];
 }): JSX.Element {
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
@@ -192,12 +189,12 @@ export const Transcript = memo(function Transcript({
   );
 });
 
-/** A sub-transcript, for a subagent's conversation under its call — its own doorways walk on, as the desktop's do. */
+/** A sub-transcript, for a subagent's conversation under its call — its own doorways walk on. */
 const Inner: TranscriptOf = ({ entries, working, onOpenSidechain, artifacts }) => <Transcript session={null} entries={entries} working={working} onOpenSidechain={onOpenSidechain} artifacts={artifacts} />;
 
 /**
- * `.ts-cut`: the counted line over what an armed rewind would delete — a dashed rule each side of the
- * words (--bad 60% into --line), 6 above and 2 under, app 10.5/12.5 in --bad, lower case, 0.02em.
+ * The counted line over what an armed rewind would delete — a dashed rule each side of the words
+ * (--bad 60% into --line), 6 above and 2 under, app 10.5/12.5 in --bad, lower case, 0.02em.
  */
 function CutLine({ count }: { count: number }): JSX.Element {
   const t = useTokens();
@@ -246,8 +243,8 @@ function WorkBlockView({
 
 /**
  * `Message`: something that was said — an instruction as a bubble on the right, an answer as a
- * document, anything else as an aside with a rule down its left. Its reading is `viewsFor`'s first, as
- * the DOM's is when nobody has picked another.
+ * document, anything else as an aside with a rule down its left. Its reading is `viewsFor`'s first
+ * when nobody has picked another.
  */
 function Message({
   entry,
@@ -262,14 +259,14 @@ function Message({
   workflow?: string | undefined;
   /** The rail's controls, where the host draws them (`MessageRail.tsx`). */
   rails?: { onEdit: EditMessage | undefined; scope: string | undefined } | undefined;
-  /** Past an armed cut: faded, the bubble on --panel-2 with a --line edge (`.ts-doomed`). */
+  /** Past an armed cut: faded, the bubble on --panel-2 with a --line edge. */
   doomed?: boolean;
 }): JSX.Element {
   const t = useTokens();
   const said = entry.text !== undefined && entry.text.length > 0;
   const value = entry.output !== undefined ? entry.output.value : (entry.text ?? "");
   // A reading somebody picked on the rail, and a type somebody asserted — the rail's; absent, the
-  // first reading of what JaiRA detected, as the DOM's is when nobody has picked another.
+  // first reading of what JaiRA detected.
   const [picked, setPicked] = useState<ViewId | null>(null);
   const types = useMessageTypes();
   const [local, setLocal] = useState<string | null | undefined>(undefined);
@@ -286,16 +283,16 @@ function Message({
     view === "markdown" && typeof value === "string" ? (
       <Markdown text={value} scale={12.5 / 12.5} lineHeight={1.65} trimEnd padding={[2, 2, 12, 2]} />
     ) : view === "text" && typeof value === "string" ? (
-      // The line height as the stylesheet writes it (unitless) on web: Blink multiplies it out in float
-      // and floors to its layout unit, so five lines of 13 × 1.6 are 103.98 tall, not 104.
+      // The line height as a factor (unitless) on web: Blink multiplies it out in float and floors to
+      // its layout unit, so five lines of 13 × 1.6 are 103.98 tall, not 104.
       <Txt spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: entry.role === "user" || entry.role === "assistant" ? "text" : "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)} {...(Platform.OS === "web" ? { lineHeight: "1.6" } : {})}>
         {value}
       </Txt>
     ) : (
       <ValueView value={value} hint={reading.hint} view={view} chrome={false} />
     );
-  // The rail's room: invisible at rest, as the DOM's is. A row of 21px controls, 4 above. With the host's
-  // controls it shows under the pointer (web) or once the message is long-pressed (a phone).
+  // The rail's room: invisible at rest. A row of 21px controls, 4 above. With the host's controls it
+  // shows under the pointer (web) or once the message is long-pressed (a phone).
   const rail =
     rails === undefined ? (
       <View marginTop={4} minHeight={22} paddingHorizontal={1} />
@@ -390,9 +387,9 @@ function Message({
 }
 
 /**
- * `MessageSource`: the badge on a message the person did not type — WHO wrote it, in a word, the rest
- * on the tooltip (`MESSAGE_SOURCE`, the desktop's words). The workflow's words name the workflow and,
- * where the shell can open its definition, are a button that does.
+ * The badge on a message the person did not type — WHO wrote it, in a word, the rest on the tooltip
+ * (`MESSAGE_SOURCE`). The workflow's words name the workflow and, where the shell can open its
+ * definition, are a button that does.
  */
 function Source({ by, workflow, onOpen, tagged }: { by: MessageAuthor; workflow: string | undefined; onOpen: (() => void) | undefined; tagged: boolean }): JSX.Element {
   const t = useTokens();
@@ -418,7 +415,7 @@ function Source({ by, workflow, onOpen, tagged }: { by: MessageAuthor; workflow:
     return (
       <>
         <Icon name={said.icon} size={11} color={String(t.v("accent"))} />
-        {/* Flex items, as the DOM's are: "From" and the name are the pill's own children, 4 apart. */}
+        {/* Flex items: "From" and the name are the pill's own children, 4 apart. */}
         {named ? (
           <>
             <Txt spec={chip} numberOfLines={1}>
@@ -452,11 +449,11 @@ function Source({ by, workflow, onOpen, tagged }: { by: MessageAuthor; workflow:
 }
 
 /**
- * `.ts-tag` with the badge in it: the role, then the pill 8 after it on the same line, raised 1px
- * (`vertical-align: 1px`). The two stand on one baseline in a line as tall as the taller of them,
- * placed as Blink places them: the role's where DM Sans' rounded ascent puts it (`baselineOf`), the
- * pill's at the foot of its icon — an inline-flex box's baseline is its first item's, and an `svg` has
- * none of its own; 3 under.
+ * An aside's role with the badge beside it: the role, then the pill 8 after it on the same line, raised
+ * 1px. The two stand on one baseline in a line as tall as the taller of them, placed as Blink places
+ * inline boxes: the role's where DM Sans' rounded ascent puts it (`baselineOf`), the pill's at the foot
+ * of its icon — an inline-flex box's baseline is its first item's, and an `svg` has none of its own;
+ * 3 under.
  */
 function TagLine({ role, children }: { role: string; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -480,7 +477,7 @@ function TagLine({ role, children }: { role: string; children: ReactNode }): JSX
 
 /**
  * A message's box, reachable: the pointer's hover on web, a long press on a phone (which toggles the
- * rail, as keyboard focus does on the desktop). A plain box when the host draws no rail.
+ * rail). A plain box when the host draws no rail.
  */
 function Reach({ reach, children, ...box }: { reach: Record<string, unknown>; children: ReactNode } & Record<string, unknown>): JSX.Element {
   if (typeof reach.onLongPress === "function") {

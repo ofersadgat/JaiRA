@@ -1,9 +1,8 @@
 /**
- * One conversation's STATE, as `chatPane.tsx`'s `ChatThread` holds it — the thread read from the record,
+ * One conversation's STATE, as `ChatThread.tsx`'s `ChatThread` holds it — the thread read from the record,
  * the plan the composer shows, what is in flight, the draft, the armed edit, and everything derived from
- * them (the entries, the live status, the split and the seam, the cuts). Moved out of the component,
- * unchanged, so the desktop's thread and the universal one (decision 0015) run the same code and only
- * draw it twice. No DOM here: scrolling is the host's, reached through `jump`.
+ * them (the entries, the live status, the split and the seam, the cuts). No DOM here: scrolling is the
+ * host's, reached through `jump`.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn } from "@jaira/shared/browser";
@@ -87,7 +86,7 @@ export function replyPlaceholder(arming: Arming | null): string {
 }
 
 /**
- * Everything one conversation holds and derives — `ChatThread`'s hooks, in the order it ran them.
+ * Everything one conversation holds and derives — what `ChatThread` draws.
  * `jump` is the host's "scroll to the live edge", called when a message is sent.
  */
 export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() => void>) {

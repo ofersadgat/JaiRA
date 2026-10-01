@@ -13,13 +13,13 @@ import { Composer } from "./Composer";
 import { useMentions } from "@jaira/ui/chatMentions";
 
 /**
- * `chatPane.tsx`'s `ChatStart`, universal (decision 0015): the empty room — say the first thing. The
- * composer's plan is asked of the STATE (`chat:startPlan`), as the desktop's is. The rules:
+ * The empty Chat room — say the first thing. There is no task yet, so the composer's plan is asked of
+ * the STATE (`chat:startPlan`). How it looks:
  *
- *   .chat-start          centred both ways, scrolls
- *   .chat-start-mid      900 at most, padding 24 0
- *   .chat-start-head     app 500 20/12.5, padding 0 16, 4 under (an h2's bold is overridden)
- *   .chat-start-where    .sub's --dim at 12.5/12.5, padding 0 16, 14 under
+ *   the room             centred both ways, scrolls
+ *   its middle           900 at most, padding 24 0
+ *   the heading          app 500 20/12.5, padding 0 16, 4 under
+ *   where it will run    --dim at 12.5/12.5, padding 0 16, 14 under
  */
 export function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
   const t = useTokens();

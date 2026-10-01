@@ -1,8 +1,8 @@
 /**
- * What the schema-aware editor's chrome says and decides, apart from the drawing (decision 0015):
- * `schemaEditor.tsx` draws it in the DOM and the universal copy natively, around the same editor
- * (an island there), from these — so the verdict, the words and the field reference's shape are
- * said once.
+ * What the schema-aware editor's chrome says and decides, apart from the drawing: the verdict, the
+ * words and the field reference's shape. `SchemaEdit`
+ * (`packages/universal/src/components/files/SchemaEdit.tsx`) draws the chrome from these, around the
+ * editor itself (`schemaEditor.tsx`, an island).
  */
 import { propertiesOf, type SchemaEntry, type SchemaFormat, type SchemaProperty, type ValidateSchemaResult } from "@jaira/shared/browser";
 import { PANE, paneDefault } from "./uiState";
