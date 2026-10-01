@@ -2,7 +2,7 @@
  * The desktop, kept open for iterating on universal copies (decision 0015).
  *
  *   npm --workspace @jaira/app run build:main          once, for the main process
- *   npx tsx packages/app/shots/studio.mts [--reseed] [--port 9301] [--built | --pages http://127.0.0.1:8094/]   leave it running
+ *   npx tsx packages/app/shots/studio.mts [--reseed] [--port 9301] [--built | --pages http://127.0.0.1:8094/] [--world <dir>]   leave it running
  *
  * Then, from another shell, the rigs that attach to it: `cascade.mts` (what the CSS does to an element)
  * and `pair.mts` (the desktop's page against the universal one, photographed and compared).
@@ -15,7 +15,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { cpSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
 import { createServer } from "node:http";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve } from "node:path";
 import { App } from "./driver.mjs";
 import { STUDIO_PORT, drawn, seed } from "./parityWorld.mjs";
 import { buildWorld, type World } from "./world.mjs";
@@ -26,7 +26,11 @@ const arg = (name: string): string | undefined => (process.argv.includes(name) ?
  * world and window (`--port`), all sharing one dev server: the first to start runs it, the rest use it.
  */
 const PORT = Number(arg("--port") ?? STUDIO_PORT);
-const DIR = join(import.meta.dirname, PORT === STUDIO_PORT ? ".world-studio" : `.world-studio-${PORT}`);
+/**
+ * The world's folder: this studio's own, or (`--world <dir>`) one kept somewhere of its own — the world the
+ * reference pictures were taken in, which has to stay where it is: its project's path is in what it draws.
+ */
+const DIR = arg("--world") !== undefined ? resolve(arg("--world")!) : join(import.meta.dirname, PORT === STUDIO_PORT ? ".world-studio" : `.world-studio-${PORT}`);
 const OUT = join(import.meta.dirname, "parity", PORT === STUDIO_PORT ? "rn" : `rn-${PORT}`);
 const CLIENT = join(import.meta.dirname, "..", "..", "client");
 /**
