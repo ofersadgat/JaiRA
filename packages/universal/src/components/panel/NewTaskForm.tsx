@@ -6,6 +6,7 @@ import { useNewTaskForm } from "@jaira/ui/newTaskModel";
 import { runInputsOf, type RunField, type RunSources, type RunValues } from "@jaira/ui/runForm";
 import { Txt, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { useEnterSubmits } from "../form/useEnterSubmits";
 import { Button } from "../settings/Button";
 import { SelectInput } from "../settings/fields";
 import { RunInputs } from "./RunPanel";
@@ -50,8 +51,10 @@ export function NewTaskForm({
     // The boxes are held in the store per state id, so starting another finds what was typed.
     onDone();
   };
+  // `<form onSubmit>`: Enter in one of its boxes creates the task, as on the desktop.
+  const box = useEnterSubmits(create);
   return (
-    <View flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>
+    <View ref={box as never} flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>
       <View flexDirection="column" gap={4}>
         <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: 0.04, upper: true, color: "dim" }}>Workflow</Txt>
         <SelectInput value={workflow} options={[["choose a workflow…", ""], ...workflows.map((entry): [string, string] => [entry.label ?? entry.rootId, entry.rootId])]} onChange={pick} />

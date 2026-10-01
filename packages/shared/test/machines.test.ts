@@ -4,7 +4,10 @@
  * the project key of a workspace on another machine.
  */
 import { describe, expect, it } from "vitest";
-import { engineUrlOf, normalizePairingCode, parseRemoteProjectKey, projectNameOf, remoteProjectKey, repositoryIdentity } from "../src/machines";
+import { createHash } from "node:crypto";
+import { engineUrlOf, hostOfUrl, normalizePairingCode, parseRemoteProjectKey, projectNameOf, remoteProjectKey, repositoryIdentity } from "../src/machines";
+import { ENGINE_CONTRACT, sha256Hex } from "../src/engineFrames";
+import { IPC_CHANNELS } from "../src/ipc";
 
 describe("a repository's identity", () => {
   it("is the same for every way its remote is written", () => {
@@ -37,6 +40,23 @@ describe("addresses and codes", () => {
     expect(engineUrlOf("mac-mini.tail4c2e.ts.net")).toBe("wss://mac-mini.tail4c2e.ts.net/engine");
     expect(engineUrlOf("https://mac-mini.tail4c2e.ts.net:8443/")).toBe("wss://mac-mini.tail4c2e.ts.net:8443/engine");
     expect(engineUrlOf("http://127.0.0.1:47318")).toBe("ws://127.0.0.1:47318/engine");
+    // A bare IP address or localhost holds no certificate: plain, as an emulator reaches the loopback listener.
+    expect(engineUrlOf("127.0.0.1:47318")).toBe("ws://127.0.0.1:47318/engine");
+    expect(engineUrlOf("localhost:47318/")).toBe("ws://localhost:47318/engine");
+    expect(engineUrlOf("100.64.0.7")).toBe("ws://100.64.0.7/engine");
+    expect(engineUrlOf("https://100.64.0.7:8443")).toBe("wss://100.64.0.7:8443/engine");
+    expect(engineUrlOf(" Desk.Tail4c2e.ts.net:443/x?y#z ")).toBe("wss://desk.tail4c2e.ts.net/engine");
+    expect(engineUrlOf("wss://desk.tail4c2e.ts.net/engine")).toBe("wss://desk.tail4c2e.ts.net/engine");
+    expect(engineUrlOf("ws://127.0.0.1:47318/engine")).toBe("ws://127.0.0.1:47318/engine");
+    expect(() => engineUrlOf("")).toThrow(/not an address/);
+    expect(hostOfUrl("wss://desk.tail4c2e.ts.net:8443/engine")).toBe("desk.tail4c2e.ts.net:8443");
+  });
+
+  it("hashes the contract the same with or without node:crypto", () => {
+    for (const text of ["", "abc", "x".repeat(55), "x".repeat(56), "x".repeat(64), [...IPC_CHANNELS].sort().join("\n")]) {
+      expect(sha256Hex(text)).toBe(createHash("sha256").update(text).digest("hex"));
+    }
+    expect(ENGINE_CONTRACT).toBe(createHash("sha256").update([...IPC_CHANNELS].sort().join("\n")).digest("hex").slice(0, 12));
   });
 
   it("reads a pairing code however it is typed", () => {

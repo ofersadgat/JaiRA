@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type JSX } from "react";
 import { Platform, TextInput, View as RNView, useWindowDimensions } from "react-native";
 import { View } from "@tamagui/core";
 import { isInstalled, shownFamilies } from "@jaira/ui/appearance";
-import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 
@@ -251,7 +251,7 @@ function FaceMenu({
         {sep}
         <View flexDirection="row" alignItems="center" gap={8} paddingVertical={4} paddingHorizontal={8}>
           <View width={12} flexShrink={0} />
-          <TextInput
+          <TextInput {...(ENTER_KEEPS_FOCUS as object)}
             value={typed}
             placeholder="another family…"
             placeholderTextColor={placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */}

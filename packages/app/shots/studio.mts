@@ -2,7 +2,7 @@
  * The desktop, kept open for iterating on universal copies (decision 0015).
  *
  *   npm --workspace @jaira/app run build:main          once, for the main process
- *   npx tsx packages/app/shots/studio.mts [--reseed] [--port 9301]   leave it running
+ *   npx tsx packages/app/shots/studio.mts [--reseed] [--port 9301] [--built | --pages http://127.0.0.1:8094/]   leave it running
  *
  * Then, from another shell, the rigs that attach to it: `cascade.mts` (what the CSS does to an element)
  * and `pair.mts` (the desktop's page against the universal one, photographed and compared).
@@ -13,8 +13,9 @@
  * for as long as this runs, so two pictures of one state are comparable.
  */
 import { spawn, type ChildProcess } from "node:child_process";
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { cpSync, existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { createServer } from "node:http";
+import { extname, join, normalize } from "node:path";
 import { App } from "./driver.mjs";
 import { STUDIO_PORT, drawn, seed } from "./parityWorld.mjs";
 import { buildWorld, type World } from "./world.mjs";
@@ -28,7 +29,47 @@ const PORT = Number(arg("--port") ?? STUDIO_PORT);
 const DIR = join(import.meta.dirname, PORT === STUDIO_PORT ? ".world-studio" : `.world-studio-${PORT}`);
 const OUT = join(import.meta.dirname, "parity", PORT === STUDIO_PORT ? "rn" : `rn-${PORT}`);
 const CLIENT = join(import.meta.dirname, "..", "..", "client");
-const DEV = "http://127.0.0.1:8081/";
+/**
+ * Where the window's pages come from: the shared dev server, or (`--pages http://127.0.0.1:<port>/`) a
+ * server of one's own that is already running — a dev server over a private copy of the sources, or the
+ * built client served as files, for a long run (a freeze of the goldens) that the shared server's
+ * reloads and restarts must not reach. This studio starts nothing in that case, and stops nothing.
+ */
+const OWN = arg("--pages");
+/**
+ * `--built`: the client as it was last built (`npm --workspace @jaira/client run build`), served as
+ * files by this studio — what a freeze of the goldens and the gate against them run on. Nothing a copier
+ * saves reaches it, a page load costs the shared dev server nothing, and the pictures are of what ships.
+ * The build is copied beside the world first, so a rebuild part-way through a run changes nothing under it.
+ */
+const BUILT = process.argv.includes("--built");
+const DEV = OWN ?? (BUILT ? `http://127.0.0.1:${PORT + 2000}/` : "http://127.0.0.1:8081/");
+
+const TYPES: Record<string, string> = { ".html": "text/html; charset=utf-8", ".js": "text/javascript", ".mjs": "text/javascript", ".css": "text/css", ".json": "application/json", ".woff2": "font/woff2", ".ttf": "font/ttf", ".png": "image/png", ".svg": "image/svg+xml", ".wasm": "application/wasm" };
+
+/** Serve the built client's folder: a route is its own page (`/rn` is `rn.html`), as the app's protocol serves it. */
+function serveBuilt(): void {
+  const built = join(CLIENT, "dist", "client");
+  if (!existsSync(join(built, "index.html"))) throw new Error(`no built client at ${built}: npm --workspace @jaira/client run build`);
+  const dir = join(DIR, "client");
+  rmSync(dir, { recursive: true, force: true });
+  cpSync(built, dir, { recursive: true });
+  createServer((req, res) => {
+    const path = decodeURIComponent(new URL(req.url ?? "/", "http://x").pathname);
+    let file = normalize(join(dir, path));
+    if (!file.startsWith(normalize(dir))) {
+      res.writeHead(403).end();
+      return;
+    }
+    if (!existsSync(file) || statSync(file).isDirectory()) {
+      const page = join(dir, `${path.replace(/^\/|\/$/g, "") || "index"}.html`);
+      file = existsSync(page) ? page : join(dir, "index.html");
+    }
+    // The assets are named by their content, so the window keeps them: a scene is a page load.
+    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": path.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-store" });
+    res.end(readFileSync(file));
+  }).listen(PORT + 2000, "127.0.0.1");
+}
 
 async function main(): Promise<void> {
   let world: World;
@@ -50,6 +91,7 @@ async function main(): Promise<void> {
       return false;
     }
   };
+  if (BUILT && OWN === undefined) serveBuilt();
   const running = await answering();
   let one: ChildProcess | undefined;
   let said = "";
@@ -68,7 +110,7 @@ async function main(): Promise<void> {
       void answering().then((up) => (up ? undefined : serve()));
     });
   };
-  if (!running) serve();
+  if (!running && OWN === undefined && !BUILT) serve();
   for (let i = 0; i < 120; i++) {
     if (await answering()) break;
     await new Promise((r) => setTimeout(r, 1000));
@@ -82,7 +124,7 @@ async function main(): Promise<void> {
   await app.holdStill(Date.UTC(2026, 8, 27, 21, 0, 0));
   await app.navigate(DEV);
   await app.until(drawn, "the desktop to draw from the dev server", 400);
-  console.log(`studio ready: the desktop on CDP port ${PORT}, pages from ${DEV}${running ? " (a dev server another studio started)" : ""}`);
+  console.log(`studio ready: the desktop on CDP port ${PORT}, pages from ${DEV}${BUILT ? " (the built client)" : running ? " (a dev server another studio started)" : ""}`);
 
   const stop = async (): Promise<void> => {
     await app.close();

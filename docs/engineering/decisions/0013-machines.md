@@ -2,7 +2,7 @@
 id: engineering/decisions/0013-machines
 type: decision
 status: accepted
-updated: 2026-09-27
+updated: 2026-09-30
 decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, engineering/units/project-store, engineering/units/project-sessions, engineering/units/cli]
 ---
 
@@ -129,6 +129,8 @@ The person's rulings of 2026-09-27 are quoted where they settle something.
   frame per message. Because there is one frame per message, no length prefix is needed. The pipe stays
   the local transport.
 - **Authentication is a machine token, not `engine.json`.** It goes in `hello`, never in the URL.
+- **A phone or a browser is a client of the same transport** (amended 2026-09-30, below): a window onto
+  one engine, with a token of its own.
 - **Versions:**
   - A contract mismatch between machines shows on that machine's row ("needs JaiRA X").
   - Its replicated records stay readable.
@@ -147,6 +149,8 @@ The person's rulings of 2026-09-27 are quoted where they settle something.
   settings sync" means for a new machine (ruling 11).
 - **Revocation.** Each machine lists who holds a token for it. Removing one revokes that token, and the
   removal syncs.
+- **Devices** (amended 2026-09-30, below). A phone or a browser tab pairs with the same code and is a
+  window, not a machine: it is issued a token and gives none, and is listed only so it can be forgotten.
 
 ### 4. Workspaces and project identity
 
@@ -586,6 +590,80 @@ the workspace specific stuff remains in the the workspace".
     (the model ids its root state names, and the default executor's model, through `accountOfRoute`).
     With none known, it judges by every account being spent, as before.
 
+### Amended 2026-09-30: a phone or a browser is a window onto one engine
+
+The person, about the phone's first connection ([0015](0015-one-universal-client.md)'s throwaway socket,
+read-only, with a token printed in the log): "this should work the same way that all of the remote stuff
+should work, no? it shouldnt be phone specific...right?" — and then "do … the transport switch". So a
+phone and a browser reach an engine the way a machine does: this decision's listener, frames and
+tokens, with pairing extended by as little as a device needs.
+
+- **A device is not a machine.** It runs no engine, so it has nothing to replicate and nothing connects
+  back to it. Pairing a machine is mutual (§3) because machines are equal; pairing a device is one way.
+- **Pairing.** The same one-time code, shown by the same "Pair a machine". The `pair` frame says it is a
+  device — an id the device made once and keeps, a name ("Pixel 8", "Chrome on Windows"), and whether
+  it is a phone or a browser — and carries no token for the other side.
+  - The engine issues a token and keeps its hash in `machine-peers.json`, marked as a device's.
+  - Nothing is added to `fleet.json`: no link is kept to it, nothing is copied from it, it is introduced
+    to no machine and told of none, and no task is ever placed on it.
+  - An id that is a machine's is refused: issuing for it would take that machine's token away.
+  - Pairing again with the same id replaces the token, so a device has one row.
+- **Admission.** A `hello` with a device's token is welcomed as a window: the service's channels as the
+  desktop's own window has them, routed across the fleet, with this connection's own current project
+  and limits watch (0012 §3), and every push. Not offered, each refused in words:
+  - what acts on that machine's screen (`project:choose`, `shell:reveal`; §8);
+  - the desktop app's own channels (its clipboard, updater, plugins and command), which a window's own
+    process answers and a device has none;
+  - the `engine:*` channels a host process uses (stop, restore, a crash to record), except `engine:info`.
+  - A contract mismatch is the existing "limited" welcome. The device says which side to update and stops.
+- **Listed and revoked.** Settings → Machines lists the devices under "Phones and browsers", each
+  saying whether it is connected and when it was last seen. Forget… revokes its token and drops its
+  connection, as for a machine; its next `hello` is refused, and it goes back to its Connect screen
+  saying why. A device is forgotten on the one machine it is paired with: there is nothing to sync.
+- **Every property of §2–§3 holds.** The token goes only in `hello` and is compared in constant time
+  over every issued hash; the code works once, for ten minutes, and is void after five wrong tries; the
+  listener is on loopback only; nothing secret is in a URL. A one-time code may be: the link
+  `jaira:///?address=…&code=…` is what a QR code would carry, and a browser's page takes the code out
+  of its address bar once it has paired.
+- **The frames are shared.** `ClientFrame`, `HostFrame` and the contract's hash moved to
+  `@jaira/shared` (`engineFrames.ts`), where a phone can import them: the hash is SHA-256 written out,
+  since a phone has no `node:crypto` and Web Crypto's is asynchronous. A test holds it to Node's.
+- **The client** (`packages/client/bridges/engineBridge.ts`) is `JairaBridge` over the platform's own
+  `WebSocket`, with nothing of Node in it.
+  - It reconnects with growing waits (1 s doubling to 30 s) and a fresh `hello`, at once when the app
+    comes back to the front or the network returns.
+  - After a reconnection it tells the store each scope may have changed, and says `limits:watch` again;
+    the window stays where it was.
+  - While it is away the window says "Disconnected … Reconnecting…" across its top.
+  - The device keeps the token in the platform's keystore (`expo-secure-store`) on a phone and in
+    `localStorage` in a browser, so the next launch connects by itself. "Forget this machine" is on the
+    Connect screen while a kept machine cannot be reached.
+- **The page a browser loads** comes from the engine's listener when the host has a built client to give
+  (the desktop and its `--serve` do; the npm `jaira serve` has none): static files only, read only, no
+  folder listed, a path that leaves the folder refused, and the content policy the desktop's `app://`
+  protocol sends (`clientFiles.ts`, used by both). `connect-src 'self'` means the page reaches the engine
+  that served it and no other.
+- **Addresses.** A name is `wss`; an address that says `http://`, a bare IP address or `localhost` is
+  `ws`, which is how an emulator reaches the loopback listener through `adb reverse`. "Add a machine"
+  reads addresses the same way.
+- **Verified:**
+  - `app/test/devices.test.ts`, with a real engine, listener and the device's bridge over Node's
+    `WebSocket`: pairing (a token, a row, no machine; a spent, wrong and voided code; a machine's id
+    refused), admission (two devices each on its own project, a write, the push it causes, the channels
+    not offered), revocation dropping the connection and refusing the next hello, reconnection, another
+    contract, and the files (headers, the SPA's page, every way out of the folder refused).
+  - `shots/remote.mts`: a headless Chrome served by the desktop's engine pairs by code, draws the board,
+    hears a push, answers a gate the desktop's run parked at, reconnects after a reload by its kept
+    token, and returns to the Connect screen when the desktop forgets it.
+  - `shots/android.mts`, on the emulator: the phone pairs by the deep link and draws the board; its Dark
+    switch, a settings write, turns the desktop's own window dark; a gate the desktop's run parks at
+    reaches its strip by a push; stopped and opened with no link, it connects by the token in its
+    keystore; forgotten on the desktop, it is back at its Connect screen.
+- **Not built:**
+  - the QR code itself (the link it would carry is read);
+  - a sign-in page a device's request causes still opens on the engine's machine, not on the device (§8);
+  - an artifact's page is served by the desktop's `jaira-artifact:` scheme, which a browser does not have.
+
 ## Consequences
 
 **Easier:**
@@ -608,4 +686,5 @@ the workspace specific stuff remains in the the workspace".
 
 - Sessions move between machines: workspace transfer, plus ownership handoff of the replicated records.
 - A machine outside Tailscale is needed: SSH, or a relay like t3code's, which only introduces.
-- Phones connect: pairing by QR, on the same transport.
+- Phones pair by QR: they connect on the same transport now (amended 2026-09-30), by a code typed or a
+  link opened; drawing the link as a QR code on Settings → Machines, and scanning it, are not built.

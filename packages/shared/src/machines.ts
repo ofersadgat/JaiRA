@@ -40,10 +40,31 @@ export interface PeerView extends MachineView {
   canReachHere: boolean;
 }
 
+/**
+ * A phone or a browser paired with this machine (decision 0013, amended 2026-09-30): a window onto its
+ * engine, which holds a token this machine issued and nothing else. Listed so it can be forgotten.
+ */
+export interface DeviceView {
+  id: string;
+  label: string;
+  kind: "phone" | "browser";
+  pairedAt: number;
+  /** When it last said hello with its token. */
+  lastUsedAt?: number;
+  /** It has a connection open now. */
+  connected: boolean;
+}
+
 export interface MachinesView {
-  /** `copy`: what of the other machines' tasks this one keeps a copy of (decision 0013 §6). */
-  self: MachineView & { reach: MachineReach; version: string; copy: CopyChoice };
+  /**
+   * `copy`: what of the other machines' tasks this one keeps a copy of (decision 0013 §6). `port`: the
+   * loopback port its engine listens on for other machines and devices, while it does — what Tailscale
+   * publishes, and what `adb reverse` points an emulator at.
+   */
+  self: MachineView & { reach: MachineReach; version: string; copy: CopyChoice; port?: number };
   machines: PeerView[];
+  /** The phones and browsers that hold a token for this machine. */
+  devices: DeviceView[];
   /** The code being shown under Pair a machine, while it is valid. */
   pairing?: { code: string; expiresAt: number };
 }
@@ -66,16 +87,33 @@ export interface CopyChoice {
 /** How long a pairing code works. */
 export const PAIRING_CODE_MS = 10 * 60 * 1000;
 
-/** The URL an engine's WebSocket is at, from the address a person types or a machine publishes. */
+/**
+ * The URL an engine's WebSocket is at, from the address a person types or a machine publishes.
+ *
+ * - A name is reached over TLS: `desk.tail4c2e.ts.net` is `wss://desk.tail4c2e.ts.net/engine`, which is
+ *   what Tailscale serves.
+ * - An address that says `http://` (or `ws://`) is taken at its word.
+ * - A bare IP address or `localhost` is plain too, since nothing holds a certificate for one: the
+ *   loopback listener itself, as an emulator reaches it through `adb reverse` (`127.0.0.1:47318`), or
+ *   a tailnet address the helper serves without certificates.
+ *
+ * Read with a pattern rather than `URL`: a phone parses addresses too, and React Native's `URL` has no
+ * setters.
+ */
 export function engineUrlOf(address: string): string {
-  let text = address.trim();
-  if (!/^[a-z]+:\/\//i.test(text)) text = `https://${text}`;
-  const url = new URL(text);
-  url.protocol = url.protocol === "http:" || url.protocol === "ws:" ? "ws:" : "wss:";
-  url.pathname = "/engine";
-  url.search = "";
-  url.hash = "";
-  return url.toString();
+  const parts = /^(?:([a-z][a-z0-9+.-]*):\/\/)?(?:[^/?#@]*@)?(\[[^\]]+\]|[^/?#:]+)(?::(\d+))?(?:[/?#].*)?$/i.exec(address.trim());
+  if (parts === null) throw new Error(`'${address}' is not an address`);
+  const scheme = parts[1]?.toLowerCase();
+  const host = parts[2]!.toLowerCase();
+  const literal = host === "localhost" || host.startsWith("[") || /^\d{1,3}(\.\d{1,3}){3}$/.test(host);
+  const plain = scheme === undefined ? literal : scheme === "http" || scheme === "ws";
+  const port = parts[3] !== undefined && Number(parts[3]) !== (plain ? 80 : 443) ? `:${Number(parts[3])}` : "";
+  return `${plain ? "ws" : "wss"}://${host}${port}/engine`;
+}
+
+/** The host (and port) of an engine URL, for saying where something is. */
+export function hostOfUrl(url: string): string {
+  return /^[a-z][a-z0-9+.-]*:\/\/(?:[^/?#@]*@)?([^/?#]+)/i.exec(url)?.[1] ?? url;
 }
 
 /** A pairing code as people read and type it: spaces, dots and case do not matter. */

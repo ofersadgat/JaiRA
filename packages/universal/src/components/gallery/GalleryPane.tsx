@@ -122,7 +122,9 @@ function ComponentGallery({ groups = GALLERY_GROUPS, validateSchema }: { groups?
     <View flexDirection="column" gap={14}>
       <View
         // Sticky on web, as `.gallery-common` is (top 0, over the rows: z-index 2); a phone has no sticky.
-        {...((isWeb ? { position: "sticky", top: 0, zIndex: 2 } : {}) as object)}
+        // `top: 0` holds it under the SCROLLER's padding (`.gallery-page`'s 12), which here is the content's:
+        // the same place is 12 down.
+        {...((isWeb ? { position: "sticky", top: 12, zIndex: 2 } : {}) as object)}
         flexDirection="row"
         flexWrap="wrap"
         alignItems="center"

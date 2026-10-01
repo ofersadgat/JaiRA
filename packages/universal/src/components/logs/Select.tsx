@@ -6,6 +6,7 @@ import { Press, Txt, edge, lengthToken, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { MenulistArrow } from "../form/MenulistArrow";
+import { selectKeyProps } from "../form/selectKeys";
 
 /**
  * A plain `<select>`, universal (decision 0015) — the one `styles.css` styles as `input, textarea,
@@ -76,6 +77,8 @@ export function Select({
         onPress={open}
         disabled={disabled}
         {...({ role: "combobox" } as object)}
+        // A closed `<select>`'s keys: the arrows step it, a letter finds a choice (`selectModel.ts`).
+        {...(selectKeyProps(flat, value, onChange) as object)}
         label={label ?? shown}
         {...(minWidth !== undefined ? { minWidth } : {})}
         paddingVertical={5}

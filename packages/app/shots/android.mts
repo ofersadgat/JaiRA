@@ -5,13 +5,19 @@
  *   (cd packages/client/android && ./gradlew assembleDebug)
  *   npx tsx packages/app/shots/android.mts [--serial emulator-5554] [--metro 8082] [--hold]
  *
- * A desktop with a few tasks and the spike socket; Metro (`one dev`) serving the debug build its
- * JavaScript; the emulator reaching both through `adb reverse`. The app is installed, opened by the deep
- * link that connects it (`jaira:///?address=…&token=…`) and photographed: the universal shell drawn
- * natively (no WebView in it), fitted and at its own size; the board scrolled under its column headings,
- * which must stay put; a task opened in the panel, Files, Chat and Settings; then, by the same link with `&screen=islands`,
- * the three islands with their readouts, and text typed into the editable island coming back over the
- * bridge.
+ * A desktop with a few tasks and a pairing code showing; Metro (`one dev`) serving the debug build its
+ * JavaScript; the emulator reaching Metro and the desktop engine's loopback listener through `adb
+ * reverse`. The app is installed, opened by the deep link that pairs and connects it
+ * (`jaira:///?address=…&code=…`, what a QR code on Settings → Machines would carry; decision 0013 as
+ * amended 2026-09-30) and photographed: the universal shell drawn natively (no WebView in it), fitted
+ * and at its own size; the board scrolled under its column headings, which must stay put; a task opened
+ * in the panel, Files, Chat and Settings. Then the phone WRITES: its Dark switch is a settings write on
+ * the desktop's engine, and the desktop's own window turns dark; and a gate the desktop's run parks at
+ * is offered on the phone's strip by a push. Stopped and opened again with no link, it connects by the
+ * token it kept in the keystore. Then, by the same link with `&screen=islands` (its
+ * code is spent, so the kept pairing stands), the three islands with their readouts, and text typed
+ * into the editable island coming back over the bridge. Last, the desktop forgets the phone, which is
+ * dropped and returns to its Connect screen.
  * What the screen says is read from Android's accessibility dump (`uiautomator`), so a tab that shows
  * an error rather than the app is caught.
  */
@@ -19,8 +25,9 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
+import type { MachinesView } from "@jaira/shared";
 import { App } from "./driver.mjs";
-import { buildWorld } from "./world.mjs";
+import { blockedAtTheGate, buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "parity", "android");
 const CLIENT = join(import.meta.dirname, "..", "..", "client");
@@ -28,7 +35,6 @@ const APK = join(CLIENT, "android", "app", "build", "outputs", "apk", "debug", "
 const SDK = process.env["ANDROID_HOME"] ?? join(process.env["LOCALAPPDATA"] ?? "", "Android", "Sdk");
 const ADB = join(SDK, "platform-tools", process.platform === "win32" ? "adb.exe" : "adb");
 const SERIAL = process.argv.includes("--serial") ? process.argv[process.argv.indexOf("--serial") + 1]! : "emulator-5554";
-const PORT = 8767;
 /**
  * The host's port for Metro, which the phone reaches as its own 8081. One's shared dev server (8081) by
  * default; `--metro 8082` for a server of this run's own — one started after a change to
@@ -96,14 +102,11 @@ async function main(): Promise<void> {
 
   // The desktop, with something on its board.
   const world = buildWorld(join(import.meta.dirname, ".world-android"));
-  process.env["JAIRA_SPIKE_WS"] = String(PORT);
   process.env["JAIRA_RENDERER"] = "one";
   const desktop = await App.launch(world, { out: OUT, port: 9290 });
   let metro: ChildProcess | undefined;
   try {
     await desktop.until("document.getElementById('root')?.children.length > 0", "the desktop to draw");
-    const token = /token ([0-9a-f]{32})/.exec(desktop.said)?.[1];
-    if (token === undefined) throw new Error("the desktop printed no token");
     for (const title of ["add dark mode", "rework the sync lint"]) {
       const made = await desktop.ipc<{ taskId: string }>("task:create", { title, workflow: "feature/plan", inputs: { issue: `# ${title}` } });
       await desktop.ipc("task:start", { taskId: made.taskId, fake: happyRules() });
@@ -128,19 +131,38 @@ async function main(): Promise<void> {
       } catch {}
       await sleep(1000);
     }
+    // A server started just now has bundled nothing: the bundle is asked for here first, so the phone's
+    // first screen (and the pairing code's ten minutes) does not wait on it.
+    if (metro !== undefined) await fetch(`http://127.0.0.1:${METRO}/index.bundle?platform=android&dev=true&minify=false`).then((r) => r.arrayBuffer(), () => undefined);
 
-    // The emulator reaches the host's Metro and the desktop's socket as its own localhost.
+    // What "Pair a machine" shows, and where this engine listens (on loopback, like everything of its).
+    // Asked for last: the code works for ten minutes.
+    const shown = await desktop.ipc<MachinesView>("machines:pairCode", undefined);
+    const PORT = shown.self.port;
+    if (PORT === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
+
+    // The emulator reaches the host's Metro and the desktop engine's listener as its own localhost.
     adb("reverse", "tcp:8081", `tcp:${METRO}`);
     adb("reverse", `tcp:${PORT}`, `tcp:${PORT}`);
     adb("install", "-r", APK);
     adb("shell", "am", "force-stop", PACKAGE);
+    // On an emulator React Native asks the HOST's own port 8081 for its JavaScript (10.0.2.2), whatever
+    // `adb reverse` says — so `--metro` was ignored, and a shared dev server that had stopped answering
+    // left the app on a blank screen (2026-09-30). Told to ask its own localhost, it goes through the
+    // reverse above, to whichever Metro this run uses. A debug build's setting, in its own preferences.
+    adb("shell", `run-as ${PACKAGE} sh -c 'mkdir -p shared_prefs && echo "<map><string name=\\"debug_http_host\\">localhost:8081</string></map>" > shared_prefs/${PACKAGE}_preferences.xml'`);
     adb("logcat", "-c");
-    const link = `jaira:///?address=${encodeURIComponent(`ws://127.0.0.1:${PORT}/`)}&token=${token}`;
+    // The code as its letters and digits alone — however it is typed is read the same — so nothing in
+    // the link needs escaping on its way through `adb shell`.
+    const link = `jaira:///?address=${encodeURIComponent(`127.0.0.1:${PORT}`)}&code=${shown.pairing.code.replace(/[^A-Za-z0-9]/g, "")}`;
     const started = Date.now();
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}'`, PACKAGE);
 
-    await until(() => says("Open a project"), "the app to connect and draw the shell", 240);
-    console.log(`(1) connected by deep link in ${Math.round((Date.now() - started) / 1000)} s (first bundle from Metro included)`);
+    await until(() => says("Open a project"), "the app to pair, connect and draw the shell", 240);
+    const paired = async (): Promise<MachinesView["devices"]> => (await desktop.ipc<MachinesView>("machines:view", undefined)).devices;
+    const device = (await paired())[0];
+    if (device === undefined || !device.connected || device.kind !== "phone") throw new Error(`the desktop does not list the phone as a connected device: ${JSON.stringify(await paired())}`);
+    console.log(`(1) paired by the deep link's code as "${device.label}" and connected in ${Math.round((Date.now() - started) / 1000)} s (first bundle from Metro included)`);
     await sleep(4000);
     quiet();
     shot("1-shell-fit");
@@ -188,8 +210,52 @@ async function main(): Promise<void> {
       quiet();
       shot(name);
     }
-    tap("TASKS");
     console.log("(2) the task in the panel, Files, Chat and Settings, each drawn");
+
+    // The phone WRITES (decision 0015's v2: nothing is read-only any more). The sidebar's Dark switch is a
+    // settings write on the desktop's engine (`config:write`): pressed on the phone, the desktop's own
+    // window turns dark from the push its store gets — and light again when the phone switches back.
+    if ((await desktop.theme()) !== "light") throw new Error("the desktop did not open in the light look");
+    tap("DARK");
+    for (let i = 0; i < 60 && (await desktop.theme()) !== "dark"; i++) await sleep(500);
+    if ((await desktop.theme()) !== "dark") throw new Error("the phone's switch to dark did not reach the desktop's engine");
+    await until(() => says("LIGHT"), "the phone itself to turn dark", 30);
+    await sleep(1500);
+    quiet();
+    shot("6-phone-wrote-dark");
+    await desktop.shot("desktop-after-phone-wrote-dark");
+    tap("LIGHT");
+    for (let i = 0; i < 60 && (await desktop.theme()) !== "light"; i++) await sleep(500);
+    if ((await desktop.theme()) !== "light") throw new Error("the phone's switch back to light did not reach the desktop's engine");
+    await until(() => says("DARK"), "the phone itself to turn light again", 30);
+    console.log("(2) the phone wrote: its Dark switch turned the desktop's own window dark, and back");
+    tap("TASKS");
+
+    // A push, about a task: a run on the desktop parks at its gate, and the phone's strip offers it.
+    // (Answered from the desktop: on a phone the conversation's transcript does not draw the gate yet,
+    // and the waiting line's pulse keeps `uiautomator` from ever reading the screen.)
+    const parked = (await desktop.ipc<{ taskId: string }>("task:create", { title: "plan the offline mode", workflow: "feature/plan", inputs: { issue: "# plan the offline mode" } })).taskId;
+    await desktop.ipc("task:start", { taskId: parked, fake: blockedAtTheGate() });
+    const gates = async (): Promise<Array<{ taskId: string; requestId: string }>> => (await desktop.ipc<Array<{ taskId: string; requestId: string }>>("interaction:pending", undefined)).filter((p) => p.taskId === parked);
+    for (let i = 0; i < 60 && (await gates()).length === 0; i++) await sleep(500);
+    const gate = (await gates())[0];
+    if (gate === undefined) throw new Error("the desktop's run never parked at its gate");
+    await until(() => says("Review the critique result."), "the phone to be offered the gate (a push)", 60);
+    quiet();
+    shot("6-gate-offered");
+    await desktop.ipc("interaction:submit", { requestId: gate.requestId, value: { decision: "approve" } });
+    await until(() => !says("Review the critique result."), "the phone's strip to let the answered gate go (a push)", 60);
+    console.log("(2) a gate the desktop's run parked at was offered on the phone, and left it when answered");
+
+    // Stopped, and opened again as a person opens an app — no link: the token kept in the keystore
+    // connects it straight away.
+    adb("shell", "am", "force-stop", PACKAGE);
+    adb("shell", "monkey", "-p", PACKAGE, "-c", "android.intent.category.LAUNCHER", "1");
+    await until(() => says("Open a project"), "the app, opened with no link, to connect by its kept token", 120);
+    await sleep(3000);
+    quiet();
+    shot("6-relaunched");
+    console.log("(2) opened again with no link, the phone connected by the token it kept");
 
     // `--hold`: everything stays up (desktop, Metro, the app) for driving the phone by hand, until
     // `parity/android/.release` appears.
@@ -199,7 +265,8 @@ async function main(): Promise<void> {
       rmSync(join(OUT, ".release"));
     }
 
-    // The island harness, opened by the same link with `&screen=islands`.
+    // The island harness, opened by the same link with `&screen=islands`. Its code is spent: the pairing
+    // it made the first time stands.
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}&screen=islands'`, PACKAGE);
     await until(() => screen().filter((n) => /^(markdown|diff|editor): ready \d/.test(n.text)).length === 3, "all three islands to report ready", 120);
     await until(() => screen().filter((n) => /drawn \d/.test(n.text)).length >= 2, "the islands to draw", 120);
@@ -234,6 +301,15 @@ async function main(): Promise<void> {
     adb("shell", "input", "swipe", "540", "400", "540", "1500", "300");
     await until(() => screen().some((n) => /^editor: .*events (\d+)/.exec(n.text) !== null && Number(/events (\d+)/.exec(n.text)![1]) >= 22), "the typed keys to come back over the bridge", 20);
     console.log(`(4) ${screen().find((n) => n.text.startsWith("editor:"))!.text}`);
+
+    // Forgotten on the desktop (Settings → Machines → Forget…): the phone's connection is dropped, its
+    // next hello refused, and it is back at the Connect screen saying why.
+    await desktop.ipc("machines:forget", { id: device.id });
+    await until(() => says("Connect to a JaiRA machine"), "the forgotten phone to return to its Connect screen", 60);
+    await sleep(1000);
+    shot("9-forgotten");
+    if ((await paired()).length !== 0) throw new Error("the desktop still lists the forgotten phone");
+    console.log("(5) forgotten on the desktop, the phone was dropped and is back at its Connect screen");
 
     // Gesture handler 2.x's `findNodeHandle` under StrictMode is reported in a development build, and
     // nothing is wrong (`DesktopFrame.tsx`); anything else is.

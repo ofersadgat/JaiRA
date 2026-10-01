@@ -113,6 +113,7 @@ function Chevron({ open, first, onPress }: { open: boolean; first: boolean; onPr
       <Press
         title="what else is at this level"
         label="what else is at this level"
+        {...({ "aria-haspopup": "menu" } as object)}
         onPress={() => at.current?.measureInWindow((x, y, _w, h) => onPress(x, y + h + 2))}
         paddingVertical={1}
         paddingHorizontal={3}

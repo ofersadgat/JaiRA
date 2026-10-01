@@ -4,12 +4,14 @@
  * Not a layered page: everything here is this machine's own.
  */
 import { useEffect, useState, type JSX } from "react";
-import type { CopyChoice, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
+import type { CopyChoice, DeviceView, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
 import {
   ADD_SCHEMA,
   COPY_CHOICES,
   COPY_WORDS,
   MACHINES_WORDS as W,
+  deviceWords,
+  devicesOf,
   diskWords,
   errorOf,
   groupedWords,
@@ -285,6 +287,43 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
   );
 }
 
+/**
+ * A phone or a browser paired with this machine (decision 0013, amended 2026-09-30): a window onto it,
+ * listed so it can be forgotten — which revokes its token and drops its connection.
+ */
+function DeviceRow({ device, onView }: { device: DeviceView; onView: (v: MachinesView) => void }): JSX.Element {
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const forget = (): void => {
+    setBusy(true);
+    invoke("machines:forget", { id: device.id })
+      .then(onView, () => undefined)
+      .finally(() => setBusy(false));
+  };
+  return (
+    <SettingsRow
+      name={<MachineChip label={device.label} state={device.connected ? "on" : "off"} />}
+      description={deviceWords(device)}
+      control={
+        confirming ? (
+          <>
+            <button type="button" className="danger" disabled={busy} onClick={forget}>
+              Forget {device.label}
+            </button>
+            <button type="button" className="ghost" onClick={() => setConfirming(false)}>
+              Keep
+            </button>
+          </>
+        ) : (
+          <button type="button" className="ghost" title={W.devices.forget} onClick={() => setConfirming(true)}>
+            Forget…
+          </button>
+        )
+      }
+    />
+  );
+}
+
 function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Element {
   // The form's state and Pair are `machinesModel.ts`'s, shared with the universal copy (decision 0015).
   const { value, setValue, busy, error, done, ready, pair } = useAddMachine(onView);
@@ -351,6 +390,13 @@ export function MachinesPane({ grouped, onGrouped }: { grouped: boolean; onGroup
                 [...view.machines].sort((a, b) => a.label.localeCompare(b.label)).map((peer) => <PeerRow key={peer.id} peer={peer} onView={setView} />)
               )}
             </SettingsSection>
+            {devicesOf(view).length > 0 ? (
+              <SettingsSection id="devices" title={W.devices.title} info={W.devices.info}>
+                {devicesOf(view).map((device) => (
+                  <DeviceRow key={device.id} device={device} onView={setView} />
+                ))}
+              </SettingsSection>
+            ) : null}
             <Outbox />
             <AddMachine onView={setView} />
             <Copies view={view} onView={setView} />

@@ -1,11 +1,9 @@
-import { StrictMode, useEffect, useState } from "react";
+import { StrictMode, useState } from "react";
 import { TamaguiProvider } from "@tamagui/core";
-import { Replayed, UniversalApp, config, connectionLost } from "@jaira/universal";
+import { Replayed, TokenRoot, UniversalApp, config } from "@jaira/universal";
 import { installGlobalErrorReporting } from "@jaira/ui/crashReport";
-import { setBridge } from "@jaira/ui/store";
 import "../rn/fonts.css";
-import { readsOnly } from "../../bridges/readOnly";
-import { socketBridge } from "../../bridges/socketBridge";
+import { Remote, pageLink } from "../Remote";
 
 // Before the first render, as `Shell.tsx` does it: the shell's banner reports what this catches. Guarded
 // because `one build` imports every page in Node, where there is no window.
@@ -17,26 +15,30 @@ if (typeof window !== "undefined") installGlobalErrorReporting();
  * rule on it comes from the copies, as on a phone. The fidelity gate diffs it against `/`, the desktop's
  * own page, in the same window and the same state; the Android emulator is the final check after it.
  *
- * In Electron it reads the window's own bridge. Anywhere else it connects to the desktop's spike socket
- * with `?address=&token=`, as the phone does.
+ * In Electron it reads the window's own bridge. Anywhere else it is a device, as the phone is: `Remote`
+ * pairs it with a machine by its code (`?address=…&code=…` does so at once, as a phone's link does) and
+ * connects it over the engine's transport. The shell says so itself when the machine goes away
+ * (`floats/Disconnected.tsx`).
  */
 export default function Rn() {
-  const [ready, setReady] = useState(() => typeof window !== "undefined" && window.jaira !== undefined);
-  useEffect(() => {
-    if (ready || typeof location === "undefined") return;
-    const q = new URLSearchParams(location.search);
-    const address = q.get("address") ?? `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/`;
-    const bridge = socketBridge(address, q.get("token") ?? "", readsOnly);
-    void bridge.ready.then(() => {
-      // The shell says so when the desktop goes away (`floats/Disconnected.tsx`), as `Shell.tsx` does.
-      bridge.onClose(connectionLost);
-      setBridge(bridge);
-      setReady(true);
-    });
-  }, [ready]);
+  // Once, at mount: `Remote` takes the code out of the address bar when it has paired with it.
+  const [link] = useState(pageLink);
   return (
-    <div id="root">
-      {ready ? (
+    <Remote
+      link={link}
+      frame={(screen) => (
+        <div style={{ height: "100vh", display: "flex", flexDirection: "column" }}>
+          <TamaguiProvider config={config} defaultTheme="light">
+            <Replayed>
+              <TokenRoot palette="ink" scheme="light">
+                {screen}
+              </TokenRoot>
+            </Replayed>
+          </TamaguiProvider>
+        </div>
+      )}
+    >
+      <div id="root">
         <StrictMode>
           <TamaguiProvider config={config} defaultTheme="light">
             <Replayed>
@@ -44,7 +46,7 @@ export default function Rn() {
             </Replayed>
           </TamaguiProvider>
         </StrictMode>
-      ) : null}
-    </div>
+      </div>
+    </Remote>
   );
 }

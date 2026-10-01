@@ -1,12 +1,13 @@
-import { createContext, useMemo, useState, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { createContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { View, isWeb } from "@tamagui/core";
 import { Platform, ScrollView, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
-import { acceptOffer, close, crumbOf, forward, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { labelPlan } from "@jaira/ui/panelTabs";
 import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Icon } from "./Icon";
+import { bodyMotion } from "./panelMotion";
 
 /**
  * `sidePanel.tsx`'s `SidePanel`, universal (decision 0015): the frame every panel entry is drawn in —
@@ -36,7 +37,8 @@ import { Icon } from "./Icon";
  *   .sp-tab-count        at least 16, padding 0 5, radius 8, --panel-2; 600 10px/16px data, centred,
  *                        --dim; amber --warn on --tint-warn, accent --accent on --tint-accent, red
  *                        --bad on --tint-bad
- *   .sp-body             flex 1, column; .scroll pads 12 12 18 and scrolls; .fill clips
+ *   .sp-body             flex 1, column; .scroll pads 12 12 18 and scrolls; .fill clips; it comes in as
+ *                        the stack moved (`.sp-motion-*`, `panelMotion.web.ts`)
  *   .sp-rail             column, spaced, padding 10 6, --panel-2; its tabs 17px icons over 9.5px names
  */
 
@@ -88,7 +90,7 @@ export function colourOr(t: Tokens, name: string, fallback: string): string {
 }
 
 /** `.sp-icon`: a 26px target, the glyph at 15. */
-export function SpIcon({ icon, label, onPress, on = false, primary = false, danger = false, disabled = false, flip = false }: { icon: PanelVerb["icon"]; label: string; onPress: () => void; on?: boolean; primary?: boolean; danger?: boolean; disabled?: boolean; flip?: boolean }): JSX.Element {
+export function SpIcon({ icon, label, onPress, on = false, toggle = false, primary = false, danger = false, disabled = false, flip = false }: { icon: PanelVerb["icon"]; label: string; onPress: () => void; on?: boolean; /** A toggle (the pin): says `aria-pressed`, as the desktop's does. */ toggle?: boolean; primary?: boolean; danger?: boolean; disabled?: boolean; flip?: boolean }): JSX.Element {
   const t = useTokens();
   return (
     <Press
@@ -96,6 +98,7 @@ export function SpIcon({ icon, label, onPress, on = false, primary = false, dang
       disabled={disabled}
       label={label}
       title={label}
+      {...((toggle ? { "aria-pressed": on } : {}) as object)}
       width={26}
       height={26}
       flexShrink={0}
@@ -232,6 +235,7 @@ function FrameControls({ stack, onStack, onFold, closeFolds }: { stack: PanelSta
       <SpIcon
         icon="pin"
         on={stack.pinned}
+        toggle
         label={stack.pinned ? "Unpin — let a new selection replace this" : "Pin — keep this while you select other things"}
         onPress={() => onStack((was) => pin(was, !was.pinned))}
       />
@@ -296,7 +300,7 @@ function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face
         })}
       </View>
       <View flexDirection="column" alignItems="center" gap={4}>
-        <SpIcon icon="pin" on={stack.pinned} label={stack.pinned ? "Unpin" : "Pin"} onPress={() => onStack((was) => pin(was, !was.pinned))} />
+        <SpIcon icon="pin" on={stack.pinned} toggle label={stack.pinned ? "Unpin" : "Pin"} onPress={() => onStack((was) => pin(was, !was.pinned))} />
         <SpIcon icon="unfold" label="Unfold the panel" onPress={onUnfold} />
       </View>
     </View>
@@ -323,6 +327,34 @@ export function SidePanel({
   closeFolds?: boolean;
 }): JSX.Element | null {
   const t = useTokens();
+  /**
+   * The mouse's own back and forward buttons, and Alt+← / Alt+→, while the pointer or the focus is in the
+   * panel (`panelStack.ts`' `historyButton` and `historyKey`, the desktop's). Listened for on the element
+   * itself: react-native-web's text boxes stop a key from reaching a React handler above them, and Alt+←
+   * in a box in the panel goes back on the desktop.
+   */
+  const frame = useRef<unknown>(null);
+  const live = useRef(onStack);
+  live.current = onStack;
+  const framed = !folded && topOf(stack) !== undefined;
+  useEffect(() => {
+    const el = frame.current as HTMLElement | null;
+    if (!isWeb || el === null || typeof el.addEventListener !== "function") return undefined;
+    const take = (event: Event, step: ((stack: PanelStack) => PanelStack) | undefined): void => {
+      if (step === undefined) return;
+      event.preventDefault();
+      live.current(step);
+    };
+    const onMouseUp = (event: MouseEvent): void => take(event, historyButton(event.button));
+    const onKeyDown = (event: KeyboardEvent): void => take(event, historyKey(event));
+    el.addEventListener("mouseup", onMouseUp);
+    el.addEventListener("keydown", onKeyDown);
+    return () => {
+      el.removeEventListener("mouseup", onMouseUp);
+      el.removeEventListener("keydown", onKeyDown);
+    };
+    // Attached again when the frame is drawn again (unfolded, or a stack that was empty).
+  }, [framed]);
   const offerName = stack.offer === null ? undefined : face(stack.offer).titleText;
   const top = topOf(stack);
   const root = stack.entries[0];
@@ -359,7 +391,7 @@ export function SidePanel({
     </View>
   );
   return (
-    <View flex={1} flexDirection="column" minHeight={0}>
+    <View ref={frame as never} flex={1} flexDirection="column" minHeight={0}>
       <View flexDirection="row" alignItems="center" gap={8} minHeight={44} paddingTop={7} paddingRight={8} paddingBottom={7} paddingLeft={12} flexShrink={0} {...(edge(t, { bottom: 1 }) as object)}>
         {pushed ? (
           <>
@@ -434,13 +466,14 @@ export function SidePanel({
       ) : null}
 
       {topFace.scroll === false ? (
-        <View key={`${top.key}|${"tab" in top ? top.tab : ""}`} flex={1} minHeight={0} flexDirection="column" overflow="hidden">
+        <View key={`${top.key}|${"tab" in top ? top.tab : ""}`} flex={1} minHeight={0} flexDirection="column" overflow="hidden" {...((isWeb ? { "data-spmotion": bodyMotion(stack.motion) } : {}) as object)}>
           {topFace.body}
         </View>
       ) : (
         <ScrollView
           key={`${top.key}|${"tab" in top ? top.tab : ""}`}
           {...(scrollbarProps(t) as object)}
+          {...((isWeb ? { dataSet: { ...(scrollbarProps(t) as { dataSet?: object }).dataSet, spmotion: bodyMotion(stack.motion) } } : {}) as object)}
           // `PLAIN_SCROLLER`: the DOM's `.sp-body.scroll` is not composited, and its text is subpixel.
           style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
           // `.sp-body.scroll`: a column the scroller's height at least (a body that fills it, as Changes

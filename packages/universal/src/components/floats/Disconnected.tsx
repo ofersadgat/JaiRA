@@ -5,9 +5,9 @@ import { useTokens } from "../../tokens";
 import { useConnectionLost } from "../../app/connection";
 
 /**
- * `Shell.tsx`'s "Disconnected from the desktop" line, universal (decision 0015): the socket to the desktop
- * went away, said across the top of the window over everything, until a reload. Its style is inline on
- * the DOM page (`BANNER`), not a `styles.css` rule:
+ * `Shell.tsx`'s "Disconnected" line, universal (decision 0015): the connection to the machine went
+ * away, said across the top of the window over everything until the bridge is welcomed again (it tries
+ * by itself, with growing waits). Its style is inline on the DOM page (`BANNER`), not a `styles.css` rule:
  *
  *   fixed across the top (inset 0 0 auto 0), z 1000; padding 6 12; --fill-accent (which every look sets),
  *   #fff; `font: 12px var(--font-app)` — 12px whatever the size preference, 400, on a `normal` line
@@ -35,9 +35,9 @@ export function DisconnectedLine({ lost, staged = false }: { lost: string; stage
     >
       {/* Three text nodes, as the JSX writes them: Blink shapes each apart. */}
       <Txt spec={{ voice: "app", scale: 1, color: "#fff" }} fontSize={12} lineHeight={16}>
-        {"Disconnected from the desktop: "}
+        {"Disconnected: "}
         {lost}
-        {". Reload to reconnect."}
+        {". Reconnecting…"}
       </Txt>
     </View>
   );

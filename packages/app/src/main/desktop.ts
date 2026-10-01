@@ -55,7 +55,6 @@ import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
 import { CLIENT_SCHEME_PRIVILEGES, CLIENT_URL, registerClientProtocol } from "./clientProtocol";
-import { startSpikeSocket, type SpikeSocket } from "./spikeSocket";
 import { electronKeychain } from "./keychain";
 import { tailChromiumLog } from "./chromiumLog";
 import { startPlugins } from "@jaira/runtime";
@@ -86,8 +85,6 @@ const DEV_CLIENT = !app.isPackaged && process.env.JAIRA_CLIENT_DEV !== undefined
  * `npm run start:universal` opens; `npm run start` opens the desktop's page as it always has.
  */
 const UNIVERSAL = process.argv.includes("--ui=universal") || process.env.JAIRA_UI === "universal";
-/** The throwaway remote transport (0015 S2), when `JAIRA_SPIKE_WS` asks for it. */
-let spike: SpikeSocket | undefined;
 const PRELOAD = join(DIST, "preload.cjs");
 
 let window: BrowserWindow | undefined;
@@ -220,7 +217,6 @@ const plugins = startPlugins(home ?? defaultBaseDir(), __dirname);
 
 /** Tell the window something. The service's pushes and the updater's both go this way. */
 function pushToWindow(message: PushMessage): void {
-  spike?.publish(message);
   // GUARDED, because this is a send into another process and the service treats it as a statement.
   //
   // `webContents.send` structure-clones its argument and throws on anything it cannot represent, and
@@ -630,7 +626,7 @@ async function readLicenseManifest(): Promise<unknown> {
   return fromPlugins.length === 0 || !Array.isArray(manifest.entries) ? manifest : { ...manifest, entries: [...manifest.entries, ...fromPlugins] };
 }
 
-/** One request, from whichever transport carried it: the window's IPC, or the spike socket (0015 S2). */
+/** One request from the window's IPC. */
 async function dispatch(channel: IpcChannel, request: unknown): Promise<unknown> {
   try {
     // Errors surface as rejections the renderer can display; the service's
@@ -1034,8 +1030,9 @@ async function hostLocally(): Promise<EngineLink | undefined> {
       kind: "desktop",
       version: app.getVersion(),
       service: () => buildService(),
-      // Other machines reach this engine through Tailscale, to loopback (decision 0013 §2).
-      network: {},
+      // Other machines reach this engine through Tailscale, to loopback (decision 0013 §2) — and so do
+      // phones and browsers, which are served the client this window loads (amended 2026-09-30).
+      network: { clientDir: CLIENT_DIR },
       stopRefusal: "this engine is a JaiRA window's own; quit that window to stop it",
       onFailure: (channel, error) => link?.recordIpcFailure(channel, error),
       log: (level, message) => link?.recordApp(level, message),
@@ -1226,8 +1223,6 @@ void app.whenReady().then(async () => {
   // controls are drawn by the OS from a colour we hand it, so they have to be handed the new one.
   nativeTheme.on("updated", () => repaintTitleBar());
   registerIpc();
-  const spikePort = Number(process.env.JAIRA_SPIKE_WS);
-  if (Number.isInteger(spikePort) && spikePort > 0) spike = startSpikeSocket(spikePort, CLIENT_DIR, dispatch, (line) => console.log(line));
   const established = await establishEngine();
   if (established === "quit") {
     app.quit();

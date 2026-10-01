@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX, type ReactNode } from "react";
+import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, TextInput, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import {
@@ -29,13 +29,13 @@ import { RENDERER_META, VIEW_META, base64Of, fileNameOf, hintText, schemaDescrib
 import { invoke } from "@jaira/ui/store";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
-import { Press, Txt, edge, font, lengthToken, viewScrollbarProps } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, viewScrollbarProps } from "../../primitives";
 import { Island } from "../../islands";
 import { useTokens, type Tokens } from "../../tokens";
 import { DataView } from "../files/DataView";
 import { ReadingForm } from "../form/Field";
 import { SchemaForm } from "../form/SchemaForm";
-import { Markdown, registerFenceRenderer } from "../Markdown";
+import { FenceLineContext, Markdown, registerFenceRenderer } from "../Markdown";
 import { Icon } from "./Icon";
 import { ChangesView, EmptyNote, Media, PatchView, Scroll, TableView, type ChangeOutcome } from "./ValueReadings";
 
@@ -288,6 +288,7 @@ export function ValueView({
 
   const head = chrome && (label !== undefined || views.length > 1 || actions !== undefined);
   // `.pinned-body > .vv > .vv-head`: padded 7 10 0, 5 over the body.
+  const fenceLine = useContext(FenceLineContext);
   const lifted = inline ? { position: "absolute", zIndex: 2, top: 3, right: 3 } : pinned ? { flexShrink: 0, paddingTop: 7, paddingHorizontal: 10, marginBottom: 5 } : { marginBottom: 3 };
   const glass = inline ? t.mix(t.v("panel"), 88, "transparent") : undefined;
   /** A toggle button's ground and ink: on, under the pointer, or neither. */
@@ -321,7 +322,8 @@ export function ValueView({
                     box={({ hovered }) => toggleInk(id === view, hovered).box}
                   >
                     {({ hovered }) => (
-                      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: id === view ? 600 : 400, color: toggleInk(id === view, hovered).color }} textAlign="center" numberOfLines={1}>
+                      // In a fence the toggle's line is the document's (inherited, unitless), not the body's 1.5.
+                      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: id === view ? 600 : 400, color: toggleInk(id === view, hovered).color, ...(fenceLine !== undefined ? { lineHeight: fenceLine } : {}) }} {...(fenceLine !== undefined && isWeb ? { lineHeight: String(fenceLine) } : {})} textAlign="center" numberOfLines={1}>
                         {VIEW_META[id].label}
                       </Txt>
                     )}
@@ -368,6 +370,7 @@ export function ValueView({
           ) : null}
           <Press
             title="What else can be done with this"
+            {...({ "aria-haspopup": "menu", "aria-expanded": more !== null } as object)}
             onPress={(e) => {
               // Under the button and aligned to its right edge, as the desktop's.
               const p = pressedAt(e, "right", 11, 2);
@@ -423,6 +426,9 @@ function hairline(): number {
  * each, the last one too), inside markdown also `.markdown pre`'s 1px ring, and a 10px scrollbar under
  * a line wider than the box (`overflow-x: auto`) — a monospace line is its characters × 0.6em.
  */
+const FENCE_UNDER = ["markdown", "md-block", "vv vv-inline", "vv-body"] as const;
+const READING_UNDER = ["vv", "vv-body"] as const;
+
 function CodeReading({ text, mime, inline, t }: { text: string; mime: string; inline: boolean; t: Tokens }): JSX.Element {
   const [room, setRoom] = useState<number | null>(null);
   // Its lines are `code`'s face: data 11/12 (the global `code` rule), inside markdown `.markdown code`'s 12/12.
@@ -438,7 +444,8 @@ function CodeReading({ text, mime, inline, t }: { text: string; mime: string; in
     const height = rows.length * size * 1.5 + 16 + 2 * rings * px + scroll;
     return (
       <View onLayout={(e: LayoutChangeEvent) => setRoom(e.nativeEvent.layout.width)}>
-        <Island component="code" height={height} props={{ text, mime, reading: true }} />
+        {/* Under what the desktop's reading stands under: `.markdown pre`'s ring and `.markdown code`'s size are written for those ancestors. */}
+        <Island component="code" height={height} under={inline ? FENCE_UNDER : READING_UNDER} props={{ text, mime, reading: true }} />
       </View>
     );
   }
@@ -500,7 +507,7 @@ function EditSource({ value, onChange, inline, t }: { value: string; onChange: (
   const rows = inline ? Math.min(Math.max(value.split("\n").length, 1), 24) : undefined;
   const size = Number(t.scaled("size-data", 1)) || 12;
   return (
-    <TextInput
+    <TextInput {...(ENTER_KEEPS_FOCUS as object)}
       value={value}
       onChangeText={onChange}
       multiline

@@ -1,7 +1,7 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { TextInput as RNTextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
 import { useReadingForm } from "./Field";
@@ -96,7 +96,7 @@ export function FormInput({
   const outer = { width: width ?? "100%", minWidth: 0, ...(num && plain === undefined ? { maxWidth: 120 } : {}) };
   const ink = disabled && !reading ? "dim" : "text";
   const input = (
-    <RNTextInput
+    <RNTextInput {...(ENTER_KEEPS_FOCUS as object)}
       ref={list.ref as never}
       value={value}
       onChangeText={(text) => {
@@ -242,7 +242,7 @@ export function TextArea({
   const ring = bad ? "bad" : focused ? "accent" : hovered && !disabled ? "rule" : "line";
   const reading = useReadingForm();
   return (
-    <RNTextInput
+    <RNTextInput {...(ENTER_KEEPS_FOCUS as object)}
       value={value}
       onChangeText={onChange}
       multiline

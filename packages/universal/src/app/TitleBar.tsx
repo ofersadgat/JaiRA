@@ -7,6 +7,7 @@ import { NewTask } from "../components/NewTask";
 import { RunModeToggle } from "../components/RunModeToggle";
 import { TaskAddressBar } from "../components/TaskAddressBar";
 import { FilesAddress } from "./FilesView";
+import { DRAG_REGION, WINDOW_GUTTER } from "../primitives";
 import { useShell } from "./shell";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
@@ -15,9 +16,8 @@ import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
 /**
  * What stands in the title bar (`.title-bar`, `App.tsx`): the ADDRESS of what is open. In Tasks, the
  * task address bar (`taskBar.tsx`, with `crumbs.tsx`), given what `App.tsx` gives its own; in Files, the
- * file address bar; in Chat, the conversation's name. Then `.title-drag`, the filler the desktop moves
- * the window by (flex 1, at least 8 + the OS buttons' gutter, which a phone has none of). The bar itself —
- * 34 tall at least, `--panel`, a `--line` under it — is `UniversalApp`'s.
+ * file address bar; in Chat, the conversation's name. Then `.title-drag` ({@link TitleDrag}). The bar
+ * itself — 34 tall at least, `--panel`, a `--line` under it — is `UniversalApp`'s.
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
@@ -26,18 +26,28 @@ export function ShellTitleBar(): JSX.Element {
     return (
       <>
         <FilesAddress />
-        <View flex={1} minWidth={8} />
+        <TitleDrag />
       </>
     );
   }
   // Settings, Logs, Debug and Components have no address: the desktop's bar is its filler alone.
-  if (state.view !== "tasks") return <View flex={1} minWidth={8} />;
+  if (state.view !== "tasks") return <TitleDrag />;
   return (
     <>
       <TasksAddress />
-      <View flex={1} minWidth={8} />
+      <TitleDrag />
     </>
   );
+}
+
+/**
+ * `.title-drag`: the filler the desktop moves its window by — flex 1, at least 8 and the gutter the OS
+ * draws its window buttons into (`--wco-right`), a drag region whose words cannot be selected. A separate
+ * box and not the row, as on the desktop: a drag region swallows presses, and the crumbs beside it are
+ * places to go. On a phone it is the filler alone.
+ */
+function TitleDrag(): JSX.Element {
+  return <View flex={1} minWidth={WINDOW_GUTTER.right(8) as never} style={DRAG_REGION as never} />;
 }
 
 /** The `<TaskAddressBar>` inside `<header className="title-bar">`, with `App.tsx`'s props. */
@@ -103,7 +113,7 @@ function ChatAddress(): JSX.Element {
   return (
     <>
       <ChatTitle surface={useChatSurface()} />
-      <View flex={1} minWidth={8} />
+      <TitleDrag />
     </>
   );
 }

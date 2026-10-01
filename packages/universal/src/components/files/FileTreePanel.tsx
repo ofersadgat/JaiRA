@@ -16,7 +16,7 @@ import {
   type FileSelection,
   type TreeDraft,
 } from "@jaira/ui/filesModel";
-import { Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import type { AskSpec } from "@jaira/ui/menu";
 import { ContextMenu, type MenuAt } from "../Menu";
@@ -399,7 +399,7 @@ function DraftRow({ draft, depth, missing, onCommit, onCancel }: { draft: TreeDr
           {missing}
         </Txt>
       ) : null}
-      <TextInput
+      <TextInput {...(ENTER_KEEPS_FOCUS as object)}
         autoFocus
         spellCheck={false}
         value={name}
@@ -433,7 +433,7 @@ function FindField({ value, onChange }: { value: string; onChange: (value: strin
   const [focused, setFocused] = useState(false);
   return (
     <View {...(hover as object)} flexShrink={0}>
-      <TextInput
+      <TextInput {...(ENTER_KEEPS_FOCUS as object)}
         autoFocus
         value={value}
         placeholder="Filter…"

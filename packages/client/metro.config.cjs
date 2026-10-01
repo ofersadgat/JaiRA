@@ -44,6 +44,12 @@ const ignored = [
   new RegExp(`^${here}[\\\\/]packages[\\\\/]client[\\\\/](dist|dist-island|\\.native-graph)[\\\\/].*`),
   new RegExp(`^${here}[\\\\/]packages[\\\\/](cli|shared|persistence|runtime|service|universal)[\\\\/]dist[\\\\/].*`),
   new RegExp(`^${here}[\\\\/]\\.git[\\\\/].*`),
+  // The native projects `one prebuild` writes and Gradle builds into, here and inside each native
+  // package: no JavaScript is in them, and a `./gradlew assembleDebug` writes tens of thousands of
+  // files there. On 2026-09-30 the shared dev server stopped answering (a core pegged, its heap at the
+  // limit) while one ran, and did not come back; not proved to be the cause, but nothing here is needed.
+  new RegExp(`^${here}[\\\\/]packages[\\\\/]client[\\\\/](android|ios)[\\\\/].*`),
+  new RegExp(`^${here}[\\\\/]node_modules[\\\\/].*[\\\\/]android[\\\\/](build|\\.cxx|\\.gradle)[\\\\/].*`),
 ];
 const stubs = { "externalLinesDiffComputer.js": join(__dirname, "native-stubs/externalLinesDiffComputer.js") };
 /**

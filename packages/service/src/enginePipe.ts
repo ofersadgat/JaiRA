@@ -19,67 +19,16 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir, userInfo } from "node:os";
 import { dirname, join } from "node:path";
-import { IPC_CHANNELS, type PushMessage } from "@jaira/shared";
+import type { ClientFrame, EngineHostInfo, HostFrame } from "@jaira/shared";
 
-/** Which contract a side speaks: the channels it knows, hashed. Two sides agree when this does. */
-export const ENGINE_CONTRACT = createHash("sha256").update([...IPC_CHANNELS].sort().join("\n")).digest("hex").slice(0, 12);
-
-/** What a host says about itself, in `engine.json`, in its welcome, and to `who` without a token. */
-export interface EngineHostInfo {
-  /** `desktop`: the app hosting the engine in its own process; `server`: `jaira serve`; `cli`: a CLI command running in-process. */
-  kind: "desktop" | "server" | "cli";
-  pid: number;
-  /** The JaiRA version the host runs. */
-  version: string;
-  contract: string;
-  /** The pipe it listens on; for a host that could not create one, where it would have been. */
-  pipe: string;
-  /** The loopback port it listens on instead, when it could not create its pipe (§4 step 3). */
-  port?: number;
-  /** Which base root it serves: {@link homeHash} of it, so a port shared by every root can be told apart. */
-  home: string;
-  /** The executable it runs on: a desktop that installs an update over it must stop it first. */
-  exe: string;
-  startedAt: number;
-}
+// The frames and the contract are `@jaira/shared`'s (`engineFrames.ts`): a phone and a browser speak
+// them too, and have no `node:` module to import this file through.
+export { ENGINE_CONTRACT, type ClientFrame, type EngineHostInfo, type HostFrame, type PairingDevice, type PeerMachine } from "@jaira/shared";
 
 /** `engine.json`: the host's info and the token a client needs. */
 export interface EngineFile extends EngineHostInfo {
   token: string;
 }
-
-/** Client → host. `who` needs no token and is answered with the host's info alone. */
-export type ClientFrame =
-  | { t: "who" }
-  | { t: "hello"; token: string; contract: string; version: string; client: string; pid?: number }
-  | { t: "req"; id: number; channel: string; request: unknown }
-  /**
-   * Pairing (decision 0013 §3), before any hello: the code this machine was shown, who the asker is,
-   * and the token the asker issued for this machine to use back.
-   */
-  | { t: "pair"; code: string; machine: PeerMachine; token: string };
-
-/** A machine as another one remembers it (decision 0013 §1). */
-export interface PeerMachine {
-  id: string;
-  label: string;
-  os: "windows" | "mac" | "linux";
-  tags: string[];
-  /** Where its engine is reached: `wss://…/engine`. Absent while it is not reachable. */
-  url?: string;
-}
-
-/** Host → client. */
-export type HostFrame =
-  | { t: "info"; host: EngineHostInfo }
-  /** `limited`: the contracts differ, so only the `engine:*` channels answer — enough to say so and to stop the host. */
-  | { t: "welcome"; host: EngineHostInfo; limited?: true }
-  | { t: "refused"; reason: string }
-  | { t: "res"; id: number; ok: true; result: unknown }
-  | { t: "res"; id: number; ok: false; error: { message: string; name?: string } }
-  | { t: "push"; message: PushMessage }
-  /** Paired: who this machine is, the token it issued for the asker, and the machines it knows, for introductions. */
-  | { t: "paired"; machine: PeerMachine; token: string; fleet: PeerMachine[] };
 
 /**
  * The loopback port a host listens on when it cannot create its pipe (a sandbox without pipes), and

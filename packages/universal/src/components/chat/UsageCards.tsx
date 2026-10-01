@@ -7,7 +7,7 @@ import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, refreshAccount, useLimits, useLimitsWatch, useNow } from "@jaira/ui/limitsStore";
 import { capital, modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windowRowsOf } from "@jaira/ui/usageCards";
 import { creditPercent, isSpent, toneOfPercent, usedPercentFor } from "@jaira/shared/browser";
-import { Press, Txt, edge, font } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { Float } from "../floats/Float";
@@ -400,7 +400,7 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
           ) : null}
           {focusing && onCompact !== undefined ? (
             <View flexDirection="column" gap={6}>
-              <TextInput
+              <TextInput {...(ENTER_KEEPS_FOCUS as object)}
                 multiline
                 value={focus}
                 onChangeText={setFocus}

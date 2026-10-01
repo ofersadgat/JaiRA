@@ -1,7 +1,9 @@
-import { lazy, Suspense, useEffect, useRef, type CSSProperties, type JSX } from "react";
+import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
 import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
 import type { DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiff";
+import { useLook } from "../tokens";
+import { dress, islandStyles, islandStylesIn } from "./islandStyles";
 import type { IslandHandle, IslandProps } from "./types";
 
 /**
@@ -19,9 +21,27 @@ const Html = lazy(() => import("@jaira/ui/htmlFrame").then((m) => ({ default: m.
 const InteractiveArtifact = lazy(() => import("@jaira/ui/interactiveArtifact").then((m) => ({ default: m.InteractiveArtifact })));
 
 export function Island(props: IslandProps): JSX.Element {
+  const look = useLook();
+  const box = useRef<HTMLDivElement>(null);
+  // The component is half its stylesheet, which the universal page does not carry: it is drawn once the
+  // island's own copy of it is in (`islandStyles`), so it never lays out unstyled and then again.
+  const [styled, setStyled] = useState(islandStylesIn);
+  useEffect(() => {
+    let here = true;
+    if (!styled) void islandStyles().then(() => here && setStyled(true));
+    return () => {
+      here = false;
+    };
+  }, [styled]);
+  // The look on the island's box, where the scoped stylesheet reads it (`:root` there is this box).
+  useLayoutEffect(() => dress(box.current, look), [styled, look.palette, look.scheme, look.wash, look.buckets, look.lanes]);
   // Marked, so the fidelity gate can leave it out: an island is the desktop's own component by
-  // construction, and on `/rn` it stands without the stylesheet a phone's island page carries.
-  return <div data-island={props.component}>{inline(props)}</div>;
+  // construction, and what it draws inside its box is the desktop's to draw.
+  return (
+    <div ref={box} data-island={props.component}>
+      {styled ? (props.under ?? []).reduceRight((inner, classes) => <div className={classes} style={{ display: "contents" }}>{inner}</div>, inline(props)) : null}
+    </div>
+  );
 }
 
 function inline({ component, props: p, height, onEvent, handle }: IslandProps): JSX.Element {

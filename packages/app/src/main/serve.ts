@@ -9,6 +9,7 @@
  * quits without `keepServerRunning`, or a signal. Stopping drains runs and closes the databases the way
  * the desktop's quit does, so a run cut by it resumes at the next start.
  */
+import { join } from "node:path";
 import { app } from "electron";
 import { AppService, hostEngine, resolveBaseDir, type HostedEngine } from "@jaira/service";
 import { takeHomeFlag } from "@jaira/shared";
@@ -64,7 +65,8 @@ void app.whenReady().then(async () => {
       kind: "server",
       version: app.getVersion(),
       eager: true,
-      network: {},
+      // The client this install ships, for a browser paired as a device (decision 0013, amended 2026-09-30).
+      network: { clientDir: join(__dirname, "client") },
       service: (publish) =>
         new AppService({
           baseDir,

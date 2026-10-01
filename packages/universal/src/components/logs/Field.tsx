@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { TextInput } from "react-native";
-import { font, lengthToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, font, lengthToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 
 /** The body's face (app at 13/12.5, line 1.5): what an unclassed element on the desktop's page inherits. */
@@ -33,7 +33,7 @@ export function BarInput({
   const t = useTokens();
   const [hovered, hover] = useHover();
   return (
-    <TextInput
+    <TextInput {...(ENTER_KEEPS_FOCUS as object)}
       value={value}
       onChangeText={onChange}
       {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") } : {})}

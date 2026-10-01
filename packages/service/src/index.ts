@@ -15,6 +15,7 @@ export * from "./connections";
 export * from "./hostEngine";
 export * from "./engineChannel";
 export * from "./engineNet";
+export * from "./clientFiles";
 export * from "./machine";
 export * from "./machineTokens";
 export * from "./fleet";

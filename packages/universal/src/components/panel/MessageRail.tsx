@@ -142,6 +142,8 @@ export function MessageRail({
               })
             }
             title={`${named.label} — ${mime}${asserted ? `, set by you (JaiRA said ${typeNameOf(given).label})` : ""}`}
+            // Each of the rail's three menus says it is one and whether it is open, as the desktop's buttons do.
+            {...({ "aria-haspopup": "menu", "aria-expanded": menu?.title === "This text is" } as object)}
             flexDirection="row"
             alignItems="center"
             gap={4}
@@ -172,6 +174,7 @@ export function MessageRail({
             <Press
               onPress={(e) => setMenu({ ...at(e), title: "Read it as", items: readingMenuOf(views, view, onPick) })}
               title={READING[view].hint}
+              {...({ "aria-haspopup": "menu", "aria-expanded": menu?.title === "Read it as" } as object)}
               marginLeft={3}
               flexDirection="row"
               alignItems="center"
@@ -218,6 +221,7 @@ export function MessageRail({
             })
           }
           title="What else can be done with this"
+          {...({ "aria-haspopup": "menu", "aria-expanded": menu !== null && menu.title === undefined } as object)}
           padding={4}
           borderRadius={radius}
           flexShrink={0}

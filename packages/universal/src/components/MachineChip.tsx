@@ -13,26 +13,32 @@ import { useTokens } from "../tokens";
  *   .mchip-off/none  --dim; none is dashed
  *   .mchip-dot       6×6 round, --ok; hollow (1px --dim) off, --warn warn, dashed hollow none
  *
- * The family and the line height are inherited in the DOM (the card's meta line: the data voice at
- * 1.5), so they are passed in here, as `voice`.
+ * The family, the weight and the line height are inherited in the DOM, so they are passed in here: a
+ * card's meta line is the data voice at 400 on 1.5 (the defaults); a settings row's name (`.set-name`)
+ * is the app voice at 550 on 1.3.
  */
 export function MachineChip({
   label,
   state = "on",
   title,
   voice,
+  weight = 400,
+  line = 1.5,
 }: {
   label: string;
   state?: MachineChipState;
   title?: string;
   /** The family the chip sits in (`--font-data` in a card's meta line). */
   voice: string;
+  /** The weight and line height it inherits there. */
+  weight?: number;
+  line?: number;
 }): JSX.Element {
   const t = useTokens();
   const size = t.scaled("size-app", 10 / 12.5);
   const ink = state === "off" || state === "none" ? t.v("dim") : t.v("text");
   // On a phone the stack is no family: the cut face of whichever voice it is (`faceOf`).
-  const face = isWeb ? { fontFamily: voice } : faceOf(t, voice === String(t.v("font-data")) ? "data" : "app", 400, size);
+  const face = isWeb ? { fontFamily: voice, ...(weight !== 400 ? { fontWeight: String(weight) } : {}) } : faceOf(t, voice === String(t.v("font-data")) ? "data" : "app", weight, size);
   const dot =
     state === "on"
       ? { backgroundColor: t.v("ok") }
@@ -57,7 +63,7 @@ export function MachineChip({
     >
       <View width={6} height={6} borderRadius={3} flexShrink={0} {...(dot as object)} />
       <Text
-        {...({ ...face, fontSize: size, lineHeight: isWeb ? "1.5" : Number(size) * 1.5 } as object)}
+        {...({ ...face, fontSize: size, lineHeight: isWeb ? String(line) : Number(size) * line } as object)}
         {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}
         color={ink as never}
       >

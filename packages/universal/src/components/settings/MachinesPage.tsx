@@ -1,12 +1,14 @@
 import { useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
-import type { CopyChoice, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
-import { chipStateOf } from "@jaira/ui/machineChip";
+import type { CopyChoice, DeviceView, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
+import { chipStateOf, type MachineChipState } from "@jaira/ui/machineChip";
 import {
   ADD_SCHEMA,
   COPY_CHOICES,
   COPY_WORDS,
   MACHINES_WORDS as W,
+  deviceWords,
+  devicesOf,
   diskWords,
   errorOf,
   groupedWords,
@@ -34,7 +36,8 @@ import { Words } from "./Words";
 
 /**
  * Settings → Machines (`machinesPane.tsx`'s `MachinesPane`), universal (decision 0015): this machine's
- * name, tags and reach, pairing, the machines it is paired with, and copies of their work. What every
+ * name, tags and reach, pairing, the machines it is paired with, the phones and browsers that are
+ * windows onto it, and copies of the machines' work. What every
  * row says, and the fleet it reads, are `machinesModel.ts`'s, as the DOM's are; its reads and writes go
  * through the same `invoke` calls. The rules it adds to the page's, from `styles.css`:
  *
@@ -65,6 +68,13 @@ export function MachinesPage(): JSX.Element {
               [...view.machines].sort((a, b) => a.label.localeCompare(b.label)).map((peer) => <PeerRow key={peer.id} peer={peer} onView={setView} />)
             )}
           </SettingsSection>
+          {devicesOf(view).length > 0 ? (
+            <SettingsSection id="devices" title={W.devices.title} info={W.devices.info}>
+              {devicesOf(view).map((device) => (
+                <DeviceRow key={device.id} device={device} onView={setView} />
+              ))}
+            </SettingsSection>
+          ) : null}
           <Outbox />
           <AddMachine onView={setView} />
           <Copies view={view} onView={setView} />
@@ -74,6 +84,23 @@ export function MachinesPage(): JSX.Element {
         </>
       )}
     </SettingsLayerContext.Provider>
+  );
+}
+
+/**
+ * A machine's chip as a row's name. In the DOM the chip is an inline box in the name's own line
+ * (`.set-name`: the app voice at 550, 1.1× on 1.3), which it inherits its weight and line height from —
+ * and it sits on that line's baseline by its dot's foot, not centred in it: 3.17 px under the line's top
+ * at the default size, measured in Chromium. So the line is drawn, and the chip placed in it.
+ */
+function NameChip({ label, state }: { label: string; state: MachineChipState }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View height={t.scaled("size-app", 1.1 * 1.3) as never}>
+      <View marginTop={t.scaled("size-app", 3.17 / 12.5) as never}>
+        <MachineChip label={label} state={state} voice={String(t.v("font-app"))} weight={550} line={1.3} />
+      </View>
+    </View>
   );
 }
 
@@ -209,7 +236,7 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
   };
   return (
     <SettingsRow
-      name={<MachineChip label={peer.label} state={chipStateOf(peer.state)} voice={String(t.v("font-app"))} />}
+      name={<NameChip label={peer.label} state={chipStateOf(peer.state)} />}
       description={<Words parts={peerWords(peer)} />}
       control={
         <>
@@ -234,6 +261,41 @@ function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) =
   );
 }
 
+/** A phone or a browser paired with this machine (`DeviceRow`): what it is, whether it is there, and Forget. */
+function DeviceRow({ device, onView }: { device: DeviceView; onView: (v: MachinesView) => void }): JSX.Element {
+  const t = useTokens();
+  const [confirming, setConfirming] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const forget = (): void => {
+    setBusy(true);
+    invoke("machines:forget", { id: device.id })
+      .then(onView, () => undefined)
+      .finally(() => setBusy(false));
+  };
+  return (
+    <SettingsRow
+      name={<NameChip label={device.label} state={device.connected ? "on" : "off"} />}
+      description={deviceWords(device)}
+      control={
+        confirming ? (
+          <>
+            <Button kind="danger" disabled={busy} onPress={forget}>
+              {`Forget ${device.label}`}
+            </Button>
+            <Button kind="ghost" onPress={() => setConfirming(false)}>
+              Keep
+            </Button>
+          </>
+        ) : (
+          <Button kind="ghost" title={W.devices.forget} onPress={() => setConfirming(true)}>
+            Forget…
+          </Button>
+        )
+      }
+    />
+  );
+}
+
 /** Answers waiting for machines that are offline, each of which can be taken back. */
 function Outbox(): JSX.Element | null {
   const t = useTokens();
@@ -251,7 +313,7 @@ function Outbox(): JSX.Element | null {
       {items.map((item) => (
         <SettingsRow
           key={item.id}
-          name={<MachineChip label={item.machine} state="off" voice={String(t.v("font-app"))} />}
+          name={<NameChip label={item.machine} state="off" />}
           description={`${item.what.charAt(0).toUpperCase()}${item.what.slice(1)}, given ${new Date(item.at).toLocaleString()}.`}
           control={
             <Button kind="ghost" onPress={() => void invoke("machines:withdraw", { id: item.id }).then(setItems, () => undefined)}>

@@ -120,8 +120,9 @@ export class App {
   }
 
   /**
-   * A plain browser, headless, on `url` — the One client served by the desktop's spike socket (0015
-   * S2), photographed with the same verbs as the app. `browser` is the executable (Chrome, Edge).
+   * A plain browser, headless, on `url` — the One client served by the desktop engine's own listener
+   * (0013, amended 2026-09-30), photographed with the same verbs as the app. `browser` is the
+   * executable (Chrome, Edge).
    */
   static async browse(browser: string, url: string, options: Options): Promise<App> {
     const port = options.port ?? 9229;
@@ -198,6 +199,9 @@ export class App {
     // something else covers is the business of the switch in `launch`.
     await app.send("Page.bringToFront");
     if (!emulate) return app;
+    // Only a window this call opened: one attached to later already holds another session's override,
+    // and the page's own size would be that override's, not the window's.
+    if (child !== null) await app.fitWindow(options.phone?.width ?? options.width ?? 1280, options.phone?.height ?? options.height ?? 860);
     await app.send("Emulation.setDeviceMetricsOverride", {
       width: options.phone?.width ?? options.width ?? 1280,
       height: options.phone?.height ?? options.height ?? 860,
@@ -220,6 +224,20 @@ export class App {
     // The page's own console, in the driver's log. The old harness needed this because an Electron
     // main process on Windows has no console attached; here it is simpler — an error the page prints
     // is evidence about the app, and evidence is the whole product.
+    // What the page is fetching, for `settled`: a lazy chunk on its way is a page about to change.
+    if (message.method === "Network.requestWillBeSent") {
+      const p = message.params as { requestId: string; type?: string; request?: { url?: string } };
+      const url = p.request?.url ?? "";
+      // A stream is never finished, a `data:` URL was never asked of anyone, and a worker's own script
+      // finishes in the worker's session, not this one (Monaco's two were "in flight" for good).
+      const never = p.type === "EventSource" || p.type === "WebSocket" || p.type === "Ping" || url.startsWith("data:") || url.startsWith("blob:") || /[.?]worker/.test(url);
+      if (!never) this.inflight.set(p.requestId, Date.now());
+      return;
+    }
+    if (message.method === "Network.loadingFinished" || message.method === "Network.loadingFailed") {
+      this.inflight.delete((message.params as { requestId: string }).requestId);
+      return;
+    }
     if (message.method === "Runtime.consoleAPICalled") {
       const params = message.params as { type?: string; args?: { value?: unknown }[] };
       if (params.type === "error") {
@@ -227,6 +245,30 @@ export class App {
         console.log(`  [page] ${said.slice(0, 300)}`);
         this.complaints.push(said.slice(0, 300));
       }
+    }
+  }
+
+  /**
+   * The OS window, sized to the page it is about to hold.
+   *
+   * The app opens at 1440×900 and the override lays the page out at 1280×860, so the page stood in the
+   * window's top-left corner with the window's ground to its right and below it — a wide margin on a
+   * window that pops up on the screen of whoever is at the machine. Asked before the override, while
+   * the page's own size is still the window's. `window.resizeTo`, because Electron's page target does
+   * not answer the Browser domain; what it lands on is read back and corrected once, since the frame
+   * it counts differs by platform. Cosmetic, so a failure leaves the window as it is.
+   */
+  private async fitWindow(width: number, height: number): Promise<void> {
+    try {
+      const size = "({ w: innerWidth, h: innerHeight })";
+      await this.evaluate(`window.resizeTo(${width}, ${height})`);
+      await sleep(250);
+      const got = await this.evaluate<{ w: number; h: number }>(size);
+      if (got.w === width && got.h === height) return;
+      await this.evaluate(`window.resizeTo(${width + (width - got.w)}, ${height + (height - got.h)})`);
+      await sleep(250);
+    } catch {
+      // The pictures do not depend on it.
     }
   }
 
@@ -478,6 +520,72 @@ export class App {
     });
   }
 
+  /** Requests the page has out, by id, and when each began ({@link settled}). */
+  private readonly inflight = new Map<string, number>();
+  private watching = false;
+
+  /**
+   * Wait until the page has stopped changing, so a picture of it is the same picture every time.
+   *
+   * A fixed pause photographs whatever has arrived by then, and what arrives late is exactly what
+   * differs between two pages of one state: Monaco and CodeMirror are lazy chunks, the first page to
+   * ask for one waits for the dev server and the second has it cached, so the pair caught a diff pane
+   * at "loading the diff editor…" on one side and drawn on the other, 18px apart, on some runs and not
+   * others. Settled is: nothing being fetched, no editor still to mount, and what `root` draws — its
+   * box, every element, every run of text and where it stands, an editor's token colours, its pictures
+   * — unchanged for `quiet` ms.
+   *
+   * Returns false, rather than throwing, when the page never holds still for that long (a clock that
+   * ticks every second): the caller photographs it anyway and may say so.
+   */
+  async settled(root = "document.body", { quiet = 1000, limit = 20_000 }: { quiet?: number; limit?: number } = {}): Promise<boolean> {
+    if (!this.watching) {
+      this.watching = true;
+      await this.send("Network.enable");
+    }
+    const reading = `(() => {
+      const root = ${root};
+      if (!root) return "nothing";
+      // An editor's host with nothing in it yet, or a pane saying it is loading: never the same twice.
+      if (document.querySelector(".monaco-host:empty, .diff-pane-loading") !== null) return "loading " + performance.now();
+      let h = 0;
+      const add = (s) => { for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; };
+      const box = (r) => r.x.toFixed(2) + "," + r.y.toFixed(2) + "," + r.width.toFixed(2) + "," + r.height.toFixed(2);
+      add(box(root.getBoundingClientRect()));
+      const all = root.querySelectorAll("*");
+      const walk = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const range = document.createRange();
+      for (let n = walk.nextNode(); n; n = walk.nextNode()) {
+        if (n.textContent.trim() === "") continue;
+        range.selectNodeContents(n);
+        add(n.textContent + box(range.getBoundingClientRect()));
+      }
+      for (const e of root.querySelectorAll("[class*=mtk]")) add(getComputedStyle(e).color);
+      for (const e of root.querySelectorAll("img")) add(e.complete ? String(e.naturalWidth) : "loading");
+      for (const e of root.querySelectorAll("iframe, canvas, svg")) add(box(e.getBoundingClientRect()));
+      return all.length + ":" + h + ":" + document.fonts.status;
+    })()`;
+    const began = Date.now();
+    let last: string | undefined;
+    let since = Date.now();
+    while (Date.now() - began < limit) {
+      // A request older than ten seconds is a stream by another name (a long poll), not a chunk on its way.
+      const fetching = [...this.inflight.values()].some((at) => Date.now() - at < 10_000);
+      const now = fetching ? `fetching ${Date.now()}` : await this.evaluate<string>(reading);
+      if (now !== last) {
+        last = now;
+        since = Date.now();
+      } else if (Date.now() - since >= quiet) return true;
+      await sleep(200);
+    }
+    return false;
+  }
+
+  /** Put the pointer somewhere and do not wait: {@link hover} without the pause for a hover card. */
+  async pointer(x: number, y: number): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
+  }
+
   /** Type into whatever has focus, as an IME commits text: one `insertText`, no key events. */
   async type(text: string): Promise<void> {
     await this.send("Input.insertText", { text });
@@ -492,6 +600,8 @@ export class App {
 
   /** Load `url` in the window, and wait for it to finish loading. */
   async navigate(url: string): Promise<void> {
+    // What the page being left was fetching is no longer on its way to anything.
+    this.inflight.clear();
     await this.send("Page.navigate", { url });
     await this.until("document.readyState === 'complete'", `${url} to load`);
   }

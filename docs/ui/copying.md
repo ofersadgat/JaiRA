@@ -23,7 +23,8 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   same state and the same look, photographs both, and compares them region by region
   (`sidebar`, `titlebar`, `board`, `panel`, `inbox`, `editor` for the workflow editor, and `viewport` for
   a whole room; `--region` for one). `--scene board|task|gate|archived|settings|files|chat|logs`
-  picks a state and `--look light|dark|<palette>[-wash]-<theme>` a look (`--every-look` for all eight).
+  picks a state (`--scene a,b` several, `--scene all` every one, `--all` every scene and specimen) and
+  `--look light|dark|<palette>[-wash]-<theme>` a look (`--every-look` for all eight).
   Pictures and red-on-grey diffs land in `packages/app/shots/parity/rn-<port>/`: read the `.diff.png`,
   and the `.dom.png` and `.rn.png` beside it. A copy is done when its region says **identical** (or
   "identical to the eye") in every look.
@@ -59,8 +60,18 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   `.ellip` (one line, …).
 - **`Press`** — anything clickable. React Native's `Pressable` (Tamagui's `onPress` never fires on
   Android). Sizing props go on the outside, the rest on the box inside; `box={({ hovered }) => ({…})}` and
-  children as a function give the `:hover` state (web only — a phone has no pointer).
+  children as a function give the `:hover` state (web only — a phone has no pointer). What the desktop
+  writes on its `<button>` goes on the `Press` and reaches the element that takes the focus: `role`
+  (`tab`, `switch`, `checkbox`, `menuitem`, `combobox` — the element stays a `<button>`), `aria-expanded`,
+  `aria-selected`, `aria-pressed`, `aria-current`, `aria-haspopup`, and `onKeyDown` / `onFocus` / `onBlur`.
 - **`useHover()`** — `:hover` on a box that is not itself pressed (a row).
+- **What the desktop does for its window, not for a component** (web only, nothing on a phone):
+  `DRAG_REGION` / `NO_DRAG` in a `style` (`-webkit-app-region`: where the frameless window is moved by, and
+  the controls and floats that opt out), `WINDOW_GUTTER` (the room the OS's window buttons take),
+  `landmark("navigation")` (a `<nav>`, `<header>`, `<aside>`, `<footer>` as its role), `ENTER_KEEPS_FOCUS`
+  on a `TextInput` (react-native-web blurs a single-line box on Enter; an `<input>` does not). The page's
+  own rules — `:focus-visible`'s ring, the one scrollbar for a scroller nobody styled — and the window's
+  name are `app/windowPage.web.ts`'s.
 - **`edge(t, { bottom: 1 }, "line")`** — a border on some sides. **Never** `borderStyle="solid"` with
   only some widths: on web Tamagui leaves the other sides at the browser's 3px.
 - **`Glyph`** — a symbol in the app voice (▶ ⚙ ⌕), optionally in a fixed width.
@@ -88,9 +99,10 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
 - **Grid** is not in React Native: rows and columns of `View`s with the tracks' widths.
 - **Colours composited in floating point** (a translucent `color-mix()` ground) come out one level apart
   from the copy's `rgba()`; `pair.mts` calls that "identical to the eye", and it is.
-- **The studio's window WRITES.** The read-only bridge is the socket's (phone, browser); inside Electron
-  both `/` and `/rn` use the window's own bridge, so pressing Cancel on a parked task cancels it. Only
-  in your studio's own world — reseed it (`studio.mts --reseed --port …`) if you spoil it.
+- **Every window WRITES.** Inside Electron both `/` and `/rn` use the window's own bridge, and a phone
+  or a browser is a paired device on the engine's transport (decision 0013, amended 2026-09-30): nothing
+  is read-only any more, so pressing Cancel on a parked task cancels it. Only in your studio's own world —
+  reseed it (`studio.mts --reseed --port …`) if you spoil it.
 - **The dev server remembers a missing file.** Import a file before it exists and the shared dev server
   caches the miss; creating the file afterwards does not clear it ("Failed to resolve import"), and it
   breaks `/` and `/rn` for every studio. Rename the IMPORTING file away and back (content unchanged).
@@ -169,6 +181,18 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   box's ground #767676 at 30% and the tick white at 60% (`form/inputs.tsx`'s `Checkbox`).
 - **A roving tab stop** (a rail's tabs, one of them in the Tab order): `Press`'s `focusable` — on web it is
   react-native-web's `tabIndex`; its `focusable` prop does nothing there.
+- **react-native-web's text boxes stop a key from bubbling** (`e.stopPropagation()` on every keydown): a
+  React `onKeyDown` on a box round one, and a `window` listener on the way up, hear nothing typed in it.
+  Listen on the element itself (`SidePanel`'s Alt+←, `useEnterSubmits`) or on the way down (`MenuLayer`'s
+  Escape), and let the box's own handler go first — it has prevented the default by the next task if it
+  took the key.
+- **A native control's keys are not a copy's for nothing**: a closed `<select>` steps with the arrows and
+  finds a choice by its letter (`form/selectKeys.ts`), a `<form>` submits on Enter in a single-line box
+  (`form/useEnterSubmits.ts`), `type="number"` steps with ↑ and ↓, a link is reached by Tab and named by
+  the right-click menu only as a real `<a>` (`render="a"`, and then no press handler: the anchor opens it).
+- **A test key must carry its character.** `driver.mts`'s `press()` sends `rawKeyDown`, which a JS key
+  handler hears and a form's implicit submission does not: send `keyDown` with `text` to press Enter as a
+  keyboard does.
 - **Found on the device, not on `/rn`** (the emulator pass, `packages/app/shots/android.mts`):
   - A hand-set `fontFamily: t.v("font-data")` is the whole CSS stack, which Android cannot read and
     draws in the system font. Go through `Txt`, or `faceOf()` for a font set by hand.
@@ -189,7 +213,9 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   with `contain: layout` (the containing block of what is fixed inside it), and a copy that takes
   `staged` to be absolute in its box instead (`shellSpecimens.tsx`).
 - **The phone is the final check, not the loop**: `packages/app/shots/android.mts` on the emulator, once
-  a region passes in every look.
+  a region passes in every look. It pairs the phone with the desktop it launches by the code that
+  desktop shows (`machines:pairCode`), over `adb reverse` to the engine's loopback port
+  (`MachinesView.self.port`): no token is printed or passed anywhere.
 
 - **The studio's dev server is shared.** A file that stops parsing — a half-written edit, a shell heredoc
   that turned `"
@@ -219,8 +245,26 @@ npx tsx packages/app/shots/peek.mts 'document.title' --port 9301           # wha
   reads 2 there; where the width is geometry (a picture's frame), measure it on web (`ring.web.ts`).
 - **Chromium splits a line's leading** by giving the ascent half of it rounded down and the descent
   the rest — the half pixel a baseline-placed box is off by, when it is off.
-- **An island stands without its host's rules.** `.review-detail .monaco-host` (the ring round the
-  diff) is in `styles.css`, which neither `/rn` nor the island page has: the island takes a `frame`.
+- **An island brings the stylesheet, and only an island has it.** The component is half its rules (the
+  markdown editor is CodeMirror under sixty `.cm-*` rules and the page's own type), so on web `Island`
+  installs `styles.css` inside `@scope ([data-island])` (`islands/islandStyles.ts`): it reaches the island's
+  elements and no copy. `:root` there is the island's own box, which carries the look as the root does.
+  Before it, the editor stood in the browser's serif, 57px taller than the desktop's, and every stage
+  under it on the Components page was that much lower.
+- **An island stands without its host's ancestors.** `.markdown pre` and `.review-detail .monaco-host` name
+  classes the universal tree does not have. `under={["markdown", "md-block"]}` stands the component under
+  boxes of those classes that generate no box (`display: contents`); the diff's ring is still its `frame`.
+- **What an editor reads off the root.** Monaco takes its face and size from the ROOT's computed style
+  (`--font-data`, `--size-editor`): `islandStyles.ts` lends the root those two where it has none.
+- **A sticky box holds under its scroller's padding.** `.gallery-common { top: 0 }` in a scroller padded
+  by 12 sticks 12 down; react-native-web puts a `ScrollView`'s padding on its content, so the copy says 12.
+- **A `button` keeps the base rule.** `.ft-mode` turns a button into a column and resets nothing else, so
+  `align-items: center` and the radius are still the base `button`'s: its content sits mid-tab, and the
+  accent under the chosen one turns up at its ends. `.cfg-input` on a `<select>` is `width: 100%` too.
+- **A flex row with no `align-items` stretches** its buttons to its tallest child (`.note-reply`: four more
+  than their own height) — invisible while the ring is faint, plain in the contrast palette.
+- **An inline box does not give way.** `.cx-chip-wrap` shrinks and the `inline-flex` chip in it does not:
+  squeezed, the desktop's composer chips keep their words and run over one another.
 
 - **A photograph holds nothing that closes on resize.** `app.shot()` captures beyond the viewport, which
   resizes the page and so closes a `MenuLayer` or a suggestion list; hold those open another way.
@@ -243,6 +287,55 @@ draws `/specimen-dom?name=markdown` (the desktop's stylesheet) and `/specimen-rn
 native path), compares them, and lists every run of text that moved and by how much — which line is
 out, not just that something is. `cascade.mts --path 'specimen-dom?name=markdown&look=light'` reads the
 rules on a specimen page.
+
+## The reference pictures (goldens)
+
+`pair.mts` needs the desktop's page to compare against, and that page is what the migration deletes
+(decision 0015, the migration's step 2). So its pictures are kept first, one per scene or specimen and
+look, with what a comparison needs of the page they came from; from then on `/rn` is held against those.
+
+```bash
+npm --workspace @jaira/app run shots:freeze -- --port 9301            # every scene and specimen, every look
+npm --workspace @jaira/app run shots:freeze -- --port 9301 --verify   # photograph again: do they reproduce?
+npm --workspace @jaira/app run shots:goldens -- --port 9301           # /rn alone, against the kept pictures
+npx tsx packages/app/shots/pair.mts --freeze --scene board,task --look dark --port 9301   # a few of them
+```
+
+- **Where.** `packages/app/shots/goldens/<scene>/<look>.png` and `…/specimen-<name>/<look>.png`, each with
+  a `<look>.json`: the scene's regions (or the specimen's box), every run of text and where it stood,
+  the desktop's editors' boxes, what the world keeps changing, the window, and the world it was taken in.
+  `manifest.json` lists the set. 1,864 pictures on 2026-09-30 (121 scenes and 112 specimens in eight
+  looks), 279 MB; the folder is not in git (`.gitignore`).
+- **`--against-goldens`** photographs `/rn` only and grades it as `pair.mts` grades it against `/`: the
+  same regions, cropped at the same places, the copy's islands painted out of both. It fails by name on
+  a picture that was never frozen, one frozen in another world (the parked task's id is the world's
+  name: another seeding draws other ids and times) and one frozen in a window of another size.
+- **The world keeps writing its log**, so what the log draws is painted out of a comparison against
+  goldens: the counts on the sidebar's Logs and Settings rows, the Logs room's rows and tally, the
+  needs-attention card's lines about the log (`VOLATILE` in `pair.mts`). `--mask-volatile` does the same
+  to a comparison against `/`, so the two can be held to each other: `--report a.json` on one run,
+  `--same-as a.json` on the other.
+- **Freeze a world that has seen every scene once.** Some scenes make what they show the first time they
+  run (`task-adopted` writes a workflow, and the planning column is called by its id from then on;
+  opening a task marks its counts seen), so the first pass over a new world is not the second. Run
+  `pair.mts --scene all` once, then freeze.
+- **Freeze from the built client**, not the shared dev server: `npm --workspace @jaira/client run build`,
+  then `studio.mts --built --port 9301` serves that build to its window as files (`--pages <url>` for a
+  server of your own). A freeze is some two thousand page loads over two or three hours; on the shared
+  server every other copier's save reloads the page under a scene, and the load is what runs the server
+  out of memory. `pair.mts` tries a picture again when the page was reloaded under it, and goes on past
+  one it cannot take. Freeze and compare from the SAME build: a golden is of the desktop's page as that
+  build drew it.
+- **A picture waits for its page to hold still** (`App.settled`): nothing being fetched, no editor still
+  to mount, and its boxes, words and token colours unchanged for a second. A fixed pause photographed
+  Monaco at "loading the diff editor…" on whichever page asked for it first.
+- **What `--verify` tells apart.** A picture reproduces to the pixel; or to the eye (a pixel a level
+  off); or but for the log's counts; or but for the inside of an editor — on the dev server Monaco draws
+  a diff's deleted lines with the token colours it has when the diff arrives, and which arrives first is
+  not the page's to decide (the copy's islands are painted out of every comparison, so no verdict rests
+  on it). Anything else does not reproduce, and is a scene that shows what an earlier one left behind: a
+  panel still open on the last task, scrolled where that scene scrolled it (`files-graph`,
+  `files-plan-children`). `--verify` on a comparison against `/` makes the check in passing.
 
 ## Shared copies
 

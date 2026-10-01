@@ -1,4 +1,4 @@
-import { useCallback, useContext, useRef, useState, type JSX, type ReactNode } from "react";
+import { Fragment, useCallback, useContext, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import { formatTokens, type ContextReading, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
 import { pathFrom, placeOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
@@ -377,7 +377,11 @@ function MadeRow({ note, made, where, onSelectTask, adopted }: { note: BandNote;
             {i > 0 ? <Txt spec={words}>,</Txt> : null}
             {run.waitsFor ? (
               <View borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={999} paddingHorizontal={6}>
-                <Txt spec={{ ...words, scale: (11.5 / 12.5) * 0.85 }}>waits for</Txt>
+                {/* The line as the stylesheet writes it (unitless 1.5) on web: Blink floors its product, and the
+                    pill's leading then falls under its words (22 device pixels as pixels put half of it above). */}
+                <Txt spec={{ ...words, scale: (11.5 / 12.5) * 0.85 }} {...(isWeb ? { lineHeight: "1.5" } : {})}>
+                  waits for
+                </Txt>
               </View>
             ) : null}
             <Press onPress={() => onSelectTask?.(run.taskId)} title={`open ${run.title} (${run.taskId})`} minWidth={0} flexShrink={1}>
@@ -456,8 +460,12 @@ export interface ForkSide {
   note?: string;
 }
 
-/** `.fork-chip`: quiet at rest, its box on hover and while its menu is open. */
-function ForkChip({ kind, side, open, disabled = false, onPress, chevron, title }: { kind: string; side: string; open: boolean; disabled?: boolean; onPress: (from: unknown) => void; chevron: boolean; title: string }): JSX.Element {
+/**
+ * `.fork-chip`: quiet at rest, its box on hover and while its menu is open. `side` is its words as the
+ * desktop's JSX has them — `{at + 1} of {sides.length} — {side.label}` is five text nodes, and Blink shapes
+ * each apart, so one string here set the glyphs after each join a fraction off.
+ */
+function ForkChip({ kind, side, open, disabled = false, onPress, chevron, title }: { kind: string; side: readonly string[]; open: boolean; disabled?: boolean; onPress: (from: unknown) => void; chevron: boolean; title: string }): JSX.Element {
   const t = useTokens();
   const face = { voice: "app" as const, scale: 10.5 / 12.5, ls: 0.02 };
   const mark = t.mix(t.v("accent"), 70, t.v("dim"));
@@ -466,7 +474,7 @@ function ForkChip({ kind, side, open, disabled = false, onPress, chevron, title 
       onPress={(e) => onPress((e as unknown as { currentTarget?: unknown }).currentTarget)}
       disabled={disabled}
       title={title}
-      label={`${kind} ${side}`}
+      label={`${kind} ${side.join("")}`}
       flexGrow={0}
       flexShrink={1}
       minWidth={0}
@@ -492,7 +500,9 @@ function ForkChip({ kind, side, open, disabled = false, onPress, chevron, title 
               {kind}
             </Txt>
             <Txt spec={{ ...face, color: ink }} ellip minWidth={0} flexShrink={1}>
-              {side.toLowerCase()}
+              {side.map((part, i) => (
+                <Fragment key={i}>{part.toLowerCase()}</Fragment>
+              ))}
             </Txt>
             {chevron ? <Icon name="chevron" size={11} color={String(t.v(ink))} /> : null}
           </>
@@ -517,7 +527,7 @@ export function ForkMark({ sides, shown, onShow, note, torn = true }: { sides: r
       {torn ? <Zig t={t} /> : null}
       <ForkChip
         kind="fork:"
-        side={`${at + 1} of ${sides.length} — ${side.label}`}
+        side={[String(at + 1), " of ", String(sides.length), " — ", side.label]}
         open={menu !== null}
         chevron
         title={note ?? "the other sides of this fork"}
@@ -546,7 +556,7 @@ export function OriginMark({ origin, onGo }: { origin: TaskOrigin; onGo?: (() =>
       <Zig t={t} />
       <ForkChip
         kind="forked from:"
-        side={`${from}, ${origin.label}`}
+        side={[from, ", ", origin.label]}
         open={false}
         disabled={onGo === undefined}
         chevron={onGo !== undefined}

@@ -26,7 +26,7 @@
 import { useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Icon } from "./icons";
 import type { PanelTabSpec, PanelVerb } from "./panelFaceModel";
-import { acceptOffer, close, crumbOf, forward, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "./panelStack";
+import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "./panelStack";
 import { labelPlan } from "./panelTabs";
 
 export type { PanelTabSpec, PanelVerb } from "./panelFaceModel";
@@ -294,14 +294,16 @@ export function SidePanel({
       // The mouse's own back and forward buttons, and Alt+← / Alt+→, while the pointer or the focus is
       // in the panel — the ways a browser's history is walked, walking this one.
       onMouseUp={(event) => {
-        if (event.button !== 3 && event.button !== 4) return;
+        const step = historyButton(event.button);
+        if (step === undefined) return;
         event.preventDefault();
-        onStack(event.button === 3 ? pop : forward);
+        onStack(step);
       }}
       onKeyDown={(event) => {
-        if (!event.altKey || (event.key !== "ArrowLeft" && event.key !== "ArrowRight")) return;
+        const step = historyKey(event);
+        if (step === undefined) return;
         event.preventDefault();
-        onStack(event.key === "ArrowLeft" ? pop : forward);
+        onStack(step);
       }}
     >
       <header className="sp-head">

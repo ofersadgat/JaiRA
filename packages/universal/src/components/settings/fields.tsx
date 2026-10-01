@@ -2,10 +2,11 @@ import { useRef, useState, type JSX } from "react";
 import { TextInput, View as RNView } from "react-native";
 import { View } from "@tamagui/core";
 import { steppedSize } from "@jaira/ui/sizeStep";
-import { Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, placeholderColor } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { MenulistArrow } from "../form/MenulistArrow";
+import { selectKeyProps } from "../form/selectKeys";
 import { useReadingForm } from "../form/Field";
 
 /**
@@ -70,6 +71,8 @@ export function SelectInput({
         onPress={open}
         disabled={disabled}
         {...({ role: "combobox" } as object)}
+        // A closed `<select>`'s keys: the arrows step it, a letter finds a choice (`selectModel.ts`).
+        {...(selectKeyProps(options.map(([label, v]) => ({ label, value: v })), value, onChange) as object)}
         label={shown}
         paddingVertical={6}
         paddingLeft={9 + MENULIST_INSET}
@@ -140,7 +143,7 @@ export function SizeStep({
       {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}
       {...(disabled ? { opacity: 0.55 } : {})}
     >
-      <TextInput
+      <TextInput {...(ENTER_KEEPS_FOCUS as object)}
         value={draft ?? String(value)}
         editable={!disabled}
         inputMode="decimal"
@@ -150,6 +153,14 @@ export function SizeStep({
           if (text.trim() !== "" && Number.isFinite(n)) onChange(n);
         }}
         onBlur={() => setDraft(null)}
+        // `type="number"`: ↑ and ↓ step it, as the arrows beside it do (a keyboard's; a phone has the arrows).
+        onKeyPress={(e) => {
+          const key = e.nativeEvent.key;
+          if (disabled || (key !== "ArrowUp" && key !== "ArrowDown")) return;
+          (e as unknown as { preventDefault?: () => void }).preventDefault?.();
+          setDraft(null);
+          step(key === "ArrowUp" ? 1 : -1);
+        }}
         style={{ ...(font(t, { voice: "data", scale: 0.79, weight: 600, tabular: true }) as object), width: 34, padding: 0, borderWidth: 0, textAlign: "right", backgroundColor: "transparent" } as never}
       />
       <Txt register="data-faint">{unit}</Txt>
@@ -199,7 +210,7 @@ export function TextField({
   // An <input>'s own width in Chromium: 152 at 12.5px, whatever the device's pixel ratio.
   const own = typeof size === "number" ? 10.56 * size + 20 : undefined;
   return (
-    <TextInput
+    <TextInput {...(ENTER_KEEPS_FOCUS as object)}
       value={value}
       onChangeText={onChange}
       {...(placeholder !== undefined ? { placeholder, placeholderTextColor: placeholderColor("light") /* Chromium draws a placeholder #757575 under dark too, measured */ } : {})}

@@ -5,7 +5,7 @@ import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
 import { projectName } from "@jaira/ui/projects";
 import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
-import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, usePanelStacks, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
+import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, useHeldStates, usePanelStacks, usePanelTween, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
@@ -18,8 +18,9 @@ import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBrid
 import type { TranscriptSource } from "../components/panel/RunTranscript";
 import { useRunContext } from "../components/run/runContext";
 import { SidePanel } from "../components/panel/SidePanel";
+import { paneTween } from "../components/panel/panelMotion";
 import { Splitter } from "../components/files/Splitter";
-import { edge } from "../primitives";
+import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
 import { newTaskOpener, panelTopKind, runMode } from "./viewState";
@@ -33,7 +34,8 @@ import { newTaskOpener, panelTopKind, runMode } from "./viewState";
  * The stack, the room's rule and the column's width are `panelHost.ts`'s, the same code `App.tsx` runs;
  * what an entry says is `faces.tsx`'s (`panelFaces.tsx`'s `faceOf`), over `panelFaceModel.ts`.
  *
- *   .ctx-panel     --panel, a --line on the left (--rule folded), clipped; the column's width
+ *   .ctx-panel     --panel, a --line on the left (--rule folded), clipped; the column's width, eased to
+ *                  a new kind's or a fold's (`.view.pane-tween`, `panelMotion.web.ts`)
  *   .splitter      6 wide, a 2px --line down its middle; dragged (`files/Splitter.tsx`)
  */
 export function PanelColumn({ chat }: { chat?: { taskId: string | null; project: string; detail: TaskDetail | null } | undefined } = {}): JSX.Element | null {
@@ -58,6 +60,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const startAgain = useCallback((taskId: string) => startAgainOf(actions, detail, selectedProject, taskId), [actions, detail, selectedProject]);
   const top = topOf(panelStack);
   const geometry = panelGeometryOf(ui, room, top);
+  // The width animates when the kind on top changes or the panel folds, not while it is dragged (`App.tsx`'s `panelTween`).
+  const tween = usePanelTween(geometry.widthKey, geometry.open, top === undefined);
   // The New-task button's side of the stack (`viewState.ts`): what is on top, and how to open the form.
   const topKind = top?.kind ?? null;
   useEffect(() => panelTopKind.set(topKind), [topKind]);
@@ -112,6 +116,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [shownSig]);
+
+  // A state the panel shows that the store is not holding — a pinned one, one a value opened here
+  // (`panelHost.ts`' `useHeldStates`, `App.tsx`'s own).
+  const heldStates = useHeldStates(panelStack.entries, state, actions.pickWorkflow);
 
   // The run's verbs and links as the middle column has them (`App.tsx` hands both the same context).
   const run = useRunContext();
@@ -183,15 +191,17 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
           viewed,
         }
       : {}),
-    // The open file's state, or the board column's (`App.tsx`'s `stateOf`); a state held for a pinned
-    // panel is not read here.
-    stateOf: (stateId) => {
+    // The open file's state, the board column's, or one read for the panel (`App.tsx`'s `stateOf`).
+    stateOf: (stateId, project) => {
       if (state.doc?.stateId === stateId && state.stateId === stateId) return { view: state.state };
       if (state.taskWorkflow === stateId) {
         const run = runSurfaceFor(state, actions, detail, stateId, state.taskWorkflowProject, state.taskWorkflowRun);
         return { view: state.taskState, ...(run !== undefined ? { run } : {}) };
       }
-      return undefined;
+      const held = heldStates[`${stateId}\u0000${project ?? ""}`];
+      if (held === undefined) return undefined;
+      const run = runSurfaceFor(state, actions, detail, stateId, project ?? null, null);
+      return { view: held, ...(run !== undefined ? { run } : {}) };
     },
     inEditor: (stateId) => state.view === "files" && state.doc?.stateId === stateId,
     openInFiles: (stateId) => {
@@ -291,6 +301,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         />
       ) : null}
       <View
+        {...(landmark("complementary") as object)}
         width={geometry.width}
         flexShrink={0}
         minHeight={0}
@@ -298,6 +309,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         overflow="hidden"
         backgroundColor={t.v("panel") as never}
         {...(edge(t, { left: 1 }, geometry.open ? "line" : "rule") as object)}
+        {...(paneTween(tween) as object)}
       >
         <ToolsFieldProvider value={toolsFieldData}>
           <SidePanel stack={panelStack} onStack={onStack} face={face} folded={!geometry.open} onFold={(folded) => geometry.foldKey !== null && actions.setFold(geometry.foldKey, !folded)} closeFolds={closeFoldsOf(panelStack)} />

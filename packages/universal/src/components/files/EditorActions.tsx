@@ -1,5 +1,5 @@
 import { createContext, useContext, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";
@@ -9,7 +9,9 @@ import { Button } from "../settings/Button";
  * (`cascade.mts '.pane-actions.pinned'`):
  *
  *   .pane-actions.pinned   row, centred, wrapping, gap 6; 8 above, a --line over it, --panel; pushed to
- *                          the foot (margin-top auto)
+ *                          the foot (margin-top auto); sticky at the foot of what scrolls it, z-index 2 —
+ *                          which is also what draws it over the Components room's own sticky bar (equal
+ *                          z-index, later in the page) when a card's Save scrolls under it
  *   button.primary/.ghost  `Button`'s; disabled at half opacity
  *   .reason                --bad, app 11/12.5 (why saving is refused)
  *   .sub                   --dim, app 11/12.5
@@ -78,7 +80,7 @@ export function EditorActionsRow({ children }: { children: ReactNode }): JSX.Ele
   const t = useTokens();
   if (useContext(Hidden)) return null;
   return (
-    <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} flexShrink={0} marginTop="auto" paddingTop={8} backgroundColor={t.v("panel") as never} borderTopWidth={1} borderRightWidth={0} borderBottomWidth={0} borderLeftWidth={0} borderStyle="solid" borderColor={t.v("line") as never}>
+    <View {...((isWeb ? { position: "sticky", bottom: 0, zIndex: 2 } : {}) as object)} flexDirection="row" flexWrap="wrap" alignItems="center" gap={6} flexShrink={0} marginTop="auto" paddingTop={8} backgroundColor={t.v("panel") as never} borderTopWidth={1} borderRightWidth={0} borderBottomWidth={0} borderLeftWidth={0} borderStyle="solid" borderColor={t.v("line") as never}>
       {children}
     </View>
   );

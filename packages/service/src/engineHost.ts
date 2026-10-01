@@ -1,14 +1,15 @@
 /**
  * Hosting the engine (decisions 0012 §2–§3, 0013 §2): the process that claims the pipe answers every
  * client's requests with the same dispatch Electron's IPC uses (`serviceHandlers`), and sends every push
- * to every client that has said hello — clients on the local pipe, and other machines over the network
- * listener (`engineNet.ts`), each a `FrameChannel`. The protocol and the paths are `enginePipe.ts`.
+ * to every client that has said hello — clients on the local pipe, and over the network listener
+ * (`engineNet.ts`) other machines and the phones and browsers paired as windows (devices), each a
+ * `FrameChannel`. The protocol and the paths are `enginePipe.ts`.
  */
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { createConnection, createServer, type Server } from "node:net";
 import { dirname } from "node:path";
-import type { PushMessage } from "@jaira/shared";
+import type { DeviceKind, PushMessage } from "@jaira/shared";
 import {
   ENGINE_CONTRACT,
   ENGINE_PORT,
@@ -23,6 +24,7 @@ import {
 import { streamChannel, type EngineTransport, type FrameChannel } from "./engineChannel";
 import { whoAt } from "./engineClient";
 import type { Handler } from "./handlers";
+import type { TokenHolder } from "./machineTokens";
 
 /** Who is on the other end of one connection, as it said in `hello`. */
 export interface EngineClientInfo {
@@ -35,6 +37,8 @@ export interface EngineClientInfo {
   transport: EngineTransport;
   /** The machine a network client proved it is, by its token. */
   machine?: { id: string; label: string };
+  /** The phone or browser a network client proved it is, by its token: a window, not a machine. */
+  device?: { id: string; label: string; kind: DeviceKind };
 }
 
 /** What one connection adds over the host's handlers, and what to forget when it goes (§3, "per connection"). */
@@ -42,6 +46,12 @@ export interface EngineConnection {
   handlers?: Partial<Record<string, Handler>>;
   closed?: () => void;
 }
+
+/**
+ * A channel this connection is not offered — a device asking for the desktop's own clipboard. Answered
+ * as an error like any other, but not a failure of the engine's: `onFailure` does not hear of it.
+ */
+export class NotOffered extends Error {}
 
 /** A frame before `hello` other than `who` — pairing (decision 0013 §3) — and its answer. */
 export type PreAuthHandler = (frame: { t: string } & Record<string, unknown>, transport: EngineTransport) => Promise<HostFrame | undefined>;
@@ -55,8 +65,8 @@ export interface EngineHostOptions {
   handlers: Partial<Record<string, Handler>>;
   /** A connection's own answers — `project:current`, `limits:watch` — over {@link handlers}. */
   connect?: (client: EngineClientInfo) => EngineConnection;
-  /** Which machine a network client's token belongs to; undefined refuses it. */
-  authorizeNetwork?: (token: string) => { id: string; label: string } | undefined;
+  /** Which machine or device a network client's token belongs to; undefined refuses it. */
+  authorizeNetwork?: (token: string) => TokenHolder | undefined;
   /** Frames a client may send before `hello`: pairing. */
   preAuth?: PreAuthHandler;
   /** A handler that threw: the IPC path records it the same way. */
@@ -121,9 +131,9 @@ export class EngineHost {
     for (const client of this.clients) if (client.admitted && !client.limited && !client.channel.destroyed) client.channel.send({ t: "push", message });
   }
 
-  /** Disconnect every network client of one machine: its token was revoked. */
-  dropMachine(machineId: string): void {
-    for (const client of [...this.clients]) if (client.info?.machine?.id === machineId) this.drop(client);
+  /** Disconnect every network client of one machine or device: its token was revoked. */
+  dropMachine(id: string): void {
+    for (const client of [...this.clients]) if (client.info?.machine?.id === id || client.info?.device?.id === id) this.drop(client);
   }
 
   /** Stop answering: every client is disconnected, the pipe goes, and so does `engine.json`. */
@@ -185,11 +195,14 @@ export class EngineHost {
         return;
       }
       let machine: { id: string; label: string } | undefined;
+      let device: { id: string; label: string; kind: DeviceKind } | undefined;
       if (client.channel.transport === "pipe") {
         if (!sameToken(frame.token, this.token)) return this.refuse(client, "the token does not match this engine's");
       } else {
-        machine = this.options.authorizeNetwork?.(String(frame.token));
-        if (machine === undefined) return this.refuse(client, "this machine is not paired with that one, or its pairing was removed");
+        const holder = this.options.authorizeNetwork?.(String(frame.token));
+        if (holder === undefined) return this.refuse(client, "this machine is not paired with that one, or its pairing was removed");
+        if (holder.device !== undefined) device = { id: holder.id, label: holder.label, kind: holder.device };
+        else machine = { id: holder.id, label: holder.label };
       }
       const limited = frame.contract !== ENGINE_CONTRACT;
       // Welcome BEFORE admitting and logging: the log line is itself a push, broadcast to the admitted,
@@ -205,9 +218,10 @@ export class EngineHost {
         connectedAt: Date.now(),
         transport: client.channel.transport,
         ...(machine !== undefined ? { machine } : {}),
+        ...(device !== undefined ? { device } : {}),
       };
       if (!limited) client.connection = this.options.connect?.(client.info);
-      const who = machine !== undefined ? `${frame.client} on ${machine.label}` : frame.client;
+      const who = machine !== undefined ? `${frame.client} on ${machine.label}` : device !== undefined ? `${device.label} (a ${device.kind})` : frame.client;
       this.options.log?.(
         "info",
         limited ? `${who} (JaiRA ${frame.version}) connected to the engine with another contract; it may only ask about it or stop it` : `${who} connected to the engine`,
@@ -215,6 +229,13 @@ export class EngineHost {
       return;
     }
     if (frame.t !== "req") return;
+    // A device is a window, and a window's page asks only what the IPC contract lists. The `engine:*`
+    // channels are what a HOST process says to the engine (stop, restore, a crash to record): a device
+    // may ask who the engine is and nothing else of them — also when limited, where they are all that answers.
+    if (client.info?.device !== undefined && frame.channel.startsWith("engine:") && frame.channel !== "engine:info") {
+      this.send(client, { t: "res", id: frame.id, ok: false, error: { message: `'${frame.channel}' is for the engine's own host, and is not offered to a ${client.info.device.kind}` } });
+      return;
+    }
     if (client.limited && !frame.channel.startsWith("engine:")) {
       this.send(client, {
         t: "res",
@@ -233,7 +254,7 @@ export class EngineHost {
       const result = await (handler as (request: unknown) => unknown)(frame.request);
       this.send(client, { t: "res", id: frame.id, ok: true, result: result === undefined ? null : result });
     } catch (e) {
-      this.options.onFailure?.(frame.channel, e);
+      if (!(e instanceof NotOffered)) this.options.onFailure?.(frame.channel, e);
       const error = e instanceof Error ? { message: e.message, name: e.name } : { message: String(e) };
       this.send(client, { t: "res", id: frame.id, ok: false, error });
     }

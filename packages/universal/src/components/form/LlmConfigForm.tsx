@@ -147,15 +147,15 @@ type RailKey = { key: string; altKey: boolean; ctrlKey: boolean; metaKey: boolea
 /**
  * `TabRail`'s `onKeyDown` (web): the keys that run ALONG the rail choose the tab before or after, Home and
  * End the ends; the pair that runs ACROSS it steps to the rail beside it in the same box (`RailFrame`) —
- * `llmConfigModel.ts`'s `railMoveOf` and `railStep`, as the desktop's. A tab here is the `role="tab"` box
- * inside its pressable, which is what takes the focus.
+ * `llmConfigModel.ts`'s `railMoveOf` and `railStep`, as the desktop's.
  */
 function railKey(event: RailKey, tabItems: readonly RailItem[], onSelect: (id: string) => void): void {
   if (event.altKey || event.ctrlKey || event.metaKey) return;
   const rail = event.currentTarget;
   const move = railMoveOf(event.key, getComputedStyle(rail).flexDirection.startsWith("row"));
   if (move === undefined) return;
-  const focusable = (tab: Element | null | undefined): HTMLElement | null => (tab?.parentElement as HTMLElement | null | undefined) ?? null;
+  // The tab IS its pressable (`Press` writes the role on the element that takes the focus).
+  const focusable = (tab: Element | null | undefined): HTMLElement | null => (tab as HTMLElement | null | undefined) ?? null;
   if (move === "in" || move === "out") {
     // The rail beside this one, in the same box. Nothing there is not an error — a lone rail simply has
     // no "across" — and the key is left alone so the page can still scroll with it.

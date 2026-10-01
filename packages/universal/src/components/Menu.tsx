@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { Platform } from "react-native";
 import type { MenuItem } from "@jaira/ui/crumbModel";
 import { Press, Txt, edge } from "../primitives";
 import { useTokens } from "../tokens";
@@ -63,6 +64,8 @@ export function ContextMenu({ anchor, onClose }: { anchor: MenuAt; onClose: () =
             }}
             disabled={item.disabled === true}
             label={item.label}
+            // `<button role="menuitem">`, as the desktop's rows are (web; a phone's are its own buttons).
+            {...((Platform.OS === "web" ? { role: "menuitem" } : {}) as object)}
             flexDirection="row"
             alignItems="baseline"
             gap={8}

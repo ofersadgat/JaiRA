@@ -5,7 +5,7 @@ import { TaskCard } from "./components/TaskCard";
 export { config } from "./tamagui.config";
 export { Replayed, TokenRoot, TokenScope, useLook, useTokens, type Look, type Tokens } from "./tokens";
 export { Island, type IslandProps } from "./islands";
-export { Connect } from "./screens/Connect";
+export { Connect, type ConnectProps } from "./screens/Connect";
 export { Markdown, registerFenceRenderer } from "./components/Markdown";
 export { DataView } from "./components/files/DataView";
 // The value view, for its specimens (`valueSpecimens.tsx`).
@@ -32,8 +32,9 @@ export { UpdateRow } from "./components/floats/UpdateRow";
 export { Transcript } from "./components/panel/SessionTranscript";
 export { SessionBands } from "./components/panel/SessionBands";
 export { RailedRows } from "./components/panel/Rail";
-// What the hosts hand the shell: the socket going away, and a phone's net for what escapes everything.
-export { connectionLost } from "./app/connection";
+// What the hosts hand the shell: the connection going away and coming back, and a phone's net for what
+// escapes everything.
+export { connectionLost, connectionRestored, useConnectionLost } from "./app/connection";
 export { installNativeErrorReporting } from "./components/floats/CrashScreen";
 // The window's own reports, a settled gate and a conversation's foot, for their specimens (`shellSpecimens.tsx`).
 export { CrashScreen, LooseErrorBanner } from "./components/floats/CrashScreen";

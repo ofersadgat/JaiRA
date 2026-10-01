@@ -5,7 +5,7 @@
  * {@link WordPart}s, which each side draws in its own way.
  */
 import { useEffect, useState } from "react";
-import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type MachinesView, type PeerView } from "@jaira/shared/browser";
+import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachinesView, type PeerView } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 
 /** A run of a sentence: words, a value (`<code>`), an error (`.upd-err`), a quiet note (`.cfg-hint`), or a link. */
@@ -110,7 +110,7 @@ export function reachWords(view: MachinesView): { description: WordPart[]; on: b
 /** The Pair a machine row's sentence. */
 export function pairWords(view: MachinesView): string {
   return view.self.reach.state === "on"
-    ? `Show a code to type on the other machine. It works once, for ${PAIRING_CODE_MS / 60_000} minutes.`
+    ? `Show a code to type on the other machine, or in JaiRA on a phone or in a browser. It works once, for ${PAIRING_CODE_MS / 60_000} minutes.`
     : "Turn on Reachable first: the other machine connects to this one to pair.";
 }
 
@@ -138,6 +138,14 @@ export function peerWords(peer: PeerView): WordPart[] {
   }
 }
 
+/** The phones and browsers paired with this machine (decision 0013, amended 2026-09-30), by name. */
+export const devicesOf = (view: MachinesView): DeviceView[] => [...(view.devices ?? [])].sort((a, b) => a.label.localeCompare(b.label));
+
+/** A paired phone's or browser's line: what it is, and whether it is there. */
+export function deviceWords(device: DeviceView): string {
+  return `${device.kind === "phone" ? "Phone" : "Browser"} · ${device.connected ? "connected now" : device.lastUsedAt === undefined ? "not connected yet" : ago(device.lastUsedAt)}`;
+}
+
 /** The Projects across machines row's sentence. */
 export const groupedWords = (grouped: boolean): string =>
   grouped
@@ -160,6 +168,11 @@ export const MACHINES_WORDS = {
   pairCode: { name: "Code for pairing" },
   yours: { title: "Your machines", info: "Remembered on every machine you pair: pairing one new machine with any of these introduces it to the rest." },
   none: { name: "None yet", description: "Pair a machine below, or show a code here and type it there." },
+  devices: {
+    title: "Phones and browsers",
+    info: "A phone or a browser paired with this machine is a window onto it: it shows and does what a window here does, keeps no copy of anything, and no task runs on it. Forgetting one disconnects it, and its pairing no longer works.",
+    forget: "Its pairing stops working, and it is disconnected",
+  },
   add: { title: "Add a machine", info: "Pairing is once per machine: after that they find each other by themselves, and a machine paired with any of yours joins all of them." },
   other: { name: "The other machine" },
   paired: "Paired. It is listed under Your machines, with any machines it was already paired with.",

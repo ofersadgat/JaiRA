@@ -1,4 +1,4 @@
-import { Fragment, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { Fragment, createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Linking, Platform, ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdown";
@@ -303,7 +303,7 @@ function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
   const line = ink.lineHeight * size;
   if (/^\d/.test(marker)) {
     return (
-      <Txt spec={{ voice: "app", ...ink }} position="absolute" right="100%" top={0} whiteSpace="pre">
+      <Txt spec={{ voice: "app", ...ink }} {...unitless(ink)} position="absolute" right="100%" top={0} whiteSpace="pre">
         {marker}
       </Txt>
     );
@@ -324,9 +324,25 @@ function Marker({ marker, ink }: { marker: string; ink: Ink }): JSX.Element {
   return <View position="absolute" width={d} height={d} left={-(size * (2 / 3) + d)} top={textTop + Math.floor((3 * (ascent - third)) / 2)} {...(shape as object)} />;
 }
 
+/**
+ * The line height a fenced block's viewer inherits: the document's (`.markdown`'s 1.6, a transcript
+ * message's 1.65), not the body's 1.5 — its toggles are a pixel taller for it. Undefined outside a fence.
+ */
+export const FenceLineContext = createContext<number | undefined>(undefined);
+
 function fenceBlock(block: FenceBlock, ctx: Ctx): Block {
   const drawn = ctx.fence?.(block);
-  if (drawn !== undefined) return { top: 0, bottom: 10, draw: (mt, mb, key) => <View key={key} marginTop={mt} marginBottom={mb}>{drawn}</View> };
+  if (drawn !== undefined) {
+    return {
+      top: 0,
+      bottom: 10,
+      draw: (mt, mb, key) => (
+        <View key={key} marginTop={mt} marginBottom={mb}>
+          <FenceLineContext.Provider value={ctx.ink.lineHeight}>{drawn}</FenceLineContext.Provider>
+        </View>
+      ),
+    };
+  }
   return { top: 0, bottom: 10, draw: (mt, mb, key) => <Pre key={key} code={block.code} ink={ctx.ink} marginTop={mt} marginBottom={mb} /> };
 }
 
@@ -336,7 +352,7 @@ function fenceBlock(block: FenceBlock, ctx: Ctx): Block {
 function Line({ ctx, children_, marginTop, marginBottom, upper, ls }: { ctx: Ctx; children_: readonly Child[]; marginTop: number; marginBottom: number; upper?: boolean; ls?: number }): JSX.Element {
   const spec = { voice: "app" as const, ...ctx.ink, ...(upper === true ? { upper } : {}), ...(ls !== undefined ? { ls } : {}) };
   return (
-    <Txt spec={spec} marginTop={marginTop} marginBottom={marginBottom}>
+    <Txt spec={spec} marginTop={marginTop} marginBottom={marginBottom} {...unitless(ctx.ink)}>
       {inlines(children_, { ...ctx.ink, ...(upper === true ? { upper } : {}), ...(ls !== undefined ? { ls } : {}) })}
     </Txt>
   );
@@ -368,9 +384,16 @@ function inlines(children: readonly Child[], ink: Ink): ReactNode[] {
   });
 }
 
+/**
+ * On web, the line as the stylesheet writes it (`.markdown { line-height: 1.6 }`, unitless): Blink
+ * multiplies it out in floating point and floors it to its layout unit, where a copy's pixels round to
+ * the nearest — a hundredth of a pixel a line, which a page of prose adds up to half a pixel by its foot.
+ */
+const unitless = (ink: Ink): Record<string, unknown> => (Platform.OS === "web" ? { lineHeight: String(ink.lineHeight) } : {});
+
 function Inline({ ink, children, ...rest }: { ink: Ink; children: ReactNode } & Record<string, unknown>): JSX.Element {
   return (
-    <Txt spec={{ voice: "app", ...ink }} {...rest}>
+    <Txt spec={{ voice: "app", ...ink }} {...unitless(ink)} {...rest}>
       {children}
     </Txt>
   );
@@ -380,8 +403,12 @@ function Link({ href, ink, children }: { href: string | undefined; ink: Ink; chi
   return (
     <Txt
       spec={{ voice: "app", ...ink, color: "accent" }}
+      {...unitless(ink)}
       textDecorationLine="underline"
-      {...(href !== undefined ? { onPress: () => void Linking.openURL(href), ...(Platform.OS === "web" ? { href, hrefAttrs: { target: "_blank", rel: "noreferrer noopener" } } : {}) } : {})}
+      // On web a real `<a target="_blank">`, as the desktop's: reached by Tab, opened by Enter, named by the
+      // right-click menu ("Copy link"), under a pointing hand — and opened by the anchor itself, which the
+      // window hands to the browser, so no press handler opens it a second time. A phone opens it by the press.
+      {...(href === undefined ? {} : Platform.OS === "web" ? { render: "a", href, target: "_blank", rel: "noreferrer noopener" } : { onPress: () => void Linking.openURL(href) })}
     >
       {children}
     </Txt>
@@ -433,7 +460,8 @@ function BlockQuote({ children, marginTop, marginBottom }: { children: ReactNode
 
 function Rule({ marginTop, marginBottom }: { marginTop: number; marginBottom: number }): JSX.Element {
   const t = useTokens();
-  return <View marginTop={marginTop} marginBottom={marginBottom} height={1} {...(edge(t, { top: 1 }) as object)} />;
+  // As tall as its one border, which Chromium draws in whole device pixels (0.667 in the studio), not a fixed 1.
+  return <View marginTop={marginTop} marginBottom={marginBottom} {...(edge(t, { top: 1 }) as object)} />;
 }
 
 /**
@@ -478,7 +506,7 @@ function Table({ node, ctx, marginTop, marginBottom }: { node: Extract<Node, { a
             const ink = { ...ctx.ink, ...(row.head ? { weight: 700 } : {}) };
             return (
               <View key={r} paddingVertical={3} paddingHorizontal={7} {...(edge(t, { right: 1, bottom: 1 }) as object)}>
-                <Txt spec={{ voice: "app", ...ink }} textAlign={(cell?.attrs["align"] as never) ?? "left"}>
+                <Txt spec={{ voice: "app", ...ink }} {...unitless(ink)} textAlign={(cell?.attrs["align"] as never) ?? "left"}>
                   {cell === undefined ? "" : inlines(cell.children, ink)}
                 </Txt>
               </View>

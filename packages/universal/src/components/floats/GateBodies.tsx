@@ -9,7 +9,7 @@ import { formStartsWith } from "@jaira/ui/gateForms";
 import { useSchemaCheck, useTouched } from "@jaira/ui/schemaForm/check";
 import { checkBlocker } from "@jaira/ui/schemaForm/model";
 import type { Schema } from "@jaira/ui/schemaForm/types";
-import { Txt, font, lengthToken } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Txt, font, lengthToken, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "../settings/Button";
@@ -69,9 +69,11 @@ export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknow
 
 /** `.mount-host`: overflow auto, no least height — a plain scrolling box on web, a scroller on a phone. */
 function MountHost({ top, children }: { top: number; children: JSX.Element }): JSX.Element {
+  const t = useTokens();
   if (isWeb) {
     return (
-      <View marginTop={top} minHeight={0} flexShrink={1} {...({ overflowY: "auto" } as object)}>
+      // With the app's own scrollbar (10 wide): Chromium's is 15, and the reviewer inside was 5 narrower.
+      <View marginTop={top} minHeight={0} flexShrink={1} {...({ overflowY: "auto" } as object)} {...(viewScrollbarProps(t) as object)}>
         {children}
       </View>
     );
@@ -236,7 +238,7 @@ function RawJson({ onSubmit }: { onSubmit: (value: unknown) => void }): JSX.Elem
       {/* The field's 12 collapses with the heading's 8. */}
       <View flexDirection="column" gap={4} marginTop={12}>
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", ls: 0.04, upper: true }}>Response (JSON)</Txt>
-        <TextInput
+        <TextInput {...(ENTER_KEEPS_FOCUS as object)}
           value={text}
           onChangeText={setText}
           multiline

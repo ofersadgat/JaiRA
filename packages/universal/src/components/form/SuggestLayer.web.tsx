@@ -1,6 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { createPortal } from "react-dom";
 import { View } from "react-native";
+import { FLOATS } from "../MenuLayer.web";
 
 /**
  * The web half of `SuggestLayer.tsx`: the box as it stands, and the popup in a fixed layer in `<body>`
@@ -15,7 +16,7 @@ export function SuggestLayer({ box, popup }: { box: ReactNode; popup: ReactNode 
         ? null
         : createPortal(
             <View style={{ position: "fixed" as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: 1000 }} pointerEvents="box-none">
-              {popup}
+              <View style={FLOATS as never}>{popup}</View>
             </View>,
             document.body,
           )}

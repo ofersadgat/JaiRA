@@ -534,9 +534,9 @@ by the person on 2026-09-30 ("the Phone only gaps can be left for later").
       page is also only as tall as its content, not the whole panel.
 - [ ] **Drag and drop, beyond the task board.** A long press and pan lifts a card (checked on the
       emulator); the run board's tiles and the automations' grip use the same `Lift` code but were
-      not tried on a device. A drag does not scroll the board near an edge, the lifted card is hidden
-      rather than dimmed, and a drop from a phone cannot write (its connection is read-only: "Cannot
-      move here").
+      not tried on a device. A drag does not scroll the board near an edge, and the lifted card is
+      hidden rather than dimmed. (A drop was last tried over the read-only spike connection, which
+      refused it; the phone writes now, and a drop has not been tried since.)
 - [ ] **The changeset reviewer's phone half is untried.** The diff island's function calls and
       command handle, the selection's rect moved by `measureInWindow`, the fade slider's
       `PanResponder`, and the note composer over the WebView with the keyboard up. A changed `.svg`
@@ -548,5 +548,12 @@ by the person on 2026-09-30 ("the Phone only gaps can be left for later").
       the keyboard), so a scroller round the box clips it; it opens on typing or a second tap, with no
       arrow keys; blur waits 150 ms so a tap on a row lands — untried on the emulator, taps inside a
       `ScrollView` included (`keyboardShouldPersistTaps`).
+- [ ] **A task's Conversation tab is empty on the emulator.** The panel draws a tall empty lane where
+      the transcript should be (seen 2026-09-30, after the transport switch), so a gate parked in the
+      conversation cannot be answered from the phone's own panel; the inbox strip still offers it.
+- [ ] **Pairing has no QR code.** The deep link a code would carry (`jaira:///?address=…&code=…`) is
+      read; nothing draws or scans one. A device cannot open or make a project (`project:choose` is
+      the machine's own dialog), a sign-in page a device's request causes opens on the engine's
+      machine, and after a reconnection only the limits watch is replayed, not the current project.
 - [ ] **The Debug session panel is still on a phone.** The running dot's pulse and the writing
       caret's blink do not move.

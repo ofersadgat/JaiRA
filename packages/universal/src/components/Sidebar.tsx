@@ -2,7 +2,7 @@ import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import { parentName } from "@jaira/ui/projects";
 import type { SidebarProject, SidebarView } from "@jaira/ui/sidebar";
-import { Glyph, Press, Txt, edge, useHover } from "../primitives";
+import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, WINDOW_GUTTER, edge, landmark, useHover } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
 import { Pills } from "./Pills";
@@ -145,6 +145,7 @@ function Column({
                 onPress={go}
                 label={v.label}
                 title={v.label}
+                {...((here ? { "aria-current": "page" } : {}) as object)}
                 flex={1}
                 minWidth={0}
                 alignSelf="stretch"
@@ -173,6 +174,7 @@ function Column({
                   onPress={(e) => act.onAct((isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget : undefined) as never)}
                   label={act.label}
                   title={act.label}
+                  {...((act.on !== undefined ? { "aria-pressed": act.on } : {}) as object)}
                   width={20}
                   height={20}
                   flexShrink={0}
@@ -272,6 +274,7 @@ function Column({
 
   return (
     <View
+      {...(landmark("navigation") as object)}
       width={collapsed ? RAIL : width}
       flexShrink={0}
       flexDirection="column"
@@ -281,11 +284,25 @@ function Column({
       overflow="hidden"
       position="relative"
     >
-      <View flexDirection="row" alignItems="center" justifyContent={collapsed ? "center" : "flex-start"} gap={8} flexShrink={0} height={34} paddingHorizontal={collapsed ? 4 : 8}>
+      {/* `.side-title` is the window's drag handle on the desktop (`DRAG_REGION`), inset on the left by what
+          the OS has put there (macOS's traffic lights); its button opts out again (`.side-title button`). */}
+      <View
+        flexDirection="row"
+        alignItems="center"
+        justifyContent={collapsed ? "center" : "flex-start"}
+        gap={8}
+        flexShrink={0}
+        height={34}
+        paddingHorizontal={collapsed ? 4 : 8}
+        {...(collapsed ? {} : { paddingLeft: WINDOW_GUTTER.left(8) as never })}
+        style={DRAG_REGION as never}
+      >
         <Press
           onPress={() => onCollapsed(!collapsed)}
           label={collapsed ? "Show the sidebar" : "Hide the sidebar"}
           title={collapsed ? "show the sidebar" : "hide the sidebar"}
+          {...({ "aria-expanded": !collapsed } as object)}
+          style={NO_DRAG}
           width={26}
           height={26}
           flexShrink={0}
@@ -360,6 +377,7 @@ function Column({
             disabled={busy}
             label="open another project"
             title="open another project"
+            {...({ "aria-haspopup": "menu" } as object)}
             width="100%"
             height={26}
             flexShrink={0}
@@ -490,6 +508,7 @@ function ProjectRow({
         onPress={() => onProject(open ? null : p.project)}
         title={p.project}
         label={p.label}
+        {...({ "aria-expanded": open } as object)}
         flex={1}
         minWidth={0}
         alignSelf="stretch"
@@ -542,6 +561,7 @@ function RailTile({ p, on, onPress }: { p: SidebarProject; on: boolean; onPress:
       onPress={onPress}
       title={p.project}
       label={p.label}
+      {...((on ? { "aria-current": "true" } : {}) as object)}
       width={28}
       height={28}
       flexShrink={0}

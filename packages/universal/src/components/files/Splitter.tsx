@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type JSX } from "react";
 import { PanResponder, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { clampSplit } from "@jaira/ui/splitter";
+import { clampSplit, splitKey } from "@jaira/ui/splitter";
 import { useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 
@@ -10,11 +10,14 @@ import { useTokens } from "../../tokens";
  * resize the one before it (the size clamped by `clampSplit`, the desktop's own). The rules, from
  * `styles.css`:
  *
- *   .splitter              6 wide, a 2px --line down its middle (`::before`, inset 0 2px); hovered --accent
+ *   .splitter              6 wide, a 2px --line down its middle (`::before`, inset 0 2px); --accent hovered
+ *                          or reached by the keyboard (`:focus-visible`), where it draws no outline
  *   .splitter.horizontal   6 tall, the line across (inset 2px 0)
  *
  * `extent` is the container along the drag, for `reserve` — the parent measures it (the DOM one reads
- * its parent element). A double-press restores `reset`, as a double-click does on the desktop.
+ * its parent element). A double-press restores `reset`, as a double-click does on the desktop. On web it
+ * is a tab stop the arrow keys move, as the desktop's (`splitKey`): a divider that can only be dragged is
+ * one some people cannot move.
  */
 export function Splitter({
   value,
@@ -43,6 +46,8 @@ export function Splitter({
   const t = useTokens();
   const [hovered, hover] = useHover();
   const [dragging, setDragging] = useState(false);
+  // Focused by the keyboard (`:focus-visible`): a press focuses it too, and lights nothing.
+  const [keyed, setKeyed] = useState(false);
   const horizontal = orientation === "horizontal";
   // The latest props, for a responder made once.
   const live = useRef({ value, onChange, min, max, reserve, extent, reset, invert });
@@ -57,7 +62,7 @@ export function Splitter({
         onPanResponderGrant: () => {
           const now = Date.now();
           const l = live.current;
-          if (now - lastTap.current < 300) l.onChange(l.reset);
+          if (now - lastTap.current < 300) l.onChange(clampSplit(l.reset, l.min, l.max, l.reserve, l.extent));
           lastTap.current = now;
           from.current = l.value;
           setDragging(true);
@@ -72,10 +77,31 @@ export function Splitter({
       }),
     [horizontal],
   );
+  const keys = isWeb
+    ? {
+        tabIndex: 0,
+        "aria-orientation": orientation,
+        onKeyDown: (event: { key: string; shiftKey: boolean; preventDefault: () => void }) => {
+          const l = live.current;
+          const next = splitKey(event.key, event.shiftKey, l.value, horizontal, l.invert);
+          if (next === undefined) return;
+          l.onChange(clampSplit(next, l.min, l.max, l.reserve, l.extent));
+          event.preventDefault();
+        },
+        onFocus: (event: { target: unknown }) => setKeyed((event.target as { matches?: (selector: string) => boolean }).matches?.(":focus-visible") === true),
+        onBlur: () => setKeyed(false),
+      }
+    : {};
   return (
-    <RNView {...pan.panHandlers} role="separator" accessibilityLabel={label} style={{ flexShrink: 0, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none" } as object) : {}) }}>
+    <RNView
+      {...pan.panHandlers}
+      {...(keys as object)}
+      role="separator"
+      accessibilityLabel={label}
+      style={{ flexShrink: 0, ...(horizontal ? { height: 6 } : { width: 6 }), ...(isWeb ? ({ cursor: horizontal ? "row-resize" : "col-resize", userSelect: "none", touchAction: "none", outlineStyle: "none" } as object) : {}) }}
+    >
       <View {...(hover as object)} flex={1} {...(horizontal ? { paddingVertical: 2 } : { paddingHorizontal: 2 })}>
-        <View flex={1} backgroundColor={t.v(hovered || dragging ? "accent" : "line") as never} />
+        <View flex={1} backgroundColor={t.v(hovered || dragging || keyed ? "accent" : "line") as never} />
       </View>
     </RNView>
   );

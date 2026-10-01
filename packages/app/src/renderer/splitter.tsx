@@ -76,6 +76,20 @@ export function clampSplit(next: number, min: number, max: number, reserve: numb
   return Math.min(ceiling, Math.max(min, next));
 }
 
+/**
+ * Where a key moves a divider from `value`, unclamped — or `undefined` for a key that is not its to take.
+ * The pair of keys follows the axis: arrows across a divider that only moves up and down are arrows that
+ * appear to do nothing. Shift moves it four times as far. Shared with the universal copy.
+ */
+export function splitKey(key: string, shift: boolean, value: number, horizontal: boolean, invert: boolean): number | undefined {
+  const step = shift ? 48 : 12;
+  const towards = invert ? -1 : 1;
+  const [less, more] = horizontal ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"];
+  if (key === less) return value - step * towards;
+  if (key === more) return value + step * towards;
+  return undefined;
+}
+
 const DEFAULT_MIN = 140;
 const DEFAULT_MAX = 720;
 
@@ -136,16 +150,12 @@ export function Splitter({
       onPointerCancel={() => {
         from.current = null;
       }}
-      // Keyboard, because a divider that can only be dragged is a divider some people cannot move.
-      // The pair of keys follows the axis: arrows across a divider that only moves up and down are
-      // arrows that appear to do nothing.
+      // Keyboard, because a divider that can only be dragged is a divider some people cannot move
+      // (`splitKey`).
       onKeyDown={(event) => {
-        const step = event.shiftKey ? 48 : 12;
-        const towards = invert === true ? -1 : 1;
-        const [less, more] = horizontal ? ["ArrowUp", "ArrowDown"] : ["ArrowLeft", "ArrowRight"];
-        if (event.key === less) onChange(clamp(value - step * towards));
-        else if (event.key === more) onChange(clamp(value + step * towards));
-        else return;
+        const next = splitKey(event.key, event.shiftKey, value, horizontal, invert === true);
+        if (next === undefined) return;
+        onChange(clamp(next));
         event.preventDefault();
       }}
       // A double-click restores the default, which is the cheapest way out of a pane dragged to a

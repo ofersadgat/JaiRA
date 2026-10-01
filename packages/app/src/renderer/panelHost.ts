@@ -8,10 +8,10 @@
  * the window's pinned stack over them, and the reconciling of a room's stack with its rule.
  */
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { InstanceNode, JairaUiState, PendingInteraction, TaskDetail, WorkflowLayer } from "@jaira/shared/browser";
+import type { InstanceNode, JairaUiState, PendingInteraction, StateView, TaskDetail, WorkflowLayer } from "@jaira/shared/browser";
 import type { ComponentServices } from "./changesetReviewModel";
 import { EMPTY_STACK, push, reconcile, routeChange, shownStack, widthKeyOf, type PanelEntry, type PanelStack } from "./panelStack";
-import type { AppState, View } from "./store";
+import { invoke, type AppState, type View } from "./store";
 import { primaryAct } from "./taskAction";
 import { nodeAt, type TrailStep } from "./trail";
 import { FOLD, PANE, PANE_WIDE, PANEL_MIN, PANEL_RAIL, openOf, paneOf } from "./uiState";
@@ -266,6 +266,58 @@ export function panelGeometryOf(ui: JairaUiState, room: PanelRoom | null, top: P
   const widthKey = top === undefined ? PANE.panelTask : widthKeyOf(top.kind);
   const width = top === undefined ? 0 : open ? Math.max(PANEL_MIN, Math.min(paneOf(ui, widthKey), PANE_WIDE)) : PANEL_RAIL;
   return { foldKey, open, widthKey, width };
+}
+
+/**
+ * A state a panel shows that the store is not holding — the open file's and the board column's are
+ * held there; a pinned state is still shown after both have moved on, and so is one a value opened in
+ * the panel. Read by its own id, and its run form asked for the way a column's is. Keyed
+ * `stateId\u0000project`. Shared with the universal shell.
+ */
+export function useHeldStates(
+  entries: readonly PanelEntry[],
+  state: Pick<AppState, "taskWorkflow" | "doc" | "stateId" | "workflowForms">,
+  pickWorkflow: (stateId: string) => void,
+): Record<string, StateView> {
+  const [heldStates, setHeldStates] = useState<Record<string, StateView>>({});
+  const shownStates = [...new Set(entries.flatMap((entry) => (entry.kind === "state" ? [`${entry.stateId}\u0000${entry.project ?? ""}`] : [])))]
+    .filter((key) => {
+      const stateId = key.split("\u0000")[0];
+      return stateId !== state.taskWorkflow && !(state.doc?.stateId === stateId && state.stateId === stateId);
+    })
+    .sort();
+  const shownStatesSig = shownStates.join("|");
+  useEffect(() => {
+    let live = true;
+    for (const key of shownStates) {
+      const [stateId, project] = key.split("\u0000") as [string, string];
+      if (state.workflowForms[stateId] === undefined) pickWorkflow(stateId);
+      if (heldStates[key] !== undefined) continue;
+      void invoke("state:view", { stateId, ...(project !== "" ? { project } : {}) })
+        .then((found) => live && setHeldStates((was) => ({ ...was, [key]: found })))
+        .catch(() => undefined);
+    }
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [shownStatesSig]);
+  return heldStates;
+}
+
+/**
+ * Whether the column's width is animating: for a moment after the KIND on top changes, the panel folds or
+ * unfolds, or it comes or goes — never while its splitter is dragged, which must follow the pointer.
+ * `.view.pane-tween`'s 220ms transition is on while this says so (260ms, the transition and a margin).
+ */
+export function usePanelTween(widthKey: string, open: boolean, empty: boolean): boolean {
+  const [panelTween, setPanelTween] = useState(false);
+  useEffect(() => {
+    setPanelTween(true);
+    const timer = setTimeout(() => setPanelTween(false), 260);
+    return () => clearTimeout(timer);
+  }, [widthKey, open, empty]);
+  return panelTween;
 }
 
 /** Whether the panel's root stands beside a conversation, where ✕ folds rather than closes. */

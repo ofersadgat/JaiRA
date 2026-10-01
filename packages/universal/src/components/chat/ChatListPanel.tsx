@@ -5,7 +5,7 @@ import { agoOf, chatRowMenu, controlsOf, deleteAskOf, emptyListText, forkTitleOf
 import type { AskSpec } from "@jaira/ui/menu";
 import { projectName } from "@jaira/ui/projects";
 import { copyText } from "../../clipboard";
-import { Press, Txt, edge, font, scrollbarProps } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { ProjectChip } from "../InboxStrip";
 import { ContextMenu, type MenuAt } from "../Menu";
@@ -79,7 +79,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
     // drawer): grow from the content's height rather than from nothing, which Yoga would collapse to 0.
     <View flexDirection="column" flexGrow={1} flexShrink={1} flexBasis="auto" minHeight={0} gap={4} paddingVertical={4}>
       {find ? (
-        <TextInput
+        <TextInput {...(ENTER_KEEPS_FOCUS as object)}
           autoFocus
           value={query}
           placeholder="Search conversations"
@@ -98,7 +98,8 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
         />
       ) : null}
       {shown.length === 0 ? (
-        <Txt spec={{ voice: "app", scale: 1, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 1) as number}>
+        // `p.empty`: the body's own size (13/12.5), --dim, padding 8 0, a paragraph's 1em above and below.
+        <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8} marginVertical={t.scaled("size-app", 13 / 12.5) as number}>
           {emptyListText(query)}
         </Txt>
       ) : (
@@ -155,7 +156,7 @@ function Row({
     };
     return (
       <View {...row} backgroundColor={ground(false) as never}>
-        <TextInput
+        <TextInput {...(ENTER_KEEPS_FOCUS as object)}
           autoFocus
           value={renaming}
           onChangeText={(title) => onRenaming(title)}

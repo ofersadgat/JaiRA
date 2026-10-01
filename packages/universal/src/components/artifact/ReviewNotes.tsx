@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import { anchorNotes, decisionWordOf, shortQuote, type ReviewNote } from "@jaira/shared/browser";
 import { forgeName, repliesOnForge } from "@jaira/ui/remoteStrip";
 import { notesCount } from "@jaira/ui/artifactReview";
-import { Press, Txt, edge, faceOf, font, lengthToken, placeholderColor, useHover } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, faceOf, font, lengthToken, placeholderColor, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Float } from "../floats/Float";
 import { InlineGlyph } from "../floats/InlineGlyph";
@@ -217,7 +217,9 @@ function NoteThread({
             moves nothing) — squeezed, they overflow both sides and are clipped, with no ellipsis. */}
         <Press onPress={onReselect} disabled={orphan} title={orphan ? "this passage is no longer in the artifact" : "show this passage"} flexGrow={1} flexShrink={1} minWidth={0} flexDirection="row" justifyContent="center" overflow="hidden">
           {({ hovered }) => (
-            <Txt spec={{ ...BODY, italic: !orphan, color: orphan ? "warn" : hovered ? "accent" : "dim" }} numberOfLines={1} flexShrink={0} {...(hovered && !orphan ? { textDecorationLine: "underline" } : {})}>
+            // One line by `nowrap` on web, not `numberOfLines`: that clips the words at their own box, and an
+            // italic's last glyph leans past it (the dot of a closing ";" was cut off).
+            <Txt spec={{ ...BODY, italic: !orphan, color: orphan ? "warn" : hovered ? "accent" : "dim" }} {...(isWeb ? { whiteSpace: "nowrap" } : { numberOfLines: 1 })} flexShrink={0} {...(hovered && !orphan ? { textDecorationLine: "underline" } : {})}>
               {orphan ? "text changed" : shortQuote(note.quote)}
             </Txt>
           )}
@@ -249,7 +251,9 @@ function NoteThread({
         </View>
       ))}
       {onReply === undefined ? null : (
-        <View flexDirection="row" gap={6} marginTop={6} paddingLeft={10} alignItems="center">
+        // No `align-items`: the row stretches its buttons to the box's height, four more than their own (a
+        // ghost's ring, faint in most palettes, showed it short in the contrast one).
+        <View flexDirection="row" gap={6} marginTop={6} paddingLeft={10}>
           <View flex={1} minWidth={0}>
             <PlainBox value={reply} editable={!sending} placeholder={onForge ? `Reply on ${forgeName(note.source)}…` : `Reply as ${author}…`} onChangeText={setReply} onSubmitEditing={() => send(false)} t={t} app />
           </View>
@@ -280,7 +284,7 @@ export const PlainBox = ({ t, app = false, rows, multiline, readOnly = false, re
   const size = Number(t.scaled(app ? "size-app" : "size-data", app ? 13 / 12.5 : 1)) || 13;
   return (
     <View {...(hover as object)}>
-      <TextInput
+      <TextInput {...(ENTER_KEEPS_FOCUS as object)}
         ref={ref}
         {...(multiline === true ? { multiline: true, numberOfLines: rows } : {})}
         {...((rows !== undefined && isWeb ? { rows } : {}) as object)}

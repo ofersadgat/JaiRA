@@ -38,7 +38,6 @@ import type {
   PendingQuestion,
   ProjectSummary,
   ProjectTask,
-  StateView,
   TaskDetail,
   PermissionSetsView as PermissionSetsData,
   WorkflowLayer,
@@ -136,10 +135,10 @@ import { RunModeToggle, RunView } from "./runViews";
 import { SidePanel } from "./sidePanel";
 import { faceOf, type HostedGate, type PanelHost } from "./panelFaces";
 import { EMPTY_STACK, push, selectStep, topOf, type PanelEntry, type PanelStack } from "./panelStack";
-import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, leafWaitOf, reviewerServicesOf, roomOf, useAdoptSubagent, rerunSurfaceFor, runSurfaceFor, usePanelStacks, useRoomRule } from "./panelHost";
+import { PANEL_FOLD, openNewTaskWith, startAgainOf, closeFoldsOf, conversationInMainOf, panelGeometryOf, panelRuleOf, parkedGateOf, leafWaitOf, reviewerServicesOf, roomOf, useAdoptSubagent, rerunSurfaceFor, runSurfaceFor, useHeldStates, usePanelStacks, usePanelTween, useRoomRule } from "./panelHost";
 import type { RerunSurface } from "./panelViews";
 import { Sidebar, type SidebarAct, type SidebarProject, type SidebarView } from "./sidebar";
-import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "./shellModel";
+import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf, windowTitle } from "./shellModel";
 import { primaryAct } from "./taskAction";
 import { Splitter } from "./splitter";
 import { TaskAddressBar } from "./taskBar";
@@ -246,26 +245,8 @@ function settingsLeadOf(section: SettingsSection, layer: ConfigLayer, project: s
 }
 
 
-/** Every nav row, for the lookups that do not care which group a view is in. */
-const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
-
-// The views that live INSIDE the settings panel (`PANEL_VIEWS`) are `shellModel.ts`'s, shared with the
-// universal shell's sidebar.
-
-/**
- * The window's name, for the taskbar and the window switcher.
- *
- * `document.title` only — with no frame there is nothing else to set, and nothing on screen shows
- * it. The strip along the top of the body used to, and the caption was removed: it named the
- * project, which the sidebar names, and then the open path, which the address bar in that very
- * strip states properly. Outside the window the pair is still what identifies this one, because
- * "JaiRA" alone is what every window of this app would say.
- */
-function windowTitle(project: string | null, view: View | "settings", doc: string | null): string {
-  const where = project === null ? "no project" : projectName(project);
-  const what = view === "files" && doc !== null ? doc : (ALL_VIEWS.find((v) => v.id === view)?.label ?? "Settings");
-  return `${where} · ${what}`;
-}
+// The views that live INSIDE the settings panel (`PANEL_VIEWS`) and the window's name (`windowTitle`) are
+// `shellModel.ts`'s, shared with the universal shell.
 
 /**
  * One glyph per page, in the icon set's own hand (`icons.tsx`: 24-unit strokes at 1.7). Models and
@@ -1149,29 +1130,8 @@ export default function App(): JSX.Element {
    * held there; a pinned state is still shown after both have moved on. Read by its own id, and its
    * run form asked for the way a column's is.
    */
-  const [heldStates, setHeldStates] = useState<Record<string, StateView>>({});
-  const shownStates = [...new Set(everyEntry.flatMap((entry) => (entry.kind === "state" ? [`${entry.stateId}\u0000${entry.project ?? ""}`] : [])))]
-    .filter((key) => {
-      const stateId = key.split("\u0000")[0];
-      return stateId !== state.taskWorkflow && !(state.doc?.stateId === stateId && state.stateId === stateId);
-    })
-    .sort();
-  const shownStatesSig = shownStates.join("|");
-  useEffect(() => {
-    let live = true;
-    for (const key of shownStates) {
-      const [stateId, project] = key.split("\u0000") as [string, string];
-      if (state.workflowForms[stateId] === undefined) actions.pickWorkflow(stateId);
-      if (heldStates[key] !== undefined) continue;
-      void invoke("state:view", { stateId, ...(project !== "" ? { project } : {}) })
-        .then((found) => live && setHeldStates((was) => ({ ...was, [key]: found })))
-        .catch(() => undefined);
-    }
-    return () => {
-      live = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownStatesSig]);
+  // `panelHost.ts`' `useHeldStates`, shared with the universal shell.
+  const heldStates = useHeldStates(everyEntry, state, actions.pickWorkflow);
 
   /** The gate a task is parked on, wherever its panel is — not only the selected one's. */
   const gateOf = (taskId: string): HostedGate | undefined => {
@@ -1328,12 +1288,8 @@ export default function App(): JSX.Element {
    * that kind changes — a form wants more room than a task's tabs, and the column says so by moving.
    */
   const { foldKey: panelFoldKey, open: panelOpen, widthKey: panelWidthKey, width: panelWidth } = panelGeometryOf(ui, room, panelTop);
-  const [panelTween, setPanelTween] = useState(false);
-  useEffect(() => {
-    setPanelTween(true);
-    const timer = setTimeout(() => setPanelTween(false), 260);
-    return () => clearTimeout(timer);
-  }, [panelWidthKey, panelOpen, panelTop === undefined]);
+  // `panelHost.ts`' `usePanelTween`, shared with the universal shell.
+  const panelTween = usePanelTween(panelWidthKey, panelOpen, panelTop === undefined);
   const panelViewClass = panelTop === undefined ? " no-panel" : `${panelOpen ? " with-panel" : " with-rail"}${panelTween ? " pane-tween" : ""}`;
   const panelViewStyle = { "--pane-right": `${panelWidth}px` } as CSSProperties;
   const panelColumn: ReactNode =

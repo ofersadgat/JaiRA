@@ -7,7 +7,9 @@
  */
 import type { ProjectSummary, ProjectTask } from "@jaira/shared/browser";
 import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, type PillCounts } from "./pill";
+import { projectName } from "./projects";
 import type { SidebarProject, SidebarView } from "./sidebar";
+import type { View } from "./store";
 import { groupOf, type ProjectGroup } from "./workspaceGroups";
 
 /**
@@ -59,6 +61,24 @@ export const ROOT_VIEWS: readonly SidebarView[] = [
   { id: "tasks", glyph: "▦", label: "All tasks" },
   { id: "chat", glyph: "✻", label: "All conversations" },
 ];
+
+/** Every nav row, for the lookups that do not care which group a view is in. */
+const ALL_VIEWS: readonly SidebarView[] = [...VIEWS, ...FOOTER_VIEWS];
+
+/**
+ * The window's name, for the taskbar and the window switcher.
+ *
+ * `document.title` only — with no frame there is nothing else to set, and nothing on screen shows
+ * it. The strip along the top of the body used to, and the caption was removed: it named the
+ * project, which the sidebar names, and then the open path, which the address bar in that very
+ * strip states properly. Outside the window the pair is still what identifies this one, because
+ * "JaiRA" alone is what every window of this app would say.
+ */
+export function windowTitle(project: string | null, view: View | "settings", doc: string | null): string {
+  const where = project === null ? "no project" : projectName(project);
+  const what = view === "files" && doc !== null ? doc : (ALL_VIEWS.find((v) => v.id === view)?.label ?? "Settings");
+  return `${where} · ${what}`;
+}
 
 /**
  * The projects, as the sidebar draws them.

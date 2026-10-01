@@ -4,7 +4,7 @@ import type { PendingApproval, PendingInteraction, PendingQuestion, ProjectSumma
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { awaitingCount, moreTitle, noticeMeta, noticeTitle, type ShownNotice } from "@jaira/ui/noticesModel";
 import { projectName } from "@jaira/ui/projects";
-import { Press, Txt, edge } from "../primitives";
+import { Press, Txt, edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { Pill } from "./Pill";
 import { colorOf } from "./Sidebar";
@@ -74,7 +74,7 @@ export function InboxStrip({
     })),
   ].slice(0, 3);
   return (
-    <View flexDirection="row" alignItems="center" gap={12} paddingHorizontal={14} height={40} flexShrink={0} backgroundColor={t.v("panel") as never} {...(edge(t, { top: 1 }) as object)}>
+    <View {...(landmark("contentinfo") as object)} flexDirection="row" alignItems="center" gap={12} paddingHorizontal={14} height={40} flexShrink={0} backgroundColor={t.v("panel") as never} {...(edge(t, { top: 1 }) as object)}>
       {total > 0 ? (
         <>
           <Txt register="app-title" spec={{ scale: 11.5 / 12.5 }} flexShrink={0}>

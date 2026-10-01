@@ -3,10 +3,11 @@ import { PixelRatio, TextInput as RNTextInput, View as RNView } from "react-nati
 import { View, isWeb } from "@tamagui/core";
 import type { MenuItem } from "@jaira/ui/menu";
 import { useReadOnly } from "@jaira/ui/reading";
-import { Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Checkbox } from "../form/inputs";
+import { selectKeyProps } from "../form/selectKeys";
 import { AUTOFILLED, ListIndicator, SuggestLayer, laidOut, useSuggest, type Suggestion } from "../form/Suggest";
 import { Svg } from "../panel/Svg";
 
@@ -131,7 +132,7 @@ export function Box({
   };
   const list = useSuggest(listed === false ? undefined : listed, value, onChange, off);
   const input = (style: Record<string, unknown>): JSX.Element => (
-    <RNTextInput
+    <RNTextInput {...(ENTER_KEEPS_FOCUS as object)}
       ref={list.ref as never}
       value={value}
       onChangeText={(next) => {
@@ -224,7 +225,7 @@ export function Area({
   }
   const border = mark !== "" ? mark : focused ? "accent" : hovered && !disabled ? "rule" : "line";
   return (
-    <RNTextInput
+    <RNTextInput {...(ENTER_KEEPS_FOCUS as object)}
       value={value}
       onChangeText={onChange}
       multiline
@@ -337,7 +338,7 @@ export function Pick({
       {...(off ? {} : hover)}
       {...layout}
     >
-      <Press onPress={open} disabled={off} {...({ role: "combobox" } as object)} label={label ?? shown} minWidth={0} overflow="hidden" {...(reading ? {} : { paddingLeft: INSET, paddingRight: ARROW_ROOM })}>
+      <Press onPress={open} disabled={off} {...({ role: "combobox" } as object)} {...(selectKeyProps(options, value, onChange) as object)} label={label ?? shown} minWidth={0} overflow="hidden" {...(reading ? {} : { paddingLeft: INSET, paddingRight: ARROW_ROOM })}>
         {reading
           ? null
           : options.map((o) => (

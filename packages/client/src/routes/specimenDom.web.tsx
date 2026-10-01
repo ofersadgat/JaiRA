@@ -1,6 +1,6 @@
 import { useLayoutEffect } from "react";
 import "@jaira/ui/styles.css";
-import { specimenOf, lookOf } from "../specimens/registry";
+import { SPECIMENS, specimenOf, lookOf } from "../specimens/registry";
 
 /**
  * `/specimen-dom?name=…&look=…`: one DOM component from the renderer, drawn from a fixture with the
@@ -21,7 +21,9 @@ export default function SpecimenDom() {
     if (look.wash) root.dataset["wash"] = "on";
     else delete root.dataset["wash"];
   }, [look.scheme, look.palette, look.wash]);
-  if (specimen === undefined) return <p>No specimen by that name.</p>;
+  // With no specimen named, the page says which there are: `pair.mts --freeze` and `--all` read the
+  // names here, since the registry imports the renderer and cannot be read from Node.
+  if (specimen === undefined) return <p id="specimens" data-names={JSON.stringify(Object.keys(SPECIMENS))}>No specimen by that name.</p>;
   const Dom = specimen.dom;
   return (
     <div id="root">

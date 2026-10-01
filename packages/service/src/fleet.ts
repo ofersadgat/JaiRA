@@ -12,17 +12,21 @@
  *   offline machine stays listed.
  * - **Reach.** This machine is published on the tailnet by the installed Tailscale app (`tailscale.ts`),
  *   or by the bundled helper when there is none.
+ * - **Devices** (amended 2026-09-30). A phone or a browser pairs with the same code and is a WINDOW onto
+ *   this engine, not a machine: it is issued a token and listed so it can be forgotten, and that is all.
+ *   It is not among {@link Fleet.peers}, so nothing links to it, copies from it, introduces it or places
+ *   a task on it.
  */
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { PAIRING_CODE_MS, engineUrlOf, normalizePairingCode, type MachineReach, type MachinesView, type PeerView, type CopyChoice } from "@jaira/shared";
+import { PAIRING_CODE_MS, engineUrlOf, normalizePairingCode, type DeviceView, type MachineReach, type MachinesView, type PairingDevice, type PeerView, type CopyChoice } from "@jaira/shared";
 import { askOnce, connectEngine, type EngineClient } from "./engineClient";
 import type { EngineHost, PreAuthHandler } from "./engineHost";
 import type { HostFrame, PeerMachine } from "./enginePipe";
 import type { Handler } from "./handlers";
 import { machineIdentity, updateMachineIdentity, type MachineIdentity } from "./machine";
-import { MachineTokens } from "./machineTokens";
+import { MachineTokens, type TokenHolder } from "./machineTokens";
 import { tailscaleServe, tailscaleStatus, tailscaleUnserve } from "./tailscale";
 import { autoReach } from "./tailnetHelper";
 
@@ -228,11 +232,28 @@ export class Fleet {
       };
     });
     const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt } : undefined;
+    const port = this.loopbackPort;
     return {
-      self: { id: me.id, label: me.label, os: me.os, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying() },
+      self: { id: me.id, label: me.label, os: me.os, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying(), ...(port !== undefined ? { port } : {}) },
       machines,
+      devices: this.devices(),
       ...(pairing !== undefined ? { pairing } : {}),
     };
+  }
+
+  /** The phones and browsers holding a token for this machine, and which of them are connected now. */
+  private devices(): DeviceView[] {
+    const live = new Set((this.host?.connected() ?? []).flatMap((client) => (client.device !== undefined ? [client.device.id] : [])));
+    return this.tokens.list().flatMap((t) =>
+      t.device === undefined
+        ? []
+        : [{ id: t.machineId, label: t.label, kind: t.device, pairedAt: t.issuedAt, ...(t.lastUsedAt !== undefined ? { lastUsedAt: t.lastUsedAt } : {}), connected: live.has(t.machineId) }],
+    );
+  }
+
+  /** A client connected or went: a device's row says whether it is there. */
+  clientsChanged(): void {
+    if (!this.stopped) this.changed();
   }
 
   /** What this machine keeps a copy of: the person's choice, else the host's default. */
@@ -352,7 +373,7 @@ export class Fleet {
     return this.view();
   }
 
-  /** A `pair` frame from a machine that was shown this one's code (`EngineHost` hands it here). */
+  /** A `pair` frame from a machine or a device that was shown this one's code (`EngineHost` hands it here). */
   readonly preAuth: PreAuthHandler = async (frame) => {
     if (frame.t !== "pair") return undefined;
     const pairing = this.pairing;
@@ -364,6 +385,7 @@ export class Fleet {
       this.changed();
       return refused("that is not the code shown on that machine");
     }
+    if (frame["device"] !== undefined) return this.pairDevice(frame["device"]);
     const machine = frame["machine"] as PeerMachine | undefined;
     const token = frame["token"];
     if (machine === undefined || typeof machine.id !== "string" || typeof token !== "string") return refused("a pairing needs the asking machine and its token");
@@ -377,6 +399,24 @@ export class Fleet {
     this.changed();
     return { t: "paired", machine: this.selfPeer(), token: issued, fleet: this.known().map(peerOf) };
   };
+
+  /**
+   * A device with the right code: issued a token, and remembered only as its holder. No token comes with
+   * it and none is held for it — this machine never connects to a device — and it is told of no other
+   * machine.
+   */
+  private pairDevice(asked: unknown): HostFrame {
+    const device = sanitizeDevice(asked);
+    if (device === undefined) return { t: "refused", reason: "a device's pairing needs its id, its name and whether it is a phone or a browser" };
+    // An id that is a machine's would take that machine's token away with it.
+    const machines = new Set([this.identity().id, ...this.known().map((m) => m.id), ...this.tokens.list().flatMap((t) => (t.device === undefined ? [t.machineId] : []))]);
+    if (machines.has(device.id)) return { t: "refused", reason: "that id is a machine's, not a device's" };
+    this.pairing = undefined;
+    const issued = this.tokens.issue(device.id, device.label, device.kind);
+    this.options.log?.("info", `paired with ${device.label}, a ${device.kind}: a window onto this machine`);
+    this.changed();
+    return { t: "paired", machine: this.selfPeer(), token: issued, fleet: [] };
+  }
 
   // --- pairing, the typing side -----------------------------------------------------------------------
 
@@ -430,8 +470,19 @@ export class Fleet {
     this.changed();
   }
 
-  /** Forget a machine here and across the fleet: its tokens no longer open anything anywhere. */
+  /**
+   * Forget a machine here and across the fleet: its tokens no longer open anything anywhere. A device is
+   * forgotten here alone, where its one token is: revoked, and its connection dropped.
+   */
   async forget(machineId: string): Promise<MachinesView> {
+    const device = this.tokens.list().find((t) => t.machineId === machineId && t.device !== undefined);
+    if (device !== undefined) {
+      this.tokens.revoke(machineId);
+      this.host?.dropMachine(machineId);
+      this.options.log?.("info", `forgot ${device.label}`);
+      this.changed();
+      return this.view();
+    }
     const target = this.known().find((m) => m.id === machineId);
     for (const [id, link] of this.links) if (id !== machineId) await link.client?.invoke("fleet:forget", { id: machineId }).catch(() => undefined);
     await this.links.get(machineId)?.client?.invoke("fleet:forget", { id: this.identity().id }).catch(() => undefined);
@@ -607,7 +658,7 @@ export class Fleet {
     await this.applyReach();
   }
 
-  authorize(token: string): { id: string; label: string } | undefined {
+  authorize(token: string): TokenHolder | undefined {
     return this.tokens.verify(token);
   }
 
@@ -637,6 +688,16 @@ function sanitizePeer(machine: PeerMachine): PeerMachine {
     tags: Array.isArray(machine.tags) ? machine.tags.filter((t): t is string => typeof t === "string").slice(0, 32) : [],
     ...(typeof machine.url === "string" && /^wss?:\/\//.test(machine.url) ? { url: machine.url } : {}),
   };
+}
+
+/** A device as it described itself: an id that is only an id, a name of sensible length, one of the kinds. */
+function sanitizeDevice(asked: unknown): PairingDevice | undefined {
+  const device = asked as Partial<PairingDevice> | null;
+  if (typeof device !== "object" || device === null) return undefined;
+  if (typeof device.id !== "string" || !/^[A-Za-z0-9_-]{8,64}$/.test(device.id)) return undefined;
+  if (device.kind !== "phone" && device.kind !== "browser") return undefined;
+  const label = typeof device.label === "string" ? device.label.replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  return { id: device.id, label: label === "" ? (device.kind === "phone" ? "A phone" : "A browser") : label, kind: device.kind };
 }
 
 /** Which machine answers at an engine URL, before pairing: its `/.well-known/jaira`. */

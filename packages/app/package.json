@@ -23,6 +23,8 @@
     "tailnet": "node buildTailnet.mjs",
     "shots": "tsx shots/run.mts",
     "shots:logs": "tsx shots/logs.mts",
+    "shots:freeze": "tsx shots/pair.mts --freeze",
+    "shots:goldens": "tsx shots/pair.mts --against-goldens",
     "build:client": "npm --workspace @jaira/client run build && node -e \"const fs=require('fs');fs.rmSync('dist/client',{recursive:true,force:true});fs.cpSync('../client/dist/client','dist/client',{recursive:true})\""
   },
   "dependencies": {
@@ -53,7 +55,6 @@
     "react-dom": "19.2.3",
     "shiki": "^4.4.3",
     "typescript": "^5.7.2",
-    "ws": "^8.22.0",
     "yaml": "^2.9.0"
   },
   "devDependencies": {
@@ -62,7 +63,6 @@
     "@types/pngjs": "^6.0.5",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
-    "@types/ws": "^8.18.1",
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",

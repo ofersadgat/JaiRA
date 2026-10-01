@@ -1,4 +1,4 @@
-import { createContext, useContext, useState, type JSX, type ReactNode } from "react";
+import { createContext, useContext, useLayoutEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { Platform, Pressable, type GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { useTokens, type Tokens } from "./tokens";
@@ -152,9 +152,27 @@ export interface PressState {
 const OUTER = new Set(["flex", "flexGrow", "flexShrink", "flexBasis", "alignSelf", "width", "height", "minWidth", "maxWidth", "minHeight", "maxHeight", "margin", "marginTop", "marginRight", "marginBottom", "marginLeft", "marginHorizontal", "marginVertical", "position", "top", "right", "bottom", "left", "zIndex"]);
 
 /**
+ * What says a control's kind and state to someone not looking at it (`role`, `aria-expanded`,
+ * `aria-selected`, `aria-pressed`, …) and what follows its focus (`onKeyDown`, `onFocus`, `onBlur`): on
+ * web they belong on the element that TAKES the focus, the `Pressable`, as the desktop writes them on its
+ * `<button>` — on the box inside it a tab's `aria-selected` described a `div` nobody can reach, and a key
+ * handler heard nothing. A phone keeps them where they were, on the box: React Native reads its own
+ * accessibility props there, and has no keyboard.
+ */
+const onControl = (k: string): boolean => isWeb && (k === "role" || k.startsWith("aria-") || k === "onKeyDown" || k === "onFocus" || k === "onBlur");
+
+/** The box's corners, which the `Pressable` takes too on web: `:focus-visible`'s outline follows the radius of the element it rings. */
+const CORNERS = ["borderRadius", "borderTopLeftRadius", "borderTopRightRadius", "borderBottomLeftRadius", "borderBottomRightRadius"] as const;
+
+/**
  * Something that can be pressed: React Native's `Pressable` around a Tamagui box. The box's props may be
  * a function of the press state, for the stylesheet's `:hover` (web only; a phone has no pointer).
  * Props that size and place it go on the `Pressable`; the box fills it.
+ *
+ * A `role` other than a button's (`tab`, `switch`, `checkbox`, `menuitem`) is the desktop's `<button
+ * role="tab">`: on web the element stays the `<button>` react-native-web draws for a button — Space
+ * presses it, `disabled` disables it, and it lays out as every other `Press` — and the role is written on
+ * it once it is there, since react-native-web picks the element FROM the role and would draw a `div`.
  */
 export function Press({
   onPress,
@@ -190,15 +208,25 @@ export function Press({
 } & Record<string, unknown>): JSX.Element {
   const outer: Record<string, unknown> = {};
   const inner: Record<string, unknown> = {};
-  for (const [k, v] of Object.entries(props)) (OUTER.has(k) ? outer : inner)[k] = v;
+  const control: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(props)) (onControl(k) ? control : OUTER.has(k) ? outer : inner)[k] = v;
+  if (isWeb) for (const k of CORNERS) if (inner[k] !== undefined) outer[k] = inner[k];
+  const { role, ...said } = control;
+  const host = useRef<unknown>(null);
+  useLayoutEffect(() => {
+    const el = host.current as { setAttribute?: (name: string, value: string) => void } | null;
+    if (isWeb && typeof el?.setAttribute === "function") el.setAttribute("role", typeof role === "string" ? role : "button");
+  }, [role]);
   return (
     <Pressable
+      ref={host as never}
       {...(onPress !== undefined ? { onPress } : {})}
       {...(onLongPress !== undefined ? { onLongPress } : {})}
       {...(disabled !== undefined ? { disabled } : {})}
       {...(focusable !== undefined ? (isWeb ? { tabIndex: focusable ? 0 : -1 } : { focusable }) : {})}
       role="button"
       {...(label !== undefined ? { accessibilityLabel: label } : {})}
+      {...(said as object)}
       style={{ ...(outer as object), ...(isWeb ? { cursor: disabled === true ? "default" : "pointer" } : {}) } as never}
     >
       {(s: { hovered?: boolean; pressed: boolean }) => {
@@ -244,6 +272,38 @@ export function edge(
     borderColor: /^[a-z][a-z0-9-]*$/.test(color) ? t.v(color) : color,
   };
 }
+
+/**
+ * `-webkit-app-region: drag` with `user-select: none` (`.title-drag`, `.side-title`): where the desktop's
+ * frameless window is grabbed and moved. The OS hit-tests it, not the page, so a press there never
+ * reaches a handler — and the property INHERITS, so anything clickable inside a strip stands in a box
+ * that says {@link NO_DRAG} (`.side-title button`), as does a float lying over one (`.float`). In a
+ * `style`; nothing on a phone, whose window is not moved.
+ */
+export const DRAG_REGION: Record<string, unknown> = isWeb ? { WebkitAppRegion: "drag", userSelect: "none" } : {};
+export const NO_DRAG: Record<string, unknown> = isWeb ? { WebkitAppRegion: "no-drag" } : {};
+
+/**
+ * A region of the window by what it is — the desktop's `<nav>` (the sidebar), `<header>` (the title bar),
+ * `<aside>` (the side panel) and `<footer>` (the inbox strip) — as the role each element has, for a
+ * reader moving by landmark. Web only: a phone's screen reader has no landmarks to move by, and a role
+ * React Native does not know has crashed Android before (`separator`).
+ */
+export const landmark = (role: "navigation" | "banner" | "complementary" | "contentinfo"): Record<string, unknown> => (isWeb ? { role } : {});
+
+/**
+ * The gutters the OS draws the window's buttons into (`--wco-left`: macOS's traffic lights; `--wco-right`:
+ * minimise, maximise and close on Windows and Linux — from Chromium's `titlebar-area-*` environment
+ * variables), added to a padding or a least width: what the desktop's top row keeps clear of them. CSS
+ * on web, where a plain browser resolves each to no gutter at all; a phone has no such buttons. The
+ * band's height (`--wco-height`) is the 34 the copies already write: `titleBarOverlay` asks for exactly it.
+ */
+export const WINDOW_GUTTER: { left: (pad: number) => number | string; right: (pad: number) => number | string } = isWeb
+  ? {
+      left: (pad) => `calc(${pad}px + env(titlebar-area-x, 0px))`,
+      right: (pad) => `calc(${pad}px + (100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, 100vw)))`,
+    }
+  : { left: (pad) => pad, right: (pad) => pad };
 
 /**
  * `styles.css`'s ONE scrollbar (`::-webkit-scrollbar`: a 10px gutter, a rounded thumb inset 2px, drawn
@@ -325,6 +385,14 @@ export function padToken(t: Tokens, name: string, fallback: [number, number]): [
  * glyph an anti-aliasing pair apart. Native keeps its own.
  */
 export const PLAIN_SCROLLER: Record<string, unknown> = isWeb ? { transform: "none", zIndex: "auto", position: "static" } : {};
+
+/**
+ * Enter leaves the focus in a single-line text box, as it does in an `<input>`: react-native-web blurs one
+ * on Enter by default, which lost the box a person was typing a second entry into (a hide rule, a tag, a
+ * search) and ran a box's commit-on-blur a second time. Spread on a `TextInput`; nothing on a phone, where
+ * the return key putting the keyboard away is what a phone does.
+ */
+export const ENTER_KEEPS_FOCUS: Record<string, unknown> = isWeb ? { blurOnSubmit: false } : {};
 
 /** Chromium's own placeholder colour (`::placeholder`, which `styles.css` leaves alone): #757575, or #a9a9a9 in a dark scheme. */
 export const placeholderColor = (scheme: "light" | "dark"): string => (scheme === "dark" ? "#a9a9a9" : "#757575");

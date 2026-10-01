@@ -2,12 +2,12 @@
 id: engineering/units/ipc-bridge
 type: engineering-unit
 status: shipped
-updated: 2026-09-23
+updated: 2026-09-30
 implements: [ui/surfaces/error-notice, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: service
 owns_contracts: [engineering/contracts/preload-bridge, engineering/contracts/ipc-channels, engineering/contracts/push-messages]
 requires: [engineering/units/project-sessions, engineering/units/view-addressing, engineering/units/task-lifecycle, engineering/units/rewind-and-fork, engineering/units/module-approvals, engineering/units/chat-turns, engineering/units/conversation-lookup, engineering/units/live-turns, engineering/units/interaction-gateway, engineering/units/workflow-authoring, engineering/units/description-sync, engineering/units/changesets, engineering/units/schema-check, engineering/units/ts-language-service, engineering/units/uri-and-artifact-reads, engineering/units/history-pruning, engineering/units/user-settings, engineering/units/project-config, engineering/units/agent-executors, engineering/units/model-routing, engineering/units/secret-chain, engineering/units/process-claims, engineering/units/app-log, engineering/units/app-shell]
-implemented_by: [packages/app/src/main/preload.ts, packages/app/src/main/desktop.ts, packages/app/src/main/engineLink.ts, packages/service/src/handlers.ts, packages/service/src/enginePipe.ts, packages/service/src/engineHost.ts, packages/service/src/engineClient.ts, packages/shared/src/ipc.ts]
+implemented_by: [packages/app/src/main/preload.ts, packages/app/src/main/desktop.ts, packages/app/src/main/engineLink.ts, packages/service/src/handlers.ts, packages/service/src/enginePipe.ts, packages/service/src/engineHost.ts, packages/service/src/engineClient.ts, packages/shared/src/ipc.ts, packages/shared/src/engineFrames.ts, packages/client/bridges/engineBridge.ts]
 verified_by: [packages/app/test/runViews.test.ts, packages/app/test/service.test.ts]
 siblings: [engineering/units/app-shell, engineering/units/view-addressing, engineering/units/renderer-store, engineering/units/interaction-gateway]
 ---
@@ -21,6 +21,8 @@ The bridge is three pieces that must agree:
 - `IpcContract`, `IPC_CHANNELS`, `PushMessage`, `PUSH_CHANNEL` and `JairaBridge` in `@jaira/shared` `ipc.ts`: the typed list of 96 request channels and the push union. `IPC_CHANNELS` is checked against `IpcContract` in both directions at compile time.
 - `preload.ts`: the `window.jaira` object, whose `invoke` admits only channels in `IPC_CHANNELS` and whose `subscribe` guards each listener. Its shape and failures are [preload-bridge](../contracts/preload-bridge.md).
 - `desktop.ts` (the desktop half of `main/index.ts`, which starts it or the windowless server `serve.ts`): `registerIpc`, which registers one `ipcMain.handle` per listed channel and answers a host channel (`HOST_CHANNELS`) itself and every other through the window's `EngineLink` — this process's `AppService` through `serviceHandlers`, or another process's over the engine's pipe (decision 0012). Settings writes repaint the title bar from the `store:invalidate` push, whichever client wrote. A handler that throws is passed to `AppService.recordIpcFailure` and rethrown. After `config:write` it repaints the title bar, since a write to a layer's `appearance` can change the frame's look. The `publish` option `index.ts` gives `AppService` sends each push to the window only while `rendererAlive` is true, and turns a failed send into a `push` crash entry.
+
+A window that is not Electron's — a phone, a browser tab — has no preload. It installs `bridges/engineBridge.ts` with the store's `setBridge`: the same `JairaBridge`, carried by the engine's own frames (`@jaira/shared` `engineFrames.ts`) over a WebSocket to the engine's listener, as a device paired by a one-time code ([0013](../decisions/0013-machines.md), amended 2026-09-30). The engine answers it from the table the pipe's clients get, less the host channels and the two that act on the machine's screen.
 
 Every channel's request and response is [ipc-channels](../contracts/ipc-channels.md), and every push is [push-messages](../contracts/push-messages.md).
 

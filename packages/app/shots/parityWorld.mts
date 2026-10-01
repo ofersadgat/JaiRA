@@ -388,8 +388,7 @@ export const SCENES: readonly Scene[] = [
   {
     name: "state",
     reach: async (app) => {
-      await app.until(says("Planning"), "the board");
-      await clickFirst(app, "Planning");
+      await clickFirst(app, await planColumn(app));
       await app.until(says("Checks"), "the state to open in the panel");
       await settle(800);
     },
@@ -447,6 +446,9 @@ export const SCENES: readonly Scene[] = [
           await app.until(says(tab === "Graph" ? "drag to pan" : tab === "JSON" ? "Schema" : "default & description"), `the ${tab} tab`);
         }
         await settle(1500);
+        // The panel beside the editor is still on the task an earlier scene opened, scrolled where that
+        // scene left it — which depends on what ran before this one. From its top, whatever ran.
+        await scrollPanel(app, 0);
       },
     }),
   ),
@@ -858,6 +860,10 @@ export const SCENES: readonly Scene[] = [
       // Then the section's top, which is what the picture frames: centred on the preview, `.ft` is
       // about as tall as the window and its upper half lay above the fold, unpainted on both pages.
       await app.evaluate(`${FT}.scrollIntoView({ block: "start" })`);
+      // Centring the preview also scrolled its own box: on `/rn` what is centred is the island, the
+      // surface's own 200 in the preview's 190, and the box moved by half the difference. Put back, as the
+      // DOM's stood (there the box itself is what was centred).
+      await app.evaluate(`(() => { for (let e = ${BODY}.parentElement; e && e !== ${FT}; e = e.parentElement) if (e.scrollTop !== 0) e.scrollTop = 0; })()`);
       await app.until(
         `(() => { const top = ${FT}.getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
         "File types to scroll into view",
@@ -903,7 +909,7 @@ export const SCENES: readonly Scene[] = [
   // …a finished task's: re-run as a fresh copy, Cancel disabled, Archive.
   { name: "card-menu-done", reach: (app) => boardMenu(app, "add dark mode", "Archive") },
   // A column's: the place, and every task standing in it (a caption, the group verbs).
-  { name: "column-menu", reach: (app) => boardMenu(app, "Planning", "Describe") },
+  { name: "column-menu", reach: async (app) => boardMenu(app, await planColumn(app), "Describe") },
   // Right-clicking inside a multi-selection (a click, then a ctrl-click): the set's verbs, counted.
   {
     name: "selection-menu",
@@ -1021,6 +1027,17 @@ export const SCENES: readonly Scene[] = [
     },
   },
 ];
+
+/**
+ * What the board calls the planning workflow's column: "Planning", its label, until `task-adopted` has
+ * written `ship`, which mounts it as a child — from then on it is no root, and its column goes by its
+ * id. A scene that clicks the column must find it in a world of either age.
+ */
+async function planColumn(app: App): Promise<string> {
+  const column = (name: string): string => `[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(name)})`;
+  await app.until(`${column("Planning")} || ${column("feature/plan")}`, "the board");
+  return (await app.evaluate<boolean>(column("Planning"))) ? "Planning" : "feature/plan";
+}
 
 /** Scroll the Components page so the row titled `title` stands just under its sticky bar, to a device pixel on both pages. */
 async function galleryRow(app: App, title: string): Promise<void> {

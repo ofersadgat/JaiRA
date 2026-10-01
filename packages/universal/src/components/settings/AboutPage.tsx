@@ -24,7 +24,7 @@ import { applyUpdate, checkForUpdate, checkPlugin, installPlugin, refreshBusy, r
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { useShell } from "../../app/shell";
 import { aboutNotes } from "../../app/viewState";
-import { Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Icon } from "../panel/Icon";
@@ -702,7 +702,7 @@ function LicenseSearch({ query, onQuery, shown, total }: { query: string; onQuer
       <Txt spec={{ voice: "app", scale: 0.96, weight: 450, lineHeight: 1.3, ls: -0.005, color: "dim", tabular: true }} numberOfLines={1}>
         {licenseCountWords(shown, total)}
       </Txt>
-      <TextInput
+      <TextInput {...(ENTER_KEEPS_FOCUS as object)}
         value={query}
         onChangeText={onQuery}
         placeholder="Search licenses"

@@ -5,6 +5,7 @@ import { useRerunForm, type RerunFormSurface } from "@jaira/ui/newTaskModel";
 import { runInputsOf, type RunValues } from "@jaira/ui/runForm";
 import { Txt, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { useEnterSubmits } from "../form/useEnterSubmits";
 import { Button } from "../settings/Button";
 import { SelectInput } from "../settings/fields";
 import { RunInputs } from "./RunPanel";
@@ -30,8 +31,10 @@ export function RerunForm({ run, onCancel }: { run: RerunSurface; onCancel: () =
     if (forking) run.onFork?.(Number(from));
     else run.onRun(runInputsOf(run.fields ?? [], run.values));
   };
+  // `<form onSubmit>`: Enter in one of its boxes starts the copy, as on the desktop.
+  const form = useEnterSubmits(start);
   return (
-    <View flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>
+    <View ref={form as never} flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>
       {run.starts !== undefined && run.starts.length > 0 && run.onFork !== undefined ? (
         <View flexDirection="column" gap={4}>
           <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: 0.04, upper: true, color: "dim" }}>Start from</Txt>

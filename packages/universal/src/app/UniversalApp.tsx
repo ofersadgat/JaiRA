@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { SHARED_SESSION } from "@jaira/shared/browser";
-import { useNow } from "@jaira/ui/limitsStore";
+import { publishUsageFigures, useNow } from "@jaira/ui/limitsStore";
 import { noticeToShow } from "@jaira/ui/noticesModel";
 import { useNotices } from "@jaira/ui/noticesStore";
 import { hueOf } from "@jaira/ui/pill";
@@ -12,6 +12,7 @@ import { FOLD, PANE, openOf, paneDefault, paneOf } from "@jaira/ui/uiState";
 import { MessageTypeContext, type MessageTypeStore } from "@jaira/ui/messageTypes";
 import { PANEL_FOLD, roomOf } from "@jaira/ui/panelHost";
 import { push } from "@jaira/ui/panelStack";
+import { windowTitle } from "@jaira/ui/shellModel";
 import { ValuePanelContext, type PinnedValue, type ValuePanel } from "@jaira/ui/valuePanel";
 import { panelOnStack } from "../components/panel/panelBridge";
 import { InboxStrip } from "../components/InboxStrip";
@@ -19,7 +20,7 @@ import { Splitter } from "../components/files/Splitter";
 import { CrashBoundary, LooseErrorBanner } from "../components/floats/CrashScreen";
 import { Disconnected } from "../components/floats/Disconnected";
 import { ShellFloats } from "../components/floats/ShellFloats";
-import { edge } from "../primitives";
+import { edge, landmark } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
 import { BoardColumn } from "./BoardColumn";
 import { ChatView } from "./ChatView";
@@ -33,6 +34,7 @@ import { AppContext, useShell } from "./shell";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
 import { Uncopied } from "./Uncopied";
+import { usePageRules, useWindowTitle } from "./windowPage";
 
 /**
  * The desktop's shell, universal (decision 0015): `App.tsx`'s frame drawn from copies, on a phone and in
@@ -51,6 +53,9 @@ export function UniversalApp(): JSX.Element {
   const look = useMemo(() => lookOf(state.config), [state.config]);
   const { workPhases, workRows, workThinking, workNotes } = look.conversation;
   const workLook = useMemo(() => ({ phases: workPhases, rows: workRows, thinking: workThinking, notes: workNotes }), [workPhases, workRows, workThinking, workNotes]);
+  // How an account's usage is drawn, for every figure the setting governs (`limitsStore.ts`), as `App.tsx`
+  // publishes it: unpublished, every figure stayed at the default whatever Appearance said.
+  useEffect(() => publishUsageFigures(look.conversation.usageFigures), [look.conversation.usageFigures]);
   const readOnlyJudge = useMemo(() => readOnlyJudgeOf((calls) => invoke("permissionSets:judgeReadOnly", { project: state.at ?? SHARED_SESSION, calls })), [state.at]);
   useEffect(() => subscribe((message) => void (message.type === "store:invalidate" && message.scope === "workflows" && forgetReadOnly(readOnlyJudge))), [readOnlyJudge]);
   const { actions } = model;
@@ -121,6 +126,10 @@ function Frame(): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const { state, actions } = useShell();
+  // The window's name outside the window (`shellModel.ts`' `windowTitle`), and the page's own rules — the
+  // keyboard's focus ring, the one scrollbar. The desktop's page only; a phone has neither.
+  useWindowTitle(windowTitle(state.at, state.view, state.doc?.path ?? state.dir?.path ?? null));
+  usePageRules(t);
   return (
     <View flex={1} flexDirection="row" overflow="hidden" backgroundColor={t.v("bg") as never}>
       <ShellSidebar />
@@ -140,6 +149,7 @@ function Frame(): JSX.Element {
         {/* `.title-bar`: at least 34 tall, --panel, a --line under it — 1.5px of --rule under contrast, a
             --rule under blueprint (`:root[data-palette=…] .title-bar`). */}
         <View
+          {...(landmark("banner") as object)}
           flexDirection="row"
           alignItems="stretch"
           flexShrink={0}

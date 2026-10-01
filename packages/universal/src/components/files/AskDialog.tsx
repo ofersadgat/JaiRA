@@ -2,7 +2,7 @@ import { useState, type JSX } from "react";
 import { TextInput, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { AskSpec } from "@jaira/ui/menu";
-import { Press, Txt, font, lengthToken, padToken } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, font, lengthToken, padToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { FocusRing } from "../floats/FocusRing";
 import { MenuLayer } from "../MenuLayer";
@@ -61,7 +61,7 @@ export function AskDialog({ spec, onCancel }: { spec: AskSpec; onCancel: () => v
           {needsValue ? (
             <View marginTop={12} gap={4}>
               <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", ls: 0.04, upper: true }}>{spec.field}</Txt>
-              <TextInput
+              <TextInput {...(ENTER_KEEPS_FOCUS as object)}
                 value={value}
                 onChangeText={setValue}
                 autoFocus

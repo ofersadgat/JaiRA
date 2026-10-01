@@ -31,6 +31,7 @@ export * from "./presetModels";
 export * from "./usage";
 export * from "./updates";
 export * from "./machines";
+export * from "./engineFrames";
 export * from "./plugins";
 export * from "./health";
 export * from "./configSchema";

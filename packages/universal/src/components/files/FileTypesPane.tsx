@@ -1,12 +1,12 @@
 import { Component, useEffect, useState, type ErrorInfo, type JSX, type ReactNode } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { LINE_HEIGHT, PANE_FAMILIES, TAB_SIZES, editorKnobApplies, typeNameOf, type EditorKind, type EditorLook, type FileSource, type PaneFamily, type RendererChoices, type RendererEdit, type RenderView } from "@jaira/shared/browser";
 import { takeEditorFront } from "@jaira/ui/editorFront";
 import { EDITOR_THEMES, EDITOR_THEME_APP, editorThemeSpec } from "@jaira/ui/editorThemes";
 import { EMPTY_CONTEXT } from "@jaira/ui/emptySurfaceContext";
 import { KINDS, KNOB_SWITCHES, KNOB_WORDS, VIEWS, fileTypesModel, sampleFor, typeIsSet, type Subject } from "@jaira/ui/fileTypesModel";
 import { RENDER_KINDS, type FileRenderer, type RenderKind } from "@jaira/ui/fileTypes";
-import { Press, Txt, edge, lengthToken, useHover } from "../../primitives";
+import { Press, Txt, edge, lengthToken, useHover, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "../form/inputs";
 import { Switch } from "../settings/controls";
@@ -106,7 +106,8 @@ export function FileTypesPane({
         {PANE_FAMILIES.map((each, i) => {
           const isOpen = open === each.id;
           return (
-            <View key={each.id} {...(i > 0 ? { marginTop: 1 } : {})}>
+            // `.ft-group + .ft-group`'s 1 collapses into the 5 under an open group's kids (blocks, in the DOM).
+            <View key={each.id} {...(i > 0 && open !== PANE_FAMILIES[i - 1]!.id ? { marginTop: 1 } : {})}>
               <TreeRow
                 label={each.label}
                 group
@@ -180,12 +181,17 @@ export function FileTypesPane({
                 flexBasis={0}
                 minWidth={0}
                 flexDirection="column"
+                // A `button`, and the base rule centres a button's content: `.ft-mode` turns it into a column
+                // and leaves `align-items: center` standing, so the bulb's row and the reading sit mid-tab.
+                alignItems="center"
                 gap={1}
                 paddingTop={6}
                 paddingHorizontal={10}
                 paddingBottom={5}
                 {...(!has ? { opacity: 0.55 } : {})}
                 box={({ hovered }) => ({
+                  // The base `button`'s radius, which `.ft-mode` leaves standing: the accent under the chosen tab turns up at its ends.
+                  borderRadius: lengthToken(t, "control-radius", 7),
                   ...edge(t, { right: i < RENDER_KINDS.length - 1 ? 1 : 0 }),
                   borderBottomWidth: 2,
                   borderBottomColor: chosen ? t.v("accent") : "transparent",
@@ -236,8 +242,10 @@ export function FileTypesPane({
               {palette !== null ? (
                 <View flexDirection="row" alignItems="center" gap={10} flexWrap="wrap" minWidth={0} paddingVertical={8} paddingHorizontal={10} borderRadius={lengthToken(t, "control-radius", 7)} backgroundColor={t.v("panel-2") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
                   <Txt register="app-label">theme</Txt>
-                  <View flexShrink={0} maxWidth={220}>
+                  {/* `.cfg-input`'s `width: 100%`, which `.ft-theme > select`'s `max-width: 220px` stops at: 220, whatever its options. */}
+                  <View flexShrink={0} width={220}>
                     <SelectInput
+                      fill
                       value={palette === "mixed" ? "" : palette.theme}
                       disabled={busy}
                       options={[
@@ -467,7 +475,8 @@ function MenuRow({
         </View>
       </Press>
       <Press onPress={onX} disabled={busy} title={xTitle} flexShrink={0} paddingHorizontal={11} justifyContent="center">
-        {({ hovered: over }) => <Txt spec={{ voice: "app", scale: 0.9 * (13 / 12.5), color: over && !busy ? "text" : "dim" }}>{x}</Txt>}
+        {/* `font: inherit`, then `font-size: calc(var(--size-app) * 0.9)`: 0.9 of the base, not of the body's 13. */}
+        {({ hovered: over }) => <Txt spec={{ voice: "app", scale: 0.9, color: over && !busy ? "text" : "dim" }}>{x}</Txt>}
       </Press>
     </View>
   );
@@ -574,6 +583,7 @@ class PreviewBoundary extends Component<{ children: ReactNode; label: string }, 
  * context, over the type's sample, 190 tall with no Save row. The text is local and thrown away.
  */
 function RendererPreview({ mime, renderer, view }: { mime: string; renderer: FileRenderer | null; view: RenderView }): JSX.Element {
+  const t = useTokens();
   const [text, setText] = useState(() => sampleFor(mime));
   const [shown, setShown] = useState(mime);
   if (shown !== mime) {
@@ -586,7 +596,9 @@ function RendererPreview({ mime, renderer, view }: { mime: string; renderer: Fil
   const Surface = renderer.surface;
   const doc: FileSource = { layer: "project", path: "sample", file: "sample", mime, text, exists: true };
   return (
-    <View height={190} flexDirection="column" overflow="hidden">
+    // `.ft-preview-body` scrolls (`overflow: auto`): an editor is at least 200 tall, ten more than this box,
+    // so the desktop's has a scrollbar down its side and the surface is that much narrower. A phone clips.
+    <View height={190} flexDirection="column" {...((isWeb ? { overflow: "auto", ...viewScrollbarProps(t) } : { overflow: "hidden" }) as object)}>
       <PreviewBoundary label={renderer.label}>
         <HideEditorActions>
           <Surface doc={doc} busy={false} onSave={view === "write" ? setText : () => undefined} context={{ ...EMPTY_CONTEXT, view }} />

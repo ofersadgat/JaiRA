@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { Choice } from "@jaira/shared/browser";
 import { EMPTY_ANSWER, answerOf, settled, submitsOnClick, useTypedStep, type Answer } from "@jaira/ui/choices";
 import { PATHS } from "@jaira/ui/icons";
-import { Press, Txt, appCh, font, lengthToken, placeholderColor, type FontSpec } from "../../primitives";
+import { ENTER_KEEPS_FOCUS, Press, Txt, appCh, font, lengthToken, placeholderColor, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "../files/Chip";
 import { Icon } from "../panel/Icon";
@@ -288,7 +288,7 @@ function TextArea({ value, onChange, rows, placeholder, readOnly, own = false, o
   const spec: FontSpec = own ? BODY : { voice: "data", scale: 12 / 12 };
   const line = (Number(t.scaled(`size-${spec.voice}`, spec.scale)) || 13) * 1.5;
   return (
-    <TextInput
+    <TextInput {...(ENTER_KEEPS_FOCUS as object)}
       value={value}
       onChangeText={onChange}
       multiline

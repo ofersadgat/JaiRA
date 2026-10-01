@@ -2,7 +2,7 @@
 id: engineering/decisions/0015-one-universal-client
 type: decision
 status: accepted
-updated: 2026-09-27
+updated: 2026-09-30
 decides_for: [engineering/units/app-shell, engineering/units/ipc-bridge, engineering/units/renderer-store]
 ---
 
@@ -210,8 +210,15 @@ packages/
   "read-only in this version" notice.
 - Controls that would mutate stay visible, because the UI must be identical, but are inert.
 - v2 turns the allowlist off and makes the controls live.
+- **v2 is here (2026-09-30).** The allowlist is deleted with the socket it guarded (below): a phone and a
+  browser are windows that write.
 
 ### The throwaway transport (ruling 3)
+
+**Gone (2026-09-30).** `spikeSocket.ts`, `socketBridge.ts`, the allowlist and `JAIRA_SPIKE_WS` are
+deleted. A phone and a browser reach an engine over [0013](0013-machines.md)'s transport, paired by its
+one-time code as a device (0013, "Amended 2026-09-30"); `bridges/engineBridge.ts` is the `JairaBridge`
+they install, and nothing above the bridge noticed. What follows is what it was.
 
 The quickest thing that works:
 
@@ -589,6 +596,35 @@ menu on content. The rest, also 2026-09-30:
 What a phone still lacks is in TODO.md ("Open inside the universal client, on a phone only"), deferred
 by the person on 2026-09-30.
 
+**The transport switch (2026-09-30).** The person, about the phone's read-only socket: "this should work
+the same way that all of the remote stuff should work, no? it shouldnt be phone specific...right?" — and
+then "do … the transport switch". Done, as 0013's amendment of the same day records it:
+- **One transport.** The phone and a browser pair with a machine by the code its Settings → Machines
+  shows, and connect to its engine's listener with the frames another machine speaks. The spike's socket,
+  its token in the log and its port are gone; the engine's loopback listener serves the built client to a
+  browser, by the rules and with the content policy of the desktop's `app://` protocol.
+- **A device is a window.** It gets what the desktop's window gets over the pipe, with a current project
+  of its own — the spike's clients shared the desktop's — and every push.
+- **It writes.** Every control is live. A browser answered a gate the desktop's run had parked at, and
+  the desktop's engine no longer held it. On the emulator the phone's Dark switch — a settings write —
+  turned the desktop's own window dark, and back.
+- **The Connect screen** (`screens/Connect.tsx`, the same on a phone and in a browser) takes an address
+  and a code; `Remote.tsx` pairs, keeps the token (the phone's keystore, a browser's `localStorage`) and
+  connects, and at the next launch connects by itself. `jaira:///?address=…&code=…` pairs at once.
+- **It stays connected.** A drop is retried with growing waits and a fresh `hello`; the shell's line says
+  "Disconnected … Reconnecting…" meanwhile and goes when it is back, and the store reads again without a
+  reload. A device forgotten on the machine returns to the Connect screen saying so.
+- **Checked:** `shots/remote.mts` (a browser), `shots/phone.mts` (`/native` in a browser) and
+  `shots/android.mts` (the emulator), each pairing by code against the engine's own port.
+- **Left:**
+  - a phone cannot open or make a project: the folder dialog is the machine's, and the folder browser of
+    0013 §8 is drawn only for another machine;
+  - on the emulator a task's conversation does not draw its transcript, so a gate cannot be answered
+    from the phone's panel yet (the strip offers it, by a push); the browser's does;
+  - the `/native` browser preview has never had the phone's tokens, so it draws unstyled;
+  - on an emulator React Native asks the host's port 8081 for its JavaScript whatever `adb reverse`
+    says; `android.mts` now tells the debug build to ask its own localhost, so `--metro` is honoured.
+
 **Performance (2026-09-30), production build, 220 cards and a 120-step conversation.** Typing in a long
 conversation on `/rn` fell from 90 ms a key to 5 ms (the transcript is memoised, so the draft above it
 does not redraw it); selecting a card from ~40 ms to ~22 ms on `/rn` and ~28 ms to ~6 ms on `/` (cards
@@ -645,6 +681,6 @@ from a universal tree it can rearrange.
 - **Islands fail S5 on iOS or Android.** Then the components concerned need native equivalents (a
   read-only diff view first) before v1 can show them.
 - **One publishes a stable 2.** Then move before migration step 3, not during it (see [Version](#version)).
-- **Now (0013 has landed).** `socketBridge` and the spike's WebSocket are deleted, and the phone reaches an
-  engine as 0013's other machines do.
+- ~~**Now (0013 has landed).** `socketBridge` and the spike's WebSocket are deleted, and the phone reaches an
+  engine as 0013's other machines do.~~ Done 2026-09-30.
 - **One gains `'use dom'`.** Then the islands move to it.

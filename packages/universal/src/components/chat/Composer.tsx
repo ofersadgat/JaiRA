@@ -452,14 +452,17 @@ function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNV
 function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
   const [ref, press] = useOpener(onOpen);
   return (
-    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210 }}>
+    // `.cx-chip-wrap` is a block that gives way (`min-width: 0`); the chip in it is an inline box, which
+    // does not: squeezed, the desktop's chips keep their words and run over one another. Copied on web,
+    // where the two are compared; a phone, which is always narrow, cuts each chip's words instead.
+    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...(Platform.OS === "web" ? { alignItems: "flex-start" } : {}) }}>
     <Press
       onPress={press}
       title={`${label}: ${value}`}
       label={label}
       {...({ "aria-expanded": open } as object)}
       minWidth={0}
-      flexShrink={1}
+      flexShrink={Platform.OS === "web" ? 0 : 1}
       maxWidth={210}
       flexDirection="row"
       alignItems="center"

@@ -5,10 +5,17 @@
  *
  *  - `GET /.well-known/jaira` says which machine and which JaiRA this is. No token needed.
  *  - `/engine` upgrades to a WebSocket carrying the engine's frames, one per message. A client proves
- *    it is a paired machine with the token in its `hello` (`machineTokens.ts`), never in the URL.
+ *    it is a paired machine — or a paired phone or browser — with the token in its `hello`
+ *    (`machineTokens.ts`), never in the URL.
+ *  - Everything else is the built One client, as static files, when the host has one to give
+ *    (`clientDir`): a browser has nowhere else to load the page that then pairs and connects here
+ *    (decision 0013, amended 2026-09-30). Files only, read only (`clientFiles.ts`); it carries no secret,
+ *    and the page it serves can do nothing until it holds a token.
  */
-import { createServer, type Server } from "node:http";
+import { readFile } from "node:fs/promises";
+import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { Duplex } from "node:stream";
+import { clientFile, clientHeaders } from "./clientFiles";
 import { ENGINE_CONTRACT } from "./enginePipe";
 import { wsHostChannel } from "./engineChannel";
 import type { EngineHost } from "./engineHost";
@@ -29,6 +36,8 @@ export interface NetworkListenerOptions {
   version: string;
   /** Default {@link NETWORK_PORT}; taken, any free port is used and said. */
   port?: number;
+  /** The built One client (`dist/client`), to serve to browsers. Absent: only the two paths above answer. */
+  clientDir?: string;
   log?: (level: "info" | "warn", message: string) => void;
 }
 
@@ -50,12 +59,41 @@ function listenOn(server: Server, port: number): Promise<number | "taken"> {
   });
 }
 
+/** One file of the built client, or the refusal `clientFile` gives. */
+async function serveClient(root: string, request: IncomingMessage, response: ServerResponse): Promise<void> {
+  const say = (status: number, reason: string): void => {
+    response.writeHead(status, { "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" });
+    response.end(`${reason}\n`);
+  };
+  // The raw target, not a parsed URL's path: parsing would fold a `..` away before it could be refused.
+  const path = (request.url ?? "/").split(/[?#]/)[0] ?? "/";
+  const found = clientFile(root, path);
+  if ("status" in found) return say(found.status, found.reason);
+  let body: Buffer;
+  try {
+    body = await readFile(found.file);
+  } catch {
+    return say(404, "not here");
+  }
+  response.writeHead(200, {
+    ...clientHeaders(found, body),
+    "Content-Length": String(body.length),
+    // Vite names what is under `assets/` by its content, so it never changes; a page is asked for anew.
+    "Cache-Control": path.startsWith("/assets/") && !found.html ? "public, max-age=31536000, immutable" : "no-cache",
+  });
+  response.end(request.method === "HEAD" ? undefined : body);
+}
+
 export async function listenNetwork(options: NetworkListenerOptions): Promise<NetworkListener> {
   const server = createServer((request, response) => {
     if (request.method === "GET" && request.url === "/.well-known/jaira") {
       const identity = options.identity();
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify({ jaira: true, machineId: identity.id, label: identity.label, os: identity.os, version: options.version, contract: ENGINE_CONTRACT }));
+      return;
+    }
+    if (options.clientDir !== undefined && (request.method === "GET" || request.method === "HEAD") && !(request.url ?? "").startsWith("/engine")) {
+      void serveClient(options.clientDir, request, response);
       return;
     }
     response.writeHead(404, { "content-type": "text/plain" });

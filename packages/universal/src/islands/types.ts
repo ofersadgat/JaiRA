@@ -7,6 +7,14 @@ export interface IslandProps {
   /** A fixed height, for an editor, which scrolls inside as on the desktop. Absent: sized to its content. */
   height?: number;
   /**
+   * The classes the component stands under on the desktop, outermost first (`["markdown", "md-block"]` for
+   * a fenced block's reading): the rules written for it there — `.markdown pre`, `.markdown code` — name
+   * those ancestors, and the universal tree round an island has none of them. On web each is a box that
+   * generates no box (`display: contents`), so the rules match and the layout is the island's own. A
+   * phone's island page does not take them yet.
+   */
+  under?: readonly string[];
+  /**
    * The person's appearance block (`lookOf(config)`), for an editor island: its fonts and size, the
    * editors' own palette, each editor's look and the palette per type — what the desktop's store puts
    * on its root, which an island page is sent instead. On web the page's root has it already.
