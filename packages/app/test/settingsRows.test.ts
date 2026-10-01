@@ -6,7 +6,7 @@
  * is its title, made safe for an attribute.
  */
 import { describe, expect, it } from "vitest";
-import { partIdOf, splitHint } from "../src/renderer/controls";
+import { partIdOf, splitHint } from "../src/renderer/settingsRows";
 
 describe("a row's one sentence", () => {
   it("keeps the first sentence and hands the rest to the ⓘ", () => {

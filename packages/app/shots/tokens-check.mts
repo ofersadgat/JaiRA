@@ -3,12 +3,15 @@
  *
  *   npx tsx packages/app/shots/tokens-check.mts
  *
- * `@jaira/universal`'s `resolveAt` replays `styles.css`'s cascade for native, where there is no browser
- * to do it. This asks the browser that IS there — the app's own window — for the same colours: for
- * every palette, both schemes, at the root and inside the sidebar, each colour variable is painted on a
- * probe element and read back with `getComputedStyle`. Every one must equal what `resolveAt` produced,
- * to within a rounding step per channel. Lengths and font stacks are not colours and are skipped.
+ * `@jaira/universal`'s `resolveAt` replays `styles.css`'s cascade — on a phone, where there is no browser
+ * to do it, and on the app's own page, which carries no stylesheet. This asks a browser for the same
+ * colours: the app's window, taken to an empty page with the stylesheet put on it and a `.sidebar` box
+ * for the rules scoped to one. For every palette, both schemes, at the root and inside the sidebar,
+ * each colour variable is painted on a probe element and read back with `getComputedStyle`. Every one
+ * must equal what `resolveAt` produced, to within a rounding step per channel. Lengths and font stacks
+ * are not colours and are skipped.
  */
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PALETTES } from "../../universal/src/cssTokens.generated";
 import { parseColor, resolveAt } from "../../universal/src/cssTokens";
@@ -35,7 +38,20 @@ async function main(): Promise<void> {
   let checked = 0;
   const wrong: string[] = [];
   try {
-    await app.until("document.querySelector('.sidebar') !== null", "the sidebar to draw");
+    // The stylesheet's token blocks are what `tokens.mjs` generated the replay from; nothing of the app
+    // needs to be on the page for Chromium to resolve them.
+    const css = readFileSync(join(import.meta.dirname, "..", "src", "renderer", "styles.css"), "utf8");
+    await app.navigate("about:blank");
+    await app.evaluate(`(() => {
+      const style = document.createElement("style");
+      style.textContent = ${JSON.stringify(css)};
+      document.head.appendChild(style);
+      const side = document.createElement("nav");
+      side.className = "sidebar";
+      document.body.appendChild(side);
+      return true;
+    })()`);
+    await app.until("document.querySelector('.sidebar') !== null && getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() !== ''", "the stylesheet's tokens to resolve");
     for (const palette of PALETTES) {
       for (const scheme of ["light", "dark"] as const) {
         for (const scopes of [[], ["sidebar"]] as const) {

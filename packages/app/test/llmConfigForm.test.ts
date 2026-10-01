@@ -6,7 +6,7 @@
  * "provider defaults" over a config that pins temperature to 1.5.
  */
 import { describe, expect, it } from "vitest";
-import { summariseLlmConfig } from "../src/renderer/llmConfigForm";
+import { summariseLlmConfig } from "../src/renderer/llmConfigModel";
 
 describe("summarising a call configuration", () => {
   it("says so plainly when a configuration states nothing", () => {

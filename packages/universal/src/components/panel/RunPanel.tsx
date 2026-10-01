@@ -4,7 +4,7 @@ import type { BoardCard, StateView } from "@jaira/shared/browser";
 import { BADGE } from "@jaira/ui/panelFaceModel";
 import { useRunCheck } from "@jaira/ui/newTaskModel";
 import { isFilled, runBlocker, runHistoryOf, runInputsOf, runSchemaOf, runTitle, type RunField, type RunValues } from "@jaira/ui/runForm";
-import type { RunSurface } from "@jaira/ui/runPanel";
+import type { RunSurface } from "@jaira/ui/runPanelTypes";
 import { useTouched } from "@jaira/ui/schemaForm/check";
 import type { ValueSources } from "@jaira/ui/schemaForm/types";
 import { Press, Txt, type FontSpec } from "../../primitives";

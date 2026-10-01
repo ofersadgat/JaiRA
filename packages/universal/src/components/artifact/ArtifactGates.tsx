@@ -4,7 +4,7 @@ import { choicesOfConfig, editorKindOf, type EditArtifactConfig, type PendingInt
 import type { JsonValue } from "@declarative-ai/json";
 import { gateServices, type ComponentServices } from "@jaira/ui/changesetReviewModel";
 import { invoke } from "@jaira/ui/store";
-import { EMPTY_ANSWER, answerOf, answersOfValue, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import { EMPTY_ANSWER, answerOf, answersOfValue, submitsOnClick, type Answer } from "@jaira/ui/choicesModel";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
 import { artifactShapeOf, notesCount, recordedDraft, reviewAnswerOf, reviewVerdictOf } from "@jaira/ui/artifactReview";
 import { useAuthor } from "@jaira/ui/reviewSelection";

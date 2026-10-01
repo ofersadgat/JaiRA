@@ -8,7 +8,7 @@ import { useLimits } from "@jaira/ui/limitsStore";
 import { summariseLlmConfig, type CategoryKey, type LlmConfigDoc } from "@jaira/ui/llmConfigModel";
 import { DEFAULT_ENVIRONMENT, defaultOverlayOf, layerWordOf, mergedDefaultsOf, modelDefaultsOf, otherLayerOf, presetsOf, suggestionsOf, type PresetDocs } from "@jaira/ui/modelsPageModel";
 import { PRESET_RULES, candidateLookupOf, candidatesSchema, candidatesViewOf, presetModelLine, presetModelProblem, presetRuleWords, type CandidateLookup, type CandidateStatus } from "@jaira/ui/presetCandidates";
-import { choiceAfterRemove, isDirty, presetNameProblem, presetSummary, presetTabsOf, resolveChoice, type PresetChoice, type PresetTab } from "@jaira/ui/presetTabs";
+import { choiceAfterRemove, isDirty, presetNameProblem, presetSummary, presetTabsOf, resolveChoice, type PresetChoice, type PresetTab } from "@jaira/ui/presetTabsModel";
 import { useShell } from "../../app/shell";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";

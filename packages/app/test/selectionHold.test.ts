@@ -17,8 +17,8 @@
  * threw it away. The fix is that a secondary click is never a dismissal.
  */
 import { describe, expect, it } from "vitest";
-import { maySurrenderSelection } from "../src/renderer/reviewNotes";
-import { selectionForMenu } from "../src/renderer/pointerMenu";
+import { maySurrenderSelection } from "../src/renderer/reviewSelection";
+import { selectionForMenu } from "../src/renderer/pointerMenuModel";
 
 describe("when a held passage is let go of", () => {
   it("keeps it while the focus is inside a surface that declared it keeps selections", () => {

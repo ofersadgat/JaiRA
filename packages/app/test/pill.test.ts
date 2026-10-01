@@ -20,14 +20,13 @@ import {
   pillKindOf,
   pillTotal,
   projectCounts,
-  tally,
   taskCounts,
   unseenRows,
   unseenTasks,
   type CountedProject,
   type CountedTask,
   type PillCounts,
-} from "../src/renderer/pill";
+} from "../src/renderer/pillModel";
 
 const kinds = (counts: PillCounts, budget: number): string[] => layoutPills(counts, budget).fit.map((f) => `${f.kind}${f.n}`);
 
@@ -53,7 +52,6 @@ describe("pillKindOf", () => {
     // somebody created and has not started.
     expect(pillKindOf("queued")).toBeNull();
     expect(pillKindOf(undefined)).toBeNull();
-    expect(pillTotal(tally({}, "queued"))).toBe(0);
   });
 
   it("fills exactly the two kinds that are live facts", () => {

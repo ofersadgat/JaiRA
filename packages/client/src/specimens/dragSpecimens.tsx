@@ -1,13 +1,11 @@
 import { useEffect, useRef, type ComponentType, type JSX, type ReactNode } from "react";
 import type { BoardCard, BoardColumn, BoardView, ConnectPlan, InstanceNode, StateChild, TaskConnectResult } from "@jaira/shared/browser";
-import { Board as DomBoard } from "@jaira/ui/board";
-import { RunBoard as DomRunBoard } from "@jaira/ui/runViews";
 import type { DragOffers } from "@jaira/ui/taskDrag";
 import { Board, RunBoard } from "@jaira/universal";
 
 /**
  * A drag held part-way (decision 0015): the board with a card in the air over a column, the drop not yet
- * made — and one where it was, and the move table asked first. Each is driven the same way on both pages:
+ * made — and one where it was, and the move table asked first. Each is driven as the reference page was:
  * a `dragstart` on the card (found by its title) and a `dragover` on the column (found by its heading),
  * real DOM drag events the boards' own handlers take, so what is photographed is what their HTML5 drag
  * draws. `connect.ask` answers from a fixture, at once (or never, for `asking`).
@@ -24,7 +22,6 @@ import { Board, RunBoard } from "@jaira/universal";
  */
 export interface DragSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
@@ -153,11 +150,6 @@ function dragSpecimen({ answers, offers, over, drop }: { answers: Record<string,
   };
   return {
     width: 820,
-    dom: () => (
-      <Drive over={over} {...(drop === true ? { drop } : {})}>
-        <DomBoard {...common} />
-      </Drive>
-    ),
     rn: () => (
       <Drive over={over} {...(drop === true ? { drop } : {})}>
         <Board {...common} />
@@ -192,15 +184,8 @@ function runSpecimen(): DragSpecimen {
   const common = { declared: DECLARED, parent: RUN, openInstance: null, onSelect: none, onOpen: none, offers: RUN_OFFERS, onDrop: none };
   return {
     width: 820,
-    // In a box shorter than the board, as the run's column is: both scroll, and Chromium composites a
+    // In a box shorter than the board, as the run's column is: it scrolls, and Chromium composites a
     // scroller that scrolls (which decides how its text is smoothed), as it does in the room.
-    dom: () => (
-      <Drive lift="review" over="Publish">
-        <div style={RUN_BOX}>
-          <DomRunBoard {...common} />
-        </div>
-      </Drive>
-    ),
     rn: () => (
       <Drive lift="review" over="Publish">
         <div style={RUN_BOX}>

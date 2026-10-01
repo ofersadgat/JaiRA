@@ -2,15 +2,13 @@ import type { JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
 import { bandsOf, piecesOf, type BandNote } from "@jaira/ui/sessionBands";
-import { SessionBandsView } from "@jaira/ui/sessionPanels";
 import type { TranscriptEntry } from "@jaira/ui/transcript";
-import { Transcript as DomTranscript } from "@jaira/ui/transcriptView";
 import { ValuePanelContext, type ValuePanel } from "@jaira/ui/valuePanel";
 import { SessionBands, Transcript, useTokens } from "@jaira/universal";
 
 /**
- * The transcript's pieces as specimens (decision 0015): `transcriptView.tsx`'s `Transcript` against its
- * universal copy (`components/panel/SessionTranscript.tsx`), from the same entries, on the sheet a
+ * The transcript's pieces as specimens (decision 0015): `Transcript`
+ * (`components/panel/SessionTranscript.tsx`, the copy of `transcriptView.tsx`'s), on the sheet a
  * conversation is printed on (`.ts-paper`'s --panel).
  *
  *  - `transcript-rows` — a stretch of work of one line each kind draws: a call that worked, one that
@@ -22,11 +20,10 @@ import { SessionBands, Transcript, useTokens } from "@jaira/universal";
  */
 export interface TranscriptSpecimen {
   width: number;
-  dom: () => JSX.Element;
   rn: () => JSX.Element;
 }
 
-/** A fixed morning, in the reader's own zone, so both pages print the same clocks. */
+/** A fixed morning, in the reader's own zone, so every run prints the same clocks. */
 const T0 = new Date(2026, 8, 21, 10, 0, 0).getTime();
 const s = (n: number): number => T0 + n * 1000;
 const MIN = 60;
@@ -103,17 +100,10 @@ const STORY: TranscriptEntry[] = [
   say("assistant", "Every scrollbar now uses one rule in `styles.css`: a thin rounded thumb, no track. `floatLayers.test.ts` needed one exemption; the app suite passes.", s(170), 1),
 ];
 
-/** A value panel that opens nothing: the Chat room has one, so its rails offer "…" — on both pages. */
+/** A value panel that opens nothing: the Chat room has one, so its rails offer "…". */
 const PANEL = { open: () => undefined } as unknown as ValuePanel;
 
 /** `.ts-paper`'s ground, which the transcript is drawn on in the Chat room. */
-function DomSheet({ children }: { children: ReactNode }): JSX.Element {
-  return (
-    <ValuePanelContext.Provider value={PANEL}>
-      <div style={{ background: "var(--panel)" }}>{children}</div>
-    </ValuePanelContext.Provider>
-  );
-}
 function RnSheet({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -125,11 +115,6 @@ function RnSheet({ children }: { children: ReactNode }): JSX.Element {
 
 const pair = (entries: TranscriptEntry[], working = false, width = 640): TranscriptSpecimen => ({
   width,
-  dom: () => (
-    <DomSheet>
-      <DomTranscript entries={entries} working={working} />
-    </DomSheet>
-  ),
   rn: () => (
     <RnSheet>
       <Transcript session={null} entries={entries} working={working} rails />
@@ -154,7 +139,7 @@ function working(): TranscriptEntry[] {
 export const TRANSCRIPT_SPECIMENS: Record<string, TranscriptSpecimen> = {
   "transcript-rows": pair(ROWS),
   "transcript-summary": pair(STORY),
-  "transcript-working": { ...pair([], true), dom: () => <DomSheet><DomTranscript entries={working()} working /></DomSheet>, rn: () => <RnSheet><Transcript session={null} entries={working()} working rails /></RnSheet> },
+  "transcript-working": { ...pair([], true), rn: () => <RnSheet><Transcript session={null} entries={working()} working rails /></RnSheet> },
 };
 
 // --- a run's conversation as panels (`sessionPanels.tsx`) --------------------------------------------
@@ -226,13 +211,6 @@ const NOTES: BandNote[] = [
 ];
 const BANDS = bandsOf(piecesOf(ROOT, REFS));
 
-function DomBands(): JSX.Element {
-  return (
-    <ValuePanelContext.Provider value={PANEL}>
-      <SessionBandsView bands={BANDS} notes={NOTES} scope="t" render={(piece) => <DomTranscript entries={SAID[piece.node.instanceId] ?? []} working={false} />} />
-    </ValuePanelContext.Provider>
-  );
-}
 function RnBands(): JSX.Element {
   const t = useTokens();
   return (
@@ -243,7 +221,7 @@ function RnBands(): JSX.Element {
     </ValuePanelContext.Provider>
   );
 }
-TRANSCRIPT_SPECIMENS["session-bands"] = { width: 760, dom: DomBands, rn: RnBands };
+TRANSCRIPT_SPECIMENS["session-bands"] = { width: 760, rn: RnBands };
 
 /**
  * What a call draws under its row unasked, and the rows that are not a plain call: an agent's question

@@ -7,7 +7,7 @@
 import { MOVE_EVENTS, type InstanceNode, type PendingUserEvent, type StateChild, type StateView } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "./fileTypes";
 import { durationOf } from "./runActivityModel";
-import { advanceTargetOf } from "./stateSurface";
+import { advanceTargetOf } from "./stateSurfaceModel";
 import { signatureOf } from "./transcript";
 import { instanceOf as instanceOfState, nodeAt } from "./trail";
 

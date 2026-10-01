@@ -2225,9 +2225,9 @@ export interface IpcContract {
   "secret:capabilities": { request: void; response: SecretCapabilities };
   "secret:set": { request: SetSecretRequest; response: { name: string; target: SecretTarget } };
   /**
-   * The build's third-party notice manifest (`dist/renderer/third-party-licenses.json`), parsed but
+   * The build's third-party notice manifest (`dist/client/third-party-licenses.json`), parsed but
    * NOT checked: the Licenses page decodes it (`decodeThirdPartyLicenseManifest`) and shows what a
-   * refusal says. Refused when the renderer was built without it.
+   * refusal says. Refused when the client was built without it.
    */
   "licenses:read": { request: void; response: unknown };
   /** The app's own updates (decision 0011 §4): where the updater stands. */

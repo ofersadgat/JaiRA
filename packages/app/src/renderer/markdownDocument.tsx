@@ -18,7 +18,7 @@ import { useRenderChoice } from "./renderChoice";
  * is the reading renderer, so the words — and their fenced blocks — are on screen while it arrives.
  */
 const MarkdownEditor = lazy(() => import("./markdownEditor").then((m) => ({ default: m.MarkdownEditor })));
-type MarkdownDiff = import("./markdownEditor").MarkdownDiff;
+type MarkdownDiff = import("./markdownEditorTypes").MarkdownDiff;
 
 export interface MarkdownDocumentProps {
   text: string;

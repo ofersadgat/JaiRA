@@ -29,7 +29,6 @@ async function main(): Promise<void> {
   // The stand-in's profile: a pairing kept from an earlier run is another world's.
   rmSync(join(OUT, ".profile-9281"), { recursive: true, force: true });
   const world = buildWorld(join(import.meta.dirname, ".world-phone"));
-  process.env.JAIRA_RENDERER = "one";
   const desktop = await App.launch(world, { out: OUT, port: 9280 });
   let phone: App | undefined;
   try {

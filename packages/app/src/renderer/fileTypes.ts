@@ -69,10 +69,10 @@ import type {
 } from "@jaira/shared/browser";
 import { defaultRendererChoice, mimeFallbacks, paneFamilyOf } from "@jaira/shared/browser";
 import type { EditorKind, PaneFamily, RendererChoice, RendererChoices, RenderView, SchemaFormat } from "@jaira/shared/browser";
-import type { ComponentServices } from "./changesetReview";
-import type { EditorServices } from "./components";
+import type { ComponentServices } from "./changesetReviewModel";
+import type { EditorServices } from "./editorServices";
 import type { Drafts, SetDraft } from "./drafts";
-import type { EditorTab } from "./editorChrome";
+import type { EditorTab } from "./stateEditorModel";
 import type { TrailStep } from "./trail";
 import type { SequentialBatchLayout } from "@jaira/shared/browser";
 

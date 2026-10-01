@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { FolderListing } from "@jaira/shared/browser";
-import type { BrowseMachine } from "@jaira/ui/folderBrowser";
+import type { BrowseMachine } from "@jaira/ui/folderBrowserTypes";
 import { invoke } from "@jaira/ui/store";
 import { Press, Txt, edge, lengthToken, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";

@@ -232,3 +232,10 @@ export function useAddMachine(onView: (v: MachinesView) => void): {
   };
   return { value, setValue, busy, error, done, ready, pair };
 }
+
+export type MachineChipState = "on" | "off" | "warn" | "none";
+
+/** A peer's connection state as a chip's. */
+export function chipStateOf(state: "online" | "offline" | "connecting" | "mismatch"): MachineChipState {
+  return state === "online" ? "on" : state === "mismatch" ? "warn" : "off";
+}

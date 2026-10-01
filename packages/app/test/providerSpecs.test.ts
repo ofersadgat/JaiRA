@@ -21,7 +21,7 @@ import {
   providerBlockPath,
   type FieldSpec,
 } from "../src/renderer/providerSpecs";
-import { providerState } from "../src/renderer/providersPane";
+import { providerState } from "../src/renderer/connectionsModel";
 
 const executor = (over: Partial<ExecutorInfo>): ExecutorInfo => ({
   name: "claude-cli",

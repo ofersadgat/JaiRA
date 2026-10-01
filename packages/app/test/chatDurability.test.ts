@@ -32,7 +32,7 @@ import { chatInstanceIdOf } from "@jaira/runtime";
 import { CUT_OFF_EVENT, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
-import { kept } from "../src/renderer/chatPane";
+import { kept } from "../src/renderer/chatThreadModel";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
 let dir: string;

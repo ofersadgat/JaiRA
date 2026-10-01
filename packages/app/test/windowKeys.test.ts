@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { EMPTY_STACK, forward, historyButton, historyKey, pop } from "../src/renderer/panelStack";
 import { windowTitle } from "../src/renderer/shellModel";
-import { clampSplit, splitKey } from "../src/renderer/splitter";
+import { clampSplit, splitKey } from "../src/renderer/splitterModel";
 
 /**
  * What the window does with a key or a mouse button outside any one component — the logic the desktop's

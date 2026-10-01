@@ -2,8 +2,8 @@ import { createContext, useContext, useRef, useState, type JSX, type ReactNode }
 import { TextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { Choice } from "@jaira/shared/browser";
-import { EMPTY_ANSWER, answerOf, settled, submitsOnClick, useTypedStep, type Answer } from "@jaira/ui/choices";
-import { PATHS } from "@jaira/ui/icons";
+import { EMPTY_ANSWER, answerOf, settled, submitsOnClick, useTypedStep, type Answer } from "@jaira/ui/choicesModel";
+import { PATHS } from "@jaira/ui/iconPaths";
 import { ENTER_KEEPS_FOCUS, Press, Txt, appCh, font, lengthToken, placeholderColor, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Chip } from "../files/Chip";

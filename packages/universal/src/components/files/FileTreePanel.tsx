@@ -18,7 +18,7 @@ import {
 } from "@jaira/ui/filesModel";
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import type { AskSpec } from "@jaira/ui/menu";
+import type { AskSpec } from "@jaira/ui/menuTypes";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { AskDialog } from "./AskDialog";
 import { Chip } from "./Chip";

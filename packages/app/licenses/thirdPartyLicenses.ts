@@ -9,8 +9,9 @@
  *    first-party packages (`@jaira/*`, `@declarative-ai/*`), whose own dependencies ship too, though
  *    they themselves are not listed. The walk is what finds a package nothing bundles: Electron's
  *    natives, the TypeScript compiler, SQLite, which the main build keeps external.
- *  - **The bundles.** Every module id the Vite renderer build put in a chunk (`window`), and every
- *    input the esbuild main build (`main.cjs`, the preload, both workers) read from `node_modules`,
+ *  - **The bundles.** Every module id the window's build — the One client, `packages/client` — put
+ *    in a chunk (`window`), which is also how what only the client depends on (react-native-web,
+ *    Tamagui, One) is found, and every input the esbuild main build (`main.cjs`, the preload, both workers) read from `node_modules`,
  *    which `build.mjs` writes to `dist/main-modules.json` because it runs first and is a different
  *    bundler (`main`). A package that is in a bundle is tagged with that bundle; the walk's own tag
  *    (`installed`) is kept only for a package no bundle contains, so the tag says where the code is.
@@ -28,7 +29,7 @@
  * committed under `licenses/spdx/`, so a build never needs the network — `npm run licenses:sync`
  * fetches any the config newly names.
  *
- * The output is `dist/renderer/third-party-licenses.json`, read by main on `licenses:read`.
+ * The output is `dist/client/third-party-licenses.json`, read by main on `licenses:read`.
  */
 import * as NodeFSP from "node:fs/promises";
 import * as NodePath from "node:path";
@@ -68,7 +69,7 @@ export interface BundledModules {
 export interface ThirdPartyLicensesPluginOptions {
   readonly configFile?: string | URL;
   readonly packageManifests: ReadonlyArray<ThirdPartyLicensePackageManifest>;
-  /** The tag this Vite build's own chunks give their packages. */
+  /** The tag this build's own chunks give their packages. */
   readonly bundleName: string;
   /** Other bundles' module lists, as JSON arrays of paths on disk — the main build's, written first. */
   readonly moduleLists?: ReadonlyArray<{ readonly bundle: string; readonly file: string | URL }>;
@@ -874,11 +875,11 @@ export function serializeManifest(manifest: ThirdPartyLicenseManifest): string {
 }
 
 /**
- * The Vite plugin: after the renderer's chunks are final, write the manifest beside them.
+ * The Vite plugin (`packages/client/vite.config.ts` adds it): after the window's chunks are final, write
+ * the manifest beside them.
  *
  * Structurally typed rather than `import type { Plugin } from "vite"`: this file is type-checked with
- * the app's sources, and `vite.config.ts` is kept out of that for the two copies of Vite's types it
- * would compare (see `tsconfig.json`). Vite reads the object for its shape either way.
+ * the app's sources, which do not depend on Vite. Vite reads the object for its shape either way.
  */
 export function thirdPartyLicensesPlugin(options: ThirdPartyLicensesPluginOptions): {
   name: string;

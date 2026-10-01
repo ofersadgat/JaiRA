@@ -2,15 +2,12 @@ import { useState, type ComponentType, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
 import { GALLERY_CHANGESET, GALLERY_SURFACES, type Changeset, type GallerySurface, type PendingInteraction } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { Stage as DomStage } from "@jaira/ui/componentGallery";
-import { GateSurface as DomGateSurface } from "@jaira/ui/components";
 import { initialState, interactionOf, parsedDoc } from "@jaira/ui/galleryModel";
-import { ImageDiff as DomImageDiff, type ImageLayout } from "@jaira/ui/imageDiff";
-import { GalleryStage, GateSurface, ImageDiff, useTokens } from "@jaira/universal";
+import { GalleryStage, GateSurface, ImageDiff, useTokens, type ImageLayout } from "@jaira/universal";
 
 /**
- * The changeset reviewer (`changesetReview.tsx`) where the gallery's cards do not reach it, as specimens
- * (decision 0015): each DOM original against its universal copy, from the same fixture.
+ * The changeset reviewer (the copy of `changesetReview.tsx`) where the gallery's cards do not reach it, as
+ * specimens (decision 0015), each from a fixture.
  *
  *  - `image-diff-overlay`, `image-diff-split`, `image-diff-added` — `imageDiff.tsx`'s comparison of two
  *    versions of a picture: stacked with the fader, side by side, and one side only (a create).
@@ -23,7 +20,6 @@ import { GalleryStage, GateSurface, ImageDiff, useTokens } from "@jaira/universa
  */
 export interface ChangesetSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
@@ -39,10 +35,6 @@ const LOGO_AFTER = svg(`<rect x="8" y="8" width="144" height="80" rx="10" fill="
 const BADGE = svg(`<circle cx="24" cy="24" r="20" fill="#2f9e44"/><path d="M14 25 l7 7 l13 -15" stroke="#fff" stroke-width="4" fill="none"/>`, 48, 48);
 const src = (text: string): string => `data:image/svg+xml;charset=utf-8,${encodeURIComponent(text)}`;
 
-function DomImages({ before, after, layout }: { before?: string; after?: string; layout: ImageLayout }): JSX.Element {
-  const [now, setNow] = useState<ImageLayout>(layout);
-  return <DomImageDiff before={before} after={after} layout={now} onLayout={setNow} />;
-}
 function RnImages({ before, after, layout }: { before?: string; after?: string; layout: ImageLayout }): JSX.Element {
   const [now, setNow] = useState<ImageLayout>(layout);
   return <ImageDiff before={before} after={after} layout={now} onLayout={setNow} />;
@@ -56,7 +48,6 @@ function RnBody({ children }: { children: ReactNode }): JSX.Element {
 
 const images = (layout: ImageLayout, before: string | undefined, after: string | undefined): ChangesetSpecimen => ({
   width: 520,
-  dom: () => <DomImages {...(before !== undefined ? { before } : {})} {...(after !== undefined ? { after } : {})} layout={layout} />,
   rn: () => (
     <RnBody>
       <RnImages {...(before !== undefined ? { before } : {})} {...(after !== undefined ? { after } : {})} layout={layout} />
@@ -79,7 +70,7 @@ const IMAGE_CHANGESET: Changeset = {
 const surfaceOf = (id: string): GallerySurface => GALLERY_SURFACES.find((s) => s.id === id)!;
 const IMAGE_SURFACE: GallerySurface = { ...surfaceOf("review_artifacts/basic"), id: "review_artifacts/image", variant: "image", inputs: { changeset: IMAGE_CHANGESET as unknown as JsonValue } };
 
-/** The gallery's stage (`.gallery-stage` round the DOM's, the dashed box round the copy's). */
+/** The gallery's stage (`.gallery-stage`: the dashed box). */
 function RnStage({ children }: { children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -91,14 +82,6 @@ function RnStage({ children }: { children: ReactNode }): JSX.Element {
 
 const staged = (surface: GallerySurface): ChangesetSpecimen => ({
   width: 624,
-  dom: () => {
-    const parsed = parsedDoc(initialState(surface).text);
-    return (
-      <div className="gallery-stage">
-        <DomStage surface={surface} doc={parsed.doc} docError={parsed.error} onResult={NOOP} />
-      </div>
-    );
-  },
   rn: () => (
     <RnStage>
       <GalleryStage surface={surface} text={initialState(surface).text} onResult={NOOP} />
@@ -148,11 +131,6 @@ const settled = (id: string, value: JsonValue): ChangesetSpecimen => {
   const pending = gateOf(id);
   return {
     width: 640,
-    dom: () => (
-      <div className="st-block">
-        <DomGateSurface pending={pending} onSubmit={NOOP} settled={{ value }} />
-      </div>
-    ),
     rn: () => (
       <View flexDirection="column">
         <GateSurface pending={pending} onSubmit={NOOP} settled={{ value }} plain />

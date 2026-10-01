@@ -2,20 +2,15 @@ import { useEffect, type ComponentType, type JSX, type ReactNode } from "react";
 import type { BoardCard, ConversationView, FileSource, UpdateState } from "@jaira/shared/browser";
 import { invoke } from "@jaira/ui/store";
 import { publishUpdate } from "@jaira/ui/updatesStore";
-import { UpdateSplit as DomUpdateSplit } from "@jaira/ui/updatesView";
-import { CardDom } from "@jaira/ui/board";
-import { Conversation as DomConversation } from "@jaira/ui/detail";
-import { JsonFormView as DomJsonFormView, PatchSideBySide as DomPatchSideBySide, RenderedFileView as DomRenderedFileView } from "@jaira/ui/fileSurfaces";
 import type { FileSurfaceContext, FileSurfaceProps } from "@jaira/ui/fileTypes";
 import { AboutUpdateSplit, Conversation, JsonFormView, PatchSideBySide, RenderedFileView, TaskCard } from "@jaira/universal";
 
 /**
- * Pieces of the rooms as specimens (decision 0015): each DOM original against its universal copy, from
- * the same fixture.
+ * Pieces of the rooms as specimens (decision 0015), each from a fixture.
  *
- *  - `card-origin`, `card-undo`, `card-undo-ended` — `board.tsx`'s card with its origin line (a task the
+ *  - `card-origin`, `card-undo`, `card-undo-ended` — the board's card with its origin line (a task the
  *    events task started; pressing it opens that task) and with **Undo** (a moment after a drop), running
- *    and finished. The copy is drawn with `copied`: on web a card with either is still the DOM card's.
+ *    and finished.
  *  - `debug-journal` — the Debug room's journal under a result (`detail.tsx`'s `Conversation`): every kind
  *    of turn, a tool turn in the data face, a failure.
  *  - `file-patch-side`, `file-html`, `file-json-form`, `file-json-form-package` — the Files viewer's
@@ -25,7 +20,6 @@ import { AboutUpdateSplit, Conversation, JsonFormView, PatchSideBySide, Rendered
  */
 export interface RoomSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
@@ -60,8 +54,7 @@ const none = (): void => undefined;
 function cardSpecimen(card: BoardCard, extra: { onUndo?: () => void; onOrigin?: () => void }): RoomSpecimen {
   return {
     width: 268,
-    dom: () => <CardDom card={card} selected={false} onSelect={none} {...extra} />,
-    rn: () => <TaskCard card={card} selected={false} onSelect={none} last copied {...extra} />,
+    rn: () => <TaskCard card={card} selected={false} onSelect={none} last {...extra} />,
   };
 }
 
@@ -100,9 +93,9 @@ const PACKAGE = fileOf(
   JSON.stringify({ name: "@acme/site", version: "1.4.0", private: true, description: "The docs site.", scripts: { build: "vite build", test: "vitest" }, dependencies: { react: "^19.0.0" } }, null, 2),
 );
 
-function surfaceSpecimen(Dom: ComponentType<FileSurfaceProps>, Rn: ComponentType<FileSurfaceProps>, doc: FileSource, choice: Record<string, string> = {}): RoomSpecimen {
+function surfaceSpecimen(Rn: ComponentType<FileSurfaceProps>, doc: FileSource, choice: Record<string, string> = {}): RoomSpecimen {
   const props: FileSurfaceProps = { doc, busy: false, onSave: none, context: contextOf(choice) };
-  return { width: 640, dom: () => <Dom {...props} />, rn: () => <Rn {...props} /> };
+  return { width: 640, rn: () => <Rn {...props} /> };
 }
 
 /** A downloaded update, published after main's own answer has landed, so the fixture is what shows. */
@@ -117,11 +110,6 @@ function WithUpdate({ children }: { children: ReactNode }): JSX.Element {
 export const ROOM_SPECIMENS: Record<string, RoomSpecimen> = {
   "about-update-split": {
     width: 220,
-    dom: () => (
-      <WithUpdate>
-        <DomUpdateSplit label="Restart to update" state={DOWNLOADED} busy={undefined} queued={undefined} />
-      </WithUpdate>
-    ),
     rn: () => (
       <WithUpdate>
         <AboutUpdateSplit label="Restart to update" />
@@ -131,9 +119,9 @@ export const ROOM_SPECIMENS: Record<string, RoomSpecimen> = {
   "card-origin": cardSpecimen(STARTED, { onOrigin: none }),
   "card-undo": cardSpecimen(MOVED, { onUndo: none }),
   "card-undo-ended": cardSpecimen(MOVED_ENDED, { onUndo: none }),
-  "debug-journal": { width: 640, dom: () => <DomConversation conversation={JOURNAL} />, rn: () => <Conversation conversation={JOURNAL} /> },
-  "file-patch-side": surfaceSpecimen(DomPatchSideBySide, PatchSideBySide, PATCH),
-  "file-html": surfaceSpecimen(DomRenderedFileView, RenderedFileView, HTML),
-  "file-json-form": surfaceSpecimen(DomJsonFormView, JsonFormView, TSCONFIG, { "project:tsconfig.json": "tsconfig" }),
-  "file-json-form-package": surfaceSpecimen(DomJsonFormView, JsonFormView, PACKAGE, { "project:package.json": "package-json" }),
+  "debug-journal": { width: 640, rn: () => <Conversation conversation={JOURNAL} /> },
+  "file-patch-side": surfaceSpecimen(PatchSideBySide, PATCH),
+  "file-html": surfaceSpecimen(RenderedFileView, HTML),
+  "file-json-form": surfaceSpecimen(JsonFormView, TSCONFIG, { "project:tsconfig.json": "tsconfig" }),
+  "file-json-form-package": surfaceSpecimen(JsonFormView, PACKAGE, { "project:package.json": "package-json" }),
 };

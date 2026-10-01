@@ -14,7 +14,7 @@ import { fileURLToPath } from "node:url";
 
 const outdir = "dist";
 // Remove only this build's own artifacts. Clearing all of `dist/` would delete
-// `dist/renderer/` (Vite's output), making the build order load-bearing.
+// `dist/client/` (the One client, copied in by `build:client`), making the build order load-bearing.
 await Promise.all(
   [
     "main.cjs",
@@ -28,6 +28,9 @@ await Promise.all(
     "main-modules.json",
   ].map((f) => rm(`${outdir}/${f}`, { force: true }).catch(() => {})),
 );
+// …and what a build from before the DOM renderer was deleted left behind: `dist/renderer/` was Vite's
+// output, nothing writes it now, and the packager copies whatever `dist/` holds.
+await rm(`${outdir}/renderer`, { recursive: true, force: true }).catch(() => {});
 
 /** @type {import("esbuild").BuildOptions} */
 const common = {
@@ -62,8 +65,9 @@ const common = {
 
 /**
  * Every file the four bundles below read, as absolute paths: `dist/main-modules.json`, which the
- * renderer build's license plugin (`licenses/thirdPartyLicenses.ts`) reads to tag the packages in
- * them `main`. This build runs first and is a different bundler, so the list is handed over on disk.
+ * client build's license plugin (`licenses/thirdPartyLicenses.ts`, run from `packages/client/vite.config.ts`)
+ * reads to tag the packages in them `main`. This build runs first and is a different bundler, so the
+ * list is handed over on disk.
  * A metafile input is relative to the working directory; one in a namespace (`<define:…>`,
  * `(disabled):fs`) is not a file, and neither is an external, which never appears as an input.
  */

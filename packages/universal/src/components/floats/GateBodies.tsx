@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
 import { choicesOfConfig, fillFormSchema, readAnswer, type ChooseOptionConfig, type ConfirmActionConfig, type FillFormConfig, type PendingInteraction } from "@jaira/shared/browser";
 import { pendingOfPrompt } from "@jaira/ui/approvalModel";
-import { EMPTY_ANSWER, answerOf, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import { EMPTY_ANSWER, answerOf, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choicesModel";
 import { formStartsWith } from "@jaira/ui/gateForms";
 import { useSchemaCheck, useTouched } from "@jaira/ui/schemaForm/check";
 import { checkBlocker } from "@jaira/ui/schemaForm/model";

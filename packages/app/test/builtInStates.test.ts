@@ -21,20 +21,18 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage, type WorkflowSource } from "@jaira/shared";
+import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
-import { layerBarOf } from "../src/renderer/builtIn";
+import { layerBarOf } from "../src/renderer/builtInModel";
 import { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, titleOf } from "../src/renderer/chatWorkflow";
-import { debugFileStatus } from "../src/renderer/debugPane";
+import { debugFileStatus } from "../src/renderer/debugModel";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
-import { builtInItems } from "../src/renderer/files";
+import { builtInItems } from "../src/renderer/filesModel";
 import { runTargetOf } from "../src/renderer/runForm";
-import { WorkflowEditor } from "../src/renderer/stateEditor";
+import { savesOf } from "../src/renderer/stateEditorModel";
 
 let dir: string;
 let service: AppService;
@@ -174,79 +172,37 @@ describe("how a file stands against what ships", () => {
 });
 
 describe("the state editor on the three kinds of file", () => {
-  const source = (patch: Partial<WorkflowSource>): WorkflowSource => ({
-    stateId: CHAT_SESSION,
-    layer: "system",
-    file: "$SYSTEM/workflows/chat/session.json",
-    text: shippedText(CHAT_SESSION),
-    exists: true,
-    ...patch,
-  });
-  const editor = (src: WorkflowSource, saved: string[] = []): string =>
-    renderToStaticMarkup(
-      createElement(WorkflowEditor, {
-        source: src,
-        tree: null,
-        executors: [],
-        busy: false,
-        onSave: (stateId: string) => saved.push(stateId),
-        layerActions: { hasProject: true, onOverride: () => undefined },
-      } as unknown as Parameters<typeof WorkflowEditor>[0]),
-    );
+  // What the editor SAYS about each kind of file is `layerBarOf`'s, and whether it offers Save is
+  // `savesOf`'s; both are held here. Whether a built-in opens as a live form or as a reading —
+  // copy-on-edit, which is off once Shared has its own copy — is decided inside `useWorkflowEditor`,
+  // which is a hook, so these cases hand the bar that decision rather than reach it.
 
-  it("with copy-on-edit, draws a built-in as a live form whose first change copies it to Shared", () => {
-    const html = renderToStaticMarkup(
-      createElement(WorkflowEditor, {
-        source: source({ builtIn: { layers: ["system"] } }),
-        tree: null,
-        executors: [],
-        busy: false,
-        onSave: () => undefined,
-        layerActions: { hasProject: true, onOverride: () => undefined, onEditCopy: () => undefined },
-      } as unknown as Parameters<typeof WorkflowEditor>[0]),
-    );
-    expect(html).toContain("an edit copies it to Shared");
-    expect(html).not.toContain("built in · read-only");
-    // Live: no inert fieldset around the form.
-    expect(html).not.toContain(`class="reading"`);
+  it("with copy-on-edit, says of a built-in that its first change copies it to Shared", () => {
+    const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system"] } }, true, true);
+    expect(bar?.chip.text).toBe("built in · an edit copies it to Shared");
+    expect(bar?.chip.text).not.toContain("read-only");
   });
 
   it("stays read-only when Shared already has a copy — that copy is the one that runs", () => {
-    const html = renderToStaticMarkup(
-      createElement(WorkflowEditor, {
-        source: source({ builtIn: { layers: ["system", "base"] } }),
-        tree: null,
-        executors: [],
-        busy: false,
-        onSave: () => undefined,
-        layerActions: { hasProject: true, onOverride: () => undefined, onEditCopy: () => undefined },
-      } as unknown as Parameters<typeof WorkflowEditor>[0]),
-    );
-    expect(html).toContain("built in · read-only");
+    const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system", "base"] } }, true);
+    expect(bar?.chip.text).toBe("built in · read-only");
+    expect(bar?.chip.title).toBe("Shared already has a copy of this state, and it is the one that runs — edit that.");
   });
 
-  it("draws a built-in as read-only, with the two overrides and no Save", () => {
-    const html = editor(source({ builtIn: { layers: ["system"] } }));
-    expect(html).toContain("built in · read-only");
-    expect(html).toContain("Edit a copy in Shared");
-    expect(html).toContain("Override here");
-    // The form is the inert reading, and the bar that holds Save and Revert is not drawn at all.
-    expect(html).toContain("<fieldset");
-    expect(html).not.toContain("edit-actions");
-    expect(html).not.toMatch(/>\s*Save\s*</);
+  it("says a built-in is read-only, with the two overrides and no Save", () => {
+    const bar = layerBarOf({ layer: "system", builtIn: { layers: ["system"] } }, true);
+    expect(bar?.chip.text).toBe("built in · read-only");
+    expect(bar?.actions.map((a) => a.label)).toEqual(["Edit a copy in Shared", "Override here"]);
+    // The bar that holds Save and Revert is not drawn for what ships, whether the form over it is a
+    // reading or, with copy-on-edit, live.
+    expect(savesOf(true, true)).toBe(false);
+    expect(savesOf(false, true)).toBe(false);
   });
 
-  it("still edits a project file, and says nothing about layers on one that overrides nothing", () => {
-    const html = editor(source({ layer: "project", file: "/w/atlas/.jaira/workflows/mine.json", stateId: "mine" }));
-    expect(html).not.toContain("built in");
-    expect(html).not.toContain("<fieldset");
-    expect(html).toMatch(/>\s*Save\s*</);
-  });
-
-  it("draws a file that shadows a built-in as an override, with the comparison one click away", () => {
-    const html = editor(source({ layer: "project", builtIn: { layers: ["project", "system"] } }));
-    expect(html).toContain("overrides built in");
-    expect(html).toContain("Compare with what ships");
+  it("says a file that shadows a built-in overrides it, with the comparison one click away", () => {
+    const bar = layerBarOf({ layer: "project", builtIn: { layers: ["project", "system"] } }, true);
+    expect(bar?.chip.text).toBe("overrides built in");
+    expect(bar?.actions.map((a) => a.label)).toEqual(["Compare with what ships"]);
   });
 
   it("decides the bar from the file alone", () => {

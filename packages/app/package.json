@@ -15,16 +15,12 @@
   },
   "scripts": {
     "build:main": "node build.mjs",
-    "build:renderer": "vite build",
-    "build": "npm run build:main && npm run build:renderer && npm run build:client",
+    "build": "npm run build:main && npm run build:client",
     "start": "npm run build && electron .",
-    "start:dom": "npm run build && electron . --ui=dom",
     "dist": "npm run build && node package.mjs",
     "tailnet": "node buildTailnet.mjs",
-    "shots": "tsx shots/run.mts",
-    "shots:logs": "tsx shots/logs.mts",
-    "shots:freeze": "tsx shots/pair.mts --freeze",
-    "shots:goldens": "tsx shots/pair.mts --against-goldens",
+    "shots": "tsx shots/pair.mts",
+    "shots:studio": "tsx shots/studio.mts --goldens-world --built",
     "build:client": "npm --workspace @jaira/client run build && node -e \"const fs=require('fs');fs.rmSync('dist/client',{recursive:true,force:true});fs.cpSync('../client/dist/client','dist/client',{recursive:true})\""
   },
   "dependencies": {
@@ -66,9 +62,9 @@
     "@vitejs/plugin-react": "^4.3.4",
     "electron": "^44.4.5",
     "electron-builder": "^26.15.3",
+    "esbuild": "^0.25.12",
     "node-llama-cpp": "^3.21.1",
     "pixelmatch": "^7.2.0",
-    "pngjs": "^7.0.0",
-    "vite": "^6.0.5"
+    "pngjs": "^7.0.0"
   }
 }

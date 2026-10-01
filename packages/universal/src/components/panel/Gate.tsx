@@ -4,10 +4,10 @@ import { choicesOfConfig, fillFormSchema, isComponentName, type Choice, type Pen
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "../settings/Button";
-import { EMPTY_ANSWER, answerOf, answersOfValue, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import { EMPTY_ANSWER, answerOf, answersOfValue, initialAnswers, submitsOnClick, type Answer } from "@jaira/ui/choicesModel";
 import { ChoiceList, ChoiceSteps, FieldFrame } from "../floats/Choices";
 import { COMPONENT_ICON } from "@jaira/ui/gateModel";
-import { PATHS } from "@jaira/ui/icons";
+import { PATHS } from "@jaira/ui/iconPaths";
 import { Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Uncopied } from "../../app/Uncopied";

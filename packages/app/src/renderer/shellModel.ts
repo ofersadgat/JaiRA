@@ -6,9 +6,9 @@
  * waiting. Nothing here renders; the drawers the rows open onto stay each shell's own.
  */
 import type { ProjectSummary, ProjectTask } from "@jaira/shared/browser";
-import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, type PillCounts } from "./pill";
+import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, type PillCounts } from "./pillModel";
 import { projectName } from "./projects";
-import type { SidebarProject, SidebarView } from "./sidebar";
+import type { SidebarProject, SidebarView } from "./sidebarTypes";
 import type { View } from "./store";
 import { groupOf, type ProjectGroup } from "./workspaceGroups";
 

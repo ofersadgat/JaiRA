@@ -106,7 +106,6 @@ async function main(): Promise<void> {
 
   // The desktop, with something on its board.
   const world = buildWorld(join(import.meta.dirname, ".world-android"));
-  process.env["JAIRA_RENDERER"] = "one";
   const desktop = await App.launch(world, { out: OUT, port: 9290 });
   let metro: ChildProcess | undefined;
   try {

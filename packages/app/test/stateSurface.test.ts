@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { InstanceNode } from "@jaira/shared/browser";
-import { advanceTargetOf, failureWordOf, headerToneOf, surfaceKindOf } from "../src/renderer/stateSurface";
+import { advanceTargetOf, headerToneOf, surfaceKindOf } from "../src/renderer/stateSurfaceModel";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -108,7 +108,6 @@ describe("how loudly a header speaks", () => {
       operation: { kind: "function", status: "failed", reason: "Cannot read properties of undefined" },
     });
     expect(headerToneOf(threw, "asked")).toBe("red");
-    expect(failureWordOf(threw)).toBe("function threw");
 
     const errored = node({
       instanceId: "3",
@@ -117,7 +116,6 @@ describe("how loudly a header speaks", () => {
       operation: { kind: "prompt", status: "failed", reason: "no API key" },
     });
     expect(headerToneOf(errored, "conversation")).toBe("red");
-    expect(failureWordOf(errored)).toBe("call failed");
   });
 
   it("stays quiet for a CANCELLATION, which is somebody pressing Stop", () => {

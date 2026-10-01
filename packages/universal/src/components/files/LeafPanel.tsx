@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { BoardCard } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
 import { BADGE } from "@jaira/ui/panelFaceModel";
-import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
+import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskNameModel";
 import { nodeAt } from "@jaira/ui/trail";
 import { entriesOf, journalFor, markAnsweredQuestions } from "@jaira/ui/transcript";
 import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps, type FontSpec } from "../../primitives";

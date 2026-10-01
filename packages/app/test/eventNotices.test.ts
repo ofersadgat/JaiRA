@@ -1,17 +1,14 @@
 /**
  * Event notices in the inbox strip (decision 0010 §4; the approved mockup's option A): the newest
  * unread notice sits quietly at the strip's right end with "+N" for the older unread ones, × reads it
- * and the next takes its place, and none of it is counted in "Awaiting you". The model is pure; the
- * strip is rendered to static markup, where the claims are structural.
+ * and the next takes its place, and none of it is counted in "Awaiting you". The model is pure, and
+ * that is what is held here; the strip that draws it is the universal tree's.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { defaultUiState, eventRef, type EventsNotice, type InstanceNode, type PendingInteraction, type ProjectSummary } from "@jaira/shared/browser";
-import { awaitingCount, noticeAge, noticeMeta, noticeToShow, unreadNotices, withNoticeRead, type ShownNotice } from "../src/renderer/noticesModel";
-import { InboxStrip } from "../src/renderer/inboxStrip";
-import { surfaceKindOf } from "../src/renderer/stateSurface";
-import { toldOf } from "../src/renderer/runViews";
+import { defaultUiState, eventRef, type EventsNotice, type InstanceNode, type PendingInteraction } from "@jaira/shared/browser";
+import { awaitingCount, noticeAge, noticeMeta, noticeTitle, noticeToShow, unreadNotices, withNoticeRead } from "../src/renderer/noticesModel";
+import { surfaceKindOf } from "../src/renderer/stateSurfaceModel";
+import { toldOf } from "../src/renderer/runConversationModel";
 import { dropEchoedTransitions, type BandNote } from "../src/renderer/sessionBands";
 
 const NOW = 1_800_000_000_000;
@@ -92,54 +89,25 @@ describe("what the item says", () => {
 });
 
 describe("the strip", () => {
-  const projects: ProjectSummary[] = [{ project: DIR, label: "app", kind: "user", tasks: 0, running: 0, statuses: {}, waiting: 0, ended: [] }];
-  const hues = { [DIR]: "var(--p1)" };
   const gate = { requestId: "r1", taskId: "t1", project: DIR, component: "confirm_action", config: { prompt: "Accept this review of !42?" } } as unknown as PendingInteraction;
-  /** `null`: no notice to show. */
-  const draw = (pending: PendingInteraction[], shown: ShownNotice | null = noticeToShow(backlog, {}) ?? null): string =>
-    renderToStaticMarkup(createElement(InboxStrip, { pending, approvals: [], questions: [], projects, hues, onSelect: () => undefined, notice: shown ?? undefined, now: NOW }));
 
-  it("is not drawn with nothing awaiting and no notice", () => {
-    expect(draw([], null)).toBe("");
-  });
-
-  it("without a notice: only what is awaiting you, as before", () => {
-    const html = draw([gate], null);
-    expect(html).toContain("Awaiting you");
-    expect(html).toContain("Accept this review of !42?");
-    expect(html).not.toContain("strip-notice");
-    expect(html).not.toContain('class="spacer"');
-  });
-
-  it("with a notice: one quiet item after a spacer — bell, chip, text, meta, +N, × — and the count is still only what awaits you", () => {
-    const html = draw([gate]);
-    expect(html).toMatch(/<span class="pill-n">1<\/span>/);
+  it("with a notice: the count is still only what awaits you", () => {
+    // One gate awaiting and three notices unread: the pill says 1, and the notices are the "+2" behind
+    // the one shown — never added to it.
+    expect(noticeToShow(backlog, {})).toEqual({ notice: checks, more: 2 });
     expect(awaitingCount({ pending: [gate], approvals: [], questions: [] })).toBe(1);
-    // After everything awaiting, behind a spacer.
-    expect(html.indexOf('class="spacer"')).toBeGreaterThan(html.indexOf("Accept this review"));
-    expect(html.indexOf('class="strip-notice"')).toBeGreaterThan(html.indexOf('class="spacer"'));
-    const item = html.slice(html.indexOf('class="strip-notice"'));
-    expect(item).toContain("🔔");
-    expect(item).toMatch(/class="chip strip-project"[^>]*>app</);
-    expect(item).toContain('<span class="strip-notice-text">Checks failed on main</span>');
-    expect(item).toContain('<span class="strip-notice-meta data-faint">git.checks.failed a1b2c3d · 2 m</span>');
-    expect(item).toMatch(/class="strip-notice-more app-secondary"[^>]*>\+2</);
   });
 
-  it("the item is a button with a label, and × is a button of its own with its own", () => {
-    const item = draw([gate]).slice(0);
-    expect(item).toMatch(/<button type="button" class="strip-notice-open"[^>]*aria-label="Notice from app: Checks failed on main — told by the events task \(checks_red\)/);
-    expect(item).toMatch(/<button type="button" class="quiet strip-dismiss"[^>]*aria-label="Dismiss this notice"[^>]*>×<\/button>/);
-    // Side by side, not one inside the other.
-    expect(item).toMatch(/<\/button><button type="button" class="quiet strip-dismiss"/);
+  it("the item's label says what it says, who told it and what a click does", () => {
+    expect(noticeTitle(checks)).toBe("Checks failed on main — told by the events task (checks_red) · git.checks.failed a1b2c3d on main. Opens its conversation at that step.");
+    // No automation recorded and no summary handed: it says what it knows.
+    expect(noticeTitle(release)).toBe("Release branch pushed — told by the events task. Opens its conversation at that step.");
   });
 
-  it("with a notice alone: drawn, without an 'Awaiting you' that would say 0", () => {
-    const html = draw([], { notice: release, more: 0 });
-    expect(html).toContain("Release branch pushed");
-    expect(html).not.toContain("Awaiting you");
-    expect(html).not.toContain("pill-n");
-    expect(html).not.toContain("strip-notice-more");
+  it("with a notice alone: nothing is counted, so there is no 'Awaiting you' to say 0", () => {
+    const read = { [checks.id]: checks.at, [review.id]: review.at };
+    expect(noticeToShow(backlog, read)).toEqual({ notice: release, more: 0 });
+    expect(awaitingCount({ pending: [], approvals: [], questions: [] })).toBe(0);
   });
 });
 

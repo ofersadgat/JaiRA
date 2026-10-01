@@ -1,6 +1,6 @@
 /**
  * Package the built app into an installer for THIS machine's platform and architecture
- * (decision 0011 §2). Run after `build.mjs` and the renderer build: `npm run dist`.
+ * (decision 0011 §2). Run after `build.mjs` and the client build: `npm run dist`.
  *
  *   node package.mjs                 # installer(s) for this platform, into release/<version>/
  *   node package.mjs --dir           # the unpacked app only, no installer: quicker, and what the smoke test needs
@@ -89,7 +89,7 @@ function prune(stage) {
 
 function stageApp() {
   const dist = join(here, "dist");
-  for (const file of ["main.cjs", "preload.cjs", "tsProjectWorker.cjs", "mcpBridgeWorker.cjs", "renderer/index.html", "client/index.html", "builtin"]) {
+  for (const file of ["main.cjs", "preload.cjs", "tsProjectWorker.cjs", "mcpBridgeWorker.cjs", "client/index.html", "client/third-party-licenses.json", "builtin"]) {
     if (!existsSync(join(dist, file))) throw new Error(`dist/${file} is missing — run the build first (npm run build)`);
   }
 

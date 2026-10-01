@@ -14,7 +14,7 @@ import {
 } from "@jaira/shared/browser";
 import { layerActionLabel, layerBarOf, type LayerBarAction, type LayerBarModel } from "@jaira/ui/builtInModel";
 import { childKeyOptions, childStateOptions } from "@jaira/ui/completions";
-import type { EditorTab } from "@jaira/ui/editorChrome";
+import type { EditorTab } from "@jaira/ui/stateEditorModel";
 import type { UiSurface } from "@jaira/ui/fileTypes";
 import { fieldClass, type FormIssues } from "@jaira/ui/issues";
 import { LinkReaderProvider } from "@jaira/ui/linkModel";

@@ -1,15 +1,13 @@
 import { useState, type JSX } from "react";
 import type { ViewHint, ViewId } from "@jaira/shared/browser";
-import { Markdown as DomMarkdown } from "@jaira/ui/markdown";
-import { ValueView as DomValueView } from "@jaira/ui/valueView";
 import { Markdown, ValueView } from "@jaira/universal";
 
 /**
- * The value view's readings as specimens (decision 0015): `valueView.tsx`'s `ValueView` against its
- * universal copy (`components/panel/ValueView.tsx`), each from the same value and hint.
+ * The value view's readings as specimens (decision 0015): `ValueView`
+ * (`components/panel/ValueView.tsx`, the copy of `valueView.tsx`'s), each from a value and a hint.
  *
  *  - `value-json` — a structured value with a schema: coloured, each key's description ghosted at the
- *    end of its line; `value-json-edit` — the same, editable (the DOM keeps the coloured reading).
+ *    end of its line; `value-json-edit` — the same, editable (it keeps the coloured reading).
  *  - `value-form` — the same value as the fields its schema declares, read-only.
  *  - `value-patch` — a ```diff: two files and a rename, hunks, a line with no newline at the end.
  *  - `value-table` — a CSV as rows and columns: a ragged row, a cell past 320 cut with an ellipsis.
@@ -21,7 +19,6 @@ import { Markdown, ValueView } from "@jaira/universal";
  */
 export interface ValueSpecimen {
   width: number;
-  dom: () => JSX.Element;
   rn: () => JSX.Element;
 }
 
@@ -126,8 +123,8 @@ const PICTURES = [
   "The end.",
 ].join("\n");
 
-/** One `ValueView` on each page, from the same props; `editable` holds its own draft on both. */
-function pair(value: unknown, hint: ViewHint | undefined, opts: { view?: ViewId; editable?: boolean; label?: string; inline?: boolean } = {}): Pick<ValueSpecimen, "dom" | "rn"> {
+/** One `ValueView` from the props; `editable` holds its own draft. */
+function pair(value: unknown, hint: ViewHint | undefined, opts: { view?: ViewId; editable?: boolean; label?: string; inline?: boolean } = {}): Pick<ValueSpecimen, "rn"> {
   const props = (edit: ((next: string) => void) | undefined) => ({
     ...(hint !== undefined ? { hint } : {}),
     ...(opts.view !== undefined ? { view: opts.view } : {}),
@@ -136,10 +133,6 @@ function pair(value: unknown, hint: ViewHint | undefined, opts: { view?: ViewId;
     ...(edit !== undefined ? { edit } : {}),
   });
   return {
-    dom: function Dom() {
-      const [held, setHeld] = useState(value);
-      return <DomValueView value={held} {...props(opts.editable === true ? setHeld : undefined)} />;
-    },
     rn: function Rn() {
       const [held, setHeld] = useState(value);
       return <ValueView value={held} {...props(opts.editable === true ? setHeld : undefined)} />;
@@ -155,12 +148,6 @@ export const VALUE_SPECIMENS: Record<string, ValueSpecimen> = {
   "value-table": { width: 520, ...pair(CSV, { mime: "text/csv" }, { label: "runs.csv" }) },
   "value-image": {
     width: 520,
-    dom: () => (
-      <div>
-        <DomValueView value={SMALL_PNG} hint={{ mime: "image/png" }} label="small.png" />
-        <DomValueView value={WIDE_PNG} hint={{ mime: "image/png" }} label="wide.png" />
-      </div>
-    ),
     rn: () => (
       <>
         <ValueView value={SMALL_PNG} hint={{ mime: "image/png" }} label="small.png" />
@@ -172,16 +159,10 @@ export const VALUE_SPECIMENS: Record<string, ValueSpecimen> = {
   "value-code-edit": { width: 520, ...pair(CODE, { mime: "text/x-typescript" }, { label: "lane.ts", editable: true }) },
   "value-changes": {
     width: 520,
-    dom: () => <DomValueView value={CHANGES} label="files" outcomes={OUTCOMES} />,
     rn: () => <ValueView value={CHANGES} label="files" outcomes={OUTCOMES} />,
   },
   "markdown-images": {
     width: 520,
-    dom: () => (
-      <div className="markdown-host">
-        <DomMarkdown text={PICTURES} />
-      </div>
-    ),
     rn: () => <Markdown text={PICTURES} />,
   },
 };

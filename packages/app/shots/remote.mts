@@ -1,5 +1,5 @@
 /**
- * The One client in an ordinary browser, as a device on a desktop's engine (decisions 0015 S2, and 0013
+ * The client in an ordinary browser, as a device on a desktop's engine (decisions 0015 S2, and 0013
  * as amended 2026-09-30): served by the engine's own loopback listener, paired by the one-time code the
  * desktop shows, and connected over the engine's transport — the same frames another machine speaks.
  *
@@ -13,7 +13,7 @@
  * board the desktop shows, compared pixel by pixel, (4) WRITE: answer a gate the desktop's run parked
  * at, which the desktop's own store then no longer holds, (5) come back after a reload with no code —
  * the token it kept — (6) be sent back to the Connect screen when the desktop forgets it, (7) pair
- * again from the universal shell's page (`/rn`), with the code typed into that screen, (8) say so when
+ * again with the code typed into the Connect screen, as a phone does it, (8) say so when
  * a kept machine does not answer, and forget it when asked, and (9) say "Disconnected … Reconnecting…"
  * across the window when the desktop goes away under it.
  */
@@ -24,6 +24,7 @@ import { PNG } from "pngjs";
 import { happyRules } from "@jaira/runtime";
 import type { MachinesView } from "@jaira/shared";
 import { App } from "./driver.mjs";
+import { PAGE } from "./parityWorld.mjs";
 import { blockedAtTheGate, buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "parity", "remote");
@@ -43,7 +44,6 @@ async function main(): Promise<void> {
   rmSync(OUT, { recursive: true, force: true });
   mkdirSync(OUT, { recursive: true });
   const world = buildWorld(join(import.meta.dirname, ".world-remote"));
-  process.env.JAIRA_RENDERER = "one";
 
   const desktop = await App.launch(world, { out: OUT, port: 9250 });
   let browser: App | undefined;
@@ -57,6 +57,8 @@ async function main(): Promise<void> {
     const port = shown.self.port;
     if (port === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
     const page = `http://127.0.0.1:${port}/`;
+    /** The shell's page on that listener ({@link PAGE}). */
+    const shell = `${page}${PAGE.slice(1)}`;
     browser = await App.browse(CHROME, `${page}?code=${encodeURIComponent(shown.pairing.code)}`, { out: OUT, port: 9251 });
     await browser.until(drawn, "the browser to pair, connect and draw");
     await browser.until(says("add dark mode"), "the browser to show the desktop's task");
@@ -119,24 +121,24 @@ async function main(): Promise<void> {
     if ((await desktop.ipc<MachinesView>("machines:view", undefined)).devices.length !== 0) throw new Error("the desktop still lists the forgotten browser");
     console.log("(6) forgotten on the desktop, the browser was dropped and is back at the Connect screen");
 
-    // The universal shell's page, as a phone draws it: the same Connect screen, with the code typed.
-    await browser.navigate(`${page}rn`);
-    await browser.until(says("Connect to a JaiRA machine"), "the universal page's Connect screen");
+    // As a phone does it: the Connect screen, with the code typed.
+    await browser.navigate(shell);
+    await browser.until(says("Connect to a JaiRA machine"), "the shell's Connect screen");
     const again = await desktop.ipc<MachinesView>("machines:pairCode", undefined);
     await browser.evaluate(`document.querySelector('input[aria-label="Code"]').focus()`);
     await browser.type(again.pairing!.code);
     await browser.shot("rn-connect");
     await browser.clickText("Pair");
-    await browser.until(drawn, "the universal page to pair and draw");
-    await browser.until(says("plan the offline mode"), "the universal shell to show the board");
+    await browser.until(drawn, "the shell to pair and draw");
+    await browser.until(says("plan the offline mode"), "the shell to show the board");
     await sleep(1000);
     await browser.shot("rn-board");
-    console.log("(7) the universal shell's page paired by a typed code and draws the board");
+    console.log("(7) the shell paired by a typed code and draws the board");
 
     // A kept machine that cannot be reached at launch: the screen says which and why, keeps trying, and
     // offers to forget it. Stood in for by pointing the kept pairing at a port nothing listens on.
     await browser.evaluate(`(() => { const p = JSON.parse(localStorage.getItem("jaira.pairing")); p.url = "ws://127.0.0.1:9/engine"; p.address = "127.0.0.1:9"; localStorage.setItem("jaira.pairing", JSON.stringify(p)); })()`);
-    await browser.navigate(`${page}rn`);
+    await browser.navigate(shell);
     await browser.until(says("Connecting to"), "the screen for a kept machine being connected to");
     await browser.until(says("Forget this machine"), "the offer to forget it");
     await browser.until(`/nothing answers|did not answer|could not reach/i.test(document.body.innerText)`, "why it is not connected");
@@ -148,8 +150,8 @@ async function main(): Promise<void> {
 
     // The engine going away under a connected window: the shell says so across its top and keeps trying.
     const last = await desktop.ipc<MachinesView>("machines:pairCode", undefined);
-    await browser.navigate(`${page}rn?code=${encodeURIComponent(last.pairing!.code)}`);
-    await browser.until(drawn, "the universal page to pair again");
+    await browser.navigate(`${shell}?code=${encodeURIComponent(last.pairing!.code)}`);
+    await browser.until(drawn, "the shell to pair again");
     await browser.until(says("plan the offline mode"), "the board again");
     await desktop.close();
     await browser.until(says("Reconnecting…"), "the line that says the machine went away");

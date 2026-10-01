@@ -12,7 +12,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { FrameContextMenu } from "@jaira/shared";
-import { itemsForFrame, selectionForMenu } from "../src/renderer/pointerMenu";
+import { itemsForFrame, selectionForMenu } from "../src/renderer/pointerMenuModel";
 
 /** A right-click on ordinary content, which every case here varies one thing from. */
 function clicked(over: Partial<FrameContextMenu> = {}): FrameContextMenu {

@@ -1,235 +1,116 @@
 /**
- * The side panel's frame and faces, rendered on the server (the panel rulings, 2026-09-24).
+ * What the side panel's frame and faces SAY, asserted on the models they draw from (the panel
+ * rulings, 2026-09-24).
  *
- * What is pinned here is the furniture the person ruled on: the root's head carries its verbs as
- * icons on the name's line, a pushed entry has ‹ and the trail it came from, a pinned stack shows the
- * waiting selection on the offer bar, and a folded panel is the rail of the root's tabs with the
- * name under each. And the two rules a face owns: a state's Configuration tab is hidden while the
- * editor has the file, and a conversation's context has no Conversation tab.
+ * This file rendered the DOM frame (`sidePanel.tsx`) and built faces with `panelFaces.tsx`'s `faceOf`;
+ * both went with the DOM renderer. The universal frame and faces
+ * (`packages/universal/src/components/panel/SidePanel.tsx`, `faces.tsx`) draw from the same pure
+ * modules, and what is pinned here is what those modules decide: what a pushed entry's trail and kind
+ * word read, where ✕ folds rather than closes, a state's Checks count, a chat's tabs, which task's
+ * Configuration is called Automations, and where a copy of a task may start. The stack's own rules are
+ * in `panelStack.test.ts`. The furniture — icons on the name's line, the rail, the offer bar's words —
+ * is the frame's, and is not tested here.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import type { StateView } from "@jaira/shared/browser";
-import { SidePanel, type PanelFace } from "../src/renderer/sidePanel";
-import { EMPTY_STACK, pin, push, reconcile, type PanelEntry, type PanelStack } from "../src/renderer/panelStack";
-import { faceOf, type PanelHost } from "../src/renderer/panelFaces";
+import type { InstanceNode, StateView, TaskDetail } from "@jaira/shared/browser";
+import { chatTabs, isEventsTask, tab, taskTabs } from "../src/renderer/panelFaceModel";
+import { closeFoldsOf, rerunStartsOf } from "../src/renderer/panelHost";
+import { EMPTY_STACK, crumbOf, kindWordOf, push, reconcile, topOf, type PanelEntry } from "../src/renderer/panelStack";
+import { checksCountOf } from "../src/renderer/panelViewsModel";
 
 const task: PanelEntry = { kind: "task", key: "task:t1", taskId: "t1", tab: "conversation" };
 const config: PanelEntry = { kind: "config", key: "config:x", stateId: "feature/plan/critique" };
-
-const face = (entry: PanelEntry): PanelFace =>
-  entry.kind === "task"
-    ? {
-        glyph: "●",
-        title: entry.taskId === "t1" ? "Tighten the plan" : "Add dark mode",
-        titleText: entry.taskId === "t1" ? "Tighten the plan" : "Add dark mode",
-        sub: "t1 · feature",
-        verbs: [{ icon: "play", label: "Re-run", primary: true, onClick: () => undefined }],
-        tabs: [
-          { id: "conversation", label: "Conversation", icon: "comment" },
-          { id: "steps", label: "Steps", icon: "plan", count: 12 },
-        ],
-        tab: entry.tab,
-        body: "the conversation",
-      }
-    : { title: "critique", titleText: "critique · configuration", body: "the form" };
-
-const draw = (stack: PanelStack, folded = false): string =>
-  renderToStaticMarkup(createElement(SidePanel, { stack, onStack: () => undefined, face, folded, onFold: () => undefined }));
 
 describe("the frame", () => {
   const root = reconcile(EMPTY_STACK, task);
 
   it("draws nothing for an empty stack", () => {
-    expect(draw(EMPTY_STACK)).toBe("");
+    // The frame asks for what is on top and draws nothing when there is none.
+    expect(topOf(EMPTY_STACK)).toBeUndefined();
+    expect(topOf(root)).toBe(task);
   });
 
-  it("puts the root's verbs on the name's line, as icons, before pin · fold · close", () => {
-    const html = draw(root);
-    expect(html).toContain("Tighten the plan");
-    expect(html).toContain('aria-label="Re-run"');
-    expect(html).toMatch(/sp-verbs[\s\S]*sp-controls/);
-    expect(html).toContain("Pin — keep this");
-    expect(html).toContain("Fold the panel");
-    expect(html).toContain("Close the panel");
-    // No row of text buttons under the head any more.
-    expect(html).not.toContain(">Re-run</button>");
-  });
-
-  it("beside a conversation, ✕ folds to the rail instead of closing, and is the only fold", () => {
-    const html = renderToStaticMarkup(createElement(SidePanel, { stack: root, onStack: () => undefined, face, folded: false, onFold: () => undefined, closeFolds: true }));
-    expect(html).toContain("Collapse the panel to a rail");
-    expect(html).not.toContain("Fold the panel");
-    expect(html).not.toContain("Close the panel");
-  });
-
-  it("draws the root's tabs, the open one marked", () => {
-    const html = draw(root);
-    expect(html).toMatch(/aria-selected="true"[^>]*>[\s\S]*?Conversation/);
-    expect(html).toContain(">12<");
+  it("beside a conversation, ✕ folds to the rail instead of closing", () => {
+    // The rule the shell hands the frame as `closeFolds`: a panel whose root stands beside a
+    // conversation — a task's in the main view, or a chat — folds; one standing on a task closes.
+    expect(closeFoldsOf(reconcile(EMPTY_STACK, { kind: "convo", key: "convo:t1", taskId: "t1", tab: "steps" }))).toBe(true);
+    expect(closeFoldsOf(reconcile(EMPTY_STACK, { kind: "chat", key: "chat:c1", taskId: "c1", tab: "produced" }))).toBe(true);
+    expect(closeFoldsOf(root)).toBe(false);
+    // It is the ROOT that decides: a card pushed on a task's panel does not make it fold.
+    expect(closeFoldsOf(push(root, config))).toBe(false);
   });
 
   it("gives a pushed entry a way back and the trail it came from", () => {
-    const html = draw(push(root, config));
-    expect(html).toContain('title="Back"');
-    expect(html).toContain("Back to t1");
-    expect(html).toContain("as it ran");
-    // The tabs stay: choosing one is a way back to the root.
-    expect(html).toContain("Conversation");
-  });
-
-  it("pinned, keeps the stack and names the new selection on the offer bar", () => {
-    const pinned = reconcile(pin(root, true), { kind: "task", key: "task:t2", taskId: "t2", tab: "conversation" });
-    const html = draw(pinned);
-    expect(html).toContain("Tighten the plan");
-    // Named as its own face names it, not by its id.
-    expect(html).toContain("<b>Add dark mode</b> is selected");
-    expect(html).toContain("Show it here");
-  });
-
-  it("folded, is the rail: the root's tabs with the name under each, and pin and unfold at the foot", () => {
-    const html = draw(root, true);
-    expect(html).toContain("sp-rail");
-    expect(html).toContain('<span class="sp-rail-name">Steps</span>');
-    expect(html).toContain('class="sp-rail-badge">12<');
-    expect(html).toContain("Unfold the panel");
-    expect(html).not.toContain("the conversation");
+    const [under, top] = push(root, config).entries;
+    // The crumb, and "Back to t1" on it.
+    expect(crumbOf(under!)).toBe("t1");
+    // What kind of thing is on top, after its name.
+    expect(kindWordOf(top!)).toBe("as it ran");
   });
 });
 
-/** The least a host needs to answer for entries that never reach its task data. */
-const host = (patch: Partial<PanelHost> = {}): PanelHost =>
-  ({
-    detail: null,
-    detailOf: () => null,
-    gateOf: () => undefined,
-    project: undefined,
-    context: {} as PanelHost["context"],
-    onStack: () => undefined,
-    select: () => undefined,
-    startAgain: () => undefined,
-    cancel: () => undefined,
-    reviewChanges: () => undefined,
-    adoptTask: () => undefined,
-    adoptSubagent: () => undefined,
-    rerunSurface: () => undefined as never,
-    stateOf: () => undefined,
-    inEditor: () => false,
-    openInFiles: () => undefined,
-    config: { tree: null, executors: [], busy: false, services: {} },
-    held: [],
-    hold: () => undefined,
-    unhold: () => undefined,
-    serveOf: () => ({ serve: async () => ({ url: "", interactive: false }) as never }),
-    stepsHeight: 300,
-    setStepsHeight: () => undefined,
-    newTask: null,
-    automationsOf: () => null,
-    ...patch,
-  }) as PanelHost;
-
-const state: PanelEntry = { kind: "state", key: "state:p:feature/plan", stateId: "feature/plan", project: "p", tab: "configuration" };
 const view = { stateId: "feature/plan", issues: [{ severity: "error", path: "", message: "bad" }], children: [], transitions: [], references: [], referencedBy: [], driftedTasks: [], environment: {} } as unknown as StateView;
 
 describe("a state's face", () => {
-  it("offers Run · Checks · Configuration, Checks counting the errors", () => {
-    const tabs = faceOf(host({ stateOf: () => ({ view }) }), state).tabs!.map((tab) => tab.id);
-    expect(tabs).toEqual(["run", "checks", "configuration"]);
-    expect(faceOf(host({ stateOf: () => ({ view }) }), state).tabs![1]).toMatchObject({ count: 1, tone: "red" });
-  });
-
-  it("hides Configuration while the Files editor has the file — and falls back to Run", () => {
-    const face = faceOf(host({ stateOf: () => ({ view }), inEditor: () => true }), state);
-    expect(face.tabs!.map((tab) => tab.id)).toEqual(["run", "checks"]);
-    expect(face.tab).toBe("run");
-    // And no ⇤: it is already in the main view.
-    expect(face.verbs).toEqual([]);
-  });
-
-  it("offers ⇤ to the Files view when the editor does not have it", () => {
-    const face = faceOf(host({ stateOf: () => ({ view }) }), state);
-    expect(face.verbs!.map((verb) => verb.label)).toEqual(["Open in the Files view"]);
+  it("counts the errors on its Checks tab", () => {
+    expect(checksCountOf(view)).toEqual({ count: 1, tone: "red" });
+    expect(tab("checks", "Checks", checksCountOf(view))).toEqual({ id: "checks", label: "Checks", icon: "check", count: 1, tone: "red" });
   });
 });
 
-describe("the conversation's context", () => {
-  it("has no Conversation tab — the conversation is in the main view", () => {
-    const tabs = faceOf(host(), { kind: "convo", key: "convo:t1", taskId: "t1", tab: "steps" }).tabs!.map((tab) => tab.id);
-    expect(tabs).toEqual(["steps", "produced", "changes", "held"]);
-  });
+const eventsTask = { taskId: "e1", title: "events", workflow: "system/events", status: "running", createdAt: "2026-09-25T00:00:00Z", instances: [], timeline: [], runs: [] } as unknown as TaskDetail;
 
+describe("the conversation's context", () => {
   it("beside the events task's conversation, adds its Automations", () => {
-    const tabs = faceOf(host({ detailOf: () => eventsTask }), { kind: "convo", key: "convo:e1", taskId: "e1", tab: "steps" }).tabs!;
-    expect(tabs.map((tab) => tab.id)).toEqual(["steps", "produced", "changes", "held", "configuration"]);
-    expect(tabs.at(-1)!.label).toBe("Automations");
+    // The one question the face asks before adding the tab.
+    expect(isEventsTask(eventsTask)).toBe(true);
+    expect(isEventsTask({ ...eventsTask, workflow: "feature" })).toBe(false);
+    expect(isEventsTask(null)).toBe(false);
   });
 
   it("beside a plain chat has no Steps either", () => {
-    const tabs = faceOf(host(), { kind: "chat", key: "chat:c1", taskId: "c1", tab: "produced" }).tabs!.map((tab) => tab.id);
-    expect(tabs).toEqual(["produced", "changes", "held"]);
+    expect(chatTabs(0).map((one) => one.id)).toEqual(["produced", "changes", "held"]);
   });
 });
 
-describe("a letterhead is a way to its step's card", () => {
-  it("makes the name pickable, apart from the fold", async () => {
-    const { StateHeader } = await import("../src/renderer/stateSurface");
-    const html = renderToStaticMarkup(createElement(StateHeader, { open: true, name: "critique", onToggle: () => undefined, onPick: () => undefined }));
-    expect(html).toContain("lh-name mono pickable");
-    expect(html).toContain("Show this step");
-    const plain = renderToStaticMarkup(createElement(StateHeader, { open: true, name: "critique", onToggle: () => undefined }));
-    expect(plain).not.toContain("pickable");
-  });
+const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
+  status: "completed",
+  index: 0,
+  superseded: false,
+  startedAt: 0,
+  children: [],
+  ...patch,
 });
 
 describe("a re-run with changes", () => {
-  it("offers to start from the beginning or before any state the task entered", async () => {
-    const { RerunForm } = await import("../src/renderer/panelViews");
-    const html = renderToStaticMarkup(
-      createElement(RerunForm, {
-        run: {
-          workflow: "feature/plan",
-          fields: [],
-          values: {},
-          busy: false,
-          onChange: () => undefined,
-          onRun: () => undefined,
-          starts: [{ seq: 7, label: "plan › critique" }],
-          onFork: () => undefined,
-        },
-        onCancel: () => undefined,
-      }),
-    );
-    expect(html).toContain("Start from");
-    expect(html).toContain("the beginning");
-    expect(html).toContain("before plan › critique");
+  it("offers to start from the beginning or before any state the task entered", () => {
+    const critique = node({ instanceId: "3", stateId: "feature/plan/critique", childKey: "critique", parentInstanceId: "2" });
+    const plan = node({ instanceId: "2", stateId: "feature/plan", childKey: "plan", parentInstanceId: "1", children: [critique] });
+    const detail = { ...eventsTask, taskId: "t1", workflow: "feature", instances: [node({ instanceId: "1", stateId: "feature", children: [plan] })] } as TaskDetail;
+    const starts = rerunStartsOf(detail, [
+      { kind: "entered", instanceId: "1", seq: 1 },
+      { kind: "entered", instanceId: "2", seq: 3 },
+      { kind: "said", instanceId: "2", seq: 5 },
+      { kind: "entered", instanceId: "3", seq: 7 },
+      // An entry the tree has no node for is not a place to start.
+      { kind: "entered", instanceId: "9", seq: 9 },
+    ]);
+    // The root is not in the list: starting there is "the beginning", which the form offers itself.
+    // Each of the others is named by its path under the root, at its entry's journal position.
+    expect(starts).toEqual([
+      { seq: 3, label: "plan" },
+      { seq: 7, label: "plan › critique" },
+    ]);
   });
 });
 
-const eventsTask = { taskId: "e1", title: "events", workflow: "system/events", status: "running", createdAt: "2026-09-25T00:00:00Z", instances: [], timeline: [], runs: [] } as unknown as NonNullable<PanelHost["detail"]>;
-
 describe("the events task's face", () => {
-  it("calls its Configuration tab Automations, and draws the Automations editor for the task's project there", () => {
-    const asked: Array<string | undefined> = [];
-    const face = faceOf(
-      host({
-        detail: eventsTask,
-        detailOf: () => eventsTask,
-        automationsOf: (project) => {
-          asked.push(project);
-          return createElement("p", null, "the automations");
-        },
-      }),
-      { kind: "task", key: "task:e1", taskId: "e1", project: "C:/work/app", tab: "configuration" },
-    );
-    expect(face.tabs!.find((tab) => tab.id === "configuration")!.label).toBe("Automations");
-    expect(renderToStaticMarkup(createElement("div", null, face.body))).toContain("the automations");
-    expect(asked).toEqual(["C:/work/app"]);
+  it("calls its Configuration tab Automations", () => {
+    expect(taskTabs(undefined, eventsTask, true).find((one) => one.id === "configuration")!.label).toBe("Automations");
   });
 
   it("leaves any other task's Configuration as it was", () => {
-    const other = { ...eventsTask, workflow: "feature" } as typeof eventsTask;
-    const face = faceOf(host({ detail: other, detailOf: () => other }), { kind: "task", key: "task:e1", taskId: "e1", tab: "steps" });
-    expect(face.tabs!.find((tab) => tab.id === "configuration")!.label).toBe("Configuration");
+    const other = { ...eventsTask, workflow: "feature" } as TaskDetail;
+    expect(taskTabs(undefined, other, true).find((one) => one.id === "configuration")!.label).toBe("Configuration");
   });
 });

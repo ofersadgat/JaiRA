@@ -1,8 +1,8 @@
 import { useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { choicesOfQuestions } from "@jaira/shared/browser";
-import type { QuestionSurfaceProps } from "@jaira/ui/components";
-import { EMPTY_ANSWER, answerOf, submitsOnClick, type Answer } from "@jaira/ui/choices";
+import type { QuestionSurfaceProps } from "@jaira/ui/questionSurfaceTypes";
+import { EMPTY_ANSWER, answerOf, submitsOnClick, type Answer } from "@jaira/ui/choicesModel";
 import { Txt } from "../../primitives";
 import { Button } from "../settings/Button";
 import { ChoiceList, ChoiceSteps } from "./Choices";

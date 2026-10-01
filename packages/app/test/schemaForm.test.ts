@@ -4,29 +4,43 @@
  * It was ported from a project whose schemas were written FOR a form: flat objects of scalars, every
  * shape spelled out where it is used. `shared/schemas.ts` is not that. Those documents are written
  * for an editor's completion and for validation, so a shape used twice is declared once under
- * `definitions` and referred to — three hundred `$ref`s in the state schema alone — and the maps a
- * state is mostly made of (`inputs`, `outputs`) carry no `properties` at all, because the keys are
- * the author's.
+ * `definitions` and referred to, every leaf is a choice of shapes (the value itself, or a binding
+ * that produces it), and the maps a state is mostly made of (`inputs`, `outputs`) carry no
+ * `properties` at all, because the keys are the author's.
  *
- * Rendered to static markup, like the other view tests here. Three properties are worth holding
- * down, and each one was a defect before it was a test:
+ * The form itself is the universal tree's (`components/form/SchemaForm.tsx`) and is not drawn here.
+ * What is held is what it ASKS `schemaForm/model.ts` on the way down a real document, and on the
+ * form somebody fills in: where a reference leads, what a map's rows answer to, which members may be
+ * left out, what a row with a complaint in it is. `schemaFormModel.test.ts` holds the model's rules
+ * one function at a time; these are the same questions asked of the documents that broke the form.
  *
- *  - A reference is FOLLOWED, or a member declared once and used twice draws as a heading with
- *    nothing under it.
- *  - A reference that has already been followed on this path is NOT followed again. A JSON Schema
- *    that describes JSON Schema refers to itself, a slot's `schema` member is one, and a renderer
- *    that draws every declared property therefore recursed until the window stopped responding.
- *    That is a hang rather than a crash: nothing throws, so nothing but a test like this catches it.
- *  - A form that READS a document draws what the document says, not what its schema permits.
+ * Not held here, because the form decides them itself: that a reference already expanded on the way
+ * down is not expanded again (what stops a render of a self-referring schema), that a READING draws
+ * only what its document states and no switches or chips, and what the switch, the ↺, the
+ * provenance mark and the source chip look like.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { schemaById } from "@jaira/shared/browser";
-import { SchemaForm } from "../src/renderer/schemaForm/SchemaForm";
-import type { Schema, SchemaFormContext } from "../src/renderer/schemaForm/types";
+import {
+  branchesOf,
+  branchIndexFor,
+  deref,
+  flatten,
+  isComposite,
+  isWithin,
+  itemPath,
+  leafControlOf,
+  mapSchema,
+  seedFor,
+  shortText,
+  singleShapeOf,
+  typeHintOf,
+} from "../src/renderer/schemaForm/model";
+import { presentationFor } from "../src/renderer/schemaForm/presentation";
+import type { Schema } from "../src/renderer/schemaForm/types";
 
 const STATE = schemaById("state")!.document as unknown as Schema;
+const JSON_SCHEMA = "#/definitions/jsonSchema";
 
 /** The document a form is a reading OF — a small state, with both kinds of map filled in. */
 const DOC = {
@@ -36,60 +50,64 @@ const DOC = {
   operation: { kind: "prompt", prompt: "Read the diff." },
 };
 
-const draw = (schema: Schema, value: unknown, ctx: Partial<SchemaFormContext> = {}): string =>
-  renderToStaticMarkup(
-    createElement(SchemaForm, { schema, value, onChange: () => undefined, ctx: { path: "", ...ctx } }),
-  );
+/** A node as the form resolves it: its reference followed, and a one-shape union unwrapped. */
+const resolved = (schema: Schema): Schema => singleShapeOf(deref(schema, STATE), STATE);
+
+/** The shape the form draws a value in — of a choice of shapes, the one the value is already in. */
+const shapeFor = (schema: Schema, value: unknown): Schema => {
+  const node = resolved(schema);
+  const branches = branchesOf(node, STATE);
+  return branches === undefined ? node : branches[branchIndexFor(branches, value, STATE)]!;
+};
+
+const membersOf = (schema: Schema): Record<string, Schema> => flatten(schema, undefined, STATE).properties;
+
+/** One slot of the state schema, reached the way the form reaches it: the map, then what every key of it answers to. */
+const slotOf = (map: "inputs" | "outputs", key: string): Schema => {
+  const held = DOC[map] as Record<string, unknown>;
+  return shapeFor(mapSchema(shapeFor(membersOf(STATE)[map]!, held), STATE)!, held[key]);
+};
 
 describe("a form built from one of this app's own schemas", () => {
   it("terminates on a schema that refers to itself", () => {
-    // The whole test, and it is a timeout rather than an assertion: a slot's `schema` member is a
-    // JSON Schema describing JSON Schema, whose `items` refers back to it. Following that for ever
-    // is not an exception — it is a render that never returns, which is why this is worth a test of
-    // its own rather than a line in another one.
-    const html = draw(STATE, DOC, { reading: true });
-    expect(html.length).toBeGreaterThan(0);
+    // A slot's `schema` member is a JSON Schema describing JSON Schema, whose `items` refers back to
+    // it. Following a reference is ONE step — the node it names, with its own references still
+    // references — so asking about a member of it never walks the document for ever.
+    const items = membersOf(deref({ $ref: JSON_SCHEMA }, STATE))["items"]!;
+    expect(items["$ref"]).toBe(JSON_SCHEMA);
+    const followed = deref(items, STATE);
+    expect(followed["$ref"]).toBeUndefined();
+    expect(membersOf(followed)["items"]!["$ref"]).toBe(JSON_SCHEMA);
+    // What the form asks of the member before it draws it, each of which answers.
+    expect(isComposite(items, STATE)).toBe(true);
+    expect(seedFor(items, STATE)).toEqual({});
+    expect(typeHintOf(items, STATE)).toBe("");
+    // A reference that names ITSELF has no node to arrive at. It comes back as it was, not as a hang.
+    const loop: Schema = { definitions: { a: { $ref: "#/definitions/a" } } };
+    expect(deref({ $ref: "#/definitions/a" }, loop)).toEqual({ $ref: "#/definitions/a" });
   });
 
   it("follows a reference, so a member declared once still draws", () => {
-    // `inputs.changeset` is a slot, and a slot is declared under `definitions`. Before references
-    // were followed this was an object with no properties: a heading with nothing beneath it.
-    expect(draw(STATE, DOC, { reading: true })).toContain("JSON Schema for the value");
+    // `inputs.changeset` is a slot, and what a slot's `schema` may be is declared once, under
+    // `definitions`. Before references were followed this was an object with no properties: a heading
+    // with nothing beneath it.
+    const said = membersOf(slotOf("inputs", "changeset"))["schema"]!;
+    expect(presentationFor(undefined, "schema", resolved(said)).tooltip).toContain("JSON Schema for the value");
+    const shape = shapeFor(said, DOC.inputs.changeset.schema);
+    expect(Object.keys(membersOf(shape))).toEqual(expect.arrayContaining(["type", "properties", "items", "enum"]));
   });
 
   it("draws the members of a MAP, whose keys are the author's", () => {
     // `inputs` and `outputs` have no `properties` — every key is the author's, described by
-    // `additionalProperties`. So the names come from the VALUE, which is the only place they exist,
-    // and a state file's whole input and output list was invisible until they did.
-    const html = draw(STATE, DOC, { reading: true });
-    expect(html).toContain("changeset");
-    expect(html).toContain("verdict");
-  });
-
-  it("reading a document draws what it SAYS, not what its schema permits", () => {
-    const reading = draw(STATE, DOC, { reading: true });
-    const whole = draw(STATE, DOC, {});
-    expect(reading).toContain("label");
-    // `transitions`, `children`, `limits` — declared, unstated, and not this document's business.
-    expect(reading).not.toContain("transitions");
-    expect(whole).toContain("transitions");
-    // Which is also why it is much shorter: the point is a reader seeing four fields rather than
-    // thirty, and the empty ones being the majority is exactly the problem.
-    expect(reading.length).toBeLessThan(whole.length);
-  });
-
-  it("draws no switches and no shape chips in a READING — it is not asking anything", () => {
-    const html = draw(STATE, DOC, { reading: true });
-    expect(html).not.toContain('role="switch"');
-    expect(html).not.toContain("sf-pick");
-  });
-
-  it("keeps drawing the whole shape where the form is a form", () => {
-    // `reading` is NOT `disabled`. A locked settings pane — a project layer you may look at but not
-    // edit — is disabled and still has to answer "what could be set here", so hiding unset members
-    // there would be hiding the thing somebody opened it to find out.
-    const locked = draw(STATE, {}, { disabled: true });
-    expect(locked).toContain("transitions");
+    // `additionalProperties`. So nothing declared claims `changeset` or `verdict`, the rows are the
+    // value's own keys, and each is drawn as the one schema every key answers to: a slot.
+    for (const map of ["inputs", "outputs"] as const) {
+      const node = shapeFor(membersOf(STATE)[map]!, DOC[map]);
+      expect(membersOf(node)).toEqual({});
+      expect(mapSchema(node, STATE)).toBeDefined();
+    }
+    expect(Object.keys(membersOf(slotOf("inputs", "changeset")))).toContain("schema");
+    expect(Object.keys(membersOf(slotOf("outputs", "verdict")))).toContain("binding");
   });
 });
 
@@ -97,7 +115,9 @@ describe("a form built from one of this app's own schemas", () => {
  * A form somebody fills in — a state's inputs, as the Run panel draws them.
  *
  * The real `feature` inputs, because they are the ones that broke: an `enum` slot drawn as a JSON box
- * refused `significant`, and a bounded number was never checked against its bounds.
+ * refused `significant`, and a bounded number was never checked against its bounds. (What an enum's
+ * box offers and what a bounded number says beside its name are in `schemaFormModel.test.ts`, on
+ * these same two members.)
  */
 describe("a form somebody fills in", () => {
   const FEATURE: Schema = {
@@ -110,130 +130,53 @@ describe("a form somebody fills in", () => {
     },
     required: ["issue"],
   };
-  const keys = { labels: "keys" as const };
 
-  it("puts a switch before every member that may be left out, and none before a required one", () => {
-    const html = draw(FEATURE, { issue: "" }, keys);
-    expect(html.match(/role="switch"/g)).toHaveLength(3);
-    expect(html).toContain('aria-label="set severity_threshold"');
-    expect(html).not.toContain('aria-label="set issue"');
+  it("knows which members may be left out — a switch goes before each — and which one is required and gets none", () => {
+    const { properties, required } = flatten(FEATURE);
+    expect([...required]).toEqual(["issue"]);
+    expect(Object.keys(properties).filter((key) => !required.has(key))).toEqual(["severity_threshold", "threshold_rank", "ask_below"]);
   });
 
-  it("says what a switched-off member gets instead of drawing a box for it", () => {
-    const html = draw(FEATURE, { issue: "" }, keys);
-    expect(html).toContain("not set — the default applies: significant");
-    expect(html).toContain("not set — the default applies: 0.8");
+  it("reads the default a switched-off member gets as one short line", () => {
+    // The form's note is "not set — the default applies: …"; what follows the colon is this.
+    const { properties } = flatten(FEATURE);
+    expect(shortText(properties["severity_threshold"]!["default"])).toBe("significant");
+    expect(shortText(properties["ask_below"]!["default"])).toBe("0.8");
   });
 
-  it("draws a switched-on enum as a box with the allowed values to pick from, not a JSON box", () => {
-    const html = draw(FEATURE, { issue: "", severity_threshold: "minor" }, keys);
-    expect(html).toContain("<datalist");
-    for (const option of ["blocker", "significant", "minor", "note"]) expect(html).toContain(`value="${option}"`);
-    expect(html).toContain('value="minor"');
-    expect(html).toContain("one of 4");
-  });
-
-  it("says what a bounded number allows beside its name", () => {
-    expect(draw(FEATURE, { issue: "", ask_below: 1.5 }, keys)).toContain("number · 0 to 1");
-  });
-
-  it("shows a complaint under its field once the field has been touched, and not before", () => {
-    const errors = [{ path: "ask_below", message: "must be at most 1" }];
-    const untouched = draw(FEATURE, { issue: "", ask_below: 1.5 }, { ...keys, errors, touched: () => false });
-    const touched = draw(FEATURE, { issue: "", ask_below: 1.5 }, { ...keys, errors, touched: (p) => p === "ask_below" });
-    expect(untouched).not.toContain("must be at most 1");
-    expect(touched).toContain("must be at most 1");
-  });
-
-  it("draws a choice of shapes as chips after the name, with the chosen shape's fields under it", () => {
-    const schema: Schema = {
-      type: "object",
-      properties: {
-        anchor: {
-          anyOf: [
-            { title: "path", type: "string" },
-            { title: "path + line", type: "object", required: ["path", "line"], properties: { path: { type: "string" }, line: { type: "integer" } } },
-            { type: "null" },
-          ],
-        },
-      },
+  it("finds the chosen shape's fields to draw under a choice of shapes, and nothing to type where the shape is none", () => {
+    const anchor: Schema = {
+      anyOf: [
+        { title: "path", type: "string" },
+        { title: "path + line", type: "object", required: ["path", "line"], properties: { path: { type: "string" }, line: { type: "integer" } } },
+        { type: "null" },
+      ],
     };
-    const html = draw(schema, { anchor: { path: "runForm.ts", line: 221 } }, keys);
-    expect(html).toContain("sf-pick");
-    expect(html).toContain(">path + line<");
-    expect(html).toContain(">none<");
-    expect(html).toContain('value="runForm.ts"');
-    expect(draw(schema, { anchor: null }, keys)).toContain("sends null");
+    const branches = branchesOf(anchor)!;
+    const held = branches[branchIndexFor(branches, { path: "runForm.ts", line: 221 })]!;
+    expect(Object.keys(flatten(held).properties)).toEqual(["path", "line"]);
+    // `null` is a shape like the others, and its control is a line saying what is sent, not a box.
+    expect(leafControlOf(branches[branchIndexFor(branches, null)]!)).toBe("none");
   });
 
-  it("opens a list at closed rows that read as their first values — unless a row has a problem in it", () => {
-    const schema: Schema = {
-      type: "object",
-      properties: {
-        criteria: { type: "array", items: { type: "object", properties: { id: { type: "string" }, statement: { type: "string" } } } },
-      },
-      required: ["criteria"],
-    };
-    const value = { criteria: [{ id: "AC-1", statement: "Pause survives an app restart" }, { id: "AC2", statement: "" }] };
-    const html = draw(schema, value, { ...keys, errors: [{ path: "criteria[1].id", message: "must match ^AC-\d+$" }] });
-    expect(html).toContain("AC-1 · Pause survives an app restart");
-    // Row 1 is troubled, so it is open: its box is drawn rather than its summary.
-    expect(html).toContain('value="AC2"');
-    expect(html).not.toContain('value="AC-1"');
+  it("opens a list at closed rows — unless a row has a problem in it", () => {
+    const items: Schema = { type: "object", properties: { id: { type: "string" }, statement: { type: "string" } } };
+    // Rows of this list open and close at all because an item is more than one line.
+    expect(isComposite(items)).toBe(true);
+    // The complaint is about a box INSIDE row 1, so row 1 is the troubled one and row 0 stays shut.
+    const complaint = "criteria[1].id";
+    expect(isWithin(complaint, itemPath("criteria", 1))).toBe(true);
+    expect(isWithin(complaint, itemPath("criteria", 0))).toBe(false);
+    // …and a row is not under another whose index its own begins with.
+    expect(isWithin("criteria[10].id", itemPath("criteria", 1))).toBe(false);
   });
 
-  it("draws a free-key object as key and value rows you can add to", () => {
-    const schema: Schema = { type: "object", properties: { env: { type: "object", additionalProperties: { type: "string" } } }, required: ["env"] };
-    const html = draw(schema, { env: { NODE_OPTIONS: "--max-old-space-size=4096" } }, keys);
-    expect(html).toContain('value="NODE_OPTIONS"');
-    expect(html).toContain('value="--max-old-space-size=4096"');
-    expect(html).toContain("+ add key");
-  });
-
-  it("draws a LAYER's members with no switch — what is in effect, editable, and a ↺ where the layer states it", () => {
-    const settings: Schema = { type: "object", properties: { enabled: { type: "boolean" }, path: { type: "string" } } };
-    const html = draw(settings, { enabled: true, path: "workflows" }, { path: "memo", isSet: (p) => p === "memo.enabled" });
-    // No on/off switch on either member (the person's rule, 2026-09-25).
-    expect(html).not.toContain("is set here");
-    expect(html).not.toContain("set path here");
-    expect(html).not.toContain("inherits workflows");
-    // The inherited value is a live control showing what is in effect.
-    expect(html).toContain('value="workflows"');
-    // One ↺, on the member the layer states.
-    expect(html.match(/set-reset/g)).toHaveLength(1);
-    expect(html.indexOf("set-reset")).toBeLessThan(html.indexOf(">path<"));
-    expect(html).not.toContain("cfg-set");
-  });
-
-  it("marks how a recorded value was settled, after its type — and says nothing where nothing was recorded", () => {
-    const schema: Schema = { type: "object", properties: { feature: { type: "string" }, patterns: { type: "string" }, units: { type: "string" }, old: { type: "string" } } };
-    const settled = { feature: { via: "bound" as const, note: "bound — from Product · brief" }, patterns: { via: "inferred" as const, confidence: 0.78 }, units: { via: "asked" as const } };
-    const html = draw(schema, { feature: "f", patterns: "p", units: "u", old: "o" }, { ...keys, provenance: (path) => settled[path as keyof typeof settled] });
-    expect(html).toContain('<span class="prov prov-bound" title="bound — from Product · brief">bound</span>');
-    expect(html).toContain('<span class="prov prov-inferred">inferred</span><span class="conf">0.78</span>');
-    expect(html).toContain('<span class="prov prov-asked">asked</span>');
-    expect(html.match(/class="prov /g)).toHaveLength(3);
-  });
-
-  it("offers a member somewhere else its value can come from, and draws the pick instead of a box", () => {
-    const schema: Schema = { type: "object", properties: { brief: { type: "string" }, tone: { type: "string" } }, required: ["brief", "tone"] };
-    const sources = (picked: string | undefined) => ({
-      label: "from a task…",
-      optionsFor: (path: string) => (path === "brief" ? [{ id: "t-1#brief", label: "Product · brief", note: "the brief" }] : []),
-      picked: (path: string) => (path === "brief" ? picked : undefined),
-      pick: () => undefined,
-    });
-    // Offered and not taken: the chip, and the member's own box still.
-    const typed = draw(schema, { brief: "typed", tone: "plain" }, { ...keys, sources: sources(undefined) });
-    expect(typed.match(/from a task…/g)).toHaveLength(1);
-    expect(typed).toContain('value="typed"');
-    // Taken: the box is gone, the picker and what the source holds are in its place.
-    const taken = draw(schema, { tone: "plain" }, { ...keys, sources: sources("t-1#brief") });
-    expect(taken).toContain('<option value="t-1#brief" selected="">Product · brief</option>');
-    expect(taken).toContain('<div class="sf-absent">the brief</div>');
-    expect(taken).toContain('class="cfg-chip on"');
-    expect(taken).toContain('value="plain"');
-    // A reading offers nothing.
-    expect(draw(schema, { brief: "b", tone: "t" }, { ...keys, reading: true, sources: sources(undefined) })).not.toContain("from a task…");
+  it("reads a free-key object as rows that all answer to one schema, and starts an added key empty", () => {
+    const env: Schema = { type: "object", additionalProperties: { type: "string" } };
+    const every = mapSchema(env, undefined)!;
+    expect(every).toEqual({ type: "string" });
+    expect(seedFor(every)).toBe("");
+    // `true` says a key may be there and not what its value looks like, so it makes no rows.
+    expect(mapSchema({ type: "object", additionalProperties: true }, undefined)).toBeUndefined();
   });
 });

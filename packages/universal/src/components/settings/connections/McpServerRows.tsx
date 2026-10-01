@@ -16,7 +16,7 @@ import {
   secretTargetsOf,
   withServersAdded,
 } from "@jaira/ui/connectionsModel";
-import type { McpServerRowsProps } from "@jaira/ui/mcpServersRows";
+import type { McpServerRowsProps } from "@jaira/ui/mcpServersRowsTypes";
 import { SchemaForm } from "../../form/SchemaForm";
 import { Code, Hint, PaneActions } from "../bits";
 import { Button } from "../Button";

@@ -19,7 +19,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { placeFloat } from "../src/renderer/popover";
+import { placeFloat } from "../src/renderer/floatPlace";
 
 const RENDERER = join(__dirname, "..", "src", "renderer");
 const CSS = readFileSync(join(RENDERER, "styles.css"), "utf8");

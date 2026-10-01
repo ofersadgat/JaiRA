@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState, type JSX } from "react";
 import type { PushMessage } from "@jaira/shared/browser";
-import { itemsForEvent, itemsForFrame } from "@jaira/ui/pointerMenu";
+import { itemsForEvent, itemsForFrame } from "@jaira/ui/pointerMenuModel";
 import { subscribe } from "@jaira/ui/store";
 import { ContextMenu, type MenuAt } from "../Menu";
 

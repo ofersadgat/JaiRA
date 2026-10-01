@@ -10,7 +10,7 @@
  * a `runId` from before runs collapsed into tasks, on props nothing typechecked.
  *
  * So nothing here describes a surface. It makes a PROJECT. Every state worth photographing is then
- * produced by starting a real task in it (`run.mts`), scripted so it costs nothing and reaches no
+ * produced by starting a real task in it (`parityWorld.mts`'s seed), scripted so it costs nothing and reaches no
  * provider, and whatever the app draws for that is by definition what the app draws.
  *
  * ## Thrown away and rebuilt every time
@@ -65,7 +65,7 @@ export function buildWorld(dir: string): World {
  * every interactive function the bundle names and routes it to the renderer, so an unanswered one
  * PARKS, and a parked gate is the single most valuable thing on this list to have a picture of.
  *
- * `happyRules()` from the same module is the other half — a run that completes — and `run.mts` uses
+ * `happyRules()` from the same module is the other half — a run that completes — and the seed uses
  * it directly.
  */
 export function blockedAtTheGate(): unknown[] {

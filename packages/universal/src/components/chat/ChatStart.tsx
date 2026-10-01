@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { ChatPlanView, ChatSettings } from "@jaira/shared/browser";
-import type { ChatSurface } from "@jaira/ui/chatPane";
+import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { CHAT_SESSION } from "@jaira/ui/chatWorkflow";
 import { chatStartWhereOf } from "@jaira/ui/chatListModel";
 import { invoke } from "@jaira/ui/store";

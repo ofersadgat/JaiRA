@@ -5,12 +5,16 @@
  * online, and again with the code showing.
  *
  *   npm --workspace @jaira/app run build && (cd packages/cli && node build.mjs)
- *   npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/machines-real.mts
+ *   npx tsx packages/app/shots/machines-real.mts
+ *
+ * It fails if the peer never shows online: the pairing is real (two engines, the one-time code), and
+ * what it proves is that the page a person sees says so. Pictures land in `shots/out/machines-real/`.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { App } from "./driver.mjs";
+import { clickFirst, drawn, says } from "./parityWorld.mjs";
 import { buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "out", "machines-real");
@@ -44,18 +48,19 @@ async function main(): Promise<void> {
 
     const app = await App.launch(world, { out: OUT, port: 9245 });
     try {
-      await app.until("window.jaira && document.getElementById('root').children.length > 0", "the window to draw");
+      await app.until(drawn, "the window to draw");
       await app.resize(1360, 900);
       await app.ipc("machines:rename", { label: "desk" });
       await app.ipc("machines:reach", { on: true });
       await app.ipc("machines:add", { address: reach.url, code: pair.code });
       await app.clickText("Settings");
       await sleep(500);
-      await app.evaluate(`(() => { const li = [...document.querySelectorAll(".sections > li")].find((e) => e.textContent.trim().startsWith("Machines")); li?.click(); return !!li; })()`);
-      await app.until(`document.body.innerText.includes("Online")`, "the other machine to show online");
+      await clickFirst(app, "Machines");
+      await app.until(says("mac-mini"), "the other machine to be listed");
+      await app.until(`document.body.textContent.includes("Online")`, "the other machine to show online");
       await sleep(400);
       await app.shot("machines");
-      await app.evaluate(`(() => { const b = [...document.querySelectorAll("button")].find((e) => e.textContent.trim() === "Show a code"); b?.click(); return !!b; })()`);
+      await clickFirst(app, "Show a code");
       await sleep(600);
       await app.shot("machines-code");
       console.log(JSON.stringify(JSON.parse(jaira("machine", "list")).machines));

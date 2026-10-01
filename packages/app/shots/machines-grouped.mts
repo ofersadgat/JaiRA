@@ -6,13 +6,14 @@
  * grouping off, the two workspaces listed apart.
  *
  *   npm --workspace @jaira/app run build && (cd packages/cli && node build.mjs)
- *   npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/machines-grouped.mts
+ *   npx tsx packages/app/shots/machines-grouped.mts
  */
 import { execFileSync, spawn } from "node:child_process";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import { App } from "./driver.mjs";
+import { clickFirst, clickTitled, drawn, says } from "./parityWorld.mjs";
 import { buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "out", "machines-grouped");
@@ -65,7 +66,7 @@ async function main(): Promise<void> {
 
     const app = await App.launch(world, { out: OUT, port: 9247 });
     try {
-      await app.until("window.jaira && document.getElementById('root').children.length > 0", "the window to draw");
+      await app.until(drawn, "the window to draw");
       await app.resize(1360, 820);
       await app.ipc("machines:rename", { label: "desk" });
       await app.ipc("machines:reach", { on: true });
@@ -92,22 +93,22 @@ async function main(): Promise<void> {
       await app.shot("queued");
       await app.clickText("Settings");
       await sleep(500);
-      await app.evaluate(`(() => { const li = [...document.querySelectorAll(".sections > li")].find((e) => e.textContent.trim().startsWith("Runs")); li?.click(); return !!li; })()`);
-      await app.until(`document.body.innerText.includes("Where tasks run")`, "the placement section");
+      await clickFirst(app, "Runs");
+      await app.until(says("Where tasks run"), "the placement section");
       await sleep(500);
       await app.shot("where");
-      // Opening a project on the other machine: its folders, through its engine.
-      await app.evaluate(`(() => { document.querySelector(".side-open")?.click(); return true; })()`);
+      // Opening a project on the other machine: its folders, through its engine — the browser lists
+      // the other clone, which only that machine's engine can see.
+      await clickTitled(app, ["open another project"]);
       await sleep(300);
-      await app.clickText("Open project on mac-mini…");
-      await app.until(`!!document.querySelector(".folder-browser .folder-row")`, "the other machine's folders");
+      await clickFirst(app, "Open project on mac-mini…");
+      await app.until(says("Open a project") + " && " + says("other-clone"), "the other machine's folders");
       await sleep(400);
       await app.shot("browse");
-      await app.evaluate(`(() => { [...document.querySelectorAll(".folder-browser button")].find((b) => b.textContent.trim() === "Cancel")?.click(); return true; })()`);
-      await app.evaluate(`(() => { const s = document.querySelector('.side-foot .side-hit'); return true; })()`);
+      await clickFirst(app, "Cancel");
       await app.ipc("settings:write", { ui: { groupWorkspaces: false } });
       await app.evaluate("location.reload()");
-      await app.until("document.getElementById('root') && document.getElementById('root').children.length > 0", "the window to draw again");
+      await app.until(drawn, "the window to draw again");
       await sleep(2500);
       await app.shot("separate");
     } finally {

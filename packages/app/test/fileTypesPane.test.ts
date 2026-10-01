@@ -16,8 +16,9 @@
  *  - **The two views are two answers.** Choosing the editor must not change the reading, and only a
  *    renderer that writes may answer the editor at all.
  *
- * The registry itself is the real one — `fileSurfaces` is imported for its registrations — because a
- * stub table would let every one of these pass while the screen showed something else.
+ * The table itself is the real one (`fileSurfaceTable.ts`), because a stub table would let every one
+ * of these pass while the screen showed something else. Its components are stand-ins: everything the
+ * model reads — ids, labels, `writes`, `themed`, `look` — is the table's, and nothing is drawn here.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -27,22 +28,14 @@ import {
   type RendererChoices,
   type RendererEdit,
 } from "@jaira/shared/browser";
-import "../src/renderer/fileSurfaces";
 import { EDITOR_THEME_APP } from "../src/renderer/editorThemes";
-import { familyKey, rendererKey, viewRenderer } from "../src/renderer/fileTypes";
-import {
-  capableOf,
-  contributors,
-  editsForOff,
-  editsForPick,
-  membersOf,
-  offStateAll,
-  editsForTheme,
-  reachOf,
-  resolveAll,
-  resolveTheme,
-  unionOffered,
-} from "../src/renderer/fileTypesPane";
+import { SURFACE_KEYS, registerSurfaceTable, type SurfaceKey } from "../src/renderer/fileSurfaceTable";
+import { familyKey, rendererKey, viewRenderer, type FileSurface } from "../src/renderer/fileTypes";
+import { fileTypesModel } from "../src/renderer/fileTypesModel";
+
+registerSurfaceTable(Object.fromEntries(SURFACE_KEYS.map((key) => [key, (() => null) as unknown as FileSurface])) as Record<SurfaceKey, FileSurface>);
+
+const { capableOf, contributors, editsForOff, editsForPick, membersOf, offStateAll, editsForTheme, reachOf, resolveAll, resolveTheme, unionOffered } = fileTypesModel();
 
 /** The choices map a settings file would hold, written the short way. */
 const lines = (entries: Record<string, Partial<ReturnType<typeof defaultRendererChoice>>>): RendererChoices =>

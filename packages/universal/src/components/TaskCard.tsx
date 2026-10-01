@@ -2,13 +2,12 @@ import { memo, useMemo, useRef, useState, type JSX, type MouseEvent as ReactMous
 import { Pressable } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { chipTip, endedLabel, holdingLabelOf, originLineOf, waitingKindOf } from "@jaira/ui/boardModel";
-import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
-import type { CardProps } from "@jaira/ui/slots";
-import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskName";
+import { PILL_WORD, pillKindOf } from "@jaira/ui/pillModel";
+import type { CardProps } from "@jaira/ui/boardModel";
+import { taskNameNote, taskNameOf, taskNamePending } from "@jaira/ui/taskNameModel";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { Press, Txt, edge, faceOf } from "../primitives";
 import { useLook, useTokens } from "../tokens";
-import { CardDom } from "./domFallback";
 import { MachineChip } from "./MachineChip";
 import { NextChips } from "./NextChips";
 import { Pill } from "./Pill";
@@ -41,9 +40,7 @@ import { Svg } from "./panel/Svg";
  *                                          above, --dim, data 0.84, one line; its mark 1em, 2 down, --accent;
  *                                          a link (`.card-origin-link`) hovered in --text
  *
- * A phone draws the undo link and the origin line from here. On web a card with either is still drawn by
- * the DOM card (`domFallback.web.tsx`) — the desktop draws this copy too — unless `copied` says otherwise
- * (the `card-*` specimens compare the two).
+ * The undo link and the origin line are drawn from here on every platform (the `card-*` specimens).
  */
 /**
  * The clicks a card (or something on it) took, by their DOM event: a column's own click, which in the DOM
@@ -51,7 +48,7 @@ import { Svg } from "./panel/Svg";
  */
 export const claimed = new WeakSet<object>();
 
-type TaskCardProps = CardProps & { inTray?: boolean; copied?: boolean };
+type TaskCardProps = CardProps & { inTray?: boolean };
 type Call<K extends keyof CardProps> = NonNullable<CardProps[K]>;
 
 /**
@@ -100,14 +97,7 @@ export function TaskCard(props: TaskCardProps): JSX.Element {
 const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string }): JSX.Element {
   const t = useTokens();
   const look = useLook();
-  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false, copied = false } = props;
-  // On web (where the desktop draws this copy too), a card with an undo link or an origin line is still
-  // the DOM card's, as it was before these were copied — `copied` draws the copy there (its specimen).
-  const uncovered = onUndo !== undefined || originLineOf(card) !== undefined;
-  if (uncovered && CardDom !== null && !copied) {
-    const { inTray: _tray, copied: _copied, ages: _ages, ...dom } = props;
-    return <CardDom {...dom} />;
-  }
+  const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false } = props;
 
   // An ARCHIVED card wears the pill of how it finished, as the DOM card does.
   const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);

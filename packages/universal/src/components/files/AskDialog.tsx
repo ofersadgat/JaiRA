@@ -1,7 +1,7 @@
 import { useState, type JSX } from "react";
 import { TextInput, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { AskSpec } from "@jaira/ui/menu";
+import type { AskSpec } from "@jaira/ui/menuTypes";
 import { ENTER_KEEPS_FOCUS, Press, Txt, font, lengthToken, padToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { FocusRing } from "../floats/FocusRing";

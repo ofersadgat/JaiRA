@@ -1,12 +1,11 @@
 import type { JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
-import { PreviewCard as DomPreviewCard } from "@jaira/ui/panelViews";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { PreviewCard } from "@jaira/universal";
 
 /**
- * A value that owns the panel's column — `panelViews.tsx`'s `PreviewCard` against its universal copy
- * (`components/panel/PreviewCard.tsx`, the value view's `pinned`), in a stage as tall as a panel's body
+ * A value that owns the panel's column — `PreviewCard` (`components/panel/PreviewCard.tsx`, the value
+ * view's `pinned`; the copy of what `panelViews.tsx` drew), in a stage as tall as a panel's body
  * (decision 0015). What the interactive artifact adds is the grant (`serve`) and the bridge
  * (`onPrompt`), which only a real task's record can answer: the `conversation-artifact`,
  * `artifact-prompt`, `artifact-produced` and `artifact-preview` scenes run one.
@@ -16,7 +15,6 @@ import { PreviewCard } from "@jaira/universal";
  */
 export interface ArtifactSpecimen {
   width: number;
-  dom: () => JSX.Element;
   rn: () => JSX.Element;
 }
 
@@ -35,20 +33,12 @@ const SOURCE_ITEM: PinnedValue = { title: "steps", value: LONG, label: "output" 
 
 /** The panel's body, as tall as the studio's: `.sp-body`, a flex column the Preview card fills. */
 const HEIGHT = 520;
-function DomStage({ children }: { children: ReactNode }): JSX.Element {
-  return <div style={{ height: HEIGHT, display: "flex", flexDirection: "column" }}>{children}</div>;
-}
 function RnStage({ children }: { children: ReactNode }): JSX.Element {
   return <View height={HEIGHT}>{children}</View>;
 }
 
 const specimen = (item: PinnedValue): ArtifactSpecimen => ({
   width: 540,
-  dom: () => (
-    <DomStage>
-      <DomPreviewCard item={item} />
-    </DomStage>
-  ),
   rn: () => (
     <RnStage>
       <PreviewCard item={item} />

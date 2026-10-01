@@ -1,24 +1,15 @@
 /**
  * Settings → Tools → Events and Automations (decision 0010 §2, §4; mockup B.1–B.2): what each event
  * switch writes — KEY LISTS, since event names hold dots — the rows and groups the section draws for
- * one remote, several and none, the status line, and both sections rendered in their main states.
+ * one remote, several and none, the status line, and what the models hand both sections in their main
+ * states (`eventsModel.ts`, `automationsModel.ts`, `automationsHost.ts` — the universal tree draws them).
  */
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { parseConfig, withPaths, type EventsStatusView, type JairaEventsConfig } from "@jaira/shared";
+import { EVENT_SPECS, parseConfig, statesPath, withPaths, type EventsStatusView, type JairaEventsConfig } from "@jaira/shared";
 import { EventTally } from "@jaira/service/eventTally";
-import { writeLine, type AutomationLine, type ShownLine } from "../src/renderer/automationsModel";
-import { AutomationsView, type AutomationsViewProps } from "../src/renderer/automationsPane";
-import { connectionBadgeOf, eventGroupsOf, eventStatusLine, eventSwitchPath, eventSwitchWrites, eventsConfigOf } from "../src/renderer/eventsModel";
-import { EventsSection, type EventsSectionProps } from "../src/renderer/eventsPane";
-
-const text = (html: string): string =>
-  html
-    .replace(/<[^>]+>/g, " ")
-    .replace(/&#x27;/g, "'")
-    .replace(/&amp;/g, "&")
-    .replace(/\s+/g, " ");
+import { badgeFor } from "../src/renderer/automationsHost";
+import { automationStateIdOf, eventPicksOf, flagText, lineFlagsOf, stepFormOf, writeLine, type AutomationLine, type ShownLine } from "../src/renderer/automationsModel";
+import { MISSED_WHILE_CLOSED, connectionBadgeOf, eventGroupsOf, eventStatusLine, eventSwitchPath, eventSwitchWrites, eventsConfigOf } from "../src/renderer/eventsModel";
 
 const NOW = Date.parse("2026-09-25T12:00:00Z");
 
@@ -120,49 +111,35 @@ describe("the tally of what arrived", () => {
   });
 });
 
-// --- rendered ----------------------------------------------------------------------------------
-
-const eventsProps = (over: Partial<EventsSectionProps> = {}): EventsSectionProps => ({
-  status: status([origin]),
-  events: { "git.push": { enabled: true, branches: ["main", "release/*"] } },
-  layerDoc: { events: { "git.push": { enabled: true } } },
-  locked: false,
-  now: NOW,
-  onWrite: () => undefined,
-  onOpenConnections: () => undefined,
-  ...over,
-});
+// --- what the sections are drawn from ------------------------------------------------------------
 
 describe("the Events section", () => {
-  it("draws a remote's events with the badge, the switch, and — for one that is on — its branches and status", () => {
-    const html = renderToStaticMarkup(createElement(EventsSection, eventsProps()));
-    expect(html).toContain('data-part="events"');
-    const words = text(html);
-    expect(words).toContain("Things that happen outside JaiRA.");
-    expect(words).toContain("origin → github.com/owner/repo · from .git/config");
-    expect(words).toContain("github · ofersadgat");
-    expect(words).toContain("Push");
-    expect(words).toContain("git.push");
-    expect(html).toContain('aria-label="stop watching for git.push"');
-    expect(html).toContain('aria-label="watch for git.merge_request.opened"');
-    expect(words).toContain("checked every 60 s while JaiRA is open · last checked 30 s ago · last seen 2 min ago · 3 today");
-    expect(html).toContain('value="release/*"');
-    // This layer states the push switch: its ↺.
-    expect(html).toContain("set-reset");
+  it("has a remote's events with the badge, the switch, and — for one that is on — its branches and status", () => {
+    const events: JairaEventsConfig = { "git.push": { enabled: true, branches: ["main", "release/*"] } };
+    const layerDoc = { events: { "git.push": { enabled: true } } };
+    const [group] = eventGroupsOf(status([origin]), events);
+    expect(group!.heading).toBe("origin → github.com/owner/repo · from .git/config");
+    const push = group!.rows.find((row) => row.name === "git.push")!;
+    expect(EVENT_SPECS[push.name].label).toBe("Push");
+    expect(push.badge!.text).toBe("github · ofersadgat");
+    // The switch: on for the event the settings turn on, off for one they do not.
+    expect(push.on).toBe(true);
+    expect(group!.rows.find((row) => row.name === "git.merge_request.opened")!.on).toBe(false);
+    // One that is on and takes branch globs gets its branch box, and its status line under it.
+    expect(push.branches).toBe(true);
+    expect(eventStatusLine(push, group!.remote, 60_000, NOW)).toBe("checked every 60 s while JaiRA is open · last checked 30 s ago · last seen 2 min ago · 3 today");
+    // This layer states the push switch: its ↺ is read at the path the switch writes.
+    expect(push.path).toEqual(["events", "git.push", "enabled"]);
+    expect(statesPath(layerDoc, push.path)).toBe(true);
+    expect(statesPath(layerDoc, group!.rows.find((row) => row.name === "git.merge_request.opened")!.path)).toBe(false);
     // The latest-state rule behind the ⓘ.
-    expect(html).toContain("Missed while JaiRA was closed?");
+    expect(MISSED_WHILE_CLOSED).toContain("Missed while JaiRA was closed?");
   });
 
-  it("mutes a remote with no connection, disables its switches, and links to Connections", () => {
-    const html = renderToStaticMarkup(createElement(EventsSection, eventsProps({ status: status([mirror]), events: {} })));
-    expect(text(html)).toContain("no connection · sign in on Connections");
-    expect(html).toContain("src-none");
-    expect(html).toMatch(/aria-label="no connection for gitlab.com — sign in on Connections"[^>]*disabled=""/);
-  });
-
-  it("says it is reading, and what went wrong reading", () => {
-    expect(text(renderToStaticMarkup(createElement(EventsSection, eventsProps({ status: null }))))).toContain("Reading this project's remotes…");
-    expect(text(renderToStaticMarkup(createElement(EventsSection, eventsProps({ status: { ...status([]), problem: "git failed" } }))))).toContain("could not be read — git failed");
+  it("mutes a remote with no connection, and leaves its switches off and unanswered", () => {
+    const [group] = eventGroupsOf(status([mirror]), {});
+    expect(group!.rows.length).toBeGreaterThan(0);
+    for (const row of group!.rows) expect(row).toMatchObject({ on: false, unanswered: true, badge: { text: "no connection · sign in on Connections", none: true } });
   });
 });
 
@@ -176,132 +153,43 @@ const line: AutomationLine = {
   ],
 };
 
-const automationsProps = (shown: ShownLine[], over: Partial<AutomationsViewProps> = {}): AutomationsViewProps => ({
-  reads: "project",
-  source: "copy",
-  shown,
-  events: { "git.push": { enabled: true } },
-  status: status([origin]),
-  workflows: [{ id: "feature/review", label: "Review" }],
-  forms: { "feature/review": [{ name: "issue", schema: { type: "string" }, required: true, description: "What is asked for." } as never] },
-  locked: false,
-  problem: null,
-  told: null,
-  asking: null,
-  layerName: "JaiRA",
-  hasTask: true,
-  onLines: () => undefined,
-  onSharedLine: () => undefined,
-  onUseSharedSteps: () => undefined,
-  onIgnore: () => undefined,
-  onAnswer: () => undefined,
-  onOpenConversation: () => undefined,
-  onEditFile: () => undefined,
-  onOpenEvents: () => undefined,
-  ...over,
-});
+/** The settings the Automations section is read against: pushes are watched, nothing else. */
+const WATCHED: JairaEventsConfig = { "git.push": { enabled: true } };
 
 describe("the Automations section", () => {
-  it("draws a line: its grip and name, When with the badge and filter, its numbered steps with inputs from the event", () => {
-    const html = renderToStaticMarkup(createElement(AutomationsView, automationsProps([{ line, from: "own", ignored: false }])));
-    const words = text(html);
-    expect(html).toContain('data-part="automations"');
-    expect(words).toContain("What happens when an event arrives.");
-    expect(html).toContain('draggable="true"');
-    expect(html).toContain('value="push_main_docs"');
-    expect(html).toContain('value="git.push"');
-    expect(words).toContain("github · ofersadgat");
-    expect(html).toContain('value="main"');
-    // The filter draws the key it states, and offers the others the event takes rather than empty boxes.
-    expect(words).toContain("only where + remote + author");
-    expect(words).not.toContain("source_branch");
-    expect(words).toContain("then");
-    expect(words).toContain("from the event");
-    expect(words).toContain("← event.commits[0].message");
-    expect(html).toContain('value="Review started"');
-    // A start is the events task's child unless it is asked to stand on its own.
-    expect(words).toContain("as a child on its own");
-    expect(html).toMatch(/aria-pressed="true"[^>]*>as a child</);
-    expect(words).toContain("In order: each step starts when the one before it has finished.");
-    expect(words).toContain("Runs as the task events in JaiRA");
-    expect(words).toContain("Open its conversation");
-    expect(words).toContain("Edit as a workflow file");
+  it("has a line's badge beside its When, and its steps' inputs as picks from the event", () => {
+    expect(badgeFor(line, status([origin]))!.text).toBe("github · ofersadgat");
+    const start = line.steps[0] as Extract<AutomationLine["steps"][number], { kind: "start" }>;
+    const picked = stepFormOf(start).picked["issue"];
+    expect(eventPicksOf(line.event).find((pick) => pick.id === picked)!.label).toBe("← event.commits[0].message");
   });
 
-  it("draws Shared's lines after the project's, the ignored one struck with Put back", () => {
-    const shared = { ...line, name: "push_main" };
-    const html = renderToStaticMarkup(
-      createElement(
-        AutomationsView,
-        automationsProps([
-          { line, from: "own", ignored: false },
-          { line: shared, from: "shared", ignored: true },
-          { line: { ...line, name: "mr_opened", event: "git.merge_request.opened", filter: {} }, from: "shared", ignored: false },
-        ]),
-      ),
-    );
-    const words = text(html);
-    expect(words).toContain("This project");
-    expect(words).toContain("From Shared · ~/.jaira");
-    expect(html).toContain("au-ignored");
-    expect(words).toContain("ignored here · Put back");
-    expect(words).toContain("Ignore in this project");
-    expect(words).toContain("from Shared");
-    // A Shared line not ignored is EDITABLE here: its name, its event, its steps — and it says what an edit does.
-    expect(html).toContain('value="mr_opened"');
-    expect(html).toContain('value="git.merge_request.opened"');
-    expect(words).toContain("A change to its steps here is this project's own copy of them; a change to its event or filter makes it a line of this project's.");
+  it("names the state a Shared line's steps are this project's own copy of", () => {
+    expect(automationStateIdOf("push_main")).toBe("system/events/push_main");
   });
 
-  it("says when a Shared line's steps are this project's own, and offers Shared's back", () => {
-    const words = text(
-      renderToStaticMarkup(createElement(AutomationsView, automationsProps([{ line: { ...line, name: "push_main" }, from: "shared", ignored: false, stepsFrom: "project" }]))),
-    );
-    expect(words).toContain("Its steps are changed for this project only, in this project's system/events/push_main");
-    expect(words).toContain("Shared's line and every other project keep Shared's.");
-    expect(words).toContain("Use Shared's steps");
-  });
-
-  it("says when a project line stands in for Shared's of the same name", () => {
-    const words = text(renderToStaticMarkup(createElement(AutomationsView, automationsProps([{ line, from: "own", ignored: false, replaces: true }]))));
-    expect(words).toContain("This project's version of Shared's line of this name, which is ignored here.");
-  });
-
-  it("flags a line an earlier one catches, and an event switched off, with a way to Events", () => {
+  it("flags a line an earlier one catches, and an event switched off", () => {
     const any = { ...line, name: "any_push", filter: {} };
-    const html = renderToStaticMarkup(
-      createElement(
-        AutomationsView,
-        automationsProps(
-          [
-            { line: any, from: "own", ignored: false },
-            { line, from: "own", ignored: false },
-            { line: { ...line, name: "checks", event: "git.checks.failed", filter: {} }, from: "own", ignored: false },
-          ],
-          {},
-        ),
-      ),
-    );
-    const words = text(html);
-    expect(words).toContain("Never reached: any_push matches every event this line would");
-    expect(words).toContain("git.checks.failed is switched off, so nothing arrives for this line.");
-    expect(words).toContain("Switch it on in Events");
-  });
-
-  it("asks, on the personal layer, where the first change goes", () => {
-    const words = text(renderToStaticMarkup(createElement(AutomationsView, automationsProps([], { asking: ["project", "base"] }))));
-    expect(words).toContain("Just you is one settings file, and automations are a workflow file.");
-    expect(words).toContain("This project");
-    expect(words).toContain("Shared");
-    expect(words).toContain("No automations yet.");
+    const shown: ShownLine[] = [
+      { line: any, from: "own", ignored: false },
+      { line, from: "own", ignored: false },
+      { line: { ...line, name: "checks", event: "git.checks.failed", filter: {} }, from: "own", ignored: false },
+    ];
+    const flags = lineFlagsOf(shown, WATCHED);
+    expect(flags[0]).toEqual([]);
+    expect(flags[1]!.map(flagText)).toEqual(["Never reached: any_push matches every event this line would, and the first line that matches wins. Drag it above any_push to run it first."]);
+    expect(flags[2]!.map(flagText)).toEqual(["git.checks.failed is switched off, so nothing arrives for this line."]);
+    // The page offers "Switch it on in Events" beside the second kind, by the flag's kind.
+    expect(flags[2]!.map((flag) => flag.kind)).toEqual(["off"]);
   });
 
   it("keeps a hand-written line whole and sends it to the file", () => {
     const raw: AutomationLine = { name: "odd", event: "", filter: {}, steps: [], raw: { rule: { name: "odd", when: "on_event('git.push') && true", to: "x" }, children: {} } };
-    const words = text(renderToStaticMarkup(createElement(AutomationsView, automationsProps([{ line: raw, from: "own", ignored: false }]))));
-    expect(words).toContain("on_event('git.push') && true");
-    expect(words).toContain("Written by hand in the file, so it is edited there.");
+    // Its guard is shown as it is written, and written back as it stood.
+    expect(writeLine(raw)).toEqual(raw.raw);
+    expect(writeLine(raw).rule["when"]).toBe("on_event('git.push') && true");
     // And the written rule of an ordinary line is what the file holds.
     expect(writeLine(line).rule["when"]).toBe("on_event('git.push', { branch: 'main' })");
   });
 });
+

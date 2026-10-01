@@ -107,8 +107,8 @@ import {
   type ExecutorTarget,
 } from "./executorConfig";
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
-import type { FileSelection } from "./files";
-import type { EditorTab } from "./editorChrome";
+import type { FileSelection } from "./filesModel";
+import type { EditorTab } from "./stateEditorModel";
 import {
   instanceAt,
   newestRunOf,
@@ -131,7 +131,7 @@ import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
-import { unseenTasks } from "./pill";
+import { unseenTasks } from "./pillModel";
 import { sessionKey, withoutSession } from "./sessionCache";
 import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 import {

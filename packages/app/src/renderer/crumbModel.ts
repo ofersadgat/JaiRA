@@ -6,8 +6,8 @@
  * disagree about what it says, what its chevron offers, or where clicking it goes. Nothing here renders.
  */
 import type { BoardCard, InstanceNode } from "@jaira/shared/browser";
-import type { MenuItem } from "./menu";
-import { taskNameOf } from "./taskName";
+import type { MenuItem } from "./menuTypes";
+import { taskNameOf } from "./taskNameModel";
 import { nodeAt, stepOf, type TrailStep } from "./trail";
 
 /**

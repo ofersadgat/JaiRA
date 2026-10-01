@@ -16,7 +16,6 @@
     "jaira": "tsx packages/cli/src/main.ts",
     "cli:build": "npm --workspace @jaira/cli run build",
     "start": "npm --workspace @jaira/app run start",
-    "start:dom": "npm --workspace @jaira/app run start:dom",
     "app": "npm --workspace @jaira/app run start",
     "app:build": "npm --workspace @jaira/app run build",
     "app:dist": "npm --workspace @jaira/app run dist",

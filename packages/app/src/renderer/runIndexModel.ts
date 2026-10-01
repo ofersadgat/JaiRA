@@ -8,7 +8,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { InstanceNode } from "@jaira/shared/browser";
 import { nameOf, paletteOfRun, railOf, type RailLane, type RailRow, type RailStep } from "./rail";
 import { autoFold, compact, type DisplayItem, type FoldCandidate, type VisibleRow } from "./stepCompaction";
-import { headerToneOf, surfaceKindOf, type HeaderTone } from "./stateSurface";
+import { headerToneOf, surfaceKindOf, type HeaderTone } from "./stateSurfaceModel";
 import { isLiveNode } from "./sessionRows";
 
 /** How often a live row's elapsed time is redrawn. A second, because that is the unit it shows. */

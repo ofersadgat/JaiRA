@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { StateSlotInfo, StateSlots } from "@jaira/shared/browser";
-import { seedRequiredBindings } from "../src/renderer/stateEditor";
+import { seedRequiredBindings } from "../src/renderer/stateEditorModel";
 import { applyForm, emptyChildRow, formOf, type ChildRow } from "../src/renderer/stateForm";
 
 const child = (key: string, inputs: ChildRow["inputs"] = []): ChildRow => ({

@@ -42,7 +42,7 @@ beforeEach(async () => {
   dirs.push(base, client);
   mkdirSync(join(client, "assets"));
   writeFileSync(join(client, "index.html"), "<html><head><script>window.a=1</script></head><body>index</body></html>");
-  writeFileSync(join(client, "rn.html"), "<html><body>rn</body></html>");
+  writeFileSync(join(client, "native.html"), "<html><body>native</body></html>");
   writeFileSync(join(client, "assets", "app-abc123.js"), "export const app = 1;\n");
   // Beside the client, not in it: what a traversal would reach.
   writeFileSync(join(client, "..", "jaira-device-secret.txt"), "secret");
@@ -272,7 +272,7 @@ describe("the client's files, from the engine's listener", { timeout: 60_000 }, 
     expect(index.headers["content-security-policy"]).toBe(clientPolicy(readFileSync(join(client, "index.html"), "utf8")));
     expect(index.headers["content-security-policy"]).toMatch(/default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-[A-Za-z0-9+/=]+'; .*connect-src 'self'/);
 
-    expect((await raw("/rn?code=abc")).body).toContain("rn");
+    expect((await raw("/native?code=abc")).body).toContain("native");
     const asset = await raw("/assets/app-abc123.js");
     expect(asset).toMatchObject({ status: 200, body: "export const app = 1;\n" });
     expect(asset.headers["content-type"]).toBe("text/javascript; charset=utf-8");
@@ -307,7 +307,7 @@ describe("the client's files, from the engine's listener", { timeout: 60_000 }, 
 
   it("resolves a path the same for the window's own protocol", () => {
     expect(clientFile(client, "/")).toMatchObject({ file: join(client, "index.html"), html: true });
-    expect(clientFile(client, "/rn")).toMatchObject({ file: join(client, "rn.html"), html: true });
+    expect(clientFile(client, "/native")).toMatchObject({ file: join(client, "native.html"), html: true });
     expect(clientFile(client, "/assets/app-abc123.js")).toMatchObject({ html: false, type: "text/javascript; charset=utf-8" });
     expect(clientFile(client, "/..%2f..%2fetc%2fpasswd")).toEqual({ status: 403, reason: expect.any(String) });
     expect(clientFile(join(client, "nowhere"), "/")).toMatchObject({ status: 404 });

@@ -5,13 +5,17 @@
  * still on the board and its conversation still opens, from the copy.
  *
  *   npm --workspace @jaira/app run build && (cd packages/cli && node build.mjs)
- *   npx tsx --tsconfig packages/app/tsconfig.json packages/app/shots/machines-replica.mts
+ *   npx tsx packages/app/shots/machines-replica.mts
+ *
+ * It fails if the task is never copied here, or if its card is not on the board once the other
+ * machine is away. Pictures land in `shots/out/machines-replica/`.
  */
 import { execFileSync, spawn } from "node:child_process";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import { App } from "./driver.mjs";
+import { clickFirst, drawn, says } from "./parityWorld.mjs";
 import { buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "out", "machines-replica");
@@ -79,7 +83,7 @@ async function main(): Promise<void> {
 
     const app = await App.launch(world, { out: OUT, port: 9248 });
     try {
-      await app.until("window.jaira && document.getElementById('root').children.length > 0", "the window to draw");
+      await app.until(drawn, "the window to draw");
       await app.resize(1360, 820);
       await app.ipc("machines:rename", { label: "desk" });
       await app.ipc("machines:reach", { on: true });
@@ -106,8 +110,8 @@ async function main(): Promise<void> {
       await app.shot("offline-conversation");
       await app.clickText("Settings");
       await sleep(500);
-      await app.evaluate(`(() => { const li = [...document.querySelectorAll(".sections > li")].find((e) => e.textContent.trim().startsWith("Machines")); li?.click(); return !!li; })()`);
-      await app.until(`document.body.innerText.includes("Keep a copy of my other machines")`, "the copy switch");
+      await clickFirst(app, "Machines");
+      await app.until(says("Copies of other machines' work"), "the copies section");
       await sleep(500);
       await app.shot("setting");
     } finally {

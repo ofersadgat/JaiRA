@@ -14,7 +14,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { SHARED_SESSION } from "@jaira/shared";
-import { chatProjectOf } from "../src/renderer/chatPane";
+import { chatProjectOf } from "../src/renderer/chatWorkflow";
 
 describe("chatProjectOf", () => {
   it("reads an open conversation out of the project that holds it", () => {

@@ -3,7 +3,7 @@ import { View } from "@tamagui/core";
 import { SECRET_SOURCE_LABELS, SECRET_TARGET_LABELS, type ForgeCheck, type JairaForgeConnection, type SecretTarget } from "@jaira/shared/browser";
 import { layerWriter } from "@jaira/ui/configWriter";
 import { BUILTIN_FORGE_SCHEMA, CUSTOM_FORGE_SCHEMA, NEW_FORGE_SCHEMA, forgeRowOf, forgesOf, gitToolsSentence, newForgeOf, secretTargetsOf, stateWord } from "@jaira/ui/connectionsModel";
-import type { IntegrationsPaneProps } from "@jaira/ui/integrationsPane";
+import type { IntegrationsPaneProps } from "@jaira/ui/integrationsPaneTypes";
 import { Txt } from "../../../primitives";
 import { SchemaForm } from "../../form/SchemaForm";
 import { Code, Hint, PaneActions } from "../bits";

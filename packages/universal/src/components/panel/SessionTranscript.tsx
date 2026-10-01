@@ -4,7 +4,7 @@ import { View, isWeb } from "@tamagui/core";
 import type { MessageAuthor, SessionView, ViewId } from "@jaira/shared/browser";
 import { MESSAGE_SOURCE, messageReadingOf, workflowSourceTitleOf } from "@jaira/ui/messageReading";
 import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
-import type { ArtifactSurface, EditMessage } from "@jaira/ui/transcriptView";
+import type { ArtifactSurface, EditMessage } from "@jaira/ui/transcriptViewTypes";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, startOfBlock, type LiveTail, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
 import { keptUnderSummary, type CallSurface } from "@jaira/ui/transcriptRows";

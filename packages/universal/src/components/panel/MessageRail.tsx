@@ -1,10 +1,10 @@
 import { useContext, useEffect, useState, type JSX } from "react";
 import { typeNameOf, type ContextReading, type ViewId } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { familyIcon } from "@jaira/ui/icons";
+import { familyIcon } from "@jaira/ui/iconPaths";
 import { READING, copyTextOf, cutTitleOf, fullClockOf, readingMenuOf, stampOf, typeMenuOf, type messageReadingOf } from "@jaira/ui/messageReading";
 import type { MessageEntry } from "@jaira/ui/transcript";
-import type { EditMessage } from "@jaira/ui/transcriptView";
+import type { EditMessage } from "@jaira/ui/transcriptViewTypes";
 import { View, isWeb } from "@tamagui/core";
 import { copyText } from "../../clipboard";
 import { Press, Txt, lengthToken } from "../../primitives";

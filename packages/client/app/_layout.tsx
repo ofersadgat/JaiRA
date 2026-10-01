@@ -3,8 +3,8 @@ import { Slot } from "one";
 /**
  * The page, from `<html>` down.
  *
- * `data-palette` is stamped for the first paint, as `packages/app/src/renderer/index.html` does, and
- * `applyAppearance` rewrites it once settings arrive. There is no CSP `<meta>` here: Electron sends the
+ * `data-palette` is the default palette, stamped for the first paint, and `applyAppearance` rewrites it
+ * once settings arrive. There is no CSP `<meta>` here: Electron sends the
  * same policy as a header from its `app://` protocol, which a page cannot override.
  */
 export default function Layout() {

@@ -1,24 +1,20 @@
 /**
- * The reorganised Settings pages (the person's rulings, 2026-09-23), rendered on the server:
+ * The reorganised Settings pages (the person's rulings, 2026-09-23), as the models the universal tree
+ * draws them from say them (`functionsModel.ts`, `connectionsModel.ts`):
  *
  *  1. Tools → Functions is the permission sets keyed by the FUNCTION — one row per tool, one column per
  *     set, the mode in each cell, a dash where a set does not offer it — with a set's commands as rows
- *     under `bash`, and `smart`'s users being the sets that hand calls to it.
- *  2. Connections → Forges draws who a connection acts as as a box — tagged OAuth or token — and the +
- *     box offers the forge's own sign-in with a pasted token under it; while a sign-in waits, the box
- *     shows the code to type.
- *  3. Connections → Local models marks the server the route points at "in use", offers every other
- *     one that answered, and draws each weights file's state.
+ *     under `bash`, and whether a run may reach a function a workflow calls.
+ *  2. Connections → Forges says who a connection acts as — signed in through the forge or by a token —
+ *     which forge its + box signs in with, and which row's sign-in is waiting on the browser.
+ *  3. Connections → Local models says what each server on the usual ports answered, and a weights
+ *     file's size.
  */
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { parseConfig, toolsInCategory, type ConfigView, type ForgeCheck, type PermissionSetsView } from "@jaira/shared";
-import { FunctionsSections } from "../src/renderer/functionsPane";
-import { ForgeRows, ForgeToolsLine, gitToolsSentence } from "../src/renderer/integrationsPane";
-import { LocalServers, WeightsRows } from "../src/renderer/providersPane";
-
-const text = (html: string): string => html.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ");
+import { functionAllowed, parseConfig, toolsInCategory, type ConfigView, type ForgeCheck, type LocalServerProbe, type PermissionSetsView } from "@jaira/shared";
+import { forgeRowOf, forgesOf, gitToolsSentence, localServerSaid, weightsSize, type ForgeRowOAuth } from "../src/renderer/connectionsModel";
+import { cellOf, columnsOf, commandSubjectsOf, isSubRow, modeClass } from "../src/renderer/functionsModel";
+import { permissionSetLayersOf } from "../src/renderer/permissionSetsHost";
 
 const config = (doc: Record<string, unknown>): ConfigView => ({
   base: doc as never,
@@ -50,112 +46,69 @@ describe("Tools → Functions", () => {
     "chat/auto": { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } },
     "chat/read-only": { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" },
   });
-  const render = (open?: string): string =>
-    renderToStaticMarkup(
-      createElement(FunctionsSections, {
-        data,
-        layer: "base",
-        config: config({}),
-        busy: false,
-        onSave: () => undefined,
-        agents: ["claude-cli"],
-        rules: ["everything", "-claude-cli"],
-        onRules: () => undefined,
-        onOpenSet: () => undefined,
-      }),
-    ) + (open ?? "");
+  // The columns the Shared page's table has: the sets the layer its switch is on can see.
+  const columns = columnsOf(data, permissionSetLayersOf("base", data.layers).reads);
+  const rowOf = (name: string) => columns.map((column) => cellOf(column, name));
 
-  it("draws one row per function and one column per set, with each set's mode in the cell", () => {
-    const html = render();
-    const readRow = html.slice(html.indexOf(">read_file<"), html.indexOf("</tr>", html.indexOf(">read_file<")));
-    expect(text(readRow)).toContain("ask ☆ smart allow");
-    // a set that does not offer a tool draws a dash, not a mode
-    const fetchRow = html.slice(html.indexOf(">web_fetch<"), html.indexOf("</tr>", html.indexOf(">web_fetch<")));
-    expect((fetchRow.match(/fx-cell none/g) ?? []).length).toBe(3);
+  it("has one column per set, and in a function's row each set's mode", () => {
+    expect(columns.map((column) => column.id)).toEqual(["chat/ask-first", "chat/auto", "chat/read-only"]);
+    expect(rowOf("read_file").map((cell) => cell.text)).toEqual(["ask", "☆ smart", "allow"]);
+    // a set that does not offer a tool has a dash, not a mode
+    expect(rowOf("web_fetch").map((cell) => [cell.text, modeClass(cell.mode)])).toEqual([
+      ["—", "none"],
+      ["—", "none"],
+      ["—", "none"],
+    ]);
   });
 
   it("lists a set's commands as rows under bash", () => {
-    const html = render();
-    const at = html.indexOf(">git status<");
-    expect(at).toBeGreaterThan(html.indexOf(">bash<"));
-    expect(text(html.slice(at, html.indexOf("</tr>", at)))).toContain("— — allow");
+    expect(commandSubjectsOf(columns)).toEqual(["git status"]);
+    // A command's row is drawn indented under its tool; the tool's own is not.
+    expect(isSubRow("git status")).toBe(true);
+    expect(isSubRow("bash")).toBe(false);
+    expect(rowOf("git status").map((cell) => cell.text)).toEqual(["—", "—", "allow"]);
   });
 
   it("says which functions a run may reach from the default executor's rules", () => {
-    const html = render();
-    const agent = html.slice(html.indexOf(">claude-cli<"), html.indexOf("</li>", html.indexOf(">claude-cli<")));
-    expect(agent).toContain("not reachable");
-    const gate = html.slice(html.indexOf(">choose_option<"), html.indexOf("</li>", html.indexOf(">choose_option<")));
-    expect(gate).toContain("available");
+    const rules = ["everything", "-claude-cli"];
+    expect(functionAllowed(rules, "claude-cli")).toBe(false);
+    expect(functionAllowed(rules, "choose_option")).toBe(true);
   });
 });
 
 describe("Connections → Forges", () => {
-  const forges = config({});
+  const forges = forgesOf(config({}));
   const checks: ForgeCheck[] = [
     { name: "gitlab", provider: "gitlab", host: "gitlab.com", status: "ok", detail: "signed in as @ofer", identity: { login: "ofer" }, credential: { source: "keychain" }, via: "oauth" },
     { name: "github", provider: "github", host: "github.com", status: "unconfigured", detail: "no token stored under GITHUB_TOKEN" },
   ];
-  const render = (oauth: boolean, waiting = false): string =>
-    renderToStaticMarkup(
-      createElement(ForgeRows, {
-        config: forges,
-        layer: "base",
-        busy: false,
-        editable: true,
-        checks,
-        secrets: { keychain: true } as never,
-        onSave: () => undefined,
-        onSaveToken: () => undefined,
-        ...(oauth
-          ? {
-              oauth: {
-                signingIn: new Set(waiting ? ["github"] : []),
-                pending: new Map(waiting ? [["github", "WDJB-MJHT"]] : []),
-                errors: new Map(),
-                viaOAuth: new Set(["gitlab"]),
-                onSignIn: () => undefined,
-                onCancel: () => undefined,
-                onDisconnect: () => undefined,
-              },
-            }
-          : {}),
-      }),
-    );
+  const oauth = (waiting = false): ForgeRowOAuth => ({
+    signingIn: new Set(waiting ? ["github"] : []),
+    pending: new Map(waiting ? [["github", "WDJB-MJHT"]] : []),
+    errors: new Map(),
+    viaOAuth: new Set(["gitlab"]),
+    onSignIn: () => undefined,
+    onCancel: () => undefined,
+    onDisconnect: () => undefined,
+  });
+  const row = (name: string, signIn: ForgeRowOAuth | undefined) => forgeRowOf(name, forges[name]!, checks.find((check) => check.name === name), signIn);
 
-  it("draws the account a connection acts as, tagged by how it signed in, and the + box's two ways in", () => {
-    const html = text(render(true));
-    expect(html).toContain("OAuth ofer");
-    expect(html).toContain("Disconnect");
-    expect(html).toContain("Sign in with GitHub or paste a token");
+  it("says the account a connection acts as, how it signed in, and the forge its + box signs in with", () => {
+    expect(row("gitlab", oauth())).toMatchObject({ state: "available", identity: { login: "ofer" }, viaOAuth: true });
+    // Nobody is signed in to GitHub: no account's box, and the + box offers "Sign in with GitHub".
+    expect(row("github", oauth())).toMatchObject({ state: "unconfigured", identity: undefined, label: "GitHub", signingIn: false });
   });
 
-  it("shows the code to type while a sign-in waits on the browser", () => {
-    expect(text(render(true, true))).toContain("Finish in your browser Enter WDJB-MJHT");
+  it("knows which row's sign-in waits on the browser", () => {
+    expect(row("github", oauth(true)).signingIn).toBe(true);
+    expect(row("gitlab", oauth(true)).signingIn).toBe(false);
   });
 
-  it("offers a pasted token alone when forge sign-in is not wired", () => {
-    const html = text(render(false));
-    expect(html).not.toContain("Sign in with");
-    expect(html).toContain("Add a token");
-  });
-
-  // Decision 0010 §1, option B: an OPENED row's first line says what uses the connection.
-  it("says nothing about the Git tools on a row at rest", () => {
-    expect(render(true)).not.toContain("Git tool");
-  });
-
-  it("opens with what uses the connection — counted from the vocabulary, plain, and a way to Tools", () => {
+  it("opens with what uses the connection — counted from the vocabulary", () => {
     const git = toolsInCategory("git");
     expect(git.length).toBe(9);
-    const html = renderToStaticMarkup(createElement(ForgeToolsLine, { onOpenTools: () => undefined }));
-    expect(text(html).trim()).toBe(`Used by ${git.length} Git tools — ${git[0]!.name}, ${git.at(-1)!.name} and seven more, on Tools → Git`);
-    expect(text(html).trim()).toBe("Used by 9 Git tools — list_merge_requests, git_push and seven more, on Tools → Git");
-    // A hint's own line: no card, no tint — and "Tools → Git" is the one thing in it that does anything.
-    expect(html).toMatch(/^<p class="cfg-hint conn-tools-line">/);
-    expect(html).toContain('<button type="button" class="link">Tools → Git</button>');
-    // Without a way there it is words.
-    expect(renderToStaticMarkup(createElement(ForgeToolsLine, {}))).not.toContain("<button");
+    expect(gitToolsSentence().lead).toBe(`Used by ${git.length} Git tools — ${git[0]!.name}, ${git.at(-1)!.name} and seven more`);
+    expect(gitToolsSentence().lead).toBe("Used by 9 Git tools — list_merge_requests, git_push and seven more");
   });
 
   it("counts whatever the git category holds", () => {
@@ -164,39 +117,16 @@ describe("Connections → Forges", () => {
 });
 
 describe("Connections → Local models", () => {
-  it("marks the server the route points at, and offers every other one that answered", () => {
-    const html = renderToStaticMarkup(
-      createElement(LocalServers, {
-        found: [
-          { name: "Ollama", baseURL: "http://localhost:11434/v1", up: true, models: ["qwen2.5-coder"], inUse: true },
-          { name: "LM Studio", baseURL: "http://localhost:1234/v1", up: true, models: ["phi-4"], inUse: false },
-          { name: "vLLM", baseURL: "http://localhost:8000/v1", up: false, models: [], inUse: false },
-        ],
-        locked: false,
-        onUse: () => undefined,
-      }),
-    );
-    const rows = html.split("conn-probe-row").slice(1);
-    expect(text(rows[0]!)).toContain("in use");
-    expect(text(rows[1]!)).toContain("Use");
-    expect(text(rows[2]!)).toContain("not running");
+  it("says what each server answered: its models, or that it is not running", () => {
+    const found: LocalServerProbe[] = [
+      { name: "Ollama", baseURL: "http://localhost:11434/v1", up: true, models: ["qwen2.5-coder"], inUse: true },
+      { name: "LM Studio", baseURL: "http://localhost:1234/v1", up: true, models: ["phi-4"], inUse: false },
+      { name: "vLLM", baseURL: "http://localhost:8000/v1", up: false, models: [], inUse: false },
+    ];
+    expect(found.map(localServerSaid)).toEqual(["localhost:11434/v1 · qwen2.5-coder", "localhost:1234/v1 · phi-4", "localhost:8000/v1 · not running"]);
   });
 
-  it("draws each weights file as found or missing", () => {
-    const html = text(
-      renderToStaticMarkup(
-        createElement(WeightsRows, {
-          weights: { "qwen2.5-7b": { modelPath: "/models/qwen.gguf" }, "phi-4": { modelPath: "/models/phi.gguf" } },
-          checks: [
-            { id: "qwen2.5-7b", modelPath: "/models/qwen.gguf", exists: true, sizeBytes: 4_700_000_000 },
-            { id: "phi-4", modelPath: "/models/phi.gguf", exists: false, error: "file missing" },
-          ],
-          locked: false,
-          onChange: () => undefined,
-        }),
-      ),
-    );
-    expect(html).toContain("found · 4.7 GB");
-    expect(html).toContain("file missing");
+  it("says a found weights file's size", () => {
+    expect(weightsSize(4_700_000_000)).toBe("4.7 GB");
   });
 });

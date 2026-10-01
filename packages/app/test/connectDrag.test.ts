@@ -9,11 +9,9 @@
  *    it has NO controls: the drop is the commit;
  *  - an adopted task files beneath the task that adopted it, out of the lane its own status names.
  */
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
 import type { BoardCard, BoardColumn, ConnectPlan, TaskConnectResult } from "@jaira/shared/browser";
-import { Board, Card, ConnectPop, lanesOf } from "../src/renderer/board";
+import { laneRunsOf, lanesOf } from "../src/renderer/boardModel";
 import { canConnect, ConnectDrag, nestUnder, ownColumnOf, previewOf, type ColumnAnswer } from "../src/renderer/connectDrag";
 
 const card = (patch: Partial<BoardCard> & Pick<BoardCard, "taskId">): BoardCard => ({
@@ -275,20 +273,6 @@ describe("previewOf", () => {
 });
 
 describe("what draws", () => {
-  it("the preview has NO controls — the drop is the commit", () => {
-    const preview = previewOf(answered({ ok: true, dryRun: true, plan: plan({ resolution: "adopt", adoptedAs: "product", workflowLabel: "Feature" }) }), card({ taskId: "t1" }), column("feature"))!;
-    const html = renderToStaticMarkup(createElement(ConnectPop, { preview }));
-    expect(html).toContain('class="connect-pop connect-pop-inline"');
-    expect(html).toContain('<span class="connect-kind">Adopt into</span>');
-    expect(html).toContain('<span class="connect-drop">Drop to adopt</span>');
-    expect(html).not.toMatch(/<button|<a |<input|onclick/i);
-    // Refused: the same box, without the accent line that names the drop.
-    const refused = renderToStaticMarkup(createElement(ConnectPop, { preview: { kind: "Move within", say: ["x"], facts: [], refused: "Not yet." } }));
-    expect(refused).toContain("connect-refused");
-    expect(refused).toContain('<span class="connect-drop connect-no">Not yet.</span>');
-    expect(renderToStaticMarkup(createElement(ConnectPop, { preview: "asking" }))).toContain("Working out what a drop does");
-  });
-
   it("files an adopted task BENEATH the task that adopted it, out of the lane its own status names", () => {
     const parent = card({ taskId: "parent", status: "queued", workflow: "feature" });
     const adopted = card({ taskId: "adopted", status: "completed", under: "parent", endedAt: 1 });
@@ -303,28 +287,14 @@ describe("what draws", () => {
       ["finished", ["other", "elsewhere"]],
     ]);
 
-    const html = renderToStaticMarkup(
-      createElement(Board, {
-        board: { level: "", breadcrumb: [], columns: [{ key: "feature", stateId: "feature", cards: [other, parent, adopted] }], atLevel: [], finished: [] },
-        selected: null,
-        numbered: false,
-        onSelectTask: () => undefined,
-        onDrill: () => undefined,
-        onTaskDrop: () => undefined,
-        connect: { ask: async (): Promise<TaskConnectResult> => ({ ok: true, dryRun: true, plan: plan({}) }), onDrop: () => undefined, undoable: new Set(["parent"]), onUndo: () => undefined },
-      }),
-    );
-    // Parent, then its child indented, then the rest — and Undo on the card the drop made.
-    const order = [...html.matchAll(/class="card(?: [^"]*)?"/g)].map((m) => m[0]);
-    expect(order).toEqual(['class="card card-draggable"', 'class="card card-child"', 'class="card card-draggable"']);
-    expect(html.indexOf(">parent<")).toBeLessThan(html.indexOf(">adopted<"));
-    expect(html.indexOf(">adopted<")).toBeLessThan(html.indexOf(">other<"));
-    expect(html).toContain("adopted · feature/product");
-    expect(html.match(/<button type="button" class="link">Undo<\/button>/g)).toHaveLength(1);
-  });
-
-  it("offers Undo only on the card it was handed for", () => {
-    const html = renderToStaticMarkup(createElement(Card, { card: card({ taskId: "t1" }), selected: false, onSelect: () => undefined }));
-    expect(html).not.toContain("Undo");
+    // The column as the board draws it: parent, then its child beneath it, then the rest — and the
+    // lane's count is of its own cards, not of what is filed under them.
+    const { boxed, runs } = laneRunsOf([other, parent, adopted]);
+    expect(boxed).toBe(true);
+    expect(runs.map((run) => [run.lane, run.count, run.entries.map((entry) => [entry.card.taskId, entry.beneath.map((under) => under.card.taskId)])])).toEqual([
+      ["not-started", 1, [["parent", ["adopted"]]]],
+      ["finished", 1, [["other", []]]],
+    ]);
   });
 });
+

@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { ChatSurface } from "@jaira/ui/chatPane";
+import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";

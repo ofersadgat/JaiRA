@@ -10,7 +10,7 @@
  * node, and the only thing that could be wrong here is which strings it recognises.
  */
 import { describe, expect, it } from "vitest";
-import { isResizeNotification } from "../src/renderer/crashScreen";
+import { isResizeNotification } from "../src/renderer/crashReport";
 
 describe("the one report that is not a failure", () => {
   it("knows the notification, in both spellings browsers have used", () => {

@@ -1,11 +1,39 @@
 /**
- * The board's pure half (decision 0015): what a card says and where it goes, with no DOM in it, so the
- * universal copies and the native app can use it without pulling in the board's React-DOM half
- * (`board.tsx` → `menu` → `popover` → `react-dom`). `board.tsx` re-exports all of it.
+ * The board's pure half (decision 0015): what a card says and where it goes, with no DOM in it — what
+ * the universal board and a phone draw from.
  */
+import type { MouseEvent as ReactMouseEvent } from "react";
 import type { BoardCard, BoardView, NextMove } from "@jaira/shared/browser";
 import { nestUnder } from "./connectDrag";
 import { cardRemoteWord } from "./remoteStrip";
+
+/** What a card is drawn from. */
+export interface CardProps {
+  card: BoardCard;
+  /** Last in its lane: a card cannot see its siblings, so the lane says. */
+  last?: boolean;
+  /** The origin line was clicked: open the events task it names, at the automation (decision 0010 §4). */
+  onOrigin?: ((taskId: string, e: ReactMouseEvent, stateId?: string) => void) | undefined;
+  /**
+   * A NEXT-TRANSITION chip was pressed (decision 0005, the rulings of 2026-09-22): take that move.
+   * Absent where the board moves nothing — the chips are not drawn at all there.
+   */
+  onMove?: ((move: NextMove) => void) | undefined;
+  /** Drawn beneath the task that adopted it. */
+  child?: boolean;
+  /**
+   * TAKE THE MOVE BACK (decision 0005): present on the card a drop just made or moved, until it is
+   * used. The one control a connect has, and it comes AFTER — the drop itself was never confirmed.
+   */
+  onUndo?: (() => void) | undefined;
+  selected: boolean;
+  onSelect: (e: ReactMouseEvent) => void;
+  onDrill?: () => void;
+  onMenu?: (e: ReactMouseEvent) => void;
+  /** Present only when a waiting transition has offered this card a move. */
+  onDragStart?: (() => void) | undefined;
+  onDragEnd?: (() => void) | undefined;
+}
 
 /**
  * The four things a card in a column can be DOING, in the order work moves through them.

@@ -4,7 +4,7 @@
  * right edge says, and what a row's menu offers.
  */
 import type { TaskSummary } from "@jaira/shared/browser";
-import type { AskSpec, MenuItem } from "./menu";
+import type { AskSpec, MenuItem } from "./menuTypes";
 
 export type ChatRow = TaskSummary & { project?: string };
 

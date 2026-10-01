@@ -29,7 +29,7 @@ export interface ThirdPartyLicenseManifest {
   readonly entries: ReadonlyArray<ThirdPartyLicenseEntry>;
 }
 
-/** The manifest's file name, beside the renderer's `index.html` in `dist/renderer/`. */
+/** The manifest's file name, beside the window's `index.html` in `dist/client/`. */
 export const THIRD_PARTY_LICENSES_FILE_NAME = "third-party-licenses.json";
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -118,7 +118,7 @@ export function filterThirdPartyLicenseEntries(
  * What each bundle tag means to a reader.
  *
  * `main` and `window` are the two bundles the build actually produces (the esbuild main process with
- * its preload and workers, and the Vite renderer), so a package tagged with one is code that is IN
+ * its preload and workers, and the One client the window loads), so a package tagged with one is code that is IN
  * that file. `installed` is a package reached only by walking the app's production dependencies —
  * loaded from `node_modules` at run time (Electron's natives, the compiler, SQLite) rather than
  * bundled. `runtime` and `assets` are the config's own entries: the Electron shell, and the files

@@ -24,7 +24,7 @@ import {
   settingsLocked,
 } from "@jaira/ui/appearanceModel";
 import { PALETTE_CARDS } from "@jaira/ui/paletteCardsModel";
-import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
+import { PILL_WORD, pillKindOf } from "@jaira/ui/pillModel";
 import type { InstanceStatus, TaskStatus } from "@jaira/shared/browser";
 import { useShell } from "../../app/shell";
 import { FileTypesPane } from "../files/FileTypesPane";

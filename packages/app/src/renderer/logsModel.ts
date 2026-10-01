@@ -12,6 +12,7 @@ import {
   type LogPolicy,
   type LogQuery,
 } from "@jaira/shared/browser";
+import type { LogUnseen } from "./updatesModel";
 
 export const LEVELS: LogLevel[] = ["debug", "info", "warn", "error"];
 
@@ -110,4 +111,30 @@ export function sampledOverride(o: LogOverride, typed: string): LogOverride | un
   if (!Number.isFinite(rate) || rate < 0 || rate > 1) return undefined;
   const { samplingRate: _held, ...rest } = o;
   return rate === 1 ? rest : { ...rest, samplingRate: rate };
+}
+
+export interface LogsPanelProps {
+  /** The pages fetched so far, newest first. */
+  entries: LogEntry[];
+  /** Whether anything older exists — the panel asks for it as the list is scrolled. */
+  hasOlder: boolean;
+  loading: boolean;
+  /** Ask the log a different question. The filters are applied where the entries are read. */
+  onSearch: (query: LogQuery) => void;
+  /** The next page towards the past. */
+  onOlder: (query: LogQuery) => void;
+  /** What is kept at all, and the control that changes it — see {@link LogPolicy}. */
+  policy: LogPolicy;
+  onPolicy: (policy: LogPolicy) => void;
+  /** The process output being read, when a row opened one. */
+  output: { jobId: number; chunks: JobOutputChunk[] } | null;
+  onOpenJob: (jobId: number) => void;
+  onOpenTask: (taskId: string) => void;
+  onClearOutput: () => void;
+  /**
+   * The errors and warnings not seen yet — Settings' two log items (`logUnseen`): each such entry is
+   * marked, the bar counts them, and its Dismiss clears both, as the items' × does elsewhere.
+   */
+  unseen?: LogUnseen | undefined;
+  onDismissUnseen?: (() => void) | undefined;
 }

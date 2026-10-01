@@ -1,14 +1,11 @@
 import { useState, type ComponentType, type JSX } from "react";
 import { CONFIG_SECTIONS } from "@jaira/shared/browser";
-import { SelectInput as DomSelectInput, SettingsRowsContext } from "@jaira/ui/controls";
-import { SchemaForm as DomSchemaForm } from "@jaira/ui/schemaForm/SchemaForm";
 import type { Schema, SchemaFormContext } from "@jaira/ui/schemaForm/types";
 import { FormRowsContext, SchemaForm, Select, SelectInput, SettingsGroup } from "@jaira/universal";
 
 /**
- * The schema form's field kinds as specimens (decision 0015): `schemaForm/SchemaForm.tsx` and its
- * universal copy, drawn from the same fixture and holding their own value, so every kind can be seen
- * and pressed on both pages.
+ * The schema form's field kinds as specimens (decision 0015): the copy of `schemaForm/SchemaForm.tsx`,
+ * drawn from a fixture and holding its own value, so every kind can be seen and pressed.
  *
  *  - `form-fields` — a form as a run's inputs or a gate draws it: required marks, the switch of an
  *    optional member (one left out), every leaf control, a union's shape chips, and a complaint under
@@ -104,25 +101,12 @@ function part(keys: readonly string[] | null): Schema {
   return { ...FIELDS, properties: Object.fromEntries(kept.map((k) => [k, props[k]!])), required: (FIELDS["required"] as string[]).filter((k) => kept.includes(k)) };
 }
 
-function fieldsOf(Form: typeof DomSchemaForm | typeof SchemaForm, keys: readonly string[] | null): ComponentType {
+function fieldsOf(keys: readonly string[] | null): ComponentType {
   const schema = part(keys);
   return function Fields() {
     const [value, setValue] = useValue<unknown>(FIELDS_VALUE);
-    return <Form schema={schema} value={value} onChange={setValue} ctx={{ path: "", ...FIELDS_CTX }} />;
+    return <SchemaForm schema={schema} value={value} onChange={setValue} ctx={{ path: "", ...FIELDS_CTX }} />;
   };
-}
-
-function DomRows(): JSX.Element {
-  const [doc, setDoc] = useValue<Record<string, unknown>>(ROWS_VALUE);
-  return (
-    <SettingsRowsContext.Provider value={true}>
-      <div className="set-group">
-        {ROWS.map((section) => (
-          <DomSchemaForm key={section.key} schema={section.schema as Schema} value={doc[section.key]} onChange={(next) => setDoc({ ...doc, [section.key]: next })} ctx={rowsCtx(section.key, doc, setDoc)} />
-        ))}
-      </div>
-    </SettingsRowsContext.Provider>
-  );
 }
 
 function RnRows(): JSX.Element {
@@ -149,27 +133,6 @@ const CHOICES: Array<[string, string]> = [
   ["a longer choice than the others", "long"],
 ];
 
-function DomSelects(): JSX.Element {
-  const [value, setValue] = useValue("native");
-  return (
-    <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start", gap: 12, padding: 12 }}>
-      <DomSelectInput value={value} options={CHOICES} onChange={setValue} />
-      <div style={{ width: 272 }}>
-        <DomSelectInput value={value} options={CHOICES} onChange={setValue} />
-      </div>
-      <DomSelectInput value={value} options={CHOICES} onChange={setValue} disabled />
-      {/* As the Logs bar sets it: `.logs-bar select` — width auto, min-width 150. */}
-      <select value={value} onChange={(e) => setValue(e.target.value)} style={{ width: "auto", minWidth: 150 }}>
-        {CHOICES.map(([label, v]) => (
-          <option key={v} value={v}>
-            {label}
-          </option>
-        ))}
-      </select>
-    </div>
-  );
-}
-
 function RnSelects(): JSX.Element {
   const [value, setValue] = useValue("native");
   const plain = CHOICES.map(([label, v]) => ({ label, value: v }));
@@ -180,39 +143,34 @@ function RnSelects(): JSX.Element {
         <SelectInput value={value} options={CHOICES} onChange={setValue} fill />
       </div>
       <SelectInput value={value} options={CHOICES} onChange={setValue} disabled fill />
+      {/* As the Logs bar sets it: `.logs-bar select` — width auto, min-width 150. */}
       <Select value={value} options={plain} onChange={setValue} minWidth={150} />
     </div>
   );
 }
 
-const DomFields = fieldsOf(DomSchemaForm, LEAVES);
-const RnFields = fieldsOf(SchemaForm, LEAVES);
-const DomLists = fieldsOf(DomSchemaForm, null);
-const RnLists = fieldsOf(SchemaForm, null);
+const RnFields = fieldsOf(LEAVES);
+const RnLists = fieldsOf(null);
 
 export const FORM_SPECIMENS = {
   // A run's inputs or a gate's form: the side panel's width.
   "form-fields": {
     width: 440,
-    dom: () => <DomFields />,
     rn: () => <RnFields />,
   },
   // The same form's lists (of values, and of rows that open and close), a map and a nested object.
   "form-lists": {
     width: 440,
-    dom: () => <DomLists />,
     rn: () => <RnLists />,
   },
   // The menulists: `select.cfg-input` three ways, and the plain `<select>`.
   selects: {
     width: 400,
-    dom: () => <DomSelects />,
     rn: () => <RnSelects />,
   },
   // A Settings page's card of rows (`.set-group`), at the page's readable width.
   "form-rows": {
     width: 740,
-    dom: () => <DomRows />,
     rn: () => <RnRows />,
   },
 };

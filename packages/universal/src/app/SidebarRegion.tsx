@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type JSX } from "react";
-import { hueOf } from "@jaira/ui/pill";
+import { hueOf } from "@jaira/ui/pillModel";
 import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProjectsOf } from "@jaira/ui/shellModel";
-import type { SidebarAct, SidebarView } from "@jaira/ui/sidebar";
+import type { SidebarAct, SidebarView } from "@jaira/ui/sidebarTypes";
 import type { View as AppView } from "@jaira/ui/store";
 import { newItems, standingRoot, type TreeDraft } from "@jaira/ui/filesModel";
 import { FOLD, OPENED, PANE, openOf, paneOf, unfoldedOf } from "@jaira/ui/uiState";

@@ -14,8 +14,8 @@ import {
   type ViewId,
 } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { familyIcon } from "./icons";
-import type { MenuItem } from "./menu";
+import { familyIcon } from "./iconPaths";
+import type { MenuItem } from "./menuTypes";
 import type { MessageEntry } from "./transcript";
 
 /**

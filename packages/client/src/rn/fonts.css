@@ -1,6 +1,6 @@
 /*
- * The two bundled faces, and nothing else from `styles.css`: the `/rn` page draws only what the
- * universal tree draws, as a phone does, and a phone has these fonts too (loaded by `expo-font`).
+ * The two bundled faces, and nothing else from `styles.css`: the page draws only what the universal
+ * tree draws, as a phone does, and a phone has these fonts too (loaded by `expo-font`).
  * The variable files the desktop uses, so the browser picks weights and optical sizes as it does there.
  */
 @font-face {

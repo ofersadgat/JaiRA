@@ -1,5 +1,6 @@
 import { useEffect, type JSX } from "react";
-import { MonacoDiffPane, type DiffActions, type MonacoDiffProps } from "@jaira/ui/monacoDiff";
+import { MonacoDiffPane } from "@jaira/ui/monacoDiff";
+import type { DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiffTypes";
 import { mountIsland } from "./host";
 
 /**

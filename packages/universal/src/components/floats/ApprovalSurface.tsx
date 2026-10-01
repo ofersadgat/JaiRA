@@ -1,7 +1,7 @@
 import { Fragment, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, Text, isWeb } from "@tamagui/core";
 import { toolDisplayOf } from "@jaira/shared/browser";
-import type { ApprovalAnswerExtras, ApprovalSurfaceProps } from "@jaira/ui/approvalSurface";
+import type { ApprovalAnswerExtras, ApprovalSurfaceProps } from "@jaira/ui/approvalSurfaceTypes";
 import {
   answerMenu,
   approvalAnswerOf,

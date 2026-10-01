@@ -1,7 +1,7 @@
 import { createContext, useContext, useRef, useState, type JSX, type ReactNode } from "react";
 import { PixelRatio, TextInput as RNTextInput, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { MenuItem } from "@jaira/ui/menu";
+import type { MenuItem } from "@jaira/ui/menuTypes";
 import { useReadOnly } from "@jaira/ui/reading";
 import { ENTER_KEEPS_FOCUS, Press, Txt, edge, font, lengthToken, padToken, placeholderColor, useHover, type FontSpec } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";

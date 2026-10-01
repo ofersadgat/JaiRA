@@ -1,5 +1,5 @@
 /**
- * A JSON editor that knows what the document is supposed to be.
+ * A JSON editor that knows what the document is supposed to be — the part of it that is typed INTO.
  *
  * Hand-editing JSON against a format you half-remember is the problem this solves, and it solves it
  * from one schema: the document is checked as you type, missing fields can be filled in, the keys
@@ -7,6 +7,10 @@
  * description at the end of its line. Picking a schema turns all of that on; without one this is
  * still a colourised editor, which is the right floor for the many `.json` files that answer to no
  * schema at all.
+ *
+ * The bar, the picker, the verdict and the field reference round it are the universal tree's
+ * (`packages/universal/src/components/files/SchemaEdit.tsx`, decision 0015); this file is the island
+ * they host: the coloured layer, the textarea over it, and the completion list at the caret.
  *
  * ## The colour is a layer behind a transparent textarea
  *
@@ -35,16 +39,9 @@
  *
  * A Compose file or a GitLab pipeline has a schema as surely as a state does, and the value a schema
  * describes does not care which syntax spelled it. So `format: "yaml"` swaps the scanner that colours
- * the layer (`highlightYaml`, which takes the same per-key hints) and the parse main runs before it
- * checks, and the rest — picker, verdict, violations, field reference — is unchanged. Completion at
- * the cursor stays JSON's for now: `cursorContext` reads braces and quotes, and YAML has neither.
- *
- * ## The checking happens in main
- *
- * ajv is a main-process dependency by design (see `service.validateSchema`), so the draft goes over
- * IPC to be checked. Debounced, because the answer to "is this valid?" is only interesting once you
- * have stopped typing — and because a round-trip per keystroke would put the panel a keystroke
- * behind the text, which reads as the validator being wrong rather than late.
+ * the layer (`highlightYaml`, which takes the same per-key hints), and the rest is unchanged.
+ * Completion at the cursor stays JSON's for now: `cursorContext` reads braces and quotes, and YAML has
+ * neither.
  */
 import {
   useCallback,
@@ -53,20 +50,16 @@ import {
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
   type JSX,
 } from "react";
 import {
-  listSchemas,
   propertiesOf,
   schemaById,
   withMissingFields,
   type SchemaEntry,
   type SchemaFormat,
   type SchemaProperty,
-  type ValidateSchemaResult,
 } from "@jaira/shared/browser";
-import { EditorActions } from "./editorChrome";
 import { Popover } from "./popover";
 import { editorPaint } from "./editorThemes";
 import { viewTheme } from "./fileTypes";
@@ -74,21 +67,6 @@ import { useRenderChoice } from "./renderChoice";
 import { cursorContext, siblingKeys } from "./jsonCursor";
 import { highlightJson, splitTokensAt, type HighlightLine, type Token } from "./jsonHighlight";
 import { highlightYaml } from "./yamlHighlight";
-import type { UiSurface } from "./fileTypes";
-import { Splitter } from "./splitter";
-import { FOLD, PANE } from "./uiState";
-import {
-  ANY_KEY,
-  REFERENCE_WIDTH,
-  VALIDATE_DEBOUNCE_MS,
-  addMissingTitle,
-  fieldInside,
-  plainSchemaLabel,
-  referenceNote,
-  referenceTitle,
-  schemaSyntax,
-  schemaVerdict,
-} from "./schemaEditorModel";
 
 /** What one Tab inserts. A literal tab, rendered two columns wide by the editor's `tab-size`. */
 const INDENT = "\t";
@@ -99,290 +77,14 @@ const HINT_LIMIT = 72;
 /** Most completions listed at once. Beyond this the list is a wall rather than a menu. */
 const MENU_LIMIT = 10;
 
-export interface SchemaJsonEditorProps {
-  text: string;
-  busy: boolean;
-  onChange: (text: string) => void;
-  /** Absent on a surface that saves some other way — the workflow editor's JSON tab owns its own. */
-  onSave?: (() => void) | undefined;
-  /** Dirty state, when the host tracks it. Controls the Save button only. */
-  dirty?: boolean;
-  onRevert?: (() => void) | undefined;
-  /** Check a draft against a schema. Supplied by the store, which owns the IPC. */
-  validate: (schemaId: string, text: string, format?: SchemaFormat) => Promise<ValidateSchemaResult | null>;
-  /** The syntax the text is written in — see "YAML is the same editor" above. Absent ⇒ JSON. */
-  format?: SchemaFormat;
-  /** The schema chosen for this document, and how to remember a change. */
-  schemaId: string | null;
-  onSchema: (schemaId: string | null) => void;
-  /**
-   * `true` ⇒ the schema is a property of what is being edited, not a choice — show it, do not offer
-   * to change it.
-   *
-   * A `.json` file on disk answers to whatever schema its author says it does, so the picker is a
-   * question worth asking. A `fill_form` config answers to `fill_form`'s contract or to nothing, and
-   * offering the state schemas beside it would be offering nine wrong answers. Such schemas are also
-   * registered unpickable, so a picker rendered here would show a blank selection while validating
-   * against something — which reads as "no schema" and is worse than no picker.
-   */
-  lockedSchema?: boolean;
-  /**
-   * Mounted as a READING — the same two layers, refusing every keystroke.
-   *
-   * A type's reading and its editor are two picks and this surface is a legitimate answer to both.
-   * Asked for the reading it must still be itself — the colours, the hints, the schema picker, the
-   * field reference — and it must not be typed into. The host says so by ALSO withholding `onSave`,
-   * which is what takes the Save row away; this is what closes the box.
-   */
-  readOnly?: boolean;
-  /**
-   * Which type this text IS, for the palette — see `viewTheme`.
-   *
-   * Absent means JSON itself, which is what three of the four hosts are drawing. The one that must
-   * say is the state form's JSON tab: a state file is its own type and inherits JSON's palette
-   * through the mime chain, so asking under `application/json` would miss a choice made about
-   * states and asking under nothing would miss the choice made about JSON.
-   *
-   * Carried here rather than by each host because this component owns `.editor-stack`, which is the
-   * element the stylesheet's palette mapping is written against — the same argument that puts the
-   * markdown editor's palette in `documents.tsx`.
-   */
-  mime?: string;
-  /**
-   * Word wrap, and where the preference is kept.
-   *
-   * Controlled when both are supplied — the app stores it in `user-settings.json`, so it survives a
-   * restart — and falls back to local state otherwise, which keeps the component usable anywhere.
-   */
-  wrap?: boolean;
-  onWrap?: ((wrap: boolean) => void) | undefined;
-  /**
-   * The field reference beside the editor: whether it is showing, how wide it is, and where those
-   * two are kept.
-   *
-   * Controlled or local on the same terms as {@link SchemaJsonEditorProps.wrap}. Worth remembering
-   * for the reason any pane is: the reference is either something you work with or something you
-   * never open, and re-deciding that on every file is the version of the question nobody wants.
-   */
-  reference?: boolean;
-  onReference?: ((show: boolean) => void) | undefined;
-  referenceWidth?: number;
-  onReferenceWidth?: ((width: number) => void) | undefined;
-  /** Extra controls for the host to place beside the picker. */
-  children?: React.ReactNode;
-}
-
-/**
- * The four field-reference props, wired to the window's remembered layout.
- *
- * One helper rather than the same four lines at each call site: this editor is reached two ways —
- * directly for a `.json` file, and through the workflow editor's JSON tab — and the panel should not
- * be remembered on one and forgotten on the other. Returns nothing when there is no host to remember
- * through, which leaves the editor on its own state.
- */
-export function schemaReferenceProps(
-  ui: UiSurface | undefined,
-): Pick<SchemaJsonEditorProps, "reference" | "onReference" | "referenceWidth" | "onReferenceWidth"> {
-  if (ui === undefined) return {};
-  return {
-    reference: ui.open(FOLD.schemaReference, false),
-    onReference: (show) => ui.setOpen(FOLD.schemaReference, show),
-    referenceWidth: ui.pane(PANE.schemaReference, REFERENCE_WIDTH),
-    onReferenceWidth: (width) => ui.setPane(PANE.schemaReference, width),
-  };
-}
-
-export function SchemaJsonEditor({
-  text,
-  busy,
-  onChange,
-  onSave,
-  dirty,
-  onRevert,
-  validate,
-  format = "json",
-  schemaId,
-  onSchema,
-  lockedSchema = false,
-  readOnly = false,
-  mime,
-  wrap,
-  onWrap,
-  reference,
-  onReference,
-  referenceWidth,
-  onReferenceWidth,
-  children,
-}: SchemaJsonEditorProps): JSX.Element {
-  /** The stack's own editing path, for the one edit made from the bar — see {@link SchemaTextStack}. */
-  const edit = useRef<SchemaSplice | null>(null);
-  const [result, setResult] = useState<ValidateSchemaResult | null>(null);
-  /** Used only when the host controls neither — see {@link SchemaJsonEditorProps.reference}. */
-  const [localReference, setLocalReference] = useState(false);
-  const [localReferenceWidth, setLocalReferenceWidth] = useState(REFERENCE_WIDTH);
-  /** Used only when the host does not control wrapping — see {@link SchemaJsonEditorProps.wrap}. */
-  const [localWrap, setLocalWrap] = useState(false);
-
-  /** This person's palette per type, read as a value so a change repaints rather than waiting. */
-  const chosen = useRenderChoice();
-
-  const wrapping = wrap ?? localWrap;
-  const setWrapping = (next: boolean): void => (onWrap ? onWrap(next) : setLocalWrap(next));
-
-  const showReference = reference ?? localReference;
-  const setShowReference = (next: boolean): void =>
-    onReference ? onReference(next) : setLocalReference(next);
-  const width = referenceWidth ?? localReferenceWidth;
-  const setWidth = (next: number): void =>
-    onReferenceWidth ? onReferenceWidth(next) : setLocalReferenceWidth(next);
-
-  const entry = schemaId === null ? undefined : schemaById(schemaId);
-
-  // Check the draft, once it has stopped moving. The cleanup cancels the pending check on every
-  // keystroke, so only the last one in a burst is ever sent.
-  useEffect(() => {
-    if (entry === undefined) {
-      setResult(null);
-      return;
-    }
-    const timer = setTimeout(() => {
-      void validate(entry.id, text, format).then(setResult);
-    }, VALIDATE_DEBOUNCE_MS);
-    return () => clearTimeout(timer);
-  }, [entry, text, format, validate]);
-
-  /** Add what the document is missing, leaving what it has exactly as it is. */
-  const addMissing = (): void => {
-    if (entry === undefined) return;
-    // An edit of the text, not a re-print of the value — comments, order and indentation survive
-    // (see `withMissingFields`). Through `splice` over the whole document, so filling in the missing
-    // fields is one undoable step rather than a silent replacement of everything the editor held.
-    const next = withMissingFields(entry, text, format);
-    if (next !== text) edit.current?.(0, text.length, next);
-  };
-
-  const parses = result?.parseError === undefined;
-  const syntax = schemaSyntax(format);
-  const plain = plainSchemaLabel(format);
-
-  // The palette this type asks for, published on the element the mapping rule reads — see
-  // `editorPaint`. Null where nothing was said, which leaves the window's own palette standing.
-  const paint = editorPaint(viewTheme(mime ?? "application/json", "text", readOnly ? "read" : "write", chosen));
-  return (
-    <div className={`file-edit schema-edit${paint === null ? "" : ` ${paint.className}`}`} style={paint?.style}>
-      {/* `edit-bar` is the row every editing surface opens with — see `editorChrome`. What is IN it
-          differs (a schema picker here, a path and a tab switch on the state form); that it is one
-          quiet line of chrome above the text, and never part of the document, does not. */}
-      <div className="edit-bar schema-bar">
-        {lockedSchema ? (
-          <span className="schema-pick">
-            <span className="sub">Schema</span>
-            <span className="chip" title={entry?.hint ?? ""}>
-              {entry?.label ?? plain}
-            </span>
-          </span>
-        ) : (
-          <label className="schema-pick">
-            <span className="sub">Schema</span>
-            <select value={schemaId ?? ""} onChange={(e) => onSchema(e.target.value === "" ? null : e.target.value)}>
-              <option value="">{plain}</option>
-              {listSchemas(format).map((option) => (
-                <option key={option.id} value={option.id} title={option.hint}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
-          </label>
-        )}
-        {entry ? (
-          <>
-            {/* Merges rather than replaces, so it is safe on a document with content in it — which
-                is when "what else belongs here?" is actually being asked. */}
-            <button
-              className="ghost"
-              onClick={addMissing}
-              disabled={busy || !parses}
-              title={addMissingTitle(entry, parses, syntax)}
-            >
-              Add missing fields
-            </button>
-            <button className="ghost" onClick={() => setShowReference(!showReference)}>
-              {showReference ? "Hide fields" : "Fields"}
-            </button>
-            <SchemaStatus result={result} syntax={syntax} />
-          </>
-        ) : null}
-        {/* Outside the schema branch: wrapping is about reading the text, and a plain `.json` file
-            with no schema chosen has just as many long lines in it. */}
-        <label className="toggle wrap-toggle" title="wrap long lines instead of scrolling sideways">
-          <input type="checkbox" checked={wrapping} onChange={(e) => setWrapping(e.target.checked)} />
-          <span className="sub">Wrap</span>
-        </label>
-        {children}
-      </div>
-      {entry ? <div className="sub schema-hint">{entry.hint}</div> : null}
-
-      {/* Two COLUMNS when the reference is open, not two rows. The reference is a thing you read
-          WHILE typing — "what else belongs in this block?" — and putting it under the editor meant
-          scrolling away from the line that raised the question. */}
-      <div
-        className={`schema-body${showReference && entry ? " with-reference" : ""}`}
-        style={{ "--reference-width": `${width}px` } as CSSProperties}
-      >
-        <div className="schema-main">
-          <SchemaTextStack
-            text={text}
-            onChange={onChange}
-            readOnly={readOnly}
-            wrapping={wrapping}
-            entry={entry}
-            format={format}
-            edit={edit}
-          />
-
-      {result?.parseError !== undefined ? (
-        <div className="reason">not valid {syntax}: {result.parseError}</div>
-      ) : (
-        (result?.violations ?? []).map((violation, i) => (
-          <div key={`${violation.path}-${i}`} className="notice bad violation">
-            <b>{violation.path.length > 0 ? violation.path : "(root)"}</b> — {violation.message}
-          </div>
-        ))
-      )}
-        </div>
-
-        {showReference && entry ? (
-          <>
-            <Splitter
-              label="Resize the field reference"
-              value={width}
-              reset={REFERENCE_WIDTH}
-              invert
-              min={200}
-              max={620}
-              onChange={setWidth}
-            />
-            <SchemaReference entry={entry} />
-          </>
-        ) : null}
-      </div>
-
-      {onSave ? (
-        <EditorActions dirty={dirty} busy={busy} onSave={onSave} onRevert={onRevert} />
-      ) : null}
-    </div>
-  );
-}
-
 /** Replace a span of the document through the editor's own editing path — see `SchemaTextStack`'s `splice`. */
 export type SchemaSplice = (from: number, to: number, inserted: string) => void;
 
 /**
  * The editor itself: the coloured layer, the textarea over it, and the completion list at the caret —
- * everything of {@link SchemaJsonEditor} that is typed INTO, apart from the bar, the verdict and the
- * reference around it. Its own component so the universal copy (decision 0015) can host exactly this
- * as an island, inside native chrome; the desktop draws it where it always stood, and the markup is
- * what it was (a fragment: `.schema-main` still holds the stack, then the list, then the violations).
+ * everything of the schema editor that is typed INTO, apart from the bar, the verdict and the
+ * reference around it. Its own component so the universal tree (decision 0015) can host exactly this
+ * as an island, inside native chrome (a fragment: `.schema-main` holds the stack, then the list).
  *
  * `edit` is handed the stack's `splice`, for the one edit the bar makes ("Add missing fields"): through
  * the textarea's own pipeline, so it stays one undoable step.
@@ -413,7 +115,6 @@ export function SchemaTextStack({
   const [highlighted, setHighlighted] = useState(0);
   /** Escape hides the list until the next edit — a way to see the line under it. */
   const [dismissed, setDismissed] = useState(false);
-
 
   /**
    * What each key means, by the path it sits at.
@@ -771,10 +472,9 @@ export function SchemaTextStack({
 
 /**
  * {@link SchemaTextStack} on its own, for a host that draws the chrome itself — the universal copy's
- * island (decision 0015), in a WebView on a phone and inline on web. What {@link SchemaJsonEditor}
- * gives the stack beside the bar is here instead: the palette on the element the mapping reads, and
- * "Add missing fields" as a count the host bumps (`fill`), made through the stack's own path so it is
- * one undoable step.
+ * island (decision 0015), in a WebView on a phone and inline on web. It gives the stack what it needs
+ * beside the text: the palette on the element the mapping reads, and "Add missing fields" as a count
+ * the host bumps (`fill`), made through the stack's own path so it is one undoable step.
  *
  * The text is held here as well as by the host. The textarea is controlled, and the host's copy comes
  * back over a bridge: typing into a box whose value is a round trip behind would lose characters.
@@ -856,111 +556,3 @@ function renderTokens(line: HighlightLine, column: number, marker: JSX.Element |
   return [...paint(before, "a"), marker, ...paint(after, "b")];
 }
 
-/** A one-glance verdict, so "is it valid?" does not require reading the list below. */
-function SchemaStatus({ result, syntax }: { result: ValidateSchemaResult | null; syntax: string }): JSX.Element {
-  const verdict = schemaVerdict(result, syntax);
-  return <span className={verdict.tone === "plain" ? "chip" : `chip chip-${verdict.tone}`}>{verdict.text}</span>;
-}
-
-/**
- * Every field the schema declares, expandable into the blocks they nest.
- *
- * The hints are `operationVocabulary`'s own — "route-prefixed", "an empty list drops the inherited
- * ones" — which is the whole argument for building these schemas from that table rather than beside
- * it. The same strings are what appear at the end of each line in the editor.
- *
- * It used to render the top level only, with a note suggesting you move the cursor into a block to
- * see inside it. That is a poor answer to "what can go in here?" — it makes reading the format
- * conditional on already editing it, and a slot's `schema` is three levels down from anywhere the
- * cursor usefully sits.
- */
-function SchemaReference({ entry }: { entry: SchemaEntry }): JSX.Element {
-  const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
-  const toggle = (at: string): void =>
-    setOpen((current) => {
-      const next = new Set(current);
-      if (next.has(at)) next.delete(at);
-      else next.add(at);
-      return next;
-    });
-
-  return (
-    <section className="schema-reference">
-      <h4>{referenceTitle(entry)}</h4>
-      <div className="sub">{referenceNote(entry)}</div>
-      <FieldList entry={entry} path={[]} open={open} onToggle={toggle} />
-    </section>
-  );
-}
-
-function FieldList({
-  entry,
-  path,
-  open,
-  onToggle,
-}: {
-  entry: SchemaEntry;
-  path: string[];
-  open: ReadonlySet<string>;
-  onToggle: (at: string) => void;
-}): JSX.Element {
-  return (
-    <dl className="kv schema-fields">
-      {propertiesOf(entry, path).map((property) => (
-        <FieldRow key={property.key} entry={entry} path={path} property={property} open={open} onToggle={onToggle} />
-      ))}
-    </dl>
-  );
-}
-
-function FieldRow({
-  entry,
-  path,
-  property,
-  open,
-  onToggle,
-}: {
-  entry: SchemaEntry;
-  path: string[];
-  property: SchemaProperty;
-  open: ReadonlySet<string>;
-  onToggle: (at: string) => void;
-}): JSX.Element {
-  // What is inside it, and so whether it discloses — `fieldInside`, shared with the universal copy.
-  const { here, at, perEntry, hasChildren } = fieldInside(entry, path, property);
-  const expanded = open.has(at);
-
-  return (
-    <>
-      <dt>
-        {property.expected ? "★ " : ""}
-        {hasChildren ? (
-          <button className="link disclose" onClick={() => onToggle(at)} aria-expanded={expanded}>
-            {expanded ? "▾" : "▸"} <code>{property.key}</code>
-          </button>
-        ) : (
-          <code>{property.key}</code>
-        )}
-      </dt>
-      <dd>
-        {property.type ? <span className="chip">{property.type}</span> : null}
-        {property.values ? <code className="sub">{property.values.join(" · ")}</code> : null}
-        {property.description ? <span className="sub"> {property.description}</span> : null}
-      </dd>
-      {expanded ? (
-        <dd className="nested">
-          {perEntry.length > 0 ? (
-            <>
-              <div className="sub">
-                each entry — the key is yours to name
-              </div>
-              <FieldList entry={entry} path={[...here, ANY_KEY]} open={open} onToggle={onToggle} />
-            </>
-          ) : (
-            <FieldList entry={entry} path={here} open={open} onToggle={onToggle} />
-          )}
-        </dd>
-      ) : null}
-    </>
-  );
-}

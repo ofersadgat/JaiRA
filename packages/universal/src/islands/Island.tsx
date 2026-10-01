@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
 import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
-import type { DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiff";
+import type { DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiffTypes";
 import { useLook } from "../tokens";
 import { dress, islandStyles, islandStylesIn } from "./islandStyles";
 import type { IslandHandle, IslandProps } from "./types";

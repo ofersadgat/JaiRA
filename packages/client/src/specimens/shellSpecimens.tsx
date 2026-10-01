@@ -2,25 +2,20 @@ import { useEffect, useState, type ComponentType, type JSX, type ReactNode } fro
 import { View } from "@tamagui/core";
 import { GALLERY_DOCUMENT, GALLERY_SURFACES, remoteProjectKey, type JairaBridge, type MachinesView, type PendingInteraction, type TaskChangeLog } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { ChangesPanel as DomChangesPanel } from "@jaira/ui/changesPanel";
-import { GateSurface as DomGateSurface } from "@jaira/ui/components";
-import { CrashScreen as DomCrashScreen, LooseErrorBanner as DomLooseErrorBanner } from "@jaira/ui/crashScreen";
 import { reportLooseError } from "@jaira/ui/crashReport";
 import { initialState, interactionOf, parsedDoc } from "@jaira/ui/galleryModel";
-import { OfflineBanner as DomOfflineBanner } from "@jaira/ui/offline";
 import { setBridge } from "@jaira/ui/store";
 import { ValuePanelContext, type ValuePanel } from "@jaira/ui/valuePanel";
 import { ChangesPanel, CrashScreen, DisconnectedLine, GateSurface, LooseErrorBanner, OfflineBanner, Toast } from "@jaira/universal";
-import { DisconnectedBanner as DomDisconnected } from "../DisconnectedBanner";
 
 /**
  * What the window says about itself, a settled gate, and a conversation's foot, as specimens (decision
- * 0015): each DOM original against its universal copy, from the same fixture.
+ * 0015), each from a fixture.
  *
- *  - `toast-error`, `toast-info` — `App.tsx`'s toast; `crash-screen`, `crash-banner` — `crashScreen.tsx`'s
- *    two nets; `disconnected` — `Shell.tsx`'s line. Each is fixed to the window, so each is drawn in a
- *    stage of its own that stands in for it: `contain: layout` makes the DOM's box the containing block
- *    of what is fixed inside it, and the copies take `staged` (placed in their box rather than the window).
+ *  - `toast-error`, `toast-info` — the shell's toast; `crash-screen`, `crash-banner` — the two nets
+ *    under a render that threw; `disconnected` — the line of a lost socket. Each is fixed to the window,
+ *    so each is drawn in a stage of its own that stands in for it, and takes `staged` (placed in its
+ *    box rather than the window).
  *  - `gate-settled-<gate>` — a gate as it was answered, in a state's panel (`.st-block`, the copy `plain`):
  *    a tool call's approval, an artifact reviewed (decided in silence, sent back with a comment, approved
  *    edited) and an artifact edited, each from its gallery card.
@@ -31,16 +26,12 @@ import { DisconnectedBanner as DomDisconnected } from "../DisconnectedBanner";
  */
 export interface ShellSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
 const NOOP = (): void => undefined;
 
-/** A box fixed descendants are placed in, as they are in the window (`contain: layout`). */
-function DomStage({ height, children }: { height: number; children: ReactNode }): JSX.Element {
-  return <div style={{ position: "relative", height, contain: "layout" }}>{children}</div>;
-}
+/** A box what is `staged` is placed in, as it is in the window. */
 function RnStage({ height, children }: { height: number; children: ReactNode }): JSX.Element {
   return (
     <View position="relative" height={height}>
@@ -49,15 +40,10 @@ function RnStage({ height, children }: { height: number; children: ReactNode }):
   );
 }
 
-/** `App.tsx`'s toast, as it writes it. */
-function DomToast({ error, notice }: { error: string | null; notice: string | null }): JSX.Element | null {
-  return error ? <div className="toast">{error}</div> : notice ? <div className="toast toast-info">{notice}</div> : null;
-}
-
 const FAILED = "Could not start the task: the workflow feature/plan has no state named draft.";
 const NOTICE = "Runs on build box.";
 
-/** A render that threw, with a stack that says the same on both pages. */
+/** A render that threw, with a stack that says the same on every run. */
 const THROWN = Object.assign(new TypeError("Cannot read properties of undefined (reading 'map')"), {
   stack: [
     "TypeError: Cannot read properties of undefined (reading 'map')",
@@ -137,11 +123,6 @@ const settled = (id: string, value: JsonValue): ShellSpecimen => {
   const pending = gateOf(id);
   return {
     width: 560,
-    dom: () => (
-      <div className="st-block">
-        <DomGateSurface pending={pending} onSubmit={NOOP} settled={{ value }} />
-      </div>
-    ),
     rn: () => (
       <View flexDirection="column">
         <GateSurface pending={pending} onSubmit={NOOP} settled={{ value }} plain />
@@ -153,11 +134,6 @@ const settled = (id: string, value: JsonValue): ShellSpecimen => {
 export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   "toast-error": {
     width: 520,
-    dom: () => (
-      <DomStage height={160}>
-        <DomToast error={FAILED} notice={null} />
-      </DomStage>
-    ),
     rn: () => (
       <RnStage height={160}>
         <Toast staged error={FAILED} notice={null} onDismissError={NOOP} onDismissNotice={NOOP} />
@@ -166,11 +142,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   "toast-info": {
     width: 520,
-    dom: () => (
-      <DomStage height={100}>
-        <DomToast error={null} notice={NOTICE} />
-      </DomStage>
-    ),
     rn: () => (
       <RnStage height={100}>
         <Toast staged error={null} notice={NOTICE} onDismissError={NOOP} onDismissNotice={NOOP} />
@@ -179,11 +150,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   "crash-screen": {
     width: 760,
-    dom: () => (
-      <DomStage height={560}>
-        <DomCrashScreen error={THROWN} where={WHERE} />
-      </DomStage>
-    ),
     rn: () => (
       <RnStage height={560}>
         <CrashScreen staged error={THROWN} where={WHERE} onReload={NOOP} />
@@ -192,13 +158,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   "crash-banner": {
     width: 520,
-    dom: () => (
-      <DomStage height={90}>
-        <Reported text={LOOSE}>
-          <DomLooseErrorBanner />
-        </Reported>
-      </DomStage>
-    ),
     rn: () => (
       <RnStage height={90}>
         <Reported text={LOOSE}>
@@ -209,11 +168,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   disconnected: {
     width: 520,
-    dom: () => (
-      <DomStage height={60}>
-        <DomDisconnected lost="the socket closed (1006)" />
-      </DomStage>
-    ),
     rn: () => (
       <RnStage height={60}>
         <DisconnectedLine staged lost="the socket closed (1006)" />
@@ -222,11 +176,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   "offline-banner": {
     width: 560,
-    dom: () => (
-      <Answered answers={{ "machines:view": MACHINES }}>
-        <DomOfflineBanner project={PEER_KEY} />
-      </Answered>
-    ),
     rn: () => (
       <Answered answers={{ "machines:view": MACHINES }}>
         <OfflineBanner project={PEER_KEY} />
@@ -235,13 +184,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   "changes-commands": {
     width: 420,
-    dom: () => (
-      <Answered answers={{ "task:changes": { ...CHANGES, git: { requests: [], steps: [], uncommitted: [] } } }}>
-        <ValuePanelContext.Provider value={PANEL}>
-          <DomChangesPanel taskId="t-fixture" signal={0} />
-        </ValuePanelContext.Provider>
-      </Answered>
-    ),
     rn: () => (
       <Answered answers={{ "task:changes": { ...CHANGES, git: { requests: [], steps: [], uncommitted: [] } } }}>
         <ValuePanelContext.Provider value={PANEL}>
@@ -252,11 +194,6 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   },
   "changes-git": {
     width: 420,
-    dom: () => (
-      <Answered answers={{ "task:changes": { ...CHANGES, execution: [], other: [] } }}>
-        <DomChangesPanel taskId="t-fixture" signal={0} />
-      </Answered>
-    ),
     rn: () => (
       <Answered answers={{ "task:changes": { ...CHANGES, execution: [], other: [] } }}>
         <ChangesPanel taskId="t-fixture" signal={0} />

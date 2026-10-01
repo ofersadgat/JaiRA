@@ -1,5 +1,5 @@
 import type { JSX, ReactNode } from "react";
-import { projectCounts } from "@jaira/ui/pill";
+import { projectCounts } from "@jaira/ui/pillModel";
 import { CRUMB_PILL_BUDGET, taskAddressOf, type TaskAddressProps } from "@jaira/ui/taskBarModel";
 import { CrumbBar } from "./Crumbs";
 import { Pills } from "./Pills";

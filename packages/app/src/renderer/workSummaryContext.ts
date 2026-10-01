@@ -6,7 +6,7 @@
  */
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PendingApproval, WorkNotes, WorkRows } from "@jaira/shared/browser";
-import type { ApprovalSurfaceProps } from "./approvalSurface";
+import type { ApprovalSurfaceProps } from "./approvalSurfaceTypes";
 import type { ToolEntry, WorkEntry } from "./transcript";
 import { isApprovalCall, verdictKeyOf, type ReadOnlyVerdicts } from "./workSummary";
 

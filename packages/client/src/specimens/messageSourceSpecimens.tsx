@@ -2,13 +2,12 @@ import type { JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { SessionView } from "@jaira/shared/browser";
 import type { TranscriptEntry } from "@jaira/ui/transcript";
-import { Transcript as DomTranscript } from "@jaira/ui/transcriptView";
 import { ValuePanelContext, type ValuePanel } from "@jaira/ui/valuePanel";
 import { Transcript, useTokens } from "@jaira/universal";
 
 /**
- * The badge on a message the person did not type (`transcriptView.tsx`'s `MessageSource`) against its
- * universal copy, in the three places it stands: over a message the workflow wrote (named, and a button
+ * The badge on a message the person did not type (the copy of `transcriptView.tsx`'s `MessageSource`),
+ * in the three places it stands: over a message the workflow wrote (named, and a button
  * opening its definition where the shell can), over one JaiRA wrote, and beside an aside's role on its
  * line (`.ts-tag .ts-source`).
  *
@@ -31,13 +30,6 @@ const SESSION = { stateId: "feature/plan/critique", status: "completed", turns: 
 const OPENS = { open: () => undefined, openState: () => undefined } as unknown as ValuePanel;
 const PLAIN = { open: () => undefined } as unknown as ValuePanel;
 
-function DomSheet({ panel, children }: { panel: ValuePanel; children: ReactNode }): JSX.Element {
-  return (
-    <ValuePanelContext.Provider value={panel}>
-      <div style={{ background: "var(--panel)" }}>{children}</div>
-    </ValuePanelContext.Provider>
-  );
-}
 function RnSheet({ panel, children }: { panel: ValuePanel; children: ReactNode }): JSX.Element {
   const t = useTokens();
   return (
@@ -49,11 +41,6 @@ function RnSheet({ panel, children }: { panel: ValuePanel; children: ReactNode }
 
 const pair = (panel: ValuePanel) => ({
   width: 640,
-  dom: () => (
-    <DomSheet panel={panel}>
-      <DomTranscript session={SESSION} entries={ENTRIES} />
-    </DomSheet>
-  ),
   rn: () => (
     <RnSheet panel={panel}>
       <Transcript session={SESSION} entries={ENTRIES} rails />

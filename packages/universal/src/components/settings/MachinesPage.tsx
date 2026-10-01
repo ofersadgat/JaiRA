@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import type { CopyChoice, DeviceView, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
-import { chipStateOf, type MachineChipState } from "@jaira/ui/machineChip";
+import { chipStateOf, type MachineChipState } from "@jaira/ui/machinesModel";
 import {
   ADD_SCHEMA,
   COPY_CHOICES,

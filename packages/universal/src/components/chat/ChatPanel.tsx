@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import type { ChatSurface } from "@jaira/ui/chatPane";
+import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { PanelColumn } from "../../app/PanelColumn";
 import { useShell } from "../../app/shell";

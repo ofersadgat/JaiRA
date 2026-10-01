@@ -11,8 +11,8 @@ import type { BoardCard, FileMutationResult, FileNode, FileRoot, FileSource, Fil
 import { isTextMime, isWritableLayer } from "@jaira/shared/browser";
 import { alternatives, runCrumbs, type Crumb } from "./crumbModel";
 import { editorPick, viewerPick, type FileSurfaceContext, type SurfaceRegistry } from "./fileTypes";
-import type { AskSpec, MenuItem } from "./menu";
-import { taskNameOf, taskNamePending } from "./taskName";
+import type { AskSpec, MenuItem } from "./menuTypes";
+import { taskNameOf, taskNamePending } from "./taskNameModel";
 import type { TrailStep } from "./trail";
 import { HALVES, type HalfMode } from "./uiState";
 

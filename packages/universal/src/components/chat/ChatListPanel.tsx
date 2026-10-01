@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState, type JSX } from "react";
 import { ScrollView, TextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { agoOf, chatRowMenu, controlsOf, deleteAskOf, emptyListText, forkTitleOf, isAnswering, isUnread, renamedTitle, shownConversations, unreadTitle, type ChatRow } from "@jaira/ui/chatListModel";
-import type { AskSpec } from "@jaira/ui/menu";
+import type { AskSpec } from "@jaira/ui/menuTypes";
 import { projectName } from "@jaira/ui/projects";
 import { copyText } from "../../clipboard";
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps } from "../../primitives";

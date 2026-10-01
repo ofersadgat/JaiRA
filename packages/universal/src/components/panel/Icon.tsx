@@ -1,5 +1,5 @@
 import type { JSX } from "react";
-import { PATHS } from "@jaira/ui/icons";
+import { PATHS } from "@jaira/ui/iconPaths";
 import { Svg } from "./Svg";
 
 export type IconName = keyof typeof PATHS;

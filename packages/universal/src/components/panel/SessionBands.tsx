@@ -3,7 +3,7 @@ import { View, isWeb } from "@tamagui/core";
 import { formatTokens, type ContextReading, type InstanceNode, type MadeBatch, type MadeTask, type MoveQuestionView, type TaskOrigin } from "@jaira/shared/browser";
 import { pathFrom, placeOf, type BandNote, type SessionBand, type SessionPiece, type SessionSegment } from "@jaira/ui/sessionBands";
 import { addedOf, cutNameOf, keyOfPiece, markedRowsOf, metaOf, pageRowsOf, sideName, sideOf, spanOf, summaryOf } from "@jaira/ui/sessionRows";
-import { KIND_ICON, KIND_WORD, headerToneOf, surfaceKindOf, type HeaderTone, type SurfaceKind } from "@jaira/ui/stateSurface";
+import { KIND_ICON, KIND_WORD, headerToneOf, surfaceKindOf, type HeaderTone, type SurfaceKind } from "@jaira/ui/stateSurfaceModel";
 import { signatureOf } from "@jaira/ui/transcript";
 import { InkContext, Press, Txt, appCh, edge, lengthToken, padToken, useHover } from "../../primitives";
 import { useLook, useTokens, type Look, type Tokens } from "../../tokens";

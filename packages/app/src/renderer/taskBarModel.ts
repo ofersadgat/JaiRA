@@ -8,7 +8,7 @@
  */
 import type { BoardCard, BoardView, InstanceNode, ProjectSummary } from "@jaira/shared/browser";
 import { alternatives, runCrumbs, type Crumb, type MenuItem } from "./crumbModel";
-import { hueOf } from "./pill";
+import { hueOf } from "./pillModel";
 import type { TrailStep } from "./trail";
 
 /**

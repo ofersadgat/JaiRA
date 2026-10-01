@@ -63,29 +63,19 @@ import { startPlugins } from "@jaira/runtime";
 // map for modules compiled after it runs, and by the time this line executes the bundle it belongs to
 // has already been compiled. See that file for the whole of the reasoning.
 
-/** `dist/` layout produced by the build (see build.mjs / vite.config.ts). */
+/** `dist/` layout produced by the build (see build.mjs). */
 const DIST = __dirname;
-const RENDERER_HTML = join(DIST, "renderer", "index.html");
-/** One's `dist/client`, copied here by `build:client` (decision 0015, S1). */
+/**
+ * One's `dist/client`, copied here by `build:client` (decision 0015): the window's page, `/` — the
+ * universal shell, the UI the phone draws, on the desktop's own store and bridge.
+ */
 const CLIENT_DIR = join(DIST, "client");
 /**
- * Which renderer the window loads: the One client (the default), or the Vite build it replaced, kept
- * while the spike compares the two (`JAIRA_RENDERER=vite`).
- */
-const RENDERER: "one" | "vite" = process.env.JAIRA_RENDERER === "vite" ? "vite" : "one";
-/**
  * The One client's DEV SERVER instead of the built client (`JAIRA_CLIENT_DEV=http://127.0.0.1:8081/`),
- * so an edit reaches the window without a build — how the universal copies are iterated on against the
+ * so an edit reaches the window without a build — how the universal tree is iterated on against the
  * desktop (decision 0015). Never in a packaged app: there the window loads only what it shipped with.
  */
 const DEV_CLIENT = !app.isPackaged && process.env.JAIRA_CLIENT_DEV !== undefined && /^http:\/\/(127\.0\.0\.1|localhost):\d+\/$/.test(process.env.JAIRA_CLIENT_DEV) ? process.env.JAIRA_CLIENT_DEV : undefined;
-/**
- * Which UI the window opens. The universal shell is the default (since 2026-10-01): the UI the phone
- * draws, from the copies, on the desktop's own store and bridge (decision 0015). `--ui=dom`, or
- * `JAIRA_UI=dom`, opens the page it replaced, kept while both exist — what `npm run start:dom` opens,
- * and what the shots that drive that page by its classes launch.
- */
-const UNIVERSAL = !(process.argv.includes("--ui=dom") || process.env.JAIRA_UI === "dom");
 const PRELOAD = join(DIST, "preload.cjs");
 
 let window: BrowserWindow | undefined;
@@ -612,13 +602,13 @@ function afterConfigWrite(): void {
 }
 
 /**
- * The Licenses page's manifest, written beside the renderer by its build (`licenses/thirdPartyLicenses.ts`).
+ * The Licenses page's manifest, written beside the client by its build (`licenses/thirdPartyLicenses.ts`).
  * Read on each ask rather than kept: the page is opened rarely, and the file is half a megabyte.
  */
 async function readLicenseManifest(): Promise<unknown> {
-  const file = join(DIST, "renderer", THIRD_PARTY_LICENSES_FILE_NAME);
+  const file = join(CLIENT_DIR, THIRD_PARTY_LICENSES_FILE_NAME);
   if (!existsSync(file)) {
-    throw new Error(`The renderer was built without its license manifest (${file}). Rebuild the app: npm run app:build.`);
+    throw new Error(`The client was built without its license manifest (${file}). Rebuild the app: npm run app:build.`);
   }
   const manifest = JSON.parse(await readFile(file, "utf8")) as { schemaVersion?: unknown; entries?: unknown[] };
   // The downloaded plugins' packages are not in the build's manifest — the installer does not ship them —
@@ -854,8 +844,7 @@ async function createWindow(): Promise<BrowserWindow> {
     reportCrash("renderer", new Error(at));
   });
 
-  if (RENDERER === "one") await win.loadURL(`${DEV_CLIENT ?? CLIENT_URL}${UNIVERSAL ? "rn" : ""}`);
-  else await win.loadFile(RENDERER_HTML);
+  await win.loadURL(DEV_CLIENT ?? CLIENT_URL);
   win.show();
   return win;
 }
@@ -1214,7 +1203,7 @@ function takeOver(): Promise<void> {
 
 void app.whenReady().then(async () => {
   registerArtifactProtocol();
-  if (RENDERER === "one") registerClientProtocol(CLIENT_DIR);
+  registerClientProtocol(CLIENT_DIR);
   // No menu bar. Left alone, Electron installs a default File/Edit/View/Window menu whose every item
   // is either a no-op here or something the app offers better elsewhere — and on Windows and Linux
   // it takes a row across the top of the window to say so. Nulling it also disables the Alt key that

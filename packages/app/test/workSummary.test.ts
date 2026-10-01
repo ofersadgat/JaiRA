@@ -3,14 +3,13 @@
  * each thought and named by what they did, chips per kind, the phase in progress keeping its latest
  * rows, and the thinking line where the provider kept the reasoning.
  */
-import { describe, expect, it, vi } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { iconOf, type TranscriptEntry, type WorkEntry } from "../src/renderer/transcript";
-import { Transcript } from "../src/renderer/transcriptView";
-import { ApprovalAskContext, WorkLookContext, type WorkLook } from "../src/renderer/workSummaryView";
-import { approvalWordsOf, chipsOf, inFlight, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
-import { durationOf, thoughtTime } from "../src/renderer/transcriptView";
+import { describe, expect, it } from "vitest";
+import { iconOf, takenApartOf, type ToolEntry, type WorkEntry } from "../src/renderer/transcript";
+import { ACTIVE_NAME, approvalWordsOf, chipsOf, countOf, inFlight, isIdle, isQuiet, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
+import { approvalCallIndex } from "../src/renderer/approvalCall";
+import { toolLineOf } from "../src/renderer/transcriptRows";
+import { durationOf } from "../src/renderer/runActivityModel";
+import { thoughtTime } from "../src/renderer/liveStatusModel";
 
 const t0 = Date.parse("2026-09-25T17:42:08Z");
 const call = (name: string, key: string, arg: string, s: number, ok: boolean | undefined = true): WorkEntry => ({
@@ -210,123 +209,87 @@ describe("time", () => {
 });
 
 describe("in the transcript", () => {
-  const draw = (entries: TranscriptEntry[], look?: WorkLook, working?: boolean): string => {
-    const transcript = createElement(Transcript, { entries, ...(working !== undefined ? { working } : {}) });
-    return renderToStaticMarkup(look === undefined ? transcript : createElement(WorkLookContext.Provider, { value: look }, transcript));
-  };
-  const answer: TranscriptEntry = { kind: "message", role: "assistant", text: "Done." };
-
-  it("draws a finished stretch as its phases and chips, with no rows, and every step behind the foot", () => {
-    const html = draw([...stretch, answer]);
-    expect(html).toContain('data-testid="work-summary"');
-    expect(html.match(/class="ws-phase/g)).toHaveLength(4);
-    expect(html).toContain("Every step");
-    expect(html).not.toContain("ws-run ");
-    expect(html).toContain("Several columns scroll on their own.");
-  });
+  // What the summary is drawn FROM. Which phase is the one in progress, how many rows it keeps and what
+  // a setting hides are the summary's own choices (the universal tree's `WorkSummary.tsx`), made over
+  // these values: the options below are the ones it passes for the settings each case names.
+  const note = (text: string): WorkEntry => ({ kind: "event", at: t0, tone: "plain", text });
 
   it("keeps the latest rows of the phase in progress while the agent works", () => {
     const working = [...stretch.slice(0, 12), { kind: "tool", name: "Bash", summary: "npx vitest run", args: { command: "npx vitest run" }, at: t0 + 55_000 } as WorkEntry];
-    const three = draw(working, { phases: true, rows: 3, thinking: true, notes: "hide-groups" }, true);
-    expect(three).toContain("ws-phase current");
+    // The call with no answer is the one still happening, and the phase holding it the one in progress.
+    const live = 12;
+    expect(working.map(inFlight).lastIndexOf(true)).toBe(live);
+    const current = phasesOf(working, { merge: "withheld", dropIdle: true }).at(-1)!;
+    expect(current.indices).toContain(live);
     // The phase in progress says what it is doing, not what it did — and the tests it is running again
     // have not passed yet, so it is changing until they do, and fixed after.
-    expect(three).toContain("Changing");
-    expect(three).not.toContain(">Fixed<");
-    expect(draw([...stretch, answer])).toContain(">Fixed<");
-    expect(three).toContain("Running ");
+    expect(current.name).toBe("Changed");
+    expect(ACTIVE_NAME[current.name]).toBe("Changing");
+    expect(phasesOf(stretch, { merge: "withheld", dropIdle: true }).at(-1)!.name).toBe("Fixed");
     // Until they pass it is a Changed after a Changed whose reasoning was withheld: one phase, whose
-    // last three rows show — the first edit, the failed run rolled into its chips.
-    expect(three.match(/class="ws-run[ "]/g)).toHaveLength(3);
-    const none = draw(working, { phases: true, rows: 0, thinking: true, notes: "hide-groups" }, true);
-    expect(none).not.toMatch(/class="ws-run[ "]/);
+    // last three rows show — the failed run, the second edit and the run going now — and the first
+    // edit, with the thought before it, rolled into its chips.
+    expect(current.indices).toEqual([7, 8, 9, 10, 11, 12]);
+    const three = windowOf(working, current.indices, 3);
+    expect(three.shown.map((run) => run.rows)).toEqual([[9], [11], [12]]);
+    expect(three.rolled).toEqual([7, 8]);
+    expect(sentenceOf(working, three.shown[2]!, live)).toEqual({ said: [], now: [{ text: "Running " }, { code: "npx vitest run", shell: true }] });
+    // With no rows kept, everything is in the chips.
+    const none = windowOf(working, current.indices, 0);
+    expect(none.shown).toEqual([]);
     // The run chip holds the failed run too, and the one running.
-    expect(none).toContain("ws-chip ws-k-run failed live");
+    expect(chipsOf(working, none.rolled, live).find((chip) => chip.kind === "run")).toMatchObject({ label: "2 commands", failed: 1, live: true });
   });
 
-  it("merges the Explored phases and drops the thinking line with thinking off, and draws one row with phases off", () => {
-    const off = draw([...stretch, answer], { phases: true, rows: 3, thinking: false, notes: "hide-groups" });
-    expect(off.match(/class="ws-phase/g)).toHaveLength(3);
-    expect(off).not.toContain("ws-think");
-    const flat = draw([...stretch, answer], { phases: false, rows: 3, thinking: true, notes: "hide-groups" });
-    expect(flat.match(/class="ws-phase/g)).toHaveLength(1);
-    expect(flat).not.toContain("ws-name");
-  });
-
-  it("shows, counts or hides the rate limits and notes as the setting says, and always lists them under Every step", () => {
-    const note = (text: string): WorkEntry => ({ kind: "event", at: t0, tone: "plain", text });
-    const withNotes: TranscriptEntry[] = [note("Hook ran: SessionStart"), note("Context injected: CLAUDE.md"), ...stretch, answer];
-    const look = (notes: WorkLook["notes"]): WorkLook => ({ phases: true, rows: 3, thinking: true, notes });
+  it("shows, counts or hides the rate limits and notes as it is asked to", () => {
+    const withNotes: WorkEntry[] = [note("Hook ran: SessionStart"), note("Context injected: CLAUDE.md"), ...stretch];
+    const chips = (indices: readonly number[]): string[] => chipsOf(withNotes, indices).map((chip) => chip.label);
     // Show: the opening notes are kept, with a notes chip — in the first Explored, whose reasoning was
     // withheld, so nothing tells the two apart.
-    const shown = draw(withNotes, look("show"));
-    expect(shown.match(/class="ws-phase/g)).toHaveLength(4);
-    expect(shown).toContain("ws-k-note");
-    // Hide phases of only these: that phase goes; the rate limit inside a working phase is still a chip.
-    const groups = draw(withNotes, look("hide-groups"));
-    expect(groups.match(/class="ws-phase/g)).toHaveLength(4);
-    expect(groups).toContain("12 s wait");
-    // Hide: no chip for them anywhere.
-    const hidden = draw(withNotes, look("hide"));
-    expect(hidden).not.toContain("12 s wait");
-    expect(hidden).not.toContain("ws-k-note");
+    const shown = phasesOf(withNotes, { merge: "withheld", dropIdle: false });
+    expect(shown.map((phase) => phase.name)).toEqual(["Explored", "Explored", "Changed", "Fixed"]);
+    expect(shown[0]!.indices).toEqual([0, 1, 2, 3, 4]);
+    expect(chips(shown[0]!.indices)).toEqual(["2 notes", "4 s", "1 search", "1 file"]);
+    // Hide phases of only these: the notes' part goes; the rate limit inside a working phase is still a chip.
+    const groups = phasesOf(withNotes, { merge: "withheld", dropIdle: true });
+    expect(groups).toHaveLength(4);
+    expect(groups[0]!.indices).toEqual([2, 3, 4]);
+    expect(chips(groups[0]!.indices)).toEqual(["4 s", "1 search", "1 file"]);
+    expect(chips(groups[1]!.indices)).toContain("12 s wait");
+    // Hide: the lines a summary leaves out of its chips are the two notes and the rate limit, and no others.
+    expect(withNotes.flatMap((entry, i) => (isQuiet(entry) ? [i] : []))).toEqual([0, 1, 8]);
   });
 
   it("leaves only the foot when every line was a rate limit or a note — or nothing, when stretches go too", () => {
-    const note = (text: string): WorkEntry => ({ kind: "event", at: t0, tone: "plain", text });
-    const idle: TranscriptEntry[] = [note("Hook ran"), note("Context injected"), answer];
-    const html = draw(idle);
-    expect(html).toContain("ws bare");
+    const idle: WorkEntry[] = [note("Hook ran"), note("Context injected")];
+    // No phase is left to draw: the foot stands alone.
+    expect(phasesOf(idle, { merge: "withheld", dropIdle: true })).toEqual([]);
     // A stretch of nothing but notes counts its notes, not "0 steps".
-    expect(html).toContain("2 notes");
-    expect(html).not.toContain("0 steps");
-    expect(html).not.toContain("ws-box");
-    expect(html).toContain("Every step");
-    for (const notes of ["hide-blocks", "hide"] as const) {
-      const gone = draw(idle, { phases: true, rows: 3, thinking: true, notes });
-      expect(gone).not.toContain("work-summary");
-      expect(gone).not.toContain("Every step");
-      expect(gone).not.toContain("Hook ran");
-      // A lone note is a stretch of only notes too.
-      expect(draw([note("Hook ran"), answer], { phases: true, rows: 3, thinking: true, notes })).not.toContain("Hook ran");
-    }
-  });
-
-  it("does not call a finished conversation that ended on an unanswered call working", () => {
-    // A chat on 2026-09-25: its record ended on a `bash` call whose result was never written, the task
-    // was completed — and the summary pulsed "Running git fetch…" with a clock that never stopped.
-    const endedOnACall = [...stretch.slice(0, 12), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin", args: { command: "git fetch origin" }, at: t0 + 55_000 } as WorkEntry];
-    for (const html of [draw(endedOnACall), draw(endedOnACall, undefined, false)]) {
-      expect(html).not.toContain("ws-phase current");
-      expect(html).not.toContain("Running ");
-      expect(html).not.toMatch(/class="ws-run[ "]/);
-    }
-    // Said to be working, the same record is drawn in progress.
-    expect(draw(endedOnACall, undefined, true)).toContain("ws-phase current");
+    expect(countOf(idle)).toBe("2 notes");
+    // What hiding such stretches goes by. A lone note is a stretch of only notes too; one that did work is not.
+    expect(isIdle(idle, [0, 1])).toBe(true);
+    expect(isIdle([note("Hook ran")], [0])).toBe(true);
+    expect(isIdle(stretch, stretch.map((_, i) => i))).toBe(false);
   });
 
   it("does not measure a turn from the note of the turn before it", () => {
     // A chat on 2026-09-26: the turn before had been left open by a quit, so all that stood between the
     // two turns' "went to" notes was the message the person had typed — and with that gone from the
     // screen, the notes, a withheld thought and a running `bash` were one stretch "872 min 51 s" long.
-    const note = (s: number): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text: "went to chat/session" });
-    const stretchOf = [note(0), note(52_363), think(52_370), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin --quiet", args: { command: "git fetch origin --quiet" }, at: t0 + 52_371_000 } as WorkEntry];
-    const look: WorkLook = { phases: true, rows: 5, thinking: true, notes: "hide-blocks" };
-    const done = draw(stretchOf, look, false);
-    expect(done).not.toContain(" h ");
-    expect(done).not.toContain("min");
-    expect(done).toContain("2 steps · 1 s");
-    // Working, the phase in progress keeps its rows and the foot counts up from the thought, not the note.
-    vi.useFakeTimers({ now: t0 + 52_380_000 });
-    try {
-      const working = draw(stretchOf, look, true);
-      expect(working).toContain("ws-phase current");
-      expect(working).toMatch(/class="ws-run live/);
-      expect(working).toContain("Running ");
-      expect(working).toContain("2 steps · 10 s so far");
-    } finally {
-      vi.useRealTimers();
-    }
+    const went = (s: number): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text: "went to chat/session" });
+    const stretchOf = [went(0), went(52_363), think(52_370), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin --quiet", args: { command: "git fetch origin --quiet" }, at: t0 + 52_371_000 } as WorkEntry];
+    const whole = spanOf(stretchOf, [0, 1, 2, 3]);
+    // Done, the foot says "2 steps · 1 s": the two notes are neither counted nor timed.
+    expect(countOf(stretchOf)).toBe("2 steps");
+    expect(secondsOf(whole.end! - whole.start!)).toBe("1 s");
+    // Working, with the clock nine seconds past the call, the foot counts up from the thought, not the note.
+    expect(secondsOf(t0 + 52_380_000 - whole.start!)).toBe("10 s");
+    // …and the phase in progress keeps its row, which says what is running.
+    const [phase] = phasesOf(stretchOf, { merge: "withheld", dropIdle: true });
+    expect(phase!.indices).toEqual([2, 3]);
+    const shown = windowOf(stretchOf, phase!.indices, 5).shown;
+    expect(shown.map((run) => run.rows)).toEqual([[3]]);
+    expect(sentenceOf(stretchOf, shown[0]!, 3).now).toEqual([{ text: "Running " }, { code: "git fetch origin --quiet", shell: true }]);
   });
 
   describe("an approval — a tool the tool called", () => {
@@ -337,41 +300,37 @@ describe("in the transcript", () => {
     const bashCall = { kind: "tool", name: "mcp__dai__bash", summary: LINE, args: { command: LINE }, at: t0 + 8_000, callId: "t1" } as WorkEntry;
     const approve = (answered?: object): WorkEntry =>
       ({ kind: "tool", name: "approve_tool_call", summary: "", args: { tool: "bash", command: LINE }, at: t0 + 9_000, callId: "approve_abc_approval-1", calledBy: "t1", ...(answered !== undefined ? { ok: true, result: "allowed", detail: answered } : {}) }) as WorkEntry;
-    const pending = { requestId: "approval-1", tool: "bash", command: LINE, input: { command: LINE }, project: "p", at: t0 + 9_000 };
-    const asked = (rows: WorkLook["rows"]): string =>
-      renderToStaticMarkup(
-        createElement(
-          WorkLookContext.Provider,
-          { value: { phases: true, rows, thinking: true, notes: "hide-groups" } },
-          createElement(ApprovalAskContext.Provider, { value: { pending, onDecide: () => undefined } }, createElement(Transcript, { entries: [think(7), bashCall, approve()], working: true })),
-        ),
-      );
+    // The stretch while the prompt is open: the request the host can answer is `approval-1`.
+    const asking = [think(7), bashCall, approve()];
+    const phaseOf = (entries: WorkEntry[]) => phasesOf(entries, { merge: "withheld", dropIdle: true })[0]!;
 
     it("draws its prompt in the latest row the summary shows — the row that says what the turn waits on", () => {
-      const html = asked(3);
-      expect(html).toContain("Waiting for you to approve ");
-      const live = html.indexOf('class="ws-run live');
-      const prompt = html.indexOf('class="inline-gate ws-ask"');
-      expect(live).toBeGreaterThan(-1);
-      expect(prompt).toBeGreaterThan(live);
-      expect(prompt).toBeLessThan(html.indexOf('class="ws-foot"'));
+      // The prompt goes where its call is: the unanswered `approve_tool_call` whose id names the request.
+      const at = approvalCallIndex(asking, "approval-1");
+      expect(at).toBe(2);
+      expect(approvalCallIndex(asking, "approval-2")).toBe(-1);
+      // That call is the latest row the summary shows, on its own, and the row says what the turn waits on.
+      const latest = windowOf(asking, phaseOf(asking).indices, 3).shown.at(-1)!;
+      expect(latest.rows).toEqual([at]);
+      expect(sentenceOf(asking, latest, at).now).toEqual([{ text: "Waiting for you to approve " }, { code: LINE, shell: true }]);
     });
 
     it("with rows set to None, draws it under the summary with its own row", () => {
-      const html = asked(0);
-      expect(html).not.toContain("ws-runs");
-      expect(html.indexOf('class="ws-kept ts-work ws-ask-row"')).toBeGreaterThan(html.indexOf('class="ws-foot"'));
-      expect(html).toContain('class="inline-gate ws-ask"');
+      // No row is shown to hold the prompt — the summary puts it, and the call's row, under itself.
+      const none = windowOf(asking, phaseOf(asking).indices, 0);
+      expect(none.shown).toEqual([]);
       // A chip of its own, live while it waits — the step is counted like any other.
-      expect(html).toContain("ws-chip ws-k-approval live");
-      expect(html).toContain("1 approval");
+      expect(chipsOf(asking, none.rolled, 2).find((chip) => chip.kind === "approval")).toMatchObject({ label: "1 approval", live: true });
     });
 
     it("folds in once answered: no prompt, and the row says who answered, how far and after how long", () => {
-      const html = draw([think(7), bashCall, approve({ decision: "allow", scope: "once", by: "person", waitedMs: 62_000 }), { kind: "message", role: "assistant", text: "done" } as TranscriptEntry]);
-      expect(html).not.toContain("ws-ask");
-      expect(html).toContain("1 approval");
-      expect(approvalWordsOf(approve({ decision: "allow", scope: "once", by: "person", waitedMs: 62_000 }) as never)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", mark: "ok" });
+      const allowed = { decision: "allow", scope: "once", by: "person", waitedMs: 62_000 };
+      const answered = [think(7), bashCall, approve(allowed)];
+      // Nothing waits on it any more: there is no call to put a prompt at, and its chip is a step like any other.
+      expect(approvalCallIndex(answered, "approval-1")).toBe(-1);
+      expect(chipsOf(answered, [0, 1, 2]).find((chip) => chip.kind === "approval")).toMatchObject({ label: "1 approval", live: false });
+      expect(toolLineOf(approve(allowed) as ToolEntry, false, false)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", prose: true, mark: "ok" });
+      expect(approvalWordsOf(approve(allowed) as never)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", mark: "ok" });
       expect(approvalWordsOf(approve({ decision: "deny", scope: "run", by: "person", waitedMs: 3_000 }) as never)).toMatchObject({ name: "Denied", preview: "by you · for this run · after 3 s", tone: "bad" });
       expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "closed", waitedMs: 5_460_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the app closed while it waited · after 1 h 31 min", tone: "warn" });
     });
@@ -379,12 +338,6 @@ describe("in the transcript", () => {
     it("is never what names a phase — the person being asked changes nothing and checks nothing", () => {
       expect(phasesOf([bashCall, approve({ decision: "allow", scope: "once", by: "person", waitedMs: 1 })], { merge: "all", dropIdle: true }).map((p) => p.name)).toEqual(["Explored"]);
     });
-  });
-
-  it("leaves a single line as the row it always was", () => {
-    const html = draw([read("a.ts", 1), answer]);
-    expect(html).not.toContain("work-summary");
-    expect(html).toContain("ts-row");
   });
 });
 
@@ -407,8 +360,10 @@ describe("a shell line that runs git (the person's note, 2026-09-26)", () => {
   });
 
   it("draws a command row's line in the colours of its parts", () => {
-    const html = renderToStaticMarkup(createElement(Transcript, { entries: [bash("cd app && git status", 1)] }));
-    expect(html).toContain('class="shell-line"');
-    expect(html.match(/class="part-c"/g)?.length).toBe(2);
+    const line = "cd app && git status";
+    // The row hands the line over as a command to colour, not only as a preview to print…
+    expect(toolLineOf(bash(line, 1) as ToolEntry, false, false)).toMatchObject({ preview: line, command: line });
+    // …and the parts it is coloured by are the two commands on it.
+    expect(takenApartOf(line).requests.map((request) => line.slice(request.span.start, request.span.end))).toEqual(["cd app", "git status"]);
   });
 });

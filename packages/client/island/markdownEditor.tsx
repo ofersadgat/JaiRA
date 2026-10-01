@@ -1,5 +1,6 @@
 import { MarkdownDocument } from "@jaira/ui/markdownDocument";
-import { MarkdownEditor, type MarkdownDiff } from "@jaira/ui/markdownEditor";
+import { MarkdownEditor } from "@jaira/ui/markdownEditor";
+import type { MarkdownDiff } from "@jaira/ui/markdownEditorTypes";
 import { mountIsland } from "./host";
 
 /**

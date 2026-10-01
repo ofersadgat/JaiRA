@@ -1,19 +1,34 @@
 /**
- * The one control on the composer that is not about what to say: the button.
+ * What the composer says and does, asserted on the pure modules its chips and cards are drawn from.
+ * The components that draw them are the universal tree's, and nothing here renders one:
  *
- * It wears three verbs across two props, and the combination that mattered was the one nobody had:
- * a composer that cannot SEND (no conversation in this state) sitting under a workflow that is still
- * running. That is the ordinary shape of watching a composite — its children hold the conversations,
- * it holds none — and it left the panel with no way to stop the run it was showing.
- *
- * Rendered to static markup rather than through a DOM harness: the claim is what is on the page, and
- * a server render answers exactly that.
+ *  - the two cards over permission sets (decision 0007 §5) — the chips' words, the Permissions card's
+ *    rows, its bucket and its sentence, and what the Tools card lists (`composerModel.ts`,
+ *    `composerCards.ts`, `permissionSetWords.ts`, and a permission set's own words in `@jaira/shared`);
+ *  - what a click on the Tools card does to the permission map (`composerPermissionSet.ts`): how
+ *    commands group under their program, what a group's and a section's mode is, and what ticking,
+ *    unticking and adding write;
+ *  - the one control that is not about what to say, the button: whether a message can be sent right
+ *    now, and what the button says Enter will do (`composerModel.ts`).
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { declOfPermissionSet, lowerPermissionSet, parsePermissionSet, type ChatPlanView, type ChatSettings, type PermissionSet, type PermissionSetChoice, type PermissionSetDecl } from "@jaira/shared/browser";
-import { Composer } from "../src/renderer/composer";
+import {
+  declOfPermissionSet,
+  lowerPermissionSet,
+  parsePermissionSet,
+  PERMISSION_SET_LAYER_LABELS,
+  permissionSetHint,
+  permissionSetLabel,
+  TOOL_CATEGORIES,
+  TOOL_SPEC_BY_NAME,
+  type ChatPlanView,
+  type ChatSettings,
+  type PermissionSet,
+  type PermissionSetChoice,
+  type PermissionSetDecl,
+} from "@jaira/shared/browser";
+import { KEEP_WHERE, originWordsOf, permissionsHintOf } from "../src/renderer/composerCards";
+import { canSendOf, chipValuesOf, composerFactsOf, sendTitleOf, type ComposerFacts } from "../src/renderer/composerModel";
 import {
   commandGroupsOf,
   commandSubjectOf,
@@ -28,6 +43,8 @@ import {
   withSubject,
   withToolHeld,
 } from "../src/renderer/composerPermissionSet";
+import { toolLineOption } from "../src/renderer/permissionSetLinesModel";
+import { SCRIPT_HINT, SHELL_HINT } from "../src/renderer/permissionSetWords";
 
 const plan = (): ChatPlanView =>
   ({
@@ -39,23 +56,12 @@ const plan = (): ChatPlanView =>
     available: { routes: [], tools: [], models: [] },
   }) as unknown as ChatPlanView;
 
-const draw = (props: Partial<Parameters<typeof Composer>[0]>): string =>
-  renderToStaticMarkup(
-    createElement(Composer, {
-      plan: plan(),
-      overrides: {},
-      onOverrides: () => undefined,
-      onSend: () => undefined,
-      ...props,
-    }),
-  );
-
 /**
  * The two cards over permission sets (decision 0007 §5).
  *
- * Drawn the same way — the real component, to static markup, with the card it is about drawn open
- * from the first render (`startOpen`) — and, for everything a click DOES, asserted on the pure
- * functions the clicks call (`composerPermissionSet.ts`), because there is no DOM harness here.
+ * What the cards SAY is read where the composer reads it: `composerFactsOf` for the map, the rows and
+ * the bucket, `chipValuesOf` for the chips' words. Everything a click DOES is asserted on the pure
+ * functions the clicks call (`composerPermissionSet.ts`), in the describe after these.
  */
 const choice = (id: string, decl: PermissionSetDecl, layer: PermissionSetChoice["layer"] = "system"): PermissionSetChoice => {
   const cut = id.lastIndexOf("/");
@@ -82,93 +88,79 @@ const permissionSetPlan = (settings: ChatSettings, bucket?: string): ChatPlanVie
     available: { routes: [], tools: TOOLS, models: [], permissionSets: PERMISSION_SETS, ...(bucket !== undefined ? { bucket } : {}) },
   }) as unknown as ChatPlanView;
 
-/** The chip's word: the text of the Permissions chip button. */
-const chipOf = (html: string): string => /title="Permissions: ([^"]*)"/.exec(html)?.[1] ?? "";
-const rowsOf = (html: string): string[] => [...html.matchAll(/<span class="cx-opt-name ellip">([^<]*)<\/span><span class="cx-opt-hint ellip">/g)].map((m) => m[1]!);
+/** What the composer reads off a plan, with no bucket picked on the card. */
+const factsOf = (view: ChatPlanView): ComposerFacts => composerFactsOf(view, undefined);
+/** The chips' words for a plan — the Permissions chip's and the Tools chip's are the two read here. */
+const chipsOf = (view: ChatPlanView): ReturnType<typeof chipValuesOf> => chipValuesOf(view, factsOf(view), undefined);
+/** The Permissions card's rows, as each is called. */
+const rowsOf = (facts: ComposerFacts): string[] => facts.rows.map(permissionSetLabel);
 const of = (decl: PermissionSetDecl): PermissionSet => parsePermissionSet(decl).permissionSet;
 
 describe("the Permissions card holds the permission sets of one bucket", () => {
-  it("names the permission set the map EXACTLY is, ticks its row, and keeps + dim", () => {
-    const html = draw({ plan: permissionSetPlan({ permissionSet: READ_ONLY }), onSavePermissionSet: async () => undefined, startOpen: { card: "Permissions" } });
-    expect(chipOf(html)).toBe("read-only");
-    expect(rowsOf(html)).toEqual(["ask first", "read-only"]);
-    // One tick, on the matching row.
-    expect(html.match(/cx-opt-tick/g)).toHaveLength(1);
-    expect(html).toMatch(/class="on"[^>]*title="reading goes ahead[^"]*"/);
-    expect(html).toMatch(/<button type="button" class="cx-set-add"[^>]*disabled=""/);
+  it("names the permission set the map EXACTLY is, and matches its row and no other", () => {
+    const view = permissionSetPlan({ permissionSet: READ_ONLY });
+    const facts = factsOf(view);
+    expect(chipsOf(view).permissions).toBe("read-only");
+    expect(rowsOf(facts)).toEqual(["ask first", "read-only"]);
+    // One match, which is the row that is ticked — and, the map being somebody's already, why `+`
+    // has nothing to keep.
+    expect(facts.matched?.id).toBe("chat/read-only");
+    expect(permissionSetHint(facts.matched!)).toBe("reading goes ahead, anything that writes is refused");
     // The head: the bucket, then where the value came from.
-    expect(html).toMatch(/cx-origin-pick cx-bucket[^>]*>.*?<\/span>chat<span class="cx-more">/);
-    expect(html).toContain("your choice for this message");
+    expect(facts.bucket).toBe("chat");
+    expect(originWordsOf(facts.permissionsOrigin, view.from)).toEqual({ text: "your choice for this message", tone: "own" });
   });
 
   it("matches a state's OWN declaration too — the lowered list and block it arrives as", () => {
     const lowered = lowerPermissionSet(parsePermissionSet({ read_file: "ask", write_file: "ask", bash: "ask", other: "ask" }).permissionSet);
-    const html = draw({ plan: permissionSetPlan({ tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) }) });
-    expect(chipOf(html)).toBe("ask first");
+    const view = permissionSetPlan({ tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) });
+    expect(chipsOf(view).permissions).toBe("ask first");
+    // Nobody chose it here, so the card says where the state's declaration came from.
+    expect(originWordsOf(factsOf(view).permissionsOrigin, view.from).text).toBe("inherited from chat/session");
   });
 
-  it("reads CUSTOM the moment one line differs, ticks nothing, and lights +", () => {
-    const html = draw({
-      plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }),
-      onSavePermissionSet: async () => undefined,
-      startOpen: { card: "Permissions" },
-    });
-    expect(chipOf(html)).toBe("custom");
-    expect(html).not.toContain("cx-opt-tick");
-    expect(html).toContain('class="cx-set-add ready"');
-    expect(html).toContain("match no permission set in chat");
+  it("reads CUSTOM the moment one line differs, matches no row, and says what + would keep", () => {
+    const view = permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } });
+    const facts = factsOf(view);
+    expect(chipsOf(view).permissions).toBe("custom");
+    expect(facts.matched).toBeUndefined();
+    expect(permissionsHintOf(facts.rows.length, facts.matched !== undefined, facts.tools.length, facts.bucket)).toBe(
+      "These tools and modes match no permission set in chat — + keeps them as a new one.",
+    );
   });
 
-  it("keeps + dim where the host gave it nowhere to write", () => {
-    const html = draw({ plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }), startOpen: { card: "Permissions" } });
-    expect(html).toMatch(/class="cx-set-add"[^>]*disabled=""/);
-  });
-
-  it("asks for a name and where, through the schema form, when + is open", () => {
-    const html = draw({
-      plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }),
-      onSavePermissionSet: async () => undefined,
-      startOpen: { card: "Permissions", keep: true },
-    });
-    expect(html).toContain("Keep these tools and modes as a permission set in <b>chat</b>");
-    expect(html).toContain("in this project");
-    expect(html).toContain(">Add</button>");
-    // With no project open there is only one place to keep it.
-    const baseOnly = draw({
-      plan: permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } }),
-      onSavePermissionSet: async () => undefined,
-      saveLayers: ["base"],
-      startOpen: { card: "Permissions", keep: true },
-    });
-    expect(baseOnly).toContain("for all projects");
-    expect(baseOnly).not.toContain("in this project");
+  it("words where a kept permission set goes, one word per layer", () => {
+    // The form offers these as its `where`, and reads the layer back from the word that was picked —
+    // so with no project open there is one place to keep it, and two words must never be the same.
+    expect(KEEP_WHERE).toEqual({ project: "in this project", base: "for all projects" });
   });
 
   it("opens on the plan's bucket, whose rows are ITS versions of the same names", () => {
     const control = { start_task: "ask", move_task: "ask", other: "deny" } as PermissionSetDecl;
-    const html = draw({ plan: permissionSetPlan({ permissionSet: control }, "chat_control"), startOpen: { card: "Permissions" } });
-    expect(chipOf(html)).toBe("ask first");
-    expect(rowsOf(html)).toEqual(["ask first"]);
-    expect(html).toContain("ask before starting, moving or answering anything");
+    const view = permissionSetPlan({ permissionSet: control }, "chat_control");
+    const facts = factsOf(view);
+    expect(facts.bucket).toBe("chat_control");
+    expect(chipsOf(view).permissions).toBe("ask first");
+    expect(rowsOf(facts)).toEqual(["ask first"]);
+    expect(facts.rows.map(permissionSetHint)).toEqual(["ask before starting, moving or answering anything"]);
     // The same map read in the chat bucket is nobody's: a label belongs to a bucket.
-    expect(chipOf(draw({ plan: permissionSetPlan({ permissionSet: control }, "chat") }))).toBe("custom");
+    expect(chipsOf(permissionSetPlan({ permissionSet: control }, "chat")).permissions).toBe("custom");
   });
 
-  it("draws the hierarchy in the picker: each bucket, what it holds, the layer that defines it, nested ones indented", () => {
-    const html = draw({ plan: permissionSetPlan({ permissionSet: ASK_FIRST }), startOpen: { card: "Permissions", buckets: true } });
-    const picker = html.slice(html.indexOf('class="cx-submenu cx-from-head"'), html.indexOf('<span class="cx-origin'));
-    expect([...picker.matchAll(/padding-left:(\d+)px[^]*?cx-opt-name ellip">([a-z_]+) <span class="cx-src">([^<]*)</g)].map((m) => [m[2], m[1], m[3]])).toEqual([
-      ["chat", "7", "built in"],
-      ["chat_control", "7", "built in"],
-      ["feature", "7", "this project"],
-      ["implementation", "23", "this project"],
+  it("lists the hierarchy for the picker: each bucket, what it holds, the layer that defines it, nested ones a level in", () => {
+    const { buckets } = factsOf(permissionSetPlan({ permissionSet: ASK_FIRST }));
+    expect(buckets.map((row) => [row.name, row.depth, PERMISSION_SET_LAYER_LABELS[row.layer]])).toEqual([
+      ["chat", 0, "built in"],
+      ["chat_control", 0, "built in"],
+      ["feature", 0, "this project"],
+      ["implementation", 1, "this project"],
     ]);
-    expect(picker).toContain("ask first · read-only");
-    expect(picker).toContain("0 permission sets, and 1 bucket inside");
+    expect(buckets.find((row) => row.path === "chat")?.hint).toBe("ask first · read-only");
+    expect(buckets.find((row) => row.path === "feature")?.hint).toBe("0 permission sets, and 1 bucket inside");
   });
 
   it("falls back to what main worded when the call declares no tools — there is no map to match", () => {
-    expect(chipOf(draw({ plan: permissionSetPlan({}) }))).toBe("ask by default");
+    expect(chipsOf(permissionSetPlan({})).permissions).toBe("ask by default");
   });
 });
 
@@ -176,38 +168,38 @@ describe("the Tools card", () => {
   const WITH_COMMANDS: PermissionSetDecl = { ...ASK_FIRST, "git status": "allow", "git commit": "ask", git: "deny", "npm test": "ask", script: "ask" };
 
   it("counts the tools the map holds, as it always did", () => {
-    expect(draw({ plan: permissionSetPlan({ permissionSet: WITH_COMMANDS }) })).toContain('title="Tools: 3 tools"');
-    expect(draw({ plan: permissionSetPlan({ permissionSet: { bash: "ask", other: "ask" } }) })).toContain('title="Tools: bash"');
-    expect(draw({ plan: permissionSetPlan({}) })).toContain('title="Tools: no tools"');
+    expect(chipsOf(permissionSetPlan({ permissionSet: WITH_COMMANDS })).tools).toBe("3 tools");
+    expect(chipsOf(permissionSetPlan({ permissionSet: { bash: "ask", other: "ask" } })).tools).toBe("bash");
+    expect(chipsOf(permissionSetPlan({})).tools).toBe("no tools");
   });
 
-  it("lists under Execution the shell, the commands grouped under their program, script, and the line that adds one", () => {
-    const html = draw({ plan: permissionSetPlan({ permissionSet: WITH_COMMANDS }), startOpen: { card: "Tools", folds: ["execution", "program:git"] } });
-    expect(html).toContain("the shell — and the mode for any command not named below");
-    // `git` is a fold that opens onto its subcommands; `npm` is one still shut.
-    expect(html).toMatch(/cx-cat cx-sub open[^]*?<span class="mono">git<\/span>[^]*?2 subcommands named; any other git is refused/);
-    expect(html).toMatch(/<span class="mono">git status<\/span>[^]*?cx-mode-allow/);
-    expect(html).toContain("add a git subcommand");
-    expect(html).toMatch(/class="cx-cat cx-sub"[^]*?<span class="mono">npm<\/span>[^]*?>test</);
-    expect(html).not.toContain("add a npm subcommand");
-    expect(html).toContain("running a file — ./x.sh, bash x.sh, python x.py — and what a runner runs that could not be read");
-    expect(html).toContain("add a command");
-    // Order: the shell, the groups, script, then the adding line.
-    const at = (text: string): number => html.indexOf(text);
-    expect([at("the shell —"), at('<span class="mono">git</span>'), at('<span class="mono">npm</span>'), at("running a file"), at("add a command")]).toEqual(
-      [...[at("the shell —"), at('<span class="mono">git</span>'), at('<span class="mono">npm</span>'), at("running a file"), at("add a command")]].sort((a, b) => a - b),
-    );
+  it("lists under Execution the shell, the commands grouped under their program, and script", () => {
+    const { map } = factsOf(permissionSetPlan({ permissionSet: WITH_COMMANDS }));
+    // The programs in the order they were written, each with its subcommands under it.
+    const groups = commandGroupsOf(map);
+    expect(groups).toEqual([
+      { program: "git", own: "deny", subs: [{ subject: "git status", mode: "allow" }, { subject: "git commit", mode: "ask" }] },
+      { program: "npm", subs: [{ subject: "npm test", mode: "ask" }] },
+    ]);
+    // An open group says its sentence; one still shut names what is under it.
+    expect(groupSentence(map, groups[0]!)).toBe("2 subcommands named; any other git is refused");
+    expect(groupSummary(map, groups[1]!)).toBe("test");
+    expect(map.entries["script"]).toEqual({ kind: "script", mode: "ask" });
+    // What the shell's line and script's say they stand for.
+    expect(SHELL_HINT).toBe("the shell — and the mode for any command not named below");
+    expect(SCRIPT_HINT).toBe("running a file — ./x.sh, bash x.sh, python x.py — and what a runner runs that could not be read");
   });
 
-  it("has a Tasks & workflows section, whose tools are drawn like any other now that they are served", () => {
-    const tasks = [...TOOLS];
-    const html = draw({ plan: permissionSetPlan({ permissionSet: { start_task: "ask", other: "deny" } }), startOpen: { card: "Tools", folds: ["tasks"] } });
-    expect(tasks.some((t) => t.name === "start_task")).toBe(true);
-    expect(html).toContain("Tasks &amp; workflows");
+  it("has a Tasks & workflows section, whose tools are worded like any other now that they are served", () => {
+    const facts = factsOf(permissionSetPlan({ permissionSet: { start_task: "ask", other: "deny" } }));
+    expect(facts.offered.some((tool) => tool.name === "start_task")).toBe(true);
+    const spec = TOOL_SPEC_BY_NAME.get("start_task")!;
+    expect(TOOL_CATEGORIES.find((category) => category.id === spec.category)?.label).toBe("Tasks & workflows");
+    expect(sectionCountOf(facts.map, "tasks")).toBe(1);
     // The hint alone — the "· not served yet" suffix went with the `unserved` mark (decision 0005
     // step 6), and a tool a conversation can actually call must not still say nothing serves it.
-    expect(html).toContain("start a task in a workflow, from this conversation");
-    expect(html).not.toContain("not served yet");
+    expect(spec.unserved).toBeUndefined();
+    expect(toolLineOption("start_task").hint).toBe("start a task in a workflow, from this conversation");
   });
 });
 
@@ -276,53 +268,38 @@ describe("what a click on the Tools card does to the map", () => {
 });
 
 describe("the composer's button", () => {
+  // The button wears three verbs across two props, and what decides between them is one question:
+  // can a message be sent right now. The stop button itself is the host's `onStop` and is drawn by
+  // the component; whether SEND stands beside it, and whether it is greyed, is `canSendOf`.
   it("sends when nothing is in flight", () => {
-    const html = draw({});
-    expect(html).toContain('aria-label="Send"');
-    expect(html).not.toContain("cx-stop");
+    expect(canSendOf(undefined, undefined, undefined)).toBe(true);
+    expect(sendTitleOf(false, undefined)).toBe("Enter to send, Shift+Enter for a new line");
   });
 
-  it("becomes a stop button while something is in flight", () => {
-    expect(draw({ busy: true, onStop: () => undefined })).toContain('aria-label="Stop"');
+  it("cannot send over a composer that is disabled — the composite case", () => {
+    // The regression. A state that holds no conversation disables the box, and where a workflow is
+    // still running under it the stop button has to stand alone: there is nowhere for a message to
+    // go, so offering to send one would be an invitation to an error.
+    const disabled = "This state holds no conversation of its own — reply in one of the runs below.";
+    expect(canSendOf(disabled, true, undefined)).toBe(false);
+    // Not even where the host would let a message join a turn, and not at rest either.
+    expect(canSendOf(disabled, true, true)).toBe(false);
+    expect(canSendOf(disabled, undefined, undefined)).toBe(false);
   });
 
-  it("stays a greyed send button when the host has nothing to stop", () => {
-    // No `onStop` is an honest shape, not an oversight: a transcript beside a board has no handle on
-    // the run it is reading, and a stop button that could not stop anything is worse than none.
-    const html = draw({ busy: true });
-    expect(html).toContain('aria-label="Send"');
-    expect(html).toContain("disabled");
-  });
-
-  it("offers stop over a composer that cannot send — the composite case", () => {
-    // The regression. A state that holds no conversation disables the box, and disabling the box
-    // used to take the only handle on a running workflow with it.
-    const html = draw({
-      busy: true,
-      onStop: () => undefined,
-      disabled: "This state holds no conversation of its own — reply in one of the runs below.",
-    });
-    expect(html).toContain('aria-label="Stop"');
-    expect(html).toContain("holds no conversation of its own");
-    // And ONLY stop: there is nowhere for a message to go, so offering to send one would be an
-    // invitation to an error.
-    expect(html).not.toContain('aria-label="Send"');
-  });
-
-  it("offers both while a turn is in flight in a conversation", () => {
+  it("sends while a turn is in flight in a conversation, and says the message joins it", () => {
     // The message joins the turn — that is what the line above the button has been saying, and what
     // `chat:send` has always done. One button meant the box refused what the channel underneath it
     // was willing to do: you could stop the agent, or wait, and nothing else.
-    const html = draw({ busy: true, joinable: true, onStop: () => undefined });
-    expect(html).toContain('aria-label="Stop"');
-    expect(html).toContain('aria-label="Send"');
-    expect(html).toContain("joins the turn in flight");
+    expect(canSendOf(undefined, true, true)).toBe(true);
+    expect(sendTitleOf(false, true)).toBe("Enter to send — this joins the turn in flight");
   });
 
   it("still refuses a second send where the first is what STARTS the conversation", () => {
     // The box on the empty Chat view. Its `busy` is a task being created, and a second send there is
     // a second conversation rather than a second message — so `joinable` is what this turns on, not
     // `busy` alone.
-    expect(draw({ busy: true })).toContain("disabled");
+    expect(canSendOf(undefined, true, undefined)).toBe(false);
+    expect(canSendOf(undefined, true, false)).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { View } from "@tamagui/core";
 import { checkedAgo, providerGroups, useLocalModels } from "@jaira/ui/connectionsModel";
 import { useMcpData } from "@jaira/ui/mcpData";
-import type { ProvidersPaneProps } from "@jaira/ui/providersPane";
+import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { useShell } from "../../app/shell";
 import { Txt } from "../../primitives";
 import { Button } from "./Button";

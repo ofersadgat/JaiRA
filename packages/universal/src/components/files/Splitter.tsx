@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type JSX } from "react";
 import { PanResponder, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { clampSplit, splitKey } from "@jaira/ui/splitter";
+import { clampSplit, splitKey } from "@jaira/ui/splitterModel";
 import { NO_STACK, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
 

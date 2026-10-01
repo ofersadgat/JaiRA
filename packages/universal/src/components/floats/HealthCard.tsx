@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { HealthItem, HealthPage } from "@jaira/shared/browser";
-import { PILL_GLYPH } from "@jaira/ui/pill";
+import { PILL_GLYPH } from "@jaira/ui/pillModel";
 import { healthFixLabel, healthGroups, healthTally, sinceWords } from "@jaira/ui/updatesModel";
 import { dismissAllHealth, dismissHealth } from "@jaira/ui/updatesStore";
 import type { FloatRect } from "@jaira/ui/floatPlace";

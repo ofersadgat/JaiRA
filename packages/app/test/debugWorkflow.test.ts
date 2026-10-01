@@ -20,7 +20,7 @@ import { initProject } from "@jaira/persistence";
 import type { PushMessage } from "@jaira/shared";
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
-import { verdictOf } from "../src/renderer/debugPane";
+import { verdictOf } from "../src/renderer/debugModel";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
 
 let dir: string;

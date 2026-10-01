@@ -356,7 +356,7 @@ describe("JaiRA's two builds", () => {
     expect(moduleFilePath("C:\\repo\\node_modules\\react\\index.js")).toBe("C:\\repo\\node_modules\\react\\index.js");
   });
 
-  it("writes the manifest beside the renderer from its chunks and the main build's module list", async () => {
+  it("writes the manifest beside the window's chunks, from them and the main build's module list", async () => {
     const fixture = await createFixture();
     const moduleList = NodePath.join(fixture.root, "main-modules.json");
     await writeJson(moduleList, [NodePath.join(fixture.dependencyRoot, "index.js")]);
@@ -418,9 +418,11 @@ describe("commercial use", () => {
   });
 
   it("allows every license the app ships — each package it bundles or installs, and each hand-written notice", async () => {
-    // The dependency walk reaches every package the two bundles hold (checked against a built manifest
-    // on 2026-09-24: the only entries it lacked were the config's, which are gated on `main`/`window`);
-    // the empty module lists open that gate, so the check needs no build first.
+    // The dependency walk reaches every package the main bundle holds and every one the window takes
+    // from the app's own dependencies; the empty module lists open the config's `main`/`window` gate,
+    // so the check needs no build first. What only the client depends on (react-native-web, Tamagui,
+    // One — 32 packages on 2026-10-01) is in the window's bundle and not on this walk: the client's
+    // build asks the same question of the manifest it writes (`packages/client/vite.config.ts`).
     const manifest = await generateThirdPartyLicenseManifest({
       configFile: NodePath.join(LICENSES_DIRECTORY, "config.json"),
       packageManifests: [{ bundle: "installed", path: NodePath.join(LICENSES_DIRECTORY, "..", "package.json"), fallback: true }],

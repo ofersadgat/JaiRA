@@ -3,7 +3,7 @@ import { Animated, ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { boardCardOrderOf, pickCard, type BoardPick } from "@jaira/ui/boardModel";
 import { openColumnMenu, openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
-import type { AskSpec } from "@jaira/ui/menu";
+import type { AskSpec } from "@jaira/ui/menuTypes";
 import { dragOffersOf, undoableOn } from "@jaira/ui/taskDrag";
 import { groupOf, groupProjects, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
 import { Board, StickyScroll, type Mods, type StickyScrollValue } from "../components/Board";

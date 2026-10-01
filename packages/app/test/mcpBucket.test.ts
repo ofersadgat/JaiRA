@@ -1,25 +1,24 @@
 /**
  * A permission set's MCP bucket (the units doc `mcp-servers`): one group per configured server, its
- * button the server's line, a line per tool it names — and Connections' MCP rows. The model is asserted
- * as data and the rows as their static markup, since the renderer has no DOM harness.
+ * button the server's line, a line per tool it names (`mcpBucketModel.ts`) — and Connections' MCP rows:
+ * what a server's row says of how it answered, and what a detected source offers (`connectionsModel.ts`).
+ * The model is asserted as data; the rows that draw it are the universal tree's.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { parsePermissionSet, TOOL_CATEGORIES, type ConfigView, type McpServerStatus, type PermissionSet } from "@jaira/shared/browser";
-import { McpBucket, mcpServerFold } from "../src/renderer/mcpBucket";
+import { mcpToolLines, parsePermissionSet, type ConfigView, type McpDetectedSource, type McpServerStatus, type PermissionSet } from "@jaira/shared/browser";
 import {
   mcpAddLabel,
   mcpGroupHint,
   mcpGroupModeOf,
   mcpGroupsOf,
+  mcpLineCount,
   mcpToolHint,
   unnamedMcpTools,
   withMcpServerMode,
   withMcpTool,
   withoutMcpServer,
 } from "../src/renderer/mcpBucketModel";
-import { McpServerRows, mcpStatusLine } from "../src/renderer/mcpServersRows";
+import { detectedSaid, effectiveServers, mcpDetail, mcpStatusLine, mcpWord, newFromSource } from "../src/renderer/connectionsModel";
 import { sectionCountOf } from "../src/renderer/composerPermissionSet";
 
 const setOf = (decl: Record<string, unknown>): PermissionSet => parsePermissionSet(decl).permissionSet;
@@ -84,32 +83,29 @@ describe("the model", () => {
   });
 });
 
-describe("drawn", () => {
-  const category = TOOL_CATEGORIES.find((one) => one.id === "mcp")!;
-  const draw = (permissionSet: PermissionSet, servers: McpServerStatus[] | undefined, open: string[], locked = false): string =>
-    renderToStaticMarkup(
-      createElement(McpBucket, { category, permissionSet, servers, locked, write: () => undefined, open: new Set(open), toggle: () => undefined }),
-    );
-
-  it("one group per server: fold, name, sentence, count and its own mode; open, a line per named tool and the add line", () => {
+describe("what the rows say", () => {
+  it("one group per server: its sentence, its count and its own mode; open, a line per named tool and the add line", () => {
     const permissionSet = setOf({ mcp__playwright__browser_evaluate: "deny", other: "ask" });
-    const html = draw(permissionSet, [playwright], ["mcp", mcpServerFold("playwright")]);
-    expect(html).toContain("cx-cat cx-sub mcp-group open");
-    expect(html).toContain('<span class="mono">playwright</span>');
-    expect(html).toContain("4 tools · 1 named here; any other playwright tool asks");
-    expect(html).toContain('class="cx-tool on set-held"');
-    expect(html).toContain("browser_evaluate");
-    expect(html).toContain("Run JavaScript on the page · destructive, says the server");
-    expect(html).toContain("name another playwright tool: 3 more, from browser_click to browser_snapshot");
-    expect(html).toContain("set-minus");
+    const groups = mcpGroupsOf(permissionSet, [playwright]);
+    expect(groups.map((group) => group.server)).toEqual(["playwright"]);
+    expect(mcpGroupHint(permissionSet, groups[0]!, true)).toBe("4 tools · 1 named here; any other playwright tool asks");
+    // With no line of its own, the group's button shows what any tool of it answers to.
+    expect(mcpGroupModeOf(permissionSet, "playwright")).toBe("ask");
+    expect(mcpLineCount(permissionSet)).toBe(1);
+    // Open: the one tool it names, saying what the server says of it, then the line that names another.
+    const lines = mcpToolLines(permissionSet, "playwright");
+    expect(lines.map((line) => [line.tool, line.mode])).toEqual([["browser_evaluate", "deny"]]);
+    expect(mcpToolHint(playwright.tools.find((tool) => tool.name === lines[0]!.tool))).toBe("Run JavaScript on the page · destructive, says the server");
+    expect(mcpAddLabel("playwright", unnamedMcpTools(permissionSet, groups[0]!))).toBe("name another playwright tool: 3 more, from browser_click to browser_snapshot");
   });
 
-  it("with no server and no line, the section says so; read-only, it is not drawn", () => {
-    expect(draw(setOf({ other: "ask" }), [], [])).toContain("nothing here — add a server in Settings → Connections");
-    expect(draw(setOf({ other: "ask" }), [], [], true)).toBe("");
+  it("with no server and no line there is no group — the section then says so, or read-only is not drawn", () => {
+    expect(mcpGroupsOf(setOf({ other: "ask" }), [])).toEqual([]);
+    // Not asked yet is the same nothing as asked and none.
+    expect(mcpGroupsOf(setOf({ other: "ask" }), undefined)).toEqual([]);
   });
 
-  it("Connections: a row per server saying how it answered, the secrets it is sent, and the detection panel", () => {
+  it("Connections: a row per server saying how it answered, and what each detected source would add", () => {
     const config = {
       base: null,
       project: { mcp: { servers: { playwright: { command: "npx", args: ["@playwright/mcp@latest"] } } } },
@@ -129,36 +125,23 @@ describe("drawn", () => {
       credentials: [{ field: "headers", key: "Authorization", credential: "LINEAR_AUTH" }],
       checkedAt: 1,
     };
-    const html = renderToStaticMarkup(
-      createElement(McpServerRows, {
-        config,
-        layer: "project",
-        busy: false,
-        editable: true,
-        secrets: { keychain: false },
-        onSave: () => undefined,
-        mcp: {
-          report: { servers: [playwright, linear], checkedAt: 1 },
-          detected: [
-            { source: "port", label: "Figma Dev Mode", where: "http://127.0.0.1:3845/mcp", state: "found", servers: [{ name: "figma", config: { url: "http://127.0.0.1:3845/mcp" } }], detail: "answering, 21 tools" },
-            { source: "project", label: "This project's .mcp.json", where: "p/.mcp.json", state: "found", servers: [{ name: "playwright", config: { command: "npx" } }] },
-          ],
-          rechecking: false,
-          recheck: () => undefined,
-          storeSecret: async () => undefined,
-          problem: null,
-        },
-      }),
-    );
-    expect(html).toContain("ready</span> — stdio · npx @playwright/mcp@latest · 4 tools");
-    expect(html).toContain("not started</span> — LINEAR_AUTH is not stored anywhere");
-    expect(html).toContain("cfg-key-box missing");
-    expect(html).toContain("Servers other tools on this machine already run");
-    expect(html).toContain("answering, 21 tools");
+    const detected: McpDetectedSource[] = [
+      { source: "port", label: "Figma Dev Mode", where: "http://127.0.0.1:3845/mcp", state: "found", servers: [{ name: "figma", config: { url: "http://127.0.0.1:3845/mcp" } }], detail: "answering, 21 tools" },
+      { source: "project", label: "This project's .mcp.json", where: "p/.mcp.json", state: "found", servers: [{ name: "playwright", config: { command: "npx" } }] },
+    ];
+    // A row per server the layers add up to, each a word and then how it is reached and what it
+    // listed — or, for one that did not start, why.
+    const servers = effectiveServers(config);
+    expect(Object.keys(servers)).toEqual(["playwright", "linear"]);
+    expect([mcpWord(true, playwright), mcpDetail(true, servers["playwright"]!, playwright)]).toEqual(["ready", "stdio · npx @playwright/mcp@latest · 4 tools"]);
+    expect([mcpWord(true, linear), mcpDetail(true, servers["linear"]!, linear)]).toEqual(["not started", "LINEAR_AUTH is not stored anywhere"]);
+    // The detection panel: what each source lists, and what its Add would write.
+    const [figma, projectFile] = detected;
+    expect(detectedSaid(figma!)).toBe("figma · answering, 21 tools");
     // Figma is new and one click from being ours; playwright is already configured.
-    expect(html).toContain(">Add<");
-    expect(html).toContain(">added<");
-    expect(html).toContain("a command JaiRA starts (stdio), or a URL it calls (HTTP)");
+    expect(newFromSource(figma!, servers)).toEqual([{ name: "figma", config: { url: "http://127.0.0.1:3845/mcp" } }]);
+    expect(newFromSource(projectFile!, servers)).toEqual([]);
     expect(mcpStatusLine({ url: "http://x/mcp" }, { ...linear, state: "ready", transport: "http", where: "http://x/mcp", tools: [playwright.tools[0]!] })).toBe("HTTP · http://x/mcp · answered with 1 tool");
   });
 });
+

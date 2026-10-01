@@ -1,19 +1,20 @@
 /**
- * The Files tree section, rendered to static markup over a report (`filesTreePane.tsx`).
+ * The Files tree section's model, over a report (`filesTreeModel.ts`).
  *
  * What is worth holding down is what the chips it replaced could not say: each rule's count and first
  * matches HERE, grouped the way the rules apply; an inherited rule switched off in the layer being
- * edited drawn on its own line as off (and the `!` it writes not drawn a second time); a group that
- * hides nothing folded; and the warning a rule earns when its only matches are inside a folder JaiRA
- * already hides. The switches write the layer's WHOLE document, never an empty list.
+ * edited kept on its own line as off (and the `!` it writes not listed a second time); a group that
+ * hides nothing folded; the warning a rule earns when its only matches are inside a folder JaiRA
+ * already hides; and who has the last word on a line. The switches write the layer's WHOLE document,
+ * never an empty list.
+ *
+ * The section is drawn by the universal tree from `filesTreeOf`, so these read what it hands the page:
+ * the groups and their heads, each line's words, the preview and the "why" sentence.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import type { JsonValue } from "@declarative-ai/json";
 import { layeredHiddenRules, type ConfigView, type HiddenReport, type HiddenRuleReport } from "@jaira/shared/browser";
-import { SettingsRowsContext } from "../src/renderer/controls";
-import { FilesTreeView, groupRules, lastWordOn, previewSentence, ruleNotes, whySentence, withHidden, type FilesTreeViewProps } from "../src/renderer/filesTreePane";
+import { filesTreeOf, groupRules, groupSummary, lastWordOn, previewSentence, ruleNotes, whyParts, withHidden, type HidPart } from "../src/renderer/filesTreeModel";
 
 const OWN = ["drafts", "!**/dist", "**/build", "!drafts/keep"];
 
@@ -45,102 +46,70 @@ const VIEW: ConfigView = {
   baseDir: "C:/home/.jaira",
 };
 
-function draw(patch: Partial<FilesTreeViewProps> = {}): string {
-  const props: FilesTreeViewProps = {
-    view: VIEW,
-    layer: "project",
-    report: report(),
-    busy: false,
-    onWrite: () => {},
-    typed: "",
-    preview: null,
-    onType: () => {},
-    asked: "",
-    answer: null,
-    onAsk: () => {},
-    open: {},
-    onFold: () => {},
-    ...patch,
-  };
-  return renderToStaticMarkup(createElement(SettingsRowsContext.Provider, { value: true }, createElement(FilesTreeView, props)));
-}
+/** What the section is drawn from: the project's layer being edited, over the walk's report. */
+const treeOf = (found: HiddenReport | null = report()) => filesTreeOf(VIEW, "project", found, () => {});
+
+/** A sentence's parts as one string, a pattern or path between backticks. */
+const said = (parts: readonly HidPart[]): string => parts.map((part) => ("code" in part ? `\`${part.code}\`` : part.text)).join("");
 
 describe("the Files tree section", () => {
-  it("is a settings section with the row, the table, the add line and the why line", () => {
-    const html = draw();
-    expect(html).toContain('data-part="files-tree"');
-    expect(html).toContain("Files tree");
-    expect(html).toContain("Hidden in the tree");
-    expect(html).toContain("Later rules win, so a !pattern puts back something an earlier rule hid.");
-    for (const column of ["Pattern", "What it hides here", "From"]) expect(html).toContain(`>${column}</span>`);
-    expect(html).toContain('placeholder="pattern, or !pattern to put something back"');
-    expect(html).toContain("Why is a path hidden?");
-    expect(html).toContain("Show system/");
-  });
+  const tree = treeOf();
+  const groupOf = (id: string) => tree.groups.find((group) => group.id === id)!;
+  const lineOf = (pattern: string, layer = "built in") => {
+    const index = tree.rules.findIndex((r) => r.pattern === pattern && r.layer === layer);
+    return tree.lineOf({ rule: tree.rules[index]!, index });
+  };
 
   it("groups the rules the way they apply, with a count on each head", () => {
-    const html = draw();
-    const heads = [...html.matchAll(/class="hid-group-name">([^<]+)</g)].map((m) => m[1]);
-    expect(heads).toEqual(["JaiRA&#x27;s own files", "Secrets", "Version control", "Dependencies", "Build output", "Added in this project"]);
-    expect(html).toContain("7 rules · hides 1 folder");
-    expect(html).toContain("3 rules · hides 2 folders");
-    expect(html).toContain("4 rules · hides nothing here · 1 off");
+    expect(tree.groups.map((group) => group.name)).toEqual(["JaiRA's own files", "Secrets", "Version control", "Dependencies", "Build output", "Added in this project"]);
+    expect(groupSummary(groupOf("jaira"), tree.rules, tree.capped)).toBe("7 rules · hides 1 folder");
+    expect(groupSummary(groupOf("dependencies"), tree.rules, tree.capped)).toBe("3 rules · hides 2 folders");
+    expect(groupSummary(groupOf("build"), tree.rules, tree.capped)).toBe("4 rules · hides nothing here · 1 off");
   });
 
   it("folds a group that hides nothing, and opens the rest", () => {
-    const html = draw();
-    expect(html).toMatch(/<div class="hid-group"><button[^>]*aria-expanded="false"[^>]*>.*?Secrets/);
-    expect(html).toMatch(/<div class="hid-group open"><button[^>]*aria-expanded="true"[^>]*>.*?Dependencies/);
+    expect(tree.openOf(groupOf("secrets"), {})).toBe(false);
+    expect(tree.openOf(groupOf("dependencies"), {})).toBe(true);
     // A person's own fold wins over the default.
-    expect(draw({ open: { secrets: true } })).toMatch(/<div class="hid-group open"><button[^>]*aria-expanded="true"[^>]*>.*?Secrets/);
+    expect(tree.openOf(groupOf("secrets"), { secrets: true })).toBe(true);
   });
 
-  it("draws an inherited rule this layer switched off on its own line, struck, saying what it writes", () => {
-    const html = draw();
-    expect(html).toContain('class="hid-line is-off"');
-    expect(html).toContain("off here, so this project shows it (writes <code class=\"hid-code\">!**/dist</code>)");
+  it("keeps an inherited rule this layer switched off on its own line, off, saying what it writes", () => {
+    const dist = lineOf("**/dist");
+    expect(dist.off).toBe(true);
+    expect(said(dist.offNote)).toBe("off here, so this project shows it (writes `!**/dist`)");
     // The `!` is that line's state, not a second rule of the project's own.
-    const own = html.slice(html.indexOf("Added in this project"));
-    expect(own).not.toContain(">!</span>**/dist");
-    expect(own).toContain(">drafts</span>");
+    const own = groupOf("project").lines.map(({ rule }) => rule.pattern);
+    expect(own).not.toContain("!**/dist");
+    expect(own).toContain("drafts");
   });
 
-  it("gives each line its count and first matches, or says it hides nothing here", () => {
-    const html = draw();
-    expect(html).toContain('<span class="hid-count">2 folders</span><span class="hid-samples data-secondary">node_modules, packages/app/node_modules</span>');
-    expect(html).toContain("nothing here");
-    expect(draw({ report: report(true) })).toContain('<span class="hid-count">at least 2 folders</span>');
+  it("gives each line its count and first matches, or nothing where it hides nothing here", () => {
+    const modules = lineOf("**/node_modules");
+    expect(modules.amount).toBe("2 folders");
+    expect(modules.samples).toBe("node_modules, packages/app/node_modules");
+    // A rule with no match has no amount: the page says "nothing here" in its place.
+    expect(lineOf("**/build", "project").amount).toBeNull();
+    // A walk that stopped early says so, and the page then writes "at least" before every count.
+    expect(tree.capped).toBe(false);
+    expect(treeOf(report(true)).capped).toBe(true);
   });
 
-  it("marks where each rule came from, the edited layer's own in the accent", () => {
-    const html = draw();
-    expect(html).toContain('<span class="hid-chip hid-origin">built in</span>');
-    expect(html).toContain('<span class="hid-chip hid-origin is-here">this project</span>');
-    expect(html).toContain('<span class="hid-chip hid-puts">puts back</span>');
-    expect(html).toContain('<span class="hid-bang">!</span>');
+  it("marks where each rule came from, the edited layer's own apart, and a `!` as one that puts back", () => {
+    expect(lineOf(".git")).toMatchObject({ origin: "built in", mine: false, put: false });
+    expect(lineOf("drafts", "project")).toMatchObject({ origin: "this project", mine: true, put: false });
+    expect(lineOf("!drafts/keep", "project")).toMatchObject({ origin: "this project", mine: true, put: true });
   });
 
   it("warns about a rule whose only matches are inside a folder already hidden", () => {
-    const html = draw();
-    expect(html).toContain("every match is inside .jaira/system, which is already hidden");
-    expect(html).toContain("puts back nothing: drafts is hidden by drafts, and a hidden folder takes its contents with it");
+    expect(lineOf("**/build", "project").notes).toEqual(["every match is inside .jaira/system, which is already hidden"]);
+    expect(lineOf("!drafts/keep", "project").notes).toEqual(["puts back nothing: drafts is hidden by drafts, and a hidden folder takes its contents with it"]);
   });
 
   it("previews a typed rule and answers why a path is hidden", () => {
-    const preview: HiddenReport = {
-      root: "C:/repo",
-      capped: false,
-      rules: [],
-      extra: { pattern: "**/*.snap", layer: "project", hides: { files: 0, folders: 5 }, samples: ["a", "b", "c"] },
-    };
-    expect(draw({ typed: "**/*.snap", preview })).toContain("would hide 5 folders: a, b, c, +2");
-    const why = draw({ asked: "packages/cli/dist/cli.js", answer: { hidden: true, rule: "**/dist", layer: "built in", via: "packages/cli/dist" } });
-    expect(why).toContain('hidden by <code class="hid-code">**/dist</code>, built in, in Build output: its folder <code class="hid-code">packages/cli/dist</code> matches');
-    expect(draw({ asked: "src/a.ts", answer: { hidden: false } })).toContain("not hidden");
-  });
-
-  it("says while it is still reading", () => {
-    expect(draw({ report: null })).toContain("reading the tree…");
+    expect(previewSentence({ pattern: "**/*.snap", layer: "project", hides: { files: 0, folders: 5 }, samples: ["a", "b", "c"] }, false)).toBe("would hide 5 folders: a, b, c, +2");
+    expect(said(whyParts({ hidden: true, rule: "**/dist", layer: "built in", via: "packages/cli/dist" }))).toBe("hidden by `**/dist`, built in, in Build output: its folder `packages/cli/dist` matches");
+    expect(said(whyParts({ hidden: false }))).toBe("not hidden");
   });
 });
 
@@ -169,6 +138,6 @@ describe("the pieces it is drawn from", () => {
   it("says nothing extra about a rule that is doing its job", () => {
     expect(ruleNotes(rules[at("**/node_modules")]!, at("**/node_modules"), rules)).toEqual([]);
     expect(previewSentence({ pattern: "!x", layer: "you", hides: { files: 0, folders: 0 }, samples: [] }, false)).toBe("would put back nothing here");
-    expect(renderToStaticMarkup(whySentence({ hidden: false, rule: "!system", layer: "you" }))).toContain("just you, puts it back");
+    expect(said(whyParts({ hidden: false, rule: "!system", layer: "you" }))).toBe("not hidden: `!system`, just you, puts it back");
   });
 });

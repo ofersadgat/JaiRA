@@ -6,7 +6,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { RemoteStatusView, ReviewNote, ReviewRemote } from "@jaira/shared";
-import { waitingKindOf } from "../src/renderer/board";
+import { waitingKindOf } from "../src/renderer/boardModel";
 import { agoLabel, cardRemoteWord, commentersLine, mergeForgeNotes, requestLabel, settledByLines, stripWords } from "../src/renderer/remoteStrip";
 
 const NOW = Date.parse("2026-09-19T11:14:00");

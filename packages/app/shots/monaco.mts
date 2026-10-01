@@ -1,5 +1,5 @@
 /**
- * Does Monaco work in the Electron app, drawn by the One client (decision 0015)? Every surface it has:
+ * Does Monaco work in the Electron app, as an island of the universal page (decision 0015)? Every surface it has:
  *
  *   npm --workspace @jaira/app run build                     then either
  *   npx tsx packages/app/shots/monaco.mts                    the development build (electron .)
@@ -151,7 +151,7 @@ async function main(): Promise<void> {
   // The world's own `userData` (keychain, Chromium profile), never the author's — as the driver does it.
   const child: ChildProcess = spawn(file, [...args, `--remote-debugging-port=${PORT}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
     cwd: world.project,
-    env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project, JAIRA_RENDERER: "one" },
+    env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
     stdio: "ignore",
   });
   let page: Cdp | undefined;
@@ -178,20 +178,23 @@ async function main(): Promise<void> {
     await page.send("Runtime.enable");
     await page.send("Page.enable");
     await page.send("Emulation.setDeviceMetricsOverride", { width: 1280, height: 860, deviceScaleFactor: 1, mobile: false });
-    await page.until("document.getElementById('root')?.children.length > 0 && document.querySelector('.sidebar') !== null", "the window to draw", 60);
+    await page.until("document.getElementById('root')?.children.length > 0 && document.querySelector('[role=navigation]') !== null", "the window to draw", 60);
     const where = await page.evaluate<string>("location.protocol + '//' + location.host + location.pathname + (globalThis.__vxrnIsSPA === true ? ' (the One client)' : ' (not the One client)')");
     say(`${PACKAGED ? "packaged app" : "development build"}: ${version["User-Agent"].match(/Electron\/[\d.]+/)?.[0]}, renderer ${where}`);
 
     // 1. The Appearance preview.
     await page.clickText("Settings");
     await page.clickText("Appearance");
-    await page.until(`document.querySelector(".ft-preview-body") !== null`, "the preview to mount");
+    // The File types section by its test id, its preview by the `code` island in it; what is inside an
+    // island is Monaco's own DOM, by Monaco's own classes.
+    const PREVIEW = "[data-testid=ft] [data-island=code]";
+    await page.until(`document.querySelector("${PREVIEW}") !== null`, "the preview to mount");
     await page.until(
-      `(document.querySelector(".ft-preview-body").scrollIntoView({ block: "center" }),
-        [...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
+      `(document.querySelector("${PREVIEW}").scrollIntoView({ block: "center" }),
+        [...document.querySelectorAll("${PREVIEW} .view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
       "the preview to colour itself",
     );
-    const previewInks = await page.evaluate<number>(`new Set([...document.querySelectorAll(".ft-preview-body .view-lines span[class^=mtk]")].map((s) => getComputedStyle(s).color)).size`);
+    const previewInks = await page.evaluate<number>(`new Set([...document.querySelectorAll("${PREVIEW} .view-lines span[class^=mtk]")].map((s) => getComputedStyle(s).color)).size`);
     say(`1. Appearance preview: drawn and coloured by the TextMate grammars (${previewInks} inks)`);
     await page.shot("1-preview");
 
@@ -199,8 +202,8 @@ async function main(): Promise<void> {
     // From a fresh load: in Settings the sidebar is Settings' own navigation, whose "Files tree" matches too.
     await page.evaluate("location.reload()");
     await sleep(1000);
-    await page.until("document.getElementById('root')?.children.length > 0 && document.querySelector('.sidebar') !== null", "the window to draw again", 60);
-    await page.clickText("Files", ".sidebar");
+    await page.until("document.getElementById('root')?.children.length > 0 && document.querySelector('[role=navigation]') !== null", "the window to draw again", 60);
+    await page.clickText("Files", '[role="navigation"]');
     await page.until(`document.body.innerText.includes("broken.ts")`, "the file tree to list broken.ts");
     await page.clickText("broken.ts");
     await page.until(`[...document.querySelectorAll(".monaco-editor .view-lines")].some((v) => v.textContent.includes("forty-two"))`, "broken.ts to open in Monaco");
@@ -238,7 +241,7 @@ async function main(): Promise<void> {
       await window.jaira.invoke("config:write", { layer: "you", config: { ...you, appearance } });
     })()`);
     await sleep(500);
-    await page.clickText("change.patch", ".sidebar");
+    await page.clickText("change.patch", '[role="navigation"]');
     await page.until(`document.querySelector(".monaco-diff-editor .view-lines .view-line") !== null`, "the diff editor to draw");
     await page.until(`document.querySelectorAll(".monaco-diff-editor .line-insert, .monaco-diff-editor .line-delete, .monaco-diff-editor .char-insert, .monaco-diff-editor .char-delete").length > 0`, "the diff to be marked", 30);
     const marks = await page.evaluate<number>(`document.querySelectorAll(".monaco-diff-editor .line-insert, .monaco-diff-editor .line-delete, .monaco-diff-editor .char-insert, .monaco-diff-editor .char-delete").length`);

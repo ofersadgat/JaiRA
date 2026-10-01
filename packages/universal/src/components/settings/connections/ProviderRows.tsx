@@ -33,7 +33,7 @@ import { checkCredentialName } from "@jaira/ui/executorConfig";
 import { accountFor, useLimits } from "@jaira/ui/limitsStore";
 import { providerBlockPath, type FieldSpec, type ProviderSpec } from "@jaira/ui/providerSpecs";
 import { layerRowOf } from "@jaira/ui/settingsRows";
-import type { ProvidersPaneProps } from "@jaira/ui/providersPane";
+import type { ProvidersPaneProps } from "@jaira/ui/providersPaneTypes";
 import { Txt } from "../../../primitives";
 import { Disclosure, Field, FieldGrid, Level } from "../../form/Field";
 import { FormInput, TextArea } from "../../form/inputs";

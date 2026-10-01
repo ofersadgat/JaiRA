@@ -1,5 +1,5 @@
 /**
- * What a state that ran FUNCTIONS says about itself — see `SilentState` and `CallBlock`.
+ * What a state that ran FUNCTIONS says about itself — the calls its panel lists (`callsOf`).
  *
  * The state this exists for is `feature/product/confidence`: three outputs, each bound to a function
  * expression, so three calls dispatched and no `operation.started` at all. The projection therefore
@@ -10,12 +10,14 @@
  *
  * The join is `InstanceNode.calls` (stamped from `operation.dispatched`) against the record store;
  * the fixtures below are the real run's rows.
+ *
+ * This file rendered the DOM's `SilentState`, which went with the DOM renderer. The universal one
+ * (`packages/universal/src/components/panel/RunTranscript.tsx`) draws the same list from the same
+ * join, so the cases are on the join: which calls it gives, and what each one carries to be drawn.
  */
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import type { InstanceNode, OperationRecordView } from "@jaira/shared/browser";
-import { SilentState } from "../src/renderer/runViews";
+import { callsOf } from "../src/renderer/runConversationModel";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -53,38 +55,30 @@ const CONFIDENCE = node({
   ],
 });
 
-const draw = (n: InstanceNode, records: Record<string, OperationRecordView>): string =>
-  renderToStaticMarkup(createElement(SilentState, { node: n, records }));
-
 describe("a state that computed its outputs by calling functions", () => {
   it("names every function it ran, and not just the namespace they share", () => {
-    const html = draw(CONFIDENCE, RECORDS);
-    expect(html).toContain("confidence.score");
-    expect(html).toContain("confidence.reasons");
+    expect(callsOf(CONFIDENCE, RECORDS).map((call) => call.name)).toEqual(["confidence.score", "confidence.reasons"]);
   });
 
   it("keeps the whole reference on the hover, because where it lives is not what it is called", () => {
-    expect(draw(CONFIDENCE, RECORDS)).toContain("confidence.ts#confidence.score");
+    expect(callsOf(CONFIDENCE, RECORDS).map((call) => call.ref)).toEqual([
+      "user:C:/Users/Ofer/.jaira/functions/confidence.ts#confidence.score",
+      "user:C:/Users/Ofer/.jaira/functions/confidence.ts#confidence.reasons",
+    ]);
   });
 
   it("shows the RESOLVED arguments, so the answer can be checked against what was handed over", () => {
-    const html = draw(CONFIDENCE, RECORDS);
-    expect(html).toContain("maxSeverityRank");
-    expect(html).toContain("thresholdRank");
+    expect(callsOf(CONFIDENCE, RECORDS).map((call) => call.args)).toEqual([{ maxSeverityRank: 1, iteration: 3 }, { thresholdRank: 2 }]);
   });
 
   it("shows what each call answered", () => {
-    const html = draw(CONFIDENCE, RECORDS);
-    expect(html).toContain("0.6333333333333333");
-    expect(html).toContain("it took more than one pass to converge");
+    expect(callsOf(CONFIDENCE, RECORDS).map((call) => call.result)).toEqual([0.6333333333333333, ["it took more than one pass to converge"]]);
   });
 
   it("falls back to the state's inputs when it dispatched nothing at all", () => {
-    // A genuinely computed state — every output an expression over values it was handed. It keeps
-    // the reading it already had rather than gaining an empty heading.
-    const html = draw(node({ instanceId: "9", stateId: "verdict", inputs: { score: 0.6 } }), {});
-    expect(html).toContain("ss-slot-name");
-    expect(html).not.toContain("ss-call");
+    // A genuinely computed state — every output an expression over values it was handed. It has no
+    // call to list, which is what leaves its panel to the inputs rather than to an empty heading.
+    expect(callsOf(node({ instanceId: "9", stateId: "verdict", inputs: { score: 0.6 } }), {})).toEqual([]);
   });
 
   it("keeps the calls under a FAILURE, which is where knowing which ones got through matters most", () => {
@@ -93,14 +87,13 @@ describe("a state that computed its outputs by calling functions", () => {
       status: "failed",
       operation: { kind: "function", status: "failed", reason: "output 'score': no function is registered" },
     });
-    const html = draw(failed, RECORDS);
-    expect(html).toContain("no function is registered");
-    expect(html).toContain("confidence.score");
+    expect(callsOf(failed, RECORDS).map((call) => [call.name, call.status])).toEqual([
+      ["confidence.score", "completed"],
+      ["confidence.reasons", "completed"],
+    ]);
   });
 
   it("drops a call whose record has been pruned rather than drawing a row about nothing", () => {
-    const html = draw(CONFIDENCE, { score: RECORDS["score"]! });
-    expect(html).toContain("confidence.score");
-    expect(html).not.toContain("confidence.reasons");
+    expect(callsOf(CONFIDENCE, { score: RECORDS["score"]! }).map((call) => call.name)).toEqual(["confidence.score"]);
   });
 });

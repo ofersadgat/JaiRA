@@ -24,7 +24,7 @@ import {
   stateDraft,
   statePrefixOf,
   workflowsDirOf,
-} from "../src/renderer/files";
+} from "../src/renderer/filesModel";
 
 const project = (dir: string): { dir: string; project?: string } => ({ dir: `${dir}/.jaira`, project: dir });
 const shared = { dir: "/home/me/.jaira" };

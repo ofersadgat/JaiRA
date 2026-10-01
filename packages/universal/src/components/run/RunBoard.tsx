@@ -2,7 +2,7 @@ import { useMemo, useRef, useState, type JSX, type MouseEvent as ReactMouseEvent
 import { Pressable, ScrollView, type View as HostView } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { InstanceNode, InstanceStatus, StateChild, TaskStatus } from "@jaira/shared/browser";
-import { PILL_WORD, pillKindOf } from "@jaira/ui/pill";
+import { PILL_WORD, pillKindOf } from "@jaira/ui/pillModel";
 import { NO_RUN_OFFERS, restingOf, runColumnsOf, runTileWordsOf, runsByChild } from "@jaira/ui/runBoardModel";
 import { PLAIN_SCROLLER, faceOf, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";

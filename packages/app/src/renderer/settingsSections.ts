@@ -14,7 +14,7 @@
  * Pure data, so the list is testable without drawing the sidebar.
  */
 import type { ConfigLayer, HealthItem } from "@jaira/shared/browser";
-import type { PillCounts } from "./pill";
+import type { PillCounts } from "./pillModel";
 import { projectName } from "./projects";
 import { healthCounts } from "./updatesModel";
 import type { SettingsSection } from "./store";

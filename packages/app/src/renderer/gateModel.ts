@@ -3,7 +3,7 @@
  * the universal copy of the gate (decision 0015) draws the same glyph. Pure.
  */
 import type { ComponentName } from "@jaira/shared/browser";
-import type { PATHS } from "./icons";
+import type { PATHS } from "./iconPaths";
 
 /**
  * A glyph per component, shown beside its NAME in the dialog's sub-line.

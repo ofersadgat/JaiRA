@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { PendingUserEvent } from "@jaira/shared/browser";
-import { runDragOffersOf } from "../src/renderer/runViews";
+import { runDragOffersOf } from "../src/renderer/runBoardModel";
 
 const wait = (over: Partial<PendingUserEvent> = {}): PendingUserEvent => ({
   requestId: "event-1",

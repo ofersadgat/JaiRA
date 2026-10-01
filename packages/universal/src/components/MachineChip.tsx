@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
-import type { MachineChipState } from "@jaira/ui/machineChip";
+import type { MachineChipState } from "@jaira/ui/machinesModel";
 import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 

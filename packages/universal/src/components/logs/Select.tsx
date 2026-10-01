@@ -1,7 +1,7 @@
 import { useMemo, useRef, useState, type JSX } from "react";
 import { View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { MenuItem } from "@jaira/ui/menu";
+import type { MenuItem } from "@jaira/ui/menuTypes";
 import { sourceGroups } from "@jaira/ui/logsModel";
 import { PLAIN_SCROLLER, Press, Txt, edge, lengthToken, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";

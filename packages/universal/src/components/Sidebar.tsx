@@ -1,7 +1,7 @@
 import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import { parentName } from "@jaira/ui/projects";
-import type { SidebarProject, SidebarView } from "@jaira/ui/sidebar";
+import type { SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, WINDOW_GUTTER, edge, landmark, useHover } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";

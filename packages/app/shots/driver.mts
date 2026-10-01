@@ -67,8 +67,6 @@ export interface Options {
   readonly port?: number;
   /** A phone instead of a window: its viewport and scale, with touch (the island harness, 0015 S5). */
   readonly phone?: { readonly width: number; readonly height: number; readonly scale: number };
-  /** Which UI the launched desktop opens: the page the shots were written for (`dom`, the default here), or the app's own default. */
-  readonly ui?: "dom" | "universal";
   /** Extra switches for a {@link browse}d browser. */
   readonly flags?: readonly string[];
 }
@@ -113,9 +111,7 @@ export class App {
      * lines, for as long as the window stayed covered — and a capture waits for a frame forever.
      * `Page.bringToFront` does not help; it raises the page, not the OS window over what covers it.
      */
-    // `--ui=dom`: the desktop opens the universal shell by default, and the shots drive the page it
-    // replaced by its classes (`pair.mts` goes to `/rn` itself). `ui: "universal"` for the default.
-    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion", ...(options.ui === "universal" ? [] : ["--ui=dom"])], {
+    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
       cwd: world.project,
       env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
       stdio: ["ignore", "pipe", "pipe"],
@@ -276,7 +272,7 @@ export class App {
     }
   }
 
-  /** Any DevTools protocol call, for a rig that needs more than the verbs here (`cascade` reads the CSS domain). */
+  /** Any DevTools protocol call, for a rig that needs more than the verbs here (`pair.mts` captures with a clip). */
   async cdp<T = unknown>(method: string, params: Record<string, unknown> = {}): Promise<T> {
     const reply = (await this.send(method, params)) as { result?: unknown; error?: { message: string } };
     if (reply.error !== undefined) throw new Error(`${method}: ${reply.error.message}`);
@@ -333,7 +329,7 @@ export class App {
    * Not this one. The renderer reads the configuration once per load and owns what it shows — a
    * write from out here reaches the file and not the window. Which is the same shape the predecessor
    * had, for the same underlying reason: a theme is a property of the whole page, so it is one theme
-   * per load, and `run.mts` takes a pass per theme.
+   * per load: a rig that wants another theme writes it and loads the page again.
    *
    * The mode is `appearance.mode` of the personal layer ("Just you", `personal-settings.json`), the
    * one every project's look is laid under, and the write goes through `config:write` — so the file
@@ -498,7 +494,7 @@ export class App {
   }
 
   /**
-   * Hold still, for a comparison of two renderers of one state (`parity.mts`).
+   * Hold still, for a picture that is compared with another of the same state (`pair.mts`).
    *
    * From the next document on: every page starts its clock at `epochMs` and lets it run from there,
    * so "36 seconds ago" says the same thing at the same step of both passes, and animations and

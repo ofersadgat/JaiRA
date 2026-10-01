@@ -3,7 +3,7 @@
  * universal shell (decision 0015) raises the same ones with the same words.
  */
 import type { PendingApproval } from "@jaira/shared/browser";
-import type { AskSpec } from "./menu";
+import type { AskSpec } from "./menuTypes";
 import { projectName } from "./projects";
 
 /** The approval that names no task: no conversation can host it, so it is the one still modal. */

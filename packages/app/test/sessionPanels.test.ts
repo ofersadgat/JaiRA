@@ -1,22 +1,23 @@
 /**
- * What the session panels actually DRAW.
+ * What the session panels are drawn FROM, beside the bands.
  *
  * `sessionBands.test.ts` covers the model — which sessions band together, and where a conversation
- * was cut. This covers the half that only exists on screen: that a cut is rendered as a torn edge
- * naming the session on BOTH sides, that a lone conversation gets no layout control it could only be
- * wrong about, and that a band of two lays out as columns while a band of three falls back to tabs.
+ * was cut. This covers what the page makes of it (`sessionRows.ts`): the rows of the page in order —
+ * panels, and the notes on the grey between them — and where each sits on the rail; how a session is
+ * timed; which panels are sides of a fork, and what each side is called; what a fold is remembered
+ * under; where an armed rewind's counted line and a fork's origin seam fall among the rows; the step
+ * a note becomes on the rail, and the name a lane's colour is looked up by.
  *
- * Rendered to static markup rather than through a DOM harness. The claims here are structural — what
- * is on the page and what it says — and that is exactly what a server render answers, without the
- * repo taking on jsdom and a testing library to ask it.
+ * How any of it is laid out — sheets, gutters, letterheads, columns or tabs, the torn edges, and the
+ * sentences written on them — is the universal tree's (`SessionBands.tsx`) and is not covered here.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import type { InstanceNode, MadeTask, SessionRef } from "@jaira/shared/browser";
-import { bandsOf, piecesOf, sameAddress, type BandNote, type SessionPiece } from "../src/renderer/sessionBands";
-import { SessionBandsView, ZigDefs, stepOfNote } from "../src/renderer/sessionPanels";
-import { keyOfNode, paletteOfRun } from "../src/renderer/runIndex";
+import { bandsOf, piecesOf, placeOf, sameAddress, type BandNote } from "../src/renderer/sessionBands";
+import { cutNameOf, keyOfPiece, markedRowsOf, pageRowsOf, sideName, sideOf, spanOf, stepOfNote, type PageRows } from "../src/renderer/sessionRows";
+import { paletteOfRun, railOf } from "../src/renderer/rail";
+import { keyOfNode } from "../src/renderer/runIndexModel";
+import { KIND_WORD, surfaceKindOf } from "../src/renderer/stateSurfaceModel";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({
   status: "completed",
@@ -35,8 +36,8 @@ const ref = (instanceId: number, sessionId: string, startedAt: number, at: numbe
  *
  * The operation is on the fixture rather than left off, because it is what makes these children
  * conversations: a leaf with no operation is a state that computed its outputs and never spoke, and
- * `Sheet` gives that one a surface instead of a panel (see `stateSurface.tsx`). Every test in this
- * file is about the panel, so every child in it has to be something that could have one.
+ * the page gives that one a surface instead of a panel (see `stateSurfaceModel.ts`). Most cases in
+ * this file are about the panel, so every child here is something that could have one.
  */
 const parentOf = (kids: Array<{ id: number; from: number; to: number }>): InstanceNode =>
   node({
@@ -54,263 +55,86 @@ const parentOf = (kids: Array<{ id: number; from: number; to: number }>): Instan
     ),
   });
 
-/** The markup for a run, with each state's transcript stubbed to a recognisable line. */
-const draw = (parent: InstanceNode, refs: SessionRef[]): string =>
-  renderToStaticMarkup(
-    createElement(SessionBandsView, {
-      bands: bandsOf(piecesOf(parent, refs)),
-      render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
-    }),
+/** A note. `kind` defaults to `failure`, which is what most of these are about. */
+const note = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => ({ kind: "failure", path: "", ...patch });
+
+/** The page for a run: its bands, and the notes among them, as the conversation lays them out. */
+const pageOf = (parent: InstanceNode | undefined, refs: SessionRef[], notes: BandNote[] = [], root = ""): PageRows =>
+  pageRowsOf(bandsOf(piecesOf(parent, refs)), notes, root);
+
+/**
+ * The page's rows, a word each: a note by its kind, a band by the instances whose words its panel
+ * holds (`#2`, or `#3 #4` for two states in one sheet; panels side by side are joined by `|`).
+ */
+const rowsOf = (page: PageRows): string[] =>
+  page.rows.map((row) =>
+    row.kind === "note" ? row.note.kind : row.band.segments.map((segment) => segment.pieces.map((piece) => `#${piece.node.instanceId}`).join(" ")).join(" | "),
   );
 
 describe("what a conversation draws", () => {
-  it("gives each session its own sheet, and every state's words a place in one", () => {
-    const html = draw(parentOf([
-      { id: 2, from: 0, to: 10 },
-      { id: 3, from: 11, to: 20 },
-    ]), [ref(2, "planning", 0, 10), ref(3, "review", 11, 20)]);
-    expect(html.match(/sb-sheet/g)).toHaveLength(2);
-    expect(html).toContain("said by #2");
-    expect(html).toContain("said by #3");
-  });
-
-  it("names a conversation in the grey above it, not in a bar across the top of it", () => {
-    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
-    // The name is outside the sheet, so it comes BEFORE the border it labels.
-    expect(html.indexOf("planning")).toBeLessThan(html.indexOf("sb-sheet"));
-    expect(html).toContain("sb-gutter");
-    // Nothing counts the states for you — the cards below are the count.
-    expect(html).not.toMatch(/\d+ states?</);
-  });
-
-  it("names the interruption on both sides of it", () => {
-    const html = draw(parentOf([
-      { id: 2, from: 0, to: 10 },
-      { id: 3, from: 11, to: 20 },
-      { id: 4, from: 21, to: 30 },
-    ]), [ref(2, "planning", 0, 10), ref(3, "review", 11, 20), ref(4, "planning", 21, 30)]);
-    // Named on both edges, because the two halves have to be findable from each other — a bar
-    // reading only "paused" leaves you counting panels to work out which thread came back.
-    expect(html).toContain('paused session <span class="mono">planning</span>');
-    expect(html).toContain('resumed session <span class="mono">planning</span>');
-    // The session that ran in the gap is a whole panel, not an edge.
-    expect(html).not.toContain("session <span class=\"mono\">review</span>");
-    // Cut edges are squared, so the halves read as halves — see `.sb-sheet.paused`.
-    expect(html).toContain("sb-sheet paused");
-    expect(html).toContain("sb-sheet resumed");
-  });
-
-  it("draws no bar at all when nothing interrupted the conversation", () => {
-    const html = draw(parentOf([
-      { id: 2, from: 0, to: 10 },
-      { id: 3, from: 11, to: 20 },
-    ]), [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
-    expect(html).not.toContain("sb-tear");
-    expect(html.match(/sb-sheet/g)).toHaveLength(1);
-  });
-
   /**
-   * Walking into a leaf shows what it SAID, not a card containing what it said.
+   * A state that was never going to speak is headed by what it IS.
    *
-   * The card is a boundary marker, and a view with one operation in it has no boundary to mark — so
-   * the fold, the status dot and the call signature were chrome around the only thing on the page,
-   * and read as a child state rather than as the run being looked at.
+   * A surface has no session to be named or timed by, so the gutter over it would be saying nothing —
+   * and the letterhead, opening with the word for its kind, is the only header it can have.
    */
-  it("drops the run card when the whole view is one operation, and keeps it when there are two", () => {
-    const alone = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
-    expect(alone).not.toContain("ts-card");
-    expect(alone).toContain("said by #2");
-    // The gutter stays: which conversation this is remains a fact worth having.
-    expect(alone).toContain("planning");
-
-    const two = draw(parentOf([
-      { id: 2, from: 0, to: 10 },
-      { id: 3, from: 11, to: 20 },
-    ]), [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
-    expect(two.match(/class="lh"/g)).toHaveLength(2);
-  });
-
-  it("offers no layout control over a band with one conversation in it", () => {
-    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
-    expect(html).not.toContain("sb-layout");
-  });
-
-  it("lays two concurrent sessions out side by side, both named and both visible", () => {
-    const html = draw(parentOf([
-      { id: 2, from: 0, to: 20 },
-      { id: 3, from: 5, to: 25 },
-    ]), [ref(2, "planning", 0, 20), ref(3, "review", 5, 25)]);
-    expect(html).toContain("sb-columns");
-    expect(html).toContain("said by #2");
-    expect(html).toContain("said by #3");
-    // Each column carries its own name, since one gutter above the band could only label one of them.
-    expect(html.match(/sb-gutter/g)).toHaveLength(2);
-    expect(html).toContain("planning");
-    expect(html).toContain("review");
-  });
-
-  it("falls back to tabs at three, showing one and filing the rest", () => {
-    const html = draw(parentOf([
-      { id: 2, from: 0, to: 30 },
-      { id: 3, from: 5, to: 25 },
-      { id: 4, from: 8, to: 22 },
-    ]), [ref(2, "a", 0, 30), ref(3, "b", 5, 25), ref(4, "c", 8, 22)]);
-    expect(html).toContain("sb-tabs");
-    expect(html).not.toContain("sb-columns");
-    expect(html).toContain("said by #2");
-    expect(html).not.toContain("said by #3");
-    // The tab already names the panel under it; a gutter repeating it would say nothing.
-    expect(html).not.toContain("sb-gutter");
-  });
-
-  it("says so rather than going blank when a call has not written its position yet", () => {
-    // A prompt that is in flight, or one whose position never landed. It IS a conversation — it just
-    // has no id yet — so it keeps the panel and the gutter says what is missing.
-    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), []);
-    expect(html).toContain("no conversation");
-    expect(html).toContain("sb-sheet");
-    expect(html).toContain("said by #2");
-    expect(html).not.toContain("sb-tear");
-  });
-
-  /**
-   * A state that was never going to speak keeps its letterhead and loses its gutter.
-   *
-   * The two halves of one rule. "One state means no letterhead" holds because the gutter above it is
-   * already saying the same three things; a surface has no session to be named or timed by, so the
-   * gutter would be saying nothing — and the letterhead is the only header it can have.
-   */
-  it("gives a surface a letterhead and no gutter", () => {
+  it("gives a surface a letterhead that says what kind of state it is", () => {
     const parent = node({
       instanceId: "1",
       stateId: "plan",
       children: [node({ instanceId: "2", stateId: "confidence", childKey: "confidence", startedAt: 0, endedAt: 5 })],
     });
-    const html = draw(parent, []);
-    expect(html).toContain("said by #2");
-    expect(html).toContain('class="lh-kind">computed<');
-    expect(html).not.toContain("sb-gutter");
-    // Least obvious and most important: the old sentence is gone rather than relocated. The kind word
-    // says what the state IS, and "no conversation" beside it would answer a question nobody asked of
-    // a state that never had one — and then repeat its timing as if it were a session's.
-    expect(html).not.toContain("no conversation");
-  });
-
-  it("drops the letterhead when a conversation is alone in its sheet", () => {
-    // The gutter names the session, names the state that opened it, and times it. A letterhead under
-    // that is the same three facts a second time.
-    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
-    expect(html).toContain("said by #2");
-    expect(html).toContain("sb-gutter solo");
-    expect(html).not.toContain('class="lh"');
-  });
-
-  it("keeps a letterhead per state once a session holds more than one", () => {
-    const html = draw(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
-      ref(2, "planning", 0, 10),
-      ref(3, "planning", 11, 20),
-    ]);
-    expect(html.match(/class="lh"/g)).toHaveLength(2);
-    expect(html).not.toContain("sb-gutter solo");
+    const [band] = bandsOf(piecesOf(parent, []));
+    const [segment] = band!.segments;
+    expect(segment!.pieces.map((piece) => piece.node.instanceId)).toEqual(["2"]);
+    expect(segment!.sessionId).toBeUndefined();
+    const kind = surfaceKindOf(segment!.pieces[0]!.node);
+    expect(kind).toBe("computed");
+    expect(KIND_WORD[kind as "computed"]).toBe("computed");
   });
 
   it("times the SESSION in the gutter — the envelope of its states, not the sum of them", () => {
     // A conversation interrupted and resumed spent the gap doing nothing. Summing the two calls
     // would report 2 ms of talking across a span of twenty.
-    const html = draw(parentOf([{ id: 2, from: 0, to: 1 }, { id: 3, from: 19, to: 20 }]), [
-      ref(2, "planning", 0, 1),
-      ref(3, "planning", 19, 20),
-    ]);
-    expect(html).toContain('class="sb-span">');
-    expect(html).toContain("20 ms");
-  });
-
-  it("offers collapse-all only where there are letterheads to fold", () => {
-    // On a solo panel the gutter's own chevron is already the control, and on a surface there is no
-    // gutter at all — so a button in either place would be a second way to do one thing.
-    const many = draw(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
-      ref(2, "planning", 0, 10),
-      ref(3, "planning", 11, 20),
-    ]);
-    expect(many).toContain("sb-foldall");
-    const one = draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
-    expect(one).not.toContain("sb-foldall");
-  });
-
-  it("keeps the sheet when a session-less piece shares its panel with a conversation", () => {
-    // The guard `Sheet` makes: a surface replaces a panel only when it IS the panel. A segment with
-    // two pieces in it is a shared conversation, and it keeps its sheet whatever the first piece is.
-    const parent = parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]);
-    const html = draw(parent, [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
-    expect(html).toContain("sb-sheet");
-    expect(html).toContain("said by #2");
-    expect(html).toContain("said by #3");
-  });
-
-  it("shows a composite that only orchestrates its children, and nothing of its own", () => {
-    const parent = parentOf([
-      { id: 2, from: 0, to: 10 },
-      { id: 3, from: 11, to: 20 },
-    ]);
-    const html = draw(parent, [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
-    expect(html).not.toContain("said by #1");
+    const bands = bandsOf(
+      piecesOf(parentOf([{ id: 2, from: 0, to: 1 }, { id: 3, from: 19, to: 20 }]), [ref(2, "planning", 0, 1), ref(3, "planning", 19, 20)]),
+    );
+    expect(bands).toHaveLength(1);
+    expect(bands[0]!.segments).toHaveLength(1);
+    expect(spanOf(bands[0]!.segments[0]!)).toBe("20 ms");
   });
 });
 
 /**
- * The errors that belong to no conversation, and the way out to the workflow behind one.
+ * The errors that belong to no conversation.
  *
- * Both are about the GREY between the sheets. A failure in a state that never opened a session has
- * no panel to be a line of, and the session id a panel is named by says nothing about what the
- * conversation is — so the background carries the one and the gutter carries the other.
+ * A failure in a state that never opened a session has no panel to be a line of — so it is a row of
+ * its own on the grey between the sheets, at the point in the run where it happened.
  */
-/** A note. `kind` defaults to `failure`, which is what most of these are about. */
-const note = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => ({ kind: "failure", path: "", ...patch });
-
-const drawWith = (
-  parent: InstanceNode | undefined,
-  refs: SessionRef[],
-  extra: { notes?: BandNote[]; root?: string; onOpenWorkflow?: (piece: SessionPiece) => void },
-): string =>
-  renderToStaticMarkup(
-    createElement(SessionBandsView, {
-      bands: bandsOf(piecesOf(parent, refs)),
-      render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
-      ...extra,
-    }),
-  );
-
 describe("a failure with no panel to appear in", () => {
   it("writes it on the background, between the conversations, where it happened", () => {
-    const html = drawWith(
+    const page = pageOf(
       parentOf([
         { id: 2, from: 10, to: 20 },
         { id: 3, from: 30, to: 40 },
       ]),
       [ref(2, "planning", 10, 20), ref(3, "review", 30, 40)],
-      { notes: [note({ seq: 1, at: 25, stateId: "plan/draft", text: "input 'framing' is not wired" })] },
+      [note({ seq: 1, at: 25, stateId: "plan/draft", text: "input 'framing' is not wired" })],
     );
-    expect(html).toContain("sb-note");
-    expect(html).toContain("input &#x27;framing&#x27; is not wired");
     // Between the two sheets, not inside either: the state it names never said a word.
-    const [first, second] = [html.indexOf("said by #2"), html.indexOf("said by #3")];
-    const at = html.indexOf("sb-note");
-    expect(at).toBeGreaterThan(first);
-    expect(at).toBeLessThan(second);
+    expect(rowsOf(page)).toEqual(["#2", "failure", "#3"]);
+    expect(page.rows[1]).toMatchObject({ kind: "note", note: { text: "input 'framing' is not wired" } });
+    // On the rail it opens no lane: nothing was entered.
+    expect(page.steps[1]).toMatchObject({ opens: false });
   });
 
   it("is the whole answer when a run failed before it opened any conversation at all", () => {
     // The case that read as "nothing happened yet": nothing ever became an instance, so there is no
     // band to hang anything on — and the reason is the only thing there is to show.
-    const html = drawWith(undefined, [], {
-      notes: [note({ seq: 1, at: 5, stateId: "plan", text: "child 'draft' terminated with error" })],
-    });
-    expect(html).toContain("sb-note");
-    expect(html).not.toContain("has not said anything yet");
-  });
-
-  it("still says nothing happened when nothing did", () => {
-    expect(drawWith(undefined, [], {})).toContain("has not said anything yet");
+    const page = pageOf(undefined, [], [note({ seq: 1, at: 5, stateId: "plan", text: "child 'draft' terminated with error" })]);
+    expect(rowsOf(page)).toEqual(["failure"]);
+    // With no note either there is no row at all, which is when the page says nothing has been said.
+    expect(rowsOf(pageOf(undefined, [], []))).toEqual([]);
   });
 });
 
@@ -322,94 +146,39 @@ describe("a failure with no panel to appear in", () => {
  * column and the same order, because reading a run means reading the two interleaved.
  */
 describe("the path on the background", () => {
-  const step = (patch: Partial<BandNote> & Pick<BandNote, "seq" | "at" | "text">): BandNote => ({
-    ...note(patch),
-    kind: "transition",
-  });
-
-  it("writes the mount path, one arrow per step further in", () => {
-    const html = drawWith(undefined, [], {
-      notes: [step({ seq: 1, at: 5, stateId: "explore", path: "product/explore", text: "explore" })],
-    });
-    // The MOUNT, not the state file. `explore` is one definition mounted under all six phases, and
-    // its id alone does not say which of them is running it.
-    expect(html).toContain("product → explore");
-    expect(html).toContain("entered");
-  });
-
-  it("trims the module already being looked at", () => {
-    const html = drawWith(undefined, [], {
-      notes: [step({ seq: 1, at: 5, path: "product/explore", text: "explore" })],
-      root: "product",
-    });
-    expect(html).toContain("explore");
-    expect(html).not.toContain("product → explore");
-  });
-
-  it("says a block is a state that could NOT be entered, not a bare reason beside a name", () => {
-    const html = drawWith(undefined, [], {
-      notes: [
-        note({ seq: 1, at: 5, kind: "blocked", path: "product/explore", text: "input 'prior_findings': child 'critique' has not run" }),
-      ],
-    });
-    expect(html).toContain("could not enter");
-    expect(html).toContain("product → explore");
-  });
-
-  it("is not drawn as a failure — no alert, and not the failure colour", () => {
-    const moved = drawWith(undefined, [], { notes: [step({ seq: 1, at: 5, path: "draft", text: "draft" })] });
-    const broke = drawWith(undefined, [], { notes: [note({ seq: 1, at: 5, path: "draft", text: "blocked" })] });
-    expect(moved).toContain("sb-note step");
-    expect(broke).toContain('class="sb-note"');
-    expect(broke).not.toContain("sb-note step");
-  });
-
   it("fills the canvas that used to say a run had not entered a child yet", () => {
-    const html = drawWith(undefined, [], {
-      notes: [
-        note({ seq: 1, at: 5, kind: "entered", path: "product", text: "" }),
-        step({ seq: 2, at: 6, path: "product/context", text: "context" }),
-      ],
-    });
-    expect(html).not.toContain("has not said anything yet");
-    expect(html.indexOf("product")).toBeLessThan(html.indexOf("context"));
+    const page = pageOf(undefined, [], [
+      note({ seq: 1, at: 5, kind: "entered", path: "product", text: "" }),
+      note({ seq: 2, at: 6, kind: "transition", path: "product/context", text: "context" }),
+    ]);
+    expect(rowsOf(page)).toEqual(["entered", "transition"]);
+    // Entering `product` opens its lane; the move to `context` is a row inside it, since a transition
+    // is taken by the state it leaves from.
+    expect(page.steps.map((step) => [step.at, step.opens])).toEqual([
+      [["product"], true],
+      [["product"], false],
+    ]);
   });
 });
 
 describe("the workflow behind a conversation", () => {
-  it("names the state that OPENED the session beside its id, as somewhere to go", () => {
-    const html = drawWith(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], {
-      onOpenWorkflow: () => undefined,
-    });
-    expect(html).toContain("sb-workflow");
-    expect(html).toContain("planning");
-    expect(html).toContain("s2");
-  });
-
-  it("offers no link where the host has no panel to describe one in", () => {
-    const html = drawWith(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)], {});
-    expect(html).not.toContain("sb-workflow");
-  });
-
-  it("keeps the link on a SURFACE, which has no gutter to carry it", () => {
+  it("names a SURFACE's own state as the one to describe, though it opened no session", () => {
     /*
      * A state that ran no conversation gets no gutter — its three facts (the session, the state that
      * opened it, the span) are all about a conversation it does not have. The workflow link is a
-     * fourth fact, about the STATE, and the letterhead has no control for it: dropping the row to
-     * avoid saying "no conversation" took the only route from a computed state to the file that
-     * computed it with it. So the row comes back holding only that.
+     * fourth fact, about the STATE, and it is the only route from a computed state to the file that
+     * computed it. So the page still answers "which state is behind this panel" for a panel with no
+     * session: the state itself.
      */
     const parent = node({
       instanceId: "1",
       stateId: "plan",
       children: [node({ instanceId: "9", stateId: "plan/confidence", childKey: "confidence", startedAt: 0, endedAt: 5 })],
     });
-    const html = drawWith(parent, [], { onOpenWorkflow: () => undefined });
-    expect(html).toContain("sb-gutter bare");
-    expect(html).toContain("plan/confidence");
-    // …and none of the conversation facts it does not have.
-    expect(html).not.toContain("no conversation");
-    expect(html).not.toContain("sb-span");
+    const page = pageOf(parent, []);
+    const [segment] = page.bands[0]!.segments;
+    expect(segment!.sessionId).toBeUndefined();
+    expect(page.starters.get(segment!.key)?.node.stateId).toBe("plan/confidence");
   });
 });
 
@@ -465,7 +234,7 @@ describe("a panel under a fan-out", () => {
    * It did not: the note rows said `build[0]` and the panel's address said `build`, so at every
    * panel the rail closed every lane down to nothing and opened them all again, and read as broken.
    */
-  const scene = (element: number | undefined): string => {
+  const scene = (element: number | undefined): PageRows => {
     const segment = element === undefined ? "build" : `build[${element}]`;
     const parent = node({
       instanceId: "1",
@@ -482,18 +251,23 @@ describe("a panel under a fan-out", () => {
         }),
       ],
     });
-    return drawWith(parent, [ref(2, "planning", 0, 10)], {
-      notes: [
-        note({ seq: 1, at: 0, kind: "entered", path: segment, text: "", instanceId: "2", stateId: "feature/build" }),
-        note({ seq: 2, at: 9, kind: "transition", path: `${segment}/next`, text: "next", stateId: "feature/build" }),
-      ],
-    });
+    return pageOf(parent, [ref(2, "planning", 0, 10)], [
+      note({ seq: 1, at: 0, kind: "entered", path: segment, text: "", instanceId: "2", stateId: "feature/build" }),
+      note({ seq: 2, at: 9, kind: "transition", path: `${segment}/next`, text: "next", stateId: "feature/build" }),
+    ]);
   };
-  const turns = (html: string): number => html.split("rail-turn").length - 1;
+  /** The rows the rail curves in: a lane forking off its parent, or joining it. */
+  const turns = (page: PageRows): number => railOf(page.steps).rows.filter((row) => row.turn).length;
 
   it("takes exactly the turns a plain mount takes — no lane closed and reopened around the panel", () => {
+    expect(rowsOf(scene(0))).toEqual(["entered", "#2", "transition"]);
+    // The panel sits where the note that entered its state put the lane: the element is in both.
+    expect(scene(0).steps.map((step) => step.at)).toEqual([["build[0]"], ["build[0]"], ["build[0]"]]);
+    // One turn — the lane forking where the state is entered — and the same one a plain mount takes.
+    expect(turns(scene(0))).toBe(1);
     expect(turns(scene(0))).toBe(turns(scene(undefined)));
-    expect(scene(0)).toContain("said by #2");
+    // No row leaves the lane: the panel and the transition after it are drawn inside it.
+    expect(railOf(scene(0).steps).rows.map((row) => row.exit)).toEqual([undefined, undefined, undefined]);
   });
 
   it("tells the elements of a fan-out apart as places", () => {
@@ -519,8 +293,10 @@ describe("a panel that is one side of a fork", () => {
       branch: { parent: "default", at: 6 },
     },
   ];
-  const html = (): string =>
-    draw(
+  /** Each panel of the run, with the fork it is a side of — what its gutter's mark is drawn from. */
+  const panels = (page: PageRows) => page.bands.flatMap((band) => band.segments.map((segment) => sideOf(segment, page.forks)));
+  const retried = (): PageRows =>
+    pageOf(
       parentOf([
         { id: 2, from: 0, to: 10 },
         { id: 3, from: 11, to: 20 },
@@ -532,40 +308,30 @@ describe("a panel that is one side of a fork", () => {
     // The third fact of the same kind as the two already there. The id says which conversation this
     // is, the state says what opened it, and until this there was nothing saying where it came from
     // — two panels with unrelated names, one silently carrying the other's whole prefix.
-    expect(html()).toContain("fork-chip");
-    expect(html()).toContain("fork:");
+    expect(rowsOf(retried())).toEqual(["#2", "#3"]);
+    expect(panels(retried()).map((side) => side !== undefined)).toEqual([true, true]);
   });
 
   it("marks BOTH sides, and counts each as the one it is", () => {
     // A fork is a fact about the division, not about the branch: the attempt that was left behind is
     // as much a side of it as the one that replaced it, and it is the side a reader is most likely
     // to arrive at first.
-    expect(html()).toContain("1 of 2");
-    expect(html()).toContain("2 of 2");
-  });
-
-  it("tears nothing, because nothing here was cut in two", () => {
-    // Two attempts are two conversations, not one conversation divided — so the panel carries the
-    // chip alone. A torn edge would claim a continuity between the sheets that does not exist.
-    const marks = html().match(/fork-mark/g) ?? [];
-    expect(marks).toHaveLength(2);
-    expect(html()).not.toContain("fork-torn");
+    const [first, second] = panels(retried());
+    // Both panels hold the same two sides, in the order they ran…
+    expect(first!.sides.map(placeOf)).toEqual(["default@6", "b7c1e4@6"]);
+    expect(second!.sides).toBe(first!.sides);
+    // …and each is the one at its own place: the attempt left behind is 1 of 2, the retry 2 of 2.
+    expect(first!.place).toBe("default@6");
+    expect(second!.place).toBe("b7c1e4@6");
+    // A side is called by how that attempt ended, which is all that tells two attempts of one state apart.
+    expect(first!.sides.map(sideName)).toEqual(["failed", "finished"]);
   });
 
   it("leaves an ordinary run unmarked", () => {
     // Nothing is paid for until a conversation actually divides, on screen as in the record.
-    expect(draw(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)])).not.toContain("fork-chip");
-  });
-});
-
-describe("the zigzag tile", () => {
-  it("takes its colour from the stylesheet, not from whoever references it", () => {
-    // The bug this guards: the stroke was `var(--zig)`, a property set on `.sb-tear` — and a paint
-    // server resolves custom properties against its OWN place in the tree, not the referencing
-    // element's. This `<defs>` sits outside every element that set it, so the stroke was an
-    // unresolved variable, which is to say none: no torn edge in the app had ever drawn its teeth,
-    // in the whole time the vocabulary has been the one two views use to mean "cut here".
-    expect(renderToStaticMarkup(createElement(ZigDefs))).not.toContain("var(--");
+    const page = pageOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)]);
+    expect(page.forks.size).toBe(0);
+    expect(panels(page)).toEqual([undefined]);
   });
 });
 
@@ -573,126 +339,46 @@ describe("the zigzag tile", () => {
  * Folding — remembered, not held by the panel.
  *
  * A fold is a statement about what you are done reading, and navigating away is not a retraction of
- * it. So the set arrives as a prop (`JairaUiState.shut`, under `SHUT.runStates`) and the sheet only
- * decides what to do with it — which is also what makes it testable without a DOM.
+ * it. So the set is kept in the settings (`JairaUiState.shut`, under `SHUT.runStates`) and a sheet
+ * only looks its states up in it — by the key below.
  */
 describe("what a fold does", () => {
-  const twoStates = (shut: ReadonlySet<string>): string =>
-    renderToStaticMarkup(
-      createElement(SessionBandsView, {
-        bands: bandsOf(
-          piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
-            ref(2, "planning", 0, 10),
-            ref(3, "planning", 11, 20),
-          ]),
-        ),
-        shut,
-        scope: "t-1",
-        render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
-      }),
-    );
-
-  it("opens everything when nothing is remembered", () => {
-    const html = twoStates(new Set());
-    expect(html).toContain("said by #2");
-    expect(html).toContain("said by #3");
-    expect(html).not.toContain("lh shut");
-  });
-
-  it("hides the body of a folded state and keeps its letterhead", () => {
-    // The letterhead has to stay: it is the only thing left to click, and folded it carries the
-    // summary of what is behind it. A fold that removed the row would be a delete.
-    const html = twoStates(new Set(["t-1:2:0"]));
-    expect(html).not.toContain("said by #2");
-    expect(html).toContain("said by #3");
-    expect(html).toContain("lh shut");
-  });
+  const pieces = () =>
+    piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
 
   it("keys a fold by TASK, run and instance, so nothing folds another task's states", () => {
     // Instance ids are minted per run, so `#i2` names a different state in every one of them — and a
     // single-run projection stamps no run at all, which is why the task has to be in the key too.
-    expect(twoStates(new Set(["t-2:2:0"]))).toContain("said by #2");
-    expect(twoStates(new Set(["t-1:9:0"]))).toContain("said by #2");
-  });
-
-  it("draws a folded SOLO sheet as its gutter alone — no empty sheet under the row", () => {
-    const solo = (shut: ReadonlySet<string>): string =>
-      renderToStaticMarkup(
-        createElement(SessionBandsView, {
-          bands: bandsOf(piecesOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)])),
-          shut,
-          scope: "t-1",
-          render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
-        }),
-      );
-    expect(solo(new Set())).toContain("said by #2");
-    expect(solo(new Set())).not.toContain("sb-sheet shut");
-    const folded = solo(new Set(["t-1:2:0"]));
-    expect(folded).not.toContain("said by #2");
-    // The section is still in the markup for its tear bars, and hidden by its class.
-    expect(folded).toContain("sb-sheet shut");
-  });
-
-  it("says `expand all` once every state in the sheet is folded", () => {
-    // The control has one meaning — fold what is in this session — so its label is a statement about
-    // what pressing it will do rather than about what it is called.
-    expect(twoStates(new Set())).toContain('aria-label="Collapse all"');
-    expect(twoStates(new Set(["t-1:2:0", "t-1:3:0"]))).toContain('aria-label="Expand all"');
+    expect(pieces().map((piece) => keyOfPiece(piece, "t-1"))).toEqual(["t-1:2:0", "t-1:3:0"]);
+    // The same two states in another task are remembered under other keys.
+    expect(pieces().map((piece) => keyOfPiece(piece, "t-2"))).toEqual(["t-2:2:0", "t-2:3:0"]);
   });
 });
 
 /**
- * Where a bookmark from the Instances index LANDS — see `runIndex.tsx` and the `focus` prop.
+ * Where a bookmark from the Instances index LANDS — see `runIndexModel.ts`.
  *
- * The scroll itself needs a browser and is not tested here. What is tested is the half that was
- * actually missing when the bookmark did nothing: whether there is anything in the document to
- * scroll TO. A jump that finds no target fails silently, so an absent stamp is invisible until
- * somebody presses the row and nothing happens.
+ * The scroll itself needs a screen and is not tested here, and neither is the stamp a letterhead
+ * wears. What is tested is the half both depend on: that the page holds each state under the name
+ * the index asks for it by. A jump that finds no target fails silently, so a mismatch is invisible
+ * until somebody presses the row and nothing happens.
  */
 describe("what a bookmark can land on", () => {
-  const landings = (html: string): string[] => [...html.matchAll(/data-instance="([^"]+)"/g)].map((m) => m[1]!);
-
-  it("stamps every state's letterhead with the instance the index names it by", () => {
-    const html = renderToStaticMarkup(
-      createElement(SessionBandsView, {
-        bands: bandsOf(
-          piecesOf(parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]), [
-            ref(2, "planning", 0, 10),
-            ref(3, "planning", 11, 20),
-          ]),
-        ),
-        render: (piece) => createElement("p", null, `said by #${piece.node.instanceId}`),
-      }),
-    );
+  it("holds every state on the page under the instance the index names it by", () => {
+    const parent = parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]);
+    const page = pageOf(parent, [ref(2, "planning", 0, 10), ref(3, "planning", 11, 20)]);
+    const held = page.bands.flatMap((band) => band.segments.flatMap((segment) => segment.pieces.map((piece) => piece.node.instanceId)));
     /*
      * Asserted against `keyOfNode` rather than against a literal, because the property that matters
      * is that the two AGREE — the index names a row by that key and the conversation stamps its
-     * landing with the same one. A literal would keep passing if both sides drifted together.
+     * landing with the piece's instance. A literal would keep passing if both sides drifted together.
      */
-    const kids = parentOf([{ id: 2, from: 0, to: 10 }, { id: 3, from: 11, to: 20 }]).children;
-    expect(landings(html)).toEqual(kids.map(keyOfNode));
-  });
-
-  it("stamps a SOLO sheet, which has no letterhead to stamp", () => {
-    /*
-     * One state in the view is drawn bare: the gutter above it already names the session, times it
-     * and says which state opened it, so the letterhead is dropped. That is the panel a reader is
-     * most likely to jump to — a leaf run is the whole page — and it was the one the bookmark could
-     * not reach, because the stamp lived on the header that is not there.
-     */
-    const html = renderToStaticMarkup(
-      createElement(SessionBandsView, {
-        bands: bandsOf(piecesOf(parentOf([{ id: 2, from: 0, to: 10 }]), [ref(2, "planning", 0, 10)])),
-        render: () => createElement("p", null, "the whole page"),
-      }),
-    );
-    expect(html).toContain("sb-bare");
-    expect(landings(html)).toEqual(parentOf([{ id: 2, from: 0, to: 10 }]).children.map(keyOfNode));
+    expect(held).toEqual(parent.children.map(keyOfNode));
   });
 });
 
 /**
- * Rewind and fork on the grey — see `cut.ts` and `CutOffer`.
+ * Rewind and fork on the grey — see `cut.ts`.
  *
  * The entered row is the handle: every state has exactly one, which a letterhead (absent on a
  * one-state sheet) and a gutter (absent on a question) cannot say. Arming a rewind is drawn on the
@@ -702,51 +388,56 @@ describe("what a bookmark can land on", () => {
 describe("rewind and fork on the grey", () => {
   const entered = (seq: number, at: number, id: number, key: string): BandNote =>
     note({ seq, at, kind: "entered", stateId: `s${id}`, instanceId: String(id), path: key, text: "" });
-  const twoStates = (): { parent: InstanceNode; refs: SessionRef[]; notes: BandNote[] } => ({
-    parent: parentOf([
-      { id: 2, from: 10, to: 20 },
-      { id: 3, from: 30, to: 40 },
-    ]),
-    refs: [ref(2, "planning", 10, 20), ref(3, "review", 30, 40)],
-    notes: [entered(5, 9, 2, "k2"), entered(15, 29, 3, "k3")],
-  });
+  const notes = [entered(5, 9, 2, "k2"), entered(15, 29, 3, "k3")];
+  const twoStates = (): PageRows =>
+    pageOf(
+      parentOf([
+        { id: 2, from: 10, to: 20 },
+        { id: 3, from: 30, to: 40 },
+      ]),
+      [ref(2, "planning", 10, 20), ref(3, "review", 30, 40)],
+      notes,
+    );
+  const row = (index: number) => ({ kind: "row", index });
 
-  it("offers the two verbs on an entered row only when a host has them to offer", () => {
-    const { parent, refs, notes } = twoStates();
-    const quiet = drawWith(parent, refs, { notes });
-    expect(quiet).not.toContain("Rewind to before");
-    const offered = drawWith(parent, refs, { notes, onCut: { rewind: () => undefined, fork: () => undefined } } as never);
-    expect(offered).toContain('aria-label="Rewind to before k3"');
-    expect(offered).toContain('aria-label="Fork before k3"');
-    // Once per entered row — the handle is the row, and a failure note is not one.
-    expect(offered.match(/aria-label="Rewind to before/g)).toHaveLength(2);
+  it("names the state each entered row's two verbs are about, and finds it from the lane", () => {
+    const page = twoStates();
+    expect(rowsOf(page)).toEqual(["entered", "#2", "entered", "#3"]);
+    // Once per entered row — the handle is the row, and a panel is not one.
+    expect([...page.noteRows.keys()]).toEqual([0, 2]);
+    // "Rewind to before k3", "Fork before k3": the name is the state's path from the module being read.
+    expect([...page.noteRows.values()].map((one) => cutNameOf(one, ""))).toEqual(["k2", "k3"]);
+    // The knot's menu offers the same two verbs, and finds the entry by its lane.
+    expect([...page.laneNotes].map(([lane, one]) => [lane, cutNameOf(one, "")])).toEqual([
+      ["i2", "k2"],
+      ["i3", "k3"],
+    ]);
   });
 
   it("draws an armed rewind as a ring on the knot, a counted line, and everything after it faded", () => {
-    const { parent, refs, notes } = twoStates();
-    const html = drawWith(parent, refs, { notes, armed: { seq: 15, at: 29 } } as never);
-    expect(html).toContain("1 state below this line will be deleted");
+    const marked = markedRowsOf(twoStates(), notes, { seq: 15, at: 29 }, undefined);
+    // One state would go — k3 — and the line that says so sits right under its entry, after
+    // everything `k2` said and before the sheet `k3` opened.
+    expect(marked.rows).toEqual([row(0), row(1), row(2), { kind: "cut", states: 1 }, row(3)]);
     // The entry's own row keeps its words and takes the ring; the sheet it opened is what fades.
-    expect(html).toContain("rail-halo cut");
-    expect(html.match(/rail-row doomed/g)?.length ?? 0).toBeGreaterThanOrEqual(1);
-    const cut = html.indexOf("sb-cut");
-    expect(cut).toBeGreaterThan(html.indexOf("said by #2"));
-    expect(cut).toBeLessThan(html.indexOf("said by #3"));
-    // Nothing before the cut is touched.
-    expect(html.indexOf("rail-row doomed")).toBeGreaterThan(html.indexOf("said by #2"));
+    expect(marked.cutRow).toBe(2);
+    expect(marked.doomedFrom).toBe(4);
+    // The line is a row on the rail too, inside the lane the entry opened.
+    expect(marked.steps[3]).toEqual({ key: "cut15", stateId: "", at: ["k3"], opens: false });
+    // Nothing armed, nothing is ringed, counted or faded.
+    const quiet = markedRowsOf(twoStates(), notes, undefined, undefined);
+    expect(quiet.rows).toEqual([row(0), row(1), row(2), row(3)]);
+    expect([quiet.cutRow, quiet.doomedFrom]).toEqual([-1, -1]);
   });
 
   it("places a fork's origin seam after the rows the copy inherited", () => {
-    const { parent, refs, notes } = twoStates();
-    const html = drawWith(parent, refs, {
-      notes,
-      origin: { taskId: "t-parent", title: "The parent", at: 40, boundary: 12, boundaryAt: 25, label: "before k3" },
-    } as never);
-    expect(html).toContain("forked from:");
-    expect(html).toContain("The parent, before k3");
-    const seam = html.indexOf("origin-mark");
-    expect(seam).toBeGreaterThan(html.indexOf("said by #2"));
-    expect(seam).toBeLessThan(html.indexOf("said by #3"));
+    // Forked from the parent before `k3`, at 25 on the parent's clock: `k2` and what it said were
+    // copied, and keep the parent's clocks; the task's own rows come later.
+    const marked = markedRowsOf(twoStates(), notes, undefined, { boundaryAt: 25 });
+    expect(marked.rows).toEqual([row(0), row(1), { kind: "origin" }, row(2), row(3)]);
+    // The seam is the run's own row, at the top of the view, and it rings and fades nothing.
+    expect(marked.steps[2]).toEqual({ key: "origin", stateId: "", at: [], opens: false });
+    expect([marked.cutRow, marked.doomedFrom]).toEqual([-1, -1]);
   });
 });
 
@@ -775,52 +466,17 @@ describe("the runs a fan-out made, as a line at the mount", () => {
   const refs = [ref(2, "planning", 10, 20)];
   const alpha = run("t-alpha00000", "Alpha", { self: true, element: 0 });
   const beta = run("t-beta000000", "Beta", { element: 1 });
-  const gamma = run("t-gamma00000", "Gamma", { element: 2, status: "running" });
 
-  it("is a line naming every OTHER run and its standing — not a panel, not a lane, and never itself", () => {
-    const html = drawWith(parent, refs, { notes: [made("split", [alpha, beta, gamma])] });
-    expect(html).toContain("split off");
-    expect(html).toContain("Beta");
-    expect(html).toContain("· queued");
-    expect(html).toContain("Gamma");
-    expect(html).toContain("· running");
-    expect(html).not.toContain("Alpha");
-    expect(html).toContain('data-made="t-beta000000 t-gamma00000"');
-    expect(html).not.toContain("said by #t-beta000000");
+  it("is a line on the grey — not a panel, and not a lane", () => {
+    // The runs a split made are tasks of their own: the page gains one row for the line, and no panel
+    // for any of them.
+    const page = pageOf(parent, refs, [made("split", [alpha, beta])]);
+    expect(rowsOf(page)).toEqual(["#2", "made"]);
+    // A made task's path is the element's, and the row belongs to the state that made it: nothing was
+    // entered here, so no lane opens, and the line sits against its parent.
     const step = stepOfNote(made("split", [alpha, beta]), "");
     expect(step.opens).toBe(false);
     expect(step.at).toEqual([]);
-  });
-
-  it("marks the run this task waits for, says what a run is holding for, and uses the mount verb for a task mount", () => {
-    const html = drawWith(parent, refs, { notes: [made("task", [run("t-beta000000", "Beta", { holding: 2, waitsFor: true })])] });
-    expect(html).toContain(">made<");
-    expect(html).toContain("waiting for 2 tasks");
-    expect(html).toContain("sb-made-waits");
-    expect(html).toContain(">waits for<");
-  });
-
-  it("links a title only when a host can open a task, and never offers to nest one", () => {
-    const bare = drawWith(parent, refs, { notes: [made("split", [alpha, beta])] });
-    expect(bare).not.toContain("aria-expanded");
-    expect(bare).not.toContain('class="sb-made-link ellip" title=');
-    const hosted = drawWith(parent, refs, { notes: [made("split", [alpha, beta])], onSelectTask: () => undefined } as never);
-    expect(hosted).toContain('title="open Beta (t-beta000000)"');
-    expect(hosted).not.toContain("aria-expanded");
-  });
-
-  it("draws the states a Skip never entered as ONE row — the mount, then their keys", () => {
-    const grouped: BandNote = { seq: 22, at: 30, kind: "skipped", stateId: "feature/ui", instanceId: "i5", path: "ui", text: "never entered", keys: ["ui", "engineering"] };
-    const interrupted: BandNote = { seq: 20, at: 29, kind: "skipped", stateId: "feature/ux/item", instanceId: "i3", path: "ux/item", text: "interrupted at 1 m 12 s" };
-    const html = drawWith(undefined, [], { notes: [interrupted, grouped] });
-    expect(html.match(/sb-skipped/g)).toHaveLength(2);
-    expect(html).toContain(">interrupted at 1 m 12 s<");
-    expect(html).toContain(">ux → item<");
-    expect(html).toContain(">never entered<");
-    expect(html).toContain(">ui, engineering<");
-    // Nested, the mount leads: "feature → ui, engineering" read from above `feature`.
-    const nested = drawWith(undefined, [], { notes: [{ ...grouped, path: "feature/ui" }] });
-    expect(nested).toContain(">feature → ui, engineering<");
   });
 
   it("draws what a conversation's tool did as a ROW between its turns, not under the call", () => {
@@ -832,15 +488,12 @@ describe("the runs a fan-out made, as a line at the mount", () => {
     ]);
     const refs3 = [ref(2, "C", 0, 10), ref(3, "C", 20, 30), ref(4, "C", 40, 50)];
     const moved: BandNote = { seq: 9, at: 5, kind: "moved", path: "", text: "", moved: { verb: "adopted into", standsAt: "feature → ux", workflow: "Feature workflow", adoptedAs: "product" } };
-    const html = drawWith(conversation, refs3, { notes: [moved] });
-    expect(html).toContain("sb-connected");
-    expect(html).toContain(">adopted into<");
-    expect(html).toContain('<b>Feature workflow</b> as <span class="mono">product</span> · standing at');
-    const [first, second, row] = [html.indexOf("said by #2"), html.indexOf("said by #3"), html.indexOf("sb-connected")];
-    expect(row).toBeGreaterThan(first);
-    expect(row).toBeLessThan(second);
+    expect(rowsOf(pageOf(conversation, refs3))).toEqual(["#2 #3 #4"]);
+    const page = pageOf(conversation, refs3, [moved]);
+    expect(rowsOf(page)).toEqual(["#2", "moved", "#3 #4"]);
+    // The row carries the tool note's own words, which is all its sentence is made of.
+    expect(page.rows[1]).toMatchObject({ kind: "note", note: { moved: { verb: "adopted into", workflow: "Feature workflow", adoptedAs: "product", standsAt: "feature → ux" } } });
     // A rail row like any other note, at the conversation's own level: it opens no lane.
     expect(stepOfNote(moved, "")).toMatchObject({ opens: false, at: [] });
   });
-
 });

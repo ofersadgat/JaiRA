@@ -4,7 +4,7 @@ import { SHARED_SESSION } from "@jaira/shared/browser";
 import { publishUsageFigures, useNow } from "@jaira/ui/limitsStore";
 import { noticeToShow } from "@jaira/ui/noticesModel";
 import { useNotices } from "@jaira/ui/noticesStore";
-import { hueOf } from "@jaira/ui/pill";
+import { hueOf } from "@jaira/ui/pillModel";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { invoke, subscribe, useApp } from "@jaira/ui/store";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "@jaira/ui/workSummaryContext";

@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
-import type { PillSlotProps } from "@jaira/ui/slots";
+import type { PillSlotProps } from "@jaira/ui/pillModel";
 import { faceOf } from "../primitives";
 import { useTokens } from "../tokens";
 

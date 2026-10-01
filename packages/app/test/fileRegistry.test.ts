@@ -21,8 +21,14 @@ import {
   hasGrammar,
   mimeOfPath,
 } from "@jaira/shared/browser";
-import "../src/renderer/fileSurfaces";
-import { editorFor, fileRenderers, viewerFor } from "../src/renderer/fileTypes";
+import { SURFACE_KEYS, registerSurfaceTable, type SurfaceKey } from "../src/renderer/fileSurfaceTable";
+import { editorFor, fileRenderers, viewerFor, type FileSurface } from "../src/renderer/fileTypes";
+
+// The real table, with each component stood in for by a function of its key's name: which surface a
+// type resolves to is the table's to say, and the components themselves are the universal tree's.
+registerSurfaceTable(
+  Object.fromEntries(SURFACE_KEYS.map((key) => [key, Object.defineProperty(() => null, "name", { value: key }) as unknown as FileSurface])) as Record<SurfaceKey, FileSurface>,
+);
 
 /** What actually draws each half of the panel for a type, with nothing chosen. */
 const surface = (mime: string, action: "view" | "edit"): string =>

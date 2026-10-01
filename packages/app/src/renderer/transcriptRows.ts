@@ -5,7 +5,7 @@
  */
 import { artifactOf, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { answersOfAnsweredText } from "./choices";
+import { answersOfAnsweredText } from "./choicesModel";
 import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, isApprovalCall } from "./workSummary";
 import { shellLineOf, type ToolEntry, type WorkEntry } from "./transcript";
 

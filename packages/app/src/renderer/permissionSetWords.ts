@@ -4,7 +4,7 @@
  * module of their own so the universal copy (decision 0015) says the same.
  */
 import { SMART_FUNCTION, isFunctionMode, type PermissionMode, type PermissionSetMode } from "@jaira/shared/browser";
-import type { PATHS } from "./icons";
+import type { PATHS } from "./iconPaths";
 
 type IconName = keyof typeof PATHS;
 

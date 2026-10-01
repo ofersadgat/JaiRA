@@ -1,16 +1,14 @@
 import type { ComponentType } from "react";
 import type { ReviewNote } from "@jaira/shared/browser";
-import { NoteList as DomNoteList } from "@jaira/ui/reviewNotes";
 import { NoteList } from "@jaira/universal";
 
 /**
- * A review's notes (`reviewNotes.tsx`'s `NoteList`), as the changeset reviewer draws them: one written
+ * A review's notes (the copy of `reviewNotes.tsx`'s `NoteList`), as the changeset reviewer draws them: one written
  * here, one read from the forge with its replies — its source said beside the author (`.note-src`) and
  * a reply that is a decision word drawn as the decision (`.note-msg.is-word`).
  */
 export interface ReviewSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
@@ -35,7 +33,6 @@ const none = (): void => undefined;
 export const REVIEW_SPECIMENS: Record<string, ReviewSpecimen> = {
   "review-notes": {
     width: 520,
-    dom: () => <DomNoteList notes={NOTES} text={TEXT} author="you" onReselect={none} onReply={none} onRemove={none} />,
     rn: () => <NoteList notes={NOTES} text={TEXT} author="you" onReselect={none} onReply={none} onRemove={none} />,
   },
 };

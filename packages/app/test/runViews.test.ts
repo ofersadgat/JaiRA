@@ -6,7 +6,8 @@
  */
 import { describe, expect, it } from "vitest";
 import { IPC_CHANNELS, type InstanceNode, type ResumePlan } from "@jaira/shared/browser";
-import { instanceOf, runsByChild } from "../src/renderer/runViews";
+import { instanceOf } from "../src/renderer/trail";
+import { runsByChild } from "../src/renderer/runBoardModel";
 import { stoppedAction } from "../src/renderer/taskAction";
 
 const node = (patch: Partial<InstanceNode> & Pick<InstanceNode, "instanceId" | "stateId">): InstanceNode => ({

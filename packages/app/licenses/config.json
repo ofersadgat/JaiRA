@@ -128,6 +128,67 @@
           "lazy-val (a dependency of electron-updater) declares the MIT license in package.json and names Vladimir Krivosheev as its author; the package ships no LICENSE file."
         ]
       }
+    },
+    {
+      "name": "@tamagui/compose-refs",
+      "license": "MIT"
+    },
+    {
+      "name": "@tamagui/constants",
+      "license": "MIT"
+    },
+    {
+      "name": "@tamagui/helpers",
+      "license": "MIT"
+    },
+    {
+      "name": "@tamagui/is-equal-shallow",
+      "license": "MIT"
+    },
+    {
+      "name": "@tamagui/simple-hash",
+      "license": "MIT"
+    },
+    {
+      "name": "@tamagui/use-did-finish-ssr",
+      "license": "MIT"
+    },
+    {
+      "name": "@tamagui/use-element-layout",
+      "license": "MIT"
+    },
+    {
+      "name": "@vxrn/color-scheme",
+      "license": "MIT"
+    },
+    {
+      "name": "@vxrn/use-isomorphic-layout-effect",
+      "license": "MIT"
+    },
+    {
+      "name": "@vxrn/safe-area",
+      "license": "MIT",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": [
+          "Copyright (c) 2023 Nate Wienert"
+        ],
+        "preamble": [
+          "@vxrn/safe-area (a part of One, in the window's bundle) is published with neither a license field nor a LICENSE file; its repository, github.com/onejs/one, is under the MIT license with this copyright line."
+        ]
+      }
+    },
+    {
+      "name": "@react-native/normalize-colors",
+      "generatedNotice": {
+        "licenseId": "MIT",
+        "copyrights": [
+          "Copyright (c) Meta Platforms, Inc. and affiliates."
+        ],
+        "preamble": [
+          "@react-native/normalize-colors (a dependency of react-native-web, in the window's bundle) declares the MIT license in package.json; the package ships no LICENSE file, so the text below is the MIT template with the copyright line of its repository, github.com/facebook/react-native."
+        ]
+      }
     }
   ]
 }

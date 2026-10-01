@@ -6,7 +6,7 @@
  */
 import type { InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
 import { EVENTS_STATE_ID } from "@jaira/shared/browser";
-import type { PATHS } from "./icons";
+import type { PATHS } from "./iconPaths";
 import { push, type PanelStack } from "./panelStack";
 import { stoppedAction } from "./taskAction";
 

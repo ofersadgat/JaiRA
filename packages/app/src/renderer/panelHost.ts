@@ -17,8 +17,8 @@ import { nodeAt, type TrailStep } from "./trail";
 import { FOLD, PANE, PANE_WIDE, PANEL_MIN, PANEL_RAIL, openOf, paneOf } from "./uiState";
 import { projectName } from "./projects";
 import { initialRunValues, runValuesOf, settledMarkOf, type RunValues } from "./runForm";
-import type { RunSurface } from "./runPanel";
-import type { RerunSurface } from "./panelViews";
+import type { RunSurface } from "./runPanelTypes";
+import type { RerunSurface } from "./panelViewsModel";
 import { pathOf } from "./panelViewsModel";
 import type { JsonValue } from "@declarative-ai/json";
 

@@ -7,7 +7,8 @@
  */
 import { describe, expect, it } from "vitest";
 import type { InstanceNode } from "@jaira/shared/browser";
-import { indexOf, keyOfNode, loopsIn, paletteOfRun } from "../src/renderer/runIndex";
+import { indexOf, keyOfNode, loopsIn, stepsIn } from "../src/renderer/runIndexModel";
+import { paletteOfRun } from "../src/renderer/rail";
 import { paletteOf } from "../src/renderer/rail";
 
 let next = 1;
@@ -169,9 +170,10 @@ describe("identity", () => {
 });
 
 /**
- * The index FITTED to a box (`RunIndexFit`, `stepCompaction.ts`) — rendered, because what the fit
- * changes is which rows are DRAWN: folds with their tile, `⋯` rows with dots on the rail, and every
- * name on a folded line a way to the top of its state.
+ * The index FITTED to a box (`RunIndexFit`, `stepCompaction.ts`). Which rows the fit folds and which
+ * it passes over with `⋯` is worked out inside `useRunIndexModel`, a hook, over `autoFold` and
+ * `compact` — those two are held in `stepCompaction.test.ts`. What is left here is what a fold's tile
+ * says it holds.
  */
 describe("the index fitted to a box", () => {
   const leaves = (names: string[]): InstanceNode[] => names.map((name) => node(name));
@@ -186,25 +188,17 @@ describe("the index fitted to a box", () => {
       ], { childKey: "build" }),
     ]),
   ];
-  const draw = async (capacity: number, convo: boolean): Promise<string> => {
-    const { createElement } = await import("react");
-    const { renderToStaticMarkup } = await import("react-dom/server");
-    const { RunIndex } = await import("../src/renderer/runIndex");
-    return renderToStaticMarkup(createElement(RunIndex, { instances: run(), heading: false, fit: { capacity, convo }, onGoTo: () => undefined }));
-  };
 
-  it("with no conversation, folds everything off the live path — each fold a tile saying how many steps", async () => {
-    const html = await draw(40, false);
-    expect(html).toContain("rail-mark rolled");
-    expect(html).toContain("6 steps");
-    // The live path stays open: the last step is drawn.
-    expect(html).toContain("cancel");
-  });
-
-  it("tight, elides with ⋯ rows whose innermost lane is dots, and names what they pass over as links", async () => {
-    const html = await draw(6, true);
-    expect(html).toContain("rail-gap-dots");
-    expect(html).toMatch(/⋯<\/span>\d+ steps/);
-    expect(html).toContain("go to the top of");
+  it("a fold is a tile saying how many steps it holds — the leaves under it, not the states that hold them", () => {
+    const [feature] = run();
+    const [plan, ux, build] = feature!.children;
+    expect(stepsIn(plan!)).toBe(6);
+    expect(stepsIn(ux!)).toBe(3);
+    // Three composites under `build`, none of them counted: eight steps ran there.
+    expect(stepsIn(build!)).toBe(8);
+    expect(stepsIn(feature!)).toBe(17);
+    // A leaf holds nothing, and is never a fold.
+    expect(stepsIn(plan!.children[0]!)).toBe(0);
   });
 });
+

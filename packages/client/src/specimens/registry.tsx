@@ -1,8 +1,5 @@
 import type { ComponentType } from "react";
-import { Markdown as DomMarkdown } from "@jaira/ui/markdown";
 import type { FileSource } from "@jaira/shared/browser";
-import { FileInspector as DomFileInspector } from "@jaira/ui/files";
-import { DataView as DomDataView } from "@jaira/ui/valueView";
 import { DataView, FileInspector, Markdown } from "@jaira/universal";
 import { ARTIFACT_SPECIMENS } from "./artifactSpecimens";
 import { DRAG_SPECIMENS } from "./dragSpecimens";
@@ -19,13 +16,15 @@ import { TRANSCRIPT_SPECIMENS } from "./transcriptSpecimens";
 import { VALUE_SPECIMENS } from "./valueSpecimens";
 
 /**
- * The specimens: a DOM component and its universal copy, each drawn from the same fixture, for
- * `pair.mts --specimen <name>` (decision 0015). Browser-only — imported from the `.web` specimen routes.
+ * The specimens: a component drawn alone from a fixture, for `pair.mts --specimen <name>`, which holds
+ * its picture against the reference picture of the same name (decision 0015). Each was a pair once — the
+ * desktop's DOM component and its universal copy, from one fixture; the DOM halves went with the DOM
+ * renderer (the tag `dom-renderer-final` has them), and what they drew is the reference picture.
+ * Browser-only — imported from the `.web` specimen route.
  */
 export interface Specimen {
   /** The box it is drawn in, in CSS pixels, as the component's usual column is wide. */
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
@@ -117,22 +116,15 @@ export const SPECIMENS: Record<string, Specimen> = {
   // `valueView.tsx`'s data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,
-    dom: () => <DomDataView value={DATA} />,
     rn: () => <DataView value={DATA} />,
   },
   // The ⓘ popover's contents on the Files address (`.facts-pop`: 320 wide, padding 12 — the box here).
   "file-facts": {
     width: 296,
-    dom: () => <DomFileInspector doc={FILE} />,
     rn: () => <FileInspector doc={FILE} />,
   },
   markdown: {
     width: 520,
-    dom: () => (
-      <div className="markdown-host">
-        <DomMarkdown text={PROSE} />
-      </div>
-    ),
     rn: () => <Markdown text={PROSE} />,
   },
 };

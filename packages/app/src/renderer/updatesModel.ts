@@ -29,7 +29,7 @@ import {
   type UpdateRestartChoice,
   type UpdateState,
 } from "@jaira/shared/browser";
-import type { PillCounts } from "./pill";
+import type { PillCounts } from "./pillModel";
 
 // --- versions ------------------------------------------------------------------------------------
 

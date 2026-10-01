@@ -1,68 +1,27 @@
 /**
  * Settings → Executors → Presets, as nested vertical tabs.
  *
- * The renderer has no DOM test infrastructure, so this is held down in two layers: the pure functions
- * that decide what the rail lists and which tab is chosen after a save, an add or a remove, and the
- * render function drawn to static markup in each state it can be in. `PresetTabs` takes every piece
- * of its state as a prop for exactly this reason.
+ * What is held down here is the pure functions: what the rail lists, and which tab is chosen after a
+ * save, an add or a remove (`presetTabsModel.ts`); what the open preset's sections say of themselves
+ * (`llmConfigModel.ts`); and where its Model section's candidates stand, which one is picked now and
+ * what the parser would refuse (`presetCandidates.ts`). The page that draws them is the universal tree's.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { railMoveOf, railStep } from "../src/renderer/llmConfigForm";
+import type { LimitsView } from "@jaira/shared";
+import { LIMIT_FIELDS, llmCategoriesOf, llmSummariesOf, railMoveOf, railStep } from "../src/renderer/llmConfigModel";
+import { PRESET_RULES, candidatesSchema, candidatesViewOf, presetModelLine, presetModelProblem, type CandidateStatus } from "../src/renderer/presetCandidates";
 import {
-  PresetTabs,
   choiceAfterRemove,
   isDirty,
   presetNameProblem,
   presetSummary,
   presetTabsOf,
   resolveChoice,
-  type PresetChoice,
-  type PresetTabsProps,
-} from "../src/renderer/presetTabs";
-import { PresetModelSection, presetModelLine, presetModelProblem, type CandidateStatus } from "../src/renderer/presetModel";
+} from "../src/renderer/presetTabsModel";
 
 const HERE = { fast: { temperature: 0.2, maxOutputTokens: 1200 }, review: { reasoning: { effort: "high" }, maxOutputTokens: 4000 } };
 const EFFECTIVE = { ...HERE, thorough: { reasoning: { effort: "xhigh" }, providerOptions: {} } };
 const TABS = presetTabsOf(HERE, EFFECTIVE);
-
-const draw = (choice: PresetChoice, extra: Partial<PresetTabsProps> = {}): string =>
-  renderToStaticMarkup(
-    createElement(PresetTabs, {
-      tabs: TABS,
-      choice,
-      onChoice: () => undefined,
-      section: "sampling",
-      onSection: () => undefined,
-      drafts: {},
-      onDraft: () => undefined,
-      newName: "",
-      onNewName: () => undefined,
-      locked: false,
-      originOf: () => "Shared (all projects)",
-      layerWord: "shared",
-      lookup: () => ({ state: "unchecked" as const }),
-      suggestions: [],
-      onSave: () => undefined,
-      onRemove: () => undefined,
-      onAdd: () => undefined,
-      ...extra,
-    }),
-  );
-
-/** Every tab of one rail, as `[text, selected, tabindex]`. */
-function tabsOf(html: string, label: string): Array<[string, boolean, string]> {
-  const rail = new RegExp(`<nav[^>]*aria-label="${label}"[^>]*>(.*?)</nav>`, "s").exec(html)?.[1] ?? "";
-  return Array.from(rail.matchAll(/<button([^>]*)>(.*?)<\/button>/gs)).map((m) => [
-    m[2]!.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(),
-    /aria-selected="true"/.test(m[1]!),
-    /tabindex="(-?\d)"/.exec(m[1]!)?.[1] ?? "",
-  ]);
-}
-
-/** The controls a person could type into or choose from, and whether each is inert. */
-const controlsOf = (html: string): string[] => Array.from(html.matchAll(/<(input|select|textarea)\b[^>]*>/g)).map((m) => m[0]);
 
 describe("what the presets rail lists", () => {
   it("puts the presets this layer states first, then the ones it only inherits", () => {
@@ -167,124 +126,40 @@ describe("arrow keys on a rail", () => {
   });
 });
 
-describe("the editor, drawn", () => {
-  it("is ONE box holding two tablists and a panel: the presets, the open preset's sections, its fields", () => {
-    const html = draw({ preset: "fast" });
-    expect(html.match(/class="llm-config/g)).toHaveLength(1);
-    expect(html).toContain('class="llm-config preset-config"');
-    expect(html.match(/role="tablist"/g)).toHaveLength(2);
-    expect(html.match(/role="tabpanel"/g)).toHaveLength(1);
-    // The outer rail comes first, and is the one marked as such.
-    expect(html.indexOf('aria-label="Presets"')).toBeLessThan(html.indexOf('aria-label="Sections"'));
-    expect(html).toContain('class="llm-rail preset-rail"');
-  });
+/** The open preset's lead section, as the page hands it to the call-settings form: its Model, first. */
+const MODEL_LEAD = { key: "model", label: "Model", hint: "Which model a state that picks this preset runs on, and how it is chosen." } as const;
 
-  it("lists every preset with its summary, closed by + preset, and only the chosen tab is a tab stop", () => {
-    expect(tabsOf(draw({ preset: "review" }), "Presets")).toEqual([
-      ["fast temperature 0.2 · ≤1200 tokens", false, "-1"],
-      ["review reasoning high · ≤4000 tokens", true, "0"],
-      ["thorough inherited · reasoning xhigh · +1 more", false, "-1"],
-      ["+ preset", false, "-1"],
+describe("the editor's rails", () => {
+  it("lists every preset with its summary", () => {
+    expect(TABS.map((tab) => [tab.name, presetSummary(tab)])).toEqual([
+      ["fast", "temperature 0.2 · ≤1200 tokens"],
+      ["review", "reasoning high · ≤4000 tokens"],
+      ["thorough", "inherited · reasoning xhigh · +1 more"],
     ]);
   });
 
-  it("marks with a dot the presets the layer being edited states, and not the inherited one", () => {
-    const html = draw({ preset: "fast" });
-    expect(html.match(/set-here-dot/g)).toHaveLength(2);
-    expect(html).toMatch(/thorough<\/span>/);
-  });
-
-  it("opens the section the host names, with the sections' own summaries", () => {
-    const html = draw({ preset: "fast" }, { section: "limits" });
-    expect(tabsOf(html, "Sections")).toEqual([
-      // The preset's Model comes first — it is what makes `coder` coder.
-      ["Model not set", false, "-1"],
-      ["Sampling temperature", false, "-1"],
-      ["Reasoning off", false, "-1"],
-      ["Output limits 1200 tokens", true, "0"],
-      ["Advanced none", false, "-1"],
+  it("gives the open preset its sections, the Model first, with the sections' own summaries", () => {
+    const fast = TABS[0]!.value;
+    const summaries = llmSummariesOf(fast, presetModelLine(fast["model"]));
+    // The preset's Model comes first — it is what makes `coder` coder.
+    expect(llmCategoriesOf(MODEL_LEAD).map((category) => [category.label, summaries[category.key]])).toEqual([
+      ["Model", "not set"],
+      ["Sampling", "temperature"],
+      ["Reasoning", "off"],
+      ["Output limits", "1200 tokens"],
+      ["Advanced", "none"],
     ]);
-    expect(html).toContain("Max output tokens");
+    expect(LIMIT_FIELDS.map((field) => field.label)).toContain("Max output tokens");
   });
 
-  it("ends a preset stated here in Save and Revert, with Remove <name> at the far end", () => {
-    const html = draw({ preset: "fast" });
-    const actions = /<div class="pane-actions">(.*?)<\/div>/s.exec(html)![1]!;
-    expect(actions.replace(/<[^>]+>/g, "|").split("|").filter((s) => s.length > 0)).toEqual(["Save", "Revert", "Remove fast"]);
-    // The spacer is what puts Remove away from the other two.
-    expect(actions).toMatch(/Revert<\/button><span class="grow"><\/span><button[^>]*class="ghost danger"/);
-    // Untouched: nothing to save or put back. Remove is always there.
-    expect(actions).toMatch(/<button[^>]*disabled=""[^>]*>Save/);
-    expect(actions).toMatch(/<button[^>]*disabled=""[^>]*>Revert/);
-    expect(actions).not.toMatch(/<button[^>]*disabled=""[^>]*>Remove/);
+  it("has nothing to save or put back on an untouched preset, and something once there is a draft", () => {
+    expect(isDirty(TABS[0]!, undefined)).toBe(false);
+    expect(isDirty(TABS[0]!, { temperature: 0.7 })).toBe(true);
+    expect(presetSummary(TABS[0]!, { temperature: 0.7 })).toBe("unsaved · temperature 0.7");
   });
 
-  it("draws the draft once there is one, and Save and Revert come alive", () => {
-    const html = draw({ preset: "fast" }, { drafts: { fast: { temperature: 0.7 } } });
-    expect(html).toContain('value="0.7"');
-    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Save/);
-    expect(tabsOf(html, "Presets")[0]![0]).toBe("fast unsaved · temperature 0.7");
-  });
-
-  it("opens an INHERITED preset in the same editor, editable, saying its first save is the copy", () => {
-    const html = draw({ preset: "thorough" }, { section: "reasoning" });
-    expect(html.match(/role="tablist"/g)).toHaveLength(2);
-    expect(tabsOf(html, "Sections")[2]).toEqual(["Reasoning xhigh", true, "0"]);
-
-    const controls = controlsOf(html);
-    expect(controls.length).toBeGreaterThan(0);
-    expect(controls.some((control) => !control.includes('disabled=""'))).toBe(true);
-
-    // `set here` means the layer being edited states it, which is false of everything in this one.
-    expect(html).not.toContain("cfg-set");
-    expect(draw({ preset: "review" }, { section: "reasoning" })).toContain("cfg-set");
-
-    expect(html.replace(/<[^>]+>/g, "")).toContain("inherited from Shared (all projects). Saving a change copies it into");
-    // No Override here: Save is the copy. Nothing of this layer's to remove yet.
-    // The pane's ACTIONS — not its tabs, and not the set/not-set switches SchemaForm draws beside each field.
-    const buttons = Array.from(html.matchAll(/<button(?![^>]*role="(?:tab|switch)")[^>]*>(.*?)<\/button>/gs)).map((m) => m[1]);
-    expect(buttons).toEqual(["Save", "Revert"]);
-    expect(html).not.toContain("Override here");
-  });
-
-  it("asks only for a Name under + preset, with no section rail until it has one", () => {
-    const html = draw("new", { newName: "cheap" });
-    expect(html).toContain('class="llm-config preset-config preset-new"');
-    expect(html.match(/role="tablist"/g)).toHaveLength(1);
-    expect(tabsOf(html, "Presets").at(-1)).toEqual(["+ preset", true, "0"]);
-    expect(html).toContain("A new preset");
-    expect(controlsOf(html)).toHaveLength(1);
-    expect(html).toContain('value="cheap"');
-    // The key tag reads as the path the name is written to.
-    expect(html).toContain("models.presets.&lt;name&gt;");
-    expect(html).toMatch(/<button[^>]*class="primary"[^>]*>Add it/);
-    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Add it/);
-  });
-
-  it("will not add a name it would have to refuse: inert while empty, and the reason under the box once typed", () => {
-    const empty = draw("new");
-    expect(empty).toMatch(/<button[^>]*disabled=""[^>]*>Add it/);
-    expect(empty).not.toContain("can&#x27;t be empty");
-
-    const taken = draw("new", { newName: "fast" });
-    expect(taken).toMatch(/<button[^>]*disabled=""[^>]*>Add it/);
-    expect(taken).toContain("there is already a preset called &#x27;fast&#x27;");
-  });
-
-  it("opens on + preset when there is nothing else to open", () => {
-    const html = draw(resolveChoice([], undefined), { tabs: [] });
-    expect(tabsOf(html, "Presets")).toEqual([["+ preset", true, "0"]]);
-    expect(html).toContain("A new preset");
-  });
-
-  it("goes inert while the layer is being written, but the rails still move", () => {
-    const html = draw({ preset: "fast" }, { locked: true, drafts: { fast: { temperature: 0.7 } } });
-    for (const control of controlsOf(html)) expect(control).toContain('disabled=""');
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Save/);
-    expect(html).toMatch(/<button[^>]*disabled=""[^>]*>Remove fast/);
-    // Revert only touches the draft, so it stays.
-    expect(html).not.toMatch(/<button[^>]*disabled=""[^>]*>Revert/);
-    expect(html).not.toMatch(/<button[^>]*role="tab"[^>]*disabled/);
+  it("opens an INHERITED preset in the same sections, saying what it holds", () => {
+    expect(llmSummariesOf(TABS[2]!.value).reasoning).toBe("xhigh");
   });
 });
 
@@ -293,11 +168,21 @@ describe("the presets that ship built in", () => {
     coder: { model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "first-available" }, reasoning: { effort: "high" } },
     simple: { model: { candidates: ["claude-haiku-4-5", "gpt-5.6-luna"], choose: "first-available" } },
   };
-  /** claude-cli signed in on a max plan; codex signed out; no OpenAI key. */
-  const lookup = (model: string): CandidateStatus =>
-    model.startsWith("claude")
-      ? { state: "available", route: "claude-cli", plan: "max" }
-      : { state: "unavailable", why: "codex-cli is not signed in" };
+
+  it("tags the rail's tabs: built in, and this layer's copy of what ships once edited", () => {
+    const tabs = presetTabsOf({ coder: SHIPPED.coder }, SHIPPED, SHIPPED);
+    // `shipped` on a preset stated here is what the page reads as "<layer> · copied from built in".
+    expect(tabs.map((tab) => [tab.name, tab.origin, tab.shipped === true, presetSummary(tab)])).toEqual([
+      ["coder", "here", true, "first available: opus · gpt-5.6-terra · reasoning high"],
+      ["simple", "built-in", false, "first available: haiku · gpt-5.6-luna"],
+    ]);
+  });
+
+  it("opens a built-in preset EDITABLE — an edit to it is a draft like any other", () => {
+    const tabs = presetTabsOf({}, SHIPPED, SHIPPED);
+    expect(tabs[0]).toMatchObject({ name: "coder", origin: "built-in" });
+    expect(isDirty(tabs[0]!, { ...SHIPPED.coder, reasoning: { effort: "xhigh" } })).toBe(true);
+  });
 
   it("lists a built-in preset untouched by any layer as built in, and one a layer states as that layer's copy", () => {
     const tabs = presetTabsOf({ coder: { ...SHIPPED.coder, reasoning: { effort: "low" } } }, { ...SHIPPED, coder: { ...SHIPPED.coder, reasoning: { effort: "low" } } }, SHIPPED);
@@ -310,36 +195,6 @@ describe("the presets that ship built in", () => {
     expect(touched.find((t) => t.name === "simple")!.origin).toBe("inherited");
   });
 
-  it("tags the rail: built in, and '<layer> · copied from built in' once edited", () => {
-    const tabs = presetTabsOf({ coder: SHIPPED.coder }, SHIPPED, SHIPPED);
-    const html = draw({ preset: "simple" }, { tabs, lookup });
-    expect(tabsOf(html, "Presets")).toEqual([
-      ["coder shared · copied from built in first available: opus · gpt-5.6-terra · reasoning high", false, "-1"],
-      ["simple built in first available: haiku · gpt-5.6-luna", true, "0"],
-      ["+ preset", false, "-1"],
-    ]);
-    expect(html).toMatch(/<span class="cx-src">built in<\/span>/);
-  });
-
-  it("opens a built-in preset EDITABLE, with Save and no Remove — a save writes it into this layer", () => {
-    const tabs = presetTabsOf({}, SHIPPED, SHIPPED);
-    const html = draw({ preset: "coder" }, { tabs, lookup, section: "reasoning" });
-    for (const control of controlsOf(html)) expect(control).not.toContain('disabled=""');
-    expect(html.replace(/<[^>]+>/g, "")).toContain("What JaiRA ships. Saving a change copies it into shared, where it wins");
-    const actions = /<div class="pane-actions">(.*?)<\/div>/s.exec(html)![1]!;
-    expect(actions.replace(/<[^>]+>/g, "|").split("|").filter((s) => s.length > 0)).toEqual(["Save", "Revert"]);
-    // An edit to it is a draft like any other.
-    expect(isDirty(tabs[0]!, { ...SHIPPED.coder, reasoning: { effort: "xhigh" } })).toBe(true);
-  });
-
-  it("offers 'Put back the built-in' — not a red Remove — on this layer's copy of one", () => {
-    const tabs = presetTabsOf({ coder: SHIPPED.coder }, SHIPPED, SHIPPED);
-    const html = draw({ preset: "coder" }, { tabs, lookup });
-    const actions = /<div class="pane-actions">(.*?)<\/div>/s.exec(html)![1]!;
-    expect(actions).toMatch(/<button[^>]*class="ghost"[^>]*>Put back the built-in<\/button>/);
-    expect(actions).not.toContain("Remove");
-  });
-
   it("will not name a new preset after a built-in one", () => {
     const tabs = presetTabsOf({}, SHIPPED, SHIPPED);
     expect(presetNameProblem("coder", tabs)).toBe("'coder' ships built in — open it and edit it, and the edit is saved here");
@@ -350,55 +205,48 @@ describe("the Model section", () => {
   const coder = { model: { candidates: ["claude-opus-5-5", "gpt-5.6-terra"], choose: "first-available" }, reasoning: { effort: "high" } };
   const lookup = (model: string): CandidateStatus =>
     model === "gpt-5.6-terra" ? { state: "available", route: "codex-cli", plan: "ChatGPT" } : { state: "unavailable", why: "claude-cli is not signed in" };
-  const text = (html: string): string => html.replace(/<[^>]+>/g, " ").replace(/&#x27;/g, "'").replace(/\s+/g, " ");
+  /** No reading of any account's allowance: what the limits board holds before the first one arrives. */
+  const NO_LIMITS: LimitsView = { accounts: [], routeAccounts: {} };
 
   it("comes first in the sections, summarised as its rule and its models", () => {
-    const tabs = presetTabsOf({ coder }, { coder });
-    const html = draw({ preset: "coder" }, { tabs, lookup, section: "model" });
-    expect(tabsOf(html, "Sections")[0]).toEqual(["Model first available: opus · gpt-5.6-terra", true, "0"]);
+    expect(llmCategoriesOf(MODEL_LEAD)[0]).toMatchObject({ key: "model", label: "Model" });
+    expect(llmSummariesOf(coder, presetModelLine(coder.model)).model).toBe("first available: opus · gpt-5.6-terra");
   });
 
-  it("shows the rule pressed, then each candidate with its route, whether it can run, and the one picked now", () => {
-    const html = renderToStaticMarkup(
-      createElement(PresetModelSection, { value: coder.model, onChange: () => undefined, disabled: false, lookup, suggestions: ["claude-opus-5-5", "gpt-5.6-terra"] }),
-    );
-    expect(html).toMatch(
-      /<div class="set-seg" role="group" aria-label="How a candidate is chosen"><button[^>]*aria-pressed="true"[^>]*>The first available<\/button><button[^>]*aria-pressed="false"[^>]*>The most left<\/button><\/div>/,
-    );
-    // One row per candidate, through the schema form's list editor — in order, movable.
-    expect(html.match(/class="cfg-list-row"/g)).toHaveLength(2);
-    expect(html).toContain('value="claude-opus-5-5"');
-    expect(html).toContain('value="gpt-5.6-terra"');
-    expect(html).toContain('title="move up"');
-    const rows = Array.from(html.matchAll(/<div class="preset-candidate">(.*?)<\/div>/gs)).map((m) => text(m[1]!).trim());
-    expect(rows).toEqual(["not available — claude-cli is not signed in", "via codex-cli · ChatGPT available picked now"]);
-    expect(text(html)).toContain("+ another model");
+  it("has the rule, then each candidate with its route, whether it can run, and the one picked now", () => {
+    const view = candidatesViewOf(coder.model, lookup, NO_LIMITS);
+    // The two rules the choice offers, in order, and the one this preset states.
+    expect(PRESET_RULES.map(([label]) => label)).toEqual(["The first available", "The most left"]);
+    expect(view.rule).toBe("first-available");
+    // One row per candidate, in order, each box offering the models the host suggests.
+    expect(view.candidates).toEqual(["claude-opus-5-5", "gpt-5.6-terra"]);
+    expect(candidatesSchema(["claude-opus-5-5", "gpt-5.6-terra"])).toMatchObject({ type: "array", items: { type: "string", examples: ["claude-opus-5-5", "gpt-5.6-terra"] } });
+    expect(view.statuses).toEqual([
+      { state: "unavailable", why: "claude-cli is not signed in" },
+      { state: "available", route: "codex-cli", plan: "ChatGPT" },
+    ]);
+    // The first that can run is the one picked now — the second here.
+    expect(view.picked).toBe(1);
+    expect(view.problem).toBeUndefined();
   });
 
   it("says when nothing has been checked yet, and picks nothing", () => {
-    const html = renderToStaticMarkup(
-      createElement(PresetModelSection, { value: coder.model, onChange: () => undefined, disabled: false, lookup: (): CandidateStatus => ({ state: "unchecked" }), suggestions: [] }),
-    );
-    expect(text(html)).toContain("not checked yet");
-    expect(html).not.toContain("picked now");
+    const view = candidatesViewOf(coder.model, (): CandidateStatus => ({ state: "unchecked" }), NO_LIMITS);
+    expect(view.statuses).toEqual([{ state: "unchecked" }, { state: "unchecked" }]);
+    expect(view.picked).toBe(-1);
   });
 
-  it("stays editable when the preset states no model, with a ↺ only once it states one, and is summarised as not set", () => {
-    const html = renderToStaticMarkup(createElement(PresetModelSection, { value: undefined, onChange: () => undefined, disabled: false, lookup, suggestions: [] }));
-    expect(html).toContain('class="cfg-field wide"');
-    expect(html).toContain("+ another model");
-    expect(html).not.toContain("set-reset");
-    const named = renderToStaticMarkup(
-      createElement(PresetModelSection, { value: { candidates: ["claude-sonnet-5"], choose: "first-available" }, onChange: () => undefined, disabled: false, lookup, suggestions: [] }),
-    );
-    expect(named).toContain("Name no model — the state&#x27;s own answers");
+  it("has no rows and no complaint when the preset states no model, and is summarised as not set", () => {
+    expect(candidatesViewOf(undefined, lookup, NO_LIMITS)).toMatchObject({ candidates: [], picked: -1, problem: undefined });
     expect(presetModelLine(undefined)).toBe("not set");
   });
 
   it("will not save a candidate list the parser would refuse, and says why once nothing is still being typed", () => {
     const bad = { candidates: ["gpt-5"], choose: "most-budget-left" };
     expect(presetModelProblem(bad)).toBe('model.choose must be "first-available" or "most-left"');
-    const html = draw({ preset: "coder" }, { tabs: presetTabsOf({ coder }, { coder }), lookup, drafts: { coder: { ...coder, model: bad } } });
-    expect(html).toMatch(/<button[^>]*class="primary"[^>]*disabled=""[^>]*>Save/);
+    expect(candidatesViewOf(bad, lookup, NO_LIMITS).problem).toBe('model.choose must be "first-available" or "most-left"');
+    // A row still being typed is not a mistake yet.
+    expect(candidatesViewOf({ ...bad, candidates: ["gpt-5", ""] }, lookup, NO_LIMITS).problem).toBeUndefined();
   });
 });
+

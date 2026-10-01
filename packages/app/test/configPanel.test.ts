@@ -6,24 +6,25 @@
  * `$ref`s and an `environment` block that inherits half of itself from wherever the state is
  * mounted. What the engine executes is the resolved document, and this is the panel that shows it.
  *
- * Two claims are worth holding down. The link is offered from every panel that raises the question
- * — a run's, a workflow's, an open state file's — because the same question answered from one door
- * and not another is exactly the gap this closes. And the panel says WHICH copy it is showing: a run
- * pins its workflow, so "as this run pinned it" and "as it stands on disk now" are different
+ * The panel is the Files view's editor under two switches (`reading.ts`): nothing in it changes
+ * anything, and the bindings have the run's values under them. And it says WHICH copy it is showing:
+ * a run pins its workflow, so "as this run pinned it" and "as it stands on disk now" are different
  * documents the moment anybody edits the file, which is precisely when somebody is reading this.
  *
- * Rendered to static markup, like the other view tests here — which is also why the drawing is split
- * from the fetch: a server render runs no effects, so `ConfigPanel` alone would only ever be caught
- * mid-read.
+ * These were read off the rendered panel while the desktop drew it itself. What is held here is what
+ * the pure modules decide for a reading — which tabs, whether Save, which of the operation's boxes,
+ * which values, which words for the copy. Where the link to the panel is offered, and what is inert,
+ * is the drawing's.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import type { EffectiveState, InstanceNode, StateView } from "@jaira/shared/browser";
-import { ConfigReading } from "../src/renderer/configPanel";
-import { StateChecks, StepCard } from "../src/renderer/panelViews";
-import { ReadOnlyContext } from "../src/renderer/reading";
-import { WorkflowEditor } from "../src/renderer/stateEditor";
+import type { EffectiveState } from "@jaira/shared/browser";
+import { copyWordsOf } from "../src/renderer/configPanelModel";
+import { modelKnobsSet, simpleFieldShown } from "../src/renderer/operationFieldsModel";
+import { SIMPLE_FIELDS } from "../src/renderer/operationForm";
+import { slotValueOf } from "../src/renderer/reading";
+import { slotMoreShown } from "../src/renderer/slotTableModel";
+import { TABS, TAB_WORDS, savesOf } from "../src/renderer/stateEditorModel";
+import { formOf, type FormModel } from "../src/renderer/stateForm";
 
 const SOURCE = {
   label: "Goals",
@@ -56,204 +57,77 @@ const resolved = (patch: Partial<EffectiveState> = {}): EffectiveState => ({
   ...patch,
 });
 
-const drawPanel = (patch: Partial<EffectiveState> = {}, props: Record<string, unknown> = {}): string =>
-  renderToStaticMarkup(createElement(ConfigReading, { state: resolved(patch), ...props }));
-
-const node = (patch: Partial<InstanceNode> = {}): InstanceNode => ({
-  instanceId: "2",
-  stateId: "feature/plan/goals",
-  status: "completed",
-  index: 0,
-  superseded: false,
-  startedAt: 1,
-  children: [],
-  ...patch,
-});
-
-const drawStep = (): string =>
-  renderToStaticMarkup(
-    createElement(StepCard, {
-      detail: { taskId: "t1", instances: [node()], runs: [] } as unknown as Parameters<typeof StepCard>[0]["detail"],
-      node: node(),
-      sessions: [],
-      onClose: () => undefined,
-      onOpen: () => undefined,
-      onConfig: () => undefined,
-    }),
-  );
-
-const stateView = (patch: Partial<StateView> = {}): StateView =>
-  ({
-    stateId: "feature/plan/goals",
-    children: [],
-    board: null,
-    tasksHere: [],
-    tasksRecent: [],
-    transitions: [],
-    environment: {},
-    issues: [],
-    references: [],
-    referencedBy: [],
-    driftedTasks: [],
-    ...patch,
-  }) as unknown as StateView;
-
-const drawState = (props: Partial<Parameters<typeof StateChecks>[0]> = {}): string =>
-  renderToStaticMarkup(createElement(StateChecks, { state: stateView(), ...props }));
+/** The form the editor draws for the reading's document — what `useWorkflowEditor` holds. */
+const formOfReading = (state: EffectiveState = resolved()): FormModel => formOf(JSON.parse(state.source!.text));
 
 describe("the state's configuration in the side panel", () => {
   it("is the FILES VIEW's editor — the same form, over the same document", () => {
-    const html = drawPanel();
-    // The form's own furniture, not a second rendering of a state written for this panel.
-    expect(html).toContain("Inputs");
-    expect(html).toContain("Outputs");
-    expect(html).toContain(".operation.output.goals");
+    const form = formOfReading();
+    // The form's own rows, not a second rendering of a state written for this panel.
+    expect(form.inputs.map((row) => row.name)).toEqual(["issue"]);
+    expect(form.outputs.map((row) => [row.name, row.binding])).toEqual([["goals", ".operation.output.goals"]]);
     // …and its three readings, which is the point of reusing it rather than printing a document.
-    expect(html).toContain(">Form<");
-    expect(html).toContain(">JSON<");
-    expect(html).toContain(">Graph<");
+    expect(TABS.map((tab) => TAB_WORDS[tab])).toEqual(["Form", "JSON", "Graph"]);
   });
 
-  it("renders nothing that changes anything", () => {
-    const html = drawPanel();
-    // The chrome is ABSENT, not disabled: a greyed-out Save under a finished run is an offer about
-    // a document nobody is editing, and it still takes a row of a narrow column.
-    expect(html).not.toContain(">Save<");
-    expect(html).not.toContain("+ Add");
-    expect(html).not.toContain("+ Wire");
-    // Linking MOVES a value into a file, which is one of the larger edits the form makes.
-    expect(html).not.toContain("🔗");
-    // The backstop for the boxes that remain — they show values and must not take any.
-    expect(html).toContain("<fieldset");
-    expect(html).toContain("disabled");
+  it("offers no Save", () => {
+    // The bar is ABSENT, not disabled: a greyed-out Save under a finished run is an offer about a
+    // document nobody is editing, and it still takes a row of a narrow column. The same file in the
+    // Files view, where it is edited, has one.
+    expect(savesOf(true, false)).toBe(false);
+    expect(savesOf(false, false)).toBe(true);
   });
 
-  it("leaves the tab bar OUTSIDE the inert part, so the readings can still be switched", () => {
-    // The bug this pins: a `fieldset[disabled]` around the whole editor reaches the tab buttons too,
-    // and a panel that promises three readings then offers one.
-    const html = drawPanel();
-    expect(html.indexOf(">Form<")).toBeLessThan(html.indexOf("<fieldset"));
-    expect(html.indexOf(">Graph<")).toBeLessThan(html.indexOf("<fieldset"));
-  });
-
-  it("drops the boxes a state left empty, and the pickers that say nothing was picked", () => {
+  it("drops the boxes a state left empty", () => {
     // A form shows every field it COULD hold, because that is how you find the one to fill in. A
     // reading of a state with a prompt and a model should not be a screen of empty labelled boxes.
-    const html = drawPanel();
-    expect(html).not.toContain("Search path");
-    expect(html).not.toContain("Model settings");
-    expect(html).not.toContain(">Description<");
-    expect(html).not.toContain(">Session<");
-    expect(html).not.toContain(">Limits<");
+    const operation = formOfReading().operation;
+    const shown = (readOnly: boolean): string[] => SIMPLE_FIELDS.filter((spec) => simpleFieldShown(readOnly, operation, spec)).map((spec) => spec.label);
     // What it DOES say is what the state says.
-    expect(html).toContain("Extract goals from");
-    expect(html).toContain("claude-opus-5");
+    expect(shown(true)).toEqual(["Prompt", "Model"]);
+    expect(operation.fields["prompt"]).toBe("Extract goals from {{.inputs.issue}}.");
+    expect(operation.fields["model"]).toBe("claude-opus-5");
+    // "Model settings" is a fold of boxes nobody tuned here, and a reading does not carry it.
+    expect(modelKnobsSet(operation)).toBe(false);
+    // The form over the same block, for the contrast: Search path and the rest are all there.
+    expect(shown(false)).toHaveLength(SIMPLE_FIELDS.length);
+    expect(shown(false)).toContain("Search path");
   });
 
-  it("shows a value without a fold to open first", () => {
-    const html = drawPanel();
-    // In the slot's own block, beside `default` and `description` — not a control of its own.
-    expect(html).toContain("run-value");
-    expect(html).not.toContain("<summary>default");
+  it("shows a value under a slot that declares nothing else", () => {
+    const state = resolved();
+    const [issue] = formOfReading(state).inputs;
+    // The block under a slot's row holds its default, its description and — in a reading — its value.
+    // This slot has neither of the first two, and the block is drawn for the value alone.
+    expect([issue!.default, issue!.description]).toEqual(["", ""]);
+    const value = slotValueOf(state.values!, "inputs", issue!.name, issue!.binding);
+    expect(slotMoreShown(true, false, false, value)).toBe(true);
+    expect(slotMoreShown(true, false, false, undefined)).toBe(false);
   });
 
   it("shows the value behind each binding, not just where it comes from", () => {
-    const html = drawPanel();
+    const state = resolved();
+    const form = formOfReading(state);
+    const [issue] = form.inputs;
+    const [goals] = form.outputs;
     // The input the engine resolved on the way in…
-    expect(html).toContain("the parser drops trailing commas");
+    expect(slotValueOf(state.values!, "inputs", issue!.name, issue!.binding)).toBe("the parser drops trailing commas");
     // …and the call's own result, which is where a produced output takes its value by name.
-    expect(html).toContain("stop dropping commas");
+    expect(slotValueOf(state.values!, "outputs", goals!.name, goals!.binding)).toEqual(["stop dropping commas"]);
   });
 
   it("shows no values at all for a state nobody has run", () => {
-    const html = drawPanel({ values: undefined });
-    expect(html).not.toContain("slot-value");
+    const form = formOfReading(resolved({ values: undefined }));
+    // With no run behind it the panel hands the form no reading at all (null), and no slot has a value.
+    expect(slotValueOf(null, "inputs", "issue", form.inputs[0]!.binding)).toBeUndefined();
+    expect(slotValueOf(null, "outputs", "goals", form.outputs[0]!.binding)).toBeUndefined();
   });
 
   it("says whether the file on screen is still the one that ran", () => {
-    expect(drawPanel()).toContain("the file this run pinned");
+    expect(copyWordsOf(resolved())).toBe("the file this run pinned");
     // The case a reader of an old failure must not have to assume: the workflow has moved since.
-    expect(drawPanel({ from: "moved" })).toContain("the workflow has changed since this run");
+    expect(copyWordsOf(resolved({ from: "moved" }))).toContain("the workflow has changed since this run");
     // And with no run named, the question does not arise.
-    expect(drawPanel({ from: "disk" })).toContain("as it stands on disk now");
-  });
-
-  it("answers plainly when nothing defines that state any more", () => {
-    expect(drawPanel({ source: undefined })).toContain("has no state called");
-  });
-});
-
-describe("the link on a step's card", () => {
-  it("offers the configuration the step ran with, under how it ran", () => {
-    const html = drawStep();
-    expect(html).toContain("How it ran");
-    expect(html).toContain("as it ran");
-  });
-});
-
-describe("the link on a state's Checks", () => {
-  it("offers the configuration in the section that names what it decides", () => {
-    const html = drawState({ onOpenConfig: () => undefined });
-    expect(html).toContain("Environment");
-    expect(html).toContain("effective configuration");
-  });
-
-  it("offers it even where no executor is named — which is when it is most wanted", () => {
-    // "inherited" is exactly the answer that sends somebody looking for what it was inherited from.
-    const html = drawState({ onOpenConfig: () => undefined });
-    expect(html).toContain("no executor named");
-    expect(html).toContain("effective configuration");
-  });
-
-  it("omits it where there is no panel to open one in", () => {
-    expect(drawState()).not.toContain("effective configuration");
-  });
-});
-
-/**
- * The other two readings.
- *
- * A reading is inert BELOW the tab bar and not everywhere: the form is what must not take input, and
- * the drawing is not a form at all — its controls pan, zoom and fit, which are ways of looking. Both
- * of those were inside one `fieldset[disabled]` for a round, which left the graph's three buttons
- * dead; and the JSON tab went through the authoring editor, whose schema picker and validation
- * report are about writing the file correctly rather than reading it.
- */
-const readingTab = (tab: "form" | "json" | "graph"): string =>
-  renderToStaticMarkup(
-    createElement(
-      ReadOnlyContext.Provider,
-      { value: true },
-      createElement(WorkflowEditor, {
-        source: resolved().source!,
-        tree: null,
-        executors: [],
-        busy: false,
-        onSave: () => undefined,
-        validate: undefined,
-        tab,
-      } as unknown as Parameters<typeof WorkflowEditor>[0]),
-    ),
-  );
-
-describe("the JSON and graph readings", () => {
-  it("shows the JSON as a document rather than through the authoring editor", () => {
-    const html = readingTab("json");
-    expect(html).toContain("reading-doc");
-    expect(html).toMatch(/readOnly|readonly/);
-    // The schema picker and its violation report are for writing the file, not for reading it.
-    expect(html).not.toContain("schema-edit");
-  });
-
-  it("leaves the drawing out of the inert part, so it can still be panned and zoomed", () => {
-    const html = readingTab("graph");
-    expect(html).toContain("sg-map");
-    expect(html).toContain("zoom in");
-    // The one that mattered: three buttons inside a disabled fieldset are three dead buttons.
-    expect(html).not.toContain("<fieldset");
-  });
-
-  it("keeps the form inert", () => {
-    expect(readingTab("form")).toContain("<fieldset");
+    expect(copyWordsOf(resolved({ from: "disk" }))).toBe("as it stands on disk now");
   });
 });

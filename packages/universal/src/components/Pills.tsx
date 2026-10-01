@@ -1,6 +1,6 @@
 import type { JSX } from "react";
 import { View, isWeb } from "@tamagui/core";
-import { layoutPills, type PillCounts } from "@jaira/ui/pill";
+import { layoutPills, type PillCounts } from "@jaira/ui/pillModel";
 import { Press, Txt } from "../primitives";
 import { useTokens } from "../tokens";
 import { Pill } from "./Pill";

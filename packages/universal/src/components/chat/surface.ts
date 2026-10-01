@@ -1,7 +1,7 @@
 import { useMemo } from "react";
-import type { ChatSurface } from "@jaira/ui/chatPane";
+import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { chatSurfaceOf, conversationsAt } from "@jaira/ui/chatSurface";
-import { hueOf } from "@jaira/ui/pill";
+import { hueOf } from "@jaira/ui/pillModel";
 import { useShell } from "../../app/shell";
 
 /**

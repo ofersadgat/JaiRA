@@ -1,6 +1,6 @@
 import { useState, type JSX } from "react";
 import type { InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
-import { hasAsking } from "@jaira/ui/stateSurface";
+import { hasAsking } from "@jaira/ui/stateSurfaceModel";
 import { RunConversation } from "../run/RunConversation";
 import { InlineGate } from "./Gate";
 import type { TranscriptSource } from "./RunTranscript";

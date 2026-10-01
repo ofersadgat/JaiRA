@@ -1,11 +1,10 @@
 import type { ComponentType, JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { RailStep } from "@jaira/ui/rail";
-import { RailedRows as DomRailedRows } from "@jaira/ui/railView";
 import { RailedRows, useTokens } from "@jaira/universal";
 
 /**
- * The conversation's rail on its own (`railView.tsx`'s `RailedRows` against `components/panel/Rail.tsx`),
+ * The conversation's rail on its own (`components/panel/Rail.tsx`, the copy of `railView.tsx`'s `RailedRows`),
  * on the page's grey (`.sb`'s --bg), in the shapes the seeded world never draws:
  *
  *  - `rail-deep` — a run sixteen states deep, whose shallow lanes fall under two pixels apart and are
@@ -15,7 +14,6 @@ import { RailedRows, useTokens } from "@jaira/universal";
  */
 export interface RailSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
@@ -50,11 +48,6 @@ const nothing = (): null => null;
 export const RAIL_SPECIMENS: Record<string, RailSpecimen> = {
   "rail-deep": {
     width: 420,
-    dom: () => (
-      <div className="sb">
-        <DomRailedRows steps={DEEP} renderStep={nothing} />
-      </div>
-    ),
     rn: () => (
       <Page>
         <RailedRows steps={DEEP} renderStep={nothing} />
@@ -63,11 +56,6 @@ export const RAIL_SPECIMENS: Record<string, RailSpecimen> = {
   },
   "rail-rolled": {
     width: 420,
-    dom: () => (
-      <div className="sb">
-        <DomRailedRows steps={ROLLED} renderStep={nothing} shut={SHUT} />
-      </div>
-    ),
     rn: () => (
       <Page>
         <RailedRows steps={ROLLED} renderStep={nothing} shut={SHUT} />

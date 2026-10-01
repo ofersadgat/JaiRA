@@ -9,7 +9,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { BoardCard } from "@jaira/shared/browser";
-import { LANES, endedLabel, laneOf, lanesOf, waitingKindOf } from "../src/renderer/board";
+import { LANES, endedLabel, laneOf, lanesOf, waitingKindOf } from "../src/renderer/boardModel";
 
 const card = (patch: Partial<BoardCard> & Pick<BoardCard, "taskId">): BoardCard => ({
   title: patch.taskId,

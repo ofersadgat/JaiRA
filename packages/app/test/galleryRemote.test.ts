@@ -7,8 +7,9 @@
  */
 import { describe, expect, it } from "vitest";
 import { GALLERY_SURFACES, parseComponentConfig, type ReviewArtifactsConfig } from "@jaira/shared/browser";
-import { gateServices } from "../src/renderer/changesetReview";
-import { GALLERY_PROJECT, galleryServices } from "../src/renderer/componentGallery";
+import { gateServices } from "../src/renderer/changesetReviewModel";
+import { GALLERY_PROJECT } from "../src/renderer/galleryModel";
+import { galleryServices } from "../src/renderer/galleryRemote";
 import { stripWords } from "../src/renderer/remoteStrip";
 
 const surface = GALLERY_SURFACES.find((s) => s.id === "review_artifacts/remote")!;

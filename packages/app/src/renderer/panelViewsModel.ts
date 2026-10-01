@@ -8,6 +8,8 @@ import { useEffect, useMemo, useRef } from "react";
 import type { ArtifactSummary, InstanceNode, SessionRef, StateView } from "@jaira/shared/browser";
 import type { RunIndexFit } from "./runIndexModel";
 import { nodeAt } from "./trail";
+import type { JsonValue } from "@declarative-ai/json";
+import type { RunField, RunValues } from "./runForm";
 
 /** An artifact picked in the Produced tab, as the value viewer draws it: its path, type and text. */
 export function producedValueOf(row: ArtifactSummary, text: string): unknown {
@@ -178,4 +180,22 @@ export function checksCountOf(state: StateView | null): { count?: number; tone?:
   if (errors > 0) return { count: errors, tone: "red" };
   if (state.issues.length > 0) return { count: state.issues.length, tone: "amber" };
   return {};
+}
+
+/** What a re-run with changes needs: the workflow's form, filled with what the task was called with. */
+export interface RerunSurface {
+  workflow: string;
+  /** Undefined while the workflow's inputs are being read; null when its file does not parse. */
+  fields: RunField[] | null | undefined;
+  values: RunValues;
+  busy: boolean;
+  onChange: (values: RunValues) => void;
+  onRun: (inputs: Record<string, JsonValue>) => void;
+  /**
+   * Where a copy may START — the beginning, or before any state the task entered (the person's
+   * ruling, 2026-09-24). A step is a FORK at that state's entry: everything before it is kept, so the
+   * inputs are the ones it ran with and the form is a reading of them.
+   */
+  starts?: readonly { seq: number; label: string }[] | undefined;
+  onFork?: ((seq: number) => void) | undefined;
 }

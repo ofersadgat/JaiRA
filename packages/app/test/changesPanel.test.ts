@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { categoryOf, judgedCallsOf, rawCallsOf, type ReadOnlyJudge } from "@jaira/service/changeLog";
-import { treeOf } from "../src/renderer/changesPanel";
+import { treeOf } from "../src/renderer/changesModel";
 import type { FileChange } from "@jaira/shared";
 
 const at = "2026-09-26T14:00:00.000Z";

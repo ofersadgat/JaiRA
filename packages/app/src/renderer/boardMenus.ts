@@ -17,7 +17,7 @@
 import { isArchivableStatus, type BoardCard } from "@jaira/shared/browser";
 import { boardCardOrderOf, type BoardPick } from "./boardModel";
 import { isChatWorkflow } from "./chatWorkflow";
-import type { AskSpec, MenuItem } from "./menu";
+import type { AskSpec, MenuItem } from "./menuTypes";
 import { invoke, type useApp } from "./store";
 
 type Actions = ReturnType<typeof useApp>["actions"];

@@ -5,7 +5,7 @@
  * the same code. Nothing here draws.
  */
 import type { ChangeAuthor, FileChange, GitStep, MergeRequestView, TaskChangeLog } from "@jaira/shared/browser";
-import type { PATHS } from "./icons";
+import type { PATHS } from "./iconPaths";
 
 type IconName = keyof typeof PATHS;
 export type GroupId = "files" | "execution" | "web" | "git" | "tasks" | "mcp" | "other";

@@ -5,7 +5,7 @@ import type { EffectiveStateValues, InstanceNode, SessionRef, TaskDetail } from 
 import { BADGE } from "@jaira/ui/panelFaceModel";
 import { callLine, pathOf, stepRowsOf, tookOf, useStepFollow, useStepsFit } from "@jaira/ui/panelViewsModel";
 import { keyOfNode } from "@jaira/ui/runIndexModel";
-import { askingInstanceOf, hasAsking } from "@jaira/ui/stateSurface";
+import { askingInstanceOf, hasAsking } from "@jaira/ui/stateSurfaceModel";
 import { invoke } from "@jaira/ui/store";
 import { nodeAt } from "@jaira/ui/trail";
 import { PLAIN_SCROLLER, Txt, scrollbarProps } from "../../primitives";

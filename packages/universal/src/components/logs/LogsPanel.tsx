@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type JSX } from "rea
 import { ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { JobOutputChunk, LogEntry, LogLevel, LogQuery } from "@jaira/shared/browser";
-import type { LogsPanelProps } from "@jaira/ui/logs";
+import type { LogsPanelProps } from "@jaira/ui/logsModel";
 import { datedOf, detailParts, keyOf, logQueryOf, nearEnd, reasonOf, sourcesOf, stamp, streamsOf, LEVELS } from "@jaira/ui/logsModel";
 import { isUnseenLog, type LogUnseen } from "@jaira/ui/updatesModel";
 import { PLAIN_SCROLLER, Press, Txt, appCh, edge, scrollbarProps, useHover, type FontSpec } from "../../primitives";

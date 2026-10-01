@@ -10,7 +10,7 @@
 import { describe, expect, it } from "vitest";
 import type { Choice } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { answerOf, answersOfAnsweredText, answersOfValue, settled, submitsOnClick, EMPTY_ANSWER } from "../src/renderer/choices";
+import { answerOf, answersOfAnsweredText, answersOfValue, settled, submitsOnClick, EMPTY_ANSWER } from "../src/renderer/choicesModel";
 
 const asked: Choice = {
   question: "Which?",
@@ -149,7 +149,7 @@ describe("an agent's question read off its call", () => {
   };
 
   it("takes the answers from the native record when there is one", async () => {
-    const { askedOf } = await import("../src/renderer/transcriptView");
+    const { askedOf } = await import("../src/renderer/transcriptRows");
     const asked = askedOf({
       kind: "tool",
       name: "AskUserQuestion",
@@ -163,7 +163,7 @@ describe("an agent's question read off its call", () => {
   });
 
   it("falls back to the wire text, and reads a typed answer as the own-answer block", async () => {
-    const { askedOf } = await import("../src/renderer/transcriptView");
+    const { askedOf } = await import("../src/renderer/transcriptRows");
     const { choicesOfQuestions } = await import("@jaira/shared/browser");
     const asked = askedOf({
       kind: "tool",
@@ -179,7 +179,7 @@ describe("an agent's question read off its call", () => {
   });
 
   it("reads the current wire spelling by the call's own questions, and ignores a record that is not the answers", async () => {
-    const { askedOf } = await import("../src/renderer/transcriptView");
+    const { askedOf } = await import("../src/renderer/transcriptRows");
     // What the capture left on the block after pairing by order went wrong: a file read's record.
     const asked = askedOf({
       kind: "tool",
@@ -193,7 +193,7 @@ describe("an agent's question read off its call", () => {
   });
 
   it("is nothing for a call the binary refused — a question nobody was asked is not drawn as one", async () => {
-    const { askedOf } = await import("../src/renderer/transcriptView");
+    const { askedOf } = await import("../src/renderer/transcriptRows");
     // What the CLI answers to five questions: its own limit is four, checked before any person sees them.
     const refused = askedOf({
       kind: "tool",
@@ -207,7 +207,7 @@ describe("an agent's question read off its call", () => {
   });
 
   it("is nothing for any other call, and unanswered while the call is in flight", async () => {
-    const { askedOf } = await import("../src/renderer/transcriptView");
+    const { askedOf } = await import("../src/renderer/transcriptRows");
     expect(askedOf({ kind: "tool", name: "Read", summary: "a.ts", args: { file_path: "a.ts" } })).toBeUndefined();
     const asked = askedOf({ kind: "tool", name: "AskUserQuestion", summary: "", args });
     expect(asked?.questions).toHaveLength(1);

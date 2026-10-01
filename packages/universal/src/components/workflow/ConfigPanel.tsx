@@ -2,7 +2,7 @@ import type { JSX } from "react";
 import { View } from "@tamagui/core";
 import type { EffectiveState, ExecutorInfo, FileTree } from "@jaira/shared/browser";
 import { copyWordsOf, readingTitleOf, useEffectiveState } from "@jaira/ui/configPanelModel";
-import type { ConfigPanelServices } from "@jaira/ui/configPanel";
+import type { ConfigPanelServices } from "@jaira/ui/configPanelModel";
 import { useEventsTaskAutomations, type EventsTaskAutomationsProps } from "@jaira/ui/eventsTaskModel";
 import { ReadOnlyContext, RunReadingContext } from "@jaira/ui/reading";
 import { Press, Txt } from "../../primitives";

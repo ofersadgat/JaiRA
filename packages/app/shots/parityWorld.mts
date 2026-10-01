@@ -1,7 +1,11 @@
 /**
- * The world every fidelity gate of decision 0015 photographs, and how each scene is reached: seeded once
- * (a finished task, a failed one, one parked at its gate, one archived), then launched once per look.
- * `parity.mts` runs the gates; `studio.mts` keeps one launched for iterating on a copy.
+ * The world the fidelity gate of decision 0015 photographs, and how each scene is reached: seeded once
+ * (a finished task, a failed one, one parked at its gate, one archived). `studio.mts` keeps the app
+ * launched on it; `pair.mts` reaches each scene there and grades its picture against the reference one.
+ *
+ * A scene is reached by what the page SAYS and by what it names itself for a person or a test — its
+ * words, a role, a title or accessible name, a `data-testid` — never by a class: the page is the
+ * universal shell, whose classes are react-native-web's and Tamagui's and mean nothing.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -9,15 +13,29 @@ import { happyRules } from "@jaira/runtime";
 import { App } from "./driver.mjs";
 import { blockedAtTheGate, type World } from "./world.mjs";
 
+/**
+ * The app's page — the universal shell — and the page a specimen is drawn on, as paths of whatever
+ * origin the window is on (`app://jaira` as shipped, a dev server or a built client under `studio.mts`).
+ * `JAIRA_SHOTS_PAGE=/rn` is for a studio serving a client built before the DOM page went, where the
+ * shell stood beside it at `/rn` — how a "before" run of a before-and-after is taken from this tree.
+ */
+export const PAGE = process.env["JAIRA_SHOTS_PAGE"] ?? "/";
+export const SPECIMEN_PAGE = "/specimen-rn";
+
+/**
+ * The world the reference pictures were taken in (`pair.mts`): kept where it is — its project's path is
+ * in what it draws — and never seeded again, since another seeding draws other ids and times and every
+ * scene's golden would then be of a world that is gone. `studio.mts --goldens-world` opens a studio on it.
+ */
+export const GOLDENS_WORLD = join(import.meta.dirname, ".world-goldens");
+
 export const PARKED = "tighten the changeset lint";
 export const says = (text: string): string => `document.body.innerText.includes(${JSON.stringify(text)})`;
 export const settle = (ms = 1200): Promise<void> => new Promise((r) => setTimeout(r, ms));
-/** The page has drawn: `#root` has children (the `/rn` page keeps a `#root` for this). */
+/** The page has drawn: `#root` has children (the universal page keeps a `#root` for this). */
 export const drawn = "window.jaira && document.getElementById('root') && document.getElementById('root').children.length > 0";
 
 export async function launch(world: World, port: number, out: string): Promise<App> {
-  // The One client is the window's default renderer; the other pages are reached by navigation.
-  process.env.JAIRA_RENDERER = "one";
   const app = await App.launch(world, { out, port });
   await app.until(drawn, "the window to draw");
   return app;
@@ -116,16 +134,20 @@ export async function seed(world: World, out: string, port = 9239): Promise<void
 }
 
 /**
- * The scenes. Each is reached from a freshly loaded page, and each is photographed on BOTH pages before
- * the next begins: reaching a scene can change what the next one shows (opening a task marks its
- * unseen counts seen), so the two pictures of a pair must be taken from the same state, back to back.
+ * The scenes. Each is reached from a freshly loaded page. Reaching a scene can change what a later one
+ * shows (opening a task marks its unseen counts seen; some scenes make what they show the first time
+ * they run), so the reference pictures were taken in a world that had seen every scene once.
  */
 export interface Scene {
   readonly name: string;
-  /** Photographed in every look, not only the two base ones. */
+  /** Photographed in every look, not only the two base ones (`--scene main`). */
   readonly everyLook?: boolean;
-  /** Selector to frame, or the whole window. */
-  readonly of?: string;
+  /**
+   * For a scene whose golden is ACCEPTED from this page (`pair.mts --accept`): a page expression giving
+   * the boxes (`{ name, x, y, width, height }[]`) of what the world keeps changing under it, besides the
+   * sidebar's counts — painted out of every comparison. The older goldens hold theirs already.
+   */
+  readonly volatile?: string;
   reach(app: App): Promise<void>;
 }
 
@@ -148,7 +170,6 @@ export const SCENES: readonly Scene[] = [
     everyLook: true,
     reach: async (app) => {
       await app.until(says("1 archived"), "the archived foot");
-      // By its words, not its class: the `/rn` page draws the same foot with no classes at all.
       await app.clickText("1 archived");
       await app.until(says("retire the old lint"), "the archived card to show");
     },
@@ -156,7 +177,7 @@ export const SCENES: readonly Scene[] = [
   {
     // A card in the air (decision 0005): "add dark mode" picked up and held over Session, not dropped —
     // the columns that would take it dashed, Session filled, the host's dry run in its drop preview. Real
-    // DOM drag events on the card and the heading, by their words, which both boards' handlers take.
+    // DOM drag events on the card and the heading, by their words, which the board's handlers take.
     name: "board-drag",
     reach: async (app) => {
       await app.until(says("add dark mode"), "the card to lift");
@@ -410,7 +431,7 @@ export const SCENES: readonly Scene[] = [
   },
   // A workflow's state files opened in the Files room (the seeded world's `.jaira/workflows/…`): a
   // leaf's `.json` in the authoring form (the workflow editor), and a composite's, on its Graph tab —
-  // the state graph, drawn natively on /rn.
+  // the state graph.
   ...(
     [
       ["files-state", "goals.json", null],
@@ -453,7 +474,7 @@ export const SCENES: readonly Scene[] = [
     }),
   ),
   // The same forms scrolled to a table further down — its heading at the top of the scroller, to a
-  // device pixel on both pages: a reading's children and their wiring, the editable form's children and
+  // device pixel: a reading's children and their wiring, the editable form's children and
   // transitions, a leaf's operation block.
   ...(
     [
@@ -524,7 +545,7 @@ export const SCENES: readonly Scene[] = [
         await app.until(`[...document.querySelectorAll("*")].some((e) => e.children.length === 0 && e.textContent === "Appearance" && e.getBoundingClientRect().left > 250)`, "the Appearance page");
         const find = `[...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(heading)} && e.getBoundingClientRect().left > 250)`;
         await app.until(`${find} !== undefined`, `the ${heading} heading`);
-        // To a device pixel, measured the same way on both pages: `scrollIntoView` lands a fraction apart.
+        // To a device pixel, as the reference page was scrolled: `scrollIntoView` lands a fraction off.
         await app.evaluate(`(() => {
           const el = ${find};
           let box = el.parentElement;
@@ -545,7 +566,7 @@ export const SCENES: readonly Scene[] = [
       ["files-markdown", ["plan_doc.md"], "The Plan"],
       ["files-readme", ["README.md"], "an edit copies it to Shared"],
       ["files-json", ["permission-sets", "chat", "ask-first.json"], "read_file"],
-      // The code editor (Monaco, an island on /rn).
+      // The code editor (Monaco, an island).
       ["files-ts", ["lint.ts"], "Revert"],
       // A type with no grammar: the plain box (`textarea.code-editor`), the configuration editor's too.
       ["files-plain", [".jaira", ".gitignore"], "Revert"],
@@ -652,7 +673,7 @@ export const SCENES: readonly Scene[] = [
     // A conversation open in the Chat room: a message and its answer (a fake model's, in markdown), the
     // composer under them, the project's Chat drawer listing it and its name in the title bar. Made
     // here the first time it is reached rather than in `seed`, so a studio seeded before it existed
-    // has it too; the same conversation is opened on both pages after that.
+    // has it too; the same conversation is opened after that.
     name: "conversation",
     reach: async (app) => {
       await conversation(app);
@@ -711,8 +732,8 @@ export const SCENES: readonly Scene[] = [
       await settle(600);
     },
   },
-  // The conversation's composer with one of its chips' cards open (a button titled "<Label>: <value>" on
-  // both pages), and the context ring's card.
+  // The conversation's composer with one of its chips' cards open (a button titled "<Label>: <value>"),
+  // and the context ring's card.
   ...(
     [
       ["composer-model", '[title^="Model: "]', "Model"],
@@ -830,10 +851,10 @@ export const SCENES: readonly Scene[] = [
       await app.until(`document.getElementById("root").textContent.includes("Components")`, "the Components row");
       await app.clickText("Components");
       await app.until(says("Every row to"), "the Components room");
-      // Every card's form is laid out from its measured width on /rn (react-native-web's onLayout, a frame
-      // or more behind), where the desktop's container queries need none: let both pages settle — and
-      // hold still: a row is scrolled to by where it stands, and on a busy machine an editor that
-      // mounted after the pause moved every row under it (a scene 18 or 54px out, 70,000 pixels).
+      // Every card's form is laid out from its measured width (react-native-web's onLayout, a frame or
+      // more behind): let the page settle — and hold still: a row is scrolled to by where it stands, and
+      // on a busy machine an editor that mounted after the pause moved every row under it (a scene 18 or
+      // 54px out, 70,000 pixels).
       await settle(2500);
       await app.settled();
     },
@@ -842,30 +863,29 @@ export const SCENES: readonly Scene[] = [
     // A real Monaco drawing a real sample through the TextMate grammars (WASM): the part of the
     // renderer most likely to break under a new origin and a new content policy.
     name: "file-types",
-    of: ".ft",
     reach: async (app) => {
       await app.clickText("Settings");
       await app.clickText("Appearance");
-      // Scrolled into view, and again on every try, for the picture rather than for Monaco: `.ft` sits
+      // Scrolled into view, and again on every try, for the picture rather than for Monaco: the section sits
       // in the settings pane's own scroll container, which a capture paints only where it is scrolled
       // to, and the page lays out after the preview mounts, undoing a scroll made before that. Monaco
       // draws an editor below the fold perfectly well; what it cannot draw in is a hidden window,
       // which is what used to leave this editor empty (see `launch` in the driver).
-      // Either page: the desktop's classes, or on `/rn` the copy's `testID` and its `code` island.
-      const FT = `document.querySelector(".ft, [data-testid=ft]")`;
-      const BODY = `document.querySelector(".ft-preview-body, [data-testid=ft] [data-island=code]")`;
+      // The section by its `testID`, the preview by its `code` island.
+      const FT = `document.querySelector("[data-testid=ft]")`;
+      const BODY = `document.querySelector("[data-testid=ft] [data-island=code]")`;
       await app.until(`${BODY} !== null`, "the preview to mount");
       await app.until(
         `(${BODY}.scrollIntoView({ block: "center" }),
           [...${BODY}.querySelectorAll(".view-lines span[class^=mtk]")].some((s) => getComputedStyle(s).color !== "rgb(0, 0, 0)"))`,
         "the preview's editor to colour itself",
       );
-      // Then the section's top, which is what the picture frames: centred on the preview, `.ft` is
-      // about as tall as the window and its upper half lay above the fold, unpainted on both pages.
+      // Then the section's top, which is what the picture frames: centred on the preview, the section is
+      // about as tall as the window and its upper half lay above the fold, unpainted.
       await app.evaluate(`${FT}.scrollIntoView({ block: "start" })`);
-      // Centring the preview also scrolled its own box: on `/rn` what is centred is the island, the
-      // surface's own 200 in the preview's 190, and the box moved by half the difference. Put back, as the
-      // DOM's stood (there the box itself is what was centred).
+      // Centring the preview also scrolled its own box: what is centred is the island, the surface's own
+      // 200 in the preview's 190, and the box moved by half the difference. Put back, as the reference
+      // page's stood (there the box itself was what was centred).
       await app.evaluate(`(() => { for (let e = ${BODY}.parentElement; e && e !== ${FT}; e = e.parentElement) if (e.scrollTop !== 0) e.scrollTop = 0; })()`);
       await app.until(
         `(() => { const top = ${FT}.getBoundingClientRect().top; return top >= 0 && top < innerHeight / 2; })()`,
@@ -905,8 +925,8 @@ export const SCENES: readonly Scene[] = [
       await app.until(`!!document.querySelector('[aria-label="Show the sidebar"]')`, "the sidebar to fold to its rail");
     },
   },
-  // The floats `App.tsx` owns (decision 0015's universal copies of them): the board's right-click menus
-  // and what they ask, and the card the Settings row's pills open.
+  // The shell's own floats: the board's right-click menus and what they ask, and the card the Settings
+  // row's pills open.
   // A card's right-click (a long press on a phone): the parked task's verbs.
   { name: "card-menu", reach: (app) => boardMenu(app, PARKED, "Copy task id") },
   // …a finished task's: re-run as a fresh copy, Cancel disabled, Archive.
@@ -942,7 +962,7 @@ export const SCENES: readonly Scene[] = [
   {
     name: "health-card",
     reach: async (app) => {
-      // By its title on the desktop's page, its accessible name on the copy's.
+      // By its title or its accessible name.
       const pills = `document.querySelector('[title="What needs attention"], [aria-label="What needs attention"]')`;
       await app.until(`${pills} !== null`, "the Settings row's pills");
       await app.evaluate(`${pills}.click()`);
@@ -993,7 +1013,7 @@ export const SCENES: readonly Scene[] = [
             const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(variant)});
             (el.closest("button, [role=button]") ?? el).click();
           })()`);
-          // The row's track slides to it (animated on /rn).
+          // The row's track slides to it (animated).
           await settle(1500);
           await galleryRow(app, row);
         }
@@ -1042,7 +1062,7 @@ async function planColumn(app: App): Promise<string> {
   return (await app.evaluate<boolean>(column("Planning"))) ? "Planning" : "feature/plan";
 }
 
-/** Scroll the Components page so the row titled `title` stands just under its sticky bar, to a device pixel on both pages. */
+/** Scroll the Components page so the row titled `title` stands just under its sticky bar, to a device pixel. */
 async function galleryRow(app: App, title: string): Promise<void> {
   await app.evaluate(`(() => {
     const walk = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -1056,8 +1076,8 @@ async function galleryRow(app: App, title: string): Promise<void> {
   await settle(600);
 }
 
-/** The Tasks room's middle column, on either page (the desktop's by its classes, the copy's by its test id). */
-const ON_BOARD = JSON.stringify('.tasks-view > .col.mid, [data-testid="board-column"]');
+/** The Tasks room's middle column, by its test id. */
+const ON_BOARD = JSON.stringify('[data-testid="board-column"]');
 
 /**
  * Right-click the board's `text` (a card's title or a column's name) where the board draws it, and wait
@@ -1260,10 +1280,7 @@ async function drillParked(app: App): Promise<void> {
   await settle(800);
 }
 
-/**
- * The centre of the lowest knot on the middle column's rail in view — a fork's knot (r 4.5), an `<svg>`
- * circle on both pages.
- */
+/** The centre of the lowest knot on the middle column's rail in view — a fork's knot (r 4.5), an `<svg>` circle. */
 async function lastKnot(app: App): Promise<{ x: number; y: number }> {
   const at = await app.evaluate<{ x: number; y: number } | null>(`(() => {
     const knots = [...document.querySelectorAll("circle")]
@@ -1281,7 +1298,7 @@ async function lastKnot(app: App): Promise<{ x: number; y: number }> {
  * Click the FIRST element in the page whose own text is exactly `text` (`clickText` takes the last that
  * contains it) — the sidebar's row, not a page's sentence that mentions the same word.
  */
-async function clickFirst(app: App, text: string): Promise<void> {
+export async function clickFirst(app: App, text: string): Promise<void> {
   const hit = await app.evaluate<boolean>(`(() => {
     const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && e.textContent === ${JSON.stringify(text)});
     if (!el) return false;
@@ -1292,8 +1309,8 @@ async function clickFirst(app: App, text: string): Promise<void> {
   await settle(250);
 }
 
-/** Click the first control whose title or accessible name is one of `titles` (both pages carry them). */
-async function clickTitled(app: App, titles: readonly string[]): Promise<void> {
+/** Click the first control whose title or accessible name is one of `titles`. */
+export async function clickTitled(app: App, titles: readonly string[]): Promise<void> {
   const hit = await app.evaluate<boolean>(`(() => {
     for (const want of ${JSON.stringify(titles)}) {
       const el = document.querySelector('[title=' + JSON.stringify(want) + '], [aria-label=' + JSON.stringify(want) + ']');
@@ -1322,9 +1339,8 @@ async function unfoldForScene(app: App): Promise<void> {
 }
 
 /**
- * The looks each gate runs in. The first two (the default palette, both modes) take every scene; the
- * rest take the scenes that draw the components copied so far, in the palettes whose rules those
- * components carry by hand (`--quick` skips them).
+ * The looks the gate runs in (`pair.mts --every-look`): the default palette in both modes, then the
+ * palettes whose rules the components carry by hand (`--quick` skips those).
  */
 export interface Look {
   theme: "light" | "dark";
@@ -1360,8 +1376,8 @@ export function parseLook(name: string): Look {
 }
 
 /**
- * Load `path` (`/`, `/rn`) in a look and reach a scene there. The look is written first and read by the load (a page
- * reads its configuration once), and the pointer is parked in the corner so no hover is carried over.
+ * Load `path` ({@link PAGE}) in a look and reach a scene there. The look is written first and read by the
+ * load (a page reads its configuration once), and the pointer is parked in the corner so no hover is carried over.
  */
 export async function goTo(app: App, path: string, to: { look?: Look; scene?: Scene } = {}): Promise<void> {
   const step = (what: string): void => {

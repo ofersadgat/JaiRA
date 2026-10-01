@@ -7,16 +7,16 @@ import { useTaskRun } from "@jaira/ui/taskRun";
 import { RowSpyContext, type RowSpy, type SpiedRow } from "./rowSpy";
 import { armedRewindOf, callsOf, lastContextOf, settledGateCallOf, settledGateOf, toldOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
 import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
-import type { EditMessage } from "@jaira/ui/transcriptView";
+import type { EditMessage } from "@jaira/ui/transcriptViewTypes";
 import { invoke } from "@jaira/ui/store";
 import { AnsweredForYou } from "./WorkRows";
 import { PendingSend } from "./PendingSend";
 import { paletteOfRun } from "@jaira/ui/rail";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "@jaira/ui/sessionBands";
 import { sessionKey } from "@jaira/ui/sessionCache";
-import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurface";
+import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurfaceModel";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
-import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurface";
+import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurfaceTypes";
 import type { CallSurface } from "@jaira/ui/transcriptRows";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
@@ -30,7 +30,7 @@ import { SessionBands, baselineOf, collapsed, sheetLookOf, type CutOffer } from 
 import { Transcript } from "./SessionTranscript";
 import { ValueView } from "./ValueView";
 import { Button } from "../settings/Button";
-import { advanceTargetOf } from "@jaira/ui/stateSurface";
+import { advanceTargetOf } from "@jaira/ui/stateSurfaceModel";
 import { durationOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { moveQuestionConfig, parseComponentConfig, type MoveQuestionView, type PendingApproval, type PendingQuestion, type PendingUserEvent, type SettledByView } from "@jaira/shared/browser";
 

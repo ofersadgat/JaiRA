@@ -252,7 +252,6 @@ async function up(): Promise<void> {
   } else {
     world = { home: join(DIR, "home"), project: join(DIR, "project"), userData: join(DIR, "user-data") };
   }
-  process.env["JAIRA_RENDERER"] = "one";
   const desktop = await App.launch(world, { out: OUT, port: PORT });
   let metro: ChildProcess | undefined;
   try {

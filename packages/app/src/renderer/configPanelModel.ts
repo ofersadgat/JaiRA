@@ -4,8 +4,33 @@
  * (`components/workflow/ConfigPanel.tsx`) read and say the same (decision 0015).
  */
 import { useCallback, useEffect, useState } from "react";
-import type { EffectiveState, WorkflowSource } from "@jaira/shared/browser";
+import type { EffectiveState, StateSlots, ValidateSchemaResult, WorkflowLayer, WorkflowSource } from "@jaira/shared/browser";
+import type { UiSurface } from "./fileTypes";
 import { invoke } from "./store";
+
+/**
+ * What the form needs to show a state WHOLE, beyond the document itself.
+ *
+ * All optional, and the panel is legible without any of them — but not complete. The one that
+ * matters most is `readFile`: a prompt held in another file (`{"$ref": "$/prompts/goals.md"}`) is
+ * the substance of the state, and without a reader the row shows a path where the prompt should be.
+ * A reading that cannot read the thing being read is the wrong kind of empty.
+ */
+export interface ConfigPanelServices {
+  /** Read any file in either layer, for showing what a LINKED property says. */
+  readFile?: ((layer: WorkflowLayer, path: string) => Promise<string | null>) | undefined;
+  /** Read a state that is NOT this file — what the graph's side panel needs. */
+  readState?: ((stateId: string) => Promise<WorkflowSource | null>) | undefined;
+  /** Read what a set of states declare as inputs, for the children table's wiring rows. */
+  loadStateSlots?: (stateIds: string[]) => Promise<Record<string, StateSlots> | null>;
+  /** Check the JSON tab's draft against a schema. Absent ⇒ the tab stays a plain text box. */
+  validateSchema?: ((schemaId: string, text: string) => Promise<ValidateSchemaResult | null>) | undefined;
+  /** The window's remembered layout, for the JSON tab's field reference — see `uiState.ts`. */
+  ui?: UiSurface | undefined;
+  /** Word wrap on the JSON tab. Passed through so the preference is one setting, not one per editor. */
+  wrapJson?: boolean;
+  onWrapJson?: ((wrap: boolean) => void) | undefined;
+}
 
 /**
  * The effective state, fetched on mount (the panel is handed to the shell as a rendered element, so its

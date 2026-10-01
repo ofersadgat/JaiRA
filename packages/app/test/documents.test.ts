@@ -21,10 +21,8 @@
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { MarkdownDocument } from "../src/renderer/documents";
-import "../src/renderer/fenceRender";
+import { MarkdownDocument } from "../src/renderer/markdownDocument";
 
-const YAML = ["id: plan", ""].join("\n");
 const DOC = ["# Plan", "", "```yaml", "id: plan", "```", "", "Approve?"].join("\n");
 
 const render = (props: Record<string, unknown>): string =>
@@ -36,10 +34,9 @@ describe("a document nothing may change", () => {
     const html = render({});
     expect(html).toContain("<h1>Plan</h1>");
     expect(html).toContain("<p>Approve?</p>");
-    // The reading a fence earns anywhere else in the app, which is the point of routing through one
-    // component: a ```yaml block is the same thing in a gate, a transcript and a file.
-    expect(html).toContain("vv-toggle");
-    expect(html).toContain(">Data<");
+    // The fence is drawn by whatever renderer the page registered (`registerFenceRenderer`); an
+    // island page registers none, and the block is its source in a box.
+    expect(html).toContain(`<pre class="language-yaml"><code>id: plan`);
   });
 });
 
@@ -66,39 +63,3 @@ describe("a document that may be changed", () => {
   });
 });
 
-describe("code, read and edited", () => {
-  it("reads with the tokenizer — no editor instance for something nobody can type into", async () => {
-    const { CodeDocument } = await import("../src/renderer/documents");
-    const html = renderToStaticMarkup(
-      createElement(CodeDocument, { text: YAML, mime: "application/yaml" }),
-    );
-    // Its fallback is the source, so the text is on screen while Monaco loads.
-    expect(html).toContain("id: plan");
-  });
-
-  it("keeps an editable value on the coloured view instead of demoting it to a box", async () => {
-    // This replaced a worse answer. The code view had no renderer that could accept a keystroke, so
-    // an editable YAML value either sat on a pane that dropped every one or fell through to a plain
-    // textarea — colour or editing, never both. `MonacoCodePane` takes an `onChange` now, so the
-    // value that said it could be changed is coloured AND changeable in the same place.
-    const { ValueView } = await import("../src/renderer/valueView");
-    const html = renderToStaticMarkup(
-      createElement(ValueView, {
-        value: YAML,
-        hint: { mime: "application/yaml" },
-        edit: () => undefined,
-      } as never),
-    );
-    expect(html).not.toContain("<textarea");
-    expect(html).toContain("id: plan");
-  });
-
-  it("still offers the source underneath, which is what the toggle is for", async () => {
-    const { ValueView } = await import("../src/renderer/valueView");
-    const html = renderToStaticMarkup(
-      createElement(ValueView, { value: YAML, hint: { mime: "application/yaml" } } as never),
-    );
-    expect(html).toContain(">Code<");
-    expect(html).toContain(">Source<");
-  });
-});

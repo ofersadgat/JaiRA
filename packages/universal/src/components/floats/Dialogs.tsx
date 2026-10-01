@@ -1,7 +1,7 @@
 import type { JSX } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { ModuleApproval } from "@jaira/shared/browser";
-import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurface";
+import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurfaceTypes";
 import { Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";

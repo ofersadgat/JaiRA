@@ -7,12 +7,10 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/browser";
-import { CUT_OFF_EVENT, foldWriting, isStreamBookkeeping, writingPath, type WritingTool } from "@jaira/shared/browser";
+import { CUT_OFF_EVENT, foldWriting, isStreamBookkeeping, workflowOutcomeOf, writingPath, type WritingTool } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import { keptUnderSummary, producedArtifact, Transcript } from "../src/renderer/transcriptView";
-import { ValuePanelContext } from "../src/renderer/valuePanel";
+import { MESSAGE_SOURCE, workflowSourceTitleOf } from "../src/renderer/messageReading";
+import { keptUnderSummary, producedArtifact, toolLineOf } from "../src/renderer/transcriptRows";
 import {
   agentTitleOf,
   blocksOf,
@@ -761,15 +759,16 @@ describe("a page the model made, in the conversation that asked for it", () => {
   });
 
   it("never summarises a produced page away, however far back in the stretch it is", () => {
-    const step = (n: number): TranscriptEntry => ({ kind: "tool", name: "bash", summary: `step ${n}`, ok: true, result: "" });
-    const drew: TranscriptEntry = { kind: "tool", name: "show_artifact", summary: "mocks/07.html", ok: true, result: envelope as never };
+    const step = (n: number): ToolEntry => ({ kind: "tool", name: "bash", summary: `step ${n}`, ok: true, result: "" });
+    const drew: ToolEntry = { kind: "tool", name: "show_artifact", summary: "mocks/07.html", ok: true, result: envelope as never };
     // The page is a piece of the answer, not a step towards it: it stays drawn under the summary.
-    expect(keptUnderSummary(drew as never)).toBe(true);
-    expect(keptUnderSummary(step(1) as never)).toBe(false);
-    const html = renderToStaticMarkup(createElement(Transcript, { entries: [drew, step(1), step(2), step(3)] }));
-    expect(html).toContain('data-testid="work-summary"');
-    expect(html).toContain("ws-kept");
-    expect(html).toContain("mocks/07.html");
+    expect(keptUnderSummary(drew)).toBe(true);
+    expect(keptUnderSummary(step(1))).toBe(false);
+    // Of a stretch long enough to be summarised it is the one row kept, with three steps after it…
+    expect([drew, step(1), step(2), step(3)].map((entry) => keptUnderSummary(entry))).toEqual([true, false, false, false]);
+    // …and the row kept is the one that draws the page under its line, unasked.
+    expect(toolLineOf(drew, false, false)).toMatchObject({ preview: "mocks/07.html", shown: "produced" });
+    expect(toolLineOf(step(1), false, false).shown).toBeUndefined();
   });
 });
 
@@ -1006,18 +1005,16 @@ describe("an agent's question the control conversation answered (decision 0005 �
     expect(markAnsweredQuestions(entries, [mark(0.9, "toolu_elsewhere")])).toBe(entries);
   });
 
-  it("draws who answered under the block, and the way back only where the host lends one", () => {
-    const [marked] = markAnsweredQuestions([ask("Which way?")], [mark(0.86, "Which way?")]);
-    const bare = renderToStaticMarkup(createElement(Transcript, { entries: [marked!] }));
-    expect(bare).toContain('data-testid="asked"');
-    expect(bare).toContain('data-testid="answered-for-you"');
-    expect(bare).toContain("Answered for you by <b>the conversation</b>");
-    expect(bare).toContain("confidence 0.86");
-    expect(bare).not.toContain("Answer it yourself");
-    const hosted = renderToStaticMarkup(createElement(Transcript, { entries: [marked!], calls: { onAnswerYourself: () => undefined } }));
-    expect(hosted).toContain("Answer it yourself");
-    // A block the person answered says nothing of the sort.
-    expect(renderToStaticMarkup(createElement(Transcript, { entries: [ask("Which way?")] }))).not.toContain("answered-for-you");
+  it("draws who answered under the block: the question's row shows it unasked, and carries the mark the line is said from", () => {
+    const [marked] = markAnsweredQuestions([ask("Which way?")], [mark(0.86, "Which way?")]) as ToolEntry[];
+    // The question and what was answered are drawn under the call's line, and no summary hides them.
+    expect(toolLineOf(marked!, false, false).shown).toBe("asked");
+    expect(keptUnderSummary(marked!)).toBe(true);
+    // Who answered and how sure ("confidence 0.86") ride on the entry, which is all the block is handed.
+    expect(marked!.settledBy).toMatchObject({ via: "control", confidence: 0.86 });
+    // A block the person answered is the same block, and says nothing of the sort.
+    expect(toolLineOf(ask("Which way?"), false, false).shown).toBe("asked");
+    expect(ask("Which way?").settledBy).toBeUndefined();
   });
 });
 
@@ -1032,15 +1029,20 @@ describe("a workflow tool's note, where the host puts it", () => {
   };
 
   it("is under the call by default — a one-column conversation has nowhere else", () => {
-    const html = renderToStaticMarkup(createElement(Transcript, { entries: [moved] }));
-    expect(html).toContain("adopted into");
-    expect(html).toContain('<b>Feature workflow</b> as <span class="mono">product</span>');
+    expect(toolLineOf(moved, false, false).shown).toBe("outcome");
+    // What the note says is the tool's own answer, read once: "adopted into Feature workflow as product".
+    expect(workflowOutcomeOf(moved.result!)).toEqual({ verb: "adopted into", standsAt: "ux", workflow: "Feature workflow", adoptedAs: "product" });
+    // It is what the call did, so a summary keeps its row.
+    expect(keptUnderSummary(moved)).toBe(true);
   });
 
   it("is left to the rail when the host draws it there, so the call's row says nothing more", () => {
-    const html = renderToStaticMarkup(createElement(Transcript, { entries: [moved], calls: { outcomes: "rail" } }));
-    expect(html).toContain("move_task");
-    expect(html).not.toContain("adopted into");
+    const line = toolLineOf(moved, false, false, { outcomes: "rail" });
+    // Still the call's row, by its title and the name the agent called…
+    expect(line).toMatchObject({ name: "Move task", called: "move_task" });
+    // …with nothing drawn under it, and nothing a summary has to keep.
+    expect(line.shown).toBeUndefined();
+    expect(keptUnderSummary(moved, { outcomes: "rail" })).toBe(false);
   });
 });
 
@@ -1062,29 +1064,19 @@ describe("what was said to the model and not typed by the person", () => {
     ]);
   });
 
-  it("stays on the right, where everything said to the model is, and wears a badge naming its source — what the person typed wears none", () => {
-    const html = renderToStaticMarkup(createElement(Transcript, { entries: entriesOf(view) }));
-    // Two bubbles on the right: the app's, marked and badged; the person's, bare.
-    expect(html.match(/ts-msg ts-msg-user/g)).toHaveLength(2);
-    expect(html.match(/ts-msg-sent/g)).toHaveLength(1);
-    expect(html).toContain("Written by JaiRA");
-    // The system prompt keeps its aside, and says whose it is.
-    expect(html).toMatch(/ts-tag">system<span class="ts-source ts-source-workflow"/);
-    expect(html.match(/ts-source /g)).toHaveLength(2);
+  it("wears a badge naming its source — what the person typed wears none", () => {
+    const said = entriesOf(view).filter((entry): entry is Extract<TranscriptEntry, { kind: "message" }> => entry.kind === "message");
+    // Two badges in four messages: the system prompt says whose it is, the app's own message that the
+    // app wrote it. The answer and the person's own words are bare.
+    expect(said.map((message) => (message.by === undefined ? undefined : MESSAGE_SOURCE[message.by].label))).toEqual(["From the workflow", "Written by JaiRA", undefined, undefined]);
+    expect(MESSAGE_SOURCE.host.title).toBe("JaiRA wrote and sent this for you — you did not type it");
   });
 
-  it("names the workflow the words came from, and is a button that opens its definition where there is a panel to open it in", () => {
-    const opened: string[] = [];
-    const named = renderToStaticMarkup(createElement(Transcript, { session: view, entries: entriesOf(view) }));
-    expect(named).toContain('From <span class="mono">plan/goals</span>');
-    expect(named).not.toContain("ts-source-link");
-    const panel = { open: () => undefined, openState: (stateId: string) => opened.push(stateId) };
-    const linked = renderToStaticMarkup(
-      createElement(ValuePanelContext.Provider, { value: panel }, createElement(Transcript, { session: view, entries: entriesOf(view) })),
-    );
-    expect(linked).toMatch(/<button type="button" class="ts-source ts-source-workflow ts-source-link"[^>]*>.*From <span class="mono">plan\/goals<\/span><\/button>/);
-    // The app's own words are not a workflow's, and open nothing.
-    expect(linked.match(/<button[^>]*ts-source/g)).toHaveLength(1);
+  it("names the workflow the words came from, and says it opens its definition where there is a panel to open it in", () => {
+    // The conversation's state is the workflow its `workflow` messages are from.
+    expect(view.stateId).toBe("plan/goals");
+    expect(workflowSourceTitleOf(view.stateId, false)).toBe("Written by the workflow plan/goals — its author's words, not typed here");
+    expect(workflowSourceTitleOf(view.stateId, true)).toBe("Written by the workflow plan/goals — its author's words, not typed here. Open its definition beside the conversation.");
   });
 });
 

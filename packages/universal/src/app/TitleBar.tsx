@@ -1,6 +1,6 @@
 import { useMemo, type JSX } from "react";
 import { View } from "@tamagui/core";
-import { taskNameOf, taskNamePending } from "@jaira/ui/taskName";
+import { taskNameOf, taskNamePending } from "@jaira/ui/taskNameModel";
 import { FOLD } from "@jaira/ui/uiState";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { NewTask } from "../components/NewTask";

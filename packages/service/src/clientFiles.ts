@@ -32,13 +32,25 @@ const TYPES: Record<string, string> = {
 /**
  * The page's content policy, as a header.
  *
- * The directives are the ones `packages/app/src/renderer/index.html` carries in its `<meta>`, and
- * for the same reasons (read them there). The one addition is a hash per inline `<script>` in
- * the page: One's SPA shell sets four globals inline before its modules load, and a hash admits
- * exactly those four and nothing else, where `'unsafe-inline'` would admit anything injected.
- *
- * `connect-src 'self'` is also what lets a browser's page reach the engine that served it and no other:
- * over HTTP(S), `'self'` covers the same host's WebSocket.
+ * The page loads only its own bundle: no remote code, no inline eval, no CDN.
+ * - `script-src` carries a hash per inline `<script>` in the page: One's SPA shell sets four globals
+ *   inline before its modules load, and a hash admits exactly those four and nothing else, where
+ *   `'unsafe-inline'` would admit anything injected.
+ * - `'wasm-unsafe-eval'` is for the TextMate tokenizer (`textmate.ts`): the grammars run on an
+ *   Oniguruma WASM build, and instantiating WebAssembly is compilation, which a bare `script-src
+ *   'self'` refuses — silently, the app then falling back to Monaco's own tokenizer. It is the NARROW
+ *   directive for exactly that: it permits WebAssembly and nothing else, and in particular not `eval()`
+ *   of JavaScript, which `'unsafe-eval'` would. The module is bundled, so this admits no remote code.
+ * - `worker-src` and `font-src` are for Monaco (CHANGESETS.md §7.3): its diff computation runs in a
+ *   bundled worker (`'self'`; the bundler may wrap one in a `blob:` URL), and its icons are a bundled
+ *   font.
+ * - `frame-src` names the artifact scheme because an interactive artifact is loaded from it, and
+ *   because WITHOUT the directive it falls through to `default-src 'none'` and the frame is refused
+ *   before it is fetched. It admits that scheme and nothing else: a static artifact is still shown from
+ *   `srcdoc`, which needs no allowance here and gets no scripts — the page's own `script-src` is
+ *   inherited by such a frame, which is precisely why an interactive one cannot use `srcdoc` at all.
+ * - `connect-src 'self'` is what lets a browser's page reach the engine that served it and no other:
+ *   over HTTP(S), `'self'` covers the same host's WebSocket.
  */
 export function clientPolicy(html: string): string {
   const hashes = [...html.matchAll(/<script>([\s\S]*?)<\/script>/g)].map((m) => `'sha256-${createHash("sha256").update(m[1] ?? "").digest("base64")}'`);
@@ -70,8 +82,8 @@ const isFile = (file: string): boolean => {
  * percent-encoded.
  *
  * - A file is itself.
- * - A route with a page of its own (`/rn` → `rn.html`) gets that page, with only the stylesheets it
- *   links: the universal shell must not stand on the desktop's `styles.css` (decision 0015).
+ * - A route with a page of its own (`/native` → `native.html`) gets that page, with only the
+ *   stylesheets it links.
  * - Anything else — a folder too — is `index.html`.
  * - Nothing outside `root`, whatever a path carries: an encoded `..`, a backslash Windows reads as a
  *   separator, a NUL.

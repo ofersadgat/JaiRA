@@ -21,13 +21,23 @@ import {
   type WritableLayer,
 } from "@jaira/shared/browser";
 import { applyForm, EMPTY_FORM, formOf, type BindingRow, type ChildRow, type FormModel, type TransitionRow } from "./stateForm";
-import type { EditorTab } from "./editorChrome";
 import { overrideTarget, type LayerBarAction } from "./builtInModel";
 import { fieldClass, formIssues, markFor, NO_ISSUES, type FormIssues } from "./issues";
 import type { UiSurface } from "./fileTypes";
 import type { LinkReader } from "./linkModel";
 import { operationFieldPaths } from "./operationFieldsModel";
 import { bindingTargets, childStateIdOf, functionOptions, guardTargets, linkTargets, operationOutputNames, resolveRef } from "./completions";
+
+/**
+ * The readings a state file's editor offers, and the name the store remembers one under.
+ *
+ * Here rather than in the editor because three modules that are not React pass it around — the
+ * surface registry, the store that holds one per file, and the app that wires them together — and a
+ * type imported from a component only so a record can be keyed by it is a dependency none of them
+ * need. Two of these EDIT the document and the third only reads it; that asymmetry is deliberate and
+ * is spelled out in `stateGraphView.tsx`.
+ */
+export type EditorTab = "form" | "json" | "graph";
 
 /**
  * The datalist every binding box completes against.

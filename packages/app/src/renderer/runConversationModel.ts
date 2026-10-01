@@ -10,7 +10,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import { isComponentName, parseComponentConfig, readCall, type ContextReading, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionRef, type SessionView } from "@jaira/shared/browser";
 import type { BandNote } from "./sessionBands";
 import { cutNameOf } from "./sessionRows";
-import { surfaceKindOf } from "./stateSurface";
+import { surfaceKindOf } from "./stateSurfaceModel";
 
 /**
  * An events automation's `notify` call, settled: what it told the person, and what about — the

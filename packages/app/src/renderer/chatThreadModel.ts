@@ -9,8 +9,8 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn } from "@jaira/shared/browser";
 import { useKeptDraft } from "./composerDrafts";
 import { titleOf } from "./chatWorkflow";
-import type { ChatSurface } from "./chatPane";
-import type { ApprovalAnswerExtras } from "./components";
+import type { ChatSurface } from "./chatSurface";
+import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import { useWaiting } from "./limitsStore";
 import { invoke } from "./store";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";

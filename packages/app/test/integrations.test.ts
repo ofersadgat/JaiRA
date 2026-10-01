@@ -15,7 +15,7 @@ import { initProject } from "@jaira/persistence";
 import { testHome } from "@jaira/testing";
 import type { ForgeCheck } from "@jaira/shared";
 import { AppService } from "@jaira/service";
-import { forgeState } from "../src/renderer/integrationsPane";
+import { forgeState } from "../src/renderer/connectionsModel";
 import { replayForge, type Replay } from "../../runtime/test/forgeReplay";
 
 let dir: string;

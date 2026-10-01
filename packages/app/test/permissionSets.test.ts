@@ -1,42 +1,45 @@
 /**
  * Settings → Permission sets and the state editor's one Tools field (decision 0007 §6).
  *
- * Three claims, and every one of them is about a pure function — there is no DOM harness here, so
- * logic that lives in a component is logic nothing asserts (`permissionSetsPane.tsx`'s own header):
+ * Every claim is about a pure function — there is no DOM harness here, so logic that lives in a
+ * component is logic nothing asserts:
  *
- *  - what the RAIL lists, and which permission set stays open through a write;
+ *  - what the RAIL lists (`permissionSetsHost.ts`'s rows, which the pane draws), which files a layer
+ *    of the page reads, where its changes go, and which permission set stays open through a write;
  *  - what a section's add-menu offers and what its minus takes away (`composerPermissionSet.ts`);
  *  - the state field's ROUND TRIP — `$ref` plus siblings in, the same document out, and a value it
- *    cannot draw kept as it was.
- *
- * Plus one render: the pane and the field are drawn to static markup, which is what a still picture
- * of them is, and is enough to catch a component that throws on a shape the model allows.
+ *    cannot draw kept as it was;
+ *  - what the pane SAYS of the permission set that is open — its standing, who uses it, how far a
+ *    copy has moved from what it was copied from, where a first change goes — and the label the
+ *    state field shows for the one a state names. The sentences around them are the component's.
  */
 import { describe, expect, it } from "vitest";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
 import {
+  copiedFrom,
+  copyDifferences,
   MODE_WHEN_UNSET,
   parsePermissionSet,
+  permissionSetFileLabel,
+  permissionSetStanding,
   SCRIPT_SUBJECT,
   permissionSetsAt,
+  usedByLine,
   type ToolChoice,
   type PermissionSetChoice,
   type PermissionSetDecl,
   type PermissionSetRecord,
-  type PermissionSetsView as PermissionSetsData,
 } from "@jaira/shared/browser";
 import {
   addableScript,
   addableTools,
   commandGroupsOf,
+  sectionCountOf,
   suggestedPrograms,
   suggestedSubcommands,
   withoutProgram,
   withToolHeld,
 } from "../src/renderer/composerPermissionSet";
 import { applyOperationFields, operationFieldsOf } from "../src/renderer/operationForm";
-import { ToolsFieldControl } from "../src/renderer/toolsField";
 import {
   applyToolsField,
   linesOfPermissionSet,
@@ -47,8 +50,16 @@ import {
   permissionSetPicks,
   toolsFieldOf,
 } from "../src/renderer/toolsFieldForm";
-import { openSectionsOf } from "../src/renderer/permissionSetCard";
-import { detachingLines, newPermissionSetProblem, permissionSetLayersOf, permissionSetRailItems, PermissionSetsView } from "../src/renderer/permissionSetsPane";
+import {
+  detachingLines,
+  INTO_NAME,
+  LOWER_NAME,
+  newPermissionSetProblem,
+  permissionSetLayersOf,
+  permissionSetRailRows,
+  PERSONAL,
+  type PermissionSetRailRow,
+} from "../src/renderer/permissionSetsHost";
 
 const SHIPPED: PermissionSetDecl = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" };
 
@@ -82,24 +93,30 @@ const tools: ToolChoice[] = [
 ];
 
 describe("the rail", () => {
+  /** The rows of one kind — a permission set's are the ones that carry a dot, a copy's tag and a summary. */
+  const setsOf = (rows: readonly PermissionSetRailRow[]): Array<Extract<PermissionSetRailRow, { kind: "set" }>> =>
+    rows.filter((row): row is Extract<PermissionSetRailRow, { kind: "set" }> => row.kind === "set");
+  const bucketsOf = (rows: readonly PermissionSetRailRow[]): Array<Extract<PermissionSetRailRow, { kind: "bucket" }>> =>
+    rows.filter((row): row is Extract<PermissionSetRailRow, { kind: "bucket" }> => row.kind === "bucket");
+
   it("is the bucket hierarchy: a heading per bucket, its permission sets, + permission set, and + bucket last", () => {
-    const items = permissionSetRailItems(permissionSetsAt(records, "project"), "project", {});
-    expect(items.map((item) => [item.id, item.heading !== undefined, item.indent])).toEqual([
-      ["bucket:chat", true, 0],
-      ["permissionSet:chat/read-only", false, 0],
-      ["permissionSet:chat/full", false, 0],
-      ["new:chat", false, 0],
-      ["bucket:feature", true, 0],
-      ["permissionSet:feature/writes", false, 0],
-      ["new:feature", false, 0],
-      ["+bucket", false, undefined],
+    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", {});
+    expect(rows.map((row) => [row.id, row.kind, row.depth])).toEqual([
+      ["bucket:chat", "bucket", 0],
+      ["permissionSet:chat/read-only", "set", 0],
+      ["permissionSet:chat/full", "set", 0],
+      ["new:chat", "add", 0],
+      ["bucket:feature", "bucket", 0],
+      ["permissionSet:feature/writes", "set", 0],
+      ["new:feature", "add", 0],
+      ["+bucket", "add", undefined],
     ]);
   });
 
   it("indents a nested bucket under its parent", () => {
     const nested: PermissionSetRecord = { id: "feature/impl/reads", bucket: "feature/impl", name: "reads", files: [{ layer: "project", file: "x", format: "json", decl: SHIPPED }] };
-    const items = permissionSetRailItems(permissionSetsAt([...records, nested], "project"), "project", {});
-    expect(items.filter((item) => item.id.startsWith("bucket:")).map((item) => [item.id, item.indent])).toEqual([
+    const rows = permissionSetRailRows(permissionSetsAt([...records, nested], "project"), "project", {});
+    expect(bucketsOf(rows).map((row) => [row.id, row.depth])).toEqual([
       ["bucket:chat", 0],
       ["bucket:feature", 0],
       ["bucket:feature/impl", 1],
@@ -109,8 +126,8 @@ describe("the rail", () => {
   it("folds a closed bucket to its heading, a bucket inside it included, and flips one on its heading", () => {
     const nested: PermissionSetRecord = { id: "feature/impl/reads", bucket: "feature/impl", name: "reads", files: [{ layer: "project", file: "x", format: "json", decl: SHIPPED }] };
     const flipped: string[] = [];
-    const items = permissionSetRailItems(permissionSetsAt([...records, nested], "project"), "project", {}, { open: new Set(["chat"]), onFold: (bucket) => flipped.push(bucket) });
-    expect(items.map((item) => item.id)).toEqual([
+    const rows = permissionSetRailRows(permissionSetsAt([...records, nested], "project"), "project", {}, { open: new Set(["chat"]), onFold: (bucket) => flipped.push(bucket) });
+    expect(rows.map((row) => row.id)).toEqual([
       "bucket:chat",
       "permissionSet:chat/read-only",
       "permissionSet:chat/full",
@@ -118,36 +135,46 @@ describe("the rail", () => {
       "bucket:feature",
       "+bucket",
     ]);
-    expect(items.find((item) => item.id === "bucket:chat")?.fold?.open).toBe(true);
-    items.find((item) => item.id === "bucket:feature")?.fold?.onFold();
+    expect(bucketsOf(rows).map((row) => [row.id, row.fold?.open])).toEqual([
+      ["bucket:chat", true],
+      ["bucket:feature", false],
+    ]);
+    bucketsOf(rows)
+      .find((row) => row.id === "bucket:feature")
+      ?.fold?.onFold();
     expect(flipped).toEqual(["feature"]);
   });
 
   it("offers no + rows where nothing can be written — the personal layer holds no permission sets", () => {
-    const items = permissionSetRailItems(permissionSetsAt(records, "project"), undefined, {});
-    expect(items.some((item) => item.id.startsWith("new:") || item.id === "+bucket")).toBe(false);
+    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), undefined, {});
+    expect(rows.some((row) => row.kind === "add")).toBe(false);
+    expect(rows.map((row) => row.id)).toEqual(["bucket:chat", "permissionSet:chat/read-only", "permissionSet:chat/full", "bucket:feature", "permissionSet:feature/writes"]);
   });
 
   it("marks what THIS layer states, and marks nothing on a layer that states nothing", () => {
     const here = (writesTo: "project" | undefined): string[] =>
-      permissionSetRailItems(permissionSetsAt(records, "project"), writesTo, {})
-        .filter((item) => item.heading === undefined && renderToStaticMarkup(createElement("i", {}, item.label)).includes("set-here-dot"))
-        .map((item) => item.id);
+      setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), writesTo, {}))
+        .filter((row) => row.dot)
+        .map((row) => row.id);
     expect(here("project")).toEqual(["permissionSet:chat/read-only", "permissionSet:feature/writes"]);
     expect(here(undefined)).toEqual([]);
   });
 
   it("tags a copy of what ships beside its name, and nothing else", () => {
-    const tags = permissionSetRailItems(permissionSetsAt(records, "project"), "project", {})
-      .filter((item) => item.heading === undefined)
-      .map((item) => [item.id, /class="cx-src">([^<]*)</.exec(renderToStaticMarkup(createElement("i", {}, item.label)))?.[1]]);
-    expect(tags.filter(([, tag]) => tag !== undefined)).toEqual([["permissionSet:chat/read-only", "this project · copied from built in"]]);
+    const tags = setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), "project", {})).map((row) => [row.id, row.copy]);
+    expect(tags).toEqual([
+      ["permissionSet:chat/read-only", "this project · copied from built in"],
+      ["permissionSet:chat/full", undefined],
+      ["permissionSet:feature/writes", undefined],
+    ]);
   });
 
   it("says a row is unsaved from its draft", () => {
     const draft = parsePermissionSet({ read_file: "allow", other: "deny" }).permissionSet;
-    const items = permissionSetRailItems(permissionSetsAt(records, "project"), "project", { "chat/read-only": draft });
-    expect(items.find((item) => item.id === "permissionSet:chat/read-only")?.summary).toBe("unsaved · 1 line · other deny");
+    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", { "chat/read-only": draft });
+    expect(setsOf(rows).find((row) => row.id === "permissionSet:chat/read-only")?.summary).toBe("unsaved · 1 line · other deny");
+    // With no draft the row says what the file holds.
+    expect(setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), "project", {})).find((row) => row.id === "permissionSet:chat/read-only")?.summary).toBe("4 lines · other deny");
   });
 });
 
@@ -208,9 +235,11 @@ describe("a section's add line and its minus", () => {
     expect(Object.keys(withToolHeld(permissionSet, {}, "read_file", false).entries)).not.toContain("read_file");
   });
 
-  it("opens on the sections that hold a line", () => {
-    expect(openSectionsOf(permissionSet)).toEqual(["files", "execution"]);
-    expect(openSectionsOf(parsePermissionSet({ other: "deny" }).permissionSet)).toEqual([]);
+  it("counts the lines each section holds — the card opens on the sections that hold one", () => {
+    // Execution's four: the shell, `script`, and the two `git` subcommands its program names.
+    const counts = (set: typeof permissionSet): number[] => (["files", "execution", "web", "git", "tasks", "mcp"] as const).map((section) => sectionCountOf(set, section));
+    expect(counts(permissionSet)).toEqual([1, 4, 0, 0, 0, 0]);
+    expect(counts(parsePermissionSet({ other: "deny" }).permissionSet)).toEqual([0, 0, 0, 0, 0, 0]);
   });
 });
 
@@ -331,110 +360,54 @@ describe("the permission set picker", () => {
   });
 });
 
-describe("drawn", () => {
-  const data: PermissionSetsData = { records, usedBy: { "chat/read-only": ["sync/review", "a", "b"] }, tools, layers: ["project", "base", "system"] };
-  const none = (): void => undefined;
-  const draw = (extra: Record<string, unknown> = {}): string =>
-    renderToStaticMarkup(
-      createElement(PermissionSetsView, {
-        data,
-        layer: "project",
-        writesTo: "project",
-        choice: { permissionSet: "chat/read-only" },
-        onChoice: none,
-        drafts: {},
-        onDraft: none,
-        comparing: false,
-        onCompare: none,
-        naming: {},
-        onNaming: none,
-        locked: false,
-        problem: null,
-        onSave: none,
-        onReset: none,
-        onCopy: none,
-        onCopyTo: none,
-        puttingBack: false,
-        onPutBack: none,
-        told: null,
-        onAdd: none,
-        ...extra,
-      } as never),
-    );
+describe("what the pane says of the open permission set, and the field of the one a state names", () => {
+  const usedBy: Record<string, string[]> = { "chat/read-only": ["sync/review", "a", "b"] };
+  const at = (id: string, all: readonly PermissionSetRecord[] = records) => permissionSetsAt(all, "project").find((one) => one.id === id)!;
 
-  it("draws the path, the standing, who uses it, and the card's own rows", () => {
-    const html = draw({ folds: new Set(["files", "execution"]) });
-    expect(html).toContain("chat / read-only");
-    expect(html).toContain("used by sync/review and 2 more states");
-    // A held line starts with the minus, and the shell's line says what it stands for.
-    expect(html).toContain("set-minus");
-    expect(html).toContain("the shell — and the mode for any command not named below");
+  it("says who uses it", () => {
+    expect(usedByLine(usedBy["chat/read-only"])).toBe("used by sync/review and 2 more states");
+    expect(usedByLine(usedBy["chat/full"])).toBe("no state names it");
   });
 
-  it("draws a built-in on a layer LIVE: every line changeable, where its copy will go, and no Override here", () => {
-    const html = draw({ choice: { permissionSet: "chat/full" }, folds: new Set(["execution"]) });
-    expect(html).not.toContain("set-readonly");
-    expect(html).toContain("set-minus");
-    expect(html).not.toContain("Override");
-    expect(html).toContain(">built in<");
-    expect(html).toContain("your first change copies it to <span class=\"mono\">.jaira/permission-sets/chat/full.json</span>");
+  it("a built-in on a layer is not the layer's own: its standing, and where its first change will copy it", () => {
+    const full = at("chat/full");
+    expect(permissionSetStanding(full)).toEqual({ here: false, label: "built in" });
+    expect(permissionSetFileLabel("project", full.id)).toBe(".jaira/permission-sets/chat/full.json");
     // Nothing of this layer's to save, revert or put back until the first change writes the copy.
-    expect(html).not.toContain(">Save<");
-    expect(html).not.toContain("Put back");
+    expect(full.here).toBe(false);
+    expect(copiedFrom(full)).toBeUndefined();
+    expect(copyDifferences(full)).toBeUndefined();
   });
 
-  it("draws a copy: its tag, how many lines differ from what ships and where it lives, and Put back the built-in", () => {
-    const html = draw({ folds: new Set(["execution"]) });
-    expect(html).toContain("this project · copied from built in");
-    expect(html).toContain("<b>1 line</b> differs from what ships — <span class=\"mono\">.jaira/permission-sets/chat/read-only.json</span>");
-    expect(html).toContain(">Save<");
-    expect(html).toContain("Put back the built-in");
-    expect(html).not.toContain("Reset to built in");
+  it("a copy: its tag, how many lines differ from what ships and where it lives", () => {
+    const readOnly = at("chat/read-only");
+    expect(permissionSetStanding(readOnly)).toEqual({ here: true, label: "this project · copied from built in" });
+    expect(copyDifferences(readOnly)).toBe(1);
+    expect(readOnly.source.file).toBe(".jaira/permission-sets/chat/read-only.json");
+    // A copy of what SHIPS is put back; a copy of the shared one is reset to it. The layer it was
+    // copied from decides which, and is named as the page names it.
+    expect(copiedFrom(readOnly)).toBe("system");
+    expect(LOWER_NAME[copiedFrom(readOnly)!]).toBe("what ships");
   });
 
-  it("asks before putting back, in the page, naming the file it deletes", () => {
-    const html = draw({ puttingBack: true });
-    expect(html).toContain('role="alertdialog"');
-    expect(html).toContain("Put back the built-in? This deletes <span class=\"mono\">.jaira/permission-sets/chat/read-only.json</span>.");
-    expect(html).toContain(">Put back<");
-    expect(html).toContain(">Cancel<");
-    // The confirmation takes the actions' place: nothing else can be pressed meanwhile.
-    expect(html).not.toContain(">Save<");
+  it("names the personal layer, and the two a change made there can be copied to", () => {
+    expect(PERSONAL).toBe("Just you");
+    expect(INTO_NAME).toEqual({ base: "Shared", project: "this project" });
   });
 
-  it("on the personal layer: shows what is in effect, and asks where a first change goes", () => {
-    const quiet = draw({ writesTo: undefined, choice: { permissionSet: "chat/full" } });
-    expect(quiet).toContain("Just you holds no permission sets, so your first change asks where to copy it");
-    expect(quiet).not.toContain("set-readonly");
-    const asking = draw({ writesTo: undefined, choice: { permissionSet: "chat/full" }, asking: "chat/full" });
-    expect(asking).toContain("Copy to Shared");
-    expect(asking).toContain("Copy to this project");
-    // While it is asked, the card is held still: the change waits for the answer.
-    expect(asking).toContain("set-readonly");
-    const noProject = draw({ data: { ...data, layers: ["base", "system"] }, layer: "base", writesTo: undefined, choice: { permissionSet: "chat/full" }, asking: "chat/full" });
-    expect(noProject).toContain("Copy to Shared");
-    expect(noProject).not.toContain("Copy to this project");
-    const told = draw({ writesTo: undefined, choice: { permissionSet: "chat/full" }, told: "Copied to Shared, with your change — ~/.jaira/permission-sets/chat/full.json." });
-    expect(told).toContain("Copied to Shared, with your change");
-  });
-
-  it("says why a file it cannot read is not drawn as a permission set", () => {
+  it("keeps why a file it cannot read is not a permission set", () => {
     const broken: PermissionSetRecord = { id: "chat/bad", bucket: "chat", name: "bad", files: [{ layer: "project", file: ".jaira/permission-sets/chat/bad.json", format: "json", problem: "it is a list" }] };
-    const html = draw({ data: { ...data, records: [...records, broken] }, choice: { permissionSet: "chat/bad" } });
-    expect(html).toContain("could not be read as a permission set");
-    expect(html).toContain("it is a list");
+    const bad = at("chat/bad", [...records, broken]);
+    // No map to draw a card from, and the reason the page gives instead.
+    expect(bad.source.decl).toBeUndefined();
+    expect(bad.source.problem).toBe("it is a list");
+    expect(bad.source.file).toBe(".jaira/permission-sets/chat/bad.json");
   });
 
-  it("draws the state field with its picker and its lines, and nothing at all when a reading has none", () => {
+  it("the state field shows the permission set a state names by its row's label", () => {
     const choices: PermissionSetChoice[] = [{ id: "chat/read-only", bucket: "chat", name: "read-only", layer: "system", decl: SHIPPED }];
-    const field = (raw: unknown, readOnly = false): string =>
-      renderToStaticMarkup(createElement(ToolsFieldControl, { value: toolsFieldOf(raw)!, permissionSets: choices, tools, readOnly, onChange: none }));
-    const html = field({ $ref: "$/permission-sets/chat/read-only", write_file: "ask" });
-    expect(html).toContain("chat / read-only — built in");
-    expect(html).toContain("over the permission set, for this state");
-    expect(html).toContain("set-minus");
-    expect(field(undefined, true)).toBe("");
-    expect(field({ read_file: "allow" })).toContain("this state&#x27;s own line");
+    const reference = toolsFieldOf({ $ref: "$/permission-sets/chat/read-only", write_file: "ask" })!.reference;
+    expect(pickOfReference(permissionSetPicks(choices, reference), reference).label).toBe("chat / read-only — built in");
   });
 });
 

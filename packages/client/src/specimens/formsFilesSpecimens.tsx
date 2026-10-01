@@ -1,17 +1,14 @@
 import { useState, type ComponentType, type JSX } from "react";
 import type { FileSource, SessionRef, SessionView, WorkflowSyncResult, WorkflowSyncStatus } from "@jaira/shared/browser";
-import { TextInput as DomTextInput } from "@jaira/ui/controls";
 import type { FileSurfaceContext, FileSurfaceProps, SyncSurface } from "@jaira/ui/fileTypes";
-import { SessionPanel as DomSessionPanel } from "@jaira/ui/session";
-import { WorkflowSyncPanel as DomWorkflowSyncPanel } from "@jaira/ui/syncPanel";
 import { FormInput, SessionPanel, WorkflowSyncSurface } from "@jaira/universal";
 
 /**
  * Forms, the Files room's remaining surfaces and the Debug room's session panel as specimens
- * (decision 0015): each DOM original against its universal copy, from the same fixture.
+ * (decision 0015), each from a fixture.
  *
  *  - `suggest` — a `.cfg-input.mono` with a `<datalist>`: shut, it is the box with the 16 kept at its
- *    end. Opened (focus it, ↓), the DOM page shows nothing more — Chromium's popup is a window of
+ *    end. Opened (focus it, ↓), the DOM page showed nothing more — Chromium's popup is a window of
  *    Electron's that no capture of the page holds — and the copy draws the type-ahead (`form/Suggest.tsx`),
  *    whose figures were measured from that window's photograph. The options are those the photograph
  *    was taken with, one of them labelled and one wider than the box.
@@ -27,26 +24,11 @@ import { FormInput, SessionPanel, WorkflowSyncSurface } from "@jaira/universal";
  */
 export interface FormsFilesSpecimen {
   width: number;
-  dom: ComponentType;
   rn: ComponentType;
 }
 
 const OPTIONS = ["claude-haiku-4-5", "claude-opus-5-5", "gpt-5.6-luna", "gpt-5.6-terra", "claude-fable-5-1", "codex-mini", "a very long model identifier that is wider than the box itself"];
 const LABELS: Record<string, string> = { "claude-opus-5-5": "Opus, the big one" };
-
-function DomSuggest(): JSX.Element {
-  const [value, setValue] = useState("");
-  return (
-    <div style={{ padding: 20 }}>
-      <DomTextInput value={value} mono list="specimen-suggest" onChange={setValue} placeholder="a model id, or a preset" />
-      <datalist id="specimen-suggest">
-        {OPTIONS.map((o) => (
-          <option key={o} value={o} {...(LABELS[o] !== undefined ? { label: LABELS[o] } : {})} />
-        ))}
-      </datalist>
-    </div>
-  );
-}
 
 function RnSuggest(): JSX.Element {
   const [value, setValue] = useState("");
@@ -88,14 +70,6 @@ const SESSION: SessionView = {
 } as SessionView;
 const LIVE = { sessionId: "s-1", seq: 1, text: "And one more thing" };
 
-function DomDebugSession({ session, live }: { session: SessionView | null; live?: boolean }): JSX.Element {
-  const [showing, setShowing] = useState<string | null>(null);
-  return (
-    <section className="debug-transcript">
-      <DomSessionPanel history={HISTORY} session={session} showing={showing} live={live === true ? LIVE : null} onShow={setShowing} />
-    </section>
-  );
-}
 function RnDebugSession({ session, live }: { session: SessionView | null; live?: boolean }): JSX.Element {
   const [showing, setShowing] = useState<string | null>(null);
   return <SessionPanel history={HISTORY} session={session} showing={showing} live={live === true ? LIVE : null} onShow={setShowing} />;
@@ -160,11 +134,6 @@ function syncSpecimen(sync: SyncSurface): FormsFilesSpecimen {
   const props: FileSurfaceProps = { doc: DESCRIPTION, busy: false, onSave: none, context: { sync, drafts: {} } as unknown as FileSurfaceContext };
   return {
     width: 720,
-    dom: () => (
-      <div style={{ height: 520, display: "flex", flexDirection: "column" }}>
-        <DomWorkflowSyncPanel {...props} />
-      </div>
-    ),
     rn: () => (
       <div style={{ height: 520, display: "flex", flexDirection: "column" }}>
         <WorkflowSyncSurface {...props} />
@@ -184,12 +153,11 @@ export const FORMS_FILES_SPECIMENS: Record<string, FormsFilesSpecimen> = {
       status: { ...SYNCED, documentChanged: true, delegated: [{ root: "feature/review", states: 3, document: "workflows/feature/review.md" }] } as unknown as WorkflowSyncStatus,
     }),
   ),
-  suggest: { width: 300, dom: DomSuggest, rn: RnSuggest },
-  "debug-session": { width: 720, dom: () => <DomDebugSession session={SESSION} live />, rn: () => <RnDebugSession session={SESSION} live /> },
+  suggest: { width: 300, rn: RnSuggest },
+  "debug-session": { width: 720, rn: () => <RnDebugSession session={SESSION} live /> },
   "debug-session-empty": {
     width: 720,
-    dom: () => <DomDebugSession session={{ ...SESSION, turns: [], empty: "This state ran no model call — a function operation." }} />,
     rn: () => <RnDebugSession session={{ ...SESSION, turns: [], empty: "This state ran no model call — a function operation." }} />,
   },
-  "debug-session-none": { width: 720, dom: () => <DomDebugSession session={null} />, rn: () => <RnDebugSession session={null} /> },
+  "debug-session-none": { width: 720, rn: () => <RnDebugSession session={null} /> },
 };

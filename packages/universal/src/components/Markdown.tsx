@@ -1,7 +1,7 @@
 import { Fragment, createContext, useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Linking, Platform, ScrollView } from "react-native";
 import { View } from "@tamagui/core";
-import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdown";
+import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdownParse";
 import { InkContext, Press, Txt, edge, type FontSpec } from "../primitives";
 import { useTokens } from "../tokens";
 import { Picture } from "./Picture";
