@@ -86,6 +86,10 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
   on hover or the keyboard's focus; under a finger — the phone app, or a phone's browser — on a press, as
   a modal that a press outside it closes. Never write `isWeb ? onMouseEnter : …` for this: a touch screen
   on web has no hover either.
+- **`onTouchElsewhere()`** (`touchElsewhere.tsx`) — for what a press opens IN PLACE rather than in a float
+  (a message's rail, under a finger): the shell's root hears every touch after the boxes nearer the finger
+  have, so a press anywhere else puts it away. A Tamagui box does not hand `onTouchStart` on on a phone:
+  `TouchRoot` is a React Native box round the shell there.
 - **`edge(t, { bottom: 1 }, "line")`** — a border on some sides. Never `borderStyle="solid"` with only
   some widths: on web Tamagui leaves the other sides at the browser's 3px.
 - **`Glyph`** — a symbol in the app voice (▶ ⚙ ⌕), optionally in a fixed width.

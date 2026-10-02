@@ -18,7 +18,7 @@ import { useValuePanel } from "@jaira/ui/valuePanel";
 
 /**
  * A message's rail: what can be done to a message, what it is, and when it was said — invisible at
- * rest, shown under the pointer (or, on a phone, after a long press on the message). The menus' rows,
+ * rest, shown under the pointer (or, with no pointer that hovers, once the message is pressed). The menus' rows,
  * the tooltips and the clock are `messageReading.ts`'s. How it looks:
  *
  *   the rail       row, centred, gap 2, 4 above, padding 0 1, at least 22 tall, wraps, --dim; opacity 0

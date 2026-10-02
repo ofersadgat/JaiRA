@@ -22,6 +22,7 @@ import { Disconnected } from "../components/floats/Disconnected";
 import { ShellFloats } from "../components/floats/ShellFloats";
 import { edge, landmark } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
+import { TouchRoot, shellTouch } from "../touchElsewhere";
 import { BoardColumn } from "./BoardColumn";
 import { ChatView } from "./ChatView";
 import { DebugView } from "./DebugView";
@@ -97,7 +98,9 @@ export function UniversalApp(): JSX.Element {
             <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
               <TokenRoot {...model.appearance}>
                 <CrashBoundary>
-                  <Frame />
+                  <TouchRoot>
+                    <Frame />
+                  </TouchRoot>
                 </CrashBoundary>
                 {/* Outside the boundary: a report about a failure must not go down with what it
                     reports. After the frame, so a phone draws them over it. */}
@@ -131,7 +134,7 @@ function Frame(): JSX.Element {
     // phone paints it here. Positioned on web, so it is the box of last resort for whatever is placed
     // absolutely with no positioned box nearer (a hidden probe measuring a table's columns): it clips,
     // where the page itself would grow a scrollbar and lay the whole window out ten pixels narrower.
-    <View flex={1} flexDirection="row" overflow="hidden" {...((isWeb ? { position: "relative" } : {}) as object)} {...((pageGround(t) ? {} : { backgroundColor: t.v("bg") }) as object)}>
+    <View flex={1} flexDirection="row" overflow="hidden" {...((isWeb ? { position: "relative" } : {}) as object)} {...((pageGround(t) ? {} : { backgroundColor: t.v("bg") }) as object)} {...(shellTouch as object)}>
       <ShellSidebar />
       {/* The sidebar's splitter: a drag writes `PANE.shellSidebar` (180–520). None on a collapsed
           sidebar: the rail is a fixed strip of glyphs. */}

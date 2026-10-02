@@ -1,4 +1,4 @@
-import { Fragment, memo, useContext, useState, type JSX, type ReactNode } from "react";
+import { Fragment, memo, useContext, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { Platform, Pressable } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { MessageAuthor, SessionView, ViewId } from "@jaira/shared/browser";
@@ -14,6 +14,8 @@ import { WorkLookContext } from "@jaira/ui/workSummaryContext";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 import type { ContextReading } from "@jaira/shared/browser";
 import { Press, Txt, edge, useHover } from "../../primitives";
+import { useCanHover } from "../../canHover";
+import { onTouchElsewhere } from "../../touchElsewhere";
 import { Pulse } from "../chat/Pulse";
 import { CompactionLine, GapMark } from "./TranscriptMarks";
 import { Work, WorkColumn, type TranscriptOf } from "./WorkRows";
@@ -35,6 +37,9 @@ import { baselineOf } from "./SessionBands";
  * and the answer being written. A subagent's doorway walks into its conversation where the host has
  * somewhere for it (`onOpenSidechain`). The message rail — Copy, rewind, fork, the type and reading
  * chips, the clock — is `MessageRail.tsx`; without the host's controls it is only the room it takes.
+ * Its controls show under a pointer that hovers; with none (`canHover.ts`: the phone app, a phone's
+ * browser) a press on the message shows them — one message's at a time — and a press anywhere else in
+ * the window (`touchElsewhere.ts`), or on the message again, puts them away.
  *
  *   the column             padding 12 16 22
  *   a user's message       at the end, at most 78% wide, margin 14 0 10; one sent for them a column ending right
@@ -98,6 +103,24 @@ export const Transcript = memo(function Transcript({
   /** The column's padding — top, right, bottom, left — where a host sets another (a preview card's 8 12 10). */
   padding?: readonly [number, number, number, number];
 }): JSX.Element {
+  // With no pointer that hovers, the message whose rail a press opened (its block), and the message the
+  // touch now landing is on: a touch anywhere else in the window puts the rail away. The shell's root
+  // hears a touch after the message under it has (a touch bubbles).
+  const hovers = useCanHover();
+  const [railAt, setRailAt] = useState<number | null>(null);
+  const touched = useRef<number | null>(null);
+  const pressed = !hovers && rails;
+  const open = useRef(railAt);
+  open.current = railAt;
+  // Heard for every touch, not only while a rail is open: the touch that OPENS a rail has to be
+  // forgotten too, or the next one elsewhere would be taken for a touch on the message.
+  useEffect(() => {
+    if (!pressed) return undefined;
+    return onTouchElsewhere(() => {
+      if (open.current !== null && touched.current !== open.current) setRailAt(null);
+      touched.current = null;
+    });
+  }, [pressed]);
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
   if (shown.length === 0) return <Empty>{empty ?? session?.empty ?? "Nothing has been said here yet."}</Empty>;
   const chains = session !== null && session !== undefined ? session.sidechains : undefined;
@@ -164,7 +187,17 @@ export const Transcript = memo(function Transcript({
                 <Message
                   entry={block}
                   {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
-                  {...(rails ? { rails: { onEdit, scope } } : {})}
+                  {...(rails
+                    ? {
+                        rails: {
+                          onEdit,
+                          scope,
+                          ...(pressed
+                            ? { press: { held: railAt === i, toggle: () => setRailAt((was) => (was === i ? null : i)), touch: () => void (touched.current = i) } }
+                            : {}),
+                        },
+                      }
+                    : {})}
                   {...(context !== undefined && prior !== undefined ? { contextBefore: prior } : {})}
                   doomed={doomed}
                 />
@@ -259,8 +292,12 @@ function Message({
   /** The reading on the answer before this one (the rail's context badge measures from it). */
   contextBefore?: ContextReading | undefined;
   workflow?: string | undefined;
-  /** The rail's controls, where the host draws them (`MessageRail.tsx`). */
-  rails?: { onEdit: EditMessage | undefined; scope: string | undefined } | undefined;
+  /**
+   * The rail's controls, where the host draws them (`MessageRail.tsx`). `press`: there is no pointer
+   * that hovers, so the message is pressed for them — whether its rail is the open one, the press that
+   * opens or closes it, and the touch that says a touch landed on this message.
+   */
+  rails?: { onEdit: EditMessage | undefined; scope: string | undefined; press?: { held: boolean; toggle: () => void; touch: () => void } | undefined } | undefined;
   /** Past an armed cut: faded, the bubble on --panel-2 with a --line edge. */
   doomed?: boolean;
 }): JSX.Element {
@@ -280,7 +317,7 @@ function Message({
   const reading = messageReadingOf(entry, value, override, picked);
   const view = reading.view;
   const [hovered, hover] = useHover();
-  const [held, setHeld] = useState(false);
+  const held = rails?.press?.held === true;
   const body =
     view === "markdown" && typeof value === "string" ? (
       <Markdown text={value} scale={12.5 / 12.5} lineHeight={1.65} trimEnd padding={[2, 2, 12, 2]} />
@@ -294,7 +331,7 @@ function Message({
       <ValueView value={value} hint={reading.hint} view={view} chrome={false} />
     );
   // The rail's room: invisible at rest. A row of 21px controls, 4 above. With the host's controls it
-  // shows under the pointer (web) or once the message is long-pressed (a phone).
+  // shows under the pointer, or — with no pointer that hovers — once the message is pressed.
   const rail =
     rails === undefined ? (
       <View marginTop={4} minHeight={22} paddingHorizontal={1} />
@@ -330,8 +367,8 @@ function Message({
         }}
       />
     );
-  /** Where the pointer and a long press reach the message (only with the host's rail). */
-  const reach = rails === undefined ? {} : { ...(hover as object), ...(Platform.OS !== "web" ? { onLongPress: () => setHeld((was) => !was) } : {}) };
+  /** Where the pointer, or a press, reaches the message (only with the host's rail). */
+  const reach: Record<string, unknown> = rails === undefined ? {} : rails.press !== undefined ? { onPress: rails.press.toggle, onTouchStart: rails.press.touch } : hover;
 
   // `data-day`: what the day chip over the scroller reads (web; a phone's chip is not drawn).
   const day = dayLabelOf(entry.at);
@@ -478,13 +515,13 @@ function TagLine({ role, children }: { role: string; children: ReactNode }): JSX
 }
 
 /**
- * A message's box, reachable: the pointer's hover on web, a long press on a phone (which toggles the
- * rail). A plain box when the host draws no rail.
+ * A message's box, reachable: the pointer's hover, or — with no pointer that hovers — a press, which
+ * shows the rail or puts it away. A plain box when the host draws no rail.
  */
 function Reach({ reach, children, ...box }: { reach: Record<string, unknown>; children: ReactNode } & Record<string, unknown>): JSX.Element {
-  if (typeof reach.onLongPress === "function") {
+  if (typeof reach.onPress === "function") {
     return (
-      <Pressable onLongPress={reach.onLongPress as () => void} style={{ minWidth: 0 }}>
+      <Pressable onPress={reach.onPress as () => void} onTouchStart={reach.onTouchStart as () => void} style={{ minWidth: 0 }}>
         <View {...(box as object)}>{children}</View>
       </Pressable>
     );

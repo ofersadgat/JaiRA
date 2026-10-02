@@ -60,6 +60,7 @@ The reading chip is drawn only when the type has more than one reading. `…` is
 | On | Does | Feedback |
 | --- | --- | --- |
 | Pointer over, or focus inside | Reveals the controls | The line fades in |
+| A press on the message, with no pointer that hovers (the phone app, a phone's browser) | Reveals its controls, and puts away any other message's; a press on it again, or anywhere else in the window, puts them away | The line is shown at once |
 | Copy | Copies the text, or the value as indented JSON | The glyph is a tick for 1.4 seconds |
 | Edit | Puts the message's text in the composer to be sent in its place | The composer shows the replacing banner, as [chat-view](../surfaces/chat-view.md) draws it |
 | Rewind | Arms a deletion from before this message, or after this reply | The banner asks, and this message or the one after it and everything below fade under the cut line |
