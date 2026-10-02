@@ -14,10 +14,21 @@
  */
 import {
   isJairaComment,
+  markRetried,
   remoteHandleId,
-  type CiConclusion,
-  type CiRun,
-  type CiStatus,
+  type ArtifactBytes,
+  type ArtifactRef,
+  type ForgeArtifact,
+  type ForgeJob,
+  type ForgePosted,
+  type ForgePipeline,
+  type JobDetail,
+  type PipelineDetail,
+  type PipelineList,
+  type PipelineQuery,
+  type PipelineSource,
+  type PipelineStatus,
+  type PipelineTests,
   type ForgeAnchor,
   type ForgeBranch,
   type ForgeCommit,
@@ -197,6 +208,7 @@ export class GitLabProvider implements ForgeProvider {
     const mr = asRecord(expectStatus(mrResponse, [200], `reading ${handle.id}`).body);
     const approvals = asRecord(expectStatus(approvalsResponse, [200], `reading the approvals of ${handle.id}`).body);
 
+    const webUrl = asText(mr["web_url"]) || handle.url;
     const comment = async (note: Record<string, unknown>): Promise<ForgeComment> => {
       const author = asRecord(note["author"]);
       const who = asText(author["username"]);
@@ -205,6 +217,7 @@ export class GitLabProvider implements ForgeProvider {
         who,
         body: asText(note["body"]),
         at: asText(note["created_at"]),
+        ...(webUrl.length > 0 ? { url: noteUrl(webUrl, note["id"]) } : {}),
         canWrite: await this.canWrite(handle.project, Number(author["id"])),
         // JaiRA's own words are the ones carrying its marker — not the token's account, which is the person's.
         own: isJairaComment(asText(note["body"])),
@@ -285,7 +298,7 @@ export class GitLabProvider implements ForgeProvider {
     };
   }
 
-  async comment(handle: RemoteHandle, body: string, anchor?: ForgeAnchor): Promise<void> {
+  async comment(handle: RemoteHandle, body: string, anchor?: ForgeAnchor): Promise<ForgePosted> {
     const path = this.mr(handle);
     if (anchor !== undefined) {
       // An inline thread is positioned against the request's CURRENT diff, so the three shas are read
@@ -301,20 +314,21 @@ export class GitLabProvider implements ForgeProvider {
           : { old_path: anchor.path, old_line: anchor.line }),
       };
       const placed = await this.call("POST", `${path}/discussions`, { body, position });
-      if (placed.status === 201) return;
+      if (placed.status === 201) return postedNote(handle, asRecord(asList(asRecord(placed.body)["notes"])[0]));
       // GitLab refuses a position it cannot place — an unchanged line wants BOTH line numbers, a line
       // outside the diff wants none. A note must not be lost to that: it goes on the request instead,
       // saying where it was about. Any other refusal is a real one.
       if (placed.status !== 400) expectStatus(placed, [201], `commenting on ${handle.id}`);
       body = `\`${anchor.path}:${anchor.line}\` — ${body}`;
     }
-    expectStatus(await this.call("POST", `${path}/notes`, { body }), [201], `commenting on ${handle.id}`);
+    return postedNote(handle, asRecord(expectStatus(await this.call("POST", `${path}/notes`, { body }), [201], `commenting on ${handle.id}`).body));
   }
 
-  async reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<void> {
+  async reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<ForgePosted> {
     const thread = `${this.mr(handle)}/discussions/${encodeURIComponent(threadId)}`;
-    expectStatus(await this.call("POST", `${thread}/notes`, { body }), [201], `replying on ${handle.id}`);
+    const note = asRecord(expectStatus(await this.call("POST", `${thread}/notes`, { body }), [201], `replying on ${handle.id}`).body);
     if (resolve === true) expectStatus(await this.call("PUT", thread, { resolved: true }), [200], `resolving a thread on ${handle.id}`);
+    return postedNote(handle, note);
   }
 
   async merge(handle: RemoteHandle): Promise<void> {
@@ -379,47 +393,6 @@ export class GitLabProvider implements ForgeProvider {
     return this.summaryOf(asRecord(expectStatus(response, [200], `reading ${project}!${number}`).body));
   }
 
-  /**
-   * The newest pipeline for the ref, and its jobs. A ref that looks like a commit is asked as `sha`,
-   * anything else as `ref` (a branch or tag). The overall state is the PIPELINE's — it already
-   * weighs `allow_failure` and a manual job, which the jobs one by one cannot.
-   */
-  async checks(project: string, ref: string): Promise<CiStatus> {
-    const at = `/projects/${encodeURIComponent(project)}/pipelines`;
-    const key = /^[0-9a-f]{7,40}$/i.test(ref) ? "sha" : "ref";
-    const listed = expectStatus(
-      await this.call("GET", `${at}?${key}=${encodeURIComponent(ref)}&order_by=id&sort=desc&per_page=1`),
-      [200],
-      `reading the pipelines of ${ref}`,
-    );
-    const pipeline = asRecord(asList(listed.body)[0]);
-    if (Object.keys(pipeline).length === 0) return { ref, state: "none", runs: [] };
-    const id = Number(pipeline["id"]);
-    const jobs = await this.pages(`${at}/${id}/jobs`, `reading the jobs of pipeline ${id}`);
-    const runs: CiRun[] = jobs.map((entry) => {
-      const job = asRecord(entry);
-      const status = asText(job["status"]);
-      const finished = ["success", "failed", "canceled", "skipped", "manual"].includes(status);
-      const url = asText(job["web_url"]);
-      const stage = asText(job["stage"]);
-      return {
-        name: asText(job["name"]),
-        status: finished ? "completed" : status === "running" ? "running" : "queued",
-        ...(finished ? { conclusion: gitlabConclusion(status) } : {}),
-        ...(url.length > 0 ? { url } : {}),
-        ...(stage.length > 0 ? { stage } : {}),
-      };
-    });
-    const sha = asText(pipeline["sha"]);
-    return {
-      ref,
-      ...(sha.length > 0 ? { sha } : {}),
-      state: gitlabPipelineState(asText(pipeline["status"])),
-      runs,
-      pipeline: { id, url: asText(pipeline["web_url"]) },
-    };
-  }
-
   async branches(project: string): Promise<ForgeBranch[]> {
     const rows = await this.pages(`/projects/${encodeURIComponent(project)}/repository/branches`, `listing the branches of ${project}`);
     return rows.map((row) => ({ name: asText(asRecord(row)["name"]), head: asText(asRecord(asRecord(row)["commit"])["id"]) }));
@@ -481,30 +454,279 @@ export class GitLabProvider implements ForgeProvider {
     if (last >= 0) commits.push(...commits.splice(last, 1));
     return commits.map(strip);
   }
-}
 
-/** A finished job's status, in JaiRA's five words. */
-function gitlabConclusion(status: string): CiConclusion {
-  switch (status) {
-    case "success":
-      return "success";
-    case "canceled":
-      return "cancelled";
-    case "skipped":
-      return "skipped";
-    case "manual":
-      // Waiting for somebody to press play: it did not run, and nothing is waiting on it to.
-      return "neutral";
-    default:
-      return "failure";
+  // --- CI (decision 0016) ------------------------------------------------------------------------
+
+  private projectPath(project: string): string {
+    return `/projects/${encodeURIComponent(project)}`;
+  }
+
+  /**
+   * A merge request's pipelines come from its OWN list, not from its head commit: a merged-result
+   * pipeline runs on a merge commit that is not one of the request's commits (measured, gitlab-org/cli
+   * !3966), so a lookup by sha misses it. A ref or a sha asks the project's list, newest first.
+   *
+   * `status` and `source` go to GitLab where one of its words means exactly ours, and are applied here
+   * otherwise — `pending` is five of GitLab's, and the merge request list takes no filters at all.
+   */
+  async pipelines(project: string, query: PipelineQuery): Promise<PipelineList> {
+    const limit = limitOf(query.limit);
+    const at = this.projectPath(project);
+    let rows: unknown[];
+    if (query.mergeRequest !== undefined) {
+      const response = await this.call("GET", `${at}/merge_requests/${query.mergeRequest}/pipelines?per_page=100`);
+      if (response.status === 404) throw new ForgeError(`${project} has no merge request !${query.mergeRequest} this token can see`, 404);
+      rows = asList(expectStatus(response, [200], `reading the pipelines of ${project}!${query.mergeRequest}`).body);
+    } else {
+      const which: { ref?: string; sha?: string } | undefined = query.ref !== undefined ? { ref: query.ref } : query.sha !== undefined ? { sha: query.sha } : undefined;
+      if (which === undefined) throw new ForgeError("name the merge request, the ref or the commit whose pipelines to list", 400);
+      const params = new URLSearchParams({ order_by: "id", sort: "desc", per_page: String(query.status !== undefined || query.source !== undefined ? 100 : limit) });
+      if (which.ref !== undefined) params.set("ref", which.ref);
+      if (which.sha !== undefined) params.set("sha", which.sha);
+      if (query.status !== undefined && query.status !== "pending") params.set("status", query.status);
+      const source = query.source !== undefined ? GITLAB_SOURCE_OF[query.source] : undefined;
+      if (source !== undefined) params.set("source", source);
+      rows = asList(expectStatus(await this.call("GET", `${at}/pipelines?${params.toString()}`), [200], `reading the pipelines of ${Object.values(which)[0]}`).body);
+    }
+    const pipelines = rows
+      .map((row) => gitlabPipelineOf(asRecord(row)))
+      .filter((pipeline) => (query.status === undefined || pipeline.status === query.status) && (query.source === undefined || pipeline.source === query.source))
+      .slice(0, limit);
+    return { pipelines, statuses: [] };
+  }
+
+  /**
+   * The pipeline, its jobs, its trigger jobs, and its test report's counts when it has one.
+   *
+   * Trigger jobs are not in the jobs list; `trigger_jobs` names them since GitLab 19.2, `bridges`
+   * before. A test report is read only when the pipeline has finished — GitLab builds it from the
+   * junit artifacts — and a refusal to read it costs the answer nothing.
+   */
+  async pipeline(project: string, id: number, options: { jobStatus?: readonly PipelineStatus[]; includeRetried?: boolean } = {}): Promise<PipelineDetail> {
+    const at = `${this.projectPath(project)}/pipelines/${id}`;
+    const response = await this.call("GET", at);
+    if (response.status === 404) throw new ForgeError(`${project} has no pipeline ${id} this token can see`, 404);
+    const pipeline = gitlabPipelineOf(asRecord(expectStatus(response, [200], `reading pipeline ${id}`).body));
+    const scopes = [...new Set((options.jobStatus ?? []).flatMap((status) => GITLAB_SCOPES_OF[status]))];
+    const query = [...scopes.map((scope) => `scope[]=${scope}`), ...(options.includeRetried === true ? ["include_retried=true"] : [])].join("&");
+    const suffix = query.length > 0 ? `?${query}` : "";
+    const jobs = (await this.pages(`${at}/jobs${suffix}`, `reading the jobs of pipeline ${id}`)).map((row) => gitlabJobOf(asRecord(row)));
+    let triggers: ForgeJob[];
+    try {
+      triggers = (await this.pages(`${at}/trigger_jobs${suffix}`, `reading the trigger jobs of pipeline ${id}`)).map((row) => gitlabJobOf(asRecord(row)));
+    } catch (e) {
+      if (!(e instanceof ForgeError) || e.status !== 404) throw e;
+      triggers = (await this.pages(`${at}/bridges${suffix}`, `reading the trigger jobs of pipeline ${id}`)).map((row) => gitlabJobOf(asRecord(row)));
+    }
+    const all = markRetried([...jobs, ...triggers]).sort((a, b) => a.id - b.id);
+    const tests = pipeline.status === "running" || pipeline.status === "pending" ? undefined : await this.testSummary(at).catch(() => undefined);
+    return { ...pipeline, jobs: all, artifacts: [], ...(tests !== undefined ? { tests } : {}) };
+  }
+
+  private async testSummary(at: string): Promise<PipelineTests | undefined> {
+    const body = asRecord(expectStatus(await this.call("GET", `${at}/test_report_summary`), [200], "reading the test report").body);
+    const total = asRecord(body["total"]);
+    if (Number(total["count"] ?? 0) === 0) return undefined;
+    return {
+      total: Number(total["count"] ?? 0),
+      failed: Number(total["failed"] ?? 0),
+      skipped: Number(total["skipped"] ?? 0),
+      errored: Number(total["error"] ?? 0),
+      suites: asList(body["test_suites"]).map((entry) => {
+        const suite = asRecord(entry);
+        return {
+          name: asText(suite["name"]),
+          total: Number(suite["total_count"] ?? 0),
+          failed: Number(suite["failed_count"] ?? 0),
+          skipped: Number(suite["skipped_count"] ?? 0),
+          errored: Number(suite["error_count"] ?? 0),
+          jobIds: asList(suite["build_ids"]).map(Number),
+        };
+      }),
+    };
+  }
+
+  /**
+   * One job. The machine is `runner` (its description names it) and `runner_manager` (platform,
+   * architecture, version — `null` to an unauthenticated read, measured); the image is only in the
+   * log. Every artifact the job lists is offered except `metadata`, the archive's index, which is
+   * GitLab's own. The log is the artifact of `file_type` `trace`.
+   */
+  async job(project: string, id: number): Promise<JobDetail> {
+    const response = await this.call("GET", `${this.projectPath(project)}/jobs/${id}`);
+    if (response.status === 404) throw new ForgeError(`${project} has no job ${id} this token can see`, 404);
+    const row = asRecord(expectStatus(response, [200], `reading job ${id}`).body);
+    const job = gitlabJobOf(row);
+    const runner = asRecord(row["runner"]);
+    const manager = asRecord(row["runner_manager"]);
+    const expiresAt = asText(row["artifacts_expire_at"]);
+    const artifacts: ForgeArtifact[] = asList(row["artifacts"])
+      .map((entry) => asRecord(entry))
+      .filter((artifact) => asText(artifact["file_type"]) !== "metadata")
+      .map((artifact) => {
+        const fileType = asText(artifact["file_type"]);
+        return {
+          jobId: id,
+          fileType,
+          name: asText(artifact["filename"]),
+          ...(typeof artifact["size"] === "number" ? { size: artifact["size"] } : {}),
+          // A log is never expired by the artifact cleanup (GitLab docs); everything else is.
+          ...(fileType !== "trace" && expiresAt.length > 0 ? { expiresAt } : {}),
+          url: fileType === "trace" ? `${job.url}/raw` : fileType === "archive" ? `${job.url}/artifacts/browse` : job.url,
+        };
+      });
+    const text = (value: unknown): string | undefined => (typeof value === "string" && value.length > 0 ? value : undefined);
+    const sha = text(asRecord(row["commit"])["id"]) ?? text(asRecord(row["pipeline"])["sha"]);
+    const pipelineId = asRecord(row["pipeline"])["id"];
+    return {
+      ...job,
+      ...(typeof pipelineId === "number" ? { pipelineId } : {}),
+      ...(sha !== undefined ? { sha } : {}),
+      runner: {
+        ...(text(runner["description"]) !== undefined ? { name: text(runner["description"])! } : {}),
+        ...(text(manager["platform"]) !== undefined ? { platform: text(manager["platform"])! } : {}),
+        ...(text(manager["architecture"]) !== undefined ? { architecture: text(manager["architecture"])! } : {}),
+        ...(text(manager["version"]) !== undefined ? { version: text(manager["version"])! } : {}),
+        tags: asList(row["tag_list"]).map(asText).filter((tag) => tag.length > 0),
+      },
+      steps: [],
+      annotations: [],
+      artifacts,
+    };
+  }
+
+  /**
+   * One artifact's bytes: the log (`/trace`), the whole archive, one file from it (`path`), or one
+   * report by its type. GitLab has no artifact of its own apart from a job's, so an `artifactId` is
+   * refused naming what to send instead.
+   */
+  async artifact(project: string, which: ArtifactRef): Promise<ArtifactBytes> {
+    if (!("jobId" in which)) throw new ForgeError("a GitLab artifact belongs to a job: name its job_id and file_type", 400);
+    const at = `${this.projectPath(project)}/jobs/${which.jobId}`;
+    const path =
+      which.fileType === "trace"
+        ? `${at}/trace`
+        : which.fileType === "archive"
+          ? `${at}/artifacts${which.path !== undefined ? `/${which.path.split("/").map(encodeURIComponent).join("/")}` : ""}`
+          : `${at}/artifacts?file_type=${encodeURIComponent(which.fileType)}`;
+    const response = await this.options.http({
+      method: "GET",
+      url: `${this.api}${path}`,
+      headers: { Authorization: `Bearer ${this.options.token}`, "User-Agent": "jaira" },
+      expect: "bytes",
+      timeoutMs: DOWNLOAD_TIMEOUT_MS,
+    });
+    if (response.status === 404) {
+      throw new ForgeError(`job ${which.jobId} has no ${which.fileType}${which.path !== undefined ? ` file ${which.path}` : ""} to download — it may have expired`, 404);
+    }
+    const body = expectStatus(response, [200], `downloading the ${which.fileType} of job ${which.jobId}`).body;
+    return { bytes: body instanceof Uint8Array ? body : new TextEncoder().encode(String(body ?? "")), ...(response.headers["content-type"] !== undefined ? { contentType: response.headers["content-type"] } : {}) };
   }
 }
 
-/** A pipeline's status as the overall state. A manual pipeline has nothing left that runs by itself. */
-function gitlabPipelineState(status: string): CiStatus["state"] {
-  if (status === "success" || status === "skipped" || status === "manual") return "success";
-  if (status === "failed" || status === "canceled") return "failure";
-  return "pending";
+/** How long a download gets: a log or an archive can be tens of megabytes. */
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+/** GitLab's pipeline and job statuses, in {@link PipelineStatus}'s words. */
+function gitlabStatus(status: string): PipelineStatus {
+  switch (status) {
+    case "running":
+    case "canceling":
+      return "running";
+    case "success":
+      return "success";
+    case "failed":
+      return "failed";
+    case "canceled":
+      return "canceled";
+    case "skipped":
+      return "skipped";
+    case "manual":
+      return "manual";
+    default:
+      // created, waiting_for_resource, preparing, pending, scheduled, waiting_for_callback
+      return "pending";
+  }
+}
+
+/** The job scopes (`scope[]`) that make up each of our statuses. */
+const GITLAB_SCOPES_OF: Record<PipelineStatus, readonly string[]> = {
+  pending: ["created", "waiting_for_resource", "preparing", "pending", "scheduled"],
+  running: ["running", "canceling"],
+  success: ["success"],
+  failed: ["failed"],
+  canceled: ["canceled"],
+  skipped: ["skipped"],
+  manual: ["manual"],
+};
+
+/** GitLab's `source` for each of ours that has exactly one. */
+const GITLAB_SOURCE_OF: Partial<Record<PipelineSource, string>> = {
+  push: "push",
+  merge_request: "merge_request_event",
+  schedule: "schedule",
+  trigger: "trigger",
+  api: "api",
+  web: "web",
+  external: "external",
+};
+
+function gitlabSource(source: string): PipelineSource {
+  switch (source) {
+    case "push":
+    case "schedule":
+    case "trigger":
+    case "api":
+    case "web":
+    case "external":
+      return source;
+    case "merge_request_event":
+    case "external_pull_request_event":
+      return "merge_request";
+    case "parent_pipeline":
+    case "pipeline":
+      return "trigger";
+    default:
+      return "other";
+  }
+}
+
+function gitlabPipelineOf(row: Record<string, unknown>): ForgePipeline {
+  const name = asText(row["name"]);
+  const finishedAt = asText(row["finished_at"]);
+  return {
+    id: Number(row["id"]),
+    sha: asText(row["sha"]),
+    ref: asText(row["ref"]),
+    source: gitlabSource(asText(row["source"])),
+    sourceName: asText(row["source"]),
+    status: gitlabStatus(asText(row["status"])),
+    ...(name.length > 0 ? { name } : {}),
+    createdAt: asText(row["created_at"]),
+    ...(finishedAt.length > 0 ? { finishedAt } : {}),
+    url: asText(row["web_url"]),
+  };
+}
+
+/** A job or a trigger job — a trigger job carries the pipeline it started. */
+function gitlabJobOf(row: Record<string, unknown>): ForgeJob {
+  const stage = asText(row["stage"]);
+  const reason = asText(row["failure_reason"]);
+  const startedAt = asText(row["started_at"]);
+  const finishedAt = asText(row["finished_at"]);
+  const downstream = asRecord(row["downstream_pipeline"])["id"];
+  return {
+    id: Number(row["id"]),
+    name: asText(row["name"]),
+    ...(stage.length > 0 ? { stage } : {}),
+    status: gitlabStatus(asText(row["status"])),
+    ...(reason.length > 0 ? { failureReason: reason } : {}),
+    ...(typeof row["allow_failure"] === "boolean" ? { allowFailure: row["allow_failure"] } : {}),
+    ...(startedAt.length > 0 ? { startedAt } : {}),
+    ...(finishedAt.length > 0 ? { finishedAt } : {}),
+    url: asText(row["web_url"]),
+    ...(typeof downstream === "number" ? { downstreamPipelineId: downstream } : {}),
+  };
 }
 
 /** A diff note's position, in JaiRA's words. A line that exists after the change is an `after` anchor. */
@@ -516,4 +738,18 @@ function anchorOf(position: Record<string, unknown>): ForgeAnchor | undefined {
     return { path: asText(position["old_path"]), line: position["old_line"], side: "before" };
   }
   return undefined;
+}
+
+/**
+ * A note's link: its merge request's page with `#note_<id>`. GitLab's notes carry no `web_url`, and
+ * this anchor is the one its own pages and docs link a note by.
+ */
+function noteUrl(requestUrl: string, id: unknown): string {
+  return `${requestUrl}#note_${String(id)}`;
+}
+
+/** What a post answered with, as far as it says: the note's id, and its link when the request has one. */
+function postedNote(handle: RemoteHandle, note: Record<string, unknown>): ForgePosted {
+  if (note["id"] === undefined) return {};
+  return { id: String(note["id"]), ...(handle.url.length > 0 ? { url: noteUrl(handle.url, note["id"]) } : {}) };
 }

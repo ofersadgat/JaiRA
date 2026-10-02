@@ -14,12 +14,23 @@
  * A pull request is called a merge request everywhere above this file.
  */
 import {
-  ciStateOf,
   isJairaComment,
+  markRetried,
   remoteHandleId,
-  type CiConclusion,
-  type CiRun,
-  type CiStatus,
+  type ArtifactBytes,
+  type ArtifactRef,
+  type ForgeAnnotation,
+  type ForgeArtifact,
+  type ForgeCommitStatus,
+  type ForgeJob,
+  type ForgePipeline,
+  type ForgePosted,
+  type JobDetail,
+  type PipelineDetail,
+  type PipelineList,
+  type PipelineQuery,
+  type PipelineSource,
+  type PipelineStatus,
   type ForgeAnchor,
   type ForgeBranch,
   type ForgeCommit,
@@ -54,7 +65,7 @@ import {
 /** `author_association` values that mean write access to the repository ("who counts"). */
 const WRITERS = new Set(["OWNER", "MEMBER", "COLLABORATOR"]);
 
-const COMMENT_FIELDS = "id body createdAt authorAssociation author { login }";
+const COMMENT_FIELDS = "id url body createdAt authorAssociation author { login }";
 
 /** Everything a settlement is decided from, in one round trip. */
 export const GITHUB_READ_QUERY = `
@@ -77,7 +88,7 @@ query JairaRead($owner: String!, $name: String!, $number: Int!) {
 
 export const GITHUB_REPLY_MUTATION = `
 mutation JairaReply($thread: ID!, $body: String!) {
-  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { id } }
+  addPullRequestReviewThreadReply(input: { pullRequestReviewThreadId: $thread, body: $body }) { comment { id url } }
 }`.trim();
 
 export const GITHUB_RESOLVE_MUTATION = `
@@ -290,6 +301,7 @@ export class GitHubProvider implements ForgeProvider {
         who,
         body: asText(node["body"]),
         at: asText(node["createdAt"] ?? node["submittedAt"]),
+        ...(asText(node["url"]).length > 0 ? { url: asText(node["url"]) } : {}),
         canWrite: WRITERS.has(asText(node["authorAssociation"])),
         // JaiRA's own words are the ones carrying its marker — not the token's account, which is the person's.
         own: isJairaComment(asText(node["body"])),
@@ -352,7 +364,7 @@ export class GitHubProvider implements ForgeProvider {
     };
   }
 
-  async comment(handle: RemoteHandle, body: string, anchor?: ForgeAnchor): Promise<void> {
+  async comment(handle: RemoteHandle, body: string, anchor?: ForgeAnchor): Promise<ForgePosted> {
     if (anchor !== undefined) {
       // An inline comment is pinned to a COMMIT, so the head is read at the moment of posting.
       const pull = asRecord(expectStatus(await this.call("GET", this.pull(handle)), [200], `reading ${handle.id}`).body);
@@ -363,23 +375,23 @@ export class GitHubProvider implements ForgeProvider {
         line: anchor.line,
         side: anchor.side === "before" ? "LEFT" : "RIGHT",
       });
-      if (placed.status === 201) return;
+      if (placed.status === 201) return postedComment(placed.body);
       // 422 is "that line is not part of the diff". A note must not be lost to that: it goes on the
       // request instead, saying where it was about. Any other refusal is a real one.
       if (placed.status !== 422) expectStatus(placed, [201], `commenting on ${handle.id}`);
       body = `\`${anchor.path}:${anchor.line}\` — ${body}`;
     }
     // A pull request's general comments are its ISSUE's comments.
-    expectStatus(
-      await this.call("POST", `/repos/${handle.project}/issues/${handle.number}/comments`, { body }),
-      [201],
-      `commenting on ${handle.id}`,
+    return postedComment(
+      expectStatus(await this.call("POST", `/repos/${handle.project}/issues/${handle.number}/comments`, { body }), [201], `commenting on ${handle.id}`).body,
     );
   }
 
-  async reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<void> {
-    await this.graphql(GITHUB_REPLY_MUTATION, { thread: threadId, body }, `replying on ${handle.id}`);
+  async reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<ForgePosted> {
+    const data = await this.graphql(GITHUB_REPLY_MUTATION, { thread: threadId, body }, `replying on ${handle.id}`);
     if (resolve === true) await this.graphql(GITHUB_RESOLVE_MUTATION, { thread: threadId }, `resolving a thread on ${handle.id}`);
+    const posted = asRecord(asRecord(data["addPullRequestReviewThreadReply"])["comment"]);
+    return { ...(asText(posted["id"]).length > 0 ? { id: asText(posted["id"]) } : {}), ...(asText(posted["url"]).length > 0 ? { url: asText(posted["url"]) } : {}) };
   }
 
   async merge(handle: RemoteHandle): Promise<void> {
@@ -401,12 +413,13 @@ export class GitHubProvider implements ForgeProvider {
    * A list, page after page, following the `Link: rel="next"` GitHub sets — until `enough` says so,
    * or {@link MAX_PAGES} pages, past which a list is not something anybody is reading.
    */
-  private async listed(path: string, what: string, enough: (rows: unknown[], page: unknown[]) => boolean = () => false): Promise<unknown[]> {
+  /** Every page of a list, following `Link: rel="next"` — the list at `key` when the answer wraps it (`check_runs`). */
+  private async listed(path: string, what: string, enough: (rows: unknown[], page: unknown[]) => boolean = () => false, key?: string): Promise<unknown[]> {
     const out: unknown[] = [];
     let url: string | undefined = `${this.rest}${path}`;
     for (let i = 0; i < MAX_PAGES && url !== undefined; i++) {
       const response = expectStatus(await this.http({ method: "GET", url, headers: this.headers() }), [200], what);
-      const page = asList(response.body);
+      const page = asList(key !== undefined ? asRecord(response.body)[key] : response.body);
       out.push(...page);
       if (page.length === 0 || enough(out, page)) break;
       url = nextLink(response.headers["link"]);
@@ -467,45 +480,6 @@ export class GitHubProvider implements ForgeProvider {
     return this.summaryOf(asRecord(expectStatus(response, [200], `reading ${project}#${number}`).body));
   }
 
-  /**
-   * Check runs AND commit statuses, because a repository reports CI through either or both — Actions
-   * and most apps through check runs, older integrations through the combined status. The combined
-   * status's own `state` is not read: with no statuses at all it says `pending`, which is a lie about
-   * a repository that has only check runs.
-   */
-  async checks(project: string, ref: string): Promise<CiStatus> {
-    const at = `/repos/${project}/commits/${encodeURIComponent(ref)}`;
-    const [runsResponse, statusResponse] = await Promise.all([this.call("GET", `${at}/check-runs?per_page=100`), this.call("GET", `${at}/status?per_page=100`)]);
-    const runsBody = asRecord(expectStatus(runsResponse, [200], `reading the check runs of ${ref}`).body);
-    const statusBody = asRecord(expectStatus(statusResponse, [200], `reading the commit status of ${ref}`).body);
-    const runs: CiRun[] = [];
-    let sha = asText(statusBody["sha"]);
-    for (const entry of asList(runsBody["check_runs"])) {
-      const run = asRecord(entry);
-      if (sha.length === 0) sha = asText(run["head_sha"]);
-      const status = asText(run["status"]);
-      const url = asText(run["html_url"]) || asText(run["details_url"]);
-      runs.push({
-        name: asText(run["name"]),
-        status: status === "completed" ? "completed" : status === "in_progress" ? "running" : "queued",
-        ...(status === "completed" ? { conclusion: githubConclusion(asText(run["conclusion"])) } : {}),
-        ...(url.length > 0 ? { url } : {}),
-      });
-    }
-    for (const entry of asList(statusBody["statuses"])) {
-      const status = asRecord(entry);
-      const state = asText(status["state"]);
-      const url = asText(status["target_url"]);
-      runs.push({
-        name: asText(status["context"]),
-        status: state === "pending" ? "running" : "completed",
-        ...(state === "pending" ? {} : { conclusion: state === "success" ? ("success" as const) : ("failure" as const) }),
-        ...(url.length > 0 ? { url } : {}),
-      });
-    }
-    return { ref, ...(sha.length > 0 ? { sha } : {}), state: ciStateOf(runs), runs };
-  }
-
   async branches(project: string): Promise<ForgeBranch[]> {
     const rows = await this.listed(`/repos/${project}/branches?per_page=100`, `listing the branches of ${project}`);
     return rows.map((row) => ({ name: asText(asRecord(row)["name"]), head: asText(asRecord(asRecord(row)["commit"])["sha"]) }));
@@ -546,6 +520,338 @@ export class GitHubProvider implements ForgeProvider {
     const response = expectStatus(await this.call("GET", `/repos/${project}/compare/${encodeURIComponent(base)}...${encodeURIComponent(head)}`), [200], `comparing ${base.slice(0, 7)}...${head.slice(0, 7)}`);
     return asList(asRecord(response.body)["commits"]).map(commitOf);
   }
+
+  // --- CI (decision 0016) ------------------------------------------------------------------------
+
+  /** The web host's root — where a person's links go. */
+  private get web(): string {
+    return this.host === "github.com" ? "https://github.com" : `https://${this.host}`;
+  }
+
+  /**
+   * A pipeline here is a CHECK SUITE: one per app per commit, and for Actions one per workflow run.
+   * A suite that ran nothing (an app that registered and did not report) is left out.
+   *
+   * A pull request's pipelines are its commits' — GitHub has no list of a pull request's runs that
+   * holds for forks (their runs carry `pull_requests: []`, measured) — read in ONE GraphQL query. A
+   * ref or a commit is two REST reads: its suites, and the workflow runs that own them.
+   */
+  async pipelines(project: string, query: PipelineQuery): Promise<PipelineList> {
+    const limit = limitOf(query.limit);
+    let listed: PipelineList;
+    if (query.mergeRequest !== undefined) listed = await this.pullPipelines(project, query.mergeRequest);
+    else {
+      const ref = query.ref ?? query.sha;
+      if (ref === undefined) throw new ForgeError("name the pull request, the ref or the commit whose pipelines to list", 400);
+      listed = await this.refPipelines(project, ref);
+    }
+    const pipelines = listed.pipelines
+      .filter((pipeline) => (query.status === undefined || pipeline.status === query.status) && (query.source === undefined || pipeline.source === query.source))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt) || b.id - a.id)
+      .slice(0, limit);
+    const statuses = listed.statuses.filter((status) => query.status === undefined || status.status === query.status);
+    return { pipelines, statuses: query.source === undefined || query.source === "external" ? statuses : [] };
+  }
+
+  private async refPipelines(project: string, ref: string): Promise<PipelineList> {
+    const at = `/repos/${project}/commits/${encodeURIComponent(ref)}`;
+    const [suitesResponse, statusResponse] = await Promise.all([this.call("GET", `${at}/check-suites?per_page=100`), this.call("GET", `${at}/status?per_page=100`)]);
+    if (suitesResponse.status === 404 || suitesResponse.status === 422) throw new ForgeError(`${project} has no commit or branch ${ref} this token can see`, 404);
+    const suites = asList(asRecord(expectStatus(suitesResponse, [200], `reading the check suites of ${ref}`).body)["check_suites"])
+      .map((entry) => asRecord(entry))
+      .filter((suite) => Number(suite["latest_check_runs_count"] ?? 1) > 0);
+    const statusBody = asRecord(expectStatus(statusResponse, [200], `reading the commit statuses of ${ref}`).body);
+    const sha = asText(statusBody["sha"]) || asText(suites[0]?.["head_sha"]);
+    // The workflow runs of the commit, to name each Actions suite's run: its event, attempt and link.
+    const runs = new Map<number, Record<string, unknown>>();
+    if (sha.length > 0 && suites.some((suite) => asText(asRecord(suite["app"])["slug"]) === "github-actions")) {
+      const body = asRecord(expectStatus(await this.call("GET", `/repos/${project}/actions/runs?head_sha=${sha}&per_page=100`), [200], `reading the workflow runs of ${sha.slice(0, 7)}`).body);
+      for (const entry of asList(body["workflow_runs"])) {
+        const run = asRecord(entry);
+        runs.set(Number(run["check_suite_id"]), run);
+      }
+    }
+    return {
+      pipelines: suites.map((suite) => this.pipelineOfSuite(project, suite, runs.get(Number(suite["id"])))),
+      statuses: asList(statusBody["statuses"]).map((entry) => githubStatusOf(sha, asRecord(entry))),
+    };
+  }
+
+  /** A suite from REST, with the workflow run that owns it when Actions ran it. */
+  private pipelineOfSuite(project: string, suite: Record<string, unknown>, run: Record<string, unknown> | undefined): ForgePipeline {
+    const app = asRecord(suite["app"]);
+    const id = Number(suite["id"]);
+    const sha = asText(suite["head_sha"]);
+    const event = run !== undefined ? asText(run["event"]) : "";
+    const finishedAt = asText(suite["status"]) === "completed" ? asText(suite["updated_at"]) : "";
+    return {
+      id,
+      sha,
+      ref: asText(suite["head_branch"]) || (run !== undefined ? asText(run["head_branch"]) : ""),
+      source: run !== undefined ? githubSource(event) : "external",
+      sourceName: run !== undefined ? event : asText(app["slug"]),
+      status: githubStatus(asText(suite["status"]), asText(suite["conclusion"])),
+      name: run !== undefined ? asText(run["name"]) : asText(app["name"]),
+      ...(run !== undefined ? { runId: Number(run["id"]), attempt: Number(run["run_attempt"] ?? 1) } : {}),
+      createdAt: asText(suite["created_at"]),
+      ...(finishedAt.length > 0 ? { finishedAt } : {}),
+      url: run !== undefined ? asText(run["html_url"]) : `${this.web}/${project}/commit/${sha}/checks?check_suite_id=${id}`,
+    };
+  }
+
+  private async pullPipelines(project: string, number: number): Promise<PipelineList> {
+    const [owner, name] = project.split("/");
+    const data = await this.graphql(GITHUB_PULL_PIPELINES_QUERY, { owner, name, number }, `reading the pipelines of ${project}#${number}`);
+    const pull = asRecord(asRecord(data["repository"])["pullRequest"]);
+    if (Object.keys(pull).length === 0) throw new ForgeError(`${project} has no pull request #${number} this token can see`, 404);
+    const pipelines: ForgePipeline[] = [];
+    const statuses: ForgeCommitStatus[] = [];
+    for (const entry of asList(asRecord(pull["commits"])["nodes"])) {
+      const commit = asRecord(asRecord(entry)["commit"]);
+      const sha = asText(commit["oid"]);
+      for (const node of asList(asRecord(commit["checkSuites"])["nodes"])) {
+        const suite = asRecord(node);
+        if (Number(asRecord(suite["checkRuns"])["totalCount"] ?? 0) === 0) continue;
+        const app = asRecord(suite["app"]);
+        const run = asRecord(suite["workflowRun"]);
+        const hasRun = Object.keys(run).length > 0;
+        const id = Number(suite["databaseId"]);
+        const event = asText(run["event"]).toLowerCase();
+        const status = asText(suite["status"]).toLowerCase();
+        pipelines.push({
+          id,
+          sha,
+          ref: asText(asRecord(suite["branch"])["name"]),
+          source: hasRun ? githubSource(event) : "external",
+          sourceName: hasRun ? event : asText(app["slug"]),
+          status: githubStatus(status, asText(suite["conclusion"]).toLowerCase()),
+          name: hasRun ? asText(asRecord(run["workflow"])["name"]) : asText(app["name"]),
+          ...(hasRun ? { runId: Number(run["databaseId"]) } : {}),
+          createdAt: asText(suite["createdAt"]),
+          ...(status === "completed" ? { finishedAt: asText(suite["updatedAt"]) } : {}),
+          url: hasRun ? asText(run["url"]) : `${this.web}/${project}/commit/${sha}/checks?check_suite_id=${id}`,
+        });
+      }
+      for (const node of asList(asRecord(commit["status"])["contexts"])) {
+        const context = asRecord(node);
+        statuses.push(
+          githubStatusOf(sha, { context: context["context"], state: asText(context["state"]).toLowerCase(), description: context["description"], target_url: context["targetUrl"], created_at: context["createdAt"] }),
+        );
+      }
+    }
+    return { pipelines, statuses };
+  }
+
+  /**
+   * A suite, its check runs (the jobs), and — when Actions ran it — the workflow run's event, attempt
+   * and uploaded artifacts, which belong to the run and name no job.
+   */
+  async pipeline(project: string, id: number, options: { jobStatus?: readonly PipelineStatus[]; includeRetried?: boolean } = {}): Promise<PipelineDetail> {
+    const response = await this.call("GET", `/repos/${project}/check-suites/${id}`);
+    if (response.status === 404) throw new ForgeError(`${project} has no check suite ${id} this token can see`, 404);
+    const suite = asRecord(expectStatus(response, [200], `reading check suite ${id}`).body);
+    const actions = asText(asRecord(suite["app"])["slug"]) === "github-actions";
+    const run = actions
+      ? asRecord(
+          asList(
+            asRecord(expectStatus(await this.call("GET", `/repos/${project}/actions/runs?check_suite_id=${id}&per_page=1`), [200], `reading the workflow run of suite ${id}`).body)["workflow_runs"],
+          )[0],
+        )
+      : undefined;
+    const filter = options.includeRetried === true ? "all" : "latest";
+    const rows = await this.listed(`/repos/${project}/check-suites/${id}/check-runs?filter=${filter}&per_page=100`, `reading the check runs of suite ${id}`, () => false, "check_runs");
+    const wanted = options.jobStatus !== undefined && options.jobStatus.length > 0 ? new Set(options.jobStatus) : undefined;
+    const jobs = markRetried(rows.map((row) => githubJobOf(asRecord(row)))).filter((job) => wanted === undefined || wanted.has(job.status));
+    const artifacts: ForgeArtifact[] = [];
+    if (run !== undefined && Object.keys(run).length > 0) {
+      const body = asRecord(expectStatus(await this.call("GET", `/repos/${project}/actions/runs/${run["id"]}/artifacts?per_page=100`), [200], `reading the artifacts of run ${run["id"]}`).body);
+      for (const entry of asList(body["artifacts"])) {
+        const artifact = asRecord(entry);
+        if (artifact["expired"] === true) continue;
+        const expiresAt = asText(artifact["expires_at"]);
+        artifacts.push({
+          artifactId: Number(artifact["id"]),
+          fileType: "archive",
+          name: asText(artifact["name"]),
+          ...(typeof artifact["size_in_bytes"] === "number" ? { size: artifact["size_in_bytes"] } : {}),
+          ...(expiresAt.length > 0 ? { expiresAt } : {}),
+          url: `${this.web}/${project}/actions/runs/${run["id"]}/artifacts/${artifact["id"]}`,
+        });
+      }
+    }
+    return { ...this.pipelineOfSuite(project, suite, run !== undefined && Object.keys(run).length > 0 ? run : undefined), jobs, artifacts };
+  }
+
+  /**
+   * A check run, and for Actions the job it is (the same id, measured): steps, the labels it asked for,
+   * the runner's name. The exit code is in the failure annotation Actions writes — "Process completed
+   * with exit code 1." (measured) — so it is known without the log.
+   */
+  async job(project: string, id: number): Promise<JobDetail> {
+    const response = await this.call("GET", `/repos/${project}/check-runs/${id}`);
+    if (response.status === 404) throw new ForgeError(`${project} has no check run ${id} this token can see`, 404);
+    const row = asRecord(expectStatus(response, [200], `reading check run ${id}`).body);
+    const job = githubJobOf(row);
+    const actions = asText(asRecord(row["app"])["slug"]) === "github-actions";
+    const count = Number(asRecord(row["output"])["annotations_count"] ?? 0);
+    const [actionsJob, annotationRows] = await Promise.all([
+      actions ? this.call("GET", `/repos/${project}/actions/jobs/${id}`).then((r) => asRecord(expectStatus(r, [200], `reading job ${id}`).body)) : Promise.resolve(undefined),
+      count > 0 ? this.listed(`/repos/${project}/check-runs/${id}/annotations?per_page=100`, `reading the annotations of ${id}`) : Promise.resolve([]),
+    ]);
+    const annotations: ForgeAnnotation[] = annotationRows.map((entry) => {
+      const a = asRecord(entry);
+      const level = asText(a["annotation_level"]);
+      const title = asText(a["title"]);
+      return {
+        path: asText(a["path"]),
+        ...(typeof a["start_line"] === "number" ? { startLine: a["start_line"] } : {}),
+        ...(typeof a["end_line"] === "number" ? { endLine: a["end_line"] } : {}),
+        level: level === "failure" || level === "warning" ? level : "notice",
+        ...(title.length > 0 ? { title } : {}),
+        message: asText(a["message"]),
+      };
+    });
+    const exit = annotations.map((a) => /exit code (\d+)/.exec(a.message)).find((match) => match !== null);
+    const runnerName = actionsJob !== undefined ? asText(actionsJob["runner_name"]) : "";
+    return {
+      ...job,
+      pipelineId: Number(asRecord(row["check_suite"])["id"]),
+      sha: asText(row["head_sha"]),
+      ...(actionsJob !== undefined ? { runner: { ...(runnerName.length > 0 ? { name: runnerName } : {}), tags: asList(actionsJob["labels"]).map(asText) } } : {}),
+      steps:
+        actionsJob === undefined
+          ? []
+          : asList(actionsJob["steps"]).map((entry) => {
+              const step = asRecord(entry);
+              const startedAt = asText(step["started_at"]);
+              const finishedAt = asText(step["completed_at"]);
+              return {
+                number: Number(step["number"]),
+                name: asText(step["name"]),
+                status: githubStatus(asText(step["status"]), asText(step["conclusion"])),
+                ...(startedAt.length > 0 ? { startedAt } : {}),
+                ...(finishedAt.length > 0 ? { finishedAt } : {}),
+              };
+            }),
+      ...(exit !== undefined && exit !== null ? { exitCode: Number(exit[1]) } : {}),
+      annotations,
+      // Only Actions keeps a log GitHub will hand over; another app's check run has its output above.
+      artifacts: actions ? [{ jobId: id, fileType: "trace", name: "job.log", url: job.url }] : [],
+    };
+  }
+
+  /** A job's log, or a run's uploaded artifact (a zip). Both answer 302 to a link valid for a minute. */
+  async artifact(project: string, which: ArtifactRef): Promise<ArtifactBytes> {
+    let path: string;
+    if ("artifactId" in which) path = `/repos/${project}/actions/artifacts/${which.artifactId}/zip`;
+    else if (which.fileType === "trace") path = `/repos/${project}/actions/jobs/${which.jobId}/logs`;
+    else throw new ForgeError("GitHub keeps one artifact per job — its log (file_type trace); a run's uploads are named by artifact_id", 400);
+    const response = await this.http({ method: "GET", url: `${this.rest}${path}`, headers: this.headers(), expect: "bytes", timeoutMs: DOWNLOAD_TIMEOUT_MS });
+    if (response.status === 404 || response.status === 410) throw new ForgeError(`${"artifactId" in which ? `artifact ${which.artifactId}` : `the log of job ${which.jobId}`} is not there to download — it may have expired`, 404);
+    const body = expectStatus(response, [200], `downloading ${"artifactId" in which ? `artifact ${which.artifactId}` : `the log of job ${which.jobId}`}`).body;
+    return { bytes: body instanceof Uint8Array ? body : new TextEncoder().encode(String(body ?? "")), ...(response.headers["content-type"] !== undefined ? { contentType: response.headers["content-type"] } : {}) };
+  }
+}
+
+/** How long a download gets: a log or an archive can be tens of megabytes. */
+const DOWNLOAD_TIMEOUT_MS = 120_000;
+
+/** A pull request's commits, each with its check suites and commit statuses, in one round trip. */
+export const GITHUB_PULL_PIPELINES_QUERY = `
+query JairaPullPipelines($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    pullRequest(number: $number) {
+      commits(last: 50) {
+        nodes {
+          commit {
+            oid
+            checkSuites(first: 30) {
+              nodes {
+                databaseId status conclusion createdAt updatedAt
+                app { slug name }
+                branch { name }
+                checkRuns(first: 1) { totalCount }
+                workflowRun { databaseId event url workflow { name } }
+              }
+            }
+            status { contexts { context state description targetUrl createdAt } }
+          }
+        }
+      }
+    }
+  }
+}`.trim();
+
+/** A check suite's, run's or step's status and conclusion, in {@link PipelineStatus}'s words. */
+function githubStatus(status: string, conclusion: string): PipelineStatus {
+  if (status === "in_progress") return "running";
+  if (status !== "completed") return "pending";
+  switch (conclusion) {
+    case "success":
+      return "success";
+    case "cancelled":
+    case "stale":
+      return "canceled";
+    case "skipped":
+    case "neutral":
+      return "skipped";
+    case "action_required":
+      // Waiting for somebody to approve it — GitLab's manual.
+      return "manual";
+    default:
+      // failure, timed_out, startup_failure
+      return "failed";
+  }
+}
+
+function githubSource(event: string): PipelineSource {
+  switch (event) {
+    case "push":
+    case "schedule":
+      return event;
+    case "pull_request":
+    case "pull_request_target":
+    case "merge_group":
+      return "merge_request";
+    case "workflow_dispatch":
+      return "web";
+    case "repository_dispatch":
+      return "api";
+    case "workflow_call":
+    case "workflow_run":
+      return "trigger";
+    default:
+      return "other";
+  }
+}
+
+/** A check run as a job. */
+function githubJobOf(row: Record<string, unknown>): ForgeJob {
+  const startedAt = asText(row["started_at"]);
+  const finishedAt = asText(row["completed_at"]);
+  return {
+    id: Number(row["id"]),
+    name: asText(row["name"]),
+    status: githubStatus(asText(row["status"]), asText(row["conclusion"])),
+    ...(startedAt.length > 0 ? { startedAt } : {}),
+    ...(finishedAt.length > 0 ? { finishedAt } : {}),
+    url: asText(row["html_url"]) || asText(row["details_url"]),
+  };
+}
+
+/** A commit status — REST's, or GraphQL's mapped onto REST's field names. */
+function githubStatusOf(sha: string, row: Record<string, unknown>): ForgeCommitStatus {
+  const state = asText(row["state"]);
+  const description = asText(row["description"]);
+  const url = asText(row["target_url"]);
+  return {
+    sha,
+    context: asText(row["context"]),
+    status: state === "success" ? "success" : state === "pending" || state === "expected" ? "pending" : "failed",
+    ...(description.length > 0 ? { description } : {}),
+    ...(url.length > 0 ? { url } : {}),
+    createdAt: asText(row["created_at"]),
+  };
 }
 
 /** Ten pages of a hundred: past that a list is not something anybody is reading. */
@@ -560,20 +866,9 @@ function nextLink(link: string | undefined): string | undefined {
   return undefined;
 }
 
-/** A check run's conclusion, in JaiRA's five words. */
-function githubConclusion(conclusion: string): CiConclusion {
-  switch (conclusion) {
-    case "success":
-      return "success";
-    case "cancelled":
-      return "cancelled";
-    case "skipped":
-      return "skipped";
-    case "neutral":
-    case "stale":
-      return "neutral";
-    default:
-      // failure, timed_out, action_required, startup_failure — each a run that did not pass.
-      return "failure";
-  }
+/** What a REST post answered with: the comment's id and its page. */
+function postedComment(body: unknown): ForgePosted {
+  const row = asRecord(body);
+  const url = asText(row["html_url"]);
+  return { ...(row["id"] !== undefined ? { id: String(row["id"]) } : {}), ...(url.length > 0 ? { url } : {}) };
 }

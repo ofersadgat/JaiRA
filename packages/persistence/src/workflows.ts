@@ -519,7 +519,7 @@ function browseLayers(
   return { workflows, files: fileEntries, unreachable };
 }
 
-/** `on_event('git.push'` — the event a guard waits on, where it names one literally. */
+/** `on_event('git.pushed'` — the event a guard waits on, where it names one literally. */
 const ON_EVENT_CALL = /\bon_event\(\s*(['"])([^'"]+)\1/g;
 
 /**

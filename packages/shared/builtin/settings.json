@@ -24,13 +24,17 @@
     "smart": { "model": "simple" }
   },
   "events": {
-    "git.push": { "enabled": true },
-    "git.merge_request.opened": { "enabled": true },
-    "git.merge_request.updated": { "enabled": true },
-    "git.merge_request.comments": { "enabled": true },
-    "git.merge_request.merged": { "enabled": true },
-    "git.merge_request.closed": { "enabled": true },
-    "git.checks.failed": { "enabled": true },
+    "git.pushed": { "enabled": true },
+    "git.merged": { "enabled": true },
+    "merge_request.opened": { "enabled": true },
+    "merge_request.updated": { "enabled": true },
+    "merge_request.pushed": { "enabled": true },
+    "merge_request.commented": { "enabled": true },
+    "merge_request.merged": { "enabled": true },
+    "merge_request.closed": { "enabled": true },
+    "pipeline.succeeded": { "enabled": true },
+    "pipeline.failed": { "enabled": true },
+    "pipeline.canceled": { "enabled": true },
     "task.finished": { "enabled": true },
     "task.failed": { "enabled": true }
   }

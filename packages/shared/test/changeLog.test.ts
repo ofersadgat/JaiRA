@@ -102,7 +102,7 @@ describe("git", () => {
     at: t(12),
     change: true,
   };
-  const comment: ChangeCall = { id: "g4", name: "mcp__dai__git_comment", standard: "git_comment", category: "git", args: { number: 482, body: "x", path: "src/styles.css", line: 3 }, at: t(13), change: true, by: { kind: "subtask", name: "Review", taskId: "t-rev" } };
+  const comment: ChangeCall = { id: "g4", name: "mcp__dai__comment_merge_request", standard: "comment_merge_request", category: "git", args: { number: 482, body: "x", path: "src/styles.css", line: 3 }, at: t(13), change: true, by: { kind: "subtask", name: "Review", taskId: "t-rev" } };
 
   it("makes a ladder of the steps, and a banner of each merge request with its link", () => {
     const log = changeLogOf([status, commit, push, open, comment, { ...edit, at: t(14) }], { root: ROOT, title });

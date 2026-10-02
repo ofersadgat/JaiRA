@@ -55,9 +55,10 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 | `list_tasks` | true | `registerWorkflowTools` | none | none |
 | `answer_question` | false | `registerWorkflowTools` | none | none |
 | `hold_task`, `release_task`, `stop_task` | false | `registerWorkflowTools` | none | none |
-| `list_merge_requests`, `read_merge_request`, `git_checks` | true | `registerGitTools` | none | none |
-| `open_merge_request`, `git_comment`, `git_merge`, `close_merge_request`, `git_push` | false | `registerGitTools` | none | none |
-| `wait_git_event` | named and not yet served (`unserved`) | nothing yet | none | none |
+| `list_merge_requests`, `read_merge_request` | true | `registerGitTools` | none | none |
+| `open_merge_request`, `comment_merge_request`, `git_merge`, `close_merge_request`, `git_push` | false | `registerGitTools` | none | none |
+| `list_pipelines`, `read_pipeline`, `read_pipeline_job`, `download_pipeline_artifact` | true | `registerGitTools` (from `ciTools.ts`) | none | none |
+| `wait_for_event` | true | `registerGitTools` | none | none |
 
 The **Git tools** ([0010](../decisions/0010-git-tools-and-events.md) §1), category `git`, reach the forge of
 the WORKSPACE's git remote (the one named in `remote`, else the only one, else `origin`) through the
@@ -66,6 +67,13 @@ sign in on Connections"}`. `git_push` and `open_merge_request` also pass `functi
 asked once per task and shared with `remote_push`/`remote_open`; the push carries the connection's token
 as an `Authorization` header in `GIT_CONFIG_*` environment variables, to the project's https url, never
 forced. `chat_control` sets do not hold them.
+
+The **CI tools** ([0016](../decisions/0016-git-and-ci-tools.md) §2), category `ci`, reach the same forge the same
+way and only read: a pipeline list (of a merge request, a ref or a sha), one pipeline and its jobs, one job
+(its machine, steps, failure and artifacts), and a download, kept as the task's artifact under
+`ci-artifacts/…` in `$CENTRAL` and read with `read_file` at the answer's `path`. Every id an answer carries is
+named as the next call takes it (`pipeline_id`, `job_id`, `artifact_id`, `file_type`). `wait_for_event`
+(category `tasks`) waits for any event, JaiRA's own included; only a remote's event passes the forge's door.
 
 The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
 CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no

@@ -37,7 +37,42 @@ export interface Migration {
   run?: (db: JairaDb) => void;
 }
 
-export const MIGRATIONS: Migration[] = [];
+export const MIGRATIONS: Migration[] = [
+  {
+    version: 25,
+    note: "decision 0016: the watcher's checks became pipelines, and the remote events were renamed (git.push → git.pushed, git.merge_request.* → merge_request.*, git.merge_request.comments → merge_request.commented, git.checks.failed → pipeline.failed)",
+    // A CHECK constraint cannot be altered, so the table is rebuilt; a head's `checks` row keeps its
+    // shape ({ sha, done, since }) under its new kind.
+    sql: `
+CREATE TABLE repo_watch_seen_next (
+  workspace  TEXT NOT NULL DEFAULT '',
+  remote     TEXT NOT NULL,
+  repository TEXT NOT NULL,
+  kind       TEXT NOT NULL CHECK (kind IN ('merge_request', 'branch', 'pipelines')),
+  key        TEXT NOT NULL,
+  state_json TEXT NOT NULL,
+  updated_at INTEGER NOT NULL,
+  PRIMARY KEY (workspace, remote, repository, kind, key)
+);
+INSERT INTO repo_watch_seen_next (workspace, remote, repository, kind, key, state_json, updated_at)
+  SELECT workspace, remote, repository, CASE kind WHEN 'checks' THEN 'pipelines' ELSE kind END, key, state_json, updated_at FROM repo_watch_seen;
+DROP TABLE repo_watch_seen;
+ALTER TABLE repo_watch_seen_next RENAME TO repo_watch_seen;
+UPDATE repo_watch_cursors
+  SET cursor_json = json_remove(json_set(cursor_json, '$.pipelines', json('true')), '$.checks')
+  WHERE json_extract(cursor_json, '$.checks') IS NOT NULL;
+UPDATE event_waits SET name = CASE name
+  WHEN 'git.push' THEN 'git.pushed'
+  WHEN 'git.merge_request.opened' THEN 'merge_request.opened'
+  WHEN 'git.merge_request.updated' THEN 'merge_request.updated'
+  WHEN 'git.merge_request.comments' THEN 'merge_request.commented'
+  WHEN 'git.merge_request.merged' THEN 'merge_request.merged'
+  WHEN 'git.merge_request.closed' THEN 'merge_request.closed'
+  WHEN 'git.checks.failed' THEN 'pipeline.failed'
+  ELSE name END;
+`,
+  },
+];
 
 /**
  * Bring one database up to date. Called on every open, and a no-op once it is.

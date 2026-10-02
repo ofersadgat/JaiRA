@@ -74,7 +74,7 @@ export function noticeAge(at: number, now: number): string {
   return `${Math.floor(hours / 24)} d`;
 }
 
-/** The faint data line after the text: `git.checks.failed a1b2c3d · 2 m` — the event, which one, how long ago. */
+/** The faint data line after the text: `pipeline.failed a1b2c3d · 2 m` — the event, which one, how long ago. */
 export function noticeMeta(notice: Pick<EventsNotice, "event" | "ref" | "at">, now: number): string {
   const what = [notice.event, notice.ref].filter((part): part is string => part !== undefined && part.length > 0).join(" ");
   const age = noticeAge(notice.at, now);

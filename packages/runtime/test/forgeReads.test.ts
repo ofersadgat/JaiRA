@@ -1,12 +1,12 @@
 /**
  * The reads decision 0010 adds to both providers — every merge request on a project, one by number,
- * CI, branches, and a request's comments flat — against fixtures, like `forge.test.ts`.
+ * branches, and a request's comments flat (CI is `forgeCi.test.ts`) — against fixtures, like `forge.test.ts`.
  *
  * Nothing here reaches a network: `replayForge` throws on any request no fixture answers. The
  * fixtures are `*.git-tools.json` (built from the documented shapes) beside the recorded ones.
  */
 import { beforeEach, describe, expect, it } from "vitest";
-import { ciStateOf, handleOfSummary, signComment, type RemoteHandle } from "@jaira/shared";
+import { handleOfSummary, signComment, type RemoteHandle } from "@jaira/shared";
 import { ForgeError, forgeProvider } from "../src/forge";
 import { replayForge, type Replay } from "./forgeReplay";
 
@@ -90,35 +90,6 @@ describe("GitHub", () => {
     const missing = (await github().mergeRequest("cli/cli", 404).catch((e: unknown) => e)) as ForgeError;
     expect(missing).toBeInstanceOf(ForgeError);
     expect(missing.status).toBe(404);
-  });
-
-  describe("checks", () => {
-    it("reads check runs AND commit statuses, and a failed status fails the whole", async () => {
-      const ci = await github().checks("cli/cli", "feature/login");
-      expect(ci).toEqual({
-        ref: "feature/login",
-        sha: "aaaa000000000000000000000000000000000001",
-        state: "pending",
-        runs: [
-          { name: "build", status: "completed", conclusion: "success", url: "https://github.com/cli/cli/runs/1" },
-          { name: "test", status: "running", url: "https://github.com/cli/cli/runs/2" },
-          { name: "ci/legacy", status: "completed", conclusion: "failure", url: "https://ci.example.test/builds/9" },
-        ],
-      });
-      // The branch is ONE path segment.
-      expect(new URL(replay.seen[0]!.url).pathname).toBe("/repos/cli/cli/commits/feature%2Flogin/check-runs");
-    });
-
-    it("folds a timed-out run into failure, and does not believe the combined status's pending when nothing reported one", async () => {
-      const ci = await github().checks("cli/cli", "trunk");
-      expect(ci.state).toBe("failure");
-      expect(ci.runs).toEqual([{ name: "build", status: "completed", conclusion: "failure", url: "https://ci.example.test/runs/3" }]);
-    });
-
-    it("says none when nothing ran for the commit", async () => {
-      const ci = await github().checks("cli/cli", "b".repeat(40));
-      expect(ci).toEqual({ ref: "b".repeat(40), sha: "b".repeat(40), state: "none", runs: [] });
-    });
   });
 
   it("lists every branch, page after page", async () => {
@@ -208,37 +179,6 @@ describe("GitLab", () => {
     expect(missing.status).toBe(404);
   });
 
-  describe("checks", () => {
-    it("reads the newest pipeline for a branch and its jobs; the state is the pipeline's", async () => {
-      const ci = await gitlab().checks(RUNNER, "feature/login");
-      expect(ci).toEqual({
-        ref: "feature/login",
-        sha: "cccc000000000000000000000000000000000001",
-        state: "pending",
-        pipeline: { id: 9001, url: "https://gitlab.com/gitlab-org/gitlab-runner/-/pipelines/9001" },
-        runs: [
-          { name: "build", status: "completed", conclusion: "success", url: "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/1", stage: "build" },
-          { name: "test", status: "running", url: "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/2", stage: "test" },
-          // Waiting for somebody to press play: finished, as far as anything running is concerned.
-          { name: "deploy", status: "completed", conclusion: "neutral", url: "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/3", stage: "deploy" },
-        ],
-      });
-      expect(query(0)).toMatchObject({ ref: "feature/login", order_by: "id", sort: "desc", per_page: "1" });
-    });
-
-    it("says failure for a failed pipeline", async () => {
-      const ci = await gitlab().checks(RUNNER, "main");
-      expect(ci.state).toBe("failure");
-      expect(ci.runs.find((r) => r.name === "test")).toMatchObject({ conclusion: "failure" });
-    });
-
-    it("asks by sha for a commit, and says none when no pipeline ran", async () => {
-      const sha = "d".repeat(40);
-      expect(await gitlab().checks(RUNNER, sha)).toEqual({ ref: sha, state: "none", runs: [] });
-      expect(query(0)).toMatchObject({ sha });
-    });
-  });
-
   it("lists every branch, following x-next-page", async () => {
     expect(await gitlab().branches(RUNNER)).toEqual([
       { name: "main", head: "cccc000000000000000000000000000000000009" },
@@ -295,14 +235,5 @@ describe("GitLab", () => {
       expect(later.map((n) => n.id)).not.toContain("1102");
       expect(later.map((n) => n.id)).toContain("1103");
     });
-  });
-});
-
-describe("ciStateOf", () => {
-  it("is none with no runs, pending while any runs, failure on a failed or cancelled one, success otherwise", () => {
-    expect(ciStateOf([])).toBe("none");
-    expect(ciStateOf([{ name: "a", status: "queued" }])).toBe("pending");
-    expect(ciStateOf([{ name: "a", status: "completed", conclusion: "cancelled" }])).toBe("failure");
-    expect(ciStateOf([{ name: "a", status: "completed", conclusion: "skipped" }, { name: "b", status: "completed", conclusion: "success" }])).toBe("success");
   });
 });

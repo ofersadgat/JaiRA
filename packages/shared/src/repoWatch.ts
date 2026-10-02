@@ -12,15 +12,15 @@
  *  - the CURSOR, one per remote: where the next "what changed since" starts, and which kinds have had
  *    their baseline taken;
  *  - the LAST SEEN state, one per `(kind, key)`: a merge request by its number, a branch by its name,
- *    and a branch's head's checks by the branch's name.
+ *    and a branch head's pipelines by the branch's name.
  */
 import type { EventName, JairaEvent } from "./events";
 import type { ForgeCheck, ForgeProviderKind } from "./forge";
 
 /** What the watcher remembers one of. */
-export type RepoWatchKind = "merge_request" | "branch" | "checks";
+export type RepoWatchKind = "merge_request" | "branch" | "pipelines";
 
-export const REPO_WATCH_KINDS: readonly RepoWatchKind[] = ["merge_request", "branch", "checks"];
+export const REPO_WATCH_KINDS: readonly RepoWatchKind[] = ["merge_request", "branch", "pipelines"];
 
 /** Which remote, on which repository. */
 export interface RepoWatchScope {
@@ -41,8 +41,8 @@ export interface RepoWatchCursor {
   mergeRequests?: { since: string };
   /** Branch heads have been read at least once. */
   branches?: true;
-  /** Branch heads' checks have a baseline. */
-  checks?: true;
+  /** Branch heads' pipelines have a baseline. */
+  pipelines?: true;
   /** Conditional-request ETags, by request url, where a provider hands them back. */
   etags?: Record<string, string>;
 }
@@ -64,19 +64,19 @@ export interface SeenBranch {
   head: string;
 }
 
-/** A branch head's checks: which commit, and whether they have been concluded (reported or passed). */
-export interface SeenChecks {
+/** A branch head's pipelines: which commit, and whether they have finished (reported) yet. */
+export interface SeenPipelines {
   sha: string;
-  /** True once the checks of `sha` concluded — or the head was there at the baseline. */
+  /** True once the pipelines of `sha` finished and were reported — or the head was there at the baseline. */
   done: boolean;
-  /** Epoch ms the head was first seen, so checks that never start are eventually given up on. */
+  /** Epoch ms the head was first seen, so a head no pipeline ever runs for is eventually given up on. */
   since: number;
 }
 
 export interface RepoWatchSeen {
   merge_request: SeenMergeRequest;
   branch: SeenBranch;
-  checks: SeenChecks;
+  pipelines: SeenPipelines;
 }
 
 /** What the watcher needs of the store. `@jaira/persistence` implements it. */
@@ -104,7 +104,7 @@ export interface EventWaitPort {
 }
 
 /**
- * One event as it is DELIVERED — what `on_event(...)` resolves to and `wait_git_event` answers with:
+ * One event as it is DELIVERED — what `on_event(...)` resolves to and `wait_for_event` answers with:
  * its name, its payload, and when JaiRA saw it happen (ISO 8601).
  */
 export type EventDelivery = JairaEvent & { at: string };

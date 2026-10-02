@@ -48,7 +48,7 @@ describe("the service's repository watcher", () => {
     await new Promise((r) => setTimeout(r, 300));
     expect(replay.seen).toEqual([]);
 
-    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: true } } } as JsonValue });
+    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.pushed": { enabled: true } } } as JsonValue });
     await until(() => branchReads() >= 2, "the branches of origin to be read");
     // gitlab.com/gitlab-org/gitlab-runner, from `.git/config` — and only the branches: push needs nothing else.
     expect(replay.seen.every((r) => r.url.includes("/projects/gitlab-org%2Fgitlab-runner/repository/branches"))).toBe(true);
@@ -63,7 +63,7 @@ describe("the service's repository watcher", () => {
     // No token: GitLab's connection names GITLAB_TOKEN and nothing stores it — the provider refuses.
     service.writeConfig({
       layer: "project",
-      config: { ...(service.readConfig().project as object), integrations: { forges: { gitlab: { enabled: false } } }, events: { "git.push": { enabled: true } } } as JsonValue,
+      config: { ...(service.readConfig().project as object), integrations: { forges: { gitlab: { enabled: false } } }, events: { "git.pushed": { enabled: true } } } as JsonValue,
     });
     await until(() => service.readLogs({ source: "runtime" }).entries.find((e) => e.message.startsWith("not watching origin")), "the skip to be said");
     // Asked again — another write, the window back — it is not said again.
@@ -84,7 +84,7 @@ describe("events:status", () => {
       { name: "origin", host: "gitlab.com", repository: "gitlab-org/gitlab-runner", provider: "gitlab", connection: { name: "gitlab" }, watchable: true, watching: false, events: {} },
     ]);
     service.setSecret({ name: "GITLAB_TOKEN", value: "good", target: "project-env-local" });
-    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: true } } } as JsonValue });
+    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.pushed": { enabled: true } } } as JsonValue });
     await until(() => branchReads() >= 2, "the branches of origin to be read");
     let status = await service.readEventStatus();
     for (const deadline = Date.now() + 30_000; status.remotes[0]?.checkedAt === undefined && Date.now() < deadline; ) {

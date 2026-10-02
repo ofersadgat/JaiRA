@@ -411,7 +411,7 @@ function pushedOf(text: string | undefined, part: string): string | undefined {
 
 /**
  * A request named by its id — `<host>/<project>!<number>` on GitLab, `#` on GitHub (`RemoteHandle.id`)
- * — and the page it is on. What `git_comment`, `git_merge` and `close_merge_request` answer with.
+ * — and the page it is on. What `comment_merge_request`, `git_merge` and `close_merge_request` answer with.
  */
 export function requestOfId(id: string | undefined): { number: number; url: string } | undefined {
   const match = /^([^/]+)\/(.+)([!#])(\d+)$/.exec(id ?? "");
@@ -456,9 +456,12 @@ function gitOf(calls: readonly ChangeCall[], files: readonly FileChange[]): GitC
           steps.push({ ...stamp, kind: "open", subject: `!${number}`, request: number, ...(view.title !== undefined ? { detail: view.title } : {}), ...(view.url !== undefined ? { url: view.url } : {}) });
           break;
         }
-        case "git_comment":
-          steps.push({ ...stamp, kind: "comment", ...(number !== undefined ? { subject: `!${number}`, request: number } : {}), ...(str(args["path"]) !== undefined ? { detail: `on ${str(args["path"])}` } : {}), ...(known?.url !== undefined ? { url: known.url } : {}) });
+        case "comment_merge_request": {
+          // The comment's own link when the forge gave one, else its request's page.
+          const url = str(result?.["url"]) ?? known?.url;
+          steps.push({ ...stamp, kind: "comment", ...(number !== undefined ? { subject: `!${number}`, request: number } : {}), ...(str(args["path"]) !== undefined ? { detail: `on ${str(args["path"])}` } : {}), ...(url !== undefined ? { url } : {}) });
           break;
+        }
         case "git_merge":
           if (known !== undefined) known.state = "merged";
           steps.push({ ...stamp, kind: "merge", ...(number !== undefined ? { subject: `!${number}`, request: number } : {}), ...(known?.url !== undefined ? { url: known.url } : {}) });

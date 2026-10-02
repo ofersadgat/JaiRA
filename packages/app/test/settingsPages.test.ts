@@ -106,13 +106,14 @@ describe("Connections → Forges", () => {
 
   it("opens with what uses the connection — counted from the vocabulary", () => {
     const git = toolsInCategory("git");
-    expect(git.length).toBe(9);
-    expect(gitToolsSentence().lead).toBe(`Used by ${git.length} Git tools — ${git[0]!.name}, ${git.at(-1)!.name} and seven more`);
-    expect(gitToolsSentence().lead).toBe("Used by 9 Git tools — list_merge_requests, git_push and seven more");
+    expect(git.length).toBe(7);
+    // The CI tools (decision 0016) reach the forge through the same connection, so they are counted too.
+    expect(gitToolsSentence().lead).toBe(`Used by ${git.length} Git tools — ${git[0]!.name}, ${git.at(-1)!.name} and five more, and ${toolsInCategory("ci").length} CI tools`);
+    expect(gitToolsSentence().lead).toBe("Used by 7 Git tools — list_merge_requests, git_push and five more, and 4 CI tools");
   });
 
   it("counts whatever the git category holds", () => {
-    expect(gitToolsSentence()).toEqual({ count: toolsInCategory("git").length, lead: `Used by ${toolsInCategory("git").length} Git tools — list_merge_requests, git_push and seven more` });
+    expect(gitToolsSentence()).toEqual({ count: toolsInCategory("git").length, lead: `Used by ${toolsInCategory("git").length} Git tools — list_merge_requests, git_push and five more, and ${toolsInCategory("ci").length} CI tools` });
   });
 });
 

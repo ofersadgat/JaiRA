@@ -286,7 +286,7 @@ function UndoLink({ onUndo }: { onUndo: () => void }): JSX.Element {
 }
 
 /**
- * "started by events · push_main · git.push a1b2c3d on main" (decision 0010 §4): a task the events task
+ * "started by events · push_main · git.pushed a1b2c3d on main" (decision 0010 §4): a task the events task
  * started says so, under the meta line in its voice (`originLineOf` says it). Pressed, it opens the
  * events task at the automation that started this one — and only that: the press stops here, so the card
  * is not selected on the way.

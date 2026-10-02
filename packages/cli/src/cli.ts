@@ -113,6 +113,7 @@ import {
   noWorkflowHost,
   registerGitTools,
   workspaceGitHost,
+  centralArtifactSink,
   PublishAuthorizer,
   type ArtifactStore,
   type ExecObserver,
@@ -649,6 +650,9 @@ function buildRunEnvironment(
       integrations: config.integrations,
       secrets,
       publishing: new PublishAuthorizer({ publish: config.functions.review_artifacts.publish }),
+      // A CI download is kept with the run's task, as the file tools keep its writes — only a durable
+      // run has one (decision 0016).
+      ...(files ? { artifacts: centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {}),
     }),
   );
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
@@ -687,7 +691,7 @@ function buildRunEnvironment(
   new UserEventHub().register(registry);
   // `on_event` (decision 0010 §3) resolves here too, and a run that reaches one fails saying the CLI
   // runs no repository watcher. Never answered `false` for being unattended: that is the one thing
-  // an event wait must not do. `wait_git_event` answers the same through the Git tools, which are
+  // an event wait must not do. `wait_for_event` answers the same through the Git tools, which are
   // lent no event hub here.
   registerUnservedEvents(registry, "by the CLI");
   // The changeset application step and its status helper (CHANGESETS.md §4.2), same as the app.

@@ -188,7 +188,7 @@ list:
 
 ```jsonc
 "transitions": [
-  { "name": "release_push", "when": "on_event('git.push', { branch: 'release/*' })", "to": "release_build" },
+  { "name": "release_push", "when": "on_event('git.pushed', { branch: 'release/*' })", "to": "release_build" },
   { "$ref": "...filter($BASE/workflows/system/events.transitions, (t) => !['push_main'].includes(t.name))" }
 ]
 ```

@@ -1,0 +1,136 @@
+{
+  "_source": "BUILT 2026-09-28 in the shapes recorded in the app (gitlab.ci.json) for what read_merge_request and list_merge_requests read of a request's pipelines on the rig's project (gitlab-org/gitlab-runner): !7429's own pipeline list (and !7438's, which is empty), its pipeline 9002, that pipeline's failed jobs and its trigger jobs. Ids and shas follow gitlab.git-tools.json; the rest is invented.",
+  "fixtures": [
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7429/pipelines",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": [
+          {
+            "id": 9002,
+            "iid": 82,
+            "sha": "8eee49006c0d827d27228bac5ec8078d86e3354e",
+            "ref": "refs/merge-requests/7429/head",
+            "status": "failed",
+            "source": "merge_request_event",
+            "created_at": "2026-09-18T08:00:00.000Z",
+            "updated_at": "2026-09-18T08:20:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/pipelines/9002"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines/9002"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "id": 9002,
+          "iid": 82,
+          "sha": "8eee49006c0d827d27228bac5ec8078d86e3354e",
+          "ref": "refs/merge-requests/7429/head",
+          "status": "failed",
+          "source": "merge_request_event",
+          "created_at": "2026-09-18T08:00:00.000Z",
+          "finished_at": "2026-09-18T08:20:00.000Z",
+          "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/pipelines/9002"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines/9002/jobs",
+        "query": {
+          "scope[]": "failed",
+          "per_page": "100",
+          "page": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "x-next-page": ""
+        },
+        "body": [
+          {
+            "id": 5,
+            "name": "unit test",
+            "stage": "test",
+            "status": "failed",
+            "failure_reason": "script_failure",
+            "allow_failure": false,
+            "started_at": "2026-09-18T08:05:00.000Z",
+            "finished_at": "2026-09-18T08:19:00.000Z",
+            "web_url": "https://gitlab.com/gitlab-org/gitlab-runner/-/jobs/5"
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines/9002/trigger_jobs",
+        "query": {
+          "scope[]": "failed",
+          "per_page": "100",
+          "page": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "x-next-page": ""
+        },
+        "body": []
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/pipelines/9002/test_report_summary"
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": {
+          "total": {
+            "time": 0,
+            "count": 0,
+            "success": 0,
+            "failed": 0,
+            "skipped": 0,
+            "error": 0,
+            "suite_error": null
+          },
+          "test_suites": []
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/api/v4/projects/gitlab-org%2Fgitlab-runner/merge_requests/7438/pipelines",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {},
+        "body": []
+      }
+    }
+  ]
+}

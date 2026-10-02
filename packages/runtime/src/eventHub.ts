@@ -3,7 +3,7 @@
  * and the hub that hands what happened to whoever waits for it.
  *
  * ```jsonc
- * { "name": "release_push", "when": "on_event('git.push', { branch: 'release/*' })", "to": "release_build" }
+ * { "name": "release_push", "when": "on_event('git.pushed', { branch: 'release/*' })", "to": "release_build" }
  * ```
  *
  * The sibling of `on_user_event` and `on_remote_event`, on the same engine machinery, with three
@@ -91,11 +91,11 @@ export const EVENT_CAPABILITIES: HostCapabilities = {
 export const RECENT_MS = 15 * 60_000;
 /** At most this many events are kept per task and name; past it the oldest go. */
 export const QUEUE_LIMIT = 100;
-/** `wait_git_event`'s timeout when the call names none, and the longest it may name. */
+/** `wait_for_event`'s timeout when the call names none, and the longest it may name. */
 export const WAIT_DEFAULT_MS = 10 * 60_000;
 export const WAIT_MAX_MS = 60 * 60_000;
 
-/** Who waits: a task's guards (`on_event`), or its agent (`wait_git_event`) — two queues, so one never takes the other's event. */
+/** Who waits: a task's guards (`on_event`), or its agent (`wait_for_event`) — two queues, so one never takes the other's event. */
 export type EventWaiter = "guard" | "tool";
 
 /** A wait in progress — what a view could draw. */

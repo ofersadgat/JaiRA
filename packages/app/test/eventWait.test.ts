@@ -38,7 +38,7 @@ const waiting = (root: string, guard: string): Record<string, JsonValue> => ({
 });
 
 const push = (branch: string, after: string): JairaEvent => ({
-  name: "git.push",
+  name: "git.pushed",
   payload: { remote: "origin", connection: "github", host: "github.com", repository: "acme/app", branch, before: "a", after, commits: [] },
 });
 
@@ -50,14 +50,14 @@ beforeEach(async () => {
   dir = mkdtempSync(join(tmpdir(), "jaira-events-"));
   const { workflowsDir } = initProject(dir, testHome());
   writeWorkflowFiles(workflowsDir, {
-    ...waiting("deploy_on_push", "on_event('git.push', { branch: 'main' }).payload.after === 'abc'"),
+    ...waiting("deploy_on_push", "on_event('git.pushed', { branch: 'main' }).payload.after === 'abc'"),
     ...waiting("after_other", "on_event('task.finished').payload.title === 'First'"),
     ...waiting("quick", "true"),
   });
   pushes = [];
   service = new AppService({ baseDir: testHome(), publish: (m) => pushes.push(m), watchWorkflows: false });
   await service.open(dir);
-  service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: true }, "task.finished": { enabled: true } } } as JsonValue });
+  service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.pushed": { enabled: true }, "task.finished": { enabled: true } } } as JsonValue });
 });
 
 afterEach(async () => {
@@ -97,7 +97,7 @@ describe("a workflow that waits for an event", () => {
     const { taskId } = await service.createTask({ title: "Deploy", workflow: "deploy_on_push" });
     await service.startTask({ taskId });
     await until(() => service.eventWaits().find((w) => w.taskId === taskId && w.waiter === "guard"), "the guard to wait");
-    expect(service.eventWaits()).toMatchObject([{ taskId, name: "git.push", filter: { branch: "main" } }]);
+    expect(service.eventWaits()).toMatchObject([{ taskId, name: "git.pushed", filter: { branch: "main" } }]);
 
     // Another branch's push is not this rule's; another project's is not this task's.
     expect(service.deliverEvent(dir, push("release/2.0", "abc"))).toBe(1);
@@ -134,7 +134,7 @@ describe("a workflow that waits for an event", () => {
       expect(row.status).toBe("canceled");
       expect(JSON.parse(row.failureJson!)).toMatchObject({ reason: SUSPENDED_WAITING });
       // When its guard began waiting is kept, so the resume counts from then.
-      expect(project.eventWaits.since(taskId, "git.push")).toBeGreaterThan(0);
+      expect(project.eventWaits.since(taskId, "git.pushed")).toBeGreaterThan(0);
     } finally {
       project.close();
     }
@@ -150,7 +150,7 @@ describe("a workflow that waits for an event", () => {
     // Done for good: its wait starts are gone.
     const after = openProject(dir, { baseDir: testHome() });
     try {
-      expect(after.eventWaits.since(taskId, "git.push")).toBeUndefined();
+      expect(after.eventWaits.since(taskId, "git.pushed")).toBeUndefined();
     } finally {
       after.close();
     }

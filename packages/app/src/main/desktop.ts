@@ -55,6 +55,7 @@ import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
 import { CLIENT_SCHEME_PRIVILEGES, CLIENT_URL, registerClientProtocol } from "./clientProtocol";
+import { recordForge, type ForgeRecordSpec } from "@jaira/service/forgeRecord";
 import { electronKeychain } from "./keychain";
 import { tailChromiumLog } from "./chromiumLog";
 import { startPlugins } from "@jaira/runtime";
@@ -904,6 +905,25 @@ async function captureAndExit(win: BrowserWindow, file: string): Promise<void> {
 }
 
 /**
+ * Debug affordance (decision 0016): with `JAIRA_FORGE_RECORD=<spec.json>` the app runs the spec's
+ * read-only forge calls through its own connections — the tokens are in `safeStorage`, which only
+ * this process can read — writes the traffic as replay fixtures under the shared root's logs, and
+ * quits without opening a window. `@jaira/service/forgeRecord` says what is kept.
+ */
+async function recordForgeAndExit(file: string): Promise<void> {
+  try {
+    if (hostedService === undefined) throw new Error("it needs this process to host the engine — close every other JaiRA window and `jaira serve` first");
+    const spec = JSON.parse(await readFile(file, "utf8")) as ForgeRecordSpec;
+    const { dir, lines } = await recordForge(hostedService, spec);
+    console.log(lines.join("\n"));
+    console.log(`recorded to ${dir}`);
+  } catch (e) {
+    console.error(`the forge recording failed: ${(e as Error).message}`);
+  }
+  app.quit();
+}
+
+/**
  * Open a project on startup: `JAIRA_PROJECT`, the first CLI argument, or the
  * current directory when it already looks like a project.
  */
@@ -970,8 +990,11 @@ function registerArtifactProtocol(): void {
 // --- the engine this window uses (decision 0012 §4-§5) ------------------------------------------------
 
 /** How this window builds the engine when it hosts it. */
+/** The engine this window built, when it hosts one — what `JAIRA_FORGE_RECORD` records through. */
+let hostedService: AppService | undefined;
+
 function buildService(): AppService {
-  return new AppService({
+  return (hostedService = new AppService({
     baseDir,
     version: app.getVersion(),
     publish: pushToWindow,
@@ -1002,7 +1025,7 @@ function buildService(): AppService {
         : dialog.showOpenDialog({ title, buttonLabel, properties: ["openDirectory", "createDirectory"] }));
       return result.canceled ? null : (result.filePaths[0] ?? null);
     },
-  });
+  }));
 }
 
 /** Whether the engine's host runs on this very executable — a server this install started, or another of its windows. */
@@ -1247,6 +1270,11 @@ void app.whenReady().then(async () => {
       console.error(`failed to open project ${dir}: ${(e as Error).message}`);
       engine.recordApp("error", `failed to open ${dir}: ${(e as Error).message}`, stackDetail(e).detail);
     }
+  }
+  const forgeRecord = process.env["JAIRA_FORGE_RECORD"];
+  if (forgeRecord) {
+    await recordForgeAndExit(forgeRecord);
+    return;
   }
   window = await createWindow();
   link?.recordApp("info", "the window is up");

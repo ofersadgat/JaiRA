@@ -223,6 +223,7 @@ import {
   PublishAuthorizer,
   registerGitTools,
   workspaceGitHost,
+  centralArtifactSink,
   reviewWithRemote,
   RemoteEventHub,
   EventHub,
@@ -230,7 +231,7 @@ import {
   FAST_MS as REPO_WATCH_CADENCE_MS,
   projectRemotes,
   type EventWaitRequest,
-  type GitEventWaits,
+  type EventWaits,
   type RepoWatchTarget,
   RemoteWatcher,
   PollingSource,
@@ -1907,13 +1908,13 @@ export class AppService {
     return session.events.deliver(event, from !== undefined ? { from } : {});
   }
 
-  /** The event waits in progress in a project — every task's `on_event` rules and agents' `wait_git_event`. */
+  /** The event waits in progress in a project — every task's `on_event` rules and agents' `wait_for_event`. */
   eventWaits(project?: string): EventWaitRequest[] {
     return this.session(project).events.list();
   }
 
-  /** What `wait_git_event` waits on, for one task: its project's hub, and the Settings switch. */
-  private gitEventWaits(open: ProjectSession, taskId: string): GitEventWaits {
+  /** What `wait_for_event` waits on, for one task: its project's hub, and the Settings switch. */
+  private toolEventWaits(open: ProjectSession, taskId: string): EventWaits {
     return {
       wait: (name, filter, timeoutMs, signal) => {
         this.kickRepoWatch(false);
@@ -2178,7 +2179,7 @@ export class AppService {
       const out: EventRemoteView["events"] = {};
       if (key === undefined) return out;
       for (const name of EVENT_NAMES) {
-        if ((EVENT_SPECS[name].group === "git") !== (remote !== undefined)) continue;
+        if ((EVENT_SPECS[name].group === "remote") !== (remote !== undefined)) continue;
         const seen = this.eventTally.activity(key, remote, name);
         if (seen !== undefined) out[name] = seen;
       }
@@ -2248,6 +2249,22 @@ export class AppService {
       this.forges.set(key, provider);
     }
     return provider;
+  }
+
+  /**
+   * A forge provider for one open project's host, over a CALLER's transport — the recording pass of
+   * `JAIRA_FORGE_RECORD` (`forgeRecord.ts`). The token is resolved here and handed to the provider,
+   * never to the caller; the transport sees each request's headers and must not keep them.
+   */
+  forgeProviderOver(projectDir: string, host: string, http: ForgeHttp): ForgeProvider {
+    const session = this.sessionOf(projectDir);
+    if (session === undefined) throw new Error(`no project is open at ${projectDir}`);
+    return forgeForHost(session.project.config.integrations, host, { secrets: this.secretResolver(session), http });
+  }
+
+  /** Where the recording pass writes: the shared root's logs directory. */
+  get forgeRecordingsDir(): string {
+    return jairaBasePaths(this.baseDir).logsDir;
   }
 
   /**
@@ -4886,8 +4903,10 @@ export class AppService {
         secrets: this.secretResolver(open),
         ...(this.options.forgeHttp !== undefined ? { http: this.options.forgeHttp } : {}),
         publishing: { authorize: (request) => remotePrimitives.publishing.authorize(request) },
-        events: this.gitEventWaits(open, taskId),
+        events: this.toolEventWaits(open, taskId),
         modelOf: (ctx) => this.modelOfCall(project, taskId, ctx),
+        // A CI download is the task's artifact, in its central folder (decision 0016).
+        artifacts: centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }),
       }),
     );
 
@@ -6081,8 +6100,9 @@ export class AppService {
           answered: () => open.publishGranted.has(request.taskId) || project.remotes.forTask(request.taskId).some((row) => row.pushedHead !== undefined),
           onGranted: () => open.publishGranted.add(request.taskId),
         }),
-        events: this.gitEventWaits(open, request.taskId),
+        events: this.toolEventWaits(open, request.taskId),
         modelOf: (ctx) => this.modelOfCall(project, request.taskId, ctx),
+        artifacts: centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }),
       }),
     );
     // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
@@ -12327,7 +12347,7 @@ function eventSwitchedOn(config: Pick<JairaConfigOf, "events">, name: EventName)
 
 /** Whether any `git.*` event is on in a project — the whole of "is there anything to watch". */
 function gitEventsOn(config: Pick<JairaConfigOf, "events">): boolean {
-  return EVENT_NAMES.some((name) => EVENT_SPECS[name].group === "git" && eventSwitchedOn(config, name));
+  return EVENT_NAMES.some((name) => EVENT_SPECS[name].group === "remote" && eventSwitchedOn(config, name));
 }
 
 /** Read a JSON document, or null when the file is absent. A malformed one is still an error. */

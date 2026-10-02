@@ -8,6 +8,11 @@ decides_for: [engineering/units/tool-policy, engineering/units/remote-review]
 
 # 0010. Git tools, events, and the events task
 
+> **Amended by [0016](0016-git-and-ci-tools.md) (2026-09-28).** The names below are this decision's as built: `git_checks` is gone (the CI tools
+> replace it), `git_comment` is `comment_merge_request`, `wait_git_event` is `wait_for_event` and waits for any event; the events are
+> `git.pushed`, `git.merged`, `merge_request.{opened,updated,pushed,commented,merged,closed}`, `pipeline.{succeeded,failed,canceled}` and
+> `task.*`. Read 0016 for the current vocabulary.
+
 Mockup and every ruling: https://claude.ai/artifact/GZQTHFjs3e67mWVFbvtYeY (v3). The person's words are
 quoted where they settle something; nothing below re-opens them.
 

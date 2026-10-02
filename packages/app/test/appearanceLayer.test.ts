@@ -99,10 +99,10 @@ describe("a change made on one layer's page (the person's rule, 2026-09-25)", ()
   });
 
   it("keeps a key with dots of its own whole — an event name", () => {
-    const layered = { ...view({}), base: {}, you: { events: { "git.push": { enabled: false }, "git.merge_request.opened": { enabled: true } } } } as unknown as ConfigView;
-    const next = withPaths({}, [[["events", "git.push", "enabled"], true]]);
-    expect(next).toEqual({ events: { "git.push": { enabled: true } } });
-    expect(clearedAbove(layered, "base", next)).toEqual([{ layer: "you", doc: { events: { "git.merge_request.opened": { enabled: true } } } }]);
+    const layered = { ...view({}), base: {}, you: { events: { "git.pushed": { enabled: false }, "merge_request.opened": { enabled: true } } } } as unknown as ConfigView;
+    const next = withPaths({}, [[["events", "git.pushed", "enabled"], true]]);
+    expect(next).toEqual({ events: { "git.pushed": { enabled: true } } });
+    expect(clearedAbove(layered, "base", next)).toEqual([{ layer: "you", doc: { events: { "merge_request.opened": { enabled: true } } } }]);
   });
 });
 

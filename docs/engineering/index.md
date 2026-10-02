@@ -136,3 +136,4 @@ A record is of its date and keeps its history. A renderer file one names (`App.t
 | [0013](decisions/0013-machines.md) — machines: one fleet, tasks placed across it, and every window seeing all of it; a phone or a browser is a window onto one engine | accepted | — |
 | [0014](decisions/0014-archived-tasks.md) — archived tasks | accepted | — |
 | [0015](decisions/0015-one-universal-client.md) — one client for desktop and mobile: every surface drawn by one universal tree, the editors as islands; the DOM renderer it was copied from is deleted (2026-10-01) | accepted | — |
+| [0016](decisions/0016-git-and-ci-tools.md) — Git and CI tools: CI split from the merge-request tools (pipelines, jobs, artifacts), tools named for what they act on, events named for what happened | accepted | — |

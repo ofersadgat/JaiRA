@@ -26,7 +26,7 @@ const settled = async (): Promise<void> => {
 };
 
 const base = { remote: "origin", connection: "github", host: "github.com", repository: "acme/app" };
-const push = (branch: string, after = "b"): JairaEvent => ({ name: "git.push", payload: { ...base, branch, before: "a", after, commits: [] } });
+const push = (branch: string, after = "b"): JairaEvent => ({ name: "git.pushed", payload: { ...base, branch, before: "a", after, commits: [] } });
 const finished = (taskId: string): JairaEvent => ({ name: "task.finished", payload: { task_id: taskId, title: "t", workflow: "w", status: "completed" } });
 
 class MemoryWaits implements EventWaitPort {
@@ -78,9 +78,9 @@ describe("on_event", () => {
   });
 
   it("parks the rule until a matching event arrives, and the rule reads what it resolved to", async () => {
-    const { hub, run, entered } = harness("on_event('git.push', { branch: 'main' }).payload.after === 'abc'");
-    await eventually(() => hub.list().length > 0, "the rule to park on git.push");
-    expect(hub.list()).toMatchObject([{ taskId: "task-7", waiter: "guard", name: "git.push", filter: { branch: "main" } }]);
+    const { hub, run, entered } = harness("on_event('git.pushed', { branch: 'main' }).payload.after === 'abc'");
+    await eventually(() => hub.list().length > 0, "the rule to park on git.pushed");
+    expect(hub.list()).toMatchObject([{ taskId: "task-7", waiter: "guard", name: "git.pushed", filter: { branch: "main" } }]);
     // Another branch: not this rule's. It waits on.
     hub.deliver(push("release/2.0", "abc"));
     await settled();
@@ -127,23 +127,23 @@ describe("where nothing watches", () => {
       "watch.json": {
         operation: { kind: "function", function: "start" },
         children: { deploy: { state: "deploy" } },
-        transitions: [{ to: "deploy", when: ".run.cursor !== 'deploy' && on_event('git.push')" }, { to: "terminate.success", when: ".run.cursor === 'deploy'" }],
+        transitions: [{ to: "deploy", when: ".run.cursor !== 'deploy' && on_event('git.pushed')" }, { to: "terminate.success", when: ".run.cursor === 'deploy'" }],
       },
       "deploy.json": { operation: { kind: "function", function: "deploy" } },
     };
     const result = await executeWorkflow({ bundle: loadBundle(files as never, "watch", { functions: HOST_FUNCTIONS }), inputs: {}, registry, prompt: buildPromptExecutor({ fakeRules: [] }) });
     expect(statusOfResult(result)).toBe("failed");
-    expect(JSON.stringify(result)).toContain("on_event('git.push') is not served by the CLI");
+    expect(JSON.stringify(result)).toContain("on_event('git.pushed') is not served by the CLI");
   });
 });
 
 describe("checkEventWait", () => {
   it("takes a name and the filter keys that event takes, each a glob or a list", () => {
-    expect(checkEventWait("git.push", { branch: ["main", "release/*"], author: "mara" })).toEqual({ name: "git.push", filter: { branch: ["main", "release/*"], author: "mara" } });
-    expect(checkEventWait("git.merge_request.opened", undefined)).toEqual({ name: "git.merge_request.opened" });
-    expect(checkEventWait("git.checks.failed", { author: "x" })).toEqual({ error: "on_event('git.checks.failed'): 'author' is not a filter git.checks.failed takes — it takes branch, remote" });
-    expect(checkEventWait("git.push", { branch: 3 })).toEqual({ error: "on_event('git.push'): the filter's 'branch' is a glob or a list of globs" });
-    expect(checkEventWait("git.push", "main")).toEqual({ error: "on_event('git.push'): the filter is an object — { branch: 'main' }" });
+    expect(checkEventWait("git.pushed", { branch: ["main", "release/*"], author: "mara" })).toEqual({ name: "git.pushed", filter: { branch: ["main", "release/*"], author: "mara" } });
+    expect(checkEventWait("merge_request.opened", undefined)).toEqual({ name: "merge_request.opened" });
+    expect(checkEventWait("pipeline.failed", { author: "x" })).toEqual({ error: "on_event('pipeline.failed'): 'author' is not a filter pipeline.failed takes — it takes branch, remote" });
+    expect(checkEventWait("git.pushed", { branch: 3 })).toEqual({ error: "on_event('git.pushed'): the filter's 'branch' is a glob or a list of globs" });
+    expect(checkEventWait("git.pushed", "main")).toEqual({ error: "on_event('git.pushed'): the filter is an object — { branch: 'main' }" });
   });
 });
 
@@ -152,7 +152,7 @@ describe("the queue", () => {
     let now = 1_000;
     const hub = new EventHub({ now: () => now });
     hub.deliver(push("main", "before-any-wait"));
-    const first = hub.wait("t1", "git.push", undefined, { waiter: "guard" });
+    const first = hub.wait("t1", "git.pushed", undefined, { waiter: "guard" });
     now += 10;
     hub.deliver(push("main", "one"));
     expect((await first)?.payload).toMatchObject({ after: "one" });
@@ -160,18 +160,18 @@ describe("the queue", () => {
     hub.deliver(push("dev", "two"));
     hub.deliver(push("main", "three"));
     hub.deliver(push("main", "four"));
-    expect(hub.queued("t1", "git.push").map((e) => (e.payload as { after: string }).after)).toEqual(["two", "three", "four"]);
-    expect((await hub.wait("t1", "git.push", { branch: "main" }, { waiter: "guard" }))?.payload).toMatchObject({ after: "three" });
-    expect((await hub.wait("t1", "git.push", undefined, { waiter: "guard" }))?.payload).toMatchObject({ after: "two" });
+    expect(hub.queued("t1", "git.pushed").map((e) => (e.payload as { after: string }).after)).toEqual(["two", "three", "four"]);
+    expect((await hub.wait("t1", "git.pushed", { branch: "main" }, { waiter: "guard" }))?.payload).toMatchObject({ after: "three" });
+    expect((await hub.wait("t1", "git.pushed", undefined, { waiter: "guard" }))?.payload).toMatchObject({ after: "two" });
     // Another task that never waited has nothing queued; the one that did never saw "before-any-wait".
-    expect(hub.queued("t2", "git.push")).toEqual([]);
-    expect(hub.queued("t1", "git.push").map((e) => (e.payload as { after: string }).after)).toEqual(["four"]);
+    expect(hub.queued("t2", "git.pushed")).toEqual([]);
+    expect(hub.queued("t1", "git.pushed").map((e) => (e.payload as { after: string }).after)).toEqual(["four"]);
   });
 
   it("gives one event to ONE wait: the oldest armed wait its filter matches", async () => {
     const hub = new EventHub();
-    const release = hub.wait("t1", "git.push", { branch: "release/*" }, { waiter: "guard" });
-    const any = hub.wait("t1", "git.push", undefined, { waiter: "guard" });
+    const release = hub.wait("t1", "git.pushed", { branch: "release/*" }, { waiter: "guard" });
+    const any = hub.wait("t1", "git.pushed", undefined, { waiter: "guard" });
     hub.deliver(push("release/1", "r"));
     expect((await release)?.payload).toMatchObject({ after: "r" });
     expect(hub.list()).toHaveLength(1);
@@ -181,8 +181,8 @@ describe("the queue", () => {
 
   it("keeps a task's guards and its agent apart", async () => {
     const hub = new EventHub();
-    const tool = hub.wait("t1", "git.push", undefined, { waiter: "tool" });
-    const guard = hub.wait("t1", "git.push", undefined, { waiter: "guard" });
+    const tool = hub.wait("t1", "git.pushed", undefined, { waiter: "tool" });
+    const guard = hub.wait("t1", "git.pushed", undefined, { waiter: "guard" });
     hub.deliver(push("main"));
     expect(await tool).toBeDefined();
     expect(await guard).toBeDefined();
@@ -200,16 +200,16 @@ describe("the queue", () => {
   it("reaches only its own project — one hub per project", async () => {
     const mine = new EventHub();
     const theirs = new EventHub();
-    const waiting = theirs.wait("t1", "git.push", undefined, { waiter: "guard", timeoutMs: 50 });
+    const waiting = theirs.wait("t1", "git.pushed", undefined, { waiter: "guard", timeoutMs: 50 });
     mine.deliver(push("main"));
     expect(await waiting).toBeUndefined();
   });
 
   it("times out to undefined, and a withdrawn wait leaves nothing behind", async () => {
     const hub = new EventHub();
-    expect(await hub.wait("t1", "git.push", undefined, { timeoutMs: 10 })).toBeUndefined();
+    expect(await hub.wait("t1", "git.pushed", undefined, { timeoutMs: 10 })).toBeUndefined();
     const abort = new AbortController();
-    const waiting = hub.wait("t1", "git.push", undefined, { signal: abort.signal });
+    const waiting = hub.wait("t1", "git.pushed", undefined, { signal: abort.signal });
     abort.abort();
     expect(await waiting).toBeUndefined();
     expect(hub.list()).toEqual([]);
@@ -221,32 +221,32 @@ describe("across a restart", () => {
     const waits = new MemoryWaits();
     let now = 1_000;
     const before = new EventHub({ waits, now: () => now });
-    void before.wait("t1", "git.push", undefined, { waiter: "guard", timeoutMs: 5 });
+    void before.wait("t1", "git.pushed", undefined, { waiter: "guard", timeoutMs: 5 });
     before.close();
-    expect(waits.since("t1", "git.push")).toBe(1_000);
+    expect(waits.since("t1", "git.pushed")).toBe(1_000);
 
     // The next start: the watcher's first look lands before the resumed run has re-armed its guard.
     now = 90_000_000;
     const after = new EventHub({ waits, now: () => now });
     after.deliver(push("main", "caught-up"));
     now += 1_000;
-    expect((await after.wait("t1", "git.push", undefined, { waiter: "guard" }))?.payload).toMatchObject({ after: "caught-up" });
+    expect((await after.wait("t1", "git.pushed", undefined, { waiter: "guard" }))?.payload).toMatchObject({ after: "caught-up" });
     // A task that was not waiting before the close starts from its own first wait.
-    expect(await after.wait("t2", "git.push", undefined, { waiter: "guard", timeoutMs: 5 })).toBeUndefined();
+    expect(await after.wait("t2", "git.pushed", undefined, { waiter: "guard", timeoutMs: 5 })).toBeUndefined();
     // And only for so long.
     now += RECENT_MS + 1;
     after.deliver(push("main", "fresh"));
-    expect(after.queued("t1", "git.push").map((e) => (e.payload as { after: string }).after)).toEqual(["fresh"]);
+    expect(after.queued("t1", "git.pushed").map((e) => (e.payload as { after: string }).after)).toEqual(["fresh"]);
   });
 
   it("forgets a task whose run ended for good — its queue and its durable start", () => {
     const waits = new MemoryWaits();
     const hub = new EventHub({ waits });
-    void hub.wait("t1", "git.push", undefined, { waiter: "guard" });
+    void hub.wait("t1", "git.pushed", undefined, { waiter: "guard" });
     hub.forgetTask("t1");
-    expect(waits.since("t1", "git.push")).toBeUndefined();
+    expect(waits.since("t1", "git.pushed")).toBeUndefined();
     expect(hub.list()).toEqual([]);
     hub.deliver(push("main"));
-    expect(hub.queued("t1", "git.push")).toEqual([]);
+    expect(hub.queued("t1", "git.pushed")).toEqual([]);
   });
 });

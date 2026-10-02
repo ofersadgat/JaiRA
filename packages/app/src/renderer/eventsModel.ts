@@ -17,13 +17,13 @@
  *
  * ## What a switch writes
  *
- * Event names hold dots, so every path here is a KEY LIST (`["events", "git.push", "enabled"]`).
+ * Event names hold dots, so every path here is a KEY LIST (`["events", "git.pushed", "enabled"]`).
  *
  *  - One remote, or none (Shared): `events.<name>.enabled`. Where some layer turned the remote's own
  *    switch the other way (`remotes.<remote>`), that is written too, so the row shows what was picked.
  *  - Several remotes: each row is that remote's own switch, `events.<name>.remotes.<remote>` — the
  *    catalog is listed once per remote because an event belongs to the connection that produces it,
- *    and turning `git.push` on for `origin` must not turn it on for `mirror`.
+ *    and turning `git.pushed` on for `origin` must not turn it on for `mirror`.
  *
  * The branch globs (`events.<name>.branches`) are one list per event, whichever remote's row edits
  * it: the setting has no per-remote branches.
@@ -50,13 +50,13 @@ export function eventsConfigOf(config: ConfigView | null): JairaEventsConfig {
 }
 
 /** The `git.*` events, in the order Settings lists them. */
-export const GIT_EVENTS: readonly EventName[] = EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "git");
+export const REMOTE_EVENTS: readonly EventName[] = EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "remote");
 /** JaiRA's own events. */
 export const TASK_EVENTS: readonly EventName[] = EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "task");
 
 /** The place in a settings document an event's switch writes, for one remote of `remotes` (see the module note). */
 export function eventSwitchPath(name: EventName, remotes: readonly string[], remote: string | undefined): readonly string[] {
-  if (EVENT_SPECS[name].group === "git" && remote !== undefined && remotes.length > 1) return ["events", name, "remotes", remote];
+  if (EVENT_SPECS[name].group === "remote" && remote !== undefined && remotes.length > 1) return ["events", name, "remotes", remote];
   return ["events", name, "enabled"];
 }
 
@@ -151,9 +151,9 @@ export function eventGroupsOf(status: EventsStatusView | null, events: JairaEven
   const groups: EventGroupView[] = [];
   if (remotes.length === 0) {
     groups.push({
-      id: "git",
-      heading: "Git · every project's remotes, from its own .git/config",
-      rows: GIT_EVENTS.map((name) => ({
+      id: "remote",
+      heading: "Remotes · every project's, from its own .git/config",
+      rows: REMOTE_EVENTS.map((name) => ({
         name,
         on: isEventEnabled({ events }, name),
         unanswered: false,
@@ -169,7 +169,7 @@ export function eventGroupsOf(status: EventsStatusView | null, events: JairaEven
       id: `remote:${remote.name}`,
       heading: `${remote.name} → ${remote.host}/${remote.repository} · from .git/config`,
       remote,
-      rows: GIT_EVENTS.map((name) => {
+      rows: REMOTE_EVENTS.map((name) => {
         const activity = remote.events[name];
         return {
           name,
@@ -209,7 +209,7 @@ export function eventGroupsOf(status: EventsStatusView | null, events: JairaEven
  */
 export function eventStatusLine(row: EventRowView, remote: EventRemoteView | undefined, cadenceMs: number, now: number): string {
   const parts: string[] = [];
-  if (EVENT_SPECS[row.name].group === "git") {
+  if (EVENT_SPECS[row.name].group === "remote") {
     if (remote === undefined) parts.push("watched on each project's remotes that have a connection");
     else {
       parts.push(`checked every ${Math.round(cadenceMs / 1000)} s while JaiRA is open`);

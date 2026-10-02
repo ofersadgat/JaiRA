@@ -15,6 +15,7 @@ import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 import { createBashTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
 import { GIT_TOOL_NAMES } from "../src/gitTools";
+import { CI_TOOL_NAMES } from "../src/ciTools";
 import { newRegistry } from "../src/wiring";
 
 let dir: string;
@@ -247,10 +248,12 @@ describe("JAIRA_TOOLS — the gateable set", () => {
     // The frozen list and the writers are the tools that existed THEN, which is the whole of what
     // they claim. The workflow tools (decision 0005 §3) were served afterwards and say `readOnly` for
     // themselves: the two that only look are readers, the six that steer work are not.
-    expect([...writers, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS, ...GIT_TOOL_NAMES].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
+    expect([...writers, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS, ...GIT_TOOL_NAMES, ...CI_TOOL_NAMES].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
     for (const name of WORKFLOW_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(name === "list_workflows" || name === "list_tasks");
-    // The Git tools (decision 0010 §1) likewise: the three that read, and the wait, are readers.
-    for (const name of GIT_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["list_merge_requests", "read_merge_request", "git_checks", "wait_git_event"].includes(name));
+    // The Git tools (decision 0010 §1) likewise: the two that read, and the wait, are readers…
+    for (const name of GIT_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["list_merge_requests", "read_merge_request", "wait_for_event"].includes(name));
+    // …and every CI tool (decision 0016): a download is kept with the task, never in the workspace.
+    for (const name of CI_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(true);
   });
 
   it("names every tool JaiRA registers — the set is the WHOLE gateable one", () => {

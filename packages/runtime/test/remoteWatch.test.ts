@@ -65,6 +65,19 @@ const settle = async (): Promise<void> => {
 const open = (extra: Partial<RemoteState> = {}): RemoteState => ({ state: "open", draft: false, head: "abc", updatedAt: new Date(T0).toISOString(), reviews: [], threads: [], comments: [], ...extra });
 
 class ScriptedForge implements ForgeProvider {
+  // CI (decision 0016) is not what this suite watches.
+  pipelines(): never {
+    throw new Error("not scripted");
+  }
+  pipeline(): never {
+    throw new Error("not scripted");
+  }
+  job(): never {
+    throw new Error("not scripted");
+  }
+  artifact(): never {
+    throw new Error("not scripted");
+  }
   readonly kind = "gitlab" as const;
   probes: Array<{ handles: string[]; cursor: ProbeCursor }> = [];
   reads: string[] = [];

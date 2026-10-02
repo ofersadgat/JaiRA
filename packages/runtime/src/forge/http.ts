@@ -22,13 +22,25 @@ export interface ForgeRequest {
    * take (RFC 6749 §4.1.3, RFC 8628 §3.1). Never together with `body`.
    */
   form?: Record<string, string>;
+  /**
+   * How to read the answer. Absent: JSON when it parses, the text otherwise — every API call. `text`:
+   * the text as sent, never parsed (a job log that happens to be JSON is still a log). `bytes`: a
+   * `Uint8Array`, for what is not text at all (an artifact archive). Only a `2xx` is read this way; a
+   * refusal is read as usual, so its message still comes through.
+   */
+  expect?: "text" | "bytes";
+  /** How long the forge gets, ms, when a download needs longer than {@link FORGE_TIMEOUT_MS}. */
+  timeoutMs?: number;
 }
 
 export interface ForgeResponse {
   status: number;
   /** Lower-cased names. */
   headers: Record<string, string>;
-  /** Parsed when the forge sent JSON, the raw text otherwise, `null` for an empty body (a `304`). */
+  /**
+   * Parsed when the forge sent JSON, the raw text otherwise, `null` for an empty body (a `304`) — or
+   * as {@link ForgeRequest.expect} asked.
+   */
   body: unknown;
 }
 
@@ -59,13 +71,18 @@ export const fetchForgeHttp: ForgeHttp = async (request) => {
     },
     ...(request.body !== undefined ? { body: JSON.stringify(request.body) } : {}),
     ...(request.form !== undefined ? { body: new URLSearchParams(request.form).toString() } : {}),
-    signal: AbortSignal.timeout(FORGE_TIMEOUT_MS),
+    signal: AbortSignal.timeout(request.timeoutMs ?? FORGE_TIMEOUT_MS),
   });
   const headers: Record<string, string> = {};
   response.headers.forEach((value, name) => {
     headers[name.toLowerCase()] = value;
   });
+  // A download is followed where it points — both forges answer a finished log or an archive with a
+  // 302 to a signed link on another host (measured) — and `fetch` sends no `Authorization` there: the
+  // Fetch standard drops it on a cross-origin redirect, and the signed link does not want it.
+  if (response.ok && request.expect === "bytes") return { status: response.status, headers, body: new Uint8Array(await response.arrayBuffer()) };
   const text = await response.text();
+  if (response.ok && request.expect === "text") return { status: response.status, headers, body: text };
   let body: unknown = null;
   if (text.length > 0) {
     try {

@@ -300,7 +300,7 @@ export class ProjectSession {
    */
   readonly remoteEvents: RemoteEventHub;
   /**
-   * Transitions — and agents — waiting for something to HAPPEN (`on_event`, `wait_git_event`,
+   * Transitions — and agents — waiting for something to HAPPEN (`on_event`, `wait_for_event`,
    * decision 0010 §3): a push, a merge request, a task finishing. The sixth channel; what answers it
    * is the repository watcher, or another task of this project ending. Per session, so a task only
    * ever hears its own project's events.
@@ -359,7 +359,7 @@ export class ProjectSession {
    * A rule waiting on the world is waiting too — on the forge (`on_remote_event`) or for an event
    * (`on_event`): resumed on the next open, its guard is armed again, the forge's row keeping its cursor
    * and the event hub's durable starts keeping what the watcher catches up on. An AGENT's
-   * `wait_git_event` is not this: its turn is cut like any other work in flight.
+   * `wait_for_event` is not this: its turn is cut like any other work in flight.
    *
    * A tool approval or an agent's question is NOT counted: the agent that asked is a process mid-turn,
    * and a quit cuts that turn.

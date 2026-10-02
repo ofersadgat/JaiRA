@@ -51,7 +51,7 @@ import {
 /** The decision's own example: a push to main starts a review, then docs sync. */
 const pushMainDocs: AutomationLine = {
   name: "push_main_docs",
-  event: "git.push",
+  event: "git.pushed",
   filter: { branch: "main" },
   steps: [
     { kind: "start", workflow: "feature/review", inputs: { issue: { event: "payload.commits[0].message" }, branch: { event: "payload.branch" }, ask_below: { literal: 0.8 } } },
@@ -61,7 +61,7 @@ const pushMainDocs: AutomationLine = {
 
 const mrOpened: AutomationLine = {
   name: "mr_opened",
-  event: "git.merge_request.opened",
+  event: "merge_request.opened",
   filter: {},
   steps: [
     { kind: "start", workflow: "review/merge-request", inputs: { request: { event: "payload.merge_request" } }, title: "Review the request" },
@@ -69,7 +69,7 @@ const mrOpened: AutomationLine = {
   ],
 };
 
-const on = { "git.push": { enabled: true }, "git.merge_request.opened": { enabled: true } } as const;
+const on = { "git.pushed": { enabled: true }, "merge_request.opened": { enabled: true } } as const;
 
 /** Each line's state as a layer holds it, by name. */
 const statesOf = (...lines: AutomationLine[]): Record<string, unknown> => Object.fromEntries(lines.map((line) => [line.name, automationStateOf(line.name, line.steps)]));
@@ -83,17 +83,17 @@ const written = (writes: readonly AutomationWrite[], layer: string, stateId: str
 
 describe("a line's guard", () => {
   it("writes on_event with the filter, and reads it back", () => {
-    expect(whenOf("git.push", {})).toBe("on_event('git.push')");
-    expect(whenOf("git.push", { branch: "main" })).toBe("on_event('git.push', { branch: 'main' })");
-    expect(whenOf("git.push", { branch: ["main", "release/*"], author: "ofer" })).toBe("on_event('git.push', { branch: ['main', 'release/*'], author: 'ofer' })");
+    expect(whenOf("git.pushed", {})).toBe("on_event('git.pushed')");
+    expect(whenOf("git.pushed", { branch: "main" })).toBe("on_event('git.pushed', { branch: 'main' })");
+    expect(whenOf("git.pushed", { branch: ["main", "release/*"], author: "ofer" })).toBe("on_event('git.pushed', { branch: ['main', 'release/*'], author: 'ofer' })");
     for (const filter of [{}, { branch: "main" }, { branch: ["main", "release/*"], author: "o'hara" }]) {
-      expect(parseWhen(whenOf("git.push", filter))).toEqual({ event: "git.push", filter });
+      expect(parseWhen(whenOf("git.pushed", filter))).toEqual({ event: "git.pushed", filter });
     }
   });
 
   it("reads a hand-written guard of the same form, and refuses anything else", () => {
-    expect(parseWhen(`on_event("git.push",{branch:"main",})`)).toEqual({ event: "git.push", filter: { branch: "main" } });
-    expect(parseWhen("on_event('git.push') && .inputs.x")).toBeUndefined();
+    expect(parseWhen(`on_event("git.pushed",{branch:"main",})`)).toEqual({ event: "git.pushed", filter: { branch: "main" } });
+    expect(parseWhen("on_event('git.pushed') && .inputs.x")).toBeUndefined();
     expect(parseWhen("true")).toBeUndefined();
     expect(parseWhen(undefined)).toBeUndefined();
   });
@@ -102,7 +102,7 @@ describe("a line's guard", () => {
 describe("one line with two steps", () => {
   it("is one named rule handing in the event, to ONE async child — the steps are that child's state", () => {
     const { rule, children } = writeLine(pushMainDocs);
-    expect(rule).toEqual({ name: "push_main_docs", when: "on_event('git.push', { branch: 'main' })", to: "push_main_docs", inputs: { event: ".event" } });
+    expect(rule).toEqual({ name: "push_main_docs", when: "on_event('git.pushed', { branch: 'main' })", to: "push_main_docs", inputs: { event: ".event" } });
     expect(children).toEqual({ push_main_docs: { async: true } });
   });
 
@@ -141,7 +141,7 @@ describe("one line with two steps", () => {
   });
 
   it("keeps what it does not write — other keys, other children, a hand-written rule", () => {
-    const hand = { name: "odd", when: "on_event('git.push') && true", to: "odd_child" };
+    const hand = { name: "odd", when: "on_event('git.pushed') && true", to: "odd_child" };
     const previous = { label: "Mine", transitions: [hand], children: { odd_child: { state: "x/y", async: true }, spare: { state: "a/b" } } };
     const read = parseEventsDoc(previous);
     expect(read.lines).toHaveLength(1);
@@ -320,14 +320,14 @@ describe("flags", () => {
   const own = (lines: AutomationLine[]) => lines.map((l) => ({ line: l, from: "own" as const, ignored: false }));
 
   it("says a line an earlier one always catches is never reached", () => {
-    const flags = lineFlagsOf(own([line("any", "git.push"), line("main", "git.push", { branch: "main" })]), on);
+    const flags = lineFlagsOf(own([line("any", "git.pushed"), line("main", "git.pushed", { branch: "main" })]), on);
     expect(flags[0]).toEqual([]);
     expect(flags[1]).toEqual([{ kind: "never", by: "any" }]);
     expect(flagText(flags[1]![0]!)).toContain("Never reached: any");
   });
 
   it("says a line an earlier one sometimes catches is not reached then", () => {
-    const flags = lineFlagsOf(own([line("main", "git.push", { branch: "main" }), line("release", "git.push", { branch: "release/*" }), line("any", "git.push", { branch: "*" })]), on);
+    const flags = lineFlagsOf(own([line("main", "git.pushed", { branch: "main" }), line("release", "git.pushed", { branch: "release/*" }), line("any", "git.pushed", { branch: "*" })]), on);
     expect(flags[1]).toEqual([]);
     expect(flags[2]).toEqual([{ kind: "shadowed", by: ["main"] }]);
     expect(flagText(flags[2]![0]!)).toBe("Not reached when main matches: the first line that matches wins.");
@@ -345,33 +345,34 @@ describe("flags", () => {
 
   it("ignores other events, ignored lines and raw lines", () => {
     const shown = [
-      { line: line("any", "git.push"), from: "shared" as const, ignored: true },
-      { line: line("mr", "git.merge_request.opened"), from: "own" as const, ignored: false },
-      { line: line("main", "git.push", { branch: "main" }), from: "own" as const, ignored: false },
+      { line: line("any", "git.pushed"), from: "shared" as const, ignored: true },
+      { line: line("mr", "merge_request.opened"), from: "own" as const, ignored: false },
+      { line: line("main", "git.pushed", { branch: "main" }), from: "own" as const, ignored: false },
     ];
     expect(lineFlagsOf(shown, on)).toEqual([[], [], []]);
   });
 
   it("flags an event switched off, one JaiRA does not raise, and a repeated name", () => {
-    const flags = lineFlagsOf(own([line("a", "git.checks.failed"), line("b", "git.pushed"), line("a", "task.failed")]), { "task.failed": { enabled: false, remotes: {} } } as never);
-    expect(flags[0]).toEqual([{ kind: "off", event: "git.checks.failed" }]);
-    expect(flags[1]).toEqual([{ kind: "unknown", event: "git.pushed" }]);
+    const flags = lineFlagsOf(own([line("a", "pipeline.failed"), line("b", "git.push"), line("a", "task.failed")]), { "task.failed": { enabled: false, remotes: {} } } as never);
+    expect(flags[0]).toEqual([{ kind: "off", event: "pipeline.failed" }]);
+    // The name before decision 0016: gone, so nothing raises it.
+    expect(flags[1]).toEqual([{ kind: "unknown", event: "git.push" }]);
     expect(flags[2]).toEqual([{ kind: "duplicate" }, { kind: "off", event: "task.failed" }]);
-    const perRemote = lineFlagsOf(own([line("a", "git.push")]), { "git.push": { enabled: false, remotes: { origin: true } } });
+    const perRemote = lineFlagsOf(own([line("a", "git.pushed")]), { "git.pushed": { enabled: false, remotes: { origin: true } } });
     expect(perRemote[0]).toEqual([]);
   });
 });
 
 describe("editing a line", () => {
   it("offers the payload's fields, and the first item's of a list", () => {
-    const ids = eventPicksOf("git.push").map((pick) => pick.id);
+    const ids = eventPicksOf("git.pushed").map((pick) => pick.id);
     expect(ids).toEqual(expect.arrayContaining(["", "payload.branch", "payload.commits", "payload.commits[0].message", "payload.remote"]));
-    expect(eventPicksOf("git.merge_request.opened").map((p) => p.label)).toContain("← event.merge_request.title");
+    expect(eventPicksOf("merge_request.opened").map((p) => p.label)).toContain("← event.merge_request.title");
     expect(eventPicksOf("nope").map((p) => p.id)).toEqual([""]);
   });
 
   it("takes the filter keys the event takes, as lists", () => {
-    expect(Object.keys((filterSchemaOf("git.push")["properties"] ?? {}) as object)).toEqual(["branch", "remote", "author"]);
+    expect(Object.keys((filterSchemaOf("git.pushed")["properties"] ?? {}) as object)).toEqual(["branch", "remote", "author"]);
     expect(Object.keys((filterSchemaOf("task.finished")["properties"] ?? {}) as object)).toEqual([]);
     expect(filterFormOf({ branch: "main", author: ["a", "b"] })).toEqual({ branch: ["main"], author: ["a", "b"] });
     expect(filterOfForm({ branch: ["main"], author: ["a", " ", "b"], remote: [] })).toEqual({ branch: "main", author: ["a", "b"] });

@@ -272,7 +272,7 @@ CREATE TABLE task_owners (
 CREATE INDEX task_owners_workspace ON task_owners(workspace, task_id);
 
 -- The repository watcher's memory (decision 0010 §2), per workspace: where the next look starts, and
--- the last state of each request, branch and branch head's checks.
+-- the last state of each request, branch and branch head's pipelines.
 CREATE TABLE repo_watch_cursors (
   workspace   TEXT NOT NULL DEFAULT '',
   remote      TEXT NOT NULL,
@@ -286,7 +286,7 @@ CREATE TABLE repo_watch_seen (
   workspace  TEXT NOT NULL DEFAULT '',
   remote     TEXT NOT NULL,
   repository TEXT NOT NULL,
-  kind       TEXT NOT NULL CHECK (kind IN ('merge_request', 'branch', 'checks')),
+  kind       TEXT NOT NULL CHECK (kind IN ('merge_request', 'branch', 'pipelines')),
   key        TEXT NOT NULL,
   state_json TEXT NOT NULL,
   updated_at INTEGER NOT NULL,

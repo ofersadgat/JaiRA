@@ -34,7 +34,7 @@
  */
 
 /** The groups a permission menu shows. Hard-coded: these are a taxonomy, not data. */
-export type ToolCategoryId = "files" | "execution" | "web" | "git" | "tasks" | "mcp";
+export type ToolCategoryId = "files" | "execution" | "web" | "git" | "ci" | "tasks" | "mcp";
 
 export interface ToolCategory {
   id: ToolCategoryId;
@@ -48,7 +48,9 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "execution", label: "Execution", hint: "running commands on this machine" },
   { id: "web", label: "Web", hint: "reaching the network" },
   // Decision 0010 §1: the repository's forge, reached through the connection signed in on Connections.
-  { id: "git", label: "Git", hint: "the repository's forge, through the connection signed in on Connections" },
+  { id: "git", label: "Git", hint: "the repository and its merge requests, through the connection signed in on Connections" },
+  // Decision 0016: the pipelines that ran on the repository's commits — CI, not git.
+  { id: "ci", label: "CI", hint: "the pipelines that ran on the repository's commits, through the same connection" },
   // The workflow tools of decision 0005 §3 — all of what `chat_control/*` holds, and part of `chat/*`.
   { id: "tasks", label: "Tasks & workflows", hint: "starting, moving and answering tasks" },
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
@@ -118,7 +120,7 @@ export interface ToolSpec {
    * Its MODE still travels — a mode for a name nothing calls is inert — so the day the tool is
    * implemented, deleting this mark is the whole change.
    *
-   * The workflow tools of decision 0005 §3 carried it until step 6 built them, and `wait_git_event`
+   * The workflow tools of decision 0005 §3 carried it until step 6 built them, and `wait_for_event`
    * (decision 0010 §1) until the event hub that serves it was built. Nothing carries it today.
    */
   unserved?: true;
@@ -224,19 +226,26 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "web",
     hint: "search the web",
   },
-  // The Git tools (decision 0010 §1): the forge of the workspace's own git remote, through the
-  // connection signed in for its host (`runtime/gitTools.ts`). A `git_` prefix only where the bare name
-  // is too generic. The readers first, then what leaves the machine, in the decision's order.
+  // The Git tools (decision 0010 §1, renamed by 0016): the repository and its merge requests on the
+  // forge of the workspace's own git remote, through the connection signed in for its host
+  // (`runtime/gitTools.ts`). Named for what each acts on; `git_merge` and `git_push` are git's own verbs
+  // done on the forge. The readers first, then what leaves the machine.
   { name: "list_merge_requests", label: "list_merge_requests", title: "List merge requests", icon: "git", category: "git", hint: "this repository's merge requests, by state, author, branch" },
-  { name: "read_merge_request", label: "read_merge_request", title: "Read merge request", icon: "git", category: "git", hint: "one merge request: description, state, threads, approvals, checks" },
-  { name: "git_checks", label: "git_checks", title: "Read checks", icon: "git", category: "git", hint: "the CI pipeline or check runs of a branch or commit" },
-  // Served by the event hub over the repository watcher (decision 0010 §2–3, `runtime/eventHub.ts`).
-  { name: "wait_git_event", label: "wait_git_event", title: "Wait for a git event", icon: "git", category: "git", hint: "wait for an event on the remote (a comment, checks finishing, a push), or its timeout" },
+  { name: "read_merge_request", label: "read_merge_request", title: "Read merge request", icon: "git", category: "git", hint: "one merge request: description, state, threads, comments, approvals, its latest pipeline" },
   { name: "open_merge_request", label: "open_merge_request", title: "Open merge request", icon: "git", category: "git", hint: "push the branch and open (or update) its merge request" },
-  { name: "git_comment", label: "git_comment", title: "Comment on merge request", icon: "git", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
+  { name: "comment_merge_request", label: "comment_merge_request", title: "Comment on merge request", icon: "git", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
   { name: "git_merge", label: "git_merge", title: "Merge", icon: "git", category: "git", hint: "merge a merge request" },
   { name: "close_merge_request", label: "close_merge_request", title: "Close merge request", icon: "git", category: "git", hint: "close a merge request without merging" },
   { name: "git_push", label: "git_push", title: "Push branch", icon: "git", category: "git", hint: "push the current branch with the connection's credentials" },
+  // The CI tools (decision 0016, `runtime/ciTools.ts`): pipelines, their jobs, and what the jobs left.
+  // Reads only — a download is kept with the task, never in the workspace.
+  { name: "list_pipelines", label: "list_pipelines", title: "List pipelines", icon: "git", category: "ci", hint: "the pipelines of a merge request, a branch or a commit" },
+  { name: "read_pipeline", label: "read_pipeline", title: "Read pipeline", icon: "git", category: "ci", hint: "one pipeline: its jobs and why each failed, its artifacts, its test counts" },
+  { name: "read_pipeline_job", label: "read_pipeline_job", title: "Read pipeline job", icon: "git", category: "ci", hint: "one job: the machine it ran on, its steps, why it failed, its artifacts" },
+  { name: "download_pipeline_artifact", label: "download_pipeline_artifact", title: "Download pipeline artifact", icon: "git", category: "ci", hint: "keep a job's log, a report or its files with the task, to read" },
+  // Served by the event hub (decision 0010 §2–3, `runtime/eventHub.ts`): any event — the remote's or JaiRA's own —
+  // so it sits with the tasks and workflows rather than with git (decision 0016 §5).
+  { name: "wait_for_event", label: "wait_for_event", title: "Wait for an event", icon: "workflow", category: "tasks", hint: "wait for an event — a push, a merge request, a pipeline, a task's end — or its timeout" },
   // The workflow tools (decision 0005 §3): the host's own operations, offered to a conversation.
   // `chat_control/*` holds nothing else; `chat/*` holds them beside the project's tools. Served since
   // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they

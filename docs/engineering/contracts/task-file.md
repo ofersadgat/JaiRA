@@ -56,7 +56,7 @@ The file is `.jaira/system/tasks/<taskId>.json` in a project and `system/tasks/<
 | `origin.item` | string | no | the element's own id, when the wire named an id field |
 | `origin.start` | `"manual"` or `"when_ready"` | no | for a split, who starts the task once its dependencies complete; absent reads as `when_ready` |
 | `origin.formerParentTaskId` | string | no | for an adoption, the `parentTaskId` the task had before, put back when it is un-adopted |
-| `origin.event` | `{name, summary}` | no | for `started`, the event it was started because of: `git.push`, and `git.push a1b2c3d on main` |
+| `origin.event` | `{name, summary}` | no | for `started`, the event it was started because of: `git.pushed`, and `git.pushed a1b2c3d on main` |
 | `origin.state` | `{stateId, path}` | no | for `started`, the calling state: `system/events/push_main`, `push_main` |
 
 ### `startedBy` and `system` are the events task's (decision 0010 §4)

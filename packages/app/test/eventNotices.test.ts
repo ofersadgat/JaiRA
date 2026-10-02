@@ -24,9 +24,9 @@ const notice = (id: string, minutesAgo: number, patch: Partial<EventsNotice> = {
   ...patch,
 });
 
-const checks = notice("ev1/i3/0", 2, { text: "Checks failed on main", event: "git.checks.failed", ref: "a1b2c3d", summary: "git.checks.failed a1b2c3d on main", key: "checks_red", stateId: "system/events/checks_red", instanceId: "i3", call: 0 });
-const review = notice("ev1/i2/1", 60, { text: "Review started for Add GitLab device sign-in", event: "git.merge_request.opened", ref: "!42" });
-const release = notice("ev1/i1/0", 180, { text: "Release branch pushed", event: "git.push", ref: "77e0c1a" });
+const checks = notice("ev1/i3/0", 2, { text: "Checks failed on main", event: "pipeline.failed", ref: "a1b2c3d", summary: "pipeline.failed a1b2c3d on main", key: "checks_red", stateId: "system/events/checks_red", instanceId: "i3", call: 0 });
+const review = notice("ev1/i2/1", 60, { text: "Review started for Add GitLab device sign-in", event: "merge_request.opened", ref: "!42" });
+const release = notice("ev1/i1/0", 180, { text: "Release branch pushed", event: "git.pushed", ref: "77e0c1a" });
 /** Oldest first, as main keeps them. */
 const backlog = [release, review, checks];
 
@@ -73,17 +73,17 @@ describe("which notice the strip shows", () => {
 
 describe("what the item says", () => {
   it("the event, which one, and how long ago — in the faint data line", () => {
-    expect(noticeMeta(checks, NOW)).toBe("git.checks.failed a1b2c3d · 2 m");
-    expect(noticeMeta(review, NOW)).toBe("git.merge_request.opened !42 · 1 h");
+    expect(noticeMeta(checks, NOW)).toBe("pipeline.failed a1b2c3d · 2 m");
+    expect(noticeMeta(review, NOW)).toBe("merge_request.opened !42 · 1 h");
     expect(noticeMeta(notice("x", 0), NOW)).toBe("now");
     expect([noticeAge(NOW - 30_000, NOW), noticeAge(NOW - 59 * MIN, NOW), noticeAge(NOW - 3 * 24 * 60 * MIN, NOW)]).toEqual(["now", "59 m", "3 d"]);
   });
 
   it("which one: a commit's short sha, a request's number as its forge writes it, nothing for a task's end", () => {
-    expect(eventRef({ name: "git.push", payload: { after: "a1b2c3d4e5f6", branch: "main" } })).toBe("a1b2c3d");
-    expect(eventRef({ name: "git.checks.failed", payload: { sha: "77e0c1a99", ref: "main" } })).toBe("77e0c1a");
-    expect(eventRef({ name: "git.merge_request.opened", payload: { host: "gitlab.com", merge_request: { number: 42 } } })).toBe("!42");
-    expect(eventRef({ name: "git.merge_request.opened", payload: { host: "github.com", merge_request: { number: 7 } } })).toBe("#7");
+    expect(eventRef({ name: "git.pushed", payload: { after: "a1b2c3d4e5f6", branch: "main" } })).toBe("a1b2c3d");
+    expect(eventRef({ name: "pipeline.failed", payload: { sha: "77e0c1a99", ref: "main" } })).toBe("77e0c1a");
+    expect(eventRef({ name: "merge_request.opened", payload: { host: "gitlab.com", merge_request: { number: 42 } } })).toBe("!42");
+    expect(eventRef({ name: "merge_request.opened", payload: { host: "github.com", merge_request: { number: 7 } } })).toBe("#7");
     expect(eventRef({ name: "task.finished", payload: { title: "x" } })).toBeUndefined();
   });
 });
@@ -99,7 +99,7 @@ describe("the strip", () => {
   });
 
   it("the item's label says what it says, who told it and what a click does", () => {
-    expect(noticeTitle(checks)).toBe("Checks failed on main — told by the events task (checks_red) · git.checks.failed a1b2c3d on main. Opens its conversation at that step.");
+    expect(noticeTitle(checks)).toBe("Checks failed on main — told by the events task (checks_red) · pipeline.failed a1b2c3d on main. Opens its conversation at that step.");
     // No automation recorded and no summary handed: it says what it knows.
     expect(noticeTitle(release)).toBe("Release branch pushed — told by the events task. Opens its conversation at that step.");
   });

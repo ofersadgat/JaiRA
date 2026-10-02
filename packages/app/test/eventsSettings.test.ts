@@ -22,7 +22,7 @@ const origin = {
   watchable: true,
   watching: true,
   checkedAt: NOW - 30_000,
-  events: { "git.push": { lastSeenAt: NOW - 120_000, today: 3 } },
+  events: { "git.pushed": { lastSeenAt: NOW - 120_000, today: 3 } },
 };
 const mirror = { name: "mirror", host: "gitlab.com", repository: "ofer/repo", provider: "gitlab" as const, watchable: false, watching: false, events: {} };
 
@@ -30,49 +30,49 @@ const status = (remotes: EventsStatusView["remotes"]): EventsStatusView => ({ re
 
 describe("what an event switch writes", () => {
   it("is the event's enabled for the only remote, and for Shared's every-project group", () => {
-    expect(eventSwitchPath("git.push", ["origin"], "origin")).toEqual(["events", "git.push", "enabled"]);
-    expect(eventSwitchPath("git.push", [], undefined)).toEqual(["events", "git.push", "enabled"]);
+    expect(eventSwitchPath("git.pushed", ["origin"], "origin")).toEqual(["events", "git.pushed", "enabled"]);
+    expect(eventSwitchPath("git.pushed", [], undefined)).toEqual(["events", "git.pushed", "enabled"]);
     expect(eventSwitchPath("task.failed", ["origin", "mirror"], undefined)).toEqual(["events", "task.failed", "enabled"]);
   });
 
   it("is the remote's own switch when there are several", () => {
-    expect(eventSwitchPath("git.push", ["origin", "mirror"], "mirror")).toEqual(["events", "git.push", "remotes", "mirror"]);
+    expect(eventSwitchPath("git.pushed", ["origin", "mirror"], "mirror")).toEqual(["events", "git.pushed", "remotes", "mirror"]);
   });
 
   it("turns the only remote's override the same way when one covers enabled", () => {
-    const events: JairaEventsConfig = { "git.push": { enabled: false, remotes: { origin: false } } };
-    expect(eventSwitchWrites(events, "git.push", ["origin"], "origin", true)).toEqual([
-      [["events", "git.push", "enabled"], true],
-      [["events", "git.push", "remotes", "origin"], true],
+    const events: JairaEventsConfig = { "git.pushed": { enabled: false, remotes: { origin: false } } };
+    expect(eventSwitchWrites(events, "git.pushed", ["origin"], "origin", true)).toEqual([
+      [["events", "git.pushed", "enabled"], true],
+      [["events", "git.pushed", "remotes", "origin"], true],
     ]);
-    expect(eventSwitchWrites({}, "git.push", ["origin"], "origin", true)).toEqual([[["events", "git.push", "enabled"], true]]);
+    expect(eventSwitchWrites({}, "git.pushed", ["origin"], "origin", true)).toEqual([[["events", "git.pushed", "enabled"], true]]);
   });
 
   it("writes a dotted event name as one key, which the parser takes", () => {
-    const doc = withPaths({}, eventSwitchWrites({}, "git.merge_request.opened", ["origin", "mirror"], "origin", true));
-    expect(doc).toEqual({ events: { "git.merge_request.opened": { remotes: { origin: true } } } });
-    expect(parseConfig(doc).events["git.merge_request.opened"]).toEqual({ enabled: false, remotes: { origin: true } });
+    const doc = withPaths({}, eventSwitchWrites({}, "merge_request.opened", ["origin", "mirror"], "origin", true));
+    expect(doc).toEqual({ events: { "merge_request.opened": { remotes: { origin: true } } } });
+    expect(parseConfig(doc).events["merge_request.opened"]).toEqual({ enabled: false, remotes: { origin: true } });
   });
 });
 
 describe("the rows", () => {
   it("are one group per remote, then JaiRA's own", () => {
-    const groups = eventGroupsOf(status([origin, mirror]), { "git.push": { enabled: true } });
+    const groups = eventGroupsOf(status([origin, mirror]), { "git.pushed": { enabled: true } });
     expect(groups.map((g) => g.heading)).toEqual([
       "origin → github.com/owner/repo · from .git/config",
       "mirror → gitlab.com/ofer/repo · from .git/config",
       "JaiRA · tasks in this project",
     ]);
-    const push = groups[0]!.rows.find((row) => row.name === "git.push")!;
-    expect(push).toMatchObject({ on: true, unanswered: false, branches: true, path: ["events", "git.push", "remotes", "origin"], activity: { today: 3 } });
+    const push = groups[0]!.rows.find((row) => row.name === "git.pushed")!;
+    expect(push).toMatchObject({ on: true, unanswered: false, branches: true, path: ["events", "git.pushed", "remotes", "origin"], activity: { today: 3 } });
     // No connection for gitlab.com: off and disabled, whatever the settings say.
-    expect(groups[1]!.rows.find((row) => row.name === "git.push")).toMatchObject({ on: false, unanswered: true });
+    expect(groups[1]!.rows.find((row) => row.name === "git.pushed")).toMatchObject({ on: false, unanswered: true });
     expect(groups[2]!.rows.map((row) => row.name)).toEqual(["task.finished", "task.failed"]);
   });
 
   it("are every project's remotes on Shared, which has none", () => {
     const groups = eventGroupsOf(status([]), {});
-    expect(groups[0]!.heading).toBe("Git · every project's remotes, from its own .git/config");
+    expect(groups[0]!.heading).toBe("Remotes · every project's, from its own .git/config");
     expect(groups[0]!.rows.every((row) => !row.unanswered && row.badge === undefined)).toBe(true);
   });
 
@@ -82,16 +82,16 @@ describe("the rows", () => {
   });
 
   it("say how an event that is on is watched, and what arrived", () => {
-    const [group] = eventGroupsOf(status([origin]), { "git.push": { enabled: true } });
-    const push = group!.rows.find((row) => row.name === "git.push")!;
+    const [group] = eventGroupsOf(status([origin]), { "git.pushed": { enabled: true } });
+    const push = group!.rows.find((row) => row.name === "git.pushed")!;
     expect(eventStatusLine(push, origin, 60_000, NOW)).toBe("checked every 60 s while JaiRA is open · last checked 30 s ago · last seen 2 min ago · 3 today");
-    const merged = group!.rows.find((row) => row.name === "git.merge_request.merged")!;
+    const merged = group!.rows.find((row) => row.name === "merge_request.merged")!;
     expect(eventStatusLine(merged, origin, 60_000, NOW)).toContain("none seen yet");
   });
 
   it("read the events in effect from the settings view", () => {
     expect(eventsConfigOf(null)).toEqual({});
-    expect(eventsConfigOf({ effective: { events: { "git.push": { enabled: true } } } } as never)).toEqual({ "git.push": { enabled: true } });
+    expect(eventsConfigOf({ effective: { events: { "git.pushed": { enabled: true } } } } as never)).toEqual({ "git.pushed": { enabled: true } });
   });
 });
 
@@ -99,15 +99,15 @@ describe("the tally of what arrived", () => {
   it("counts per project, remote and event, and today only", () => {
     let now = NOW;
     const tally = new EventTally(() => now);
-    const push = { name: "git.push", payload: { remote: "origin" } } as never;
+    const push = { name: "git.pushed", payload: { remote: "origin" } } as never;
     tally.record("p", push);
     tally.record("p", push);
     tally.record("p", { name: "task.failed", payload: { task_id: "t" } } as never);
-    expect(tally.activity("p", "origin", "git.push")).toEqual({ lastSeenAt: NOW, today: 2 });
+    expect(tally.activity("p", "origin", "git.pushed")).toEqual({ lastSeenAt: NOW, today: 2 });
     expect(tally.activity("p", undefined, "task.failed")).toEqual({ lastSeenAt: NOW, today: 1 });
-    expect(tally.activity("q", "origin", "git.push")).toBeUndefined();
+    expect(tally.activity("q", "origin", "git.pushed")).toBeUndefined();
     now += 2 * 86_400_000;
-    expect(tally.activity("p", "origin", "git.push")).toEqual({ lastSeenAt: NOW, today: 0 });
+    expect(tally.activity("p", "origin", "git.pushed")).toEqual({ lastSeenAt: NOW, today: 0 });
   });
 });
 
@@ -115,23 +115,23 @@ describe("the tally of what arrived", () => {
 
 describe("the Events section", () => {
   it("has a remote's events with the badge, the switch, and — for one that is on — its branches and status", () => {
-    const events: JairaEventsConfig = { "git.push": { enabled: true, branches: ["main", "release/*"] } };
-    const layerDoc = { events: { "git.push": { enabled: true } } };
+    const events: JairaEventsConfig = { "git.pushed": { enabled: true, branches: ["main", "release/*"] } };
+    const layerDoc = { events: { "git.pushed": { enabled: true } } };
     const [group] = eventGroupsOf(status([origin]), events);
     expect(group!.heading).toBe("origin → github.com/owner/repo · from .git/config");
-    const push = group!.rows.find((row) => row.name === "git.push")!;
-    expect(EVENT_SPECS[push.name].label).toBe("Push");
+    const push = group!.rows.find((row) => row.name === "git.pushed")!;
+    expect(EVENT_SPECS[push.name].label).toBe("Pushed");
     expect(push.badge!.text).toBe("github · ofersadgat");
     // The switch: on for the event the settings turn on, off for one they do not.
     expect(push.on).toBe(true);
-    expect(group!.rows.find((row) => row.name === "git.merge_request.opened")!.on).toBe(false);
+    expect(group!.rows.find((row) => row.name === "merge_request.opened")!.on).toBe(false);
     // One that is on and takes branch globs gets its branch box, and its status line under it.
     expect(push.branches).toBe(true);
     expect(eventStatusLine(push, group!.remote, 60_000, NOW)).toBe("checked every 60 s while JaiRA is open · last checked 30 s ago · last seen 2 min ago · 3 today");
     // This layer states the push switch: its ↺ is read at the path the switch writes.
-    expect(push.path).toEqual(["events", "git.push", "enabled"]);
+    expect(push.path).toEqual(["events", "git.pushed", "enabled"]);
     expect(statesPath(layerDoc, push.path)).toBe(true);
-    expect(statesPath(layerDoc, group!.rows.find((row) => row.name === "git.merge_request.opened")!.path)).toBe(false);
+    expect(statesPath(layerDoc, group!.rows.find((row) => row.name === "merge_request.opened")!.path)).toBe(false);
     // The latest-state rule behind the ⓘ.
     expect(MISSED_WHILE_CLOSED).toContain("Missed while JaiRA was closed?");
   });
@@ -145,7 +145,7 @@ describe("the Events section", () => {
 
 const line: AutomationLine = {
   name: "push_main_docs",
-  event: "git.push",
+  event: "git.pushed",
   filter: { branch: "main" },
   steps: [
     { kind: "start", workflow: "feature/review", inputs: { issue: { event: "payload.commits[0].message" } } },
@@ -154,7 +154,7 @@ const line: AutomationLine = {
 };
 
 /** The settings the Automations section is read against: pushes are watched, nothing else. */
-const WATCHED: JairaEventsConfig = { "git.push": { enabled: true } };
+const WATCHED: JairaEventsConfig = { "git.pushed": { enabled: true } };
 
 describe("the Automations section", () => {
   it("has a line's badge beside its When, and its steps' inputs as picks from the event", () => {
@@ -173,23 +173,23 @@ describe("the Automations section", () => {
     const shown: ShownLine[] = [
       { line: any, from: "own", ignored: false },
       { line, from: "own", ignored: false },
-      { line: { ...line, name: "checks", event: "git.checks.failed", filter: {} }, from: "own", ignored: false },
+      { line: { ...line, name: "checks", event: "pipeline.failed", filter: {} }, from: "own", ignored: false },
     ];
     const flags = lineFlagsOf(shown, WATCHED);
     expect(flags[0]).toEqual([]);
     expect(flags[1]!.map(flagText)).toEqual(["Never reached: any_push matches every event this line would, and the first line that matches wins. Drag it above any_push to run it first."]);
-    expect(flags[2]!.map(flagText)).toEqual(["git.checks.failed is switched off, so nothing arrives for this line."]);
+    expect(flags[2]!.map(flagText)).toEqual(["pipeline.failed is switched off, so nothing arrives for this line."]);
     // The page offers "Switch it on in Events" beside the second kind, by the flag's kind.
     expect(flags[2]!.map((flag) => flag.kind)).toEqual(["off"]);
   });
 
   it("keeps a hand-written line whole and sends it to the file", () => {
-    const raw: AutomationLine = { name: "odd", event: "", filter: {}, steps: [], raw: { rule: { name: "odd", when: "on_event('git.push') && true", to: "x" }, children: {} } };
+    const raw: AutomationLine = { name: "odd", event: "", filter: {}, steps: [], raw: { rule: { name: "odd", when: "on_event('git.pushed') && true", to: "x" }, children: {} } };
     // Its guard is shown as it is written, and written back as it stood.
     expect(writeLine(raw)).toEqual(raw.raw);
-    expect(writeLine(raw).rule["when"]).toBe("on_event('git.push') && true");
+    expect(writeLine(raw).rule["when"]).toBe("on_event('git.pushed') && true");
     // And the written rule of an ordinary line is what the file holds.
-    expect(writeLine(line).rule["when"]).toBe("on_event('git.push', { branch: 'main' })");
+    expect(writeLine(line).rule["when"]).toBe("on_event('git.pushed', { branch: 'main' })");
   });
 });
 

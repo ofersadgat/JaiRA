@@ -1,5 +1,5 @@
 /**
- * `compare` on both providers — the commits a push brought, for the repository watcher's `git.push`
+ * `compare` on both providers — the commits a push brought, for the repository watcher's `git.pushed`
  * (decision 0010 §2). Against the documented shapes, through a transport that answers inline.
  */
 import { describe, expect, it } from "vitest";

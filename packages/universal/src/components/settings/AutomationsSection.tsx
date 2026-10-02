@@ -332,7 +332,7 @@ function LineBody({ line, props, off = false, onLine }: { line: AutomationLine; 
           When
         </Txt>
         <View width={em(17)} maxWidth="100%">
-          <FormInput value={line.event} mono placeholder="an event — git.push" label="the event this line waits for" disabled={props.locked} suggest={eventOptionsOf(props.events)} onChange={(event) => onLine({ ...line, event, filter: {} })} />
+          <FormInput value={line.event} mono placeholder="an event — git.pushed" label="the event this line waits for" disabled={props.locked} suggest={eventOptionsOf(props.events)} onChange={(event) => onLine({ ...line, event, filter: {} })} />
         </View>
         {badge !== undefined ? <ConnectionPill first badge={badge} onOpenConnections={props.onOpenConnections} /> : null}
       </View>

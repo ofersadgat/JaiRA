@@ -48,8 +48,8 @@ describe("the built-in settings layer", () => {
   it("switches every event on, so a layer above only ever turns one off", () => {
     const config = parseConfig(JSON.parse(readFileSync(BUILT_IN, "utf8")));
     for (const name of EVENT_NAMES) expect(isEventEnabled(config, name, "origin"), name).toBe(true);
-    const off = parseConfig(mergeConfigLayers([JSON.parse(readFileSync(BUILT_IN, "utf8")), { events: { "git.push": { enabled: false } } }]) ?? {});
-    expect(isEventEnabled(off, "git.push", "origin")).toBe(false);
+    const off = parseConfig(mergeConfigLayers([JSON.parse(readFileSync(BUILT_IN, "utf8")), { events: { "git.pushed": { enabled: false } } }]) ?? {});
+    expect(isEventEnabled(off, "git.pushed", "origin")).toBe(false);
     expect(isEventEnabled(off, "task.failed")).toBe(true);
   });
 

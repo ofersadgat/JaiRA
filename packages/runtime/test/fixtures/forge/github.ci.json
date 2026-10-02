@@ -1,0 +1,2133 @@
+{
+  "_source": "RECORDED 2026-09-28 in the app through the github.com connection (JAIRA_FORGE_RECORD, service/forgeRecord.ts), public repository cli/cli: commit 46480afb's suites (its check-suites and head_sha runs lists TRIMMED to suite 72128932321 and the first two others), pull request #14543's pipelines (GraphQL), suites 72128932321 and 98748420420 with their runs, check runs and artifacts, check run 79286928933 (its log is past retention: 410), job 109083036468 and its log, artifact 10991111218. TRIMMED: the nested repository, head_repository, app owner/permissions/events, actor and pull_requests fields (read by no provider) removed from REST answers, and job 109083036468's log cut to its first 120 lines. No request headers kept; response headers reduced to the ones a provider reads. The token's own /user answer is left out.",
+  "fixtures": [
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/46480afb125d852c3edd2b4850a97c09b65c64cf/status",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"c14cfc53375273b14f96b4d71a8aed7af96142c30acf216a8536ea464e0d1a77\""
+        },
+        "body": {
+          "state": "pending",
+          "statuses": [],
+          "sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "total_count": 0,
+          "commit_url": "https://api.github.com/repos/cli/cli/commits/46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "url": "https://api.github.com/repos/cli/cli/commits/46480afb125d852c3edd2b4850a97c09b65c64cf/status"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/commits/46480afb125d852c3edd2b4850a97c09b65c64cf/check-suites",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"caadbbe0197a989b255bea6fe50261c0727821133f365e3934049d4e4ec0c468\""
+        },
+        "body": {
+          "total_count": 3,
+          "check_suites": [
+            {
+              "id": 72128925799,
+              "node_id": "CS_kwDODKw3uc8AAAAQyzgQZw",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "status": "queued",
+              "conclusion": null,
+              "url": "https://api.github.com/repos/cli/cli/check-suites/72128925799",
+              "before": "7f885723a9cb72cd4318eef3c831f8a7bb9d9093",
+              "after": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "app": {
+                "id": 68071,
+                "client_id": "Iv1.346fba89cfb7867e",
+                "slug": "github-service-catalog-staging",
+                "node_id": "MDM6QXBwNjgwNzE=",
+                "name": "GitHub Service Catalog (Staging)",
+                "description": "GitHub's Internal Service Catalog (Staging)",
+                "external_url": "https://catalog-staging.githubapp.com",
+                "html_url": "https://github.com/apps/github-service-catalog-staging",
+                "created_at": "2020-06-08T18:49:22Z",
+                "updated_at": "2026-01-09T19:28:45Z"
+              },
+              "created_at": "2026-06-03T11:49:28Z",
+              "updated_at": "2026-06-03T11:49:28Z",
+              "rerequestable": true,
+              "runs_rerequestable": true,
+              "latest_check_runs_count": 0,
+              "check_runs_url": "https://api.github.com/repos/cli/cli/check-suites/72128925799/check-runs",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            },
+            {
+              "id": 72128926027,
+              "node_id": "CS_kwDODKw3uc8AAAAQyzgRSw",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "status": "queued",
+              "conclusion": null,
+              "url": "https://api.github.com/repos/cli/cli/check-suites/72128926027",
+              "before": "7f885723a9cb72cd4318eef3c831f8a7bb9d9093",
+              "after": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "app": {
+                "id": 68070,
+                "client_id": "Iv1.cf9a5f171bae5d4a",
+                "slug": "github-service-catalog",
+                "node_id": "MDM6QXBwNjgwNzA=",
+                "name": "GitHub Service Catalog",
+                "description": "GitHub's Internal Service Catalog.",
+                "external_url": "https://catalog.githubapp.com",
+                "html_url": "https://github.com/apps/github-service-catalog",
+                "created_at": "2020-06-08T18:41:25Z",
+                "updated_at": "2025-11-12T10:22:31Z"
+              },
+              "created_at": "2026-06-03T11:49:28Z",
+              "updated_at": "2026-06-03T11:49:28Z",
+              "rerequestable": true,
+              "runs_rerequestable": true,
+              "latest_check_runs_count": 0,
+              "check_runs_url": "https://api.github.com/repos/cli/cli/check-suites/72128926027/check-runs",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            },
+            {
+              "id": 72128932321,
+              "node_id": "CS_kwDODKw3uc8AAAAQyzgp4Q",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "status": "completed",
+              "conclusion": "failure",
+              "url": "https://api.github.com/repos/cli/cli/check-suites/72128932321",
+              "before": "7f885723a9cb72cd4318eef3c831f8a7bb9d9093",
+              "after": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              },
+              "created_at": "2026-06-03T11:49:30Z",
+              "updated_at": "2026-06-03T11:58:41Z",
+              "rerequestable": true,
+              "runs_rerequestable": false,
+              "latest_check_runs_count": 6,
+              "check_runs_url": "https://api.github.com/repos/cli/cli/check-suites/72128932321/check-runs",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/runs",
+        "query": {
+          "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"5aebb9887d1bd75853793b9d0bf83abad44a727836f9c33797cd89a9675910ce\""
+        },
+        "body": {
+          "total_count": 3,
+          "workflow_runs": [
+            {
+              "id": 26920098385,
+              "name": "Triage Scheduled Tasks",
+              "node_id": "WFR_kwLODKw3uc8AAAAGRJAaUQ",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "path": ".github/workflows/triage-scheduled-tasks.yml",
+              "display_title": "Triage Scheduled Tasks",
+              "run_number": 3710,
+              "event": "schedule",
+              "status": "completed",
+              "conclusion": "success",
+              "workflow_id": 235328803,
+              "check_suite_id": 72250735554,
+              "check_suite_node_id": "CS_kwDODKw3uc8AAAAQ0nq7wg",
+              "url": "https://api.github.com/repos/cli/cli/actions/runs/26920098385",
+              "html_url": "https://github.com/cli/cli/actions/runs/26920098385",
+              "created_at": "2026-06-03T23:41:25Z",
+              "updated_at": "2026-06-03T23:41:36Z",
+              "run_attempt": 1,
+              "referenced_workflows": [
+                {
+                  "path": "desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/triage-no-response-close.yml@main",
+                  "sha": "48ef4929a3782bdc8f12c280e11904b8d59cde78",
+                  "ref": "refs/heads/main"
+                },
+                {
+                  "path": "desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/triage-stale-issues.yml@main",
+                  "sha": "48ef4929a3782bdc8f12c280e11904b8d59cde78",
+                  "ref": "refs/heads/main"
+                },
+                {
+                  "path": "desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/pitch-surface-top-issues.yml@main",
+                  "sha": "48ef4929a3782bdc8f12c280e11904b8d59cde78",
+                  "ref": "refs/heads/main"
+                }
+              ],
+              "run_started_at": "2026-06-03T23:41:25Z",
+              "jobs_url": "https://api.github.com/repos/cli/cli/actions/runs/26920098385/jobs",
+              "logs_url": "https://api.github.com/repos/cli/cli/actions/runs/26920098385/logs",
+              "check_suite_url": "https://api.github.com/repos/cli/cli/check-suites/72250735554",
+              "artifacts_url": "https://api.github.com/repos/cli/cli/actions/runs/26920098385/artifacts",
+              "cancel_url": "https://api.github.com/repos/cli/cli/actions/runs/26920098385/cancel",
+              "rerun_url": "https://api.github.com/repos/cli/cli/actions/runs/26920098385/rerun",
+              "previous_attempt_url": null,
+              "workflow_url": "https://api.github.com/repos/cli/cli/actions/workflows/235328803",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            },
+            {
+              "id": 26918015526,
+              "name": "Triage Scheduled Tasks",
+              "node_id": "WFR_kwLODKw3uc8AAAAGRHBSJg",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "path": ".github/workflows/triage-scheduled-tasks.yml",
+              "display_title": "Triage Scheduled Tasks",
+              "run_number": 3709,
+              "event": "schedule",
+              "status": "completed",
+              "conclusion": "success",
+              "workflow_id": 235328803,
+              "check_suite_id": 72244887112,
+              "check_suite_node_id": "CS_kwDODKw3uc8AAAAQ0iF-SA",
+              "url": "https://api.github.com/repos/cli/cli/actions/runs/26918015526",
+              "html_url": "https://github.com/cli/cli/actions/runs/26918015526",
+              "created_at": "2026-06-03T22:51:07Z",
+              "updated_at": "2026-06-03T22:51:21Z",
+              "run_attempt": 1,
+              "referenced_workflows": [
+                {
+                  "path": "desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/pitch-surface-top-issues.yml@main",
+                  "sha": "48ef4929a3782bdc8f12c280e11904b8d59cde78",
+                  "ref": "refs/heads/main"
+                },
+                {
+                  "path": "desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/triage-stale-issues.yml@main",
+                  "sha": "48ef4929a3782bdc8f12c280e11904b8d59cde78",
+                  "ref": "refs/heads/main"
+                },
+                {
+                  "path": "desktop/gh-cli-and-desktop-shared-workflows/.github/workflows/triage-no-response-close.yml@main",
+                  "sha": "48ef4929a3782bdc8f12c280e11904b8d59cde78",
+                  "ref": "refs/heads/main"
+                }
+              ],
+              "run_started_at": "2026-06-03T22:51:07Z",
+              "jobs_url": "https://api.github.com/repos/cli/cli/actions/runs/26918015526/jobs",
+              "logs_url": "https://api.github.com/repos/cli/cli/actions/runs/26918015526/logs",
+              "check_suite_url": "https://api.github.com/repos/cli/cli/check-suites/72244887112",
+              "artifacts_url": "https://api.github.com/repos/cli/cli/actions/runs/26918015526/artifacts",
+              "cancel_url": "https://api.github.com/repos/cli/cli/actions/runs/26918015526/cancel",
+              "rerun_url": "https://api.github.com/repos/cli/cli/actions/runs/26918015526/rerun",
+              "previous_attempt_url": null,
+              "workflow_url": "https://api.github.com/repos/cli/cli/actions/workflows/235328803",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            },
+            {
+              "id": 26882796913,
+              "name": "Unit and Integration Tests",
+              "node_id": "WFR_kwLODKw3uc8AAAAGQlbtcQ",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "path": ".github/workflows/go.yml",
+              "display_title": "Merge pull request #13578 from cli/bump-go-1.26.4",
+              "run_number": 21427,
+              "event": "push",
+              "status": "completed",
+              "conclusion": "failure",
+              "workflow_id": 25016,
+              "check_suite_id": 72128932321,
+              "check_suite_node_id": "CS_kwDODKw3uc8AAAAQyzgp4Q",
+              "url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913",
+              "created_at": "2026-06-03T11:49:30Z",
+              "updated_at": "2026-06-03T11:58:41Z",
+              "run_attempt": 1,
+              "referenced_workflows": [],
+              "run_started_at": "2026-06-03T11:49:30Z",
+              "jobs_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/jobs",
+              "logs_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/logs",
+              "check_suite_url": "https://api.github.com/repos/cli/cli/check-suites/72128932321",
+              "artifacts_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/artifacts",
+              "cancel_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/cancel",
+              "rerun_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/rerun",
+              "previous_attempt_url": null,
+              "workflow_url": "https://api.github.com/repos/cli/cli/actions/workflows/25016",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "POST",
+        "path": "/graphql",
+        "operation": "JairaPullPipelines"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        },
+        "body": {
+          "data": {
+            "repository": {
+              "pullRequest": {
+                "commits": {
+                  "nodes": [
+                    {
+                      "commit": {
+                        "oid": "2c354efe48616041586de6d5f16bc15f94fc659a",
+                        "checkSuites": {
+                          "nodes": [
+                            {
+                              "databaseId": 98649872300,
+                              "status": "QUEUED",
+                              "conclusion": null,
+                              "createdAt": "2026-09-28T14:06:21Z",
+                              "updatedAt": "2026-09-28T14:06:21Z",
+                              "app": {
+                                "slug": "github-service-catalog-staging",
+                                "name": "GitHub Service Catalog (Staging)"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 0
+                              },
+                              "workflowRun": null
+                            },
+                            {
+                              "databaseId": 98649872995,
+                              "status": "QUEUED",
+                              "conclusion": null,
+                              "createdAt": "2026-09-28T14:06:21Z",
+                              "updatedAt": "2026-09-28T14:06:21Z",
+                              "app": {
+                                "slug": "github-service-catalog",
+                                "name": "GitHub Service Catalog"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 0
+                              },
+                              "workflowRun": null
+                            },
+                            {
+                              "databaseId": 98649889253,
+                              "status": "COMPLETED",
+                              "conclusion": "SKIPPED",
+                              "createdAt": "2026-09-28T14:06:24Z",
+                              "updatedAt": "2026-09-28T14:06:25Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 6
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433459746,
+                                "event": "pull_request_target",
+                                "url": "https://github.com/cli/cli/actions/runs/36433459746",
+                                "workflow": {
+                                  "name": "PR Triaging"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98649891680,
+                              "status": "COMPLETED",
+                              "conclusion": "SUCCESS",
+                              "createdAt": "2026-09-28T14:06:24Z",
+                              "updatedAt": "2026-09-28T14:06:32Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 7
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433460491,
+                                "event": "pull_request_target",
+                                "url": "https://github.com/cli/cli/actions/runs/36433460491",
+                                "workflow": {
+                                  "name": "PR Triaging"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98649892233,
+                              "status": "COMPLETED",
+                              "conclusion": "SKIPPED",
+                              "createdAt": "2026-09-28T14:06:24Z",
+                              "updatedAt": "2026-09-28T14:06:26Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 6
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433460623,
+                                "event": "pull_request_target",
+                                "url": "https://github.com/cli/cli/actions/runs/36433460623",
+                                "workflow": {
+                                  "name": "PR Triaging"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98649894031,
+                              "status": "COMPLETED",
+                              "conclusion": "SKIPPED",
+                              "createdAt": "2026-09-28T14:06:25Z",
+                              "updatedAt": "2026-09-28T14:06:27Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 6
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433461257,
+                                "event": "pull_request_target",
+                                "url": "https://github.com/cli/cli/actions/runs/36433461257",
+                                "workflow": {
+                                  "name": "PR Triaging"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98649896662,
+                              "status": "COMPLETED",
+                              "conclusion": "SUCCESS",
+                              "createdAt": "2026-09-28T14:06:25Z",
+                              "updatedAt": "2026-09-28T14:16:25Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 6
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433462231,
+                                "event": "pull_request",
+                                "url": "https://github.com/cli/cli/actions/runs/36433462231",
+                                "workflow": {
+                                  "name": "Unit and Integration Tests"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98649896845,
+                              "status": "COMPLETED",
+                              "conclusion": "SUCCESS",
+                              "createdAt": "2026-09-28T14:06:25Z",
+                              "updatedAt": "2026-09-28T14:09:16Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 2
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433462311,
+                                "event": "pull_request",
+                                "url": "https://github.com/cli/cli/actions/runs/36433462311",
+                                "workflow": {
+                                  "name": "Code Scanning"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98649900883,
+                              "status": "COMPLETED",
+                              "conclusion": "SKIPPED",
+                              "createdAt": "2026-09-28T14:06:26Z",
+                              "updatedAt": "2026-09-28T14:06:28Z",
+                              "app": {
+                                "slug": "github-actions",
+                                "name": "GitHub Actions"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 6
+                              },
+                              "workflowRun": {
+                                "databaseId": 36433463799,
+                                "event": "pull_request_target",
+                                "url": "https://github.com/cli/cli/actions/runs/36433463799",
+                                "workflow": {
+                                  "name": "PR Triaging"
+                                }
+                              }
+                            },
+                            {
+                              "databaseId": 98650163360,
+                              "status": "COMPLETED",
+                              "conclusion": "SUCCESS",
+                              "createdAt": "2026-09-28T14:07:10Z",
+                              "updatedAt": "2026-09-28T14:09:07Z",
+                              "app": {
+                                "slug": "github-advanced-security",
+                                "name": "GitHub Advanced Security"
+                              },
+                              "branch": {
+                                "name": "dependabot/github_actions/codeql-actions-9d88a12d2b"
+                              },
+                              "checkRuns": {
+                                "totalCount": 1
+                              },
+                              "workflowRun": null
+                            }
+                          ]
+                        },
+                        "status": null
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-suites/72128932321"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"02b9dc8c45923a6cb881be22853b2aec97403ed5e820672ce0c98faf871c682d\""
+        },
+        "body": {
+          "id": 72128932321,
+          "node_id": "CS_kwDODKw3uc8AAAAQyzgp4Q",
+          "head_branch": "trunk",
+          "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "status": "completed",
+          "conclusion": "failure",
+          "url": "https://api.github.com/repos/cli/cli/check-suites/72128932321",
+          "before": "7f885723a9cb72cd4318eef3c831f8a7bb9d9093",
+          "after": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z"
+          },
+          "created_at": "2026-06-03T11:49:30Z",
+          "updated_at": "2026-06-03T11:58:41Z",
+          "rerequestable": true,
+          "runs_rerequestable": false,
+          "latest_check_runs_count": 6,
+          "check_runs_url": "https://api.github.com/repos/cli/cli/check-suites/72128932321/check-runs",
+          "head_commit": {
+            "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+            "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+            "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+            "timestamp": "2026-06-03T11:49:25Z",
+            "author": {
+              "name": "Babak K. Shandiz",
+              "email": "babakks@github.com"
+            },
+            "committer": {
+              "name": "GitHub",
+              "email": "noreply@github.com"
+            }
+          }
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/runs",
+        "query": {
+          "check_suite_id": "72128932321",
+          "per_page": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"23d819fa62577f2fb643786656c5de8110a32634dd3205ddd8310629c7a309f5\""
+        },
+        "body": {
+          "total_count": 1,
+          "workflow_runs": [
+            {
+              "id": 26882796913,
+              "name": "Unit and Integration Tests",
+              "node_id": "WFR_kwLODKw3uc8AAAAGQlbtcQ",
+              "head_branch": "trunk",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "path": ".github/workflows/go.yml",
+              "display_title": "Merge pull request #13578 from cli/bump-go-1.26.4",
+              "run_number": 21427,
+              "event": "push",
+              "status": "completed",
+              "conclusion": "failure",
+              "workflow_id": 25016,
+              "check_suite_id": 72128932321,
+              "check_suite_node_id": "CS_kwDODKw3uc8AAAAQyzgp4Q",
+              "url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913",
+              "created_at": "2026-06-03T11:49:30Z",
+              "updated_at": "2026-06-03T11:58:41Z",
+              "run_attempt": 1,
+              "referenced_workflows": [],
+              "run_started_at": "2026-06-03T11:49:30Z",
+              "jobs_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/jobs",
+              "logs_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/logs",
+              "check_suite_url": "https://api.github.com/repos/cli/cli/check-suites/72128932321",
+              "artifacts_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/artifacts",
+              "cancel_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/cancel",
+              "rerun_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913/rerun",
+              "previous_attempt_url": null,
+              "workflow_url": "https://api.github.com/repos/cli/cli/actions/workflows/25016",
+              "head_commit": {
+                "id": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+                "tree_id": "2172a6a606862b1e04290266ad0863880f65e9b1",
+                "message": "Merge pull request #13578 from cli/bump-go-1.26.4\n\nBump Go to 1.26.4",
+                "timestamp": "2026-06-03T11:49:25Z",
+                "author": {
+                  "name": "Babak K. Shandiz",
+                  "email": "babakks@github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-suites/72128932321/check-runs",
+        "query": {
+          "filter": "latest",
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"42f5712917050e14c95a27ef3eccfb17896aac5d9dde174ca1b2da3155f350ab\""
+        },
+        "body": {
+          "total_count": 6,
+          "check_runs": [
+            {
+              "id": 79286928871,
+              "name": "build (ubuntu-latest)",
+              "node_id": "CR_kwDODKw3uc8AAAASdd6F5w",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "external_id": "f4e2b5fa-765e-5aed-a4f7-cc3df054715c",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/79286928871",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928871",
+              "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928871",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-06-03T11:49:34Z",
+              "completed_at": "2026-06-03T11:54:25Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928871/annotations"
+              },
+              "check_suite": {
+                "id": 72128932321
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 79286928873,
+              "name": "build (windows-latest)",
+              "node_id": "CR_kwDODKw3uc8AAAASdd6F6Q",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "external_id": "8c3821bf-8235-5ac5-986c-5b5823d120bb",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/79286928873",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928873",
+              "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928873",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-06-03T11:49:34Z",
+              "completed_at": "2026-06-03T11:58:40Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928873/annotations"
+              },
+              "check_suite": {
+                "id": 72128932321
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 79286928899,
+              "name": "integration-tests (windows-latest)",
+              "node_id": "CR_kwDODKw3uc8AAAASdd6GAw",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "external_id": "f5b5d7d1-c236-5598-9e8d-a4d4af3c99c3",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/79286928899",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928899",
+              "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928899",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-06-03T11:49:34Z",
+              "completed_at": "2026-06-03T11:52:19Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928899/annotations"
+              },
+              "check_suite": {
+                "id": 72128932321
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 79286928915,
+              "name": "integration-tests (ubuntu-latest)",
+              "node_id": "CR_kwDODKw3uc8AAAASdd6GEw",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "external_id": "69e60901-ab2a-5a2b-b232-0e0dc426ce06",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/79286928915",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928915",
+              "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928915",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-06-03T11:49:34Z",
+              "completed_at": "2026-06-03T11:51:00Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928915/annotations"
+              },
+              "check_suite": {
+                "id": 72128932321
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 79286928933,
+              "name": "build (macos-latest)",
+              "node_id": "CR_kwDODKw3uc8AAAASdd6GJQ",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "external_id": "71547356-b11f-5239-b5cd-e5257b2afb96",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/79286928933",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928933",
+              "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928933",
+              "status": "completed",
+              "conclusion": "failure",
+              "started_at": "2026-06-03T11:49:34Z",
+              "completed_at": "2026-06-03T11:54:22Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928933/annotations"
+              },
+              "check_suite": {
+                "id": 72128932321
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 79286928947,
+              "name": "integration-tests (macos-latest)",
+              "node_id": "CR_kwDODKw3uc8AAAASdd6GMw",
+              "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+              "external_id": "2e062e03-4539-58fa-b54d-b54313cb0d8f",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/79286928947",
+              "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928947",
+              "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928947",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-06-03T11:49:35Z",
+              "completed_at": "2026-06-03T11:51:47Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928947/annotations"
+              },
+              "check_suite": {
+                "id": 72128932321
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/runs/26882796913/artifacts",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"439247b42f9592a1d5d71bdd019bb408311a50ea9708e520fb99d37914c8bced\""
+        },
+        "body": {
+          "total_count": 0,
+          "artifacts": []
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-suites/98748420420"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"9dfa5648e8ed3f406929ab60c6bfa0c854dbe8824dfcd7e98e80086e060a036b\""
+        },
+        "body": {
+          "id": 98748420420,
+          "node_id": "CS_kwDODKw3uc8AAAAW_d1RRA",
+          "head_branch": "trunk",
+          "head_sha": "9b031151a825bda919203c5202876a725d637368",
+          "status": "completed",
+          "conclusion": "success",
+          "url": "https://api.github.com/repos/cli/cli/check-suites/98748420420",
+          "before": "babd691446b9c935574771ef31e85e88f1362e4a",
+          "after": "9b031151a825bda919203c5202876a725d637368",
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z"
+          },
+          "created_at": "2026-09-28T18:50:47Z",
+          "updated_at": "2026-09-28T18:54:44Z",
+          "rerequestable": true,
+          "runs_rerequestable": false,
+          "latest_check_runs_count": 5,
+          "check_runs_url": "https://api.github.com/repos/cli/cli/check-suites/98748420420/check-runs",
+          "head_commit": {
+            "id": "9b031151a825bda919203c5202876a725d637368",
+            "tree_id": "43bcdc05fc6707661198f38da3ccee9e7f328db0",
+            "message": "Merge pull request #14516 from cli/bagtoad/allow-ghu-tokens-for-attach\n\nAllow `ghu_` tokens for supported actors to attach files",
+            "timestamp": "2026-09-25T07:51:35Z",
+            "author": {
+              "name": "Kynan Ware",
+              "email": "47394200+BagToad@users.noreply.github.com"
+            },
+            "committer": {
+              "name": "GitHub",
+              "email": "noreply@github.com"
+            }
+          }
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/runs",
+        "query": {
+          "check_suite_id": "98748420420",
+          "per_page": "1"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"31478897dd99f5f6d8ec42ce1a47bf878c26b22937a395887bad582a96840122\""
+        },
+        "body": {
+          "total_count": 1,
+          "workflow_runs": [
+            {
+              "id": 36468061885,
+              "name": "Dependabot PR Triage (skills-driven)",
+              "node_id": "WFR_kwLODKw3uc8AAAAIfap2vQ",
+              "head_branch": "trunk",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "path": ".github/workflows/dependabot-triage.lock.yml",
+              "display_title": "Dependabot PR Triage (skills-driven)",
+              "run_number": 1380,
+              "event": "schedule",
+              "status": "completed",
+              "conclusion": "success",
+              "workflow_id": 323696448,
+              "check_suite_id": 98748420420,
+              "check_suite_node_id": "CS_kwDODKw3uc8AAAAW_d1RRA",
+              "url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885",
+              "created_at": "2026-09-28T18:50:47Z",
+              "updated_at": "2026-09-28T18:54:44Z",
+              "run_attempt": 1,
+              "referenced_workflows": [],
+              "run_started_at": "2026-09-28T18:50:47Z",
+              "jobs_url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885/jobs",
+              "logs_url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885/logs",
+              "check_suite_url": "https://api.github.com/repos/cli/cli/check-suites/98748420420",
+              "artifacts_url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885/artifacts",
+              "cancel_url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885/cancel",
+              "rerun_url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885/rerun",
+              "previous_attempt_url": null,
+              "workflow_url": "https://api.github.com/repos/cli/cli/actions/workflows/323696448",
+              "head_commit": {
+                "id": "9b031151a825bda919203c5202876a725d637368",
+                "tree_id": "43bcdc05fc6707661198f38da3ccee9e7f328db0",
+                "message": "Merge pull request #14516 from cli/bagtoad/allow-ghu-tokens-for-attach\n\nAllow `ghu_` tokens for supported actors to attach files",
+                "timestamp": "2026-09-25T07:51:35Z",
+                "author": {
+                  "name": "Kynan Ware",
+                  "email": "47394200+BagToad@users.noreply.github.com"
+                },
+                "committer": {
+                  "name": "GitHub",
+                  "email": "noreply@github.com"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-suites/98748420420/check-runs",
+        "query": {
+          "filter": "latest",
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"76ff8a0b250547ef6c5ee829575e116adbdf4b33d2c1a22ed727751da72e288e\""
+        },
+        "body": {
+          "total_count": 5,
+          "check_runs": [
+            {
+              "id": 109083036468,
+              "name": "activation",
+              "node_id": "CR_kwDODKw3uc8AAAAZZdsLNA",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "eb723559-2139-57fe-b150-7cc9d0a2b4b3",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109083036468",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:50:55Z",
+              "completed_at": "2026-09-28T18:51:40Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083036468/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109083386735,
+              "name": "agent",
+              "node_id": "CR_kwDODKw3uc8AAAAZZeBjbw",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "2f0d5d41-657f-5305-837e-0f5615cd028c",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109083386735",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083386735",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083386735",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:51:44Z",
+              "completed_at": "2026-09-28T18:52:51Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083386735/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109083850870,
+              "name": "detection",
+              "node_id": "CR_kwDODKw3uc8AAAAZZed4dg",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "42645c56-8288-56df-9e70-43e32841543f",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109083850870",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083850870",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083850870",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:52:54Z",
+              "completed_at": "2026-09-28T18:53:50Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083850870/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109084244956,
+              "name": "safe_outputs",
+              "node_id": "CR_kwDODKw3uc8AAAAZZe173A",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "4f877c82-4d3b-5e2e-bd09-5666b150b838",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109084244956",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084244956",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084244956",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:53:53Z",
+              "completed_at": "2026-09-28T18:54:03Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109084244956/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109084333534,
+              "name": "conclusion",
+              "node_id": "CR_kwDODKw3uc8AAAAZZe7V3g",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "0ece4a23-db26-5ce5-abdc-b9551b6f6c99",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109084333534",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084333534",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084333534",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:54:08Z",
+              "completed_at": "2026-09-28T18:54:43Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109084333534/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/runs/36468061885/artifacts",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"0cd935236e852a9e99ccc00b4583f3b72527e99fcc6eb6295ef3178d071d10f6\""
+        },
+        "body": {
+          "total_count": 7,
+          "artifacts": [
+            {
+              "id": 10991111218,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk5MTExMTIxOA==",
+              "name": "safe-outputs-items",
+              "size_in_bytes": 301,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10991111218",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10991111218/zip",
+              "expired": false,
+              "digest": "sha256:bba263ff36823c6642f6a4d2e4de264de0b587231eaf512beae355fde5a27404",
+              "created_at": "2026-09-28T18:54:01Z",
+              "updated_at": "2026-09-28T18:54:01Z",
+              "expires_at": "2026-12-27T18:50:47Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            },
+            {
+              "id": 10990986728,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk5MDk4NjcyOA==",
+              "name": "usage",
+              "size_in_bytes": 1953,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990986728",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990986728/zip",
+              "expired": false,
+              "digest": "sha256:bc2929a04aac614d40928d480bb7ac9e10584f93e06bbff3861389dd5d292415",
+              "created_at": "2026-09-28T18:54:33Z",
+              "updated_at": "2026-09-28T18:54:33Z",
+              "expires_at": "2026-12-27T18:50:47Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            },
+            {
+              "id": 10990796556,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk5MDc5NjU1Ng==",
+              "name": "agent",
+              "size_in_bytes": 87106,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990796556",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990796556/zip",
+              "expired": false,
+              "digest": "sha256:768161904069a09c72ed2c7759d2bf2862f5f8b9779ecd850c474a8fab14c92a",
+              "created_at": "2026-09-28T18:52:46Z",
+              "updated_at": "2026-09-28T18:52:46Z",
+              "expires_at": "2026-12-27T18:50:47Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            },
+            {
+              "id": 10990511821,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk5MDUxMTgyMQ==",
+              "name": "aic-usage-cache",
+              "size_in_bytes": 1134,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990511821",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990511821/zip",
+              "expired": false,
+              "digest": "sha256:5fadeb56461062f9acc47aa088eacee1b76ccf4bc099d59713787481ee4a89e0",
+              "created_at": "2026-09-28T18:54:36Z",
+              "updated_at": "2026-09-28T18:54:36Z",
+              "expires_at": "2026-10-05T18:54:36Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            },
+            {
+              "id": 10990242116,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk5MDI0MjExNg==",
+              "name": "detection",
+              "size_in_bytes": 18949,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990242116",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990242116/zip",
+              "expired": false,
+              "digest": "sha256:2d34415cc2e1b3aacdf6e85ea9daf5b91b02c4b9ddedaba44f39a99bc2e3bd59",
+              "created_at": "2026-09-28T18:53:47Z",
+              "updated_at": "2026-09-28T18:53:47Z",
+              "expires_at": "2026-12-27T18:50:47Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            },
+            {
+              "id": 10990022038,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk5MDAyMjAzOA==",
+              "name": "activation",
+              "size_in_bytes": 609803,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990022038",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10990022038/zip",
+              "expired": false,
+              "digest": "sha256:7556667fb3c527ed9cc0fd8c1f52c3f22374f24d035f5149ecec079f145b8ce7",
+              "created_at": "2026-09-28T18:51:37Z",
+              "updated_at": "2026-09-28T18:51:37Z",
+              "expires_at": "2026-09-29T18:51:35Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            },
+            {
+              "id": 10989977277,
+              "node_id": "MDg6QXJ0aWZhY3QxMDk4OTk3NzI3Nw==",
+              "name": "agent-output-fallback",
+              "size_in_bytes": 529,
+              "url": "https://api.github.com/repos/cli/cli/actions/artifacts/10989977277",
+              "archive_download_url": "https://api.github.com/repos/cli/cli/actions/artifacts/10989977277/zip",
+              "expired": false,
+              "digest": "sha256:7083ca9b86b416fdf870ffcdd5ec541a2f90349347f6ca58be05c4da41bb7ef5",
+              "created_at": "2026-09-28T18:52:44Z",
+              "updated_at": "2026-09-28T18:52:44Z",
+              "expires_at": "2026-12-27T18:50:47Z",
+              "workflow_run": {
+                "id": 36468061885,
+                "repository_id": 212613049,
+                "head_repository_id": 212613049,
+                "head_branch": "trunk",
+                "head_sha": "9b031151a825bda919203c5202876a725d637368"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-runs/79286928933"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"e53d372c86617ac1a6be71d0f60724b24199aa0e207a6ba98fa3e5ac8e60abcd\""
+        },
+        "body": {
+          "id": 79286928933,
+          "name": "build (macos-latest)",
+          "node_id": "CR_kwDODKw3uc8AAAASdd6GJQ",
+          "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "external_id": "71547356-b11f-5239-b5cd-e5257b2afb96",
+          "url": "https://api.github.com/repos/cli/cli/check-runs/79286928933",
+          "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928933",
+          "details_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928933",
+          "status": "completed",
+          "conclusion": "failure",
+          "started_at": "2026-06-03T11:49:34Z",
+          "completed_at": "2026-06-03T11:54:22Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 1,
+            "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/79286928933/annotations"
+          },
+          "check_suite": {
+            "id": 72128932321
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z"
+          }
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-runs/79286928933/annotations",
+        "query": {
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"fb893827222e33fbe4a1fdeba6e25c9339689945b02cdf22d21174bc764d724b\""
+        },
+        "body": [
+          {
+            "path": ".github",
+            "blob_href": "https://github.com/cli/cli/blob/46480afb125d852c3edd2b4850a97c09b65c64cf/.github",
+            "start_line": 308,
+            "start_column": null,
+            "end_line": 308,
+            "end_column": null,
+            "annotation_level": "failure",
+            "title": "",
+            "message": "Process completed with exit code 1.",
+            "raw_details": ""
+          }
+        ]
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/jobs/79286928933"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"d2d2a795f7fa344b009a27a52008d771f7ef21637cc00ed0fe6bbec5fdf316df\""
+        },
+        "body": {
+          "id": 79286928933,
+          "run_id": 26882796913,
+          "workflow_name": "Unit and Integration Tests",
+          "head_branch": "trunk",
+          "run_url": "https://api.github.com/repos/cli/cli/actions/runs/26882796913",
+          "run_attempt": 1,
+          "node_id": "CR_kwDODKw3uc8AAAASdd6GJQ",
+          "head_sha": "46480afb125d852c3edd2b4850a97c09b65c64cf",
+          "url": "https://api.github.com/repos/cli/cli/actions/jobs/79286928933",
+          "html_url": "https://github.com/cli/cli/actions/runs/26882796913/job/79286928933",
+          "status": "completed",
+          "conclusion": "failure",
+          "created_at": "2026-06-03T11:49:31Z",
+          "started_at": "2026-06-03T11:49:34Z",
+          "completed_at": "2026-06-03T11:54:22Z",
+          "name": "build (macos-latest)",
+          "steps": [],
+          "check_run_url": "https://api.github.com/repos/cli/cli/check-runs/79286928933",
+          "labels": [
+            "macos-latest"
+          ],
+          "runner_id": 1013646729,
+          "runner_name": "GitHub Actions 1013646729",
+          "runner_group_id": 0,
+          "runner_group_name": "GitHub Actions"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/jobs/79286928933/logs"
+      },
+      "response": {
+        "status": 410,
+        "headers": {
+          "content-type": "application/json; charset=utf-8"
+        },
+        "body": {
+          "message": "Server Error",
+          "documentation_url": "https://docs.github.com/rest/actions/workflow-jobs#download-job-logs-for-a-workflow-run",
+          "status": "410"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/artifacts/10991111218/zip"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/zip",
+          "etag": "\"0x8DF1D91DC2B8A18\""
+        },
+        "body": null,
+        "bodyBase64": "UEsDBBQACAAIAMCWPF0AAAAAAAAAAAAAAAAXAAAAc2FmZS1vdXRwdXQtaXRlbXMuanNvbmwDAFBLBwgAAAAAAgAAAAAAAABQSwMEFAAIAAgAwJY8XQAAAAAAAAAAAAAAABUAAAB0ZW1wb3JhcnktaWQtbWFwLmpzb26rruUCAFBLBwgGsKHdBQAAAAMAAABQSwECLQMUAAgACADAljxdAAAAAAIAAAAAAAAAFwAAAAAAAAAAACAApIEAAAAAc2FmZS1vdXRwdXQtaXRlbXMuanNvbmxQSwECLQMUAAgACADAljxdBrCh3QUAAAADAAAAFQAAAAAAAAAAACAApIFHAAAAdGVtcG9yYXJ5LWlkLW1hcC5qc29uUEsFBgAAAAACAAIAiAAAAI8AAAAAAA=="
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-runs/109083036468"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"79c89c6cf2755f72f7e1f51fd9cd28a4b16aa5a677e77e5e2e5ef982c61fa0ab\""
+        },
+        "body": {
+          "id": 109083036468,
+          "name": "activation",
+          "node_id": "CR_kwDODKw3uc8AAAAZZdsLNA",
+          "head_sha": "9b031151a825bda919203c5202876a725d637368",
+          "external_id": "eb723559-2139-57fe-b150-7cc9d0a2b4b3",
+          "url": "https://api.github.com/repos/cli/cli/check-runs/109083036468",
+          "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+          "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+          "status": "completed",
+          "conclusion": "success",
+          "started_at": "2026-09-28T18:50:55Z",
+          "completed_at": "2026-09-28T18:51:40Z",
+          "output": {
+            "title": null,
+            "summary": null,
+            "text": null,
+            "annotations_count": 0,
+            "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083036468/annotations"
+          },
+          "check_suite": {
+            "id": 98748420420
+          },
+          "app": {
+            "id": 15368,
+            "client_id": "Iv1.05c79e9ad1f6bdfa",
+            "slug": "github-actions",
+            "node_id": "MDM6QXBwMTUzNjg=",
+            "name": "GitHub Actions",
+            "description": "Automate your workflow from idea to production",
+            "external_url": "https://help.github.com/en/actions",
+            "html_url": "https://github.com/apps/github-actions",
+            "created_at": "2018-07-30T09:30:17Z",
+            "updated_at": "2026-06-18T16:17:48Z"
+          }
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/jobs/109083036468"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"4a112c2ea2f2edfc15d5494b750879f01edb049bad46f74d2e84ae0c109577e9\""
+        },
+        "body": {
+          "id": 109083036468,
+          "run_id": 36468061885,
+          "workflow_name": "Dependabot PR Triage (skills-driven)",
+          "head_branch": "trunk",
+          "run_url": "https://api.github.com/repos/cli/cli/actions/runs/36468061885",
+          "run_attempt": 1,
+          "node_id": "CR_kwDODKw3uc8AAAAZZdsLNA",
+          "head_sha": "9b031151a825bda919203c5202876a725d637368",
+          "url": "https://api.github.com/repos/cli/cli/actions/jobs/109083036468",
+          "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+          "status": "completed",
+          "conclusion": "success",
+          "created_at": "2026-09-28T18:50:47Z",
+          "started_at": "2026-09-28T18:50:55Z",
+          "completed_at": "2026-09-28T18:51:40Z",
+          "name": "activation",
+          "steps": [
+            {
+              "name": "Set up job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 1,
+              "started_at": "2026-09-28T18:50:59Z",
+              "completed_at": "2026-09-28T18:51:04Z"
+            },
+            {
+              "name": "Setup Scripts",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 2,
+              "started_at": "2026-09-28T18:51:04Z",
+              "completed_at": "2026-09-28T18:51:11Z"
+            },
+            {
+              "name": "Generate agentic run info",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 3,
+              "started_at": "2026-09-28T18:51:11Z",
+              "completed_at": "2026-09-28T18:51:12Z"
+            },
+            {
+              "name": "Restore daily AIC usage cache",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 4,
+              "started_at": "2026-09-28T18:51:12Z",
+              "completed_at": "2026-09-28T18:51:15Z"
+            },
+            {
+              "name": "Restore daily AIC usage cache (artifact fallback)",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 5,
+              "started_at": "2026-09-28T18:51:15Z",
+              "completed_at": "2026-09-28T18:51:16Z"
+            },
+            {
+              "name": "Check daily workflow token guardrail",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 6,
+              "started_at": "2026-09-28T18:51:16Z",
+              "completed_at": "2026-09-28T18:51:20Z"
+            },
+            {
+              "name": "Check for OAuth tokens",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 7,
+              "started_at": "2026-09-28T18:51:20Z",
+              "completed_at": "2026-09-28T18:51:20Z"
+            },
+            {
+              "name": "Checkout .github and .agents folders",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 8,
+              "started_at": "2026-09-28T18:51:20Z",
+              "completed_at": "2026-09-28T18:51:30Z"
+            },
+            {
+              "name": "Save agent config folders for base branch restoration",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 9,
+              "started_at": "2026-09-28T18:51:30Z",
+              "completed_at": "2026-09-28T18:51:30Z"
+            },
+            {
+              "name": "Check workflow lock file",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 10,
+              "started_at": "2026-09-28T18:51:30Z",
+              "completed_at": "2026-09-28T18:51:32Z"
+            },
+            {
+              "name": "Check compile-agentic version",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 11,
+              "started_at": "2026-09-28T18:51:32Z",
+              "completed_at": "2026-09-28T18:51:33Z"
+            },
+            {
+              "name": "Log runtime features",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 12,
+              "started_at": "2026-09-28T18:51:33Z",
+              "completed_at": "2026-09-28T18:51:33Z"
+            },
+            {
+              "name": "Create prompt with built-in context",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 13,
+              "started_at": "2026-09-28T18:51:33Z",
+              "completed_at": "2026-09-28T18:51:33Z"
+            },
+            {
+              "name": "Interpolate variables and render templates",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 14,
+              "started_at": "2026-09-28T18:51:33Z",
+              "completed_at": "2026-09-28T18:51:33Z"
+            },
+            {
+              "name": "Substitute placeholders",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 15,
+              "started_at": "2026-09-28T18:51:33Z",
+              "completed_at": "2026-09-28T18:51:34Z"
+            },
+            {
+              "name": "Validate prompt placeholders",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 16,
+              "started_at": "2026-09-28T18:51:34Z",
+              "completed_at": "2026-09-28T18:51:34Z"
+            },
+            {
+              "name": "Print prompt",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 17,
+              "started_at": "2026-09-28T18:51:34Z",
+              "completed_at": "2026-09-28T18:51:34Z"
+            },
+            {
+              "name": "Stage prompt files for artifact upload",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 18,
+              "started_at": "2026-09-28T18:51:34Z",
+              "completed_at": "2026-09-28T18:51:34Z"
+            },
+            {
+              "name": "Upload activation artifact",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 19,
+              "started_at": "2026-09-28T18:51:34Z",
+              "completed_at": "2026-09-28T18:51:37Z"
+            },
+            {
+              "name": "Post Checkout .github and .agents folders",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 37,
+              "started_at": "2026-09-28T18:51:37Z",
+              "completed_at": "2026-09-28T18:51:37Z"
+            },
+            {
+              "name": "Post Setup Scripts",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 38,
+              "started_at": "2026-09-28T18:51:37Z",
+              "completed_at": "2026-09-28T18:51:38Z"
+            },
+            {
+              "name": "Complete job",
+              "status": "completed",
+              "conclusion": "success",
+              "number": 39,
+              "started_at": "2026-09-28T18:51:38Z",
+              "completed_at": "2026-09-28T18:51:38Z"
+            }
+          ],
+          "check_run_url": "https://api.github.com/repos/cli/cli/check-runs/109083036468",
+          "labels": [
+            "ubuntu-slim"
+          ],
+          "runner_id": 1019605006,
+          "runner_name": "GitHub Actions 1019605006",
+          "runner_group_id": 0,
+          "runner_group_name": "GitHub Actions"
+        }
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/actions/jobs/109083036468/logs"
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "text/plain",
+          "etag": "\"0x8DF1D918820FE5A\""
+        },
+        "body": null,
+        "bodyBase64": "77u/MjAyNi0wOS0yOFQxODo1MDo1OS4yOTAyNTA4WiBDdXJyZW50IHJ1bm5lciB2ZXJzaW9uOiAnMi4zMzcuMCcKMjAyNi0wOS0yOFQxODo1MDo1OS4yOTU0MTcwWiAjI1tncm91cF1SdW5uZXIgSW1hZ2UgUHJvdmlzaW9uZXIKMjAyNi0wOS0yOFQxODo1MDo1OS4yOTU1MTA3WiBIb3N0ZWQgQ29tcHV0ZSBBZ2VudAoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5NTU2ODRaIFZlcnNpb246IDIwMjYwODI4LjU4NwoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5NTYzNDVaIENvbW1pdDogYWJhYzkyNjYyY2FiNGNjNzM1MmRlNGY5ZjlkMmUyNDE5YWFkOWMyOQoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5NTcwNjZaIEJ1aWxkIERhdGU6IDIwMjYtMDgtMjhUMTY6NDQ6MjVaCjIwMjYtMDktMjhUMTg6NTA6NTkuMjk2ODM3MlogV29ya2VyIElEOiB7M2Y5ZGQ2MmUtZWNjMC00OGIzLWEyYjAtZmI4MzRiODVjYTRkfQoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5NjkxNDVaIEF6dXJlIFJlZ2lvbjogd2VzdHVzMwoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5Njk3MTNaICMjW2VuZGdyb3VwXQoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5NzE0OTZaICMjW2dyb3VwXVZNIEltYWdlCjIwMjYtMDktMjhUMTg6NTA6NTkuMjk3MjA5OVogLSBPUzogTGludXggKHg2NCkKMjAyNi0wOS0yOFQxODo1MDo1OS4yOTcyNzI2WiAtIFNvdXJjZTogRG9ja2VyCjIwMjYtMDktMjhUMTg6NTA6NTkuMjk3MzI5OFogLSBOYW1lOiB1YnVudHU6MjQuMDQKMjAyNi0wOS0yOFQxODo1MDo1OS4yOTc1OTYzWiAtIFZlcnNpb246IDIwMjYwOTIyLjYuNQoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5NzY3MjJaICMjW2VuZGdyb3VwXQoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5ODg1NzNaICMjW2dyb3VwXUdJVEhVQl9UT0tFTiBQZXJtaXNzaW9ucwoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5OTE2ODhaIEFjdGlvbnM6IHJlYWQKMjAyNi0wOS0yOFQxODo1MDo1OS4yOTkyMjgwWiBDb250ZW50czogcmVhZAoyMDI2LTA5LTI4VDE4OjUwOjU5LjI5OTI4ODJaIE1ldGFkYXRhOiByZWFkCjIwMjYtMDktMjhUMTg6NTA6NTkuMjk5MzY3NFogIyNbZW5kZ3JvdXBdCjIwMjYtMDktMjhUMTg6NTA6NTkuMjk5NjQzOVogU2VjcmV0IHNvdXJjZTogQWN0aW9ucwoyMDI2LTA5LTI4VDE4OjUwOjU5LjMwMDc5MTdaIENhY2hlIG1vZGU6IHdyaXRlCjIwMjYtMDktMjhUMTg6NTA6NTkuMzAwOTA0NFogUHJlcGFyZSB3b3JrZmxvdyBkaXJlY3RvcnkKMjAyNi0wOS0yOFQxODo1MDo1OS44NzY4MjY0WiBQcmVwYXJlIGFsbCByZXF1aXJlZCBhY3Rpb25zCjIwMjYtMDktMjhUMTg6NTA6NTkuODk1ODUwOVogR2V0dGluZyBhY3Rpb24gZG93bmxvYWQgaW5mbwoyMDI2LTA5LTI4VDE4OjUxOjAwLjMzNTg5NzRaIERvd25sb2FkIGFjdGlvbiByZXBvc2l0b3J5ICdnaXRodWIvZ2gtYXctYWN0aW9uc0AyYTc4ZDA0NDAzZmRjNjkwN2QwZjA1MzI3Y2ZmYWM5ZGJhZDUzMTJkJyAoU0hBOjJhNzhkMDQ0MDNmZGM2OTA3ZDBmMDUzMjdjZmZhYzlkYmFkNTMxMmQpCjIwMjYtMDktMjhUMTg6NTE6MDIuMzMxMTc0NFogRG93bmxvYWQgYWN0aW9uIHJlcG9zaXRvcnkgJ2FjdGlvbnMvZ2l0aHViLXNjcmlwdEAzYTI4NDRiN2U5YzQyMmQzYzEwZDI4N2M4OTU1NzNmNzEwOGRhMWIzJyAoU0hBOjNhMjg0NGI3ZTljNDIyZDNjMTBkMjg3Yzg5NTU3M2Y3MTA4ZGExYjMpCjIwMjYtMDktMjhUMTg6NTE6MDMuMTcwMjYzMVogRG93bmxvYWQgYWN0aW9uIHJlcG9zaXRvcnkgJ2FjdGlvbnMvY2FjaGVANTVjYzgzNDU4NjNjN2NjNGM2NmEzMjlhZWM3ZTQzM2QyZDFjNTJhOScgKFNIQTo1NWNjODM0NTg2M2M3Y2M0YzY2YTMyOWFlYzdlNDMzZDJkMWM1MmE5KQoyMDI2LTA5LTI4VDE4OjUxOjAzLjc5NDIxNzVaIERvd25sb2FkIGFjdGlvbiByZXBvc2l0b3J5ICdhY3Rpb25zL2NoZWNrb3V0QDNkM2M0MmU1YWFjNWJhODA1ODI1ZGE3NjQxMGMxODEyNzNiYTkwYjEnIChTSEE6M2QzYzQyZTVhYWM1YmE4MDU4MjVkYTc2NDEwYzE4MTI3M2JhOTBiMSkKMjAyNi0wOS0yOFQxODo1MTowNC4wODI3NzYyWiBEb3dubG9hZCBhY3Rpb24gcmVwb3NpdG9yeSAnYWN0aW9ucy91cGxvYWQtYXJ0aWZhY3RAMDQzZmI0NmQxYTkzYzc3YWFlNjU2ZTdjMWM2NGE4NzVkMWZjNmEwYScgKFNIQTowNDNmYjQ2ZDFhOTNjNzdhYWU2NTZlN2MxYzY0YTg3NWQxZmM2YTBhKQoyMDI2LTA5LTI4VDE4OjUxOjA0Ljc5ODk3NjZaIENvbXBsZXRlIGpvYiBuYW1lOiBhY3RpdmF0aW9uCjIwMjYtMDktMjhUMTg6NTE6MDUuMDA2NDUxOVogIyNbZ3JvdXBdUnVuIGdpdGh1Yi9naC1hdy1hY3Rpb25zL3NldHVwQDJhNzhkMDQ0MDNmZGM2OTA3ZDBmMDUzMjdjZmZhYzlkYmFkNTMxMmQKMjAyNi0wOS0yOFQxODo1MTowNS4wMDg2ODIwWiB3aXRoOgoyMDI2LTA5LTI4VDE4OjUxOjA1LjAwODc3NDVaICAgZGVzdGluYXRpb246IC9ob21lL3J1bm5lci93b3JrL190ZW1wL2doLWF3L2FjdGlvbnMKMjAyNi0wOS0yOFQxODo1MTowNS4wMDg4NDY5WiAgIGpvYi1uYW1lOiBhY3RpdmF0aW9uCjIwMjYtMDktMjhUMTg6NTE6MDUuMDA4OTEyOVogICBzYWZlLW91dHB1dC1hcnRpZmFjdC1jbGllbnQ6IHRydWUKMjAyNi0wOS0yOFQxODo1MTowNS4wMDkwMDk4WiBlbnY6CjIwMjYtMDktMjhUMTg6NTE6MDUuMDA5MDYwN1ogICBHSF9BV19NQVhfREFJTFlfQUlfQ1JFRElUUzogNTAwMAoyMDI2LTA5LTI4VDE4OjUxOjA1LjAwOTEzODZaICAgR0hfQVdfUlVOVElNRV9GRUFUVVJFUzogaXNzdWVfaW50ZW50cwoyMDI2LTA5LTI4VDE4OjUxOjA1LjAwOTIyMTNaICAgR0hfQVdfU0VUVVBfV09SS0ZMT1dfTkFNRTogRGVwZW5kYWJvdCBQUiBUcmlhZ2UgKHNraWxscy1kcml2ZW4pCjIwMjYtMDktMjhUMTg6NTE6MDUuMDA5MzQ2MlogICBHSF9BV19DVVJSRU5UX1dPUktGTE9XX1JFRjogY2xpL2NsaS8uZ2l0aHViL3dvcmtmbG93cy9kZXBlbmRhYm90LXRyaWFnZS5sb2NrLnltbEByZWZzL2hlYWRzL3RydW5rCjIwMjYtMDktMjhUMTg6NTE6MDUuMDA5NDU2NlogICBHSF9BV19JTkZPX1ZFUlNJT046IDEuMC44MAoyMDI2LTA5LTI4VDE4OjUxOjA1LjAwOTUxNjhaICAgR0hfQVdfSU5GT19BV0ZfVkVSU0lPTjogdjAuMjguNwoyMDI2LTA5LTI4VDE4OjUxOjA1LjAwOTU4NDhaICAgR0hfQVdfSU5GT19FTkdJTkVfSUQ6IGNvcGlsb3QKMjAyNi0wOS0yOFQxODo1MTowNS4wMDk2NDQ1WiAjI1tlbmRncm91cF0KMjAyNi0wOS0yOFQxODo1MToxMC4yNjc5NjU3WiBTdWNjZXNzZnVsbHkgY29waWVkIDQ4NSBmaWxlcyB0byAvaG9tZS9ydW5uZXIvd29yay9fdGVtcC9naC1hdy9hY3Rpb25zCjIwMjYtMDktMjhUMTg6NTE6MTAuNzk0Njc1MlogU3VjY2Vzc2Z1bGx5IGNvcGllZCAyNiBtY3Atc2NyaXB0cyBmaWxlcyB0byAvaG9tZS9ydW5uZXIvd29yay9fdGVtcC9naC1hdy9tY3Atc2NyaXB0cwoyMDI2LTA5LTI4VDE4OjUxOjExLjA0NjAyMjNaIFN1Y2Nlc3NmdWxseSBjb3BpZWQgODcgc2FmZS1vdXRwdXRzIGZpbGVzIHRvIC9ob21lL3J1bm5lci93b3JrL190ZW1wL2doLWF3L3NhZmVvdXRwdXRzCjIwMjYtMDktMjhUMTg6NTE6MTEuMTY1OTQxMFogW2luZm9dIFtvdGxwXSBJTlBVVF9UUkFDRV9JRCBub3Qgc2V0LCBhIG5ldyB0cmFjZSBJRCB3aWxsIGJlIGdlbmVyYXRlZAoyMDI2LTA5LTI4VDE4OjUxOjExLjE2NjA1NjlaIFtpbmZvXSBbb3RscF0gR0hfQVdfT1RMUF9FTkRQT0lOVFMgbm90IHNldCwgc2tpcHBpbmcgc2V0dXAgc3BhbgoyMDI2LTA5LTI4VDE4OjUxOjExLjE3MDM4MzBaIFtpbmZvXSBbb3RscF0gcmVzb2x2ZWQgdHJhY2UtaWQ9YmQ4ZmI3OTEyOTUzZTJhMDU5NDNiNjdiOWU5MjM4NzcKMjAyNi0wOS0yOFQxODo1MToxMS4xNzEwOTgyWiBbaW5mb10gW290bHBdIHRyYWNlLWlkPWJkOGZiNzkxMjk1M2UyYTA1OTQzYjY3YjllOTIzODc3IHdyaXR0ZW4gdG8gR0lUSFVCX09VVFBVVAoyMDI2LTA5LTI4VDE4OjUxOjExLjE3Nzg0ODdaIFtpbmZvXSBbb3RscF0gc3Bhbi1pZD00ODYzMzM3NjZhYzY5YTEzIHdyaXR0ZW4gdG8gR0lUSFVCX09VVFBVVAoyMDI2LTA5LTI4VDE4OjUxOjExLjE3ODcxNzlaIFtpbmZvXSBbb3RscF0gR0lUSFVCX0FXX09URUxfVFJBQ0VfSUQgd3JpdHRlbiB0byBHSVRIVUJfRU5WCjIwMjYtMDktMjhUMTg6NTE6MTEuMTc5MDgyOFogW2luZm9dIFtvdGxwXSBHSVRIVUJfQVdfT1RFTF9QQVJFTlRfU1BBTl9JRCB3cml0dGVuIHRvIEdJVEhVQl9FTlYKMjAyNi0wOS0yOFQxODo1MToxMS4xNzk0NDAxWiBbaW5mb10gW290bHBdIEdJVEhVQl9BV19PVEVMX0pPQl9TVEFSVF9NUyB3cml0dGVuIHRvIEdJVEhVQl9FTlYKMjAyNi0wOS0yOFQxODo1MToxMS4yNTU2MzkzWiAjI1tncm91cF1SdW4gYWN0aW9ucy9naXRodWItc2NyaXB0QDNhMjg0NGI3ZTljNDIyZDNjMTBkMjg3Yzg5NTU3M2Y3MTA4ZGExYjMKMjAyNi0wOS0yOFQxODo1MToxMS4yNTU3ODMxWiB3aXRoOgoyMDI2LTA5LTI4VDE4OjUxOjExLjI2MDgzNjdaICAgc2NyaXB0OiBjb25zdCBwYXRoID0gcmVxdWlyZSgncGF0aCcpOwpjb25zdCBhY3Rpb25zRGlyID0gcGF0aC5qb2luKHByb2Nlc3MuZW52LlJVTk5FUl9URU1QLCAnZ2gtYXcnLCAnYWN0aW9ucycpOwpjb25zdCB7IHNldHVwR2xvYmFscyB9ID0gcmVxdWlyZShwYXRoLmpvaW4oYWN0aW9uc0RpciwgJ3NldHVwX2dsb2JhbHMuY2pzJykpOwpzZXR1cEdsb2JhbHMoY29yZSwgZ2l0aHViLCBjb250ZXh0LCBleGVjLCBpbywgZ2V0T2N0b2tpdCk7CmNvbnN0IHsgbWFpbiB9ID0gcmVxdWlyZShwYXRoLmpvaW4oYWN0aW9uc0RpciwgJ2dlbmVyYXRlX2F3X2luZm8uY2pzJykpOwphd2FpdCBtYWluKGNvcmUsIGNvbnRleHQpOwoKMjAyNi0wOS0yOFQxODo1MToxMS4yNjE5OTkzWiAgIGdpdGh1Yi10b2tlbjogKioqCjIwMjYtMDktMjhUMTg6NTE6MTEuMjYyMDYzMFogICBkZWJ1ZzogZmFsc2UKMjAyNi0wOS0yOFQxODo1MToxMS4yNjIxMTM3WiAgIHVzZXItYWdlbnQ6IGFjdGlvbnMvZ2l0aHViLXNjcmlwdAoyMDI2LTA5LTI4VDE4OjUxOjExLjI2MzkxODJaICAgcmVzdWx0LWVuY29kaW5nOiBqc29uCjIwMjYtMDktMjhUMTg6NTE6MTEuMjY0MDA2MVogICByZXRyaWVzOiAwCjIwMjYtMDktMjhUMTg6NTE6MTEuMjY0MDYwOVogICByZXRyeS1leGVtcHQtc3RhdHVzLWNvZGVzOiA0MDAsNDAxLDQwMyw0MDQsNDIyCjIwMjYtMDktMjhUMTg6NTE6MTEuMjY0MTMzNFogZW52OgoyMDI2LTA5LTI4VDE4OjUxOjExLjI2NDE3ODlaICAgR0hfQVdfTUFYX0RBSUxZX0FJX0NSRURJVFM6IDUwMDAKMjAyNi0wOS0yOFQxODo1MToxMS4yNzA0NjM5WiAgIEdIX0FXX1JVTlRJTUVfRkVBVFVSRVM6IGlzc3VlX2ludGVudHMKMjAyNi0wOS0yOFQxODo1MToxMS4yNzA1Njk1WiAgIEdJVEhVQl9BV19PVEVMX1RSQUNFX0lEOiBiZDhmYjc5MTI5NTNlMmEwNTk0M2I2N2I5ZTkyMzg3NwoyMDI2LTA5LTI4VDE4OjUxOjExLjI3MDY1NThaICAgR0lUSFVCX0FXX09URUxfUEFSRU5UX1NQQU5fSUQ6IDQ4NjMzMzc2NmFjNjlhMTMKMjAyNi0wOS0yOFQxODo1MToxMS4yNzQzMDE4WiAgIEdJVEhVQl9BV19PVEVMX0pPQl9TVEFSVF9NUzogMTc5MDYyMTQ3MTE3OAoyMDI2LTA5LTI4VDE4OjUxOjExLjI3NDM4NTlaICAgR0hfQVdfSU5GT19FTkdJTkVfSUQ6IGNvcGlsb3QKMjAyNi0wOS0yOFQxODo1MToxMS4yNzQ0NTI2WiAgIEdIX0FXX0lORk9fRU5HSU5FX05BTUU6IEdpdEh1YiBDb3BpbG90IENMSQoyMDI2LTA5LTI4VDE4OjUxOjExLjI3NDUyMzBaICAgR0hfQVdfSU5GT19NT0RFTDogYXV0bwoyMDI2LTA5LTI4VDE4OjUxOjExLjI3NDU4NTNaICAgR0hfQVdfSU5GT19WRVJTSU9OOiAxLjAuODAKMjAyNi0wOS0yOFQxODo1MToxMS4yNzQ2NTc0WiAgIEdIX0FXX0lORk9fQUdFTlRfVkVSU0lPTjogMS4wLjgwCjIwMjYtMDktMjhUMTg6NTE6MTEuMjc0ODcxN1ogICBHSF9BV19JTkZPX0NMSV9WRVJTSU9OOiB2MC44Ny41CjIwMjYtMDktMjhUMTg6NTE6MTEuMjc0OTUxNVogICBHSF9BV19JTkZPX1dPUktGTE9XX05BTUU6IERlcGVuZGFib3QgUFIgVHJpYWdlIChza2lsbHMtZHJpdmVuKQoyMDI2LTA5LTI4VDE4OjUxOjExLjI3NTAzMzJaICAgR0hfQVdfSU5GT19FWFBFUklNRU5UQUw6IGZhbHNlCjIwMjYtMDktMjhUMTg6NTE6MTEuMjc1MTA3N1ogICBHSF9BV19JTkZPX1NVUFBPUlRTX1RPT0xTX0FMTE9XTElTVDogdHJ1ZQoyMDI2LTA5LTI4VDE4OjUxOjExLjI3NTE3NTBaICAgR0hfQVdfSU5GT19TVEFHRUQ6IGZhbHNlCjIwMjYtMDktMjhUMTg6NTE6MTEuMjc1MjgwNFogICBHSF9BV19JTkZPX0FMTE9XRURfRE9NQUlOUzogWyJkZWZhdWx0cyJdCjIwMjYtMDktMjhUMTg6NTE6MTEuMjc1MzQ3OFogICBHSF9BV19JTkZPX0ZJUkVXQUxMX0VOQUJMRUQ6IHRydWUKMjAyNi0wOS0yOFQxODo1MToxMS4yNzU0MTIyWiAgIEdIX0FXX0lORk9fQVdGX1ZFUlNJT046IHYwLjI4LjcKMjAyNi0wOS0yOFQxODo1MToxMS4yNzU0NzE1WiAgIEdIX0FXX0lORk9fQVdNR19WRVJTSU9OOiAKMjAyNi0wOS0yOFQxODo1MToxMS4yNzU1Mjg0WiAgIEdIX0FXX0lORk9fRklSRVdBTExfVFlQRTogc3F1aWQKMjAyNi0wOS0yOFQxODo1MToxMS4yNzU1ODk5WiAgIEdIX0FXX0lORk9fQUdFTlRfUlVOVElNRTogCjIwMjYtMDktMjhUMTg6NTE6MTEuMjc1NjQ4OFogICBHSF9BV19DT01QSUxFRF9TVFJJQ1Q6IHRydWUKMjAyNi0wOS0yOFQxODo1MToxMS4yNzU3MDU2WiAjI1tlbmRncm91cF0KMjAyNi0wOS0yOFQxODo1MToxMi4xNzI4NjQ4WiBTdGFydGluZyBjb250ZXh0IHZhcmlhYmxlIHZhbGlkYXRpb24uLi4KMjAyNi0wOS0yOFQxODo1MToxMi4xNzQ2MzEwWiDinJMgZ2l0aHViLmV2ZW50Lm9yZ2FuaXphdGlvbi5pZCBpcyB2YWxpZDogNTk3MDQ3MTEKMjAyNi0wOS0yOFQxODo1MToxMi4xNzUxMjQ2WiDinJMgZ2l0aHViLmV2ZW50LnJlcG9zaXRvcnkuaWQgaXMgdmFsaWQ6IDIxMjYxMzA0OQoyMDI2LTA5LTI4VDE4OjUxOjEyLjE3NTY3NzdaIFZhbGlkYXRlZCAyIGNvbnRleHQgdmFyaWFibGVzCjIwMjYtMDktMjhUMTg6NTE6MTIuMTc2MTc5OFog4pyFIEFsbCBjb250ZXh0IHZhcmlhYmxlcyB2YWxpZGF0ZWQgc3VjY2Vzc2Z1bGx5CjIwMjYtMDktMjhUMTg6NTE6MTIuMTc2ODA4M1ogTG9ja2Rvd24gbW9kZSBub3QgZXhwbGljaXRseSBlbmFibGVkLCBza2lwcGluZyB2YWxpZGF0aW9uCjIwMjYtMDktMjhUMTg6NTE6MTIuMTc3MzI3NFogUmVwb3NpdG9yeSB2aXNpYmlsaXR5OiB1bmtub3duCjIwMjYtMDktMjhUMTg6NTE6MTIuMTc3NTkyN1ogQ29tcGlsZWQgd2l0aCBzdHJpY3QgbW9kZTogdHJ1ZQoyMDI2LTA5LTI4VDE4OjUxOjEyLjUwNTAwNThaIEdlbmVyYXRlZCBtZXJnZWQgbW9kZWxzLmpzb24gYXQ6IC90bXAvZ2gtYXcvbW9kZWxzLmpzb24KMjAyNi0wOS0yOFQxODo1MToxMi41MDYwMjU1WiBHZW5lcmF0ZWQgYXdfaW5mby5qc29uIGF0OiAvdG1wL2doLWF3L2F3X2luZm8uanNvbgoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNTUzMzVaIHsKMjAyNi0wOS0yOFQxODo1MToxMi41MTU4MTI1WiAgICJlbmdpbmVfaWQiOiAiY29waWxvdCIsCjIwMjYtMDktMjhUMTg6NTE6MTIuNTE1ODg4N1ogICAiZW5naW5lX25hbWUiOiAiR2l0SHViIENvcGlsb3QgQ0xJIiwKMjAyNi0wOS0yOFQxODo1MToxMi41MTU5NTg1WiAgICJtb2RlbCI6ICJhdXRvIiwKMjAyNi0wOS0yOFQxODo1MToxMi41MTYwMTgwWiAgICJ2ZXJzaW9uIjogIjEuMC44MCIsCjIwMjYtMDktMjhUMTg6NTE6MTIuNTE2MDgwMlogICAiYWdlbnRfdmVyc2lvbiI6ICIxLjAuODAiLAoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNjE2MDlaICAgIndvcmtmbG93X25hbWUiOiAiRGVwZW5kYWJvdCBQUiBUcmlhZ2UgKHNraWxscy1kcml2ZW4pIiwKMjAyNi0wOS0yOFQxODo1MToxMi41MTYyNjUyWiAgICJleHBlcmltZW50YWwiOiBmYWxzZSwKMjAyNi0wOS0yOFQxODo1MToxMi41MTYzMzU1WiAgICJzdXBwb3J0c190b29sc19hbGxvd2xpc3QiOiB0cnVlLAoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNjQwOTJaICAgImNhY2hlX21lbW9yeSI6IGZhbHNlLAoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNjQ3MTVaICAgInJ1bl9pZCI6IDM2NDY4MDYxODg1LAoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNjUzMzhaICAgInJ1bl9udW1iZXIiOiAxMzgwLAoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNjU5NDVaICAgInJ1bl9hdHRlbXB0IjogIjEiLAoyMDI2LTA5LTI4VDE4OjUxOjEyLjUxNjY1NjBaICAgInJlcG9zaXRvcnkiOiAiY2xpL2NsaSIsCjIwMjYtMDktMjhUMTg6NTE6MTIuNTE2ODE1NVogICAicmVmIjogInJlZnMvaGVhZHMvdHJ1bmsiLAo="
+      }
+    },
+    {
+      "match": {
+        "method": "GET",
+        "path": "/repos/cli/cli/check-suites/98748420420/check-runs",
+        "query": {
+          "filter": "all",
+          "per_page": "100"
+        }
+      },
+      "response": {
+        "status": 200,
+        "headers": {
+          "content-type": "application/json; charset=utf-8",
+          "etag": "W/\"300a3798e33e125b2df05ed419dc5692a89675bbf0e87acc9539d0819bd1aaba\""
+        },
+        "body": {
+          "total_count": 5,
+          "check_runs": [
+            {
+              "id": 109084333534,
+              "name": "conclusion",
+              "node_id": "CR_kwDODKw3uc8AAAAZZe7V3g",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "0ece4a23-db26-5ce5-abdc-b9551b6f6c99",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109084333534",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084333534",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084333534",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:54:08Z",
+              "completed_at": "2026-09-28T18:54:43Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109084333534/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109084244956,
+              "name": "safe_outputs",
+              "node_id": "CR_kwDODKw3uc8AAAAZZe173A",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "4f877c82-4d3b-5e2e-bd09-5666b150b838",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109084244956",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084244956",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109084244956",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:53:53Z",
+              "completed_at": "2026-09-28T18:54:03Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109084244956/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109083850870,
+              "name": "detection",
+              "node_id": "CR_kwDODKw3uc8AAAAZZed4dg",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "42645c56-8288-56df-9e70-43e32841543f",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109083850870",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083850870",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083850870",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:52:54Z",
+              "completed_at": "2026-09-28T18:53:50Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083850870/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109083386735,
+              "name": "agent",
+              "node_id": "CR_kwDODKw3uc8AAAAZZeBjbw",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "2f0d5d41-657f-5305-837e-0f5615cd028c",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109083386735",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083386735",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083386735",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:51:44Z",
+              "completed_at": "2026-09-28T18:52:51Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 1,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083386735/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            },
+            {
+              "id": 109083036468,
+              "name": "activation",
+              "node_id": "CR_kwDODKw3uc8AAAAZZdsLNA",
+              "head_sha": "9b031151a825bda919203c5202876a725d637368",
+              "external_id": "eb723559-2139-57fe-b150-7cc9d0a2b4b3",
+              "url": "https://api.github.com/repos/cli/cli/check-runs/109083036468",
+              "html_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+              "details_url": "https://github.com/cli/cli/actions/runs/36468061885/job/109083036468",
+              "status": "completed",
+              "conclusion": "success",
+              "started_at": "2026-09-28T18:50:55Z",
+              "completed_at": "2026-09-28T18:51:40Z",
+              "output": {
+                "title": null,
+                "summary": null,
+                "text": null,
+                "annotations_count": 0,
+                "annotations_url": "https://api.github.com/repos/cli/cli/check-runs/109083036468/annotations"
+              },
+              "check_suite": {
+                "id": 98748420420
+              },
+              "app": {
+                "id": 15368,
+                "client_id": "Iv1.05c79e9ad1f6bdfa",
+                "slug": "github-actions",
+                "node_id": "MDM6QXBwMTUzNjg=",
+                "name": "GitHub Actions",
+                "description": "Automate your workflow from idea to production",
+                "external_url": "https://help.github.com/en/actions",
+                "html_url": "https://github.com/apps/github-actions",
+                "created_at": "2018-07-30T09:30:17Z",
+                "updated_at": "2026-06-18T16:17:48Z"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

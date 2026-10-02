@@ -354,9 +354,10 @@ export function useLocalModels(active: boolean, checkedAt: number, config: unkno
 const SMALL_NUMBERS = ["no", "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"];
 
 /**
- * "Used by 9 Git tools — list_merge_requests, git_push and seven more", DERIVED from the vocabulary
- * (decision 0010 §1): the count and the two names are the `git` category's, so a tool added there
- * is counted here without anybody remembering this line.
+ * "Used by 7 Git tools — list_merge_requests, git_push and five more, and 4 CI tools", DERIVED from the
+ * vocabulary (decision 0010 §1): the count and the two names are the `git` category's, so a tool added
+ * there is counted here without anybody remembering this line. The CI tools (decision 0016) reach the
+ * forge through the same connection, so they count here too.
  */
 export function gitToolsSentence(): { count: number; lead: string } {
   const tools = toolsInCategory("git").map((spec) => spec.name);
@@ -365,7 +366,9 @@ export function gitToolsSentence(): { count: number; lead: string } {
   const named = count === 1 ? [tools[0]!] : [tools[0]!, tools[count - 1]!];
   const rest = count - named.length;
   const more = rest === 0 ? "" : ` and ${SMALL_NUMBERS[rest] ?? String(rest)} more`;
-  return { count, lead: `Used by ${count} Git tool${count === 1 ? "" : "s"} — ${named.join(rest === 0 ? " and " : ", ")}${more}` };
+  const ci = toolsInCategory("ci").length;
+  const alsoCi = ci === 0 ? "" : `, and ${ci} CI tool${ci === 1 ? "" : "s"}`;
+  return { count, lead: `Used by ${count} Git tool${count === 1 ? "" : "s"} — ${named.join(rest === 0 ? " and " : ", ")}${more}${alsoCi}` };
 }
 
 /** What a connection's row should say, from its configuration and what the check observed. */

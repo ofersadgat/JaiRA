@@ -108,9 +108,9 @@ export interface TaskStartedBy {
    * on a task started before the state was recorded (it cannot be recovered, so it is left out).
    */
   state?: StartingState;
-  /** The event's name (`git.push`), or empty when the step was handed none. */
+  /** The event's name (`git.pushed`), or empty when the step was handed none. */
   event: string;
-  /** What happened, in a line: "git.push a1b2c3d on main" — see `eventSummary`. */
+  /** What happened, in a line: "git.pushed a1b2c3d on main" — see `eventSummary`. */
   summary: string;
 }
 
@@ -130,9 +130,9 @@ export interface StartingState {
 
 /** What a started task keeps of the event that started it — the card's line. */
 export interface StartingEvent {
-  /** `git.push`. */
+  /** `git.pushed`. */
   name: string;
-  /** "git.push a1b2c3d on main" — `eventSummary`. */
+  /** "git.pushed a1b2c3d on main" — `eventSummary`. */
   summary: string;
 }
 

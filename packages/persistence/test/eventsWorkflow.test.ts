@@ -40,9 +40,9 @@ function automation(name: string, event: string, workflow: string): { line: Reco
   };
 }
 
-const push = automation("push_main", "git.push", "feature/review");
-const nightly = automation("nightly", "git.merge_request.opened", "review/merge-request");
-const release = automation("release_push", "git.push", "release/build");
+const push = automation("push_main", "git.pushed", "feature/review");
+const nightly = automation("nightly", "merge_request.opened", "review/merge-request");
+const release = automation("release_push", "git.pushed", "release/build");
 
 function sharedCopy(): Record<string, unknown> {
   return {
@@ -161,14 +161,14 @@ describe("the events workflow", () => {
   });
 
   it("the lint names a line whose event Settings switch off", () => {
-    // Every event ships switched on (the built-in layer), so this project turns git.push off.
+    // Every event ships switched on (the built-in layer), so this project turns git.pushed off.
     const settings = join(dir, ".jaira", "settings.json");
     const stated = existsSync(settings) ? (JSON.parse(readFileSync(settings, "utf8")) as Record<string, unknown>) : {};
-    writeFileSync(settings, JSON.stringify({ ...stated, events: { "git.push": { enabled: false } } }), "utf8");
+    writeFileSync(settings, JSON.stringify({ ...stated, events: { "git.pushed": { enabled: false } } }), "utf8");
     write(own(), `${EVENTS_WORKFLOW}.json`, { $ref: `$SYSTEM/workflows/${EVENTS_WORKFLOW}`, transitions: [push.line], children: push.children });
     write(own(), `${EVENTS_WORKFLOW}/push_main.json`, push.state);
     const issues = browseWorkflows(open()).workflows.find((w) => w.rootId === EVENTS_WORKFLOW)?.issues ?? [];
-    expect(issues).toContainEqual({ stateId: EVENTS_WORKFLOW, path: "transitions.0.when", message: "git.push is switched off in Settings → Tools → Events, so this never fires", severity: "warning" });
+    expect(issues).toContainEqual({ stateId: EVENTS_WORKFLOW, path: "transitions.0.when", message: "git.pushed is switched off in Settings → Tools → Events, so this never fires", severity: "warning" });
     expect(issues.filter((i) => i.severity === "error")).toEqual([]);
   });
 

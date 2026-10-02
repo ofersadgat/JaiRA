@@ -9,7 +9,7 @@
  * The root has no spine (`sequence: []`) and its own rules are the lines. A line is ONE named rule and
  * ONE async child:
  *
- *  - the rule `{ name, when: "on_event('git.push', { branch: 'main' })", to: name, inputs: { event:
+ *  - the rule `{ name, when: "on_event('git.pushed', { branch: 'main' })", to: name, inputs: { event:
  *    ".event" } }` — it hands the event in, because `.event` (what the rule's `on_event` resolved to)
  *    is readable in the rule's own `inputs` and nowhere else;
  *  - the child `name: { "async": true }`, whose state is the default `./name`: `system/events/<name>`,
@@ -103,7 +103,7 @@ export const NO_STEPS: StepsOf = () => ({});
 
 const quote = (text: string): string => `'${text.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
 
-/** `on_event('git.push', { branch: 'main' })` — a line's guard. Keys in the order the filter spells them. */
+/** `on_event('git.pushed', { branch: 'main' })` — a line's guard. Keys in the order the filter spells them. */
 export function whenOf(event: string, filter: AutomationLine["filter"]): string {
   const entries = Object.entries(filter).filter(([, value]) => value !== undefined && !(Array.isArray(value) && value.length === 0)) as Array<[string, EventFilterValue]>;
   if (entries.length === 0) return `on_event(${quote(event)})`;

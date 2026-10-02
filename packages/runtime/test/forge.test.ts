@@ -155,8 +155,8 @@ describe("GitLab", () => {
         anchor: { path: "commands/helpers/cache.go", line: 42, side: "after" },
         resolved: false,
         comments: [
-          { id: "1101", who: "mara", body: "This cache key ignores the runner's architecture.", at: "2026-09-18T09:00:00.000Z", canWrite: true, own: false },
-          { id: "1102", who: "jaira-bot", body: SIGNED_FIX, at: "2026-09-18T09:20:00.000Z", canWrite: true, own: true },
+          { id: "1101", who: "mara", body: "This cache key ignores the runner's architecture.", at: "2026-09-18T09:00:00.000Z", url: `https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7429#note_1101`, canWrite: true, own: false },
+          { id: "1102", who: "jaira-bot", body: SIGNED_FIX, at: "2026-09-18T09:20:00.000Z", url: `https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7429#note_1102`, canWrite: true, own: true },
         ],
       });
       // A line that only exists BEFORE the change anchors on the old side; resolved is the forge's word.
@@ -169,7 +169,7 @@ describe("GitLab", () => {
     it("shows anyone's comment and says who can write — a non-member is a 404, which is an answer", async () => {
       const { comments } = await gitlab().read(mr(7429));
       expect(comments).toEqual([
-        { id: "1103", who: "visitor", body: "Looks fine to me", at: "2026-09-18T09:30:00.000Z", canWrite: false, own: false },
+        { id: "1103", who: "visitor", body: "Looks fine to me", at: "2026-09-18T09:30:00.000Z", url: `https://gitlab.com/gitlab-org/gitlab-runner/-/merge_requests/7429#note_1103`, canWrite: false, own: false },
       ]);
     });
 

@@ -7,6 +7,9 @@
  *    real headers (GitHub's `ETag`, and the `304` it earns).
  *  - `<forge>.documented.json` — BUILT from the vendor's documented shapes, for what cannot be
  *    recorded without a token: every write, GitLab's discussions, the whole of GitHub's GraphQL.
+ *  - `<forge>.ci.json` — RECORDED in the app through its own signed-in connection
+ *    (`JAIRA_FORGE_RECORD`, `service/forgeRecord.ts`), against public projects, reads only. A
+ *    download's bytes are `bodyBase64`.
  *
  * A request no fixture matches THROWS, naming itself. That is the property that matters: a provider
  * test can never reach the network, so it can never push, open or comment anywhere real.
@@ -108,7 +111,10 @@ export function replayForge(): Replay {
       seen.push(request);
       const hit = fixtures.find((fixture) => matches(fixture.match, request));
       if (hit === undefined) throw new Error(`no fixture answers ${request.method} ${request.url}`);
-      return structuredClone(hit.response);
+      // A download's bytes are recorded base64 (`service/forgeRecord.ts`) and answered as bytes, the way
+      // the real transport answers a request made with `expect: "bytes"`.
+      const { bodyBase64, ...response } = structuredClone(hit.response) as ForgeResponse & { bodyBase64?: string };
+      return bodyBase64 !== undefined ? { ...response, body: new Uint8Array(Buffer.from(bodyBase64, "base64")) } : response;
     },
   };
 }

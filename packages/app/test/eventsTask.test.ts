@@ -33,7 +33,7 @@ function automation(name: string, filter: string, workflow: string, options: { t
   ];
   return {
     name,
-    line: { name, when: `on_event('git.push', ${filter})`, to: name, inputs: { event: ".event" } },
+    line: { name, when: `on_event('git.pushed', ${filter})`, to: name, inputs: { event: ".event" } },
     children: { [name]: { async: true } },
     state: automationStateOf(name, steps),
   };
@@ -56,12 +56,12 @@ const review: Record<string, JsonValue> = {
   "feature/review": {
     label: "Review",
     inputs: { issue: { schema: { type: "string" } }, ask_below: { schema: { type: "number" } } },
-    transitions: [{ when: "on_event('git.merge_request.opened')", to: "terminate.success" }],
+    transitions: [{ when: "on_event('merge_request.opened')", to: "terminate.success" }],
   },
 };
 
 const push = (branch: string, after: string, message: string): JairaEvent => ({
-  name: "git.push",
+  name: "git.pushed",
   payload: {
     remote: "origin",
     connection: "github",
@@ -91,7 +91,7 @@ beforeEach(async () => {
   workflowsDir = initProject(dir, testHome()).workflowsDir;
   writeWorkflowFiles(workflowsDir, review);
   await start();
-  service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: true } } } as JsonValue });
+  service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.pushed": { enabled: true } } } as JsonValue });
 });
 
 afterEach(async () => {
@@ -152,7 +152,7 @@ describe("the events task's supervisor", () => {
     await service.superviseEventsTasks();
     const task = await until(listening, "the events task to listen");
     expect(task).toMatchObject({ title: "events", workflow: EVENTS_WORKFLOW, system: "events" });
-    expect(service.eventWaits()).toMatchObject([{ taskId: task.taskId, name: "git.push", filter: { branch: "main" } }]);
+    expect(service.eventWaits()).toMatchObject([{ taskId: task.taskId, name: "git.pushed", filter: { branch: "main" } }]);
   });
 
   it("is resumed after a restart — suspended by the close, or interrupted — keeping its id", async () => {
@@ -313,7 +313,7 @@ describe("an automation, end to end", () => {
     expect(started).toMatchObject({
       workflow: "feature/review",
       title: "feature/review",
-      origin: { kind: "started", taskId: events.taskId, key: "push_main", index: 0, event: "git.push a1b2c3d on main", stateId: automationStateIdOf("push_main"), label: "started by events · push_main · git.push a1b2c3d on main" },
+      origin: { kind: "started", taskId: events.taskId, key: "push_main", index: 0, event: "git.pushed a1b2c3d on main", stateId: automationStateIdOf("push_main"), label: "started by events · push_main · git.pushed a1b2c3d on main" },
     });
     expect(started.startedBy).toBeUndefined();
     const meta = readMeta(started.taskId);
@@ -323,13 +323,13 @@ describe("an automation, end to end", () => {
       taskId: events.taskId,
       key: "push_main",
       index: 0,
-      event: { name: "git.push", summary: "git.push a1b2c3d on main" },
+      event: { name: "git.pushed", summary: "git.pushed a1b2c3d on main" },
       state: { stateId: automationStateIdOf("push_main"), path: "push_main" },
     });
 
     // Call 2 ran — the notice names the event its state was entered with — while the started task still runs.
     const notice = await until(() => service.notices()[0], "the notice");
-    expect(notice).toMatchObject({ project: dir, taskId: events.taskId, text: "started feature/review", event: "git.push", summary: "git.push a1b2c3d on main", ref: "a1b2c3d" });
+    expect(notice).toMatchObject({ project: dir, taskId: events.taskId, text: "started feature/review", event: "git.pushed", summary: "git.pushed a1b2c3d on main", ref: "a1b2c3d" });
     expect(pushes.some((m) => m.type === "notice:posted")).toBe(true);
     await until(() => service.listTasks().find((t) => t.taskId === started.taskId)?.status === "running", "the started task to be running");
 
@@ -349,7 +349,7 @@ describe("an automation, end to end", () => {
     // not among the roots.
     expect(service.boardRoots({ project: dir }).columns.flatMap((c) => c.cards).some((c) => c.taskId === started.taskId)).toBe(false);
     const card = service.board({ project: dir, level: EVENTS_WORKFLOW }).columns.find((c) => c.key === "push_main")?.cards.find((c) => c.taskId === started.taskId);
-    expect(card?.origin).toMatchObject({ kind: "started", key: "push_main", event: "git.push a1b2c3d on main", stateId: automationStateIdOf("push_main") });
+    expect(card?.origin).toMatchObject({ kind: "started", key: "push_main", event: "git.pushed a1b2c3d on main", stateId: automationStateIdOf("push_main") });
 
     // And the events task is listening again, for the next one — a second firing is occurrence 1.
     await until(() => (listening() !== undefined && service.eventWaits().some((w) => w.taskId === events.taskId) ? true : undefined), "the line to re-arm");
@@ -359,7 +359,7 @@ describe("an automation, end to end", () => {
     const rested = service.taskDetail(events.taskId);
     expect(flattenInstances(rested.instances).find((n) => n.instanceId === firing.instanceId)?.plainCall).toBe(true);
     expect(rested.instances[0]?.status).toBe("running");
-    expect(rested.listening).toEqual(["git.push"]);
+    expect(rested.listening).toEqual(["git.pushed"]);
     service.deliverEvent(dir, push("main", "b2c3d4e5f6a7", "Second"));
     const second = await until(() => service.listTasks().find((t) => t.origin?.kind === "started" && t.taskId !== started.taskId), "the second started task");
     expect(readMeta(second.taskId).origin).toMatchObject({ key: "push_main", occurrence: 1, index: 0 });
@@ -402,8 +402,8 @@ describe("an automation, end to end", () => {
       by: "events",
       fromTask: events.taskId,
       state: { key: "push_main", path: "push_main", stateId: automationStateIdOf("push_main"), occurrence: 0, call: 0 },
-      event: "git.push",
-      summary: "git.push a1b2c3d on main",
+      event: "git.pushed",
+      summary: "git.pushed a1b2c3d on main",
     });
     await until(() => service.notices()[0], "the notice");
     // Not the events task's child: nothing in its journal, and its card is among the roots with the line.
@@ -417,9 +417,9 @@ describe("an automation, end to end", () => {
     const issuesOf = () => service.browseWorkflows(dir).workflows.find((w) => w.rootId === EVENTS_WORKFLOW)?.issues ?? [];
     expect(issuesOf().filter((i) => /switched off/.test(i.message))).toEqual([]);
     // On by default (the built-in layer); the project turns it off.
-    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.push": { enabled: false } } } as JsonValue });
+    service.writeConfig({ layer: "project", config: { ...(service.readConfig().project as object), events: { "git.pushed": { enabled: false } } } as JsonValue });
     expect(issuesOf()).toContainEqual(
-      expect.objectContaining({ stateId: EVENTS_WORKFLOW, path: "transitions.0.when", severity: "warning", message: "git.push is switched off in Settings → Tools → Events, so this never fires" }),
+      expect.objectContaining({ stateId: EVENTS_WORKFLOW, path: "transitions.0.when", severity: "warning", message: "git.pushed is switched off in Settings → Tools → Events, so this never fires" }),
     );
   });
 });

@@ -10,37 +10,43 @@
  *
  * Only what an enabled event needs, per remote (`enabledEvents`):
  *
- *  - **merge requests**, for any `git.merge_request.*` — those updated since the cursor, in one list;
- *  - **comments**, for `git.merge_request.comments` — only on a request that list says changed;
- *  - **branch heads**, for `git.push` or `git.checks.failed` — the branch list;
- *  - **checks**, for `git.checks.failed` — of branch heads matching that event's branches, and only
- *    until each head's checks conclude.
+ *  - **merge requests**, for any `merge_request.*` or `git.merged` — those updated since the cursor,
+ *    in one list;
+ *  - **comments**, for `merge_request.commented` — only on a request that list says changed;
+ *  - **branch heads**, for `git.pushed` or a `pipeline.*` — the branch list;
+ *  - **pipelines**, for a `pipeline.*` — of branch heads matching that event's branches, and only
+ *    until each head's pipelines finish.
  *
  * Nothing is enabled, nothing is polled: a target with no events is no target at all.
  *
  * ## The latest-state rule
  *
  * "We should only handle a transition for the latest state that we missed." Every look compares the
- * forge's state NOW with the last state seen, and a difference is at most one event per merge request
- * or branch (a request's comments are their own difference, and one event however many arrived):
+ * forge's state NOW with the last state seen, and a difference is at most one occurrence per merge
+ * request or branch (a request's comments are their own difference, and one event however many
+ * arrived). One occurrence may carry two names (decision 0016 §4):
  *
  *  | last seen            | now                        | event                          |
  *  | -------------------- | -------------------------- | ------------------------------ |
- *  | —                    | open                       | `git.merge_request.opened`     |
+ *  | —                    | open                       | `merge_request.opened`         |
  *  | —                    | merged / closed            | nothing (opened and closed unseen) |
- *  | open                 | open, head/title/description moved | `git.merge_request.updated` |
- *  | open                 | merged                     | `git.merge_request.merged`     |
- *  | open                 | closed                     | `git.merge_request.closed`     |
- *  | branch at A          | branch at B                | one `git.push` A..B            |
- *  | —                    | branch at B                | one `git.push` from {@link NEW_BRANCH_SHA} |
- *  | head's checks open   | concluded, something failed| `git.checks.failed`            |
+ *  | open                 | open, title/description moved | `merge_request.updated`     |
+ *  | open                 | open, head moved           | `merge_request.updated` and `merge_request.pushed` |
+ *  | open                 | merged                     | `git.merged` and `merge_request.merged` |
+ *  | open                 | closed                     | `merge_request.closed`         |
+ *  | branch at A          | branch at B                | one `git.pushed` A..B          |
+ *  | —                    | branch at B                | one `git.pushed` from {@link NEW_BRANCH_SHA} |
+ *  | head's pipelines running | finished                | per pipeline: `pipeline.succeeded`, `.failed` or `.canceled` |
+ *
+ * A head's pipelines on GitLab are its newest (a re-run supersedes); on GitHub every suite, one per
+ * workflow or app, each reporting its own. A skipped or manual pipeline raises nothing.
  *
  * A merge request that is merged or closed is forgotten once reported: if it reopens, it is open and
  * unseen, which is `opened` again.
  *
  * ## The baseline
  *
- * The first look at a remote — or at a kind newly needed, like branches once `git.push` is switched
+ * The first look at a remote — or at a kind newly needed, like branches once `git.pushed` is switched
  * on — stores what is there and emits NOTHING. A repository's existing hundred branches are not a
  * hundred pushes. Each kind's baseline is marked on the cursor, so a restart is not a first look:
  * closed for a weekend, the first look after start is one comparison, and the latest state is what
@@ -49,7 +55,7 @@
  * Comments JaiRA posted are never events: every one carries JaiRA's marker (`signComment`,
  * `isJairaComment` — the forge's `own`), and an events task that answered its own comment would never
  * stop. Only the MARKER excludes, not the account (the rulings of 2026-09-25): the connection's token is
- * the person's, and what they write on the forge with it fires `git.merge_request.comments` like
+ * the person's, and what they write on the forge with it fires `merge_request.commented` like
  * anyone's.
  */
 import { createHash } from "node:crypto";
@@ -59,7 +65,7 @@ import {
   matchesGlobs,
   NEW_BRANCH_SHA,
   handleOfSummary,
-  type CiStatus,
+  type PipelineStatus,
   type EnabledEvent,
   type EventComment,
   type EventDelivery,
@@ -111,8 +117,16 @@ export interface RepositoryWatcherOptions {
 
 /** How far back a merge request list reaches past the cursor: a forge's clock and a request updated in the same second as the last look. Re-seeing an unchanged request costs nothing — it is compared, not reported. */
 export const LOOKBACK_MS = 5 * 60_000;
-/** Checks that never start on a head are given up on after this — a branch with no CI. */
-export const CHECKS_GIVE_UP_MS = 60 * 60_000;
+/** A head no pipeline starts for is given up on after this — a branch with no CI. */
+export const PIPELINES_GIVE_UP_MS = 60 * 60_000;
+
+/** The pipeline events, and which a finished pipeline's status raises — skipped and manual raise none. */
+const PIPELINE_EVENTS = ["pipeline.succeeded", "pipeline.failed", "pipeline.canceled"] as const;
+const PIPELINE_EVENT_OF: Partial<Record<PipelineStatus, (typeof PIPELINE_EVENTS)[number]>> = {
+  success: "pipeline.succeeded",
+  failed: "pipeline.failed",
+  canceled: "pipeline.canceled",
+};
 /** A list page the watcher reads at most — the forge's own maximum. */
 const LIST_LIMIT = 100;
 
@@ -358,7 +372,7 @@ export class RepositoryWatcher {
     const hold = (): boolean => this.alive(key, target);
 
     // --- merge requests ---------------------------------------------------------------------------
-    const mergeRequests = [...on.keys()].some((name) => name.startsWith("git.merge_request."));
+    const mergeRequests = [...on.keys()].some((name) => name.startsWith("merge_request.") || name === "git.merged");
     if (mergeRequests) {
       if (cursor.mergeRequests === undefined) {
         const open = await provider.listMergeRequests(target.repository, { state: "open", limit: LIST_LIMIT });
@@ -387,9 +401,9 @@ export class RepositoryWatcher {
     }
 
     // --- branch heads -----------------------------------------------------------------------------
-    const pushes = on.has("git.push");
-    const checks = on.has("git.checks.failed");
-    if (!pushes && !checks) return;
+    const pushes = on.has("git.pushed");
+    const pipelines = PIPELINE_EVENTS.some((name) => on.has(name));
+    if (!pushes && !pipelines) return;
     const heads = await provider.branches(target.repository);
     if (!hold()) return;
     if (cursor.branches === undefined) {
@@ -402,47 +416,76 @@ export class RepositoryWatcher {
         seen.delete(branch.name);
         if (before === branch.head) continue;
         store.see(scope, "branch", branch.name, { head: branch.head });
-        if (checks && cursor.checks === true && wants("git.checks.failed", branch.name)) {
-          store.see(scope, "checks", branch.name, { sha: branch.head, done: false, since: this.clock.now() });
+        if (pipelines && cursor.pipelines === true && PIPELINE_EVENTS.some((name) => wants(name, branch.name))) {
+          store.see(scope, "pipelines", branch.name, { sha: branch.head, done: false, since: this.clock.now() });
         }
-        if (pushes && wants("git.push", branch.name)) {
+        if (pushes && wants("git.pushed", branch.name)) {
           const commits = await this.commits(provider, target.repository, before, branch.head);
           if (!hold()) return;
-          emit({ name: "git.push", payload: { ...base, branch: branch.name, before: before ?? NEW_BRANCH_SHA, after: branch.head, commits } });
+          emit({ name: "git.pushed", payload: { ...base, branch: branch.name, before: before ?? NEW_BRANCH_SHA, after: branch.head, commits } });
         }
       }
       // A branch deleted on the forge: forgotten, and nothing fires — a deletion is not a push.
       for (const gone of seen.keys()) {
         store.forget(scope, "branch", gone);
-        store.forget(scope, "checks", gone);
+        store.forget(scope, "pipelines", gone);
       }
     }
     save();
 
-    // --- checks -----------------------------------------------------------------------------------
-    if (!checks) return;
-    if (cursor.checks === undefined) {
+    // --- pipelines --------------------------------------------------------------------------------
+    if (!pipelines) return;
+    if (cursor.pipelines === undefined) {
       // The heads there now had their chance before anybody was listening.
-      for (const branch of heads) store.see(scope, "checks", branch.name, { sha: branch.head, done: true, since: this.clock.now() });
-      cursor.checks = true;
+      for (const branch of heads) store.see(scope, "pipelines", branch.name, { sha: branch.head, done: true, since: this.clock.now() });
+      cursor.pipelines = true;
       save();
       return;
     }
-    for (const [branch, row] of store.seenAll(scope, "checks")) {
-      if (row.done || !wants("git.checks.failed", branch)) continue;
-      const status: CiStatus = await provider.checks(target.repository, row.sha);
+    for (const [branch, row] of store.seenAll(scope, "pipelines")) {
+      if (row.done || !PIPELINE_EVENTS.some((name) => wants(name, branch))) continue;
+      const { pipelines: ran } = await provider.pipelines(target.repository, { sha: row.sha, limit: 100 });
       if (!hold()) return;
-      if (status.state === "pending") continue;
-      if (status.state === "none") {
-        if (this.clock.now() - row.since >= CHECKS_GIVE_UP_MS) store.see(scope, "checks", branch, { ...row, done: true });
+      // GitLab: the newest pipeline of the commit is its verdict (a re-run supersedes the one before).
+      // GitHub: every suite is a workflow of its own, and each reports.
+      const current = provider.kind === "gitlab" ? ran.slice(0, 1) : ran;
+      if (current.length === 0) {
+        if (this.clock.now() - row.since >= PIPELINES_GIVE_UP_MS) store.see(scope, "pipelines", branch, { ...row, done: true });
         continue;
       }
-      store.see(scope, "checks", branch, { ...row, done: true });
-      if (status.state === "failure") {
-        const failed = status.runs
-          .filter((run) => run.status === "completed" && (run.conclusion === "failure" || run.conclusion === "cancelled"))
-          .map((run) => ({ name: run.name, conclusion: run.conclusion!, ...(run.url !== undefined ? { url: run.url } : {}) }));
-        emit({ name: "git.checks.failed", payload: { ...base, ref: branch, sha: row.sha, checks: failed } });
+      if (current.some((pipeline) => pipeline.status === "pending" || pipeline.status === "running")) continue;
+      store.see(scope, "pipelines", branch, { ...row, done: true });
+      for (const pipeline of current) {
+        const name = PIPELINE_EVENT_OF[pipeline.status];
+        if (name === undefined || !wants(name, branch)) continue;
+        const payload = {
+          ...base,
+          ref: branch,
+          sha: row.sha,
+          pipeline_id: pipeline.id,
+          ...(pipeline.name !== undefined ? { name: pipeline.name } : {}),
+          source: pipeline.source,
+          url: pipeline.url,
+        };
+        if (name !== "pipeline.failed") {
+          emit({ name, payload });
+          continue;
+        }
+        const failed = (await provider.pipeline(target.repository, pipeline.id, { jobStatus: ["failed"] })).jobs;
+        if (!hold()) return;
+        emit({
+          name,
+          payload: {
+            ...payload,
+            failed_jobs: failed.map((job) => ({
+              job_id: job.id,
+              name: job.name,
+              ...(job.stage !== undefined ? { stage: job.stage } : {}),
+              ...(job.failureReason !== undefined ? { failure_reason: job.failureReason } : {}),
+              url: job.url,
+            })),
+          },
+        });
       }
     }
   }
@@ -478,13 +521,13 @@ export class RepositoryWatcher {
       // Unseen and already merged or closed: opened and closed between two looks — nothing.
       if (summary.state !== "open") return;
       store.see(scope, "merge_request", key, this.seenOf(summary, summary.updatedAt));
-      if (wants("git.merge_request.opened", branch)) emit({ name: "git.merge_request.opened", payload });
+      if (wants("merge_request.opened", branch)) emit({ name: "merge_request.opened", payload });
       return;
     }
 
     // Comments first: they happened before the request was merged, if it was.
     let commentsAt = prev.commentsAt;
-    if (summary.updatedAt !== prev.updatedAt && wants("git.merge_request.comments", branch)) {
+    if (summary.updatedAt !== prev.updatedAt && wants("merge_request.commented", branch)) {
       const handle = handleOfSummary(provider.kind, target.host, target.repository, summary);
       const notes = await provider.comments(handle, { since: prev.commentsAt });
       // The marker, read here rather than trusted off `own`: this is the rule, and a note is its body.
@@ -499,7 +542,7 @@ export class RepositoryWatcher {
           ...(note.threadId !== undefined ? { thread_id: note.threadId } : {}),
           ...(note.anchor !== undefined ? { anchor: note.anchor } : {}),
         }));
-        emit({ name: "git.merge_request.comments", payload: { ...payload, comments } });
+        emit({ name: "merge_request.commented", payload: { ...payload, comments } });
       }
     }
     commentsAt = later(commentsAt, summary.updatedAt);
@@ -508,17 +551,25 @@ export class RepositoryWatcher {
       // Reported once, then forgotten: a reopened request is an unseen open one — `opened` again.
       store.forget(scope, "merge_request", key);
       if (prev.state !== "open") return;
-      const name = summary.state === "merged" ? "git.merge_request.merged" : "git.merge_request.closed";
-      if (wants(name, branch)) emit({ name, payload });
+      if (summary.state === "merged") {
+        // One merge, two names (decision 0016 §4): git_merge's, and the merge request's.
+        if (wants("git.merged", branch)) emit({ name: "git.merged", payload });
+        if (wants("merge_request.merged", branch)) emit({ name: "merge_request.merged", payload });
+      } else if (wants("merge_request.closed", branch)) emit({ name: "merge_request.closed", payload });
       return;
     }
     store.see(scope, "merge_request", key, this.seenOf(summary, commentsAt));
     if (prev.state !== "open") {
-      if (wants("git.merge_request.opened", branch)) emit({ name: "git.merge_request.opened", payload });
+      if (wants("merge_request.opened", branch)) emit({ name: "merge_request.opened", payload });
       return;
     }
     const moved = prev.head !== summary.head || prev.title !== summary.title || prev.description !== digest(summary.description);
-    if (moved && wants("git.merge_request.updated", branch)) emit({ name: "git.merge_request.updated", payload });
+    if (moved && wants("merge_request.updated", branch)) emit({ name: "merge_request.updated", payload });
+    // New commits are also the push, told as the request's — the same occurrence under a second name.
+    if (prev.head !== summary.head && wants("merge_request.pushed", branch)) {
+      const commits = await this.commits(provider, target.repository, prev.head, summary.head);
+      emit({ name: "merge_request.pushed", payload: { ...payload, before: prev.head, after: summary.head, commits } });
+    }
   }
 
   /** The commits a push brought, when the provider can say cheaply; none when it cannot. */

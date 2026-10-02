@@ -26,10 +26,10 @@ describe("repository watcher memory", () => {
 
   it("keeps one cursor per remote and repository, replaced whole", () => {
     store.setCursor(origin, { mergeRequests: { since: "2026-09-25T10:00:00Z" }, branches: true });
-    store.setCursor({ ...origin, repository: "github.com/acme/other" }, { checks: true });
+    store.setCursor({ ...origin, repository: "github.com/acme/other" }, { pipelines: true });
     store.setCursor(origin, { mergeRequests: { since: "2026-09-25T11:00:00Z" }, branches: true, etags: { "/pulls": 'W/"1"' } });
     expect(store.cursor(origin)).toEqual({ mergeRequests: { since: "2026-09-25T11:00:00Z" }, branches: true, etags: { "/pulls": 'W/"1"' } });
-    expect(store.cursor({ ...origin, repository: "github.com/acme/other" })).toEqual({ checks: true });
+    expect(store.cursor({ ...origin, repository: "github.com/acme/other" })).toEqual({ pipelines: true });
     // Same repository under another remote name is another remote.
     expect(store.cursor({ ...origin, remote: "upstream" })).toBeUndefined();
   });
@@ -46,7 +46,7 @@ describe("repository watcher memory", () => {
   it("keeps the last seen state per kind and key, and forgets one", () => {
     store.see(origin, "branch", "main", { head: "a1" });
     store.see(origin, "branch", "release/2.0", { head: "b1" });
-    store.see(origin, "checks", "main", { sha: "a1", done: false, since: 5 });
+    store.see(origin, "pipelines", "main", { sha: "a1", done: false, since: 5 });
     store.see(origin, "merge_request", "12", { state: "open", head: "c1", title: "Fix", description: "d", updatedAt: "t", commentsAt: "t" });
     store.see(origin, "branch", "main", { head: "a2" });
     expect(store.seen(origin, "branch", "main")).toEqual({ head: "a2" });
@@ -54,12 +54,12 @@ describe("repository watcher memory", () => {
       ["main", { head: "a2" }],
       ["release/2.0", { head: "b1" }],
     ]);
-    expect(store.seen(origin, "checks", "main")).toEqual({ sha: "a1", done: false, since: 5 });
+    expect(store.seen(origin, "pipelines", "main")).toEqual({ sha: "a1", done: false, since: 5 });
     expect(store.seen(origin, "merge_request", "12")?.state).toBe("open");
     store.forget(origin, "branch", "release/2.0");
     expect(store.seen(origin, "branch", "release/2.0")).toBeUndefined();
     // Kinds do not collide on a key.
-    expect(store.seen(origin, "checks", "main")).toBeDefined();
+    expect(store.seen(origin, "pipelines", "main")).toBeDefined();
   });
 
   it("reads the same from a process that was not there", () => {
@@ -78,15 +78,15 @@ describe("repository watcher memory", () => {
 describe("event waits", () => {
   it("keeps the FIRST wait's start per task and name, and ends a task's all at once", () => {
     const waits = new EventWaitStore(db);
-    expect(waits.since("t-1", "git.push")).toBeUndefined();
-    waits.open("t-1", "git.push", 100);
-    waits.open("t-1", "git.push", 200);
+    expect(waits.since("t-1", "git.pushed")).toBeUndefined();
+    waits.open("t-1", "git.pushed", 100);
+    waits.open("t-1", "git.pushed", 200);
     waits.open("t-1", "task.finished", 300);
-    waits.open("t-2", "git.push", 400);
-    expect(waits.since("t-1", "git.push")).toBe(100);
+    waits.open("t-2", "git.pushed", 400);
+    expect(waits.since("t-1", "git.pushed")).toBe(100);
     expect(waits.since("t-1", "task.finished")).toBe(300);
     waits.closeTask("t-1");
-    expect(waits.since("t-1", "git.push")).toBeUndefined();
-    expect(waits.since("t-2", "git.push")).toBe(400);
+    expect(waits.since("t-1", "git.pushed")).toBeUndefined();
+    expect(waits.since("t-2", "git.pushed")).toBe(400);
   });
 });

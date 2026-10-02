@@ -108,7 +108,7 @@ export function lanesOf(cards: readonly BoardCard[]): { lane: Lane; cards: Board
 }
 
 /**
- * A card's origin line — `started by events · push_main · git.push a1b2c3d on main` — the words, and
+ * A card's origin line — `started by events · push_main · git.pushed a1b2c3d on main` — the words, and
  * where a click goes: the events task, AT the automation that started it. Two sources, one line (the
  * rulings of 2026-09-25): a task started as the automation's CHILD carries it in its provenance
  * (`origin.kind: "started"`), one started on its own in `startedBy`. None: no line.

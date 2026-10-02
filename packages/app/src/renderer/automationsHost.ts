@@ -74,9 +74,9 @@ export function badgeFor(line: AutomationLine, status: EventsStatusView | null):
   return remote === undefined ? undefined : connectionBadgeOf(remote);
 }
 
-/** A fresh line: `git.push`, one step to fill in. */
+/** A fresh line: `git.pushed`, one step to fill in. */
 export function newLineOf(name: string): AutomationLine {
-  return { name, event: "git.push", filter: {}, steps: [{ kind: "start", workflow: "", inputs: {} }] };
+  return { name, event: "git.pushed", filter: {}, steps: [{ kind: "start", workflow: "", inputs: {} }] };
 }
 
 /** What the host asks main for: a state file of a layer — the events root, or an automation's state. */

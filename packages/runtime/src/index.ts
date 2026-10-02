@@ -53,6 +53,9 @@ export * from "./searchTools";
 export * from "./webTools";
 export * from "./workflowTools";
 export * from "./gitTools";
+export * from "./ciTools";
+export * from "./ciArtifacts";
+export * from "./ciLog";
 export * from "./artifactSink";
 export * from "./secrets";
 // Connections to forges, and the providers behind them (decision 0004 §1).

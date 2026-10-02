@@ -23,7 +23,7 @@ import {
 } from "../src/index";
 
 const push: EventDelivery = {
-  name: "git.push",
+  name: "git.pushed",
   payload: { remote: "origin", connection: "github", host: "github.com", repository: "acme/app", branch: "main", before: "0a", after: "a1b2c3d4e5", commits: [] },
   at: "2026-09-25T10:00:00.000Z",
 };
@@ -109,7 +109,7 @@ describe("notify", () => {
   it("posts the text — its event read by the host off the calling state when the call names none — and answers what it told", async () => {
     const { notices, call } = rig();
     expect((await call(NOTIFY, { text: " deployed " }, SITE)).value).toEqual({ text: "deployed" });
-    expect((await call(NOTIFY, { text: "again", event: push as never })).value).toEqual({ text: "again", event: "git.push a1b2c3d on main" });
+    expect((await call(NOTIFY, { text: "again", event: push as never })).value).toEqual({ text: "again", event: "git.pushed a1b2c3d on main" });
     expect(notices).toEqual([
       { notice: { text: "deployed" }, caller: { instanceId: "i-1", call: 1 } },
       { notice: { text: "again", event: push }, caller: { call: 0 } },
@@ -119,19 +119,19 @@ describe("notify", () => {
 
   it("answers with the event the HOST read off the calling state", async () => {
     const { call } = rig({ notify: (notice) => ({ ...notice, event: push }) });
-    expect((await call(NOTIFY, { text: "deployed" }, SITE)).value).toEqual({ text: "deployed", event: "git.push a1b2c3d on main" });
+    expect((await call(NOTIFY, { text: "deployed" }, SITE)).value).toEqual({ text: "deployed", event: "git.pushed a1b2c3d on main" });
   });
 });
 
 describe("eventSummary", () => {
   it("says what happened in a line, the event's name first", () => {
-    expect(eventSummary(push)).toBe("git.push a1b2c3d on main");
+    expect(eventSummary(push)).toBe("git.pushed a1b2c3d on main");
     const mr = { remote: "origin", connection: "gitlab", host: "gitlab.com", repository: "g/p" };
     const request = { number: 42, title: "Add sign-in", state: "open", author: "ofer", source_branch: "f", target_branch: "main", head_sha: "abc", url: "u" };
-    expect(eventSummary({ name: "git.merge_request.opened", payload: { ...mr, merge_request: request } })).toBe("git.merge_request.opened !42 by ofer");
-    expect(eventSummary({ name: "git.merge_request.merged", payload: { ...mr, host: "github.com", merge_request: request } })).toBe("git.merge_request.merged #42 by ofer");
-    expect(eventSummary({ name: "git.merge_request.comments", payload: { ...mr, merge_request: request, comments: [{}, {}] } })).toBe("git.merge_request.comments !42 · 2 comments");
-    expect(eventSummary({ name: "git.checks.failed", payload: { ...mr, ref: "main", sha: "0123456789", checks: [] } })).toBe("git.checks.failed 0123456 on main");
+    expect(eventSummary({ name: "merge_request.opened", payload: { ...mr, merge_request: request } })).toBe("merge_request.opened !42 by ofer");
+    expect(eventSummary({ name: "merge_request.merged", payload: { ...mr, host: "github.com", merge_request: request } })).toBe("merge_request.merged #42 by ofer");
+    expect(eventSummary({ name: "merge_request.commented", payload: { ...mr, merge_request: request, comments: [{}, {}] } })).toBe("merge_request.commented !42 · 2 comments");
+    expect(eventSummary({ name: "pipeline.failed", payload: { ...mr, ref: "main", sha: "0123456789", checks: [] } })).toBe("pipeline.failed 0123456 on main");
     expect(eventSummary({ name: "task.finished", payload: { task_id: "t", title: "First", workflow: "w", status: "completed" } })).toBe('task.finished "First"');
     expect(eventSummary({ name: "something.else" })).toBe("something.else");
   });

@@ -381,6 +381,8 @@ export interface ForgeComment {
   who: string;
   body: string;
   at: string;
+  /** Its own page on the forge — a link a person can open to land on this comment. */
+  url?: string;
   /** Write access to the project — GitHub OWNER / MEMBER / COLLABORATOR, GitLab Developer and up. */
   canWrite: boolean;
   /**
@@ -389,6 +391,12 @@ export interface ForgeComment {
    * write with it on the forge (the rulings of 2026-09-25).
    */
   own: boolean;
+}
+
+/** A comment just posted: its id and link, as far as the forge answered with them. */
+export interface ForgePosted {
+  id?: string;
+  url?: string;
 }
 
 export interface ForgeThread {
@@ -468,38 +476,202 @@ export interface MergeRequestQuery {
   limit?: number;
 }
 
-/** How far a CI run has got. */
-export type CiRunStatus = "queued" | "running" | "completed";
+// --- pipelines, jobs, artifacts (decision 0016) ------------------------------------------------------
 
-/** How a finished run ended — each forge's words, folded into these. */
-export type CiConclusion = "success" | "failure" | "cancelled" | "skipped" | "neutral";
+/**
+ * Where a pipeline or a job has got, in one vocabulary for both forges. `manual` is GitLab's: a job,
+ * or a pipeline stopped at one, that runs only when somebody starts it. A GitHub job that timed out
+ * or failed to start is `failed`.
+ */
+export type PipelineStatus = "pending" | "running" | "success" | "failed" | "canceled" | "skipped" | "manual";
 
-/** One CI run of a commit: a GitHub check run or commit status, a GitLab job. */
-export interface CiRun {
-  name: string;
-  status: CiRunStatus;
-  /** Present once `completed`. */
-  conclusion?: CiConclusion;
-  url?: string;
-  /** GitLab's stage; absent on GitHub. */
-  stage?: string;
+export const PIPELINE_STATUSES: readonly PipelineStatus[] = ["pending", "running", "success", "failed", "canceled", "skipped", "manual"];
+
+/**
+ * Why a pipeline ran. GitLab's `source`, GitHub's run `event` — `merge_request` is GitLab's
+ * `merge_request_event` and GitHub's `pull_request` — and `external` for a GitHub suite that no
+ * workflow run owns (another app's checks) or a GitLab pipeline of external statuses.
+ */
+export type PipelineSource = "push" | "merge_request" | "schedule" | "trigger" | "api" | "web" | "external" | "other";
+
+export const PIPELINE_SOURCES: readonly PipelineSource[] = ["push", "merge_request", "schedule", "trigger", "api", "web", "external", "other"];
+
+/**
+ * One pipeline: a GitLab pipeline, or a GitHub check suite — for Actions, the suite of one workflow
+ * run. On GitHub `id` is the SUITE's id, the one id every GitHub CI result has; the workflow run's
+ * id is `runId`, which is the number in its web link.
+ */
+export interface ForgePipeline {
+  id: number;
+  sha: string;
+  /** The ref it ran for: a branch, a tag, or GitLab's `refs/merge-requests/<iid>/{head,merge,train}`. */
+  ref: string;
+  source: PipelineSource;
+  /** The forge's own word for `source` — GitLab's `merge_request_event`, a GitHub app's slug. */
+  sourceName: string;
+  status: PipelineStatus;
+  /** GitHub: the workflow's name, or the app's. GitLab: the pipeline's name, when it has one. */
+  name?: string;
+  /** GitHub Actions: the workflow run's id and attempt. */
+  runId?: number;
+  attempt?: number;
+  createdAt: string;
+  finishedAt?: string;
+  url: string;
 }
 
 /**
- * The CI state of a branch or commit, as one answer: every run, and what they come to.
- *
- * `state` is `none` when nothing ran for the ref at all, `pending` while anything has not finished,
- * `failure` when anything finished badly (failed, cancelled, timed out), and `success` otherwise.
+ * A GitHub commit status: another CI's word on a commit, with nothing more to read than this. GitLab
+ * folds these into a pipeline of source `external`; GitHub keeps them loose, so they are listed
+ * beside the pipelines.
  */
-export interface CiStatus {
-  /** What was asked about: a branch name or a commit. */
-  ref: string;
-  /** The commit the runs belong to, when the forge said. */
+export interface ForgeCommitStatus {
+  sha: string;
+  context: string;
+  status: PipelineStatus;
+  description?: string;
+  url?: string;
+  createdAt: string;
+}
+
+/** What `pipelines` narrows by — exactly one of `mergeRequest`, `ref`, `sha`. */
+export interface PipelineQuery {
+  mergeRequest?: number;
+  ref?: string;
   sha?: string;
-  state: "none" | "pending" | "success" | "failure";
-  runs: CiRun[];
-  /** GitLab: the pipeline read. */
-  pipeline?: { id: number; url: string };
+  status?: PipelineStatus;
+  source?: PipelineSource;
+  /** At most this many, newest first. 20 when absent; at most 100. */
+  limit?: number;
+}
+
+export interface PipelineList {
+  pipelines: ForgePipeline[];
+  /** GitHub only: the commit statuses of the commits asked about. */
+  statuses: ForgeCommitStatus[];
+}
+
+/** One job of a pipeline: a GitLab job or trigger job, a GitHub check run (for Actions, the job). */
+export interface ForgeJob {
+  /** GitHub: the check run's id, which for Actions IS the job's id (measured). */
+  id: number;
+  name: string;
+  /** GitLab's stage; absent on GitHub. */
+  stage?: string;
+  status: PipelineStatus;
+  /** GitLab's `failure_reason` — `script_failure`, `runner_system_failure`, … */
+  failureReason?: string;
+  /** GitLab: a failure that does not fail the pipeline. */
+  allowFailure?: boolean;
+  startedAt?: string;
+  finishedAt?: string;
+  url: string;
+  /** A GitLab trigger job: the pipeline it started. */
+  downstreamPipelineId?: number;
+  /** Present when retried jobs were asked for: this attempt was superseded. */
+  retried?: boolean;
+}
+
+/**
+ * Something a job or a pipeline left, to be downloaded. The log is one: GitLab lists it as the job's
+ * artifact of `fileType` `trace`, and GitHub's job log is called that here too.
+ *
+ * Which fields are set says how to fetch it: `jobId` + `fileType` (GitLab: every kind; GitHub: the
+ * log), or `artifactId` (GitHub's uploaded artifacts, which belong to the run, not a job).
+ */
+export interface ForgeArtifact {
+  jobId?: number;
+  artifactId?: number;
+  /** GitLab's `file_type` — `trace`, `archive`, `junit`, `codequality`, … — or `archive` for a GitHub upload. */
+  fileType: string;
+  /** The file's name, or a GitHub artifact's. */
+  name: string;
+  size?: number;
+  expiresAt?: string;
+  /** Its page on the forge, when it has one. */
+  url?: string;
+}
+
+/** The counts of a GitLab pipeline's test report, per suite — each suite with the jobs that ran it. */
+export interface PipelineTests {
+  total: number;
+  failed: number;
+  skipped: number;
+  errored: number;
+  suites: Array<{ name: string; total: number; failed: number; skipped: number; errored: number; jobIds: number[] }>;
+}
+
+export interface PipelineDetail extends ForgePipeline {
+  jobs: ForgeJob[];
+  /** Artifacts that belong to the pipeline itself — GitHub's uploads. GitLab's belong to jobs. */
+  artifacts: ForgeArtifact[];
+  tests?: PipelineTests;
+}
+
+/** The machine a job ran on, as the forge tells it. */
+export interface ForgeRunner {
+  /** GitHub's runner name; GitLab's runner description. */
+  name?: string;
+  /** GitLab `runner_manager.platform`. */
+  platform?: string;
+  /** GitLab `runner_manager.architecture`. */
+  architecture?: string;
+  /** GitLab `runner_manager.version`. */
+  version?: string;
+  /** GitLab's `tag_list`; GitHub's `labels` — what the job ASKED for, `ubuntu-latest`. */
+  tags: string[];
+}
+
+export interface ForgeJobStep {
+  number: number;
+  name: string;
+  status: PipelineStatus;
+  startedAt?: string;
+  finishedAt?: string;
+}
+
+/** A GitHub check run annotation. */
+export interface ForgeAnnotation {
+  path: string;
+  startLine?: number;
+  endLine?: number;
+  level: "notice" | "warning" | "failure";
+  title?: string;
+  message: string;
+}
+
+export interface JobDetail extends ForgeJob {
+  pipelineId?: number;
+  sha?: string;
+  runner?: ForgeRunner;
+  /** GitHub: the job's steps. GitLab has none in its API; its log's sections are the nearest thing. */
+  steps: ForgeJobStep[];
+  /** GitHub Actions: from the failure annotation "Process completed with exit code N." */
+  exitCode?: number;
+  annotations: ForgeAnnotation[];
+  artifacts: ForgeArtifact[];
+}
+
+/**
+ * With retried jobs asked for, every attempt is in the list and none says which it is: an attempt is
+ * retried when a later job of the same name (and stage) exists.
+ */
+export function markRetried(jobs: ForgeJob[]): ForgeJob[] {
+  const latest = new Map<string, number>();
+  for (const job of jobs) {
+    const key = `${job.stage ?? ""}\u0000${job.name}`;
+    latest.set(key, Math.max(latest.get(key) ?? 0, job.id));
+  }
+  return jobs.map((job) => (latest.get(`${job.stage ?? ""}\u0000${job.name}`) !== job.id ? { ...job, retried: true } : job));
+}
+
+/** Which artifact to fetch — the fields a {@link ForgeArtifact} carries. */
+export type ArtifactRef = { jobId: number; fileType: string; path?: string } | { artifactId: number };
+
+/** A downloaded artifact, as bytes: a log is text, an archive a zip. */
+export interface ArtifactBytes {
+  bytes: Uint8Array;
+  contentType?: string;
 }
 
 /** One branch on the forge. */
@@ -562,8 +734,9 @@ export interface ForgeProvider {
   probe(handles: RemoteHandle[], cursor: ProbeCursor): Promise<Probe>;
   /** Full: threads, reviews, approvals, state, head. */
   read(handle: RemoteHandle): Promise<RemoteState>;
-  comment(handle: RemoteHandle, body: string, anchor?: ForgeAnchor): Promise<void>;
-  reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<void>;
+  /** Post a comment; answers where it landed, when the forge said. */
+  comment(handle: RemoteHandle, body: string, anchor?: ForgeAnchor): Promise<ForgePosted | void>;
+  reply(handle: RemoteHandle, threadId: string, body: string, resolve?: boolean): Promise<ForgePosted | void>;
   merge(handle: RemoteHandle): Promise<void>;
   close(handle: RemoteHandle): Promise<void>;
 
@@ -575,8 +748,6 @@ export interface ForgeProvider {
   listMergeRequests(project: string, query?: MergeRequestQuery): Promise<MergeRequestSummary[]>;
   /** One merge request by its number — what a handle is made from when only the number is known. */
   mergeRequest(project: string, number: number): Promise<MergeRequestSummary>;
-  /** The CI state of a branch or a commit. */
-  checks(project: string, ref: string): Promise<CiStatus>;
   /** Every branch and its head. */
   branches(project: string): Promise<ForgeBranch[]>;
   /** The comments on one merge request, flat and in order — only those written after `since`, when given. */
@@ -587,6 +758,17 @@ export interface ForgeProvider {
    * provider without it carries no commits.
    */
   compare?(project: string, base: string | undefined, head: string): Promise<ForgeCommit[]>;
+
+  // CI (decision 0016): pipelines, their jobs, and what the jobs left.
+
+  /** The pipelines of a merge request, a ref or a commit, newest first. */
+  pipelines(project: string, query: PipelineQuery): Promise<PipelineList>;
+  /** One pipeline and its jobs. */
+  pipeline(project: string, id: number, options?: { jobStatus?: readonly PipelineStatus[]; includeRetried?: boolean }): Promise<PipelineDetail>;
+  /** One job: its machine, steps, failure and artifacts. */
+  job(project: string, id: number): Promise<JobDetail>;
+  /** Download one artifact. */
+  artifact(project: string, which: ArtifactRef): Promise<ArtifactBytes>;
 }
 
 /** One commit, as a push event carries it. */
@@ -611,13 +793,6 @@ export function handleOfSummary(provider: ForgeProviderKind, host: string, proje
     url: summary.url,
     head: summary.head,
   };
-}
-
-/** What a finished run's conclusions come to — {@link CiStatus.state}. */
-export function ciStateOf(runs: readonly CiRun[]): CiStatus["state"] {
-  if (runs.length === 0) return "none";
-  if (runs.some((run) => run.status !== "completed")) return "pending";
-  return runs.some((run) => run.conclusion === "failure" || run.conclusion === "cancelled") ? "failure" : "success";
 }
 
 /** What a connection's check found — a {@link ProbeResult}'s sibling, with who the token is. */
@@ -817,7 +992,7 @@ export function handleOfRow(row: RemoteHandleRow): RemoteHandle | undefined {
  *
  * The marker, not the account, is what "JaiRA's own" means. The connection's token belongs to the
  * person, so the account is theirs too: a comment they write on the forge themselves is theirs, fires
- * `git.merge_request.comments`, and counts on a review gate; one JaiRA posted with the same token is
+ * `merge_request.commented`, and counts on a review gate; one JaiRA posted with the same token is
  * never an event and never settles anything, because it carries the marker.
  */
 export interface CommentSignature {

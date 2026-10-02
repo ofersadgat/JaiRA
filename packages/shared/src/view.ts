@@ -473,7 +473,7 @@ export interface TaskDetail {
   /**
    * The events this task's rules are LISTENING for right now (`on_event` guards armed on its
    * project's hub), by name, in the order they were armed — what the activity strip says of a task
-   * parked only on the world: "Listening for git.push, task.failed", never "waiting for you". Live
+   * parked only on the world: "Listening for git.pushed, task.failed", never "waiting for you". Live
    * only, like {@link fastForward}; absent when nothing listens.
    */
   listening?: string[];

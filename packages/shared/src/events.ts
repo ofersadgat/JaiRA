@@ -2,7 +2,11 @@
  * The event vocabulary (decision 0010 §2) — what `on_event(name, filter?)` names, what each event
  * carries, and what a filter on it can say.
  *
- * An event is something that happened on a remote (`git.*`) or in JaiRA (`task.*`). Here rather than
+ * An event is something that happened on a project's remote — its git (`git.*`), its merge requests
+ * (`merge_request.*`), its CI (`pipeline.*`) — or in JaiRA (`task.*`). An event is named as the past
+ * tense of what happened, which is the tool that does it where there is one (decision 0016 §4:
+ * `git.pushed` for `git_push`, `merge_request.commented` for `comment_merge_request`), and one
+ * occurrence may carry two names (a merge is `git.merged` and `merge_request.merged`). Here rather than
  * beside the watcher that raises them, for the reason `./userEvents` is: the RUNTIME raises and
  * delivers them, the LINT checks a guard's name and filter against them, the SETTINGS page lists them
  * with their labels, and the workflow editor offers `← event.x` picks from each payload's schema.
@@ -30,23 +34,27 @@ import type { TaskStatus } from "./task";
 
 // --- the names ------------------------------------------------------------------------------------
 
-/** Every event, in the order Settings lists them: the remote's first, then JaiRA's own. */
+/** Every event, in the order Settings lists them: the remote's first — git, merge requests, CI — then JaiRA's own. */
 export const EVENT_NAMES = [
-  "git.push",
-  "git.merge_request.opened",
-  "git.merge_request.updated",
-  "git.merge_request.comments",
-  "git.merge_request.merged",
-  "git.merge_request.closed",
-  "git.checks.failed",
+  "git.pushed",
+  "git.merged",
+  "merge_request.opened",
+  "merge_request.updated",
+  "merge_request.pushed",
+  "merge_request.commented",
+  "merge_request.merged",
+  "merge_request.closed",
+  "pipeline.succeeded",
+  "pipeline.failed",
+  "pipeline.canceled",
   "task.finished",
   "task.failed",
 ] as const;
 
 export type EventName = (typeof EVENT_NAMES)[number];
 
-/** Where an event happens: on a project's git remote, or in JaiRA. */
-export type EventGroup = "git" | "task";
+/** Where an event happens: on one of a project's git remotes (its forge), or in JaiRA. */
+export type EventGroup = "remote" | "task";
 
 /** Whether a string is one of {@link EVENT_NAMES}. */
 export function isEventName(name: unknown): name is EventName {
@@ -55,12 +63,12 @@ export function isEventName(name: unknown): name is EventName {
 
 /** The group an event belongs to — its name's first segment, which is the same thing said once. */
 export function eventGroupOf(name: EventName): EventGroup {
-  return name.startsWith("git.") ? "git" : "task";
+  return name.startsWith("task.") ? "task" : "remote";
 }
 
 // --- the payloads ---------------------------------------------------------------------------------
 
-/** What every `git.*` event carries: which remote it happened on, and the connection that saw it. */
+/** What every remote event carries: which remote it happened on, and the connection that saw it. */
 export interface GitEventBase {
   /** The git remote's name in the project's `.git/config` — `origin`, `upstream`. */
   remote: string;
@@ -140,27 +148,50 @@ export interface EventComment {
 }
 
 /** ONE event however many comments arrived (decision 0010 §2) — each is an element of `comments`. */
-export interface GitMergeRequestCommentsPayload extends GitMergeRequestPayload {
+export interface MergeRequestCommentedPayload extends GitMergeRequestPayload {
   /** Oldest first. */
   comments: EventComment[];
 }
 
-/** One check run or pipeline job that did not pass. */
-export interface EventCheck {
-  name: string;
-  /** The forge's word for how it ended — `failure`, `failed`, `timed_out`, `canceled`. */
-  conclusion: string;
-  /** Its page on the forge, when it has one. */
-  url?: string;
+/** New commits on an open merge request's branch — the push, told as the request's. */
+export interface MergeRequestPushedPayload extends GitMergeRequestPayload {
+  /** The request's head before. */
+  before: string;
+  /** Its head now — `merge_request.head_sha`. */
+  after: string;
+  /** The commits in `before..after`, oldest first, when the forge could say. */
+  commits: EventCommit[];
 }
 
-export interface GitChecksFailedPayload extends GitEventBase {
-  /** The branch the checks ran for, by its short name. */
+/** A pipeline that finished on a branch's head — under the names the CI tools take (decision 0016). */
+export interface PipelinePayload extends GitEventBase {
+  /** The branch it ran for, by its short name. */
   ref: string;
-  /** The commit they ran on. */
+  /** The commit it ran on. */
   sha: string;
-  /** The checks that failed — only those. */
-  checks: EventCheck[];
+  /** What `read_pipeline` takes. */
+  pipeline_id: number;
+  /** GitHub: the workflow's name, or the app's; GitLab: the pipeline's, when it has one. */
+  name?: string;
+  /** Why it ran — push, merge_request, schedule, … */
+  source: string;
+  url: string;
+}
+
+/** A job of a failed pipeline that failed — what `read_pipeline_job` takes, and why. */
+export interface EventFailedJob {
+  job_id: number;
+  name: string;
+  /** GitLab's stage. */
+  stage?: string;
+  /** GitLab's `failure_reason` — `script_failure`, `stuck_pending_no_matching_runners`, … */
+  failure_reason?: string;
+  url: string;
+}
+
+export interface PipelineFailedPayload extends PipelinePayload {
+  /** The jobs that failed — only those. */
+  failed_jobs: EventFailedJob[];
 }
 
 /** What every `task.*` event carries. */
@@ -175,13 +206,17 @@ export interface TaskEventPayload {
 
 /** Each event's payload, by name. */
 export interface EventPayloads {
-  "git.push": GitPushPayload;
-  "git.merge_request.opened": GitMergeRequestPayload;
-  "git.merge_request.updated": GitMergeRequestPayload;
-  "git.merge_request.comments": GitMergeRequestCommentsPayload;
-  "git.merge_request.merged": GitMergeRequestPayload;
-  "git.merge_request.closed": GitMergeRequestPayload;
-  "git.checks.failed": GitChecksFailedPayload;
+  "git.pushed": GitPushPayload;
+  "git.merged": GitMergeRequestPayload;
+  "merge_request.opened": GitMergeRequestPayload;
+  "merge_request.updated": GitMergeRequestPayload;
+  "merge_request.pushed": MergeRequestPushedPayload;
+  "merge_request.commented": MergeRequestCommentedPayload;
+  "merge_request.merged": GitMergeRequestPayload;
+  "merge_request.closed": GitMergeRequestPayload;
+  "pipeline.succeeded": PipelinePayload;
+  "pipeline.failed": PipelineFailedPayload;
+  "pipeline.canceled": PipelinePayload;
   "task.finished": TaskEventPayload;
   "task.failed": TaskEventPayload;
 }
@@ -250,14 +285,32 @@ const COMMENT_SCHEMA: Schema = object(
   ["thread_id", "anchor"],
 );
 
-const CHECK_SCHEMA: Schema = object(
+const FAILED_JOB_SCHEMA: Schema = object(
   {
-    name: text("name", "The check run or pipeline job."),
-    conclusion: text("conclusion", "The forge's word for how it ended — failure, failed, timed_out, canceled."),
+    job_id: { type: "integer", title: "job id", description: "The job — what read_pipeline_job takes." },
+    name: text("name", "The job's name."),
+    stage: text("stage", "GitLab's stage."),
+    failure_reason: text("failure reason", "Why it failed — script_failure, stuck_pending_no_matching_runners, …"),
     url: text("url", "Its page on the forge."),
   },
-  ["url"],
+  ["stage", "failure_reason"],
 );
+
+const pipelineSchema = (own: Record<string, Schema> = {}): Schema => ({
+  ...object(
+    {
+      ...GIT_BASE_PROPERTIES,
+      ref: text("branch", "The branch it ran for, by its short name."),
+      sha: text("sha", "The commit it ran on."),
+      pipeline_id: { type: "integer", title: "pipeline id", description: "The pipeline — what read_pipeline takes." },
+      name: text("name", "The workflow's name, or the app's (GitHub); the pipeline's own name (GitLab)."),
+      source: text("source", "Why it ran — push, merge_request, schedule, trigger, api, web, external, other."),
+      url: text("url", "Its page on the forge."),
+      ...own,
+    },
+    ["name"],
+  ),
+});
 
 const gitSchema = (own: Record<string, Schema>): Schema => object({ ...GIT_BASE_PROPERTIES, ...own });
 
@@ -276,9 +329,9 @@ const taskSchema = (status: TaskStatus): Schema =>
 /**
  * The keys `on_event`'s filter takes, and what each is matched against:
  *
- *  - `branch` — a push's branch, a merge request's TARGET branch, the branch checks ran for.
- *  - `remote` — the git remote's name, on every `git.*` event.
- *  - `author` — a merge request's author on every merge request event (`comments` included: "on the
+ *  - `branch` — a push's branch, a merge request's TARGET branch, the branch a pipeline ran for.
+ *  - `remote` — the git remote's name, on every remote event.
+ *  - `author` — a merge request's author on every merge request event (`commented` included: "on the
  *    requests X opened"), and the head commit's author on a push.
  *  - `source_branch`, `target_branch` — a merge request's own two branches.
  *
@@ -311,11 +364,11 @@ const MERGE_REQUEST_FILTERS: readonly EventFilterKey[] = ["branch", "remote", "a
 
 /** Every event's label, hint, group, filters and payload schema, by name. */
 export const EVENT_SPECS: { readonly [N in EventName]: EventSpec & { name: N } } = {
-  "git.push": {
-    name: "git.push",
-    group: "git",
-    label: "Push",
-    hint: "A branch's head moved on the remote — one event for everything pushed since it was last seen.",
+  "git.pushed": {
+    name: "git.pushed",
+    group: "remote",
+    label: "Pushed",
+    hint: "A branch's head moved on the remote — what git_push does. One event for everything pushed since it was last seen.",
     filters: ["branch", "remote", "author"],
     branches: "branch",
     schema: gitSchema({
@@ -325,65 +378,103 @@ export const EVENT_SPECS: { readonly [N in EventName]: EventSpec & { name: N } }
       commits: { type: "array", title: "commits", description: "The commits pushed, oldest first — the last is after.", items: COMMIT_SCHEMA },
     }),
   },
-  "git.merge_request.opened": {
-    name: "git.merge_request.opened",
-    group: "git",
+  "git.merged": {
+    name: "git.merged",
+    group: "remote",
+    label: "Merged",
+    hint: "A merge request was merged into its target branch — what git_merge does. The same merge as merge_request.merged.",
+    filters: MERGE_REQUEST_FILTERS,
+    branches: "target_branch",
+    schema: mergeRequestSchema(),
+  },
+  "merge_request.opened": {
+    name: "merge_request.opened",
+    group: "remote",
     label: "Merge request opened",
-    hint: "Somebody opened a merge request on the remote.",
+    hint: "A merge request was opened — what open_merge_request does.",
     filters: MERGE_REQUEST_FILTERS,
     branches: "target_branch",
     schema: mergeRequestSchema(),
   },
-  "git.merge_request.updated": {
-    name: "git.merge_request.updated",
-    group: "git",
+  "merge_request.updated": {
+    name: "merge_request.updated",
+    group: "remote",
     label: "Merge request updated",
-    hint: "An open merge request's branch moved, or its title or description changed.",
+    hint: "An open merge request changed — new commits on its branch, or its title or description.",
     filters: MERGE_REQUEST_FILTERS,
     branches: "target_branch",
     schema: mergeRequestSchema(),
   },
-  "git.merge_request.comments": {
-    name: "git.merge_request.comments",
-    group: "git",
-    label: "Merge request comments",
-    hint: "New comments on a merge request — one event carrying every comment that arrived since the last.",
+  "merge_request.pushed": {
+    name: "merge_request.pushed",
+    group: "remote",
+    label: "Merge request pushed",
+    hint: "New commits on an open merge request's branch — the push git.pushed tells, told as the merge request's.",
+    filters: MERGE_REQUEST_FILTERS,
+    branches: "target_branch",
+    schema: mergeRequestSchema({
+      before: text("before", "The request's head before."),
+      after: text("after", "Its head now."),
+      commits: { type: "array", title: "commits", description: "The commits pushed, oldest first, when the forge could say.", items: COMMIT_SCHEMA },
+    }),
+  },
+  "merge_request.commented": {
+    name: "merge_request.commented",
+    group: "remote",
+    label: "Merge request commented",
+    hint: "New comments on a merge request — what comment_merge_request does. One event carrying every comment since the last.",
     filters: MERGE_REQUEST_FILTERS,
     branches: "target_branch",
     schema: mergeRequestSchema({
       comments: { type: "array", title: "comments", description: "The comments that arrived, oldest first.", items: COMMENT_SCHEMA },
     }),
   },
-  "git.merge_request.merged": {
-    name: "git.merge_request.merged",
-    group: "git",
+  "merge_request.merged": {
+    name: "merge_request.merged",
+    group: "remote",
     label: "Merge request merged",
-    hint: "A merge request was merged into its target branch.",
+    hint: "A merge request was merged into its target branch. The same merge as git.merged, under the merge request's name.",
     filters: MERGE_REQUEST_FILTERS,
     branches: "target_branch",
     schema: mergeRequestSchema(),
   },
-  "git.merge_request.closed": {
-    name: "git.merge_request.closed",
-    group: "git",
+  "merge_request.closed": {
+    name: "merge_request.closed",
+    group: "remote",
     label: "Merge request closed",
-    hint: "A merge request was closed without being merged.",
+    hint: "A merge request was closed without being merged — what close_merge_request does.",
     filters: MERGE_REQUEST_FILTERS,
     branches: "target_branch",
     schema: mergeRequestSchema(),
   },
-  "git.checks.failed": {
-    name: "git.checks.failed",
-    group: "git",
-    label: "Checks failed",
-    hint: "The CI pipeline or check runs on a branch's head finished, and at least one failed.",
+  "pipeline.succeeded": {
+    name: "pipeline.succeeded",
+    group: "remote",
+    label: "Pipeline succeeded",
+    hint: "A pipeline on a branch's head finished, and nothing in it failed.",
     filters: ["branch", "remote"],
     branches: "ref",
-    schema: gitSchema({
-      ref: text("branch", "The branch the checks ran for, by its short name."),
-      sha: text("sha", "The commit they ran on."),
-      checks: { type: "array", title: "checks", description: "The checks that failed — only those.", items: CHECK_SCHEMA },
+    schema: pipelineSchema(),
+  },
+  "pipeline.failed": {
+    name: "pipeline.failed",
+    group: "remote",
+    label: "Pipeline failed",
+    hint: "A pipeline on a branch's head finished, and a job in it failed or timed out.",
+    filters: ["branch", "remote"],
+    branches: "ref",
+    schema: pipelineSchema({
+      failed_jobs: { type: "array", title: "failed jobs", description: "The jobs that failed — only those.", items: FAILED_JOB_SCHEMA },
     }),
+  },
+  "pipeline.canceled": {
+    name: "pipeline.canceled",
+    group: "remote",
+    label: "Pipeline canceled",
+    hint: "A pipeline on a branch's head was canceled before it finished.",
+    filters: ["branch", "remote"],
+    branches: "ref",
+    schema: pipelineSchema(),
   },
   "task.finished": {
     name: "task.finished",
@@ -467,7 +558,7 @@ function requestNumber(payload: { host?: unknown }, number: number): string {
 
 /**
  * What happened, in one short line — what a task the events task started says it came from
- * ("started by events · git.push a1b2c3d on main"). The event's name leads, so the line reads the
+ * ("started by events · git.pushed a1b2c3d on main"). The event's name leads, so the line reads the
  * same whichever event it was; the rest is the one or two facts a person would look for first.
  */
 export function eventSummary(event: { name: string; payload?: unknown }): string {
@@ -478,18 +569,23 @@ export function eventSummary(event: { name: string; payload?: unknown }): string
   const plural = (n: number): string => `${n} comment${n === 1 ? "" : "s"}`;
   const words = ((): string => {
     switch (event.name) {
-      case "git.push":
+      case "git.pushed":
         return `${short(payload["after"])} on ${String(payload["branch"] ?? "")}`;
-      case "git.merge_request.opened":
-      case "git.merge_request.updated":
-      case "git.merge_request.merged":
-      case "git.merge_request.closed":
+      case "git.merged":
+      case "merge_request.opened":
+      case "merge_request.updated":
+      case "merge_request.merged":
+      case "merge_request.closed":
         return request?.number === undefined ? "" : `${requestNumber(payload, request.number)}${request.author !== undefined ? ` by ${request.author}` : ""}`;
-      case "git.merge_request.comments": {
+      case "merge_request.pushed":
+        return request?.number === undefined ? short(payload["after"]) : `${requestNumber(payload, request.number)} at ${short(payload["after"])}`;
+      case "merge_request.commented": {
         const count = Array.isArray(payload["comments"]) ? payload["comments"].length : 0;
         return request?.number === undefined ? plural(count) : `${requestNumber(payload, request.number)} · ${plural(count)}`;
       }
-      case "git.checks.failed":
+      case "pipeline.succeeded":
+      case "pipeline.failed":
+      case "pipeline.canceled":
         return `${short(payload["sha"])} on ${String(payload["ref"] ?? "")}`;
       case "task.finished":
       case "task.failed":
@@ -502,7 +598,7 @@ export function eventSummary(event: { name: string; payload?: unknown }): string
 /**
  * The one mark that says WHICH happening it was — a commit's short sha, or a request's `!42` / `#42` —
  * or nothing for an event that has neither (a task's end). What a notice in the inbox strip puts
- * after the event's name ("git.checks.failed a1b2c3d · 2 m"), where {@link eventSummary}'s whole line
+ * after the event's name ("pipeline.failed a1b2c3d · 2 m"), where {@link eventSummary}'s whole line
  * would not fit.
  */
 export function eventRef(event: { name: string; payload?: unknown }): string | undefined {
@@ -511,15 +607,19 @@ export function eventRef(event: { name: string; payload?: unknown }): string | u
   const short = (sha: unknown): string | undefined => (typeof sha === "string" && sha.length > 0 ? sha.slice(0, 7) : undefined);
   const request = payload["merge_request"] as Partial<EventMergeRequest> | undefined;
   switch (event.name) {
-    case "git.push":
+    case "git.pushed":
       return short(payload["after"]);
-    case "git.checks.failed":
+    case "pipeline.succeeded":
+    case "pipeline.failed":
+    case "pipeline.canceled":
       return short(payload["sha"]);
-    case "git.merge_request.opened":
-    case "git.merge_request.updated":
-    case "git.merge_request.merged":
-    case "git.merge_request.closed":
-    case "git.merge_request.comments":
+    case "git.merged":
+    case "merge_request.opened":
+    case "merge_request.updated":
+    case "merge_request.pushed":
+    case "merge_request.commented":
+    case "merge_request.merged":
+    case "merge_request.closed":
       return typeof request?.number === "number" ? requestNumber(payload, request.number) : undefined;
     default:
       return undefined;

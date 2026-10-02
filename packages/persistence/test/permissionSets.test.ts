@@ -398,8 +398,9 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
       // The shell is on the list: `"bash": "deny"`, but the commands that only read (`git status`,
       // `npm test`, …) allow, so it is a shell with those to run, each line judged by the map. The Git
-      // tools of decision 0010 follow the web tools, `wait_git_event` among them since the event hub serves it.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "git_checks", "wait_git_event", "open_merge_request", "git_comment", "git_merge", "close_merge_request", "git_push", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      // tools of decision 0010 follow the web tools, then the CI tools of decision 0016, then `wait_for_event`
+      // with the tasks and workflows.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -414,13 +415,16 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           web_search: "allow",
           list_merge_requests: "allow",
           read_merge_request: "allow",
-          git_checks: "allow",
-          wait_git_event: "allow",
+          wait_for_event: "allow",
           open_merge_request: "deny",
-          git_comment: "deny",
+          comment_merge_request: "deny",
           git_merge: "deny",
           close_merge_request: "deny",
           git_push: "deny",
+          list_pipelines: "allow",
+          read_pipeline: "allow",
+          read_pipeline_job: "allow",
+          download_pipeline_artifact: "allow",
           list_workflows: "allow",
           start_task: "deny",
           move_task: "deny",

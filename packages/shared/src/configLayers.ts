@@ -44,7 +44,7 @@ export function inheritedDoc(view: ConfigView, layer: ConfigLayer): Record<strin
 
 /**
  * A place in a settings document: a dotted path (`appearance.palette`), or its keys as a list, for a
- * key that has dots of its own — an event name (`events`, `git.push`, `enabled`), a remote, a host.
+ * key that has dots of its own — an event name (`events`, `git.pushed`, `enabled`), a remote, a host.
  */
 export type ConfigPath = string | readonly string[];
 

@@ -1436,7 +1436,7 @@ function parseEvents(raw: unknown): JairaEventsConfig {
     }
     const where = `config.events["${name}"]`;
     const entry = plainObject(value, where);
-    const git = EVENT_SPECS[name].group === "git";
+    const git = EVENT_SPECS[name].group === "remote";
     allowedFields(entry, git ? ["enabled", "branches", "remotes"] : ["enabled"], where);
     const enabled = entry["enabled"];
     if (enabled !== undefined && typeof enabled !== "boolean") throw new Error(`${where}.enabled must be true or false`);
@@ -1484,7 +1484,7 @@ export function isEventEnabled(config: Pick<JairaConfig, "events">, name: EventN
 
 /** The `git.*` events on for one remote, in {@link EVENT_NAMES}' order, each with its branch globs. */
 export function enabledEvents(config: Pick<JairaConfig, "events">, remote: string): EnabledEvent[] {
-  return EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "git" && isEventEnabled(config, name, remote)).map((name) => {
+  return EVENT_NAMES.filter((name) => EVENT_SPECS[name].group === "remote" && isEventEnabled(config, name, remote)).map((name) => {
     const branches = config.events[name]?.branches;
     return branches === undefined ? { name } : { name, branches: [...branches] };
   });

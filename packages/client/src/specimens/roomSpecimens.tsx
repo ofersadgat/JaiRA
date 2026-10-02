@@ -44,7 +44,7 @@ const STARTED = cardOf({
   activeStatus: "completed",
   activeStateId: "review",
   endedAt: NOW - 18 * 60_000,
-  startedBy: { by: "events", fromTask: "t-events", state: { key: "push_main", stateId: "events/push_main" } as never, event: "git.push", summary: "git.push a1b2c3d on main" },
+  startedBy: { by: "events", fromTask: "t-events", state: { key: "push_main", stateId: "events/push_main" } as never, event: "git.pushed", summary: "git.pushed a1b2c3d on main" },
 });
 const MOVED = cardOf({ taskId: "t-moved", title: "tighten the changeset lint", status: "running", activeStatus: "running", activeStateId: "critique" });
 const MOVED_ENDED = cardOf({ taskId: "t-moved-2", title: "retire the old lint", status: "completed", activeStatus: "completed", activeStateId: "done", endedAt: NOW - 3 * 60_000 });
