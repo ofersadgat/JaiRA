@@ -2,6 +2,8 @@
  * The fleet as the window sees it (decision 0013 §1–§3): this machine, the machines it is paired with,
  * and the pairing code it is showing, for Settings → Machines.
  */
+import type { ChatSettings } from "./operationVocabulary";
+
 export type MachineOsTag = "windows" | "mac" | "linux";
 
 /** How this machine is reached from the others. */
@@ -20,10 +22,24 @@ export interface MachineReach {
   signInUrl?: string;
 }
 
+/**
+ * What a machine IS, for the icon that stands for it. Guessed where the machine can tell (a battery is
+ * a laptop) and the person's to correct, in Settings → Machines.
+ */
+export type MachineForm = "desktop" | "laptop" | "mini" | "server";
+
+export const MACHINE_FORMS: readonly MachineForm[] = ["desktop", "laptop", "mini", "server"];
+
+/** A stored or received form, when it is one; a machine that never said is a desktop. */
+export function machineFormOf(raw: unknown): MachineForm {
+  return MACHINE_FORMS.includes(raw as MachineForm) ? (raw as MachineForm) : "desktop";
+}
+
 export interface MachineView {
   id: string;
   label: string;
   os: MachineOsTag;
+  form: MachineForm;
   /** The person's tags, not counting the OS. */
   tags: string[];
 }
@@ -198,11 +214,137 @@ export interface PlacementView {
   ordered: boolean;
 }
 
+/**
+ * Where the person asked for a task to run (decision 0013 §5, amended 2026-10-02). Absent: anywhere —
+ * the first of the project's workspaces with room. A choice is kept: a task sent to a machine or a
+ * workspace that has no room WAITS for it, and is never started somewhere else instead.
+ */
+export interface RunTarget {
+  /** A machine, by id: the first of ITS workspaces with room. */
+  machine?: string;
+  /** One workspace, by its project key (a directory here, a remote key elsewhere). Wins over `machine`. */
+  project?: string;
+}
+
+/** One workspace asked whether it has room, and what it answered. */
+export interface PlacementAsk {
+  at: number;
+  /** The workspace's project key. */
+  project: string;
+  machineId: string;
+  /** The machine's name. */
+  label: string;
+  dir: string;
+  /** Why it took no new run; absent when it had room. */
+  why?: string;
+}
+
+/** One thing done to get a placed task going, once it had somewhere to run. */
+export interface StartStep {
+  at: number;
+  /** `workspace`: its worktree was made. `pin`: its workflow was frozen as it stood. */
+  kind: "workspace" | "pin";
+  /** What it was done to: the worktree's branch, the workflow's id. */
+  what: string;
+  tookMs: number;
+}
+
+/**
+ * How a task came to run where it does — written once, when it starts, and drawn above the message
+ * that started it (`jaira.placed`, `hostRows.ts`).
+ */
+export interface PlacementNote {
+  /** When placing began. */
+  since: number;
+  /** When a workspace took it. */
+  at: number;
+  target?: RunTarget;
+  /** Workspaces asked in all, and how many of those had no room. */
+  asked: number;
+  refused: number;
+  /** How many times it waited before asking again. */
+  waits: number;
+  /** The round that placed it: every workspace asked, the one that took it last. */
+  asks: PlacementAsk[];
+  on: { project: string; machineId: string; label: string; dir: string };
+  /** A person sent it there by hand ("Run on…"), room or none. */
+  byHand?: true;
+  /** What starting it then did. */
+  steps?: StartStep[];
+}
+
+/** A task that has not started because nothing it may run on has room — or that is being placed now. */
 export interface QueuedPlacement {
   taskId: string;
   project: string;
   requires: string[];
   since: number;
+  /** `placing`: its workspaces are being asked for the first time. `waiting`: none had room. */
+  phase: "placing" | "waiting";
+  target?: RunTarget;
+  /** What the composer picked for the start it waits for: the chips read it while there is no run to read. */
+  settings?: ChatSettings;
+  asked: number;
+  refused: number;
+  waits: number;
+  /** The latest round. */
+  asks: PlacementAsk[];
+  /** When it last asked, and when it asks again. */
+  askedAt?: number;
+  nextAt?: number;
+}
+
+/** What a workspace's checkout says of itself: the git half of a session's shell environment. */
+export interface WorkspaceGit {
+  /** Absent when detached. */
+  branch?: string;
+  /** Commits on the branch that its upstream does not have. Absent with no upstream. */
+  ahead?: number;
+  /** Lines added and removed in the working tree since the last commit. */
+  added?: number;
+  removed?: number;
+  /** The open merge request (or pull request) of the branch, when its forge has one and can be asked. */
+  mergeRequest?: { provider: "gitlab" | "github"; number: number; url: string; state: "open" | "merged" | "closed"; draft?: true };
+}
+
+/** One workspace a conversation could run in. */
+export interface EnvironmentWorkspace {
+  /** Its project key: a directory here, a remote key elsewhere. */
+  project: string;
+  dir: string;
+  /** Its folder's name. */
+  label: string;
+  /** Tasks running in it (a parked one is still running), and tasks waiting for it. */
+  running: number;
+  queued: number;
+  git?: WorkspaceGit;
+  /** Why it would take no new run now; absent when it would. */
+  why?: string;
+}
+
+/** One machine of the fleet that has a workspace of the project, with how busy it is. */
+export interface EnvironmentMachine {
+  id: string;
+  label: string;
+  self: boolean;
+  os: MachineOsTag;
+  form: MachineForm;
+  state: PeerView["state"];
+  /** Its load, when it answered: cores, the share of them working (0–1), and memory in bytes. */
+  cores?: number;
+  cpu?: number;
+  memoryFree?: number;
+  memoryTotal?: number;
+  workspaces: EnvironmentWorkspace[];
+}
+
+/**
+ * Where a project's conversations can run, in the order tasks are placed (decision 0013 §5): what the
+ * bar under the composer says and the list it opens offers.
+ */
+export interface EnvironmentView {
+  identity?: string;
+  machines: EnvironmentMachine[];
 }
 
 /** One folder's folders, for the picker (decision 0013 §8). */

@@ -489,8 +489,11 @@ export class App {
    * `captureBeyondViewport` is why a selector may name something below the fold — the predecessor
    * read the compositor, so it could only photograph what was on screen, and its 1000×900 window
    * silently clipped every specimen wider or taller than that.
+   *
+   * `beyond: false` photographs the window as it stands: laying the page out again for a capture past
+   * the viewport is a resize to the page, and a menu closes on one (`MenuLayer.web.tsx`).
    */
-  async shot(name: string, of?: string): Promise<void> {
+  async shot(name: string, of?: string, beyond = true): Promise<void> {
     const clip =
       of === undefined
         ? undefined
@@ -507,7 +510,7 @@ export class App {
     await this.send("Page.bringToFront");
     const reply = await this.send("Page.captureScreenshot", {
       format: "png",
-      captureBeyondViewport: true,
+      captureBeyondViewport: beyond,
       ...(clip !== null && clip !== undefined ? { clip: { ...clip, scale: 1 } } : {}),
     });
     const data = reply.result?.data;

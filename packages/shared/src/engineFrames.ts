@@ -33,6 +33,8 @@ export interface PeerMachine {
   id: string;
   label: string;
   os: "windows" | "mac" | "linux";
+  /** What it is (`MachineForm`). Absent from a machine that predates the field: read as a desktop. */
+  form?: "desktop" | "laptop" | "mini" | "server";
   tags: string[];
   /** Where its engine is reached: `wss://…/engine`. Absent while it is not reachable. */
   url?: string;

@@ -2,7 +2,7 @@
 id: engineering/contracts/journal-events
 type: engineering-contract
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-02
 visibility: public
 kind: event
 owned_by: [engineering/units/event-journal]
@@ -137,6 +137,7 @@ A fast-forward, a move held for a running state, and a finished task's reopening
 | `jaira.left` | `requestId, kind` (`interaction` or `question`), `under?, key, byTaskId, reason` | `AppService.leaveToPerson`, when a fast-forward's conversation leaves a question to the person | the question — by its identity, the instance asking (`under`) and `key` (`questionKeyOf`: a gate's component and arguments, or an agent's question texts) — is the person's; the request id is only what it was parked under then |
 | `jaira.moveAsked` | `requestId, move: {target, workflow?, path?, skip?, confirmed?, by}, missing, optional?, targetLabel?` | `parkMoveQuestion` (`@jaira/persistence` `moveQuestion.ts`), on the MOVED task, beside the `pending_interactions` row of the question's gate | a legal move asked, in this task's conversation, for inputs it lacked; the move waits on the answer. `conversationView` projects it as an `asked` turn at the root, where the question is drawn |
 | `jaira.moveAnswered` | `requestId, outcome` (`moved`, `refused`, `dismissed`), `answered?, message?` | `closeMoveQuestion`, when the question is answered | how the question ended: `answered` is what the person gave, by input name; `message` a refusal's reason. Folded onto the `asked` turn |
+| `jaira.placed` | `note: PlacementNote` — `since, at, target?, asked, refused, waits, asks[], on: {project, machineId, label, dir}, byHand?, steps?[]` | `AppService.startRun`, right after the run begins, for a task that placement chose a workspace for ([decision 0013](../decisions/0013-machines.md) §5) | how the task came to run where it does: every workspace asked, how many refused, how many waits, the round that placed it, and what starting did (a worktree made, the workflow pinned). Written once; `taskDetail` reads it as `TaskDetail.placed`, and the Chat room draws it above the first message. Written after the start, so `hasJournalHistory` never sees it before a first start |
 
 The reading rules, which `openFastForward`, `heldMoves`, `reopenedAfter` and `openConnectIntent` implement and every consumer shares:
 

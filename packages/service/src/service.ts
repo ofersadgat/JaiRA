@@ -175,6 +175,7 @@ import {
   permissionSetUsers,
   writePermissionSet,
   policyAuditRow,
+  placedNoteOf,
   recordHostRow,
   modelStoreAt,
   type ModelStore,
@@ -420,9 +421,18 @@ import {
   repositoryIdentity,
   parseRemoteProjectKey,
   remoteProjectKey,
+  PLACED_EVENT,
+  machineFormOf,
+  type EnvironmentMachine,
+  type EnvironmentView,
+  type WorkspaceGit,
+  type PlacementAsk,
+  type PlacementNote,
   type PlacementView,
   type PlacementWorkspace,
   type QueuedPlacement,
+  type RunTarget,
+  type StartStep,
   type FolderListing,
   type JairaEngineConfig,
   type JairaUpdatesConfig,
@@ -689,7 +699,7 @@ import { Fleet, type ReachPort } from "./fleet";
 import { Federation } from "./federation";
 import { Replicator } from "./replicator";
 import { machineTags } from "./machine";
-import { Placement, workspaceKey, type MachineCapacity, type PlacementRules, type PlacementThresholds } from "./placement";
+import { candidatesOf, Placement, queuedView, waitsForWords, workspaceKey, type HeldStart, type MachineCapacity, type PlacementRules, type PlacementThresholds, type QueuedTask } from "./placement";
 import { ResourceSampler } from "./resources";
 import { walkHiddenReport } from "./hiddenReport";
 import { layeredHiddenRules, whyHiddenPath, type ConfigLayer, type HiddenReport, type HiddenReportRequest, type HiddenRule, type HiddenVerdict } from "@jaira/shared";
@@ -1313,6 +1323,18 @@ function logOverrideFor(policy: LogPolicy, scope: string, tag: string | undefine
   }
   return best;
 }
+
+/** How long what a checkout said of itself is believed before it is asked again. */
+const WORKSPACE_LOOK_MS = 4_000;
+
+/** One machine's half of an environment, as it answers `fleet:environment`: by its own directories. */
+interface LocalEnvironment {
+  capacity: MachineCapacity;
+  workspaces: Record<string, { queued: number; git?: WorkspaceGit }>;
+}
+
+/** Two spellings of one directory on some machine: slashes and, on Windows, case aside. */
+const sameDir = (a: string, b: string): boolean => a.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase() === b.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 
 export interface StartRunRequest extends Omit<StartTaskRequest, "fake"> {
   fake?: JsonValue | FakeRule[];
@@ -2468,8 +2490,14 @@ export class AppService {
    * The accounts a workflow's models spend (`accountOfRoute`), from the model ids its root state file
    * names and the project's default model — what "out of usage" is judged by when it is placed. Empty
    * when none names a route, and then the whole machine's accounts are.
+   *
+   * A model the person PICKED for the start (`StartTaskRequest.overrides`) is the one the run spends,
+   * whatever the file and the default name: a Codex conversation is not held back because Claude's
+   * allowance is spent.
    */
-  private accountsOf(workflow: string, project: string): string[] {
+  private accountsOf(workflow: string, project: string, picked?: string): string[] {
+    const pickedRoute = picked !== undefined ? routeOfModel(picked) : undefined;
+    if (pickedRoute !== undefined) return [accountOfRoute(pickedRoute)];
     const models = new Set<string>();
     for (const layer of ["project", "base", "system"] as const) {
       try {
@@ -2496,28 +2524,111 @@ export class AppService {
     return this.listProjects().filter((p) => p.identity === identity && p.kind === "user");
   }
 
+  /** The tasks being asked about for the first time: not in the queue yet, and not started. In memory. */
+  private readonly placing = new Map<string, QueuedTask>();
+
+  /** What is being placed or waits changed, or what is known of it did: every window hears the whole list. */
+  private placementChanged(moved: Array<{ taskId: string; project: string; to: { taskId: string; project: string } }> = []): void {
+    this.publish({ type: "placement:changed", queue: this.queuedPlacements(), ...(moved.length > 0 ? { moved } : {}) });
+  }
+
+  /**
+   * One round: ask the workspaces a task may run on, in the project's order, whether they have room.
+   *
+   * The asks are the ones it took to find room — up to the workspace that had it — or every one of
+   * them when none did. The item comes back with the round counted into it.
+   */
+  private async askRound(item: QueuedTask): Promise<{ item: QueuedTask; chosen?: ProjectSummary }> {
+    const selfId = this.fleet.identity().id;
+    const candidates = candidatesOf(this.workspacesOf(item.identity), item.target, selfId);
+    const at = Date.now();
+    const { chosen, considered } = await this.placement.choose(item.identity, candidates, item.requires, selfId, item.needs ?? []);
+    const upTo = chosen === undefined ? considered : considered.slice(0, considered.findIndex((c) => c.project === chosen.project) + 1);
+    const asks: PlacementAsk[] = upTo.map((c) => ({
+      at,
+      project: c.project,
+      machineId: c.machineId,
+      label: c.label,
+      dir: parseRemoteProjectKey(c.project)?.dir ?? c.project,
+      ...(c.why !== undefined ? { why: c.why } : {}),
+    }));
+    const counted: QueuedTask = {
+      ...item,
+      asked: (item.asked ?? 0) + asks.length,
+      refused: (item.refused ?? 0) + asks.filter((ask) => ask.why !== undefined).length,
+      asks,
+      askedAt: at,
+    };
+    return { item: counted, ...(chosen !== undefined ? { chosen } : {}) };
+  }
+
   /**
    * `task:start`, placed (decision 0013 §5): in a project with several workspaces the task goes to the
    * first with room — here, or re-made on another workspace, since it has not started yet — or waits.
+   *
+   * `runOn` narrows where it may go to one machine or one workspace. None of those having room is not
+   * a reason to go anywhere else: it waits for what it was sent to.
    */
   async placeAndStart(request: StartRunRequest): Promise<{ taskId: string; project?: string; placedOn?: string; queued?: true }> {
-    const dir = request.project;
+    // `placed` is the engine's to say, never a window's.
+    const { runOn, placed: _never, ...plain } = request;
+    const dir = plain.project;
     const identity = dir !== undefined && parseRemoteProjectKey(dir) === undefined ? this.repositoryOf(dir) : undefined;
     const members = identity !== undefined ? this.workspacesOf(identity) : [];
-    if (identity === undefined || dir === undefined || members.length <= 1) return this.startTask(request);
-    const detail = this.taskDetail(request.taskId, dir);
+    if (identity === undefined || dir === undefined || members.length <= 1) return this.startTask(plain);
+    const detail = this.taskDetail(plain.taskId, dir);
     // A task that ran before continues where it is: its records are there.
-    if (detail.runs.length > 0) return this.startTask(request);
-    const requires = this.requiresOf(detail.workflow, dir);
-    const needs = this.accountsOf(detail.workflow, dir);
-    const { chosen } = await this.placement.choose(identity, members, requires, this.fleet.identity().id, needs);
-    if (chosen === undefined) {
-      this.placement.enqueue({ taskId: request.taskId, project: dir, identity, requires, needs, since: Date.now() });
-      this.log({ level: "info", source: "machines", message: `'${detail.title}' waits for a workspace with room`, project: sessionKey(dir), taskId: request.taskId });
-      this.publish({ type: "store:invalidate", scope: "tasks" });
-      return { taskId: request.taskId, queued: true };
+    if (detail.runs.length > 0) return this.startTask(plain);
+    const { taskId, project: _dir, ...start } = plain;
+    const first: QueuedTask = {
+      taskId,
+      project: dir,
+      identity,
+      requires: this.requiresOf(detail.workflow, dir),
+      needs: this.accountsOf(detail.workflow, dir, start.overrides?.model),
+      since: Date.now(),
+      ...(runOn?.project !== undefined || runOn?.machine !== undefined ? { target: runOn } : {}),
+      // The whole start, kept: what waits starts as it was asked to (the composer's model, a test's script).
+      ...(Object.keys(start).length > 0 ? { start: start as HeldStart } : {}),
+    };
+    this.placing.set(taskId, first);
+    this.placementChanged();
+    let round: { item: QueuedTask; chosen?: ProjectSummary };
+    try {
+      round = await this.askRound(first);
+    } finally {
+      this.placing.delete(taskId);
     }
-    if (chosen.project === dir) return this.startTask(request);
+    if (round.chosen === undefined) {
+      this.placement.enqueue({ ...round.item, waits: 1 });
+      this.log({ level: "info", source: "machines", message: `'${detail.title}' waits for ${waitsForWords(round.item)}`, project: sessionKey(dir), taskId });
+      this.publish({ type: "store:invalidate", scope: "tasks" });
+      this.placementChanged();
+      return { taskId, queued: true };
+    }
+    try {
+      return await this.startPlaced(round.item, round.chosen);
+    } finally {
+      this.placementChanged();
+    }
+  }
+
+  /** Start a task on the workspace that took it — here, or re-made there — with how it got there written down. */
+  private async startPlaced(item: QueuedTask, chosen: ProjectSummary, byHand = false): Promise<{ taskId: string; project?: string; placedOn?: string }> {
+    const me = this.fleet.identity();
+    const placed: PlacementNote = {
+      since: item.since,
+      at: Date.now(),
+      ...(item.target !== undefined ? { target: item.target } : {}),
+      asked: item.asked ?? 0,
+      refused: item.refused ?? 0,
+      waits: item.waits ?? 0,
+      asks: item.asks ?? [],
+      on: { project: chosen.project, machineId: chosen.machine?.id ?? me.id, label: chosen.machine?.label ?? me.label, dir: parseRemoteProjectKey(chosen.project)?.dir ?? chosen.project },
+      ...(byHand ? { byHand: true as const } : {}),
+    };
+    const request = { ...(item.start ?? {}), taskId: item.taskId, project: item.project, placed } as StartRunRequest;
+    if (chosen.project === item.project) return this.startTask(request);
     return this.relocate(request, chosen);
   }
 
@@ -2533,7 +2644,8 @@ export class AppService {
       ...(detail.inputs !== undefined ? { inputs: detail.inputs } : {}),
       ...(detail.branch !== undefined ? { branch: detail.branch } : {}),
     };
-    const { taskId: _was, project: _from, ...rest } = request;
+    // Everything the start carries goes with it; where it may run does not — that was decided here.
+    const { taskId: _was, project: _from, runOn: _decided, ...rest } = request;
     const remote = parseRemoteProjectKey(target.project);
     let taskId: string;
     if (remote !== undefined) {
@@ -2551,15 +2663,17 @@ export class AppService {
     return { taskId, project: target.project, placedOn };
   }
 
-  /** Try every waiting task, oldest first, while workspaces have room. */
+  /** Try every waiting task, oldest first, while the workspaces it may run on have room. */
   tryQueue(): Promise<void> {
     this.queueRunning ??= (async () => {
-      // Whether the queue changed. The timer tries it every 10 s, and an invalidate on every try — with
-      // nothing waiting, or nothing yet with room — had every window re-read its task lists and every
-      // board, and redraw, six times a minute for nothing.
+      // Whether a task left the queue. The timer tries it every 10 s, and a tasks invalidate on every
+      // try — with nothing waiting, or nothing yet with room — had every window re-read its task lists
+      // and every board, and redraw, six times a minute for nothing. A round that only asked again says
+      // so with `placement:changed`, which moves the waiting conversation's own figures and nothing else.
       let moved = false;
+      let asked = false;
+      const went: Array<{ taskId: string; project: string; to: { taskId: string; project: string } }> = [];
       for (const item of this.placement.queue()) {
-        const members = this.workspacesOf(item.identity);
         let status: string | undefined;
         try {
           status = this.taskDetail(item.taskId, item.project).status;
@@ -2571,18 +2685,28 @@ export class AppService {
           moved = true;
           continue;
         }
-        const { chosen } = await this.placement.choose(item.identity, members, item.requires, this.fleet.identity().id, item.needs ?? []);
-        if (chosen === undefined) continue;
+        const round = await this.askRound(item);
+        // What it waits for may have been changed, or it may have been sent somewhere by hand, while
+        // the machines were answering: the round was about a choice that no longer stands.
+        const now = this.placement.queue().find((q) => q.taskId === item.taskId);
+        if (now === undefined || JSON.stringify(now.target) !== JSON.stringify(item.target)) continue;
+        const counted = { asked: round.item.asked, refused: round.item.refused, asks: round.item.asks, askedAt: round.item.askedAt };
+        if (round.chosen === undefined) {
+          this.placement.patch(item.taskId, { ...counted, waits: (now.waits ?? 0) + 1 });
+          asked = true;
+          continue;
+        }
         this.placement.dequeue(item.taskId);
         moved = true;
         try {
-          if (chosen.project === item.project) await this.startTask({ taskId: item.taskId, project: item.project });
-          else await this.relocate({ taskId: item.taskId, project: item.project }, chosen);
+          const started = await this.startPlaced({ ...now, ...counted }, round.chosen);
+          if (started.project !== undefined && started.project !== item.project) went.push({ taskId: item.taskId, project: item.project, to: { taskId: started.taskId, project: started.project } });
         } catch (e) {
           this.log({ level: "warn", source: "machines", message: `a waiting task could not be started: ${(e as Error).message}`, taskId: item.taskId });
         }
       }
       if (moved) this.publish({ type: "store:invalidate", scope: "tasks" });
+      if (moved || asked) this.placementChanged(went);
     })().finally(() => {
       this.queueRunning = undefined;
     });
@@ -2619,26 +2743,222 @@ export class AppService {
     const identity = this.repositoryOf(project) ?? this.listProjects().find((p) => p.project === project)?.identity;
     if (identity === undefined) throw this.refusal("project", "this project has no git remote, so it has no other workspaces to place tasks on");
     this.placement.setRules(identity, { order, caps });
+    // A cap raised is room made: what waits is asked about now, not at the next tick.
+    if (this.placement.queue().length > 0) void this.tryQueue();
     return this.placementView(project);
   }
 
-  queuedPlacements(): QueuedPlacement[] {
-    return this.placement.queue().map((q) => ({ taskId: q.taskId, project: q.project, requires: q.requires, since: q.since }));
+  // --- the environment: where a conversation can run, and what each place says of itself ---------------
+
+  /**
+   * What each workspace's checkout says of itself, as of when it was last looked at — only for the
+   * workspaces somebody has asked about (`environment:view`): a look is three git calls and, now and
+   * then, one to the forge, which nobody should pay for a project no window is showing.
+   */
+  private readonly workspaceGit = new Map<string, { git?: WorkspaceGit; at: number; looking?: Promise<void>; again?: boolean; request?: { branch: string; at: number; failed: boolean; found?: NonNullable<WorkspaceGit["mergeRequest"]> } }>();
+
+  /**
+   * Look at a workspace's checkout — its branch, what is unpushed, the lines changed, its merge request
+   * — unless it was looked at within `maxAgeMs`. Says so (`environment:changed`) when what it found differs.
+   */
+  private lookAtWorkspace(session: ProjectSession, maxAgeMs = WORKSPACE_LOOK_MS): Promise<void> {
+    if (session.kind !== "user") return Promise.resolve();
+    let known = this.workspaceGit.get(session.key);
+    if (known === undefined) this.workspaceGit.set(session.key, (known = { at: 0 }));
+    if (known.looking !== undefined) {
+      // Asked to look NOW while a look is under way: that one may have read the checkout already.
+      if (maxAgeMs === 0) known.again = true;
+      return known.looking;
+    }
+    if (Date.now() - known.at < maxAgeMs) return Promise.resolve();
+    const entry = known;
+    entry.looking = (async () => {
+      const config = session.project.config;
+      const git = new Git({ exec: new NodeExec({ execEnv: config.execEnvironment }), repoDir: session.project.paths.projectDir, execEnv: config.execEnvironment, timeoutMs: 15_000 });
+      let found: WorkspaceGit | undefined;
+      try {
+        // A folder its repository ignores is no checkout of it: the enclosing branch is not its own.
+        if ((await git.isRepo()) && !(await git.isIgnored())) {
+          const [branch, ahead, lines] = await Promise.all([git.currentBranch(), git.aheadOfUpstream(), git.changedLines()]);
+          const mergeRequest = branch !== undefined ? await this.mergeRequestOf(session, git, branch, entry) : undefined;
+          found = {
+            ...(branch !== undefined ? { branch } : {}),
+            ...(ahead !== undefined ? { ahead } : {}),
+            ...(lines !== undefined ? lines : {}),
+            ...(mergeRequest !== undefined ? { mergeRequest } : {}),
+          };
+        }
+      } catch (e) {
+        // Git did not answer (a lock, a timeout): what was known stands, and the next look asks again.
+        this.log({ level: "debug", source: "machines", message: `could not look at the checkout in ${session.dir}: ${(e as Error).message}`, project: session.key });
+        found = entry.git;
+      }
+      const changed = JSON.stringify(found) !== JSON.stringify(entry.git);
+      if (found === undefined) delete entry.git;
+      else entry.git = found;
+      entry.at = Date.now();
+      if (changed) this.publishFor(session, { type: "environment:changed", project: session.dir });
+    })().finally(() => {
+      delete entry.looking;
+      if (entry.again === true) {
+        delete entry.again;
+        void this.lookAtWorkspace(session, 0).catch(() => undefined);
+      }
+    });
+    return entry.looking;
   }
 
-  /** A queued task sent to a workspace by hand (ruled: "4a"): taken out of the queue and started there. */
+  /**
+   * The open merge request of a branch, asked of the forge its remote is on — at most once a minute
+   * for one branch, and every five when the forge could not be asked (no connection, a refused token),
+   * so a workspace with nobody signed in costs one failed call and not one per look.
+   */
+  private async mergeRequestOf(session: ProjectSession, git: Git, branch: string, entry: { request?: { branch: string; at: number; failed: boolean; found?: NonNullable<WorkspaceGit["mergeRequest"]> } }): Promise<WorkspaceGit["mergeRequest"]> {
+    const last = entry.request;
+    if (last !== undefined && last.branch === branch && Date.now() - last.at < (last.failed ? 5 * 60_000 : 60_000)) return last.found;
+    let found: NonNullable<WorkspaceGit["mergeRequest"]> | undefined;
+    let failed = false;
+    try {
+      const remotes = await projectRemotes(git, session.project.config.integrations);
+      // The remote the project is named for (`repositoryOf`): `upstream` before `origin`.
+      const remote = remotes.find((r) => r.name === "upstream") ?? remotes.find((r) => r.name === "origin") ?? remotes[0];
+      if (remote?.provider !== undefined && remote.connection !== undefined) {
+        const [request] = await this.forgeFor(session, remote.host).listMergeRequests(remote.repository, { state: "open", sourceBranch: branch, limit: 1 });
+        if (request !== undefined) found = { provider: remote.provider, number: request.number, url: request.url, state: request.state, ...(request.draft ? { draft: true as const } : {}) };
+      }
+    } catch {
+      failed = true;
+      found = last?.branch === branch ? last.found : undefined;
+    }
+    entry.request = { branch, at: Date.now(), failed, ...(found !== undefined ? { found } : {}) };
+    return found;
+  }
+
+  /** This machine's half of an environment: its room to run, and what its workspaces among `dirs` say and hold. */
+  private async localEnvironment(dirs: readonly string[]): Promise<LocalEnvironment> {
+    const sessions = dirs.flatMap((dir) => {
+      const session = this.sessions.get(sessionKey(dir));
+      return session === undefined ? [] : [session];
+    });
+    await Promise.all(sessions.map((session) => this.lookAtWorkspace(session)));
+    const queue = this.placement.queue();
+    const workspaces: LocalEnvironment["workspaces"] = {};
+    for (const session of sessions) {
+      const git = this.workspaceGit.get(session.key)?.git;
+      // Waiting for it: sent to it, or asked for in it and sent nowhere in particular.
+      const queued = queue.filter((q) => (q.target?.project !== undefined ? sessionKey(q.target.project) === session.key : q.target?.machine === undefined && sessionKey(q.project) === session.key)).length;
+      workspaces[session.dir] = { queued, ...(git !== undefined ? { git } : {}) };
+    }
+    return { capacity: this.capacity(), workspaces };
+  }
+
+  /**
+   * Where a project's conversations can run (`environment:view`): each machine that has a workspace of
+   * it, in the order tasks are placed, with its load and what each workspace's checkout says of itself.
+   * A project with one workspace is one machine with one workspace, and so is JaiRA's own root.
+   */
+  async environmentView(workspace: string): Promise<EnvironmentView> {
+    // JaiRA's own root is somewhere a conversation runs too: this machine, that folder, no checkout to read.
+    const here =
+      workspace === SHARED_SESSION
+        ? this.listProjects().find((p) => p.kind === "shared")
+        : this.listProjects().find((p) => p.project === workspace || (parseRemoteProjectKey(p.project) === undefined && parseRemoteProjectKey(workspace) === undefined && sessionKey(p.project) === sessionKey(workspace)));
+    if (here === undefined) return { machines: [] };
+    const me = this.fleet.identity();
+    const identity = here.identity;
+    const members = identity !== undefined ? this.placement.ordered(identity, this.workspacesOf(identity), me.id) : [here];
+    const why = new Map<string, string>();
+    if (identity !== undefined && members.length > 1) for (const c of (await this.placement.choose(identity, members, [], me.id)).considered) if (c.why !== undefined) why.set(c.project, c.why);
+    // Each machine once, in the order its first workspace is placed.
+    const machineIds = [...new Set(members.map((m) => m.machine?.id ?? me.id))];
+    const dirsOf = (machineId: string): string[] => members.filter((m) => (m.machine?.id ?? me.id) === machineId).map((m) => parseRemoteProjectKey(m.project)?.dir ?? m.project);
+    const halves = new Map<string, LocalEnvironment | undefined>();
+    await Promise.all(
+      machineIds.map(async (machineId) => {
+        if (machineId === me.id) return void halves.set(machineId, await this.localEnvironment(dirsOf(machineId)));
+        const client = this.fleet.client(machineId);
+        // A machine that predates the question still says how busy it is.
+        const half = client === undefined ? undefined : ((await client.invoke("fleet:environment", { dirs: dirsOf(machineId) }).catch(() => undefined)) as LocalEnvironment | undefined);
+        const capacity = half === undefined ? await this.placement.capacityOf(machineId, me.id) : undefined;
+        halves.set(machineId, half ?? (capacity !== undefined ? { capacity, workspaces: {} } : undefined));
+      }),
+    );
+    const machines: EnvironmentMachine[] = machineIds.map((machineId) => {
+      const mine = members.filter((m) => (m.machine?.id ?? me.id) === machineId);
+      const about = mine[0]!.machine;
+      const half = halves.get(machineId);
+      const resources = half?.capacity.resources;
+      return {
+        id: machineId,
+        label: about?.label ?? me.label,
+        self: machineId === me.id,
+        os: about?.os ?? me.os,
+        form: about?.form ?? machineFormOf(undefined),
+        state: about?.state ?? "online",
+        ...(resources !== undefined ? { cores: resources.cores, cpu: resources.cpu, memoryFree: resources.freeMemory, memoryTotal: resources.totalMemory } : {}),
+        workspaces: mine.map((m) => {
+          const dir = parseRemoteProjectKey(m.project)?.dir ?? m.project;
+          const said = half?.workspaces[dir] ?? Object.entries(half?.workspaces ?? {}).find(([d]) => sameDir(d, dir))?.[1];
+          const reason = why.get(m.project);
+          return {
+            project: m.project,
+            dir,
+            label: m.label,
+            running: m.running,
+            queued: said?.queued ?? 0,
+            ...(said?.git !== undefined ? { git: said.git } : {}),
+            ...(reason !== undefined ? { why: reason } : {}),
+          };
+        }),
+      };
+    });
+    return { ...(identity !== undefined ? { identity } : {}), machines };
+  }
+
+  /** What is being placed now, then what waits, oldest first. */
+  queuedPlacements(): QueuedPlacement[] {
+    return [...[...this.placing.values()].map((q) => queuedView(q, "placing")), ...this.placement.queue().map((q) => queuedView(q, "waiting"))];
+  }
+
+  /**
+   * A queued task sent to a workspace by hand (ruled: "4a"): taken out of the queue and started there,
+   * room or none, as the start it was waiting for.
+   */
   async runQueuedOn(taskId: string, project: string, target: string): Promise<{ taskId: string; project: string }> {
     const item = this.placement.dequeue(taskId);
     if (item === undefined) throw this.refusal("run", "that task is not waiting for a workspace");
+    this.placementChanged();
     const members = this.workspacesOf(item.identity);
     const chosen = members.find((m) => m.project === target);
     if (chosen === undefined) throw this.refusal("run", "that workspace is not one of this project's");
-    if (chosen.project === project) {
-      await this.startTask({ taskId, project });
-      return { taskId, project };
+    const started = await this.startPlaced({ ...item, project }, chosen, true);
+    // Re-made on another workspace: a window showing it where it waited follows it there.
+    if (started.project !== undefined && started.project !== project) this.placementChanged([{ taskId, project, to: { taskId: started.taskId, project: started.project } }]);
+    return { taskId: started.taskId, project: started.project ?? project };
+  }
+
+  /**
+   * Change what a waiting task waits for (`placement:change`): where it may run, and what its first
+   * message runs under. Nothing has started, so nothing is undone; it is asked for again at once.
+   */
+  async changeQueued(request: { taskId: string; project: string; runOn?: RunTarget | null; overrides?: ChatSettings }): Promise<QueuedPlacement[]> {
+    const item = this.placement.queue().find((q) => q.taskId === request.taskId);
+    if (item === undefined) throw this.refusal("run", "that task is not waiting for a workspace");
+    const next: QueuedTask = { ...item };
+    if (request.runOn !== undefined) {
+      if (request.runOn === null || (request.runOn.project === undefined && request.runOn.machine === undefined)) delete next.target;
+      else next.target = request.runOn;
+      // A new choice is asked about afresh: the last round was about the old one.
+      next.asks = [];
     }
-    const moved = await this.relocate({ taskId, project }, chosen);
-    return { taskId: moved.taskId, project: moved.project };
+    if (request.overrides !== undefined) {
+      next.start = { ...next.start, overrides: request.overrides };
+      next.needs = this.accountsOf(this.taskDetail(item.taskId, item.project).workflow, item.project, request.overrides.model);
+    }
+    this.placement.replace(next);
+    this.placementChanged();
+    await this.tryQueue();
+    return this.queuedPlacements();
   }
 
   /**
@@ -2681,6 +3001,9 @@ export class AppService {
     return {
       ...this.fleet.handlersFor(caller),
       "fleet:capacity": () => this.capacity(),
+      // Its half of an environment (`environment:view` on the machine that asks): its room to run, and
+      // what its workspaces' checkouts say of themselves.
+      "fleet:environment": ((request: { dirs?: string[] }) => this.localEnvironment((request.dirs ?? []).filter((d): d is string => typeof d === "string").slice(0, 64))) as (request: never) => unknown,
       // A machine keeping a copy of this one's tasks (decision 0013 §6): what changed since what it
       // holds, the big strings it lacks, and a snapshot's files.
       "replica:pull": ((request: { project: string; known?: Record<string, ReplicaKnown>; archived?: boolean; only?: string[] }) =>
@@ -3338,6 +3661,12 @@ export class AppService {
     if (message.type === "run:finished" && this.archiveTimer !== undefined) queueMicrotask(() => this.sweepArchive());
     // Every workflow write says so here — the one place all of them pass (decision 0010 §4).
     if (message.type === "store:invalidate" && message.scope === "workflows") this.kickEventsSupervisor();
+    // Work was done in a checkout somebody is looking at: what it says of itself may have moved.
+    if (message.type === "run:finished" || message.type === "chat:turnEnded" || (message.type === "engine:event" && (message.event as { type?: string }).type === "operation.completed")) {
+      const about = (message as { project?: string }).project;
+      const session = about !== undefined && parseRemoteProjectKey(about) === undefined ? this.sessions.get(sessionKey(about)) : undefined;
+      if (session !== undefined && this.workspaceGit.has(session.key)) void this.lookAtWorkspace(session, 0).catch(() => undefined);
+    }
   }
 
   /**
@@ -4318,10 +4647,12 @@ export class AppService {
     const forward = open.fastForwards.get(taskId);
     // So is what its rules are listening for: the hub's live waits, not a journal fact.
     const listening = [...new Set(open.events.list().filter((wait) => wait.taskId === taskId && wait.waiter === "guard").map((wait) => wait.name as string))];
+    const placed = viewed.runs.length > 0 ? placedNoteOf(open.project, taskId) : undefined;
     const detail = {
       ...viewed,
       ...(forward !== undefined && forward.end === undefined ? { fastForward: fastForwardView(forward) } : {}),
       ...(listening.length > 0 ? { listening } : {}),
+      ...(placed !== undefined ? { placed } : {}),
     };
     // Folded in HERE rather than fetched separately, because the one surface that needs it — the
     // activity strip's verb — already has the detail and would otherwise draw a button before
@@ -4416,7 +4747,7 @@ export class AppService {
       const identity = session.kind === "user" ? this.repositoryOf(session.dir) : undefined;
       out.push({
         ...(identity !== undefined ? { identity } : {}),
-        machine: { id: this.fleet.identity().id, label: this.fleet.identity().label, state: "online", self: true },
+        machine: { id: this.fleet.identity().id, label: this.fleet.identity().label, state: "online", self: true, os: this.fleet.identity().os, form: this.fleet.identity().form },
         project: session.dir,
         // The shared group is named for the root it IS, not "shared": repointing the root is the one
         // thing that changes which runs are in it, so the directory is the useful label.
@@ -4606,6 +4937,7 @@ export class AppService {
         ...(bundle !== undefined ? { bundle } : {}),
         ...(request.interactions !== undefined ? { interactions: request.interactions } : {}),
         ...(request.fake !== undefined ? { fake: request.fake } : {}),
+        ...(request.placed !== undefined ? { placed: request.placed } : {}),
       });
       // A start that got through settles the question, whatever it was last time.
       this.moduleApprovals.delete(request.taskId);
@@ -4696,6 +5028,8 @@ export class AppService {
       directed?: DirectedTransitions;
       /** This start reopens a COMPLETED task to take that move — `BeginRunOptions.reopen`. */
       reopen?: boolean;
+      /** How placement got the task here (decision 0013 §5): written into its journal once it has begun. */
+      placed?: PlacementNote;
     },
   ): Promise<{ taskId: string }> {
     const project = open.project;
@@ -4724,7 +5058,9 @@ export class AppService {
     this.settleOwedInputs(open, taskId);
     // Materialize the worktree before marking the task running, so a git failure
     // leaves it startable rather than `running` with nowhere to run (DESIGN §9.2).
+    const preparing = Date.now();
     const workspace = opts.workspace ?? (await ensureWorkspace(project, taskId));
+    const prepared = Date.now();
 
     // Child-process tracking (DESIGN §4.2a). The registry is built before the run
     // exists, so the observer forwards to a claim made below — safe because nothing
@@ -4822,6 +5158,7 @@ export class AppService {
     // with a request id of its own. The row keeps its window, its cursor and what it has seen.
     project.remotes.stopAwaiting(taskId);
 
+    const pinning = Date.now();
     const started = await beginTaskRun(project, taskId, {
       functions: registry.functions,
       ...(opts.bundle !== undefined ? { bundle: opts.bundle } : {}),
@@ -4830,6 +5167,16 @@ export class AppService {
       ...(opts.loaded !== undefined ? { continues: true } : {}),
       ...(opts.reopen === true ? { reopen: true } : {}),
     });
+    // How it came to run here, and what starting it did — the journal's first row, so the conversation
+    // can say it above the message that started it. After the run has begun: a row before that would be
+    // history, and a task with history cannot make a fresh start.
+    if (opts.placed !== undefined) {
+      const steps: StartStep[] = [
+        ...(workspace.isWorktree ? [{ at: preparing, kind: "workspace" as const, what: workspace.branch ?? workspace.root, tookMs: prepared - preparing }] : []),
+        { at: pinning, kind: "pin" as const, what: started.meta.workflow, tookMs: Date.now() - pinning },
+      ];
+      recordHostRow(project, taskId, { type: PLACED_EVENT, note: { ...opts.placed, steps } });
+    }
 
     // The workflow's OWN TypeScript functions (SPEC §7.5), merged rather than wrapped: a resolved
     // symbol is already a registry entry carrying its capabilities, signature and error contract.
@@ -8278,6 +8625,8 @@ export class AppService {
       if (!result.removed) throw this.refusal("run", `could not remove the task's worktree: ${result.reason}`);
     }
     deleteTask(session.project, taskId);
+    // It waits for nothing now.
+    if (this.placement.dequeue(taskId) !== undefined) this.placementChanged();
     // What it had adopted is nobody's child now.
     releaseUnmirroredAdoptions(session.project, taskId);
     this.publishFor(session, { type: "store:invalidate", scope: "tasks" });

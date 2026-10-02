@@ -3,6 +3,7 @@ import type { FileSource } from "@jaira/shared/browser";
 import { DataView, FileInspector, Markdown } from "@jaira/universal";
 import { ARTIFACT_SPECIMENS } from "./artifactSpecimens";
 import { DRAG_SPECIMENS } from "./dragSpecimens";
+import { ENVIRONMENT_SPECIMENS } from "./environmentSpecimens";
 import { FLOAT_SPECIMENS } from "./floatSpecimens";
 import { FORM_SPECIMENS } from "./formSpecimens";
 import { FORMS_FILES_SPECIMENS } from "./formsFilesSpecimens";
@@ -112,6 +113,8 @@ export const SPECIMENS: Record<string, Specimen> = {
   ...ARTIFACT_SPECIMENS,
   // A box's `<datalist>` type-ahead, the Files room's last surfaces and the Debug session panel (`formsFilesSpecimens.tsx`).
   ...FORMS_FILES_SPECIMENS,
+  // Where a conversation runs: a machine's icon, the bar under the composer, its list, and how it was placed (`environmentSpecimens.tsx`).
+  ...ENVIRONMENT_SPECIMENS,
   // The data tree — the Files viewer of a JSON or YAML file (decision 0015).
   "data-view": {
     width: 520,

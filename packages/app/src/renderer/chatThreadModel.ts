@@ -6,8 +6,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn } from "@jaira/shared/browser";
-import { useKeptDraft } from "./composerDrafts";
-import { titleOf } from "./chatWorkflow";
+import { keepDraft, useKeptDraft } from "./composerDrafts";
+import { CHAT_SESSION, titleOf } from "./chatWorkflow";
 import type { ChatSurface } from "./chatSurface";
 import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import { useWaiting } from "./limitsStore";
@@ -112,6 +112,34 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   const [arming, setArming] = useState<Arming | null>(null);
   /** The agent title a rename has already been asked for — see the effect that adopts it. */
   const asked = useRef<string | null>(null);
+
+  /**
+   * The conversation while it has NOT STARTED — it is being placed, or waits for a workspace with room
+   * (decision 0013 §5). There is no run and no record, so what the composer's chips say is asked of the
+   * state (`chat:startPlan`) under what was picked for the start it waits for; changing a chip changes
+   * that start (`placement:change`), and nothing is sent.
+   */
+  const queued = surface.queued;
+  const queuedSettings = useMemo(() => queued?.settings ?? {}, [JSON.stringify(queued?.settings ?? {})]);
+  const [startPlan, setStartPlan] = useState<ChatPlanView | null>(null);
+  const notStarted = queued !== undefined;
+  useEffect(() => {
+    if (!notStarted) return;
+    let live = true;
+    void invoke("chat:startPlan", { stateId: CHAT_SESSION, overrides: queuedSettings, ...(project !== undefined ? { project } : {}) })
+      .then((next) => live && setStartPlan(next))
+      .catch(() => live && setStartPlan(null));
+    return () => {
+      live = false;
+    };
+  }, [notStarted, queuedSettings, project]);
+  /** The message it will open with: what was just typed here, or what the task was made with. */
+  const openingMessage = surface.opening ?? (typeof surface.detail?.inputs?.["message"] === "string" ? (surface.detail.inputs["message"] as string) : null);
+  /** Take the waiting message back to the start page to be said again: its words go with it. */
+  const takeBack = (): void => {
+    if (openingMessage !== null) keepDraft(`chat:new:${project ?? ""}`, openingMessage);
+    void surface.onTakeBack(taskId, project);
+  };
 
   /**
    * The tail that was streaming, held until the record that supersedes it has arrived.
@@ -327,7 +355,10 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
      * one, which is a comparison against the thread rather than a timer. Handed to `entriesOf` rather
      * than appended after it, so they land above the answer they provoked instead of under it.
      */
-    const outstanding = surface.opening === null ? sent : [surface.opening, ...sent];
+    // The opening message of a run this window did not start (a conversation that waited, and was
+    // started by the engine when room opened) is the task's own input, until the record holds it.
+    const opening = surface.opening ?? (thread === null && surface.detail?.status === "running" ? openingMessage : null);
+    const outstanding = opening === null ? sent : [opening, ...sent];
     const turns = thread?.session.turns ?? [];
     const pending = outstanding.filter((text) => !turns.some((turn) => turn.role === "user" && turn.text === text));
     return entriesOf(
@@ -338,7 +369,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       surface.live ?? afterglow,
       pending,
     );
-  }, [thread, surface.journal, surface.live, afterglow, surface.opening, sent]);
+  }, [thread, surface.journal, surface.live, afterglow, surface.opening, surface.detail?.status, openingMessage, sent]);
 
   /**
    * What the model is doing right now — read off exactly what is being rendered.
@@ -498,9 +529,21 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     setDraft("");
   };
 
+  /**
+   * Whether the run is still getting going: it has somewhere to run and has said nothing — no record,
+   * nothing streaming. What the placement summary's second phase is in progress for.
+   */
+  const starting = running && thread === null && surface.live === null && afterglow === null;
+
   return {
     taskId,
     project,
+    queued,
+    queuedSettings,
+    startPlan,
+    openingMessage,
+    takeBack,
+    starting,
     thread,
     plan,
     overrides,

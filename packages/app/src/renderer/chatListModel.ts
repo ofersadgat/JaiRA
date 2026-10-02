@@ -100,10 +100,3 @@ export function renamedTitle(typed: string, was: string): string | undefined {
 export function chatTitleOf(conversations: readonly TaskSummary[], taskId: string | null): string {
   return conversations.find((c) => c.taskId === taskId)?.title ?? "New conversation";
 }
-
-/** What the empty Chat room says about where a new conversation runs. */
-export function chatStartWhereOf(hasProject: boolean): string {
-  return hasProject
-    ? "This conversation works in the open project — it asks before it runs or changes anything."
-    : "No project is open, so this runs in JaiRA's own root. Open one to talk about your code.";
-}

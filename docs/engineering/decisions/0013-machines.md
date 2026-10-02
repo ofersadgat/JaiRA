@@ -2,7 +2,7 @@
 id: engineering/decisions/0013-machines
 type: decision
 status: accepted
-updated: 2026-09-30
+updated: 2026-10-02
 decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, engineering/units/project-store, engineering/units/project-sessions, engineering/units/cli]
 ---
 
@@ -187,6 +187,8 @@ The person's rulings of 2026-09-27 are quoted where they settle something.
   - The queue is kept by the engine of the machine where the task was started. No hub is needed, and a
     machine that goes offline keeps its own queue.
   - A queued task can be moved to a chosen workspace (ruling 6).
+  - A task may be sent to one machine or one workspace when it is started; with no room there it waits
+    for that one (amended 2026-10-02, below).
 - **After it starts,** a task belongs to the workspace it runs in. Moving a started task is the later
   session move.
 
@@ -664,6 +666,84 @@ tokens, with pairing extended by as little as a device needs.
   - the QR code itself (the link it would carry is read);
   - a sign-in page a device's request causes still opens on the engine's machine, not on the device (§8);
   - an artifact's page is served by the desktop's `jaira-artifact:` scheme, which a browser does not have.
+
+### Amended 2026-10-02: a conversation says where it runs, and may be sent somewhere
+
+A conversation started with Codex picked on 2026-09-29 showed nothing for three minutes, its model chip
+reading "no model", and then answered with Claude. Placement had queued it (two workspaces of one
+repository were open and the machine stood at the 10% free-memory floor); the queue restarted it without
+the composer's picks; and the Chat room had nothing to draw for a conversation that had not started. The
+person: "we should have ui in the conversation displaying whats happening. is it queued, is the system
+deciding where to place it, etc." — and both faults fixed.
+
+**Rulings.**
+
+- The bar under the composer is "what is the shell environment of the session": "the machine + workspace
+  + git branch + mr if it exists".
+- "you should be able to select a machine (and have it auto select the workspace on the machine) or
+  select a specific workplace on the machine."
+- "if you select a machine, and its workspaces are full, it should queue waiting for a space to open on
+  that machine. it shouldnt error or back out or try a different solution." The same holds for a chosen
+  workspace.
+- Placing is told as tool calls are: "think of each pill as an action 'asked machine' then if it
+  responded positively thats a success, if it denied or it failed, the task failed." It stands above the
+  message, "because the message isnt sent until the result is decided"; starting is a phase of its own,
+  since "there could also be tools run during starting which prepare the workspace", and moving a session
+  between machines one day is another.
+- A machine's icon is what it is (desktop, laptop, mini, server; a phone), with its system's mark and
+  whether it is reachable on its corners.
+
+**The engine.**
+
+- **A waiting start is kept whole.** The queue holds everything the start was asked with — the composer's
+  picks (`overrides`), a test's scripted replies, its interactions — and starts it as asked. Usage is
+  judged by the model picked, not the one the workflow names.
+- **Where it may run** (`StartTaskRequest.runOn: RunTarget`): a machine (its first workspace with room)
+  or one workspace. With no room there it waits for that; nothing else is asked.
+- **Being placed is visible.** A task whose workspaces are being asked for the first time is in the list
+  `placement:queue` answers, phase `placing`, before it waits (phase `waiting`). Each item carries its
+  target, its picks (`settings`), how many workspaces were asked and refused, how many waits, the latest
+  round's asks with each one's reason, and when it asks again (every 10 s, and at once when a run ends or
+  the rules change).
+- **`placement:change`** changes what a waiting task waits for — where it may run, what its first message
+  runs under — and asks again at once. Deleting a waiting task takes it out of the queue.
+- **How it was placed is recorded.** The start writes `jaira.placed` (`PlacementNote`: every ask, every
+  wait, the round that placed it, where it went, by hand or not, and what starting did — a worktree made,
+  the workflow pinned); `TaskDetail.placed` reads it.
+- **Pushes.** `placement:changed` carries the whole list on every change, and `moved` when a waiting task
+  started on another workspace (re-made there under a new id), so a window showing it follows it.
+  `environment:changed` says a workspace's checkout moved.
+- **Where a project can run** (`environment:view`, by `workspace` so it is never forwarded): each machine
+  with a workspace of the project, in placement order, with what it is (`form`), its system, its state,
+  its cores, CPU and memory; and each workspace with what runs and waits there, why it would take no run
+  now, and what its checkout says — branch, commits not pushed, lines changed since the last commit, and
+  the branch's open merge request from its forge (asked at most once a minute, every five after a
+  failure). Another machine's half is asked of it (`fleet:environment`); one that predates the question
+  still reports its load. A checkout is read only once a window has asked about it, and again when a run,
+  a turn or a call ends in it. JaiRA's own root is one machine with one workspace and no checkout.
+- **What a machine is** (`MachineIdentity.form`): guessed once — a battery is a laptop, a Mac that calls
+  itself a mini a mini, Linux with no display a server, anything else a desktop — and the person's to
+  change (`machines:form`, Settings → Machines). Paired machines carry it in their frames.
+
+**The window.** The Chat room's [environment bar](../../ui/components/environment-bar.md) under the
+composer, the chip beside the conversation's title and the start page's sentence state one choice and
+open one list; the [placement summary](../../ui/components/placement-summary.md) above the first message
+draws placing and starting, and the message itself, dashed while it is placed and amber with
+`queued · {time}`, `Edit` and `Delete` while it waits. A project that is one repository in several
+workspaces lists the conversations of all of them.
+
+**Verified.** `placementChoice.test.ts` (the start kept whole, usage by the picked model, the rounds, the
+note, sent somewhere and waiting for it, changed while waiting, `moved`), `environment.test.ts` (the form,
+the git facts, the view here and across two machines, the checkout looked at again), `environmentModel.test.ts`
+(every word the bar, the list, the chip, the sentence and the summary say), and `chat-placement.mts`: in
+the real app, two clones of one repository, a conversation sent to this machine waits while neither has
+room, starts in the second clone when it has, and the thread follows it there.
+
+**Not built.**
+
+- The 10%-of-memory floor is unchanged; a machine near it refuses every workspace, now visibly.
+- A phone has not been run with the bar and the summary.
+- Moving a started conversation between machines (a third phase in the summary).
 
 ## Consequences
 

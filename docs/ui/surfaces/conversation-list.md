@@ -2,7 +2,7 @@
 id: ui/surfaces/conversation-list
 type: ui-surface
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-02
 kind: panel
 realizes: [ux/patterns/filter-in-place, ux/patterns/ordered-by-urgency-then-recency, ux/patterns/live-facts-and-unseen-counts, ux/patterns/name-it-where-it-will-live, ux/patterns/verbs-on-the-thing-itself, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/absence-is-stated]
 serves: [product/chat-with-agents, product/see-what-changed-since-you-looked, product/all-projects-in-one-place, product/keep-track-of-everything]
@@ -13,7 +13,7 @@ siblings: [ui/surfaces/sidebar, ui/surfaces/chat-view, ui/surfaces/confirm-dialo
 
 # Conversation list
 
-The drawer of conversations that hangs in the [sidebar](sidebar.md) under the `Chat` row of the open project, or under `All conversations` at the root, where it spans every open project: one line per conversation, newest activity first. It opens only while its row is the current room and closes when another row is chosen, taking the band's spare height and pushing the rows below it down. Its verbs `+` and `⌕` live on the row above it, not in the drawer.
+The drawer of conversations that hangs in the [sidebar](sidebar.md) under the `Chat` row of the open project, or under `All conversations` at the root, where it spans every open project; a project that is one repository in several workspaces lists the conversations of all of them, since a conversation runs in whichever had room: one line per conversation, newest activity first. It opens only while its row is the current room and closes when another row is chosen, taking the band's spare height and pushing the rows below it down. Its verbs `+` and `⌕` live on the row above it, not in the drawer.
 
 ## The rows read first, each led by a mark that says whether its last reply was read
 
@@ -22,8 +22,8 @@ The drawer of conversations that hangs in the [sidebar](sidebar.md) under the `C
 - **Rows.** App text at the app base, 4px by 8px padding, 6px corners and 6px gaps, from left to right:
   - a 7px mark, filled `--accent` when the newest reply has not been read and a hollow `--line` ring once it has;
   - the title, taking the spare width and ending in an ellipsis, led by an 11px fork glyph in a dimmed `--accent` when the conversation was forked from another;
-  - at the root only, the project chip: a hairline pill with a 5px dot in the project's hue on a 16% wash of it and the project name in mono `--dim`;
-  - the time since the last activity in `.app-secondary`, or, while the conversation is answering, a 12px turning ring in `--accent` in the time's place.
+  - at the root, and in a project that is one repository in several workspaces, the chip of the row's own project or workspace: a hairline pill with a 5px dot in the project's hue on a 16% wash of it and the project name in mono `--dim`;
+  - the time since the last activity in `.app-secondary`, or, while the conversation is answering, a 12px turning ring in `--accent` in the time's place; a conversation that waits for a workspace with room shows a 12px clock in `--warn` there, and one being placed a turning ring in `--dim`.
 - **Selected.** The open conversation's row sits on a 14% wash of `--accent`. Pointing at any row gives it `--panel-2`.
 - **Nothing to list.** One `--dim` line in place of the rows.
 

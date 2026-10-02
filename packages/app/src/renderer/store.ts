@@ -77,6 +77,7 @@ import type {
   EventsNotice,
   SchemaFormat,
   QueuedPlacement,
+  RunTarget,
 } from "@jaira/shared/browser";
 import { withNoticeRead } from "./noticesModel";
 import {
@@ -799,6 +800,19 @@ export interface ChatState {
   opening: string | null;
   /** The last failure, beside the composer rather than in the toast that scrolls away. */
   error: string | null;
+  /**
+   * Where the NEXT conversation is to run, when the person chose (decision 0013 §5): a machine, or one
+   * workspace. Absent is automatic. Held here because three things show it — the bar under the
+   * composer, the chip beside the title, the start page's sentence — and it rides the start
+   * (`StartTaskRequest.runOn`). A conversation that exists has its own: where it waits, or where it runs.
+   */
+  runOn?: RunTarget;
+  /**
+   * What the next conversation's composer starts with, when it was carried from a waiting one taken
+   * back to be edited: the model and the rest that were picked for it. The start page's own picks
+   * replace it from the first change.
+   */
+  settings?: ChatSettings;
 }
 
 /** The rooms — the destinations the sidebar lists. */
@@ -2416,6 +2430,22 @@ export function useApp() {
         case "userEvent:resolved":
           void refreshUserEvents();
           break;
+        case "placement:changed": {
+          // What is being placed or waits, whole (decision 0013 §5): the waiting conversation's own
+          // figures move with it, and nothing else is re-read.
+          patch({ queue: message.queue });
+          // A waiting task that started on ANOTHER workspace was re-made there under a new id: the
+          // thread, and the selection, follow it.
+          for (const went of message.moved ?? []) {
+            if (ref.current.chat.taskId === went.taskId) {
+              patch({ chat: { ...ref.current.chat, taskId: went.to.taskId, project: went.to.project } });
+              actionsRef.current.select(went.to.taskId, went.to.project);
+            } else if (ref.current.selected === went.taskId) {
+              actionsRef.current.select(went.to.taskId, went.to.project);
+            }
+          }
+          break;
+        }
         case "chat:turnEnded": {
           // The backstop for {@link AppState.producing} on a chat turn — what `run:finished` is for a
           // run. Normally already zero: every turn's start is balanced by its own terminal event.
@@ -3207,7 +3237,9 @@ export function useApp() {
       newConversation: async (message: string, overrides: ChatSettings = {}): Promise<string | null> => {
         const text = message.trim();
         if (text === "") return null;
-        patch({ chat: { ...ref.current.chat, busy: true, opening: text, error: null } });
+        // Where it was sent, taken with the message: the next conversation starts from automatic again.
+        const { runOn, settings: _carried, ...chat } = ref.current.chat;
+        patch({ chat: { ...chat, busy: true, opening: text, error: null } });
         // NAMED, both when there is a checkout to name and when there is not. `undefined` meant "the
         // focused project", which main resolves only while exactly one user project is open — so
         // creating a conversation with a second checkout open failed with "several projects are
@@ -3234,11 +3266,17 @@ export function useApp() {
           // The composer's picks ride the START, because for a conversation the first message IS the
           // run — see `StartTaskRequest.overrides`. Every later message carries them on `chat:send`
           // instead, which is the same settings reaching the same call by the route that call takes.
-          const started = await actionsRef.current.startTaskAsking({
-            taskId: summary.taskId,
-            ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
-            project,
-          });
+          // Said in the thread itself — where it is being placed, that it waits, where it went — so
+          // the notice every other start posts is left out.
+          const started = await actionsRef.current.startTaskAsking(
+            {
+              taskId: summary.taskId,
+              ...(Object.keys(overrides).length > 0 ? { overrides } : {}),
+              ...(runOn !== undefined ? { runOn } : {}),
+              project,
+            },
+            false,
+          );
           // A conversation is a task, and is placed like one (decision 0013 §5, ruling 16): where it went
           // to another workspace, the thread follows it there.
           if (started?.project !== undefined && started.project !== project) {
@@ -3250,6 +3288,39 @@ export function useApp() {
         } catch (e) {
           patch({ chat: { ...ref.current.chat, busy: false, error: (e as Error).message } });
           return null;
+        }
+      },
+
+      /**
+       * Choose where the next conversation runs: a machine, one workspace, or — with nothing — wherever
+       * has room first.
+       */
+      setRunOn: (target: RunTarget | undefined) => {
+        const { runOn: _was, ...chat } = ref.current.chat;
+        patch({ chat: { ...chat, ...(target !== undefined && (target.project !== undefined || target.machine !== undefined) ? { runOn: target } : {}) } });
+      },
+
+      /**
+       * Take a WAITING conversation back to be said again: it has not started, so it is deleted, and the
+       * start page opens with where it was sent and what it was to run under. (Its words are the
+       * caller's to keep — the composer's draft.)
+       */
+      takeBackQueued: async (taskId: string, project?: string) => {
+        const item = ref.current.queue.find((q) => q.taskId === taskId);
+        const { runOn: _was, settings: _had, ...chat } = ref.current.chat;
+        patch({ chat: { ...chat, ...(item?.target !== undefined ? { runOn: item.target } : {}), ...(item?.settings !== undefined ? { settings: item.settings } : {}) } });
+        await actionsRef.current.deleteTasks([taskId], project);
+      },
+
+      /**
+       * Change what a WAITING conversation waits for (`placement:change`): where it may run, or what its
+       * first message runs under. Nothing has started, so nothing is undone; it is asked for again at once.
+       */
+      changeQueued: async (taskId: string, project: string, change: { runOn?: RunTarget | null; overrides?: ChatSettings }) => {
+        try {
+          patch({ queue: await invoke("placement:change", { taskId, project, ...change }) });
+        } catch (e) {
+          patch({ chat: { ...ref.current.chat, error: (e as Error).message } });
         }
       },
 
@@ -4656,10 +4727,12 @@ export function useApp() {
        * its message and nothing else, so the service keeps the list and `functions:pending` hands it
        * back. When it comes back empty the failure was something else, and the error stands as it is.
        */
-      startTaskAsking: async (request: StartTaskRequest): Promise<{ taskId: string; project?: string } | undefined> => {
+      startTaskAsking: async (request: StartTaskRequest, say = true): Promise<{ taskId: string; project?: string } | undefined> => {
         try {
           const started = await invoke("task:start", request);
-          // Placed (decision 0013 §5): said where it went, or that it waits.
+          // Placed (decision 0013 §5): said where it went, or that it waits — unless the caller says it
+          // itself (a conversation does, in its thread).
+          if (!say) return started;
           if (started.queued === true) patch({ notice: "No workspace has room for this task now: it waits, and starts as soon as one frees up." });
           else if (started.placedOn !== undefined) patch({ notice: `Runs on ${started.placedOn}.` });
           return started;

@@ -54,3 +54,9 @@ export { RunBoard } from "./components/run/RunBoard";
 export { FormInput } from "./components/form/inputs";
 export { SessionPanel } from "./components/debug/SessionPanel";
 export { DelimitedView, PatchFileSurface, SyncSurface as WorkflowSyncSurface } from "./components/files/surfaces";
+// Where a conversation runs: the machine's icon, the bar under the composer and its list, how it was placed and the message that waits (`environmentSpecimens.tsx`).
+export { MachineIcon, WorkRing } from "./components/MachineIcon";
+export { Composer } from "./components/chat/Composer";
+export { EnvironmentBar, EnvironmentRows } from "./components/chat/EnvironmentBar";
+export { PlacementSummary } from "./components/chat/PlacementSummary";
+export { QueuedMessage } from "./components/chat/QueuedMessage";

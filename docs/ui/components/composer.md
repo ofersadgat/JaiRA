@@ -2,7 +2,7 @@
 id: ui/components/composer
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-10-02
 realizes: [ux/patterns/button-says-what-will-happen, ux/patterns/pick-from-what-exists, ux/patterns/arm-the-cut-then-confirm, ux/patterns/second-deliberate-step-for-irreversible]
 serves: [product/chat-with-agents, product/steer-agents-mid-task, product/rewind-to-where-it-went-wrong, product/try-another-direction]
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
@@ -10,7 +10,7 @@ reuses: [ui/components/composer-setting-chip, ui/components/model-cascade, ui/co
 implemented_by: [packages/universal/src/components/chat/Composer.tsx, packages/universal/src/components/run/RunConversation.tsx, packages/app/src/renderer/composerModel.ts, packages/app/src/renderer/composerDrafts.ts]
 verified_by: [packages/app/test/composer.test.ts, packages/app/shots/parityWorld.mts#conversation, packages/app/shots/parityWorld.mts#run-leaf, packages/app/shots/parityWorld.mts#composer-context, packages/app/shots/parityWorld.mts#artifact-prompt]
 mockups: [ui/assets/composer/empty.html, ui/assets/composer/composing.html, ui/assets/composer/busy.html, ui/assets/composer/disabled.html, ui/assets/composer/error.html, ui/assets/composer/armed.html]
-siblings: [ui/components/activity-strip, ui/components/composer-setting-chip, ui/components/transcript]
+siblings: [ui/components/activity-strip, ui/components/composer-setting-chip, ui/components/transcript, ui/components/environment-bar]
 ---
 
 # Composer
@@ -26,6 +26,7 @@ A rounded message box inside a thin grey ring on the page ground: attached files
 ## The text reads first, the settings under it, and the send button last
 
 - **Band.** 10px above, 16px at the sides and 14px below, on `--bg`. The ring and everything in it are at most 900px wide and centred.
+- **Tray.** In the Chat room the [environment-bar](environment-bar.md) is tucked under the ring: the ring's width, its top 22px under the ring's foot and behind it. With a tray the band is 10px below it instead of 14px.
 - **Ring.** A 1px ring in `--line` with 22px corners around a `--panel` shell. It turns a 55% mix of `--accent` while anything inside has focus, and solid `--accent` while files are dragged over the composer, without moving the contents.
 - **Pills.** Above the text when files are attached, wrapping, 6px apart: a paperclip glyph, the name, a dim note when only the name will go, and a `×`. Each pill is `--panel-2` with a 1px `--line` edge, fully rounded, at most 260px wide.
 - **Text.** The app face at 13.5/12.5 of the app size with line height 1.55, placeholder in `--tok-hint`. It starts 54px tall and grows with its content to 40% of the window height, then scrolls.
@@ -43,7 +44,7 @@ A rounded message box inside a thin grey ring on the page ground: attached files
 | composing | Typed text lights the send button, and attachments alone light it too. Attached files stand as pills; one over 200,000 bytes or not text carries its note and sends only its name. Typing `@` at the start of a word, in a conversation with a project, opens the mention list. A drag over the composer turns the ring solid `--accent`. | [composing.html](../assets/composer/composing.html) |
 | busy | In a chat thread or a run's conversation state: the stop and the send side by side, and `joins this turn` in `--accent` or `waits for this turn` in `--dim` with a pulse, saying what a message sent now does. The box that starts a conversation greys its send while the conversation is created and offers no stop. | [busy.html](../assets/composer/busy.html) |
 | success | Sending clears the box and every pill at once, and the composer turns busy while the turn runs. | [busy.html](../assets/composer/busy.html) |
-| disabled | The whole shell `--panel-2`, the reason as the placeholder, and the box, the paperclip and drops refused. A chat that can no longer be continued keeps a greyed send; a run with no state chosen yet that is still going shows the stop alone. | [disabled.html](../assets/composer/disabled.html) |
+| disabled | The whole shell `--panel-2`, the reason as the placeholder, and the box, the paperclip and drops refused. A chat that can no longer be continued keeps a greyed send; a run with no state chosen yet that is still going shows the stop alone. A conversation that waits for a workspace keeps its chips live: each changes what its first message will run under. | [disabled.html](../assets/composer/disabled.html) |
 | error | A failed send puts the message in `--bad` on a 12% `--bad` wash above the ring, and the typed text stays. A setting that is an expression adds `{fields} is an expression here` in `--warn` after the chips. | [error.html](../assets/composer/error.html) |
 | armed | A banner above the ring. Edit puts the old text in the box with `Say this instead…`; fork empties it with `Start the new conversation with…`; rewind empties it and waits for `Rewind`. The [chat view](../surfaces/chat-view.md) fades what a rewind would delete. | [armed.html](../assets/composer/armed.html) |
 
@@ -69,7 +70,7 @@ A rounded message box inside a thin grey ring on the page ground: attached files
 | Where | String |
 | --- | --- |
 | Placeholder | `Ask for more changes…` in a run · `Ask for a change, or a question about the code…` to start a chat · `Reply…` · `Say this instead…` · `Start the new conversation with…` |
-| Disabled placeholder | `This conversation cannot be continued.` · `Select a run to continue its conversation.` |
+| Disabled placeholder | `This conversation cannot be continued.` · `Select a run to continue its conversation.` · `Finding somewhere for this conversation to run…` · `This conversation starts when a workspace has room.` |
 | Send tooltip | `Enter to send, Shift+Enter for a new line` · `Enter to send — this joins the turn in flight` while busy |
 | Send, stop and paperclip names | `Send` · `Stop` with tooltip `Stop this turn` · `Attach files` |
 | Live words | `joins this turn` · `waits for this turn` |

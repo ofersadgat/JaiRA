@@ -28,7 +28,7 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
-  | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external", string[]> = {
+  | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -158,6 +158,8 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   play: ["M7 5v14l11-7Z"],
   stop: ["M7 7h10v10H7Z"],
   back: ["m15 18-6-6 6-6"],
+  // Where something went: a placed task's workspace (`placementSummary.ts`).
+  arrow: ["M5 12h14", "m13 6 6 6-6 6"],
   // Leaves the app: a box with an arrow out of its corner — a merge request, an issue, in the browser.
   external: ["M14 4h6v6", "M20 4 11 13", "M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"],
   info: ["M12 22a10 10 0 1 0 0-20 10 10 0 0 0 0 20Z", "M12 16v-4", "M12 8h.01"],

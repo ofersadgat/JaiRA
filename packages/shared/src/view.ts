@@ -12,6 +12,7 @@ import type { WorkflowOutcome } from "./workflowTools";
 import type { ModuleApproval } from "./refusal";
 import type { NextMove } from "./move";
 import type { ConnectMissingInput } from "./connect";
+import type { MachineForm, MachineOsTag, PlacementNote } from "./machines";
 
 /**
  * Per-instance status, derived from the event journal (SPEC §10.1). `blocked` is
@@ -477,6 +478,11 @@ export interface TaskDetail {
    * only, like {@link fastForward}; absent when nothing listens.
    */
   listening?: string[];
+  /**
+   * How the task came to run where it does (decision 0013 §5) — read off its journal's `jaira.placed`
+   * row. Absent for a task that was never placed: one in a project with a single workspace.
+   */
+  placed?: PlacementNote;
 }
 
 /**
@@ -1153,7 +1159,7 @@ export interface ProjectSummary {
    */
   identity?: string;
   /** Which machine the workspace is on, and whether it is reachable now. `self` for this one. */
-  machine?: { id: string; label: string; state: "online" | "offline" | "connecting" | "mismatch"; self?: true };
+  machine?: { id: string; label: string; state: "online" | "offline" | "connecting" | "mismatch"; self?: true; os?: MachineOsTag; form?: MachineForm };
   /** What to call it in a group header. */
   label: string;
   /** `shared` is the selected root as a project — the machine's, not a checkout. See `SHARED_SESSION`. */

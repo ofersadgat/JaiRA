@@ -37,7 +37,7 @@ import type { InputProvenance, InputSourcesRequest, InputSourcesResponse, TaskAd
 import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
-import type { FolderListing, CopyChoice, MachinesView, OutboxView, PlacementView, QueuedPlacement } from "./machines";
+import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesView, OutboxView, PlacementNote, PlacementView, QueuedPlacement, RunTarget } from "./machines";
 import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
@@ -160,6 +160,16 @@ export interface StartTaskRequest {
    * applied somewhere else — when the root state has no prompt operation of its own to rewrite.
    */
   overrides?: ChatSettings;
+  /**
+   * Where the person asked for it to run — a machine or one workspace (decision 0013 §5). Absent:
+   * anywhere. A choice with no room makes the task WAIT for that choice; it never starts elsewhere.
+   */
+  runOn?: RunTarget;
+  /**
+   * How it was placed — set by the engine that placed it, for the engine that starts it to write into
+   * the task's journal. Never sent by a window.
+   */
+  placed?: PlacementNote;
 }
 
 /**
@@ -2307,6 +2317,20 @@ export interface IpcContract {
   "placement:queue": { request: void; response: QueuedPlacement[] };
   /** Send a queued task to a workspace by hand, before it starts; `target` absent puts it back to waiting. */
   "placement:runOn": { request: { taskId: string; project: string; target: string }; response: { taskId: string; project: string } };
+  /**
+   * Change what a waiting task waits FOR, before it starts: where it may run (`runOn`; `null` is
+   * anywhere) and what its first message runs under (`overrides`). It is asked for again at once.
+   */
+  "placement:change": { request: { taskId: string; project: string; runOn?: RunTarget | null; overrides?: ChatSettings }; response: QueuedPlacement[] };
+  /**
+   * Where a project's conversations can run: every machine with a workspace of it, how busy each is,
+   * and what each workspace's checkout says of itself (branch, unpushed commits, lines changed, merge
+   * request). `workspace` names any one of them — and is not `project`, so the request is answered
+   * here, as this machine sees the fleet, whichever machine that workspace is on.
+   */
+  "environment:view": { request: { workspace: string }; response: EnvironmentView };
+  /** Say what this machine is: a desktop, a laptop, a mini or a server. */
+  "machines:form": { request: { form: MachineForm }; response: MachinesView };
 }
 
 export type IpcChannel = keyof IpcContract;
@@ -2499,6 +2523,9 @@ export const IPC_CHANNELS = [
   "placement:setRules",
   "placement:queue",
   "placement:runOn",
+  "placement:change",
+  "environment:view",
+  "machines:form",
 ] as const satisfies readonly IpcChannel[];
 
 /**
@@ -2809,6 +2836,19 @@ export type PushMessage =
   | { type: "limits:changed"; view: LimitsView }
   /** The waiting messages and runs changed — one was added, sent, dropped or rescheduled. Machine-wide. */
   | { type: "waiting:changed"; items: WaitingItem[] }
+  /**
+   * The tasks being placed or waiting for a workspace changed — one began, asked again, was sent
+   * somewhere or started. The whole list, as `placement:queue` answers it. This machine's.
+   *
+   * `moved`: the waiting tasks that just started on ANOTHER workspace, where each was re-made under a
+   * new id — what a window showing one follows it by.
+   */
+  | { type: "placement:changed"; queue: QueuedPlacement[]; moved?: Array<{ taskId: string; project: string; to: { taskId: string; project: string } }> }
+  /**
+   * What a workspace's checkout says of itself changed — its branch, what is unpushed, the lines
+   * changed, its merge request. Only for a workspace somebody has asked about (`environment:view`).
+   */
+  | { type: "environment:changed"; project: string }
   /** The updater moved (decision 0011 §4). */
   | { type: "update:changed"; state: UpdateState }
   /** A plugin download moved, ended or failed, or a plugin was removed. */
