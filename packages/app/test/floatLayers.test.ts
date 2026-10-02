@@ -19,7 +19,7 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { placeFloat } from "../src/renderer/floatPlace";
+import { holdFloat, holdOf, placeFloat } from "../src/renderer/floatPlace";
 
 const RENDERER = join(__dirname, "..", "src", "renderer");
 const CSS = readFileSync(join(RENDERER, "styles.css"), "utf8");
@@ -157,6 +157,29 @@ describe("placing a float", () => {
     const tall = placeFloat(button, { width: 200, height: 2000 }, view, "below", "start", 6);
     expect(tall.maxHeight).toBe(800 - 404 - 6 - 4);
     expect(tall.top + tall.maxHeight!).toBeLessThanOrEqual(800);
+  });
+
+  it("stays where it opened when it is told to settle, and grows downward from there", () => {
+    // A hover card whose rows open under the pointer. It opened under its anchor with room to spare.
+    const low = { left: 400, top: 560, right: 480, bottom: 584 };
+    const first = placeFloat(low, { width: 200, height: 150 }, view, "below", "start", 6);
+    expect(first).toEqual({ left: 400, top: 590, maxHeight: undefined });
+    const hold = holdOf(low, first);
+    // A row is unfolded and it wants 400: placed afresh it would flip above the anchor, out from under
+    // the pointer that is on it.
+    expect(placeFloat(low, { width: 200, height: 400 }, view, "below", "start", 6).top).toBe(560 - 6 - 400);
+    // Settled, it keeps its corner and scrolls inside what room there is under it.
+    expect(holdFloat(low, hold, 400, view)).toEqual({ left: 400, top: 590, maxHeight: 800 - 590 - 4 });
+    // While it still fits it is not capped.
+    expect(holdFloat(low, hold, 180, view)).toEqual({ left: 400, top: 590, maxHeight: undefined });
+  });
+
+  it("follows its anchor while settled", () => {
+    const first = placeFloat(button, { width: 200, height: 100 }, view, "below", "start", 6);
+    const hold = holdOf(button, first);
+    // The page scrolled 100 up under it: the anchor moved, and the card with it.
+    const moved = { left: 400, top: 280, right: 480, bottom: 304 };
+    expect(holdFloat(moved, hold, 100, view)).toEqual({ left: 400, top: 310, maxHeight: undefined });
   });
 
   it("opens beside, for a flyout", () => {

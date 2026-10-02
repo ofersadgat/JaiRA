@@ -211,7 +211,7 @@ export function toolLineOf(
   // The approval prompt, a tool the tool called: its verdict is its name, and who, how far and after
   // how long are the rest of the line (the person, 2026-09-26).
   if (isApprovalCall(entry)) {
-    const words = approvalWordsOf(entry);
+    const words = approvalWordsOf(entry, unanswered && open);
     return {
       name: words.name,
       called: entry.name,
@@ -219,7 +219,7 @@ export function toolLineOf(
       command: approvalAnswerOf(entry) === undefined ? approvalAboutOf(entry).command : undefined,
       prose: approvalAnswerOf(entry) !== undefined,
       tone: words.tone,
-      ...(words.mark !== undefined ? { mark: words.mark === "waiting" && !(unanswered && open) ? ("cut" as const) : words.mark } : {}),
+      ...(words.mark !== undefined ? { mark: words.mark } : {}),
       shown: undefined,
       unanswered,
       running,

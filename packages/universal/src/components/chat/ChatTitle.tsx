@@ -10,13 +10,14 @@ import type { ChatListSurface } from "./ChatListPanel";
  * The open conversation's name in the title bar: where the other rooms put their address, set as the
  * address's last crumb is. How it looks:
  *
- *   the title           row, centred, gap 7, padding 0 16; app 600 13/12.5, line 1.3, --text
+ *   the title           row, centred, gap 7, padding 0 16; app 600 13/12.5, line 1.3, --text; it gives
+ *                       way to the bar's width, and the name is cut with an ellipsis
  *   its glyph           14 square, --dim
  */
 export function ChatTitle({ surface }: { surface: Pick<ChatListSurface, "conversations" | "taskId"> }): JSX.Element {
   const t = useTokens();
   return (
-    <View flexDirection="row" alignItems="center" gap={7} minWidth={0} paddingHorizontal={16}>
+    <View flexDirection="row" alignItems="center" gap={7} flexShrink={1} minWidth={0} paddingHorizontal={16}>
       <Icon name="comment" size={14} color={String(t.v("dim"))} />
       <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600, lineHeight: 1.3 }} ellip flexShrink={1} minWidth={0}>
         {chatTitleOf(surface.conversations, surface.taskId)}

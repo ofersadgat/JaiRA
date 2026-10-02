@@ -249,7 +249,8 @@ function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face
     <View flex={1} flexDirection="column" justifyContent="space-between" paddingVertical={10} paddingHorizontal={6} backgroundColor={t.v("panel-2") as never} aria-label="Side panel, folded">
       <View flexDirection="column" alignItems="center" gap={4}>
         {face?.glyph !== undefined ? (
-          <View paddingTop={4} paddingBottom={8}>
+          // What the panel is of, named on hover: folded, the glyph is all there is of its head.
+          <View paddingTop={4} paddingBottom={8} {...((isWeb ? { title: face.titleText } : {}) as object)}>
             <GlyphSizeContext.Provider value={13}>{face.glyph}</GlyphSizeContext.Provider>
           </View>
         ) : null}

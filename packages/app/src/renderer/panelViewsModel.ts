@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef } from "react";
 import type { ArtifactSummary, InstanceNode, SessionRef, StateView } from "@jaira/shared/browser";
 import type { RunIndexFit } from "./runIndexModel";
+import { isLiveNode } from "./sessionRows";
 import { nodeAt } from "./trail";
 import type { JsonValue } from "@declarative-ai/json";
 import type { RunField, RunValues } from "./runForm";
@@ -104,6 +105,17 @@ export function tookOf(start: number, end: number | undefined, now = Date.now())
   const m = Math.floor(s / 60);
   if (m < 60) return `${m}m ${s % 60}s`;
   return `${Math.floor(m / 60)}h ${m % 60}m`;
+}
+
+/**
+ * How long a step took, as its card says it. A step with no end recorded is one of two facts: still
+ * going (its status says so — then it is how long SO FAR, by the caller's clock), or ended without its
+ * end being written (stopped, the app closed). The second has no duration to state, and is not given
+ * one that grows with the clock.
+ */
+export function stepTookOf(node: Pick<InstanceNode, "startedAt" | "endedAt" | "status" | "superseded">, now = Date.now()): string {
+  if (node.endedAt !== undefined) return tookOf(node.startedAt, node.endedAt);
+  return isLiveNode(node as InstanceNode) ? `${tookOf(node.startedAt, undefined, now)} so far` : "not recorded";
 }
 
 /** The names from the run's root down to a node — the step card's path. */

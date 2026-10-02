@@ -69,6 +69,26 @@ export function inFlight(entry: WorkEntry): boolean {
   return entry.kind === "tool" && entry.ok === undefined && entry.result === undefined;
 }
 
+/**
+ * The step in flight in a stretch of work: the last one still happening — and only in a stretch that is
+ * still being worked on. A finished conversation that ended on a call nobody answered has none: that
+ * call was cut off, and nothing about it is still running.
+ */
+export function liveIndexOf(entries: readonly WorkEntry[], working: boolean): number | undefined {
+  if (!working) return undefined;
+  for (let i = entries.length - 1; i >= 0; i--) if (inFlight(entries[i]!)) return i;
+  return undefined;
+}
+
+/**
+ * Which phase is the one in progress: the one holding the step in flight, else the last (the agent is
+ * between steps). None (-1) once the work is over.
+ */
+export function currentPhaseOf(phases: readonly { indices: readonly number[] }[], live: number | undefined, working: boolean): number {
+  if (!working) return -1;
+  return live !== undefined ? phases.findIndex((phase) => phase.indices.includes(live)) : phases.length - 1;
+}
+
 /** The file a call is about: its path argument, else the line it was summarised by. */
 function pathOf(entry: WorkEntry): string {
   if (entry.kind === "writing") return entry.path ?? "";
@@ -135,11 +155,17 @@ const REACH: Record<string, string> = { once: "once", run: "for this run", sessi
  * An approval as a row reads it (the person, 2026-09-26, round 1's option A): its verdict as the name —
  * Approve while it waits, then Approved, Denied or Not answered — and who, how far and after how long as
  * the rest of the line.
+ *
+ * `waiting`: its stretch is still being written, so no answer YET is somebody still being asked. With no
+ * answer in a stretch that is over, nobody is: it reads Not answered, and is marked as cut off.
  */
-export function approvalWordsOf(entry: ToolEntry): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" } {
+export function approvalWordsOf(entry: ToolEntry, waiting = true): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" | "cut" } {
   const answer = approvalAnswerOf(entry);
   const about = approvalAboutOf(entry);
-  if (answer === undefined) return { name: "Approve", preview: about.command ?? about.tool ?? "", tone: "plain", mark: "waiting" };
+  if (answer === undefined) {
+    const preview = about.command ?? about.tool ?? "";
+    return waiting ? { name: "Approve", preview, tone: "plain", mark: "waiting" } : { name: "Not answered", preview, tone: "warn", mark: "cut" };
+  }
   const after = answer.waitedMs >= 1000 ? ` · after ${secondsOf(answer.waitedMs)}` : "";
   if (answer.by !== "person") {
     return { name: "Not answered", preview: `${answer.by === "closed" ? "the app closed" : "the run stopped"} while it waited${after}`, tone: "warn", mark: "bad" };
@@ -334,7 +360,8 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
         return [{ text: plural(list.length, "note", "notes") }];
       case "approval": {
         if (list.length > 1) return [{ text: `${list.length} approvals` }];
-        const words = approvalWordsOf(list[0] as ToolEntry);
+        // Only a stretch still being worked on has anybody waiting on an answer.
+        const words = approvalWordsOf(list[0] as ToolEntry, live !== undefined);
         const command = approvalAboutOf(list[0] as ToolEntry).command;
         return [{ text: `${words.name} ` }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
       }

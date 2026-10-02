@@ -7,6 +7,7 @@ import { answersOfValue, type Answer } from "@jaira/ui/choicesModel";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
 import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
+import { thoughtLiveOf } from "@jaira/ui/stillRunning";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
 import { isApprovalCall } from "@jaira/ui/workSummary";
 import { askedOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
@@ -15,7 +16,7 @@ import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { ChoiceList, ChoiceSteps, FieldFrame } from "../floats/Choices";
-import { Pulse } from "../chat/Paper";
+import { Pulse } from "../chat/Pulse";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
 import { ValueView } from "./ValueView";
@@ -272,7 +273,7 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, tra
 
 /** `Thought`: one block of reasoning, and how long it took. */
 function Thought({ entry, narrated, open }: { entry: ThoughtEntry; narrated?: boolean | undefined; open: boolean }): JSX.Element {
-  const live = entry.live === true && open && narrated !== true;
+  const live = thoughtLiveOf(entry, open, narrated);
   const elapsed = useElapsed(entry.startedAt, live);
   const shown = live ? elapsed : entry.durationMs;
   const took = shown !== undefined ? `${live ? "Thinking for" : "Thought for"} ${thoughtTime(shown)}` : undefined;

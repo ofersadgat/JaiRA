@@ -3,11 +3,13 @@ import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import type { EffectiveStateValues, InstanceNode, SessionRef, TaskDetail } from "@jaira/shared/browser";
 import { BADGE } from "@jaira/ui/panelFaceModel";
-import { callLine, pathOf, stepRowsOf, tookOf, useStepFollow, useStepsFit } from "@jaira/ui/panelViewsModel";
+import { callLine, pathOf, stepRowsOf, stepTookOf, useStepFollow, useStepsFit } from "@jaira/ui/panelViewsModel";
 import { keyOfNode } from "@jaira/ui/runIndexModel";
+import { isLiveNode } from "@jaira/ui/sessionRows";
 import { askingInstanceOf, hasAsking } from "@jaira/ui/stateSurfaceModel";
 import { invoke } from "@jaira/ui/store";
 import { nodeAt } from "@jaira/ui/trail";
+import { useNow } from "@jaira/ui/workSummaryContext";
 import { PLAIN_SCROLLER, Txt, scrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { NoneRow, PanelRow, PanelSection, valueRows } from "./PanelViews";
@@ -198,6 +200,8 @@ function StepCard({
   const cost = node.operation?.costUsd ?? ran.reduce((sum, one) => sum + (one.costUsd ?? 0), 0);
   const name = path[path.length - 1] ?? node.stateId;
   const open = (slot: string, value: unknown): void => onOpen(`${name} · ${slot}`, value);
+  // How long so far, for a step still going: by a clock that moves only while it is.
+  const now = useNow(node.endedAt === undefined && isLiveNode(node));
   return (
     <View flexDirection="column" gap={10} minWidth={0}>
       <View flexDirection="row" alignItems="center" gap={7} minWidth={0}>
@@ -219,7 +223,7 @@ function StepCard({
       </PanelSection>
       <PanelSection title="How it ran">
         <PanelRow name="status" value={node.superseded ? `${node.status} · superseded` : node.status} />
-        <PanelRow name="took" value={tookOf(node.startedAt, node.endedAt)} title={new Date(node.startedAt).toLocaleString()} />
+        <PanelRow name="took" value={stepTookOf(node, now)} title={new Date(node.startedAt).toLocaleString()} />
         {node.operationCalls !== undefined
           ? node.operationCalls.map((call, i) => (call === undefined ? null : <PanelRow key={i} name={`call ${i + 1}`} value={callLine(call)} title={call.status === "failed" ? call.reason : undefined} />))
           : node.operation !== undefined

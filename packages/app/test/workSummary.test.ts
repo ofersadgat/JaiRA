@@ -5,7 +5,7 @@
  */
 import { describe, expect, it } from "vitest";
 import { iconOf, takenApartOf, type ToolEntry, type WorkEntry } from "../src/renderer/transcript";
-import { ACTIVE_NAME, approvalWordsOf, chipsOf, countOf, inFlight, isIdle, isQuiet, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
+import { ACTIVE_NAME, approvalWordsOf, chipsOf, countOf, currentPhaseOf, inFlight, isIdle, isQuiet, liveIndexOf, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
 import { approvalCallIndex } from "../src/renderer/approvalCall";
 import { toolLineOf } from "../src/renderer/transcriptRows";
 import { durationOf } from "../src/renderer/runActivityModel";
@@ -219,8 +219,11 @@ describe("in the transcript", () => {
     // The call with no answer is the one still happening, and the phase holding it the one in progress.
     const live = 12;
     expect(working.map(inFlight).lastIndexOf(true)).toBe(live);
-    const current = phasesOf(working, { merge: "withheld", dropIdle: true }).at(-1)!;
+    expect(liveIndexOf(working, true)).toBe(live);
+    const phases = phasesOf(working, { merge: "withheld", dropIdle: true });
+    const current = phases.at(-1)!;
     expect(current.indices).toContain(live);
+    expect(currentPhaseOf(phases, live, true)).toBe(phases.length - 1);
     // The phase in progress says what it is doing, not what it did — and the tests it is running again
     // have not passed yet, so it is changing until they do, and fixed after.
     expect(current.name).toBe("Changed");
@@ -239,6 +242,33 @@ describe("in the transcript", () => {
     expect(none.shown).toEqual([]);
     // The run chip holds the failed run too, and the one running.
     expect(chipsOf(working, none.rolled, live).find((chip) => chip.kind === "run")).toMatchObject({ label: "2 commands", failed: 1, live: true });
+  });
+
+  it("does not call a finished conversation that ended on an unanswered call working", () => {
+    // A chat on 2026-09-25: its record ended on a `bash` call whose result was never written, the task
+    // was completed — and the summary pulsed "Running git fetch…" with a clock that never stopped.
+    const endedOnACall = [...stretch.slice(0, 12), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin", args: { command: "git fetch origin" }, at: t0 + 55_000 } as WorkEntry];
+    const phases = phasesOf(endedOnACall, { merge: "withheld", dropIdle: true });
+    // Not being worked on: no step is in flight and no phase is in progress, whatever the entries lack.
+    expect(inFlight(endedOnACall[12]!)).toBe(true);
+    expect(liveIndexOf(endedOnACall, false)).toBeUndefined();
+    expect(currentPhaseOf(phases, liveIndexOf(endedOnACall, false), false)).toBe(-1);
+    // So nothing pulses, no row is kept, and its sentence says what it did, not what it "is doing".
+    const run = runsOf(endedOnACall, [12])[0]!;
+    expect(sentenceOf(endedOnACall, run, liveIndexOf(endedOnACall, false))).toEqual({ said: [{ text: "Ran " }, { code: "git fetch origin", shell: true }] });
+    expect(chipsOf(endedOnACall, phases.at(-1)!.indices, liveIndexOf(endedOnACall, false)).some((chip) => chip.live)).toBe(false);
+    // Said to be working, the same record is drawn in progress.
+    expect(liveIndexOf(endedOnACall, true)).toBe(12);
+    expect(currentPhaseOf(phases, 12, true)).toBe(phases.length - 1);
+    expect(sentenceOf(endedOnACall, run, 12).now).toEqual([{ text: "Running " }, { code: "git fetch origin", shell: true }]);
+  });
+
+  it("calls the last phase the one in progress while the agent is between steps", () => {
+    // Working, and every call so far has answered: it is thinking of the next one.
+    const phases = phasesOf(stretch, { merge: "withheld", dropIdle: true });
+    expect(liveIndexOf(stretch, true)).toBeUndefined();
+    expect(currentPhaseOf(phases, undefined, true)).toBe(phases.length - 1);
+    expect(currentPhaseOf(phases, undefined, false)).toBe(-1);
   });
 
   it("shows, counts or hides the rate limits and notes as it is asked to", () => {
@@ -333,6 +363,19 @@ describe("in the transcript", () => {
       expect(approvalWordsOf(approve(allowed) as never)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", mark: "ok" });
       expect(approvalWordsOf(approve({ decision: "deny", scope: "run", by: "person", waitedMs: 3_000 }) as never)).toMatchObject({ name: "Denied", preview: "by you · for this run · after 3 s", tone: "bad" });
       expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "closed", waitedMs: 5_460_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the app closed while it waited · after 1 h 31 min", tone: "warn" });
+    });
+
+    it("reads Not answered, not Approve, once nobody is being asked any more", () => {
+      // No answer was recorded and the stretch is over (the run stopped, the app closed before it could
+      // write one): "Approve" would say somebody is still being asked.
+      expect(approvalWordsOf(approve() as never, true)).toMatchObject({ name: "Approve", preview: LINE, mark: "waiting" });
+      expect(approvalWordsOf(approve() as never, false)).toMatchObject({ name: "Not answered", preview: LINE, tone: "warn", mark: "cut" });
+      expect(toolLineOf(approve() as ToolEntry, true, false)).toMatchObject({ name: "Approve", mark: "waiting", running: true });
+      expect(toolLineOf(approve() as ToolEntry, false, false)).toMatchObject({ name: "Not answered", mark: "cut", running: false, tone: "warn" });
+      // Its sentence in a summary row follows: waiting only in a stretch still being worked on.
+      const run = runsOf(asking, [2])[0]!;
+      expect(sentenceOf(asking, run, undefined).said[0]).toEqual({ text: "Not answered " });
+      expect(sentenceOf(asking, run, 2).now![0]).toEqual({ text: "Waiting for you to approve " });
     });
 
     it("is never what names a phase — the person being asked changes nothing and checks nothing", () => {

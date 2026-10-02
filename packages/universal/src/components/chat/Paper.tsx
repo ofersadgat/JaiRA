@@ -5,6 +5,7 @@ import { useLook, useTokens } from "../../tokens";
 import { Press, Txt, edge } from "../../primitives";
 import { statusFigureOf, statusVerbOf, statusWhatOf } from "@jaira/ui/liveStatusModel";
 import { useElapsed } from "@jaira/ui/runActivityModel";
+import { Pulse } from "./Pulse";
 
 /**
  * The sheet a conversation is printed on, on the grey it floats over. How it looks:
@@ -38,21 +39,6 @@ export function Sheet({ children, dark }: { children: ReactNode; dark: boolean }
       {...({ boxShadow: dark ? "0px 1px 3px rgba(0, 0, 0, 0.35)" : "0px 1px 3px rgba(15, 20, 30, 0.06)" } as object)}
     >
       {children}
-    </View>
-  );
-}
-
-/**
- * `Pulse`: three dots in the colour given, 4 round, 3 apart, at .55. Drawn still: they do not
- * breathe.
- */
-export function Pulse({ color = "accent" }: { color?: string }): JSX.Element {
-  const t = useTokens();
-  return (
-    <View flexDirection="row" alignItems="center" gap={3} flexShrink={0}>
-      {[0, 1, 2].map((i) => (
-        <View key={i} width={4} height={4} borderRadius={999} opacity={0.55} backgroundColor={t.v(color) as never} />
-      ))}
     </View>
   );
 }

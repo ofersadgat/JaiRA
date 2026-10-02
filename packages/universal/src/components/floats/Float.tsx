@@ -1,7 +1,7 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { FLOAT_GAP, placeFloat, type FloatAlign, type FloatRect, type FloatSide } from "@jaira/ui/floatPlace";
+import { FLOAT_GAP, holdFloat, holdOf, placeFloat, type FloatAlign, type FloatHold, type FloatRect, type FloatSide } from "@jaira/ui/floatPlace";
 import { useKeyboardInset } from "./keyboard";
 
 /**
@@ -14,12 +14,16 @@ import { useKeyboardInset } from "./keyboard";
  * window's corner). On web the size is read from the element in whole pixels (`offsetWidth`,
  * `offsetHeight`, `scrollHeight`), so a float placed by its bottom edge (`align: "end"`) lands where the
  * reference pictures have it.
+ *
+ * `settle`: once shown it stays where it opened against its anchor and grows downward from there
+ * (`holdFloat`) — a card whose rows open under the pointer, which must not move out from under it.
  */
 export function Float({
   anchor,
   side = "below",
   align = "start",
   offset = FLOAT_GAP,
+  settle = false,
   children,
   ...box
 }: {
@@ -28,6 +32,8 @@ export function Float({
   align?: FloatAlign;
   /** Room between the float and its anchor (not `gap`: the box's own `gap` is its children's). */
   offset?: number;
+  /** Stay where it first opened, and grow downward from there. */
+  settle?: boolean;
   children?: ReactNode;
 } & Record<string, unknown>): JSX.Element {
   const whole = useWindowDimensions();
@@ -37,7 +43,11 @@ export function Float({
   const ref = useRef<unknown>(null);
   // The size it WANTS: taken while it is not capped, so a cap does not shrink what it asks for.
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
-  const placed = size === null ? null : placeFloat(anchor, size, win, side, align, offset);
+  // With `settle`: where it first stood against its anchor, kept from its first placing on.
+  const held = useRef<FloatHold | null>(null);
+  const fresh = size === null ? null : placeFloat(anchor, size, win, side, align, offset);
+  if (settle && fresh !== null && held.current === null) held.current = holdOf(anchor, fresh);
+  const placed = settle && size !== null && held.current !== null ? holdFloat(anchor, held.current, size.height, win) : fresh;
   return (
     <View
       ref={ref as never}

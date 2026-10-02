@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
-import { AccessibilityInfo, Animated, Easing, Text } from "react-native";
-import { isStill } from "../../motion";
+import { Animated, Easing, Text } from "react-native";
+import { useMoves } from "../../useMoves";
 
 /**
  * What moves in the Debug session panel, on a phone (`SessionPanel.tsx`): a running call's dot breathing
@@ -11,23 +11,8 @@ import { isStill } from "../../motion";
  *                             asked for, still at 0.7
  *   the caret "▍"             1s in two steps, for ever: shown for half a second, gone for half
  *
- * Both stand still under a test that reads the screen (`motion.ts`).
+ * Both stand still under a test that reads the screen (`motion.ts`, asked through `useMoves`).
  */
-function useMoves(): { moves: boolean; reduced: boolean } {
-  const [reduced, setReduced] = useState<boolean | null>(null);
-  useEffect(() => {
-    let live = true;
-    void AccessibilityInfo.isReduceMotionEnabled()
-      .catch(() => false)
-      .then((on) => live && setReduced(on));
-    const sub = AccessibilityInfo.addEventListener("reduceMotionChanged", setReduced);
-    return () => {
-      live = false;
-      sub.remove();
-    };
-  }, []);
-  return { moves: reduced === false && !isStill(), reduced: reduced === true };
-}
 
 /** The pulse on what it holds, on the native driver. */
 export function Breathing({ children }: { children: ReactNode }): JSX.Element {

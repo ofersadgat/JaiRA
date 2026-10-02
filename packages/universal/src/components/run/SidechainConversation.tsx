@@ -3,6 +3,7 @@ import { ScrollView } from "react-native";
 import { View } from "@tamagui/core";
 import type { InstanceNode, TaskDetail } from "@jaira/shared/browser";
 import { sessionKey } from "@jaira/ui/sessionCache";
+import { sidechainWorkingOf, writingOf } from "@jaira/ui/stillRunning";
 import { sidechainEntriesOf } from "@jaira/ui/transcript";
 import { nodeAt, type TrailStep } from "@jaira/ui/trail";
 import { scrollbarProps } from "../../primitives";
@@ -51,6 +52,13 @@ export function SidechainConversation({
 
   const liveItems = liveTurn?.sidechains[call];
   const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);
+  // Still being written exactly while the call that spawned it is still running (`stillRunning.ts`):
+  // the host's record going on after the subagent answered does not make the subagent's last step live.
+  const working = useMemo(() => {
+    // The turn in flight is the host's when it streams this chain, or names the host's record.
+    const hosts = liveTurn !== null && (liveItems !== undefined || (view !== null && liveTurn.sessionId === view.sessionId && liveTurn.seq === view.seq));
+    return sidechainWorkingOf(view, call, hosts ? liveTurn : null, writingOf(undefined, view) || liveItems !== undefined);
+  }, [view, call, liveTurn, liveItems]);
   // Same rule as the thread that spawned it; the call is the reset — a different chain starts at its end.
   const { at: _at, following: _following, unpin: _unpin, ...follow } = useLiveEdge(call);
   // The page is at least as tall as the scroller: the scroller's own height, measured.
@@ -74,6 +82,7 @@ export function SidechainConversation({
             session={view}
             entries={entries}
             live={liveTurn}
+            working={working}
             empty="This subagent has not said anything yet."
             {...(open !== undefined && host !== undefined ? { onOpenSidechain: (nested: string, name: string) => open(host, nested, name) } : {})}
           />

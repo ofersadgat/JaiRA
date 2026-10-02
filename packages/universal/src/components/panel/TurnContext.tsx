@@ -1,20 +1,18 @@
-import { useRef, useState, type JSX } from "react";
-import { Pressable } from "react-native";
-import { View, isWeb } from "@tamagui/core";
+import type { JSX } from "react";
+import { View } from "@tamagui/core";
 import { contextFill, formatTokens, toneOfContext, type ContextReading } from "@jaira/shared/browser";
 import { colourOf } from "@jaira/ui/contextParts";
-import type { FloatRect } from "@jaira/ui/floatPlace";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { Float } from "../floats/Float";
-import { MenuLayer } from "../MenuLayer";
+import { HoverFloatLayer, Tap, useHoverFloat } from "../floats/hoverFloat";
 import { Ring } from "../usage/Ring";
-import { HoverLayer } from "./HoverLayer";
 
 /**
  * On an answer's rail, how full the conversation was after it — the ring and its figure, and the
- * breakdown on hover (a press on a phone). The colours of the breakdown are `contextParts.ts`'s. How it
+ * breakdown on hover — or, with no pointer that hovers, on a press, closed by a press outside it
+ * (`floats/hoverFloat.tsx`). The colours of the breakdown are `contextParts.ts`'s. How it
  * looks:
  *
  *   the badge       row, centred, gap 4, padding 3 4, radius 5, data 500 10.5/12 on 1, tabular, --dim
@@ -26,23 +24,15 @@ import { HoverLayer } from "./HoverLayer";
  */
 export function TurnContext({ context, before, route }: { context: ContextReading; before?: ContextReading | undefined; route?: string | undefined }): JSX.Element {
   const t = useTokens();
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<FloatRect | null>(null);
-  const anchor = useRef<unknown>(null);
+  // The tip takes no pointer, so nothing lingers: it is gone as the pointer leaves the badge.
+  const hover = useHoverFloat(0);
+  const { open, rect, anchor } = hover;
   const fill = contextFill(context, route);
   const tone = toneOfContext(fill);
   const prior = before !== undefined ? contextFill(before, route) : null;
   const window = context.window;
   const parts = context.breakdown ?? [];
   const figure = fill === null ? formatTokens(context.used, true) : `${Math.round(fill)}%`;
-  const show = (): void => {
-    const el = anchor.current as { getBoundingClientRect?: () => DOMRect; measureInWindow?: (then: (x: number, y: number, w: number, h: number) => void) => void } | null;
-    if (el?.getBoundingClientRect !== undefined) {
-      const r = el.getBoundingClientRect();
-      setRect({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
-    } else el?.measureInWindow?.((x, y, w, h) => setRect({ left: x, top: y, right: x + w, bottom: y + h }));
-    setOpen(true);
-  };
   const face = { voice: "data" as const, scale: 10.5 / 12, weight: 500, tabular: true, lineHeight: 1 };
   const words = { voice: "app" as const, scale: 12 / 12.5, color: "text", lineHeight: 1.4 };
   const px = (n: number, voice: "app" | "data"): number => n / (Number(t.scaled(`size-${voice}`, 1)) || (voice === "app" ? 12.5 : 12));
@@ -98,7 +88,7 @@ export function TurnContext({ context, before, route }: { context: ContextReadin
         borderRadius={5}
         backgroundColor={(open ? t.v("fill-ghost-hover") : "transparent") as never}
         aria-label={fill === null ? `${formatTokens(context.used)} tokens in context after this reply` : `${Math.round(fill)}% of the context after this reply`}
-        {...(isWeb ? { onMouseEnter: show, onMouseLeave: () => setOpen(false) } : {})}
+        {...hover.bind}
       >
         <Ring t={t} pct={fill} tone={tone} size={12} width={3.2} />
         <Txt spec={{ ...face, color: tone === "warn" ? "warn" : "dim" }} numberOfLines={1}>
@@ -108,9 +98,9 @@ export function TurnContext({ context, before, route }: { context: ContextReadin
   );
   return (
     <>
-      {/* On a phone the badge is pressed (a Tamagui `onPress` does not fire there). */}
-      {isWeb ? badge : <Pressable onPress={show}>{badge}</Pressable>}
-      {open ? isWeb ? <HoverLayer>{tip}</HoverLayer> : <MenuLayer onClose={() => setOpen(false)}>{tip}</MenuLayer> : null}
+      {/* Under a finger the badge is pressed (a Tamagui `onPress` does not fire on a phone: `Tap` is a `Pressable`). */}
+      <Tap hover={hover}>{badge}</Tap>
+      {open ? <HoverFloatLayer hover={hover}>{tip}</HoverFloatLayer> : null}
     </>
   );
 }

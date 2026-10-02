@@ -1,6 +1,6 @@
 import { useRef, useState, type JSX } from "react";
-import { TextInput, View as RNView } from "react-native";
-import { View, isWeb } from "@tamagui/core";
+import { Pressable, TextInput, View as RNView } from "react-native";
+import { View } from "@tamagui/core";
 import { contextFill, formatAge, formatTokens, formatUsd, toneOfContext, type ContextPart, type ContextReading, type LimitAccountView } from "@jaira/shared/browser";
 import { colourOf } from "@jaira/ui/contextParts";
 import type { FloatRect } from "@jaira/ui/floatPlace";
@@ -9,6 +9,7 @@ import { capital, modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windo
 import { creditPercent, isSpent, toneOfPercent, usedPercentFor } from "@jaira/shared/browser";
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { useCanHover } from "../../canHover";
 import { colorOf } from "../Sidebar";
 import { Float } from "../floats/Float";
 import { MenuLayer } from "../MenuLayer";
@@ -342,6 +343,13 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
   const [focus, setFocus] = useState("");
   const section = useRef<RNView | null>(null);
   const [beside, setBeside] = useState<FloatRect | null>(null);
+  // A part's breakdown opens beside the section: under a pointer that hovers, while it is on the part's
+  // row; under a finger, on a press of the row, and a press outside the breakdown closes it.
+  const hovers = useCanHover();
+  const showPart = (name: string): void => {
+    setShown(name);
+    section.current?.measureInWindow((x, y, w, h) => setBeside({ left: x, top: y, right: x + w, bottom: y + h }));
+  };
   const body = ((): JSX.Element => {
     if (context === null || context === undefined) {
       return (
@@ -427,7 +435,8 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
           ) : null}
           {parts.length > 0 ? (
             <View flexDirection="column" gap={1} marginHorizontal={-6}>
-              {parts.map((p, k) => (
+              {parts.map((p, k) => {
+                const row = (
                 <View
                   key={p.name}
                   flexDirection="row"
@@ -437,21 +446,7 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
                   paddingHorizontal={6}
                   borderRadius={6}
                   backgroundColor={(shown === p.name ? t.v("fill-ghost-selected") : "transparent") as never}
-                  {...(isWeb
-                    ? {
-                        onMouseEnter: () => {
-                          setShown(p.name);
-                          section.current?.measureInWindow((x, y, w, h) => setBeside({ left: x, top: y, right: x + w, bottom: y + h }));
-                        },
-                        onMouseLeave: () => setShown((was) => (was === p.name ? undefined : was)),
-                      }
-                    : {
-                        // A phone has no hover: a press opens the breakdown, as a hover card opens on one.
-                        onPress: () => {
-                          setShown(p.name);
-                          section.current?.measureInWindow((x, y, w, h) => setBeside({ left: x, top: y, right: x + w, bottom: y + h }));
-                        },
-                      })}
+                  {...(hovers ? { onMouseEnter: () => showPart(p.name), onMouseLeave: () => setShown((was) => (was === p.name ? undefined : was)) } : {})}
                 >
                   <View width={8} height={8} borderRadius={2} backgroundColor={colorOf(t, colourOf(p.name, k)) as never} />
                   <Txt spec={{ voice: "app", scale: 12 / 12.5, lineHeight: 1.3 }} ellip flex={1} minWidth={0}>
@@ -467,12 +462,21 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
                     {p.parts !== undefined && p.parts.length > 0 ? "›" : ""}
                   </Txt>
                 </View>
-              ))}
+                );
+                // Under a finger the row is pressed (a Tamagui `onPress` does not fire on a phone).
+                return hovers ? (
+                  row
+                ) : (
+                  <Pressable key={p.name} onPress={() => showPart(p.name)}>
+                    {row}
+                  </Pressable>
+                );
+              })}
             </View>
           ) : null}
         </Section>
         {open !== undefined && open.parts !== undefined && open.parts.length > 0 && beside !== null ? (
-          isWeb ? (
+          hovers ? (
             <HoverLayer>
               <PartFlyout part={open} window={window} beside={beside} />
             </HoverLayer>

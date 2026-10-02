@@ -2,7 +2,7 @@ import { Fragment, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import { parentName } from "@jaira/ui/projects";
 import type { SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
-import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, WINDOW_GUTTER, edge, landmark, useHover } from "../primitives";
+import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, WINDOW_GUTTER, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
 import { Pills } from "./Pills";
@@ -204,7 +204,7 @@ function Column({
             // in the column it takes the rest — `flex: 1`, whose 0% basis CSS reads as the content in a
             // section of no set height; Yoga's 0 would collapse the root's drawer to nothing, so the basis
             // is said as what CSS makes of it.
-            {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden" } : { overflow: "hidden" }) } : { flexGrow: 1, flexShrink: 1, flexBasis: "auto" })}
+            {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden", ...viewScrollbarProps(t) } : { overflow: "hidden" }) } : { flexGrow: 1, flexShrink: 1, flexBasis: "auto" })}
             minHeight={0}
             marginTop={3}
             marginBottom={6}

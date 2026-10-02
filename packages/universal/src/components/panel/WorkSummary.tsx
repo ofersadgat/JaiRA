@@ -1,7 +1,6 @@
-import { useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { Pressable } from "react-native";
+import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { ScrollView, useWindowDimensions } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
-import type { FloatRect } from "@jaira/ui/floatPlace";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
 import { ApprovalAskContext, WorkLookContext, useNow, useReadOnlyVerdicts } from "@jaira/ui/workSummaryContext";
 import {
@@ -9,9 +8,10 @@ import {
   allOf,
   chipsOf,
   countOf,
-  inFlight,
+  currentPhaseOf,
   isIdle,
   isQuiet,
+  liveIndexOf,
   phasesOf,
   secondsOf,
   sentenceOf,
@@ -26,11 +26,10 @@ import {
 import type { WorkEntry } from "@jaira/ui/transcript";
 import { Press, Txt, edge, faceOf } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { MenuLayer } from "../MenuLayer";
-import { Pulse } from "../chat/Paper";
+import { Pulse } from "../chat/Pulse";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { Float } from "../floats/Float";
-import { HoverLayer } from "./HoverLayer";
+import { HoverFloatLayer, Tap, useHoverFloat, type HoverFloat } from "../floats/hoverFloat";
 import { Icon, type IconName } from "./Icon";
 import { ShellLine } from "./WorkRows";
 
@@ -38,7 +37,8 @@ import { ShellLine } from "./WorkRows";
  * The work between two messages, summarised — a box of phases (a number, a name, a chip per kind of
  * work, the first line of its thinking, how long it took), the latest steps of the phase in progress,
  * and the foot, "Every step", that opens every row in place. Everything that counts something opens the
- * rows it counts in a hover card (web; a press on a phone). What it says is `workSummary.ts`'s; the
+ * rows it counts in a card: on hover under a pointer, on a press under a finger, where it is a modal a
+ * press outside closes (`floats/hoverFloat.tsx`; the foot's own press opens its rows in place instead). What it says is `workSummary.ts`'s; the
  * settings, the read-only judge and the approval its host can answer are `workSummaryContext.ts`'s
  * providers. How it looks:
  *
@@ -65,7 +65,11 @@ import { ShellLine } from "./WorkRows";
  *   every row, open padding 4 2 6, 1px --line but the top, radius 0 0 8 8
  *   the kept rows   6 above
  *   a hover card    at most 560 (the window less 32), padding 6, 1px --line, radius 10, --panel, --lift;
- *                   its head row, spaced, 4 under, padding 4 8 6, a --line under, app 11/12.5 --dim
+ *                   its head row, spaced, 4 under, padding 4 8 6, a --line under, app 11/12.5 --dim;
+ *                   it stays where it opened while its rows are unfolded (`settle`), and follows
+ *                   what it was opened from when the page scrolls under it
+ *   what opens one  the pointer over it, or the keyboard's focus on it (each is in the Tab order); with
+ *                   no pointer that hovers, a press on it, and a press outside the card closes it
  *   a called row    22 in, hooked to the call above: 1.5px --line left and bottom, 9 × 17, −13 · −5
  */
 
@@ -103,73 +107,23 @@ function hueOfKind(t: Tokens, kind: WorkKind): string {
   return String(t.v(HUES[kind]));
 }
 
-/**
- * A hover card's state: open while the pointer is over the anchor or the card, closed 160 ms after it
- * leaves both. On a phone a press opens it (and a press outside closes it).
- */
-function useHoverCard(linger = 160): {
-  open: boolean;
-  anchor: React.MutableRefObject<unknown>;
-  rect: FloatRect | null;
-  bind: Record<string, unknown>;
-  cardBind: Record<string, unknown>;
-  press: () => void;
-  close: () => void;
-} {
-  const [open, setOpen] = useState(false);
-  const [rect, setRect] = useState<FloatRect | null>(null);
-  const anchor = useRef<unknown>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const measure = (): void => {
-    const el = anchor.current as { getBoundingClientRect?: () => DOMRect; measureInWindow?: (then: (x: number, y: number, w: number, h: number) => void) => void } | null;
-    if (el !== null && typeof el.getBoundingClientRect === "function") {
-      const r = el.getBoundingClientRect();
-      setRect({ left: r.left, top: r.top, right: r.right, bottom: r.bottom });
-    } else if (el !== null && typeof el.measureInWindow === "function") {
-      el.measureInWindow((x, y, w, h) => setRect({ left: x, top: y, right: x + w, bottom: y + h }));
-    }
-  };
-  const stay = (): void => {
-    clearTimeout(timer.current);
-    measure();
-    setOpen(true);
-  };
-  const leave = (): void => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setOpen(false), linger);
-  };
-  const close = (): void => {
-    clearTimeout(timer.current);
-    setOpen(false);
-  };
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return {
-    open,
-    anchor,
-    rect,
-    bind: isWeb ? { onMouseEnter: stay, onMouseLeave: leave } : {},
-    cardBind: isWeb ? { onMouseEnter: stay, onMouseLeave: leave } : {},
-    press: () => {
-      if (isWeb) return;
-      measure();
-      setOpen((was) => !was);
-    },
-    close,
-  };
-}
+type HoverCard = HoverFloat;
 
-type HoverCard = ReturnType<typeof useHoverCard>;
+/** In the Tab order (web): what opens a card under the pointer opens it under the keyboard's focus too. */
+const REACHED: Record<string, unknown> = isWeb ? { tabIndex: 0 } : {};
 
 /** The float a hover card is — placed under its anchor, in the layer over everything. */
 function Card({ hover, label, count, children }: { hover: HoverCard; label: string; count?: string | undefined; children: ReactNode }): JSX.Element | null {
   const t = useTokens();
+  const win = useWindowDimensions();
   if (!hover.open) return null;
   const card = (
     <Float
       anchor={hover.rect ?? { left: 0, top: 0, right: 0, bottom: 0 }}
       side="below"
+      settle
       width={560}
-      maxWidth="calc(100vw - 32px)"
+      maxWidth={win.width - 32}
       padding={6}
       borderWidth={1}
       borderStyle="solid"
@@ -184,20 +138,11 @@ function Card({ hover, label, count, children }: { hover: HoverCard; label: stri
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{label}</Txt>
         {count !== undefined ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{count}</Txt> : null}
       </View>
-      {children}
+      {/* Taller than the screen it scrolls inside: the box's own `overflow` does on web; a phone's needs a scroller. */}
+      {isWeb ? children : <ScrollView nestedScrollEnabled>{children}</ScrollView>}
     </Float>
   );
-  return isWeb ? <HoverLayer>{card}</HoverLayer> : <MenuLayer onClose={hover.close}>{card}</MenuLayer>;
-}
-
-/** On a phone a hover card opens on a press: what is pointed at on web is tapped there. */
-function Tap({ hover, style, children }: { hover: HoverCard; style?: Record<string, unknown>; children: ReactNode }): JSX.Element {
-  if (isWeb) return <>{children}</>;
-  return (
-    <Pressable onPress={hover.press} style={style as never}>
-      {children}
-    </Pressable>
-  );
+  return <HoverFloatLayer hover={hover}>{card}</HoverFloatLayer>;
 }
 
 /** A row in a list of rows: a call a tool made sits under the call that made it. */
@@ -248,7 +193,7 @@ function SaidText({ said }: { said: readonly Said[] }): JSX.Element {
 
 function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
   const t = useTokens();
-  const hover = useHoverCard();
+  const hover = useHoverFloat();
   const hue = chip.live ? String(t.v("accent")) : chip.failed > 0 ? String(t.v("bad")) : hueOfKind(t, chip.kind);
   const [hovered, setHovered] = useState(false);
   const on = hover.open || hovered;
@@ -268,8 +213,10 @@ function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
         borderRadius={999}
         backgroundColor={t.mix(hue, on ? 20 : 11, "transparent") as never}
         {...({ boxShadow: `inset 0px 0px 0px ${chip.live ? 1.5 : 1}px ${chip.live ? hue : t.mix(hue, 22, "transparent")}` } as object)}
-        {...(isWeb
+        {...REACHED}
+        {...(hover.hovers
           ? {
+              ...hover.bind,
               onMouseEnter: () => {
                 setHovered(true);
                 (hover.bind.onMouseEnter as () => void)();
@@ -314,7 +261,7 @@ function Chips({ entries, indices, live, rowOf }: Rows & { entries: readonly Wor
 function ThoughtLine({ entries, indices }: { entries: readonly WorkEntry[]; indices: readonly number[] }): JSX.Element | null {
   const t = useTokens();
   const line = thoughtLineOf(entries, indices);
-  const hover = useHoverCard();
+  const hover = useHoverFloat();
   if (line === undefined) return <View flexGrow={1} flexShrink={1} flexBasis={0} />;
   return (
     <>
@@ -332,7 +279,8 @@ function ThoughtLine({ entries, indices }: { entries: readonly WorkEntry[]; indi
         paddingHorizontal={3}
         borderRadius={4}
         backgroundColor={(hover.open ? t.v("fill-ghost-hover") : "transparent") as never}
-        {...(isWeb ? hover.bind : {})}
+        {...REACHED}
+        {...hover.bind}
       >
         <Icon name="think" size={11} color={String(t.v("accent"))} />
         <Txt spec={{ voice: "app", scale: 11.5 / 12.5, italic: true, color: hover.open ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
@@ -352,7 +300,7 @@ function ThoughtLine({ entries, indices }: { entries: readonly WorkEntry[]; indi
 /** One of the phase's latest rows: consecutive calls of one kind, said in a sentence. */
 function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entries: readonly WorkEntry[]; run: WorkRun; live?: number | undefined; now: number; clock: (at?: number) => string; below?: ReactNode }): JSX.Element {
   const t = useTokens();
-  const hover = useHoverCard();
+  const hover = useHoverFloat();
   const { said, now: doing } = sentenceOf(entries, run, live);
   const running = doing !== undefined;
   const failedCount = run.rows.filter((i) => {
@@ -379,7 +327,7 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
         </View>
         <View flex={1} minWidth={0} flexDirection="row" alignItems="center" gap={6}>
           <Tap hover={hover} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0 }}>
-          <View ref={hover.anchor as never} flexGrow={0} flexShrink={1} minWidth={0} borderRadius={4} {...(isWeb ? hover.bind : {})}>
+          <View ref={hover.anchor as never} flexGrow={0} flexShrink={1} minWidth={0} borderRadius={4} {...REACHED} {...hover.bind}>
             <Txt spec={{ voice: "app", scale: 12 / 12.5, color: wait ? "warn" : "text" }} ellip>
               <SaidText said={said} />
               {doing !== undefined ? (
@@ -449,11 +397,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const t = useTokens();
   const look = useContext(WorkLookContext);
   const [open, setOpen] = useState(false);
-  const live = useMemo(() => {
-    if (!working) return undefined;
-    for (let i = entries.length - 1; i >= 0; i--) if (inFlight(entries[i]!)) return i;
-    return undefined;
-  }, [entries, working]);
+  const live = useMemo(() => liveIndexOf(entries, working), [entries, working]);
   const now = useNow(working);
   const all = useMemo(() => entries.map((_, i) => i), [entries]);
   const dropIdle = look.notes !== "show";
@@ -464,10 +408,10 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [entries, look.phases, look.thinking, dropIdle, all, verdicts, heard]);
   const counted = (indices: readonly number[]): number[] => (look.notes === "hide" ? indices.filter((i) => !isQuiet(entries[i]!)) : [...indices]);
-  const currentAt = working ? (live !== undefined ? phases.findIndex((p) => p.indices.includes(live)) : phases.length - 1) : -1;
+  const currentAt = currentPhaseOf(phases, live, working);
   const whole = spanOf(entries, all);
   const took = whole.start === undefined ? undefined : (working ? now : (whole.end ?? whole.start)) - whole.start;
-  const foot = useHoverCard();
+  const foot = useHoverFloat();
   const ask = useContext(ApprovalAskContext);
   const askAt = working && ask !== undefined ? approvalCallIndex(entries, ask.pending.requestId) : -1;
   const prompt = (afterRow: boolean): ReactNode =>
@@ -526,6 +470,9 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
           })}
         </View>
       )}
+      {/* The foot's own box is what its card is opened from and placed against: the whole button, under
+          the pointer or the keyboard's focus (the button is in the Tab order itself). */}
+      <View ref={foot.anchor as never} minWidth={0} {...(!open ? foot.bind : {})}>
       <Press
         onPress={() => {
           foot.close();
@@ -545,7 +492,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
         box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : wash })}
       >
         {({ hovered }) => (
-          <View ref={foot.anchor as never} flex={1} flexDirection="row" alignItems="center" gap={8} minWidth={0} {...(isWeb && !open ? foot.bind : {})}>
+          <View flex={1} flexDirection="row" alignItems="center" gap={8} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: hovered ? "text" : "dim" }} {...normalLineOf(t, "app", 11.5 / 12.5)} flex={1} minWidth={0}>
               Every step
             </Txt>
@@ -558,6 +505,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
           </View>
         )}
       </Press>
+      </View>
       {!open ? (
         <Card hover={foot} label="Every step" count={`${entries.length} lines`}>
           <RowsList indices={all} rowOf={rowOf} entries={entries} />
@@ -592,11 +540,11 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
 
 /** The phase's name (a pulse before it while it is the one in progress), and its rows on hover. */
 function PhaseName({ name, label, current, indices, rowOf }: Rows & { name: string; label: string; current: boolean; indices: readonly number[] }): JSX.Element {
-  const hover = useHoverCard();
+  const hover = useHoverFloat();
   return (
     <>
       <Tap hover={hover} style={{ width: 92, flexShrink: 0 }}>
-      <View ref={hover.anchor as never} width={92} flexShrink={0} flexDirection="row" alignItems="center" gap={5} borderRadius={4} {...(isWeb ? hover.bind : {})}>
+      <View ref={hover.anchor as never} width={92} flexShrink={0} flexDirection="row" alignItems="center" gap={5} borderRadius={4} {...REACHED} {...hover.bind}>
         {current ? <Pulse /> : null}
         <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: current ? "accent" : "text" }} numberOfLines={1}>
           {name}

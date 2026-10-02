@@ -14,6 +14,7 @@ import { PendingSend } from "./PendingSend";
 import { paletteOfRun } from "@jaira/ui/rail";
 import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "@jaira/ui/sessionBands";
 import { sessionKey } from "@jaira/ui/sessionCache";
+import { partHoldsEnd, writingOf } from "@jaira/ui/stillRunning";
 import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurfaceModel";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
 import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurfaceTypes";
@@ -303,7 +304,8 @@ export function RunTranscript({
       liveTurn !== null &&
       (piece.sessionId !== undefined ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq : liveTurn.stateId === piece.node.stateId && piece.node.status === "running");
     const live = matches ? liveTurn : null;
-    const entries = entriesOfPart(markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions), piece.part);
+    const whole = markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions);
+    const entries = entriesOfPart(whole, piece.part);
     // The message that opened this state's conversation is where its entry into the run is: a rewind or
     // a fork from it cuts at the same journal point as the rail's entered row — for a message typed into
     // the run, before that message.
@@ -318,6 +320,8 @@ export function RunTranscript({
         session={view}
         entries={entries}
         live={live}
+        // A record drawn in parts is in progress only in the part that reaches its end.
+        working={writingOf(undefined, view) && partHoldsEnd(whole, piece.part)}
         calls={calls}
         rails
         onEdit={onEdit}

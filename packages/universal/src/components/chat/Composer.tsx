@@ -38,7 +38,7 @@ import { Svg } from "../panel/Svg";
 import { INK, Ring } from "../usage/Ring";
 import { BucketPicker, CardHint, ChipCard, KeepPermissionSet, Opt, Opts, RouteCascade, ThinkingBody } from "./ComposerCards";
 import { ToolsBody } from "./ComposerTools";
-import { Pulse } from "./Paper";
+import { Pulse } from "./Pulse";
 import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
 import { FigureFace } from "../usage/Figures";
 import { BrandIcon } from "../settings/bits";

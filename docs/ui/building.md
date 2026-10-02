@@ -80,6 +80,12 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
   `onFocus` and `onBlur` go on the `Press` and reach the element that takes the focus. `label` is its
   accessible name, `title` its tooltip, `focusable` its place in the Tab order.
 - **`useHover()`** — hover on a box that is not itself pressed (a row).
+- **`useHoverFloat()`, `Tap`, `HoverFloatLayer`** (`components/floats/hoverFloat.tsx`) — something that
+  shows more of itself in a float (a hover card, a tip with a breakdown in it). How it opens is the
+  POINTER's to decide, not the platform's (`useCanHover()`, `canHover.ts`): under a pointer that hovers,
+  on hover or the keyboard's focus; under a finger — the phone app, or a phone's browser — on a press, as
+  a modal that a press outside it closes. Never write `isWeb ? onMouseEnter : …` for this: a touch screen
+  on web has no hover either.
 - **`edge(t, { bottom: 1 }, "line")`** — a border on some sides. Never `borderStyle="solid"` with only
   some widths: on web Tamagui leaves the other sides at the browser's 3px.
 - **`Glyph`** — a symbol in the app voice (▶ ⚙ ⌕), optionally in a fixed width.
@@ -121,7 +127,7 @@ One file serves both wherever it can. Where it cannot:
 - **A pair of files**: `Name.tsx` and `Name.web.tsx` (the plain file is the phone's) or `Name.tsx` and
   `Name.native.tsx` (the plain file is the web's). The bundler picks by platform. Among the existing
   pairs: `MenuLayer`, `Lift`, `Turn`, `Img`, `floats/TipLayer`, `floats/InlineGlyph`, `floats/keyboard`,
-  `form/SuggestLayer`, `form/Range`, `panel/Svg`, `panel/HoverLayer`, `islands/Island`, `tokens`,
+  `form/SuggestLayer`, `form/Range`, `panel/Svg`, `panel/HoverLayer`, `chat/Pulse`, `canHover`, `islands/Island`, `tokens`,
   `clipboard`, `app/windowPage`.
 - **`isWeb`** (from `@tamagui/core`) for a line or two inside one file.
 - **DOM code never reaches a phone.** Anything that touches `document`, a DOM event or a DOM-only package

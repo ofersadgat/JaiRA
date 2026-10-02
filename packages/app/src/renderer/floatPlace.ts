@@ -67,3 +67,27 @@ export function placeFloat(
     maxHeight: height > roomY ? roomY : undefined,
   };
 }
+
+/** Where a float first stood against its anchor: its top left corner, from the anchor's. */
+export interface FloatHold {
+  dx: number;
+  dy: number;
+}
+
+/** What {@link holdFloat} is given to keep: where `placeFloat` first put the float against `a`. */
+export function holdOf(a: FloatRect, placed: { left: number; top: number }): FloatHold {
+  return { dx: placed.left - a.left, dy: placed.top - a.top };
+}
+
+/**
+ * A float that STAYS where it opened — against its anchor, which it still follows — and grows downward
+ * from there, scrolling inside past the window's edge, instead of being placed afresh when its content
+ * changes size. For a card whose rows open under the pointer: placed afresh, a card that grew past its
+ * room flipped to the anchor's other side or slid up, the pointer was left outside it, and it closed
+ * before the click that opened the row could be followed by another.
+ */
+export function holdFloat(a: FloatRect, hold: FloatHold, height: number, view: { height: number }): { left: number; top: number; maxHeight: number | undefined } {
+  const top = a.top + hold.dy;
+  const room = Math.max(MIN_HEIGHT, view.height - top - FLOAT_EDGE);
+  return { left: a.left + hold.dx, top, maxHeight: height > room ? room : undefined };
+}
