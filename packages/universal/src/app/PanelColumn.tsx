@@ -164,6 +164,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     // it too, not "Running".
     gate: hostGate,
     onGate: (value) => hostGate !== undefined && actions.answer(hostGate.requestId, value),
+    landing: state.landing,
     // The gate a task is parked on, wherever its panel is — not only the selected one's.
     gateOf: (taskId) => {
       const asking = parkedGateOf(state.pending, taskId);

@@ -17,6 +17,7 @@ export function TaskConversation({
   source,
   gate,
   onGate,
+  focus,
   onRerun,
   onResume,
   onOpenSidechain,
@@ -26,6 +27,8 @@ export function TaskConversation({
   source: TranscriptSource;
   gate: PendingInteraction | undefined;
   onGate: (value: unknown) => void;
+  /** Where a click asked it to land — an event notice opens the events task at its firing (`landingFocusOf`). */
+  focus?: { instance: string; at: number } | undefined;
   onRerun: (taskId: string) => void;
   onResume: (taskId: string) => void;
   onOpenSidechain?: ((node: InstanceNode, call: string, name: string) => void) | undefined;
@@ -42,6 +45,7 @@ export function TaskConversation({
       project={project}
       {...(gate !== undefined ? { gate, onGate } : {})}
       asking={gate !== undefined}
+      {...(focus !== undefined ? { focus } : {})}
       onRerun={onRerun}
       onResume={onResume}
       onOpenSidechain={onOpenSidechain}

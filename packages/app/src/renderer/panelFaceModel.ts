@@ -125,6 +125,15 @@ export const chatPanelTitleOf = (detail: TaskDetail | null): string => detail?.t
 export const CHAT_PANEL_SUB = "beside the conversation";
 
 /**
+ * Where a click asked a task's conversation to land (`AppState.landing`: an event notice opens the
+ * events task at its firing), as the transcript's `focus` — for the task it was asked of, and no other.
+ */
+export function landingFocusOf(landing: { taskId: string; instance: string; at: number } | null | undefined, taskId: string): { instance: string; at: number } | undefined {
+  if (landing === null || landing === undefined || landing.taskId !== taskId) return undefined;
+  return { instance: landing.instance, at: landing.at };
+}
+
+/**
  * The Steps index's two verbs on a step (its right-click menu): rewind to before the step was entered,
  * or fork there — the cut at the journal position of the step's `entered` turn. Absent when the host
  * cannot do both; a step with no `entered` turn offers nothing to cut at.

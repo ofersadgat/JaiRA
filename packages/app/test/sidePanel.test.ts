@@ -7,13 +7,14 @@
  * (`packages/universal/src/components/panel/SidePanel.tsx`, `faces.tsx`) draw from the same pure
  * modules, and what is pinned here is what those modules decide: what a pushed entry's trail and kind
  * word read, where ✕ folds rather than closes, a state's Checks count, a chat's tabs, which task's
- * Configuration is called Automations, and where a copy of a task may start. The stack's own rules are
+ * Configuration is called Automations, where a copy of a task may start, and which task's conversation
+ * a click's landing is for. The stack's own rules are
  * in `panelStack.test.ts`. The furniture — icons on the name's line, the rail, the offer bar's words —
  * is the frame's, and is not tested here.
  */
 import { describe, expect, it } from "vitest";
 import type { InstanceNode, StateView, TaskDetail } from "@jaira/shared/browser";
-import { chatTabs, isEventsTask, tab, taskTabs } from "../src/renderer/panelFaceModel";
+import { chatTabs, isEventsTask, landingFocusOf, tab, taskTabs } from "../src/renderer/panelFaceModel";
 import { closeFoldsOf, rerunStartsOf } from "../src/renderer/panelHost";
 import { EMPTY_STACK, crumbOf, kindWordOf, push, reconcile, topOf, type PanelEntry } from "../src/renderer/panelStack";
 import { checksCountOf } from "../src/renderer/panelViewsModel";
@@ -112,5 +113,24 @@ describe("the events task's face", () => {
   it("leaves any other task's Configuration as it was", () => {
     const other = { ...eventsTask, workflow: "feature" } as TaskDetail;
     expect(taskTabs(undefined, other, true).find((one) => one.id === "configuration")!.label).toBe("Configuration");
+  });
+});
+
+describe("a task's conversation, asked to land somewhere", () => {
+  // What `select` records when a click names one run of a state: an event notice, its firing.
+  const landing = { taskId: "e1", instance: "7", at: 1_000 };
+
+  it("goes to the run that was asked for, with the ask's stamp", () => {
+    // The stamp is what makes the same ask made twice two asks (`RunTranscript` serves each once).
+    expect(landingFocusOf(landing, "e1")).toEqual({ instance: "7", at: 1_000 });
+  });
+
+  it("sends no other task's conversation anywhere", () => {
+    expect(landingFocusOf(landing, "t1")).toBeUndefined();
+  });
+
+  it("goes nowhere when nothing was asked", () => {
+    expect(landingFocusOf(null, "e1")).toBeUndefined();
+    expect(landingFocusOf(undefined, "e1")).toBeUndefined();
   });
 });

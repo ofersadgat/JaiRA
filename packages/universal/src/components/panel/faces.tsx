@@ -1,7 +1,7 @@
 import { issueReveal } from "../../app/viewState";
 import { useContext, type JSX, type ReactNode } from "react";
 import type { ArtifactSummary, InstanceNode, PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
-import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
+import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, landingFocusOf, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
 import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { View } from "@tamagui/core";
 import type { ExecutorInfo, FileTree, WorkflowSource } from "@jaira/shared/browser";
@@ -52,6 +52,8 @@ export interface FaceHost {
   /** The gate the selected task is parked on, and how to answer it. */
   gate: PendingInteraction | undefined;
   onGate: (value: unknown) => void;
+  /** Where a click asked a task's conversation to land (`AppState.landing`): an event notice, at its firing. */
+  landing?: { taskId: string; instance: string; at: number } | null | undefined;
   /** The gate any task is parked on, wherever its panel is — for a task the store is not holding (`OwnRun`). */
   gateOf?: ((taskId: string) => { gate: PendingInteraction; onGate: (value: unknown) => void } | undefined) | undefined;
   startAgain: (taskId: string) => void;
@@ -340,6 +342,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
                 source={host.source}
                 gate={host.gate}
                 onGate={host.onGate}
+                focus={landingFocusOf(host.landing, detail.taskId)}
                 onRerun={host.startAgain}
                 onResume={host.resume}
                 onOpenSidechain={(node, call, name) => openSubagent(host, detail.taskId, project, node, call, name)}
