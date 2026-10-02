@@ -121,8 +121,14 @@ export function Island({ component, props, height, appearance, onEvent, onReport
   };
 
   const page = pageOf(component);
+  // The height is the BOX's, and the page fills it. react-native-webview puts a container of its own
+  // round the page (`flex: 1`: a basis of zero), and under the phone's strict layout (`StrictLayout.tsx`)
+  // a box sized by its content is as tall as its children's bases — nothing. Offered a settled height
+  // (`IslandBand`), the box, the container and the page all stood 0 tall and the Files room's editors
+  // were blank; only in a scroller, which offers no height, did the page's own height hold them open.
+  const tall = height ?? measured;
   return (
-    <View ref={box} collapsable={false} onLayout={(e) => (laid.current = e.nativeEvent.layout.width)}>
+    <View ref={box} collapsable={false} style={{ height: tall }} onLayout={(e) => (laid.current = e.nativeEvent.layout.width)}>
       <WebView
         ref={web}
         source={{ uri: page }}
@@ -133,7 +139,7 @@ export function Island({ component, props, height, appearance, onEvent, onReport
         // Sized to its content, a markdown island does not scroll itself: the screen around it does.
         scrollEnabled={height !== undefined}
         nestedScrollEnabled={height !== undefined}
-        style={{ height: height ?? measured, backgroundColor: "transparent" }}
+        style={{ height: tall, backgroundColor: "transparent" }}
       />
     </View>
   );

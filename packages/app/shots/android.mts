@@ -5,6 +5,11 @@
  *   (cd packages/client/android && ./gradlew assembleDebug)
  *   npx tsx packages/app/shots/android.mts [--serial emulator-5554] [--metro 8082] [--hold]
  *
+ * Gradle wants a JDK 17 in `JAVA_HOME` and the SDK in `ANDROID_HOME` (there is no `local.properties`:
+ * without it, "SDK location not found"). The island pages reach the APK only through the prebuild
+ * (`plugins/withIslands.cjs` copies `dist-island/` to `android/app/src/main/assets/island`): after a
+ * `build:island` with no prebuild, copy that folder by hand or Gradle packages the old pages.
+ *
  * A desktop with a few tasks and a pairing code showing; Metro (`one dev`) serving the debug build its
  * JavaScript; the emulator reaching Metro and the desktop engine's loopback listener through `adb
  * reverse`. The app is installed, opened by the deep link that pairs and connects it
