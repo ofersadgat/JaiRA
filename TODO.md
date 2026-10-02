@@ -558,6 +558,11 @@ found is fixed or listed here.
       menu is a `Modal`, outside the fitted frame, so it is drawn three times the shell's size and
       its 220 cut a lane menu's lines short ("Rewind to befor…"); a suggestion list stays where it
       opened if the page is scrolled under it (the web's shuts on a scroll).
+- [ ] **The workflow editor's comparison is eight lines tall on a phone.** "Compare with what ships"
+      draws its Monaco diff 176 px tall at the top of the band (the diff's own `.monaco-host` height)
+      with the editor's ground below it (emulator, 2026-10-02). Not held against the desktop yet. The
+      island host's height fix of that day (`Island.native.tsx`) was seen on Android only: iOS wraps
+      the WebView in the same box and has never been run.
 - [ ] **Pairing has no QR code.** The deep link a code would carry (`jaira:///?address=…&code=…`) is
       read; nothing draws or scans one. A device cannot open or make a project (`project:choose` is
       the machine's own dialog), a sign-in page a device's request causes opens on the engine's
@@ -580,12 +585,27 @@ The one UI is `packages/universal`; what the deletion took with it, and what it 
       `errorAt`/`unsetNoteOf`, the value view's mime-to-parse chain, and the decisions inside
       `useWorkflowEditor`, `useRunIndexModel`, `useTypedStep` and `useToolsField`. No test imports
       `updateRow.ts`, `valueViewMeta.ts`, `contextParts.ts`, or most of `aboutModel.ts` and `logsModel.ts`.
-- [ ] **Dead code the copies' scaffolding left.** The non-replayed token path (`tokens.tsx`,
-      `app/windowPage.web.ts`: every route is `Replayed`), the `Uncopied` fallbacks (unreachable; the
-      shots still query their test id), `screens/CopiesBoard.tsx`, `settingsParts.ts`' DOM readers,
-      `issues.ts` `anchorFor`, `gateForms.ts` `recordOf`, `linkModel.ts` `LINK_TARGETS_ID`, `fileTypes.ts`'
-      module `REGISTRY`, `AppState.landing`, the reviewer's unreachable `DiscardNotes`, `Choices`' unread
-      `first` prop, and `popover.tsx`'s `usePopover`, `Overlay`, `useHoverCard`, `useHover`.
+- [ ] **What the copies' scaffolding left that is not dead after all, or not yet.** The non-replayed
+      token path (`tokens.tsx`, `app/windowPage.web.ts`) is reached: the `/native` browser preview
+      (`client/app/native.tsx`, which `shots/phone.mts` drives) draws `NativeApp` with no `Replayed`
+      around it — unstyled, as decision 0015 notes — so it goes when that page is put under `Replayed`
+      or retired. `fileTypes.ts`' module `REGISTRY` is read by no page (the Files room registers into
+      its own, `SURFACES`) but by three test files, through every lookup's default argument: taking it
+      out means making that argument required and rewriting them. Exports nothing imports, left as
+      they are: types (`MountContext`, `ChatThreadModel`, `FileAction`, `Widget`), `uiState.ts`'
+      `SIDEBAR_RAIL` (the universal sidebar cites it for its own 46), `Lift.web.tsx`'s `HOLD` (the
+      native half's twin), `markdown.tsx`'s `registerFenceRenderer` and `SchemaForm`'s `registerWidget`
+      (nothing registers), and what the universal index exports that no specimen imports any more
+      (`DelimitedView`, `PatchFileSurface`, `Field`, `FieldGrid`, `Level`, `Range`, `isStill`,
+      `useShell`, `useConnectionLost`, `registerFenceRenderer`, `registerWidget`).
+- [ ] **A behaviour the DOM page had and the one page lacks: showing the control a diagnostic is
+      about.** The state inspector's click switches the editor to its form (`stateEditorModel.ts`) and
+      stops there, where the DOM's `stateEditor.tsx` then scrolled to the control and flashed it —
+      `issues.ts`' `anchorFor` (with its tests) and `FLASH_MS` are what is left of that, and they read
+      a DOM a phone has not got. (An event notice opening the events task AT its firing was the other,
+      and is wired again: `panelFaceModel.ts`' `landingFocusOf`, from `AppState.landing` to the
+      transcript's `focus`. No rig has seen it land: the `event-notices` rig above is the one that
+      would, and `FileSurfaceContext.landing`, which the DOM page carried it in, is set by nothing.)
 - [ ] **The reference pictures are not in git.** `packages/app/shots/goldens` (hundreds of MB) and the
       world they were taken in (`shots/.world-goldens`) live on the machine that took them. They can be
       taken again from the tag `dom-renderer-final` (a new world, a new set), and a scene whose look

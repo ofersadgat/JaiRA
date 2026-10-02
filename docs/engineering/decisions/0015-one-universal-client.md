@@ -783,6 +783,30 @@ timer and could be read before it had moved, which changed the title bar's gutte
 from launch to launch; and a relaunched world draws an answered gate as a call listing, which the
 scene's wait did not accept.
 
+**After it, on the phone and in the tree (2026-10-02).**
+- The emulator run (`android.mts`) passes on the tree without the DOM renderer: paired by code, every
+  room drawn, a setting written and a gate answered from the phone, reconnected by its kept token, the
+  three island pages drawn styled from the pruned stylesheet, forgotten by the desktop.
+- It found the Files room's editors blank on a phone — not from the deletion: the island's WebView
+  stood 0 tall once the phone's layout became strict (react-native-webview wraps the page in a
+  `flex: 1` container, and a box sized by its content gives a zero basis nothing). The island's box
+  carries the height now (`Island.native.tsx`). Seen on the device after it: the code editor with the
+  compiler's squiggle, the schema text editor with its problem strip, the markdown editor, and the
+  workflow editor's comparison.
+- The copying's scaffolding that nothing reached is gone (about 600 lines): `Uncopied` and its five
+  unreachable fallbacks, `CopiesBoard`, the popover's dismissal hooks and layer registry (only the schema
+  editor's list uses `Popover`, and shuts it by its own rules), the reviewer's `DiscardNotes` (dead in
+  the DOM page too), and a dozen exports with no reference. What looked dead and is not stays, in
+  `TODO.md`: the non-replayed token path (the `/native` browser preview reaches it) and the file
+  registry's module default (three test files read it).
+- The page after that cleanup, held to the page before it in the same world: every light picture of
+  the 829 identical to the pixel but one scene's known flicker (its window and its viewport). (A
+  first take differed in 28 board scenes by the scrollbar's thumb: the real mouse pointer was resting
+  over the test window, and the page drew the hover. `packages/app/shots/README.md` says so now.)
+- Two behaviours turned out to be missing rather than dead. An event notice opening the events task AT
+  its firing was one prop short and is wired again (`landingFocusOf`). A diagnostic scrolling to and
+  flashing its control is not: `TODO.md`.
+
 **What the deletion took with it.**
 - **Coverage** (`packages/app/shots/README.md`, "Retired"):
   - event notices end to end in the window — the newest shown with "+1", × reading it, a click opening

@@ -51,6 +51,14 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
   off the desktop is photographed at the override's scale (2) instead of the monitor's (1.5), and every
   golden then fails with "another window". Leave it where it opens, under the other windows; it does
   not need the focus.
+- **The real mouse pointer must not rest over the studio's window.** The page hears it: a scroller
+  under it draws its thumb in the hover colour (28 board scenes once differed by one 9px column), a
+  button under it lights. Park the pointer elsewhere before a sweep; a run whose only differences are
+  scrollbar thumbs or one hovered control was taken with it over the window.
+- **Compare runs of the same selection.** A scene or specimen photographed on its own can differ from
+  the same one photographed in a full run by a few dozen anti-aliasing pixels (text drawn after
+  different pages); in sequence it reproduces to the pixel. A before-and-after is two runs of the same
+  `--scene`/`--specimen`/`--all`.
 - **A new scene or specimen** has no DOM original. Once its picture is right:
   `pair.mts --accept --scene <name>` (in the goldens' world) or `--accept --specimen <name>` keeps the
   page's own picture as its golden, in every look, and the manifest records that it was accepted from
