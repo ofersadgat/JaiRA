@@ -201,7 +201,8 @@ export class App {
     if (!emulate) return app;
     // Only a window this call opened: one attached to later already holds another session's override,
     // and the page's own size would be that override's, not the window's.
-    if (child !== null) await app.fitWindow(options.phone?.width ?? options.width ?? 1280, options.phone?.height ?? options.height ?? 860);
+    // (Not a headless browser's, which has no window to size: `quiet` is `browse`.)
+    if (child !== null && !quiet) await app.fitWindow(options.phone?.width ?? options.width ?? 1280, options.phone?.height ?? options.height ?? 860);
     await app.send("Emulation.setDeviceMetricsOverride", {
       width: options.phone?.width ?? options.width ?? 1280,
       height: options.phone?.height ?? options.height ?? 860,
@@ -255,20 +256,42 @@ export class App {
    * window's top-left corner with the window's ground to its right and below it — a wide margin on a
    * window that pops up on the screen of whoever is at the machine. Asked before the override, while
    * the page's own size is still the window's. `window.resizeTo`, because Electron's page target does
-   * not answer the Browser domain; what it lands on is read back and corrected once, since the frame
-   * it counts differs by platform. Cosmetic, so a failure leaves the window as it is.
+   * not answer the Browser domain; what it lands on is read back and corrected, since the frame it
+   * counts differs by platform.
+   *
+   * Not only cosmetic: the override lays the page out at 1280 whatever the window is, but
+   * `env(titlebar-area-width)` is the REAL window's, and with it the gutter the title bar keeps for the
+   * OS's buttons (`--wco-right`). A resize lands a moment after it is asked for — on a busy machine,
+   * later than a fixed pause — and read too early the size is still the one the window opened at: the
+   * correction then took the whole difference off (a 1440 window "corrected" to 1125), the gutter came
+   * out at 300px instead of 145, and a title bar with little room (the Files room on a composite
+   * state) dropped its label in that launch and not the next. So each ask is waited for until the size
+   * holds still, and corrected by what it landed on until it is the page's.
    */
   private async fitWindow(width: number, height: number): Promise<void> {
     try {
       const size = "({ w: innerWidth, h: innerHeight })";
-      await this.evaluate(`window.resizeTo(${width}, ${height})`);
-      await sleep(250);
-      const got = await this.evaluate<{ w: number; h: number }>(size);
-      if (got.w === width && got.h === height) return;
-      await this.evaluate(`window.resizeTo(${width + (width - got.w)}, ${height + (height - got.h)})`);
-      await sleep(250);
+      const landed = async (): Promise<{ w: number; h: number }> => {
+        let last = await this.evaluate<{ w: number; h: number }>(size);
+        for (let still = 0, i = 0; i < 40 && still < 4; i++) {
+          await sleep(100);
+          const now = await this.evaluate<{ w: number; h: number }>(size);
+          still = now.w === last.w && now.h === last.h ? still + 1 : 0;
+          last = now;
+        }
+        return last;
+      };
+      let ask = { w: width, h: height };
+      for (let attempt = 0; attempt < 5; attempt++) {
+        await this.evaluate(`window.resizeTo(${ask.w}, ${ask.h})`);
+        await sleep(250);
+        const got = await landed();
+        if (got.w === width && got.h === height) return;
+        ask = { w: ask.w + (width - got.w), h: ask.h + (height - got.h) };
+      }
+      console.log(`  (the window would not take ${width}×${height}: the title bar's gutter for the OS's buttons may be another launch's)`);
     } catch {
-      // The pictures do not depend on it.
+      // Left as it opened.
     }
   }
 

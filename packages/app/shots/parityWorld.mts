@@ -360,7 +360,10 @@ export const SCENES: readonly Scene[] = [
       await clickFirst(app, "Tasks");
       await app.until(says(ANSWERED), `${ANSWERED} on the board`);
       await clickFirst(app, ANSWERED);
-      await app.until(says("Show the record"), "the settled gate in the panel");
+      // In the launch that parked it the gate is drawn settled, its record behind a toggle. A later
+      // launch reads the run from its records alone, and the same state lists its call and what it
+      // returned — which is what every picture of a kept world is of.
+      await app.until(`${says("Show the record")} || ${says('"decision": "request_changes"')}`, "the answered gate in the panel");
       await settle(1500);
     },
   },
