@@ -11,14 +11,6 @@ import { isKnownRef } from "./completions";
 
 // --- the link control --------------------------------------------------------------
 
-/**
- * The datalist every link control completes against.
- *
- * One list for the whole editor rather than one per control: a state form renders a link control per
- * linkable field, per slot row and once for the operation, and a datalist id has to be unique.
- */
-export const LINK_TARGETS_ID = "link-targets";
-
 /** The link toggle's tooltip, for either way it is pressed. */
 export function linkToggleTitle(linked: boolean): string {
   return linked

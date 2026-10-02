@@ -24,7 +24,6 @@ import { useMachines } from "@jaira/ui/machinesModel";
 import { UpdateRow } from "../components/floats/UpdateRow";
 import { PointerMenus } from "../components/floats/PointerMenus";
 import { useShell } from "./shell";
-import { Uncopied } from "./Uncopied";
 import { aboutNotes } from "./viewState";
 
 /**

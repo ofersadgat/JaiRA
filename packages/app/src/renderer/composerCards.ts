@@ -1,6 +1,6 @@
 /**
- * What the composer's CARDS compute — the route → model cascade, the words beside a thinking level and
- * a tool, where a value came from, and a mentioned or attached file. The cards themselves are
+ * What the composer's CARDS compute — the route → model cascade, the words beside a thinking level,
+ * where a value came from, and a mentioned or attached file. The cards themselves are
  * `packages/universal/src/components/chat/ComposerCards.tsx`.
  */
 import { ROUTE_BORROWS } from "./composerModel";
@@ -15,13 +15,6 @@ export const EFFORT_HINTS: Record<string, string> = {
   xhigh: "deeper — slower and dearer",
   max: "as deep as the model goes",
   ultra: "max, and hands parts off",
-};
-
-/** What granting each tool actually lets the model do. */
-export const TOOL_HINTS: Record<string, string> = {
-  bash: "run shell commands, under the policy",
-  read_file: "read files in the workspace",
-  write_file: "create and change files",
 };
 
 /** A model as the picker sees it — the id, and what it can be given and produce. */

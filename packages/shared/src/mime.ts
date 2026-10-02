@@ -159,7 +159,7 @@ const TEXT: Record<string, string> = {
   svg: "image/svg+xml",
   // The compiled languages. None of these had a name until a fenced ``` block needed one — see
   // {@link mimeOfFenceLang} — and naming them pays twice: a `.cpp` opened in the Files view stops
-  // resolving to plain text as well. Every type here is one `monacoLanguageOf` can colour, which is
+  // resolving to plain text as well. Every type here is one `monacoGrammarOf` can colour, which is
   // the only promise a name makes.
   c: "text/x-c",
   h: "text/x-c",
@@ -193,7 +193,7 @@ const TEXT: Record<string, string> = {
   cmd: "application/x-bat",
   dockerfile: "text/x-dockerfile",
   // The rest of what Monaco ships a grammar for and somebody in this repo might open. The bar for
-  // this block is the one `monacoLanguageOf` states: a name here promises a COLOURER, so a language
+  // this block is the one `monacoGrammarOf` states: a name here promises a COLOURER, so a language
   // Monaco does not have (Zig, Nix, Haskell, Vue, Svelte) is deliberately absent — it would resolve
   // to plain text either way, and naming it would claim otherwise. `.m` is absent for the opposite
   // reason: it is Objective-C and MATLAB in equal measure, and a wrong grammar is worse than none.

@@ -7,12 +7,11 @@ import { ReadOnlyContext } from "@jaira/ui/reading";
 import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { docKey, useDraftBox } from "@jaira/ui/drafts";
 import { syncSurfaceOf } from "@jaira/ui/syncState";
-import { registerSurfaceTable, newSurfaceRegistry, SURFACE_KEYS, type SurfaceKey } from "@jaira/ui/fileSurfaceTable";
+import { registerSurfaceTable, newSurfaceRegistry, type SurfaceKey } from "@jaira/ui/fileSurfaceTable";
 import { isReading, type FileSurface, type FileSurfaceProps } from "@jaira/ui/fileTypes";
 import { Island } from "../../islands";
 import { Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { Uncopied } from "../../app/Uncopied";
 import { Markdown } from "../Markdown";
 import { DataView } from "./DataView";
 import { LeafPanel } from "./LeafPanel";
@@ -33,8 +32,8 @@ import { useShell } from "../../app/shell";
 /**
  * The file surfaces: what draws each half of the Files panel. Which renderers a type has, and in what
  * order, is the table's (`fileSurfaceTable.ts`), which names a surface by a key; these are the
- * components behind the keys. Viewers are native; an EDITOR (CodeMirror, Monaco) is an island. A key
- * with no surface here is an {@link Uncopied} box where it stands.
+ * components behind the keys. Viewers are native; an EDITOR (CodeMirror, Monaco) is an island. Every
+ * key has a surface here (`COPIED`'s type holds it to that).
  */
 
 /** An empty note: --dim, 8 above and below, and a paragraph's margins (1em of the body's 13). */
@@ -309,7 +308,7 @@ function SyncFromStore(props: FileSurfaceProps & { preview: ReactNode }): JSX.El
 }
 
 /** The surfaces there are, by the table's key. */
-const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
+const COPIED: Record<SurfaceKey, FileSurface> = {
   MarkdownView,
   MarkdownFileEdit,
   JsonView,
@@ -330,8 +329,5 @@ const COPIED: Partial<Record<SurfaceKey, FileSurface>> = {
   WorkflowSyncPanel: SyncSurface,
 };
 
-/** The table, registered with these surfaces — and an {@link Uncopied} box for any key without one. */
-export const SURFACES = registerSurfaceTable(
-  Object.fromEntries(SURFACE_KEYS.map((key) => [key, COPIED[key] ?? ((): JSX.Element => <Uncopied name={key} flex={1} />)])) as Record<SurfaceKey, FileSurface>,
-  newSurfaceRegistry(),
-);
+/** The table, registered with these surfaces. */
+export const SURFACES = registerSurfaceTable(COPIED, newSurfaceRegistry());

@@ -24,7 +24,6 @@ import {
   changesetAnswerOf,
   changesetSubmitOf,
   changesetVerdictOf,
-  discardWhatOf,
   draftsOfDecisions,
   driftedChanges,
   noteFor,
@@ -43,9 +42,7 @@ import { Island, type IslandHandle } from "../../islands";
 import { PLAIN_SCROLLER, Press, Txt, edge, lengthToken, scrollbarProps, useHover, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { FieldFrame } from "../floats/Choices";
-import { GateTitle } from "../floats/GateTitle";
 import { InlineGlyph } from "../floats/InlineGlyph";
-import { ModalBox } from "../floats/Modal";
 import { Icon } from "../panel/Icon";
 import { OneLine } from "../panel/OneLine";
 import { BrandIcon } from "../settings/bits";
@@ -158,7 +155,6 @@ export function ChangesetReview({
   }, [remoteStatus, readOnly]);
   const generalNotes = readOnly ? ((Array.isArray(recorded["notes"]) ? recorded["notes"] : []) as unknown as ReviewNote[]) : ((remoteStatus?.notes?.[REVIEW_NOTE_ARTIFACT] ?? []) as ReviewNote[]);
   const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
-  const [confirming, setConfirming] = useState<string | undefined>(undefined);
   const [moved, setMoved] = useState<ReadonlySet<string>>(new Set());
   const changesetForDrift = parsed.changeset;
   useEffect(() => {
@@ -198,7 +194,6 @@ export function ChangesetReview({
   const going = reviewSettled(decisions);
   const submit = (level?: string): void => onSubmit(changesetAnswerOf(decisions, level, reviewComment));
   const change = changeset.changes.find((c) => c.id === selected);
-  const confirmingChange = changeset.changes.find((c) => c.id === confirming);
   // At most 720 wide: one column, the chooser capped at 30vh.
   const narrow = width === undefined || width <= 720;
   const dim = String(t.v("dim"));
@@ -332,19 +327,6 @@ export function ChangesetReview({
           )}
         </View>
       </View>
-
-      {confirmingChange !== undefined ? (
-        <DiscardNotes
-          change={confirmingChange}
-          notes={(draftOf(confirmingChange.id).notes ?? []).length}
-          hasComment={(draftOf(confirmingChange.id).comment ?? "").trim().length > 0}
-          onCancel={() => setConfirming(undefined)}
-          onDiscard={() => {
-            set(confirmingChange.id, { excluded: true, comment: "", notes: [] });
-            setConfirming(undefined);
-          }}
-        />
-      ) : null}
     </View>
   );
 }
@@ -690,27 +672,6 @@ function Count({ icon, color, weight = 400, title, children }: { icon: "check" |
       <Icon name={icon} size={13} color={color} />
       <Txt spec={{ voice: "app", scale: 13 / 12.5, weight, color }}>{children}</Txt>
     </View>
-  );
-}
-
-/** The confirm that stands between removing a change and somebody's words. */
-function DiscardNotes({ change, notes, hasComment, onCancel, onDiscard }: { change: Change; notes: number; hasComment: boolean; onCancel: () => void; onDiscard: () => void }): JSX.Element {
-  return (
-    <ModalBox onDismiss={onCancel} testID="discard-notes" label="Remove this change and discard what you wrote?">
-      <GateTitle>Remove this change and discard what you wrote?</GateTitle>
-      <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }}>{change.path}</Txt>
-      <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "warn" }} marginTop={10}>
-        It carries {discardWhatOf(notes, hasComment)}. A change that is not in the review has nothing for a note to be about, so removing it throws them away.
-      </Txt>
-      <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={14}>
-        <Button kind="danger" onPress={onDiscard}>
-          Remove and discard
-        </Button>
-        <Button kind="ghost" onPress={onCancel}>
-          Keep it
-        </Button>
-      </View>
-    </ModalBox>
   );
 }
 

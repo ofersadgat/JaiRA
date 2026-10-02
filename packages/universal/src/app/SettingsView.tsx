@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, View as RNView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
-import { JUST_YOU_VIEWS, SECTIONS, settingsFrameOf, settingsLayersFor, settingsLeadParts, settingsProjectLabel, type JustYouView } from "@jaira/ui/settingsSections";
+import { JUST_YOU_VIEWS, settingsFrameOf, settingsLayersFor, settingsLeadParts, settingsProjectLabel, type JustYouView } from "@jaira/ui/settingsSections";
 import { PLAIN_SCROLLER, scrollbarProps } from "../primitives";
 import { useTokens } from "../tokens";
 import { AppearancePage } from "../components/settings/AppearancePage";
@@ -20,13 +20,11 @@ import { fixHealthItem, useForgeOAuth } from "@jaira/ui/settingsShell";
 import { useHealth } from "@jaira/ui/updatesStore";
 import { SettingsShellContext, type SettingsShell } from "../components/settings/NeedsAttention";
 import { useShell } from "./shell";
-import { Uncopied } from "./Uncopied";
 
 /**
  * The Settings room: one scrolling column (padding 14 16 on --bg) holding the page — its title, whose
  * settings these are, the layer switch and, on the personal layer, "Which rows" — around the open
- * section's own sections. What the frame says is `settingsSections.ts`'s. A section with no page here
- * would be an {@link Uncopied} box inside the frame; every section has one today.
+ * section's own sections. What the frame says is `settingsSections.ts`'s. Every section has a page here.
  */
 export function SettingsView(): JSX.Element {
   const t = useTokens();
@@ -78,9 +76,7 @@ export function SettingsView(): JSX.Element {
       <ToolsPage />
     ) : section === "connections" ? (
       <ConnectionsPage />
-    ) : (
-      <Uncopied name={`${SECTIONS.find((s) => s.id === section)?.label ?? section} page`} height={320} />
-    );
+    ) : null;
 
   return (
     // The scroll box's frame, which the accordion measures its sections against (`parts.ts`). No stacking

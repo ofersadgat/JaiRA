@@ -43,9 +43,6 @@ export const EXECUTOR_CONFIG_KEYS: Record<string, string> = {
 /** The registry name a `genericCli` entry takes when it names none — `AGENT_GENERIC_CLI` upstream. */
 export const DEFAULT_GENERIC_NAME = "generic-cli";
 
-/** The sandbox values codex accepts, in the order the parser lists them. */
-export const CODEX_SANDBOXES = ["read-only", "workspace-write", "danger-full-access"] as const;
-
 /**
  * Which fields a kind actually has.
  *
@@ -63,22 +60,6 @@ export function editableFields(kind: ExecutorKind): ExecutorField[] {
 export function credentialUseOf(kind: ExecutorKind): CredentialUse {
   return EXECUTOR_KINDS[kind].credential;
 }
-
-/**
- * Where each field lives inside an executor's config block.
- *
- * The three model fields are nested (`models.default`), the rest are flat. One map rather than a
- * branch at each call site, so a patch, a read and a placeholder all agree on the path.
- */
-export const FIELD_PATHS: Record<ExecutorField, string> = {
-  name: "name",
-  command: "command",
-  credential: "credential",
-  sandbox: "sandbox",
-  args: "args",
-  prompt: "prompt",
-  env: "env",
-};
 
 /** A field write. `undefined` REMOVES the key, which is how a layer goes back to inheriting. */
 export type ExecutorPatch = Record<string, unknown>;
@@ -235,16 +216,6 @@ function applyFields(block: Record<string, unknown>, patch: ExecutorPatch): Reco
     }
   }
   return next;
-}
-
-/** Read a dotted path out of a block — the counterpart of {@link applyFields}'s write. */
-export function fieldAt(block: Record<string, unknown> | undefined, path: string): unknown {
-  let cursor: unknown = block;
-  for (const part of path.split(".")) {
-    if (!isObject(cursor)) return undefined;
-    cursor = cursor[part];
-  }
-  return cursor;
 }
 
 /** Drop an `agents` block that no longer holds anything, so an untouched layer stays empty. */

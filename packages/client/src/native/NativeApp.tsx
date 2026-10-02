@@ -14,8 +14,7 @@ import { StrictLayout } from "./StrictLayout";
  * migration step — and not in a WebView (the person, 2026-09-27: "the goal is to replicate the desktop
  * ui, but not in a webview"). Pair and connect (`Remote`), then the universal shell (`UniversalApp`):
  * the desktop's frame drawn natively, region by region, on a machine's engine over its own transport
- * (decision 0013, amended 2026-09-30) — at a desktop's width in `DesktopFrame`. A region not drawn yet
- * says so where it stands (`Uncopied`).
+ * (decision 0013, amended 2026-09-30) — at a desktop's width in `DesktopFrame`.
  *
  * `&screen=islands` on the link opens the island harness instead (`IslandsTab`), which the emulator
  * test (`shots/android.mts`) measures; `&still=1` holds the clocks and spinners so that test can read

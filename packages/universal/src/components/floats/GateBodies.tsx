@@ -33,7 +33,7 @@ import type { ComponentServices } from "@jaira/ui/changesetReviewModel";
  * (`GateSurface`), so `top` is what the body adds above something with no margin of its own (a step
  * line, the details, the form): 8 under the heading, or 0 under "Answering this continues the task."
  */
-export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknown) => void, top: number, flat = false, services?: Partial<ComponentServices>): JSX.Element | null {
+export function gateBodyOf(pending: PendingInteraction, onSubmit: (value: unknown) => void, top: number, flat = false, services?: Partial<ComponentServices>): JSX.Element {
   const config = pending.config;
   const inputs = pending.inputs as Record<string, unknown>;
   switch (config?.component) {

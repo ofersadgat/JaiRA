@@ -33,17 +33,12 @@ import { SettingsView } from "./SettingsView";
 import { AppContext, useShell } from "./shell";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
-import { Uncopied } from "./Uncopied";
 import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
 
 /**
  * The shell (decision 0015): the app's one frame, drawn by the desktop's window and a browser through
  * react-native-web and natively by a phone. One store drives it — `useApp()`, called once, here — and
- * every region reads it through `useShell`.
- *
- * A view with no room here would be drawn as {@link Uncopied}: a labelled box where it stands, so what is
- * missing is visible on the screen and in every picture, rather than silently absent. Every `View` has
- * a room today.
+ * every region reads it through `useShell`. Every `View` has a room here.
  */
 export function UniversalApp(): JSX.Element {
   const model = useApp();
@@ -185,9 +180,7 @@ function Frame(): JSX.Element {
             <DebugView />
           ) : state.view === "gallery" ? (
             <GalleryView />
-          ) : (
-            <Uncopied name={`the ${state.view} view`} flex={1} />
-          )}
+          ) : null}
         </View>
         <ShellInbox />
       </View>

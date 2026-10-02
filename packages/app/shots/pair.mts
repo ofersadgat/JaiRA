@@ -597,7 +597,6 @@ async function scene(app: App, scene: Scene, look: Look, seed: string, replace: 
   );
   if (helped) throw new Error("styles.css is on the page: it would draw what the components should");
   const islands = await app.evaluate<Island[]>(islandsOf("[data-island]"));
-  const uncopied = await app.evaluate<string[]>(`[...document.querySelectorAll("[data-testid^=uncopied-]")].map((e) => e.getAttribute("data-testid").slice(9))`);
   const rnRuns = flag("--texts") ? await app.evaluate<Run[]>(texts("document.body")) : [];
   const rn = await capture(app);
   const window = await windowOf(app, rn);
@@ -608,7 +607,7 @@ async function scene(app: App, scene: Scene, look: Look, seed: string, replace: 
   for (const r of [...islands, ...kept.golden.volatile]) for (const png of [golden, rn]) mask(png, r, scale);
   writeFileSync(join(OUT, `${name}.golden.png`), PNG.sync.write(golden));
   writeFileSync(join(OUT, `${name}.rn.png`), PNG.sync.write(rn));
-  console.log(`${name}${uncopied.length > 0 ? `  (not copied yet: ${uncopied.join(", ")})` : ""}${islands.length > 0 ? `  (islands left out: ${islands.map((i) => i.name).join(", ")})` : ""}${kept.golden.volatile.length > 0 ? `  (the log's left out: ${[...new Set(kept.golden.volatile.map((v) => v.name))].join(", ")})` : ""}`);
+  console.log(`${name}${islands.length > 0 ? `  (islands left out: ${islands.map((i) => i.name).join(", ")})` : ""}${kept.golden.volatile.length > 0 ? `  (the log's left out: ${[...new Set(kept.golden.volatile.map((v) => v.name))].join(", ")})` : ""}`);
   if (unreached !== undefined) {
     failed = true;
     results.push({ of: name, part: "window", grade: "unreached", note: unreached });

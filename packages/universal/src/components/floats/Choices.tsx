@@ -46,7 +46,6 @@ export function ChoiceList({
   onImmediate,
   readOnly = false,
   stepped = false,
-  first = true,
   flat = false,
   top = 14,
 }: {
@@ -56,11 +55,6 @@ export function ChoiceList({
   onImmediate?: ((question: string, value: string) => void) | undefined;
   readOnly?: boolean;
   stepped?: boolean;
-  /**
-   * The first block's 14 collapses with what is above it (a heading's 8): the host says whether it has
-   * collapsed that already (as `GateSurface`'s body does), so the block adds only the difference.
-   */
-  first?: boolean;
   /**
    * The block is a flex item (its host a flex column, as the gallery's wide modal is): a formatting
    * context of its own, so the options' 12 stays inside it rather than collapsing into its 14.

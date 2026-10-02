@@ -21,11 +21,6 @@ export interface SurfaceRow {
 const TABLE: SurfaceRow[] = [];
 const row = (mime: string, kind: RenderKind, renderer: SurfaceRow["renderer"]): void => void TABLE.push({ mime, kind, renderer });
 
-/** Every row, in registration order — the order is the meaning (the first leads). */
-export function surfaceTable(): readonly SurfaceRow[] {
-  return TABLE;
-}
-
 /**
  * Register the whole table with these components — into `fileTypes.ts`'s own registry, or into one the
  * caller made (`newSurfaceRegistry`), which is what the Files room's `SURFACES` is.

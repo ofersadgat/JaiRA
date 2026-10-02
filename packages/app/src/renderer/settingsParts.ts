@@ -8,11 +8,7 @@
  * scroll goes by. The Settings page keeps the list itself — each section says it is one as it is drawn
  * (`packages/universal/src/components/settings/parts.ts`), so a page that adds a section, or draws one
  * only when a project is open, is listed without anybody keeping a second list in step with the first.
- *
- * `useSettingsParts` below reads the sections off a DOM page instead, by `data-part` and
- * `data-part-label`. No page writes those attributes and nothing calls it.
  */
-import { useCallback, useEffect, useRef, useState } from "react";
 
 export interface SettingsPart {
   id: string;
@@ -85,88 +81,4 @@ export function wantedStep(
   if (page.top === null || page.holding) return "wait";
   // Only when the page itself changed: a person who scrolled away by hand is left where they went.
   return page.contentHeight !== wanted.height && Math.abs(page.top - PART_MARGIN) > 2 ? "go" : "wait";
-}
-
-/**
- * The sections drawn on the page — not every one in the DOM: under the Just you view's "What you
- * changed" a section with none of its rows left is still there and `display: none`,
- * and a list entry that scrolled to nothing would be a link to nowhere.
- */
-function partsIn(body: HTMLElement): HTMLElement[] {
-  return [...body.querySelectorAll<HTMLElement>("[data-part]")].filter((el) => el.getClientRects().length > 0);
-}
-
-/**
- * The parts of `body`, the one being read, and a way to go to one.
- *
- * `key` is what makes a new page a new page (the section id): the list is re-read when it changes,
- * and the scroll box is back at its top.
- */
-export function useSettingsParts(
-  body: HTMLElement | null,
-  key: string,
-): { parts: SettingsPart[]; active: string | null; go: (id: string) => void } {
-  const [parts, setParts] = useState<SettingsPart[]>([]);
-  const [active, setActive] = useState<string | null>(null);
-  // A click names the section it went to, and holds it while the scroll it started is still moving —
-  // otherwise a section too short to reach the top would be un-lit by its own arrival.
-  const held = useRef<{ id: string; until: number } | null>(null);
-
-  useEffect(() => {
-    if (body === null) return undefined;
-    let frame = 0;
-    const read = (): void => {
-      const els = partsIn(body);
-      const next = els.map((el) => ({ id: el.dataset["part"] ?? "", label: el.dataset["partLabel"] ?? el.dataset["part"] ?? "" }));
-      setParts((prev) => (prev.length === next.length && prev.every((p, i) => p.id === next[i]!.id && p.label === next[i]!.label) ? prev : next));
-      const hold = held.current;
-      if (hold !== null && Date.now() < hold.until) {
-        setActive(hold.id);
-        return;
-      }
-      if (els.length === 0) {
-        setActive(null);
-        return;
-      }
-      const top = body.getBoundingClientRect().top;
-      const current = readingPartOf(
-        els.map((el) => ({ id: el.dataset["part"] ?? "", top: el.getBoundingClientRect().top - top })),
-        { top: body.scrollTop, height: body.clientHeight, contentHeight: body.scrollHeight },
-      );
-      if (hold !== null && hold.until <= Date.now()) held.current = null;
-      setActive(current);
-    };
-    const soon = (): void => {
-      cancelAnimationFrame(frame);
-      frame = requestAnimationFrame(read);
-    };
-    held.current = null;
-    // A new page starts at its top, not wherever the last one was scrolled to.
-    body.scrollTop = 0;
-    read();
-    body.addEventListener("scroll", soon, { passive: true });
-    // Sections that arrive after the first paint — a pane waiting on its data — join the list.
-    const watch = new MutationObserver(soon);
-    watch.observe(body, { childList: true, subtree: true });
-    return () => {
-      cancelAnimationFrame(frame);
-      body.removeEventListener("scroll", soon);
-      watch.disconnect();
-    };
-  }, [body, key]);
-
-  const go = useCallback(
-    (id: string) => {
-      if (body === null) return;
-      const el = partsIn(body).find((part) => part.dataset["part"] === id);
-      if (el === undefined) return;
-      held.current = { id, until: Date.now() + CLICK_HOLD_MS };
-      setActive(id);
-      const still = typeof window.matchMedia === "function" && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-      el.scrollIntoView({ block: "start", behavior: still ? "auto" : "smooth" });
-    },
-    [body],
-  );
-
-  return { parts, active, go };
 }

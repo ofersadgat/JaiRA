@@ -5,13 +5,6 @@
  */
 import type { BuiltInStanding, WorkflowLayer, WritableLayer } from "@jaira/shared/browser";
 
-/** What a layer is called where a sentence names one. */
-export const LAYER_WORDS: Record<WorkflowLayer, string> = {
-  project: "this project",
-  base: "the shared root",
-  system: "what ships",
-};
-
 /** One thing the top bar offers. `disabled` carries the reason, which is the button's tooltip. */
 export interface LayerBarAction {
   id: "override-base" | "override-project" | "compare";

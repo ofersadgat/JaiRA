@@ -58,7 +58,7 @@ async function main(): Promise<void> {
     await new Promise((r) => setTimeout(r, 1500));
     await phone.shot("shell-fit");
     const census = await phone.evaluate<string>(
-      `"frames " + document.querySelectorAll("iframe").length + ", Tamagui views " + document.querySelectorAll(".is_View").length + ", DOM cards " + document.querySelectorAll(".card").length + ", not copied yet: " + ([...document.querySelectorAll("[data-testid^=uncopied-]")].map((e) => e.getAttribute("data-testid").slice(9)).join(", ") || "nothing")`,
+      `"frames " + document.querySelectorAll("iframe").length + ", Tamagui views " + document.querySelectorAll(".is_View").length + ", DOM cards " + document.querySelectorAll(".card").length`,
     );
     console.log(`(2) the shell, fitted to the phone's width (${census})`);
     if (!census.startsWith("frames 0")) throw new Error("the phone drew a frame: the shell must be native, not a WebView");

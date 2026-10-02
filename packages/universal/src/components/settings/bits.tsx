@@ -1,7 +1,7 @@
 import type { JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
 import { brandHex, brandMark, brandOf } from "@jaira/ui/brands";
-import { Txt, edge, lengthToken } from "../../primitives";
+import { Txt, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
 
@@ -152,10 +152,4 @@ export function Mark({ brand, state }: { brand: string; state: "available" | "un
       <View position="absolute" left={-2} top={-2} width={8} height={8} borderRadius={999} backgroundColor={t.v(dot) as never} {...({ boxShadow: `0 0 0 2px ${String(t.v("bg"))}` } as object)} />
     </View>
   );
-}
-
-/** A 1px --line between a list's rows. */
-export function RowRule(): JSX.Element {
-  const t = useTokens();
-  return <View height={0} {...(edge(t, { top: 1 }) as object)} />;
 }

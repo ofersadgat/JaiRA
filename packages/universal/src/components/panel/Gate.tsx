@@ -10,7 +10,6 @@ import { COMPONENT_ICON } from "@jaira/ui/gateModel";
 import { PATHS } from "@jaira/ui/iconPaths";
 import { Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { Uncopied } from "../../app/Uncopied";
 import { Icon, type IconName } from "./Icon";
 import { gateBodyOf, subjectOf } from "../floats/GateBodies";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
@@ -98,7 +97,7 @@ export function GateSurface({
     if (config?.component === "choose_option" && config.questions === undefined && plainChoice(choicesOfConfig(config))) return <ChooseOption choices={choicesOfConfig(config)} onSubmit={onSubmit} inFlex={plain} />;
     // Every other body (`floats/GateBodies.tsx`): a choice with words or several questions, a
     // confirmation, a form, a tool call, a review or an edit of an artifact, the JSON box.
-    return gateBodyOf(pending, onSubmit, pending.resumes || flat ? 0 : 8, flat, services) ?? <Uncopied name={`the ${pending.component} gate`} />;
+    return gateBodyOf(pending, onSubmit, pending.resumes || flat ? 0 : 8, flat, services);
   })();
   return (
     <FieldFrame.Provider value={!plain}>
@@ -129,7 +128,6 @@ function ChooseOption({ choices, onSubmit, inFlex = false }: { choices: readonly
   const [answers, setAnswers] = useState<Record<string, Answer>>(() => initialAnswers(choices));
   const only = choices[0];
   if (only === undefined) return <></>;
-  if (only.freeText !== undefined || choices.length > 1) return <Uncopied name="a question with words of its own" />;
   const answer = answers[only.question] ?? EMPTY_ANSWER;
   const send = (picked: string | string[]): void => onSubmit({ decision: picked });
   const immediate = submitsOnClick(choices, answers);

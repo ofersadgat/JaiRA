@@ -3,7 +3,7 @@
  *
  * `shared/mime.ts` names a type for an extension, and naming one is a claim: this file has a
  * grammar, so it will open coloured. Nothing enforces that claim at runtime — a type with no entry
- * in `monacoLanguageOf` resolves to `plaintext` and the file opens grey, which looks like a styling
+ * in `monacoGrammarOf` resolves to `plaintext` and the file opens grey, which looks like a styling
  * problem rather than a missing table row and so goes unreported indefinitely. That is exactly how
  * `.ps1`, `.bat` and `.graphql` came to be classified as text by one function and as non-text by
  * another for as long as they were.
@@ -39,7 +39,7 @@ import {
  *    rather than the answer.
  *  - `application/toml` is the one genuine hole left. Monaco ships no `toml` grammar, so a
  *    `Cargo.toml` opens uncoloured. It is nearly INI and could borrow that grammar, and deliberately
- *    does not: `monacoLanguage.ts` states the rule that an unknown type shows plain rather than
+ *    does not: `grammars.ts` states the rule that an unknown type shows plain rather than
  *    wearing a grammar that is only mostly right, and a rule is not worth having if it bends for the
  *    first convenient case.
  */
@@ -120,7 +120,7 @@ describe("one route, two engines", () => {
   it("declines rather than guessing where only the other engine has a grammar", async () => {
     const { fenceLanguage } = await import("../src/renderer/markdownEditor");
     // Monaco can colour Python; CodeMirror here cannot. The honest answer is an uncoloured fence,
-    // never a grammar that is merely nearby — the rule `languages.ts` states for both columns.
+    // never a grammar that is merely nearby — the rule `grammars.ts` states for both columns.
     expect(monacoGrammarOf(mimeOfPath("a.py"))).toBe("python");
     expect(fenceLanguage("python")).toBeNull();
     expect(fenceLanguage("")).toBeNull();

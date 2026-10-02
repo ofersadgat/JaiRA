@@ -323,14 +323,6 @@ export function changesetAnswerOf(decisions: readonly ChangeDecision[], level: s
 export const changesetVerdictOf = (going: boolean): string => (going ? "no comments — this round is applied" : "comments left — nothing is written, the set goes back");
 export const changesetSubmitOf = (going: boolean): string => (going ? "Apply the review" : "Send back with comments");
 
-/** Whether a change carries words an X would throw away. */
-export const speaksOf = (draft: Draft): boolean => (draft.comment ?? "").trim().length > 0 || (draft.notes ?? []).length > 0;
-
-/** What the discard confirm names: "2 notes and a comment". */
-export function discardWhatOf(notes: number, hasComment: boolean): string {
-  return [notes > 0 ? `${notes} note${notes === 1 ? "" : "s"}` : "", hasComment ? "a comment" : ""].filter((s) => s !== "").join(" and ");
-}
-
 /** A change's path as the detail names it, a rename's old path first. */
 export const pathLabelOf = (change: Change): string => `${change.fromPath !== undefined ? `${change.fromPath} → ` : ""}${change.path}`;
 

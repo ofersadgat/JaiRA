@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useRef, type JSX, type ReactNode } from "react";
 import { Animated, Easing } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { stateWord, type ProviderState } from "@jaira/ui/connectionsModel";
@@ -592,10 +592,4 @@ export function Problem({ children, indent = false }: { children: string; indent
       {children}
     </Txt>
   );
-}
-
-/** Hold a state that a row's parent resets — the open form's, the chevron's. */
-export function useToggle(start = false): [boolean, (v?: boolean) => void] {
-  const [on, set] = useState(start);
-  return [on, (v) => set((was) => (v === undefined ? !was : v))];
 }

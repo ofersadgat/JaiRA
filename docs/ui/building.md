@@ -53,8 +53,6 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
 
 - A region file builds its component's props from the store; a component takes props and knows nothing of
   the store, so a specimen can draw it from a fixture.
-- A view with no room yet is `<Uncopied name="…" />`: a labelled box where it stands, so what is missing
-  shows in every picture.
 - A piece that a specimen or the client needs is exported from `packages/universal/src/index.ts`. Import
   from `@jaira/universal`, never a path under it: the client's alias points the package name at the index
   alone, so `@jaira/universal/components/…` does not resolve on the dev server.

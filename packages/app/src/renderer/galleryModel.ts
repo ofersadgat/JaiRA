@@ -60,11 +60,6 @@ export function parsedDoc(text: string): { doc?: Record<string, unknown>; error?
   }
 }
 
-/** The element id a row carries, so a link can land on it. */
-export function groupAnchor(groupId: string): string {
-  return `gallery-${groupId}`;
-}
-
 /**
  * The variant ids these groups use, in the shared vocabulary's order, with how many rows have each; an
  * id the vocabulary does not know is appended rather than dropped.

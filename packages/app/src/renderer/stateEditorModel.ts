@@ -39,25 +39,6 @@ import { bindingTargets, childStateIdOf, functionOptions, guardTargets, linkTarg
  */
 export type EditorTab = "form" | "json" | "graph";
 
-/**
- * The datalist every binding box completes against.
- *
- * One list for the whole form: a state has a binding box per slot, per operation input and per child
- * wire, and they all name paths in the SAME evaluation scope — this state's inputs and its children's
- * outputs. A list per table would be the same content under N ids.
- */
-export const BINDING_TARGETS_ID = "binding-targets";
-
-/**
- * The datalist a `when` guard completes against.
- *
- * Separate from the binding list and that is the whole point: hw refuses a BINDING whose path starts
- * with `operation` — "not a runtime namespace — expected inputs, outputs, children or artifacts" —
- * while the same path in a guard loads cleanly. One shared list would suggest paths that fail the
- * workflow to load in half the places it was offered.
- */
-export const GUARD_TARGETS_ID = "guard-targets";
-
 /** What the operation block's own controls mark, so the kind picker can take what is left over. */
 export const OPERATION_FIELD_PATHS = operationFieldPaths("operation");
 

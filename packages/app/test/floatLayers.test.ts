@@ -111,7 +111,7 @@ describe("the stylesheet has no in-place floats", () => {
   it("`position: fixed` is only on the window's own layers", () => {
     const offenders = all
       .filter((r) => decl(r.body, "position") === "fixed" && FIXED_OK[r.selector] === undefined)
-      .map((r) => `styles.css:${r.line} ${r.selector} — a float is <Popover>/<Overlay>; a fixed box inside a transformed ancestor is not fixed`);
+      .map((r) => `styles.css:${r.line} ${r.selector} — a float is <Popover>; a fixed box inside a transformed ancestor is not fixed`);
     expect(offenders).toEqual([]);
   });
 });

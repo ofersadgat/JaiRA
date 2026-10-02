@@ -20,7 +20,7 @@
  *
  * Each of those was fixed once, where it was found, and the next float was written the old way and
  * came up underneath something else. So the rule is structural now: a float is rendered into
- * `document.body` by {@link Popover} (or {@link Overlay}, for one that places itself), which is the
+ * `document.body` by {@link Popover}, which is the
  * only place in the renderer that calls `createPortal`, and `floatLayers.test.ts` fails the build on a
  * stylesheet rule shaped like an in-place float, on a z-index that is not one of the layer tokens,
  * and on a `createPortal` anywhere else.
@@ -35,22 +35,16 @@
  *  - **the anchor's palette.** Tokens are declared on subtrees — an island's box carries its look
  *    (`islandStyles.ts`), an editor its theme's — and a float moved to `<body>` would otherwise lose
  *    them. The custom properties that differ between the anchor and the body are copied onto the
- *    float;
- *  - **dismissal**, through {@link usePopover}: a press outside closes it, where "outside" excludes
- *    the anchor, the float, and every float opened from inside it (they are not its DOM descendants
- *    any more — a context carries them up); Escape closes the innermost open one only.
+ *    float.
+ *
+ * Dismissal is the host's: the schema editor shuts its list by rules of its own.
  *
  * With no document (a server render, which is how the tests draw a still picture) a float renders in
  * place.
  */
 import {
-  createContext,
-  forwardRef,
-  useCallback,
-  useContext,
   useEffect,
   useLayoutEffect,
-  useMemo,
   useRef,
   useState,
   type HTMLAttributes,
@@ -62,110 +56,8 @@ import {
 import { createPortal } from "react-dom";
 import { FLOAT_EDGE, MIN_HEIGHT, placeFloat, type FloatAlign, type FloatRect, type FloatSide } from "./floatPlace";
 
-export { FLOAT_EDGE, FLOAT_GAP, placeFloat, type FloatAlign, type FloatRect, type FloatSide } from "./floatPlace";
-
 /** What a float is placed against: a live element, or a place in the window. */
 export type FloatAnchor = RefObject<Element | null> | FloatRect | { x: number; y: number };
-
-// --- dismissal ------------------------------------------------------------------------------------
-
-/**
- * The floats that count as INSIDE an open popover.
- *
- * A float is portalled out of its opener's DOM, so `contains` can no longer tell a click on a submenu
- * from a click on the page. Every {@link Popover} registers its element with the nearest layer above
- * it in the REACT tree — which a portal keeps — and a layer passes the registration up, so a click on
- * a submenu of a submenu is inside all three.
- */
-interface Layer {
-  add: (element: Element) => () => void;
-}
-const LayerContext = createContext<Layer | null>(null);
-
-/** Open floats, oldest first: Escape closes the last one only. */
-const openStack: object[] = [];
-
-export interface PopoverHandle<T extends HTMLElement = HTMLElement> {
-  open: boolean;
-  setOpen: (next: boolean | ((was: boolean) => boolean)) => void;
-  toggle: () => void;
-  close: () => void;
-  /** Put on the element the float is placed against — usually the button's wrapper. A press on it is not outside. */
-  anchor: RefObject<T | null>;
-  /** Handed to {@link Popover} as `at`; it is what makes the float and its own floats count as inside. */
-  layer: Layer;
-}
-
-/**
- * Open state for a float, closed by a press anywhere that is not the anchor, the float or a float
- * opened from it, and by Escape when it is the innermost open float.
- *
- * `onClose` hears every close, whoever caused it — for the host that has more than `open` to reset.
- */
-export function usePopover<T extends HTMLElement = HTMLDivElement>(
-  options: { startOpen?: boolean | undefined; onClose?: (() => void) | undefined } = {},
-): PopoverHandle<T> {
-  const parent = useContext(LayerContext);
-  const [open, setOpenState] = useState(options.startOpen === true);
-  const anchor = useRef<T | null>(null);
-  const inside = useRef(new Set<Element>());
-  const onClose = useRef(options.onClose);
-  onClose.current = options.onClose;
-
-  const setOpen = setOpenState;
-  const wasOpen = useRef(open);
-  useEffect(() => {
-    if (wasOpen.current && !open) onClose.current?.();
-    wasOpen.current = open;
-  }, [open]);
-  const layer = useMemo<Layer>(
-    () => ({
-      add: (element) => {
-        inside.current.add(element);
-        const up = parent?.add(element);
-        return () => {
-          inside.current.delete(element);
-          up?.();
-        };
-      },
-    }),
-    [parent],
-  );
-
-  useEffect(() => {
-    if (!open) return undefined;
-    const token = {};
-    openStack.push(token);
-    const press = (event: Event): void => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (anchor.current?.contains(target) === true) return;
-      for (const element of inside.current) if (element.contains(target)) return;
-      setOpen(false);
-    };
-    const key = (event: KeyboardEvent): void => {
-      if (event.key === "Escape" && openStack[openStack.length - 1] === token) setOpen(false);
-    };
-    // Capture, so a press on something that stops propagation still counts.
-    window.addEventListener("mousedown", press, true);
-    window.addEventListener("keydown", key);
-    return () => {
-      window.removeEventListener("mousedown", press, true);
-      window.removeEventListener("keydown", key);
-      const at = openStack.indexOf(token);
-      if (at >= 0) openStack.splice(at, 1);
-    };
-  }, [open, setOpen]);
-
-  return {
-    open,
-    setOpen,
-    toggle: useCallback(() => setOpen((was) => !was), [setOpen]),
-    close: useCallback(() => setOpen(false), [setOpen]),
-    anchor,
-    layer,
-  };
-}
 
 // --- placement ------------------------------------------------------------------------------------
 
@@ -303,10 +195,8 @@ function assign<T>(ref: Ref<T> | undefined, value: T | null): void {
 type DivProps = Omit<HTMLAttributes<HTMLDivElement>, "children">;
 
 export interface PopoverProps extends DivProps {
-  /** What it is placed against. With a {@link PopoverHandle} as `at`, its `anchor` is the default. */
+  /** What it is placed against. */
   anchor?: FloatAnchor | undefined;
-  /** The handle from {@link usePopover}: makes the float count as inside for dismissal. */
-  at?: PopoverHandle<HTMLElement> | undefined;
   side?: FloatSide | undefined;
   align?: FloatAlign | undefined;
   gap?: number | undefined;
@@ -329,9 +219,7 @@ export interface PopoverProps extends DivProps {
  * A float placed against an anchor, drawn over everything. The element it renders IS the card:
  * `className` styles it, and the layer's own `.float` rule makes it fixed on the float layer.
  */
-export function Popover({ anchor, at, side = "below", align = "start", gap, matchWidth, settle, ref, className, style, children, ...rest }: PopoverProps): JSX.Element {
-  const parent = useContext(LayerContext);
-  const layer = at?.layer ?? parent;
+export function Popover({ anchor, side = "below", align = "start", gap, matchWidth, settle, ref, className, style, children, ...rest }: PopoverProps): JSX.Element {
   const own = useRef<HTMLDivElement | null>(null);
   const setOwn = (element: HTMLDivElement | null): void => {
     own.current = element;
@@ -340,16 +228,9 @@ export function Popover({ anchor, at, side = "below", align = "start", gap, matc
   const [placed, setPlaced] = useState<Placed | null>(null);
   const [matched, setMatched] = useState<number | undefined>(undefined);
   const [, bump] = useState(0);
-  const target: FloatAnchor | undefined = anchor ?? at?.anchor;
+  const target: FloatAnchor | undefined = anchor;
   /** With `settle`: where it was first shown, relative to the anchor's top left. */
   const settled = useRef<{ dx: number; dy: number } | null>(null);
-
-  // Registered with the layer it opened from, so a press inside it is not a press outside that one.
-  useLayoutEffect(() => {
-    const element = own.current;
-    if (element === null || layer === null) return undefined;
-    return layer.add(element);
-  }, [layer]);
 
   // The anchor's palette, once per anchor element.
   const anchorElement = target !== undefined && isRef(target) ? target.current : null;
@@ -427,98 +308,10 @@ export function Popover({ anchor, at, side = "below", align = "start", gap, matc
             }
       }
     >
-      <LayerContext.Provider value={at?.layer ?? parent}>{children}</LayerContext.Provider>
+      {children}
     </div>
   );
   if (typeof document === "undefined") return <div {...rest} className={className} style={style}>{children}</div>;
   // In a seat that draws no box: see `dressSeat`.
   return createPortal(<div style={SEAT}>{card}</div>, document.body);
-}
-
-/**
- * A float that places ITSELF — a tooltip that follows the pointer, written to through its ref. It
- * gets the float layer and nothing else: no anchor, no placement, no dismissal.
- */
-export const Overlay = forwardRef<HTMLDivElement, DivProps & { children?: ReactNode }>(function Overlay({ className, children, ...rest }, ref) {
-  const parent = useContext(LayerContext);
-  const own = useRef<HTMLDivElement | null>(null);
-  useLayoutEffect(() => {
-    if (own.current === null || parent === null) return undefined;
-    return parent.add(own.current);
-  }, [parent]);
-  const setRef = (element: HTMLDivElement | null): void => {
-    own.current = element;
-    assign(ref, element);
-  };
-  const classes = `float${className !== undefined ? ` ${className}` : ""}`;
-  if (typeof document === "undefined") return <div {...rest} ref={setRef} className={className}>{children}</div>;
-  return createPortal(
-    <div {...rest} ref={setRef} className={classes}>
-      {children}
-    </div>,
-    document.body,
-  );
-});
-
-/**
- * A hover card the pointer can travel INTO: it stays open for `linger` ms after the anchor is left,
- * and for as long as the pointer is on the card itself. {@link useHover} closes the moment the anchor
- * is left, which is right for a tooltip and wrong for a card whose rows open — the pointer crosses a
- * gap on its way there. Spread `bind` on the anchor and `cardBind` on the float.
- */
-export function useHoverCard<T extends HTMLElement>(
-  linger = 160,
-): {
-  open: boolean;
-  anchor: RefObject<T | null>;
-  bind: Pick<HTMLAttributes<T>, "onMouseEnter" | "onMouseLeave" | "onFocus" | "onBlur">;
-  cardBind: Pick<HTMLAttributes<HTMLDivElement>, "onMouseEnter" | "onMouseLeave">;
-  close: () => void;
-} {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<T | null>(null);
-  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const stay = useCallback(() => {
-    clearTimeout(timer.current);
-    setOpen(true);
-  }, []);
-  const leave = useCallback(() => {
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => setOpen(false), linger);
-  }, [linger]);
-  const close = useCallback(() => {
-    clearTimeout(timer.current);
-    setOpen(false);
-  }, []);
-  useEffect(() => () => clearTimeout(timer.current), []);
-  return {
-    open,
-    anchor,
-    bind: { onMouseEnter: stay, onMouseLeave: leave, onFocus: stay, onBlur: leave },
-    cardBind: { onMouseEnter: stay, onMouseLeave: leave },
-    close,
-  };
-}
-
-/**
- * Open while the pointer is over the anchor or focus is inside it — a hover card. Spread `bind` on
- * the anchor; `open` says whether to draw the float.
- */
-export function useHover<T extends HTMLElement>(): {
-  open: boolean;
-  anchor: RefObject<T | null>;
-  bind: Pick<HTMLAttributes<T>, "onMouseEnter" | "onMouseLeave" | "onFocus" | "onBlur">;
-} {
-  const [open, setOpen] = useState(false);
-  const anchor = useRef<T | null>(null);
-  return {
-    open,
-    anchor,
-    bind: {
-      onMouseEnter: () => setOpen(true),
-      onMouseLeave: () => setOpen(false),
-      onFocus: () => setOpen(true),
-      onBlur: () => setOpen(false),
-    },
-  };
 }
