@@ -46,6 +46,11 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
   killed, and until then its port is taken: wait before starting another on the same port. Two studios
   photographing at once slow each other badly (each capture waits for the window to be in front — some
   twenty seconds a picture instead of three); run a sweep while no other is running.
+- **The studio's window has to be drawing, on a monitor.** A minimised window's page is hidden, draws
+  no frame, and a capture waits for one forever (a run once stood still for 29 minutes). A window moved
+  off the desktop is photographed at the override's scale (2) instead of the monitor's (1.5), and every
+  golden then fails with "another window". Leave it where it opens, under the other windows; it does
+  not need the focus.
 - **A new scene or specimen** has no DOM original. Once its picture is right:
   `pair.mts --accept --scene <name>` (in the goldens' world) or `--accept --specimen <name>` keeps the
   page's own picture as its golden, in every look, and the manifest records that it was accepted from

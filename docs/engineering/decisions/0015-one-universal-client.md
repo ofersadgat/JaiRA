@@ -762,6 +762,27 @@ kept first:
   floor, for a change that must not show. The deletion was made under that rule: nothing the universal
   page draws or does was to change.
 
+**What the comparison showed.** The universal page was photographed at the tag (every scene and
+specimen, 829 pictures a look with their regions, light twice for the noise floor) and again after the
+deletion, the stylesheet's pruning and the comments pass, in the same kept world on the built client:
+- Light: 823 of 829 pictures identical to the pixel; 4 within the floor (the gallery's pager button, 3–4
+  px, which differs between two runs of one build); 2 changed, both the About page, whose scrollbar is
+  shorter because Licenses lists 266 packages where it listed 236 — the manifest is the client build's
+  now and names what the window ships.
+- Dark: 823 of 829 identical; the same About page and the same flicker; and the Logs page, where the
+  log's error count is one digit narrower than it was in the earlier launch (the mask covers the counts
+  but not an icon a wider count pushed out of it).
+- The verdicts against the goldens are the same but for those pictures: 827 of 829 in light, 825 of 829
+  in dark. In light, of 121 scenes 58 are identical or identical to the eye, 52 differ by under 100 px
+  and 11 by 100–408 px; of 112 specimens 100 are identical or identical to the eye, the largest
+  difference 141 px.
+- The other six looks were photographed at the tag and not again after: the generated tokens are
+  byte-identical, and a look is only its tokens.
+Retaking the goldens found two faults in the rig, fixed with it: the test window was resized on a
+timer and could be read before it had moved, which changed the title bar's gutter for the OS's buttons
+from launch to launch; and a relaunched world draws an answered gate as a call listing, which the
+scene's wait did not accept.
+
 **What the deletion took with it.**
 - **Coverage** (`packages/app/shots/README.md`, "Retired"):
   - event notices end to end in the window — the newest shown with "+1", × reading it, a click opening
