@@ -21,6 +21,8 @@ export interface ChatListSurface {
   hues?: Readonly<Record<string, string>> | undefined;
   names?: Readonly<Record<string, string>> | undefined;
   producing: Readonly<Record<string, number>>;
+  /** The conversations that have not started: being placed, or waiting for a workspace with room. */
+  unplaced?: Readonly<Record<string, "placing" | "waiting">> | undefined;
   seen: Readonly<Record<string, number>>;
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
@@ -222,7 +224,15 @@ function Row({
         </View>
       ) : null}
       {task.project !== undefined ? <ProjectChip label={surface.names?.[task.project] ?? projectName(task.project)} hue={surface.hues?.[task.project] ?? "var(--p0)"} /> : null}
-      {isAnswering(task, surface.producing) ? (
+      {surface.unplaced?.[task.taskId] === "waiting" ? (
+        <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Waiting for a workspace with room" } : {}) as object)}>
+          <Icon name="clock" size={12} color={String(t.v("warn"))} />
+        </View>
+      ) : surface.unplaced?.[task.taskId] === "placing" ? (
+        <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Finding somewhere for it to run" } : {}) as object)}>
+          <Spinner size={12} color={String(t.v("dim"))} />
+        </View>
+      ) : isAnswering(task, surface.producing) ? (
         <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Answering now" } : {}) as object)}>
           <Spinner size={12} color={String(t.v("accent"))} />
         </View>

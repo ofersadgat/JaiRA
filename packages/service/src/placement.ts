@@ -5,13 +5,19 @@
  * waits in this machine's queue, and starts when one frees up (ruled: "3a"). A queued task can be sent
  * to a workspace by hand (ruled: "4a").
  *
+ * A person may narrow where it runs to one machine or one workspace (`RunTarget`, ruled 2026-10-02): the
+ * same walk over fewer workspaces, and the same wait when none of them has room — it is never started
+ * somewhere it was not sent. What waits keeps the whole start it waits for (the composer's settings, the
+ * scripted answers), so it starts as it was asked to, however long it waited.
+ *
  * The order, until the person sets one, is the other machines' workspaces in the order the machines
  * were paired, then this machine's (ruled: "other machines first, this one last"). The rules — order and
  * caps, per project — sync across the fleet (ruling 11).
  */
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { parseRemoteProjectKey, type ProjectSummary } from "@jaira/shared";
+import type { JsonValue } from "@declarative-ai/json";
+import { parseRemoteProjectKey, projectNameOf, type ChatSettings, type PlacementAsk, type ProjectSummary, type QueuedPlacement, type RunTarget } from "@jaira/shared";
 import type { Fleet } from "./fleet";
 import type { MachineResources } from "./resources";
 
@@ -57,6 +63,60 @@ export interface QueuedTask {
   /** The accounts its models spend — see `whyNot`. */
   needs?: string[];
   since: number;
+  /** Where it was sent, when the person chose. Absent: anywhere. */
+  target?: RunTarget;
+  /** The start it waits for, kept whole: what the composer picked, and a test's scripted answers. */
+  start?: HeldStart;
+  /** Workspaces asked so far, how many had no room, and how many times it has waited to ask again. */
+  asked?: number;
+  refused?: number;
+  waits?: number;
+  /** The latest round, and when it was asked. */
+  asks?: PlacementAsk[];
+  askedAt?: number;
+}
+
+/** What a start carries besides the task: everything `task:start` was given that the run needs. */
+export interface HeldStart {
+  overrides?: ChatSettings;
+  interactions?: Record<string, JsonValue[]>;
+  fake?: JsonValue;
+}
+
+/** How often what waits asks again (`AppService.placementTimer`). */
+export const ASK_AGAIN_MS = 10_000;
+
+/** A waiting task as a window reads it. `phase` is `placing` only for one being asked about for the first time. */
+export function queuedView(item: QueuedTask, phase: QueuedPlacement["phase"]): QueuedPlacement {
+  return {
+    taskId: item.taskId,
+    project: item.project,
+    requires: item.requires,
+    since: item.since,
+    phase,
+    ...(item.target !== undefined ? { target: item.target } : {}),
+    ...(item.start?.overrides !== undefined ? { settings: item.start.overrides } : {}),
+    asked: item.asked ?? 0,
+    refused: item.refused ?? 0,
+    waits: item.waits ?? 0,
+    asks: item.asks ?? [],
+    ...(item.askedAt !== undefined ? { askedAt: item.askedAt, ...(phase === "waiting" ? { nextAt: item.askedAt + ASK_AGAIN_MS } : {}) } : {}),
+  };
+}
+
+/** What a waiting task waits for, and why each workspace asked had no room — the log's sentence. */
+export function waitsForWords(item: QueuedTask): string {
+  const what = item.target?.project !== undefined ? "the workspace it was sent to" : item.target?.machine !== undefined ? "a workspace with room on the machine it was sent to" : "a workspace with room";
+  const asks = item.asks ?? [];
+  if (asks.length === 0) return `${what}: none of them is open`;
+  return `${what}: ${asks.map((ask) => `${ask.label} / ${projectNameOf(ask.dir)} — ${ask.why ?? "has room"}`).join("; ")}`;
+}
+
+/** The workspaces a task may run on: all of the project's, or the ones the person narrowed it to. */
+export function candidatesOf(members: readonly ProjectSummary[], target: RunTarget | undefined, selfId: string): ProjectSummary[] {
+  if (target?.project !== undefined) return members.filter((m) => m.project === target.project);
+  if (target?.machine !== undefined) return members.filter((m) => (m.machine?.id ?? selfId) === target.machine);
+  return [...members];
 }
 
 /** One workspace considered, and why it was passed over. */
@@ -145,7 +205,8 @@ export class Placement {
 
   // --- choosing -------------------------------------------------------------------------------------------
 
-  private async capacityOf(machineId: string, selfId: string): Promise<MachineCapacity | undefined> {
+  /** A machine's room to run, asked of it now; undefined when it cannot be reached. */
+  async capacityOf(machineId: string, selfId: string): Promise<MachineCapacity | undefined> {
     if (machineId === selfId) return this.options.localCapacity();
     const client = this.options.fleet.client(machineId);
     if (client === undefined) return undefined;
@@ -204,6 +265,18 @@ export class Placement {
 
   enqueue(item: QueuedTask): void {
     this.writeQueue([...this.queue().filter((q) => q.taskId !== item.taskId), item]);
+  }
+
+  /** Put a changed item back where it stands in the line; nothing happens if it has left. */
+  replace(item: QueuedTask): void {
+    const items = this.queue();
+    if (items.some((q) => q.taskId === item.taskId)) this.writeQueue(items.map((q) => (q.taskId === item.taskId ? item : q)));
+  }
+
+  /** Write what a round found into an item that is still waiting. */
+  patch(taskId: string, found: Pick<QueuedTask, "asked" | "refused" | "waits" | "asks" | "askedAt">): void {
+    const item = this.queue().find((q) => q.taskId === taskId);
+    if (item !== undefined) this.replace({ ...item, ...found });
   }
 
   dequeue(taskId: string): QueuedTask | undefined {

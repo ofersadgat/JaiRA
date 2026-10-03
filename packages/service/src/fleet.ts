@@ -20,7 +20,7 @@
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { PAIRING_CODE_MS, engineUrlOf, normalizePairingCode, type DeviceView, type MachineReach, type MachinesView, type PairingDevice, type PeerView, type CopyChoice } from "@jaira/shared";
+import { PAIRING_CODE_MS, engineUrlOf, machineFormOf, normalizePairingCode, type DeviceView, type MachineForm, type MachineReach, type MachinesView, type PairingDevice, type PeerView, type CopyChoice } from "@jaira/shared";
 import { askOnce, connectEngine, type EngineClient } from "./engineClient";
 import type { EngineHost, PreAuthHandler } from "./engineHost";
 import type { HostFrame, PeerMachine } from "./enginePipe";
@@ -197,7 +197,7 @@ export class Fleet {
   selfPeer(): PeerMachine {
     const me = this.identity();
     const url = this.reach.state === "on" && this.reach.url !== undefined ? engineUrlOf(this.reach.url) : this.read().url;
-    return { id: me.id, label: me.label, os: me.os, tags: me.tags, ...(url !== undefined ? { url } : {}) };
+    return { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, ...(url !== undefined ? { url } : {}) };
   }
 
   private known(): KnownMachine[] {
@@ -222,6 +222,7 @@ export class Fleet {
         id: m.id,
         label: m.label,
         os: m.os,
+        form: machineFormOf(m.form),
         tags: m.tags,
         ...(m.url !== undefined ? { url: m.url } : {}),
         state: link?.state ?? "offline",
@@ -234,7 +235,7 @@ export class Fleet {
     const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt } : undefined;
     const port = this.loopbackPort;
     return {
-      self: { id: me.id, label: me.label, os: me.os, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying(), ...(port !== undefined ? { port } : {}) },
+      self: { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying(), ...(port !== undefined ? { port } : {}) },
       machines,
       devices: this.devices(),
       ...(pairing !== undefined ? { pairing } : {}),
@@ -295,6 +296,14 @@ export class Fleet {
 
   setTags(tags: string[]): MachinesView {
     updateMachineIdentity(this.options.baseDir, { tags });
+    this.announce();
+    this.changed();
+    return this.view();
+  }
+
+  /** Say what this machine is — its icon, here and on every machine that knows it. */
+  setForm(form: MachineForm): MachinesView {
+    updateMachineIdentity(this.options.baseDir, { form });
     this.announce();
     this.changed();
     return this.view();
@@ -566,8 +575,8 @@ export class Fleet {
   }
 
   /** Every paired machine, with its link's state: what federation lists workspaces under. */
-  peers(): Array<{ id: string; label: string; state: PeerView["state"] }> {
-    return this.known().map((m) => ({ id: m.id, label: m.label, state: this.links.get(m.id)?.state ?? "offline" }));
+  peers(): Array<{ id: string; label: string; state: PeerView["state"]; os: PeerMachine["os"]; form: MachineForm }> {
+    return this.known().map((m) => ({ id: m.id, label: m.label, state: this.links.get(m.id)?.state ?? "offline", os: m.os, form: machineFormOf(m.form) }));
   }
 
   /** The live connection to a machine, if it is online now. */
@@ -675,7 +684,7 @@ export class Fleet {
 }
 
 function peerOf(machine: KnownMachine): PeerMachine {
-  return { id: machine.id, label: machine.label, os: machine.os, tags: machine.tags, ...(machine.url !== undefined ? { url: machine.url } : {}) };
+  return { id: machine.id, label: machine.label, os: machine.os, ...(machine.form !== undefined ? { form: machine.form } : {}), tags: machine.tags, ...(machine.url !== undefined ? { url: machine.url } : {}) };
 }
 
 /** A peer as another machine described it: only the fields a peer has, shaped. */
@@ -685,6 +694,7 @@ function sanitizePeer(machine: PeerMachine): PeerMachine {
     id: String(machine.id),
     label: String(machine.label ?? "machine").slice(0, 80),
     os,
+    form: machineFormOf(machine.form),
     tags: Array.isArray(machine.tags) ? machine.tags.filter((t): t is string => typeof t === "string").slice(0, 32) : [],
     ...(typeof machine.url === "string" && /^wss?:\/\//.test(machine.url) ? { url: machine.url } : {}),
   };

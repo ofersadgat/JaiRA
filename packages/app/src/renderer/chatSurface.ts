@@ -10,6 +10,8 @@ import type {
   ConversationView,
   PendingApproval,
   PendingQuestion,
+  QueuedPlacement,
+  RunTarget,
   TaskDetail,
   TaskSummary,
 } from "@jaira/shared/browser";
@@ -66,6 +68,11 @@ export interface ChatSurface {
    * wants to draw.
    */
   producing: Readonly<Record<string, number>>;
+  /**
+   * Which conversations have not started, by task id: `placing` while their workspaces are being asked,
+   * `waiting` while none has room (decision 0013 §5). The list draws it where a row says "answering".
+   */
+  unplaced: Readonly<Record<string, "placing" | "waiting">>;
   /** How far each conversation has been read — see `JairaUiState.seen`. */
   seen: Readonly<Record<string, number>>;
   /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
@@ -73,6 +80,22 @@ export interface ChatSurface {
   onOpen: (taskId: string | null, project?: string) => void;
   /** Start one. The settings are the composer's, and reach the first message by riding its run. */
   onNew: (message: string, overrides?: ChatSettings) => Promise<string | null>;
+  /**
+   * The open conversation while it has not started: being placed, or waiting for a workspace with room
+   * (decision 0013 §5). Its counts, what it asked last and what it waits for are what the thread draws
+   * above the message that has not been sent.
+   */
+  queued?: QueuedPlacement | undefined;
+  /** Where the next conversation is to run, when the person chose; absent is automatic. */
+  runOn?: RunTarget | undefined;
+  /** Choose it. For a conversation that waits, this changes what it waits for. */
+  onRunOn: (target: RunTarget | undefined) => void;
+  /** Change what a waiting conversation's first message runs under — the composer's chips, before the start. */
+  onQueuedSettings: (overrides: ChatSettings) => void;
+  /** Take a waiting conversation back to the start page, with where it was sent and what it ran under. */
+  onTakeBack: (taskId: string, project?: string) => Promise<void>;
+  /** What the start page's composer begins with, carried from a conversation taken back. */
+  startSettings?: ChatSettings | undefined;
   onRename: (taskId: string, title: string, project?: string) => void;
   onDelete: (taskIds: readonly string[], project?: string) => void;
   /** Stop the RUN — what the first message is. Later messages are turns, and `chat:cancel` stops those. */
@@ -102,9 +125,17 @@ type Actions = ReturnType<typeof useApp>["actions"];
 /**
  * At the ROOT: every project's conversations, newest first, each stamped with its own project — "all
  * conversations" is a place, and this is what it holds. Inside a project: that project's.
+ *
+ * A project that is one repository in several workspaces (`grouped`, decision 0013 §4) lists the
+ * conversations of ALL of them, each stamped with its workspace: a conversation is placed on whichever
+ * has room (§5), and one that went to another clone is still this project's.
  */
-export function conversationsAt(state: Pick<AppState, "at" | "allConversations" | "tasks">): ChatSurface["conversations"] {
-  return state.at === null ? state.allConversations : conversationsOf(state.tasks);
+export function conversationsAt(state: Pick<AppState, "at" | "allConversations" | "tasks" | "projects">, grouped = true): ChatSurface["conversations"] {
+  if (state.at === null) return state.allConversations;
+  const identity = grouped ? state.projects.find((p) => p.project === state.at)?.identity : undefined;
+  const group = identity !== undefined ? new Set(state.projects.filter((p) => p.kind === "user" && p.identity === identity).map((p) => p.project)) : new Set<string>();
+  if (group.size <= 1) return conversationsOf(state.tasks);
+  return state.allConversations.filter((c) => c.project !== undefined && group.has(c.project));
 }
 
 /**
@@ -125,6 +156,7 @@ export function chatSurfaceOf(
     names: Readonly<Record<string, string>>;
   },
 ): ChatSurface {
+  const queued = state.chat.taskId === null ? undefined : state.queue.find((q) => q.taskId === state.chat.taskId);
   return {
     conversations: parts.conversations,
     hues: parts.hues,
@@ -142,10 +174,19 @@ export function chatSurfaceOf(
     live: state.selected === state.chat.taskId ? state.liveTurn : null,
     hasProject: state.at !== null,
     producing: state.producing,
+    unplaced: Object.fromEntries(state.queue.map((q) => [q.taskId, q.phase])),
     seen: state.settings.ui.seen,
     onSeen: actions.markSeen,
     onOpen: actions.openConversation,
     onNew: actions.newConversation,
+    queued,
+    runOn: queued !== undefined ? queued.target : state.chat.runOn,
+    onRunOn: (target) => (queued !== undefined ? void actions.changeQueued(queued.taskId, queued.project, { runOn: target ?? null }) : actions.setRunOn(target)),
+    onQueuedSettings: (overrides) => {
+      if (queued !== undefined) void actions.changeQueued(queued.taskId, queued.project, { overrides });
+    },
+    onTakeBack: actions.takeBackQueued,
+    startSettings: state.chat.settings,
     onRename: actions.renameTask,
     onDelete: actions.deleteTasks,
     onCancelRun: actions.cancelTask,

@@ -4,6 +4,10 @@ import { View, isWeb } from "@tamagui/core";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
+import { routeOf } from "@jaira/ui/composerModel";
+import { facesOf } from "@jaira/ui/environmentModel";
+import { placementSummaryOf } from "@jaira/ui/placementSummary";
+import { clockOf } from "@jaira/ui/runActivityModel";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
@@ -18,6 +22,10 @@ import { ForkMark, OriginMark } from "../panel/SessionBands";
 import { WaitingHost } from "./Waiting";
 import { DayChip } from "../panel/TranscriptMarks";
 import { FootFade } from "./FootFade";
+import { EnvironmentBar } from "./EnvironmentBar";
+import { PlacementSummary } from "./PlacementSummary";
+import { QueuedMessage } from "./QueuedMessage";
+import { useChatEnvironment } from "./environment";
 
 /**
  * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
@@ -35,6 +43,12 @@ import { FootFade } from "./FootFade";
  * With it: the approval and question asked inline (`InlineHost`), a message waiting for the allowance
  * (`Waiting.tsx`), a conversation that divided (`ForkMark`) or was forked from another (`OriginMark`),
  * and the day chip over the thread (`DayChip`, web — a phone draws none yet).
+ *
+ * Where it runs (decision 0013 §5): a conversation that was placed says how above its first message
+ * (`PlacementSummary`), and its shell environment in the tray under the box (`EnvironmentBar`). One that
+ * has not started — it is being placed, or waits for a workspace with room — is that summary in
+ * progress and the message it will open with, not sent yet (`QueuedMessage`); the box takes no reply
+ * then, and its chips change the start it waits for.
  */
 export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const t = useTokens();
@@ -54,6 +68,15 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
   const mentions = useMentions(surface.hasProject, m.project);
+  const env = useChatEnvironment(surface);
+  const placement = placementSummaryOf({
+    queued: m.queued,
+    placed: surface.detail?.placed,
+    starting: m.starting,
+    agent: m.plan?.effective.model !== undefined && routeOf(m.plan.effective.model) !== "" ? routeOf(m.plan.effective.model) : undefined,
+    selfId: env.view?.machines.find((machine) => machine.self)?.id,
+  });
+  const placed = placement !== undefined ? <PlacementSummary summary={placement} faces={facesOf(env.view)} clock={clockOf} /> : null;
   // What the thread follows: a new thread or a word of the live tail opens a short window in which the
   // content growing is followed; anything else the reader does is not.
   const follow = useRef(true);
@@ -140,18 +163,33 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
         <ApprovalAskContext.Provider value={m.askValue}>
         <Paper minHeight={viewport}>
-          <Transcript
-            session={m.thread?.session ?? null}
-            entries={m.split !== null ? m.split.shared : m.seam !== null ? m.seam.shared : m.entries}
-            {...(plain ? { live, working: m.answering } : {})}
-            empty={m.answering ? "Working…" : "This conversation has not said anything yet."}
-            artifacts={m.artifacts}
-            onEdit={m.edit}
-            scope={m.taskId}
-            rails
-            {...narrated}
-            {...doomed}
-          />
+          {m.queued !== undefined ? (
+            // Not started: the message it will open with, not sent until it has somewhere to run — in
+            // the transcript's own column (padding 12 16 22).
+            <View paddingTop={12} paddingHorizontal={16} paddingBottom={22} minWidth={0}>
+              {placed}
+              <QueuedMessage message={m.openingMessage ?? ""} since={m.queued.since} waiting={m.queued.phase === "waiting"} onEdit={m.takeBack} onDelete={() => surface.onDelete([m.taskId], m.project)} />
+            </View>
+          ) : placed !== null ? (
+            // Over the transcript, in its column; the transcript's own 12 above is taken back.
+            <View paddingTop={12} paddingHorizontal={16} marginBottom={-12} minWidth={0}>
+              {placed}
+            </View>
+          ) : null}
+          {m.queued !== undefined ? null : (
+            <Transcript
+              session={m.thread?.session ?? null}
+              entries={m.split !== null ? m.split.shared : m.seam !== null ? m.seam.shared : m.entries}
+              {...(plain ? { live, working: m.answering } : {})}
+              empty={m.answering ? "Working…" : "This conversation has not said anything yet."}
+              artifacts={m.artifacts}
+              onEdit={m.edit}
+              scope={m.taskId}
+              rails
+              {...narrated}
+              {...doomed}
+            />
+          )}
           {plain ? asking : null}
         </Paper>
         {m.split === null && m.seam !== null && m.origin !== undefined ? (
@@ -227,17 +265,23 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         ) : null}
         {m.error !== null ? <ChatError text={m.error} /> : null}
         <Composer
-          plan={m.plan ?? null}
+          plan={m.queued !== undefined ? m.startPlan : (m.plan ?? null)}
           busy={m.sending > 0 || m.answering}
           joinable={m.thread !== null}
-          overrides={m.overrides}
-          onOverrides={m.setOverrides}
+          overrides={m.queued !== undefined ? m.queuedSettings : m.overrides}
+          // Waiting, a chip changes the start it waits for; while it is being placed, nothing can.
+          onOverrides={m.queued === undefined ? m.setOverrides : m.queued.phase === "waiting" ? surface.onQueuedSettings : () => undefined}
           value={m.draft}
           onValue={m.setDraft}
           onSend={m.send}
           onStop={m.stop}
           placeholder={replyPlaceholder(m.arming)}
-          {...(m.plan === null && m.thread === null ? { disabled: "This conversation cannot be continued." } : {})}
+          {...(m.queued !== undefined
+            ? { disabled: m.queued.phase === "waiting" ? "This conversation starts when a workspace has room." : "Finding somewhere for this conversation to run…" }
+            : m.plan === null && m.thread === null
+              ? { disabled: "This conversation cannot be continued." }
+              : {})}
+          tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}
           usage={{ context: m.lastContext, onCompact: m.onCompact, cost: m.thread?.costUsd }}
           onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(m.project !== undefined ? { project: m.project } : {}) })}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}

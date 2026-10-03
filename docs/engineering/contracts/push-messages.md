@@ -2,7 +2,7 @@
 id: engineering/contracts/push-messages
 type: engineering-contract
 status: shipped
-updated: 2026-10-01
+updated: 2026-10-02
 visibility: internal
 kind: event
 owned_by: [engineering/units/ipc-bridge]
@@ -76,6 +76,8 @@ The pending shapes are [inbox-channels](inbox-channels.md).
 | `frame:contextMenu` `menu` | `{x, y, selectionText, linkURL, srcURL, mediaType, isEditable, editFlags}` | yes | a right-click inside a sandboxed artifact frame, in window coordinates; `mediaType` is `none`, `image`, `audio`, `video`, `canvas`, `file` or `plugin`; `editFlags` is `{canCut, canCopy, canPaste, canSelectAll}` |
 | `limits:changed` `view` | `LimitsView` | yes | the limits board changed — a reading arrived from a call, a refresh started or ended — coalesced to one push per 100 ms. Published bare, machine-wide ([usage-readings](usage-readings.md)) |
 | `waiting:changed` `items` | `WaitingItem[]` | yes | a message or a run waiting for an account's allowance was added, sent, deleted, rescheduled to a later reset, or had its "Try again at …" box changed. Published bare, machine-wide |
+| `placement:changed` `queue`, `moved?` | `QueuedPlacement[]`, `{taskId, project, to: {taskId, project}}[]` | yes, `moved` no | what is being placed or waits for a workspace changed — a task began being placed, asked again, waited, was sent somewhere, changed what it waits for, or started: the whole list, phase `placing` then `waiting`. `moved` names the waiting tasks that just started on ANOTHER workspace, re-made there under a new id, so a window showing one follows it. This machine's own; never relayed ([decision 0013](../decisions/0013-machines.md) §5) |
+| `environment:changed` `project` | string | yes | what a workspace's checkout says of itself — its branch, commits not pushed, lines changed, its merge request — changed when it was looked at again (a run, a turn or a call ended in it). Only for workspaces a window asked about with `environment:view` |
 | `forge:signInFinished` `outcome` | `ForgeSignInOutcome`: `{ok: true, connection, login?}` or `{ok: false, connection, code: "denied" \| "expired" \| "canceled" \| "failed", reason}` | yes | a sign-in `forge:signIn` started has ended; on success it is sent after the token is stored and the availability pass that checks it has landed, so `login` is the account that pass saw ([forge-integrations](../units/forge-integrations.md)). Published bare, machine-wide |
 
 ## No error reaches the publisher, and an undeliverable push is recorded and dropped

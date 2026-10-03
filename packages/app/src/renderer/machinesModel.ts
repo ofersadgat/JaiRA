@@ -5,7 +5,7 @@
  * run by run (`Words.tsx`).
  */
 import { useEffect, useState } from "react";
-import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachinesView, type PeerView } from "@jaira/shared/browser";
+import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachineForm, type MachinesView, type PeerView } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 
 /** A run of a sentence: words, a value (drawn as code), an error, a quiet note, or a link. */
@@ -160,6 +160,7 @@ export const MACHINES_WORDS = {
   },
   name: { name: "Name", description: "How other machines and the task chips call this one." },
   tags: { name: "Tags", description: "What a workflow can ask for. The operating system is added by itself." },
+  form: { name: "What it is", description: "The shape of this machine's icon, wherever it is named. Guessed once; yours to correct." },
   reach: {
     name: "Reachable from my other machines",
     info: "JaiRA publishes its own port on your tailnet with Tailscale (tailscale serve) — or, without the Tailscale app, with the Tailscale helper it ships with — and turns it off again with this switch. Funnel is never used.",
@@ -239,3 +240,11 @@ export type MachineChipState = "on" | "off" | "warn" | "none";
 export function chipStateOf(state: "online" | "offline" | "connecting" | "mismatch"): MachineChipState {
   return state === "online" ? "on" : state === "mismatch" ? "warn" : "off";
 }
+
+/** What a machine can be, as Settings offers it. */
+export const FORM_CHOICES: ReadonlyArray<readonly [string, MachineForm]> = [
+  ["Desktop", "desktop"],
+  ["Laptop", "laptop"],
+  ["Mini", "mini"],
+  ["Server", "server"],
+];

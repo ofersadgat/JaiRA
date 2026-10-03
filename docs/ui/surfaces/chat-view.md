@@ -2,12 +2,12 @@
 id: ui/surfaces/chat-view
 type: ui-surface
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-02
 kind: screen
-realizes: [ux/patterns/stream-then-settle, ux/patterns/follow-the-live-edge, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/show-the-request-not-the-outcome, ux/patterns/arm-the-cut-then-confirm, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/choose-a-side-where-it-divided]
-serves: [product/chat-with-agents, product/steer-agents-mid-task, product/watch-agents-work-live, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/read-what-work-produced]
-components: [ui/components/transcript, ui/components/message, ui/components/work-row, ui/components/produced-artifacts, ui/components/fork-mark, ui/components/composer, ui/components/composer-setting-chip, ui/components/model-cascade, ui/components/value-view, ui/components/splitter, ui/components/context-menu]
-mockups: [ui/assets/chat-view/empty.html, ui/assets/chat-view/thread.html, ui/assets/chat-view/producing.html, ui/assets/chat-view/armed.html, ui/assets/chat-view/divided.html, ui/assets/chat-view/error.html, ui/assets/chat-view/controlling.html]
+realizes: [ux/patterns/unattended-run-never-waits-silently, ux/patterns/stream-then-settle, ux/patterns/follow-the-live-edge, ux/patterns/say-what-it-is-doing-and-for-how-long, ux/patterns/show-the-request-not-the-outcome, ux/patterns/arm-the-cut-then-confirm, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/choose-a-side-where-it-divided]
+serves: [product/nothing-stalls-in-silence, product/chat-with-agents, product/steer-agents-mid-task, product/watch-agents-work-live, product/rewind-to-where-it-went-wrong, product/try-another-direction, product/read-what-work-produced]
+components: [ui/components/transcript, ui/components/message, ui/components/work-row, ui/components/produced-artifacts, ui/components/fork-mark, ui/components/composer, ui/components/environment-bar, ui/components/placement-summary, ui/components/machine-icon, ui/components/composer-setting-chip, ui/components/model-cascade, ui/components/value-view, ui/components/splitter, ui/components/context-menu]
+mockups: [ui/assets/chat-view/empty.html, ui/assets/chat-view/thread.html, ui/assets/chat-view/producing.html, ui/assets/chat-view/armed.html, ui/assets/chat-view/divided.html, ui/assets/chat-view/error.html, ui/assets/chat-view/controlling.html, ui/assets/chat-view/where.html, ui/assets/chat-view/where-list.html, ui/assets/chat-view/placing.html, ui/assets/chat-view/queued.html, ui/assets/chat-view/starting.html, ui/assets/chat-view/placed.html]
 siblings: [ui/surfaces/conversation-list, ui/surfaces/sidebar, ui/surfaces/context-panel, ui/surfaces/tasks-view, ui/surfaces/run-conversation, ui/surfaces/inbox-strip]
 ---
 
@@ -25,11 +25,12 @@ The Chat view starts **`chat/session`** ([decision 0005](../../engineering/decis
 
 ## The conversation reads first and the box to answer it sits under it
 
-- **Title bar.** The open conversation's title, or `New conversation`, in the app face at the app base in `--dim`. It is a name, not an address, and has no crumbs.
+- **Title bar.** The open conversation's title, or `New conversation`, in the app face at the app base in `--dim`. It is a name, not an address, and has no crumbs. Beside it a chip says where the conversation runs: the [machine-icon](../components/machine-icon.md) and `machine / workspace`, dashed and reading `automatic` while nothing is decided.
 - **Produced.** When the conversation has produced files, a [produced-artifacts](../components/produced-artifacts.md) strip above the scroller reading `Produced` and a count, which never scrolls away.
 - **Thread.** A scroller on `--bg` holding a floating day chip and the [transcript](../components/transcript.md) on a `--panel` sheet at most 900px wide and centred: [message](../components/message.md)s, [work-row](../components/work-row.md)s and the gaps between turns.
 - **Live status.** While a turn is in flight, one line between the thread and the foot on a faint `--accent` wash: a pulse, the verb in `--accent` at weight 600, what it works on in mono, and the time or size so far.
-- **Foot.** Under a `--line` rule: the armed banner, then a red error line when a send failed, then the [composer](../components/composer.md) with its [composer-setting-chip](../components/composer-setting-chip.md)s and the [model-cascade](../components/model-cascade.md) behind the model chip.
+- **Foot.** Under a `--line` rule: the armed banner, then a red error line when a send failed, then the [composer](../components/composer.md) with its [composer-setting-chip](../components/composer-setting-chip.md)s and the [model-cascade](../components/model-cascade.md) behind the model chip, and tucked under it the [environment-bar](../components/environment-bar.md) stating the machine, the workspace and its checkout.
+- **Placement.** In a project with more than one workspace, the [placement-summary](../components/placement-summary.md) stands at the top of the sheet, above the first message: how the conversation was placed and started.
 - **Pinned value.** Choosing `Open in context panel` on any value adds a divider and a second column 420px wide holding that value, drawn by [context-panel](context-panel.md). Closing it returns the room to one column.
 
 ## The room offers a start, then shows the thread in whatever state its latest turn is in
@@ -37,6 +38,10 @@ The Chat view starts **`chat/session`** ([decision 0005](../../engineering/decis
 | State | Surface shows | Mockup |
 | --- | --- | --- |
 | empty | No conversation open: `What are we doing?` at 1.6 times the app base, the sentence `This conversation works in the open project — it asks before it runs or changes anything.`, and the composer reading `Ask for a change, or a question about the code…` with chips showing what the first message will run under. With no project open the sentence is `No project is open, so this runs in JaiRA's own root. Open one to talk about your code.` and `@` offers no files. | [empty.html](../assets/chat-view/empty.html) |
+| choosing where | In a project with more than one workspace the sentence reads `This conversation runs {choice} — it asks before it runs or changes anything.`, the choice in `--accent` over a dashed line with a chevron: `in the first workspace with room`, `on {machine}, in its first workspace with room`, or `in {workspace} on {machine}`. The sentence, the title's chip and the bar under the composer state the same choice, and each opens the same list. | [where.html](../assets/chat-view/where.html), [where-list.html](../assets/chat-view/where-list.html) |
+| placing | The first message has been given and its workspaces are being asked for room: the summary's `Placing` phase in progress, the message under it dashed and faded, the composer greyed with `Finding somewhere for this conversation to run…`, the chip reading `automatic · choosing`. | [placing.html](../assets/chat-view/placing.html) |
+| waiting | Nothing it may run on has room: `Placing` in the waiting tone, counting every workspace asked and every wait; the message amber with `queued · {time}`, `Edit` and `Delete`; the composer greyed with `This conversation starts when a workspace has room.`, its chips still changing what the first message runs under; the chip and the bar saying what it waits for, and both still opening the list. A conversation sent to a machine or a workspace waits for that one. | [queued.html](../assets/chat-view/queued.html) |
+| starting | A workspace took it: `Placed` rolled up, `Starting` in progress, the message sent, the bar naming the workspace and its branch. When the workspace that took it is not the one it was asked for in, the room follows it there. | [starting.html](../assets/chat-view/starting.html), [placed.html](../assets/chat-view/placed.html) |
 | loading | The first message stands as a bubble while the conversation is created and read. With nothing yet on the page the sheet reads `Working…` while the conversation runs and `This conversation has not said anything yet.` otherwise. A failed re-read never blanks a thread that was already showing. | [producing.html](../assets/chat-view/producing.html) |
 | thread | The settled conversation and the composer reading `Reply…`. | [thread.html](../assets/chat-view/thread.html) |
 | producing | The answer arrives as plain text and settles into a message. The status line reads `Thinking`, `Answering`, `Writing`, `Running` or `Working`, with `Jump to live ↓` at its far end once the reader has scrolled away. The composer offers a stop button beside send and says whether a message sent now `joins this turn` or `waits for this turn`. | [producing.html](../assets/chat-view/producing.html) |
@@ -50,7 +55,8 @@ The first line quoted in a banner is cut at 60 characters. Rewinding to a reply 
 
 - The sidebar's `Chat` row inside a project, or `All conversations` at the root, opens the room with the [conversation-list](conversation-list.md) under the row. Its `+` opens the start box; at the root the start box works in JaiRA's own root.
 - Choosing a row opens that conversation. Reading marks it read, and it marks itself read again each time it moves while open.
-- Sending the first message creates the conversation, selects it and starts it.
+- Sending the first message creates the conversation, selects it and starts it, on the machine or in the workspace chosen, or wherever has room first.
+- `Edit` on a waiting message returns to the start box with the message, where it was sent and what it was to run under; `Delete` removes the waiting conversation.
 - Forking from a message opens the new conversation once its first message is sent. The origin chip opens the conversation it came from.
 - The room hosts no questions, approvals or gates. A question from a chat waits on the [inbox-strip](inbox-strip.md), which leads to the Tasks room.
 - Leaving for another room, opening another conversation or deleting this one from its row's menu leaves the room.
@@ -61,4 +67,5 @@ The first line quoted in a banner is cut at 60 characters. Rewinding to a reply 
 - **Live edge.** While the reader is at the bottom, arriving text keeps the view there. Opening another conversation starts at its end, and sending pins the view to the end again.
 - **Theme.** Sheet, bubbles, washes and seams are tokens with a light and a dark value.
 - **Focus.** Nothing takes focus on arrival, the composer's box included.
-- **Unsaved work.** The unsent message, its attachments, its per-message settings and an armed banner belong to the open conversation and are lost on opening another or leaving the room, with no warning.
+- **Unsaved work.** The unsent message, its attachments, its per-message settings and an armed banner belong to the open conversation and are lost on opening another or leaving the room, with no warning. Where the next conversation is to run is kept until that conversation is started.
+- **Waiting.** A waiting conversation keeps its message, where it was sent and what it runs under across a restart, and starts as it was asked to when room opens.

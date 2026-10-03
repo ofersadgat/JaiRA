@@ -2,7 +2,7 @@
 id: ui/components/conversation-row
 type: ui-component
 status: shipped
-updated: 2026-10-01
+updated: 2026-10-02
 realizes: [ux/patterns/live-facts-and-unseen-counts, ux/patterns/verbs-on-the-thing-itself, ux/patterns/name-it-where-it-will-live]
 serves: [product/chat-with-agents, product/see-what-changed-since-you-looked, product/all-projects-in-one-place, product/try-another-direction]
 surfaces: [ui/surfaces/conversation-list]
@@ -29,7 +29,7 @@ One line in the sidebar's list of conversations: a 7px dot at the left, filled b
 - **Mark.** A 7px circle that never shrinks: a 1px `--line` ring when read, filled `--accent` when the newest reply came after the person last read it. Both states keep the same size, so titles stay aligned.
 - **Title.** Takes the spare width and ends in an ellipsis. A forked conversation starts with an 11px fork glyph in a 70% mix of `--accent` into `--dim`, 4px before the words.
 - **Project chip.** At the root only, before the time: the project's name in the data face at 0.79 of the data size, on a 16% wash of the project's hue with a 5px dot in the hue, fully rounded. The shared root wears grey.
-- **Time.** At the far right in `.app-secondary`: `now`, then minutes, hours and days. While the conversation is answering, a 12px turning ring in `--accent` stands in its place.
+- **Time.** At the far right in `.app-secondary`: `now`, then minutes, hours and days. While the conversation is answering, a 12px turning ring in `--accent` stands in its place. A conversation that has not started shows what it is doing there instead: a 12px clock in `--warn` while it waits for a workspace with room (`Waiting for a workspace with room`), a turning ring in `--dim` while it is being placed (`Finding somewhere for it to run`).
 - **Selected.** The open conversation's line sits on a 14% `--accent` wash.
 
 ## Every state keeps the mark's column and changes the ground, the glyph or the far end
@@ -42,7 +42,7 @@ One line in the sidebar's list of conversations: a 7px dot at the left, filled b
 | read | Unread rows with a filled `--accent` dot, read rows with a hollow ring, each with its time. | [read.html](../assets/conversation-row/read.html) |
 | selected | The open conversation on the `--accent` wash, its dot hollow once read. A conversation answering now shows the turning ring in place of its time, selected or not, read or unread. | [selected.html](../assets/conversation-row/selected.html) |
 | forked | The fork glyph before the title; the tooltip names the conversation it came from and where, or `a task since deleted`. | [forked.html](../assets/conversation-row/forked.html) |
-| at root | Every row carries its project chip in the project's hue, the shared root's in grey. | [at-root.html](../assets/conversation-row/at-root.html) |
+| at root | Every row carries its project chip in the project's hue, the shared root's in grey. A project that is one repository in several workspaces lists them all, each row chipped with its own workspace. | [at-root.html](../assets/conversation-row/at-root.html) |
 | renaming | The row is one text box filling the line, with a 1px `--accent` edge, 4px corners, 2px by 4px padding on `--bg`, holding the title and the caret. No mark, chip or time. | [renaming.html](../assets/conversation-row/renaming.html) |
 | error | Cannot occur on the row: a failed rename keeps the old title, and a failed conversation is still listed as a conversation. | |
 
@@ -51,7 +51,7 @@ One line in the sidebar's list of conversations: a 7px dot at the left, filled b
 | On | Does | Feedback |
 | --- | --- | --- |
 | Pointer over | Nothing | No visible change: the hover ground is `--panel-2`, the same as the sidebar's |
-| Click | Opens that conversation in the chat view, in the row's own project at the root | The row takes the `--accent` wash; reading it hollows the dot |
+| Click | Opens that conversation in the chat view, in the row's own project or workspace | The row takes the `--accent` wash; reading it hollows the dot |
 | Right-click | Opens `Open`, `Rename…`, `Copy task id` and `Delete…` at the pointer in a [context-menu](context-menu.md) | The menu at the pointer |
 | `Rename…` | Turns the row into its text box | The box with the caret in it |
 | Enter in the box | Saves a changed, non-empty title | The row returns with the new title |

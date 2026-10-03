@@ -173,7 +173,7 @@ function RowsList({ indices, rowOf, entries }: Rows & { indices: readonly number
 const lines = (n: number): string => (n === 1 ? "1 line" : `${n} lines`);
 
 /** `SaidText`: a run's sentence — words, and code in the data voice (a shell line in its parts' colours). */
-function SaidText({ said }: { said: readonly Said[] }): JSX.Element {
+export function SaidText({ said }: { said: readonly Said[] }): JSX.Element {
   const t = useTokens();
   const size = t.scaled("size-data", 11 / 12);
   return (

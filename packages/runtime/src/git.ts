@@ -170,6 +170,15 @@ export class Git implements GitRead, GitLifecycle {
   }
 
   /**
+   * Whether this directory is one its enclosing repository ignores — inside a working tree, and still
+   * no part of that checkout (a scratch folder, a build output). Its branch and its changes are not
+   * this directory's to report.
+   */
+  async isIgnored(): Promise<boolean> {
+    return (await this.tryRun(["check-ignore", "-q", "."])) !== undefined;
+  }
+
+  /**
    * Who git would attribute a commit here to.
    *
    * `git config` rather than a config file read, so the whole precedence chain answers — repo, then
@@ -203,6 +212,25 @@ export class Git implements GitRead, GitLifecycle {
   async currentBranch(): Promise<string | undefined> {
     const name = await this.tryRun(["rev-parse", "--abbrev-ref", "HEAD"]);
     return name === undefined || name === "HEAD" ? undefined : name;
+  }
+
+  /**
+   * Commits on the current branch that its upstream does not have — what a push would send. Undefined
+   * when the branch has no upstream (never pushed, or detached).
+   */
+  async aheadOfUpstream(): Promise<number | undefined> {
+    const count = await this.tryRun(["rev-list", "--count", "@{upstream}..HEAD"]);
+    return count === undefined || !/^\d+$/.test(count) ? undefined : Number(count);
+  }
+
+  /**
+   * Lines added and removed in the working tree since the last commit, staged or not. Files git does
+   * not track yet are not counted: it has no earlier side to count them against. Undefined on an unborn
+   * branch.
+   */
+  async changedLines(): Promise<{ added: number; removed: number } | undefined> {
+    const stat = await this.tryRun(["diff", "--shortstat", "HEAD"]);
+    return stat === undefined ? undefined : parseShortstat(stat);
   }
 
   async branchExists(branch: string): Promise<boolean> {
@@ -407,4 +435,11 @@ export function parseRawDiff(raw: string): DiffEntry[] {
     }
   }
   return entries;
+}
+
+/** `git diff --shortstat`'s one line — " 3 files changed, 128 insertions(+), 34 deletions(-)" — or nothing, for no change. */
+export function parseShortstat(text: string): { added: number; removed: number } {
+  const added = /(\d+) insertions?\(\+\)/.exec(text);
+  const removed = /(\d+) deletions?\(-\)/.exec(text);
+  return { added: added === null ? 0 : Number(added[1]), removed: removed === null ? 0 : Number(removed[1]) };
 }

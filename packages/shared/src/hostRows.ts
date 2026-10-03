@@ -23,6 +23,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { ConnectIntent, ConnectStepResult } from "./connect";
 import type { FastForwardEnd } from "./fastForward";
+import type { PlacementNote } from "./machines";
 
 /** A fast-forward started — everything a later process needs to take the mode up again. */
 export const FAST_FORWARD_EVENT = "jaira.fastForward";
@@ -150,6 +151,18 @@ export interface LeftEvent {
   reason: string;
 }
 
+/**
+ * A task was PLACED (decision 0013 §5): which workspaces were asked, how long it waited, where it
+ * went, and what starting it there did. Written once, by the engine that starts it, after the run has
+ * begun — a row before that would be history, and a task with history is not a fresh start.
+ */
+export const PLACED_EVENT = "jaira.placed";
+
+export interface PlacedEvent {
+  type: typeof PLACED_EVENT;
+  note: PlacementNote;
+}
+
 /** Canonical JSON: keys sorted at every depth, so one value is one string whatever built it. */
 function canonical(value: unknown): string {
   if (value === null || typeof value !== "object") return JSON.stringify(value) ?? "null";
@@ -173,6 +186,6 @@ export function questionKeyOf(what: { kind: "interaction"; component: string; in
 /**
  * Rows about what THIS process is doing with a task, which a copy of the task's journal (a fork, a
  * split copy) does not inherit: the copy is another task, and nobody fast-forwarded it, held a move
- * for it, left it a question or handed its card an Undo.
+ * for it, left it a question, handed its card an Undo or placed it on a workspace.
  */
-export const PROCESS_NOTE_EVENTS: ReadonlySet<string> = new Set([FAST_FORWARD_EVENT, FAST_FORWARD_ENDED_EVENT, MOVE_HELD_EVENT, MOVE_DROPPED_EVENT, CONNECT_EVENT, LEFT_EVENT]);
+export const PROCESS_NOTE_EVENTS: ReadonlySet<string> = new Set([FAST_FORWARD_EVENT, FAST_FORWARD_ENDED_EVENT, MOVE_HELD_EVENT, MOVE_DROPPED_EVENT, CONNECT_EVENT, LEFT_EVENT, PLACED_EVENT]);

@@ -11,7 +11,7 @@
 import { resolve } from "node:path";
 import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest, CopyChoice } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import type { HealthItem, LogLevel } from "@jaira/shared";
+import type { HealthItem, LogLevel, MachineForm } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
 import type { EngineClientInfo } from "./engineHost";
 import type { AppService, CrashKind } from "./service";
@@ -255,6 +255,9 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       return service.federation.outboxView();
     }) as Handler,
     "placement:runOn": ((request: { taskId: string; project: string; target: string }) => service.runQueuedOn(request.taskId, request.project, request.target)) as Handler,
+    "placement:change": ((request: Parameters<typeof service.changeQueued>[0]) => service.changeQueued(request)) as Handler,
+    "environment:view": ((request: { workspace: string }) => service.environmentView(request.workspace)) as Handler,
+    "machines:form": ((request: { form: MachineForm }) => service.fleet.setForm(request.form)) as Handler,
     "health:dismissAll": (() => {
       service.health.dismissAll();
       return service.health.list();

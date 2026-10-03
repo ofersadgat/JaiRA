@@ -75,6 +75,8 @@ import { BrandIcon } from "../settings/bits";
  *   the clip          26 round, the paperclip 15, --dim; hovered --panel-2 and --text
  *   send              30 round, --accent, the arrow 16 in --panel; disabled --panel-2, --tok-hint, at
  *                     half opacity; stop --bad, a 10 square (radius 2) of --panel
+ *   the tray          what is tucked under the frame (`EnvironmentBar.tsx`): the frame's width, its top
+ *                     22 under the frame's foot, behind it; with one, 10 under the composer, not 14
  */
 export function Composer({
   plan,
@@ -94,6 +96,7 @@ export function Composer({
   readMention,
   onSavePermissionSet,
   saveLayers,
+  tray,
 }: {
   plan: ChatPlanView | null;
   busy?: boolean;
@@ -116,6 +119,8 @@ export function Composer({
   onSavePermissionSet?: ((request: Omit<SavePermissionSetRequest, "project">) => Promise<unknown>) | undefined;
   /** Where `+` may write. */
   saveLayers?: readonly WritableLayer[] | undefined;
+  /** What is tucked under the frame: the session's environment bar. */
+  tray?: ReactNode;
 }): JSX.Element {
   const t = useTokens();
   const win = useWindowDimensions();
@@ -240,13 +245,15 @@ export function Composer({
   const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
 
   return (
-    <View paddingTop={10} paddingHorizontal={16} paddingBottom={14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
+    <View paddingTop={10} paddingHorizontal={16} paddingBottom={has(tray) ? 10 : 14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
       <View
         width="100%"
         maxWidth={900}
         alignSelf="center"
         padding={1}
         borderRadius={22}
+        // Over the tray tucked under it.
+        {...(has(tray) ? { position: "relative", zIndex: 1 } : {})}
         backgroundColor={(dropping ? t.v("accent") : focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
         {/* Positioned: painted after the conversation above it, with what else is. */}
@@ -372,6 +379,11 @@ export function Composer({
           </View>
         </View>
       </View>
+      {has(tray) ? (
+        <View width="100%" maxWidth={900} alignSelf="center" marginTop={-22} position="relative" zIndex={0}>
+          {tray}
+        </View>
+      ) : null}
       {mention !== null && mention.paths.length > 0 && boxAt !== null ? (
         <MenuLayer onClose={() => setMention(null)}>
           <Float anchor={boxAt} side="above" align="start" offset={4} width={boxAt.right - boxAt.left} maxHeight={240} padding={4} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={10} backgroundColor={t.v("panel") as never} {...({ boxShadow: "0px 8px 24px rgba(0, 0, 0, 0.18)", overflowY: "auto" } as object)}>
@@ -442,6 +454,9 @@ export function Composer({
     </View>
   );
 }
+
+/** Whether there is a tray to tuck under the frame. */
+const has = (tray: ReactNode): boolean => tray !== undefined && tray !== null && tray !== false;
 
 /** Measure a chip's box in the window and hand it to what opens from it. */
 function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNView | null>, () => void] {

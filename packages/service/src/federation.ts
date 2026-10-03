@@ -62,6 +62,7 @@ export const MACHINE_LOCAL = new Set([
   "machines:changed",
   "limits:changed",
   "waiting:changed",
+  "placement:changed",
   "frame:contextMenu",
   "forge:signInFinished",
 ]);
@@ -136,7 +137,7 @@ export class Federation {
         out.push({
           ...summary,
           project: remoteProjectKey(peer.id, summary.project),
-          machine: { id: peer.id, label: peer.label, state: peer.state },
+          machine: { id: peer.id, label: peer.label, state: peer.state, os: peer.os, form: peer.form },
           // What is running there is news only while it can be acted on.
           ...(peer.state === "online" ? {} : { waiting: 0 }),
         });

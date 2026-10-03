@@ -6,6 +6,7 @@ import {
   ADD_SCHEMA,
   COPY_CHOICES,
   COPY_WORDS,
+  FORM_CHOICES,
   MACHINES_WORDS as W,
   deviceWords,
   devicesOf,
@@ -26,6 +27,7 @@ import { copyText } from "../../clipboard";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { MachineChip } from "../MachineChip";
+import { MachineIcon } from "../MachineIcon";
 import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "./Button";
 import { Segmented, Switch } from "./controls";
@@ -42,6 +44,7 @@ import { Words } from "./Words";
  *
  *   a machine's tags     row, wraps, centred, gap 6; the OS a dashed chip (app 10/12.5, --dim, 1px
  *                        --line, round, padding 0 6), each tag a chip with its × (padding 0 0 0 4, --dim)
+ *   what it is           its icon (20: the shape, the system's mark on it) before the four it can be
  *   the box adding one   a text box 80 wide
  *   the pairing code     its row on --tint-accent; the code the data face at 15/12.5, 0.08em, padding
  *                        4 10, a dashed --line, radius --control-radius
@@ -132,6 +135,16 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
         control={<TextField value={label} label="Machine name" disabled={busy} onChange={setLabel} onBlur={rename} onSubmit={rename} />}
       />
       <SettingsRow name={W.tags.name} description={W.tags.description} control={<Tags os={view.self.os} tags={view.self.tags} disabled={busy} onChange={(tags) => act(invoke("machines:tags", { tags }))} />} />
+      <SettingsRow
+        name={W.form.name}
+        description={W.form.description}
+        control={
+          <>
+            <MachineIcon face={{ shape: view.self.form, mark: view.self.os }} size={20} />
+            <Segmented value={view.self.form} options={FORM_CHOICES} label={W.form.name} disabled={busy} onChange={(form) => act(invoke("machines:form", { form }))} />
+          </>
+        }
+      />
       <SettingsRow
         name={W.reach.name}
         description={<Words parts={reach.description} />}
