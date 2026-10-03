@@ -9,6 +9,7 @@
  *   --scene a,b | all | main   several scenes, every scene, or the ones photographed in every look
  *   --specimen a,b | all       several specimens, or every one the registry names
  *   --all                      every scene and every specimen
+ *   --changed [<git-ref>]      the scenes and specimens a change can reach, light (see "What a change reaches")
  *   --scroll-to <heading>   the page scrolled so that heading tops its scroller, for a long page (a golden of its own: `<scene>@<heading>`)
  *   --texts   with a region: list the words that moved, and by how much (a specimen always does)
  *   --report <file.json>    what each comparison said, for a later run to be held against
@@ -36,6 +37,25 @@
  *              accepted from the universal page, and when.
  *   --freeze   is gone from this tree: there is no DOM page here to photograph (see {@link FROZEN_ELSEWHERE}).
  *
+ * ## What a change reaches
+ *
+ * A golden taken (`--accept`) is recorded with the source files whose functions ran while its scene was
+ * reached and photographed, or its specimen drawn: `goldens/coverage.json`, beside the manifest.
+ * `--record-coverage` records only that, for the scenes and specimens named (all of them by default), with
+ * no picture kept or graded. It is V8's own coverage over CDP, a function at a time; a module's top level,
+ * and whatever a page runs while its modules load, is no part of it (see {@link Recorder}). Scripts map
+ * back to files only as the DEV SERVER serves them, a module per file — the built client is bundled, with
+ * no sourcemaps — so coverage is recorded from a studio without `--built`.
+ *
+ *   --changed [<git-ref>]   the files changed since the ref (by default the merge base with main, with the
+ *                           working tree and what is not yet tracked), and every scene and specimen that ran
+ *                           one; with them, a specimen whose own file in `specimens/` changed, and whatever
+ *                           has no coverage recorded. A shared foundation ({@link FOUNDATIONS}) is under
+ *                           every picture: the whole set; the specimen registry, every specimen. Light,
+ *                           unless `--look` or `--every-look`. The
+ *                           changed UI files that no recorded scene or specimen ran are listed: give one a
+ *                           specimen, or name the scenes that draw it.
+ *
  * Attaches to the app `studio.mts` keeps running, so a change to a component is in the next run with
  * no build. The page is the universal shell on the native token path, with no stylesheet of the app's
  * on it, so what matches, matches the way a phone would draw it; the emulator is the last check.
@@ -44,8 +64,9 @@
  * `<name>.golden.png` the reference (both with the same boxes painted out), `<name>.diff.png` where
  * they differ; `shots/before-after.mts` holds one run's `.rn.png`s against another's, pixel for pixel.
  */
+import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import pixelmatch from "pixelmatch";
 import { PNG } from "pngjs";
 import { App } from "./driver.mjs";
@@ -57,8 +78,14 @@ const flag = (name: string): boolean => process.argv.includes(name);
 const OUT = arg("--out") !== undefined ? resolve(arg("--out")!) : join(import.meta.dirname, "parity", arg("--port") === undefined ? "rn" : `rn-${arg("--port")}`);
 /** The reference pictures: `<scene>/<look>.png` and `specimen-<name>/<look>.png`, each with a `<look>.json` beside it, and `manifest.json` over them all. */
 const GOLDENS = arg("--goldens") ?? join(import.meta.dirname, "goldens");
-/** What this run does: the page against its goldens, or the page's picture kept as the golden of what has none. */
-const MODE: "compare" | "accept" = flag("--accept") ? "accept" : "compare";
+/**
+ * What this run does: the page against its goldens, the page's picture kept as the golden of what has
+ * none, or (`--record-coverage`) only what each scene and specimen runs.
+ */
+const MODE: "compare" | "accept" | "record" = flag("--accept") ? "accept" : flag("--record-coverage") ? "record" : "compare";
+/** The checkout, and the client the dev server serves its own files from (`/src/…`, `/app/…`, `/bridges/…`). */
+const ROOT = resolve(import.meta.dirname, "..", "..", "..");
+const CLIENT = join(ROOT, "packages", "client");
 
 /** What `--freeze` (and its `--verify`) says now: the page the goldens are of is not in this tree. */
 const FROZEN_ELSEWHERE = [
@@ -379,6 +406,191 @@ function writeManifest(): void {
   writeFileSync(join(GOLDENS, "manifest.json"), JSON.stringify(index, null, 1));
 }
 
+/** What a scene or specimen ran (`coverage.json`), keyed as the manifest keys its pictures. */
+type Coverage = { pictures: Record<string, { kind: Golden["kind"]; files: string[]; recordedAt: string; commit: string }> };
+const COVERAGE = join(GOLDENS, "coverage.json");
+const readCoverage = (): Coverage | undefined => (existsSync(COVERAGE) ? (JSON.parse(readFileSync(COVERAGE, "utf8")) as Coverage) : undefined);
+const keyOf = (kind: Golden["kind"], name: string): string => (kind === "specimen" ? `specimen-${name}` : name);
+
+type Taken = { result: Array<{ url: string; functions: Array<{ ranges: Array<{ startOffset: number; endOffset: number; count: number }> }> }> };
+
+/**
+ * The file in this checkout a script the page ran was served from, as the dev server serves them: the
+ * client's own under its root (`/src/Remote.tsx`), every other package's by its path (`/@fs/C:/…`).
+ * Not the server's own (`/@vite/client`), a pre-bundled dependency, a built file, or Electron's.
+ */
+function sourceOf(url: string, origin: string): string | undefined {
+  if (!url.startsWith(`${origin}/`)) return undefined;
+  const path = decodeURIComponent(url.slice(origin.length).replace(/[?#].*$/, ""));
+  if (path.startsWith("/@") && !path.startsWith("/@fs/")) return undefined;
+  const fs = path.startsWith("/@fs/") ? path.slice("/@fs".length) : undefined;
+  const file = fs === undefined ? join(CLIENT, path) : /^\/[A-Za-z]:\//.test(fs) ? fs.slice(1) : fs;
+  const rel = relative(ROOT, file).replaceAll("\\", "/");
+  return rel.startsWith("..") || /(^|\/)(node_modules|dist)\//.test(rel) || !existsSync(file) ? undefined : rel;
+}
+
+/**
+ * What each scene and specimen runs, recorded over CDP: V8's precise coverage, binary and a function at
+ * a time (`callCount: false, detailed: false`), started before the page is reached and taken after its
+ * picture. A file is in a picture's list when one of its functions ran.
+ *
+ * Not its top level: every module the page imports runs that, so every file would be under every
+ * picture. Nor what a page runs while its modules load (a `.map` at a module's top level, React Refresh's
+ * registrations), taken once from the specimen page with nothing drawn on it (`?names`) and left out of
+ * every list. A file whose only code runs as it loads (a table of constants, the generated tokens) is so
+ * under no picture: `--changed` says so of it, and {@link FOUNDATIONS} names the ones under all of them.
+ */
+class Recorder {
+  private readonly ran = new Map<string, { kind: Golden["kind"]; files: Set<string> }>();
+
+  private constructor(
+    private readonly app: App,
+    private readonly origin: string,
+    /** The functions the page runs as its modules load, by script and place: never a picture's own. */
+    private readonly loading: ReadonlySet<string>,
+  ) {}
+
+  /** A recorder, or nothing when the studio serves the built client (said, for `--accept`; refused, for `--record-coverage`). */
+  static async open(app: App, origin: string): Promise<Recorder | undefined> {
+    await app.cdp("Profiler.enable");
+    const recorder = new Recorder(app, origin, new Set());
+    await recorder.start();
+    await app.navigate(`${origin}${SPECIMEN_PAGE}?names`);
+    await app.until("document.getElementById('specimens') !== null", "the specimen page to load", 400);
+    // Not at once: what the modules defer (a room's module fetched after the first draw) runs seconds later.
+    await app.settled();
+    await new Promise((r) => setTimeout(r, 2000));
+    const taken = await recorder.take();
+    if (!taken.result.some((s) => sourceOf(s.url, origin) !== undefined)) {
+      const why = "the studio serves the built client, whose scripts are bundled with no sourcemaps: coverage is recorded from a studio on the dev server (studio.mts --goldens-world, without --built)";
+      if (MODE === "record") throw new Error(why);
+      console.log(`  (coverage not recorded: ${why})`);
+      return undefined;
+    }
+    const loading = new Set(taken.result.flatMap((s) => s.functions.filter((f) => f.ranges[0]!.count > 0).map((f) => `${s.url}#${f.ranges[0]!.startOffset}`)));
+    return new Recorder(app, origin, loading);
+  }
+
+  /** From here: a page about to be reached. Again on a second try, which starts the counts over. */
+  async start(): Promise<void> {
+    await this.app.cdp("Profiler.stopPreciseCoverage");
+    await this.app.cdp("Profiler.startPreciseCoverage", { callCount: false, detailed: false });
+  }
+
+  private async take(): Promise<Taken> {
+    const taken = await this.app.cdp<Taken>("Profiler.takePreciseCoverage");
+    await this.app.cdp("Profiler.stopPreciseCoverage");
+    return taken;
+  }
+
+  /** What ran since {@link start}, kept as the scene's or specimen's: over every look it is taken in, one list. */
+  async took(kind: Golden["kind"], name: string): Promise<number> {
+    const files = this.ran.get(keyOf(kind, name))?.files ?? new Set<string>();
+    for (const script of (await this.take()).result) {
+      const file = sourceOf(script.url, this.origin);
+      if (file === undefined) continue;
+      // The script's own top level starts at 0.
+      if (script.functions.some((f) => f.ranges[0]!.startOffset > 0 && f.ranges[0]!.count > 0 && !this.loading.has(`${script.url}#${f.ranges[0]!.startOffset}`))) files.add(file);
+    }
+    this.ran.set(keyOf(kind, name), { kind, files });
+    return files.size;
+  }
+
+  /** Into `coverage.json`: what was recorded this run replaces what was, and the rest stays. */
+  write(): void {
+    if (this.ran.size === 0) return;
+    const index = readCoverage() ?? { pictures: {} };
+    const commit = execFileSync("git", ["rev-parse", "--short", "HEAD"], { cwd: ROOT, encoding: "utf8" }).trim();
+    for (const [key, { kind, files }] of this.ran) index.pictures[key] = { kind, files: [...files].sort(), recordedAt: new Date().toISOString(), commit };
+    writeFileSync(COVERAGE, JSON.stringify(index, null, 1));
+    const counts = [...this.ran.values()].map((r) => r.files.size);
+    const everywhere = [...this.ran.values()].map((r) => r.files).reduce((a, b) => new Set([...a].filter((f) => b.has(f))));
+    console.log(`coverage recorded for ${this.ran.size} scenes and specimens (${Math.min(...counts)} to ${Math.max(...counts)} files each; ${everywhere.size} under every one of them) in ${COVERAGE}`);
+  }
+}
+
+/**
+ * Under every picture, so a change to one is the full sweep: the primitives, the tokens and the
+ * stylesheet they are replayed from, and the fonts. Most run only as they load, which coverage does not
+ * see (see {@link Recorder}).
+ */
+const FOUNDATIONS: readonly RegExp[] = [
+  /^packages\/universal\/src\/primitives\.tsx$/,
+  /^packages\/universal\/src\/(css)?[tT]okens(?!.*\.native\.)[^/]*\.tsx?$/,
+  /^packages\/universal\/src\/tamagui\.config\.ts$/,
+  /^packages\/app\/src\/renderer\/styles\.css$/,
+  /^packages\/client\/src\/rn\/fonts\.css$/,
+];
+/**
+ * Under every specimen and no scene: the registry every specimen is drawn through, and the page that
+ * draws it. A change to one is every specimen, with the scenes coverage chooses — a new specimen is
+ * spread into the registry, and the scenes are not on its page.
+ */
+const SPECIMEN_FOUNDATIONS: readonly RegExp[] = [/^packages\/client\/src\/specimens\/registry\.tsx$/, /^packages\/client\/(app\/specimen-rn|src\/routes\/specimenRn[^/]*)\.tsx$/];
+/**
+ * A file the page draws from: what a scene or specimen should cover, and is listed when none does. Not
+ * the universal tree's index, which only exports, and which every new component is added to.
+ */
+const UI_FILE = /^packages\/(universal\/src\/(?!index\.ts$)|client\/(src|app|bridges)\/).*\.(tsx?|css)$/;
+
+/** The files changed since `ref`, with the working tree and what git does not track yet; by default since the merge base with main. */
+function changedFiles(ref: string | undefined): { since: string; files: string[] } {
+  const git = (...args: string[]): string[] => execFileSync("git", args, { cwd: ROOT, encoding: "utf8" }).split("\n").map((l) => l.trim()).filter((l) => l !== "");
+  const base = ref ?? git("merge-base", "HEAD", "main")[0]!;
+  const files = new Set([...git("diff", "--name-only", base), ...git("ls-files", "--others", "--exclude-standard")]);
+  return { since: ref ?? `the merge base with main (${base.slice(0, 8)})`, files: [...files].sort() };
+}
+
+/**
+ * `--changed`: the scenes and specimens the change can reach (see "What a change reaches" above), said
+ * as they are chosen; `undefined` for the whole set.
+ */
+function reachedBy(ref: string | undefined, specimens: readonly string[]): { scenes: string[]; specimens: string[] } | undefined {
+  const { since, files } = changedFiles(ref);
+  const coverage = readCoverage();
+  const ui = files.filter((f) => UI_FILE.test(f) && !/\.test\.tsx?$/.test(f));
+  console.log(`--changed since ${since}: ${files.length} files changed, ${ui.length} of them the page's`);
+  const foundation = files.find((f) => FOUNDATIONS.some((r) => r.test(f)));
+  if (foundation !== undefined) {
+    console.log(`${foundation} is under every picture: the full sweep`);
+    return undefined;
+  }
+  if (coverage === undefined) {
+    console.log(`no coverage is recorded yet (pair.mts --record-coverage, from a studio on the dev server): the full sweep`);
+    return undefined;
+  }
+  const changed = new Set(files);
+  const covered = new Set<string>();
+  /** What chose each, said once per picture. */
+  const why = new Map<string, string>();
+  const choose = (key: string, reason: string): void => void (why.has(key) ? undefined : why.set(key, reason));
+  const reaches = (key: string): void => {
+    const recorded = coverage.pictures[key];
+    if (recorded === undefined) return choose(key, "no coverage recorded");
+    const hit = recorded.files.filter((f) => changed.has(f));
+    for (const f of recorded.files) covered.add(f);
+    if (hit.length > 0) choose(key, hit.map((f) => f.replace(/.*\//, "")).join(", "));
+  };
+  for (const s of SCENES) reaches(s.name);
+  for (const s of specimens) reaches(`specimen-${s}`);
+  const specimenFoundation = files.find((f) => SPECIMEN_FOUNDATIONS.some((r) => r.test(f)));
+  if (specimenFoundation !== undefined) for (const s of specimens) choose(`specimen-${s}`, `${specimenFoundation.replace(/.*\//, "")}, under every specimen`);
+  // A specimen whose own file changed: a fixture is the file's top level, which coverage does not see.
+  for (const file of files.filter((f) => /^packages\/client\/src\/specimens\/[^/]+\.tsx$/.test(f) && existsSync(join(ROOT, f)))) {
+    const text = readFileSync(join(ROOT, file), "utf8");
+    for (const s of specimens) if (new RegExp(`(^|[\\s{,])(["']${s}["']|${/^[A-Za-z_$][\w$]*$/.test(s) ? s : "(?!)"})\\s*:`, "m").test(text)) choose(`specimen-${s}`, file.replace(/.*\//, ""));
+  }
+  const scenes = SCENES.map((s) => s.name).filter((n) => why.has(n));
+  const chosen = specimens.filter((s) => why.has(`specimen-${s}`));
+  const reasons = new Map<string, string[]>();
+  for (const [key, reason] of why) reasons.set(reason, [...(reasons.get(reason) ?? []), key]);
+  for (const [reason, keys] of reasons) console.log(`  ${reason}: ${keys.join(", ")}`);
+  console.log(`${scenes.length} of ${SCENES.length} scenes and ${chosen.length} of ${specimens.length} specimens`);
+  const uncovered = ui.filter((f) => !covered.has(f) && existsSync(join(ROOT, f)) && !SPECIMEN_FOUNDATIONS.some((r) => r.test(f)));
+  if (uncovered.length > 0) console.log(`changed, and under no picture as recorded — add a specimen for it, or name the scenes that draw it (--scene a,b):\n${uncovered.map((f) => `  ${f}`).join("\n")}`);
+  return { scenes, specimens: chosen };
+}
+
 /**
  * A page reached and photographed undisturbed, or tried again. The dev server is every studio's: a file
  * somebody saves reloads this window's page under whatever scene it was in the middle of, or fails
@@ -429,7 +641,14 @@ interface SpecimenShot {
   window: Win;
 }
 
-const specimenShot = (app: App, origin: string, name: string, look: Look): Promise<SpecimenShot> => undisturbed(app, `the ${name} specimen`, () => specimenPage(app, origin, name, look));
+/** Recording what each scene and specimen runs: `--record-coverage`, and `--accept` from a studio on the dev server. */
+let recorder: Recorder | undefined;
+
+const specimenShot = (app: App, origin: string, name: string, look: Look): Promise<SpecimenShot> =>
+  undisturbed(app, `the ${name} specimen`, async () => {
+    await recorder?.start();
+    return specimenPage(app, origin, name, look);
+  });
 
 async function specimenPage(app: App, origin: string, name: string, look: Look): Promise<SpecimenShot> {
   // Wherever the last scene left the pointer, a specimen under it would be drawn hovered.
@@ -488,12 +707,18 @@ function gradeSpecimen(base: string, golden: Pick<SpecimenShot, "png" | "box" | 
 async function specimen(app: App, origin: string, name: string, look: Look, replace: boolean): Promise<boolean> {
   const base = `specimen-${name}-${lookName(look)}`;
   const kept = readGolden("specimen", name, lookName(look));
+  if (MODE === "record") {
+    await specimenShot(app, origin, name, look);
+    console.log(`${base}: ${await recorder!.took("specimen", name)} files`);
+    return false;
+  }
   if (MODE === "accept") {
     if (kept !== undefined && !replace) {
       alreadyKept++;
       return false;
     }
     const shot = await specimenShot(app, origin, name, look);
+    await recorder?.took("specimen", name);
     accept(
       { kind: "specimen", name, look: lookName(look), seed: null, window: shot.window, picture: { width: shot.png.width, height: shot.png.height }, box: roundRect(shot.box), islands: shot.islands.map(roundRect), volatile: [], texts: roundRuns(shot.texts), takenAt: new Date().toISOString(), from: "universal" },
       shot.png,
@@ -539,17 +764,28 @@ async function scene(app: App, scene: Scene, look: Look, seed: string, replace: 
   const stem = `${scene.name}${arg("--scroll-to") !== undefined ? `@${arg("--scroll-to")!.replace(/[^a-z0-9]+/gi, "_")}` : ""}`;
   const name = `${stem}-${lookName(look)}`;
   const kept = readGolden("scene", stem, lookName(look));
+  const reached = (): Promise<void> =>
+    undisturbed(app, name, async () => {
+      await recorder?.start();
+      await reach(app, { look, scene });
+    });
+  if (MODE === "record") {
+    await reached();
+    console.log(`${name}: ${await recorder!.took("scene", stem)} files`);
+    return false;
+  }
   if (MODE === "accept") {
     if (kept !== undefined && !replace) {
       alreadyKept++;
       return false;
     }
-    await undisturbed(app, name, () => reach(app, { look, scene }));
+    await reached();
     const regions = await regionsOf(app);
     const runs = await app.evaluate<Run[]>(texts("document.body"));
     const islands = await app.evaluate<Island[]>(islandsOf("[data-island]"));
     const volatile = [...(await app.evaluate<Island[]>(VOLATILE)), ...(scene.volatile !== undefined ? await app.evaluate<Island[]>(scene.volatile) : [])];
     const png = await capture(app);
+    await recorder?.took("scene", stem);
     accept(
       {
         kind: "scene",
@@ -710,11 +946,15 @@ async function main(): Promise<void> {
     process.exitCode = 2;
     return;
   }
+  const began = Date.now();
+  if (flag("--changed") && (arg("--scene") !== undefined || arg("--specimen") !== undefined || flag("--all"))) throw new Error("--changed chooses the scenes and specimens itself: leave out --scene, --specimen and --all");
   mkdirSync(OUT, { recursive: true });
   console.log(
     MODE === "accept"
       ? `pair: keeping the page's own picture as the golden of what has none, in ${GOLDENS}`
-      : `pair: the page against the reference pictures in ${GOLDENS} — taken from the tag dom-renderer-final in the world ${GOLDENS_WORLD} (scenes are compared in a studio on it: studio.mts --goldens-world)`,
+      : MODE === "record"
+        ? `pair: recording what each scene and specimen runs, in ${COVERAGE}`
+        : `pair: the page against the reference pictures in ${GOLDENS} — taken from the tag dom-renderer-final in the world ${GOLDENS_WORLD} (scenes are compared in a studio on it: studio.mts --goldens-world)`,
   );
   const app = await App.connect(Number(arg("--port") ?? STUDIO_PORT), { out: OUT });
   let failed = false;
@@ -724,9 +964,23 @@ async function main(): Promise<void> {
     if ((await app.evaluate<string>("location.protocol")) === "chrome-error:") await app.navigate(arg("--pages") ?? "http://127.0.0.1:8081/");
     const origin = await app.evaluate<string>("location.protocol + '//' + location.host");
     const names = (given: string | undefined): string[] | undefined => given?.split(",").map((s) => s.trim()).filter((s) => s !== "");
+    // The registry is the page's (it imports the universal tree): the specimen page with no name lists them.
+    // (With a query of its own: from a specimen's page, the bare path is not a new document.)
+    const registry = async (): Promise<string[]> => {
+      await app.navigate(`${origin}${SPECIMEN_PAGE}?names`);
+      await app.until("document.getElementById('specimens') !== null", "the specimen page to list its specimens", 400);
+      return JSON.parse(await app.evaluate<string>("document.getElementById('specimens').dataset.names")) as string[];
+    };
+    // `--changed [<ref>]`: what the change reaches, or (a foundation, no coverage yet) the whole set.
+    const ref = arg("--changed")?.startsWith("--") === false ? arg("--changed") : undefined;
+    const reached = flag("--changed") ? reachedBy(ref, await registry()) : undefined;
+    if (reached !== undefined && reached.scenes.length === 0 && reached.specimens.length === 0) {
+      console.log("nothing the gate photographs is reached by the change");
+      return;
+    }
     // Nothing named: the whole set, scenes and specimens.
-    const everything = flag("--all") || (arg("--scene") === undefined && arg("--specimen") === undefined);
-    const wanted = names(arg("--scene")) ?? (everything ? ["all"] : []);
+    const everything = flag("--all") || (reached === undefined && arg("--scene") === undefined && arg("--specimen") === undefined);
+    const wanted = reached?.scenes ?? names(arg("--scene")) ?? (everything ? ["all"] : []);
     const scenes = wanted.flatMap((w) => {
       if (w === "all") return SCENES;
       if (w === "main") return SCENES.filter((s) => s.everyLook === true);
@@ -736,18 +990,13 @@ async function main(): Promise<void> {
     });
     // What `--accept` may replace: a scene or specimen named itself, never one a sweep (`all`, `main`) came across.
     const named = new Set([...wanted.filter((w) => w !== "all" && w !== "main"), ...(names(arg("--specimen")) ?? []).filter((s) => s !== "all").map((s) => `specimen-${s}`)]);
-    let specimens = names(arg("--specimen")) ?? (everything ? ["all"] : []);
-    if (specimens.includes("all")) {
-      // The registry is the page's (it imports the universal tree): the specimen page with no name lists them.
-      // (With a query of its own: from a specimen's page, the bare path is not a new document.)
-      await app.navigate(`${origin}${SPECIMEN_PAGE}?names`);
-      await app.until("document.getElementById('specimens') !== null", "the specimen page to list its specimens", 400);
-      const all = JSON.parse(await app.evaluate<string>("document.getElementById('specimens').dataset.names")) as string[];
-      specimens = [...new Set([...specimens.filter((s) => s !== "all"), ...all])];
-    }
+    let specimens = reached?.specimens ?? names(arg("--specimen")) ?? (everything ? ["all"] : []);
+    if (specimens.includes("all")) specimens = [...new Set([...specimens.filter((s) => s !== "all"), ...(await registry())])];
     // The light look, unless more are asked for; every look for what is accepted, unless one is named.
+    // What a page runs is the same in every look: coverage is recorded in the light one unless asked.
     const looks: readonly Look[] = flag("--every-look") || (MODE === "accept" && arg("--look") === undefined) ? LOOKS : [parseLook(arg("--look") ?? "light")];
     const seed = scenes.length > 0 ? await seedOf(app) : "";
+    if (MODE !== "compare") recorder = await Recorder.open(app, origin);
     // One that cannot be photographed (a scene that will not be reached, a page that throws) is said and
     // counted, and the rest go on: a run of several hundred is not lost to one.
     const each = async (what: string, run: () => Promise<boolean>): Promise<void> => {
@@ -764,9 +1013,12 @@ async function main(): Promise<void> {
   } finally {
     await app.close();
     writeManifest();
+    recorder?.write();
   }
-  if (MODE === "accept") {
-    const lost = results.filter((r) => r.grade === "unreached").map((r) => r.of);
+  const lost = results.filter((r) => r.grade === "unreached").map((r) => r.of);
+  if (MODE === "record") {
+    if (lost.length > 0) console.log(`${lost.length} could not be reached, and have no coverage recorded: ${lost.join(", ")}`);
+  } else if (MODE === "accept") {
     console.log(`accepted ${accepted.length} pictures as goldens in ${GOLDENS}${alreadyKept > 0 ? `; ${alreadyKept} have one already and were left alone (name a scene or specimen to replace its golden)` : ""}${lost.length > 0 ? `; ${lost.length} could not be photographed: ${lost.join(", ")}` : ""}`);
   } else {
     if (results.length > 3) {
@@ -778,7 +1030,8 @@ async function main(): Promise<void> {
     const held = arg("--same-as");
     if (held !== undefined && !sameAs(held)) failed = true;
   }
-  console.log(`wrote ${MODE === "accept" ? GOLDENS : OUT}`);
+  const took = Math.round((Date.now() - began) / 1000);
+  console.log(`wrote ${MODE === "accept" ? GOLDENS : MODE === "record" ? COVERAGE : OUT}, in ${Math.floor(took / 60)}m ${took % 60}s`);
   if (failed) process.exitCode = 1;
 }
 

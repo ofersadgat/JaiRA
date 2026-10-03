@@ -24,6 +24,48 @@ npx tsx packages/app/shots/pair.mts --port 9301 --scene task --region panel --te
 npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
 ```
 
+While working, a studio on the dev server, and only what the change reaches:
+
+```bash
+npx tsx packages/app/shots/studio.mts --goldens-world --port 9301          # the dev server: an edit is in the next page, no build
+npx tsx packages/app/shots/pair.mts --port 9301 --changed                  # what this branch changed reaches, light
+npx tsx packages/app/shots/pair.mts --port 9301 --changed HEAD             # what the working tree changed reaches
+npx tsx packages/app/shots/pair.mts --port 9301 --record-coverage          # what each scene and specimen runs, recorded again
+```
+
+- **What a change reaches** is read from `goldens/coverage.json` (not in git), beside the manifest: for
+  each scene and specimen, the source files whose functions ran while it was reached and photographed.
+  `--accept` records it with the golden; `--record-coverage` records only it, for what is named or for
+  everything, with no picture kept or graded. `--changed [<ref>]` takes the files changed since the ref
+  (by default the merge base with main, with the working tree and what git does not track yet) and
+  photographs, in the light look, every scene and specimen that ran one of them, a specimen whose own
+  `specimens/*.tsx` changed, and whatever has no coverage recorded. It says what chose each.
+- **A foundation is under every picture.** A change to `primitives.tsx`, the tokens (`tokens*.tsx`,
+  `cssTokens*.ts`, `tamagui.config.ts`), `styles.css` or the fonts is the full sweep, said in one line. A
+  change to the specimen registry or the specimen page is every specimen, with the scenes coverage
+  chooses: the scenes are not on that page.
+- **Coverage is recorded from the dev server.** It is V8's, over CDP, a function at a time, and a script
+  is a file only as the dev server serves them, a module each; the built client is bundled with no
+  sourcemaps, and a studio with `--built` records nothing (`--accept` says so; `--record-coverage`
+  refuses). A module's top level is no part of it, nor is what a page runs while its modules load
+  (taken once from the specimen page with nothing on it): otherwise every file would be under every
+  picture. So a file whose only code is its top level — a table of constants, a fixture — is under no
+  picture, and `--changed` lists it, with every other changed UI file no scene or specimen ran: give it
+  a specimen, or name the scenes that draw it (`--scene a,b`).
+- **What coverage cannot see**: the engine. A scene's picture holds what main and the service answered
+  (`environment:view`, a task's journal), and a change there reaches no page file. Name the scenes, or
+  run the full sweep.
+- **Coverage drifts with the code**: a scene that starts drawing a component is not chosen by a change to
+  it until coverage is recorded again. Record it again after a merge, or when `--changed` lists a file
+  under no picture that you know a scene draws; it takes about as long as a light sweep.
+- **The full sweep stays the gate before a merge**, on the built client. `--changed` is for the loop.
+  Measured on the dev server, one studio: a change to `Composer.tsx` reaches 45 scenes (the Chat room's,
+  and every task and run scene, whose panel holds a conversation's composer) and one specimen, in 6m
+  40s; the full light sweep took 29m 49s, and gave the same verdicts for the same pictures, but for one
+  thread's scroll in two `artifact-*` scenes that the full run's order disturbs. A change to the
+  renderer's store (`store.ts`, under 151 of the 240) reaches nearly everything; so does the specimen
+  registry, for the specimens.
+
 - **The reference pictures** (`goldens/`, not in git) are of the DOM renderer, taken from the commit
   tagged `dom-renderer-final` (a checkout of it: `git worktree add ../JaiRA-2-dom dom-renderer-final`)
   with that tree's `pair.mts --freeze --goldens <this tree's goldens>`. `pair.mts --freeze` here says
@@ -80,7 +122,7 @@ npx tsx packages/app/shots/pair.mts --port 9301 --specimen markdown --every-look
 | `world.mts` | Builds a scratch project and base root, and the scripted replies that park a run at its gate. | The world of every rig. |
 | `parityWorld.mts` | The gate's world (its seed) and its 121 scenes; `PAGE`, `SPECIMEN_PAGE`, `GOLDENS_WORLD`. | The scenes. Reached by text, role, title, test id only; the DOM-class branches are removed. |
 | `studio.mts` | Keeps the app open on a seeded world, from the dev server or the built client. | The loop. Now `--goldens-world`; refuses to seed that world. |
-| `pair.mts` | The page against its reference pictures, graded region by region; `--accept`. | The gate. Reworked: the goldens are what it compares against; `--freeze` points to the tag. |
+| `pair.mts` | The page against its reference pictures, graded region by region; `--accept`; `--changed`, only what a change reaches, by the coverage `--record-coverage` keeps. | The gate. Reworked: the goldens are what it compares against; `--freeze` points to the tag. |
 | `peek.mts` | What a studio's window shows, and an expression evaluated in it. | Looking at things. |
 | `islands.mts` | The island pages (Monaco, CodeMirror, frames) in a browser standing in for a phone's WebView, with their timings. | The phone's islands; drives no page of the app's. |
 | `android.mts` | The phone app on the emulator, end to end: pairs by the desktop's code, reaches each room. | The device check. |

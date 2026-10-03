@@ -205,6 +205,17 @@ scene's picture would be of one that is gone.
 
 ## How it is checked
 
+**While working**, only what the change reaches, on the dev server (no build between an edit and its
+picture):
+
+```bash
+npx tsx packages/app/shots/studio.mts --goldens-world --port 9301           # leave running
+npx tsx packages/app/shots/pair.mts --port 9301 --changed                   # what the branch reaches, light
+npx tsx packages/app/shots/pair.mts --port 9301 --changed HEAD              # what the working tree reaches
+```
+
+**Before a merge**, the full sweep, on the built client:
+
 ```bash
 npm --workspace @jaira/client run build                                     # the client the gate runs on
 npx tsx packages/app/shots/studio.mts --goldens-world --built --port 9301   # leave running
@@ -229,11 +240,27 @@ npx tsx packages/app/shots/pair.mts --port 9301 --accept --scene <name>     # ke
   level: two layouts never agree to a sixty-fourth of a pixel, and a mixed colour computed in floating
   point is a level off its 8-bit one) or a count of differing pixels. With N in the thousands, "to the
   eye" means a region is subpixel text on one side and greyscale on the other: see below.
+- **`--changed [<ref>]`** photographs, in the light look, every scene and specimen whose recorded
+  coverage holds a file changed since the ref (by default the merge base with main, with the working
+  tree and untracked files), a specimen whose own `specimens/*.tsx` changed, and whatever has no
+  coverage yet; it says what chose each. The coverage (`goldens/coverage.json`) is the source files
+  whose functions ran while a scene was reached or a specimen drawn: `--accept` records it with the
+  golden, `--record-coverage` records only it. Both from a studio on the dev server: the built client is
+  bundled with no sourcemaps.
+- **A foundation is under every picture**: `primitives.tsx`, the tokens, `styles.css`, the fonts. A
+  change to one is the full sweep, and `--changed` says so. The specimen registry is under every
+  specimen.
+- **A file under no picture** is listed by `--changed`: a new component, or one whose only code runs as
+  its module loads (a fixture, a table), which coverage does not see. Give it a specimen, or name the
+  scenes that draw it. Nor does coverage see the engine: a change to what main or the service answers is
+  named scenes or the full sweep. Coverage drifts as scenes start drawing new things; record it again
+  (`--record-coverage`) after a merge. (Measured: a change to `Composer.tsx` reaches 45 of 121 scenes
+  and 1 of 119 specimens, 6m 40s against the full light sweep's 29m 49s on the same studio.)
 - **A scene is compared only in the goldens' world** (`studio.mts --goldens-world`,
   `shots/.world-goldens`): its picture holds that world's task ids, times and project path. That world is
   opened as it is and never seeded again. A specimen has no world and is compared from any studio.
 - **The built client, not the dev server**, for a sweep (`--built`): nothing anyone saves reaches it, and
-  the pictures are of what ships. The dev server is for the loop.
+  the pictures are of what ships. The dev server is for the loop, and for recording coverage.
 - **A new scene or specimen** has no golden. Once its picture is right, `pair.mts --accept --scene <name>`
   (in the goldens' world) or `--accept --specimen <name>` keeps the page's own picture, in every look.
   `--accept` with nothing named takes everything that has no golden and leaves the rest.
