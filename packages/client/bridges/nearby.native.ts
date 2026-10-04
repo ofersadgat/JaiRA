@@ -14,11 +14,12 @@ interface JairaNetModule {
   tailnetAvailable(): boolean;
   startBrowsing(): void;
   stopBrowsing(): void;
+  localAddresses(): string[];
   tailnetStart(hostname: string): Promise<void>;
   tailnetProxy(target: string): Promise<number>;
   tailnetState(): string;
   tailnetLogout(): Promise<void>;
-  addListener(event: "onNearby", listener: (event: { machines: Array<{ name: string; txt?: Record<string, string>; host?: string; port?: number }>; problem?: string }) => void): EventSubscription;
+  addListener(event: "onNearby", listener: (event: { machines: Array<{ name: string; txt?: Record<string, string>; host?: string; port?: number }>; state?: NearbyState["state"]; problem?: string }) => void): EventSubscription;
   addListener(event: "onTailnetState", listener: (event: { state: string }) => void): EventSubscription;
 }
 
@@ -34,13 +35,21 @@ export function browseNearby(listener: (state: NearbyState) => void): () => void
       const announced = announcementOf(found.txt, { ...(found.host !== undefined ? { host: found.host } : {}), ...(found.port !== undefined ? { port: found.port } : {}) });
       if (announced !== undefined) machines.push({ ...announced, key: found.name });
     }
-    listener({ machines, ...(event.problem !== undefined ? { problem: event.problem } : {}) });
+    listener({ machines, state: event.state ?? "browsing", ...(event.problem !== undefined ? { problem: event.problem } : {}) });
   });
   native.startBrowsing();
   return () => {
     subscription.remove();
     native.stopBrowsing();
   };
+}
+
+export function localAddresses(): string[] {
+  try {
+    return native?.localAddresses() ?? [];
+  } catch {
+    return [];
+  }
 }
 
 function parseState(text: string): TailnetState {

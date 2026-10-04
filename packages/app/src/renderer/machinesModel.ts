@@ -5,7 +5,7 @@
  * run by run (`Words.tsx`).
  */
 import { useEffect, useState } from "react";
-import { PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachineForm, type MachinesView, type PeerView } from "@jaira/shared/browser";
+import { LAN_PAIRING_PORT, PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachineForm, type MachinesView, type NearbyEvent, type PeerView } from "@jaira/shared/browser";
 import { invoke, subscribe as subscribePush } from "./store";
 
 /** A run of a sentence: words, a value (drawn as code), an error, a quiet note, or a link. */
@@ -120,10 +120,38 @@ export function pairCodeWords(view: MachinesView, expiresAt: number): WordPart[]
     "On the other machine: Settings → Machines → Add a machine, with ",
     { code: view.self.reach.url ?? "" },
     ".",
-    // Announced on the local network (decision 0013, amended 2026-10-04): a phone lists it by name.
-    ...(view.pairing?.nearby === true ? [` On a phone on this Wi-Fi: open JaiRA and pick ${view.self.label}.`] : []),
+    // Announced on the local network (decision 0013, amended 2026-10-04): a phone lists it by name, or
+    // takes its local address where the network hides it.
+    ...(view.pairing?.nearby !== undefined ? nearbyWords(view.self.label, view.pairing.nearby) : []),
     ` Works until ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`,
   ];
+}
+
+/** How a phone on this Wi-Fi finds the machine: by name in its list, else by the address typed. */
+export function nearbyWords(label: string, nearby: { port: number; addresses: string[] }): WordPart[] {
+  const first = nearby.addresses[0];
+  if (first === undefined) return [" This machine has no address on a local network, so no phone nearby can find it."];
+  return [` On a phone on this Wi-Fi: open JaiRA and pick ${label}. Not listed? Type `, { code: nearby.port === LAN_PAIRING_PORT ? first : `${first}:${nearby.port}` }, " there."];
+}
+
+/** What phones did on the pairing listener lately, one line each, oldest first. */
+export function nearbyLogLines(events: NearbyEvent[]): string[] {
+  return events.map((e) => {
+    const when = new Date(e.at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+    const what =
+      e.what === "connected"
+        ? "connected"
+        : e.what === "wrong-code"
+          ? "typed a code that is not this one"
+          : e.what === "paired"
+            ? `paired as ${e.detail ?? "a phone"}`
+            : e.what === "sign-in"
+              ? "asked to join your tailnet: its Tailscale page was opened"
+              : e.what === "left"
+                ? "left"
+                : `was refused: ${e.detail ?? "no reason given"}`;
+    return `${when}  ${e.from}  ${what}`;
+  });
 }
 
 /** A phone that paired over the local network and is joining the tailnet: what to do about it here. */
@@ -177,6 +205,7 @@ export const MACHINES_WORDS = {
   },
   pair: { name: "Pair a machine", button: "Show a code" },
   pairCode: { name: "Code for pairing" },
+  nearbyLog: { name: "Phones nearby" },
   phone: { name: "A phone joining" },
   yours: { title: "Your machines", info: "Remembered on every machine you pair: pairing one new machine with any of these introduces it to the rest." },
   none: { name: "None yet", description: "Pair a machine below, or show a code here and type it there." },

@@ -15,7 +15,13 @@ export interface NearbyMachine extends LanAnnouncement {
 
 export interface NearbyState {
   machines: NearbyMachine[];
-  /** Why none can be found: `denied` when local-network access was refused, else the system's words. */
+  /**
+   * Where the browse stands: `starting`, `browsing` (looking, and listening for changes), `waiting` (the
+   * system cannot look now, and says why), `retrying` (it failed and starts again by itself), `denied`
+   * (local-network access was refused in Settings).
+   */
+  state: "starting" | "browsing" | "waiting" | "retrying" | "denied";
+  /** Why it is not looking, in the system's words (`denied` when access was refused). */
   problem?: string;
 }
 
@@ -44,6 +50,11 @@ export const NEARBY_SUPPORTED = false;
 /** Look for machines nearby until the returned function is called. */
 export function browseNearby(_listener: (state: NearbyState) => void): () => void {
   return () => undefined;
+}
+
+/** This device's IPv4 addresses on its networks, Wi-Fi first: what a machine nearby sees it as. */
+export function localAddresses(): string[] {
+  return [];
 }
 
 /** Tailscale built in, where this build has it. */

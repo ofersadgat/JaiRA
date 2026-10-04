@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { AppState, Linking } from "react-native";
-import { engineUrlOf, hostOfUrl } from "@jaira/shared/browser";
-import { Connect, connectionLost, connectionRestored, type NearbyStep } from "@jaira/universal";
+import { engineUrlOf, hostOfUrl, typedLanMachine, type LanAnnouncement } from "@jaira/shared/browser";
+import { Connect, connectionLost, connectionRestored, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { DEVICE_KIND, deviceLabel } from "../bridges/deviceInfo";
 import { engineBridge, pairDevice, type EngineBridge } from "../bridges/engineBridge";
 import { pairNearby } from "../bridges/lanPair";
-import { NEARBY_SUPPORTED, browseNearby, randomBytes, tailnet, type NearbyState } from "../bridges/nearby";
+import { NEARBY_SUPPORTED, browseNearby, localAddresses, randomBytes, tailnet, type NearbyState } from "../bridges/nearby";
 import { deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } from "../bridges/savedPairing";
 import { tailnetEngineUrl, tailnetHostname, tailnetJoin } from "../bridges/tailnetJoin";
 
@@ -95,8 +95,10 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   const turn = useRef(0);
   /** Which connection is the current one, while its URL is worked out (the tailnet's proxy). */
   const connecting = useRef(0);
-  const [nearby, setNearby] = useState<NearbyState>({ machines: [] });
-  const [nearbyPairing, setNearbyPairing] = useState<{ label: string; step: NearbyStep } | undefined>(undefined);
+  const [nearby, setNearby] = useState<NearbyState & { since: number; phone: string[] }>(() => ({ machines: [], state: "starting", since: Date.now(), phone: [] }));
+  /** Bumped to look again from scratch: Search again, or the app back in front. */
+  const [search, setSearch] = useState(0);
+  const [nearbyPairing, setNearbyPairing] = useState<{ label: string; step: NearbyStep; attempts: NearbyAttempt[] } | undefined>(undefined);
   /** The phone's Tailscale asks to be signed in again (its key expired, or it was signed out). */
   const [signInUrl, setSignInUrl] = useState<string | undefined>(undefined);
 
@@ -166,17 +168,21 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
     [open],
   );
 
-  /** Pair with a machine found on this Wi-Fi by the code it shows, then join its tailnet. */
-  const pairWithNearby = useCallback(
-    async (key: string, code: string): Promise<void> => {
-      const machine = nearby.machines.find((m) => m.key === key);
-      if (machine === undefined) {
-        setProblem("that machine is no longer showing its code: show a new one there");
-        return;
-      }
+  /**
+   * Pair with a machine on this Wi-Fi — one found in the list, or a local address typed — by the code it
+   * shows, then join its tailnet. Says each step and each address it tries.
+   */
+  const pairLocally = useCallback(
+    async (machine: LanAnnouncement, code: string): Promise<void> => {
       const mine = ++turn.current;
       setProblem(null);
-      setNearbyPairing({ label: machine.label, step: "reaching" });
+      setBusy(true);
+      let attempts: NearbyAttempt[] = [];
+      let step: NearbyStep = "reaching";
+      const show = (): void => {
+        if (turn.current === mine) setNearbyPairing({ label: machine.label, step, attempts });
+      };
+      show();
       let kept: SavedPairing | undefined;
       try {
         await pairNearby({
@@ -190,8 +196,13 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
             kept = { address: paired.address, url: engineUrlOf(paired.address), token: paired.token, machine: { id: paired.machine.id, label: paired.machine.label }, ...(tailnet !== undefined ? { tailnet: true as const } : {}) };
             await savePairing(kept);
           },
-          onStep: (step) => {
-            if (turn.current === mine) setNearbyPairing({ label: machine.label, step });
+          onStep: (next) => {
+            step = next;
+            show();
+          },
+          onAttempt: (attempt) => {
+            attempts = [...attempts.filter((a) => a.address !== attempt.address), attempt];
+            show();
           },
         });
         if (turn.current !== mine) return;
@@ -199,17 +210,32 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
         connect(kept!);
       } catch (e) {
         if (turn.current !== mine) return;
+        // The attempts stay on screen beside the reason, to read what was tried.
         setNearbyPairing(undefined);
         // Paired, but not onto the tailnet: connecting carries on, offering the sign-in on the phone.
         if (kept !== undefined) connect(kept);
-        setProblem((e as Error).message);
+        setProblem((e as Error).message + (attempts.length > 0 && kept === undefined ? ` (tried ${attempts.map((a) => `${a.address}: ${a.state === "failed" ? (a.reason ?? "no answer") : a.state}`).join("; ")})` : ""));
+      } finally {
+        if (turn.current === mine) setBusy(false);
       }
     },
-    [nearby, connect],
+    [connect],
+  );
+
+  const pairWithNearby = useCallback(
+    (key: string, code: string): void => {
+      const machine = nearby.machines.find((m) => m.key === key);
+      if (machine === undefined) setProblem("that machine is no longer showing its code: show a new one there, then search again");
+      else void pairLocally(machine, code);
+    },
+    [nearby, pairLocally],
   );
 
   const pair = useCallback(
     async (address: string, code: string, fallback?: SavedPairing): Promise<void> => {
+      // A machine's local address, typed where the list cannot see it: paired over the local network.
+      const local = NEARBY_SUPPORTED ? typedLanMachine(address) : undefined;
+      if (local !== undefined) return pairLocally(local, code);
       const mine = ++turn.current;
       setBusy(true);
       setProblem(null);
@@ -232,7 +258,7 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
         if (turn.current === mine) setBusy(false);
       }
     },
-    [connect],
+    [connect, pairLocally],
   );
 
   // At launch, and whenever a link arrives: a link with a code pairs (it is a person's deliberate act);
@@ -282,8 +308,19 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   // The machines on this Wi-Fi showing a code, while the form is up.
   useEffect(() => {
     if (electron || !NEARBY_SUPPORTED || phase !== "ask") return;
-    return browseNearby(setNearby);
-  }, [electron, phase]);
+    const since = Date.now();
+    setNearby({ machines: [], state: "starting", since, phone: localAddresses() });
+    return browseNearby((state) => setNearby({ ...state, since, phone: localAddresses() }));
+  }, [electron, phase, search]);
+
+  // Back in front: the system may have dropped the browse while the app was away, so it starts afresh.
+  useEffect(() => {
+    if (electron || !NEARBY_SUPPORTED) return;
+    const listener = AppState.addEventListener("change", (next) => {
+      if (next === "active") setSearch((n) => n + 1);
+    });
+    return () => listener.remove();
+  }, [electron]);
 
   // A pairing through the tailnet: the phone's Tailscale may ask to be signed in again.
   const viaTailnet = saved?.tailnet === true;
@@ -328,8 +365,18 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
         onPair={(a, c) => void pair(a, c)}
         {...(NEARBY_SUPPORTED
           ? {
-              nearby: { machines: nearby.machines.map((m) => ({ key: m.key, label: m.label, os: m.os })), ...(nearby.problem !== undefined ? { problem: nearby.problem } : {}) },
-              onPairNearby: (key: string, c: string) => void pairWithNearby(key, c),
+              nearby: {
+                machines: nearby.machines.map((m) => ({ key: m.key, label: m.label, os: m.os, addresses: m.addresses, port: m.port })),
+                state: nearby.state,
+                since: nearby.since,
+                phone: nearby.phone,
+                ...(nearby.problem !== undefined ? { problem: nearby.problem } : {}),
+              },
+              onSearchAgain: () => {
+                setProblem(null);
+                setSearch((n) => n + 1);
+              },
+              onPairNearby: (key: string, c: string) => pairWithNearby(key, c),
               ...(nearbyPairing !== undefined ? { pairing: nearbyPairing } : {}),
             }
           : {})}

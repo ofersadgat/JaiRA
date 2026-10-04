@@ -35,6 +35,11 @@ export const LAN_SERVICE_TYPE = "jaira";
 export const LAN_PAIRING_VERSION = 1;
 /** The pairing listener's WebSocket path. */
 export const LAN_PAIRING_PATH = "/pair";
+/**
+ * The port the pairing listener tries first, so that a machine's local address alone is enough to type
+ * where discovery cannot see it (`192.168.1.32`). Taken, it uses another and says which.
+ */
+export const LAN_PAIRING_PORT = 47_319;
 
 const DSI = "JaiRA-LAN-pairing-CPace-ristretto255-v1";
 const encoder = new TextEncoder();
@@ -85,6 +90,24 @@ export function announcementOf(txt: Record<string, unknown> | undefined, fallbac
 /** The URL a phone opens to pair with one of an announcement's addresses. */
 export function lanPairingUrl(address: string, port: number): string {
   return `ws://${address.includes(":") ? `[${address}]` : address}:${port}${LAN_PAIRING_PATH}`;
+}
+
+/**
+ * A machine's local-network address as a person types it — `192.168.1.32`, or `192.168.1.32:52000` when
+ * the machine said another port — read as a machine to pair with nearby, whose id and name are not
+ * known until it answers. Undefined for anything else: a tailnet address (100.64/10), loopback, a name.
+ */
+export function typedLanMachine(address: string): LanAnnouncement | undefined {
+  const parts = /^\s*(?:ws:\/\/|http:\/\/)?(\d{1,3}(?:\.\d{1,3}){3})(?::(\d{1,5}))?\/?\s*$/.exec(address);
+  if (parts === null) return undefined;
+  const octets = parts[1]!.split(".").map(Number) as [number, number, number, number];
+  if (octets.some((o) => o > 255)) return undefined;
+  const [a, b] = octets;
+  const local = a === 10 || (a === 172 && b >= 16 && b < 32) || (a === 192 && b === 168);
+  if (!local) return undefined;
+  const port = parts[2] !== undefined ? Number(parts[2]) : LAN_PAIRING_PORT;
+  if (port <= 0 || port > 65535) return undefined;
+  return { id: "", label: parts[1]!, os: "machine", port, addresses: [parts[1]!], v: LAN_PAIRING_VERSION };
 }
 
 // --- frames ---------------------------------------------------------------------------------------------

@@ -1,7 +1,7 @@
 export { config } from "./tamagui.config";
 export { Replayed, TokenRoot, TokenScope, useLook, useTokens, type Look, type Tokens } from "./tokens";
 export { Island, type IslandProps } from "./islands";
-export { Connect, nearbyStepWords, type ConnectProps, type NearbyChoice, type NearbyStep } from "./screens/Connect";
+export { Connect, elapsedWords, nearbySearchWords, nearbyStepWords, type ConnectProps, type NearbyAttempt, type NearbyChoice, type NearbySearch, type NearbyStep } from "./screens/Connect";
 export { Markdown, registerFenceRenderer } from "./components/Markdown";
 export { DataView } from "./components/files/DataView";
 // The value view, for its specimens (`valueSpecimens.tsx`).

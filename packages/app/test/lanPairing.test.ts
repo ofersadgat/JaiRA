@@ -17,14 +17,14 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { AppService, hostEngine, loopbackReach, type HostedEngine } from "@jaira/service";
 import type { AnnouncePort } from "@jaira/service/lanPairing";
-import { announcementOf, engineUrlOf, type LanAnnouncement, type MachinesView } from "@jaira/shared";
+import { announcementOf, engineUrlOf, typedLanMachine, type LanAnnouncement, type MachinesView } from "@jaira/shared";
 import { engineBridge } from "../../client/bridges/engineBridge";
 import { pairNearby, type LanStep } from "../../client/bridges/lanPair";
 
 let base: string;
 let service: AppService;
 let hosted: HostedEngine;
-let announced: Array<{ name: string; type: string; port: number; txt: Record<string, string> } | undefined>;
+let announced: Array<{ name: string; type: string; port: number; txt: Record<string, string>; addresses: string[] } | undefined>;
 const opened: string[] = [];
 
 const announce: AnnouncePort = {
@@ -70,11 +70,40 @@ async function showCode(): Promise<{ code: string; machine: LanAnnouncement }> {
 const view = (): MachinesView => service.fleet.view();
 
 describe("pairing a phone over the local network", () => {
+  it("says what each phone did, for Settings: connected, a wrong code, paired", async () => {
+    const { code, machine } = await showCode();
+    const wrong = code.replace(/.$/, (c) => (c === "A" ? "B" : "A"));
+    await expect(pairNearby({ machine, code: wrong, device: PHONE, random, onPaired: () => undefined })).rejects.toThrow();
+    await pairNearby({ machine, code, device: PHONE, random, onPaired: () => undefined });
+    await expect.poll(() => view().nearbyLog?.map((e) => e.what)).toEqual(["connected", "wrong-code", "connected", "paired"]);
+    expect(view().nearbyLog![0]!.from).toBe("127.0.0.1");
+    expect(view().nearbyLog![3]!.detail).toBe("Ofer's iPhone");
+  });
+
+  it("pairs with a typed local address, whose machine is known only once it answers", async () => {
+    const { code, machine } = await showCode();
+    const typed = typedLanMachine(`192.168.1.32:${machine.port}`)!;
+    expect(typed).toMatchObject({ id: "", port: machine.port });
+    const attempts: string[] = [];
+    // The test reaches it on loopback, as a phone would at the typed address.
+    const paired = await pairNearby({ machine: { ...typed, addresses: ["127.0.0.1"] }, code, device: PHONE, random, onPaired: () => undefined, onAttempt: (a) => attempts.push(`${a.address} ${a.state}`) });
+    expect(paired.machine.label).toBe("desk");
+    expect(attempts).toEqual([`127.0.0.1:${machine.port} trying`, `127.0.0.1:${machine.port} answered`]);
+  });
+
+  it("says which addresses did not answer", async () => {
+    const { code, machine } = await showCode();
+    const attempts: string[] = [];
+    await pairNearby({ machine: { ...machine, addresses: ["127.0.0.1", "127.0.0.2"], port: machine.port }, code, device: PHONE, random, onPaired: () => undefined, onAttempt: (a) => attempts.push(`${a.address} ${a.state}`) }).catch(() => undefined);
+    expect(attempts).toContain(`127.0.0.1:${machine.port} answered`);
+  });
+
   it("announces this machine while a code is shown, with its id, port and addresses", async () => {
     const { machine } = await showCode();
     expect(machine).toMatchObject({ id: service.fleet.identity().id, label: "desk", v: 1 });
     expect(machine.port).toBeGreaterThan(0);
-    await expect.poll(() => view().pairing?.nearby).toBe(true);
+    await expect.poll(() => view().pairing?.nearby).toMatchObject({ port: machine.port });
+    expect(view().pairing?.nearby?.addresses).toEqual(announced.at(-1)!.addresses);
     service.fleet.cancelPairing();
     await expect.poll(() => announced.at(-1)).toBeUndefined();
     await expect.poll(() => view().pairing).toBeUndefined();

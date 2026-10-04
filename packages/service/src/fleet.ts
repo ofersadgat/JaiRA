@@ -30,7 +30,7 @@ import type { EngineHost, PreAuthHandler } from "./engineHost";
 import type { HostFrame, PeerMachine } from "./enginePipe";
 import type { Handler } from "./handlers";
 import { machineIdentity, updateMachineIdentity, type MachineIdentity } from "./machine";
-import { LanPairing, type AnnouncePort, type LanPairingHost, type PhoneJoin } from "./lanPairing";
+import { LanPairing, type AnnouncePort, type LanActivity, type LanPairingHost, type PhoneJoin } from "./lanPairing";
 import { MachineTokens, type TokenHolder } from "./machineTokens";
 import { tailscaleServe, tailscaleStatus, tailscaleUnserve } from "./tailscale";
 import { autoReach } from "./tailnetHelper";
@@ -138,6 +138,8 @@ export class Fleet {
   private lanExpiry: ReturnType<typeof setTimeout> | undefined;
   /** A phone that proved the code and is joining the tailnet. */
   private phone: PhoneJoin | undefined;
+  /** What phones did on the pairing listener lately, for Settings to say. */
+  private lanLog: LanActivity[] = [];
   private reach: MachineReach = { state: "off" };
   private loopbackPort: number | undefined;
   private host: EngineHost | undefined;
@@ -248,8 +250,10 @@ export class Fleet {
         canReachHere: issued.has(m.id),
       };
     });
-    const nearby = this.lan?.listening() !== undefined;
-    const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt, ...(nearby ? { nearby } : {}) } : undefined;
+    const nearby = this.lan?.listening();
+    const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt, ...(nearby !== undefined ? { nearby } : {}) } : undefined;
+    // What phones did lately: ten minutes is long enough to read what went wrong.
+    const nearbyLog = this.lanLog.filter((e) => e.at > Date.now() - 10 * 60_000);
     const port = this.loopbackPort;
     return {
       self: { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying(), ...(port !== undefined ? { port } : {}) },
@@ -257,6 +261,7 @@ export class Fleet {
       devices: this.devices(),
       ...(pairing !== undefined ? { pairing } : {}),
       ...(this.phone !== undefined ? { phone: this.phone } : {}),
+      ...(nearbyLog.length > 0 ? { nearbyLog } : {}),
     };
   }
 
@@ -390,6 +395,7 @@ export class Fleet {
     let tail = "";
     for (let i = 0; i < 4; i += 1) tail += CODE_CHARS[randomInt(CODE_CHARS.length)];
     this.pairing = { code: `${words[0]} · ${words[1]} · ${tail}`, expiresAt: Date.now() + PAIRING_CODE_MS, attempts: 0 };
+    this.lanLog = [];
     this.announceNearby();
     this.changed();
     return this.view();
@@ -456,6 +462,10 @@ export class Fleet {
       },
       phoneChanged: (phone) => {
         this.phone = phone;
+        this.changed();
+      },
+      activity: (event) => {
+        this.lanLog = [...this.lanLog, event].slice(-8);
         this.changed();
       },
       log: (level, message) => this.options.log?.(level, message),

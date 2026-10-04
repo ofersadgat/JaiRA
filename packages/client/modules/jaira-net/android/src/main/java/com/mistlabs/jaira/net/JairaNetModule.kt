@@ -8,6 +8,8 @@ import android.os.Looper
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
 import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
 
 /**
  * The phone's network module (decision 0013, amended 2026-10-04), the JavaScript side of which is
@@ -25,6 +27,9 @@ class JairaNetModule : Module() {
   /** NSD resolves one service at a time: the rest wait their turn. */
   private val toResolve = ArrayDeque<NsdServiceInfo>()
   private var resolving = false
+  /** Browsing is wanted: a browse that fails to start is tried again until `stopBrowsing`. */
+  private var wanted = false
+  private var retryMs = 1000L
 
   private val context: Context
     get() = requireNotNull(appContext.reactContext) { "no React context" }
@@ -36,9 +41,22 @@ class JairaNetModule : Module() {
 
     Function("tailnetAvailable") { TailnetBridge.available }
 
-    Function("startBrowsing") { main.post { startBrowsing() } }
+    Function("startBrowsing") {
+      main.post {
+        wanted = true
+        retryMs = 1000L
+        startBrowsing()
+      }
+    }
 
-    Function("stopBrowsing") { main.post { stopBrowsing() } }
+    Function("stopBrowsing") {
+      main.post {
+        wanted = false
+        stopBrowsing()
+      }
+    }
+
+    Function("localAddresses") { localAddresses() }
 
     AsyncFunction("tailnetStart") { hostname: String ->
       val dir = File(context.filesDir, "tailnet").apply { mkdirs() }
@@ -54,22 +72,41 @@ class JairaNetModule : Module() {
     OnDestroy { main.post { stopBrowsing() } }
   }
 
-  private fun publish(problem: String? = null) {
-    val machines = found.values.toList()
-    sendEvent("onNearby", if (problem == null) mapOf("machines" to machines) else mapOf("machines" to machines, "problem" to problem))
+  private fun publish(state: String, problem: String? = null) {
+    val body = mutableMapOf<String, Any>("machines" to found.values.toList(), "state" to state)
+    if (problem != null) body["problem"] = problem
+    sendEvent("onNearby", body)
   }
+
+  /** This phone's IPv4 addresses on its networks (Wi-Fi first): what a machine nearby sees it as. */
+  private fun localAddresses(): List<String> =
+    runCatching {
+      NetworkInterface.getNetworkInterfaces().toList()
+        .filter { it.isUp && !it.isLoopback }
+        .sortedBy { if (it.name.startsWith("wlan")) 0 else 1 }
+        .flatMap { i -> i.inetAddresses.toList().filterIsInstance<Inet4Address>().mapNotNull { it.hostAddress } }
+        .filter { !it.startsWith("169.254.") }
+    }.getOrDefault(emptyList())
 
   private fun startBrowsing() {
     stopBrowsing()
     val manager = context.getSystemService(Context.NSD_SERVICE) as NsdManager
     nsd = manager
     val listener = object : NsdManager.DiscoveryListener {
-      override fun onDiscoveryStarted(serviceType: String) {}
+      override fun onDiscoveryStarted(serviceType: String) {
+        main.post { publish("browsing") }
+      }
 
       override fun onDiscoveryStopped(serviceType: String) {}
 
       override fun onStartDiscoveryFailed(serviceType: String, errorCode: Int) {
-        main.post { publish("could not look for machines on this network (error $errorCode)") }
+        main.post {
+          val delay = retryMs
+          retryMs = minOf(retryMs * 2, 30_000L)
+          discovery = null
+          publish("retrying", "could not look on this network (NSD error $errorCode) — looking again in ${delay / 1000} s")
+          main.postDelayed({ if (wanted) startBrowsing() }, delay)
+        }
       }
 
       override fun onStopDiscoveryFailed(serviceType: String, errorCode: Int) {}
@@ -83,11 +120,12 @@ class JairaNetModule : Module() {
 
       override fun onServiceLost(service: NsdServiceInfo) {
         main.post {
-          if (found.remove(service.serviceName) != null) publish()
+          if (found.remove(service.serviceName) != null) publish("browsing")
         }
       }
     }
     discovery = listener
+    publish("starting")
     manager.discoverServices("_jaira._tcp", NsdManager.PROTOCOL_DNS_SD, listener)
   }
 
@@ -118,7 +156,7 @@ class JairaNetModule : Module() {
               put("port", info.port)
               if (host != null) put("host", host)
             }
-            publish()
+            publish("browsing")
             resolveNext()
           }
         }

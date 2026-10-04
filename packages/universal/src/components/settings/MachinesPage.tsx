@@ -16,6 +16,7 @@ import {
   pairCodeWords,
   pairWords,
   peerWords,
+  nearbyLogLines,
   phoneJoinWords,
   reachWords,
   sentence,
@@ -195,6 +196,20 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
         <View backgroundColor={t.v("tint-accent") as never}>
           <SettingsRow name={W.phone.name} description={<Words parts={phoneJoinWords(view.phone)} />} />
         </View>
+      ) : null}
+      {view.nearbyLog !== undefined ? (
+        <SettingsRow
+          name={W.nearbyLog.name}
+          description={
+            <View gap={2}>
+              {nearbyLogLines(view.nearbyLog).map((line, i) => (
+                <Txt key={i} spec={{ voice: "data", scale: 11 / 12.5, color: "dim" }} selectable>
+                  {line}
+                </Txt>
+              ))}
+            </View>
+          }
+        />
       ) : null}
     </SettingsSection>
   );

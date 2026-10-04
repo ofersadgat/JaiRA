@@ -36,6 +36,15 @@ export interface TailnetJoin {
   join(onLogin: (url: string) => void): Promise<void>;
 }
 
+/** One of the machine's addresses being tried, for the screen to say. */
+export interface LanAttempt {
+  /** `192.168.1.32:47319`. */
+  address: string;
+  state: "trying" | "answered" | "failed";
+  /** Why it failed. */
+  reason?: string;
+}
+
 export interface LanPaired {
   /** The engine on the tailnet: `https://desk.tail4c2e.ts.net`. */
   address: string;
@@ -53,6 +62,8 @@ export interface PairNearbyOptions {
   /** The token, as soon as it is issued: kept before the tailnet is joined, which can take minutes. */
   onPaired: (paired: LanPaired) => Promise<void> | void;
   onStep?: (step: LanStep) => void;
+  /** Each address tried while reaching the machine, as it goes. */
+  onAttempt?: (attempt: LanAttempt) => void;
   /** How long reaching and proving may take. */
   timeoutMs?: number;
 }
@@ -119,15 +130,20 @@ class Inbox {
 }
 
 /** The first of the machine's addresses that answers as that machine, with its greeting. */
-async function reach(machine: LanAnnouncement, timeoutMs: number): Promise<{ socket: WebSocket; inbox: Inbox; hi: LanFrame & { t: "hi" } }> {
-  const tries = machine.addresses.map(async (address) => {
-    const socket = new WebSocket(lanPairingUrl(address, machine.port));
+async function reach(machine: LanAnnouncement, timeoutMs: number, onAttempt?: (attempt: LanAttempt) => void): Promise<{ socket: WebSocket; inbox: Inbox; hi: LanFrame & { t: "hi" } }> {
+  const tries = machine.addresses.map(async (host) => {
+    const address = `${host}:${machine.port}`;
+    onAttempt?.({ address, state: "trying" });
+    const socket = new WebSocket(lanPairingUrl(host, machine.port));
     const inbox = new Inbox(socket);
     try {
       const hi = await inbox.next(timeoutMs, "on the local network");
-      if (hi.t !== "hi" || hi.machine?.id !== machine.id || typeof hi.sid !== "string") throw new LanPairError("another machine answered");
+      // A typed address (no id yet) takes whichever machine answers there; the code proves which.
+      if (hi.t !== "hi" || typeof hi.sid !== "string" || (machine.id !== "" && hi.machine?.id !== machine.id)) throw new LanPairError("another machine answered");
+      onAttempt?.({ address, state: "answered" });
       return { socket, inbox, hi };
     } catch (e) {
+      onAttempt?.({ address, state: "failed", reason: (e as Error).message === "the machine closed the connection" ? "nothing answers there" : (e as Error).message });
       try {
         socket.close();
       } catch {
@@ -162,9 +178,9 @@ function first<T>(promises: Promise<T>[]): Promise<T | undefined> {
 /** Pair with a machine found nearby, by the code it shows; then join its tailnet. */
 export async function pairNearby(options: PairNearbyOptions): Promise<LanPaired> {
   const timeoutMs = options.timeoutMs ?? 15_000;
-  const label = options.machine.label;
   options.onStep?.("reaching");
-  const { socket, inbox, hi } = await reach(options.machine, timeoutMs);
+  const { socket, inbox, hi } = await reach(options.machine, timeoutMs, options.onAttempt);
+  const label = hi.machine?.label ?? options.machine.label;
   const close = (): void => {
     try {
       socket.close();

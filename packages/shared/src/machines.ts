@@ -83,14 +83,26 @@ export interface MachinesView {
   devices: DeviceView[];
   /**
    * The code being shown under Pair a machine, while it is valid. `nearby`: phones on this machine's
-   * local network can find it to pair (decision 0013, amended 2026-10-04).
+   * local network can find it to pair (decision 0013, amended 2026-10-04) — its pairing listener's port
+   * and the addresses it is announced on, the likeliest first.
    */
-  pairing?: { code: string; expiresAt: number; nearby?: boolean };
+  pairing?: { code: string; expiresAt: number; nearby?: { port: number; addresses: string[] } };
   /**
    * A phone that proved the code over the local network and is joining the tailnet. `signInUrl`: its
    * Tailscale sign-in page, opened in the browser; approving it there lets the phone on.
    */
   phone?: { label: string; signInUrl?: string };
+  /** What phones did on the pairing listener in the last ten minutes, oldest first. */
+  nearbyLog?: NearbyEvent[];
+}
+
+/** One step of a phone on the pairing listener, from its address on the local network. */
+export interface NearbyEvent {
+  from: string;
+  what: "connected" | "wrong-code" | "paired" | "sign-in" | "refused" | "left";
+  /** A refusal's reason, or the phone's name once it said it. */
+  detail?: string;
+  at: number;
 }
 
 /**
