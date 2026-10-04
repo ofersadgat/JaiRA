@@ -130,6 +130,9 @@ async function build() {
   // run, and Apple allows a team only a few. The export below signs it.
   run("xcodebuild", [
     "archive",
+    // Warnings and errors only: the full log of a React Native build is several times GitLab's 4 MB
+    // job log, which cut the first one off before its error.
+    "-quiet",
     "-workspace", join(IOS, workspace),
     "-scheme", scheme,
     "-configuration", "Release",
@@ -147,6 +150,7 @@ async function build() {
     writeFileSync(options, exportOptions(env.APPLE_TEAM_ID));
     run("xcodebuild", [
       "-exportArchive",
+      "-quiet",
       "-archivePath", archive,
       "-exportPath", join(OUT, "export"),
       "-exportOptionsPlist", options,
