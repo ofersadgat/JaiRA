@@ -1,8 +1,8 @@
 ---
 id: engineering/decisions/0017-ios-releases
 type: decision
-status: proposed
-updated: 2026-10-03
+status: built
+updated: 2026-10-04
 decides_for: [engineering/units/app-shell]
 ---
 
@@ -11,7 +11,7 @@ decides_for: [engineering/units/app-shell]
 Extends decision 0011 §3 (releases) to the phone app of decision 0015. The person asked, 2026-10-02:
 "build a pipeline to build release and deploy an ios version of this app", on GitLab's own Mac and on
 GitHub, with "many apps go through the same pipeline". The sections below are what was settled with
-them; "proposed" until a release has reached TestFlight.
+them.
 
 ## Context
 
@@ -78,14 +78,39 @@ them; "proposed" until a release has reached TestFlight.
    The build jobs run this pipeline's release scripts, kept apart from the commit they build, which may
    be older than them (a stable release promotes an earlier nightly's commit).
 
+## Seen (2026-10-04, branch `ios-pipeline`)
+
+Four nightlies of the branch, `v0.1.1-nightly.20261004.1`–`.4`, in the real releases repository:
+
+- **GitLab first, GitHub filling in** (`.2`): GitLab built both Linux installers and published them, and
+  its Mac built iOS, had Apple sign it and uploaded it; GitHub's plan for the same tag listed only what
+  was missing, its Linux jobs exited at their records, it built Windows and macOS and added them
+  (`nightly.yml` merged across both Windows architectures), and its iOS job found the upload in App
+  Store Connect and recorded it without building.
+- **Both at once** (`.3`): one release, all seven builds, from both systems; GitLab's Mac uploaded iOS
+  first and GitHub's, having built, found it before its own upload.
+- **GitHub alone** (`.4`): all six installers and iOS uploaded from GitHub's Mac.
+- **Again**: GitLab on `.2` and on `.4` skipped at the plan (`already has linux-x64, linux-arm64,
+  win-x64, ios`).
+
+What the first runs found, and fixed on the branch: the packaged `jaira serve` smoke test (never run in
+CI before: GitHub's schedule arrives hours after 2am Pacific, so the plan skipped every nightly since
+2026-09-27) — a Linux server needs `--no-sandbox` on its command line, and a Windows one a moment to
+answer; One's release bundle needs `react-native.config.cjs` and `@react-native-community/cli`;
+Windows PowerShell 5.1 passed the Node release list as one object; a dropped connection is asked again;
+GitHub lists a new release a moment after making it; GitHub's x64 Linux window smoke test needs
+`--disable-gpu` under xvfb.
+
 ## Not yet
 
 - **A real icon.** `packages/client/assets/icon.png` is a placeholder (a "J" in the dark palette's
   accent): App Store Connect rejects an upload without one, and Expo's template has none.
 - **The app reports its committed version** (`bridges/clientVersion.ts` reads `package.json`), not the
   build's.
-- **Run on a phone.** The first `check` is also the first iOS build ever; what it finds (the island pages,
-  the fonts, the Reanimated workaround, App Transport Security for `ws://` to a tailnet address) is
-  still to come.
+- **Run on a phone.** The app builds, signs and reaches TestFlight; whether it runs (the island pages,
+  the fonts, the Reanimated workaround, App Transport Security for `ws://` to a tailnet address) is not
+  yet seen.
+- **The nightly schedule.** GitHub fires the cron hours late and the plan builds only at 2am Pacific, so
+  no scheduled nightly has been built since 2026-09-27.
 - **A shared pipeline for other apps**: a GitLab CI/CD component and a GitHub reusable workflow over the
   same steps, once a second app exists.
