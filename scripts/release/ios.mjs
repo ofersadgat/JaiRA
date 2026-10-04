@@ -46,7 +46,8 @@ function ascToken() {
   const part = (value) => Buffer.from(JSON.stringify(value)).toString("base64url");
   const now = Math.floor(Date.now() / 1000);
   const unsigned = `${part({ alg: "ES256", kid: env.ASC_KEY_ID, typ: "JWT" })}.${part({ iss: env.ASC_ISSUER_ID, iat: now, exp: now + 1200, aud: "appstoreconnect-v1" })}`;
-  const key = createPrivateKey(Buffer.from(env.ASC_KEY_P8_BASE64, "base64"));
+  // The key's `.p8` file, base64 (CI), or its path (`status` on someone's own machine).
+  const key = createPrivateKey(env.ASC_KEY_PATH ? readFileSync(env.ASC_KEY_PATH) : Buffer.from(env.ASC_KEY_P8_BASE64, "base64"));
   return `${unsigned}.${sign("sha256", Buffer.from(unsigned), { key, dsaEncoding: "ieee-p1363" }).toString("base64url")}`;
 }
 
@@ -170,8 +171,33 @@ function simulate(workspace, scheme) {
   }
 }
 
+/**
+ * What App Store Connect has of the app: every build, newest first, with its processing state (a build
+ * that fails processing is INVALID and TestFlight does not list it; Apple emails why). Needs only the
+ * key: ASC_KEY_ID, ASC_ISSUER_ID and ASC_KEY_PATH (or ASC_KEY_P8_BASE64). Runs anywhere, no Mac.
+ */
+async function status() {
+  const apps = await asc(`/v1/apps?filter[bundleId]=${encodeURIComponent(BUNDLE_ID)}`);
+  const app = apps.data.find((a) => a.attributes.bundleId === BUNDLE_ID);
+  if (app === undefined) return console.log(`App Store Connect has no app ${BUNDLE_ID} for this key's team`);
+  console.log(`${app.attributes.name} (${BUNDLE_ID}), App Store Connect app ${app.id}`);
+  const builds = await asc(`/v1/builds?filter[app]=${app.id}&sort=-uploadedDate&limit=20&include=preReleaseVersion,buildBetaDetail`);
+  const included = new Map((builds.included ?? []).map((item) => [`${item.type}:${item.id}`, item.attributes]));
+  if (builds.data.length === 0) console.log("no builds");
+  for (const build of builds.data) {
+    const a = build.attributes;
+    const version = included.get(`preReleaseVersions:${build.relationships?.preReleaseVersion?.data?.id}`)?.version ?? "?";
+    const beta = included.get(`buildBetaDetails:${build.relationships?.buildBetaDetail?.data?.id}`);
+    console.log(
+      `${version} (${a.version})  ${a.processingState}  uploaded ${a.uploadedDate}${a.expired ? "  expired" : ""}` +
+        (beta !== undefined ? `  internal: ${beta.internalBuildState}  external: ${beta.externalBuildState}` : ""),
+    );
+  }
+}
+
 async function build() {
-  if (mode !== "check" && mode !== "release" && mode !== "simulator") throw new Error("usage: node scripts/release/ios.mjs check|release|simulator");
+  if (mode === "status") return status();
+  if (mode !== "check" && mode !== "release" && mode !== "simulator") throw new Error("usage: node scripts/release/ios.mjs check|release|simulator|status");
   if (process.platform !== "darwin") throw new Error("iOS builds need a Mac");
   if (mode === "release") {
     const missing = [...KEY_VARIABLES, ...RECORD_VARIABLES].filter((name) => !env[name]);
