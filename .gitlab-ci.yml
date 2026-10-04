@@ -97,6 +97,8 @@ build:
       when: never
     - when: on_success
   before_script:
+    # Untagged, so any runner may take it — the Mac too, a shell runner that keeps the last job's clone.
+    - rm -rf ../declarative-ai
     - git clone --depth 1 "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" ../declarative-ai
     - cd ../declarative-ai && npm install && npm run build && cd "$CI_PROJECT_DIR"
     - npm install
