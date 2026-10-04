@@ -5,6 +5,7 @@
  *
  *   node scripts/release/ios.mjs check     an unsigned Release archive: does it build? (no credentials)
  *   node scripts/release/ios.mjs release   the same archive, then signed and uploaded
+ *   node scripts/release/ios.mjs simulator the Release app launched on a fresh simulator, and photographed
  *
  * Signing is Apple's cloud signing: the archive is built unsigned, and `xcodebuild -exportArchive`,
  * authenticated with an App Store Connect API key, has Apple sign it with a distribution certificate
@@ -100,8 +101,77 @@ function exportOptions(team) {
 `;
 }
 
+/** The newest iOS runtime installed and an iPhone it can run: what the simulator smoke test boots. */
+function simulatorTarget() {
+  const json = (args) => JSON.parse(execFileSync("xcrun", ["simctl", "list", ...args, "-j"], { encoding: "utf8" }));
+  const runtime = json(["runtimes"])
+    .runtimes.filter((r) => r.isAvailable && r.platform === "iOS")
+    .sort((a, b) => b.version.localeCompare(a.version, undefined, { numeric: true }))[0];
+  if (runtime === undefined) throw new Error("no iOS simulator runtime is installed: xcodebuild -downloadPlatform iOS");
+  const device = runtime.supportedDeviceTypes.filter((d) => d.productFamily === "iPhone").at(-1);
+  if (device === undefined) throw new Error(`${runtime.name} supports no iPhone`);
+  return { runtime, device };
+}
+
+/**
+ * The Release app on a fresh simulator: installed, launched, alive 25 seconds later, and photographed
+ * (`build/simulator.png`). What it said and, if it died, its crash report are printed. The phone app had
+ * never run on iOS before this; a launch crash should end here, not on someone's phone.
+ */
+function simulate(workspace, scheme) {
+  const derived = join(OUT, "simulator");
+  run("xcodebuild", [
+    "build",
+    "-quiet",
+    "-workspace", join(IOS, workspace),
+    "-scheme", scheme,
+    "-configuration", "Release",
+    "-sdk", "iphonesimulator",
+    "-destination", "generic/platform=iOS Simulator",
+    "-derivedDataPath", derived,
+    "CODE_SIGNING_ALLOWED=NO",
+  ]);
+  const app = join(derived, "Build", "Products", "Release-iphonesimulator", `${scheme}.app`);
+  const { runtime, device } = simulatorTarget();
+  console.log(`\nsimulator: ${device.name}, ${runtime.name}`);
+  const udid = execFileSync("xcrun", ["simctl", "create", `jaira-smoke-${process.pid}`, device.identifier, runtime.identifier], { encoding: "utf8" }).trim();
+  const shot = join(OUT, "simulator.png");
+  try {
+    run("xcrun", ["simctl", "bootstatus", udid, "-b"]);
+    run("xcrun", ["simctl", "install", udid, app]);
+    const launched = execFileSync("xcrun", ["simctl", "launch", udid, BUNDLE_ID], { encoding: "utf8" }).trim();
+    const pid = Number(launched.split(":").pop());
+    console.log(`launched ${BUNDLE_ID} (pid ${pid}); waiting 25 seconds`);
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 25_000);
+    let alive = true;
+    try {
+      process.kill(pid, 0);
+    } catch {
+      alive = false;
+    }
+    run("xcrun", ["simctl", "io", udid, "screenshot", shot]);
+    // What the app said: React Native logs through os_log, a JavaScript error included.
+    const said = execFileSync("xcrun", ["simctl", "spawn", udid, "log", "show", "--last", "2m", "--style", "compact", "--predicate", `process == "${scheme}"`], { encoding: "utf8", maxBuffer: 64 * 1024 * 1024 });
+    console.log(said.split("\n").filter((line) => /error|exception|fatal|warn|\[javascript\]|ReactNative/i.test(line)).slice(-60).join("\n") || "(the app logged no error or warning)");
+    if (!alive) {
+      const reports = join(process.env.HOME ?? "", "Library", "Logs", "DiagnosticReports");
+      let crash;
+      try {
+        crash = readdirSync(reports).filter((name) => name.startsWith(scheme)).sort().at(-1);
+      } catch {
+        // No reports folder: nothing crashed in a way the system wrote down.
+      }
+      if (crash !== undefined) console.log(`--- ${crash}\n${readFileSync(join(reports, crash), "utf8").slice(0, 8000)}`);
+      throw new Error(`${scheme} was not running 25 seconds after launch (screenshot: ${shot})`);
+    }
+    console.log(`\n${scheme} is running on ${device.name} (${runtime.name}); screenshot: ${shot}`);
+  } finally {
+    execFileSync("xcrun", ["simctl", "delete", udid]);
+  }
+}
+
 async function build() {
-  if (mode !== "check" && mode !== "release") throw new Error("usage: node scripts/release/ios.mjs check|release");
+  if (mode !== "check" && mode !== "release" && mode !== "simulator") throw new Error("usage: node scripts/release/ios.mjs check|release|simulator");
   if (process.platform !== "darwin") throw new Error("iOS builds need a Mac");
   if (mode === "release") {
     const missing = [...KEY_VARIABLES, ...RECORD_VARIABLES].filter((name) => !env[name]);
@@ -125,6 +195,7 @@ async function build() {
   const workspace = readdirSync(IOS).find((name) => name.endsWith(".xcworkspace"));
   if (workspace === undefined) throw new Error(`the prebuild wrote no .xcworkspace into ${IOS}`);
   const scheme = basename(workspace, ".xcworkspace");
+  if (mode === "simulator") return simulate(workspace, scheme);
   const archive = join(OUT, `${scheme}.xcarchive`);
   // Unsigned: on a fresh machine automatic signing would make a new development certificate on every
   // run, and Apple allows a team only a few. The export below signs it.
