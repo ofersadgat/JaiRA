@@ -1,5 +1,5 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
-import { Platform, TextInput, View as RNView, useWindowDimensions } from "react-native";
+import { Keyboard, Modal, Platform, TextInput, View as RNView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import {
   REASONING_EFFORTS,
@@ -29,7 +29,7 @@ import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limits
 import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
 import { modeMeta } from "@jaira/ui/permissionSetWords";
 import { figureOf } from "@jaira/ui/usageFigure";
-import { NO_STACK, PLAIN_SCROLLER, Press, Txt, font } from "../../primitives";
+import { NO_STACK, PLAIN_SCROLLER, Press, Txt, edge, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { MenuLayer } from "../MenuLayer";
 import { Float } from "../floats/Float";
@@ -42,6 +42,8 @@ import { Pulse } from "./Pulse";
 import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
 import { FigureFace } from "../usage/Figures";
 import { BrandIcon } from "../settings/bits";
+import { usePhone } from "../../app/phone";
+import { useKeyboardShown } from "../floats/keyboard";
 
 /**
  * The composer: the box a message is typed into, what it will run as, and the button that sends it.
@@ -75,6 +77,9 @@ import { BrandIcon } from "../settings/bits";
  *   the clip          26 round, the paperclip 15, --dim; hovered --panel-2 and --text
  *   send              30 round, --accent, the arrow 16 in --panel; disabled --panel-2, --tok-hint, at
  *                     half opacity; stop --bad, a 10 square (radius 2) of --panel
+ *   on a phone        16 → 8 either side; the chips wrap. While the keyboard is up the chips fold to the
+ *                     model's and a ⋯ that puts the keyboard down to show them all, and the tray steps
+ *                     aside (decision 0015, amended 2026-10-04). ⤢ writes in a full screen of its own.
  *   the tray          what is tucked under the frame (`EnvironmentBar.tsx`): the frame's width, its top
  *                     22 under the frame's foot, behind it; with one, 10 under the composer, not 14
  */
@@ -243,9 +248,15 @@ export function Composer({
   };
   const close = (): void => setCard(null);
   const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
+  // A phone's: the chips folded while the keyboard is up, and the full-screen writer.
+  const phone = usePhone();
+  const keyboard = useKeyboardShown();
+  const folded = phone && keyboard;
+  const tucked = has(tray) && !folded;
+  const [full, setFull] = useState(false);
 
   return (
-    <View paddingTop={10} paddingHorizontal={16} paddingBottom={has(tray) ? 10 : 14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
+    <View paddingTop={10} paddingHorizontal={phone ? 8 : 16} paddingBottom={tucked ? 10 : phone ? 8 : 14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
       <View
         width="100%"
         maxWidth={900}
@@ -253,7 +264,7 @@ export function Composer({
         padding={1}
         borderRadius={22}
         // Over the tray tucked under it.
-        {...(has(tray) ? { position: "relative", zIndex: 1 } : {})}
+        {...(tucked ? { position: "relative", zIndex: 1 } : {})}
         backgroundColor={(dropping ? t.v("accent") : focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
         {/* Positioned: painted after the conversation above it, with what else is. */}
@@ -332,12 +343,20 @@ export function Composer({
               ...(isWeb ? { outlineStyle: "none", resize: "none", fieldSizing: "content" } : {}),
             } as never}
           />
-          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0}>
+          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0} {...(phone && !folded ? { flexWrap: "wrap", rowGap: 4 } : {})}>
             <Chip t={t} lead={<BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />} label="Model" value={chips.model} own={origin.model === "override"} open={card?.which === "Model"} onOpen={opener("Model")} />
-            <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} />
-            <Chip t={t} icon="think" label="Thinking" value={chips.thinking} own={origin.reasoning === "override"} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
-            <Chip t={t} icon="shield" label="Permissions" value={chips.permissions} own={permissionsOrigin === "override"} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
-            <Chip t={t} icon="tool" label="Tools" value={chips.tools} own={toolsOrigin === "override"} open={card?.which === "Tools"} onOpen={opener("Tools")} />
+            {folded ? (
+              <Press onPress={() => Keyboard.dismiss()} label="Show every setting" title="show every setting" height={26} paddingHorizontal={8} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("panel-2") as never}>
+                <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>⋯</Txt>
+              </Press>
+            ) : (
+              <>
+                <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} />
+                <Chip t={t} icon="think" label="Thinking" value={chips.thinking} own={origin.reasoning === "override"} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
+                <Chip t={t} icon="shield" label="Permissions" value={chips.permissions} own={permissionsOrigin === "override"} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
+                <Chip t={t} icon="tool" label="Tools" value={chips.tools} own={toolsOrigin === "override"} open={card?.which === "Tools"} onOpen={opener("Tools")} />
+              </>
+            )}
             {plan !== null && plan.unresolved.length > 0 ? (
               <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} ellip minWidth={0} paddingLeft={4}>
                 {plan.unresolved.map((u) => u.field).join(", ")} {plan.unresolved.length === 1 ? "is" : "are"} an expression here
@@ -353,6 +372,11 @@ export function Composer({
               </View>
             ) : null}
             {usage !== undefined ? <ContextMeter t={t} context={usage.context} route={route} open={card?.which === "context"} onOpen={opener("context")} /> : null}
+            {phone ? (
+              <Press onPress={() => setFull(true)} disabled={off} title="Write in a full screen" label="Write in a full screen" width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999}>
+                <Txt spec={{ voice: "app", scale: 1.1, color: "dim" }}>⤢</Txt>
+              </Press>
+            ) : null}
             <Press
               onPress={attach}
               disabled={off}
@@ -379,10 +403,24 @@ export function Composer({
           </View>
         </View>
       </View>
-      {has(tray) ? (
+      {tucked ? (
         <View width="100%" maxWidth={900} alignSelf="center" marginTop={-22} position="relative" zIndex={0}>
           {tray}
         </View>
+      ) : null}
+      {phone && full ? (
+        <FullWriter
+          t={t}
+          value={draft}
+          onValue={setDraft}
+          placeholder={disabled ?? placeholder ?? "Ask for more changes…"}
+          canSend={(draft.trim() !== "" || files.length > 0) && canSend}
+          onSend={() => {
+            send();
+            setFull(false);
+          }}
+          onClose={() => setFull(false)}
+        />
       ) : null}
       {mention !== null && mention.paths.length > 0 && boxAt !== null ? (
         <MenuLayer onClose={() => setMention(null)}>
@@ -452,6 +490,40 @@ export function Composer({
       {card?.which === "account" && account !== undefined ? <AccountCard anchor={card.at} account={account} cost={usage?.cost} others={limits.accounts.filter((a) => a.key !== account.key)} onClose={close} /> : null}
       {card?.which === "context" && usage !== undefined ? <ContextCard anchor={card.at} context={usage.context} route={route} busy={busy} onCompact={usage.onCompact} onClose={close} /> : null}
     </View>
+  );
+}
+
+/**
+ * A phone's full-screen writer (decision 0015, amended 2026-10-04): the composer's draft in a screen of
+ * its own, for anything longer than a few lines — Cancel and Send on top, the text to the keyboard.
+ * Cancel keeps the draft. How it looks: a bar 52 tall, --panel, a --line under it; the text app 15 on a
+ * 1.55 line, padding 14 16.
+ */
+function FullWriter({ t, value, onValue, placeholder, canSend, onSend, onClose }: { t: Tokens; value: string; onValue: (next: string) => void; placeholder: string; canSend: boolean; onSend: () => void; onClose: () => void }): JSX.Element {
+  return (
+    <Modal visible animationType="slide" presentationStyle="pageSheet" onRequestClose={onClose}>
+      <View flex={1} backgroundColor={t.v("panel") as never}>
+        <View flexDirection="row" alignItems="center" height={52} paddingHorizontal={8} gap={8} {...(edge(t, { bottom: 1 }) as object)}>
+          <Press onPress={onClose} label="Cancel" height={44} paddingHorizontal={8} justifyContent="center">
+            <Txt spec={{ voice: "app", scale: 15 / 12.5, color: "accent" }}>Cancel</Txt>
+          </Press>
+          <View flex={1} />
+          <Press onPress={onSend} disabled={!canSend} label="Send" height={36} paddingHorizontal={14} justifyContent="center" borderRadius={999} backgroundColor={t.v(canSend ? "accent" : "panel-2") as never}>
+            <Txt spec={{ voice: "app", scale: 14 / 12.5, weight: 600, color: canSend ? "on-accent" : "dim" }}>Send</Txt>
+          </Press>
+        </View>
+        <TextInput
+          multiline
+          autoFocus
+          value={value}
+          onChangeText={onValue}
+          placeholder={placeholder}
+          placeholderTextColor={String(t.v("tok-hint"))}
+          {...(Platform.OS === "web" ? {} : { textAlignVertical: "top" as const })}
+          style={{ ...(font(t, { voice: "app", scale: 15 / 12.5, color: "text", lineHeight: 1.55 }) as object), flex: 1, paddingVertical: 14, paddingHorizontal: 16, backgroundColor: "transparent", borderWidth: 0, ...(isWeb ? { outlineStyle: "none", resize: "none" } : {}) } as never}
+        />
+      </View>
+    </Modal>
   );
 }
 

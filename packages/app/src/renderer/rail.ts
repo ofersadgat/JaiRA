@@ -84,16 +84,21 @@ const gapAt = (j: number): number => (j < FULL ? PITCH : PITCH * RATIO ** (j - F
  * Computed once per run from its deepest point, never per row: spacing that changed as lanes opened
  * would kink every straight line in the drawing.
  *
+ * `squeeze` (1, the default) scales every gap: below 1 the lanes crowd together, a child's line over
+ * its parent's, which is how a phone's rail is drawn at rest.
+ *
  * `fan` raises every gap to {@link FAN_MIN} and leaves the rest alone. That is what a squeezed gutter
  * does while it is being pointed at, because a 3px gap is not something anybody can aim a mouse at —
  * and it is a FLOOR rather than a reset, so the gaps that were already wide enough do not move.
  */
-export function centresFor(depth: number, fan = false): number[] {
+export function centresFor(depth: number, fan = false, squeeze = 1): number[] {
   if (depth <= 1) return [PAD];
   const centres = [PAD];
   for (let i = 1; i < depth; i++) {
-    // The trunk keeps a floor: it is the lane that is always present and always clickable.
-    const gap = Math.max(gapAt(depth - 1 - i), i === 1 ? ROOT_GAP : 0, fan ? FAN_MIN : 0);
+    // The trunk keeps a floor: it is the lane that is always present and always clickable. `squeeze`
+    // scales every gap down — a phone's rail at the conversation's edge, the index flattened to fit
+    // (`StepsRail`), and widened back as it is pulled out.
+    const gap = Math.max(gapAt(depth - 1 - i), i === 1 ? ROOT_GAP : 0, fan ? FAN_MIN : 0) * squeeze;
     centres.push(centres[i - 1]! + gap);
   }
   return centres;

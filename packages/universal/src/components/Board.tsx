@@ -1,11 +1,14 @@
-import { Fragment, createContext, useContext, useEffect, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
-import { Animated, Pressable, ScrollView, type View as HostView } from "react-native";
+import { Fragment, createContext, useContext, useEffect, useMemo, useReducer, useRef, useState, type DragEvent as ReactDragEvent, type JSX, type MouseEvent as ReactMouseEvent, type ReactNode } from "react";
+import { Animated, PanResponder, Pressable, ScrollView, View as RNView, type View as HostView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { BoardCard, BoardColumn, BoardView, NextMove } from "@jaira/shared/browser";
 import { canPickUp, columnDropOf, connectDragOf, CONFIRM_YES, type ColumnDrop, type ConnectDrop, type MoveQuestion } from "@jaira/ui/boardDrag";
 import { archivedSplitOf, drillTargetOf, LANE_LABEL, laneRunsOf, type LaneEntry } from "@jaira/ui/boardModel";
 import type { ConnectAsk, ConnectDrag } from "@jaira/ui/connectDrag";
 import { NO_DRAG_OFFERS, type DragOffers } from "@jaira/ui/taskDrag";
+import { shownOf, stackedParts, swipeColumn, type BoardShown, type StripColumn } from "@jaira/ui/phoneModel";
+import { usePhone } from "../app/phone";
+import { ContextMenu, type MenuAt } from "./Menu";
 import { Press, Txt, edge, useHover } from "../primitives";
 import { useLook, useTokens, type Look, type Tokens } from "../tokens";
 import { ConnectPop, Kind } from "./ConnectPop";
@@ -202,6 +205,8 @@ export function Board({
 }: BoardProps): JSX.Element {
   const t = useTokens();
   const look = useLook();
+  // A phone's board: a strip of its columns, and all of them stacked or one at a time (`PhoneColumns`).
+  const phone = usePhone();
   // Archived cards are held at the foot of each Finished lane; one Show here shows them in every column.
   const [showArchived, setShowArchived] = useState(false);
   const [confirming, setConfirming] = useState<MoveQuestion | null>(null);
@@ -316,9 +321,10 @@ export function Board({
       </Lift>
     );
   };
-  const columns = board.columns.map((column, index) => (
+  const columnOf = (column: BoardView["columns"][number], index: number, wide = false): JSX.Element => (
     <Column
       key={column.key}
+      wide={wide}
       t={t}
       look={look}
       index={index}
@@ -366,7 +372,8 @@ export function Board({
         />
       )}
     </Column>
-  ));
+  );
+  const columns = board.columns.map((column, index) => columnOf(column, index));
   const atLevel = board.atLevel.filter((card) => card.status !== "archived");
   return (
     <View
@@ -377,7 +384,9 @@ export function Board({
       {...((look.palette !== "blueprint" ? {} : isWeb ? graphPaperWeb(t) : { position: "relative" }) as object)}
     >
       {look.palette === "blueprint" && !isWeb ? <GraphPaper t={t} /> : null}
-      {roots ? (
+      {phone ? (
+        <PhoneColumns columns={board.columns} draw={columnOf} />
+      ) : roots ? (
         <View flexDirection="row" flexWrap="wrap" alignItems="stretch" columnGap={10} rowGap={12}>
           {columns}
           {board.columns.length === 0 ? <NoChildren /> : null}
@@ -409,6 +418,138 @@ export function Board({
         </View>
       ) : null}
       {ghost !== null ? <LiftedCard ghost={ghost} /> : null}
+    </View>
+  );
+}
+
+/**
+ * A phone's board (decision 0015, amended 2026-10-04): a strip naming All and every column with its count,
+ * and under it either every column stacked — the empty ones folded into one line, the headings sticking
+ * as they do — or one column at the whole width, a swipe sideways moving to the next (`phoneModel.ts`'
+ * `swipeColumn`). ⌄ lists them all, with what each holds. How it looks:
+ *
+ *   the strip        row, centred: a sideways scroller of names, then ⌄ (40 wide); a --line under, 4 below
+ *   a name           padding 0 10, 40 tall; data 12/12 --dim with its count after (app-secondary); the
+ *                    one shown --text, 600, a 2px --accent under; All in the app voice, a --line after it
+ *   the empties      a row, wrapping, gap 6, padding 8 4, a dashed --line under: each name and its 0
+ *                    (data-faint), "·" between, "empty" pushed right; a name pressed shows its column
+ */
+function PhoneColumns({ columns, draw }: { columns: readonly BoardView["columns"][number][]; draw: (column: BoardView["columns"][number], index: number, wide?: boolean) => JSX.Element }): JSX.Element {
+  const t = useTokens();
+  const strip: StripColumn[] = columns.map((c) => ({ key: c.key, label: c.label ?? c.key, count: c.cards.filter((card) => card.status !== "archived").length }));
+  const [chosen, setShown] = useState<BoardShown>("all");
+  const shown = shownOf(chosen, strip);
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  const live = useRef({ strip, shown });
+  live.current = { strip, shown };
+  const swipe = useMemo(
+    () =>
+      PanResponder.create({
+        // In the capture phase: a card under the finger has taken the touch as a press, and only a
+        // clearly sideways drag is taken from it — an up-and-down one is the column's scroll.
+        onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > 24 && Math.abs(g.dx) > Math.abs(g.dy) * 2,
+        // Once sideways, it is the board's: the column's scroller asks for it back when the finger drifts
+        // up or down, and is refused; if it takes it anyway, what the finger did so far still counts.
+        onPanResponderTerminationRequest: () => false,
+        onPanResponderRelease: (_e, g) => {
+          if (Math.abs(g.dx) < 60) return;
+          setShown(swipeColumn(live.current.strip, live.current.shown, g.dx < 0 ? 1 : -1));
+        },
+        onPanResponderTerminate: (_e, g) => {
+          if (Math.abs(g.dx) < 60) return;
+          setShown(swipeColumn(live.current.strip, live.current.shown, g.dx < 0 ? 1 : -1));
+        },
+      }),
+    [],
+  );
+  const total = strip.reduce((sum, c) => sum + c.count, 0);
+  const name = (key: "all" | string, label: string, count: number): JSX.Element => {
+    const on = key === "all" ? shown === "all" : shown !== "all" && shown.column === key;
+    return (
+      <Press
+        key={key}
+        onPress={() => setShown(key === "all" ? "all" : { column: key })}
+        label={key === "all" ? "All columns" : label}
+        {...({ "aria-selected": on, role: "tab" } as object)}
+        height={40}
+        paddingHorizontal={10}
+        flexDirection="row"
+        alignItems="center"
+        gap={6}
+        flexShrink={0}
+        {...(edge(t, { bottom: 2 }, on ? "accent" : "rgba(0, 0, 0, 0)") as object)}
+      >
+        <Txt spec={{ voice: key === "all" ? "app" : "data", scale: 1, weight: on ? 600 : 400, color: on ? "text" : "dim" }} numberOfLines={1}>
+          {label}
+        </Txt>
+        <Txt register="app-secondary" spec={{ tabular: true }}>
+          {count}
+        </Txt>
+      </Press>
+    );
+  };
+  const column = shown === "all" ? undefined : columns.findIndex((c) => c.key === shown.column);
+  return (
+    <View flexDirection="column" gap={10}>
+      <View flexDirection="row" alignItems="center" marginBottom={4} {...(edge(t, { bottom: 1 }) as object)} {...({ role: "tablist" } as object)}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={{ flex: 1 }} contentContainerStyle={{ alignItems: "center" }}>
+          {name("all", "All", total)}
+          <View width={1} height={18} marginHorizontal={2} backgroundColor={t.v("line") as never} />
+          {strip.map((c) => name(c.key, c.label, c.count))}
+        </ScrollView>
+        <Press
+          onPress={(e) =>
+            setMenu({
+              x: Math.max(4, (e?.nativeEvent?.pageX ?? 300) - 220),
+              y: (e?.nativeEvent?.pageY ?? 120) + 16,
+              items: [
+                { label: "All columns", note: `${total} task${total === 1 ? "" : "s"}`, checked: shown === "all", onSelect: () => setShown("all") },
+                ...strip.map((c, i) => ({ label: `${i + 1}  ${c.label}`, note: `${c.count}`, checked: shown !== "all" && shown.column === c.key, separator: i === 0, onSelect: () => setShown({ column: c.key }) })),
+              ],
+            })
+          }
+          label="Every column"
+          title="every column"
+          width={40}
+          height={40}
+          flexShrink={0}
+          alignItems="center"
+          justifyContent="center"
+        >
+          <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>⌄</Txt>
+        </Press>
+      </View>
+      {column === undefined ? (
+        // A React Native box, not Tamagui's: on web Tamagui's leaves the responder's handlers off its element.
+        <RNView {...swipe.panHandlers} style={{ flexDirection: "column", gap: 10 }}>
+          {stackedParts(strip).map((part) =>
+            part.kind === "column" ? (
+              draw(columns[part.index]!, part.index, true)
+            ) : (
+              <View key={`empty:${part.columns[0]!.column.key}`} flexDirection="row" flexWrap="wrap" alignItems="baseline" gap={6} paddingVertical={8} paddingHorizontal={4} {...(edge(t, { bottom: 1 }, "line", "dashed") as object)}>
+                {part.columns.map(({ column: c }, i) => (
+                  <Fragment key={c.key}>
+                    {i > 0 ? <Txt register="data-faint">·</Txt> : null}
+                    <Press onPress={() => setShown({ column: c.key })} label={`${c.label}, empty`} flexDirection="row" alignItems="baseline" gap={4} paddingVertical={4}>
+                      <Txt spec={{ voice: "data", scale: 1, color: "dim" }}>{c.label}</Txt>
+                      <Txt register="data-faint">0</Txt>
+                    </Press>
+                  </Fragment>
+                ))}
+                <Txt register="app-secondary" marginLeft="auto">
+                  empty
+                </Txt>
+              </View>
+            ),
+          )}
+          {columns.length === 0 ? <NoChildren /> : null}
+        </RNView>
+      ) : (
+        <RNView {...swipe.panHandlers} style={{ flexDirection: "column" }}>
+          {draw(columns[column]!, column, true)}
+        </RNView>
+      )}
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </View>
   );
 }
@@ -581,6 +722,7 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
 export function Column({
   t,
   look,
+  wide = false,
   index,
   name,
   seq,
@@ -599,6 +741,8 @@ export function Column({
 }: {
   t: Tokens;
   look: Look;
+  /** A phone's: the whole width, none of the desktop's 210–320. */
+  wide?: boolean;
   index: number;
   name: ReactNode;
   seq?: number;
@@ -636,8 +780,7 @@ export function Column({
   const box = {
     flexGrow: 1,
     flexShrink: 0,
-    flexBasis: 210,
-    maxWidth: 320,
+    ...(wide ? { width: "100%" } : { flexBasis: 210, maxWidth: 320 }),
     minWidth: 0,
     flexDirection: "column",
     backgroundColor: s.column.ground,

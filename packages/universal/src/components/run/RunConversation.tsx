@@ -10,6 +10,10 @@ import { WaitingLine } from "../chat/Waiting";
 import { OfflineBanner } from "../panel/OfflineBanner";
 import { CutStrip, CxDoing, RunActivity } from "../panel/RunActivity";
 import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
+import { RAIL_WIDTH, StepsRail } from "../panel/StepsRail";
+import { runFocus } from "../panel/panelBridge";
+import { askingInstanceOf, hasAsking } from "@jaira/ui/stateSurfaceModel";
+import { usePhone } from "../../app/phone";
 
 /**
  * One run's conversation — the transcript's scroller (`RunTranscript`), and under it the composer or
@@ -20,6 +24,10 @@ import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
  * task.
  *
  *   the whole          column, flex 1; the transcript flex 1, scrolls
+ *
+ * On a phone the run's Steps stand at the transcript's right edge as bookmarks into it (`StepsRail`), the
+ * transcript 30 narrower for it. Where the host goes to a step for it (`focus`, the main view's), the rail
+ * asks the same way; where it does not (the panel's sheet), the conversation keeps its own.
  */
 export function RunConversation({
   detail,
@@ -73,9 +81,46 @@ export function RunConversation({
           onCancel: () => setArmed(null),
         }
       : undefined;
+  // A phone's Steps rail: where the reader is, and where it asked to go when the host keeps no such thing.
+  const phone = usePhone();
+  const [ownFocus, setOwnFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
+  const [reading, setReading] = useState<string | undefined>(undefined);
+  const hostFocus = focus !== undefined || onHere !== undefined;
+  const transcript = (
+    <RunTranscript
+      detail={detail}
+      parent={parent}
+      source={source}
+      {...(gate !== undefined && onGate !== undefined ? { gate, onGate } : {})}
+      armed={armed}
+      onArm={setArmed}
+      onOpenSidechain={onOpenSidechain}
+      focus={focus ?? (phone ? ownFocus : undefined)}
+      onHere={
+        phone
+          ? (instance, onScreen) => {
+              onHere?.(instance, onScreen);
+              setReading(instance);
+            }
+          : onHere
+      }
+    />
+  );
   return (
     <View flex={1} minHeight={0} flexDirection="column" {...(onLayout !== undefined ? { onLayout: (e: { nativeEvent: { layout: { height: number } } }) => onLayout(e.nativeEvent.layout.height) } : {})}>
-      <RunTranscript detail={detail} parent={parent} source={source} {...(gate !== undefined && onGate !== undefined ? { gate, onGate } : {})} armed={armed} onArm={setArmed} onOpenSidechain={onOpenSidechain} focus={focus} onHere={onHere} />
+      {phone && detail.instances.length > 0 ? (
+        <View flex={1} minHeight={0} flexDirection="column" paddingRight={RAIL_WIDTH} {...((isWeb ? { position: "relative" } : {}) as object)}>
+          {transcript}
+          <StepsRail
+            instances={detail.instances}
+            here={reading}
+            {...(asking && detail.instances.some((node) => hasAsking(node)) ? { asking: askingInstanceOf(detail.instances) } : {})}
+            onGoTo={(node) => (hostFocus ? runFocus.set({ instance: node.instanceId, at: Date.now() }) : setOwnFocus({ instance: node.instanceId, at: Date.now() }))}
+          />
+        </View>
+      ) : (
+        transcript
+      )}
       {/* What stands under the scroller — the composer's place and the panel's foot. Nothing here asks
           for a layer: the scroller above is painted where it stands (`PLAIN_SCROLLER`), so Chromium gives
           these a layer only by overlap, where they touch it. */}

@@ -508,6 +508,24 @@ Two things the live runs settled that are worth not re-deriving:
       "conversation artifacts"; there are no such tables yet (see the §4.2 entry above),
       so pruning covers `runs`, `events` and `command_log` only.
 
+## The phone's own layout (decision 0015, amended 2026-10-04)
+
+The mobile pass: on a phone's width the shell lays the desktop's components out for the phone (drawer,
+sheet, Inbox room, Steps rail, the board one column at a time). Seen in a phone-sized browser
+(`shots/phoneLayout.mts`); a release carries it to a phone for the first time.
+
+- [ ] **See it on a phone.** The keyboard above all (a browser has none): the composer riding it with its
+      chips folded, the sheet raised to full by a box in it and its Done, the frame standing clear of it
+      on iOS and on Android (where a resized window should leave nothing to clear).
+- [ ] **A form's ↑ ↓ between fields** on the keyboard's edge, and its main button there (the mockups'
+      D4): the edge has Done only.
+- [ ] **Files, Settings, Logs and Components** keep their desktop insides at the phone's width; only
+      their panels are sheets. Each wants the same treatment the board had.
+- [ ] **Turning the phone** moves between the phone's layout and the fitted desktop, which mounts the
+      shell again (the store reloads; what was open is kept where `ui` keeps it).
+- [ ] **The Steps rail of a long run**: the strip shows the rows that fit its height; the index's own
+      fitting (`useStepsFit`) is not asked of it yet.
+
 ## Open inside the universal client, on a phone only (decision 0015)
 
 The desktop's layout, drawn natively on a phone from the same components (`packages/universal`). Each

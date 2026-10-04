@@ -10,6 +10,7 @@ import { BrandIcon } from "../bits";
 import { Button } from "../Button";
 import { Switch } from "../controls";
 import { useDrawnRow } from "../SettingsPage";
+import { usePhone } from "../../../app/phone";
 
 /**
  * One Connections row and the boxes it is made of: the provider, forge and MCP server rows
@@ -88,6 +89,9 @@ export function ConnRow({
   useDrawnRow(true);
   const shown = boxes.filter((b) => b !== null && b !== undefined && b !== false);
   const under = (wide ?? []).filter((b) => b !== null && b !== undefined && b !== false);
+  // A phone's row is too narrow for the name, the boxes and the controls side by side: the name takes the
+  // first line, and the boxes and controls wrap under it.
+  const phone = usePhone();
   return (
     <View
       flexDirection="column"
@@ -100,8 +104,8 @@ export function ConnRow({
       {...({ "data-state": state } as object)}
       {...hover}
     >
-      <View flexDirection="row" alignItems="flex-start" gap={14}>
-        <View flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0} flexDirection="column" gap={3}>
+      <View flexDirection="row" alignItems="flex-start" gap={14} {...(phone ? { flexWrap: "wrap", rowGap: 10 } : {})}>
+        <View flexGrow={1} flexShrink={1} flexBasis={phone ? "100%" : 0} minWidth={0} flexDirection="column" gap={3}>
           {main}
         </View>
         {shown.length > 0 ? (

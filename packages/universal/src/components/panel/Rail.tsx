@@ -63,6 +63,7 @@ export function RailedRows({
   renderGap,
   renderCrumb,
   rowClass,
+  squeeze = 1,
 }: {
   steps: readonly RailStep[];
   renderStep: (index: number) => ReactNode;
@@ -96,6 +97,8 @@ export function RailedRows({
    * fades it to .35.
    */
   rowClass?: ((index: number) => string | undefined) | undefined;
+  /** The lanes' spacing, scaled (`rail.ts`' `centresFor`): a phone's rail at rest is the index squeezed. */
+  squeeze?: number;
 }): JSX.Element {
   const t = useTokens();
   const { rows, deepest: reached } = useMemo(() => railOf(steps), [steps]);
@@ -120,7 +123,7 @@ export function RailedRows({
   // not of the centres drawn (asked of those it would un-fan itself).
   const [fan, setFan] = useState(false);
   const compressed = useMemo(() => needsFan(deepest), [deepest]);
-  const centres = useMemo(() => centresFor(deepest, fan), [deepest, fan]);
+  const centres = useMemo(() => centresFor(deepest, fan, squeeze), [deepest, fan, squeeze]);
   const columns = useMemo(() => {
     const map = new Map<number, number[]>();
     for (const group of stacksOf(centres)) for (const i of group) map.set(i, group);

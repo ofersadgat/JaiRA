@@ -138,9 +138,18 @@ One file serves both wherever it can. Where it cannot:
   goes in a `.web.tsx`. `node packages/client/scripts/nativeGraph.mjs` (part of `npm run typecheck`) walks
   what Metro would bundle and names any DOM-only package it reaches, with the chain of imports that
   reaches it.
-- The phone draws the shell at the desktop's width, fitted to its screen (`DesktopFrame` in
-  `packages/client/src/native`); its root lays out strictly (`StrictLayout`), so Yoga behaves as CSS
-  flexbox does. There is no phone layout yet: that is the later mobile pass.
+- On a phone's width (under 700, `phoneModel.ts`' `PHONE_WIDTH`) the shell lays itself out for the
+  phone (decision 0015, amended 2026-10-04): `UniversalApp phone` draws `PhoneFrame.tsx` — the sidebar a
+  drawer with an INBOX row, the context panel a sheet (`panel/PanelSheet.tsx`), the run's Steps a rail at
+  its conversation's edge (`panel/StepsRail.tsx`), the board one column at a time with All first
+  (`Board.tsx`' `PhoneColumns`). A component asks `usePhone()` (`app/phone.ts`); everything it does
+  differently is behind that, and the desktop is untouched. What decides the layout is
+  `phoneModel.ts`'s, with a test. Wider (a tablet, a phone on its side) the shell is the desktop's,
+  fitted to the screen (`DesktopFrame` in `packages/client/src/native`). Either way the root lays out
+  strictly (`StrictLayout`), so Yoga behaves as CSS flexbox does.
+- `packages/app/shots/phoneLayout.mts` drives the phone's layout in a phone-sized headless Chrome: the
+  drawer, the Inbox, the sheet's heights and the main view, the Steps rail, the board. Built client
+  first (`npm --workspace @jaira/app run build`).
 
 ## Islands
 

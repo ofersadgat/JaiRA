@@ -13,6 +13,7 @@ import { MessageTypeContext, type MessageTypeStore } from "@jaira/ui/messageType
 import { PANEL_FOLD, roomOf } from "@jaira/ui/panelHost";
 import { push } from "@jaira/ui/panelStack";
 import { windowTitle } from "@jaira/ui/shellModel";
+import { phoneTypography } from "@jaira/ui/phoneModel";
 import { ValuePanelContext, type PinnedValue, type ValuePanel } from "@jaira/ui/valuePanel";
 import { panelOnStack } from "../components/panel/panelBridge";
 import { InboxStrip } from "../components/InboxStrip";
@@ -32,6 +33,8 @@ import { LogsView } from "./LogsView";
 import { PanelColumn } from "./PanelColumn";
 import { SettingsView } from "./SettingsView";
 import { AppContext, useShell } from "./shell";
+import { PhoneContext } from "./phone";
+import { PhoneFrame } from "./PhoneFrame";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
 import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
@@ -40,8 +43,11 @@ import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
  * The shell (decision 0015): the app's one frame, drawn by the desktop's window and a browser through
  * react-native-web and natively by a phone. One store drives it — `useApp()`, called once, here — and
  * every region reads it through `useShell`. Every `View` has a room here.
+ *
+ * `phone`: the host is a phone's window (decision 0015, amended 2026-10-04) — the shell lays itself out
+ * for it (`PhoneFrame`), and its text is larger (`phoneModel.ts`' `phoneTypography`).
  */
-export function UniversalApp(): JSX.Element {
+export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.Element {
   const model = useApp();
   const { state } = model;
   // What every transcript is provided, however deep: how work between two messages is summarised
@@ -90,16 +96,18 @@ export function UniversalApp(): JSX.Element {
       },
     };
   }, [actions]);
+  const appearance = useMemo(() => (phone ? { ...model.appearance, overrides: phoneTypography(model.appearance.overrides) } : model.appearance), [phone, model.appearance]);
   return (
+    <PhoneContext.Provider value={phone}>
     <AppContext.Provider value={model}>
       <ValuePanelContext.Provider value={valuePanel}>
         <MessageTypeContext.Provider value={messageTypes}>
           <WorkLookContext.Provider value={workLook}>
             <ReadOnlyJudgeContext.Provider value={readOnlyJudge}>
-              <TokenRoot {...model.appearance}>
+              <TokenRoot {...appearance}>
                 <CrashBoundary>
                   <TouchRoot>
-                    <Frame />
+                    {phone ? <PhoneFrame /> : <Frame />}
                   </TouchRoot>
                 </CrashBoundary>
                 {/* Outside the boundary: a report about a failure must not go down with what it
@@ -112,6 +120,7 @@ export function UniversalApp(): JSX.Element {
         </MessageTypeContext.Provider>
       </ValuePanelContext.Provider>
     </AppContext.Provider>
+    </PhoneContext.Provider>
   );
 }
 
@@ -194,7 +203,7 @@ function Frame(): JSX.Element {
 }
 
 /** The inbox strip on the store: what is awaiting the person across projects, and the one notice to show. */
-function ShellInbox(): JSX.Element | null {
+export function ShellInbox(): JSX.Element | null {
   const { state, actions } = useShell();
   const projectHues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
   const notices = useNotices();
