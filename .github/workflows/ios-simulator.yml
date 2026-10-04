@@ -10,6 +10,7 @@ on:
     paths:
       - packages/client/**
       - packages/universal/**
+      - packages/tailnet/**
       - scripts/release/ios.mjs
 
 permissions:
@@ -33,6 +34,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+
+      # Tailscale built into the app is Go, bound with gomobile (packages/client/modules/jaira-net/build.mjs).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: JaiRA/packages/tailnet/go.mod
+          cache-dependency-path: JaiRA/packages/tailnet/go.sum
 
       # Xcode 26, as the release builds with (release.yml).
       - name: Select Xcode 26

@@ -119,8 +119,18 @@ export function pairCodeWords(view: MachinesView, expiresAt: number): WordPart[]
   return [
     "On the other machine: Settings → Machines → Add a machine, with ",
     { code: view.self.reach.url ?? "" },
-    `. Works until ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`,
+    ".",
+    // Announced on the local network (decision 0013, amended 2026-10-04): a phone lists it by name.
+    ...(view.pairing?.nearby === true ? [` On a phone on this Wi-Fi: open JaiRA and pick ${view.self.label}.`] : []),
+    ` Works until ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`,
   ];
+}
+
+/** A phone that paired over the local network and is joining the tailnet: what to do about it here. */
+export function phoneJoinWords(phone: NonNullable<MachinesView["phone"]>): WordPart[] {
+  return phone.signInUrl !== undefined
+    ? [`${phone.label} is paired. To let it onto your tailnet, approve it in the Tailscale page that opened in your browser. `, { link: "Open the page again", href: phone.signInUrl }]
+    : [`${phone.label} is paired, and is joining your tailnet…`];
 }
 
 /** A paired machine's line: whether it is there, what it runs, and where. */
@@ -167,6 +177,7 @@ export const MACHINES_WORDS = {
   },
   pair: { name: "Pair a machine", button: "Show a code" },
   pairCode: { name: "Code for pairing" },
+  phone: { name: "A phone joining" },
   yours: { title: "Your machines", info: "Remembered on every machine you pair: pairing one new machine with any of these introduces it to the rest." },
   none: { name: "None yet", description: "Pair a machine below, or show a code here and type it there." },
   devices: {

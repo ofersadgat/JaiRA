@@ -41,7 +41,7 @@ const loopbackReach: ReachPort = {
 async function machine(label: string): Promise<Machine> {
   const base = mkdtempSync(join(tmpdir(), `jaira-fleet-${label}-`));
   updateMachineIdentity(base, { label });
-  const fleet = new Fleet({ baseDir: base, version: "0.2.0", reach: loopbackReach, retryMs: 50 });
+  const fleet = new Fleet({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, retryMs: 50 });
   const host = (await claimEngine({
     baseDir: base,
     kind: "desktop",

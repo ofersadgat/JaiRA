@@ -26,7 +26,7 @@
  */
 import { execFileSync } from "node:child_process";
 import { createPrivateKey, sign } from "node:crypto";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { ensureRelease, hasRecord, record, recordName, retrying, upload } from "./github.mjs";
@@ -214,6 +214,11 @@ async function build() {
 
   // The island pages go into the bundle at prebuild (`plugins/withIslands.cjs`), so they come first.
   run("npm", ["--workspace", "@jaira/client", "run", "build:island"]);
+  // Tailscale built in (decision 0013, amended 2026-10-04): gomobile's framework, which the native
+  // module's podspec vendors when `pod install` runs. Needs Go. (Not there in a commit before it: these
+  // scripts are the branch's, run against the release's commit.)
+  const tailnet = join(CLIENT, "modules", "jaira-net", "build.mjs");
+  if (existsSync(tailnet)) run("node", [tailnet, "ios"]);
   // A prebuild replaces `ios/` whole, from app.json, app.config.cjs and the plugins.
   run("npx", ["one", "prebuild", "--platform", "ios", "--no-install"], { cwd: CLIENT });
   run("pod", ["install"], { cwd: IOS });

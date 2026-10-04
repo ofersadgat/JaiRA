@@ -237,7 +237,9 @@ release:build:win-x64:
   before_script:
     - export PATH="/opt/homebrew/bin:$PATH"
     - mise install node@22 && export PATH="$(mise where node@22)/bin:$PATH"
-    - node --version && xcodebuild -version | head -1 && pod --version
+    # Tailscale built into the app is Go, bound with gomobile (packages/client/modules/jaira-net/build.mjs).
+    - GO_VERSION="$(sed -n 's/^go //p' packages/tailnet/go.mod)" && mise install "go@$GO_VERSION" && export PATH="$(mise where "go@$GO_VERSION")/bin:$PATH"
+    - node --version && go version && xcodebuild -version | head -1 && pod --version
 
 ios:check:
   extends: .ios

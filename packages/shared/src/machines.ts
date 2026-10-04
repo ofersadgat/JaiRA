@@ -81,8 +81,16 @@ export interface MachinesView {
   machines: PeerView[];
   /** The phones and browsers that hold a token for this machine. */
   devices: DeviceView[];
-  /** The code being shown under Pair a machine, while it is valid. */
-  pairing?: { code: string; expiresAt: number };
+  /**
+   * The code being shown under Pair a machine, while it is valid. `nearby`: phones on this machine's
+   * local network can find it to pair (decision 0013, amended 2026-10-04).
+   */
+  pairing?: { code: string; expiresAt: number; nearby?: boolean };
+  /**
+   * A phone that proved the code over the local network and is joining the tailnet. `signInUrl`: its
+   * Tailscale sign-in page, opened in the browser; approving it there lets the phone on.
+   */
+  phone?: { label: string; signInUrl?: string };
 }
 
 /**

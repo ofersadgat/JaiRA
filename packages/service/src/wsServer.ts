@@ -33,7 +33,7 @@ export interface WsConnection {
  * Answer an HTTP upgrade request as a WebSocket, or refuse it with 400. `head` is what arrived after
  * the headers, which the server's `upgrade` event hands over and which may already hold a frame.
  */
-export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: Buffer, options: { pingMs?: number } = {}): WsConnection | undefined {
+export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: Buffer, options: { pingMs?: number; maxMessageBytes?: number } = {}): WsConnection | undefined {
   const key = request.headers["sec-websocket-key"];
   const upgrade = String(request.headers["upgrade"] ?? "").toLowerCase();
   if (typeof key !== "string" || upgrade !== "websocket" || request.headers["sec-websocket-version"] !== "13") {
@@ -42,7 +42,7 @@ export function acceptWebSocket(request: IncomingMessage, socket: Duplex, head: 
   }
   const accept = createHash("sha1").update(key + GUID).digest("base64");
   socket.write(["HTTP/1.1 101 Switching Protocols", "Upgrade: websocket", "Connection: Upgrade", `Sec-WebSocket-Accept: ${accept}`, "", ""].join("\r\n"));
-  return new Connection(socket, head, options.pingMs ?? 25_000);
+  return new Connection(socket, head, options.pingMs ?? 25_000, options.maxMessageBytes ?? MAX_WS_MESSAGE_BYTES);
 }
 
 function frame(opcode: number, payload: Buffer): Buffer {
@@ -79,6 +79,8 @@ class Connection implements WsConnection {
     private readonly socket: Duplex,
     head: Buffer,
     pingMs: number,
+    /** The largest message taken: a listener strangers can reach takes only small ones. */
+    private readonly maxBytes: number,
   ) {
     socket.on("data", (chunk: Buffer) => this.take(chunk));
     socket.on("close", () => this.finish(1006, "the connection dropped"));
@@ -163,10 +165,11 @@ class Connection implements WsConnection {
       } else if (length === 127) {
         if (this.buffer.length < 10) return;
         const big = this.buffer.readBigUInt64BE(2);
-        if (big > BigInt(MAX_WS_MESSAGE_BYTES)) return this.fail(1009, "message too big");
+        if (big > BigInt(this.maxBytes)) return this.fail(1009, "message too big");
         length = Number(big);
         at = 10;
       }
+      if (length > this.maxBytes) return this.fail(1009, "message too big");
       if (!masked) return this.fail(1002, "client frames must be masked");
       if (this.buffer.length < at + 4 + length) return;
       const mask = this.buffer.subarray(at, at + 4);
@@ -205,7 +208,7 @@ class Connection implements WsConnection {
         if (opcode === OP.continuation && this.fragments.length === 0) return this.fail(1002, "a continuation with nothing to continue");
         this.fragments.push(payload);
         this.fragmentBytes += payload.length;
-        if (this.fragmentBytes > MAX_WS_MESSAGE_BYTES) return this.fail(1009, "message too big");
+        if (this.fragmentBytes > this.maxBytes) return this.fail(1009, "message too big");
         if (!fin) return;
         const text = Buffer.concat(this.fragments).toString("utf8");
         this.fragments = [];

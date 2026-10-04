@@ -280,6 +280,13 @@ jobs:
         working-directory: JaiRA
         run: npm install
 
+      # Tailscale built into the app is Go, bound with gomobile (packages/client/modules/jaira-net/build.mjs).
+      - uses: actions/setup-go@v5
+        if: steps.done.outputs.built != 'true'
+        with:
+          go-version-file: JaiRA/packages/tailnet/go.mod
+          cache-dependency-path: JaiRA/packages/tailnet/go.sum
+
       - name: Write the notes
         if: steps.done.outputs.built != 'true'
         env:

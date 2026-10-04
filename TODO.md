@@ -567,6 +567,18 @@ found is fixed or listed here.
       read; nothing draws or scans one. A device cannot open or make a project (`project:choose` is
       the machine's own dialog), a sign-in page a device's request causes opens on the engine's
       machine, and after a reconnection only the limits watch is replayed, not the current project.
+- [ ] **Pairing on the Wi-Fi is not seen on a phone.** Built 2026-10-04 (decision 0013, amended that
+      day): the machine announced while its code shows, the code proved by CPace, the phone's own
+      Tailscale node whose sign-in page the machine opens. Seen against a real engine in tests, and a
+      fresh node asks Tailscale's real control plane for a sign-in; not yet a phone on a real Wi-Fi,
+      approved, and connected through its node. The iOS framework builds only on a Mac (CI).
+- [ ] **Android's built-in Tailscale cannot list the network interfaces.** On Android 11 and later tsnet
+      needs them from Java (Tailscale's app registers an interface getter); without it the node may run
+      on DERP relays alone, or not start. Android is not released.
+- [ ] **Export compliance.** The app now carries WireGuard (Tailscale built in) and the pairing
+      exchange's ChaCha20-Poly1305, standard algorithms, and still declares
+      `ITSAppUsesNonExemptEncryption: false` (mass-market exemption) so App Store Connect does not hold
+      every upload. The publisher confirms that, or files the annual self-classification report.
 
 ## Open after the DOM renderer was deleted (2026-10-01, decision 0015)
 

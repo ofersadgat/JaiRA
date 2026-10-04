@@ -27,6 +27,7 @@
     "@jaira/runtime": "*",
     "@jaira/shared": "*",
     "ajv": "^8.20.0",
+    "bonjour-service": "^1.4.4",
     "typescript": "^5.7.2"
   }
 }
