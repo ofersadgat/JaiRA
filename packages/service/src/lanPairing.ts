@@ -177,7 +177,8 @@ export class LanPairing {
       return;
     }
     this.unannounce = await this.announce.publish({
-      name: me.label,
+      // Unique on the network even beside another machine of the same name; the phone shows the TXT label.
+      name: `${me.label.slice(0, 50)} (${me.id.slice(-4)})`,
       type: LAN_SERVICE_TYPE,
       port: this.port!,
       txt: announcementTxt({ id: me.id, label: me.label, os: me.os, port: this.port!, addresses, v: LAN_PAIRING_VERSION }),
