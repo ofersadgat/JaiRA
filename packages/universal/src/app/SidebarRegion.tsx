@@ -9,6 +9,8 @@ import { healthCounts, logUnseen } from "@jaira/ui/updatesModel";
 import { checkForUpdate, useHealth } from "@jaira/ui/updatesStore";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
 import { settingsPageProblems } from "@jaira/ui/settingsSections";
+import { INBOX_VIEW } from "@jaira/ui/inboxModel";
+import { awaitingCount } from "@jaira/ui/noticesModel";
 import { fixHealthItem, openHealthPage, useForgeOAuth } from "@jaira/ui/settingsShell";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { FileTreePanel, type FileTreePanelProps } from "../components/files/FileTreePanel";
@@ -27,10 +29,25 @@ import { useShell } from "./shell";
 import { aboutNotes } from "./viewState";
 
 /**
- * The sidebar on the store: the rooms, their counts (`shellModel.ts`), their verbs, and the drawers each
- * opens onto — with the floats its rows raise: the `+` menu, the health card, the folder browser.
+ * The sidebar as a phone's drawer (`PhoneFrame`): its width, the Inbox room it opens from an INBOX row at
+ * its root, and closing it — its own |◂, and any row that has no drawer of its own to show.
  */
-export function ShellSidebar(): JSX.Element {
+export type PhoneSidebar = {
+  width: number;
+  inbox: boolean;
+  onInbox: () => void;
+  onLeaveInbox: () => void;
+  /** A room was chosen (not the Inbox). */
+  onRoom: () => void;
+  onClose: () => void;
+};
+
+/**
+ * The sidebar on the store: the rooms, their counts (`shellModel.ts`), their verbs, and the drawers each
+ * opens onto — with the floats its rows raise: the `+` menu, the health card, the folder browser. On a
+ * phone (`phone`) it is a drawer, with the Inbox's row at its root.
+ */
+export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {}): JSX.Element {
   const { state, actions, appearance } = useShell();
   const ui = state.settings.ui;
   const health = useHealth();
@@ -114,7 +131,8 @@ export function ShellSidebar(): JSX.Element {
       });
     },
   };
-  const roots: SidebarView[] = ROOT_VIEWS.map((v) =>
+  const inboxRoot: SidebarView[] = phone === undefined ? [] : [{ ...INBOX_VIEW, counts: { waiting: awaitingCount(state) } }];
+  const roots: SidebarView[] = [...inboxRoot, ...ROOT_VIEWS.map((v): SidebarView =>
     v.id !== "chat"
       ? { ...v, counts: rooms.rootTasks, onSeen: () => actions.markSeenAll(rooms.seenRootTasks) }
       : {
@@ -124,7 +142,7 @@ export function ShellSidebar(): JSX.Element {
           acts: [{ ...newChat, onAct: (from) => (actions.standOn(null), newChat.onAct(from)) }, find("conversations")],
           panel: <ChatDrawer find={finding.conversations === true} />,
         },
-  );
+  )];
   const views: SidebarView[] = VIEWS.map((v) =>
     v.id === "tasks"
       ? { ...v, counts: rooms.atTasks, onSeen: () => actions.markSeenAll(rooms.seenAtTasks) }
@@ -161,11 +179,19 @@ export function ShellSidebar(): JSX.Element {
       footer={footer}
       settings={settings}
       onLeaveSettings={() => actions.setView(beforeSettings.current)}
-      view={state.view}
-      onView={(id) => actions.setView(id as AppView)}
-      collapsed={!openOf(ui, FOLD.shellSidebar)}
-      onCollapsed={(shut) => actions.setFold(FOLD.shellSidebar, !shut)}
-      width={paneOf(ui, PANE.shellSidebar)}
+      view={phone?.inbox === true ? INBOX_VIEW.id : state.view}
+      onView={(id) => {
+        if (phone === undefined) return actions.setView(id as AppView);
+        if (id === INBOX_VIEW.id) return phone.onInbox();
+        phone.onLeaveInbox();
+        phone.onRoom();
+        actions.setView(id as AppView);
+        // A row with a drawer of its own (Files, Chat) stays open on it, to choose from; the rest close.
+        if (![...roots, ...views].some((v) => v.id === id && v.panel !== undefined)) phone.onClose();
+      }}
+      collapsed={phone === undefined ? !openOf(ui, FOLD.shellSidebar) : false}
+      onCollapsed={(shut) => (phone !== undefined ? phone.onClose() : actions.setFold(FOLD.shellSidebar, !shut))}
+      width={phone?.width ?? paneOf(ui, PANE.shellSidebar)}
       projects={sidebarProjectsOf(groups, projectHues, ui.seen, actions.markProjectSeen)}
       at={groupOf(groups, state.at)?.key ?? state.at}
       onProject={actions.standOn}

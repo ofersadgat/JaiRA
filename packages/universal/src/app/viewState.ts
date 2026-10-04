@@ -67,3 +67,15 @@ export const definitionReveal = shared<{ path: string; line: number; column: num
  * notes by it — only for that one opening.
  */
 export const aboutNotes = shared(false);
+
+/** A phone's sidebar, slid over the room (`PhoneFrame`): the title bar's ▸| opens it, a choice in it closes it. */
+export const phoneDrawer = shared(false);
+
+/** A phone's Inbox room is the one showing, in place of the store's view (`PhoneFrame`). */
+export const phoneInbox = shared(false);
+
+/**
+ * The height a phone's context panel is asked to stand at (`PanelSheet`): the Inbox opens a task with its
+ * question showing, so at least half. A request, with a stamp so the same one twice means "again".
+ */
+export const sheetAsk = shared<{ detent: "peek" | "half" | "full"; at: number } | null>(null);

@@ -4,6 +4,7 @@ import { View } from "@tamagui/core";
 import type { LeadPart } from "@jaira/ui/settingsSections";
 import type { RowLayer } from "@jaira/ui/settingsRows";
 import { Press, Txt, edge } from "../../primitives";
+import { usePhone } from "../../app/phone";
 import { useTokens } from "../../tokens";
 import { SettingsLayerContext, useInheritLabel, useLayerRow } from "./layers";
 import { dropPart, partsMoved, placePart } from "./parts";
@@ -27,7 +28,8 @@ import { dropPart, partsMoved, placePart } from "./parts";
  *   the title            app 650 at 1.5×, line 1.2, -0.015em, --text
  *   the lead             app 400 at 1.04×, line 1.5, --dim, 5 above; its bold parts: 600, --text
  *   under the lead       10 above (the Just you view's "Which rows")
- *   the head's aside     flex none, 2 down (the layer switch)
+ *   the head's aside     flex none, 2 down (the layer switch); on a phone under the title, 10 below,
+ *                        wrapping
  *   the "nothing" line   shown only when "What you changed" leaves nothing: 18 16 inside a dashed
  *                        --line, radius 12, --dim, at most 740 wide
  *   a section            column, gap 10, at most 740 wide (not `wide`); hidden under "What you changed"
@@ -106,12 +108,14 @@ export function SettingsPage({
   children: ReactNode;
 }): JSX.Element {
   const t = useTokens();
+  // A phone's page is too narrow for the head's aside beside the title: it goes under it, and may wrap.
+  const phone = usePhone();
   const { count, mark } = useMarks();
   const page = useMemo(() => ({ mark }), [mark]);
   return (
     <PageContext.Provider value={page}>
       <View flexDirection="column" gap={26} maxWidth={1040} paddingTop={6} paddingHorizontal={4} paddingBottom={36} onLayout={partsMoved}>
-        <View flexDirection="row" justifyContent="space-between" alignItems="flex-start" gap={16} maxWidth={740}>
+        <View flexDirection={phone ? "column" : "row"} justifyContent="space-between" alignItems={phone ? "stretch" : "flex-start"} gap={phone ? 10 : 16} maxWidth={740}>
           <View flexShrink={1} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 1.5, weight: 650, ls: -0.015, lineHeight: 1.2 }} role="heading" aria-level={1}>
               {title}
@@ -136,7 +140,7 @@ export function SettingsPage({
             ) : null}
           </View>
           {aside !== undefined ? (
-            <View flexShrink={0} marginTop={2}>
+            <View flexShrink={phone ? 1 : 0} minWidth={0} marginTop={2} {...(phone ? { flexDirection: "row", flexWrap: "wrap" } : {})}>
               {aside}
             </View>
           ) : null}

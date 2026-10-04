@@ -1,10 +1,11 @@
 import { useEffect, useState, type JSX } from "react";
-import { Linking, useWindowDimensions } from "react-native";
+import { Linking, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { DesktopFrame } from "./DesktopFrame";
 import { IslandsTab } from "./IslandsTab";
 import { TamaguiProvider } from "@tamagui/core";
-import { TokenRoot, UniversalApp, config, installNativeErrorReporting } from "@jaira/universal";
+import { Replayed, TokenRoot, UniversalApp, config, installNativeErrorReporting } from "@jaira/universal";
+import { isPhoneWidth } from "@jaira/ui/phoneModel";
 import { Remote, linkOf, type PairLink } from "../Remote";
 import { holdStill } from "./still";
 import { StrictLayout } from "./StrictLayout";
@@ -14,7 +15,9 @@ import { StrictLayout } from "./StrictLayout";
  * migration step — and not in a WebView (the person, 2026-09-27: "the goal is to replicate the desktop
  * ui, but not in a webview"). Pair and connect (`Remote`), then the universal shell (`UniversalApp`):
  * the desktop's frame drawn natively, region by region, on a machine's engine over its own transport
- * (decision 0013, amended 2026-09-30) — at a desktop's width in `DesktopFrame`.
+ * (decision 0013, amended 2026-09-30). On a phone's width the shell lays itself out for the phone
+ * (`UniversalApp phone`: decision 0015, amended 2026-10-04, the mobile pass); wider — a tablet, a phone on
+ * its side — it is the desktop's, fitted in `DesktopFrame`.
  *
  * `&screen=islands` on the link opens the island harness instead (`IslandsTab`), which the emulator
  * test (`shots/android.mts`) measures; `&still=1` holds the clocks and spinners so that test can read
@@ -58,6 +61,9 @@ export function NativeApp(): JSX.Element {
   return (
     <SafeAreaProvider>
       <TamaguiProvider config={config} defaultTheme="light">
+        {/* `Replayed`: in a browser (the `/native` preview) the tokens are the replayed cascade, as on the
+            phone, where it is the only kind there is — there is no stylesheet on the page to resolve them. */}
+        <Replayed>
         {/* The window's height, not flex alone: in a browser (the `/native` preview) nothing above sizes it.
             react-native-safe-area-context's SafeAreaView, not React Native's, which pads only on iOS: on
             Android the app sat under the status bar. */}
@@ -76,13 +82,22 @@ export function NativeApp(): JSX.Element {
                 <IslandsTab />
               </TokenRoot>
             ) : (
-              <DesktopFrame>
-                <UniversalApp />
-              </DesktopFrame>
+              isPhoneWidth(window.width) ? (
+                // The whole height by size, not flex: in a browser the safe area's box is a block, where
+                // `flex: 1` below it means nothing.
+                <View style={{ height: "100%", width: "100%" }}>
+                  <UniversalApp phone />
+                </View>
+              ) : (
+                <DesktopFrame>
+                  <UniversalApp />
+                </DesktopFrame>
+              )
             )}
           </Remote>
           </StrictLayout>
         </SafeAreaView>
+        </Replayed>
       </TamaguiProvider>
     </SafeAreaProvider>
   );

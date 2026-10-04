@@ -9,6 +9,7 @@ import { TaskAddressBar } from "../components/TaskAddressBar";
 import { FilesAddress } from "./FilesView";
 import { DRAG_REGION, WINDOW_GUTTER } from "../primitives";
 import { useShell } from "./shell";
+import { usePhone } from "./phone";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
 import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
@@ -21,6 +22,8 @@ import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
+  // A phone has no window to drag: the bar is its address alone, which may take the whole width.
+  if (usePhone() && state.view === "tasks") return <TasksAddress />;
   if (state.view === "chat") return <ChatAddress />;
   if (state.view === "files") {
     return (
@@ -72,12 +75,21 @@ function TasksAddress(): JSX.Element {
   const mode = runMode.use();
   const top = panelTopKind.use();
   const opener = newTaskOpener.use();
+  const phone = usePhone();
   const openNewTask = (): void => {
     if (opener !== null) return opener();
     // No panel column to push the form onto yet: unfold it, as `openNewTaskWith` does after pushing.
     actions.setFold(FOLD.panelTasks, true);
   };
-  return (
+  const tools = (
+    <>
+      {state.trail.length > 0 && state.taskFocus !== null ? <RunModeToggle mode={mode} onMode={runMode.set} /> : null}
+      {(state.taskFocus ?? atProject) === state.at && state.at !== null ? <NewTask onOpen={openNewTask} open={top === "newTask"} /> : null}
+    </>
+  );
+  // A phone's bar has no room for the crumbs and the tools side by side: the tools take a row under them.
+  const hasTools = (state.trail.length > 0 && state.taskFocus !== null) || ((state.taskFocus ?? atProject) === state.at && state.at !== null);
+  const bar = (withTools: boolean): JSX.Element => (
     <TaskAddressBar
       projects={namedProjects}
       focus={state.taskFocus}
@@ -98,13 +110,19 @@ function TasksAddress(): JSX.Element {
       onDrill={actions.drillProject}
       onWalkBack={actions.walkBackTo}
       onOpenProject={() => void actions.chooseProject("open")}
-      tools={
-        <>
-          {state.trail.length > 0 && state.taskFocus !== null ? <RunModeToggle mode={mode} onMode={runMode.set} /> : null}
-          {(state.taskFocus ?? atProject) === state.at && state.at !== null ? <NewTask onOpen={openNewTask} open={top === "newTask"} /> : null}
-        </>
-      }
+      tools={withTools ? tools : null}
     />
+  );
+  if (!phone || !hasTools || state.trail.length === 0) return bar(true);
+  return (
+    <View flex={1} minWidth={0} flexDirection="column">
+      <View flexDirection="row" minWidth={0}>
+        {bar(false)}
+      </View>
+      <View flexDirection="row" alignItems="center" justifyContent="flex-end" gap={8} paddingHorizontal={8} paddingBottom={6}>
+        {tools}
+      </View>
+    </View>
   );
 }
 

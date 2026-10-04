@@ -19,12 +19,15 @@ import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBrid
 import type { TranscriptSource } from "../components/panel/RunTranscript";
 import { useRunContext } from "../components/run/runContext";
 import { SidePanel } from "../components/panel/SidePanel";
+import { PanelSheet } from "../components/panel/PanelSheet";
+import { close as closeStack } from "@jaira/ui/panelStack";
 import { paneTween } from "../components/panel/panelMotion";
 import { Splitter } from "../components/files/Splitter";
 import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
-import { newTaskOpener, panelTopKind, runMode } from "./viewState";
+import { newTaskOpener, panelTopKind, runMode, sheetAsk } from "./viewState";
+import { usePhone } from "./phone";
 
 /**
  * A room's side panel: the splitter and the panel stack's top entry (`SidePanel.tsx`) — a task's run, a
@@ -289,8 +292,24 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   };
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
   void roomRef;
+  const phone = usePhone();
+  const ask = sheetAsk.use();
 
   if (top === undefined) return null;
+  // A phone's panel is a sheet over the room (`PanelSheet`). Tasks always has it, at its head at least; a
+  // room whose panel folds to a rail (Chat, Files) has it while it is unfolded, and folding it closes it.
+  if (phone) {
+    if (room !== "tasks" && !geometry.open) return null;
+    const minimise = (): void => (room === "tasks" ? sheetAsk.set({ detent: "peek", at: Date.now() }) : geometry.foldKey !== null ? actions.setFold(geometry.foldKey, false) : undefined);
+    const adopt = face(top).verbs?.find((verb) => verb.icon === "adopt" && verb.disabled !== true);
+    return (
+      <PanelSheet ask={room === "tasks" ? ask : null} {...(adopt !== undefined ? { onMain: adopt.onClick } : {})} onClose={() => (room === "tasks" ? onStack(closeStack) : minimise())}>
+        <ToolsFieldProvider value={toolsFieldData}>
+          <SidePanel stack={panelStack} onStack={onStack} face={face} folded={false} onFold={(folded) => folded && minimise()} closeFolds={closeFoldsOf(panelStack)} />
+        </ToolsFieldProvider>
+      </PanelSheet>
+    );
+  }
   return (
     <>
       {/* The side panel's splitter: a drag writes the width of the kind on top (`widthKey`) — it sizes

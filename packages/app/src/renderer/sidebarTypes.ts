@@ -52,6 +52,11 @@ export interface SidebarView {
    * column could open with the tree of the view you were on already gone.
    */
   panel?: ReactNode;
+  /**
+   * A root row that is a room across every project rather than the root's own view of one (the Inbox):
+   * choosing it leaves the address where it stands, and it is "here" from any address.
+   */
+  keepsProject?: boolean;
   /** This row's own verbs — see {@link SidebarAct}. Drawn only while the column has width for them. */
   acts?: readonly SidebarAct[];
   /** What this view has waiting in the open project — see SHELL.md §4.3. */

@@ -5,6 +5,7 @@ import type { SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, WINDOW_GUTTER, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
+import { usePhone } from "../app/phone";
 import { Pills } from "./Pills";
 
 /**
@@ -118,17 +119,18 @@ function Column({
 }: SidebarProps): JSX.Element {
   const t = useTokens();
   const look = useLook();
+  const phone = usePhone();
   const [openMenu, setOpenMenu] = useState<MenuAt | null>(null);
 
   const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any", mode?: { back?: () => void; expand?: () => void }, inRail = false): JSX.Element => {
-    const inScope = scope === "any" || (scope === "root") === (at === null);
+    const inScope = scope === "any" || v.keepsProject === true || (scope === "root") === (at === null);
     const here = view === v.id && inScope;
     const drawer = v.panel !== undefined && (here || mode?.back !== undefined) && !collapsed;
     const acts = collapsed ? [] : (v.acts ?? []);
     const go = (): void => {
       if (mode?.back !== undefined) return mode.back();
       mode?.expand?.();
-      if (scope === "root" && at !== null) onProject(null);
+      if (scope === "root" && at !== null && v.keepsProject !== true) onProject(null);
       onView(v.id);
     };
     return (
@@ -296,7 +298,7 @@ function Column({
         justifyContent={collapsed ? "center" : "flex-start"}
         gap={8}
         flexShrink={0}
-        height={34}
+        height={phone ? 44 : 34}
         paddingHorizontal={collapsed ? 4 : 8}
         {...(collapsed ? {} : { paddingLeft: WINDOW_GUTTER.left(8) as never })}
         style={DRAG_REGION as never}
@@ -383,7 +385,7 @@ function Column({
             title="open another project"
             {...({ "aria-haspopup": "menu" } as object)}
             width="100%"
-            height={26}
+            height={phone ? 40 : 26}
             flexShrink={0}
             flexDirection="row"
             alignItems="center"
@@ -461,6 +463,8 @@ function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean;
           : { backgroundColor: t.v("panel"), boxShadow: `0 0 0 1px ${String(t.v("line"))}` }
         : { backgroundColor: t.v("tint-accent") };
   const radius = on && (look.palette === "pastel" || look.palette === "pastel-rail") ? 9 : 6;
+  // A phone's drawer: rows a finger can hit.
+  const phone = usePhone();
   return (
     <View
       {...(hover as object)}
@@ -469,8 +473,8 @@ function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean;
       justifyContent={rail ? "center" : "flex-start"}
       gap={4}
       width={rail ? 34 : "100%"}
-      // 30 tall in the rail's lists of views; 26 everywhere else.
-      height={tall ? 30 : 26}
+      // 30 tall in the rail's lists of views; 26 everywhere else; 40 in a phone's drawer.
+      height={phone ? 40 : tall ? 30 : 26}
       flexShrink={0}
       borderRadius={radius}
       backgroundColor={(hovered ? t.v("fill-ghost-hover") : "transparent") as never}

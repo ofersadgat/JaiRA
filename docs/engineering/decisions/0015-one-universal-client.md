@@ -2,7 +2,7 @@
 id: engineering/decisions/0015-one-universal-client
 type: decision
 status: accepted
-updated: 2026-10-01
+updated: 2026-10-04
 decides_for: [engineering/units/app-shell, engineering/units/ipc-bridge, engineering/units/renderer-store]
 ---
 
@@ -65,7 +65,9 @@ primitives. That is the real cost, and it is paid per component.
 
 1. **Mobile shows exactly the desktop UI.** "What I want now is to generate the exact same ui on mobile
    as there is on desktop. This is meant as a migration step, not as a final step (which will do a
-   mobile ui/ux pass)." No drawer, no sheets, no phone layout in this work.
+   mobile ui/ux pass)." No drawer, no sheets, no phone layout in this work. (The mobile pass began on
+   2026-10-04: on a phone's width the phone lays the same components out for itself —
+   [amended below](#amended-2026-10-04-the-mobile-pass--the-phone-lays-the-desktops-ui-out-for-itself).)
 2. **Styling: Tamagui.**
 3. **Transport: throwaway.** (It landed as [0013, machines](0013-machines.md).) "There is another session building out the remote properly … just do the
    quickest thing to get it working and expect to throw it away."
@@ -843,11 +845,79 @@ day: each component's `implemented_by` and `verified_by`, the units and contract
   perfect ui match before tackling the editor"). What is left of that match on 2026-10-01 is small —
   checkbox and select-arrow snapping in six Files scenes, a sticky heading's hairline in three looks, a
   few scenes under 180 px — and when the editors are taken up is the person's to say.
-- **The mobile UI/UX pass** (ruling 1: "a migration step, not a final step"). A phone still draws the
-  desktop's layout at the desktop's width, fitted to its screen.
+- **The mobile UI/UX pass** (ruling 1: "a migration step, not a final step"). Begun 2026-10-04
+  ([below](#amended-2026-10-04-the-mobile-pass--the-phone-lays-the-desktops-ui-out-for-itself)).
 - **What a phone lacks**: `TODO.md`, "Open inside the universal client, on a phone only", deferred by the
   person on 2026-09-30. A physical phone, iOS and a release build are still untried.
 - **Native desktop**: [below](#native-desktop-later).
+
+## Amended 2026-10-04: the mobile pass — the phone lays the desktop's UI out for itself
+
+Ruling 1's "later mobile UI/UX pass", begun. On a phone's width (`phoneModel.ts`' `PHONE_WIDTH`, 700)
+the phone app no longer fits the desktop's 1280px window to its screen (`DesktopFrame`, kept for wider
+windows): the shell lays the SAME components out for the phone (`UniversalApp phone`, `PhoneFrame.tsx`).
+The desktop is untouched: every change below is behind the phone's flag.
+
+**How it was reached.** Six rounds of mockups with the person on 2026-10-04 (canvas: "JaiRA on a phone",
+https://claude.ai/artifact/D3c3RX29JGG8Wc6XF1n3Rv). The first round invented new screens (tab bars, an
+inbox-first home); the person: "You're reinventing the ui. What I want is a way to take the ui that is
+already there and adapt it to the mobile format." Every later design kept the components as they are and
+changed only where each region stands. The rulings:
+
+1. **Drawer and sheet.** "where drawer is the left panel and sheet is the context menu." The sidebar is a
+   drawer over the room; the context panel is a sheet over it.
+2. **The sheet has three heights** — its head alone, half the room, all of it but a strip — and dragged
+   past the top it moves the conversation into the main view (the desktop's own "Show this conversation
+   in the main view"); the main view's sheet then holds what the panel holds beside a conversation
+   (Steps, Produced, Changes, Held). "the small context menu should come from the bottom, like a sheet":
+   every height stands on the bottom edge.
+3. **An Inbox, beside All tasks and All conversations.** "inbox is a good idea and merits a tab like
+   conversations/all conversations." The desktop's inbox strip is not drawn on a phone ("it takes too much
+   space"): the INBOX row opens a room of everything awaiting the person, and a dot on ▸| says something
+   waits.
+4. **Steps are bookmarks into the conversation**, on a rail at its right edge: "the left railing zoomed
+   out / collapsed". The rail is the Steps index's own drawing — "the rail should still look like it did
+   before with the circles and the lines" — one row per state ("keep it one row per state"), its lanes
+   squeezed together at rest so a child's line runs over its parent's ("the overlap is the child"). A tap
+   lands on a state; a drag along it lands on the state under the finger and names it; pulled left it
+   widens into the Steps index itself — "so close that you can animate the rail popping out as you
+   swipe". Long runs fold as the index already folds them.
+5. **The board is one column at a time, with All first.** A strip names All and every column with its
+   count; All stacks every column (empty ones folded into one line, headings sticking); a column alone
+   fills the width, and a sideways swipe moves on.
+6. **The keyboard**: the composer rides it, its chips folded to the model's while it is up and the
+   environment bar aside; typing in the sheet raises it to full; a form gets its keyboard's edge; a long
+   ask gets a full-screen writer. Not: the chips on the keyboard's own bar (round 3's D2).
+
+**What was built.**
+
+| Where | What |
+| --- | --- |
+| `app/src/renderer/phoneModel.ts` | When a window is a phone's, its text (× 1.16 on both bases), the sheet's heights and where a drag lets it go (`settleSheet`: a flick goes one height on, past full or flicked up from full is the main view, under the head closes), the board's strip (`stackedParts`, `swipeColumn`), the rail's pull (`railAt`, `railPull`, `scrubRow`, `ancestorsOf`). `test/phoneModel.test.ts`. |
+| `app/src/renderer/inboxModel.ts` | The Inbox's items in the strip's order, and its sidebar row (`INBOX_VIEW`, `keepsProject`: choosing it leaves the address where it stands). |
+| `universal/src/app/PhoneFrame.tsx`, `phone.ts` | The frame: the title bar with ▸| (and its dot), the room, the drawer (`ShellSidebar phone`), the Inbox room; standing clear of the keyboard (`useKeyboardTop`). `PhoneContext` / `usePhone()` is the flag. |
+| `universal/src/components/InboxRoom.tsx` | The Inbox room: a card per item; pressed, its task opens with the sheet at half. |
+| `universal/src/components/panel/PanelSheet.tsx` | The context panel as a sheet (`PanelColumn` on a phone): the three heights, the drag, the main view, closing; full while typing in it, with a Done on the keyboard's edge. |
+| `universal/src/components/panel/StepsRail.tsx` | The Steps rail at the run conversation's edge (`RunConversation` on a phone): `RunIndex` with `squeeze` (`rail.ts`' `centresFor`) and `fade`; tap, scrub with a label, pull out. |
+| `universal/src/components/Board.tsx` | `PhoneColumns`: the strip, All stacked, one column with a swipe, ⌄'s list. |
+| `universal/src/components/chat/Composer.tsx` | On a phone: the chips wrap, fold while the keyboard is up (⋯ puts it down), the tray steps aside; ⤢ opens `FullWriter`. |
+| `universal/src/components/Sidebar.tsx`, `app/TitleBar.tsx` | Rows a finger can hit (40 tall in the drawer); a drilled run's tools on a row under its crumbs. |
+| `client/src/native/NativeApp.tsx`, `client/app/_layout.tsx` | The phone's layout under 700 wide; the page's viewport is the device's (a phone's browser laid it out 980 wide). |
+
+**Seen.** `shots/phoneLayout.mts`, the phone app in a phone-sized headless Chrome paired with a desktop
+(`/native`): the drawer with its INBOX row, the Inbox listing a parked gate and opening it at half, the
+sheet dragged to full, half and its head, flicked up from full into the main view, the Steps rail beside
+that conversation scrubbed (the conversation followed) and pulled out into the index, the board's strip
+and All. Type checks clean, the native graph reaches nothing DOM-only.
+
+**Not seen, or not built.**
+
+- On a phone itself: the keyboard (a browser has none) — the composer riding it, the sheet raised by it,
+  Done — and the gestures under a real finger. The release built from this is the first look.
+- The form's ↑ ↓ between fields (round 3's D4): the keyboard's edge has Done only.
+- The Files, Settings, Logs and Components rooms keep their desktop insides at the phone's width; their
+  panels are sheets. Settings' pages are in the drawer, as on the desktop.
+- Turning the phone moves between the phone's layout and the fitted desktop, which mounts the shell again.
 
 ## Native desktop, later
 
@@ -886,8 +956,9 @@ a true native desktop after that. This plan leaves the door open to them without
 
 **Deferred:** a native desktop build ([above](#native-desktop-later)).
 
-**Foreclosed for now:** any mobile-specific layout. That is the later mobile UI/UX pass, which starts
-from a universal tree it can rearrange.
+**Foreclosed for now:** ~~any mobile-specific layout. That is the later mobile UI/UX pass, which starts
+from a universal tree it can rearrange.~~ The pass began 2026-10-04: the same components, rearranged for a
+phone's width (amended above).
 
 ## Revisit when
 

@@ -1,9 +1,9 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useEffect, useState, type JSX, type ReactNode } from "react";
 import type { GestureResponderEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { InstanceNode } from "@jaira/shared/browser";
 import { nameOf } from "@jaira/ui/rail";
-import { keyOfNode, stepsIn, toneOf, useRunIndexModel, type RunIndexFit } from "@jaira/ui/runIndexModel";
+import { keyOfNode, stepsIn, toneOf, useRunIndexModel, type IndexRow, type RunIndexFit } from "@jaira/ui/runIndexModel";
 import { metaOf } from "@jaira/ui/sessionRows";
 import type { DisplayItem } from "@jaira/ui/stepCompaction";
 import { Press, Txt, type FontSpec } from "../../primitives";
@@ -49,6 +49,9 @@ export function RunIndex({
   onGoTo,
   onCut,
   fit,
+  squeeze,
+  fade = 1,
+  onRows,
 }: {
   instances: readonly InstanceNode[];
   here?: string | undefined;
@@ -57,10 +60,16 @@ export function RunIndex({
   /** The two verbs of a cut (`cut.ts`), on a row's menu. Absent ⇒ a row has no menu. */
   onCut?: { rewind: (node: InstanceNode) => void; fork: (node: InstanceNode) => void } | undefined;
   fit?: RunIndexFit | undefined;
+  /** A phone's rail (`StepsRail`): the lanes' spacing scaled, and the rows faded, as it is pulled out. */
+  squeeze?: number | undefined;
+  fade?: number | undefined;
+  /** The rows as drawn, top to bottom — for a rail that finds the one under a finger (`StepsRail`). */
+  onRows?: ((rows: readonly IndexRow[]) => void) | undefined;
 }): JSX.Element {
   const t = useTokens();
   const { steps, rows, palette, shutLanes, toggleFold, toggleLoop, foldable, onShut, mark, isHere, fitRows, gapOf, expand, byKey, now } = useRunIndexModel({ instances, fit, here });
   const [menu, setMenu] = useState<MenuAt | null>(null);
+  useEffect(() => onRows?.(rows), [rows, onRows]);
   const goTop = (key: string): void => {
     const node = byKey.get(key);
     if (node !== undefined) onGoTo?.(node);
@@ -255,6 +264,12 @@ export function RunIndex({
     );
   };
 
+  const faded = (drawn: JSX.Element | null): JSX.Element | null =>
+    fade === 1 || drawn === null ? drawn : (
+      <View width="100%" opacity={fade} {...(fade === 0 ? { pointerEvents: "none" } : {})}>
+        {drawn}
+      </View>
+    );
   if (instances.length === 0) return <PanelEmpty>No run yet.</PanelEmpty>;
   return (
     <>
@@ -263,11 +278,12 @@ export function RunIndex({
         steps={steps}
         index
         cap={30}
-        renderStep={(index) => row(index, false)}
+        renderStep={(index) => faded(row(index, false))}
         renderRolled={(lane) => {
           const at = steps.findIndex((step) => step.key === lane.key);
-          return at < 0 ? null : row(at, true);
+          return at < 0 ? null : faded(row(at, true));
         }}
+        {...(squeeze !== undefined ? { squeeze } : {})}
         mark={mark}
         here={isHere}
         palette={palette}
