@@ -12,8 +12,13 @@
  * - A manual stable release promotes the latest published nightly's commit, so what ships as stable is
  *   what ran as nightly. Its version is the `version` input, or the nightly's own `X.Y.Z`.
  * - A nightly builds `main`. A commit that already has a nightly, published or still a draft, made by
- *   either system, gets that nightly again, to be filled in. Otherwise a new one; on the schedule only
- *   once the last is 20 hours old.
+ *   either system, gets that nightly again, to be filled in. On the schedule, the night's nightly (under
+ *   20 hours old) that lacks builds this pipeline makes is filled in at its own commit, whatever main has
+ *   had since: GitLab's schedule starts it at 2am Pacific, and GitHub's, which arrives hours late, adds
+ *   what GitLab cannot build. A new nightly is started on the schedule only at 2am there, and once the
+ *   last is 20 hours old.
+ * - A release is built against one declarative-ai commit: a release already there, or a nightly being
+ *   promoted, gives the one its notes record (`declarative-ai-commit:`); otherwise main's.
  * - A release is filled in, never refused (decision 0017 §8): the plan is skipped only when the release
  *   already holds every build this pipeline makes (`BUILDS`, recorded as `build-<name>.json`), and each
  *   build job checks its own again before building (`builds.mjs`).
@@ -32,7 +37,7 @@
 import { execFileSync } from "node:child_process";
 import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { NIGHTLY, RELEASES_REPO, STABLE, appleVersionOf, commitOf, github, nextNightly, nightliesOf, publishedReleases, stablesOf, versionOf } from "./versions.mjs";
+import { NIGHTLY, RELEASES_REPO, STABLE, appleVersionOf, commitOf, github, nextNightly, nightliesOf, publishedReleases, stablesOf, upstreamOf, versionOf } from "./versions.mjs";
 import { allReleases, recordName } from "./github.mjs";
 
 const env = process.env;
@@ -98,35 +103,49 @@ async function plan() {
   const channel =
     env.EVENT === "push" ? (NIGHTLY.test(pushedTag) ? "nightly" : "stable") : env.EVENT === "schedule" ? "nightly" : env.INPUT_CHANNEL || "nightly";
 
+  // What this pipeline builds: a release that already has all of it needs nothing from here.
+  const builds = (env.BUILDS ?? "").split(/\s+/).filter(Boolean);
+  const missingFrom = (release) => builds.filter((build) => !release.assets.some((a) => a.name === recordName(build)));
+  const ageOf = (release) => Date.now() - Date.parse(release.published_at ?? release.created_at);
+
   let version;
   let commit;
+  let promoted;
   if (env.EVENT === "push") {
     // `npm run release-*-version` pushes the tag: a stable one after bumping, a nightly one as it is.
     version = pushedTag;
     if (!STABLE.test(version) && !NIGHTLY.test(version)) throw new Error(`tag '${env.REF_NAME}' is neither vX.Y.Z nor vX.Y.Z-nightly.YYYYMMDD.N`);
     commit = env.GITHUB_SHA;
   } else if (channel === "stable") {
-    const nightly = nightlies[0];
-    if (nightly === undefined) throw new Error("a stable release promotes the latest nightly, and there is none yet");
-    commit = commitOf(nightly);
-    if (commit === undefined) throw new Error(`nightly ${nightly.tag_name} does not record its JaiRA commit`);
-    version = env.INPUT_VERSION || NIGHTLY.exec(versionOf(nightly))[1];
+    promoted = nightlies[0];
+    if (promoted === undefined) throw new Error("a stable release promotes the latest nightly, and there is none yet");
+    commit = commitOf(promoted);
+    if (commit === undefined) throw new Error(`nightly ${promoted.tag_name} does not record its JaiRA commit`);
+    version = env.INPUT_VERSION || NIGHTLY.exec(versionOf(promoted))[1];
     if (!STABLE.test(version)) throw new Error(`version '${version}' is not X.Y.Z`);
   } else {
     commit = env.GITHUB_SHA;
-    if (env.EVENT === "schedule" && hourIn(NIGHTLY_ZONE) !== NIGHTLY_HOUR) {
-      return skip(`a nightly is built at ${NIGHTLY_HOUR}:00 in ${NIGHTLY_ZONE}, and it is ${hourIn(NIGHTLY_ZONE)}:00 there`);
-    }
     // This commit's nightly, started by either system: filled in, not made again (0017 §8).
     const same = nightliesOf(all).find((r) => commitOf(r) === commit);
+    // The night's nightly, newest first, drafts included.
+    const latest = nightliesOf(all).sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))[0];
     if (same !== undefined) {
       version = versionOf(same);
       console.log(`${same.tag_name} is already this commit's nightly${same.draft ? " (a draft)" : ""}`);
+    } else if (env.EVENT === "schedule" && latest !== undefined && commitOf(latest) !== undefined && ageOf(latest) < NIGHTLY_GAP_MS && missingFrom(latest).length > 0) {
+      // A scheduled run fills in the night's nightly at that nightly's commit, whichever system started it
+      // and whatever main has had since: GitHub's schedule arrives hours after GitLab's 2am one.
+      version = versionOf(latest);
+      commit = commitOf(latest);
+      console.log(`filling in ${latest.tag_name} (${commit.slice(0, 8)}), which lacks ${missingFrom(latest).join(", ")}`);
     } else {
+      // Starting a nightly: on the schedule only at 2am there, and not twice in a day.
+      if (env.EVENT === "schedule" && hourIn(NIGHTLY_ZONE) !== NIGHTLY_HOUR) {
+        return skip(`a nightly is started at ${NIGHTLY_HOUR}:00 in ${NIGHTLY_ZONE}, and it is ${hourIn(NIGHTLY_ZONE)}:00 there`);
+      }
       const last = nightlies[0];
-      if (env.EVENT === "schedule" && last !== undefined) {
-        const age = Date.now() - Date.parse(last.published_at);
-        if (age < NIGHTLY_GAP_MS) return skip(`${last.tag_name} is only ${Math.round(age / 60000)} minutes old`);
+      if (env.EVENT === "schedule" && last !== undefined && ageOf(last) < NIGHTLY_GAP_MS) {
+        return skip(`${last.tag_name} is only ${Math.round(ageOf(last) / 60000)} minutes old`);
       }
       version = nextNightly(appVersion, all.map(versionOf));
     }
@@ -136,14 +155,18 @@ async function plan() {
   // A release already there is filled in: only the builds it lacks are made (each job checks again, in
   // case the other system finishes one meanwhile). With every build this pipeline makes in it, nothing is.
   const release = all.filter((r) => r.tag_name === tag).sort((a, b) => a.id - b.id)[0];
-  const builds = (env.BUILDS ?? "").split(/\s+/).filter(Boolean);
   if (release !== undefined) {
-    const missing = builds.filter((build) => !release.assets.some((a) => a.name === recordName(build)));
+    const missing = missingFrom(release);
     if (builds.length > 0 && missing.length === 0) return skip(`${tag} already has ${builds.join(", ")}`);
     console.log(`${tag} is in ${RELEASES_REPO}${release.draft ? " as a draft" : ""}; still to build here: ${missing.join(", ") || "(each job checks)"}`);
   }
 
-  const upstream = env.UPSTREAM_COMMIT || (await github(`/repos/${UPSTREAM_REPO}/commits/main`)).sha;
+  // One release is built against one declarative-ai commit, whichever system builds which part of it: the
+  // one its notes record. A stable release takes the one its nightly ran with, as it takes its commit.
+  const upstream =
+    (release !== undefined ? upstreamOf(release) : undefined) ??
+    (promoted !== undefined ? upstreamOf(promoted) : undefined) ??
+    (env.UPSTREAM_COMMIT || (await github(`/repos/${UPSTREAM_REPO}/commits/main`)).sha);
   const previous = (channel === "stable" ? stables : nightlies).find((r) => r.tag_name !== tag);
   const notes = [
     channel === "stable" ? `JaiRA ${version}.` : `JaiRA nightly ${version}. Nightly builds are what the next stable release is promoted from.`,

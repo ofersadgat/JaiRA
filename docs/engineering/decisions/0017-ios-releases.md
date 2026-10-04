@@ -110,7 +110,11 @@ GitHub lists a new release a moment after making it; GitHub's x64 Linux window s
 - **Run on a phone.** The app builds, signs and reaches TestFlight; whether it runs (the island pages,
   the fonts, the Reanimated workaround, App Transport Security for `ws://` to a tailnet address) is not
   yet seen.
-- **The nightly schedule.** GitHub fires the cron hours late and the plan builds only at 2am Pacific, so
-  no scheduled nightly has been built since 2026-09-27.
+- **The nightly schedule.** GitHub fires its cron hours late and the plan starts a nightly only at 2am
+  Pacific, so no scheduled nightly was built from 2026-09-27. The plan now lets a scheduled run fill in
+  the night's nightly whenever it arrives (at that nightly's commit and declarative-ai commit), so the
+  intended shape is a GitLab pipeline schedule at 2:00 America/Los_Angeles with RELEASE_CHANNEL =
+  nightly (GitLab's schedules are on time and zoned) starting it, and GitHub's late schedule adding
+  macOS and Windows arm64. The GitLab schedule is not set up yet.
 - **A shared pipeline for other apps**: a GitLab CI/CD component and a GitHub reusable workflow over the
   same steps, once a second app exists.

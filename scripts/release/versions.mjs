@@ -14,6 +14,7 @@ export const RELEASES_REPO = process.env.RELEASES_REPO ?? "ofersadgat/releases";
 export const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;
 export const NIGHTLY = /^(\d+\.\d+\.\d+)-nightly\.(\d{8})\.(\d+)$/;
 const COMMIT_LINE = /^jaira-commit: ([0-9a-f]{40})$/m;
+const UPSTREAM_LINE = /^declarative-ai-commit: ([0-9a-f]{40})$/m;
 
 /** GET from the GitHub API; `token` is optional (the releases repository is public). */
 export async function github(path, token = process.env.GH_TOKEN) {
@@ -36,6 +37,8 @@ export async function publishedReleases(token) {
 
 export const versionOf = (release) => release.tag_name.replace(/^v/, "");
 export const commitOf = (release) => COMMIT_LINE.exec(release.body ?? "")?.[1];
+/** The declarative-ai commit a release was built against, which the plan writes into its notes too. */
+export const upstreamOf = (release) => UPSTREAM_LINE.exec(release.body ?? "")?.[1];
 export const stablesOf = (published) => published.filter((r) => !r.prerelease && STABLE.test(versionOf(r)));
 export const nightliesOf = (published) => published.filter((r) => NIGHTLY.test(versionOf(r)));
 
