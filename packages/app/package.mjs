@@ -319,7 +319,9 @@ function smoke(output) {
   rmSync(shot, { force: true });
   console.log(`smoke test: ${exe}`);
   // A CI Linux runner cannot give Chromium's sandbox helper the setuid root it needs.
-  const argv = process.platform === "linux" && process.env.CI ? ["--no-sandbox"] : [];
+  // And no GPU: under xvfb on GitHub's x64 machine Chromium's display compositor failed
+  // (`UnknownVizError`) and nothing was captured (2026-10-04); the window draws the same in software.
+  const argv = process.platform === "linux" && process.env.CI ? ["--no-sandbox", "--disable-gpu"] : [];
   const run = spawnSync(exe, argv, {
     env: { ...process.env, JAIRA_HOME: home, JAIRA_CAPTURE: shot, JAIRA_CAPTURE_DELAY_MS: "4000", ELECTRON_ENABLE_LOGGING: "1" },
     encoding: "utf8",
