@@ -93,10 +93,15 @@ export function TaskCard(props: TaskCardProps): JSX.Element {
   );
 }
 
+/** Two taps this close together on a phone are a double tap: they open the run. */
+const DOUBLE_TAP = 320;
+
 /** The card itself; `ages` is only what makes it draw again when an age it shows has moved on. */
 const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string }): JSX.Element {
   const t = useTokens();
   const look = useLook();
+  // A phone's double tap: when this card was last tapped.
+  const lastTap = useRef(0);
   const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false } = props;
 
   // An ARCHIVED card wears the pill of how it finished.
@@ -255,10 +260,18 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
   );
   if (isWeb) return drawn;
   // A phone: React Native's Pressable, since Tamagui's `onPress` never fires on Android. A tap selects,
-  // a long press opens the card's menu (the desktop's right-click), or with none the run (its double-click).
+  // a second tap within `DOUBLE_TAP` opens the run (the desktop's double-click), and a long press opens
+  // the card's menu (its right-click), or with none the run.
   const long = onMenu !== undefined ? (e: unknown) => onMenu(e as never) : onDrill;
+  const tapped = (): void => {
+    const now = Date.now();
+    const again = onDrill !== undefined && now - lastTap.current < DOUBLE_TAP;
+    lastTap.current = again ? 0 : now;
+    if (again) onDrill();
+    else onSelect(undefined as never);
+  };
   return (
-    <Pressable onPress={() => onSelect(undefined as never)} {...(long !== undefined ? { onLongPress: long } : {})}>
+    <Pressable onPress={tapped} {...(long !== undefined ? { onLongPress: long } : {})}>
       {drawn}
     </Pressable>
   );

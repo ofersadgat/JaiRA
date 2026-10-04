@@ -34,7 +34,7 @@ import { PanelColumn } from "./PanelColumn";
 import { SettingsView } from "./SettingsView";
 import { AppContext, useShell } from "./shell";
 import { PhoneContext } from "./phone";
-import { PhoneFrame } from "./PhoneFrame";
+import { PhoneFrame, RemoteLine } from "./PhoneFrame";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
 import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
@@ -171,6 +171,8 @@ function Frame(): JSX.Element {
         >
           <ShellTitleBar />
         </View>
+        {/* A phone's machine while none is reached (a tablet draws this frame): nothing on the desktop. */}
+        <RemoteLine />
         {/* The viewport: the open room, taking the rest of the height. */}
         <View flex={1} minHeight={0} flexDirection="row">
           {state.view === "tasks" ? (

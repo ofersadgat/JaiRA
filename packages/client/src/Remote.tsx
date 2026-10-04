@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
-import { AppState, Linking } from "react-native";
+import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { AppState, Linking, Pressable, Text, View } from "react-native";
+import type { JairaBridge } from "@jaira/shared/browser";
 import { engineUrlOf, hostOfUrl, typedLanMachine, type LanAnnouncement } from "@jaira/shared/browser";
-import { Connect, connectionLost, connectionRestored, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
+import { Connect, connectionLost, connectionRestored, remoteStatus, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { DEVICE_KIND, deviceLabel } from "../bridges/deviceInfo";
@@ -28,7 +29,19 @@ import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "..
  * A phone also lists the machines on its Wi-Fi that are showing a code, and pairs with one by its code
  * alone (amended 2026-10-04, `bridges/lanPair.ts`); it then joins that machine's tailnet with Tailscale
  * built into the app, and from then on connects through it (`bridges/tailnetJoin.ts`) wherever it is.
+ *
+ * `shell` (the phone app, decision 0015 amended 2026-10-04): the shell is NOT held back until a machine
+ * answers. It is drawn at once on a bridge that answers nothing (`NO_MACHINE`), so it stands empty — no
+ * projects — while the line under its title bar says why (`remoteStatus`) and opens the Connect screen
+ * over it. Connected, the machine's bridge is installed and the shell drawn again on it, its projects
+ * those of the machine it reached.
  */
+
+/** A bridge with no machine behind it: what is asked is never answered, and nothing is pushed. */
+const NO_MACHINE: JairaBridge = {
+  invoke: () => new Promise(() => undefined),
+  subscribe: () => () => undefined,
+};
 
 /** An address and a one-time code that came with the page's URL or the app's link — what a QR code carries. */
 export interface PairLink {
@@ -84,8 +97,18 @@ function pageAddress(): string | undefined {
 
 type Phase = "loading" | "ask" | "connecting" | "connected";
 
-export function Remote({ link, frame, children }: { link?: Partial<PairLink>; frame?: (screen: JSX.Element) => JSX.Element; children: ReactNode }): JSX.Element | null {
+export function Remote({ link, frame, shell = false, children }: { link?: Partial<PairLink>; frame?: (screen: JSX.Element) => JSX.Element; shell?: boolean; children: ReactNode }): JSX.Element | null {
   const electron = typeof window !== "undefined" && window.jaira !== undefined;
+  const ungated = shell && !electron;
+  // Before the shell first draws: the bridge it stands on until a machine answers.
+  useState(() => {
+    if (ungated) setBridge(NO_MACHINE);
+    return true;
+  });
+  /** The shell drawn again on each machine reached: its store reads that machine from the start. */
+  const [generation, setGeneration] = useState(0);
+  /** The Connect screen over the shell, opened from its line (`shell`). */
+  const [form, setForm] = useState(false);
   const [phase, setPhase] = useState<Phase>(electron ? "connected" : "loading");
   const [saved, setSaved] = useState<SavedPairing | undefined>(undefined);
   const [problem, setProblem] = useState<string | null>(null);
@@ -113,7 +136,10 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
       if (bridge.current !== mine) return;
       switch (state.state) {
         case "connected":
-          if (!installed) setBridge(mine);
+          if (!installed) {
+            setBridge(mine);
+            setGeneration((n) => n + 1);
+          }
           installed = true;
           connectionRestored();
           setProblem(null);
@@ -308,12 +334,13 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   }, [electron]);
 
   // The machines on this Wi-Fi showing a code, while the form is up.
+  const formUp = !ungated || form;
   useEffect(() => {
-    if (electron || !NEARBY_SUPPORTED || phase !== "ask") return;
+    if (electron || !NEARBY_SUPPORTED || phase !== "ask" || !formUp) return;
     const since = Date.now();
     setNearby({ machines: [], state: "starting", since, phone: localAddresses() });
     return browseNearby((state) => setNearby({ ...state, since, phone: localAddresses() }));
-  }, [electron, phase, search]);
+  }, [electron, phase, search, formUp]);
 
   // Back in front: the system may have dropped the browse while the app was away, so it starts afresh.
   useEffect(() => {
@@ -338,7 +365,21 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
 
   useEffect(() => () => bridge.current?.close(), []);
 
-  if (phase === "connected") return <>{children}</>;
+  // The shell's line (`shell`): why it has no projects yet, and the way to the Connect screen.
+  useEffect(() => {
+    if (!ungated) return undefined;
+    const open = (): void => setForm(true);
+    if (phase === "connected" || phase === "loading") remoteStatus.set(null);
+    else if (phase === "ask") remoteStatus.set({ state: "none", ...(problem !== null ? { detail: problem } : {}), open });
+    else remoteStatus.set({ state: problem !== null || signInUrl !== undefined ? "problem" : "connecting", label: saved?.machine.label, ...(problem !== null ? { detail: problem } : signInUrl !== undefined ? { detail: "Tailscale needs its sign-in approved" } : {}), open });
+    if (phase === "connected") setForm(false);
+    return undefined;
+  }, [ungated, phase, problem, saved, signInUrl]);
+  useEffect(() => () => remoteStatus.set(null), []);
+
+  if (ungated) {
+    if (!form || phase === "connected" || phase === "loading") return <Fragment key={generation}>{children}</Fragment>;
+  } else if (phase === "connected") return <>{children}</>;
   if (phase === "loading") return null;
   const forget = (): void => {
     turn.current += 1;
@@ -387,5 +428,18 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
           : {})}
       />
     );
-  return frame !== undefined ? frame(screen) : screen;
+  const framed = frame !== undefined ? frame(screen) : screen;
+  if (!ungated) return framed;
+  // Over the shell, with a way back to it.
+  return (
+    <>
+      <Fragment key={generation}>{children}</Fragment>
+      <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
+        {framed}
+        <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setForm(false)} style={{ position: "absolute", top: 8, right: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: "rgba(20, 22, 40, 0.08)" }}>
+          <Text style={{ fontSize: 15, color: "#4a4fd1", fontWeight: "600" }}>Close</Text>
+        </Pressable>
+      </View>
+    </>
+  );
 }

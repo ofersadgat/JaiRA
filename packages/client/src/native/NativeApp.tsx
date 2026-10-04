@@ -70,6 +70,8 @@ export function NativeApp(): JSX.Element {
         <SafeAreaView style={{ height: window.height }}>
           <StrictLayout>
           <Remote
+            // The shell is drawn at once, empty until a machine answers (decision 0015, amended 2026-10-04).
+            shell
             {...(link !== undefined ? { link } : {})}
             frame={(screen) => (
               <TokenRoot palette="ink" scheme="light">

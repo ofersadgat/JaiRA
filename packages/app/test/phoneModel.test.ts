@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { PendingApproval, PendingInteraction, PendingQuestion } from "@jaira/shared/browser";
 import { inboxItemsOf } from "../src/renderer/inboxModel";
-import { ancestorsOf, dragHeight, isPhoneWidth, phoneTypography, railAt, railPull, scrubRow, settleSheet, sheetHeights, shownOf, stackedParts, swipeColumn, type StripColumn } from "../src/renderer/phoneModel";
+import { ancestorsOf, dragHeight, drawerSettles, isPhoneWidth, phoneTypography, railAt, railPull, scrubRow, settleSheet, sheetHeights, shownOf, stackedParts, swipeColumn, type StripColumn } from "../src/renderer/phoneModel";
 
 describe("a phone's window", () => {
   it("is one narrower than 700", () => {
@@ -120,5 +120,14 @@ describe("the Steps rail", () => {
     const byId = new Map(nodes.map((n) => [n.instanceId, n]));
     expect(ancestorsOf(nodes[2]!, byId, (n) => n.stateId)).toEqual(["feature/plan", "critique"]);
     expect(ancestorsOf(nodes[0]!, byId, (n) => n.stateId)).toEqual([]);
+  });
+});
+
+describe("the drawer", () => {
+  it("opens past a third of the way, or on a flick to the right", () => {
+    expect(drawerSettles(120, 0, 330)).toBe(true);
+    expect(drawerSettles(100, 0, 330)).toBe(false);
+    expect(drawerSettles(40, 0.8, 330)).toBe(true);
+    expect(drawerSettles(300, -0.8, 330)).toBe(false);
   });
 });

@@ -263,8 +263,11 @@ export function Composer({
         alignSelf="center"
         padding={1}
         borderRadius={22}
-        // Over the tray tucked under it.
-        {...(tucked ? { position: "relative", zIndex: 1 } : {})}
+        // Over the tray tucked under it. Whether the tray is there NOW does not change this: on a phone the
+        // tray steps aside while the keyboard is up, and a box that gains or loses its stacking is flattened
+        // or not, which makes its native views again — the text box among them, which lost its focus and
+        // put the keyboard straight back down.
+        {...(has(tray) ? { position: "relative", zIndex: 1 } : {})}
         backgroundColor={(dropping ? t.v("accent") : focused ? t.mix(t.v("accent"), 55, t.v("line")) : t.v("line")) as never}
       >
         {/* Positioned: painted after the conversation above it, with what else is. */}

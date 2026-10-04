@@ -8,9 +8,9 @@
  * headless Chrome on `/native` — `NativeApp` through react-native-web, the same component tree Metro
  * bundles for Android and iOS — served by the desktop's engine. The address arrives with the page and
  * the code is typed, as a person would from the desktop's Settings → Machines; it pairs (decision 0013,
- * amended 2026-09-30), then photographs the universal shell the phone draws — the desktop's frame from
- * the copies, fitted to the phone's width and then at its own size — and checks there is no frame
- * (WebView) in it.
+ * amended 2026-09-30), then photographs the universal shell the phone draws at a tablet's width — the
+ * desktop's frame from the copies, fitted and then at its own size — and checks there is no frame
+ * (WebView) in it. A phone's own width is `phoneLayout.mts`'s.
  */
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -44,7 +44,11 @@ async function main(): Promise<void> {
     const port = shown.self.port;
     if (port === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
     const url = `http://127.0.0.1:${port}/native?address=${encodeURIComponent(`127.0.0.1:${port}`)}`;
-    phone = await App.browse(CHROME, url, { out: OUT, port: 9281, phone: { width: 390, height: 844, scale: 3 } });
+    // A tablet's width: a phone's lays the shell out for itself (`phoneLayout.mts`); wider, it is the
+    // desktop's, fitted. The shell is drawn at once, and its line opens the Connect screen.
+    phone = await App.browse(CHROME, url, { out: OUT, port: 9281, phone: { width: 1024, height: 768, scale: 2 } });
+    await phone.until(says("No machine connected"), "the shell, drawn before any machine answers");
+    await phone.evaluate(`[...document.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === "No machine connected. Connect").click()`);
     await phone.until(says("Connect to a JaiRA machine"), "the phone's connect screen");
     await phone.evaluate(`document.querySelector('input[aria-label="Code"]').focus()`);
     await phone.type(shown.pairing.code);
