@@ -79,8 +79,8 @@ const args =
     : ["bind", "-target=android/arm64,android/amd64", "-androidapi=24", "-javapkg=com.mistlabs.jaira", ...common, "-o", out, "./mobile"];
 console.log(`gomobile ${args.join(" ")}`);
 execFileSync(`gomobile${exe}`, args, { cwd: TAILNET, env, stdio: "inherit" });
-rmSync(out.replace(/\.aar$/, "-sources.jar"), { force: true });
 if (platform === "android") {
+  rmSync(out.replace(/\.aar$/, "-sources.jar"), { force: true });
   const pom = ["<?xml version=\"1.0\" encoding=\"UTF-8\"?>", '<project xmlns="http://maven.apache.org/POM/4.0.0">', "  <modelVersion>4.0.0</modelVersion>", "  <groupId>com.mistlabs.jaira</groupId>", "  <artifactId>tailnet</artifactId>", "  <version>0.1.0</version>", "  <packaging>aar</packaging>", "</project>", ""];
   writeFileSync(join(MAVEN, "tailnet-0.1.0.pom"), pom.join("\n"));
 }
