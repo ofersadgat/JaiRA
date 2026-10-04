@@ -19,8 +19,26 @@ const token = () => {
   return process.env.GH_TOKEN;
 };
 
+/**
+ * `fetch`, asked again on a dropped connection or a 5xx: a release job talks to two APIs for half an hour,
+ * and one `EPIPE` (seen on GitLab's Mac, 2026-10-04, after a successful upload) must not fail it.
+ */
+export async function retrying(url, init) {
+  for (let attempt = 1; ; attempt += 1) {
+    try {
+      const response = await fetch(url, init);
+      if (response.status < 500 || attempt === 4) return response;
+      console.log(`${init?.method ?? "GET"} ${url}: ${response.status}, asking again`);
+    } catch (error) {
+      if (attempt === 4) throw error;
+      console.log(`${init?.method ?? "GET"} ${url}: ${error.cause?.code ?? error.message}, asking again`);
+    }
+    await new Promise((r) => setTimeout(r, 2000 * attempt));
+  }
+}
+
 export async function api(method, url, body, extra = {}) {
-  const response = await fetch(url.startsWith("https://") ? url : `https://api.github.com${url}`, {
+  const response = await retrying(url.startsWith("https://") ? url : `https://api.github.com${url}`, {
     method,
     headers: {
       accept: "application/vnd.github+json",
@@ -134,7 +152,7 @@ export async function replace(release, name, data) {
 
 /** A file in the release, as text. */
 export async function download(asset) {
-  const response = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/assets/${asset.id}`, {
+  const response = await retrying(`https://api.github.com/repos/${RELEASES_REPO}/releases/assets/${asset.id}`, {
     headers: { accept: "application/octet-stream", authorization: `Bearer ${token()}`, "x-github-api-version": "2022-11-28" },
   });
   if (!response.ok) throw new Error(`download ${asset.name}: ${response.status} ${await response.text()}`);

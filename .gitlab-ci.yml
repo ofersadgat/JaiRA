@@ -195,7 +195,9 @@ release:build:win-x64:
     - if ($env:PLAN_SKIP -eq "true") { Write-Output "nothing to release"; exit 0 }
     - Copy-Item -Recurse scripts\release "$env:TEMP\release"
     # Node 22, the latest 22.x release, from nodejs.org: the runner image is not guaranteed to have it.
-    - $node = (Invoke-RestMethod https://nodejs.org/dist/index.json | Where-Object { $_.version -like 'v22.*' } | Select-Object -First 1).version
+    # The call is parenthesized so Windows PowerShell 5.1 passes the list item by item; unwrapped it
+    # passes the whole array as one object, and every version came back joined into the URL (a 400).
+    - $node = ((Invoke-RestMethod https://nodejs.org/dist/index.json) | Where-Object { $_.version -like 'v22.*' } | Select-Object -First 1).version
     - Invoke-WebRequest "https://nodejs.org/dist/$node/node-$node-win-x64.zip" -OutFile "$env:TEMP\node.zip"
     - Expand-Archive "$env:TEMP\node.zip" -DestinationPath "$env:TEMP\node" -Force
     - $env:PATH = "$env:TEMP\node\node-$node-win-x64;$env:PATH"

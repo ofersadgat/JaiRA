@@ -28,7 +28,7 @@ import { createPrivateKey, sign } from "node:crypto";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
-import { ensureRelease, hasRecord, record, recordName, upload } from "./github.mjs";
+import { ensureRelease, hasRecord, record, recordName, retrying, upload } from "./github.mjs";
 
 const env = process.env;
 const mode = process.argv[2];
@@ -50,7 +50,7 @@ function ascToken() {
 }
 
 async function asc(path) {
-  const response = await fetch(`https://api.appstoreconnect.apple.com${path}`, { headers: { authorization: `Bearer ${ascToken()}` } });
+  const response = await retrying(`https://api.appstoreconnect.apple.com${path}`, { headers: { authorization: `Bearer ${ascToken()}` } });
   if (!response.ok) throw new Error(`App Store Connect ${path}: ${response.status} ${await response.text()}`);
   return response.json();
 }
