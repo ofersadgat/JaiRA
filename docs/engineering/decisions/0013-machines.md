@@ -873,10 +873,11 @@ searching / trying?"
   typed local address (10.0.2.2, the host) pairing with a real engine's listener on port 47319 by its
   code; the phone's node then started and asking for its sign-in.
 
+**Seen on a phone (2026-10-04).** With nightly `v0.1.1-nightly.20261004.6` (TestFlight 20261004.6) the
+person paired an iPhone with the Windows desktop: "this worked."
+
 **Not built, or not yet seen.**
 
-- A phone has not paired on a real Wi-Fi, been approved, and connected through its node; nor has the
-  iOS framework been built (it builds on a Mac, in CI).
 - A phone that pairs with a second machine on the same tailnet reuses its node; one on another tailnet
   would need its node signed out first, which nothing offers yet.
 
