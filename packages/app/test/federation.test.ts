@@ -35,7 +35,7 @@ async function machine(label: string): Promise<Machine> {
   dirs.push(base);
   const pushes: PushMessage[] = [];
   let hosted: HostedEngine | undefined;
-  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, publish: (m) => {
+  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => {
     pushes.push(m);
     hosted?.host.broadcast(m);
   } });

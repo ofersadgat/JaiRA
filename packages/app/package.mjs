@@ -230,6 +230,24 @@ function probe(exe) {
   if (run.status !== 0) throw new Error(`probe failed: exit ${run.status ?? run.signal}\n${run.stderr ?? ""}`);
 }
 
+/** The last lines of every log under `dir`, for an error: what a server said before its scratch home goes. */
+function logsUnder(dir) {
+  const found = [];
+  const walk = (folder) => {
+    for (const entry of readdirSync(folder, { withFileTypes: true })) {
+      const path = join(folder, entry.name);
+      if (entry.isDirectory()) walk(path);
+      else if (entry.name.endsWith(".log")) found.push(`--- ${path}\n${readFileSync(path, "utf8").split(/\r?\n/).slice(-40).join("\n")}`);
+    }
+  };
+  try {
+    walk(dir);
+  } catch {
+    // Whatever was read is still worth showing.
+  }
+  return found.length > 0 ? `\n${found.join("\n")}` : "\n(no log file under the scratch home)";
+}
+
 /**
  * Run the packaged `jaira` command through its wrapper (decision 0011 §7), and the engine it starts
  * (decision 0012 §5):
@@ -264,9 +282,16 @@ ${run.stdout ?? ""}${run.stderr ?? ""}` };
     console.log(`command: jaira plugin list answered ${listed.answer.length} plugins`);
 
     const served = jaira("serve", "--detach");
-    if (served.run.status !== 0 || served.answer?.serving !== true) throw new Error(`jaira serve --detach failed: ${served.said}`);
-    const status = jaira("server", "status");
-    if (status.run.status !== 0 || status.answer?.host?.kind !== "server") throw new Error(`jaira server status failed: ${status.said}`);
+    if (served.run.status !== 0 || served.answer?.serving !== true) throw new Error(`jaira serve --detach failed: ${served.said}${logsUnder(home)}`);
+    // A server that has just answered may be too busy to answer the next 1.5-second ping while it
+    // finishes starting (it refreshes the catalog): `stuck` for a few seconds is not stuck. Seen on a
+    // GitHub Windows machine, 2026-10-04.
+    let status = jaira("server", "status");
+    for (let tries = 0; tries < 15 && status.answer?.stuck !== undefined; tries += 1) {
+      Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 2000);
+      status = jaira("server", "status");
+    }
+    if (status.run.status !== 0 || status.answer?.host?.kind !== "server") throw new Error(`jaira server status failed: ${status.said}${logsUnder(home)}`);
     const stopped = jaira("server", "stop");
     if (stopped.run.status !== 0 || stopped.answer?.stopped !== true) throw new Error(`jaira server stop failed: ${stopped.said}`);
     console.log(`command: jaira serve hosted the engine windowless (pid ${served.answer.pid}), and jaira server stop ended it`);
@@ -294,7 +319,9 @@ function smoke(output) {
   rmSync(shot, { force: true });
   console.log(`smoke test: ${exe}`);
   // A CI Linux runner cannot give Chromium's sandbox helper the setuid root it needs.
-  const argv = process.platform === "linux" && process.env.CI ? ["--no-sandbox"] : [];
+  // And no GPU: under xvfb on GitHub's x64 machine Chromium's display compositor failed
+  // (`UnknownVizError`) and nothing was captured (2026-10-04); the window draws the same in software.
+  const argv = process.platform === "linux" && process.env.CI ? ["--no-sandbox", "--disable-gpu"] : [];
   const run = spawnSync(exe, argv, {
     env: { ...process.env, JAIRA_HOME: home, JAIRA_CAPTURE: shot, JAIRA_CAPTURE_DELAY_MS: "4000", ELECTRON_ENABLE_LOGGING: "1" },
     encoding: "utf8",

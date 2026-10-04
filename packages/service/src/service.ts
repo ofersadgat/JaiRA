@@ -697,6 +697,7 @@ import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { Fleet, type ReachPort } from "./fleet";
+import type { AnnouncePort } from "./lanPairing";
 import { Federation } from "./federation";
 import { Replicator } from "./replicator";
 import { machineTags } from "./machine";
@@ -714,6 +715,10 @@ export interface AppServiceOptions {
   version?: string;
   /** How this machine is published on the tailnet. Default: the installed Tailscale app. */
   reach?: ReachPort;
+  /** How a pairing machine is announced to phones on its local network; `false` announces nothing (tests). */
+  announce?: AnnouncePort | false;
+  /** Tests: where the pairing listener binds — loopback, so no firewall asks. */
+  lanBindHost?: string;
   /**
    * Whether this engine keeps a copy of the fleet's tasks when the person has not said (decision 0013
    * §6). A window's engine does; `jaira serve` with no window does not (ruling 7). Default: no.
@@ -1414,6 +1419,9 @@ export class AppService {
       publish: (view) => this.publish({ type: "machines:changed", view }),
       log: (level, message) => this.log({ level, source: "machines", message }),
       ...(options.reach !== undefined ? { reach: options.reach } : {}),
+      ...(options.announce !== undefined ? { announce: options.announce } : {}),
+      ...(options.lanBindHost !== undefined ? { lanBindHost: options.lanBindHost } : {}),
+      openPage: (url) => this.openPage(url),
       copyByDefault: options.replicate === true ? "not-archived" : "nothing",
     });
     this.resources = new ResourceSampler();

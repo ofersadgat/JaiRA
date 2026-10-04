@@ -122,6 +122,8 @@ export interface EngineBridgeOptions {
   timeoutMs?: number;
   /** Tests: another contract. */
   contract?: string;
+  /** How the machine is named in what the bridge says, when the URL does not say it (a loopback proxy). */
+  where?: string;
 }
 
 /**
@@ -138,7 +140,7 @@ const RESYNC: PushMessage[] = (["tasks", "board", "task", "workflows", "config",
 export function engineBridge(options: EngineBridgeOptions): EngineBridge {
   const first = options.retryMs ?? 1000;
   const longest = options.maxRetryMs ?? 30_000;
-  const where = describe(options.url);
+  const where = options.where ?? describe(options.url);
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   const listeners = new Set<(message: PushMessage) => void>();
   const stateListeners = new Set<(state: BridgeState) => void>();

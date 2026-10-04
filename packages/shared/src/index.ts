@@ -14,6 +14,7 @@ export * from "./usage";
 export * from "./updates";
 export * from "./machines";
 export * from "./engineFrames";
+export * from "./lanPairing";
 export * from "./plugins";
 export * from "./health";
 export * from "./configSchema";

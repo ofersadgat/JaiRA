@@ -4,6 +4,7 @@
     "slug": "jaira",
     "scheme": "jaira",
     "version": "0.1.0",
+    "icon": "./assets/icon.png",
     "orientation": "default",
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
@@ -14,7 +15,8 @@
         "NSAppTransportSecurity": {
           "NSAllowsLocalNetworking": true
         },
-        "NSLocalNetworkUsageDescription": "JaiRA connects to a JaiRA desktop on your network."
+        "NSLocalNetworkUsageDescription": "JaiRA looks on your Wi-Fi for a JaiRA machine showing a pairing code, to pair with it.",
+        "NSBonjourServices": ["_jaira._tcp"]
       }
     },
     "android": {

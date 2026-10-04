@@ -1,0 +1,72 @@
+name: iOS simulator
+
+# The phone app's Release build launched on a fresh iOS simulator, alive 25 seconds later, and
+# photographed (decision 0017; `scripts/release/ios.mjs simulator`). It needs no Apple credentials. Run
+# by hand, and on a pull request that touches what the phone app is made of.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - packages/client/**
+      - packages/universal/**
+      - packages/tailnet/**
+      - scripts/release/ios.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    runs-on: macos-26
+    steps:
+      - name: Checkout JaiRA
+        uses: actions/checkout@v4
+        with:
+          path: JaiRA
+
+      - name: Checkout declarative-ai
+        uses: actions/checkout@v4
+        with:
+          repository: ofersadgat/declarative-ai
+          path: declarative-ai
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Tailscale built into the app is Go, bound with gomobile (packages/client/modules/jaira-net/build.mjs).
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: JaiRA/packages/tailnet/go.mod
+          cache-dependency-path: JaiRA/packages/tailnet/go.sum
+
+      # Xcode 26, as the release builds with (release.yml).
+      - name: Select Xcode 26
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app | grep -vi beta | sort -V | tail -1)"
+          echo "Using $xcode"
+          sudo xcode-select -s "$xcode"
+
+      - name: Install and build declarative-ai
+        working-directory: declarative-ai
+        run: |
+          npm install
+          npm run build
+
+      - name: Install JaiRA
+        working-directory: JaiRA
+        run: npm install
+
+      - name: Build, launch and photograph
+        working-directory: JaiRA
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node scripts/release/ios.mjs simulator
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: ios-simulator
+          path: JaiRA/packages/client/ios/build/simulator.png
+          if-no-files-found: ignore

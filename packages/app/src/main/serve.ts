@@ -29,8 +29,9 @@ function say(line: string): void {
 }
 
 // No dock icon, no window, and nothing that quits when the (nonexistent) last window closes. A server
-// draws nothing: no GPU process, and no renderer to sandbox — which also spares a Linux machine the
-// setuid sandbox helper a window needs.
+// draws nothing: no GPU process, and no renderer to sandbox. On Linux the switch below is too late to
+// spare the setuid sandbox helper (Chromium checks it before this runs), so whoever starts a server
+// passes `--no-sandbox` on its command line there too (`desktop.ts`, the CLI's `jaira serve`).
 app.disableHardwareAcceleration();
 app.commandLine.appendSwitch("no-sandbox");
 app.dock?.hide();

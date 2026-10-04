@@ -47,7 +47,7 @@ beforeEach(async () => {
   // Beside the client, not in it: what a traversal would reach.
   writeFileSync(join(client, "..", "jaira-device-secret.txt"), "secret");
   let host: HostedEngine | undefined;
-  service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
+  service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
   host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0, clientDir: client } }))!;
   hosted = host;
   service.fleet.rename("desk");
@@ -316,7 +316,7 @@ describe("the client's files, from the engine's listener", { timeout: 60_000 }, 
   it("serves nothing but its two paths when the host gave it no client", async () => {
     await hosted.close();
     let host: HostedEngine | undefined;
-    service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
+    service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
     host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
     hosted = host;
     expect((await raw("/")).status).toBe(404);

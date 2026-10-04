@@ -32,3 +32,10 @@ packages/client/ios/
 packages/app/shots/.*.mts
 packages/app/shots/.*.mjs
 packages/app/shots/.*.txt
+# Tailscale built into the phone app (decision 0013, amended 2026-10-04): gomobile's output, made by
+# `node packages/client/modules/jaira-net/build.mjs ios|android` from packages/tailnet/mobile.
+packages/client/modules/jaira-net/ios/Tailnet.xcframework*
+packages/client/modules/jaira-net/android/libs/
+# What Gradle builds there.
+packages/client/modules/*/android/build/
+packages/client/modules/*/android/.cxx/

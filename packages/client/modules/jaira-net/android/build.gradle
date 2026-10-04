@@ -1,0 +1,42 @@
+// The phone's network module (decision 0013, amended 2026-10-04): JaiRA machines nearby (NSD), and
+// Tailscale built in — the gomobile library `build.mjs android` makes from packages/tailnet/mobile, kept
+// as a Maven repository of one artifact in `libs/maven` (a library cannot take a bare .aar: Gradle
+// refuses to bundle it). Without it the module still builds, saying it has no tailnet.
+plugins {
+  id 'com.android.library'
+  id 'expo-module-gradle-plugin'
+}
+
+group = 'com.mistlabs.jaira'
+version = '0.1.0'
+
+def tailnetRepo = file('libs/maven')
+def hasTailnet = new File(tailnetRepo, 'com/mistlabs/jaira/tailnet/0.1.0/tailnet-0.1.0.aar').exists()
+
+// The app resolves this module's dependencies against its own repositories: every project gets this one.
+if (hasTailnet) {
+  rootProject.allprojects {
+    repositories {
+      maven { url tailnetRepo.toURI() }
+    }
+  }
+}
+
+android {
+  namespace "com.mistlabs.jaira.net"
+  defaultConfig {
+    versionCode 1
+    versionName '0.1.0'
+  }
+  sourceSets {
+    main {
+      java.srcDirs += hasTailnet ? 'src/withTailnet/java' : 'src/withoutTailnet/java'
+    }
+  }
+}
+
+dependencies {
+  if (hasTailnet) {
+    implementation 'com.mistlabs.jaira:tailnet:0.1.0'
+  }
+}

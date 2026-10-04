@@ -2,7 +2,7 @@
 id: engineering/decisions/0013-machines
 type: decision
 status: accepted
-updated: 2026-10-02
+updated: 2026-10-04
 decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, engineering/units/project-store, engineering/units/project-sessions, engineering/units/cli]
 ---
 
@@ -745,6 +745,111 @@ room, starts in the second clone when it has, and the thread follows it there.
 - A phone has not been run with the bar and the summary.
 - Moving a started conversation between machines (a third phase in the summary).
 
+### Amended 2026-10-04: a phone finds the machine on its Wi-Fi, and joins the tailnet with Tailscale built in
+
+The person, about pairing a phone: "I dont like the phone bootstrap process." Until now a phone needed the
+Tailscale app, signed in to the same tailnet, and then the machine's `*.ts.net` address typed with the
+code. The rulings:
+
+- **Found on the local network.** "have the phone do a search over the local network and if jaira is
+  running on a machine then that machine populates in a list on the phone. the phone has the option to
+  select it, then it has to type in the verification code from the machine, and this code allows it
+  access to the network and pairs the phone to the machine." An unknown phone gets nothing: "we cant
+  give an unknown phone access to an internal network".
+- **No Tailscale app.** "i dont want the phone to rely on an external tailscale app": Tailscale is built
+  into the phone app.
+- **The machine's own way onto the tailnet.** "we already have a process for adding a machine into the
+  jaira tailscale network, use that": the phone is a node of its own, like the helper (§2), after a
+  sign-in through a link, which the machine opens where the person is (§8's sign-in pages).
+- **The phone is a window.** It is on the tailnet while the app is open. When the app is in the
+  background the system suspends it, Tailscale and connection with it, as it would with the Tailscale
+  app; it reconnects when the app comes back.
+
+**The flow.**
+
+1. On the machine, Pair a machine shows the code, as before. While it shows — and only then — the
+   machine listens on its local-network addresses, on a port of its own, and announces itself there as
+   `_jaira._tcp` (Bonjour): its id, name, system, port and addresses in the TXT record
+   (`packages/service/src/lanPairing.ts`, through `bonjour-service`).
+2. The phone lists the machines on its Wi-Fi that are showing a code (`NWBrowser` on iOS, NSD on Android:
+   the `JairaNet` native module, `packages/client/modules/jaira-net`). The person picks one and types its
+   code.
+3. The code is proved, never sent. It is the password of a PAKE: CPace over ristretto255, bound to a
+   session id the machine picks and to the machine's id (`@jaira/shared`'s `lanPairing.ts`, on
+   `@noble/curves`). The machine answers the phone's share with its own and a proof; the phone checks it
+   and only then sends its proof. A wrong code fails on the phone before it says anything about itself.
+4. Everything after is sealed: ChaCha20-Poly1305 under a key for each direction, the nonce a counter. The
+   phone says who it is; the machine issues it a device token, exactly as a code typed with the address
+   does (amended 2026-09-30), and answers with the engine's tailnet address. The phone keeps both at once.
+5. The phone starts its node (`packages/tailnet/mobile`, tsnet bound with gomobile), named
+   `jaira-<its name>`. Its sign-in page goes to the machine over the sealed channel, and the machine opens
+   it in the browser. The person is signed in to Tailscale there already: approving it puts the phone on
+   the tailnet as their device. Settings → Machines says which phone is joining, with the page's link.
+6. From then on the phone connects through its node, wherever it is: the node gives the app a loopback
+   port proxying to the engine's tailnet address (TLS against the engine's own name and certificate), and
+   the bridge connects there as it would to the engine.
+
+**What holds.**
+
+- **The listener is not the engine.** It answers one WebSocket path, `/pair`, and speaks only the
+  exchange. It takes frames of 16 KB at most, gives a connection a minute to prove the code and ten
+  minutes in all, and closes when the code is spent, stopped, expired or voided; a phone that proved
+  the code keeps its connection while it joins. It is the one thing that ever listens on a local-network
+  interface (§2's "nothing listens on a public interface" still holds: never the engine, never the
+  internet), and only while a code is shown.
+- **Five tries.** Each exchange spends one of the code's tries when it starts, not when it fails: the
+  machine's proof tells a guesser whether the guess was right, so every exchange is a guess. Five void
+  the code, which the code typed with an address also spends.
+- **An impostor learns nothing.** Anyone on the Wi-Fi can announce a "JaiRA". A phone that connects to
+  one sends it a share that reveals nothing about the code, and the impostor's proof fails.
+- **Only Tailscale's page is opened.** A phone's sign-in page is opened only when it is
+  `https://login.tailscale.com/a/…`. Anything else is refused, so a phone cannot have the machine open a
+  page of its choosing.
+- **No reach, no pairing.** The machine must be reachable on the tailnet (Reachable from my other
+  machines), since the phone's whole point is the engine's tailnet address.
+- **Signing in again.** A node's key expires, after 180 days by default. A phone whose node asks for a
+  sign-in again says so on its Connect screen, with a button that opens the page on the phone. Pairing
+  again is the other way: the machine opens the page.
+- **A browser is unchanged.** A page cannot look at the network and has no tailnet of its own, so it
+  pairs by address and code. The address form also stays on the phone, one tap away, for a network where
+  devices cannot see each other (guest Wi-Fi, client isolation).
+
+**Platform.**
+
+- iOS: `NSBonjourServices` lists `_jaira._tcp`; the local-network prompt appears the first time the phone
+  looks. Browsing Bonjour needs no multicast entitlement.
+- The phone's Tailscale is built from `packages/tailnet/mobile` by
+  `node packages/client/modules/jaira-net/build.mjs ios|android`: `Tailnet.xcframework` (a Mac) and
+  `tailnet.aar` (the NDK), into the module, out of git. `ios.mjs` runs it before `pod install`, so every
+  iOS build — the release, `check`, the simulator — needs Go, which both CIs now set up. Without the
+  framework or the library the module still builds and says it has no tailnet; the phone then pairs to a
+  token and reaches the address over its own network.
+- Windows asks once whether the app may accept connections on the network, the first time a code is
+  shown.
+
+**Verified.**
+
+- `shared/test/lanPairing.test.ts`: the same code however typed agrees; another code, another machine id,
+  a missing or forged proof, a share that is not a point or is the identity all fail; the sealed channel
+  refuses a frame out of order, replayed, altered or sent back; the announcement reads back, bytes too.
+- `app/test/lanPairing.test.ts`, with a real engine and the phone's `lanPair.ts` over Node's `WebSocket`:
+  the announcement comes and goes with the code; the right code pairs to a token the engine welcomes and
+  spends the code; four wrong codes are refused before the phone says who it is, and the fifth voids the
+  code, after which nothing listens; the sign-in page is opened and Settings says which phone is joining;
+  a page that is not Tailscale's is not opened; a machine not reachable does not pair.
+- `tailnet/mobile`: a fresh node asks for a sign-in through Tailscale's real control plane
+  (`JAIRA_TAILNET_LIVE=1`), and the Android library builds with gomobile.
+
+**Not built, or not yet seen.**
+
+- A phone has not paired on a real Wi-Fi, been approved, and connected through its node; nor has the
+  iOS framework been built (it builds on a Mac, in CI).
+- On Android, tsnet cannot read the network interfaces on Android 11 and later without help from Java
+  (Tailscale's own app registers an interface getter). The node may then run on DERP relays alone, or not
+  at all. Android is not released.
+- A phone that pairs with a second machine on the same tailnet reuses its node; one on another tailnet
+  would need its node signed out first, which nothing offers yet.
+
 ## Consequences
 
 **Easier:**
@@ -766,6 +871,8 @@ room, starts in the second clone when it has, and the thread follows it there.
 ## Revisit when
 
 - Sessions move between machines: workspace transfer, plus ownership handoff of the replicated records.
-- A machine outside Tailscale is needed: SSH, or a relay like t3code's, which only introduces.
-- Phones pair by QR: they connect on the same transport now (amended 2026-09-30), by a code typed or a
-  link opened; drawing the link as a QR code on Settings → Machines, and scanning it, are not built.
+- A machine outside Tailscale is needed: SSH, or a relay like t3code's, which only introduces. A phone,
+  whose Tailscale is built in (amended 2026-10-04), would need the same way.
+- Phones pair by QR: they connect on the same transport now (amended 2026-09-30), and find the machine
+  on their Wi-Fi (amended 2026-10-04); drawing the link as a QR code on Settings → Machines, and scanning
+  it, are not built.

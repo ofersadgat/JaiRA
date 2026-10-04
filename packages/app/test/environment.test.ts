@@ -240,7 +240,7 @@ describe("another machine's workspaces", () => {
   async function machine(label: string): Promise<Machine> {
     const base = temp(label);
     let hosted: HostedEngine | undefined;
-    const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
+    const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
     hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
     closing.push(() => hosted!.close());
     service.fleet.rename(label);

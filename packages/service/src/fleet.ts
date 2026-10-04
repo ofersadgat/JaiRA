@@ -16,6 +16,10 @@
  *   this engine, not a machine: it is issued a token and listed so it can be forgotten, and that is all.
  *   It is not among {@link Fleet.peers}, so nothing links to it, copies from it, introduces it or places
  *   a task on it.
+ * - **Phones nearby** (amended 2026-10-04). While a code is shown, this machine also announces itself on
+ *   the local network (`lanPairing.ts`), so a phone on the same Wi-Fi lists it and pairs by typing the
+ *   code — proved by a code exchange, never sent — then joins the tailnet with Tailscale built in, its
+ *   sign-in page opened here.
  */
 import { randomInt } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
@@ -26,6 +30,7 @@ import type { EngineHost, PreAuthHandler } from "./engineHost";
 import type { HostFrame, PeerMachine } from "./enginePipe";
 import type { Handler } from "./handlers";
 import { machineIdentity, updateMachineIdentity, type MachineIdentity } from "./machine";
+import { LanPairing, type AnnouncePort, type LanPairingHost, type PhoneJoin } from "./lanPairing";
 import { MachineTokens, type TokenHolder } from "./machineTokens";
 import { tailscaleServe, tailscaleStatus, tailscaleUnserve } from "./tailscale";
 import { autoReach } from "./tailnetHelper";
@@ -102,6 +107,12 @@ export interface FleetOptions {
   copyByDefault?: CopyChoice["mode"];
   /** Tests: how long the first retry waits. */
   retryMs?: number;
+  /** Open a page where the person is: a phone's Tailscale sign-in page. */
+  openPage?: (url: string) => void;
+  /** How a pairing machine is announced to phones nearby; `false` announces nothing (tests). */
+  announce?: AnnouncePort | false;
+  /** Tests: where the pairing listener binds — loopback, so no firewall asks. */
+  lanBindHost?: string;
 }
 
 const WORDS = [
@@ -122,6 +133,11 @@ export class Fleet {
   private readonly peerPushListeners = new Set<(machineId: string, message: unknown) => void>();
   private readonly peerStateListeners = new Set<(machineId: string, online: boolean) => void>();
   private pairing: { code: string; expiresAt: number; attempts: number } | undefined;
+  /** Phones on the local network, while a code is shown (`lanPairing.ts`). */
+  private lan: LanPairing | undefined;
+  private lanExpiry: ReturnType<typeof setTimeout> | undefined;
+  /** A phone that proved the code and is joining the tailnet. */
+  private phone: PhoneJoin | undefined;
   private reach: MachineReach = { state: "off" };
   private loopbackPort: number | undefined;
   private host: EngineHost | undefined;
@@ -232,13 +248,15 @@ export class Fleet {
         canReachHere: issued.has(m.id),
       };
     });
-    const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt } : undefined;
+    const nearby = this.lan?.listening() !== undefined;
+    const pairing = this.pairing !== undefined && this.pairing.expiresAt > Date.now() ? { code: this.pairing.code, expiresAt: this.pairing.expiresAt, ...(nearby ? { nearby } : {}) } : undefined;
     const port = this.loopbackPort;
     return {
       self: { id: me.id, label: me.label, os: me.os, form: me.form, tags: me.tags, reach: this.reach, version: this.options.version, copy: this.copying(), ...(port !== undefined ? { port } : {}) },
       machines,
       devices: this.devices(),
       ...(pairing !== undefined ? { pairing } : {}),
+      ...(this.phone !== undefined ? { phone: this.phone } : {}),
     };
   }
 
@@ -372,14 +390,76 @@ export class Fleet {
     let tail = "";
     for (let i = 0; i < 4; i += 1) tail += CODE_CHARS[randomInt(CODE_CHARS.length)];
     this.pairing = { code: `${words[0]} · ${words[1]} · ${tail}`, expiresAt: Date.now() + PAIRING_CODE_MS, attempts: 0 };
+    this.announceNearby();
     this.changed();
     return this.view();
   }
 
   cancelPairing(): MachinesView {
-    this.pairing = undefined;
+    this.endPairing();
     this.changed();
     return this.view();
+  }
+
+  /** The code is spent, stopped or expired: phones nearby no longer find this machine. */
+  private endPairing(): void {
+    this.pairing = undefined;
+    if (this.lanExpiry !== undefined) clearTimeout(this.lanExpiry);
+    this.lanExpiry = undefined;
+    void this.lan?.stop().then(() => this.changed());
+  }
+
+  /** While the code is shown: announced on the local network, until it expires. */
+  private announceNearby(): void {
+    if (this.options.announce === false || this.host === undefined || this.stopped) return;
+    this.lan ??= new LanPairing(this.lanHost(), this.options.announce, this.options.lanBindHost);
+    void this.lan.start().then(() => this.changed());
+    if (this.lanExpiry !== undefined) clearTimeout(this.lanExpiry);
+    this.lanExpiry = setTimeout(() => {
+      if (this.pairing === undefined || this.pairing.expiresAt <= Date.now()) this.endPairing();
+      this.changed();
+    }, PAIRING_CODE_MS + 1000);
+    this.lanExpiry.unref?.();
+  }
+
+  /** What the local-network listener asks of this fleet. */
+  private lanHost(): LanPairingHost {
+    return {
+      identity: () => {
+        const me = this.identity();
+        return { id: me.id, label: me.label, os: me.os };
+      },
+      tryCode: () => {
+        const pairing = this.pairing;
+        if (pairing === undefined || pairing.expiresAt <= Date.now()) return { refused: "no pairing code is being shown on that machine, or it expired: show a new one" };
+        // Spent before the proof, not after a wrong one: the machine's answer tells a guesser whether it
+        // guessed right, so every exchange is a guess.
+        pairing.attempts += 1;
+        if (pairing.attempts >= MAX_CODE_ATTEMPTS) this.endPairing();
+        this.changed();
+        return { code: pairing.code };
+      },
+      spendCode: () => {
+        this.endPairing();
+        this.changed();
+      },
+      pairDevice: (asked) => {
+        const address = this.reach.state === "on" ? this.reach.url : undefined;
+        if (address === undefined) return { refused: "that machine is not reachable on the tailnet: turn on Reachable from my other machines there" };
+        const answer = this.pairDevice(asked);
+        if (answer.t !== "paired") return { refused: answer.t === "refused" ? answer.reason : "that machine did not pair" };
+        return { token: answer.token, machine: { id: answer.machine.id, label: answer.machine.label, os: answer.machine.os }, address };
+      },
+      openLogin: (url, phone) => {
+        this.options.log?.("info", `opened the Tailscale sign-in page for ${phone}: approving it lets the phone onto your tailnet`);
+        this.options.openPage?.(url);
+      },
+      phoneChanged: (phone) => {
+        this.phone = phone;
+        this.changed();
+      },
+      log: (level, message) => this.options.log?.(level, message),
+    };
   }
 
   /** A `pair` frame from a machine or a device that was shown this one's code (`EngineHost` hands it here). */
@@ -390,7 +470,7 @@ export class Fleet {
     if (pairing === undefined || pairing.expiresAt <= Date.now()) return refused("no pairing code is being shown on that machine, or it expired: show a new one");
     if (normalizePairingCode(String(frame["code"])) !== normalizePairingCode(pairing.code)) {
       pairing.attempts += 1;
-      if (pairing.attempts >= MAX_CODE_ATTEMPTS) this.pairing = undefined;
+      if (pairing.attempts >= MAX_CODE_ATTEMPTS) this.endPairing();
       this.changed();
       return refused("that is not the code shown on that machine");
     }
@@ -399,7 +479,7 @@ export class Fleet {
     const token = frame["token"];
     if (machine === undefined || typeof machine.id !== "string" || typeof token !== "string") return refused("a pairing needs the asking machine and its token");
     if (machine.id === this.identity().id) return refused("a machine cannot pair with itself");
-    this.pairing = undefined;
+    this.endPairing();
     this.remember(sanitizePeer(machine));
     this.holdToken(machine.id, token);
     const issued = this.tokens.issue(machine.id, machine.label);
@@ -420,7 +500,7 @@ export class Fleet {
     // An id that is a machine's would take that machine's token away with it.
     const machines = new Set([this.identity().id, ...this.known().map((m) => m.id), ...this.tokens.list().flatMap((t) => (t.device === undefined ? [t.machineId] : []))]);
     if (machines.has(device.id)) return { t: "refused", reason: "that id is a machine's, not a device's" };
-    this.pairing = undefined;
+    this.endPairing();
     const issued = this.tokens.issue(device.id, device.label, device.kind);
     this.options.log?.("info", `paired with ${device.label}, a ${device.kind}: a window onto this machine`);
     this.changed();
@@ -674,6 +754,8 @@ export class Fleet {
   /** Stop linking and leave the tailnet mapping in place — it is the machine's, kept across restarts. */
   close(): void {
     this.stopped = true;
+    if (this.lanExpiry !== undefined) clearTimeout(this.lanExpiry);
+    void this.lan?.stop(true);
     this.reachInUse?.close?.();
     for (const link of this.links.values()) {
       if (link.timer !== undefined) clearTimeout(link.timer);

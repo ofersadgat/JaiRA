@@ -446,7 +446,11 @@ export async function serveCommand(options: { detach: boolean; home?: string }, 
   if (installedElectron() || options.detach) {
     const env = { ...process.env };
     delete env["ELECTRON_RUN_AS_NODE"];
-    const [command, args] = installedElectron() ? [process.execPath, ["--serve", ...home]] : [process.execPath, [process.argv[1]!, "serve", ...home]];
+    // On Linux `--no-sandbox` must be on the command line: Chromium checks its setuid sandbox helper
+    // before the app's `serve.ts` runs, so the switch it appends comes too late where the helper is not
+    // setuid root (an AppImage, a CI machine), and the server dies before it answers.
+    const electronArgs = ["--serve", ...(process.platform === "linux" ? ["--no-sandbox"] : []), ...home];
+    const [command, args] = installedElectron() ? [process.execPath, electronArgs] : [process.execPath, [process.argv[1]!, "serve", ...home]];
     if (!options.detach) {
       // In the foreground, with its output here; Ctrl-C reaches it too, and it drains before it goes.
       const child = spawn(command, args, { stdio: "inherit", env, windowsHide: true });

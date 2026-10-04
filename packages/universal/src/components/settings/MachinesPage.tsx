@@ -16,6 +16,7 @@ import {
   pairCodeWords,
   pairWords,
   peerWords,
+  phoneJoinWords,
   reachWords,
   sentence,
   useAddMachine,
@@ -188,6 +189,11 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
               </>
             }
           />
+        </View>
+      ) : null}
+      {view.phone !== undefined ? (
+        <View backgroundColor={t.v("tint-accent") as never}>
+          <SettingsRow name={W.phone.name} description={<Words parts={phoneJoinWords(view.phone)} />} />
         </View>
       ) : null}
     </SettingsSection>

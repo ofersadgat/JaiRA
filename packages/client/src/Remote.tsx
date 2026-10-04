@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
-import { AppState } from "react-native";
-import { engineUrlOf } from "@jaira/shared/browser";
-import { Connect, connectionLost, connectionRestored } from "@jaira/universal";
+import { AppState, Linking } from "react-native";
+import { engineUrlOf, hostOfUrl } from "@jaira/shared/browser";
+import { Connect, connectionLost, connectionRestored, type NearbyStep } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { DEVICE_KIND, deviceLabel } from "../bridges/deviceInfo";
 import { engineBridge, pairDevice, type EngineBridge } from "../bridges/engineBridge";
+import { pairNearby } from "../bridges/lanPair";
+import { NEARBY_SUPPORTED, browseNearby, randomBytes, tailnet, type NearbyState } from "../bridges/nearby";
 import { deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } from "../bridges/savedPairing";
+import { tailnetEngineUrl, tailnetHostname, tailnetJoin } from "../bridges/tailnetJoin";
 
 /**
  * A window that is not Electron's — a phone, a browser tab — standing on a machine's engine (decisions
@@ -21,6 +24,10 @@ import { deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } 
  * A machine that refuses the token (the device was forgotten there) forgets the token here too and
  * brings the form back, saying so. One that speaks another contract keeps the pairing and says which
  * side to update.
+ *
+ * A phone also lists the machines on its Wi-Fi that are showing a code, and pairs with one by its code
+ * alone (amended 2026-10-04, `bridges/lanPair.ts`); it then joins that machine's tailnet with Tailscale
+ * built into the app, and from then on connects through it (`bridges/tailnetJoin.ts`) wherever it is.
  */
 
 /** An address and a one-time code that came with the page's URL or the app's link — what a QR code carries. */
@@ -86,14 +93,18 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   const bridge = useRef<EngineBridge | undefined>(undefined);
   /** Which attempt is the current one: a slower, older one must not overwrite it. */
   const turn = useRef(0);
+  /** Which connection is the current one, while its URL is worked out (the tailnet's proxy). */
+  const connecting = useRef(0);
+  const [nearby, setNearby] = useState<NearbyState>({ machines: [] });
+  const [nearbyPairing, setNearbyPairing] = useState<{ label: string; step: NearbyStep } | undefined>(undefined);
+  /** The phone's Tailscale asks to be signed in again (its key expired, or it was signed out). */
+  const [signInUrl, setSignInUrl] = useState<string | undefined>(undefined);
 
-  const connect = useCallback((pairing: SavedPairing): void => {
-    bridge.current?.close();
-    const mine = engineBridge({ url: pairing.url, token: pairing.token, client: deviceLabel(), version: CLIENT_VERSION });
+  /** Connect the bridge to a pairing's engine at `url`: its own, or the tailnet proxy's to it. */
+  const open = useCallback((pairing: SavedPairing, url: string): void => {
+    const mine = engineBridge({ url, token: pairing.token, client: deviceLabel(), version: CLIENT_VERSION, ...(url !== pairing.url ? { where: hostOfUrl(pairing.url) } : {}) });
     bridge.current = mine;
     let installed = false;
-    setSaved(pairing);
-    setPhase("connecting");
     mine.onState((state) => {
       if (bridge.current !== mine) return;
       switch (state.state) {
@@ -129,6 +140,73 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
       }
     });
   }, []);
+
+  const connect = useCallback(
+    (pairing: SavedPairing): void => {
+      bridge.current?.close();
+      bridge.current = undefined;
+      const attempt = ++connecting.current;
+      setSaved(pairing);
+      setPhase("connecting");
+      if (pairing.tailnet !== true) return open(pairing, pairing.url);
+      // Through Tailscale built into the app: its loopback proxy to the engine.
+      if (tailnet === undefined) {
+        setProblem("this build of JaiRA has no Tailscale built in, which this pairing needs: forget this machine and pair by address");
+        return;
+      }
+      tailnetEngineUrl(tailnet, tailnetHostname(deviceLabel()), pairing.address).then(
+        (url) => {
+          if (connecting.current === attempt) open(pairing, url);
+        },
+        (e: Error) => {
+          if (connecting.current === attempt) setProblem(`Tailscale on this phone did not start: ${e.message}`);
+        },
+      );
+    },
+    [open],
+  );
+
+  /** Pair with a machine found on this Wi-Fi by the code it shows, then join its tailnet. */
+  const pairWithNearby = useCallback(
+    async (key: string, code: string): Promise<void> => {
+      const machine = nearby.machines.find((m) => m.key === key);
+      if (machine === undefined) {
+        setProblem("that machine is no longer showing its code: show a new one there");
+        return;
+      }
+      const mine = ++turn.current;
+      setProblem(null);
+      setNearbyPairing({ label: machine.label, step: "reaching" });
+      let kept: SavedPairing | undefined;
+      try {
+        await pairNearby({
+          machine,
+          code,
+          device: { id: await deviceId(), label: deviceLabel(), kind: "phone" },
+          random: randomBytes,
+          ...(tailnet !== undefined ? { tailnet: tailnetJoin(tailnet, tailnetHostname(deviceLabel())) } : {}),
+          // Kept as soon as it is issued: joining the tailnet can take minutes, and the token stands either way.
+          onPaired: async (paired) => {
+            kept = { address: paired.address, url: engineUrlOf(paired.address), token: paired.token, machine: { id: paired.machine.id, label: paired.machine.label }, ...(tailnet !== undefined ? { tailnet: true as const } : {}) };
+            await savePairing(kept);
+          },
+          onStep: (step) => {
+            if (turn.current === mine) setNearbyPairing({ label: machine.label, step });
+          },
+        });
+        if (turn.current !== mine) return;
+        setNearbyPairing(undefined);
+        connect(kept!);
+      } catch (e) {
+        if (turn.current !== mine) return;
+        setNearbyPairing(undefined);
+        // Paired, but not onto the tailnet: connecting carries on, offering the sign-in on the phone.
+        if (kept !== undefined) connect(kept);
+        setProblem((e as Error).message);
+      }
+    },
+    [nearby, connect],
+  );
 
   const pair = useCallback(
     async (address: string, code: string, fallback?: SavedPairing): Promise<void> => {
@@ -201,6 +279,21 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
     };
   }, [electron]);
 
+  // The machines on this Wi-Fi showing a code, while the form is up.
+  useEffect(() => {
+    if (electron || !NEARBY_SUPPORTED || phase !== "ask") return;
+    return browseNearby(setNearby);
+  }, [electron, phase]);
+
+  // A pairing through the tailnet: the phone's Tailscale may ask to be signed in again.
+  const viaTailnet = saved?.tailnet === true;
+  useEffect(() => {
+    if (!viaTailnet || tailnet === undefined) return;
+    const hear = (state: { state: string; url?: string }): void => setSignInUrl(state.state === "needs-login" ? state.url : undefined);
+    hear(tailnet.state());
+    return tailnet.onState(hear);
+  }, [viaTailnet]);
+
   useEffect(() => () => bridge.current?.close(), []);
 
   if (phase === "connected") return <>{children}</>;
@@ -219,10 +312,11 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
     phase === "connecting" && saved !== undefined ? (
       <Connect
         saved={{ label: saved.machine.label, address: saved.address }}
-        problem={problem}
+        problem={signInUrl !== undefined ? "Tailscale on this phone needs you to sign in again before it can reach the machine" : problem}
         onPair={() => undefined}
         onRetry={() => (bridge.current !== undefined ? bridge.current.retryNow() : connect(saved))}
         onForget={forget}
+        {...(signInUrl !== undefined ? { signIn: () => void Linking.openURL(signInUrl) } : {})}
       />
     ) : (
       <Connect
@@ -232,6 +326,13 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
         problem={problem}
         busy={busy}
         onPair={(a, c) => void pair(a, c)}
+        {...(NEARBY_SUPPORTED
+          ? {
+              nearby: { machines: nearby.machines.map((m) => ({ key: m.key, label: m.label, os: m.os })), ...(nearby.problem !== undefined ? { problem: nearby.problem } : {}) },
+              onPairNearby: (key: string, c: string) => void pairWithNearby(key, c),
+              ...(nearbyPairing !== undefined ? { pairing: nearbyPairing } : {}),
+            }
+          : {})}
       />
     );
   return frame !== undefined ? frame(screen) : screen;
