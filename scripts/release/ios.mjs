@@ -142,6 +142,14 @@ async function build() {
   ]);
   if (mode === "check") return console.log(`\nbuilt ${archive} (unsigned)`);
 
+  // Asked again after the long build: the other system, building the same release, may have uploaded
+  // it meanwhile, and App Store Connect refuses a build number twice.
+  if (await hasRecord(env.PLAN_TAG, "ios")) return console.log(`${env.PLAN_TAG} recorded ios while this built: not uploading`);
+  if (await uploaded()) {
+    console.log(`App Store Connect got ${env.JAIRA_IOS_VERSION} (${env.JAIRA_IOS_BUILD}) while this built: recording it, not uploading`);
+    return markReleased();
+  }
+
   const secrets = mkdtempSync(join(tmpdir(), "jaira-ios-"));
   try {
     const key = join(secrets, `AuthKey_${env.ASC_KEY_ID}.p8`);

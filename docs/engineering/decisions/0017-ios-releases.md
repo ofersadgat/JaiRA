@@ -66,7 +66,9 @@ them; "proposed" until a release has reached TestFlight.
    - each build that reached the release leaves a record there, `build-<name>.json` (`linux-x64`,
      `linux-arm64`, `win-x64`, `win-arm64`, `mac-arm64`, `mac-x64`, `ios`), uploaded after its files;
    - every build job asks first (`scripts/release/builds.mjs check`) and exits if its record is there;
-     the iOS job also asks App Store Connect whether the version and build are already uploaded;
+     the iOS job also asks App Store Connect whether the version and build are already uploaded, before
+     building and again before uploading (the other system may have uploaded it meanwhile, and App
+     Store Connect refuses a build number twice), and records one it finds rather than building it;
    - the plan is skipped when the release has every build the pipeline makes (`BUILDS`);
    - publishing (`publish.mjs`) finds the release or makes it as a draft (two pipelines making it at once
      keep the older one), uploads only files and builds it lacks, merges the update manifests with the
