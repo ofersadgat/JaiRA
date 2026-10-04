@@ -1,110 +1,88 @@
 /**
- * Publish one release to the releases repository (decision 0011 §3): what `plan.mjs` decided, with
- * every installer in a directory. Both CI systems run it, so a release looks the same whichever built
- * it.
+ * Publish the builds a pipeline made into their release in the releases repository (decision 0011 §3,
+ * 0017 §8). Both CI systems run it, and either may have built part of the release already, so it adds
+ * to what is there:
  *
- *   node scripts/release/publish.mjs <installers dir> <notes file>
+ *   node scripts/release/publish.mjs <builds dir> <notes file>
  *
- * - A new repository has no commit, and a release needs one to tag, so the first publish creates the
- *   README through the contents API. After that the README is there and this does nothing.
- * - The release is created as a DRAFT, every file is uploaded, and only then is it published. A run
- *   that fails halfway leaves a draft nobody's updater can see, never a release missing its installers.
+ * - `<builds dir>` holds one folder per build job (any names): its installers, its update manifests and
+ *   `build.json` (`builds.mjs mark`), which a job writes only when it succeeded. A folder without one
+ *   (a failed build's leftovers) is ignored, and so is a build the release already has.
+ * - The release is found or made as a draft (`github.mjs`); each build's files are uploaded, skipping
+ *   any already there; the update manifests are merged with the release's own copies across
+ *   architectures (`manifests.mjs`) and replaced; then each build's record; and only then is a draft
+ *   published. A run that fails halfway leaves its build without a record, so the next run redoes it.
  * - A nightly is a prerelease and never latest; a stable release is latest.
  *
  * Environment: RELEASES_REPO, GH_TOKEN, PLAN_TAG, PLAN_VERSION, PLAN_PRERELEASE ("true" | "false").
  * Node 22, no dependencies.
  */
-import { mkdtempSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { RELEASES_REPO } from "./versions.mjs";
+import { api, download, ensureRelease, recordName, reread, replace, upload } from "./github.mjs";
 import { mergeManifests, parseManifest, serializeManifest } from "./manifests.mjs";
 
 const env = process.env;
-const repo = env.RELEASES_REPO ?? "ofersadgat/releases";
 const [dir, notesFile] = process.argv.slice(2);
-if (dir === undefined || notesFile === undefined) throw new Error("usage: publish.mjs <installers dir> <notes file>");
+if (dir === undefined || notesFile === undefined) throw new Error("usage: publish.mjs <builds dir> <notes file>");
 for (const name of ["GH_TOKEN", "PLAN_TAG", "PLAN_VERSION", "PLAN_PRERELEASE"]) {
   if (!env[name]) throw new Error(`${name} is not set`);
 }
+const isManifest = (name) => /\.yml$/.test(name) && name !== "builder-debug.yml";
 
-const headers = {
-  accept: "application/vnd.github+json",
-  authorization: `Bearer ${env.GH_TOKEN}`,
-  "x-github-api-version": "2022-11-28",
-};
-
-async function api(method, url, body, extra = {}) {
-  const response = await fetch(url.startsWith("https://") ? url : `https://api.github.com${url}`, {
-    method,
-    headers: { ...headers, ...extra },
-    body,
-  });
-  if (!response.ok) throw new Error(`${method} ${url}: ${response.status} ${await response.text()}`);
-  return response.status === 204 ? undefined : response.json();
-}
-
-async function exists(path) {
-  const response = await fetch(`https://api.github.com${path}`, { headers });
-  if (response.status === 404) return false;
-  if (!response.ok) throw new Error(`GET ${path}: ${response.status} ${await response.text()}`);
-  return true;
-}
-
-const all = readdirSync(dir)
+/** Each build folder that holds a finished build: its record and its files. */
+const builds = (existsSync(dir) ? readdirSync(dir) : [])
   .map((name) => join(dir, name))
-  .filter((file) => statSync(file).isFile());
-
-/**
- * The update manifests, merged across architectures (`manifests.mjs`): each build machine's copy
- * arrives as `<name>@<build>`, and the release gets one `<name>` listing every architecture's file.
- */
-const copies = new Map();
-for (const file of all) {
-  const match = /^(.+\.yml)@(.+)$/.exec(basename(file));
-  if (match === null) continue;
-  copies.set(match[1], [...(copies.get(match[1]) ?? []), file]);
-}
-const merged = mkdtempSync(join(tmpdir(), "jaira-manifests-"));
-for (const [name, sources] of copies) {
-  const manifest = mergeManifests(
-    sources.map((file) => parseManifest(readFileSync(file, "utf8"), basename(file))),
-    name,
-  );
-  if (manifest.version !== env.PLAN_VERSION) throw new Error(`${name} is for ${manifest.version}, not ${env.PLAN_VERSION}`);
-  writeFileSync(join(merged, name), serializeManifest(manifest));
-  console.log(`${name}: ${manifest.files.map((f) => f.url).join(", ")}`);
-}
-const files = [...all.filter((file) => !/\.yml@/.test(basename(file))), ...[...copies.keys()].map((name) => join(merged, name))];
-if (files.length === 0) throw new Error(`no installers in ${dir}`);
-
-if (!(await exists(`/repos/${repo}/contents/README.md`))) {
-  const readme = "# JaiRA releases\n\nInstallers for JaiRA. Each release names the JaiRA and declarative-ai commits it was built from.\n";
-  await api("PUT", `/repos/${repo}/contents/README.md`, JSON.stringify({ message: "Add README", content: Buffer.from(readme).toString("base64") }));
-  console.log(`gave ${repo} its first commit`);
+  .filter((folder) => statSync(folder).isDirectory() && existsSync(join(folder, "build.json")))
+  .map((folder) => ({
+    record: JSON.parse(readFileSync(join(folder, "build.json"), "utf8")),
+    files: readdirSync(folder)
+      .filter((name) => name !== "build.json")
+      .map((name) => join(folder, name))
+      .filter((file) => statSync(file).isFile()),
+  }));
+if (builds.length === 0) {
+  console.log("no finished build to publish");
+  process.exit(0);
 }
 
 const prerelease = env.PLAN_PRERELEASE === "true";
-const release = await api(
-  "POST",
-  `/repos/${repo}/releases`,
-  JSON.stringify({
-    tag_name: env.PLAN_TAG,
-    name: `JaiRA ${env.PLAN_VERSION}`,
-    body: readFileSync(notesFile, "utf8"),
-    draft: true,
-    prerelease,
-  }),
-);
-console.log(`draft ${env.PLAN_TAG} created`);
+let release = await ensureRelease({ tag: env.PLAN_TAG, version: env.PLAN_VERSION, notes: readFileSync(notesFile, "utf8"), prerelease });
+const fresh = builds.filter((b) => {
+  const done = release.assets.some((a) => a.name === recordName(b.record.build));
+  if (done) console.log(`${b.record.build}: already in ${env.PLAN_TAG}, skipped`);
+  return !done;
+});
 
-const uploadBase = release.upload_url.replace(/\{.*\}$/, "");
-for (const file of files) {
-  const name = basename(file);
-  await api("POST", `${uploadBase}?name=${encodeURIComponent(name)}`, readFileSync(file), {
-    "content-type": "application/octet-stream",
-  });
-  console.log(`uploaded ${name} (${Math.round(statSync(file).size / 1048576)} MB)`);
+for (const build of fresh) {
+  for (const file of build.files.filter((f) => !isManifest(basename(f)))) await upload(release, basename(file), readFileSync(file));
 }
 
-const published = await api("PATCH", `/repos/${repo}/releases/${release.id}`, JSON.stringify({ draft: false, make_latest: prerelease ? "false" : "true" }));
-console.log(`published ${published.html_url}`);
+// The update manifests: this run's copies of each name, merged with the one the release has.
+release = await reread(release);
+const manifests = new Map();
+for (const build of fresh) {
+  for (const file of build.files.filter((f) => isManifest(basename(f)))) {
+    const name = basename(file);
+    manifests.set(name, [...(manifests.get(name) ?? []), parseManifest(readFileSync(file, "utf8"), `${build.record.build}/${name}`)]);
+  }
+}
+for (const [name, copies] of manifests) {
+  const existing = release.assets.find((a) => a.name === name);
+  if (existing !== undefined) copies.push(parseManifest(await download(existing), `${env.PLAN_TAG}/${name}`));
+  const manifest = mergeManifests(copies, name);
+  if (manifest.version !== env.PLAN_VERSION) throw new Error(`${name} is for ${manifest.version}, not ${env.PLAN_VERSION}`);
+  await replace(release, name, Buffer.from(serializeManifest(manifest)));
+  console.log(`${name}: ${manifest.files.map((f) => f.url).join(", ")}`);
+  release = await reread(release);
+}
+
+for (const build of fresh) await upload(release, recordName(build.record.build), Buffer.from(`${JSON.stringify(build.record, null, 2)}\n`));
+
+if (release.draft) {
+  const published = await api("PATCH", `/repos/${RELEASES_REPO}/releases/${release.id}`, JSON.stringify({ draft: false, make_latest: prerelease ? "false" : "true" }));
+  console.log(`published ${published.html_url}`);
+} else {
+  console.log(`added ${fresh.map((b) => b.record.build).join(", ") || "nothing"} to ${release.html_url}`);
+}

@@ -71,6 +71,20 @@ export function nextNightly(appVersion, released, now = new Date()) {
   return `${bump(base, "patch")}-nightly.${day}.${Math.max(0, ...today) + 1}`;
 }
 
+/**
+ * A release's version as Apple wants it (decision 0017): `CFBundleShortVersionString` is `X.Y.Z` and
+ * nothing else, and `CFBundleVersion` must be new for that `X.Y.Z` and higher than the builds before
+ * it. A nightly is its own `X.Y.Z` with build `YYYYMMDD.N`, read off its version, so GitHub and GitLab
+ * number it alike. A stable release is built the day it is promoted, from a nightly of the same
+ * `X.Y.Z`: build `YYYYMMDD.1000` of that day stays above every nightly before it.
+ */
+export function appleVersionOf(version, now = new Date()) {
+  const nightly = NIGHTLY.exec(version);
+  if (nightly !== null) return { version: nightly[1], build: `${nightly[2]}.${Number(nightly[3])}` };
+  if (!STABLE.test(version)) throw new Error(`'${version}' is neither X.Y.Z nor X.Y.Z-nightly.YYYYMMDD.N`);
+  return { version, build: `${now.toISOString().slice(0, 10).replace(/-/g, "")}.1000` };
+}
+
 /** Every version tagged in the releases repository, read over git: no API, no rate limit. */
 export async function releasedVersions() {
   const { execFileSync } = await import("node:child_process");
