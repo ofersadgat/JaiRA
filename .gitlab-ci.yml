@@ -16,7 +16,16 @@
 # the same releases repository GitHub's `.github/workflows/release.yml` publishes
 # to, with the same two scripts (`scripts/release/plan.mjs` decides what to
 # build, `scripts/release/publish.mjs` publishes), so the two agree on versions
-# and on what is already released. A release pipeline runs for:
+# and on what is already released.
+#
+# Either system may build any release, in any order, and again (decision 0017 §8):
+# a release is filled in. The plan reuses a commit's nightly if one exists; each
+# build job first asks the GitHub release for its own record (`builds.mjs check`)
+# and stops if it is there; publishing adds only what the release lacks. So a
+# release GitLab started gets its macOS and Windows arm64 installers from GitHub,
+# and running a pipeline twice builds nothing the second time.
+#
+# A release pipeline runs for:
 #
 # - a pushed `vX.Y.Z` tag: that commit, as stable; a `vX.Y.Z-nightly.YYYYMMDD.N`
 #   tag: that commit, as that nightly (`npm run release-*-version -- --gitlab`);
@@ -28,10 +37,18 @@
 #   since the last nightly, and at any hour but 2am Pacific.
 #
 # GitLab.com's hosted runners build Linux x64, Linux arm64 and Windows x64. There
-# is no macOS (it needs a Premium plan) and no Windows arm64, so GitLab's releases
-# lack those. Needs the RELEASES_TOKEN variable (a GitHub token with Contents
-# read/write on the releases repository); if it is protected, the release tags
-# must be protected too (Settings > Repository > Protected tags, `v*`).
+# is no hosted macOS (it needs a Premium plan) and no Windows arm64, so GitLab's
+# releases lack those installers. Needs the RELEASES_TOKEN variable (a GitHub token
+# with Contents read/write on the releases repository); if it is protected, the
+# release tags must be protected too (Settings > Repository > Protected tags, `v*`).
+#
+# iOS (decision 0017) builds on the mistlabs group's own Mac (`mac` tag, a shell
+# runner shared with mist-server), with `scripts/release/ios.mjs`: a release
+# uploads to App Store Connect, signed by Apple's cloud signing. It needs the
+# group variables ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8_BASE64 (protected, so only
+# protected branches and tags see it) and APPLE_TEAM_ID. It may fail without
+# failing the release, and nothing waits for it. Run pipeline with IOS_CHECK = true
+# builds an unsigned archive of any branch, with no credentials.
 default:
   image: node:22
 
@@ -49,6 +66,10 @@ variables:
   RELEASE_VERSION:
     value: ""
     description: "stable only: X.Y.Z (default: the latest nightly's X.Y.Z)"
+  IOS_CHECK:
+    value: "false"
+    options: ["false", "true"]
+    description: "true also builds an unsigned iOS archive of this branch on the Mac (no upload)."
   RELEASES_REPO: ofersadgat/releases
 
 workflow:
@@ -103,12 +124,20 @@ release:plan:
       fi
     # declarative-ai's main as GitLab has it, resolved once so every build uses the same commit (unpinned).
     - export UPSTREAM_COMMIT="$(git ls-remote "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" refs/heads/main | cut -f1)"
+    # What this pipeline builds: the plan is skipped when the release already has all of it. iOS only
+    # where the App Store Connect key reaches (a protected variable: protected branches and tags).
+    - export BUILDS="linux-x64 linux-arm64 win-x64${ASC_KEY_P8_BASE64:+ ios}"
     - EVENT="$RELEASE_EVENT" REF_NAME="$CI_COMMIT_TAG" GITHUB_SHA="$CI_COMMIT_SHA" INPUT_CHANNEL="$RELEASE_CHANNEL" INPUT_VERSION="$RELEASE_VERSION" GH_TOKEN="$RELEASES_TOKEN" PLAN_DIR=plan node scripts/release/plan.mjs
   artifacts:
     paths: [plan/]
     reports:
       dotenv: plan/plan.env
 
+# Every build job: stop if the release already records this build (made here or on GitHub,
+# `builds.mjs check`); otherwise build the plan's commit and, only once it has succeeded, put
+# its installers, its update manifests and its record (`builds.mjs mark`) in builds/<name>/
+# for release:publish. The release scripts are this pipeline's, copied aside before checking
+# out the commit to build, which may be older than them.
 .release-build-linux:
   stage: build
   needs: [release:plan]
@@ -118,6 +147,9 @@ release:plan:
     GIT_DEPTH: 0
   script:
     - if [ "$PLAN_SKIP" = "true" ]; then echo "nothing to release"; exit 0; fi
+    - cp -r scripts/release /tmp/release
+    - export GH_TOKEN="$RELEASES_TOKEN"
+    - if [ "$(node /tmp/release/builds.mjs check "$BUILD_NAME")" = "true" ]; then exit 0; fi
     - git checkout --quiet "$PLAN_COMMIT"
     # xvfb for the smoke test, which launches the packaged app; the rest is what Electron needs to start.
     - apt-get update -qq
@@ -127,24 +159,28 @@ release:plan:
     - cd ../declarative-ai && npm install && npm run build && cd "$CI_PROJECT_DIR"
     - npm install
     - JAIRA_BUILD_VERSION="$PLAN_VERSION" NODE_OPTIONS=--max-old-space-size=4096 xvfb-run -a npm run app:dist
+    - mkdir -p "builds/$BUILD_NAME"
+    - find "packages/app/release/$PLAN_VERSION" -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' -o -name '*.yml' \) ! -name builder-debug.yml -exec cp {} "builds/$BUILD_NAME/" \;
+    - node /tmp/release/builds.mjs mark "$BUILD_NAME" "builds/$BUILD_NAME"
   after_script:
-    - mkdir -p installers smoke
-    - find "packages/app/release/$PLAN_VERSION" -maxdepth 1 -type f \( -name '*.AppImage' -o -name '*.deb' -o -name '*.blockmap' \) -exec cp {} installers/ \; 2>/dev/null || true
+    - mkdir -p smoke
     - cp "packages/app/release/$PLAN_VERSION/smoke.png" "smoke/$CI_JOB_NAME_SLUG.png" 2>/dev/null || true
-    # Each update manifest under this build's name; the publish step merges the copies of one name.
-    - for m in "packages/app/release/$PLAN_VERSION"/*.yml; do [ -f "$m" ] && [ "$(basename "$m")" != builder-debug.yml ] && cp "$m" "installers/$(basename "$m")@$CI_JOB_NAME_SLUG"; done; true
   artifacts:
     when: always
     expire_in: 1 week
-    paths: [installers/, smoke/]
+    paths: [builds/, smoke/]
 
 release:build:linux-x64:
   extends: .release-build-linux
   tags: [saas-linux-small-amd64]
+  variables:
+    BUILD_NAME: linux-x64
 
 release:build:linux-arm64:
   extends: .release-build-linux
   tags: [saas-linux-small-arm64]
+  variables:
+    BUILD_NAME: linux-arm64
 
 release:build:win-x64:
   stage: build
@@ -154,14 +190,20 @@ release:build:win-x64:
   tags: [saas-windows-medium-amd64]
   variables:
     GIT_DEPTH: 0
+    BUILD_NAME: win-x64
   script:
     - if ($env:PLAN_SKIP -eq "true") { Write-Output "nothing to release"; exit 0 }
-    - git checkout --quiet $env:PLAN_COMMIT
+    - Copy-Item -Recurse scripts\release "$env:TEMP\release"
     # Node 22, the latest 22.x release, from nodejs.org: the runner image is not guaranteed to have it.
-    - $node = (Invoke-RestMethod https://nodejs.org/dist/index.json | Where-Object { $_.version -like 'v22.*' } | Select-Object -First 1).version
+    # The call is parenthesized so Windows PowerShell 5.1 passes the list item by item; unwrapped it
+    # passes the whole array as one object, and every version came back joined into the URL (a 400).
+    - $node = ((Invoke-RestMethod https://nodejs.org/dist/index.json) | Where-Object { $_.version -like 'v22.*' } | Select-Object -First 1).version
     - Invoke-WebRequest "https://nodejs.org/dist/$node/node-$node-win-x64.zip" -OutFile "$env:TEMP\node.zip"
     - Expand-Archive "$env:TEMP\node.zip" -DestinationPath "$env:TEMP\node" -Force
     - $env:PATH = "$env:TEMP\node\node-$node-win-x64;$env:PATH"
+    - $env:GH_TOKEN = $env:RELEASES_TOKEN
+    - if ((node "$env:TEMP\release\builds.mjs" check $env:BUILD_NAME) -eq "true") { exit 0 }
+    - git checkout --quiet $env:PLAN_COMMIT
     - git clone --quiet --filter=blob:none "https://gitlab-ci-token:$($env:CI_JOB_TOKEN)@gitlab.com/mistlabs/declarative-ai.git" ..\declarative-ai
     - git -C ..\declarative-ai checkout --quiet $env:PLAN_UPSTREAM
     - Push-Location ..\declarative-ai
@@ -172,17 +214,72 @@ release:build:win-x64:
     - $env:JAIRA_BUILD_VERSION = $env:PLAN_VERSION
     - $env:NODE_OPTIONS = "--max-old-space-size=4096"
     - npm run app:dist
+    - New-Item -ItemType Directory -Force "builds\$env:BUILD_NAME" | Out-Null
+    - Get-ChildItem "packages\app\release\$env:PLAN_VERSION\*" -File -Include *.exe, *.blockmap, *.yml | Where-Object { $_.Name -ne "builder-debug.yml" } | Copy-Item -Destination "builds\$env:BUILD_NAME"
+    - node "$env:TEMP\release\builds.mjs" mark $env:BUILD_NAME "builds\$env:BUILD_NAME"
   after_script:
-    - New-Item -ItemType Directory -Force installers, smoke | Out-Null
-    - Get-ChildItem "packages\app\release\$env:PLAN_VERSION\*" -File -Include *.exe, *.blockmap -ErrorAction SilentlyContinue | Copy-Item -Destination installers
+    - New-Item -ItemType Directory -Force smoke | Out-Null
     - Copy-Item "packages\app\release\$env:PLAN_VERSION\smoke.png" "smoke\$env:CI_JOB_NAME_SLUG.png" -ErrorAction SilentlyContinue
-    # Each update manifest under this build's name; the publish step merges the copies of one name.
-    - Get-ChildItem "packages\app\release\$env:PLAN_VERSION\*.yml" -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ne "builder-debug.yml" } | ForEach-Object { Copy-Item $_.FullName "installers\$($_.Name)@$env:CI_JOB_NAME_SLUG" }
   artifacts:
     when: always
     expire_in: 1 week
-    paths: [installers/, smoke/]
+    paths: [builds/, smoke/]
 
+# The Mac keeps its state between jobs (a shell runner): the declarative-ai clone
+# beside the checkout is removed first, Node comes from mise (one version per job,
+# whatever else the machine has), and one iOS job runs at a time on its 8 GB.
+.ios:
+  tags: [mac]
+  resource_group: mac
+  variables:
+    GIT_DEPTH: 0
+    NODE_OPTIONS: --max-old-space-size=4096
+  before_script:
+    - export PATH="/opt/homebrew/bin:$PATH"
+    - mise install node@22 && export PATH="$(mise where node@22)/bin:$PATH"
+    - node --version && xcodebuild -version | head -1 && pod --version
+
+ios:check:
+  extends: .ios
+  stage: build
+  needs: []
+  rules:
+    - if: $RELEASE_EVENT
+      when: never
+    - if: $IOS_CHECK == "true"
+  script:
+    - rm -rf ../declarative-ai
+    - git clone --quiet --depth 1 "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" ../declarative-ai
+    - cd ../declarative-ai && npm install && npm run build && cd "$CI_PROJECT_DIR"
+    - npm install
+    - node scripts/release/ios.mjs check
+
+# Uploads to App Store Connect and records `ios` in the GitHub release; stops first if the
+# release or App Store Connect already has this build (ios.mjs).
+release:build:ios:
+  extends: .ios
+  stage: build
+  needs: [release:plan]
+  rules:
+    - if: $RELEASE_EVENT
+  # New: an iOS failure must not hold back the desktop release.
+  allow_failure: true
+  script:
+    - if [ "$PLAN_SKIP" = "true" ]; then echo "nothing to release"; exit 0; fi
+    - if [ -z "$ASC_KEY_P8_BASE64" ]; then echo "no App Store Connect key here (a protected variable reaches only protected branches and tags)"; exit 0; fi
+    - RELEASE_SCRIPTS="$(mktemp -d)" && cp -r scripts/release "$RELEASE_SCRIPTS/"
+    - export GH_TOKEN="$RELEASES_TOKEN"
+    - if [ "$(node "$RELEASE_SCRIPTS/release/builds.mjs" check ios)" = "true" ]; then exit 0; fi
+    - git checkout --quiet "$PLAN_COMMIT"
+    - rm -rf ../declarative-ai
+    - git clone --quiet --filter=blob:none "https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/declarative-ai.git" ../declarative-ai
+    - git -C ../declarative-ai checkout --quiet "$PLAN_UPSTREAM"
+    - cd ../declarative-ai && npm install && npm run build && cd "$CI_PROJECT_DIR"
+    - npm install
+    - NOTES_FILE=plan/notes.md JAIRA_IOS_VERSION="$PLAN_IOS_VERSION" JAIRA_IOS_BUILD="$PLAN_IOS_BUILD" node "$RELEASE_SCRIPTS/release/ios.mjs" release
+
+# Publishes whatever builds finished, even when another failed: the release gets those now, and
+# a later run, here or on GitHub, adds the rest.
 release:publish:
   stage: publish
   needs:
@@ -192,6 +289,8 @@ release:publish:
     - release:build:win-x64
   rules:
     - if: $RELEASE_EVENT
+      when: always
   script:
+    - if [ -z "$PLAN_SKIP" ]; then echo "the plan did not finish"; exit 1; fi
     - if [ "$PLAN_SKIP" = "true" ]; then echo "nothing to release"; exit 0; fi
-    - GH_TOKEN="$RELEASES_TOKEN" node scripts/release/publish.mjs installers plan/notes.md
+    - GH_TOKEN="$RELEASES_TOKEN" node scripts/release/publish.mjs builds plan/notes.md

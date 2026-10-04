@@ -1066,7 +1066,10 @@ async function hostLocally(): Promise<EngineLink | undefined> {
  * outlives this window when `engine.keepServerRunning` says so. Undefined when it did not come up.
  */
 async function startServer(): Promise<EngineClient | undefined> {
-  const args = [...(app.isPackaged ? [] : [app.getAppPath()]), "--serve", ...(home !== undefined ? ["--home", home] : [])];
+  // On Linux `--no-sandbox` must be on the command line: Chromium checks its setuid sandbox helper
+  // before `serve.ts` runs, so the switch it appends comes too late where the helper is not setuid root
+  // (an AppImage, a CI machine).
+  const args = [...(app.isPackaged ? [] : [app.getAppPath()]), "--serve", ...(process.platform === "linux" ? ["--no-sandbox"] : []), ...(home !== undefined ? ["--home", home] : [])];
   const env = { ...process.env };
   delete env["ELECTRON_RUN_AS_NODE"];
   try {

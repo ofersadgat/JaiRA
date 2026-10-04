@@ -7,13 +7,24 @@ name: Release
 # - a pushed `vX.Y.Z` tag releases that commit as stable, and a `vX.Y.Z-nightly.YYYYMMDD.N` tag as that
 #   nightly (`npm run release-<major|minor|patch|nightly>-version` pushes them);
 # - a manual `stable` run promotes the latest nightly's commit;
-# - a nightly builds `main`, from the schedule (once a day at 2am Pacific; skipped with no new commits) or
-#   by hand.
+# - a nightly builds `main`, from the schedule (once a day at 2am Pacific) or by hand.
+#
+# Either system may build any release, in any order, and again (decision 0017 §8): a release is filled
+# in. The plan reuses a commit's nightly if one exists and is skipped when the release already has every
+# build this workflow makes; each build job first asks the release for its own record
+# (`scripts/release/builds.mjs check`) and stops if it is there; publishing adds only what the release
+# lacks, and publishes what finished even when another build failed.
 #
 # Needs one secret: RELEASES_TOKEN, a fine-grained token with Contents read/write on the releases
 # repository and nothing else.
 #
 # Unsigned for now: every signing step belongs here once the accounts exist, gated on its secrets.
+#
+# iOS (decision 0017): the `ios` job builds the phone app on a GitHub-hosted Mac with
+# `scripts/release/ios.mjs` and uploads it to App Store Connect, signed by Apple's cloud signing. It runs
+# only with the secrets ASC_KEY_ID, ASC_ISSUER_ID, ASC_KEY_P8_BASE64 (an App Store Connect API key with
+# the Admin role, its `.p8` file base64) and APPLE_TEAM_ID, the same names as GitLab's group variables.
+# Nothing waits for it, and its failure does not fail the release.
 
 on:
   push:
@@ -25,7 +36,7 @@ on:
   workflow_dispatch:
     inputs:
       channel:
-        description: nightly builds main; stable promotes the latest nightly
+        description: nightly builds this branch's commit; stable promotes the latest nightly
         type: choice
         options: [nightly, stable]
         default: nightly
@@ -55,6 +66,9 @@ jobs:
       upstream: ${{ steps.plan.outputs.upstream }}
       prerelease: ${{ steps.plan.outputs.prerelease }}
       notes: ${{ steps.plan.outputs.notes }}
+      ios_version: ${{ steps.plan.outputs.ios_version }}
+      ios_build: ${{ steps.plan.outputs.ios_build }}
+      ios: ${{ steps.ios.outputs.enabled }}
     steps:
       - name: Require the releases token
         env:
@@ -64,6 +78,10 @@ jobs:
             echo "::error::Add a RELEASES_TOKEN secret: a fine-grained token with Contents read/write on $RELEASES_REPO."
             exit 1
           fi
+
+      # A job's `if` cannot read secrets, so whether the iOS job runs is decided here.
+      - id: ios
+        run: echo "enabled=${{ secrets.ASC_KEY_P8_BASE64 != '' }}" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@v4
         with:
@@ -81,6 +99,8 @@ jobs:
           INPUT_CHANNEL: ${{ inputs.channel }}
           INPUT_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          # What this workflow builds: the plan is skipped when the release already has all of it.
+          BUILDS: win-x64 win-arm64 mac-arm64 mac-x64 linux-x64 linux-arm64${{ steps.ios.outputs.enabled == 'true' && ' ios' || '' }}
 
   build:
     needs: plan
@@ -97,8 +117,31 @@ jobs:
           - { name: linux-x64, os: ubuntu-latest }
           - { name: linux-arm64, os: ubuntu-24.04-arm }
     runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      PLAN_TAG: ${{ needs.plan.outputs.tag }}
+      PLAN_VERSION: ${{ needs.plan.outputs.version }}
+      PLAN_COMMIT: ${{ needs.plan.outputs.commit }}
     steps:
+      # This workflow's release scripts, apart from the commit to build, which may be older than them.
+      - name: Checkout the release scripts
+        uses: actions/checkout@v4
+        with:
+          path: ci
+          sparse-checkout: scripts/release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Made here or on GitLab, this build may already be in the release.
+      - name: Check the release
+        id: done
+        shell: bash
+        run: echo "built=$(node ci/scripts/release/builds.mjs check ${{ matrix.name }})" >> "$GITHUB_OUTPUT"
+
       - name: Checkout JaiRA
+        if: steps.done.outputs.built != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ needs.plan.outputs.commit }}
@@ -106,32 +149,32 @@ jobs:
 
       # Unpinned (0011 §3): main, as the plan saw it, so all six machines build the same commit.
       - name: Checkout declarative-ai
+        if: steps.done.outputs.built != 'true'
         uses: actions/checkout@v4
         with:
           repository: ofersadgat/declarative-ai
           ref: ${{ needs.plan.outputs.upstream }}
           path: declarative-ai
 
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
       - name: Install Linux build and display tools
-        if: runner.os == 'Linux'
+        if: steps.done.outputs.built != 'true' && runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb fakeroot
 
       - name: Install and build declarative-ai
+        if: steps.done.outputs.built != 'true'
         working-directory: declarative-ai
         run: |
           npm install
           npm run build
 
       - name: Install JaiRA
+        if: steps.done.outputs.built != 'true'
         working-directory: JaiRA
         run: npm install
 
       # The smoke test at the end of package.mjs launches the packaged app, which needs a display.
       - name: Build the installer
+        if: steps.done.outputs.built != 'true'
         working-directory: JaiRA
         shell: bash
         env:
@@ -146,40 +189,122 @@ jobs:
             npm run app:dist
           fi
 
-      # The update manifests (latest*.yml / nightly*.yml) carry this machine's name: two machines write
-      # the same file name, and publish.mjs merges the copies into one per name (manifests.mjs).
-      - name: Name the update manifests by build
-        working-directory: JaiRA/packages/app/release/${{ needs.plan.outputs.version }}
+      # This build's installers, update manifests and record, for publish.mjs.
+      - name: Collect the build
+        if: steps.done.outputs.built != 'true'
         shell: bash
         run: |
-          for manifest in *.yml; do
-            [ -e "$manifest" ] || continue
-            [ "$manifest" = "builder-debug.yml" ] && continue
-            mv "$manifest" "$manifest@${{ matrix.name }}"
+          mkdir -p build
+          for file in JaiRA/packages/app/release/$PLAN_VERSION/*; do
+            case "$(basename "$file")" in
+              builder-debug.yml) ;;
+              *.yml|*.exe|*.blockmap|*.dmg|*.zip|*.AppImage|*.deb) cp "$file" build/ ;;
+            esac
           done
+          node ci/scripts/release/builds.mjs mark ${{ matrix.name }} build
 
       - uses: actions/upload-artifact@v4
+        if: steps.done.outputs.built != 'true'
         with:
-          name: installer-${{ matrix.name }}
+          name: build-${{ matrix.name }}
           if-no-files-found: error
-          path: |
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.yml@*
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.exe
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.blockmap
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.dmg
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.zip
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.AppImage
-            JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/*.deb
+          path: build/
 
       - uses: actions/upload-artifact@v4
-        if: always()
+        if: always() && steps.done.outputs.built != 'true'
         with:
           name: smoke-${{ matrix.name }}
           path: JaiRA/packages/app/release/${{ needs.plan.outputs.version }}/smoke.png
           if-no-files-found: ignore
 
+  ios:
+    needs: plan
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.ios == 'true'
+    # New: an iOS failure must not fail the release.
+    continue-on-error: true
+    runs-on: macos-26
+    env:
+      GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+      PLAN_TAG: ${{ needs.plan.outputs.tag }}
+      PLAN_VERSION: ${{ needs.plan.outputs.version }}
+      PLAN_COMMIT: ${{ needs.plan.outputs.commit }}
+      PLAN_PRERELEASE: ${{ needs.plan.outputs.prerelease }}
+    steps:
+      - name: Checkout the release scripts
+        uses: actions/checkout@v4
+        with:
+          path: ci
+          sparse-checkout: scripts/release
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Check the release
+        id: done
+        run: echo "built=$(node ci/scripts/release/builds.mjs check ios)" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout JaiRA
+        if: steps.done.outputs.built != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.commit }}
+          path: JaiRA
+
+      - name: Checkout declarative-ai
+        if: steps.done.outputs.built != 'true'
+        uses: actions/checkout@v4
+        with:
+          repository: ofersadgat/declarative-ai
+          ref: ${{ needs.plan.outputs.upstream }}
+          path: declarative-ai
+
+      # Xcode 26, not the image's newest: the iOS 27 SDK needs a scene life cycle Expo 57 has only as an
+      # opt-in (decision 0017). The highest 26.x the image has, betas left out.
+      - name: Select Xcode 26
+        if: steps.done.outputs.built != 'true'
+        run: |
+          xcode="$(ls -d /Applications/Xcode_26*.app | grep -vi beta | sort -V | tail -1)"
+          echo "Using $xcode"
+          sudo xcode-select -s "$xcode"
+
+      - name: Install and build declarative-ai
+        if: steps.done.outputs.built != 'true'
+        working-directory: declarative-ai
+        run: |
+          npm install
+          npm run build
+
+      - name: Install JaiRA
+        if: steps.done.outputs.built != 'true'
+        working-directory: JaiRA
+        run: npm install
+
+      - name: Write the notes
+        if: steps.done.outputs.built != 'true'
+        env:
+          NOTES: ${{ needs.plan.outputs.notes }}
+        run: printf '%s\n' "$NOTES" > notes.md
+
+      - name: Build, sign and upload
+        if: steps.done.outputs.built != 'true'
+        working-directory: JaiRA
+        env:
+          JAIRA_IOS_VERSION: ${{ needs.plan.outputs.ios_version }}
+          JAIRA_IOS_BUILD: ${{ needs.plan.outputs.ios_build }}
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_P8_BASE64: ${{ secrets.ASC_KEY_P8_BASE64 }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          NOTES_FILE: ${{ github.workspace }}/notes.md
+          NODE_OPTIONS: --max-old-space-size=4096
+        run: node ../ci/scripts/release/ios.mjs release
+
+  # Publishes whatever builds finished, even when another failed: the release gets those now, and a later
+  # run, here or on GitLab, adds the rest.
   publish:
     needs: [plan, build]
+    if: ${{ !cancelled() && needs.plan.outputs.skip == 'false' }}
     runs-on: ubuntu-latest
     steps:
       # For scripts/release/publish.mjs, which GitLab's pipeline runs too.
@@ -189,11 +314,11 @@ jobs:
         with:
           node-version: 22
 
+      # One folder per build that uploaded one (none, when every build was already in the release).
       - uses: actions/download-artifact@v4
         with:
-          pattern: installer-*
-          path: installers
-          merge-multiple: true
+          pattern: build-*
+          path: builds
 
       - name: Write the notes
         env:
@@ -201,7 +326,7 @@ jobs:
         run: printf '%s\n' "$NOTES" > notes.md
 
       - name: Publish
-        run: node scripts/release/publish.mjs installers notes.md
+        run: node scripts/release/publish.mjs builds notes.md
         env:
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
           PLAN_TAG: ${{ needs.plan.outputs.tag }}

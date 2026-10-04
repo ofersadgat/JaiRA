@@ -14,6 +14,7 @@ export const RELEASES_REPO = process.env.RELEASES_REPO ?? "ofersadgat/releases";
 export const STABLE = /^(\d+)\.(\d+)\.(\d+)$/;
 export const NIGHTLY = /^(\d+\.\d+\.\d+)-nightly\.(\d{8})\.(\d+)$/;
 const COMMIT_LINE = /^jaira-commit: ([0-9a-f]{40})$/m;
+const UPSTREAM_LINE = /^declarative-ai-commit: ([0-9a-f]{40})$/m;
 
 /** GET from the GitHub API; `token` is optional (the releases repository is public). */
 export async function github(path, token = process.env.GH_TOKEN) {
@@ -36,6 +37,8 @@ export async function publishedReleases(token) {
 
 export const versionOf = (release) => release.tag_name.replace(/^v/, "");
 export const commitOf = (release) => COMMIT_LINE.exec(release.body ?? "")?.[1];
+/** The declarative-ai commit a release was built against, which the plan writes into its notes too. */
+export const upstreamOf = (release) => UPSTREAM_LINE.exec(release.body ?? "")?.[1];
 export const stablesOf = (published) => published.filter((r) => !r.prerelease && STABLE.test(versionOf(r)));
 export const nightliesOf = (published) => published.filter((r) => NIGHTLY.test(versionOf(r)));
 
@@ -69,6 +72,20 @@ export function nextNightly(appVersion, released, now = new Date()) {
     .filter((m) => m !== null && m[2] === day)
     .map((m) => Number(m[3]));
   return `${bump(base, "patch")}-nightly.${day}.${Math.max(0, ...today) + 1}`;
+}
+
+/**
+ * A release's version as Apple wants it (decision 0017): `CFBundleShortVersionString` is `X.Y.Z` and
+ * nothing else, and `CFBundleVersion` must be new for that `X.Y.Z` and higher than the builds before
+ * it. A nightly is its own `X.Y.Z` with build `YYYYMMDD.N`, read off its version, so GitHub and GitLab
+ * number it alike. A stable release is built the day it is promoted, from a nightly of the same
+ * `X.Y.Z`: build `YYYYMMDD.1000` of that day stays above every nightly before it.
+ */
+export function appleVersionOf(version, now = new Date()) {
+  const nightly = NIGHTLY.exec(version);
+  if (nightly !== null) return { version: nightly[1], build: `${nightly[2]}.${Number(nightly[3])}` };
+  if (!STABLE.test(version)) throw new Error(`'${version}' is neither X.Y.Z nor X.Y.Z-nightly.YYYYMMDD.N`);
+  return { version, build: `${now.toISOString().slice(0, 10).replace(/-/g, "")}.1000` };
 }
 
 /** Every version tagged in the releases repository, read over git: no API, no rate limit. */
