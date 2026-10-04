@@ -31,5 +31,8 @@
     "react-native-web": "^0.21.3",
     "react-native-webview": "13.16.1"
   },
-  "main": "one/metro-entry"
+  "main": "one/metro-entry",
+  "devDependencies": {
+    "@react-native-community/cli": "^20.2.0"
+  }
 }

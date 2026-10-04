@@ -85,8 +85,13 @@ export async function ensureRelease({ tag, version, notes, prerelease }) {
     `/repos/${RELEASES_REPO}/releases`,
     JSON.stringify({ tag_name: tag, name: `JaiRA ${version}`, body: notes, draft: true, prerelease }),
   );
-  const kept = await findRelease(tag);
-  if (kept.id !== mine.id) {
+  // The list catches up with a new release a moment later (seen on GitHub, 2026-10-04: not listed yet).
+  let kept;
+  for (let tries = 0; tries < 10 && kept === undefined; tries += 1) {
+    if (tries > 0) await new Promise((r) => setTimeout(r, 1000));
+    kept = await findRelease(tag);
+  }
+  if (kept !== undefined && kept.id !== mine.id) {
     // The other pipeline made one first: build into that one.
     await api("DELETE", `/repos/${RELEASES_REPO}/releases/${mine.id}`);
     console.log(`another pipeline made ${tag} at the same time; using its release`);
