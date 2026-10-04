@@ -840,13 +840,43 @@ code. The rulings:
 - `tailnet/mobile`: a fresh node asks for a sign-in through Tailscale's real control plane
   (`JAIRA_TAILNET_LIVE=1`), and the Android library builds with gomobile.
 
+**What the first try on a phone found (2026-10-04).** The person, on an iPhone: "the operation couldnt be
+completed (Network.NWError error -65569 - DefunctConnection)", no way to look again, nothing moving to
+say it was still looking, and nothing found after minutes. And: "even in the error state you should be
+able to try again", "more informative ui as the app is scanning … what machines has it found? what is it
+searching / trying?"
+
+- **The phone's browse dies and comes back.** iOS drops a Bonjour browse (-65569) when the app goes
+  inactive — behind the local-network prompt itself. A failed browse now starts again by itself (1 s,
+  doubling to 30 s), the app looks afresh whenever it comes back to the front, and Android's NSD does
+  the same.
+- **The machine answers on the phone's network.** `multicast-dns` sends from the one interface the
+  system picks: on the Windows machine it was built on, WSL's switch (172.30.32.1), not the Ethernet
+  (192.168.1.32), so no phone heard it. Each local address gets a responder of its own; a Mac uses the
+  system's (`dns-sd -R`); virtual switches (WSL, Hyper-V, Docker, Tailscale) rank after real networks.
+- **The search says itself.** Three moving dots and how long it has looked; this phone's own address;
+  the machines found, with their addresses and port; what to check after fifteen seconds with nothing
+  found; a dropped or refused browse in words; Search again in every state. Pairing says each address
+  it tries and what came of it, and the phone's Tailscale says what it is doing (starting, waiting for
+  its sign-in, on the tailnet as which name, failed and why).
+- **An address to type where the network hides machines.** The pairing listener tries port 47319 first,
+  so the local address alone is enough; Settings → Machines shows it under the code, and the phone's
+  Address field pairs over the local network when given one (`typedLanMachine`).
+- **Settings says what each phone did** under Phones nearby: connected, a code that is not this one (a
+  phone hangs up after the exchange when the machine's proof does not hold), paired as which phone, its
+  sign-in opened.
+- **Tailscale built in now starts on Android.** Android 11 and later refuse Go's own listing of the
+  network interfaces, and the node stopped there; Java lists them for it (`InterfaceSource`, as
+  Tailscale's own app does). It then panicked finding no place for its log state: `TS_LOGS_DIR` is the
+  node's directory, and nothing is uploaded (`TS_NO_LOGS_NO_SUPPORT`).
+- **Seen on the emulator:** the search screen moving and timing, Search again, this phone's address; a
+  typed local address (10.0.2.2, the host) pairing with a real engine's listener on port 47319 by its
+  code; the phone's node then started and asking for its sign-in.
+
 **Not built, or not yet seen.**
 
 - A phone has not paired on a real Wi-Fi, been approved, and connected through its node; nor has the
   iOS framework been built (it builds on a Mac, in CI).
-- On Android, tsnet cannot read the network interfaces on Android 11 and later without help from Java
-  (Tailscale's own app registers an interface getter). The node may then run on DERP relays alone, or not
-  at all. Android is not released.
 - A phone that pairs with a second machine on the same tailnet reuses its node; one on another tailnet
   would need its node signed out first, which nothing offers yet.
 

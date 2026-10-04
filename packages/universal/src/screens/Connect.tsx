@@ -28,7 +28,7 @@ export { elapsedWords, nearbySearchWords, nearbyStepWords, type NearbyAttempt, t
 
 export interface ConnectProps {
   /** The machine this device is already paired with, while it is being connected to. */
-  saved?: { label: string; address: string };
+  saved?: { label: string; address: string; /** What else is going on: the phone's Tailscale, when it carries the connection. */ detail?: string };
   /** What the fields start with: the page's own origin in a browser, a link's address and code. */
   initial?: { address?: string; code?: string };
   /** Why pairing or connecting has not worked, in the machine's or the bridge's words. */
@@ -47,7 +47,7 @@ export interface ConnectProps {
   /** Pair with a machine found nearby, by the code it shows. */
   onPairNearby?: (key: string, code: string) => void;
   /** Pairing with a machine nearby, while it happens: the step, and each address tried. */
-  pairing?: { label: string; step: NearbyStep; attempts?: NearbyAttempt[] };
+  pairing?: { label: string; step: NearbyStep; attempts?: NearbyAttempt[]; /** The phone's Tailscale, while it joins. */ detail?: string };
   /** The phone's Tailscale wants signing in again (its key expired): the page, opened here. */
   signIn?: () => void;
 }
@@ -132,6 +132,7 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
         <Text fontFamily={t.v("font-data") as never} fontSize={13} color={t.v("dim") as never}>
           {saved.address}
         </Text>
+        {saved.detail !== undefined ? words(saved.detail, /failed/.test(saved.detail) ? "bad" : "dim") : null}
         {trouble}
         {signIn !== undefined ? button("Sign in to Tailscale", signIn, "primary") : null}
         {onRetry !== undefined ? button("Try again", onRetry, signIn !== undefined ? "quiet" : "primary") : null}
@@ -165,6 +166,7 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
               {(pairing.attempts ?? []).map((a) => (
                 <View key={a.address}>{data(`${a.address}  ${a.state === "trying" ? "reaching…" : a.state === "answered" ? "answered" : `no: ${a.reason ?? "no answer"}`}`, a.state === "failed" ? "bad" : "dim")}</View>
               ))}
+              {pairing.detail !== undefined ? data(pairing.detail, /failed/.test(pairing.detail) ? "bad" : "dim") : null}
             </View>
           ) : null}
           {trouble}

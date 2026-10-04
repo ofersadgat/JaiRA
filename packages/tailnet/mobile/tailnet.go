@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -93,6 +94,11 @@ func Start(dir, hostname string, l StateListener) error {
 		mu.Unlock()
 		return errors.New("a directory for the node's state is needed")
 	}
+	// Where Tailscale keeps its log state: on Android it finds no place of its own and panics ("no safe
+	// place found to store log state"), taking the app with it. And none of it is uploaded: a window has
+	// nothing for Tailscale's support to read.
+	_ = os.Setenv("TS_LOGS_DIR", dir)
+	_ = os.Setenv("TS_NO_LOGS_NO_SUPPORT", "true")
 	s := &tsnet.Server{Dir: dir, Hostname: hostname, Logf: func(string, ...any) {}}
 	// The sign-in link is said in the library's user log, again every few seconds while nobody has signed
 	// in; the IPN bus says it too (below). Either way it is passed on once per link.

@@ -7,9 +7,9 @@ import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { DEVICE_KIND, deviceLabel } from "../bridges/deviceInfo";
 import { engineBridge, pairDevice, type EngineBridge } from "../bridges/engineBridge";
 import { pairNearby } from "../bridges/lanPair";
-import { NEARBY_SUPPORTED, browseNearby, localAddresses, randomBytes, tailnet, type NearbyState } from "../bridges/nearby";
+import { NEARBY_SUPPORTED, browseNearby, localAddresses, randomBytes, tailnet, type NearbyState, type TailnetState } from "../bridges/nearby";
 import { deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } from "../bridges/savedPairing";
-import { tailnetEngineUrl, tailnetHostname, tailnetJoin } from "../bridges/tailnetJoin";
+import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "../bridges/tailnetJoin";
 
 /**
  * A window that is not Electron's — a phone, a browser tab — standing on a machine's engine (decisions
@@ -101,6 +101,8 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   const [nearbyPairing, setNearbyPairing] = useState<{ label: string; step: NearbyStep; attempts: NearbyAttempt[] } | undefined>(undefined);
   /** The phone's Tailscale asks to be signed in again (its key expired, or it was signed out). */
   const [signInUrl, setSignInUrl] = useState<string | undefined>(undefined);
+  /** What the phone's Tailscale is doing, said on the screen while it matters. */
+  const [tailnetLine, setTailnetLine] = useState<string | undefined>(undefined);
 
   /** Connect the bridge to a pairing's engine at `url`: its own, or the tailnet proxy's to it. */
   const open = useCallback((pairing: SavedPairing, url: string): void => {
@@ -323,10 +325,13 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   }, [electron]);
 
   // A pairing through the tailnet: the phone's Tailscale may ask to be signed in again.
-  const viaTailnet = saved?.tailnet === true;
+  const viaTailnet = saved?.tailnet === true || nearbyPairing?.step === "joining" || nearbyPairing?.step === "approve";
   useEffect(() => {
     if (!viaTailnet || tailnet === undefined) return;
-    const hear = (state: { state: string; url?: string }): void => setSignInUrl(state.state === "needs-login" ? state.url : undefined);
+    const hear = (state: TailnetState): void => {
+      setSignInUrl(state.state === "needs-login" ? state.url : undefined);
+      setTailnetLine(tailnetWords(state));
+    };
     hear(tailnet.state());
     return tailnet.onState(hear);
   }, [viaTailnet]);
@@ -348,8 +353,8 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
   const screen =
     phase === "connecting" && saved !== undefined ? (
       <Connect
-        saved={{ label: saved.machine.label, address: saved.address }}
-        problem={signInUrl !== undefined ? "Tailscale on this phone needs you to sign in again before it can reach the machine" : problem}
+        saved={{ label: saved.machine.label, address: saved.address, ...(saved.tailnet === true && tailnetLine !== undefined ? { detail: tailnetLine } : {}) }}
+        problem={signInUrl !== undefined ? "Tailscale on this phone needs its sign-in approved before it can reach the machine: open it here, or pair again with a code to open it on the machine" : problem}
         onPair={() => undefined}
         onRetry={() => (bridge.current !== undefined ? bridge.current.retryNow() : connect(saved))}
         onForget={forget}
@@ -377,7 +382,7 @@ export function Remote({ link, frame, children }: { link?: Partial<PairLink>; fr
                 setSearch((n) => n + 1);
               },
               onPairNearby: (key: string, c: string) => pairWithNearby(key, c),
-              ...(nearbyPairing !== undefined ? { pairing: nearbyPairing } : {}),
+              ...(nearbyPairing !== undefined ? { pairing: { ...nearbyPairing, ...(tailnetLine !== undefined && (nearbyPairing.step === "joining" || nearbyPairing.step === "approve") ? { detail: tailnetLine } : {}) } } : {}),
             }
           : {})}
       />

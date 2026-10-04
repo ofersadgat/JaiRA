@@ -64,6 +64,24 @@ export async function tailnetEngineUrl(tailnet: Tailnet, hostname: string, addre
   return `ws://127.0.0.1:${port}/engine`;
 }
 
+/** What the phone's Tailscale is doing, in a line for the screen. */
+export function tailnetWords(state: TailnetState): string {
+  switch (state.state) {
+    case "starting":
+      return "Tailscale on this phone: starting…";
+    case "needs-login":
+      return "Tailscale on this phone: waiting for its sign-in to be approved";
+    case "running":
+      return `Tailscale on this phone: on the tailnet${state.dnsName ? ` as ${state.dnsName}` : ""}`;
+    case "error":
+      return `Tailscale on this phone failed: ${state.message ?? "no reason given"}`;
+    case "unavailable":
+      return "This build has no Tailscale built in";
+    default:
+      return "Tailscale on this phone: not started";
+  }
+}
+
 /** Whether an address is on a tailnet: a `.ts.net` name or a 100.64/10 address. */
 export function onTailnet(address: string): boolean {
   let host: string;
