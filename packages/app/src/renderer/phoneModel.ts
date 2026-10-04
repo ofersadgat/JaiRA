@@ -170,3 +170,14 @@ export function ancestorsOf<N extends { instanceId: string; parentInstanceId?: s
   }
   return out;
 }
+
+/**
+ * Where a drag of the phone's drawer lets it go: out (true) or back in. `at` is how far out it was let go
+ * (0 to `width`), `velocity` the finger's (px/ms, positive to the right). A flick goes its way; else past
+ * a third of the way it opens.
+ */
+export function drawerSettles(at: number, velocity: number, width: number): boolean {
+  if (velocity > 0.5) return true;
+  if (velocity < -0.5) return false;
+  return at > width / 3;
+}

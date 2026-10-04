@@ -13,7 +13,8 @@
  * - **sheet**: dragged up it is full; dragged past the top the conversation is in the main view, the sheet
  *   back at its head; dragged down past its head it closes;
  * - **board**: All tasks — the strip, every column stacked, one column alone after a swipe;
- * - **chat**: a conversation, its composer at the foot.
+ * - **chat**: a conversation, its composer at the foot;
+ * - **open**: a double tap on a card opens its run.
  */
 import { existsSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
@@ -96,11 +97,16 @@ async function main(): Promise<void> {
     if (port === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
     const url = `http://127.0.0.1:${port}/native?address=${encodeURIComponent(`127.0.0.1:${port}`)}`;
     phone = await App.browse(CHROME, url, { out: OUT, port: 9283, phone: { width: 390, height: 844, scale: 3 } });
-    await phone.until(says("Connect to a JaiRA machine"), "the phone's connect screen");
+    // The shell is drawn at once, empty, saying it has no machine; its line opens the Connect screen.
+    await phone.until(`!!document.querySelector('[aria-label="Open the sidebar"]') && ${says("No machine connected")}`, "the phone's shell, drawn before any machine answers");
+    await phone.shot("00-no-machine");
+    check(true, "the shell is drawn before a machine is reached, saying it has none");
+    await tapLabel(phone, "No machine connected. Connect");
+    await phone.until(says("Connect to a JaiRA machine"), "the Connect screen over the shell");
     await phone.evaluate(`document.querySelector('input[aria-label="Code"]').focus()`);
     await phone.type(shown.pairing.code);
     await phone.clickText("Pair");
-    await phone.until(`!!document.querySelector('[aria-label="Open the sidebar"]')`, "the phone to pair and draw its own layout");
+    await phone.until(`!!document.querySelector('[aria-label="Open the sidebar"]') && !${says("Connect to a JaiRA machine")} && !${says("No machine connected")}`, "the phone to pair, close the Connect screen and draw the machine's shell");
     await sleep(1500);
     await phone.shot("0-first");
     console.log("  dims", await phone.evaluate<string>(`JSON.stringify({ inner: innerWidth, client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, h: innerHeight, meta: document.querySelector('meta[name=viewport]')?.content ?? null })`));
@@ -108,6 +114,15 @@ async function main(): Promise<void> {
     console.log("  page says:", (await phone.evaluate<string>("document.body.innerText")).slice(0, 400).replace(/\n/g, " | "));
     check((await phone.evaluate<number>(`document.querySelectorAll('[aria-label="Fit to the screen"], [aria-label="Show at full size"]').length`)) === 0, "the phone draws its own layout, not the desktop's fitted");
 
+    if (doing("drawer")) {
+      // A swipe from the screen's left edge pulls the drawer out; one back to the left pushes it in.
+      await drag(phone, 4, 420, 424, 260);
+      check(await phone.evaluate<boolean>(`!!document.querySelector('[aria-label="Close the sidebar"]')`), "a swipe from the left edge opens the drawer");
+      await phone.shot("0b-drawer-swiped");
+      await drag(phone, 300, 420, 424, -260);
+      await sleep(400);
+      check(await phone.evaluate<boolean>(`!document.querySelector('[aria-label="Close the sidebar"]')`), "a swipe back to the left closes it");
+    }
     if (doing("drawer") || doing("inbox") || doing("sheet")) {
       await tapLabel(phone, "Open the sidebar");
       await phone.until(says("Inbox"), "the drawer to open with its Inbox row");
@@ -166,9 +181,10 @@ async function main(): Promise<void> {
       check(await phone.evaluate<boolean>(`!!document.querySelector('[aria-label="All columns"]')`), "the board has its strip, All first");
       const selectedTabs = (): Promise<string> => phone!.evaluate<string>(`[...document.querySelectorAll('[role="tab"][aria-selected="true"]')].map((e) => e.getAttribute("aria-label") + "@" + Math.round(e.getBoundingClientRect().top)).join(", ")`);
       console.log("  selected before the swipe:", await selectedTabs());
-      await drag(phone, 330, 400, 405, -220);
+      // On a column's heading: on web a card is the browser's to drag (HTML drag and drop), which takes the touch.
+      await drag(phone, 330, 185, 188, -220);
       console.log("  selected after the swipe:", await selectedTabs());
-      check(await phone.evaluate<boolean>(`!![...document.querySelectorAll('[aria-selected="true"][role="tab"]')].find((e) => e.getAttribute("aria-label") !== "All columns")`), "swiped left, the board shows one column");
+      check(await phone.evaluate<boolean>(`[...document.querySelectorAll('[aria-selected="true"][role="tab"]')].filter((e) => e.getBoundingClientRect().top < 100).every((e) => e.getAttribute("aria-label") !== "All columns")`), "swiped left, the board shows one column");
       await phone.shot("10-board-one");
       await tapLabel(phone, "All columns");
       await sleep(500);
@@ -176,10 +192,14 @@ async function main(): Promise<void> {
     }
     if (doing("files")) {
       await tapLabel(phone, "Open the sidebar");
-      // Standing on the project opens its rows (Files, Tasks, Chat) under it.
-      await phone.clickText(".world-phone-layout");
-      await sleep(600);
-      await phone.clickText("Files");
+      // Standing on the project opens its rows (Files, Tasks, Chat) under it — unless it already stands there.
+      try {
+        await phone.clickText("Files");
+      } catch {
+        await phone.clickText(".world-phone-layout");
+        await sleep(600);
+        await phone.clickText("Files");
+      }
       await sleep(1200);
       await tap(phone, 375, 420);
       await phone.shot("13-files");
@@ -197,6 +217,24 @@ async function main(): Promise<void> {
       await phone.clickText("All conversations");
       await sleep(1200);
       await phone.shot("12-chat");
+    }
+    if (doing("open")) {
+      // The drawer may still stand open on All conversations' list.
+      if (!(await phone.evaluate<boolean>(`!!document.querySelector('[aria-label="Close the sidebar"]')`))) await tapLabel(phone, "Open the sidebar");
+      await phone.clickText("All tasks");
+      await sleep(1200);
+      // A double tap on a card opens its run.
+      const card = await phone.evaluate<{ x: number; y: number } | null>(`(() => { const el = [...document.querySelectorAll("*")].find((e) => e.childElementCount === 0 && e.textContent === "add dark mode"); if (!el) return null; const r = el.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + r.height / 2 }; })()`);
+      if (card !== null) {
+        await phone.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [card] });
+        await phone.cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await sleep(120);
+        await phone.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [card] });
+        await phone.cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await sleep(1500);
+        await phone.shot("11b-double-tapped");
+        check(await phone.evaluate<boolean>(`${says("Conversation")} && ${says("Tasks")}`), "a double tap on a card opens its run");
+      } else check(false, "a card to double-tap");
     }
   } finally {
     const said = [...(phone?.complaints ?? [])].filter((c) => !/disk_cache|gpu_disk|Gpu Cache/.test(c));

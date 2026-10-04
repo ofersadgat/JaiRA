@@ -919,6 +919,31 @@ and All. Type checks clean, the native graph reaches nothing DOM-only.
   panels are sheets. Settings' pages are in the drawer, as on the desktop.
 - Turning the phone moves between the phone's layout and the fitted desktop, which mounts the shell again.
 
+**The first look on an iPhone** (nightly `0.1.1 (20261004.7)`, the person, 2026-10-04):
+
+1. "when you try to click in the composer, the keyboard comes up and then gets dismissed immediately."
+   The composer's frame lost its stacking (`position`, `zIndex`) when its tray stepped aside for the
+   keyboard, and on the new architecture a box that gains or loses that is flattened or not, which makes
+   its native views again — the text box among them, which lost its focus. The frame keeps its stacking
+   whatever the keyboard does (`Composer.tsx`).
+2. "you should be able to swipe the left menu onto the screen by swiping right from the left edge." A drag
+   that starts in the screen's first 20 points and goes right pulls the drawer out under the finger; one
+   to the left on it pushes it back (`PhoneFrame.tsx`' `DrawerHost`, `phoneModel.ts`' `drawerSettles`).
+   It is asked in the capture phase at the frame's root, so a tap and every other drag are left alone.
+3. "there isnt a good way to open a task...perhaps double tap?" A second tap on a card within 320ms opens
+   its run, as a double-click does on the desktop (`TaskCard.tsx`).
+4. "you shouldnt gate showing the ui on being able to connect. the ui should be visible, but you just
+   shouldnt see projects. i.e. the ui populates the projects based on the machines it can connect to."
+   The phone draws the shell at once, on a bridge that answers nothing, so it stands empty; a line under
+   the title bar says why — no machine paired, one being reached, one not answering — and opens the
+   Connect screen over the shell (`remoteStatus.ts`, `PhoneFrame.tsx`' `RemoteLine`, `Remote.tsx`'s
+   `shell`). Connected, the shell is drawn again on the machine's bridge, with its projects. A browser
+   tab keeps the Connect screen first.
+
+Also found on the way, in the browser: a drawer cut short as it closed stayed over the screen, invisible,
+taking every touch (it now takes none while it closes, and goes after its slide's time whatever the slide
+says).
+
 ## Native desktop, later
 
 The desktop ships as Electron first, from the DOM tree and then from shared components as they are
