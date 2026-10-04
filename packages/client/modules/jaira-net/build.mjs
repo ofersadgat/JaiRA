@@ -25,7 +25,8 @@ if (platform !== "ios" && platform !== "android") {
 }
 
 function go(args, options = {}) {
-  return execFileSync("go", args, { cwd: TAILNET, encoding: "utf8", ...options }).trim();
+  // With `stdio: "inherit"` there is no output to return.
+  return (execFileSync("go", args, { cwd: TAILNET, encoding: "utf8", ...options }) ?? "").trim();
 }
 
 try {
