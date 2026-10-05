@@ -73,6 +73,8 @@ variables:
   RELEASE_VERSION: ""
   IOS_CHECK: "false"
   RELEASES_REPO: ofersadgat/releases
+  # Cloned beside the checkout, and removed after a Linux job on the group's machine (scripts/ci/in-node.sh).
+  CI_CLONES_BESIDE: declarative-ai
 
 build:
   stage: test

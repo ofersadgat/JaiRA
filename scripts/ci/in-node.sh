@@ -2,13 +2,14 @@
 # Runs a job's commands (given on stdin) in the node:22 image, wherever the job landed
 # (.gitlab/ci/pipeline.yml). On GitLab's hosted runners the job is already in that image and they run
 # as they are. On the group's own Linux machine, a shell runner, they run in a container of it: the
-# checkout and anything cloned beside it (JaiRA's declarative-ai) mounted at the same paths, the job's
-# variables passed in.
+# checkout and what is cloned beside it mounted at the same paths, the job's variables passed in.
 #
 # That machine keeps what a job leaves until the project's next job, on a disk every project shares,
-# so as the container ends it removes the bulk — every node_modules, the clone beside the checkout —
-# and gives what is left back to the runner's user: the container runs as root (apt-get), and the
-# runner's next `git clean` could not remove it otherwise. npm's cache goes with the container.
+# so as the container ends it removes the bulk — every node_modules, and the clones beside the
+# checkout the project names in CI_CLONES_BESIDE (JaiRA's declarative-ai; only those: every project's
+# checkout is beside them, and another's job may be using its own) — and gives what is left back to
+# the runner's user: the container runs as root (apt-get), and the runner's next `git clean` could not
+# remove it otherwise. npm's cache goes with the container.
 #
 # The whole script is read before it runs (`main`): a job may check out an older commit, which
 # rewrites this file under it. JaiRA and Tag & Restart have the same script; a change to one belongs
@@ -19,7 +20,7 @@ set -euo pipefail
 # shellcheck disable=SC2016 # expanded in the container
 readonly IN_CONTAINER='
 clear_up() {
-  rm -rf "$CI_MOUNT/declarative-ai"
+  for clone in ${CI_CLONES_BESIDE:-}; do rm -rf "${CI_MOUNT:?}/$clone"; done
   find "$CI_PROJECT_DIR" -name node_modules -type d -prune -exec rm -rf {} +
   chown -R "$CI_HOST_OWNER" "$CI_PROJECT_DIR"
 }
