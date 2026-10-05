@@ -179,8 +179,12 @@ function ShellInboxRoom(): JSX.Element {
   );
 }
 
-/** How much of the screen's left edge a swipe that pulls the drawer out starts in. */
-const EDGE = 20;
+/**
+ * How much of the screen's left edge a swipe that pulls the drawer out starts in. Wider on Android, whose
+ * gesture navigation keeps the first 24 or so for its own Back: a swipe from just past that is the
+ * drawer's.
+ */
+const EDGE = Platform.OS === "android" ? 36 : 20;
 
 /**
  * The sidebar, slid over the room from the left — by ▸|, or by a finger from the screen's left edge,

@@ -14,16 +14,14 @@
  * JavaScript; the emulator reaching Metro and the desktop engine's loopback listener through `adb
  * reverse`. The app is installed, opened by the deep link that pairs and connects it
  * (`jaira:///?address=…&code=…`, what a QR code on Settings → Machines would carry; decision 0013 as
- * amended 2026-09-30) and photographed: the universal shell drawn natively (no WebView in it), fitted
- * and at its own size; the board scrolled under its column headings, which must stay put; a task opened
- * in the panel, Files, Chat and Settings. Then the phone WRITES: its Dark switch is a settings write on
- * the desktop's engine, and the desktop's own window turns dark; and a gate the desktop's run parks at
- * is offered on the phone's strip by a push, opened from there in the phone's own panel and ANSWERED
- * there — the desktop's task moves on. Stopped and opened again with no link, it connects by the token
- * it kept in the keystore. Then, by the same link with `&screen=islands` (its
- * code is spent, so the kept pairing stands), the three islands with their readouts, and text typed
- * into the editable island coming back over the bridge. Last, the desktop forgets the phone, which is
- * dropped and returns to its Connect screen.
+ * amended 2026-09-30) and photographed: the universal shell drawn natively (no WebView in it), laid
+ * out for the phone (decision 0015, amended 2026-10-04) — the drawer opened by a swipe from the left
+ * edge, the board's strip, a task's sheet, Files, Chat and Settings. Then a gate the desktop's run parks
+ * at is listed in the phone's Inbox by a push, opened from there in the task's sheet and ANSWERED there —
+ * the desktop's task moves on, a write. Stopped and opened again with no link, it connects by the token
+ * it kept in the keystore. Then, by the same link with `&screen=islands` (its code is spent, so the kept
+ * pairing stands), the three islands with their readouts, and text typed into the editable island coming
+ * back over the bridge. Last, the desktop forgets the phone, which is dropped and says it has no machine.
  * What the screen says is read from Android's accessibility dump (`uiautomator`), so a tab that shows
  * an error rather than the app is caught. The dump waits for a second in which nothing on screen
  * changes, and a running task's panel counts its seconds: the link says `&still=1`, which holds the
@@ -97,6 +95,31 @@ function quiet(): void {
   }
 }
 
+/** The phone's shell, connected: its ▸| drawn, and no line under the title bar saying it has no machine, is reaching one, or why not. */
+const connected = (): boolean => {
+  const all = screen();
+  return all.some((n) => n.text === "Open the sidebar") && !all.some((n) => /\. (Connect|Details)$/.test(n.text));
+};
+
+/** A finger's drag from (x0, y0) to (x1, y1) over `ms`. */
+const swipe = (x0: number, y0: number, x1: number, y1: number, ms = 300): void => void adb("shell", "input", "swipe", String(x0), String(y0), String(x1), String(y1), String(ms));
+
+/** The drawer, opened as a person opens it: a swipe from the screen's left edge. */
+async function drawer(): Promise<void> {
+  if (says("Close the sidebar")) return;
+  // Past the system's own Back strip (gesture navigation's first 24 or so), inside the drawer's 36.
+  swipe(78, 1200, 760, 1210, 250);
+  await until(() => says("Close the sidebar"), "the drawer to open from the left edge", 15);
+  await sleep(600);
+}
+
+/** The drawer shut: a press on what it covers, at the screen's right edge. */
+async function shut(): Promise<void> {
+  if (!says("Close the sidebar")) return;
+  adb("shell", "input", "tap", "1040", "1200");
+  await until(() => !says("Close the sidebar"), "the drawer to close", 15);
+}
+
 function tap(text: string): void {
   const node = screen().find((n) => n.text === text) ?? screen().find((n) => n.text.includes(text));
   if (node === undefined) throw new Error(`nothing on screen reads "${text}"`);
@@ -154,6 +177,8 @@ async function main(): Promise<void> {
     adb("reverse", `tcp:${PORT}`, `tcp:${PORT}`);
     adb("install", "-r", APK);
     adb("shell", "am", "force-stop", PACKAGE);
+    // A phone with nothing kept: a pairing an earlier run left would be another machine, unreachable.
+    adb("shell", "pm", "clear", PACKAGE);
     // On an emulator React Native asks the HOST's own port 8081 for its JavaScript (10.0.2.2), whatever
     // `adb reverse` says — so `--metro` was ignored, and a shared dev server that had stopped answering
     // left the app on a blank screen (2026-09-30). Told to ask its own localhost, it goes through the
@@ -168,101 +193,82 @@ async function main(): Promise<void> {
     const started = Date.now();
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}'`, PACKAGE);
 
-    await until(() => says("Open a project"), "the app to pair, connect and draw the shell", 240);
+    await until(connected, "the app to pair, connect and draw the shell", 240);
     const paired = async (): Promise<MachinesView["devices"]> => (await desktop.ipc<MachinesView>("machines:view", undefined)).devices;
     const device = (await paired())[0];
     if (device === undefined || !device.connected || device.kind !== "phone") throw new Error(`the desktop does not list the phone as a connected device: ${JSON.stringify(await paired())}`);
     console.log(`(1) paired by the deep link's code as "${device.label}" and connected in ${Math.round((Date.now() - started) / 1000)} s (first bundle from Metro included)`);
     await sleep(4000);
     quiet();
-    shot("1-shell-fit");
+    shot("1-shell");
     // The shell is native: no WebView anywhere in what Android is drawing.
     const webviews = (adb("shell", "cat", "/sdcard/ui.xml").match(/class="android\.webkit\.WebView"/g) ?? []).length;
     if (webviews > 0) throw new Error(`the shell drew ${webviews} WebView(s): it must be native`);
-    console.log("(1) the universal shell draws natively, fitted to the phone (no WebView)");
+    if (says("Fit to the screen") || says("Show at full size")) throw new Error("the phone drew the desktop's frame fitted, not its own layout");
+    console.log("(1) the universal shell draws natively, laid out for the phone (no WebView)");
 
-    tap("1:1");
+    // The drawer, from the left edge: the sidebar with the Inbox at its root and the phone's machines.
+    await drawer();
+    shot("2-drawer");
+    if (!says("INBOX") || !screen().some((n) => n.text.startsWith("This phone's machines"))) throw new Error("the drawer has no Inbox row, or no row for the phone's machines");
+    console.log("(2) a swipe from the left edge opened the drawer: the Inbox, and the phone's machines");
+    tap("ALL TASKS");
+    await until(() => says("All columns"), "the board with its strip", 30);
     await sleep(1500);
-    shot("2-shell-full");
-    tap("fit");
-    console.log("(2) at its own size, and back");
+    quiet();
+    shot("2-board");
 
-    // A column's heading sticks while the board scrolls under it (`Board.tsx`'s `StickyHead` on a phone):
-    // a slow drag up the empty board moves the second row's "Events" heading with the board, while the
-    // first row's "Planning" goes only as far as the board's top and stays there over its cards.
-    const tops = (): { planning: number; events: number } => {
-      const all = screen();
-      return { planning: all.find((n) => n.text === "Planning")?.y ?? NaN, events: all.find((n) => n.text === "Events")?.y ?? NaN };
-    };
-    const before = tops();
-    adb("shell", "input", "swipe", "600", "1500", "600", "1380", "1500");
+    // The rooms, as a person walks them: a task in its sheet, Files, Chat, Settings.
+    tap("add dark mode");
+    await until(() => says("Conversation"), "the task's sheet", 30);
     await sleep(1500);
-    const after = tops();
-    shot("2-board-scrolled");
-    const scrolled = before.events - after.events;
-    const held = before.planning - after.planning;
-    if (!(scrolled > 40 && held < scrolled / 2)) throw new Error(`the column headings did not stick: the board scrolled ${scrolled} px and Planning's heading moved ${held}`);
-    console.log(`(2) the board scrolled ${Math.round(scrolled)} px; the first row's headings moved ${Math.round(held)} and stuck at its top`);
-    adb("shell", "input", "swipe", "600", "1300", "600", "1700", "300");
-    await sleep(1000);
-
-    // The rooms, as a person walks them: a task opened in the panel, Files, Chat, Settings, fitted.
+    shot("3-task");
     const rooms: [string, string, string][] = [
-      ["add dark mode", "Conversation", "3-task"],
       ["FILES", "Select a file in the tree.", "4-files"],
       ["CHAT", "What are we doing?", "5-chat"],
       ["SETTINGS", "Connections", "6-settings"],
     ];
     for (const [press, shows, name] of rooms) {
+      await drawer();
+      if (!says(press)) tap(".world-android");
       tap(press);
+      await sleep(800);
+      await shut();
       await until(() => says(shows), `${name} to show "${shows}"`, 30);
       await sleep(1500);
       quiet();
       shot(name);
     }
-    console.log("(2) the task in the panel, Files, Chat and Settings, each drawn");
+    console.log("(2) the task in its sheet, Files, Chat and Settings, each drawn");
 
-    // The phone WRITES (decision 0015's v2: nothing is read-only any more). The sidebar's Dark switch is a
-    // settings write on the desktop's engine (`config:write`): pressed on the phone, the desktop's own
-    // window turns dark from the push its store gets — and light again when the phone switches back.
-    if ((await desktop.theme()) !== "light") throw new Error("the desktop did not open in the light look");
-    tap("DARK");
-    for (let i = 0; i < 60 && (await desktop.theme()) !== "dark"; i++) await sleep(500);
-    if ((await desktop.theme()) !== "dark") throw new Error("the phone's switch to dark did not reach the desktop's engine");
-    await until(() => says("LIGHT"), "the phone itself to turn dark", 30);
-    await sleep(1500);
-    quiet();
-    shot("6-phone-wrote-dark");
-    await desktop.shot("desktop-after-phone-wrote-dark");
-    tap("LIGHT");
-    for (let i = 0; i < 60 && (await desktop.theme()) !== "light"; i++) await sleep(500);
-    if ((await desktop.theme()) !== "light") throw new Error("the phone's switch back to light did not reach the desktop's engine");
-    await until(() => says("DARK"), "the phone itself to turn light again", 30);
-    console.log("(2) the phone wrote: its Dark switch turned the desktop's own window dark, and back");
-    tap("TASKS");
-
-    // A push, about a task: a run on the desktop parks at its gate, and the phone's strip offers it.
-    // Pressed there it opens in the phone's own panel, the gate drawn where the run stopped in its
-    // conversation, and the phone answers it: the desktop's engine has nothing parked any more.
+    // A push, about a task: a run on the desktop parks at its gate, and the phone's Inbox lists it.
+    // Pressed there it opens in the task's sheet, the gate at its foot, and the phone answers it — a
+    // write: the desktop's engine has nothing parked any more.
     const parked = (await desktop.ipc<{ taskId: string }>("task:create", { title: "plan the offline mode", workflow: "feature/plan", inputs: { issue: "# plan the offline mode" } })).taskId;
     await desktop.ipc("task:start", { taskId: parked, fake: blockedAtTheGate() });
     const gates = async (): Promise<Array<{ taskId: string; requestId: string }>> => (await desktop.ipc<Array<{ taskId: string; requestId: string }>>("interaction:pending", undefined)).filter((p) => p.taskId === parked);
     for (let i = 0; i < 60 && (await gates()).length === 0; i++) await sleep(500);
     const gate = (await gates())[0];
     if (gate === undefined) throw new Error("the desktop's run never parked at its gate");
-    await until(() => says("Review the critique result."), "the phone to be offered the gate (a push)", 60);
+    await drawer();
+    // Standing in Settings, the sidebar is Settings' own pages, over its rows: Back first.
+    if (screen().some((n) => n.text === "Back")) {
+      tap("Back");
+      await sleep(800);
+    }
+    tap("INBOX");
+    await until(() => says("Review the critique result."), "the phone's Inbox to list the gate (a push)", 60);
     quiet();
-    shot("6-gate-offered");
+    shot("6-gate-in-inbox");
     tap("Review the critique result.");
-    await until(() => screen().some((n) => n.text === "approve"), "the gate to open in the phone's panel", 60);
+    await until(() => screen().some((n) => n.text === "approve"), "the gate to open in the task's sheet", 60);
     await sleep(1500);
-    shot("6-gate-in-panel");
+    shot("6-gate-in-sheet");
     tap("approve");
     for (let i = 0; i < 60 && (await gates()).length > 0; i++) await sleep(500);
     if ((await gates()).length > 0) throw new Error("the phone's answer did not reach the desktop's engine: the gate is still parked");
-    await until(() => !says("Review the critique result."), "the phone's strip to let the answered gate go (a push)", 60);
     shot("6-gate-answered");
-    console.log("(2) a gate the desktop's run parked at was offered on the phone, opened in its panel and answered there: the desktop's task moved on");
+    console.log("(2) a gate the desktop's run parked at was listed in the phone's Inbox, opened in its sheet and answered there: the desktop's task moved on");
 
     // Stopped, and opened again as a person opens an app — no link: the token kept in the keystore
     // connects it straight away.
@@ -271,7 +277,7 @@ async function main(): Promise<void> {
     // now and then, and the run waited two minutes at the home screen.
     await sleep(1500);
     adb("shell", "am", "start", "-a", "android.intent.action.MAIN", "-c", "android.intent.category.LAUNCHER", "-n", `${PACKAGE}/.MainActivity`);
-    await until(() => says("Open a project"), "the app, opened with no link, to connect by its kept token", 120);
+    await until(connected, "the app, opened with no link, to connect by its kept token", 120);
     await sleep(3000);
     quiet();
     shot("6-relaunched");
@@ -323,16 +329,19 @@ async function main(): Promise<void> {
     console.log(`(4) ${screen().find((n) => n.text.startsWith("editor:"))!.text}`);
 
     // Forgotten on the desktop (Settings → Machines → Forget…): the phone's connection is dropped, its
-    // next hello refused, and it is back at the Connect screen saying why.
+    // next hello refused, and the machine forgotten on the phone too: its shell says it has none.
+    // Back from the islands to the shell: a link that names the app's screen and nothing to pair.
+    adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "'jaira:///?screen=app&still=1'", PACKAGE);
+    await until(connected, "the app, back from the islands, to its shell", 60);
     await desktop.ipc("machines:forget", { id: device.id });
-    await until(() => says("Connect to a JaiRA machine"), "the forgotten phone to return to its Connect screen", 60);
+    await until(() => screen().some((n) => n.text.startsWith("No machine connected")), "the forgotten phone to say it has no machine", 60);
     await sleep(1000);
     shot("9-forgotten");
     if ((await paired()).length !== 0) throw new Error("the desktop still lists the forgotten phone");
-    console.log("(5) forgotten on the desktop, the phone was dropped and is back at its Connect screen");
+    console.log("(5) forgotten on the desktop, the phone was dropped and says it has no machine");
 
     // Gesture handler 2.x's `findNodeHandle` under StrictMode is reported in a development build, and
-    // nothing is wrong (`DesktopFrame.tsx`); anything else is.
+    // nothing is wrong (`DesktopFrame.tsx`, on a wide screen); anything else is.
     // `uiautomator dump` itself sometimes dies ("FATAL EXCEPTION: UiAutomation"): that process is not the app.
     const log = adb("logcat", "-d", "-s", "ReactNativeJS:E", "AndroidRuntime:E").split("\n");
     const dumper = new Set(log.filter((l) => l.includes("FATAL EXCEPTION: UiAutomation")).map((l) => l.split(/\s+/)[2]));

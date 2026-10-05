@@ -1,7 +1,7 @@
 export { config } from "./tamagui.config";
 export { Replayed, TokenRoot, TokenScope, useLook, useTokens, type Look, type Tokens } from "./tokens";
 export { Island, type IslandProps } from "./islands";
-export { Connect, elapsedWords, nearbySearchWords, nearbyStepWords, type ConnectProps, type NearbyAttempt, type NearbyChoice, type NearbySearch, type NearbyStep } from "./screens/Connect";
+export { Connect, type PairedMachine, elapsedWords, nearbySearchWords, nearbyStepWords, type ConnectProps, type NearbyAttempt, type NearbyChoice, type NearbySearch, type NearbyStep } from "./screens/Connect";
 export { Markdown, registerFenceRenderer } from "./components/Markdown";
 export { DataView } from "./components/files/DataView";
 // The value view, for its specimens (`valueSpecimens.tsx`).
@@ -11,7 +11,7 @@ export { PreviewCard } from "./components/panel/PreviewCard";
 export { FileInspector } from "./components/files/FileAddressBar";
 export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
-export { remoteStatus, type RemoteStatus } from "./app/remoteStatus";
+export { phoneMachines, remoteStatus, type PhoneMachines, type RemoteStatus } from "./app/remoteStatus";
 export { SchemaForm, registerWidget } from "./components/form/SchemaForm";
 export { Field, FieldGrid, FormRowsContext, Level } from "./components/form/Field";
 export { SettingsGroup } from "./components/settings/SettingsPage";

@@ -32,3 +32,21 @@ export function newDeviceId(): string {
   while (id.length < 24) id += Math.floor(Math.random() * 0x1_0000_0000).toString(36);
   return `d-${id.slice(0, 24)}`;
 }
+
+/**
+ * A phone paired with several machines (decision 0015, amended 2026-10-04) keeps each pairing under a
+ * key of its own — a keystore entry is small — and an index of them in pairing order.
+ */
+export const PAIRINGS_INDEX = "jaira.pairings";
+export function pairingKey(machineId: string): string {
+  return `jaira.pairing.${machineId.replace(/[^A-Za-z0-9._-]/g, "_")}`;
+}
+export function parseIndex(text: string | null): string[] {
+  if (text === null) return [];
+  try {
+    const ids = JSON.parse(text) as unknown;
+    return Array.isArray(ids) ? ids.filter((id): id is string => typeof id === "string") : [];
+  } catch {
+    return [];
+  }
+}

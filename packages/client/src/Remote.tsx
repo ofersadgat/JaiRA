@@ -1,15 +1,15 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { AppState, Linking, Pressable, Text, View } from "react-native";
-import type { JairaBridge } from "@jaira/shared/browser";
 import { engineUrlOf, hostOfUrl, typedLanMachine, type LanAnnouncement } from "@jaira/shared/browser";
-import { Connect, connectionLost, connectionRestored, remoteStatus, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
+import { Connect, connectionLost, connectionRestored, phoneMachines, remoteStatus, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { DEVICE_KIND, deviceLabel } from "../bridges/deviceInfo";
 import { engineBridge, pairDevice, type EngineBridge } from "../bridges/engineBridge";
 import { pairNearby } from "../bridges/lanPair";
 import { NEARBY_SUPPORTED, browseNearby, localAddresses, randomBytes, tailnet, type NearbyState, type TailnetState } from "../bridges/nearby";
-import { deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } from "../bridges/savedPairing";
+import { addPairing, deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } from "../bridges/savedPairing";
+import { useFleetLinks } from "./fleetLinks";
 import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "../bridges/tailnetJoin";
 
 /**
@@ -31,17 +31,12 @@ import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "..
  * built into the app, and from then on connects through it (`bridges/tailnetJoin.ts`) wherever it is.
  *
  * `shell` (the phone app, decision 0015 amended 2026-10-04): the shell is NOT held back until a machine
- * answers. It is drawn at once on a bridge that answers nothing (`NO_MACHINE`), so it stands empty — no
- * projects — while the line under its title bar says why (`remoteStatus`) and opens the Connect screen
- * over it. Connected, the machine's bridge is installed and the shell drawn again on it, its projects
- * those of the machine it reached.
+ * answers, and the phone keeps every machine it pairs with. The shell is drawn at once on the fleet
+ * bridge (`fleetLinks.ts`, `fleetBridge.ts`), whose requests wait until a machine answers, so it stands
+ * empty — no projects — while the line under its title bar says why (`remoteStatus`) and opens the
+ * Connect screen over it. Its projects are those of every machine it reaches. The Connect screen lists
+ * the phone's machines and pairs another; the drawer opens it at any time (`phoneMachines`).
  */
-
-/** A bridge with no machine behind it: what is asked is never answered, and nothing is pushed. */
-const NO_MACHINE: JairaBridge = {
-  invoke: () => new Promise(() => undefined),
-  subscribe: () => () => undefined,
-};
 
 /** An address and a one-time code that came with the page's URL or the app's link — what a QR code carries. */
 export interface PairLink {
@@ -100,14 +95,16 @@ type Phase = "loading" | "ask" | "connecting" | "connected";
 export function Remote({ link, frame, shell = false, children }: { link?: Partial<PairLink>; frame?: (screen: JSX.Element) => JSX.Element; shell?: boolean; children: ReactNode }): JSX.Element | null {
   const electron = typeof window !== "undefined" && window.jaira !== undefined;
   const ungated = shell && !electron;
-  // Before the shell first draws: the bridge it stands on until a machine answers.
+  // Every machine the phone is paired with (`shell`), and the one bridge over them — installed before the
+  // shell first draws.
+  const fleet = useFleetLinks(ungated);
   useState(() => {
-    if (ungated) setBridge(NO_MACHINE);
+    if (ungated) setBridge(fleet.bridge);
     return true;
   });
-  /** The shell drawn again on each machine reached: its store reads that machine from the start. */
-  const [generation, setGeneration] = useState(0);
-  /** The Connect screen over the shell, opened from its line (`shell`). */
+  /** The link (address and code) a pairing was already started for (`shell`). */
+  const linkPaired = useRef<string | null>(null);
+  /** The Connect screen over the shell, opened from its line or the drawer (`shell`). */
   const [form, setForm] = useState(false);
   const [phase, setPhase] = useState<Phase>(electron ? "connected" : "loading");
   const [saved, setSaved] = useState<SavedPairing | undefined>(undefined);
@@ -136,10 +133,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
       if (bridge.current !== mine) return;
       switch (state.state) {
         case "connected":
-          if (!installed) {
-            setBridge(mine);
-            setGeneration((n) => n + 1);
-          }
+          if (!installed) setBridge(mine);
           installed = true;
           connectionRestored();
           setProblem(null);
@@ -197,6 +191,16 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   );
 
   /**
+   * A pairing made: connected to — alone, or (`shell`) among the phone's other machines, the Connect
+   * screen going back to the shell once it is done (`done`).
+   */
+  const adopt = (pairing: SavedPairing, done = true): void => {
+    if (!ungated) return connect(pairing);
+    fleet.add(pairing);
+    if (done) setForm(false);
+  };
+
+  /**
    * Pair with a machine on this Wi-Fi — one found in the list, or a local address typed — by the code it
    * shows, then join its tailnet. Says each step and each address it tries.
    */
@@ -222,7 +226,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
           // Kept as soon as it is issued: joining the tailnet can take minutes, and the token stands either way.
           onPaired: async (paired) => {
             kept = { address: paired.address, url: engineUrlOf(paired.address), token: paired.token, machine: { id: paired.machine.id, label: paired.machine.label }, ...(tailnet !== undefined ? { tailnet: true as const } : {}) };
-            await savePairing(kept);
+            await (ungated ? addPairing(kept) : savePairing(kept));
           },
           onStep: (next) => {
             step = next;
@@ -235,19 +239,20 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
         });
         if (turn.current !== mine) return;
         setNearbyPairing(undefined);
-        connect(kept!);
+        adopt(kept!);
       } catch (e) {
         if (turn.current !== mine) return;
         // The attempts stay on screen beside the reason, to read what was tried.
         setNearbyPairing(undefined);
         // Paired, but not onto the tailnet: connecting carries on, offering the sign-in on the phone.
-        if (kept !== undefined) connect(kept);
+        if (kept !== undefined) adopt(kept, false);
         setProblem((e as Error).message + (attempts.length > 0 && kept === undefined ? ` (tried ${attempts.map((a) => `${a.address}: ${a.state === "failed" ? (a.reason ?? "no answer") : a.state}`).join("; ")})` : ""));
       } finally {
         if (turn.current === mine) setBusy(false);
       }
     },
-    [connect],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connect, ungated, fleet.add],
   );
 
   const pairWithNearby = useCallback(
@@ -271,13 +276,13 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
         const paired = await pairDevice(address, code, { id: await deviceId(), label: deviceLabel(), kind: DEVICE_KIND });
         if (turn.current !== mine) return;
         const pairing: SavedPairing = { ...paired, address };
-        await savePairing(pairing);
+        if (!ungated) await savePairing(pairing);
         dropPageCode();
-        connect(pairing);
+        adopt(pairing);
       } catch (e) {
         if (turn.current !== mine) return;
         // A link opened twice carries a spent code: the pairing it made the first time still stands.
-        if (fallback !== undefined) connect(fallback);
+        if (fallback !== undefined) adopt(fallback);
         else {
           setProblem((e as Error).message);
           setPhase((was) => (was === "connected" ? was : "ask"));
@@ -286,7 +291,8 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
         if (turn.current === mine) setBusy(false);
       }
     },
-    [connect, pairLocally],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [connect, pairLocally, ungated, fleet.add],
   );
 
   // At launch, and whenever a link arrives: a link with a code pairs (it is a person's deliberate act);
@@ -296,6 +302,18 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   const address = link?.address ?? (code !== undefined ? pageAddress() : undefined);
   useEffect(() => {
     if (electron) return;
+    // The phone's machines are `fleetLinks.ts`'s to reach; a link with a code pairs another — once: a
+    // second try spends nothing but the code, and would set aside the first one's pairing as stale (a
+    // development build runs every effect twice).
+    if (ungated) {
+      setPhase("ask");
+      const key = `${address ?? ""}|${code ?? ""}`;
+      if (address !== undefined && code !== undefined && code !== "" && linkPaired.current !== key) {
+        linkPaired.current = key;
+        void pair(address, code);
+      }
+      return;
+    }
     let live = true;
     void loadPairing().then((kept) => {
       if (!live) return;
@@ -316,7 +334,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
     return () => {
       live = false;
     };
-  }, [electron, address, code, pair, connect]);
+  }, [electron, ungated, address, code, pair, connect]);
 
   // Back in front, or back on a network: no reason to sit out the rest of a wait.
   useEffect(() => {
@@ -365,20 +383,36 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
 
   useEffect(() => () => bridge.current?.close(), []);
 
-  // The shell's line (`shell`): why it has no projects yet, and the way to the Connect screen.
+  // The shell's line (`shell`): why it has no projects yet, and the way to the Connect screen — and the
+  // drawer's way to it, whatever the line says.
+  const links = fleet.links;
   useEffect(() => {
     if (!ungated) return undefined;
     const open = (): void => setForm(true);
-    if (phase === "connected" || phase === "loading") remoteStatus.set(null);
-    else if (phase === "ask") remoteStatus.set({ state: "none", ...(problem !== null ? { detail: problem } : {}), open });
-    else remoteStatus.set({ state: problem !== null || signInUrl !== undefined ? "problem" : "connecting", label: saved?.machine.label, ...(problem !== null ? { detail: problem } : signInUrl !== undefined ? { detail: "Tailscale needs its sign-in approved" } : {}), open });
-    if (phase === "connected") setForm(false);
+    phoneMachines.set({ open, labels: links.map((l) => l.pairing.machine.label), connected: links.filter((l) => l.state === "connected").length });
+    const why = fleet.notice ?? problem ?? links.find((l) => l.reason !== undefined)?.reason;
+    if (!fleet.loaded || links.some((l) => l.state === "connected")) remoteStatus.set(null);
+    else if (links.length === 0) remoteStatus.set({ state: "none", ...(why !== undefined && why !== null ? { detail: why } : {}), open });
+    else
+      remoteStatus.set({
+        state: links.some((l) => l.reason !== undefined) ? "problem" : "connecting",
+        label: links.length === 1 ? links[0]!.pairing.machine.label : `${links.length} machines`,
+        ...(why !== undefined && why !== null ? { detail: why } : {}),
+        open,
+      });
     return undefined;
-  }, [ungated, phase, problem, saved, signInUrl]);
-  useEffect(() => () => remoteStatus.set(null), []);
+  }, [ungated, links, fleet.loaded, fleet.notice, problem]);
+  useEffect(
+    () => () => {
+      remoteStatus.set(null);
+      phoneMachines.set(null);
+    },
+    [],
+  );
+
 
   if (ungated) {
-    if (!form || phase === "connected" || phase === "loading") return <Fragment key={generation}>{children}</Fragment>;
+    if (!form) return <>{children}</>;
   } else if (phase === "connected") return <>{children}</>;
   if (phase === "loading") return null;
   const forget = (): void => {
@@ -392,7 +426,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
     setPhase("ask");
   };
   const screen =
-    phase === "connecting" && saved !== undefined ? (
+    !ungated && phase === "connecting" && saved !== undefined ? (
       <Connect
         saved={{ label: saved.machine.label, address: saved.address, ...(saved.tailnet === true && tailnetLine !== undefined ? { detail: tailnetLine } : {}) }}
         problem={signInUrl !== undefined ? "Tailscale on this phone needs its sign-in approved before it can reach the machine: open it here, or pair again with a code to open it on the machine" : problem}
@@ -406,9 +440,21 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
         // A link that arrives later fills the fields it carries.
         key={`${address ?? ""}|${code ?? ""}`}
         initial={{ address: address ?? pageAddress() ?? "", code: code ?? "" }}
-        problem={problem}
+        problem={ungated ? (fleet.notice ?? problem) : problem}
         busy={busy}
         onPair={(a, c) => void pair(a, c)}
+        {...(ungated
+          ? {
+              paired: links.map((l) => ({
+                key: l.pairing.machine.id,
+                label: l.pairing.machine.label,
+                address: l.pairing.address,
+                state: l.state,
+                ...(l.reason !== undefined ? { reason: l.reason } : {}),
+                onForget: () => fleet.forget(l.pairing.machine.id),
+              })),
+            }
+          : {})}
         {...(NEARBY_SUPPORTED
           ? {
               nearby: {
@@ -433,7 +479,7 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   // Over the shell, with a way back to it.
   return (
     <>
-      <Fragment key={generation}>{children}</Fragment>
+      {children}
       <View style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0 }}>
         {framed}
         <Pressable accessibilityRole="button" accessibilityLabel="Close" onPress={() => setForm(false)} style={{ position: "absolute", top: 8, right: 8, paddingHorizontal: 12, paddingVertical: 8, borderRadius: 16, backgroundColor: "rgba(20, 22, 40, 0.08)" }}>
