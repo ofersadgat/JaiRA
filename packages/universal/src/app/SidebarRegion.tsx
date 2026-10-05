@@ -27,6 +27,10 @@ import { UpdateRow } from "../components/floats/UpdateRow";
 import { PointerMenus } from "../components/floats/PointerMenus";
 import { useShell } from "./shell";
 import { aboutNotes } from "./viewState";
+import { phoneMachines } from "./remoteStatus";
+import { View } from "@tamagui/core";
+import { Press, Txt } from "../primitives";
+import { useTokens } from "../tokens";
 
 /**
  * The sidebar as a phone's drawer (`PhoneFrame`): its width, the Inbox room it opens from an INBOX row at
@@ -203,7 +207,12 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
       onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
       // The Update row above Settings (`UpdateRow`). It opens About, where a failure or a download is
       // said in full — with the release notes open, from its menu (`aboutNotes`).
-      update={(collapsed) => <UpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />}
+      update={(collapsed) => (
+        <>
+          {phone !== undefined ? <PhoneMachinesRow onOpen={phone.onClose} /> : null}
+          <UpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />
+        </>
+      )}
       onProjectSettings={(p) => {
         actions.standOn(p.project);
         actions.setConfigLayer(p.kind === "shared" ? "base" : "project");
@@ -298,4 +307,40 @@ function FilesDrawer({ find, draft, onDraft, floats }: { find: boolean; draft: T
 /** The Chat drawer: `ChatListPanel` on the room's surface (`useChatSurface`). */
 function ChatDrawer({ find }: { find: boolean }): JSX.Element {
   return <ChatListPanel surface={useChatSurface()} find={find} />;
+}
+
+/**
+ * A phone's own machines, in its drawer over Update and Settings (decision 0015, amended 2026-10-04): their
+ * names and how many answer; pressed, the Connect screen that lists them and pairs another. How it looks:
+ * a row 40 tall, padding 0 12, gap 10 — ▣ (--dim), the names (app-label, one line), "n of m" (--dim).
+ */
+function PhoneMachinesRow({ onOpen }: { onOpen: () => void }): JSX.Element | null {
+  const t = useTokens();
+  const machines = phoneMachines.use();
+  if (machines === null) return null;
+  const names = machines.labels.length === 0 ? "Connect a machine" : machines.labels.join(", ");
+  return (
+    <Press
+      onPress={() => {
+        onOpen();
+        machines.open();
+      }}
+      label={`This phone's machines: ${names}`}
+      height={40}
+      paddingHorizontal={12}
+      flexDirection="row"
+      alignItems="center"
+      gap={10}
+      borderRadius={6}
+      box={({ pressed }) => ({ backgroundColor: pressed ? t.v("fill-ghost-hover") : "transparent" })}
+    >
+      <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>▣</Txt>
+      <View flex={1} minWidth={0}>
+        <Txt register="app-label" ellip>
+          {names}
+        </Txt>
+      </View>
+      {machines.labels.length > 0 ? <Txt spec={{ voice: "app", scale: 0.92, color: machines.connected > 0 ? "dim" : "warn" }}>{`${machines.connected} of ${machines.labels.length}`}</Txt> : null}
+    </Press>
+  );
 }

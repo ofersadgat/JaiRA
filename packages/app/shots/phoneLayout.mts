@@ -127,6 +127,7 @@ async function main(): Promise<void> {
       await tapLabel(phone, "Open the sidebar");
       await phone.until(says("Inbox"), "the drawer to open with its Inbox row");
       await phone.shot("1-drawer");
+      check(await phone.evaluate<boolean>(`!![...document.querySelectorAll('[aria-label]')].find((e) => (e.getAttribute('aria-label') ?? "").startsWith("This phone's machines:"))`) && (await phone.evaluate<boolean>(says("1 of 1"))), "the drawer lists this phone's machines, one answering");
       check(await phone.evaluate<boolean>(says("All tasks")), "the drawer is the sidebar, with All tasks under Inbox");
     }
     if (doing("inbox") || doing("sheet")) {

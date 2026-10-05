@@ -35,3 +35,29 @@ export const remoteStatus = {
       () => value,
     ),
 };
+
+/**
+ * The machines a phone is paired with, for its drawer's row (`ShellSidebar` on a phone): their names, how
+ * many answer, and the way to the Connect screen that lists them and pairs another. Null where there is
+ * no such phone (the desktop, a browser tab).
+ */
+export type PhoneMachines = { labels: readonly string[]; connected: number; open: () => void } | null;
+let machinesValue: PhoneMachines = null;
+const machinesListeners = new Set<() => void>();
+export const phoneMachines = {
+  get: (): PhoneMachines => machinesValue,
+  set: (next: PhoneMachines): void => {
+    if (Object.is(next, machinesValue)) return;
+    machinesValue = next;
+    for (const on of machinesListeners) on();
+  },
+  use: (): PhoneMachines =>
+    useSyncExternalStore(
+      (on) => {
+        machinesListeners.add(on);
+        return () => machinesListeners.delete(on);
+      },
+      () => machinesValue,
+      () => machinesValue,
+    ),
+};

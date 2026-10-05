@@ -2,6 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { Linking, View, useWindowDimensions } from "react-native";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { DesktopFrame } from "./DesktopFrame";
+import { GestureRoot } from "./GestureRoot";
 import { IslandsTab } from "./IslandsTab";
 import { TamaguiProvider } from "@tamagui/core";
 import { Replayed, TokenRoot, UniversalApp, config, installNativeErrorReporting } from "@jaira/universal";
@@ -88,7 +89,9 @@ export function NativeApp(): JSX.Element {
                 // The whole height by size, not flex: in a browser the safe area's box is a block, where
                 // `flex: 1` below it means nothing.
                 <View style={{ height: "100%", width: "100%" }}>
-                  <UniversalApp phone />
+                  <GestureRoot>
+                    <UniversalApp phone />
+                  </GestureRoot>
                 </View>
               ) : (
                 <DesktopFrame>

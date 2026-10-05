@@ -302,7 +302,7 @@ async function up(): Promise<void> {
     const link = `jaira:///?address=${encodeURIComponent(`127.0.0.1:${port}`)}&code=${shown.pairing.code.replace(/[^A-Za-z0-9]/g, "")}&still=1`;
     writeFileSync(LINK, link);
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}'`, PACKAGE);
-    await until(() => screen().some((n) => n.text.includes("Open a project")), "the app to pair, connect and draw the shell", 300);
+    await until(connected, "the app to pair, connect and draw the shell", 300);
     console.log(`ready: the phone is paired with the desktop on CDP port ${PORT}; touch ${join(OUT, ".release")} to stop`);
     while (!existsSync(join(OUT, ".release"))) await sleep(1000);
     rmSync(join(OUT, ".release"));
@@ -310,6 +310,15 @@ async function up(): Promise<void> {
     metro?.kill();
     await desktop.close();
   }
+}
+
+/**
+ * The phone's shell, connected (decision 0015, amended 2026-10-04: it is drawn before a machine answers):
+ * its ▸| drawn, and no line under the title bar saying it has no machine, is reaching one, or why not.
+ */
+function connected(): boolean {
+  const all = screen();
+  return all.some((n) => n.text === "Open the sidebar") && !all.some((n) => /\. (Connect|Details)$/.test(n.text));
 }
 
 const command = process.argv[2];
@@ -325,7 +334,7 @@ else if (command === "reload") {
   adb("shell", "am", "force-stop", PACKAGE);
   prefs();
   open(process.argv[3]);
-  await until(() => screen().some((n) => n.text.includes("Open a project")), "the app to draw the shell again", 180);
+  await until(connected, "the app to draw the shell again", 180);
 } else if (command === "tall") {
   // A layout that ran away (a `Press` growing in a box whose height was still being settled): any view
   // taller than twenty screens, from the activity's own view hierarchy — read without waiting for idle.

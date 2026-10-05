@@ -944,6 +944,31 @@ Also found on the way, in the browser: a drawer cut short as it closed stayed ov
 taking every touch (it now takes none while it closes, and goes after its slide's time whatever the slide
 says).
 
+**Every paired machine** (the person: "implement both todos"). A phone keeps every machine it pairs with
+(`savedPairing`'s `loadPairings`, `addPairing`, `forgetMachine`: each pairing under a keystore entry of its
+own, the single pairing an older version kept read as the first) and reaches all of them at once
+(`client/src/fleetLinks.ts`). The store stands on one bridge over them (`bridges/fleetBridge.ts`):
+
+- **One fleet, one engine.** An engine already reaches its whole fleet and lists every workspace in it
+  (0013 §1, §7), so machines that say they are one fleet (`machines:view`: their fleets share a machine)
+  answer through the first of them that is connected — the others stand by, and take over when it goes.
+- **Several fleets, merged.** The lists about every project at once — `project:list` and what waits on the
+  person (`interaction:`, `approval:`, `question:`, `userEvent:pending`), `task:all` — are asked of each
+  fleet and put end to end, the shared root kept once. Every other request goes to the fleet that holds
+  what it names: a `project` (or the `dir` opened), else a `requestId` it answers, else the fleet of the
+  project last opened.
+- **Waiting.** Until a machine answers, what the shell asks waits, and is asked when one does; a fleet
+  arriving or leaving tells the store every scope may have changed. The shell is said to be disconnected
+  only when no machine answers.
+- **Managing them.** The Connect screen lists the phone's machines — connected, reaching, or why not, each
+  with Forget — over the way to pair another (`Connect`'s `paired`); the drawer opens it at any time ("This
+  phone's machines", with how many answer), and a machine that forgets the phone is forgotten on it.
+
+Seen: `test/fleetBridge.test.ts` (fleets, the merge, routing, waiting, pushes) and `test/fleetDevices.test.ts`
+— two real engines that are not one fleet, the phone's bridge to each over Node's WebSocket, the projects
+of both listed through the fleet bridge with one shared root, and standing on each project answered by its
+own machine. A browser cannot show it: the page a machine's engine serves may reach that engine alone.
+
 ## Native desktop, later
 
 The desktop ships as Electron first, from the DOM tree and then from shared components as they are

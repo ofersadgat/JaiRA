@@ -50,6 +50,21 @@ export interface ConnectProps {
   pairing?: { label: string; step: NearbyStep; attempts?: NearbyAttempt[]; /** The phone's Tailscale, while it joins. */ detail?: string };
   /** The phone's Tailscale wants signing in again (its key expired): the page, opened here. */
   signIn?: () => void;
+  /**
+   * The machines this phone is already paired with (decision 0015, amended 2026-10-04: a phone reaches
+   * every one), each with what it is doing and a way to forget it — over the way to pair another.
+   */
+  paired?: readonly PairedMachine[] | undefined;
+}
+
+/** One machine a phone is paired with, as its Connect screen lists it. */
+export interface PairedMachine {
+  key: string;
+  label: string;
+  address: string;
+  state: "connected" | "connecting" | "waiting" | "mismatch";
+  reason?: string | undefined;
+  onForget: () => void;
 }
 
 const markOf = (os: string): "windows" | "mac" | "linux" | undefined => (os === "windows" || os === "mac" || os === "linux" ? os : undefined);
@@ -66,7 +81,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForget, nearby, onSearchAgain, onPairNearby, pairing, signIn }: ConnectProps): JSX.Element {
+export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForget, nearby, onSearchAgain, onPairNearby, pairing, signIn, paired }: ConnectProps): JSX.Element {
   const t = useTokens();
   const [address, setAddress] = useState(initial?.address ?? "");
   const [code, setCode] = useState(initial?.code ?? "");
@@ -122,6 +137,34 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
       {text}
     </Text>
   );
+  // The phone's own machines, each with what it is doing: over the way to pair another.
+  const others = paired !== undefined && paired.length > 0;
+  const mine = others ? (
+    <View gap={6} marginBottom={10}>
+      {heading("This phone's machines")}
+      {paired.map((m) => (
+        <View key={m.key} flexDirection="row" alignItems="center" gap={10} borderWidth={1} borderColor={t.v("line") as never} borderRadius={7} paddingHorizontal={10} paddingVertical={8} backgroundColor={t.v("panel") as never}>
+          <View width={8} height={8} borderRadius={4} backgroundColor={t.v(m.state === "connected" ? "ok" : m.state === "connecting" ? "accent" : "warn") as never} />
+          <View flex={1} gap={2} minWidth={0}>
+            <Text {...(app as object)} fontSize={14} fontWeight="600" numberOfLines={1}>
+              {m.label}
+            </Text>
+            <Text fontFamily={t.v("font-data") as never} fontSize={11} color={t.v("dim") as never} numberOfLines={1}>
+              {m.address}
+            </Text>
+            <Text {...(app as object)} fontSize={12} color={t.v(m.state === "connected" ? "dim" : m.state === "connecting" ? "dim" : "bad") as never} numberOfLines={2}>
+              {m.state === "connected" ? "Connected" : m.state === "connecting" ? "Connecting…" : sentence(m.reason ?? "not answering")}
+            </Text>
+          </View>
+          <Pressable role="button" accessibilityLabel={`Forget ${m.label}`} onPress={m.onForget}>
+            <Text {...(app as object)} fontSize={13} color={t.v("dim") as never} paddingHorizontal={6} paddingVertical={6}>
+              Forget
+            </Text>
+          </Pressable>
+        </View>
+      ))}
+    </View>
+  ) : null;
   const where = (machine: NearbyChoice): string | undefined =>
     machine.addresses !== undefined && machine.addresses.length > 0 ? `${machine.addresses.join(" · ")}${machine.port !== undefined ? ` · port ${machine.port}` : ""}` : undefined;
 
@@ -177,7 +220,8 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
     const search = nearbySearchWords(nearby, now);
     return (
       <Frame t={t}>
-        {heading("Connect to a JaiRA machine")}
+        {mine}
+        {heading(others ? "Pair another machine" : "Connect to a JaiRA machine")}
         <View flexDirection="row" alignItems="center" gap={8}>
           {search.looking ? <Pulse /> : null}
           <View flex={1}>{words(search.headline, search.trouble ? "bad" : "dim")}</View>
@@ -228,7 +272,8 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
 
   return (
     <Frame t={t}>
-      {heading("Connect to a JaiRA machine")}
+      {mine}
+      {heading(others ? "Pair another machine" : "Connect to a JaiRA machine")}
       {words(
         nearby !== undefined
           ? "On that machine, Settings → Machines → Pair a machine shows a code that works once, its tailnet address, and the local address to type when this phone cannot list it."

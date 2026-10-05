@@ -525,13 +525,6 @@ sheet, Inbox room, Steps rail, the board one column at a time). Seen in a phone-
       shell again (the store reloads; what was open is kept where `ui` keeps it).
 - [ ] **The Steps rail of a long run**: the strip shows the rows that fit its height; the index's own
       fitting (`useStepsFit`) is not asked of it yet.
-- [ ] **The emulator rigs** (`shots/android.mts`, `android-check.mts`) still expect the Connect screen
-      first and the desktop's layout: on a phone's width the shell now comes first, empty, with its line
-      opening the Connect screen, and lays itself out for the phone. They need the same changes
-      `phone.mts` and `phoneLayout.mts` had.
-- [ ] **More than one machine.** The shell's projects are those of the one machine the phone reaches;
-      "the ui populates the projects based on the machines it can connect to" wants every paired machine
-      reached and its projects listed.
 
 ## Open inside the universal client, on a phone only (decision 0015)
 
