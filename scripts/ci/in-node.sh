@@ -3,14 +3,30 @@
 # (.gitlab/ci/pipeline.yml). On GitLab's hosted runners the job is already in that image and they run
 # as they are. On the group's own Linux machine, a shell runner, they run in a container of it: the
 # checkout and anything cloned beside it (JaiRA's declarative-ai) mounted at the same paths, the job's
-# variables passed in, npm's cache kept in a volume between jobs. The container runs as root
-# (apt-get), so what it wrote is given back to the runner's user as it ends; the runner's next
-# `git clean` could not remove it otherwise.
+# variables passed in.
+#
+# That machine keeps what a job leaves until the project's next job, on a disk every project shares,
+# so as the container ends it removes the bulk — every node_modules, the clone beside the checkout —
+# and gives what is left back to the runner's user: the container runs as root (apt-get), and the
+# runner's next `git clean` could not remove it otherwise. npm's cache goes with the container.
 #
 # The whole script is read before it runs (`main`): a job may check out an older commit, which
 # rewrites this file under it. JaiRA and Tag & Restart have the same script; a change to one belongs
 # in the other.
 set -euo pipefail
+
+# What the container runs: the job's commands, and the clearing up however they end.
+# shellcheck disable=SC2016 # expanded in the container
+readonly IN_CONTAINER='
+clear_up() {
+  rm -rf "$CI_MOUNT/declarative-ai"
+  find "$CI_PROJECT_DIR" -name node_modules -type d -prune -exec rm -rf {} +
+  chown -R "$CI_HOST_OWNER" "$CI_PROJECT_DIR"
+}
+trap "clear_up 2> /dev/null || true" EXIT
+git config --global --add safe.directory "*"
+bash -eo pipefail -c "$CI_JOB_COMMANDS"
+'
 
 main() {
   local job
@@ -30,16 +46,9 @@ main() {
 
   local image="${CI_NODE_IMAGE:-node:22}"
   docker pull --quiet "$image" > /dev/null
-  # shellcheck disable=SC2016 # expanded in the container
-  exec docker run --rm \
-    -v "$root:$root" -w "$CI_PROJECT_DIR" -v ci-npm-cache:/root/.npm \
+  exec docker run --rm -v "$root:$root" -w "$CI_PROJECT_DIR" \
     "${env[@]}" -e CI_JOB_COMMANDS="$job" -e CI_HOST_OWNER="$(id -u):$(id -g)" -e CI_MOUNT="$root" \
-    "$image" \
-    bash -c '
-      trap '\''chown -R "$CI_HOST_OWNER" "$CI_PROJECT_DIR" "$CI_MOUNT/declarative-ai" 2> /dev/null || true'\'' EXIT
-      git config --global --add safe.directory "*"
-      bash -eo pipefail -c "$CI_JOB_COMMANDS"
-    '
+    "$image" bash -c "$IN_CONTAINER"
 }
 
 main "$@"
