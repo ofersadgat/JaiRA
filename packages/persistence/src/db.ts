@@ -7,6 +7,7 @@
  */
 import Database from "better-sqlite3";
 import { migrate, read, SCHEMA_BASELINE } from "./migrations";
+import { SYNC_SQL } from "./sync";
 
 export type JairaDb = Database.Database;
 
@@ -311,6 +312,7 @@ CREATE TABLE replica_seqs (
   PRIMARY KEY (workspace, remote_seq)
 );
 CREATE INDEX replica_seqs_local ON replica_seqs(local_seq);
+${SYNC_SQL}
 `;
 
 /**
@@ -324,6 +326,10 @@ export function openDb(file: string): JairaDb {
   const db = new Database(file);
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
+  // So an `INSERT OR REPLACE` that removes a conflicting row fires that row's DELETE trigger, and the
+  // change log (decision 0018, `sync.ts`) gets its tombstone: SQLite skips delete triggers on a
+  // replace's implicit delete otherwise. The log's triggers write only `sync_changes`, which has none.
+  db.pragma("recursive_triggers = ON");
   if (read(db) < SCHEMA_BASELINE) {
     try {
       // IMMEDIATE, and asked again inside: two processes opening a new file at once must create it once.

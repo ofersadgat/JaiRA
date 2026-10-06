@@ -81,3 +81,4 @@ export { isEventEnabled, enabledEvents, type JairaEventsConfig, type JairaEventS
 export type { JairaEngineConfig } from "./config";
 // What the Licenses page reads: the build's manifest of third-party notices, its decoder and search.
 export * from "./thirdPartyLicenses";
+export * from "./sync";

@@ -40,6 +40,7 @@ import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
 import { claimReplayed, registerWorkspace, workspaceIdOf } from "./workspace";
+import { touch } from "./sync";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.project");
@@ -441,7 +442,10 @@ function openAt(
     workspace,
     config,
     db,
-    tasks: new TaskFileStore(paths.tasksDir),
+    // A task's file is not in the database: its writes reach the change log from here (decision 0018).
+    // Its removal is the task's deletion too — after the runtime row's, whose tombstone it must not
+    // turn back into a change.
+    tasks: new TaskFileStore(paths.tasksDir, replica ? undefined : (taskId, removed) => touch(db, "task", taskId, taskId, removed)),
     runtime,
     events: new SqliteEventLog(db, journalDir),
     commands: new CommandLog(db),

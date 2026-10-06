@@ -56,7 +56,11 @@ export function functionRefsOf(bundle: WorkflowBundle): Set<string> {
   return names;
 }
 
-export function taskSummaries(project: Project): TaskSummary[] {
+/**
+ * Every task's summary — or, given `only`, those tasks' alone (a reader syncing what changed, decision
+ * 0018). The counts that reach across tasks (`controls`) are still taken over all of them.
+ */
+export function taskSummaries(project: Project, only?: ReadonlySet<string>): TaskSummary[] {
   // Who stands under whom: a task filed beneath another, adopted by it, or made by its fan-out.
   const under = new Map<string, number>();
   for (const meta of project.tasks.list()) {
@@ -72,7 +76,8 @@ export function taskSummaries(project: Project): TaskSummary[] {
     }
     return currentEvents ?? undefined;
   };
-  return project.runtime.list().map((row) => {
+  const rows = project.runtime.list();
+  return (only === undefined ? rows : rows.filter((row) => only.has(row.taskId))).map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
     const startedBy =
       meta?.startedBy === undefined || project.runtime.get(meta.startedBy.fromTask) !== undefined

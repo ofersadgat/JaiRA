@@ -65,6 +65,8 @@ export const MACHINE_LOCAL = new Set([
   "placement:changed",
   "frame:contextMenu",
   "forge:signInFinished",
+  // This engine's change log, on its own clock (decision 0018): another machine's copy of its tasks is kept by replication.
+  "sync:changed",
 ]);
 
 export interface OutboxItem {

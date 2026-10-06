@@ -175,6 +175,13 @@ export function shadowTable(db: JairaDb, table: string): boolean {
     .prepare(`SELECT sql FROM main.sqlite_master WHERE type='index' AND tbl_name=? AND sql IS NOT NULL`)
     .all(table) as Array<{ sql: string }>;
   for (const index of indexes) db.exec(index.sql);
+  // And the change log's triggers (decision 0018, `sync.ts`): a trigger on `main.<table>` does not see
+  // a write that lands in the shadow, so the shadow gets its own — a TEMP trigger, writing the one
+  // `main.sync_changes` every reader syncs from.
+  const triggers = db
+    .prepare(`SELECT sql FROM main.sqlite_master WHERE type='trigger' AND tbl_name=? AND name LIKE 'sync_%' AND sql IS NOT NULL`)
+    .all(table) as Array<{ sql: string }>;
+  for (const trigger of triggers) db.exec(trigger.sql.replace(/^CREATE\s+TRIGGER/i, "CREATE TEMP TRIGGER"));
   return true;
 }
 

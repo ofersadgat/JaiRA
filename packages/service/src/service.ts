@@ -187,6 +187,12 @@ import {
   startedTaskOf,
   PROCESS_ENDED,
   ownerOf,
+  changesSince,
+  pruneTombstones,
+  syncHorizon,
+  syncNow,
+  touch,
+  TOMBSTONE_KEEP_MS,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -579,6 +585,7 @@ import type {
   LogQuery,
   ProjectSummary,
   ProjectTask,
+  SyncPage,
   RunMetrics,
   SessionOutput,
   SessionRef,
@@ -1440,6 +1447,10 @@ export class AppService {
     this.archiveTimer = setInterval(() => this.sweepArchive(), 15 * 60_000);
     this.archiveTimer.unref?.();
     this.placementTimer.unref?.();
+    // The change log, watched (decision 0018 §5): whatever wrote it — this process or `jaira` in a
+    // terminal — a window hears of it within a sixth of a second, with the rows.
+    this.syncTimer = setInterval(() => this.pushSync(), 150);
+    this.syncTimer.unref?.();
     this.federation = new Federation(this.fleet, {
       baseDir: this.baseDir,
       publish: (message) => this.publish(message),
@@ -3495,6 +3506,7 @@ export class AppService {
     this.closed = true;
     clearInterval(this.placementTimer);
     clearInterval(this.archiveTimer);
+    clearInterval(this.syncTimer);
     this.resources.close();
     this.replicator.close();
     for (const replica of this.replicaSessions.values()) replica.project.close();
@@ -3625,6 +3637,113 @@ export class AppService {
     return this.sessions.get(sessionKey(ref));
   }
 
+  // --- the change log (decision 0018) -----------------------------------------------------------------
+
+  private syncTimer: ReturnType<typeof setInterval> | undefined;
+  /** The newest stamp, and how many entries carry it, as the last push left them. */
+  private synced: { at: number; count: number } | undefined;
+  private tombstonesPrunedAt = 0;
+
+  /** The one database the log is in: every session's is the same file (decision 0013 §4). */
+  private syncDb(): Project["db"] | undefined {
+    return (this.sessions.values().next().value as ProjectSession | undefined)?.project.db;
+  }
+
+  /**
+   * What changed at or after `since` — `sync:since`, and the page `sync:changed` pushes. Everything
+   * (`whole`) for a cursor of 0 or one older than the horizon, below which tombstones were dropped.
+   *
+   * The cursor answered is the newest stamp taken BEFORE the rows are read, so a row written while
+   * they are read is at or after it and comes again on the next page.
+   */
+  syncSince(since: number): SyncPage {
+    this.sharedSession();
+    const db = this.syncDb();
+    if (db === undefined) return { at: 0, horizon: 0, whole: true, tasks: [], gone: [], changes: [] };
+    const at = syncNow(db);
+    const horizon = syncHorizon(db);
+    if (since <= 0 || since < horizon) return { at, horizon, whole: true, tasks: this.indexTasks(), gone: [], changes: [] };
+    const changes = changesSince(db, since);
+    const gone = new Set(changes.filter((c) => c.collection === "task" && c.deleted).map((c) => c.id));
+    const touched = new Set(changes.flatMap((c) => (c.taskId !== null && !gone.has(c.taskId) ? [c.taskId] : [])));
+    let tasks = touched.size === 0 ? [] : this.indexTasks(touched);
+    // A summary counts the tasks under it (`controls`), so the task one stands under changed with it.
+    const above = new Set(tasks.flatMap((t) => [t.parentTaskId, t.origin?.taskId].filter((id): id is string => id !== undefined && !touched.has(id))));
+    if (above.size > 0) tasks = [...tasks, ...this.indexTasks(above)];
+    return { at, horizon, whole: false, tasks, gone: [...gone], changes };
+  }
+
+  /**
+   * Every task's summary, or those of `only`: this machine's workspaces and its copies of other
+   * machines' (decision 0018 §7 — a window reads another machine's tasks from this engine's copy).
+   */
+  private indexTasks(only?: ReadonlySet<string>): ProjectTask[] {
+    const out: ProjectTask[] = [];
+    for (const session of this.sessions.values()) for (const task of taskSummaries(session.project, only)) out.push({ ...task, project: session.dir });
+    for (const peer of this.fleet.peers()) {
+      for (const dir of this.federation.projectsOf(peer.id)) {
+        const key = remoteProjectKey(peer.id, dir);
+        const session = this.replicaSession(key, peer.id, dir);
+        if (session === undefined) continue;
+        for (const task of taskSummaries(session.project, only)) out.push({ ...task, project: key });
+      }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /**
+   * Push what changed since the last push, when the log has moved. Moved means a newer stamp, or more
+   * entries at the newest — two writes in one millisecond, a poll apart. (One row rewritten twice in
+   * the same millisecond with nothing after it is not seen here; a window's own sweep reads it.)
+   */
+  private pushSync(): void {
+    if (this.closed || this.options.publish === undefined) return;
+    const db = this.syncDb();
+    if (db === undefined) return;
+    const now = Date.now();
+    if (now - this.tombstonesPrunedAt > 60 * 60_000) {
+      this.tombstonesPrunedAt = now;
+      pruneTombstones(db, TOMBSTONE_KEEP_MS, now);
+    }
+    const head = db.prepare(`SELECT at, COUNT(*) AS count FROM sync_changes WHERE at = (SELECT MAX(at) FROM sync_changes)`).get() as { at: number | null; count: number };
+    const at = head.at ?? 0;
+    if (this.synced === undefined) {
+      this.synced = { at, count: head.count };
+      return;
+    }
+    if (at === this.synced.at && head.count === this.synced.count) return;
+    const prev = this.synced.at;
+    const page = this.syncSince(prev);
+    this.synced = { at: page.at, count: (db.prepare(`SELECT COUNT(*) AS count FROM sync_changes WHERE at = ?`).get(page.at) as { count: number }).count };
+    this.options.publish({ type: "sync:changed", prev, page });
+  }
+
+  /**
+   * A gate the engine holds in memory, entered in the log as it is asked and settled — the database
+   * does not see it. A settled one leaves a tombstone.
+   */
+  private logGate(message: PushMessage): void {
+    const db = this.syncDb();
+    if (db === undefined) return;
+    switch (message.type) {
+      case "approval:requested":
+      case "question:requested":
+        touch(db, message.type.split(":")[0]!, message.pending.requestId, message.pending.taskId ?? null);
+        break;
+      case "userEvent:requested":
+        touch(db, "userEvent", message.request.requestId, message.request.taskId ?? null);
+        break;
+      case "approval:resolved":
+      case "question:resolved":
+      case "userEvent:resolved":
+        touch(db, message.type.split(":")[0]!, message.requestId, null, true);
+        break;
+      case "placement:changed":
+        touch(db, "placement", "queue");
+        break;
+    }
+  }
+
   /**
    * Where a task lives, from its id alone — the project every request about it is answered from.
    *
@@ -3705,6 +3824,7 @@ export class AppService {
   }
 
   private publish(message: PushMessage): void {
+    this.logGate(message);
     this.options.publish?.(message);
     // A run ended — here or, relayed, on another machine: a workspace may have room for what waits.
     if (message.type === "run:finished" && this.placement !== undefined && this.placement.queue().length > 0) void this.tryQueue();

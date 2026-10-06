@@ -139,6 +139,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "task:system": (() => service.listSystemTasks()) as Handler,
     "project:list": (() => service.listProjects()) as Handler,
     "task:all": ((request: { workflows?: string[] } | undefined) => service.listAllTasks(request ?? {})) as Handler,
+    "sync:since": ((request: { since: number }) => service.syncSince(request.since)) as Handler,
     "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
     "run:records": ((request: Parameters<typeof service.runRecords>[0]) => service.runRecords(request)) as Handler,
     "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,

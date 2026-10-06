@@ -23,6 +23,7 @@
  *  - **Change `SCHEMA` too**, so a fresh database is born in the shape the step leaves an old one in.
  */
 import type { JairaDb } from "./db";
+import { SYNC_SQL } from "./sync";
 
 /** The version `SCHEMA` creates a database at. */
 export const SCHEMA_BASELINE = 24;
@@ -71,6 +72,11 @@ UPDATE event_waits SET name = CASE name
   WHEN 'git.checks.failed' THEN 'pipeline.failed'
   ELSE name END;
 `,
+  },
+  {
+    version: 26,
+    note: "decision 0018: the change log readers sync from (sync_changes, written by triggers on every table a reader reads), and the horizon below which its tombstones were dropped (sync_meta)",
+    sql: SYNC_SQL,
   },
 ];
 

@@ -41,6 +41,7 @@ import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesV
 import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
+import type { SyncPage } from "./sync";
 import type { CommandApproval } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
@@ -1579,6 +1580,12 @@ export interface IpcContract {
    * of threads.
    */
   "task:all": { request: { workflows?: string[] } | void; response: ProjectTask[] };
+  /**
+   * What changed at or after `since` (decision 0018): the summaries of the tasks that changed, the ones
+   * deleted, and the change log's entries — or everything (`whole`) for a cursor of 0 or one older than
+   * the horizon. The same page `sync:changed` pushes.
+   */
+  "sync:since": { request: { since: number }; response: SyncPage };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
   /**
@@ -2359,6 +2366,7 @@ export const IPC_CHANNELS = [
   "project:current",
   "task:list",
   "task:all",
+  "sync:since",
   "task:detail",
   "task:create",
   "task:start",
@@ -2745,6 +2753,11 @@ export function startsThinking(entry: JsonValue): boolean {
  */
 export type PushMessage =
   | { type: "engine:event"; taskId: string; seq: number; at: number; event: JsonValue; project?: string }
+  /**
+   * What changed since `prev` (decision 0018 §5): pushed whenever the change log moves. A reader whose
+   * cursor is older than `prev` missed a page, and asks `sync:since` from its cursor instead.
+   */
+  | { type: "sync:changed"; prev: number; page: SyncPage }
   /**
    * `workflows` fires when a watched workflows directory changes on disk (§11.1's re-lint) — the
    * project's and the shared base root's alike, since a base edit changes what this project runs.

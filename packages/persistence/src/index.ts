@@ -61,3 +61,4 @@ export * from "./connectUndo";
 export * from "./moveLegality";
 export * from "./moveQuestion";
 export * from "./nextMoves";
+export * from "./sync";
