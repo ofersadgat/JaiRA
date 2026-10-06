@@ -2,22 +2,22 @@
  * The limits board and the waiting list, as the renderer sees them (usage-readings contract).
  *
  * Machine-wide state read from deep inside components that know nothing else about it — a composer's
- * number, a message rail's badge, a sign-in card — so it is published here and read with a hook, the
- * same arrangement `renderChoice.ts` uses, rather than threaded through every prop list. Main pushes
- * each change (`limits:changed`, `waiting:changed`); the first reader fetches the current state.
+ * number, a message rail's badge, a sign-in card — so it is read with a hook rather than threaded
+ * through every prop list. Each is a view of the window's cache (decision 0018, group 7): read when a
+ * component first holds it, and again when the change log says it moved (`limits`, `waiting`).
  *
- * A meter on screen WATCHES ({@link useLimitsWatch}): while one does, main refreshes a reading that
- * has gone stale by itself. With nothing watching, nothing is fetched.
+ * A meter on screen WATCHES ({@link useLimitsWatch}): while one does, the engine refreshes a reading
+ * that has gone stale by itself. With nothing watching, nothing is fetched.
  */
 import { useEffect, useState, useSyncExternalStore } from "react";
 import type { LimitAccountView, LimitsView, UsageFigures, WaitingItem } from "@jaira/shared/browser";
 import { accountOfRoute } from "@jaira/shared/browser";
-import { invoke, subscribe as subscribePush } from "./store";
+import { invoke, syncCache } from "./store";
+import { useView } from "./useView";
 
-let view: LimitsView = { accounts: [], routeAccounts: {} };
-let waiting: WaitingItem[] = [];
+const NO_LIMITS: LimitsView = { accounts: [], routeAccounts: {} };
+const NOTHING_WAITS: WaitingItem[] = [];
 const watchers = new Set<() => void>();
-let started = false;
 
 function notify(): void {
   for (const w of [...watchers]) w();
@@ -30,44 +30,12 @@ function subscribe(watch: () => void): () => void {
   };
 }
 
-/** Fetch once and listen — the first time anything asks. A server render (no bridge) never starts. */
-function start(): void {
-  if (started || typeof window === "undefined" || (window as { jaira?: unknown }).jaira === undefined) return;
-  started = true;
-  void invoke("limits:read", undefined).then(
-    (next) => publishLimits(next),
-    () => undefined,
-  );
-  void invoke("waiting:list", undefined).then(
-    (next) => publishWaiting(next),
-    () => undefined,
-  );
-  subscribePush((message) => {
-    if (message.type === "limits:changed") publishLimits(message.view);
-    else if (message.type === "waiting:changed") publishWaiting(message.items);
-  });
-}
-
-/** Replace the board view — from main, or from a test drawing a still picture. */
-export function publishLimits(next: LimitsView): void {
-  view = next;
-  notify();
-}
-
-/** Replace the waiting list — from main, or from a test. */
-export function publishWaiting(next: WaitingItem[]): void {
-  waiting = next;
-  notify();
-}
-
 export function useLimits(): LimitsView {
-  useEffect(start, []);
-  return useSyncExternalStore(subscribe, () => view, () => view);
+  return useView("limits:read", undefined).value ?? NO_LIMITS;
 }
 
 export function useWaiting(): WaitingItem[] {
-  useEffect(start, []);
-  return useSyncExternalStore(subscribe, () => waiting, () => waiting);
+  return useView("waiting:list", undefined).value ?? NOTHING_WAITS;
 }
 
 /**
@@ -97,7 +65,7 @@ export function accountFor(limits: LimitsView, route: string | undefined): Limit
 /** A meter is on screen: keep the board fresh while it is. */
 export function useLimitsWatch(active = true): void {
   useEffect(() => {
-    if (!active || typeof window === "undefined" || (window as { jaira?: unknown }).jaira === undefined) return;
+    if (!active) return;
     void invoke("limits:watch", { watching: true }).catch(() => undefined);
     return () => {
       void invoke("limits:watch", { watching: false }).catch(() => undefined);
@@ -108,7 +76,7 @@ export function useLimitsWatch(active = true): void {
 /** Press Refresh on an account. */
 export function refreshAccount(key: string): void {
   void invoke("limits:refresh", { account: key }).then(
-    (next) => publishLimits(next),
+    () => syncCache().refresh("limits:read", undefined),
     () => undefined,
   );
 }
@@ -116,7 +84,7 @@ export function refreshAccount(key: string): void {
 /** Act on a waiting item: send it now anyway, delete it, or turn "Try again at …" on or off. */
 export function actOnWaiting(id: string, action: "sendNow" | "drop" | "retry", retry?: boolean): void {
   void invoke("waiting:act", { id, action, ...(retry !== undefined ? { retry } : {}) }).then(
-    (next) => publishWaiting(next),
+    () => syncCache().refresh("waiting:list", undefined),
     () => undefined,
   );
 }

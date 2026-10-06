@@ -3,12 +3,13 @@
  * Needs-attention item's button does — as a hook and a function (`SettingsView.tsx` and
  * `SidebarRegion.tsx`, in `packages/universal/src/app`, call them).
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import type { EventsStatusView, ForgeCheck, ForgeSignInPending, HealthItem, HealthPage } from "@jaira/shared/browser";
 import { isPluginId, SHARED_SESSION, type ConfigLayer } from "@jaira/shared/browser";
 import type { AutomationsChannel } from "./automationsHost";
 import type { PermissionSetsChannel } from "./permissionSetsHost";
-import { invoke, subscribe } from "./store";
+import { invoke, subscribe, syncCache } from "./store";
+import { useView } from "./useView";
 import { checkForUpdate, installPlugin } from "./updatesStore";
 
 /** Signing in to a forge through the browser (OAuth device flow), as Connections draws it. */
@@ -28,7 +29,10 @@ export interface ForgeOAuth {
  * token is stored and the check that names the account has landed.
  */
 export function useForgeOAuth(forges: readonly ForgeCheck[] | undefined, readAvailability: () => void): ForgeOAuth {
-  const [forgeSignIns, setForgeSignIns] = useState<ReadonlyMap<string, ForgeSignInPending>>(new Map());
+  // The sign-ins under way are the engine's (decision 0018, group 7): a view of the cache, read again
+  // as the change log says they moved. What went wrong with a press is this window's own.
+  const held = useView("forge:signIns", undefined).value;
+  const forgeSignIns: ReadonlyMap<string, ForgeSignInPending> = useMemo(() => new Map((held ?? []).map((p) => [p.connection, p])), [held]);
   const [forgeErrors, setForgeErrors] = useState<ReadonlyMap<string, string>>(new Map());
   const forgeError = useCallback((connection: string, reason: string | undefined): void => {
     setForgeErrors((current) => {
@@ -38,20 +42,12 @@ export function useForgeOAuth(forges: readonly ForgeCheck[] | undefined, readAva
       return next;
     });
   }, []);
-  const forgePending = useCallback((connection: string, pending: ForgeSignInPending | undefined): void => {
-    setForgeSignIns((current) => {
-      const next = new Map(current);
-      if (pending === undefined) next.delete(connection);
-      else next.set(connection, pending);
-      return next;
-    });
-  }, []);
+  /** A sign-in started or stopped here: read the engine's list now, ahead of the change log. */
+  const signInsMoved = useCallback((): void => void syncCache().refresh("forge:signIns", undefined), []);
   useEffect(() => {
-    void invoke("forge:signIns", undefined).then((list) => setForgeSignIns(new Map(list.map((p) => [p.connection, p]))), () => undefined);
     return subscribe((message) => {
       if (message.type !== "forge:signInFinished") return;
       const { outcome } = message;
-      forgePending(outcome.connection, undefined);
       forgeError(outcome.connection, outcome.ok || outcome.code === "canceled" ? undefined : outcome.reason);
       readAvailability();
     });
@@ -65,12 +61,12 @@ export function useForgeOAuth(forges: readonly ForgeCheck[] | undefined, readAva
     onSignIn: (connection: string) => {
       forgeError(connection, undefined);
       void invoke("forge:signIn", { connection }).then(
-        (start) => (start.ok ? forgePending(connection, start.pending) : forgeError(connection, start.fix !== undefined ? `${start.reason} — ${start.fix}` : start.reason)),
+        (start) => (start.ok ? signInsMoved() : forgeError(connection, start.fix !== undefined ? `${start.reason} — ${start.fix}` : start.reason)),
         (e: unknown) => forgeError(connection, e instanceof Error ? e.message : String(e)),
       );
     },
     onCancel: (connection: string) => {
-      void invoke("forge:cancelSignIn", { connection }).then(() => forgePending(connection, undefined));
+      void invoke("forge:cancelSignIn", { connection }).then(signInsMoved);
     },
     onDisconnect: (connection: string) => {
       void invoke("forge:signOut", { connection }).then(

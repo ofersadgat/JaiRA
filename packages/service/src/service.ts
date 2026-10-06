@@ -3647,6 +3647,12 @@ export class AppService {
 
   // --- the change log (decision 0018) -----------------------------------------------------------------
 
+  /** The forge sign-ins under way moved: every window's Connections page reads them again. */
+  private signInsMoved(): void {
+    const db = this.syncDb();
+    if (db !== undefined) touch(db, "forge", "signIns");
+  }
+
   /** A composer's unsent words (decision 0018 §9) — kept here when this engine owns the conversation; routed here by its task id. */
   draftGet(key: string): { text: string; at: number } | null {
     const db = this.syncDb();
@@ -3766,8 +3772,9 @@ export class AppService {
   }
 
   /**
-   * A gate the engine holds in memory, entered in the log as it is asked and settled — the database
-   * does not see it. A settled one leaves a tombstone.
+   * What the engine holds outside the database, entered in the log as it changes — the database does
+   * not see it: a gate as it is asked and settled (a settled one leaves a tombstone), the placement
+   * queue, and what the settings pages show (limits, what waits, machines, sign-ins, configuration).
    */
   private logGate(message: PushMessage): void {
     const db = this.syncDb();
@@ -3787,6 +3794,22 @@ export class AppService {
         break;
       case "placement:changed":
         touch(db, "placement", "queue");
+        break;
+      // What the settings pages show, held in memory or in files: their views read again by it (group 7).
+      case "limits:changed":
+        touch(db, "limits", "limits");
+        break;
+      case "waiting:changed":
+        touch(db, "waiting", "waiting");
+        break;
+      case "machines:changed":
+        touch(db, "machine", "machines");
+        break;
+      case "forge:signInFinished":
+        touch(db, "forge", "signIns");
+        break;
+      case "store:invalidate":
+        if (message.scope === "config" || message.scope === "availability") touch(db, message.scope, message.scope);
         break;
     }
   }
@@ -10132,6 +10155,7 @@ export class AppService {
     };
     const controller = new AbortController();
     this.forgeSignIns.set(name, { pending, controller });
+    this.signInsMoved();
     // The plain page, where the person types the code shown beside Sign in — see `ForgeSignInPending`.
     this.openPage(pending.verificationUri);
     void this.finishForgeSignIn(name, connection, endpoints, clientId, authorization, controller.signal);

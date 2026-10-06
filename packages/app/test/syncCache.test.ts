@@ -245,6 +245,33 @@ describe("views about no one task", () => {
     expect(reads("approval:pending")).toBe(before.approvals + 1);
     expect(reads("board:roots")).toBe(before.board + 1);
   });
+
+  it("include the settings pages', each read again only for its own kind of change (group 7)", async () => {
+    const e = engine(() => ({}));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("settings", [
+      ["limits:read", undefined],
+      ["machines:view", undefined],
+      ["forge:signIns", undefined],
+      ["cli:status", undefined],
+    ]);
+    await settle();
+    const reads = (channel: string): number => e.asked.filter((a) => a.channel === channel).length;
+    const before = { limits: reads("limits:read"), machines: reads("machines:view"), forge: reads("forge:signIns"), cli: reads("cli:status") };
+    // The engine logged a limits change: the limits are read again, and nothing else is.
+    cache.push(changed(10, page(11, [], { changes: [{ collection: "limits", id: "limits", taskId: null, at: 11, deleted: false }] })));
+    await settle();
+    expect(reads("limits:read")).toBe(before.limits + 1);
+    expect(reads("machines:view")).toBe(before.machines);
+    expect(reads("forge:signIns")).toBe(before.forge);
+    // A configuration change moves the sign-ins, and the command's status is read by nothing a page brings.
+    cache.push(changed(11, page(12, [], { changes: [{ collection: "config", id: "config", taskId: null, at: 12, deleted: false }] })));
+    await settle();
+    expect(reads("forge:signIns")).toBe(before.forge + 1);
+    expect(reads("cli:status")).toBe(before.cli);
+  });
 });
 
 describe("reading again now", () => {

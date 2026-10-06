@@ -158,6 +158,19 @@ const SHOWS: Partial<Record<string, readonly string[]>> = {
   "question:pending": ["question"],
   "userEvent:pending": ["userEvent"],
   "state:view": ["task", "event"],
+  // The settings pages' (group 7): what the engine holds in memory or in files, logged as it changes.
+  "limits:read": ["limits"],
+  "waiting:list": ["waiting"],
+  "machines:view": ["machine"],
+  "machines:outbox": ["machine"],
+  "machines:copies": ["machine", "workspace"],
+  "forge:signIns": ["forge", "config"],
+  "permissionSets:read": ["config"],
+  "catalog:status": ["config", "availability"],
+  "mcp:tools": ["config"],
+  "mcp:detect": ["config"],
+  "cli:status": [],
+  "licenses:read": [],
 };
 
 /** Views whose answer never changes once had — a placeholder's string, by its hash: never read again. */

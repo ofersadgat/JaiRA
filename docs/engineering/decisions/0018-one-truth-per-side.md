@@ -297,7 +297,12 @@ Each step ends with the window working, and with a check in the real app in the 
    a filter of it; views held by key (channel and request, the task by id alone) and read again only for
    the changes they show (`SHOWS`), at most twice a second while a task streams; a reconcile on focus,
    on visibility, once a minute and after a gap. `store.ts` reads the selected task and the place's
-   views from it; which tasks are answering is read from open records.
+   views from it; which tasks are answering is read from open records. The settings pages (group 7)
+   read their engine views from it too — limits, what waits, the machines, the outbox and copies, forge
+   sign-ins, the catalog, MCP, the command — each re-read for its own kind of change, which the engine
+   logs as it pushes it. Left as they were: the window host's engine status (not engine data), the
+   build's license notices (a file of the build), and Connections' probes and the permission-set and
+   automation editors (actions, and documents read when opened).
 3. **Lazy placeholders** — `service/src/lazy.ts`: tools' strings over 64 KB (this machine's window) or
    4 KB (a phone, a browser) sent as `{"$lazy": {size, preview, hash}}`; what was said is never replaced;
    `lazy:value` answers a hash from memory, then from the blob table. `useFilled` fills one where it is drawn.
@@ -315,6 +320,13 @@ Each step ends with the window working, and with a check in the real app in the 
    kept view shown while none can, replaced by the engine's answer. Its limit (200 MB by default, or
    none) and what it uses are on the phone's Connect screen; past it the views read longest ago go,
    never an index. A machine forgotten takes its index with it. A browser keeps no mirror.
+7. **Files** — `persistence/src/fileStorage.ts` replaced the `TEMP` shadow tables: the database is the
+   truth for every concern while JaiRA runs, and a concern in `file` mode is also written to files as
+   each change is saved. At open its files are read only when they moved since JaiRA last had them
+   (their fingerprint is recorded at every close): staged, then each task they speak for has its rows
+   replaced by theirs. A concern with no files yet has them written from the database. `"both"` is read
+   as `"file"`. Not built: watching files while running (§11), so a second process opening a workspace
+   another has open reads the files the first has appended to since its last close.
 
 Found on the way, and fixed: a repository that committed `.jaira/system/workspace.id` gave every clone
 one id, and opening a second clone took the first's tasks (`workspaceIdFor` now gives a copy its own).

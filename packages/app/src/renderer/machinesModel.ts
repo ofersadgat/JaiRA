@@ -4,9 +4,10 @@
  * draws. A sentence that holds a link or a value is a list of {@link WordPart}s, which the page draws
  * run by run (`Words.tsx`).
  */
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { LAN_PAIRING_PORT, PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachineForm, type MachinesView, type NearbyEvent, type PeerView } from "@jaira/shared/browser";
-import { invoke, subscribe as subscribePush } from "./store";
+import { invoke, syncCache } from "./store";
+import { useView } from "./useView";
 
 /** A run of a sentence: words, a value (drawn as code), an error, a quiet note, or a link. */
 export type WordPart = string | { code: string } | { error: string } | { hint: string } | { link: string; href: string };
@@ -38,16 +39,19 @@ export function diskWords(disk: { bytes: number; machines: number } | undefined)
   return disk === undefined ? "…" : disk.bytes === 0 ? "Nothing copied yet." : `${sizeOf(disk.bytes)} from ${disk.machines} machine${disk.machines === 1 ? "" : "s"}, under ~/.jaira/remote.`;
 }
 
-/** The fleet, fetched once and kept current by `machines:changed`. */
+/**
+ * The fleet: a view of the window's cache, read again when the change log says the machines moved
+ * (decision 0018, group 7). The second half is for an action that answered with the fleet as it now
+ * stands — it has the view read again, ahead of the change log.
+ */
 export function useMachines(): [MachinesView | undefined, (next: MachinesView) => void] {
-  const [view, setView] = useState<MachinesView | undefined>(undefined);
-  useEffect(() => {
-    void invoke("machines:view", undefined).then(setView, () => undefined);
-    return subscribePush((message) => {
-      if (message.type === "machines:changed") setView(message.view);
-    });
-  }, []);
-  return [view, setView];
+  return [useView("machines:view", undefined).value, machinesMoved];
+}
+
+/** Something this window did moved the fleet: read it again now. */
+export function machinesMoved(): void {
+  void syncCache().refresh("machines:view", undefined);
+  void syncCache().refresh("machines:outbox", undefined);
 }
 
 /**

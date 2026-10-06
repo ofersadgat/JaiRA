@@ -11,9 +11,10 @@
  * A secret's VALUE goes straight to main (`secret:set`) and is never held here; storing one re-checks,
  * since a server that was waiting for it may start now.
  */
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { McpDetectedSource, McpToolsReport, SecretTarget } from "@jaira/shared/browser";
-import { invoke } from "./store";
+import { invoke, syncCache } from "./store";
+import { useView } from "./useView";
 
 export interface McpData {
   /** The configured servers, as last asked. Absent until the first answer. */
@@ -30,47 +31,44 @@ export interface McpData {
 }
 
 /**
- * The MCP data, asked for while `active`, and again whenever `stamp` changes (the configuration
- * object — a save, a layer switch, another project).
+ * The MCP data while `active`: views of the window's cache (decision 0018, group 7), read again as the
+ * change log says the configuration moved — and when `stamp` changes (the configuration object a page
+ * is editing: a save, a layer switch, another project).
  */
 export function useMcpData(active: boolean, stamp: unknown): McpData {
-  const [report, setReport] = useState<McpToolsReport | undefined>(undefined);
-  const [detected, setDetected] = useState<McpDetectedSource[] | undefined>(undefined);
+  const tools = useView("mcp:tools", active ? undefined : null);
+  const detected = useView("mcp:detect", active ? undefined : null).value;
+  const report: McpToolsReport | undefined = tools.value;
   const [rechecking, setRechecking] = useState(false);
-  const [problem, setProblem] = useState<string | null>(null);
+  const [failed, setFailed] = useState<string | null>(null);
+  const problem = failed ?? tools.error ?? null;
 
+  const first = useRef(true);
   useEffect(() => {
-    if (!active) return;
-    let live = true;
-    void invoke("mcp:tools", undefined).then(
-      (next) => live && setReport(next),
-      (e: unknown) => live && setProblem(e instanceof Error ? e.message : String(e)),
-    );
-    void invoke("mcp:detect", undefined).then(
-      (next) => live && setDetected(next),
-      () => live && setDetected(undefined),
-    );
-    return () => {
-      live = false;
-    };
+    if (first.current || !active) return void (first.current = false);
+    void syncCache().refresh("mcp:tools", undefined);
+    void syncCache().refresh("mcp:detect", undefined);
   }, [active, stamp]);
 
   const recheck = useCallback((): void => {
     setRechecking(true);
-    setProblem(null);
+    setFailed(null);
     void invoke("mcp:tools", { recheck: true })
-      .then(setReport, (e: unknown) => setProblem(e instanceof Error ? e.message : String(e)))
+      .then(
+        () => syncCache().refresh("mcp:tools", undefined),
+        (e: unknown) => setFailed(e instanceof Error ? e.message : String(e)),
+      )
       .finally(() => setRechecking(false));
-    void invoke("mcp:detect", undefined).then(setDetected, () => setDetected(undefined));
+    void syncCache().refresh("mcp:detect", undefined);
   }, []);
 
   const storeSecret = useCallback(
     async (request: { name: string; value: string; target: SecretTarget }): Promise<void> => {
-      setProblem(null);
+      setFailed(null);
       try {
         await invoke("secret:set", request);
       } catch (e) {
-        setProblem(e instanceof Error ? e.message : String(e));
+        setFailed(e instanceof Error ? e.message : String(e));
         return;
       }
       recheck();
