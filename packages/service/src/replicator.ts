@@ -29,9 +29,9 @@ import {
   type ReplicaDirs,
   type ReplicaPage,
 } from "@jaira/persistence";
-import { jairaBasePaths, jairaPaths, remoteProjectKey } from "@jaira/shared";
+import { jairaBasePaths, jairaPaths, parseRemoteProjectKey, remoteProjectKey, type PushMessage } from "@jaira/shared";
 import type { Fleet } from "./fleet";
-import { MACHINE_LOCAL, type Federation } from "./federation";
+import type { Federation } from "./federation";
 
 export interface ReplicatorOptions {
   baseDir: string;
@@ -60,12 +60,20 @@ export class Replicator {
       if (online) this.schedule(machineId, 1_000);
     });
     fleet.onPeerPush((machineId, message) => {
-      const push = message as { type?: string; taskId?: unknown; project?: unknown };
-      if (MACHINE_LOCAL.has(push.type ?? "")) return;
-      // News about one task is applied to that task at once — a turn streaming there reads here as
-      // it goes; anything else asks the whole machine again, a little later.
-      if (typeof push.taskId === "string" && typeof push.project === "string") this.soon(machineId, push.project, push.taskId);
-      else this.schedule(machineId, 1_500);
+      // What a machine's change log says changed is what is pulled (decision 0018 §7, the first hop):
+      // its own tasks that moved, each within a quarter of a second; a deletion, or a page this copy
+      // missed (`prev` past its cursor for that machine), asks the whole machine again — the
+      // reconciliation, which the minute's sweep and a machine coming online also are.
+      if ((message as { type?: string }).type !== "sync:changed") return;
+      const { prev, page } = message as Extract<PushMessage, { type: "sync:changed" }>;
+      const cursor = this.cursors.get(machineId);
+      this.cursors.set(machineId, Math.max(cursor ?? 0, page.at));
+      if (cursor === undefined || prev > cursor || page.whole || page.gone.length > 0) {
+        this.schedule(machineId, 250);
+        return;
+      }
+      // Its own: a task it holds a copy of is another machine's, and that machine says when it moves.
+      for (const task of page.tasks) if (parseRemoteProjectKey(task.project) === undefined) this.soon(machineId, task.project, task.taskId);
     });
     this.timer = setInterval(() => {
       for (const peer of this.fleet.peers()) if (peer.state === "online") this.schedule(peer.id, 0);
@@ -183,6 +191,9 @@ export class Replicator {
       .get() as { n: number };
     return { bytes: bytes + rows.n + records.n, machines: machines.size, dir };
   }
+
+  /** The newest of each machine's change-log stamps this copy has heard (decision 0018 §5), in that machine's clock. */
+  private readonly cursors = new Map<string, number>();
 
   /** Tasks a push named, by machine and directory, waiting for the next quick pull. */
   private readonly named = new Map<string, { machineId: string; dir: string; tasks: Set<string>; timer: ReturnType<typeof setTimeout> }>();

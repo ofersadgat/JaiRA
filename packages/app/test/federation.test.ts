@@ -129,6 +129,10 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
     const later = (await b.call("task:create", { title: "written after", workflow: "chat/session", project: dir })) as { taskId: string };
     const copied = join(a.service.replicator.replicaDir(bId, a.service.replicator.workspaceOf(bId, dir)!), ".jaira", "system", "tasks", `${later.taskId}.json`);
     await expect.poll(() => existsSync(copied), { timeout: 8000 }).toBe(true);
+    // The second hop (decision 0018 §7): this machine's own index has it, from its copy, keyed for its machine.
+    await expect
+      .poll(async () => ((await a.call("sync:since", { since: 0 })) as { tasks: Array<{ taskId: string; project: string }> }).tasks.find((t) => t.taskId === later.taskId)?.project, { timeout: 8000 })
+      .toBe(remote!.project);
 
     await b.hosted.close();
     made.splice(made.indexOf(b), 1);
