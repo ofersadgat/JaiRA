@@ -1,7 +1,7 @@
 ---
 id: engineering/decisions/0018-one-truth-per-side
 type: decision
-status: proposed
+status: accepted
 updated: 2026-10-06
 decides_for: [engineering/units/app-shell, engineering/units/operation-record-store, engineering/units/live-turns, engineering/units/storage-policy]
 ---
