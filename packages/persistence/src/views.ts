@@ -77,6 +77,10 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
     return currentEvents ?? undefined;
   };
   const rows = project.runtime.list();
+  // Which of them have a call in flight: an open record (decision 0018).
+  const answering = new Set(
+    (project.db.prepare(`SELECT DISTINCT task_id FROM operation_records WHERE status = 'open'`).all() as Array<{ task_id: string }>).map((r) => r.task_id),
+  );
   return (only === undefined ? rows : rows.filter((row) => only.has(row.taskId))).map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
     const startedBy =
@@ -94,6 +98,7 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
       taskId: row.taskId,
       title: meta?.title ?? "(missing task file)",
       status: row.status,
+      ...(answering.has(row.taskId) ? { answering: true as const } : {}),
       ...archivedOf(row),
       workflow: meta?.workflow ?? "",
       ...(meta?.labels !== undefined ? { labels: meta.labels } : {}),

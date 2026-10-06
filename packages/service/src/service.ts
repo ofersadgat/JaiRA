@@ -3758,12 +3758,15 @@ export class AppService {
    * it is down. `undefined` for an id no workspace owns, or one whose workspace is not open here — the
    * request then goes where it named, which is where it went before.
    */
-  homeOf(taskId: string): string | undefined {
+  homeOf(taskId: string, named?: string): string | undefined {
     const any = this.sessions.values().next().value;
     if (any === undefined) return undefined;
     const owner = ownerOf(any.project.db, taskId);
     if (owner === undefined) return undefined;
-    for (const session of this.sessions.values()) if (session.project.workspace === owner) return session.dir;
+    // Named right already — by its directory, or by a role (`shared`) that means more to some answers
+    // than the directory does: left as it was named.
+    if (named !== undefined && this.sessionOf(named)?.project.workspace === owner) return named;
+    for (const session of this.sessions.values()) if (session.project.workspace === owner) return session.kind === "shared" ? SHARED_SESSION : session.dir;
     const where = any.project.db.prepare(`SELECT machine, dir FROM workspaces WHERE id = ?`).get(owner) as { machine: string | null; dir: string } | undefined;
     return where?.machine != null ? remoteProjectKey(where.machine, where.dir) : undefined;
   }

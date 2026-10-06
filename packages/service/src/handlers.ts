@@ -94,7 +94,7 @@ function withHome(service: AppService, request: unknown): unknown {
   const { taskId, taskIds, project } = request as { taskId?: unknown; taskIds?: unknown; project?: unknown };
   const id = typeof taskId === "string" ? taskId : Array.isArray(taskIds) && typeof taskIds[0] === "string" ? taskIds[0] : undefined;
   if (id === undefined) return request;
-  const home = service.homeOf(id);
+  const home = service.homeOf(id, typeof project === "string" ? project : undefined);
   return home === undefined || home === project ? request : { ...request, project: home };
 }
 

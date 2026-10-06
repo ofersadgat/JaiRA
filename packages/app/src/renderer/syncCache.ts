@@ -41,6 +41,8 @@ interface Entry {
   channel: IpcChannel;
   request: unknown;
   taskId: string | null;
+  /** For a view about no one task, the project it is scoped to, if it names one: only that project's changes read it again. */
+  project: string | null;
   value: unknown;
   error: string | undefined;
   /** The cursor the current value or error was asked at; -1 before the first answer. */
@@ -52,6 +54,8 @@ interface Entry {
   again: boolean;
   /** Changed while held only still: read when it is next held live. */
   stale: boolean;
+  /** The read under way, settling when the view is current. */
+  idle: Promise<void> | undefined;
   /** When a change last had it read, and the read waiting out the gap, if one is. */
   changeReadAt: number;
   soon: ReturnType<typeof setTimeout> | undefined;
@@ -80,14 +84,21 @@ const KEEP_UNHELD = 64;
  */
 const CHANGE_READ_GAP_MS = 500;
 
-/** The key a view is held under: its channel and request, with the project left out (the engine finds a task by id). */
+/**
+ * The key a view is held under: its channel and request — with the project left out of a request that
+ * names a task, which the engine finds by its id wherever it is (so a guess of its project cannot make
+ * a second copy of it). A request about no one task keeps its project: there the project is what it
+ * asks about, and every project's board under one key would be one board.
+ */
 export function viewKey(channel: string, request: unknown): string {
-  return `${channel} ${stableJson(stripProject(request))}`;
+  return `${channel} ${stableJson(withoutGuessedProject(request))}`;
 }
 
-function stripProject(request: unknown): unknown {
+function withoutGuessedProject(request: unknown): unknown {
   if (request === null || typeof request !== "object" || Array.isArray(request)) return request;
-  const { project: _project, ...rest } = request as Record<string, unknown>;
+  const named = request as Record<string, unknown>;
+  if (typeof named["taskId"] !== "string" && !Array.isArray(named["taskIds"])) return request;
+  const { project: _project, ...rest } = named;
   return rest;
 }
 
@@ -99,6 +110,28 @@ function stableJson(value: unknown): string {
     .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
   return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${stableJson(v)}`).join(",")}}`;
 }
+
+/**
+ * What a view that is about no one task shows, by the change log's collections — what a page has to
+ * bring for it to be read again. A view not listed here and naming no task is read on every page.
+ */
+const SHOWS: Partial<Record<string, readonly string[]>> = {
+  "project:list": ["task", "event", "gate", "approval", "question", "userEvent", "placement", "workspace", "remote", "wait"],
+  "board:roots": ["task", "event", "gate", "approval", "question", "userEvent", "remote", "wait"],
+  "board:view": ["task", "event", "gate", "approval", "question", "userEvent", "remote", "wait"],
+  "placement:queue": ["placement", "task"],
+  "history:size": ["task", "event", "record", "job"],
+  "interaction:pending": ["gate"],
+  "approval:pending": ["approval"],
+  "question:pending": ["question"],
+  "userEvent:pending": ["userEvent"],
+  "state:view": ["task", "event"],
+};
+
+const projectOf = (request: unknown): string | null => {
+  const project = (request as { project?: unknown } | null)?.project;
+  return typeof project === "string" ? project : null;
+};
 
 const taskOf = (request: unknown): string | null => {
   const id = (request as { taskId?: unknown } | null)?.taskId;
@@ -201,9 +234,12 @@ export class SyncCache {
     if (page.at > this.cursorAt || page.whole) this.cursorAt = Math.max(this.cursorAt, page.at);
     this.indexList = [...this.index.values()].sort((a, b) => b.updatedAt - a.updatedAt);
     const changed = new Set<string>([...page.tasks.map((t) => t.taskId), ...page.gone, ...page.changes.flatMap((c) => (c.taskId !== null ? [c.taskId] : []))]);
+    const collections = new Set(page.changes.map((c) => c.collection));
+    // Where the changed tasks are — a project-scoped view is read only for its own project's.
+    const projects = new Set(page.tasks.map((t) => t.project));
     for (const [key, entry] of this.entries) {
       if (!this.isHeld(entry)) continue;
-      if (!page.whole && (entry.taskId === null || !changed.has(entry.taskId))) continue;
+      if (!page.whole && !this.touches(entry, changed, collections, projects, page.gone.length > 0)) continue;
       if (this.isLive(entry)) this.readForChange(key, entry);
       else entry.stale = true;
     }
@@ -262,7 +298,7 @@ export class SyncCache {
     const key = viewKey(channel, request);
     let entry = this.entries.get(key);
     if (entry === undefined) {
-      entry = { channel, request, taskId: taskOf(request), value: undefined, error: undefined, at: -1, asked: false, loading: false, again: false, stale: false, changeReadAt: 0, soon: undefined, owners: new Map(), count: 0, usedAt: Date.now(), shown: NOTHING };
+      entry = { channel, request, taskId: taskOf(request), project: projectOf(request), value: undefined, error: undefined, at: -1, asked: false, loading: false, again: false, stale: false, idle: undefined, changeReadAt: 0, soon: undefined, owners: new Map(), count: 0, usedAt: Date.now(), shown: NOTHING };
       this.entries.set(key, entry);
     }
     entry.usedAt = Date.now();
@@ -272,6 +308,20 @@ export class SyncCache {
 
   private isHeld(entry: Entry): boolean {
     return entry.owners.size > 0 || entry.count > 0;
+  }
+
+  /** Whether a page that changed these tasks and collections, in these projects, moves this view. */
+  private touches(entry: Entry, tasks: ReadonlySet<string>, collections: ReadonlySet<string>, projects: ReadonlySet<string>, deleted: boolean): boolean {
+    if (entry.taskId !== null) return tasks.has(entry.taskId);
+    const shows = SHOWS[entry.channel];
+    if (shows !== undefined && ![...collections].some((c) => shows.includes(c))) return false;
+    // A project's view: moved by its own tasks, by a deletion (whose project the page does not say), and
+    // by what belongs to no task (a workspace, the queue).
+    if (entry.project !== null && !projects.has(entry.project) && !deleted) {
+      const unowned = [...collections].some((c) => c === "workspace" || c === "placement");
+      if (!unowned) return false;
+    }
+    return true;
   }
 
   /** Held by someone who wants it kept current. */
@@ -292,39 +342,52 @@ export class SyncCache {
     else entry.soon = setTimeout(go, wait);
   }
 
-  private async read(key: string): Promise<void> {
+  /**
+   * Read a view, and answer when it is current: a read already under way is waited for, and one more
+   * after it if something changed meanwhile — so "read this again now" never answers before the view has.
+   */
+  private read(key: string): Promise<void> {
     const entry = this.entries.get(key);
-    if (entry === undefined) return;
-    if (entry.loading) {
+    if (entry === undefined) return Promise.resolve();
+    if (entry.idle !== undefined) {
       entry.again = true;
-      return;
+      return entry.idle;
     }
     entry.asked = true;
     entry.loading = true;
     show(entry);
     this.bump();
-    const asked = this.cursorAt;
-    try {
-      const value = await this.io.invoke(entry.channel, entry.request as never);
-      if (asked >= entry.at) {
-        entry.value = value;
-        entry.error = undefined;
-        entry.at = asked;
+    entry.idle = (async () => {
+      try {
+        do {
+          entry.again = false;
+          const asked = this.cursorAt;
+          try {
+            const value = await this.io.invoke(entry.channel, entry.request as never);
+            if (asked >= entry.at) {
+              entry.value = value;
+              entry.error = undefined;
+              entry.at = asked;
+            }
+          } catch (e) {
+            if (asked >= entry.at) {
+              entry.error = e instanceof Error ? e.message : String(e);
+              entry.at = asked;
+            }
+          }
+          if (entry.again) {
+            show(entry);
+            this.bump();
+          }
+        } while (entry.again);
+      } finally {
+        entry.loading = false;
+        entry.idle = undefined;
+        show(entry);
+        this.bump();
       }
-    } catch (e) {
-      if (asked >= entry.at) {
-        entry.error = e instanceof Error ? e.message : String(e);
-        entry.at = asked;
-      }
-    } finally {
-      entry.loading = false;
-      show(entry);
-      this.bump();
-      if (entry.again) {
-        entry.again = false;
-        void this.read(key);
-      }
-    }
+    })();
+    return entry.idle;
   }
 
   /** Drop views nothing holds, past the newest {@link KEEP_UNHELD}. */

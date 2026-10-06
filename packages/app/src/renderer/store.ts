@@ -457,16 +457,9 @@ export interface AppState {
   /** The Chat view: which conversation is open. */
   chat: ChatState;
   /**
-   * Which tasks have a call in flight RIGHT NOW, by task id and depth.
-   *
-   * The one thing `status` cannot answer for a conversation. A typed turn is deliberately not a run —
-   * no workspace, no job, no status change (see `runChatMessage`) — so a task that is answering its
-   * fourth message is still `completed` as far as the task list is concerned. What does move is the
-   * journal: every call emits `operation.started` and exactly one terminal event, whatever happens to
-   * it, and those are published for every task rather than only the selected one.
-   *
-   * A DEPTH rather than a flag, because a composite state's children emit the same pair inside their
-   * parent's: counting means a child settling does not report the parent as finished.
+   * Which tasks have a call in flight RIGHT NOW, by task id — read from the index (`TaskSummary.answering`,
+   * an open record), not counted from events: a count kept from `operation.started` and its terminal event
+   * was wrong for good after one missed event or a reload (decision 0018).
    */
   producing: Record<string, number>;
 
@@ -1022,6 +1015,88 @@ function selectedViewsOf(store: SyncCache, raw: AppState, previous: SelectedView
   };
 }
 
+/** The index and the views about no one task, as the cache holds them (decision 0018) — read, never patched. */
+type PlaceViews = Pick<AppState, "tasks" | "sharedTasks" | "allConversations" | "projects" | "boards" | "board" | "queue" | "history" | "pending" | "approvals" | "questions" | "userEvents" | "producing">;
+
+/** The index's answering tasks, as `producing` — the same object until the index moves. */
+const producingOf = new WeakMap<readonly ProjectTask[], Record<string, number>>();
+function answeringIn(all: readonly ProjectTask[]): Record<string, number> {
+  let out = producingOf.get(all);
+  if (out === undefined) {
+    out = Object.fromEntries(all.filter((t) => t.answering === true).map((t) => [t.taskId, 1]));
+    producingOf.set(all, out);
+  }
+  return out;
+}
+
+const NO_TASKS: ProjectTask[] = [];
+const NO_PROJECTS: ProjectSummary[] = [];
+const NO_HISTORY_SIZE: HistorySize = { tasks: 0, events: 0, commands: 0 };
+/** The index filtered, per index and filter: the same array until the index moves. */
+const filtered = new WeakMap<readonly ProjectTask[], Map<string, ProjectTask[]>>();
+function filterIndex(all: readonly ProjectTask[], key: string, keep: (task: ProjectTask) => boolean): ProjectTask[] {
+  let byKey = filtered.get(all);
+  if (byKey === undefined) {
+    byKey = new Map();
+    filtered.set(all, byKey);
+  }
+  let out = byKey.get(key);
+  if (out === undefined) {
+    out = all.filter(keep);
+    if (out.length === 0) out = NO_TASKS;
+    byKey.set(key, out);
+  }
+  return out;
+}
+
+/** A conversation, as the Chat lists count one — `CHAT_LIST_WORKFLOWS`, an entry ending in `/` a namespace. */
+const listedConversation = (task: ProjectTask): boolean =>
+  CHAT_LIST_WORKFLOWS.some((w) => (w.endsWith("/") ? task.workflow.startsWith(w) : task.workflow === w));
+
+/** The board a project's group shows: its roots, or the level drilled into. */
+function boardRequest(project: string | null, level: string | null): readonly ["board:roots" | "board:view", unknown] {
+  const at = project === null ? {} : { project };
+  return level === null ? ["board:roots", at] : ["board:view", { level, ...at }];
+}
+
+/**
+ * The window's lists, as functions of the cache and where it stands: every task list is the one index
+ * filtered — a project's, the shared root's, the conversations — so two of them cannot disagree, and
+ * none can be another project's under this one's name.
+ */
+function placeViewsOf(store: SyncCache, raw: AppState, previous: PlaceViews | undefined): PlaceViews {
+  const all = store.tasks() as ProjectTask[];
+  const projects = store.peek("project:list", undefined).value ?? NO_PROJECTS;
+  const shared = projects.find((p) => p.kind === "shared")?.project;
+  const peekBoard = (project: string | null, level: string | null): BoardView | null => {
+    const [channel, request] = boardRequest(project, level);
+    return (store.peek(channel, request as never).value as BoardView | undefined) ?? null;
+  };
+  let boards: Record<string, BoardView | null> = Object.fromEntries(projects.map((p) => [p.project, peekBoard(p.project, raw.levels[p.project] ?? null)]));
+  const was = previous?.boards;
+  if (was !== undefined && Object.keys(was).length === Object.keys(boards).length && Object.entries(boards).every(([k, v]) => was[k] === v)) boards = was;
+  return {
+    tasks: raw.at === null ? NO_TASKS : filterIndex(all, `at ${raw.at}`, (t) => t.project === raw.at),
+    sharedTasks: shared === undefined ? NO_TASKS : filterIndex(all, `shared ${shared}`, (t) => t.project === shared),
+    allConversations: filterIndex(all, "conversations", listedConversation),
+    projects,
+    boards,
+    board: peekBoard(raw.at, raw.level),
+    queue: store.peek("placement:queue", undefined).value ?? NO_QUEUE,
+    history: raw.at === null ? NO_HISTORY_SIZE : (store.peek("history:size", { project: raw.at }).value ?? null),
+    pending: store.peek("interaction:pending", undefined).value ?? NO_PENDING,
+    approvals: store.peek("approval:pending", undefined).value ?? NO_APPROVALS,
+    questions: store.peek("question:pending", undefined).value ?? NO_QUESTIONS,
+    userEvents: store.peek("userEvent:pending", undefined).value ?? NO_USER_EVENTS,
+    producing: answeringIn(all),
+  };
+}
+const NO_QUEUE: QueuedPlacement[] = [];
+const NO_PENDING: PendingInteraction[] = [];
+const NO_APPROVALS: PendingApproval[] = [];
+const NO_QUESTIONS: PendingQuestion[] = [];
+const NO_USER_EVENTS: PendingUserEvent[] = [];
+
 export function useApp() {
   const [state, setState] = useState<AppState>(EMPTY);
   /**
@@ -1076,12 +1151,12 @@ export function useApp() {
     () => store.version,
     () => store.version,
   );
-  const viewsMemo = useRef<{ raw: AppState; version: number; views: SelectedViews } | null>(null);
+  const viewsMemo = useRef<{ raw: AppState; version: number; views: SelectedViews & PlaceViews } | null>(null);
   const selectedViews = useCallback(
-    (raw: AppState): SelectedViews => {
+    (raw: AppState): SelectedViews & PlaceViews => {
       const memo = viewsMemo.current;
       if (memo !== null && memo.raw === raw && memo.version === store.version) return memo.views;
-      const views = selectedViewsOf(store, raw, memo?.views);
+      const views = { ...selectedViewsOf(store, raw, memo?.views), ...placeViewsOf(store, raw, memo?.views) };
       viewsMemo.current = { raw, version: store.version, views };
       return views;
     },
@@ -1113,6 +1188,33 @@ export function useApp() {
     if (streaming) store.hold("selected", always, transcripts);
     else store.hold("selected", [...always, ...transcripts]);
   }, [store, state.selected, shownInstance, state.sessionsOpen, streaming]);
+
+  /**
+   * What the window holds of the place it stands, told to the cache: the project summaries, the queue,
+   * everything waiting on the person, the history's size and the board here — and every project's board
+   * while the Tasks view shows them all.
+   */
+  const shownProjects = selectedViews(state).projects;
+  useEffect(() => {
+    const held: Array<readonly [IpcChannel, unknown]> = [
+      ["project:list", undefined],
+      ["placement:queue", undefined],
+      ["interaction:pending", undefined],
+      ["approval:pending", undefined],
+      ["question:pending", undefined],
+      ["userEvent:pending", undefined],
+      boardRequest(state.at, state.level),
+    ];
+    if (state.at !== null) held.push(["history:size", { project: state.at }]);
+    if (state.view === "tasks") for (const p of shownProjects) held.push(boardRequest(p.project, state.levels[p.project] ?? null));
+    store.hold("place", held);
+  }, [store, state.at, state.level, state.view, state.levels, shownProjects]);
+
+  // A project closed while the board was narrowed to it: the narrowing goes with it.
+  useEffect(() => {
+    const focus = ref.current.taskFocus;
+    if (focus !== null && shownProjects.length > 0 && !shownProjects.some((p) => p.project === focus)) patch({ taskFocus: null });
+  }, [shownProjects, patch]);
 
   /**
    * The walk is checked against the tree it walks, whenever the tree moves. A retry restarts instance
@@ -1243,27 +1345,9 @@ export function useApp() {
    * where having no project open is a perfectly ordinary state.
    */
   const refreshTasks = useCallback(async () => {
-    // The guard is back, and it is now TRUSTWORTHY: `ref.current` is written by `patch` rather than
-    // only at render, so "is a project open" is answered with the current value instead of the last
-    // painted one. Without the guard main logs `no project is open` for every refresh in a window
-    // that simply has no project — a real error, raised by design, about a question nobody asked.
-    const at = ref.current.at;
-    if (at === null) return patch({ tasks: [] });
-    try {
-      // NAMED, not left to main to resolve. Unqualified it was answerable only while one project was
-      // open, and threw "several projects are open" the moment a second one did — which is the whole
-      // point of the rule, working, on a call that had simply not been told where it was standing.
-      const tasks = await invoke("task:list", { project: at });
-      // Only while the window still stands there. Two reads in flight answer in either order, and
-      // the one for the project just LEFT landing last drew that project's conversations in this
-      // one's Chat list — seen after a reload, which reads where the engine says and then moves back.
-      if (ref.current.at === at) patch({ tasks });
-    } catch {
-      // Quiet, not a toast: the overwhelmingly likely cause is a project closing underneath a
-      // refresh already in flight, and an empty list is the right answer to that.
-      if (ref.current.at === at) patch({ tasks: [] });
-    }
-  }, [patch]);
+    // Every task list is the index filtered (decision 0018): bring the index up to date.
+    await store.reconcile();
+  }, [store]);
 
   /**
    * JaiRA's own runs — a separate read, because they live in a separate project.
@@ -1274,14 +1358,8 @@ export function useApp() {
    * be opened, so a failure here is a real one.
    */
   const refreshSharedTasks = useCallback(async () => {
-    try {
-      patch({ sharedTasks: await invoke("task:list", { project: SHARED_SESSION }) });
-    } catch {
-      // Quiet: the shared project materializes on first use, and a machine where it cannot be opened
-      // at all is already saying so in the log. An empty list is the right answer either way.
-      patch({ sharedTasks: [] });
-    }
-  }, [patch]);
+    await store.reconcile();
+  }, [store]);
 
   /**
    * Fetch one board level. `null` is the root listing, which is a different channel — the roots have
@@ -1292,19 +1370,12 @@ export function useApp() {
    */
   const refreshBoard = useCallback(
     async (level?: string | null) => {
-      try {
-        const next = level === undefined ? ref.current.level : level;
-        // Named, like every other project-scoped read: the project is the head of the address and
-        // this board is of whatever the shell is standing on. At the root there is none, and main
-        // answers the roots board with an empty one rather than throwing.
-        const at = ref.current.at === null ? {} : { project: ref.current.at };
-        const board = next === null ? await invoke("board:roots", at) : await invoke("board:view", { level: next, ...at });
-        patch({ board, level: next });
-      } catch (e) {
-        fail(e);
-      }
+      // The level is the window's choice; the board at it is the cache's.
+      if (level !== undefined && level !== ref.current.level) patch({ level });
+      const [channel, request] = boardRequest(ref.current.at, ref.current.level);
+      await store.refresh(channel, request as never);
     },
-    [patch, fail],
+    [patch, store],
   );
 
   /**
@@ -1617,36 +1688,16 @@ export function useApp() {
    * nothing open still has to show.
    */
   const refreshProjects = useCallback(async () => {
-    let projects: ProjectSummary[];
-    try {
-      projects = await invoke("project:list", undefined);
-    } catch {
-      return patch({ projects: [], boards: {}, levels: {} });
-    }
-    const levels = ref.current.levels;
-    const boards: Record<string, BoardView | null> = {};
-    await Promise.all(
-      projects.map(async (p) => {
-        const level = levels[p.project] ?? null;
-        try {
-          boards[p.project] =
-            level === null
-              ? await invoke("board:roots", { project: p.project })
-              : await invoke("board:view", { level, project: p.project });
-        } catch {
-          // A group whose board will not load is shown empty rather than taking the view down with it.
-          boards[p.project] = null;
-        }
+    // Read again now, after something this window did; the change log keeps them current otherwise.
+    await Promise.all([
+      store.refresh("project:list", undefined),
+      store.refresh("placement:queue", undefined),
+      ...cur().projects.map((p) => {
+        const [channel, request] = boardRequest(p.project, ref.current.levels[p.project] ?? null);
+        return store.refresh(channel, request as never);
       }),
-    );
-    // A narrowing that names a project this window no longer has is a filter that hides everything
-    // and says nothing — which is what closing the checkout the Tasks view was narrowed to would
-    // otherwise leave behind. Back to the listing, which always has something in it.
-    const focus = ref.current.taskFocus;
-    const gone = focus !== null && !projects.some((p) => p.project === focus);
-    const queue = await invoke("placement:queue", undefined).catch(() => [] as QueuedPlacement[]);
-    patch({ projects, boards, queue, ...(gone ? { taskFocus: null } : {}) });
-  }, [patch]);
+    ]);
+  }, [store]);
 
   /**
    * The conversations of every open project, for the root's Chat list.
@@ -1656,14 +1707,8 @@ export function useApp() {
    * while keeping a board's worth of rows off the wire to draw a list of threads.
    */
   const refreshAllConversations = useCallback(async () => {
-    try {
-      patch({ allConversations: await invoke("task:all", { workflows: [...CHAT_LIST_WORKFLOWS] }) });
-    } catch {
-      // Quiet: a project closing under a refresh already in flight, and an empty list is the honest
-      // answer to that until the next one lands.
-      patch({ allConversations: [] });
-    }
-  }, [patch]);
+    await store.reconcile();
+  }, [store]);
 
   /**
    * The newest page, from whatever the filters currently say.
@@ -1879,12 +1924,12 @@ export function useApp() {
    */
   const projectOfTask = useCallback((taskId: string): string | undefined => {
     const stamped =
-      ref.current.allConversations.find((t) => t.taskId === taskId)?.project ??
-      ref.current.pending.find((p) => p.taskId === taskId)?.project ??
-      ref.current.approvals.find((a) => a.taskId === taskId)?.project ??
-      ref.current.questions.find((q) => q.taskId === taskId)?.project;
+      cur().allConversations.find((t) => t.taskId === taskId)?.project ??
+      cur().pending.find((p) => p.taskId === taskId)?.project ??
+      cur().approvals.find((a) => a.taskId === taskId)?.project ??
+      cur().questions.find((q) => q.taskId === taskId)?.project;
     if (stamped !== undefined && stamped !== "") return stamped;
-    for (const project of ref.current.projects) {
+    for (const project of cur().projects) {
       if (project.ended.some((t) => t.taskId === taskId)) return project.project;
     }
     return undefined;
@@ -1892,10 +1937,10 @@ export function useApp() {
 
   const taskClock = useCallback((taskId: string): number | null => {
     const row =
-      ref.current.tasks.find((t) => t.taskId === taskId) ??
-      ref.current.allConversations.find((t) => t.taskId === taskId);
+      cur().tasks.find((t) => t.taskId === taskId) ??
+      cur().allConversations.find((t) => t.taskId === taskId);
     if (row !== undefined) return row.updatedAt;
-    for (const project of ref.current.projects) {
+    for (const project of cur().projects) {
       const ended = project.ended.find((t) => t.taskId === taskId);
       if (ended !== undefined) return ended.updatedAt;
     }
@@ -1998,47 +2043,24 @@ export function useApp() {
   );
 
   const refreshPending = useCallback(async () => {
-    try {
-      patch({ pending: await invoke("interaction:pending", undefined) });
-    } catch (e) {
-      fail(e);
-    }
-  }, [patch, fail]);
+    await store.refresh("interaction:pending", undefined);
+  }, [store]);
 
   const refreshApprovals = useCallback(async () => {
-    try {
-      patch({ approvals: await invoke("approval:pending", undefined) });
-    } catch (e) {
-      fail(e);
-    }
-  }, [patch, fail]);
+    await store.refresh("approval:pending", undefined);
+  }, [store]);
 
   const refreshQuestions = useCallback(async () => {
-    try {
-      patch({ questions: await invoke("question:pending", undefined) });
-    } catch (e) {
-      fail(e);
-    }
-  }, [patch, fail]);
+    await store.refresh("question:pending", undefined);
+  }, [store]);
 
   const refreshUserEvents = useCallback(async () => {
-    try {
-      patch({ userEvents: await invoke("userEvent:pending", undefined) });
-    } catch (e) {
-      fail(e);
-    }
-  }, [patch, fail]);
+    await store.refresh("userEvent:pending", undefined);
+  }, [store]);
 
   const refreshHistory = useCallback(async () => {
-    // Same rule as {@link refreshTasks}: run history belongs to a project, so with none open there is
-    // nothing to size.
-    if (ref.current.at === null) return patch({ history: { tasks: 0, events: 0, commands: 0 } });
-    try {
-      patch({ history: await invoke("history:size", { ...(ref.current.at !== null ? { project: ref.current.at } : {}) }) });
-    } catch (e) {
-      fail(e);
-    }
-  }, [patch, fail]);
+    if (ref.current.at !== null) await store.refresh("history:size", { project: ref.current.at });
+  }, [store]);
 
   /**
    * Settings, config, executors and secret capabilities.
@@ -2280,7 +2302,7 @@ export function useApp() {
       addressRestored.current = true;
       if (kept === null) return write();
       const actions = actionsRef.current;
-      if (kept.at !== ref.current.at && (kept.at === null || ref.current.projects.some((p) => p.project === kept.at))) actions.standOn(kept.at);
+      if (kept.at !== ref.current.at && (kept.at === null || cur().projects.some((p) => p.project === kept.at))) actions.standOn(kept.at);
       actions.setView(kept.view);
       // One selection: the Chat view draws the selected task as its thread, so it opens the
       // conversation, and every other view selects what it had selected.
@@ -2299,94 +2321,28 @@ export function useApp() {
       // by design. But it applies to INVALIDATES only: an `engine:event` or a `log:entry` from that
       // same run is exactly what the person who pressed the button is waiting to see, and dropping
       // those made a running sync indistinguishable from a button that did nothing.
+      // The lists, the boards and what waits on the person are the cache's — it has just been told to
+      // reconcile. What is left is what the change log does not carry: the files on disk (a state's
+      // view, the tree, the workflows), the configuration and what works on this machine.
       const about = (message as { project?: string }).project;
-      if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.at) {
-        // …except JaiRA's own lists, which are nobody's project and so are nobody's to ignore. The
-        // Tasks view draws a board for EVERY project, including this one, so a card of its that has
-        // moved has moved on screen.
-        if (message.scope === "tasks" || (message.scope === "board" && ref.current.view === "tasks")) {
-          void refreshProjects();
-        }
-        // A shared workflow's runs land here, and the Files inspector shows them beside its Run
-        // button. Dropping this invalidate is what would leave that history one run behind.
-        if (message.scope === "tasks") void refreshSharedTasks();
-        // The root's conversation list spans every project, so a thread that moved in one this
-        // window is not standing in still moved on screen.
-        if (message.scope === "tasks") void refreshAllConversations();
-        // The task on screen is not among the exceptions any more: the cache keeps it current from
-        // the change log whatever project it is in (decision 0018).
-        return;
-      }
+      if (message.type === "store:invalidate" && about !== undefined && about !== ref.current.at) return;
       switch (message.type) {
         case "store:invalidate":
-          if (message.scope === "tasks") {
-            void refreshTasks();
-            void refreshHistory();
-            void refreshAllConversations();
-            // The open state's view carries its own task lists (`tasksHere`, `tasksRecent`), which
-            // the Files inspector reads for the second half of its run history and the middle panel
-            // reads for its task list. A `tasks` invalidate is exactly the event that changes them,
-            // and it used to refresh neither — so a run started from the Run button sat there at
-            // whatever the panel last happened to fetch until something touched the board.
+          if (message.scope === "tasks" || message.scope === "board") {
             void refreshState(ref.current.stateId);
-            // And the Tasks view's, which is the same panel with its own subject — a run started from
-            // a board column belongs in the history section right under the button that started it.
             void refreshTaskState(ref.current.taskWorkflow);
-            // JaiRA's own lists too. They are not project-scoped, so they are refreshed for an
-            // invalidate about ANY project — including the system one, whose invalidates the guard
-            // above drops.
-            void refreshProjects();
-            void refreshSharedTasks();
           }
-          if (message.scope === "board") {
-            void refreshBoard();
-            // The Files board is the same projection reached another way, so a card that moved has
-            // to move there too.
-            void refreshState(ref.current.stateId);
-            // And the Tasks view's boards, which are a THIRD reading of it — one per project, in
-            // `boards`, rebuilt only by this. Without it a card sat in whatever column it was in when
-            // the run started until the run ended: every transition in between published exactly this
-            // message, and every one of them refreshed two projections and not the one on screen.
-            //
-            // Only while that view is on screen. This message is published per JOURNAL ENTRY, and
-            // rebuilding it costs a fetch per project — worth paying to watch a card move, not worth
-            // paying to keep a screen nobody is looking at up to date. `setView` catches up on entry.
-            if (ref.current.view === "tasks") void refreshProjects();
-          }
-          // `task`: the selected task is the cache's, kept current from the change log (decision 0018).
           if (message.scope === "workflows") {
             void refreshTree();
             void refreshState(ref.current.stateId);
-            // A root added, renamed or deleted on disk changes what the New-task picker may offer, and
-            // a picker listing a state that no longer exists is a Create button that fails on click.
             void refreshWorkflows();
-            // Whatever the Tasks view is describing, for the reason the Files view's state view is
-            // refreshed above: the two are the same panel reached from two boards.
             void refreshTaskState(ref.current.taskWorkflow);
           }
           if (message.scope === "config") void refreshConfig();
-          // The checks main runs by itself have landed. Nothing asked for them, so nothing is waiting
-          // on a response — this push is how their result reaches the screen.
           if (message.scope === "availability") void refreshAvailability();
           break;
         case "engine:event": {
           const line = engineLine(message.event);
-          /*
-           * "Is this task saying something right now", tracked for EVERY task and not just the
-           * selected one — see {@link AppState.producing}. Before the guard below, deliberately: the
-           * conversation list draws a spinner for whichever of its rows is answering, and every row
-           * but one is by definition not the selection.
-           */
-          const op = (message.event as { type?: string }).type;
-          if (op === "operation.started" || op === "operation.completed" || op === "operation.failed") {
-            const depth = (ref.current.producing[message.taskId] ?? 0) + (op === "operation.started" ? 1 : -1);
-            const producing = { ...ref.current.producing };
-            // Never negative. A window opened mid-turn sees the terminal event without its start, and
-            // a count that went to −1 would then need two starts before it read as speaking again.
-            if (depth > 0) producing[message.taskId] = depth;
-            else delete producing[message.taskId];
-            patch({ producing });
-          }
           // A sync's events name a task nobody selected — it runs in JaiRA's own project. While one is
           // in flight, anything not about the selected task is that sync narrating itself.
           if (message.taskId !== ref.current.selected) {
@@ -2406,26 +2362,11 @@ export function useApp() {
           setState((s) => ({ ...s, stream: [...s.stream, line].slice(-STREAM_LIMIT) }));
           break;
         }
-        case "interaction:requested":
-        case "interaction:resolved":
-          void refreshPending();
-          break;
-        case "approval:requested":
-        case "approval:resolved":
-          void refreshApprovals();
-          break;
-        case "question:requested":
-        case "question:resolved":
-          void refreshQuestions();
-          break;
-        case "userEvent:requested":
-        case "userEvent:resolved":
-          void refreshUserEvents();
-          break;
+        // What waits on the person is the cache's: an ask and its settling each reach the change log.
         case "placement:changed": {
           // What is being placed or waits, whole (decision 0013 §5): the waiting conversation's own
           // figures move with it, and nothing else is re-read.
-          patch({ queue: message.queue });
+          // The queue is the cache's (it hears the change through the log); the moves are news to act on.
           // A waiting task that started on ANOTHER workspace was re-made there under a new id: the
           // thread, and the selection, follow it.
           for (const went of message.moved ?? []) {
@@ -2438,27 +2379,7 @@ export function useApp() {
           }
           break;
         }
-        case "chat:turnEnded": {
-          // The backstop for {@link AppState.producing} on a chat turn — what `run:finished` is for a
-          // run. Normally already zero: every turn's start is balanced by its own terminal event.
-          if (ref.current.producing[message.taskId] !== undefined) {
-            const { [message.taskId]: _done, ...rest } = ref.current.producing;
-            patch({ producing: rest });
-          }
-          break;
-        }
         case "run:finished": {
-          // The backstop for {@link AppState.producing}. A run's every call is balanced by its own
-          // terminal event, so this is normally already zero — but a process killed mid-call publishes
-          // this and nothing else, and a spinner that never stops is worse than one that starts late.
-          if (ref.current.producing[message.taskId] !== undefined) {
-            const { [message.taskId]: _done, ...rest } = ref.current.producing;
-            patch({ producing: rest });
-          }
-          void refreshProjects();
-          void refreshTasks();
-          void refreshSharedTasks();
-          void refreshBoard();
           void refreshState(ref.current.stateId);
           // Every cached transcript of the finished run was fetched while it could still grow. The
           // panel refetches what it is showing; the live tail's record has landed with it.
@@ -2690,7 +2611,7 @@ export function useApp() {
         // the project THIS connection opened last). Without it the address moved only here: a window
         // that crashed while standing on JaiRA came back on mist-server, the last project it had
         // OPENED. Re-opening one already open is a no-op there; only this machine's own checkouts.
-        const standing = project === null ? undefined : ref.current.projects.find((p) => p.project === project);
+        const standing = project === null ? undefined : cur().projects.find((p) => p.project === project);
         if (standing?.kind === "user" && parseRemoteProjectKey(project!) === undefined) void invoke("project:open", { dir: project! }).catch(() => undefined);
         void refreshTree();
         void refreshWorkflows();
@@ -2963,7 +2884,7 @@ export function useApp() {
         patch({ busy: true, error: null });
         try {
           const summary = await invoke("task:create", {
-            title: runTitle(workflow, runHistoryOf(workflow, ref.current.tasks, null).startedHere.length),
+            title: runTitle(workflow, runHistoryOf(workflow, cur().tasks, null).startedHere.length),
             workflow,
             ...(Object.keys(inputs).length > 0 ? { inputs } : {}),
             // Slots taken FROM A TASK (decision 0005 §2): read by the main process, now or when the
@@ -3288,7 +3209,7 @@ export function useApp() {
        * caller's to keep — the composer's draft.)
        */
       takeBackQueued: async (taskId: string, project?: string) => {
-        const item = ref.current.queue.find((q) => q.taskId === taskId);
+        const item = cur().queue.find((q) => q.taskId === taskId);
         const { runOn: _was, settings: _had, ...chat } = ref.current.chat;
         patch({ chat: { ...chat, ...(item?.target !== undefined ? { runOn: item.target } : {}), ...(item?.settings !== undefined ? { settings: item.settings } : {}) } });
         await actionsRef.current.deleteTasks([taskId], project);
@@ -3300,7 +3221,8 @@ export function useApp() {
        */
       changeQueued: async (taskId: string, project: string, change: { runOn?: RunTarget | null; overrides?: ChatSettings }) => {
         try {
-          patch({ queue: await invoke("placement:change", { taskId, project, ...change }) });
+          await invoke("placement:change", { taskId, project, ...change });
+          await store.refresh("placement:queue", undefined);
         } catch (e) {
           patch({ chat: { ...ref.current.chat, error: (e as Error).message } });
         }
@@ -3482,7 +3404,7 @@ export function useApp() {
         patch({ busy: true, error: null });
         try {
           const result = await invoke("history:prune", { olderThanDays, apply: true });
-          patch({ prune: result, history: result.remaining, busy: false });
+          patch({ prune: result, busy: false });
         } catch (e) {
           fail(e);
         }
@@ -3650,7 +3572,7 @@ export function useApp() {
        * `Date.now()`, so a turn that lands in the same millisecond as the click is not swallowed.
        */
       markProjectSeen: (project: string) => {
-        const summary = ref.current.projects.find((p) => p.project === project);
+        const summary = cur().projects.find((p) => p.project === project);
         if (summary === undefined) return;
         const next = withSeenAll(ref.current.settings.ui, unseenTasks(summary, ref.current.settings.ui.seen));
         if (next !== ref.current.settings.ui) setUi(next);

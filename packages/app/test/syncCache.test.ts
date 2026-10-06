@@ -209,3 +209,76 @@ describe("a busy task", () => {
     expect(reads() - before).toBe(2);
   });
 });
+
+describe("views about no one task", () => {
+  it("are read again for the kinds of change they show, and a project's only for its own tasks", async () => {
+    const e = engine(() => ({}));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("store", [
+      ["approval:pending", undefined],
+      ["board:roots", { project: "/a" }],
+    ]);
+    await settle();
+    const reads = (channel: string): number => e.asked.filter((a) => a.channel === channel).length;
+    const before = { approvals: reads("approval:pending"), board: reads("board:roots") };
+    // A record streamed in /b: neither moves.
+    cache.push(changed(10, page(11, [{ ...task("t-b"), project: "/b" }], { changes: [{ collection: "record", id: "r", taskId: "t-b", at: 11, deleted: false }] })));
+    await settle();
+    expect(reads("approval:pending")).toBe(before.approvals);
+    expect(reads("board:roots")).toBe(before.board);
+    // A task of /a moved, and an approval was asked: both do.
+    await new Promise((r) => setTimeout(r, 600));
+    cache.push(
+      changed(
+        11,
+        page(12, [{ ...task("t-a"), project: "/a" }], {
+          changes: [
+            { collection: "task", id: "t-a", taskId: "t-a", at: 12, deleted: false },
+            { collection: "approval", id: "ap", taskId: "t-a", at: 12, deleted: false },
+          ],
+        }),
+      ),
+    );
+    await settle();
+    expect(reads("approval:pending")).toBe(before.approvals + 1);
+    expect(reads("board:roots")).toBe(before.board + 1);
+  });
+});
+
+describe("reading again now", () => {
+  it("answers only once the view is current, when a read was already under way", async () => {
+    let n = 0;
+    const e = engine(() => ({ n: ++n }));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    e.hold();
+    cache.hold("store", [["task:detail", { taskId: "t-a" }]]);
+    const now = cache.refresh("task:detail", { taskId: "t-a" });
+    let answered = false;
+    void now.then(() => (answered = true));
+    await settle();
+    expect(answered).toBe(false);
+    e.release();
+    await now;
+    expect(cache.peek("task:detail", { taskId: "t-a" }).value).toEqual({ n: 2 });
+  });
+});
+
+describe("keys", () => {
+  it("leave a task's guessed project out, and keep the project of a view about a project", async () => {
+    const e = engine((channel, request) => ({ channel, project: (request as { project?: string }).project }));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("store", [
+      ["board:roots", { project: "/a" }],
+      ["board:roots", { project: "/b" }],
+    ]);
+    await settle();
+    expect(cache.peek("board:roots", { project: "/a" }).value).toEqual({ channel: "board:roots", project: "/a" });
+    expect(cache.peek("board:roots", { project: "/b" }).value).toEqual({ channel: "board:roots", project: "/b" });
+  });
+});

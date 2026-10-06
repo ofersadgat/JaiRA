@@ -1228,6 +1228,12 @@ export interface TaskSummary {
   taskId: string;
   title: string;
   status: TaskStatus;
+  /**
+   * A call of this task is in flight right now — its record is still open (decision 0018: a fact of
+   * the records, not a count a window keeps of events). The one thing `status` cannot say of a
+   * conversation, which answers its fourth message as a `completed` task.
+   */
+  answering?: true;
   /** Set when {@link status} is `archived`. */
   archived?: TaskArchived;
   workflow: string;
