@@ -6,7 +6,7 @@
  * semantics — statuses, columns and active paths all arrive pre-projected, which
  * is what keeps the UI from disagreeing with the engine.
  */
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { JsonValue } from "@declarative-ai/json";
 import type {
   ApprovalScope,
@@ -135,7 +135,8 @@ import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from
 import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pillModel";
-import { sessionKey, withoutSession } from "./sessionCache";
+import { sessionKey } from "./sessionCache";
+import { SyncCache } from "./syncCache";
 import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 import {
   emptyUiState,
@@ -171,6 +172,17 @@ let installed: JairaBridge | undefined;
  */
 export function setBridge(api: JairaBridge): void {
   installed = api;
+  // Another engine: another database, another clock — nothing cached from the last one stands.
+  cache = undefined;
+}
+
+/**
+ * The window's store of engine data (decision 0018, `syncCache.ts`): one per engine this window talks
+ * to, made on first use.
+ */
+let cache: SyncCache | undefined;
+export function syncCache(): SyncCache {
+  return (cache ??= new SyncCache({ invoke: (channel, request) => invoke(channel, request) }));
 }
 
 function bridge(): JairaBridge {
@@ -541,8 +553,16 @@ export interface AppState {
   records: Record<string, OperationRecordView>;
   /** The conversation of the state being looked at — one operation, whole. */
   session: SessionView | null;
-  /** Which instance the viewer is showing. Null ⇒ the task's most recent. */
+  /**
+   * Which instance the viewer is showing. As the window holds it, the instance a navigation named, if
+   * one did; as it is read (`state`, `cur()`), resolved — that one, else the newest run of
+   * {@link sessionAt}, else the task's most recent.
+   */
   sessionInstance: string | null;
+  /** The state a navigation asked the conversation to open at, when it named no instance (window-owned). */
+  sessionAt: string | null;
+  /** The instances whose transcripts are open beside the one being read (window-owned): {@link sessions} reads them. */
+  sessionsOpen: string[];
   /**
    * Where a click asked the task's conversation to LAND: one run of one state — an event notice's
    * `notify` firing. Set by `select` when it is handed an instance, and a stamp (`at`) so the same ask
@@ -892,6 +912,8 @@ const EMPTY: AppState = {
   records: {},
   session: null,
   sessionInstance: null,
+  sessionAt: null,
+  sessionsOpen: [],
   landing: null,
   sessions: {},
   logs: [],
@@ -926,36 +948,6 @@ const LOG_PAGE = 200;
 /** How many lines of a sync's own narration the panel keeps. Enough for a three-state run. */
 const SYNC_PROGRESS_LIMIT = 60;
 /**
- * The journal events that change a run's SHAPE — see the `engine:event` case.
- *
- * A run enters a state, settles a call, leaves a state. Between those the instance tree and the
- * session history are exactly what they were, so refetching them per journal entry would be three
- * round trips to learn nothing. These four are the entries where that stops being true.
- */
-const STRUCTURAL_EVENTS = new Set(["instance.entered", "instance.terminated", "operation.completed", "operation.failed"]);
-/**
- * The journal entries that write a LINE into the run's own narration — everything `conversationView`
- * projects into a turn.
- *
- * A SUPERSET of {@link STRUCTURAL_EVENTS}, and it has to be its own set rather than a reuse: a
- * transition fired and a child that could not be entered move no instance and open no conversation,
- * so neither changes the tree or the session history — and both are a sentence in the story of the
- * run. `entered product → explore` is one of them.
- *
- * Until this existed the journal projection was refetched only on a `task` invalidate, which a run
- * publishes exactly once, when it ENDS. So the notes drawn between the panels — every state entered,
- * every transition taken, every child blocked — were frozen at whatever had happened by the moment
- * the task was opened, and the rest of the run's path appeared only after it was over.
- */
-const NARRATED_EVENTS = new Set([
-  ...STRUCTURAL_EVENTS,
-  "operation.started",
-  // The runs a fan-out made (decision 0003): a line at the mount, and the copies it names appear.
-  "fanout.made",
-  "transition.taken",
-  "instance.blocked",
-]);
-/**
  * How long the layout has to stop changing before it is written to `user-settings.json`, in ms.
  *
  * Long enough that a drag is one write rather than several hundred, short enough that letting go of
@@ -985,6 +977,51 @@ function engineLine(raw: unknown): string {
  * What is still per-window is the ADDRESS this holds — {@link AppState.at}, `view`, `doc`. Splitting
  * the pane means making those per-pane; the components are already ready for it.
  */
+/** The selected task's fields, as the cache holds them (decision 0018) — never patched, always read. */
+type SelectedViews = Pick<AppState, "detail" | "conversation" | "sessionHistory" | "records" | "session" | "sessions" | "sessionInstance">;
+
+const NO_HISTORY: SessionRef[] = [];
+const NO_RECORDS: Record<string, OperationRecordView> = {};
+const NO_SESSIONS: Record<string, SessionView> = {};
+const recordsByRows = new WeakMap<object, Record<string, OperationRecordView>>();
+
+/**
+ * Read the selected task's views out of the cache, by the selection's id: a function of the cache and
+ * the window's own state, so it cannot describe another task than the one selected. `previous` is
+ * the last answer, whose maps are reused when nothing in them moved, so a panel keyed on them does
+ * not redraw for a change elsewhere.
+ */
+function selectedViewsOf(store: SyncCache, raw: AppState, previous: SelectedViews | undefined): SelectedViews {
+  const taskId = raw.selected;
+  if (taskId === null) return { detail: null, conversation: null, sessionHistory: NO_HISTORY, records: NO_RECORDS, session: null, sessions: NO_SESSIONS, sessionInstance: raw.sessionInstance };
+  const sessionHistory = store.peek("session:history", { taskId }).value ?? NO_HISTORY;
+  const rows = store.peek("run:records", { taskId }).value;
+  let records = rows === undefined ? NO_RECORDS : recordsByRows.get(rows);
+  if (records === undefined) {
+    records = Object.fromEntries(rows!.map((row) => [row.recordId, row]));
+    recordsByRows.set(rows!, records);
+  }
+  const sessionInstance = raw.sessionInstance ?? instanceAt(sessionHistory, raw.sessionAt);
+  const session = store.peek("session:view", { taskId, ...(sessionInstance !== null ? { instanceId: sessionInstance } : {}) }).value ?? null;
+  let sessions: Record<string, SessionView> = {};
+  for (const id of raw.sessionsOpen) {
+    const view = store.peek("session:view", { taskId, instanceId: id }).value;
+    if (view !== undefined) sessions[id] = view;
+  }
+  const was = previous?.sessions;
+  if (was !== undefined && Object.keys(was).length === Object.keys(sessions).length && Object.entries(sessions).every(([id, view]) => was[id] === view)) sessions = was;
+  else if (Object.keys(sessions).length === 0) sessions = NO_SESSIONS;
+  return {
+    detail: store.peek("task:detail", { taskId }).value ?? null,
+    conversation: store.peek("task:conversation", { taskId }).value ?? null,
+    sessionHistory,
+    records,
+    session,
+    sessions,
+    sessionInstance,
+  };
+}
+
 export function useApp() {
   const [state, setState] = useState<AppState>(EMPTY);
   /**
@@ -1027,6 +1064,88 @@ export function useApp() {
   }, []);
   // The backstop: after a render the ref is the state, whatever the incremental writes above did.
   ref.current = state;
+
+  /**
+   * The engine's data, from the cache (decision 0018): the selected task's fields are read from it by
+   * the selection's id, never patched — so no late answer, missed refresh or guessed project can put
+   * one task's data under another. Every reader in this file reads them through {@link cur}.
+   */
+  const store = syncCache();
+  const storeVersion = useSyncExternalStore(
+    useCallback((listener: () => void) => store.subscribe(listener), [store]),
+    () => store.version,
+    () => store.version,
+  );
+  const viewsMemo = useRef<{ raw: AppState; version: number; views: SelectedViews } | null>(null);
+  const selectedViews = useCallback(
+    (raw: AppState): SelectedViews => {
+      const memo = viewsMemo.current;
+      if (memo !== null && memo.raw === raw && memo.version === store.version) return memo.views;
+      const views = selectedViewsOf(store, raw, memo?.views);
+      viewsMemo.current = { raw, version: store.version, views };
+      return views;
+    },
+    [store],
+  );
+  /** What is true now, the cache's views of the selected task included. */
+  const cur = useCallback((): AppState => ({ ...ref.current, ...selectedViews(ref.current) }), [selectedViews]);
+
+  /**
+   * What the window holds of the selected task, told to the cache: those views are read, and read
+   * again whenever the change log says the task moved. While one of its turns streams, its transcripts
+   * are held still — the live tail is drawing that turn — and read again as it ends.
+   */
+  const shownInstance = selectedViews(state).sessionInstance;
+  const streaming = state.liveTurn !== null;
+  useEffect(() => {
+    const taskId = state.selected;
+    if (taskId === null) return void store.hold("selected", []);
+    const transcripts: Array<readonly [IpcChannel, unknown]> = [
+      ["session:view", { taskId, ...(shownInstance !== null ? { instanceId: shownInstance } : {}) }],
+      ...state.sessionsOpen.map((instanceId) => ["session:view", { taskId, instanceId }] as const),
+    ];
+    const always: Array<readonly [IpcChannel, unknown]> = [
+      ["task:detail", { taskId }],
+      ["task:conversation", { taskId }],
+      ["session:history", { taskId }],
+      ["run:records", { taskId }],
+    ];
+    if (streaming) store.hold("selected", always, transcripts);
+    else store.hold("selected", [...always, ...transcripts]);
+  }, [store, state.selected, shownInstance, state.sessionsOpen, streaming]);
+
+  /**
+   * The walk is checked against the tree it walks, whenever the tree moves. A retry restarts instance
+   * ids, so a trail held across one would offer crumbs into a run that no longer exists. A sidechain
+   * step is also checked against its host's session where one is held.
+   */
+  const shownDetail = selectedViews(state).detail;
+  useEffect(() => {
+    if (shownDetail === null) return;
+    const trail = prunedTrail(ref.current.trail, shownDetail.instances, (instanceId) => cur().sessions[instanceId]);
+    if (!sameTrail(trail, ref.current.trail)) patch({ trail });
+  }, [shownDetail, cur, patch]);
+
+  /**
+   * The cache's own reconciliation (decision 0018 §5): loaded whole at start, then asked from its
+   * cursor whenever the window comes back to the front and once a minute — what keeps it right with
+   * no push arriving at all.
+   */
+  useEffect(() => {
+    void store.start();
+    const reconcile = (): void => void store.reconcile();
+    const visible = (): void => {
+      if (typeof document === "undefined" || document.visibilityState === "visible") reconcile();
+    };
+    const sweep = setInterval(reconcile, 60_000);
+    globalThis.addEventListener?.("focus", reconcile);
+    globalThis.document?.addEventListener?.("visibilitychange", visible);
+    return () => {
+      clearInterval(sweep);
+      globalThis.removeEventListener?.("focus", reconcile);
+      globalThis.document?.removeEventListener?.("visibilitychange", visible);
+    };
+  }, [store]);
 
   const fail = useCallback((e: unknown) => patch({ error: (e as Error).message, busy: false }), [patch]);
   /** An answer another machine will get when it is back: said, so it is not taken for lost. */
@@ -1476,16 +1595,11 @@ export function useApp() {
    * fall back — carried on reading the right project.
    */
   const refreshConversation = useCallback(
-    async (taskId: string | null, project?: string) => {
-      if (taskId === null) return patch({ conversation: null });
-      const scope = project ?? ref.current.selectedProject ?? undefined;
-      try {
-        patch({ conversation: await invoke("task:conversation", { taskId, ...(scope !== undefined ? { project: scope } : {}) }) });
-      } catch {
-        patch({ conversation: null });
-      }
+    async (taskId: string | null, _project?: string) => {
+      // Read again now, after something this window did; the change log keeps it current otherwise.
+      if (taskId !== null) await store.refresh("task:conversation", { taskId });
     },
-    [patch],
+    [store],
   );
 
   /**
@@ -1613,69 +1727,34 @@ export function useApp() {
     async (
       taskId: string | null,
       instanceId: string | null = null,
-      project?: string,
+      _project?: string,
       atState?: string | null,
-      // Which instance was resolved, so a NAVIGATION can start the trail at it. Returned rather than
-      // patched here: this also runs on every invalidating push, and re-seeding the trail from one
-      // would drop you back to the top of the walk on each engine event.
+      // Which instance was resolved, so a NAVIGATION can start the trail at it.
     ): Promise<string | null> => {
       if (taskId === null) {
-        patch({ sessionHistory: [], records: {}, session: null, sessionInstance: null });
+        patch({ sessionInstance: null, sessionAt: null });
         return null;
       }
-      const scope = project ?? ref.current.selectedProject ?? undefined;
-      const at = scope !== undefined ? { project: scope } : {};
+      // The window's choice — which run to read — is the window's; what each run said is the cache's.
+      patch({ sessionInstance: instanceId, sessionAt: atState ?? null });
+      await store.refresh("session:history", { taskId });
+      const history = store.peek("session:history", { taskId }).value ?? [];
+      const wanted = instanceId ?? instanceAt(history, atState ?? null);
+      void store.refresh("run:records", { taskId });
+      void store.refresh("session:view", { taskId, ...(wanted !== null ? { instanceId: wanted } : {}) });
+      // The live tail is re-seeded from MAIN, not wiped: while a call is in flight the tail IS the
+      // conversation, and main keeps the same accumulation (`session:live`); `null` there means
+      // nothing is streaming. A tail already AHEAD of the snapshot stays (`tailIsAhead`).
+      let live: Awaited<ReturnType<typeof invoke<"session:live">>> = null;
       try {
-        const history = await invoke("session:history", { taskId, ...at });
-        /**
-         * What each of those calls actually RAN, keyed by the id the journal names it with.
-         *
-         * Tolerated rather than folded into the failure path: a task whose records cannot be read
-         * still has a conversation, and losing the whole panel because the derivation is unavailable
-         * would trade the thing that works for the thing that was missing.
-         */
-        let records: Record<string, OperationRecordView> = {};
-        try {
-          const rows = await invoke("run:records", { taskId, ...at });
-          records = Object.fromEntries(rows.map((row) => [row.recordId, row]));
-        } catch {
-          records = {};
-        }
-        const wanted = instanceId ?? instanceAt(history, atState ?? null);
-        const session = await invoke("session:view", {
-          taskId,
-          ...(wanted !== null ? { instanceId: wanted } : {}),
-          ...at,
-        });
-        // The live tail is re-seeded from MAIN, not wiped. Wiping it here is how a watched run went
-        // blank on every navigation: the record lands only when the operation settles, so while a
-        // call is in flight the tail IS the conversation — and this refresh runs on every task
-        // invalidate. Main keeps the same accumulation (`session:live`); `null` there means nothing
-        // is streaming, which is exactly when dropping the tail is right (the stored turn is the
-        // same content with its tool calls attached, and keeping both would show the answer twice).
-        let live: Awaited<ReturnType<typeof invoke<"session:live">>> = null;
-        try {
-          live = await invoke("session:live", { taskId, ...at });
-        } catch {
-          live = null;
-        }
-        // A tail already AHEAD of the snapshot stays: pushes folded in while the snapshot was in
-        // flight would be lost by reverting to it, and `n` says which of the two has seen more.
-        const keep = tailIsAhead(ref.current.liveTurn, live);
-        patch({
-          sessionHistory: history,
-          records,
-          session,
-          sessionInstance: wanted,
-          ...(keep ? {} : { liveTurn: liveTurnOfSnapshot(live) }),
-        });
-        return wanted;
+        live = await invoke("session:live", { taskId });
       } catch {
-        patch({ sessionHistory: [], records: {}, session: null, sessionInstance: null });
-        return null;
+        live = null;
       }
+      if (ref.current.selected === taskId && !tailIsAhead(ref.current.liveTurn, live)) patch({ liveTurn: liveTurnOfSnapshot(live) });
+      return wanted;
     },
-    [patch],
+    [patch, store],
   );
 
   /**
@@ -1824,35 +1903,19 @@ export function useApp() {
   }, []);
 
   const refreshDetail = useCallback(
-    // The detail is RETURNED as well as patched, because it is what a navigation seeds the address
-    // bar from: the run a path stands on is an instance, and the instance tree is the only record
-    // that has one for a state which ran no model call.
-    async (taskId: string | null, project?: string): Promise<TaskDetail | null> => {
+    // The detail is RETURNED, because it is what a navigation seeds the address bar from: the run a
+    // path stands on is an instance, and the instance tree is the only record that has one for a state
+    // which ran no model call. Read again now; the change log keeps it current otherwise, and the
+    // trail is checked against it whenever it moves (the effect beside the holds).
+    async (taskId: string | null, _project?: string): Promise<TaskDetail | null> => {
       if (!taskId) {
-        patch({ detail: null, trail: [], trailState: null });
+        patch({ trail: [], trailState: null });
         return null;
       }
-      const scope = project ?? ref.current.selectedProject ?? undefined;
-      try {
-        const detail = await invoke("task:detail", { taskId, ...(scope !== undefined ? { project: scope } : {}) });
-        // The walk is checked against the tree it walks. A retry restarts instance ids, so a trail
-        // held across one would offer crumbs into a run that no longer exists — and the address bar
-        // is the one surface that must not describe a place you cannot get to. A sidechain step is
-        // also checked against its host's session where one is cached; an uncached session keeps
-        // the step, because the cache empties on every run boundary and that is not evidence.
-        const trail = prunedTrail(ref.current.trail, detail.instances, (instanceId) => ref.current.sessions[instanceId]);
-        patch({ detail, ...(sameTrail(trail, ref.current.trail) ? {} : { trail }) });
-        return detail;
-      } catch {
-        // Quiet, like the conversation and session reads beside it. This fires on every selection
-        // change and on every push about the selected task, so a selection that has gone stale — a
-        // project closed underneath it, a task pruned — would otherwise raise a toast per event
-        // rather than emptying the panel, which is the honest answer and the one already rendered.
-        patch({ detail: null });
-      }
-      return null;
+      await store.refresh("task:detail", { taskId });
+      return store.peek("task:detail", { taskId }).value ?? null;
     },
-    [patch],
+    [patch, store],
   );
 
   const focusStateRun = useCallback(
@@ -1866,12 +1929,12 @@ export function useApp() {
       void refreshTasks();
       void refreshSharedTasks();
       if (view === null) {
-        patch({ selected: null, sessionHistory: [], records: {}, session: null, sessionInstance: null, conversation: null, sessions: {}, trail: [], trailState: null });
+        patch({ selected: null, sessionInstance: null, sessionAt: null, sessionsOpen: [], trail: [], trailState: null });
         return;
       }
       const newest = newestRunOf(view);
       if (newest === null) {
-        patch({ selected: null, sessionHistory: [], records: {}, session: null, sessionInstance: null, conversation: null, trail: [], trailState: null });
+        patch({ selected: null, sessionInstance: null, sessionAt: null, sessionsOpen: [], trail: [], trailState: null });
         return;
       }
       // The project the STATE's runs live in, not the focused one — see `owningProject`. `view` is
@@ -1881,7 +1944,7 @@ export function useApp() {
       // authoritative here and a recovered answer must never overrule a stated one.
       const at =
         runTargetOf(view.layer, ref.current.at).project ?? ref.current.at ?? projectOfTask(newest.taskId) ?? undefined;
-      patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessions: {}, trail: [], trailState: null });
+      patch({ selected: newest.taskId, selectedProject: at ?? null, stream: [], sessionsOpen: [], trail: [], trailState: null });
       void refreshConversation(newest.taskId, at);
       void refreshSession(newest.taskId, null, at, view.stateId);
       // The trail starts at the run that was opened: the panel is showing it, so the address bar has
@@ -1903,20 +1966,9 @@ export function useApp() {
    */
   const loadSession = useCallback(
     async (instanceId: string) => {
-      const taskId = ref.current.selected;
-      if (taskId === null || ref.current.sessions[instanceId] !== undefined) return;
-      const scope = ref.current.selectedProject ?? undefined;
-      try {
-        const view = await invoke("session:view", {
-          taskId,
-          instanceId,
-          ...(scope !== undefined ? { project: scope } : {}),
-        });
-        patch({ sessions: { ...ref.current.sessions, [instanceId]: view } });
-      } catch {
-        // Left absent rather than cached as empty: the card says "not loaded" and a second click
-        // retries, where a cached failure would be permanent for the life of the selection.
-      }
+      if (ref.current.selected === null || ref.current.sessionsOpen.includes(instanceId)) return;
+      // Opened, by id: the cache reads it and keeps it (`sessions` is read from it).
+      patch({ sessionsOpen: [...ref.current.sessionsOpen, instanceId] });
     },
     [patch],
   );
@@ -1937,51 +1989,10 @@ export function useApp() {
    */
   const loadSessions = useCallback(
     async (at: ReadonlyArray<{ instanceId: string }>) => {
-      const taskId = ref.current.selected;
-      if (taskId === null) return;
-      const scope = ref.current.selectedProject ?? undefined;
-      // Asked for by INSTANCE, which is the whole address: a task is one machine and its instance
-      // ids are durable, so one id names one conversation for the task's whole life.
-      const key = sessionKey;
-      const wanted = at.filter((one) => ref.current.sessions[key(one)] === undefined);
+      if (ref.current.selected === null) return;
+      const wanted = at.map((one) => sessionKey(one)).filter((id) => !ref.current.sessionsOpen.includes(id));
       if (wanted.length === 0) return;
-      const loaded = await Promise.all(
-        wanted.map(async (one) => {
-          try {
-            const view = await invoke("session:view", {
-              taskId,
-              instanceId: one.instanceId,
-              ...(scope !== undefined ? { project: scope } : {}),
-            });
-            return [key(one), view] as const;
-          } catch {
-            return null;
-          }
-        }),
-      );
-      if (ref.current.selected !== taskId) return;
-      const next = { ...ref.current.sessions };
-      let landed = false;
-      for (const entry of loaded) {
-        if (entry === null) continue;
-        next[entry[0]] = entry[1];
-        landed = true;
-      }
-      /**
-       * Only when something ACTUALLY arrived — otherwise this is a spin.
-       *
-       * The panel asks for whatever it is missing whenever `sessions` changes identity, and `patch`
-       * makes a new object every time it is called. So a round in which every fetch failed used to
-       * publish an identical map under a new identity, the panel would see the same entries still
-       * missing, ask again, fail again — as fast as the round trips resolve, for as long as the
-       * failure lasts. Dropping a failure so it can be re-asked is right; re-asking it in a loop
-       * with nothing in between is what turns one broken transcript into an unusable window.
-       *
-       * The retry is not lost. Anything that legitimately moves the panel — a record landing, a
-       * state entered, the selection changing — re-runs the fetch, which is the cadence a transient
-       * failure wants anyway.
-       */
-      if (landed) patch({ sessions: next });
+      patch({ sessionsOpen: [...ref.current.sessionsOpen, ...new Set(wanted)] });
     },
     [patch],
   );
@@ -2277,6 +2288,10 @@ export function useApp() {
       else if (kept.selected !== null) actions.select(kept.selected);
     });
     return bridge().subscribe((message: PushMessage) => {
+      // The cache first (decision 0018): a page is applied, a missed one reconciled. An invalidate is a
+      // hint that something moved — after a reconnect, every scope — so the cache asks from its cursor.
+      store.push(message);
+      if (message.type === "store:invalidate") void store.reconcile();
       // An INVALIDATE about a project this window is not showing.
       //
       // Narrow on purpose. JaiRA's own project forced it — a sync runs there and invalidates ITS task
@@ -2298,15 +2313,8 @@ export function useApp() {
         // The root's conversation list spans every project, so a thread that moved in one this
         // window is not standing in still moved on screen.
         if (message.scope === "tasks") void refreshAllConversations();
-        // …and except the task on SCREEN. A sync or a review runs in JaiRA's own project, and the
-        // person watching its conversation is owed the same refresh cadence as any selected task —
-        // dropping these is why a watched run showed nothing until it finished, then everything at
-        // once. The refreshers scope themselves to `selectedProject`, which is exactly `about`.
-        if (about === ref.current.selectedProject && message.scope === "task" && ref.current.selected !== null) {
-          void refreshDetail(ref.current.selected);
-          void refreshConversation(ref.current.selected);
-          void refreshSession(ref.current.selected, ref.current.sessionInstance);
-        }
+        // The task on screen is not among the exceptions any more: the cache keeps it current from
+        // the change log whatever project it is in (decision 0018).
         return;
       }
       switch (message.type) {
@@ -2345,17 +2353,7 @@ export function useApp() {
             // paying to keep a screen nobody is looking at up to date. `setView` catches up on entry.
             if (ref.current.view === "tasks") void refreshProjects();
           }
-          if (message.scope === "task") {
-            void refreshDetail(ref.current.selected);
-            // Whenever a run is on screen. That is now any selected task at all: the Tasks panel
-            // reads a task AS its conversation, so the two conditions that used to gate this — the
-            // panel showing a task, the address bar standing on a run — are both narrower than the
-            // set of screens the transcript is on.
-            if (ref.current.selected !== null) {
-              void refreshConversation(ref.current.selected);
-              void refreshSession(ref.current.selected, ref.current.sessionInstance);
-            }
-          }
+          // `task`: the selected task is the cache's, kept current from the change log (decision 0018).
           if (message.scope === "workflows") {
             void refreshTree();
             void refreshState(ref.current.stateId);
@@ -2397,54 +2395,14 @@ export function useApp() {
             }
             return;
           }
-          // A record lands when its operation settles, and the cached view of that instance was
-          // fetched while the record was still OPEN — empty, or missing its newest call. Dropping it
-          // makes the conversation panel refetch (it loads whatever is missing), and the live tail
-          // goes with it: the stored turn is the same content with its tool calls attached. Without
-          // this, a transcript watched from the start stayed empty after the run finished.
+          // A call settled: its record has landed, so the live tail ends — the transcripts held still while
+          // it streamed are held live again by the hold effect, and read.
           const ev = message.event as { type?: string; instanceId?: string };
           if ((ev.type === "operation.completed" || ev.type === "operation.failed") && typeof ev.instanceId === "string") {
-            /**
-             * Through {@link withoutSession}, which knows BOTH keys the cache can be holding it
-             * under — this used to spell one of them itself, and spelled the wrong one.
-             *
-             * Dropping a stale key is what lets the settled answer arrive: every panel a person had
-             * open while a run was going would otherwise stay frozen on whatever the record held
-             * mid-call. The live tail is cleared in the same breath.
-             */
-            const rest = withoutSession(ref.current.sessions, { instanceId: ev.instanceId });
-            if (rest !== ref.current.sessions) patch({ sessions: rest, liveTurn: null });
-            else patch({ liveTurn: null });
+            patch({ liveTurn: null });
           }
-          /**
-           * The RUN'S SHAPE changed — refetch what draws it.
-           *
-           * A run publishes `store:invalidate` at `board` scope per journal entry and at `task` scope
-           * only when it ENDS, so for the whole of a run the two projections the transcript is built
-           * from — the instance tree and the session history — were whatever they happened to be when
-           * you arrived. Walk into a child while it is the only one that has run, wait for its
-           * siblings to finish, walk back out, and the level above still shows one child: not a stale
-           * render, a stale fetch, and nothing on the way back up re-asks.
-           *
-           * Gated on the structural events rather than done per entry. These fire once per state
-           * entered and once per call settled — the moments the shape actually moves — while token
-           * deltas arrive on `session:turn` and must not cost three round trips each.
-           */
-          if (STRUCTURAL_EVENTS.has(ev.type ?? "")) {
-            void refreshDetail(ref.current.selected);
-            void refreshSession(ref.current.selected, ref.current.sessionInstance);
-          }
-          // A computed TITLE settled (SPEC §5.2): the detail header names the task by it, and was
-          // fetched while it was still pending. Only the detail — the board refetches on its own
-          // per-entry invalidate, and a settled field changes no session history.
-          else if (ev.type === "value.settled" && (message.event as { field?: string }).field === "title") {
-            void refreshDetail(ref.current.selected);
-          }
-          // The run's NARRATION, on the wider set — see {@link NARRATED_EVENTS}. The instance tree
-          // says what exists; this says what happened, and the transcript draws the second between
-          // its panels. Refetched here rather than left to the end-of-run invalidate, which is when
-          // a path somebody is watching being walked is of no further use to them.
-          if (NARRATED_EVENTS.has(ev.type ?? "")) void refreshConversation(ref.current.selected);
+          // The run's shape and narration — the instance tree, the session history, the conversation — are
+          // the cache's: every entry and record the run writes reaches it through the change log.
           setState((s) => ({ ...s, stream: [...s.stream, line].slice(-STREAM_LIMIT) }));
           break;
         }
@@ -2501,19 +2459,10 @@ export function useApp() {
           void refreshTasks();
           void refreshSharedTasks();
           void refreshBoard();
-          void refreshDetail(ref.current.selected);
           void refreshState(ref.current.stateId);
-          if (ref.current.selected !== null) {
-            void refreshConversation(ref.current.selected);
-            // The session HISTORY too, not only the detail beside it. It is what says which states
-            // held a conversation, so a run that finished three children while you were reading the
-            // first one left the panel able to name them (the instance tree refreshed) and unable to
-            // show what any of them said.
-            void refreshSession(ref.current.selected, ref.current.sessionInstance);
-          }
           // Every cached transcript of the finished run was fetched while it could still grow. The
           // panel refetches what it is showing; the live tail's record has landed with it.
-          if (message.taskId === ref.current.selected) patch({ sessions: {}, liveTurn: null });
+          if (message.taskId === ref.current.selected) patch({ liveTurn: null });
           break;
         }
         case "session:turn": {
@@ -2612,7 +2561,7 @@ export function useApp() {
           taskWorkflowProject: null,
           taskWorkflowRun: null,
           stream: [],
-          sessions: {},
+          sessionsOpen: [],
           landing: taskId !== null && atInstance !== undefined && atInstance !== null ? { taskId, instance: atInstance, at: Date.now() } : null,
           // A trail names one task's instances (see `trail.ts`), so arriving at another task starts
           // a new one rather than extending this.
@@ -2685,11 +2634,8 @@ export function useApp() {
             trail: [],
             trailState: null,
             selected: null,
-            detail: null,
-            conversation: null,
-            session: null,
             sessionInstance: null,
-            sessions: {},
+            sessionsOpen: [],
             inspect: "path",
           });
           return;
@@ -2813,7 +2759,7 @@ export function useApp() {
           taskWorkflowProject: null,
           taskWorkflowRun: null,
           stream: [],
-          sessions: {},
+          sessionsOpen: [],
           trail: [],
           trailState: null,
           inspect: "path",
@@ -3196,14 +3142,9 @@ export function useApp() {
           if (ref.current.selected !== null && taskIds.includes(ref.current.selected)) {
             patch({
               selected: null,
-              detail: null,
               stream: [],
-              sessions: {},
-              sessionHistory: [],
-              records: {},
-              session: null,
+              sessionsOpen: [],
               sessionInstance: null,
-              conversation: null,
               trail: [],
               trailState: null,
               inspect: "path",
@@ -3560,7 +3501,7 @@ export function useApp() {
             return;
           }
           await invoke("project:open", { dir: what.dir });
-          patch({ busy: false, selected: null, detail: null });
+          patch({ busy: false, selected: null });
           await refreshAll();
         } catch (e) {
           fail(e);
@@ -3579,7 +3520,7 @@ export function useApp() {
         patch({ busy: true, error: null, initPrompt: null });
         try {
           await invoke("project:init", { dir });
-          patch({ busy: false, selected: null, detail: null });
+          patch({ busy: false, selected: null });
           await refreshAll();
         } catch (e) {
           fail(e);
@@ -3614,7 +3555,7 @@ export function useApp() {
             }
           }
           await invoke(mode === "init" ? "project:init" : "project:open", { dir: picked.dir });
-          patch({ busy: false, selected: null, detail: null });
+          patch({ busy: false, selected: null });
           await refreshAll();
         } catch (e) {
           fail(e);
@@ -3844,7 +3785,7 @@ export function useApp() {
         void refreshSession(ref.current.selected, instanceId, ref.current.selectedProject ?? owningProject());
         // The path lands on the run that was clicked, not on the state's newest — the row named one
         // pass through it, and that is the one about to be on screen.
-        const node = nodeAt(ref.current.detail?.instances ?? [], instanceId);
+        const node = nodeAt(cur().detail?.instances ?? [], instanceId);
         patch(node === undefined ? { trail: [], trailState: null } : { trail: [stepOf(node)], trailState: null });
       },
 
@@ -4946,5 +4887,6 @@ export function useApp() {
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
-  return { state, actions, appearance };
+  const shown = useMemo(() => ({ ...state, ...selectedViews(state) }), [state, storeVersion, selectedViews]);
+  return { state: shown, actions, appearance };
 }

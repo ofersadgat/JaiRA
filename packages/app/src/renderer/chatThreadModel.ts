@@ -11,7 +11,8 @@ import { CHAT_SESSION, titleOf } from "./chatWorkflow";
 import type { ChatSurface } from "./chatSurface";
 import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import { useWaiting } from "./limitsStore";
-import { invoke } from "./store";
+import { invoke, syncCache } from "./store";
+import { useView } from "./useView";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
 import { approvalCallIndex } from "./approvalCall";
 
@@ -92,7 +93,16 @@ export function replyPlaceholder(arming: Arming | null): string {
 export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() => void>) {
   const taskId = surface.taskId!;
   const project = surface.project ?? undefined;
-  const [thread, setThread] = useState<ChatThreadView | null>(null);
+  /**
+   * The thread, from the window's store (decision 0018): held while this conversation is open, read
+   * again whenever its records move — held still while one of its turns streams, which the live tail is
+   * drawing, and read as the turn ends. The last good answer stands until a better one ({@link kept}).
+   */
+  const streaming = surface.live !== null;
+  const held = useView("chat:thread", { taskId }, streaming);
+  const lastThread = useRef<ChatThreadView | null>(null);
+  const thread = kept(lastThread.current, held.value ?? null);
+  lastThread.current = thread;
   const [plan, setPlan] = useState<ChatPlanView | null | undefined>(undefined);
   const [overrides, setOverrides] = useState<ChatSettings>({});
   /**
@@ -111,7 +121,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    * that failed to load used to draw exactly like one with nothing in it, which is how a misdirected
    * read ("unknown task … in <another project>") looked like a conversation whose data was gone.
    */
-  const [unreadable, setUnreadable] = useState<string | null>(null);
+  const unreadable = held.error !== undefined ? `This conversation could not be read: ${held.error}` : null;
   // Kept per conversation, so leaving it and coming back finds what was being typed.
   const [draft, setDraft] = useKeptDraft(`chat:${taskId}`);
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
@@ -160,26 +170,17 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    * updates would put the turn on screen twice for a frame, which is the same bug wearing the other
    * face.
    */
-  const [afterglow, setAfterglow] = useState<LiveTail | null>(null);
+  const [glow, setGlow] = useState<{ tail: LiveTail; against: ChatThreadView | undefined } | null>(null);
   useEffect(() => {
-    if (surface.live !== null) setAfterglow(surface.live);
+    if (surface.live !== null) setGlow({ tail: surface.live, against: held.value ?? undefined });
+    // Captured as the tail last stood, against the thread it was on top of.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [surface.live]);
-
-  const read = useCallback(() => {
-    void invoke("chat:thread", { taskId, ...(project !== undefined ? { project } : {}) })
-      .then((next) => {
-        setThread((was) => kept(was, next));
-        setAfterglow(null);
-        setUnreadable(null);
-      })
-      .catch((e: unknown) => setUnreadable(`This conversation could not be read: ${e instanceof Error ? e.message : String(e)}`));
-  }, [taskId, project]);
-
-  // Re-read on anything that means the record moved. `detail` and `journal` are re-fetched by the
-  // store on every task invalidation, so their identity is the cheapest honest signal there is; the
-  // live tail is in the dependency list too, so the thread lands the moment a turn settles rather
-  // than one interaction later.
-  useEffect(read, [read, surface.detail, surface.journal, surface.live === null]);
+  // Shown until the thread it was on top of has been read again — the same render the new thread
+  // arrives in, so the turn is never on screen twice and never in neither form.
+  const afterglow = glow !== null && glow.against === (held.value ?? undefined) ? glow.tail : null;
+  /** Read again now — after this window sent something, before the change log says the record moved. */
+  const read = useCallback(() => void syncCache().refresh("chat:thread", { taskId }), [taskId]);
 
   // The plan is re-asked whenever the settings change or a message lands, because it reports what
   // WOULD run — and after a turn that includes which model actually answered the last one.

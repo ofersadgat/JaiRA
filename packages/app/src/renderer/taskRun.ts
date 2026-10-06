@@ -16,11 +16,14 @@
  * context: the host's, with every run-shaped field replaced by this run's.
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { ConversationView, OperationRecordView, SessionRef, TaskDetail } from "@jaira/shared/browser";
+import type { SessionRef, TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "./fileTypes";
 import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 import { sessionKey } from "./sessionCache";
 import { invoke, subscribe } from "./store";
+import { useView, useViews } from "./useView";
+
+const NO_HISTORY: SessionRef[] = [];
 
 export interface TaskRun {
   detail: TaskDetail | null;
@@ -31,67 +34,57 @@ export interface TaskRun {
 }
 
 export function useTaskRun(taskId: string, project: string | undefined, host: FileSurfaceContext): TaskRun {
-  const [detail, setDetail] = useState<TaskDetail | null>(null);
-  const [conversation, setConversation] = useState<ConversationView | null>(null);
-  const [history, setHistory] = useState<SessionRef[]>([]);
-  const [records, setRecords] = useState<Record<string, OperationRecordView>>({});
-  const [sessions, setSessions] = useState<FileSurfaceContext["sessions"]>({});
-  const [failed, setFailed] = useState<string | null>(null);
+  // The run's views, from the window's store (decision 0018): held while it is shown, read again
+  // whenever its records move. Its transcripts are held still while a turn streams — the live tail
+  // is drawing that turn — and read as it ends.
   const [liveTurn, setLiveTurn] = useState<FileSurfaceContext["liveTurn"]>(null);
+  const streaming = liveTurn !== null;
+  const detailHeld = useView("task:detail", { taskId });
+  const conversationHeld = useView("task:conversation", { taskId });
+  const historyHeld = useView("session:history", { taskId });
+  const rowsHeld = useView("run:records", { taskId });
+  const [open, setOpen] = useState<string[]>([]);
+  const openViews = useViews(
+    "session:view",
+    useMemo(() => open.map((instanceId) => ({ taskId, instanceId })), [open, taskId]),
+    streaming,
+  );
+  const detail = detailHeld.value ?? null;
+  const conversation = conversationHeld.value ?? null;
+  const history = historyHeld.value ?? NO_HISTORY;
+  const rows = rowsHeld.value;
+  const records = useMemo(() => Object.fromEntries((rows ?? []).map((row) => [row.recordId, row])), [rows]);
+  const sessions = useMemo(() => {
+    const out: FileSurfaceContext["sessions"] = {};
+    open.forEach((instanceId, i) => {
+      const view = openViews[i]?.value;
+      if (view !== undefined) out[instanceId] = view;
+    });
+    return out;
+  }, [open, openViews]);
+  const failed = detailHeld.error ?? null;
 
+  // Another task: another run, nothing open in it yet, no tail.
+  useEffect(() => {
+    setOpen([]);
+    setLiveTurn(null);
+  }, [taskId]);
+
+  // The live tail: seeded from main, then folded from the pushes about this task (decision 0018 §10's
+  // deltas). A settled call ends it, and the transcripts held still while it streamed are read.
   useEffect(() => {
     let mounted = true;
-    const at = project !== undefined ? { project } : {};
-    setDetail(null);
-    setSessions({});
-    const load = async (): Promise<void> => {
-      try {
-        const [d, c, h, snap] = await Promise.all([
-          invoke("task:detail", { taskId, ...at }),
-          invoke("task:conversation", { taskId, ...at }),
-          invoke("session:history", { taskId, ...at }),
-          invoke("session:live", { taskId, ...at }).catch(() => null),
-        ]);
-        const rows = await invoke("run:records", { taskId, ...at }).catch(() => [] as OperationRecordView[]);
-        if (!mounted) return;
-        setDetail(d);
-        setConversation(c);
-        setHistory(h);
-        setRecords(Object.fromEntries(rows.map((row) => [row.recordId, row])));
-        setLiveTurn((current) => (tailIsAhead(current, snap) ? current : liveTurnOfSnapshot(snap)));
-        setFailed(null);
-      } catch (e) {
-        if (mounted) setFailed((e as Error).message);
-      }
-    };
-    void load();
+    void invoke("session:live", { taskId, ...(project !== undefined ? { project } : {}) })
+      .catch(() => null)
+      .then((snap) => mounted && setLiveTurn((current) => (tailIsAhead(current, snap) ? current : liveTurnOfSnapshot(snap))));
     const off = subscribe((message) => {
       if (!("taskId" in message) || message.taskId !== taskId) return;
       if (message.type === "session:turn") {
         setLiveTurn((current) => (alreadyFolded(current, message) ? current : foldLiveTurn(current, message)));
         return;
       }
-      if (message.type === "engine:event") {
-        const event = message.event as { type?: string; instanceId?: string } | undefined;
-        if (event?.type === "operation.completed" || event?.type === "operation.failed") {
-          // The record landed: the cached transcript of that instance was read while it was open.
-          setLiveTurn(null);
-          if (typeof event.instanceId === "string") {
-            const key = sessionKey({ instanceId: event.instanceId });
-            setSessions((prev) => {
-              if (prev[key] === undefined) return prev;
-              const { [key]: _stale, ...rest } = prev;
-              return rest;
-            });
-          }
-        }
-        void load();
-        return;
-      }
-      if (message.type === "run:finished") {
-        setSessions({});
-        void load();
-      }
+      const event = message.type === "engine:event" ? (message.event as { type?: string } | undefined) : undefined;
+      if (message.type === "run:finished" || event?.type === "operation.completed" || event?.type === "operation.failed") setLiveTurn(null);
     });
     return () => {
       mounted = false;
@@ -99,29 +92,12 @@ export function useTaskRun(taskId: string, project: string | undefined, host: Fi
     };
   }, [taskId, project]);
 
-  const loadSessions = useCallback(
-    (wanted: ReadonlyArray<{ instanceId: string }>) => {
-      void (async () => {
-        const missing = wanted.filter((one) => sessions[sessionKey(one)] === undefined);
-        if (missing.length === 0) return;
-        const loaded = await Promise.all(
-          missing.map(async (one) => {
-            try {
-              return [sessionKey(one), await invoke("session:view", { taskId, instanceId: one.instanceId, ...(project !== undefined ? { project } : {}) })] as const;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        setSessions((prev) => {
-          const next = { ...prev };
-          for (const entry of loaded) if (entry !== null) next[entry[0]] = entry[1];
-          return next;
-        });
-      })();
-    },
-    [taskId, project, sessions],
-  );
+  const loadSessions = useCallback((wanted: ReadonlyArray<{ instanceId: string }>) => {
+    setOpen((was) => {
+      const add = wanted.map((one) => sessionKey(one)).filter((id) => !was.includes(id));
+      return add.length === 0 ? was : [...was, ...new Set(add)];
+    });
+  }, []);
 
   const context = useMemo<FileSurfaceContext>(
     () => ({
