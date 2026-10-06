@@ -39,7 +39,7 @@ import { EventWaitStore, RepoWatchStore } from "./repoWatch";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
-import { claimReplayed, registerWorkspace, workspaceIdOf } from "./workspace";
+import { claimReplayed, registerWorkspace, workspaceIdFor, workspaceIdOf } from "./workspace";
 import { touch } from "./sync";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -400,7 +400,9 @@ function openAt(
   // the first workspace this machine opens.
   mkdirSync(dirname(paths.dbFile), { recursive: true });
   const db = openDb(paths.dbFile);
-  const workspace = workspaceIdOf(paths);
+  // A copy of another machine's workspace is its owner's id, as written; this machine's own is held to
+  // what the database knows (`workspaceIdFor`: a committed id file is not a second clone's to take).
+  const workspace = replica ? workspaceIdOf(paths) : workspaceIdFor(db, paths);
   if (!replica) registerWorkspace(db, workspace, paths.projectDir);
   // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
   // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would

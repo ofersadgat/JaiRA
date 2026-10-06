@@ -18,3 +18,7 @@ system/machine.key
 # secret chain (DESIGN §8.1). Its sibling .env is deliberately NOT ignored: a project that wants
 # to commit a non-secret default has to be able to.
 .env.local
+
+# This workspace's id in the shared database (decision 0013 §4). Committed, every clone of the
+# repository would claim the same tasks — which this repository did until 2026-10-06.
+system/workspace.id
