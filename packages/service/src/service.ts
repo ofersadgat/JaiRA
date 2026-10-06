@@ -186,6 +186,7 @@ import {
   settleStartedMirror,
   startedTaskOf,
   PROCESS_ENDED,
+  ownerOf,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -3622,6 +3623,30 @@ export class AppService {
     const remote = parseRemoteProjectKey(ref);
     if (remote !== undefined) return this.replicaSession(ref, remote.machineId, remote.dir);
     return this.sessions.get(sessionKey(ref));
+  }
+
+  /**
+   * Where a task lives, from its id alone — the project every request about it is answered from.
+   *
+   * A task id names one task in the one database (decision 0013 §4), and `task_owners` says which
+   * workspace made it, so the window never has to know. It used to: every request carried the
+   * project the window THOUGHT the task was in, and a wrong guess — a reload that came back standing
+   * on another project, a list row with no project of its own — read the task out of a workspace that
+   * does not own it, answered "unknown task", and the window drew the conversation empty.
+   *
+   * This machine's workspace as the key the lists stamp (`session.dir`); another machine's as its
+   * remote key, which `Federation.route` forwards while that machine is up and its copy answers while
+   * it is down. `undefined` for an id no workspace owns, or one whose workspace is not open here — the
+   * request then goes where it named, which is where it went before.
+   */
+  homeOf(taskId: string): string | undefined {
+    const any = this.sessions.values().next().value;
+    if (any === undefined) return undefined;
+    const owner = ownerOf(any.project.db, taskId);
+    if (owner === undefined) return undefined;
+    for (const session of this.sessions.values()) if (session.project.workspace === owner) return session.dir;
+    const where = any.project.db.prepare(`SELECT machine, dir FROM workspaces WHERE id = ?`).get(owner) as { machine: string | null; dir: string } | undefined;
+    return where?.machine != null ? remoteProjectKey(where.machine, where.dir) : undefined;
   }
 
   /**

@@ -89,6 +89,7 @@ import {
   resolveTheme,
   SHARED_SESSION,
   WORKFLOW_JSON,
+  parseRemoteProjectKey,
   type WritingTool,
 } from "@jaira/shared/browser";
 import {
@@ -126,6 +127,7 @@ import {
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
+import { readAddress, writeAddress } from "./windowAddress";
 import { applyAppearance, typographyOf, useSystemDark } from "./appearance";
 import { surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
@@ -1126,16 +1128,21 @@ export function useApp() {
     // only at render, so "is a project open" is answered with the current value instead of the last
     // painted one. Without the guard main logs `no project is open` for every refresh in a window
     // that simply has no project — a real error, raised by design, about a question nobody asked.
-    if (ref.current.at === null) return patch({ tasks: [] });
+    const at = ref.current.at;
+    if (at === null) return patch({ tasks: [] });
     try {
       // NAMED, not left to main to resolve. Unqualified it was answerable only while one project was
       // open, and threw "several projects are open" the moment a second one did — which is the whole
       // point of the rule, working, on a call that had simply not been told where it was standing.
-      patch({ tasks: await invoke("task:list", { project: ref.current.at }) });
+      const tasks = await invoke("task:list", { project: at });
+      // Only while the window still stands there. Two reads in flight answer in either order, and
+      // the one for the project just LEFT landing last drew that project's conversations in this
+      // one's Chat list — seen after a reload, which reads where the engine says and then moves back.
+      if (ref.current.at === at) patch({ tasks });
     } catch {
       // Quiet, not a toast: the overwhelmingly likely cause is a project closing underneath a
       // refresh already in flight, and an empty list is the right answer to that.
-      patch({ tasks: [] });
+      if (ref.current.at === at) patch({ tasks: [] });
     }
   }, [patch]);
 
@@ -2239,9 +2246,36 @@ export function useApp() {
     publishRenderChoices(look.renderers);
   }, [look.renderers]);
 
+  /**
+   * Where the window stands, written as it moves and read back once at start — see `windowAddress.ts`.
+   * Not written until the read-back has run, or the empty state a reload starts in would overwrite
+   * the place it is about to return to.
+   */
+  const addressRestored = useRef(false);
+  useEffect(() => {
+    if (!addressRestored.current) return;
+    writeAddress({ at: state.at, view: state.view, selected: state.selected, conversation: state.chat.taskId });
+  }, [state.at, state.view, state.selected, state.chat.taskId]);
+
   // Initial load + push subscription.
   useEffect(() => {
-    void refreshAll();
+    void refreshAll().then(() => {
+      // A reload returns where it stood. The project only while it is still open on this side; the
+      // task and the conversation by id alone, which is all the engine needs to find them.
+      const kept = readAddress();
+      // Written from here on, and once now: a window that never moves would otherwise never say where
+      // it stands, and its first reload would have nothing to come back to.
+      const write = (): void => writeAddress({ at: ref.current.at, view: ref.current.view, selected: ref.current.selected, conversation: ref.current.chat.taskId });
+      addressRestored.current = true;
+      if (kept === null) return write();
+      const actions = actionsRef.current;
+      if (kept.at !== ref.current.at && (kept.at === null || ref.current.projects.some((p) => p.project === kept.at))) actions.standOn(kept.at);
+      actions.setView(kept.view);
+      // One selection: the Chat view draws the selected task as its thread, so it opens the
+      // conversation, and every other view selects what it had selected.
+      if (kept.view === "chat" && kept.conversation !== null) actions.openConversation(kept.conversation);
+      else if (kept.selected !== null) actions.select(kept.selected);
+    });
     return bridge().subscribe((message: PushMessage) => {
       // An INVALIDATE about a project this window is not showing.
       //
@@ -2675,14 +2709,12 @@ export function useApp() {
        * because the listing draws them all.
        */
       focusProject: (project: string | null) => {
-        patch({ taskFocus: project, at: project });
-        // Except the picker's list, which is per project: the New-task button is offered only in the
-        // focused one, and a picker still listing the last project's roots would create tasks from
-        // workflows this one may not even have.
-        void refreshWorkflows();
-        // And the tree, which is now a view of ONE place: this moves `at`, so it moves which place.
-        // Narrowing the board and then opening Files used to show whatever the tree was left at.
-        void refreshTree();
+        // It moves `at`, so it is standing somewhere else, and everything read FOR a place is read
+        // again — `standOn`, which refreshes the picker's roots and the tree this did, and the
+        // project's own lists this did not: its task list stayed the last project's, so the Chat list
+        // drew that project's conversations under this one's name.
+        if (project !== ref.current.at) return actionsRef.current.standOn(project);
+        patch({ taskFocus: project });
       },
 
       /**
@@ -2708,6 +2740,12 @@ export function useApp() {
           trail: [],
           trailState: null,
         });
+        // Told to the engine, which is where a reloaded window asks where it stands (`project:current`,
+        // the project THIS connection opened last). Without it the address moved only here: a window
+        // that crashed while standing on JaiRA came back on mist-server, the last project it had
+        // OPENED. Re-opening one already open is a no-op there; only this machine's own checkouts.
+        const standing = project === null ? undefined : ref.current.projects.find((p) => p.project === project);
+        if (standing?.kind === "user" && parseRemoteProjectKey(project!) === undefined) void invoke("project:open", { dir: project! }).catch(() => undefined);
         void refreshTree();
         void refreshWorkflows();
         void refreshConfig();
@@ -3218,8 +3256,11 @@ export function useApp() {
        * was clicked in between.
        */
       openConversation: (taskId: string | null, project?: string) => {
-        patch({ chat: { ...ref.current.chat, taskId, project: project ?? null, opening: null, error: null } });
-        actionsRef.current.select(taskId, project);
+        // Unnamed — a reload restoring it by id — its own project where a list knows it, so the
+        // thread's header and composer say where it is rather than where the window stands.
+        const at = project ?? (taskId === null ? undefined : projectOfTask(taskId));
+        patch({ chat: { ...ref.current.chat, taskId, project: at ?? null, opening: null, error: null } });
+        actionsRef.current.select(taskId, at);
       },
 
       /**

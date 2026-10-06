@@ -47,13 +47,17 @@ export type ServiceChannel = Exclude<IpcChannel, HostChannel>;
  * forwarded to it (decision 0013 §7, `Federation.route`).
  */
 export function serviceHandlers(service: AppService, options: { local?: boolean } = {}): Record<ServiceChannel, Handler> {
-  const table = localHandlers(service);
+  const table = homed(service, localHandlers(service));
   // Another machine asking: answered with THIS machine's workspaces only. Forwarding on would send its
   // own requests back to it, and two machines asking each other for everything would never stop.
   if (options.local === true) return table;
   const routed = {} as Record<ServiceChannel, Handler>;
   for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
-    routed[channel] = ((request: unknown) => service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request)) as Handler;
+    // Homed BEFORE routing too: a task another machine owns is forwarded there whatever the window named.
+    routed[channel] = ((asked: unknown) => {
+      const request = withHome(service, asked);
+      return service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request);
+    }) as Handler;
   }
   // Starting a task PLACES it, where its project has several workspaces (decision 0013 §5). Only a
   // request made here: one forwarded from another machine was placed there already.
@@ -67,6 +71,31 @@ export function serviceHandlers(service: AppService, options: { local?: boolean 
     return [...local, ...remote, ...service.offlineTasks(request as { workflows?: string[] } | undefined)];
   }) as Handler;
   return routed;
+}
+
+/**
+ * A request about a task answered where the task is (`AppService.homeOf`), whatever project it named.
+ *
+ * Every channel whose request names a `taskId` (or `taskIds`, all of one project) means that task's
+ * own project by its `project`, so this is one rule rather than one per method — and a new channel
+ * gets it without anybody remembering to. The project a request names is the window's guess; the
+ * owner is a row in the database, and where they differ the guess is the one that is wrong.
+ */
+function homed(service: AppService, table: Record<ServiceChannel, Handler>): Record<ServiceChannel, Handler> {
+  const out = {} as Record<ServiceChannel, Handler>;
+  for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
+    out[channel] = ((request: unknown) => (handler as (request: unknown) => unknown)(withHome(service, request))) as Handler;
+  }
+  return out;
+}
+
+function withHome(service: AppService, request: unknown): unknown {
+  if (request === null || typeof request !== "object") return request;
+  const { taskId, taskIds, project } = request as { taskId?: unknown; taskIds?: unknown; project?: unknown };
+  const id = typeof taskId === "string" ? taskId : Array.isArray(taskIds) && typeof taskIds[0] === "string" ? taskIds[0] : undefined;
+  if (id === undefined) return request;
+  const home = service.homeOf(id);
+  return home === undefined || home === project ? request : { ...request, project: home };
 }
 
 function localHandlers(service: AppService): Record<ServiceChannel, Handler> {

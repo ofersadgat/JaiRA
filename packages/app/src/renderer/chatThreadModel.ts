@@ -106,6 +106,12 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   const [sending, setSending] = useState(0);
   const [sent, setSent] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
+  /**
+   * Why the thread could not be read, while it cannot. Said rather than swallowed: a conversation
+   * that failed to load used to draw exactly like one with nothing in it, which is how a misdirected
+   * read ("unknown task … in <another project>") looked like a conversation whose data was gone.
+   */
+  const [unreadable, setUnreadable] = useState<string | null>(null);
   // Kept per conversation, so leaving it and coming back finds what was being typed.
   const [draft, setDraft] = useKeptDraft(`chat:${taskId}`);
   /** Which message is being replaced, when one is — see `chat:send`'s `branchAt`. */
@@ -164,8 +170,9 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       .then((next) => {
         setThread((was) => kept(was, next));
         setAfterglow(null);
+        setUnreadable(null);
       })
-      .catch(() => undefined);
+      .catch((e: unknown) => setUnreadable(`This conversation could not be read: ${e instanceof Error ? e.message : String(e)}`));
   }, [taskId, project]);
 
   // Re-read on anything that means the record moved. `detail` and `journal` are re-fetched by the
@@ -549,7 +556,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     overrides,
     setOverrides,
     sending,
-    error,
+    error: error ?? unreadable,
     draft,
     setDraft,
     arming,
