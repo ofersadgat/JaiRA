@@ -9,7 +9,7 @@ import { engineBridge, pairDevice, type EngineBridge } from "../bridges/engineBr
 import { pairNearby } from "../bridges/lanPair";
 import { NEARBY_SUPPORTED, browseNearby, localAddresses, randomBytes, tailnet, type NearbyState, type TailnetState } from "../bridges/nearby";
 import { addPairing, deviceId, forgetPairing, loadPairing, savePairing, type SavedPairing } from "../bridges/savedPairing";
-import { useFleetLinks } from "./fleetLinks";
+import { phoneMirror, useFleetLinks } from "./fleetLinks";
 import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "../bridges/tailnetJoin";
 
 /**
@@ -99,9 +99,17 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   // shell first draws.
   const fleet = useFleetLinks(ungated);
   useState(() => {
-    if (ungated) setBridge(fleet.bridge);
+    if (ungated) setBridge(fleet.bridge, { sources: fleet.sources, ...(phoneMirror !== undefined ? { mirror: phoneMirror } : {}) });
     return true;
   });
+  /** What the phone keeps of its machines, as its Connect screen says it. */
+  const [kept, setKept] = useState(() => phoneMirror?.usage());
+  useEffect(() => {
+    if (!ungated || phoneMirror === undefined) return undefined;
+    const mirror = phoneMirror;
+    setKept(mirror.usage());
+    return mirror.onChange(() => setKept(mirror.usage()));
+  }, [ungated]);
   /** The link (address and code) a pairing was already started for (`shell`). */
   const linkPaired = useRef<string | null>(null);
   /** The Connect screen over the shell, opened from its line or the drawer (`shell`). */
@@ -453,6 +461,9 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
                 ...(l.reason !== undefined ? { reason: l.reason } : {}),
                 onForget: () => fleet.forget(l.pairing.machine.id),
               })),
+              ...(phoneMirror !== undefined && kept !== undefined
+                ? { kept: { ...kept, onLimit: (limit: number | null) => void phoneMirror?.setLimit(limit), onClear: () => void phoneMirror?.clearViews() } }
+                : {}),
             }
           : {})}
         {...(NEARBY_SUPPORTED

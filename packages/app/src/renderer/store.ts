@@ -139,7 +139,7 @@ import { applyEditors } from "./editorLook";
 import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pillModel";
 import { sessionKey } from "./sessionCache";
-import { SyncCache } from "./syncCache";
+import { SyncCache, type SyncOptions } from "./syncCache";
 import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 import {
   emptyUiState,
@@ -173,11 +173,15 @@ let installed: JairaBridge | undefined;
  * phone installs its socket bridge here before the first render. Nothing else in the store changes,
  * because nothing else in it knows what carries a request.
  */
-export function setBridge(api: JairaBridge): void {
+export function setBridge(api: JairaBridge, options: SyncOptions = {}): void {
   installed = api;
+  cacheOptions = options;
   // Another engine: another database, another clock — nothing cached from the last one stands.
   cache = undefined;
 }
+
+/** How the cache is kept, as the host page said: the engines it follows, and a mirror on the device (a phone's). */
+let cacheOptions: SyncOptions = {};
 
 /**
  * The window's store of engine data (decision 0018, `syncCache.ts`): one per engine this window talks
@@ -185,7 +189,7 @@ export function setBridge(api: JairaBridge): void {
  */
 let cache: SyncCache | undefined;
 export function syncCache(): SyncCache {
-  return (cache ??= new SyncCache({ invoke: (channel, request) => invoke(channel, request) }));
+  return (cache ??= new SyncCache({ invoke: (channel, request) => invoke(channel, request) }, cacheOptions));
 }
 
 function bridge(): JairaBridge {

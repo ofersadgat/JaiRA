@@ -21,12 +21,42 @@
  * the one its current value was asked at; one read per key at a time, a change during it reading
  * again after. So an answer cannot land on the wrong task, and an old one cannot overwrite a new one.
  * A read that fails keeps its error: a view that could not be read says so rather than looking empty.
+ *
+ * A phone follows several engines (`SyncSources`, §7): each its own clock and cursor, its pages applied
+ * against its own, a whole page of one dropping only what that one put here. And it keeps a mirror on
+ * the device (`syncMirror.ts`): the index and the views read before, shown from the moment it starts
+ * and while no engine answers — a cache of the engines, which an engine's answer replaces.
  */
 import type { IpcChannel, IpcRequest, IpcResponse, ProjectTask, PushMessage, SyncPage } from "@jaira/shared/browser";
+import type { SyncMirror } from "./syncMirror";
 
 export interface SyncIo {
   invoke<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<IpcResponse<C>>;
 }
+
+/**
+ * The engines a cache follows when there are several — a phone paired with machines of different
+ * fleets (decision 0018 §7). Each has its own clock, so each has its own cursor: a page is applied
+ * against the cursor of the engine it came from, and a whole page drops only what that engine had put
+ * here. Without it the cache follows the one engine its `io` reaches (source `""`).
+ */
+export interface SyncSources {
+  /** The engines answering now, by id. */
+  ids(): readonly string[];
+  /** Hears when the engines answering change. */
+  onChange(listener: () => void): () => void;
+  /** `sync:since`, of one of them. */
+  since(source: string, since: number): Promise<SyncPage>;
+}
+
+export interface SyncOptions {
+  sources?: SyncSources;
+  /** A copy of the cache kept on the device, read before any engine answers (a phone's mirror). */
+  mirror?: SyncMirror;
+}
+
+/** The one engine of a cache without {@link SyncSources}. */
+const LOCAL = "";
 
 /** One view, as a reader sees it. */
 export interface Held<T> {
@@ -45,8 +75,10 @@ interface Entry {
   project: string | null;
   value: unknown;
   error: string | undefined;
-  /** The cursor the current value or error was asked at; -1 before the first answer. */
+  /** Which read the current value or error came from; -1 before the first answer. */
   at: number;
+  /** The value is the mirror's, kept from before: no engine has answered for it yet. */
+  mirrored: boolean;
   /** Whether it has ever been read. */
   asked: boolean;
   loading: boolean;
@@ -143,23 +175,46 @@ const taskOf = (request: unknown): string | null => {
 
 export class SyncCache {
   private readonly index = new Map<string, ProjectTask>();
-  /** The page each task's summary (or its deletion) was taken from: an older page never overwrites it. */
-  private readonly indexAt = new Map<string, number>();
+  /**
+   * The engine and page each task's summary (or its deletion) was taken from: an older page of the
+   * same engine never overwrites it. Another engine's clock says nothing of this one's, so a page from
+   * another engine is newer by arriving.
+   */
+  private readonly indexAt = new Map<string, { source: string; at: number }>();
   private indexList: ProjectTask[] = [];
   private readonly entries = new Map<string, Entry>();
   private readonly listeners = new Set<() => void>();
-  private cursorAt = 0;
+  /** Per engine, the newest stamp of its clock this cache has everything up to. */
+  private readonly cursors = new Map<string, number>();
   private started = false;
-  private reconciling: Promise<void> | undefined;
-  private reconcileAgain = false;
+  private loading: Promise<void> | undefined;
+  private readonly reconciling = new Map<string, { run: Promise<void>; again: boolean }>();
+  /** Counts reads: which one a view's value came from. */
+  private reads = 0;
+  private readonly sources: SyncSources | undefined;
+  private readonly mirror: SyncMirror | undefined;
   /** Bumped on every change a reader could see — what `useSyncExternalStore` compares. */
   version = 0;
 
-  constructor(private readonly io: SyncIo) {}
+  constructor(
+    private readonly io: SyncIo,
+    options: SyncOptions = {},
+  ) {
+    this.sources = options.sources;
+    this.mirror = options.mirror;
+    this.sources?.onChange(() => {
+      if (this.started) void this.reconcile();
+    });
+  }
 
-  /** The cursor: the newest stamp this cache has everything up to. */
+  /** The cursor of the one engine of a cache without {@link SyncSources}. */
   get cursor(): number {
-    return this.cursorAt;
+    return this.cursorOf(LOCAL);
+  }
+
+  /** One engine's cursor: the newest stamp of its clock this cache has everything up to. */
+  cursorOf(source: string): number {
+    return this.cursors.get(source) ?? 0;
   }
 
   /** Every task's summary, newest first. */
@@ -176,66 +231,125 @@ export class SyncCache {
     return () => this.listeners.delete(listener);
   }
 
-  /** Load the index whole. Idempotent; what arrives before it is applied after. */
+  /**
+   * Load the index: from the mirror first, when there is one, and then from each engine — whole from a
+   * cursor of 0, else what changed since the mirror's. Idempotent; what arrives before it is applied after.
+   */
   start(): Promise<void> {
-    this.started = true;
-    return this.reconcile();
+    this.loading ??= this.loadMirror().then(() => {
+      this.started = true;
+      return this.reconcile();
+    });
+    return this.loading;
   }
 
   /**
-   * Bring everything up to date from the cursor — the reconciliation that needs no push. Whole from a
-   * cursor of 0. One at a time; asked again while one runs, it runs once more after.
+   * Bring everything up to date from each engine's cursor — the reconciliation that needs no push.
+   * Whole from a cursor of 0. One at a time per engine; asked again while one runs, it runs once more after.
    */
   reconcile(): Promise<void> {
-    if (this.reconciling !== undefined) {
-      this.reconcileAgain = true;
-      return this.reconciling;
+    const ids = this.sources?.ids() ?? [LOCAL];
+    return Promise.all(ids.map((id) => this.reconcileOne(id))).then(() => undefined);
+  }
+
+  private reconcileOne(source: string): Promise<void> {
+    const running = this.reconciling.get(source);
+    if (running !== undefined) {
+      running.again = true;
+      return running.run;
     }
-    this.reconciling = (async () => {
+    const state = { run: Promise.resolve(), again: false };
+    this.reconciling.set(source, state);
+    state.run = (async () => {
       try {
         do {
-          this.reconcileAgain = false;
-          const page = await this.io.invoke("sync:since", { since: this.cursorAt });
-          this.apply(page);
-        } while (this.reconcileAgain);
+          state.again = false;
+          const cursor = this.cursorOf(source);
+          let page = await this.since(source, cursor);
+          // A clock behind the cursor is another database under the engine's name (a machine set up
+          // again): nothing taken from the old one stands, its stamps least of all.
+          if (!page.whole && page.at < cursor) {
+            page = await this.since(source, 0);
+            this.drop(source);
+          }
+          this.apply(page, source);
+        } while (state.again);
       } catch {
         // The engine is away or refused: the cache stays as it was, and the next trigger asks again.
       } finally {
-        this.reconciling = undefined;
+        this.reconciling.delete(source);
       }
     })();
-    return this.reconciling;
+    return state.run;
   }
 
-  /** A push from the engine. `sync:changed` is applied, or — one having been missed — reconciled from the cursor. */
+  private since(source: string, since: number): Promise<SyncPage> {
+    return this.sources !== undefined ? this.sources.since(source, since) : this.io.invoke("sync:since", { since });
+  }
+
+  /**
+   * A push from an engine. `sync:changed` is applied, or — one having been missed — reconciled from that
+   * engine's cursor. Which engine sent it is the message's `source`, set by a bridge over several.
+   */
   push(message: PushMessage): void {
     if (message.type !== "sync:changed") return;
     if (!this.started) return;
-    if (message.prev > this.cursorAt) {
-      void this.reconcile();
+    const source = message.source ?? LOCAL;
+    if (message.prev > this.cursorOf(source)) {
+      void this.reconcileOne(source);
       return;
     }
-    this.apply(message.page);
+    this.apply(message.page, source);
   }
 
-  /** Apply one page: summaries upserted, the gone dropped, the cursor moved forward, held views of what changed read again. */
-  apply(page: SyncPage): void {
+  /** An engine no longer followed — a machine forgotten: what it put here goes, from the mirror too. */
+  forget(source: string): void {
+    this.drop(source);
+    this.mirror?.forgetIndex(source);
+    this.sortIndex();
+    this.bump();
+  }
+
+  /** Everything one engine put in the index, and its cursor. */
+  private drop(source: string): void {
+    for (const [id, had] of [...this.indexAt]) {
+      if (had.source !== source) continue;
+      this.index.delete(id);
+      this.indexAt.delete(id);
+    }
+    this.cursors.delete(source);
+  }
+
+  /**
+   * Apply one page of an engine: summaries upserted, the gone dropped, its cursor moved forward, held
+   * views of what changed read again.
+   */
+  apply(page: SyncPage, source: string = LOCAL): void {
+    /** This page is older than what the index has of a task — which only the same engine's clock can say. */
+    const older = (id: string): boolean => {
+      const had = this.indexAt.get(id);
+      return had !== undefined && had.source === source && had.at > page.at;
+    };
     if (page.whole) {
-      // Whole is everything as of its cursor: what it lacks is gone, unless a newer page put it here.
-      for (const id of [...this.index.keys()]) if ((this.indexAt.get(id) ?? 0) <= page.at) this.index.delete(id);
+      // Whole is everything the engine has as of its cursor: what it put here and lacks now is gone,
+      // unless a newer page put it here.
+      for (const [id, had] of [...this.indexAt]) if (had.source === source && had.at <= page.at) this.index.delete(id);
     }
     for (const task of page.tasks) {
-      if ((this.indexAt.get(task.taskId) ?? -1) > page.at) continue;
+      if (older(task.taskId)) continue;
       this.index.set(task.taskId, task);
-      this.indexAt.set(task.taskId, page.at);
+      this.indexAt.set(task.taskId, { source, at: page.at });
     }
     for (const id of page.gone) {
-      if ((this.indexAt.get(id) ?? -1) > page.at) continue;
+      if (older(id)) continue;
       this.index.delete(id);
-      this.indexAt.set(id, page.at);
+      this.indexAt.set(id, { source, at: page.at });
     }
-    if (page.at > this.cursorAt || page.whole) this.cursorAt = Math.max(this.cursorAt, page.at);
-    this.indexList = [...this.index.values()].sort((a, b) => b.updatedAt - a.updatedAt);
+    // A whole page is the engine's state as of its stamp, whatever came before — one from a database set
+    // up again sets the cursor back.
+    if (page.whole || page.at > this.cursorOf(source)) this.cursors.set(source, page.at);
+    this.sortIndex();
+    this.keepIndex(source);
     // A draft's change moves its draft and nothing else of its task (decision 0018 §9).
     const changed = new Set<string>([...page.tasks.map((t) => t.taskId), ...page.gone, ...page.changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" ? [c.taskId] : []))]);
     const drafted = new Set(page.changes.flatMap((c) => (c.collection === "draft" ? [c.id] : [])));
@@ -243,7 +357,14 @@ export class SyncCache {
     // Where the changed tasks are — a project-scoped view is read only for its own project's.
     const projects = new Set(page.tasks.map((t) => t.project));
     for (const [key, entry] of this.entries) {
-      if (!this.isHeld(entry) || IMMUTABLE.has(entry.channel)) continue;
+      if (!this.isHeld(entry)) continue;
+      // Shown from the mirror, or unreadable: an engine answering is the time to ask it again.
+      if (entry.mirrored || entry.error !== undefined) {
+        if (this.isLive(entry)) this.readForChange(key, entry);
+        else entry.stale = true;
+        continue;
+      }
+      if (IMMUTABLE.has(entry.channel)) continue;
       if (entry.channel === "draft:get") {
         if (!page.whole && !drafted.has((entry.request as { key: string }).key)) continue;
       } else if (!page.whole && !this.touches(entry, changed, collections, projects, page.gone.length > 0)) continue;
@@ -305,12 +426,67 @@ export class SyncCache {
     const key = viewKey(channel, request);
     let entry = this.entries.get(key);
     if (entry === undefined) {
-      entry = { channel, request, taskId: taskOf(request), project: projectOf(request), value: undefined, error: undefined, at: -1, asked: false, loading: false, again: false, stale: false, idle: undefined, changeReadAt: 0, soon: undefined, owners: new Map(), count: 0, usedAt: Date.now(), shown: NOTHING };
+      entry = { channel, request, taskId: taskOf(request), project: projectOf(request), value: undefined, error: undefined, at: -1, mirrored: false, asked: false, loading: false, again: false, stale: false, idle: undefined, changeReadAt: 0, soon: undefined, owners: new Map(), count: 0, usedAt: Date.now(), shown: NOTHING };
       this.entries.set(key, entry);
+      this.fromMirror(key, entry);
     }
     entry.usedAt = Date.now();
     if (!entry.asked) void this.read(key);
     return key;
+  }
+
+  /** The index the mirror kept, for each engine no page has come from yet — what a phone shows offline. */
+  private async loadMirror(): Promise<void> {
+    if (this.mirror === undefined) return;
+    let kept: Awaited<ReturnType<SyncMirror["indexes"]>>;
+    try {
+      kept = await this.mirror.indexes();
+    } catch {
+      return;
+    }
+    for (const [source, index] of kept) {
+      if (this.cursors.has(source)) continue;
+      for (const [task, at] of index.tasks) {
+        if (this.indexAt.has(task.taskId)) continue;
+        this.index.set(task.taskId, task);
+        this.indexAt.set(task.taskId, { source, at });
+      }
+      this.cursors.set(source, index.cursor);
+    }
+    this.sortIndex();
+    this.bump();
+  }
+
+  /** A view the mirror kept, shown until an engine answers for it. */
+  private fromMirror(key: string, entry: Entry): void {
+    if (this.mirror === undefined) return;
+    void this.mirror.view(key).then(
+      (value) => {
+        if (value === undefined || this.entries.get(key) !== entry || entry.value !== undefined) return;
+        entry.value = value;
+        entry.error = undefined;
+        // A placeholder's string is what it was wherever it is read; anything else, as it was then.
+        entry.mirrored = !IMMUTABLE.has(entry.channel);
+        show(entry);
+        this.bump();
+      },
+      () => undefined,
+    );
+  }
+
+  /** Have the mirror keep what one engine put in the index, and its cursor. */
+  private keepIndex(source: string): void {
+    this.mirror?.keepIndex(source, () => ({
+      cursor: this.cursorOf(source),
+      tasks: [...this.indexAt].flatMap(([id, had]): Array<[ProjectTask, number]> => {
+        const task = had.source === source ? this.index.get(id) : undefined;
+        return task === undefined ? [] : [[task, had.at]];
+      }),
+    }));
+  }
+
+  private sortIndex(): void {
+    this.indexList = [...this.index.values()].sort((a, b) => b.updatedAt - a.updatedAt);
   }
 
   private isHeld(entry: Entry): boolean {
@@ -368,16 +544,19 @@ export class SyncCache {
       try {
         do {
           entry.again = false;
-          const asked = this.cursorAt;
+          const asked = ++this.reads;
           try {
             const value = await this.io.invoke(entry.channel, entry.request as never);
             if (asked >= entry.at) {
               entry.value = value;
               entry.error = undefined;
               entry.at = asked;
+              entry.mirrored = false;
+              this.mirror?.keepView(key, value);
             }
           } catch (e) {
-            if (asked >= entry.at) {
+            // A view shown from the mirror stays shown while no engine can answer for it.
+            if (asked >= entry.at && !entry.mirrored) {
               entry.error = e instanceof Error ? e.message : String(e);
               entry.at = asked;
             }

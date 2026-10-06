@@ -6,7 +6,7 @@ import { reportLooseError } from "@jaira/ui/crashReport";
 import { initialState, interactionOf, parsedDoc } from "@jaira/ui/galleryModel";
 import { setBridge } from "@jaira/ui/store";
 import { ValuePanelContext, type ValuePanel } from "@jaira/ui/valuePanel";
-import { ChangesPanel, CrashScreen, DisconnectedLine, GateSurface, LooseErrorBanner, OfflineBanner, Toast } from "@jaira/universal";
+import { ChangesPanel, Connect, CrashScreen, DisconnectedLine, GateSurface, LooseErrorBanner, OfflineBanner, Toast } from "@jaira/universal";
 
 /**
  * What the window says about itself, a settled gate, and a conversation's foot, as specimens (decision
@@ -23,6 +23,8 @@ import { ChangesPanel, CrashScreen, DisconnectedLine, GateSurface, LooseErrorBan
  *    `changes-git` — the Changes tab with commands in their parts' colours and a state's definition a
  *    press away. Their reads are answered here: `machines:view` and `task:changes` go to the fixture
  *    below, everything else to the window's bridge.
+ *  - `connect-kept` — a phone's Connect screen over its two machines, one away, and what it keeps of
+ *    them (decision 0018 §7): its mirror's size against the limit chosen.
  */
 export interface ShellSpecimen {
   width: number;
@@ -205,4 +207,19 @@ export const SHELL_SPECIMENS: Record<string, ShellSpecimen> = {
   "gate-settled-review-sent-back": settled("review_artifact/comments", { decision: "reject", comments: "Say what the interval is, and who sets it." }),
   "gate-settled-review-edited": settled("review_artifact/editable", { decision: "approve", content: EDITED }),
   "gate-settled-edit": settled("edit_artifact/basic", { content: EDITED }),
+  "connect-kept": {
+    width: 390,
+    rn: () => (
+      <RnStage height={620}>
+        <Connect
+          onPair={NOOP}
+          paired={[
+            { key: "desk", label: "desk", address: "desk.tail4c2e.ts.net", state: "connected", onForget: NOOP },
+            { key: "laptop", label: "laptop", address: "192.168.1.24", state: "waiting", reason: "nothing answers at 192.168.1.24", onForget: NOOP },
+          ]}
+          kept={{ bytes: 37_400_000, limit: 200 * 2 ** 20, onLimit: NOOP, onClear: NOOP }}
+        />
+      </RnStage>
+    ),
+  },
 };

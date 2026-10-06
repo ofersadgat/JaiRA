@@ -2774,9 +2774,11 @@ export type PushMessage =
   | { type: "engine:event"; taskId: string; seq: number; at: number; event: JsonValue; project?: string }
   /**
    * What changed since `prev` (decision 0018 §5): pushed whenever the change log moves. A reader whose
-   * cursor is older than `prev` missed a page, and asks `sync:since` from its cursor instead.
+   * cursor is older than `prev` missed a page, and asks `sync:since` from its cursor instead. `source`
+   * is which engine sent it, set by a bridge over several (a phone's, `fleetBridge.ts`): each has its
+   * own clock. An engine never sets it.
    */
-  | { type: "sync:changed"; prev: number; page: SyncPage }
+  | { type: "sync:changed"; prev: number; page: SyncPage; source?: string }
   /**
    * `workflows` fires when a watched workflows directory changes on disk (§11.1's re-lint) — the
    * project's and the shared base root's alike, since a base edit changes what this project runs.

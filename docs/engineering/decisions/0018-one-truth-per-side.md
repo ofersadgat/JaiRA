@@ -285,6 +285,40 @@ Each step ends with the window working, and with a check in the real app in the 
 6. **The phone's mirror** (§7), with its size limit in Settings.
 7. **Files** (§11): the startup import, the export as changes are saved, `"both"` retired.
 
+## Built (2026-10-06, branch `one-truth`)
+
+1. **The change log** — `persistence/src/sync.ts`: `sync_changes`, written by triggers on every table a
+   reader reads (TEMP copies of them on the file-backed tables' shadows), stamped
+   `MAX(now, newest stamp)` so the clock never goes back; tombstones kept 30 days behind a horizon;
+   `touch()` for what lives outside the database (a gate in memory, a task file). The engine answers
+   `sync:since` (whole from 0, below the horizon, or after a project opened or closed) and pushes
+   `sync:changed {prev, page}` within 150 ms of the log moving.
+2. **The window's cache** — `app/src/renderer/syncCache.ts`: the task index always loaded, every list
+   a filter of it; views held by key (channel and request, the task by id alone) and read again only for
+   the changes they show (`SHOWS`), at most twice a second while a task streams; a reconcile on focus,
+   on visibility, once a minute and after a gap. `store.ts` reads the selected task and the place's
+   views from it; which tasks are answering is read from open records.
+3. **Lazy placeholders** — `service/src/lazy.ts`: tools' strings over 64 KB (this machine's window) or
+   4 KB (a phone, a browser) sent as `{"$lazy": {size, preview, hash}}`; what was said is never replaced;
+   `lazy:value` answers a hash from memory, then from the blob table. `useFilled` fills one where it is drawn.
+4. **The window's own data** — drafts per person in the owning engine (`drafts`, the later write by
+   its clock wins), and where each window stood per device and window (`window_states`): a reload finds
+   its own window's place, a fresh start the device's most recently used one.
+5. **Machines** — a copy of another machine follows its `sync:changed`: that machine's own tasks
+   pulled as they move, the whole machine asked again after a gap, a deletion or a whole page. The second
+   hop is the copy's rows landing in this engine's database, whose own log tells its windows.
+6. **The phone's mirror** — the cache follows each paired machine's engine as a source of its own
+   (`SyncSources`; `fleetBridge.ts` tags each push with the machine that sent it): its own cursor, its
+   whole pages dropping only what it put there, a clock behind the cursor read as another database.
+   `syncMirror.ts` keeps each engine's index and cursor, and the views read, as files on the device
+   (`client/bridges/mirrorStore.native.ts`, the app's documents): read before any machine answers, a
+   kept view shown while none can, replaced by the engine's answer. Its limit (200 MB by default, or
+   none) and what it uses are on the phone's Connect screen; past it the views read longest ago go,
+   never an index. A machine forgotten takes its index with it. A browser keeps no mirror.
+
+Found on the way, and fixed: a repository that committed `.jaira/system/workspace.id` gave every clone
+one id, and opening a second clone took the first's tasks (`workspaceIdFor` now gives a copy its own).
+
 ## Consequences
 
 - **Easy**: a lost, late, duplicated or reordered message costs only latency; a reload, a reconnect or
