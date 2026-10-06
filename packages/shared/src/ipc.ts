@@ -1586,6 +1586,8 @@ export interface IpcContract {
    * the horizon. The same page `sync:changed` pushes.
    */
   "sync:since": { request: { since: number }; response: SyncPage };
+  /** The string a `$lazy` placeholder stands for, by its hash (decision 0018 §6). */
+  "lazy:value": { request: { hash: string }; response: string };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
   "task:create": { request: CreateTaskRequest; response: TaskSummary };
   /**
@@ -2367,6 +2369,7 @@ export const IPC_CHANNELS = [
   "task:list",
   "task:all",
   "sync:since",
+  "lazy:value",
   "task:detail",
   "task:create",
   "task:start",

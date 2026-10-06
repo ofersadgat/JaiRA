@@ -69,6 +69,24 @@ describe("sync:since", () => {
     expect((await since(page.at + 1)).tasks).toEqual([]);
   });
 
+  it("is everything again once a project opens after the cursor — its tasks did not change, but the index did", async () => {
+    const third = mkdtempSync(join(tmpdir(), "jaira-sync-c-"));
+    writeWorkflowFiles(initProject(third, testHome()).workflowsDir, specPlanningFiles());
+    const other = new AppService({ baseDir: testHome(), watchWorkflows: false });
+    await other.open(third);
+    const theirs = other.createTask({ title: "made before it was open here", workflow: "feature/plan", inputs: { issue: "i" }, project: third }).taskId;
+    await other.close();
+    try {
+      const cursor = (await since(0)).at;
+      await service.open(third);
+      const page = await since(cursor);
+      expect(page.whole).toBe(true);
+      expect(page.tasks.map((t) => t.taskId)).toContain(theirs);
+    } finally {
+      rmSync(third, { recursive: true, force: true });
+    }
+  });
+
   it("names a deleted task among the gone", async () => {
     const doomed = made(a);
     const cursor = (await since(0)).at;

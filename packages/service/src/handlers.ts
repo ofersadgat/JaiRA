@@ -15,6 +15,8 @@ import type { HealthItem, LogLevel, MachineForm } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
 import type { EngineClientInfo } from "./engineHost";
 import type { AppService, CrashKind } from "./service";
+import { LAZY_OVER_LOCAL } from "./lazy";
+import type { ChatThreadView, SessionView } from "@jaira/shared";
 
 /** A channel's handler: its request in, its answer (or a promise of it) out. */
 export type Handler = (request: never) => unknown;
@@ -46,11 +48,16 @@ export type ServiceChannel = Exclude<IpcChannel, HostChannel>;
  * Every request the service answers, by channel — this machine's projects here, another machine's
  * forwarded to it (decision 0013 §7, `Federation.route`).
  */
-export function serviceHandlers(service: AppService, options: { local?: boolean } = {}): Record<ServiceChannel, Handler> {
+export function serviceHandlers(service: AppService, options: { local?: boolean; lazyOver?: number } = {}): Record<ServiceChannel, Handler> {
   const table = homed(service, localHandlers(service));
   // Another machine asking: answered with THIS machine's workspaces only. Forwarding on would send its
-  // own requests back to it, and two machines asking each other for everything would never stop.
+  // own requests back to it, and two machines asking each other for everything would never stop. And
+  // whole: a machine keeping a copy keeps what it copies.
   if (options.local === true) return table;
+  // A window: a transcript's large values as placeholders, fetched when drawn (decision 0018 §6).
+  // `JAIRA_LAZY_OVER` sets it for a window on this machine — to see a phone's transcripts on a desktop.
+  const fromEnv = Number(process.env["JAIRA_LAZY_OVER"]);
+  lazyViews(service, table, options.lazyOver ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : LAZY_OVER_LOCAL));
   const routed = {} as Record<ServiceChannel, Handler>;
   for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
     // Homed BEFORE routing too: a task another machine owns is forwarded there whatever the window named.
@@ -98,6 +105,17 @@ function withHome(service: AppService, request: unknown): unknown {
   return home === undefined || home === project ? request : { ...request, project: home };
 }
 
+/**
+ * A window's transcripts with their large values as placeholders over `over` (`lazy.ts`): the session
+ * views and chat threads, the only views a tool's whole input and output reach.
+ */
+export function lazyViews(service: AppService, table: Record<string, Handler>, over: number): void {
+  const view = table["session:view"] as (request: unknown) => unknown;
+  const thread = table["chat:thread"] as (request: unknown) => unknown;
+  table["session:view"] = (async (request: unknown) => service.lazy.session((await view(request)) as SessionView, over)) as Handler;
+  table["chat:thread"] = (async (request: unknown) => service.lazy.thread((await thread(request)) as ChatThreadView | null, over)) as Handler;
+}
+
 function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
   return {
     "project:open": ((request: { dir: string; remember?: boolean }) =>
@@ -140,6 +158,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "project:list": (() => service.listProjects()) as Handler,
     "task:all": ((request: { workflows?: string[] } | undefined) => service.listAllTasks(request ?? {})) as Handler,
     "sync:since": ((request: { since: number }) => service.syncSince(request.since)) as Handler,
+    "lazy:value": ((request: { hash: string }) => service.lazy.value(request.hash)) as Handler,
     "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
     "run:records": ((request: Parameters<typeof service.runRecords>[0]) => service.runRecords(request)) as Handler,
     "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,

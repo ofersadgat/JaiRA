@@ -128,6 +128,9 @@ const SHOWS: Partial<Record<string, readonly string[]>> = {
   "state:view": ["task", "event"],
 };
 
+/** Views whose answer never changes once had — a placeholder's string, by its hash: never read again. */
+const IMMUTABLE = new Set<string>(["lazy:value"]);
+
 const projectOf = (request: unknown): string | null => {
   const project = (request as { project?: unknown } | null)?.project;
   return typeof project === "string" ? project : null;
@@ -238,7 +241,7 @@ export class SyncCache {
     // Where the changed tasks are — a project-scoped view is read only for its own project's.
     const projects = new Set(page.tasks.map((t) => t.project));
     for (const [key, entry] of this.entries) {
-      if (!this.isHeld(entry)) continue;
+      if (!this.isHeld(entry) || IMMUTABLE.has(entry.channel)) continue;
       if (!page.whole && !this.touches(entry, changed, collections, projects, page.gone.length > 0)) continue;
       if (this.isLive(entry)) this.readForChange(key, entry);
       else entry.stale = true;

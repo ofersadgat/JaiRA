@@ -6,7 +6,8 @@
  * tail is drawing — and it is read as soon as it is held live again.
  */
 import { useEffect, useId, useMemo, useSyncExternalStore } from "react";
-import type { IpcChannel, IpcRequest, IpcResponse } from "@jaira/shared/browser";
+import { lazyHashes, withLazyFilled, type IpcChannel, type IpcRequest, type IpcResponse } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
 import { syncCache } from "./store";
 import { viewKey, type Held } from "./syncCache";
 
@@ -49,4 +50,24 @@ export function useViews<C extends IpcChannel>(channel: C, requests: ReadonlyArr
   );
   // eslint-disable-next-line react-hooks/exhaustive-deps
   return useMemo(() => requests.map((request) => store.peek(channel, request)), [store, keys, version]);
+}
+
+/**
+ * A value with its `$lazy` placeholders filled in (decision 0018 §6): each fetched by its hash while
+ * this is mounted, the value as it came — placeholders and all — until they arrive. Mount it where
+ * the value is DRAWN (an opened payload), not where it is listed, and only what is looked at is fetched.
+ */
+export function useFilled<T extends JsonValue | undefined>(value: T): T {
+  const hashes = useMemo(() => (value === undefined ? [] : [...lazyHashes(value)].sort()), [value]);
+  const requests = useMemo(() => hashes.map((hash) => ({ hash })), [hashes.join(",")]);
+  const held = useViews("lazy:value", requests);
+  return useMemo(() => {
+    if (value === undefined || hashes.length === 0) return value;
+    const known = new Map<string, string>();
+    hashes.forEach((hash, i) => {
+      const text = held[i]?.value;
+      if (text !== undefined) known.set(hash, text);
+    });
+    return withLazyFilled(value, known) as T;
+  }, [value, hashes, held]);
 }

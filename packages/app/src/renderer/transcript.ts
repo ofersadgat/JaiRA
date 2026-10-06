@@ -42,7 +42,7 @@ import {
   type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
-import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, type ContextReading } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, knownText, type ContextReading } from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -335,7 +335,7 @@ export function shellLineOf(entry: ToolEntry): string | undefined {
   if (toolIconOf(entry.name) !== "terminal") return undefined;
   const args = entry.args;
   if (args === null || typeof args !== "object" || Array.isArray(args)) return typeof args === "string" && args.length > 0 ? args : undefined;
-  const command = (args as Record<string, unknown>)["command"];
+  const command = knownText((args as Record<string, unknown>)["command"]) ?? (args as Record<string, unknown>)["command"];
   if (typeof command === "string" && command.length > 0) return command;
   if (Array.isArray(command) && command.length > 0 && command.every((word) => typeof word === "string")) return command.join(" ");
   return undefined;
@@ -558,12 +558,16 @@ function firstArgOf(args: unknown): string {
   if (typeof args === "string") return args;
   if (args === null || typeof args !== "object" || Array.isArray(args)) return "";
   const record = args as Record<string, unknown>;
+  // A large value is a placeholder (decision 0018 §6): its preview is what the line can say of it.
   for (const key of ["command", "path", "file", "file_path", "pattern", "query", "url"]) {
-    const value = record[key];
-    if (typeof value === "string") return value;
+    const text = knownText(record[key]);
+    if (text !== undefined) return text;
   }
-  const first = Object.values(record).find((v) => typeof v === "string");
-  return typeof first === "string" ? first : "";
+  for (const value of Object.values(record)) {
+    const text = knownText(value);
+    if (text !== undefined) return text;
+  }
+  return "";
 }
 
 function isErrorish(result: unknown): boolean {

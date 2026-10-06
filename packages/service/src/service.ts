@@ -542,6 +542,7 @@ let installed: LogSink | undefined;
  */
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
+import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
 import { EventTally } from "./eventTally";
@@ -1731,6 +1732,7 @@ export class AppService {
       const key = sessionKey(project.paths.projectDir);
       const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key, project) });
       this.sessions.set(key, session);
+      this.indexMoved(session);
       // Shared's own events task (decision 0010 §4), on the root's first open.
       void this.superviseEvents(session);
       return session;
@@ -3174,6 +3176,7 @@ export class AppService {
     await prepareUserModules(project.paths, { searchPath: project.config.workflows.path });
     const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key, project) });
     this.sessions.set(key, session);
+    this.indexMoved(session);
     this.log({
       level: "info",
       source: "project",
@@ -3590,6 +3593,7 @@ export class AppService {
     // question with an answer — a project that was closed, or one that was never opened.
     this.log({ level: "info", source: "project", message: `closing ${session.project.paths.projectDir}`, project: key });
     this.sessions.delete(key);
+    this.indexMoved(session);
     for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
     // The resumes the open started, settled before the close unwinds what they started — and the
     // events task's supervision, which may be starting one.
@@ -3639,10 +3643,24 @@ export class AppService {
 
   // --- the change log (decision 0018) -----------------------------------------------------------------
 
+  /** Large values answered as placeholders, and their strings by hash (decision 0018 §6, `lazy.ts`). */
+  readonly lazy = new LazyValues(() => this.syncDb());
+
   private syncTimer: ReturnType<typeof setInterval> | undefined;
   /** The newest stamp, and how many entries carry it, as the last push left them. */
   private synced: { at: number; count: number } | undefined;
   private tombstonesPrunedAt = 0;
+  /** When the set of workspaces the index is made of last moved: a cursor older than this gets everything. */
+  private wholeSince = 0;
+
+  /**
+   * A project opened or closed. Its tasks did not change, so the log says nothing of them — but every
+   * reader's index now lacks them, or still has them: its next page is whole (decision 0018 §5).
+   */
+  private indexMoved(session: ProjectSession): void {
+    touch(session.project.db, "workspace", session.project.workspace);
+    this.wholeSince = syncNow(session.project.db);
+  }
 
   /** The one database the log is in: every session's is the same file (decision 0013 §4). */
   private syncDb(): Project["db"] | undefined {
@@ -3662,7 +3680,7 @@ export class AppService {
     if (db === undefined) return { at: 0, horizon: 0, whole: true, tasks: [], gone: [], changes: [] };
     const at = syncNow(db);
     const horizon = syncHorizon(db);
-    if (since <= 0 || since < horizon) return { at, horizon, whole: true, tasks: this.indexTasks(), gone: [], changes: [] };
+    if (since <= 0 || since < horizon || since < this.wholeSince) return { at, horizon, whole: true, tasks: this.indexTasks(), gone: [], changes: [] };
     const changes = changesSince(db, since);
     const gone = new Set(changes.filter((c) => c.collection === "task" && c.deleted).map((c) => c.id));
     const touched = new Set(changes.flatMap((c) => (c.taskId !== null && !gone.has(c.taskId) ? [c.taskId] : [])));

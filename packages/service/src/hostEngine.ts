@@ -15,6 +15,7 @@ import type { EngineHostInfo } from "./enginePipe";
 import { NotOffered, claimEngine, type EngineHost, type EngineHostOptions, type PreAuthHandler } from "./engineHost";
 import { listenNetwork, type NetworkListener } from "./engineNet";
 import { HOST_CHANNELS, enginePeerHandlers, serviceHandlers, type EngineControl, type Handler } from "./handlers";
+import { LAZY_OVER_REMOTE } from "./lazy";
 import type { AppService } from "./service";
 
 export interface HostEngineOptions {
@@ -127,6 +128,16 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
       return { stopping: true as const };
     },
   };
+  // A phone's or a browser's transcripts: large values as placeholders from 4 KB, over the network
+  // (decision 0018 §6) — the rest of its channels are a window's like any other.
+  let deviceViews: Record<string, Handler> | undefined;
+  const deviceViewsOf = (): Record<string, Handler> => {
+    if (deviceViews === undefined) {
+      const remote = serviceHandlers(engine(), { lazyOver: LAZY_OVER_REMOTE }) as Record<string, Handler>;
+      deviceViews = { "session:view": remote["session:view"]!, "chat:thread": remote["chat:thread"]! };
+    }
+    return deviceViews;
+  };
   const dispatchOf = (): Record<string, Handler> => {
     dispatch ??= { ...(serviceHandlers(engine()) as Record<string, Handler>), ...enginePeerHandlers(engine(), control), ...(options.handlers as Record<string, Handler> | undefined) };
     return dispatch;
@@ -164,7 +175,7 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
           // A phone or a browser (amended 2026-09-30): a window like the desktop's own — the service's
           // answers, with this connection's current project and limits watch above — less what a window
           // can only do in front of this machine's screen.
-          ...(client.device !== undefined ? deviceRefusals(client.device.kind) : {}),
+          ...(client.device !== undefined ? { ...deviceViewsOf(), ...deviceRefusals(client.device.kind) } : {}),
         },
         closed: () => {
           connections?.drop(client.id);
