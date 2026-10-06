@@ -8,6 +8,7 @@
 import Database from "better-sqlite3";
 import { migrate, read, SCHEMA_BASELINE } from "./migrations";
 import { SYNC_SQL } from "./sync";
+import { WINDOW_STATES_SQL } from "./windowStates";
 
 export type JairaDb = Database.Database;
 
@@ -313,6 +314,7 @@ CREATE TABLE replica_seqs (
 );
 CREATE INDEX replica_seqs_local ON replica_seqs(local_seq);
 ${SYNC_SQL}
+${WINDOW_STATES_SQL}
 `;
 
 /**

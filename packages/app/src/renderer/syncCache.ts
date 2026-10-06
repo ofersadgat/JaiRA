@@ -236,13 +236,17 @@ export class SyncCache {
     }
     if (page.at > this.cursorAt || page.whole) this.cursorAt = Math.max(this.cursorAt, page.at);
     this.indexList = [...this.index.values()].sort((a, b) => b.updatedAt - a.updatedAt);
-    const changed = new Set<string>([...page.tasks.map((t) => t.taskId), ...page.gone, ...page.changes.flatMap((c) => (c.taskId !== null ? [c.taskId] : []))]);
+    // A draft's change moves its draft and nothing else of its task (decision 0018 §9).
+    const changed = new Set<string>([...page.tasks.map((t) => t.taskId), ...page.gone, ...page.changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" ? [c.taskId] : []))]);
+    const drafted = new Set(page.changes.flatMap((c) => (c.collection === "draft" ? [c.id] : [])));
     const collections = new Set(page.changes.map((c) => c.collection));
     // Where the changed tasks are — a project-scoped view is read only for its own project's.
     const projects = new Set(page.tasks.map((t) => t.project));
     for (const [key, entry] of this.entries) {
       if (!this.isHeld(entry) || IMMUTABLE.has(entry.channel)) continue;
-      if (!page.whole && !this.touches(entry, changed, collections, projects, page.gone.length > 0)) continue;
+      if (entry.channel === "draft:get") {
+        if (!page.whole && !drafted.has((entry.request as { key: string }).key)) continue;
+      } else if (!page.whole && !this.touches(entry, changed, collections, projects, page.gone.length > 0)) continue;
       if (this.isLive(entry)) this.readForChange(key, entry);
       else entry.stale = true;
     }

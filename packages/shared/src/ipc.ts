@@ -1586,6 +1586,18 @@ export interface IpcContract {
    * the horizon. The same page `sync:changed` pushes.
    */
   "sync:since": { request: { since: number }; response: SyncPage };
+  /**
+   * A composer's unsent words, kept by the engine that owns its conversation (decision 0018 §9): read
+   * when the composer opens, written as it is typed. `taskId` routes it to that engine; `""` forgets it.
+   */
+  "draft:get": { request: { key: string; taskId?: string; project?: string }; response: { text: string; at: number } | null };
+  "draft:put": { request: { key: string; taskId?: string; text: string; project?: string }; response: void };
+  /**
+   * Where a window stands, kept for its device (decision 0018 §9): written as it moves; read by a window
+   * opening with nothing of its own, which stands where the device's most recently used one did.
+   */
+  "window:keep": { request: { device: string; window: string; state: JsonValue }; response: void };
+  "window:last": { request: { device: string }; response: JsonValue | null };
   /** The string a `$lazy` placeholder stands for, by its hash (decision 0018 §6). */
   "lazy:value": { request: { hash: string }; response: string };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
@@ -2370,6 +2382,10 @@ export const IPC_CHANNELS = [
   "task:all",
   "sync:since",
   "lazy:value",
+  "draft:get",
+  "draft:put",
+  "window:keep",
+  "window:last",
   "task:detail",
   "task:create",
   "task:start",

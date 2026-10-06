@@ -33,6 +33,7 @@ function repository(dir: string, home: string, remote: string): void {
   git(dir, "remote", "add", "origin", remote);
 }
 const OURS = { title: "Fix permission mode switching bug", answer: "The gate reads the permission live now." };
+const DRAFT = "and the gate should say which mode it read";
 const THEIRS = { title: "Survey the untested handlers", answer: "Eleven handlers have no test." };
 
 async function converse(app: App, project: string, said: { title: string; answer: string }): Promise<string> {
@@ -53,7 +54,7 @@ async function main(): Promise<void> {
   const second = join(WORLD, "mist-server");
   repository(world.project, world.home, "git@gitlab.com:example/jaira-app.git");
   repository(second, world.home, "git@gitlab.com:example/mist-server.git");
-  const app = await App.launch(world, { out: OUT, port: 9251 });
+  let app = await App.launch(world, { out: OUT, port: 9251 });
   try {
     await app.until(drawn, "the window to draw");
     await app.resize(1180, 820);
@@ -94,7 +95,24 @@ async function main(): Promise<void> {
     await app.until(says(OURS.answer), "the first project's conversation, opened after the second's");
     await app.shot("crossed");
     if (app.complaints.length > 0) throw new Error(`the window complained:\n${app.complaints.join("\n")}`);
-    console.log("reload: the window came back where it stood, and each conversation opened from its own list");
+
+    // A draft, typed and left: kept by the engine that owns the conversation (decision 0018 §9).
+    const ours = (await app.ipc<Array<{ taskId: string; title: string }>>("task:list", { project: first.project })).find((t) => t.title === OURS.title)!;
+    await app.evaluate(`(() => { const box = [...document.querySelectorAll("textarea")].find((t) => t.getBoundingClientRect().width > 0); box.focus(); })()`);
+    await app.type(DRAFT);
+    await settle(1500);
+    const kept = await app.ipc<{ text: string } | null>("draft:get", { key: `chat:${ours.taskId}`, taskId: ours.taskId });
+    if (kept?.text !== DRAFT) throw new Error(`the engine kept ${JSON.stringify(kept)} for the draft`);
+
+    // The app quit and started again: no tab of its own to come back to, so the device's last window's place.
+    await app.close();
+    // Another debugging port: the one just closed can be held a moment longer by what is still exiting.
+    app = await App.launch(world, { out: OUT, port: 9255 });
+    await app.until(drawn, "the window to draw after the restart");
+    await app.until(says(OURS.answer), "the same conversation, after the restart", 120);
+    await app.until(`[...document.querySelectorAll("textarea")].some((t) => t.value === ${JSON.stringify(DRAFT)})`, "the draft in its composer, after the restart", 60);
+    await app.shot("restart");
+    console.log("reload: the window came back where it stood — after a reload and after a restart, its draft with it — and each conversation opened from its own list");
   } catch (e) {
     // What was on screen when it gave up, beside the pictures that were taken.
     await app.shot("failed").catch(() => undefined);

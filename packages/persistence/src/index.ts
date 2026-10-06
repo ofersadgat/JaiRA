@@ -62,3 +62,5 @@ export * from "./moveLegality";
 export * from "./moveQuestion";
 export * from "./nextMoves";
 export * from "./sync";
+export * from "./drafts";
+export * from "./windowStates";

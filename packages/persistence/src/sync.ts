@@ -46,6 +46,7 @@ const TRACKED: readonly Tracked[] = [
   { table: "jobs", collection: "job", id: "CAST(R.id AS TEXT)", task: "R.task_id", updateOf: ["ended_at", "outcome", "cancel_requested_at"] },
   { table: "module_approvals", collection: "moduleApproval", id: "R.path", task: "NULL" },
   { table: "workspaces", collection: "workspace", id: "R.id", task: "NULL" },
+  { table: "drafts", collection: "draft", id: "R.key", task: "R.task_id" },
 ];
 
 /** The stamp: this machine's milliseconds, never behind the newest in the log. */
@@ -73,6 +74,12 @@ function triggers(t: Tracked): string {
  * both a migration's step and part of a fresh database's schema.
  */
 export const SYNC_SQL = `
+CREATE TABLE IF NOT EXISTS drafts (
+  key        TEXT PRIMARY KEY,
+  task_id    TEXT,
+  text       TEXT NOT NULL,
+  updated_at INTEGER NOT NULL
+);
 CREATE TABLE IF NOT EXISTS sync_changes (
   collection TEXT NOT NULL,
   id         TEXT NOT NULL,

@@ -127,7 +127,10 @@ import {
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
-import { readAddress, writeAddress } from "./windowAddress";
+import { lastAddress, readAddress, writeAddress, type WindowIo } from "./windowAddress";
+
+/** The engine as the window's address module needs it — its copy of where each window stood. */
+const windowIo: WindowIo = { invoke: ((channel: "window:keep" | "window:last", request: never) => invoke(channel, request)) as WindowIo["invoke"] };
 import { applyAppearance, typographyOf, useSystemDark } from "./appearance";
 import { surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
@@ -2287,18 +2290,27 @@ export function useApp() {
   const addressRestored = useRef(false);
   useEffect(() => {
     if (!addressRestored.current) return;
-    writeAddress({ at: state.at, view: state.view, selected: state.selected, conversation: state.chat.taskId });
+    writeAddress({ at: state.at, view: state.view, selected: state.selected, conversation: state.chat.taskId }, windowIo);
   }, [state.at, state.view, state.selected, state.chat.taskId]);
+  // Coming to the front is being used: this window is now the device's most recently used one.
+  useEffect(() => {
+    const used = (): void => {
+      if (addressRestored.current) writeAddress({ at: ref.current.at, view: ref.current.view, selected: ref.current.selected, conversation: ref.current.chat.taskId }, windowIo);
+    };
+    globalThis.addEventListener?.("focus", used);
+    return () => globalThis.removeEventListener?.("focus", used);
+  }, []);
 
   // Initial load + push subscription.
   useEffect(() => {
-    void refreshAll().then(() => {
-      // A reload returns where it stood. The project only while it is still open on this side; the
-      // task and the conversation by id alone, which is all the engine needs to find them.
-      const kept = readAddress();
+    void refreshAll().then(async () => {
+      // A reload returns where it stood; a window opening with nothing of its own, where the device's
+      // most recently used window did (decision 0018 §9). The project only while it is still open on
+      // this side; the task and the conversation by id alone, which is all the engine needs to find them.
+      const kept = readAddress() ?? (await lastAddress(windowIo));
       // Written from here on, and once now: a window that never moves would otherwise never say where
       // it stands, and its first reload would have nothing to come back to.
-      const write = (): void => writeAddress({ at: ref.current.at, view: ref.current.view, selected: ref.current.selected, conversation: ref.current.chat.taskId });
+      const write = (): void => writeAddress({ at: ref.current.at, view: ref.current.view, selected: ref.current.selected, conversation: ref.current.chat.taskId }, windowIo);
       addressRestored.current = true;
       if (kept === null) return write();
       const actions = actionsRef.current;

@@ -187,6 +187,10 @@ import {
   startedTaskOf,
   PROCESS_ENDED,
   ownerOf,
+  draftOf,
+  keepDraft,
+  keepWindowState,
+  lastWindowState,
   changesSince,
   pruneTombstones,
   syncHorizon,
@@ -3643,6 +3647,30 @@ export class AppService {
 
   // --- the change log (decision 0018) -----------------------------------------------------------------
 
+  /** A composer's unsent words (decision 0018 §9) — kept here when this engine owns the conversation; routed here by its task id. */
+  draftGet(key: string): { text: string; at: number } | null {
+    const db = this.syncDb();
+    return db === undefined ? null : draftOf(db, key);
+  }
+
+  /** Where a device's window stands (decision 0018 §9) — the window's own, of which this is the copy. */
+  windowKeep(device: string, window: string, state: unknown): void {
+    const db = this.syncDb();
+    if (db !== undefined) keepWindowState(db, device, window, state);
+  }
+
+  /** Where the device's most recently used window stood. */
+  windowLast(device: string): unknown {
+    const db = this.syncDb();
+    return db === undefined ? null : lastWindowState(db, device);
+  }
+
+  draftPut(key: string, taskId: string | null, text: string): void {
+    const db = this.syncDb();
+    if (db === undefined) throw this.refusal("project", "no project is open to keep a draft in");
+    keepDraft(db, key, taskId, text);
+  }
+
   /** Large values answered as placeholders, and their strings by hash (decision 0018 §6, `lazy.ts`). */
   readonly lazy = new LazyValues(() => this.syncDb());
 
@@ -3683,7 +3711,8 @@ export class AppService {
     if (since <= 0 || since < horizon || since < this.wholeSince) return { at, horizon, whole: true, tasks: this.indexTasks(), gone: [], changes: [] };
     const changes = changesSince(db, since);
     const gone = new Set(changes.filter((c) => c.collection === "task" && c.deleted).map((c) => c.id));
-    const touched = new Set(changes.flatMap((c) => (c.taskId !== null && !gone.has(c.taskId) ? [c.taskId] : [])));
+    // A draft is no part of a task's summary: its change is the draft's alone (decision 0018 §9).
+    const touched = new Set(changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" && !gone.has(c.taskId) ? [c.taskId] : [])));
     let tasks = touched.size === 0 ? [] : this.indexTasks(touched);
     // A summary counts the tasks under it (`controls`), so the task one stands under changed with it.
     const above = new Set(tasks.flatMap((t) => [t.parentTaskId, t.origin?.taskId].filter((id): id is string => id !== undefined && !touched.has(id))));

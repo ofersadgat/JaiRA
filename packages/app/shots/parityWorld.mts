@@ -1391,9 +1391,10 @@ export async function goTo(app: App, path: string, to: { look?: Look; scene?: Sc
   if (to.scene !== undefined) await unfoldForScene(app);
   // Against wherever the window is: `app://jaira` as shipped, the dev server under `studio.mts`.
   const url = (await app.evaluate<string>("location.protocol + '//' + location.host")) + path;
-  // A scene starts a fresh window: a reload returns where the window stood (`windowAddress.ts`, kept in
-  // the tab's sessionStorage), and the scene before this one is not where this one starts.
-  await app.evaluate("(() => { try { sessionStorage.clear(); } catch {} })()");
+  // A scene starts a fresh window on a fresh device: a reload returns where the window stood, and a
+  // window with nothing of its own where the device's last one did (`windowAddress.ts`) — and the scene
+  // before this one is not where this one starts.
+  await app.evaluate("(() => { try { sessionStorage.clear(); localStorage.removeItem('jaira.device'); } catch {} })()");
   step("navigate");
   await app.navigate(url);
   step("draw");
