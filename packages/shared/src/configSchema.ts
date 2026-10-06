@@ -103,27 +103,27 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
       properties: {
         journal: {
           type: "string",
-          enum: ["file", "db", "both"],
+          enum: ["file", "db"],
           title: "journal",
           description:
             "The engine's event stream. In a file it is one JSONL per run, which two people can append to on one branch without conflicting; in the database it is one table nobody can merge.",
         },
         conversations: {
           type: "string",
-          enum: ["file", "db", "both"],
+          enum: ["file", "db"],
           title: "conversations",
           description:
             "Every model call and the transcripts they make up. In files these are readable by tooling JaiRA did not write, which is most of the reason to choose it.",
         },
         tasks: {
           type: "string",
-          enum: ["file", "db", "both"],
+          enum: ["file", "db"],
           title: "tasks",
           description: "What was asked for, and where each run of it got to.",
         },
         artifacts: {
           type: "string",
-          enum: ["file", "db", "both"],
+          enum: ["file", "db"],
           title: "artifact map",
           description:
             "The map from what a producer said it wrote to where the bytes went. The bytes themselves are already files and are not affected by this.",

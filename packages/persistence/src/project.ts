@@ -23,12 +23,13 @@ import {
   type JairaBasePaths,
   type JairaConfig,
   type JairaPaths,
+  type JairaStorageConcern,
 } from "@jaira/shared";
 import { openDb, type JairaDb } from "./db";
-import { applyStorage, isFileBacked, type ShadowReport } from "./shadow";
-import { journalFiles, replayJournal } from "./journalFile";
-import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
-import { ARTIFACT_ROWS, fingerprintOf, replayRows, RowLog, rowFiles, TASK_ROWS } from "./rowFile";
+import { applyStorage, isFileBacked, keepFingerprints, type ConcernFiles, type StorageReport } from "./fileStorage";
+import { exportJournal, journalFiles, replayJournal } from "./journalFile";
+import { conversationFiles, ConversationLog, exportConversations, replayConversations } from "./conversationFile";
+import { ARTIFACT_ROWS, exportRows, fingerprintOf, replayRows, RowLog, rowFiles, TASK_ROWS } from "./rowFile";
 import { SqliteSessionStore, type OpeningAuthor, type SessionScope } from "./sessionStore";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
@@ -39,7 +40,7 @@ import { EventWaitStore, RepoWatchStore } from "./repoWatch";
 import { SqliteEventLog } from "./eventLog";
 import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
-import { claimReplayed, registerWorkspace, workspaceIdFor, workspaceIdOf } from "./workspace";
+import { registerWorkspace, workspaceIdFor, workspaceIdOf } from "./workspace";
 import { touch } from "./sync";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -87,7 +88,7 @@ export interface Project {
   eventWaits: EventWaitStore;
   /** What `config.storage` did to this connection — see {@link applyStorage}. Empty when everything
    *  is in the database, which is the default. */
-  storage: ShadowReport;
+  storage: StorageReport;
   /** Task ids marked `interrupted` by recovery during this open. */
   recovered: string[];
   /**
@@ -404,27 +405,41 @@ function openAt(
   // what the database knows (`workspaceIdFor`: a committed id file is not a second clone's to take).
   const workspace = replica ? workspaceIdOf(paths) : workspaceIdFor(db, paths);
   if (!replica) registerWorkspace(db, workspace, paths.projectDir);
-  // BEFORE anything reads. A file-backed concern is served by a `TEMP` table standing in front of
-  // its `main` counterpart (DESIGN §4.4), and a store constructed against the connection first would
-  // have prepared its statements against the table it is meant to shadow.
-  const storage = applyStorage(db, workspace, config.storage, {
-    journal: () => replayJournal(db, paths.journalDir),
-    conversations: () => replayConversations(db, paths.conversationsDir),
-    tasks: () => replayRows(db, paths.taskRowsDir, TASK_ROWS),
-    artifacts: () => replayRows(db, paths.artifactRowsDir, ARTIFACT_ROWS),
-  }, {
-    // What `both` compares against, so a `git pull` under a persisted index is noticed.
-    journal: () => fingerprintOf(journalFiles(paths.journalDir).map((f) => f.file)),
-    conversations: () => fingerprintOf(conversationFiles(paths.conversationsDir)),
-    tasks: () => fingerprintOf(rowFiles(paths.taskRowsDir)),
-    artifacts: () => fingerprintOf(rowFiles(paths.artifactRowsDir)),
-  });
-  // Only a file-backed concern gets a directory to write to — a recorder handed one would otherwise
-  // append to files nothing replays, which is a slower way of writing to /dev/null.
+  // BEFORE anything reads: a concern kept in files too has what its files say brought into the
+  // database when they moved since JaiRA last had them, and its files started when it has none
+  // (`fileStorage.ts`, decision 0018 §11). After this the database is the truth.
+  const files: Record<JairaStorageConcern, ConcernFiles> = {
+    journal: {
+      dir: paths.journalDir,
+      replay: () => replayJournal(db, paths.journalDir),
+      fingerprint: () => fingerprintOf(journalFiles(paths.journalDir).map((f) => f.file)),
+      export: (taskIds) => exportJournal(db, paths.journalDir, taskIds),
+    },
+    conversations: {
+      dir: paths.conversationsDir,
+      replay: () => replayConversations(db, paths.conversationsDir),
+      fingerprint: () => fingerprintOf(conversationFiles(paths.conversationsDir)),
+      export: (taskIds) => exportConversations(db, paths.conversationsDir, config.storage.format, taskIds),
+    },
+    tasks: {
+      dir: paths.taskRowsDir,
+      replay: () => replayRows(db, paths.taskRowsDir, TASK_ROWS),
+      fingerprint: () => fingerprintOf(rowFiles(paths.taskRowsDir)),
+      export: (taskIds) => exportRows(db, paths.taskRowsDir, TASK_ROWS, taskIds),
+    },
+    artifacts: {
+      dir: paths.artifactRowsDir,
+      replay: () => replayRows(db, paths.artifactRowsDir, ARTIFACT_ROWS),
+      fingerprint: () => fingerprintOf(rowFiles(paths.artifactRowsDir)),
+      export: (taskIds) => exportRows(db, paths.artifactRowsDir, ARTIFACT_ROWS, taskIds),
+    },
+  };
+  const storage = applyStorage(db, workspace, config.storage, replica ? {} : files, now);
+  // Only a concern kept in files gets a directory to write to — a recorder handed one would otherwise
+  // append to files nothing reads, which is a slower way of writing to /dev/null.
   const journalDir = isFileBacked(config.storage.journal) ? paths.journalDir : undefined;
   const taskLog = isFileBacked(config.storage.tasks) ? new RowLog(paths.taskRowsDir) : undefined;
   const artifactLog = isFileBacked(config.storage.artifacts) ? new RowLog(paths.artifactRowsDir) : undefined;
-  if (!replica) claimReplayed(db, workspace);
   const runtime = new RuntimeStore(db, workspace, taskLog);
   const jobs = new JobStore(db, opts?.staleMs, workspace);
 
@@ -461,6 +476,10 @@ function openAt(
     recoveredCalls,
     orphans,
     storage,
-    close: () => db.close(),
+    close: () => {
+      // What the files are as JaiRA leaves them: the next open trusts the database over them.
+      if (!replica) keepFingerprints(db, workspace, config.storage, files, now);
+      db.close();
+    },
   };
 }

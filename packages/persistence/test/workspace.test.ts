@@ -185,20 +185,22 @@ describe("one database, many workspaces", () => {
 });
 
 describe("a workspace whose records are files", () => {
-  it("rebuilds its own index in the shared database and leaves every other workspace's alone", () => {
+  it("brings in its own files' tasks and leaves every other workspace's alone", () => {
     const a = openAt(clone("a"));
     const inA = createTask(a, { title: "in a", workflow: "w" });
     a.events.recorder(inA.id).record({ type: "instance.entered", instanceId: "1" } as never, 1);
 
     const dir = clone("b");
-    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ storage: { journal: "both" } }), "utf8");
+    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ storage: { journal: "file" } }), "utf8");
     const b = openAt(dir);
     const inB = createTask(b, { title: "in b", workflow: "w" });
     b.events.recorder(inB.id).record({ type: "instance.entered", instanceId: "1" } as never, 2);
     close(b);
-    // Reopened with its journal on disk: replayed, and written back as the persisted index.
+    // Its database forgot the journal; its files have it, and have moved since they were recorded.
+    a.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ?`).run(inB.id);
+    a.db.prepare(`DELETE FROM storage_index`).run();
     const again = openAt(dir);
-    expect(again.storage.replayed).toEqual({ journal: 1 });
+    expect(again.storage.imported).toEqual({ journal: 1 });
     expect(again.events.list(inB.id).map((e) => e.type)).toEqual(["instance.entered"]);
     expect(a.events.list(inA.id).map((e) => e.type)).toEqual(["instance.entered"]);
     const inMain = (id: string): number =>

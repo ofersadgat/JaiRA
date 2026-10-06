@@ -20,7 +20,7 @@ import { ownerOf } from "./workspace";
 import { removeTaskJournal } from "./journalFile";
 import { removeTaskConversations } from "./conversationFile";
 import { removeTaskRows } from "./rowFile";
-import { isFileBacked } from "./shadow";
+import { isFileBacked } from "./fileStorage";
 import { dropConnectUndo } from "./connectUndo";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
@@ -506,8 +506,8 @@ export function deleteTask(project: Project, taskId: string): void {
     project.db.prepare(`DELETE FROM event_waits WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM task_runtime WHERE task_id = ?`).run(taskId);
   })();
-  // The task's journal files, for the reason `prune` deletes a run's: with the file as the truth, a
-  // deletion that left it behind is a task that returns on the next pull (DESIGN §4.4).
+  // The task's files, for the reason `prune` deletes a run's: a deletion that left them behind is a
+  // task that returns when they are next imported — a pull, a clone (DESIGN §4.4, decision 0018 §11).
   if (isFileBacked(project.config.storage.journal)) removeTaskJournal(project.paths.journalDir, taskId);
   if (isFileBacked(project.config.storage.conversations)) {
     removeTaskConversations(project.paths.conversationsDir, taskId);

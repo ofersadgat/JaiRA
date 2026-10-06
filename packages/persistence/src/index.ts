@@ -4,7 +4,7 @@ export * from "./eventLog";
 export * from "./taskStore";
 export * from "./snapshots";
 export * from "./project";
-export * from "./shadow";
+export * from "./fileStorage";
 export * from "./workspace";
 export * from "./replica";
 export * from "./archive";

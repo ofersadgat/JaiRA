@@ -2,7 +2,7 @@
 id: engineering/units/process-claims
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 implements: [product/pick-up-where-it-left-off, product/failures-explain-themselves, product/find-out-why-the-app-misbehaves, ui/surfaces/logs-view]
 layer: data
 owns_contracts: []
@@ -40,7 +40,7 @@ It deliberately does not own:
 - Layer `data`, package `@jaira/persistence`. It calls only the database connection. No upstream seam: the observer reaches `NodeExec` and `agentSpawn` in `@jaira/runtime`, never the engine.
 - The app's `startRun` in `service.ts` builds a `JobOutputSink` and a `RunOwner` after `beginTaskRun`, logs observer failures as `recording a child process failed (<phase>)`, and passes `cancelTaskIn` as `onCancelRequested`. It forwards the owner's observer through one that also logs `started <command>` and `finished <code>`, and its `finally` flushes the sink and releases the claim.
 - The CLI's `runTaskNow` in `cli.ts` builds a `RunOwner` with no sink, so a CLI run's child output is drained and kept nowhere, and releases the claim in `finally`.
-- `parseStorage` in `shared/src/config.ts` refuses `jobs` and `job_output` as storage concerns, because a replayed table is per connection and a claim only means something across processes.
+- `parseStorage` in `shared/src/config.ts` refuses `jobs` and `job_output` as storage concerns, because a claim only means something across processes. Its message still gives the old reason, that a replayed table is per connection, which no longer holds: since [decision 0018](../decisions/0018-one-truth-per-side.md) §11 every concern is read from the one database.
 
 ## The jobs table is the only store of liveness, and nothing else holds it
 

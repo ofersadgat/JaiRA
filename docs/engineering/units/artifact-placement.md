@@ -2,7 +2,7 @@
 id: engineering/units/artifact-placement
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 implements: [product/read-what-work-produced, ui/components/produced-artifacts]
 layer: core
 owns_contracts: [engineering/contracts/artifact-destination-template]
@@ -26,7 +26,7 @@ It deliberately does not own:
 - Parsing and defaulting the `artifacts` block: [project-config](project-config.md), with the shape in [settings-json](../contracts/settings-json.md).
 - The tools that write and read through the map: [host-tools](host-tools.md). Whether a producing call may run and when a large payload asks: [tool-policy](tool-policy.md).
 - Listing and serving artifacts and reading `artifact://` URIs: [uri-and-artifact-reads](uri-and-artifact-reads.md).
-- The row file format and its replay: [storage-policy](storage-policy.md) and [storage-files](../contracts/storage-files.md). The table's columns and migrations: [sqlite-schema](../contracts/sqlite-schema.md).
+- The row file format, its export and its import: [storage-policy](storage-policy.md) and [storage-files](../contracts/storage-files.md). The table's columns and migrations: [sqlite-schema](../contracts/sqlite-schema.md).
 - Deleting rows: `deleteTask` in [task-lifecycle](task-lifecycle.md) removes a task's rows and row file and leaves the bytes; [history-pruning](history-pruning.md) leaves both.
 - Naming a blob reference: upstream `@declarative-ai/hw`.
 
@@ -70,7 +70,7 @@ It deliberately does not own:
 | A blob is returned by a state whose output never reaches the root's outputs | only the result's root outputs are walked | bind it to a root output | the blob is never placed or listed |
 | An artifact cannot be written | the app pushes an `artifact.failed` `engine:event` that is never journaled, and the CLI prints a warning; the run's status is unchanged | fix the destination and run again | the run completes without that artifact |
 | The process is killed during `persistEngineArtifacts` | it runs before `finishTaskRun`, so what it placed keeps its rows and the rest is never placed | none for the unplaced blobs; the next open marks the task `interrupted` | the task reads interrupted and its list lacks those artifacts |
-| The process is killed after an upsert and before the row-file append | the row lived only in the shadow table, as [storage-policy](storage-policy.md) states for every file-backed store | none | the record is one state behind after reopen |
+| The process is killed after an upsert and before the row-file append | the row is in the database and not in the row file, as [storage-policy](storage-policy.md) states for every file-backed store; an import, at an open that finds the files moved, puts the file's older state back | none | the record is one state behind after an import |
 | A symlink inside the root points outside it | containment compares paths lexically and resolves no link | none | the bytes land outside the root |
 | Two producers write one task's map at once | `put` is synchronous and the upsert keeps the last; one task is driven by one process | none needed | the latest record |
 | A placement is retried | the upsert replaces the row and the same bytes are rewritten | none needed | one record |

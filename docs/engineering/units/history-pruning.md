@@ -2,7 +2,7 @@
 id: engineering/units/history-pruning
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 implements: [product/keep-history-within-bounds, ux/patterns/second-deliberate-step-for-irreversible, ui/surfaces/settings-data]
 layer: service
 owns_contracts: []
@@ -30,7 +30,7 @@ The app's `pruneHistory({ olderThanDays, apply })` behind `history:prune` comput
 It deliberately does not own:
 
 - Deleting a task whole: `deleteTask` in [task-lifecycle](task-lifecycle.md).
-- Blob reference counts and the lineage rows' meaning: [operation-record-store](operation-record-store.md). File-backed concerns and their shadow tables: [storage-policy](storage-policy.md). The journal's files: [event-journal](event-journal.md). The tables: [sqlite-schema](../contracts/sqlite-schema.md).
+- Blob reference counts and the lineage rows' meaning: [operation-record-store](operation-record-store.md). File-backed concerns, their export and their import at open: [storage-policy](storage-policy.md). The journal's files: [event-journal](event-journal.md). The tables: [sqlite-schema](../contracts/sqlite-schema.md).
 - The terminal command's output and exit code: [cli](cli.md).
 
 ## Pruning is service code that holds the eligibility rule itself, so no caller can widen it
@@ -73,7 +73,7 @@ It deliberately does not own:
 | Another process starts a candidate between the scan and the transaction | the status is read outside the transaction and not read again | none | the started task loses its history |
 | Two processes prune at once | SQLite serializes the two transactions, and the second deletes nothing more, though it reports the counts it scanned before the first committed | none needed | the second report overstates what it deleted |
 | The process dies inside the transaction | nothing commits | prune again | nothing changed |
-| The process dies after the commit and before the files are removed | the files still hold the history, and the next open replays it | prune again | pruned history returns |
+| The process dies after the commit and before the files are removed | the files still hold the history, and the next import, at an open that finds the files moved since the last close, brings it back | prune again | pruned history returns |
 | A prune is repeated | candidates already pruned have no journal or command rows, so they appear in no list | none needed | an empty plan |
 
 ## Nothing migrates, and a prune has no rollback

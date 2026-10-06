@@ -159,13 +159,3 @@ export function claimTask(db: JairaDb, workspace: string, taskId: string): void 
   }
 }
 
-/**
- * Claim the rows a file-backed `tasks` concern replayed into this connection — a clone's own task
- * rows, or a pulled one's that no workspace has claimed. One another workspace owns stays theirs,
- * and is left out of everything this workspace lists.
- */
-export function claimReplayed(db: JairaDb, workspace: string): void {
-  const shadowed = db.prepare(`SELECT 1 FROM temp.sqlite_master WHERE type = 'table' AND name = 'task_runtime'`).get();
-  if (shadowed === undefined) return;
-  db.prepare(`INSERT OR IGNORE INTO task_owners (task_id, workspace) SELECT task_id, ? FROM temp.task_runtime`).run(workspace);
-}

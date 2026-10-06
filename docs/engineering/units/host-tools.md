@@ -2,7 +2,7 @@
 id: engineering/units/host-tools
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-06
 implements: [product/read-what-work-produced, product/agents-act-only-where-allowed, product/hand-work-to-agents]
 layer: core
 owns_contracts: [engineering/contracts/host-tool-vocabulary]
@@ -47,7 +47,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | Workspace files under `ctx.workspace.root`, else `options.cwd` | read by `read_file`, `edit`, `glob`, `grep` and a content-less `show_artifact`; written by `write_file` and `edit` when the destination is the workspace | the filesystem | agents' own built-ins, git, the person |
 | Artifact bytes at a resolved destination | written by `write_file`, `edit` and `show_artifact` | the filesystem | artifact-placement resolves the path; uri-and-artifact-reads serves them |
-| `artifacts` rows | `put` after every write, every edit and every `show_artifact` given `content`; `get` before every read | `SqliteArtifactStore` in the project database, or its row files when `storage.artifacts` is file-backed | artifact-placement owns the store and places returned blobs |
+| `artifacts` rows | `put` after every write, every edit and every `show_artifact` given `content`; `get` before every read | `SqliteArtifactStore` in the project database, also written to its row files when `storage.artifacts` is file-backed | artifact-placement owns the store and places returned blobs |
 | Pages and search results | fetched | the remote host | none |
 
 ## The invariants keep a logical path round-tripping and a tool inside its workspace

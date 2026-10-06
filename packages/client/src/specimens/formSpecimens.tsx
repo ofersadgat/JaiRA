@@ -75,7 +75,7 @@ const FIELDS_CTX: Omit<SchemaFormContext, "path"> = {
 const ROWS = ["archive", "storage"].map((key) => CONFIG_SECTIONS.find((s) => s.key === key)!);
 const ROWS_VALUE: Record<string, unknown> = {
   archive: { auto: true, keep: 5, failedAfterDays: 2, succeededAfterDays: 1 },
-  storage: { journal: "db", conversations: "file", tasks: "db", artifacts: "both", format: "claude" },
+  storage: { journal: "db", conversations: "file", tasks: "db", artifacts: "file", format: "claude" },
 };
 const STATED = new Set(["archive.keep", "storage.conversations"]);
 

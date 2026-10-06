@@ -1,8 +1,8 @@
 /**
  * Conversations as files — the second concern to get a writer (DESIGN §4.4).
  *
- * Same inversion as the journal: the file is the truth, the table is an index replayed from it, and
- * a write reaches disk before it reaches the row. What makes this one harder is that the journal is
+ * As with the journal, the table is the truth while JaiRA runs and the file its export (decision 0018
+ * §11): each row's state is appended as it is written, read back from the table. What makes this one harder is that the journal is
  * append-only and this is not. `operation_records` is UPDATED — `open` → `completed`, a streamed
  * partial refreshed on a debounce, a provider handle stamped mid-flight — so a file that held one
  * line per row would have to be rewritten in place, which is the one thing an append-only format
@@ -60,6 +60,7 @@ import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSyn
 import { join } from "node:path";
 import type { JairaSessionFormat } from "@jaira/shared";
 import type { JairaDb } from "./db";
+import { noteRemoved, noteWriting, noteWritten } from "./fileLedger";
 
 /** An `operation_records` row. `record_id` is the row's id (the scoped hash, migration 13). */
 export interface RecordRow {
@@ -298,7 +299,9 @@ export class ConversationLog {
     }
     const file = conversationFileFor(this.dir, this.taskId);
     mkdirSync(join(this.dir, sanitize(this.taskId)), { recursive: true });
+    noteWriting(file);
     appendFileSync(file, out.join("\n") + "\n", "utf8");
+    noteWritten(file);
   }
 }
 
@@ -350,8 +353,8 @@ export function readConversationFile(file: string): ConversationEntry[] {
  * written once however many partials it streamed — and so the order rows land in is the order the
  * keys were first seen, which keeps a transcript's positions in sequence.
  *
- * `undefined` when there is nothing on disk at all — the signal `applyStorage` needs to seed from
- * `main` instead. See {@link ReplaySource}.
+ * `undefined` when there is nothing on disk at all — the case `applyStorage` writes the files from
+ * the database instead.
  */
 export function replayConversations(db: JairaDb, dir: string): number | undefined {
   const files = conversationFiles(dir);
@@ -427,4 +430,44 @@ export function replayConversations(db: JairaDb, dir: string): number | undefine
 /** Delete a task's whole conversation directory, for the same reason. */
 export function removeTaskConversations(dir: string, taskId: string): void {
   rmSync(join(dir, sanitize(taskId)), { recursive: true, force: true });
+  noteRemoved(join(dir, sanitize(taskId)));
+}
+
+/**
+ * Write tasks' conversation files from the tables — what conversations just put in files start from,
+ * so their files hold everything the database does (decision 0018 §11): each task's sessions, its
+ * lineage's ancestors first, then its names, then its records in the order they started. Returns the
+ * entries written.
+ */
+export function exportConversations(db: JairaDb, dir: string, format: JairaSessionFormat, taskIds: readonly string[], at: number = Date.now()): number {
+  const sessions = db.prepare(
+    `WITH RECURSIVE lineage(id) AS (
+       SELECT session_id FROM operation_records WHERE session_id IS NOT NULL AND task_id = :task
+       UNION SELECT landed_session_id FROM operation_records WHERE landed_session_id IS NOT NULL AND task_id = :task
+       UNION SELECT session_id FROM session_names WHERE task_id = :task
+       UNION SELECT s.parent FROM sessions s JOIN lineage ON s.id = lineage.id WHERE s.parent IS NOT NULL
+     )
+     SELECT id, parent, cursor, provider, provider_session_id, cut_at, created_at FROM sessions
+      WHERE id IN (SELECT id FROM lineage) ORDER BY created_at, id`,
+  );
+  const names = db.prepare(`SELECT task_id, name, session_id FROM session_names WHERE task_id = ? ORDER BY name`);
+  const records = db.prepare(
+    `SELECT id AS record_id, task_id, status, request_json, result_json, error_json,
+            metrics_json, provider_session_id, landed_session_id, landed_seq, started_at, ended_at
+       FROM operation_records WHERE task_id = ? ORDER BY started_at, id`,
+  );
+  let written = 0;
+  for (const taskId of taskIds) {
+    const entries: ConversationEntry[] = [
+      ...(sessions.all({ task: taskId }) as SessionRow[]).map((row) => ({ kind: "session" as const, row })),
+      ...(names.all(taskId) as NameRow[]).map((row) => ({ kind: "name" as const, row })),
+      ...(records.all(taskId) as RecordRow[]).map((row) => ({ kind: "record" as const, row })),
+    ];
+    removeTaskConversations(dir, taskId);
+    if (entries.length === 0) continue;
+    const log = new ConversationLog(dir, format, taskId);
+    for (const entry of entries) log.append(entry, at);
+    written += entries.length;
+  }
+  return written;
 }

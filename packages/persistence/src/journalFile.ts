@@ -1,11 +1,10 @@
 /**
  * The journal as files — one JSONL per task (DESIGN §4.4).
  *
- * This is the write half of the storage policy, for the first concern to get one. The file is the
- * TRUTH and the table is an index replayed from it: an event is appended here synchronously and
- * mirrored into the (shadowed) table in the same call, so nothing is ever only in memory and there
- * is no flush policy to lose a journal across a crash. That inversion is the whole reason the design
- * does not describe a cache.
+ * The table is the truth while JaiRA runs and the file its export (decision 0018 §11,
+ * `fileStorage.ts`): an event is appended here synchronously, just before its row is written, so the
+ * file never lacks what the table has and there is no flush policy to lose a line across a crash. The
+ * file is read back only at an open that finds it moved since JaiRA last left it (a pull, a clone).
  *
  * ## One file per task
  *
@@ -13,7 +12,7 @@
  * a resume continues the same journal and a re-run is a new task with a new directory — so the
  * per-run split has nothing left to separate. Two people running tasks on one branch still write
  * different filenames (different task ids), so their appends never conflict — and after a pull,
- * both replay into the same table and appear on the board.
+ * both are imported into the same table and appear on the board.
  *
  * ## The line, and why it is JaiRA's own shape
  *
@@ -31,15 +30,16 @@
  *
  * `seq`. It is `INTEGER PRIMARY KEY AUTOINCREMENT` — assigned by whichever database is holding the
  * rows — and writing it down would put a database artifact in a file that outlives databases. Line
- * ORDER is the order; a replay inserts in that order and lets the column re-mint, which preserves
+ * ORDER is the order; an import inserts in that order and lets the column re-mint, which preserves
  * every ordering anything actually asks for (`ORDER BY seq` within a run, and `created_at` carries
  * the real time regardless). Nothing persists a `seq` to point at — the one cursor that takes one,
  * `list({ afterSeq })`, has no caller outside a test.
  */
-import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JairaDb } from "./db";
+import { noteRemoved, noteWriting, noteWritten } from "./fileLedger";
 
 /** One line of a task's journal — the row, minus the id the database assigns. */
 export interface JournalLine {
@@ -97,7 +97,9 @@ function sanitize(segment: string): string {
 export function appendJournal(journalDir: string, line: JournalLine): void {
   const file = journalFileFor(journalDir, line.taskId);
   mkdirSync(join(journalDir, sanitize(line.taskId)), { recursive: true });
+  noteWriting(file);
   appendFileSync(file, JSON.stringify(line) + "\n", "utf8");
+  noteWritten(file);
 }
 
 /** The journal files a directory holds, in a deterministic order. */
@@ -143,10 +145,8 @@ export function readJournalFile(file: string): JournalLine[] {
 /**
  * Replay every run's file into the journal table.
  *
- * Returns the number of rows inserted, or `undefined` when there is nothing on disk at all — which
- * is the signal the caller needs to seed the shadow from `main` instead. An EMPTY journal directory
- * is not the same as no journal: the first means the files are the truth and there is no history,
- * the second means this concern has just been switched on and the history is still in the database.
+ * Returns the number of rows inserted, or `undefined` when there is nothing on disk at all — the
+ * case where the files are instead written from the database (an export, `fileStorage.ts`).
  */
 export function replayJournal(db: JairaDb, journalDir: string): number | undefined {
   const files = journalFiles(journalDir);
@@ -204,7 +204,36 @@ export function appendRewound(journalDir: string, taskId: string, lines: readonl
   });
 }
 
-/** Delete a task's whole journal directory — what deleting the task does now that the file is the truth. */
+/** Delete a task's whole journal directory — what deleting the task does, so a pull cannot bring it back. */
 export function removeTaskJournal(journalDir: string, taskId: string): void {
   rmSync(join(journalDir, sanitize(taskId)), { recursive: true, force: true });
+  noteRemoved(join(journalDir, sanitize(taskId)));
+}
+
+/**
+ * Write tasks' journal files from the table — what a journal just put in files starts from, so its
+ * files hold everything the database does (decision 0018 §11). Returns the lines written.
+ */
+export function exportJournal(db: JairaDb, journalDir: string, taskIds: readonly string[]): number {
+  const read = db.prepare(`SELECT instance_id, type, payload_json, created_at FROM state_machine_events WHERE task_id = ? ORDER BY seq`);
+  let written = 0;
+  for (const taskId of taskIds) {
+    const rows = read.all(taskId) as Array<{ instance_id: string | null; type: string; payload_json: string; created_at: number }>;
+    removeTaskJournal(journalDir, taskId);
+    if (rows.length === 0) continue;
+    const lines = rows.map((row) =>
+      JSON.stringify({
+        type: row.type,
+        timestamp: new Date(row.created_at).toISOString(),
+        taskId,
+        ...(row.instance_id !== null ? { instanceId: row.instance_id } : {}),
+        event: JSON.parse(row.payload_json) as unknown,
+      } satisfies Omit<JournalLine, "event"> & { event: unknown }),
+    );
+    mkdirSync(join(journalDir, sanitize(taskId)), { recursive: true });
+    writeFileSync(journalFileFor(journalDir, taskId), lines.join("\n") + "\n", "utf8");
+    noteWritten(journalFileFor(journalDir, taskId));
+    written += rows.length;
+  }
+  return written;
 }

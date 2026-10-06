@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type JairaDb } from "../src/db";
 import { changesSince, pruneTombstones, syncHorizon, syncNow, touch } from "../src/sync";
-import { shadowTable } from "../src/shadow";
+import { stageTable } from "../src/fileStorage";
 
 let dir: string;
 let db: JairaDb;
@@ -111,8 +111,11 @@ describe("the change log", () => {
     ]);
   });
 
-  it("sees writes to a table standing behind a file-backed concern's TEMP copy", () => {
-    expect(shadowTable(db, "state_machine_events")).toBe(true);
+  it("logs nothing an import stages, only what it brings into the database", () => {
+    expect(stageTable(db, "state_machine_events")).toBe(true);
+    event("t-staged");
+    expect(changesSince(db, 0, { collections: ["event"] })).toEqual([]);
+    db.exec(`DROP TABLE temp.state_machine_events`);
     event("t-a");
     expect(changesSince(db, 0, { collections: ["event"] }).map((c) => c.taskId)).toEqual(["t-a"]);
   });

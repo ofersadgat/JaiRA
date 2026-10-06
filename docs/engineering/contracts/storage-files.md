@@ -2,24 +2,24 @@
 id: engineering/contracts/storage-files
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 visibility: public
 kind: format
 owned_by: [engineering/units/storage-policy]
-consumers: ["@jaira/persistence replay at open in conversationFile.ts and rowFile.ts", "@jaira/persistence SqliteSessionStore, RuntimeStore and SqliteArtifactStore, which append", "@jaira/persistence cut.ts, whose cuts append tombstones and whose forks append a copy's lines", "@jaira/persistence lifecycle.ts deleteTask and prune.ts pruneHistory, which remove files", "Claude Code and Codex session readers, through native turn lines", "git, merging committed system/ directories", "people reading a committed file"]
+consumers: ["@jaira/persistence import and export at open in journalFile.ts, conversationFile.ts and rowFile.ts, through fileStorage.ts", "@jaira/persistence SqliteSessionStore, RuntimeStore and SqliteArtifactStore, which append", "@jaira/persistence cut.ts, whose cuts append tombstones and whose forks append a copy's lines", "@jaira/persistence lifecycle.ts deleteTask and prune.ts pruneHistory, which remove files", "Claude Code and Codex session readers, through native turn lines", "git, merging committed system/ directories", "people reading a committed file"]
 since: 2026-08-24
 siblings: [engineering/contracts/journal-events, engineering/contracts/sqlite-schema, engineering/contracts/jaira-layout]
 ---
 
 # Storage files
 
-The append-only JSONL files that hold a project's conversations, task rows and artifact map when those concerns are file-backed, and the fingerprint that lets `both` skip replaying them.
+The append-only JSONL files a project's conversations, task rows and artifact map are written to when those concerns are file-backed, and the fingerprint that tells an open whether they moved since JaiRA last had them. The database is the truth while JaiRA runs; these files are its export, read back only at open, when they moved ([decision 0018](../decisions/0018-one-truth-per-side.md) §11).
 
 ## A caller reaches for these files when a concern is file-backed, and never for the journal or a task's metadata
 
-**Use when.** `storage.conversations`, `storage.tasks` or `storage.artifacts` in `settings.json` is `file` or `both`, and code appends to, replays, removes or tools read these files, or a person commits or merges them.
+**Use when.** `storage.conversations`, `storage.tasks` or `storage.artifacts` in `settings.json` is `file`, and code appends to, exports, imports or removes these files, or tools read them, or a person commits or merges them.
 
-**Do not use when.** Reading or writing the journal file: [journal-events](journal-events.md). Reading a task's metadata file `system/tasks/<taskId>.json`: [task-file](task-file.md). Querying the tables the files replay into: [sqlite-schema](sqlite-schema.md). Nothing JaiRA reads comes from a native turn line.
+**Do not use when.** Reading or writing the journal file: [journal-events](journal-events.md). Reading a task's metadata file `system/tasks/<taskId>.json`: [task-file](task-file.md). Querying the tables the files are written from and imported into: [sqlite-schema](sqlite-schema.md). Nothing JaiRA reads comes from a native turn line.
 
 ## The shape is one file per task per concern, each line a whole row state
 
@@ -112,44 +112,52 @@ One line per message of `messagesOfRecord` over the record's result, after the r
 
 The key is `task_id` for `task_runtime`, and `task_id` with `logical_path` for `artifacts`.
 
-### The `both` fingerprint is a hash of each file's path, size and modification time
+### The fingerprint is a hash of each file's path, size and modification time
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `storage_index.fingerprint` | string | yes | the first 32 hex characters of SHA-256 over `<path>:<size>:<mtimeMs>` per file, or `<path>:gone` for a file that vanished, sorted by path and joined by newlines |
+| `storage_index.fingerprint` | string | yes | the first 32 hex characters of SHA-256 over `<path>:<size>:<mtimeMs>` per file, or `<path>:gone` for a file that vanished, sorted by path and joined by newlines; or `stale`, set when the concern is opened in `db` |
+| recorded | when | yes | at an export, at an import, and at a project's close when every file of the concern is as JaiRA left it, none added, removed or changed by anything else; an open whose fingerprint matches reads nothing |
 | files covered | list | yes | journal: every task's `journal.jsonl`; conversations: every task's `conversations.jsonl`; tasks and artifacts: every `.jsonl` in their directory |
 
-### Replay folds every file, keeps the last line per key and inserts once
+### An import folds every file, keeps the last line per key and replaces each task it names
 
 - Conversation files are read by task directory name; row files by file name.
 - For each key the last line read wins, and a tombstone after a line removes it.
-- Conversations insert sessions, then records, then names, in one transaction; rows insert with `INSERT OR REPLACE` in one transaction, dropping columns the table no longer has.
+- The fold lands in `TEMP` staging tables. Conversations insert sessions, then records, then names; rows insert with `INSERT OR REPLACE`, every column a line names, so a column the table does not have fails the import.
+- Then, in the same transaction, each task the files name has its rows in `main` replaced by the staged ones: a task no workspace owns becomes this workspace's, a task another workspace owns is untouched, `sessions` rows are upserted, and tasks the files do not name are left alone. `state_machine_events.seq` and `artifacts.id` are minted again by `main`.
 
-## Errors are skipped lines, and only a constraint violation stops a replay
+### An export writes a concern's files afresh from the database
+
+When a file-backed concern has no files at open, or its fingerprint is `stale` because it was kept in the database alone since, every task this workspace owns has its file replaced by one written from its tables: journal lines in `seq` order, conversation sessions (the lineage's ancestors first), then names, then records in the order they started, and row files from `SELECT *`.
+
+## Errors are skipped lines, and only a constraint violation stops an import
 
 | Condition | Response | Caller does |
 | --- | --- | --- |
 | A line does not parse, matches no envelope, or has no object row | skipped | nothing; that state is gone |
 | A file cannot be read | treated as empty | nothing |
-| No file exists for the concern | the replay source answers `undefined` and the concern is seeded from `main` | nothing |
-| After folding, two live records claim one seat | the replay transaction throws a UNIQUE constraint error and the project does not open | remove one record's lines, or append a tombstone for it, and reopen |
+| No file exists for the concern | the fingerprint is `undefined` and the concern's files are exported from the database | nothing |
+| After folding, two live records claim one seat | the import transaction throws a UNIQUE constraint error and the project does not open | remove one record's lines, or append a tombstone for it, and reopen |
 | One record id appears under two task ids | primary key violation; the project does not open | remove the copy |
 | A row line names a table the concern does not own | skipped | nothing |
 
 ## Renaming a field or line type breaks every committed file until it is migrated
 
-- Renaming a row field, a `jaira.*` type or an envelope field breaks replay of every committed file; the files are migrated first, and no reader keeps the old form.
+- Renaming a row field, a `jaira.*` type or an envelope field breaks the import of every committed file; the files are migrated first, and no reader keeps the old form.
 - Changing either dialect's detection rule can leave the other dialect's lines unread.
 - Changing native turn line shapes breaks only other tools' readers.
 
 ## Several behaviours differ from what an append-only file seems to promise
 
 - Every streamed flush appends another whole record line, so a file grows with each partial and replays as the last.
-- Row and conversation lines are appended after the table write, so a crash can lose the last state; the journal writes its line first.
+- Row and conversation lines are appended just after the table write, re-reading the row, so a crash can leave a file one state behind the database; the journal writes its line just before its row.
+- A file is never read while JaiRA runs. One changed under a running process, such as by a `git pull`, is read at the next open: the close leaves the concern's fingerprint as it was, so that open imports. Watching the files is unbuilt.
+- A file whose lines JaiRA itself appended but whose row never reached the table, such as after a failed insert or a rolled-back transaction, stays ahead of the database across a clean close, because the close records the files as they are.
 - `storage.format` shapes conversation lines only; row files have one shape.
-- A record's long strings are blob references whose bytes live only in the database's `blobs` table, so a clone or a deleted database replays references, not text.
+- A record's long strings are blob references whose bytes live only in the database's `blobs` table, so a clone or a deleted database imports references, not text.
 - An `artifacts` row line carries its database `id`, so lines written by two machines can share one, and `INSERT OR REPLACE` then keeps only one of the rows.
 - A write through a store with no task scope, or outside the session store, appends nothing: `recoverInterrupted` settling `open` records, and a recovered native capture folded through the unscoped store at open.
 - `uuid` counters and `parentUuid` chains restart with each store instance, so two lines can share a `uuid`.
-- The fingerprint includes absolute paths, so a moved checkout replays in full once.
-- When every file of a concern is removed, the next open seeds from `main`, so under `file` the rows `main` held when the concern was switched on reappear.
+- The fingerprint includes absolute paths, so a moved checkout is imported in full once.
+- When every file of a concern is removed, the next open exports them again from the database; removing the files deletes no row.

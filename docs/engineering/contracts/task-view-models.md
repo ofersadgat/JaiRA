@@ -2,7 +2,7 @@
 id: engineering/contracts/task-view-models
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 visibility: internal
 kind: schema
 owned_by: [engineering/units/board-projection, engineering/units/files-view-models, engineering/units/workflow-browser]
@@ -272,7 +272,7 @@ The task view models are the JSON shapes in `@jaira/shared` `view.ts` that task 
 - `BoardCard.status` is the task row and `activeStatus` the deepest live instance, so a `running` task parked on a gate reads `waiting_for_user` only in `activeStatus`, and never on the roots board.
 - `jaira board` builds its shape without a gate vocabulary, so every running function state there reads `waiting_for_user`.
 - `board:view` without a level, or through `boardView` directly, projects only the most recently updated task's workflow; tasks of other workflows are on no column.
-- `TaskOrigin.at` and `boundary` are `seq` values, which a file-backed journal re-mints at each open, as [journal-events](journal-events.md) says, so a fork's label can name a different event after a reopen. `taskOriginOf` always sets `kind`.
+- `TaskOrigin.at` and `boundary` are `seq` values, which a file-backed journal's import re-mints, as [journal-events](journal-events.md) says, so a fork's label can name a different event after an import. `taskOriginOf` always sets `kind`.
 - `TaskSummary.createdAt` is an ISO string from the file and `updatedAt` is the row's epoch clock; `BoardCard.endedAt` is the journal's, and the only one that says when a run ended.
 - `ProjectSummary.ended` includes `stopping` tasks, and `running` includes those waiting on a person.
 - `ProjectTask.project` and `ProjectSummary.project` are directories, including for the shared root, and never the `shared` alias.

@@ -207,10 +207,10 @@ describe("config.storage", () => {
   });
 
   it("refuses the two tables that cannot be file-backed, by name and with the reason", () => {
-    // Not "unknown key". A replayed table is TEMP and therefore per-connection, so anything whose
-    // value is cross-process coordination cannot live in a file — and being told that is the
-    // difference between fixing the config and trying a different spelling.
-    expect(() => parseConfig({ storage: { jobs: "file" } })).toThrow(/cross-process/);
+    // Not "unknown key". Process claims mean nothing past the run holding them, so nothing in them
+    // belongs in a file — and being told that is the difference between fixing the config and trying
+    // a different spelling.
+    expect(() => parseConfig({ storage: { jobs: "file" } })).toThrow(/past the run that holds them/);
     expect(() => parseConfig({ storage: { job_output: "file" } })).toThrow(/main thread/);
     // Even asking for them in the database is refused: the answer is that they are not a choice.
     expect(() => parseConfig({ storage: { jobs: "db" } })).toThrow(/cannot be chosen/);
@@ -229,7 +229,9 @@ describe("config.storage", () => {
   });
 
   it("refuses a mode and a format that are not modes or formats", () => {
-    expect(() => parseConfig({ storage: { journal: "jsonl" } })).toThrow(/file, db, both/);
+    expect(() => parseConfig({ storage: { journal: "jsonl" } })).toThrow(/one of file, db$/);
+    // Retired (decision 0018 §11): read as what it now means.
+    expect(parseConfig({ storage: { journal: "both" } }).storage.journal).toBe("file");
     expect(() => parseConfig({ storage: { format: "openai" } })).toThrow(/claude, codex/);
     expect(() => parseConfig({ storage: [] })).toThrow(/must be an object/);
   });
