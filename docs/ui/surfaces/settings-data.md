@@ -2,7 +2,7 @@
 id: ui/surfaces/settings-data
 type: ui-surface
 status: shipped
-updated: 2026-09-23
+updated: 2026-10-06
 kind: screen
 realizes: [ux/patterns/inherited-unless-set-here, ux/patterns/schema-driven-form, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/absence-is-stated]
 serves: [product/read-what-work-produced, product/run-history-travels-with-the-repository, product/keep-history-within-bounds, product/pick-up-where-it-left-off]
@@ -19,7 +19,7 @@ The Data & history page of the [Settings view](settings-view.md): what a run lea
 
 - **Head.** `Data & history`, the lead `Where runs keep what they produce, and how much there is.` followed by the layer sentence, and the [layer switch](../components/settings-header.md) at the head's top-right.
 - **Artifacts.** `Destination`, across the row: four [preset-chips](../components/preset-chips.md) over a mono template box and a line of the variables it may use. Then `Artifact directory`, a mono box, and `Keep inline below`, a number.
-- **Storage.** `Journal`, `Conversations`, `Tasks` and `Artifact map`, each `file`, `db` or `both`, and `Session line shape`, `claude` or `codex`.
+- **Storage.** `Journal`, `Conversations`, `Tasks` and `Artifact map`, each `file` or `db`, and `Session line shape`, `claude` or `codex`.
 - **Stored history.** Only while a project is open. A sentence under the heading saying these are the open project's records whichever layer the switch is on, then three rows, `Tasks`, `Events` and `Commands`, each with its count in the data face at the right edge.
 - **Pruning.** Only while a project is open. `Older than`: a number box starting at `30`, `days`, and a ghost `Preview`. After a preview or a delete, a second row reports it.
 

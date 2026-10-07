@@ -186,6 +186,19 @@ import {
   settleStartedMirror,
   startedTaskOf,
   PROCESS_ENDED,
+  ownerOf,
+  draftOf,
+  keepDraft,
+  keepWindowState,
+  lastWindowState,
+  deviceLayout,
+  keepDeviceLayout,
+  changesSince,
+  pruneTombstones,
+  syncHorizon,
+  syncNow,
+  touch,
+  TOMBSTONE_KEEP_MS,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -535,6 +548,7 @@ let installed: LogSink | undefined;
  */
 let installedPolicy: LevelPolicy | undefined;
 import { LiveTurnFlusher, partialRecordValue } from "./liveTurns";
+import { LazyValues } from "./lazy";
 import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
 import { EventTally } from "./eventTally";
@@ -578,6 +592,7 @@ import type {
   LogQuery,
   ProjectSummary,
   ProjectTask,
+  SyncPage,
   RunMetrics,
   SessionOutput,
   SessionRef,
@@ -1439,6 +1454,10 @@ export class AppService {
     this.archiveTimer = setInterval(() => this.sweepArchive(), 15 * 60_000);
     this.archiveTimer.unref?.();
     this.placementTimer.unref?.();
+    // The change log, watched (decision 0018 §5): whatever wrote it — this process or `jaira` in a
+    // terminal — a window hears of it within a sixth of a second, with the rows.
+    this.syncTimer = setInterval(() => this.pushSync(), 150);
+    this.syncTimer.unref?.();
     this.federation = new Federation(this.fleet, {
       baseDir: this.baseDir,
       publish: (message) => this.publish(message),
@@ -1719,6 +1738,7 @@ export class AppService {
       const key = sessionKey(project.paths.projectDir);
       const session = new ProjectSession({ key, kind: role, project, ...this.hubsFor(key, project) });
       this.sessions.set(key, session);
+      this.indexMoved(session);
       // Shared's own events task (decision 0010 §4), on the root's first open.
       void this.superviseEvents(session);
       return session;
@@ -3162,6 +3182,7 @@ export class AppService {
     await prepareUserModules(project.paths, { searchPath: project.config.workflows.path });
     const session = new ProjectSession({ key, kind: "user", project, ...this.hubsFor(key, project) });
     this.sessions.set(key, session);
+    this.indexMoved(session);
     this.log({
       level: "info",
       source: "project",
@@ -3494,6 +3515,7 @@ export class AppService {
     this.closed = true;
     clearInterval(this.placementTimer);
     clearInterval(this.archiveTimer);
+    clearInterval(this.syncTimer);
     this.resources.close();
     this.replicator.close();
     for (const replica of this.replicaSessions.values()) replica.project.close();
@@ -3577,6 +3599,7 @@ export class AppService {
     // question with an answer — a project that was closed, or one that was never opened.
     this.log({ level: "info", source: "project", message: `closing ${session.project.paths.projectDir}`, project: key });
     this.sessions.delete(key);
+    this.indexMoved(session);
     for (const [requestId, owner] of [...this.requestOwner]) if (owner === key) this.requestOwner.delete(requestId);
     // The resumes the open started, settled before the close unwinds what they started — and the
     // events task's supervision, which may be starting one.
@@ -3622,6 +3645,213 @@ export class AppService {
     const remote = parseRemoteProjectKey(ref);
     if (remote !== undefined) return this.replicaSession(ref, remote.machineId, remote.dir);
     return this.sessions.get(sessionKey(ref));
+  }
+
+  // --- the change log (decision 0018) -----------------------------------------------------------------
+
+  /** The forge sign-ins under way moved: every window's Connections page reads them again. */
+  private signInsMoved(): void {
+    const db = this.syncDb();
+    if (db !== undefined) touch(db, "forge", "signIns");
+  }
+
+  /** A composer's unsent words (decision 0018 §9) — kept here when this engine owns the conversation; routed here by its task id. */
+  draftGet(key: string): { text: string; at: number } | null {
+    const db = this.syncDb();
+    return db === undefined ? null : draftOf(db, key);
+  }
+
+  /** Where a device's window stands (decision 0018 §9) — the window's own, of which this is the copy. */
+  windowKeep(device: string, window: string, state: unknown): void {
+    const db = this.syncDb();
+    if (db !== undefined) keepWindowState(db, device, window, state);
+  }
+
+  /** Where the device's most recently used window stood. */
+  windowLast(device: string): unknown {
+    const db = this.syncDb();
+    return db === undefined ? null : lastWindowState(db, device);
+  }
+
+  /** A device's layout (decision 0018 §9) — its own, not the machine's. */
+  layoutGet(device: string): unknown {
+    const db = this.syncDb();
+    return db === undefined ? null : deviceLayout(db, device);
+  }
+
+  layoutKeep(device: string, ui: unknown): void {
+    const db = this.syncDb();
+    if (db !== undefined) keepDeviceLayout(db, device, ui);
+  }
+
+  draftPut(key: string, taskId: string | null, text: string): void {
+    const db = this.syncDb();
+    if (db === undefined) throw this.refusal("project", "no project is open to keep a draft in");
+    keepDraft(db, key, taskId, text);
+  }
+
+  /** Large values answered as placeholders, and their strings by hash (decision 0018 §6, `lazy.ts`). */
+  readonly lazy = new LazyValues(() => this.syncDb());
+
+  private syncTimer: ReturnType<typeof setInterval> | undefined;
+  /** The newest stamp, and how many entries carry it, as the last push left them. */
+  private synced: { at: number; count: number } | undefined;
+  private tombstonesPrunedAt = 0;
+  /** When the set of workspaces the index is made of last moved: a cursor older than this gets everything. */
+  private wholeSince = 0;
+
+  /**
+   * A project opened or closed. Its tasks did not change, so the log says nothing of them — but every
+   * reader's index now lacks them, or still has them: its next page is whole (decision 0018 §5).
+   */
+  private indexMoved(session: ProjectSession): void {
+    touch(session.project.db, "workspace", session.project.workspace);
+    this.wholeSince = syncNow(session.project.db);
+  }
+
+  /** The one database the log is in: every session's is the same file (decision 0013 §4). */
+  private syncDb(): Project["db"] | undefined {
+    return (this.sessions.values().next().value as ProjectSession | undefined)?.project.db;
+  }
+
+  /**
+   * What changed at or after `since` — `sync:since`, and the page `sync:changed` pushes. Everything
+   * (`whole`) for a cursor of 0 or one older than the horizon, below which tombstones were dropped.
+   *
+   * The cursor answered is the newest stamp taken BEFORE the rows are read, so a row written while
+   * they are read is at or after it and comes again on the next page.
+   */
+  syncSince(since: number): SyncPage {
+    this.sharedSession();
+    const db = this.syncDb();
+    if (db === undefined) return { at: 0, horizon: 0, whole: true, tasks: [], gone: [], changes: [] };
+    const at = syncNow(db);
+    const horizon = syncHorizon(db);
+    if (since <= 0 || since < horizon || since < this.wholeSince) return { at, horizon, whole: true, tasks: this.indexTasks(), gone: [], changes: [] };
+    const changes = changesSince(db, since);
+    const gone = new Set(changes.filter((c) => c.collection === "task" && c.deleted).map((c) => c.id));
+    // A draft is no part of a task's summary: its change is the draft's alone (decision 0018 §9).
+    const touched = new Set(changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" && !gone.has(c.taskId) ? [c.taskId] : [])));
+    let tasks = touched.size === 0 ? [] : this.indexTasks(touched);
+    // A summary counts the tasks under it (`controls`), so the task one stands under changed with it.
+    const above = new Set(tasks.flatMap((t) => [t.parentTaskId, t.origin?.taskId].filter((id): id is string => id !== undefined && !touched.has(id))));
+    if (above.size > 0) tasks = [...tasks, ...this.indexTasks(above)];
+    return { at, horizon, whole: false, tasks, gone: [...gone], changes };
+  }
+
+  /**
+   * Every task's summary, or those of `only`: this machine's workspaces and its copies of other
+   * machines' (decision 0018 §7 — a window reads another machine's tasks from this engine's copy).
+   */
+  private indexTasks(only?: ReadonlySet<string>): ProjectTask[] {
+    const out: ProjectTask[] = [];
+    for (const session of this.sessions.values()) for (const task of taskSummaries(session.project, only)) out.push({ ...task, project: session.dir });
+    for (const peer of this.fleet.peers()) {
+      for (const dir of this.federation.projectsOf(peer.id)) {
+        const key = remoteProjectKey(peer.id, dir);
+        const session = this.replicaSession(key, peer.id, dir);
+        if (session === undefined) continue;
+        for (const task of taskSummaries(session.project, only)) out.push({ ...task, project: key });
+      }
+    }
+    return out.sort((a, b) => b.updatedAt - a.updatedAt);
+  }
+
+  /**
+   * Push what changed since the last push, when the log has moved. Moved means a newer stamp, or more
+   * entries at the newest — two writes in one millisecond, a poll apart. (One row rewritten twice in
+   * the same millisecond with nothing after it is not seen here; a window's own sweep reads it.)
+   */
+  private pushSync(): void {
+    if (this.closed || this.options.publish === undefined) return;
+    const db = this.syncDb();
+    if (db === undefined) return;
+    const now = Date.now();
+    if (now - this.tombstonesPrunedAt > 60 * 60_000) {
+      this.tombstonesPrunedAt = now;
+      pruneTombstones(db, TOMBSTONE_KEEP_MS, now);
+    }
+    const head = db.prepare(`SELECT at, COUNT(*) AS count FROM sync_changes WHERE at = (SELECT MAX(at) FROM sync_changes)`).get() as { at: number | null; count: number };
+    const at = head.at ?? 0;
+    if (this.synced === undefined) {
+      this.synced = { at, count: head.count };
+      return;
+    }
+    if (at === this.synced.at && head.count === this.synced.count) return;
+    const prev = this.synced.at;
+    const page = this.syncSince(prev);
+    this.synced = { at: page.at, count: (db.prepare(`SELECT COUNT(*) AS count FROM sync_changes WHERE at = ?`).get(page.at) as { count: number }).count };
+    this.options.publish({ type: "sync:changed", prev, page });
+  }
+
+  /**
+   * What the engine holds outside the database, entered in the log as it changes — the database does
+   * not see it: a gate as it is asked and settled (a settled one leaves a tombstone), the placement
+   * queue, and what the settings pages show (limits, what waits, machines, sign-ins, configuration).
+   */
+  private logGate(message: PushMessage): void {
+    const db = this.syncDb();
+    if (db === undefined) return;
+    switch (message.type) {
+      case "approval:requested":
+      case "question:requested":
+        touch(db, message.type.split(":")[0]!, message.pending.requestId, message.pending.taskId ?? null);
+        break;
+      case "userEvent:requested":
+        touch(db, "userEvent", message.request.requestId, message.request.taskId ?? null);
+        break;
+      case "approval:resolved":
+      case "question:resolved":
+      case "userEvent:resolved":
+        touch(db, message.type.split(":")[0]!, message.requestId, null, true);
+        break;
+      case "placement:changed":
+        touch(db, "placement", "queue");
+        break;
+      // What the settings pages show, held in memory or in files: their views read again by it (group 7).
+      case "limits:changed":
+        touch(db, "limits", "limits");
+        break;
+      case "waiting:changed":
+        touch(db, "waiting", "waiting");
+        break;
+      case "machines:changed":
+        touch(db, "machine", "machines");
+        break;
+      case "forge:signInFinished":
+        touch(db, "forge", "signIns");
+        break;
+      case "store:invalidate":
+        if (message.scope === "config" || message.scope === "availability") touch(db, message.scope, message.scope);
+        break;
+    }
+  }
+
+  /**
+   * Where a task lives, from its id alone — the project every request about it is answered from.
+   *
+   * A task id names one task in the one database (decision 0013 §4), and `task_owners` says which
+   * workspace made it, so the window never has to know. It used to: every request carried the
+   * project the window THOUGHT the task was in, and a wrong guess — a reload that came back standing
+   * on another project, a list row with no project of its own — read the task out of a workspace that
+   * does not own it, answered "unknown task", and the window drew the conversation empty.
+   *
+   * This machine's workspace as the key the lists stamp (`session.dir`); another machine's as its
+   * remote key, which `Federation.route` forwards while that machine is up and its copy answers while
+   * it is down. `undefined` for an id no workspace owns, or one whose workspace is not open here — the
+   * request then goes where it named, which is where it went before.
+   */
+  homeOf(taskId: string, named?: string): string | undefined {
+    const any = this.sessions.values().next().value;
+    if (any === undefined) return undefined;
+    const owner = ownerOf(any.project.db, taskId);
+    if (owner === undefined) return undefined;
+    // Named right already — by its directory, or by a role (`shared`) that means more to some answers
+    // than the directory does: left as it was named.
+    if (named !== undefined && this.sessionOf(named)?.project.workspace === owner) return named;
+    for (const session of this.sessions.values()) if (session.project.workspace === owner) return session.kind === "shared" ? SHARED_SESSION : session.dir;
+    const where = any.project.db.prepare(`SELECT machine, dir FROM workspaces WHERE id = ?`).get(owner) as { machine: string | null; dir: string } | undefined;
+    return where?.machine != null ? remoteProjectKey(where.machine, where.dir) : undefined;
   }
 
   /**
@@ -3680,6 +3910,7 @@ export class AppService {
   }
 
   private publish(message: PushMessage): void {
+    this.logGate(message);
     this.options.publish?.(message);
     // A run ended — here or, relayed, on another machine: a workspace may have room for what waits.
     if (message.type === "run:finished" && this.placement !== undefined && this.placement.queue().length > 0) void this.tryQueue();
@@ -9937,6 +10168,7 @@ export class AppService {
     };
     const controller = new AbortController();
     this.forgeSignIns.set(name, { pending, controller });
+    this.signInsMoved();
     // The plain page, where the person types the code shown beside Sign in — see `ForgeSignInPending`.
     this.openPage(pending.verificationUri);
     void this.finishForgeSignIn(name, connection, endpoints, clientId, authorization, controller.signal);

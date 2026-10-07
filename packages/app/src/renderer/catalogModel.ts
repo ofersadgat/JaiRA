@@ -4,7 +4,8 @@
 import { useEffect, useState } from "react";
 import type { CatalogSourceView, CatalogStatusView } from "@jaira/shared/browser";
 import { agoLabel } from "./remoteStrip";
-import { invoke } from "./store";
+import { invoke, syncCache } from "./store";
+import { useView } from "./useView";
 
 /** The brand a source's row wears. */
 export const SOURCE_BRAND: Record<string, string> = {
@@ -33,28 +34,23 @@ export interface CatalogState {
 }
 
 /**
- * Read the catalog's status. `stamp` is the last availability check's time: a refresh follows every
- * check, so the status is read again when that moves.
+ * The catalog's status: a view of the window's cache (decision 0018, group 7), read again as the change
+ * log says the configuration or availability moved. `stamp` is the last availability check's time:
+ * a refresh follows every check, so it is read again when that moves.
  */
 export function useCatalogStatus(stamp: number): CatalogState {
-  const [view, setView] = useState<CatalogStatusView | null>(null);
+  const view = useView("catalog:status", undefined).value ?? null;
   const [refreshing, setRefreshing] = useState(false);
   const [now, setNow] = useState(() => Date.now());
 
-  // Read on mount and after every check — and, while a pass is running or a planned source has not
-  // answered yet, again every second and a half until it settles: the refresh that follows a check
-  // lands seconds AFTER it, and nothing else would tell this section it did.
+  // Read again after every check — and, while a pass is running or a planned source has not answered
+  // yet, every second and a half until it settles: the refresh that follows a check lands seconds
+  // AFTER it, and the engine says nothing when it does.
   const [tick, setTick] = useState(0);
   const settling = view === null || view.refreshing || view.sources.some((s) => s.state === "not asked yet");
   useEffect(() => {
-    let live = true;
-    void invoke("catalog:status", undefined)
-      .then((next) => live && setView(next))
-      .catch(() => undefined);
+    if (tick > 0 || stamp > 0) void syncCache().refresh("catalog:status", undefined);
     setNow(Date.now());
-    return () => {
-      live = false;
-    };
   }, [stamp, tick]);
   useEffect(() => {
     if (!settling) return;
@@ -65,9 +61,9 @@ export function useCatalogStatus(stamp: number): CatalogState {
   const refresh = (): void => {
     setRefreshing(true);
     void invoke("catalog:refresh", undefined)
-      .then((next) => {
-        setView(next);
+      .then(() => {
         setNow(Date.now());
+        return syncCache().refresh("catalog:status", undefined);
       })
       .catch(() => undefined)
       .finally(() => setRefreshing(false));

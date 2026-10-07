@@ -2,7 +2,7 @@
 id: engineering/units/project-store
 type: engineering-unit
 status: shipped
-updated: 2026-09-27
+updated: 2026-10-06
 implements: [product/pick-up-where-it-left-off, product/share-processes-across-projects, product/run-history-travels-with-the-repository, ux/patterns/refuse-with-the-reason-and-the-fix]
 layer: data
 owns_contracts: [engineering/contracts/sqlite-schema]
@@ -20,7 +20,7 @@ siblings: [engineering/units/storage-policy, engineering/units/process-claims, e
 
 1. It creates `system/snapshots` and `system/tasks`, so a deleted or never-cloned `system/` is regenerated rather than refused.
 2. It opens `system/jaira.db` with `openDb`.
-3. It calls `applyStorage` before any store exists, so a file-backed concern's statements are prepared against its shadow table.
+3. It calls `applyStorage` before anything reads, so a file-backed concern's files are exported when it has none and imported into the database when they moved since JaiRA last had them; after this the database is the truth ([decision 0018](../decisions/0018-one-truth-per-side.md) §11). A replica gets none of this.
 4. It builds every store on that one connection, handing the journal, task and artifact stores a file log only when their concern is file-backed.
 5. It reads `jobs.orphans`, lets `runtime.recoverInterrupted` mark every `running` task with no live run claim `interrupted`, then calls `jobs.reapStale`.
 
@@ -30,13 +30,13 @@ It deliberately does not own:
 
 - What each store writes: [event-journal](event-journal.md), [operation-record-store](operation-record-store.md), and [task-lifecycle](task-lifecycle.md) for the task row and `recoverInterrupted`.
 - Run claims, orphans and reaping: [process-claims](process-claims.md).
-- Shadow tables, replay and the file formats: [storage-policy](storage-policy.md).
+- Exporting and importing a file-backed concern's files, their fingerprints and the file formats: [storage-policy](storage-policy.md).
 - Paths and the ignore list's place in the layout: [project-layout](project-layout.md) and [jaira-layout](../contracts/jaira-layout.md). Parsing and merging `settings.json`: [project-config](project-config.md).
 - The shared root's `module_approvals` rows, which `approvalsIn` in [module-approvals](module-approvals.md) reads through its own `openDb`.
 
 ## The store is the data layer's entry point, and every host opens a project through it
 
-- Layer `data`, package `@jaira/persistence`. It calls `@jaira/shared` for paths, `parseConfig`, `mergeConfigDocuments` and `refusal`, then `applyStorage`, the replay sources and every store constructor.
+- Layer `data`, package `@jaira/persistence`. It calls `@jaira/shared` for paths, `parseConfig`, `mergeConfigDocuments` and `refusal`, then `applyStorage` with each concern's replay, fingerprint and export, every store constructor, and `keepFingerprints` at `close`.
 - No upstream seam. The engine reaches the stores it builds, never the open.
 - The app opens one `Project` per open directory through `openProject` and the shared root through `openSharedProject`. The CLI opens through `openWithRecoveryNote`, which prints `recovered N interrupted task(s)` and a `process left running by a previous session` warning per orphan.
 - Boundary: derived and committed. The `.gitignore` it writes names the line: `system/jaira.db` with its `-wal` and `-shm` files, `system/logs/`, `system/machine.key` and `.env.local` stay out, and everything else under `system/` is meant to be committed.
@@ -50,7 +50,7 @@ It deliberately does not own:
 | `.jaira/settings.json` initial document | written once by `initProject` as the whole of `defaultConfig()` | the file | Settings, hand edits |
 | `<layer>/.gitignore` | written when absent; `system/machine.key` appended when the file names neither it nor `system/` | the file | the person |
 | `system/jaira.db` schema and `PRAGMA user_version` | created from `SCHEMA` or brought forward by migrations on every open | the database, see [sqlite-schema](../contracts/sqlite-schema.md) | every store |
-| `Project.recovered`, `Project.orphans`, `Project.storage` | computed per open | `task_runtime` and `jobs` rows; the `ShadowReport` | the CLI prints the first two; the app recovers native sessions for `recovered` |
+| `Project.recovered`, `Project.orphans`, `Project.storage` | computed per open | `task_runtime` and `jobs` rows; the `StorageReport`, `{ imported, exported, current }` | the CLI prints the first two; the app recovers native sessions for `recovered` |
 
 ## The invariants keep a project openable and its recovery honest
 

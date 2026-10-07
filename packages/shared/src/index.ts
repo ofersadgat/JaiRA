@@ -67,3 +67,5 @@ export * from "./fastForward";
 export * from "./hostRows";
 export * from "./refusal";
 export * from "./thirdPartyLicenses";
+export * from "./sync";
+export * from "./lazy";

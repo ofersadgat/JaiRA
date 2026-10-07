@@ -124,43 +124,31 @@ describe("artifacts as files", () => {
   });
 });
 
-describe("`both` — the index that survives a close", () => {
+describe("files as JaiRA left them, and moved since", () => {
   const write = (p: Project): void => {
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
     p.runtime.beginTask("t-1", "h", 1);
   };
 
-  it("reuses the persisted index when the files have not moved", () => {
-    // First open has no files at all, so it SEEDS — there is no index to persist yet.
-    const first = project({ tasks: "both" });
+  it("are not read while they are as JaiRA left them: the database is the truth", () => {
+    const first = project({ tasks: "file" });
     write(first);
     first.close();
     open.pop();
 
-    // Second: the files exist now, so it replays — and under `both` writes the result back to
-    // `main` with a fingerprint of what it was built from.
-    const second = project({ tasks: "both" });
-    expect(second.storage.replayed).toMatchObject({ tasks: expect.any(Number) as unknown as number });
-    second.close();
-    open.pop();
-
-    // Third: same files, matching fingerprint, no replay.
-    const third = project({ tasks: "both" });
-    expect(third.storage.reused).toEqual(["tasks"]);
-    expect(third.storage.replayed).toEqual({});
-    expect(third.runtime.get("t-1")?.status).toBe("queued");
+    const second = project({ tasks: "file" });
+    expect(second.storage).toEqual({ imported: {}, exported: {}, current: ["tasks"] });
+    expect(second.runtime.get("t-1")?.status).toBe("queued");
   });
 
-  it("replays instead when a file moved underneath it — the `git pull` case", () => {
-    const first = project({ tasks: "both" });
+  it("are read when one moved underneath — the `git pull` case — for the tasks they speak for", () => {
+    const first = project({ tasks: "file" });
     write(first);
+    createTask(first, { id: "t-2", title: "two", workflow: "w" });
     first.close();
     open.pop();
-    // The open that actually persists an index, so there is one for the pull to invalidate.
-    project({ tasks: "both" });
-    open.pop()?.close();
 
-    // What a pull looks like from here: the file is not what the index was built from.
+    // What a pull looks like from here: the file is not what JaiRA left.
     const file = rowFileFor(systemDir("taskRows"), "t-1");
     writeFileSync(
       file,
@@ -174,21 +162,19 @@ describe("`both` — the index that survives a close", () => {
       "utf8",
     );
 
-    const second = project({ tasks: "both" });
-    expect(second.storage.reused).toEqual([]);
-    expect(second.storage.replayed).toMatchObject({ tasks: expect.any(Number) as unknown as number });
+    const second = project({ tasks: "file" });
+    expect(second.storage.current).toEqual([]);
+    expect(second.storage.imported).toMatchObject({ tasks: expect.any(Number) as unknown as number });
     expect(second.runtime.get("t-1")?.status).toBe("completed");
+    expect(second.runtime.get("t-2")).toBeDefined();
   });
 
-  it("does not persist an index under `file`, which is what makes the two modes different", () => {
-    const first = project({ tasks: "file" });
+  it("`both`, retired, is read as `file`", () => {
+    const first = project({ tasks: "both" });
     write(first);
     first.close();
     open.pop();
-
-    const second = project({ tasks: "file" });
-    expect(second.storage.reused).toEqual([]);
-    expect(second.storage.replayed).toMatchObject({ tasks: expect.any(Number) as unknown as number });
+    expect(project({ tasks: "both" }).storage.current).toEqual(["tasks"]);
   });
 });
 

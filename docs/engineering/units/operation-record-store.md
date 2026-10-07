@@ -2,7 +2,7 @@
 id: engineering/units/operation-record-store
 type: engineering-unit
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-06
 implements: [product/complete-record-of-every-run, product/pick-up-where-it-left-off, product/rewind-to-where-it-went-wrong, product/try-another-direction]
 layer: data
 owns_contracts: []
@@ -36,7 +36,7 @@ It deliberately does not own:
 - The live tail that calls `update` through `recordAt`: [live-turns](live-turns.md).
 - Reading an agent's own session file and folding it into entries: [native-session-capture](native-session-capture.md). Settling a crashed task's `open` records: `recoverInterrupted` in [task-lifecycle](task-lifecycle.md).
 - Choosing a cut point and copying a task's records: [rewind-and-fork](rewind-and-fork.md). Deleting failed records that reported no handle before a resume: `releaseUnconsumedFailures` in [run-load](run-load.md). Deleting pruned history: [history-pruning](history-pruning.md).
-- The conversation file's format and replay: [storage-policy](storage-policy.md).
+- The conversation file's format, its export and its import at open: [storage-policy](storage-policy.md).
 
 ## The store is the data layer's implementation of upstream's session and record ports
 
@@ -45,11 +45,11 @@ It deliberately does not own:
 - Constructed through `sessionStoreFor(project, {taskId})`, which attaches the conversation file log when that concern is file-backed. A store built with `new SqliteSessionStore(db, scope)` writes the table only.
 - The app hands every run and chat turn a `SqliteMemoCache` over the project database. `jaira` hands none, so a `memoize` step is skipped there.
 
-## The table is the truth for records by default, and the conversation file once conversations are file-backed
+## The table is the truth for records, and the conversation file is its export once conversations are file-backed
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `operation_records` | inserted by `append` and `derive`; updated by `update`, `finish`, `correctLineage`, `foldNativeCapture`; deleted by `cutSession` and `dropRecords` | the table under `storage.conversations: db`; the conversation file under `file` and `both` | `recoverInterrupted` settles `open` rows; `forkTask` copies; `releaseUnconsumedFailures`, `deleteTask` and `pruneHistory` delete; conversation-lookup and `load.ts` read |
+| `operation_records` | inserted by `append` and `derive`; updated by `update`, `finish`, `correctLineage`, `foldNativeCapture`; deleted by `cutSession` and `dropRecords` | the table, whatever `storage.conversations` says; under `file` the conversation file is imported over a task's rows at an open that finds the files moved ([decision 0018](../decisions/0018-one-truth-per-side.md) §11) | `recoverInterrupted` settles `open` rows; `forkTask` copies; `releaseUnconsumedFailures`, `deleteTask` and `pruneHistory` delete; conversation-lookup and `load.ts` read |
 | `sessions` | inserted by `branch`, `branchFrom`, `sessionIdOf`, `derive`; updated by `stampSessionHandle` and `cutSession`; deleted with a dropped branch | same as records | `forkTask` copies; `pruneHistory` deletes |
 | `session_names` | inserted by `sessionIdOf`; deleted with a dropped branch | same as records | `forkTask` copies; `deleteTask` and `pruneHistory` delete |
 | `blobs` | written by `dehydrate` on `finish` and `foldNativeCapture`; decremented by `release` on delete | the database, in every storage mode | `forkTask` adds references; `pruneHistory` releases and collects |
@@ -81,7 +81,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | The process is killed mid-call | the row stays `open` with its question and last flushed partial, and the record keeps the provider handle `update` stamped | `recoverInterrupted` settles it `interrupted` at the next open when its task was `running`; the app folds the agent's own session file in when a handle exists; a re-dispatch reopens the row | the interrupted turn shows what it had streamed |
 | The process is killed mid-way through a chat turn | the task was never `running`, so the recovery sweep never settles the record, and it stays `open` | none | the partial turn stays, read as interrupted |
-| Two live calls want one seat, including a chat turn in the app beside a `jaira` resume of the same task | under `storage.conversations: db` the claim index refuses the second; `withSessionPosition` forks once and runs the call on the branch, and a second refusal fails the call. Under a file-backed concern each connection claims alone, see [storage-policy](storage-policy.md) | none needed | the later call's turn continues on a branch |
+| Two live calls want one seat, including a chat turn in the app beside a `jaira` resume of the same task | the claim index refuses the second, whatever `storage.conversations` says; `withSessionPosition` forks once and runs the call on the branch, and a second refusal fails the call | none needed | the later call's turn continues on a branch |
 | A reopened record finds its seat taken while it was dead | the reopen's update hits the claim index and raises `PositionTaken` | the call forks | the turn continues on a branch |
 | A call is retried with the same scoped id | the row is reopened rather than a second row inserted | none needed | one turn, not two |
 | A reader reads a record while its call streams | each write is one statement, so the reader sees a whole partial with status `open`, and `bySession` and replayed history leave it out | none needed | the turn so far shows as in progress |

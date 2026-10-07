@@ -64,7 +64,7 @@ import { ConversationLog, type NameRow, type RecordRow, type SessionRow } from "
 import { createTask } from "./lifecycle";
 import { dropConnectUndo } from "./connectUndo";
 import { pinAt, type Pin } from "./documents";
-import { isFileBacked } from "./shadow";
+import { isFileBacked } from "./fileStorage";
 
 const log = createLogger("jaira.persistence.cut");
 

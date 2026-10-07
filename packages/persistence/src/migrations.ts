@@ -23,6 +23,8 @@
  *  - **Change `SCHEMA` too**, so a fresh database is born in the shape the step leaves an old one in.
  */
 import type { JairaDb } from "./db";
+import { SYNC_SQL } from "./sync";
+import { DEVICE_LAYOUTS_SQL, WINDOW_STATES_SQL } from "./windowStates";
 
 /** The version `SCHEMA` creates a database at. */
 export const SCHEMA_BASELINE = 24;
@@ -71,6 +73,26 @@ UPDATE event_waits SET name = CASE name
   WHEN 'git.checks.failed' THEN 'pipeline.failed'
   ELSE name END;
 `,
+  },
+  {
+    version: 26,
+    note: "decision 0018: the change log readers sync from (sync_changes, written by triggers on every table a reader reads), and the horizon below which its tombstones were dropped (sync_meta)",
+    sql: SYNC_SQL,
+  },
+  {
+    version: 27,
+    note: "decision 0018 §9: a composer's unsent words kept by the engine that owns its conversation (drafts), in the change log so they reach the person's other devices",
+    sql: SYNC_SQL,
+  },
+  {
+    version: 28,
+    note: "decision 0018 §9: where each of a device's windows stood (window_states), so a window opening with nothing of its own stands where the device's most recently used one did",
+    sql: WINDOW_STATES_SQL,
+  },
+  {
+    version: 29,
+    note: "decision 0018 §9: each device's layout (device_layouts) — panes, folds and read marks are the device's, not the machine's",
+    sql: DEVICE_LAYOUTS_SQL,
   },
 ];
 

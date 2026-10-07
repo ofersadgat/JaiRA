@@ -2,7 +2,7 @@
  * One database for every workspace (decision 0013 §4): what each clone sees of it, what an open does
  * to the others, and the once-only merge of the database a clone used to keep.
  */
-import { existsSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -54,6 +54,88 @@ describe("one database, many workspaces", () => {
     expect(a.workspace).toMatch(/^[0-9a-f-]{36}$/);
   });
 
+  it("gives a clone that copied another's id file an id of its own, and the tasks stay where they were made", () => {
+    // A repository that committed `workspace.id`: every clone has the same one (2026-10-06).
+    const aDir = clone("a");
+    const a = openAt(aDir);
+    const task = createTask(a, { title: "made in a", workflow: "w" });
+    const aId = a.workspace;
+    close(a);
+    const bDir = clone("b");
+    writeFileSync(jairaPaths(bDir).workspaceIdFile, readFileSync(jairaPaths(aDir).workspaceIdFile, "utf8"));
+    const b = openAt(bDir);
+    expect(b.workspace).not.toBe(aId);
+    expect(b.runtime.list()).toEqual([]);
+    expect(readFileSync(jairaPaths(bDir).workspaceIdFile, "utf8").trim()).toBe(b.workspace);
+    const again = openAt(aDir);
+    expect(again.runtime.list().map((r) => r.taskId)).toEqual([task.id]);
+  });
+
+  it("takes its id back when the record was moved to a copy, because its tasks' files are here", () => {
+    const aDir = clone("a");
+    const a = openAt(aDir);
+    const task = createTask(a, { title: "made in a", workflow: "w" });
+    const id = a.workspace;
+    close(a);
+    const bDir = clone("b");
+    writeFileSync(jairaPaths(bDir).workspaceIdFile, `${id}
+`);
+    // As the old rule left it: the record re-registered under the copy.
+    const db = openDb(join(home, "system", "jaira.db"));
+    db.prepare(`UPDATE workspaces SET dir = ? WHERE id = ?`).run(bDir, id);
+    db.close();
+    const back = openAt(aDir);
+    expect(back.workspace).toBe(id);
+    expect(back.runtime.list().map((r) => r.taskId)).toEqual([task.id]);
+  });
+
+  it("treats a task file the repository committed as nobody's evidence — it is in every clone", () => {
+    const aDir = clone("a");
+    const a = openAt(aDir);
+    const shared = createTask(a, { title: "committed", workflow: "w" });
+    const mine = createTask(a, { title: "made here", workflow: "w" });
+    const id = a.workspace;
+    close(a);
+    // The copy has the id file and the committed task's file, and not the one made in a.
+    const bDir = clone("b");
+    writeFileSync(jairaPaths(bDir).workspaceIdFile, `${id}
+`);
+    writeFileSync(join(jairaPaths(bDir).tasksDir, `${shared.id}.json`), readFileSync(join(jairaPaths(aDir).tasksDir, `${shared.id}.json`), "utf8"));
+    const b = openAt(bDir);
+    expect(b.workspace).not.toBe(id);
+    close(b);
+    const back = openAt(aDir);
+    expect(back.workspace).toBe(id);
+    expect(back.runtime.list().map((r) => r.taskId).sort()).toEqual([shared.id, mine.id].sort());
+  });
+
+  it("adopts the id that owns its task files when its id file is gone and the record names another directory", () => {
+    const aDir = clone("a");
+    const a = openAt(aDir);
+    const task = createTask(a, { title: "made in a", workflow: "w" });
+    const id = a.workspace;
+    close(a);
+    const db = openDb(join(home, "system", "jaira.db"));
+    db.prepare(`UPDATE workspaces SET dir = ? WHERE id = ?`).run(join(root, "elsewhere"), id);
+    db.close();
+    rmSync(jairaPaths(aDir).workspaceIdFile);
+    const back = openAt(aDir);
+    expect(back.workspace).toBe(id);
+    expect(back.runtime.list().map((r) => r.taskId)).toEqual([task.id]);
+  });
+
+  it("adopts the id its directory is registered under when its id file is gone", () => {
+    const aDir = clone("a");
+    const a = openAt(aDir);
+    const task = createTask(a, { title: "made in a", workflow: "w" });
+    const id = a.workspace;
+    close(a);
+    rmSync(jairaPaths(aDir).workspaceIdFile);
+    const back = openAt(aDir);
+    expect(back.workspace).toBe(id);
+    expect(back.runtime.list().map((r) => r.taskId)).toEqual([task.id]);
+  });
+
   it("lists, reads and acts on only the tasks its own workspace made", () => {
     const a = openAt(clone("a"));
     const b = openAt(clone("b"));
@@ -103,20 +185,22 @@ describe("one database, many workspaces", () => {
 });
 
 describe("a workspace whose records are files", () => {
-  it("rebuilds its own index in the shared database and leaves every other workspace's alone", () => {
+  it("brings in its own files' tasks and leaves every other workspace's alone", () => {
     const a = openAt(clone("a"));
     const inA = createTask(a, { title: "in a", workflow: "w" });
     a.events.recorder(inA.id).record({ type: "instance.entered", instanceId: "1" } as never, 1);
 
     const dir = clone("b");
-    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ storage: { journal: "both" } }), "utf8");
+    writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ storage: { journal: "file" } }), "utf8");
     const b = openAt(dir);
     const inB = createTask(b, { title: "in b", workflow: "w" });
     b.events.recorder(inB.id).record({ type: "instance.entered", instanceId: "1" } as never, 2);
     close(b);
-    // Reopened with its journal on disk: replayed, and written back as the persisted index.
+    // Its database forgot the journal; its files have it, and have moved since they were recorded.
+    a.db.prepare(`DELETE FROM state_machine_events WHERE task_id = ?`).run(inB.id);
+    a.db.prepare(`DELETE FROM storage_index`).run();
     const again = openAt(dir);
-    expect(again.storage.replayed).toEqual({ journal: 1 });
+    expect(again.storage.imported).toEqual({ journal: 1 });
     expect(again.events.list(inB.id).map((e) => e.type)).toEqual(["instance.entered"]);
     expect(a.events.list(inA.id).map((e) => e.type)).toEqual(["instance.entered"]);
     const inMain = (id: string): number =>

@@ -2,7 +2,7 @@
 id: engineering/units/task-worktrees
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 implements: [product/parallel-work-without-collisions, product/large-work-splits-into-independent-pieces, product/work-inside-wsl]
 layer: service
 owns_contracts: []
@@ -48,7 +48,7 @@ It deliberately does not own:
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `task_runtime.worktree_path` | written by `setWorktree` once the directory exists; cleared by `clearWorktree` | the table, or the `taskRows` file when `storage.tasks` is file-backed | `reviewChanges`, `$WORKTREE` reads, file checks in a worktree, `jaira worktree list`, a made task's workspace |
+| `task_runtime.worktree_path` | written by `setWorktree` once the directory exists; cleared by `clearWorktree` | the table; also written to the `taskRows` file when `storage.tasks` is file-backed | `reviewChanges`, `$WORKTREE` reads, file checks in a worktree, `jaira worktree list`, a made task's workspace |
 | `TaskMeta.branch` | read by `ensureWorkspace` | the task file | `createTask` refuses one on the shared root; a fork and a rerun copy the parent's; the fan-out host names a split copy's |
 | `task_runtime.branch` | read by `dependencyBaseOf` | the row, copied from the task file when the task is created | none |
 | The worktree directory and git's record of it | made by `git worktree add`; removed by `git worktree remove` or dropped by `prune` | the repository | agents and people working in it |

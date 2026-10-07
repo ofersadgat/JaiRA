@@ -24,7 +24,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import type { JairaDb } from "./db";
 import { release } from "./blobStore";
 import type { Project } from "./project";
-import { writableColumns } from "./shadow";
+import { writableColumns } from "./fileStorage";
 import { ownerOf, OWNED_BY } from "./workspace";
 
 type Row = Record<string, unknown>;

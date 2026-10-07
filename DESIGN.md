@@ -1106,6 +1106,29 @@ record and spawn is detected and retried, never duplicated silently.
 
 ### 4.4 Storage Policy — files, tables, or both (built 2026-08-24)
 
+> **Amended 2026-10-06 by decision 0018 §11** (`docs/engineering/decisions/0018-one-truth-per-side.md`).
+> The inversion below is retired: **the database is the truth while JaiRA runs, for every concern,**
+> and there are no `TEMP` shadow tables. What this section says about shadows, seeding, `both` and
+> "the file is the truth" is history; the rest (concerns, line shapes, dialects, pruning, what
+> `system/` commits) stands. As built (`persistence/src/fileStorage.ts`, `fileLedger.ts`):
+>
+> - **Modes are `file` and `db`.** `file` also writes the concern to its files as each change is
+>   saved — the journal's line just before its row; a task's, an artifact's and a conversation's
+>   just after, re-read from the table — and never reads them back while running. `both` is read
+>   as `file`.
+> - **At open, per file-backed concern,** its files' fingerprint (size and mtime per file) is
+>   compared with the one `storage_index` recorded for the workspace. No files, or a recorded
+>   `stale` (the concern was opened in `db` since): **export** — each owned task's file is written
+>   afresh from the database. A match: **current** — nothing is read. Otherwise (a pull, a clone, a
+>   crash before a close): **import** — the files are replayed into `TEMP` staging tables (no
+>   foreign keys, no change-log triggers), each task they name has its rows in `main` replaced by
+>   theirs (a task no workspace owns becomes this one's; another workspace's is untouched), and
+>   the staging tables are dropped before anything reads. `seq` and `artifacts.id` are re-minted.
+> - **At close** the fingerprint is recorded only when every file of the concern is as JaiRA left
+>   it (the per-process file ledger); a file something else changed while JaiRA ran keeps the old
+>   fingerprint, so the next open imports it. Reading such a change while running is unbuilt.
+> - `main` keeps its foreign keys, and the position claim holds across processes again.
+
 §4.1 drew the file/table line **once, in code, for everyone**: task metadata is a
 file because a human might edit it, everything else is a table. Two arguments
 retired that as a fixed rule.

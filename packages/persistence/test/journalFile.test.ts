@@ -8,7 +8,7 @@
  * quietly wrong: a merge conflict marker in the middle of a file, a process killed mid-append, a
  * concern switched on for the first time with its history still in the database.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -40,8 +40,11 @@ afterEach(() => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+/** Where a project keeps its journal files. */
+const journalDir = (): string => join(dir, "repo", ".jaira", "system", "journal");
+
 /** A project whose journal is where the caller says. */
-function project(journal: "file" | "db" | "both"): Project {
+function project(journal: "file" | "db"): Project {
   writeFileSync(
     join(dir, "repo", ".jaira", "settings.json"),
     JSON.stringify({ storage: { journal } }),
@@ -110,9 +113,9 @@ describe("the round trip — the file is the truth", () => {
 });
 
 describe("switching a concern on", () => {
-  it("seeds from the database the first time, so the history does not read as deleted", () => {
-    // The flip path. A project that has been running with `journal: db` has its history in the
-    // database and no files at all; the first open after the change has to start from those rows.
+  it("starts its files from the database, so they hold the history the database does", () => {
+    // A project that has been running with `journal: db` has its history in the database and no
+    // files at all; the first open after the change writes them (decision 0018 §11).
     const before = project("db");
     createTask(before, { id: "t-1", title: "one", workflow: "w" });
     record(before, "t-1", ["a", "b"]);
@@ -120,33 +123,71 @@ describe("switching a concern on", () => {
     open.pop();
 
     const after = project("file");
-    expect(after.storage.shadowed).toEqual(["state_machine_events"]);
-    expect(after.storage.seeded).toEqual({ state_machine_events: 2 });
+    expect(after.storage.exported).toEqual({ journal: 2 });
+    expect(readJournalFile(journalFileFor(journalDir(), "t-1")).map((l) => l.type)).toEqual(["a", "b"]);
     expect(after.events.list("t-1").map((e) => e.type)).toEqual(["a", "b"]);
   });
+});
 
-  it("prefers the files once there are any, because that is what truth means", () => {
+describe("the database is the truth while JaiRA runs", () => {
+  it("reads nothing from files as JaiRA left them, and what they say when they moved since", () => {
     const p = project("file");
     createTask(p, { id: "t-1", title: "one", workflow: "w" });
-    record(p, "t-1", ["from-the-file"]);
+    record(p, "t-1", ["written"]);
     p.close();
     open.pop();
 
-    // A row only `main` has — the state a flip leaves behind, and exactly what must NOT win.
-    const stale = project("file");
-    stale.db
-      .prepare(
-        `INSERT INTO main.state_machine_events (task_id, type, payload_json, created_at)
-         VALUES ('t-1', 'from-the-database', '{}', 1)`,
-      )
-      .run();
-    stale.close();
+    // A row the files do not have: the database is the truth, so it stands while the files are as left.
+    const kept = project("file");
+    expect(kept.storage.current).toEqual(["journal"]);
+    kept.db.prepare(`INSERT INTO state_machine_events (task_id, type, payload_json, created_at) VALUES ('t-1', 'only-in-the-database', '{}', 2)`).run();
+    kept.close();
+    open.pop();
+    const still = project("file");
+    expect(still.storage.current).toEqual(["journal"]);
+    expect(still.events.list("t-1").map((e) => e.type)).toEqual(["written", "only-in-the-database"]);
+    still.close();
     open.pop();
 
-    const reopened = project("file");
-    expect(reopened.storage.replayed).toEqual({ journal: 1 });
-    expect(reopened.storage.seeded).toEqual({});
-    expect(reopened.events.list("t-1").map((e) => e.type)).toEqual(["from-the-file"]);
+    // A pull moved the file: what it says of its task is brought in, in place of the task's rows.
+    appendFileSync(journalFileFor(journalDir(), "t-1"), JSON.stringify({ type: "pulled", timestamp: "2026-01-01T00:00:00.000Z", taskId: "t-1", event: { type: "pulled" } }) + "\n", "utf8");
+    const pulled = project("file");
+    expect(pulled.storage.imported).toEqual({ journal: 2 });
+    expect(pulled.events.list("t-1").map((e) => e.type)).toEqual(["written", "pulled"]);
+  });
+
+  it("reads in at the next open a pull that landed while JaiRA ran — the close does not take it as its own", () => {
+    const p = project("file");
+    createTask(p, { id: "t-1", title: "one", workflow: "w" });
+    record(p, "t-1", ["mine"]);
+    // A pull, mid-session, and JaiRA writing on after it: the file is no longer only what JaiRA wrote.
+    appendFileSync(journalFileFor(journalDir(), "t-1"), JSON.stringify({ type: "pulled", timestamp: "2026-01-01T00:00:00.000Z", taskId: "t-1", event: { type: "pulled" } }) + "\n", "utf8");
+    record(p, "t-1", ["mine-after"]);
+    p.close();
+    open.pop();
+
+    const next = project("file");
+    expect(next.storage.imported).toEqual({ journal: 3 });
+    expect(next.events.list("t-1").map((e) => e.type)).toEqual(["mine", "pulled", "mine-after"]);
+  });
+
+  it("writes its files afresh when put in them again, after a spell in the database alone", () => {
+    const p = project("file");
+    createTask(p, { id: "t-1", title: "one", workflow: "w" });
+    record(p, "t-1", ["while-filed"]);
+    p.close();
+    open.pop();
+
+    const alone = project("db");
+    record(alone, "t-1", ["while-alone"]);
+    alone.close();
+    open.pop();
+
+    // The files stood still and say nothing of what came after: they are written from the database.
+    const again = project("file");
+    expect(again.storage.exported).toEqual({ journal: 2 });
+    expect(readJournalFile(journalFileFor(journalDir(), "t-1")).map((l) => l.type)).toEqual(["while-filed", "while-alone"]);
+    expect(again.events.list("t-1").map((e) => e.type)).toEqual(["while-filed", "while-alone"]);
   });
 });
 

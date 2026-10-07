@@ -2,7 +2,7 @@
 id: engineering/contracts/settings-json
 type: engineering-contract
 status: shipped
-updated: 2026-09-27
+updated: 2026-10-06
 visibility: public
 kind: format
 owned_by: [engineering/units/project-config]
@@ -66,7 +66,7 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 | `models` | object | no | how each route prefix is reached, and named presets |
 | `executors` | object of operation nodes | no | sparse overlays over derived executor trees; only `executors.default` is used |
 | `artifacts` | object | no | where artifact bytes land and when a producer asks first |
-| `storage` | object | no | whether each concern's truth is a file, the database or both |
+| `storage` | object | no | whether each concern is also written to files beside the database |
 | `memo` | object | no | `{enabled?: boolean}`, default `false`; parsed and read by nothing |
 | `execEnvironment` | `"windows"` or `{wsl: non-empty string}` | no, default `"windows"` | where commands, git and agents run; keys beside `wsl` are ignored |
 | `agents` | object | no | the agent runtimes this project registers |
@@ -158,7 +158,7 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `artifacts.dir` | non-empty string | no, default `"artifacts"` | what `$ARTIFACT_DIR` expands to |
 | `artifacts.inlineMaxBytes` | non-negative integer | no, default `65536` | content below this is kept inline as well as placed; not a size limit |
 | `artifacts.askAboveBytes` | non-negative integer | no, default `4194304` | producing more than this asks a person; `0` never asks |
-| `storage.journal`, `storage.conversations`, `storage.tasks`, `storage.artifacts` | `"file"`, `"db"` or `"both"` | no, default `"db"` | where that concern's truth is; the modes are [storage-policy](../units/storage-policy.md) |
+| `storage.journal`, `storage.conversations`, `storage.tasks`, `storage.artifacts` | `"file"` or `"db"` | no, default `"db"` | `file` also writes that concern to files as each change is saved, and imports them at open when they moved; `db` keeps it in the database alone, which is the truth either way ([decision 0018](../decisions/0018-one-truth-per-side.md) §11). The retired `"both"` is read as `"file"`; the modes are [storage-policy](../units/storage-policy.md) |
 | `storage.format` | `"claude"` or `"codex"` | no, default `"claude"` | the line shape a file-backed conversation is written in |
 | `workflows.path` | non-empty array of non-empty strings | no | each entry starts with `$` or is absolute; absent means the layer roots' `workflows` and `functions` in order |
 | `files.hidden` | array of non-empty strings | no | glob rules this layer ADDS, trimmed, order kept; the effective list is the built-in defaults, then the shared layer's, the project's and the person's, and the last rule to match a path decides; absent and `[]` both add nothing |
@@ -305,4 +305,5 @@ A `credential` anywhere must be a non-empty string with no whitespace.
 - A `null` in the project layer replaces the base's block and then fails parse.
 - An `execEnvironment` object in one layer and `"windows"` in the other resolves to whichever the project layer holds.
 - A project created by `initProject` holds every default, so it overrides the shared layer's `storage`, `memo`, `artifacts` and `execEnvironment` until those keys are deleted. The personal layer is laid over it all the same.
-- `STORAGE_CONCERN_TABLES.conversations` reads `operation_records + session_positions`, and the comment on `both` says it has no staleness check. The concern is `operation_records`, `sessions` and `session_names`, and `both` replays when the file's fingerprint moves.
+- `STORAGE_CONCERN_TABLES.conversations` reads `operation_records + session_positions`. The concern is `operation_records`, `sessions` and `session_names`.
+- `"both"` is not in the schema's `enum`, yet a layer that says it parses, read as `"file"`.
