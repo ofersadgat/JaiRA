@@ -308,7 +308,10 @@ Each step ends with the window working, and with a check in the real app in the 
    `lazy:value` answers a hash from memory, then from the blob table. `useFilled` fills one where it is drawn.
 4. **The window's own data** — drafts per person in the owning engine (`drafts`, the later write by
    its clock wins), and where each window stood per device and window (`window_states`): a reload finds
-   its own window's place, a fresh start the device's most recently used one.
+   its own window's place, a fresh start the device's most recently used one. The layout — panes,
+   folds, read marks — is the device's too (`device_layouts`, `layout:get`/`layout:keep`): a device
+   with none yet starts from the machine's in `user-settings.json`. A phone is named by the id it pairs
+   as, from its keystore, since it has no `localStorage`.
 5. **Machines** — a copy of another machine follows its `sync:changed`: that machine's own tasks
    pulled as they move, the whole machine asked again after a gap, a deletion or a whole page. The second
    hop is the copy's rows landing in this engine's database, whose own log tells its windows.

@@ -127,12 +127,29 @@ import {
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
 import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
-import { lastAddress, readAddress, writeAddress, type WindowIo } from "./windowAddress";
+import { deviceIdReady, lastAddress, readAddress, writeAddress, type WindowIo } from "./windowAddress";
 
 /** The engine as the window's address module needs it — its copy of where each window stood. */
+/** Keep this device's layout with the engine (decision 0018 §9). Quiet: a cache of gestures. */
+function keepLayout(ui: JairaUiState): void {
+  void deviceIdReady()
+    .then((device) => invoke("layout:keep", { device, ui: ui as unknown as JsonValue }))
+    .catch(() => undefined);
+}
+
+/** This device's layout as the engine keeps it, if it has one. */
+async function layoutOf(): Promise<JairaUiState | undefined> {
+  try {
+    const kept = await invoke("layout:get", { device: await deviceIdReady() });
+    return kept === null ? undefined : parseUiState(kept);
+  } catch {
+    return undefined;
+  }
+}
+
 const windowIo: WindowIo = { invoke: ((channel: "window:keep" | "window:last", request: never) => invoke(channel, request)) as WindowIo["invoke"] };
 import { applyAppearance, typographyOf, useSystemDark } from "./appearance";
-import { surfaceOf } from "@jaira/shared/browser";
+import { parseUiState, surfaceOf } from "@jaira/shared/browser";
 import { DEFAULT_CONFIG_LAYER } from "./settingsSections";
 import { lookOf, lookWith, rendererWrites, rendererWritten, targetLayerOf } from "./appearanceLayer";
 import { applyEditors } from "./editorLook";
@@ -1294,9 +1311,9 @@ export function useApp() {
     if (uiWrite.current === null) return;
     clearTimeout(uiWrite.current);
     uiWrite.current = null;
-    // Quiet on failure, and deliberately so: this is a cache of gestures. A preferences file that
-    // cannot be written is not worth a toast over a window whose layout is already correct.
-    void invoke("settings:write", { ui: ref.current.settings.ui }).catch(() => undefined);
+    // Quiet on failure, and deliberately so: this is a cache of gestures. A layout that cannot be kept
+    // is not worth a toast over a window whose layout is already correct.
+    keepLayout(ref.current.settings.ui);
   }, []);
 
   /**
@@ -1313,7 +1330,7 @@ export function useApp() {
       if (uiWrite.current !== null) clearTimeout(uiWrite.current);
       uiWrite.current = setTimeout(() => {
         uiWrite.current = null;
-        void invoke("settings:write", { ui: ref.current.settings.ui }).catch(() => undefined);
+        keepLayout(ref.current.settings.ui);
       }, UI_WRITE_DELAY);
     },
     [patch],
@@ -2082,11 +2099,15 @@ export function useApp() {
   const refreshSettings = useCallback(async () => {
     try {
       const settings = await invoke("settings:read", undefined);
-      // The LAYOUT is taken from the file once and owned here afterwards. This runs again on every
-      // project open, and by then the window has a layout that the file may be up to
-      // {@link UI_WRITE_DELAY} behind — so re-reading it would occasionally snap a divider back to
-      // where it was before the drag that opened the project.
-      patch({ settings: uiHydrated.current ? keepingUi(settings) : settings });
+      // The LAYOUT is taken once and owned here afterwards. This runs again on every project open, and
+      // by then the window has a layout the engine may be up to {@link UI_WRITE_DELAY} behind — so
+      // re-reading it would occasionally snap a divider back to where it was before the drag that
+      // opened the project. It is the DEVICE's (decision 0018 §9): kept by the engine per device, and
+      // a device with none yet starts from the machine's, in the settings file, which it keeps on.
+      if (uiHydrated.current) return patch({ settings: keepingUi(settings) });
+      const own = await layoutOf();
+      patch({ settings: own !== undefined ? { ...settings, ui: own } : settings });
+      if (own === undefined) keepLayout(settings.ui);
       uiHydrated.current = true;
     } catch (e) {
       fail(e);

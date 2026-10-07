@@ -191,6 +191,8 @@ import {
   keepDraft,
   keepWindowState,
   lastWindowState,
+  deviceLayout,
+  keepDeviceLayout,
   changesSince,
   pruneTombstones,
   syncHorizon,
@@ -3669,6 +3671,17 @@ export class AppService {
   windowLast(device: string): unknown {
     const db = this.syncDb();
     return db === undefined ? null : lastWindowState(db, device);
+  }
+
+  /** A device's layout (decision 0018 §9) — its own, not the machine's. */
+  layoutGet(device: string): unknown {
+    const db = this.syncDb();
+    return db === undefined ? null : deviceLayout(db, device);
+  }
+
+  layoutKeep(device: string, ui: unknown): void {
+    const db = this.syncDb();
+    if (db !== undefined) keepDeviceLayout(db, device, ui);
   }
 
   draftPut(key: string, taskId: string | null, text: string): void {

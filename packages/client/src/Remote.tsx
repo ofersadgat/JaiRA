@@ -3,6 +3,7 @@ import { AppState, Linking, Pressable, Text, View } from "react-native";
 import { engineUrlOf, hostOfUrl, typedLanMachine, type LanAnnouncement } from "@jaira/shared/browser";
 import { Connect, connectionLost, connectionRestored, phoneMachines, remoteStatus, type NearbyAttempt, type NearbyStep } from "@jaira/universal";
 import { setBridge } from "@jaira/ui/store";
+import { deviceIdFrom } from "@jaira/ui/windowAddress";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { DEVICE_KIND, deviceLabel } from "../bridges/deviceInfo";
 import { engineBridge, pairDevice, type EngineBridge } from "../bridges/engineBridge";
@@ -99,6 +100,9 @@ export function Remote({ link, frame, shell = false, children }: { link?: Partia
   // shell first draws.
   const fleet = useFleetLinks(ungated);
   useState(() => {
+    // This device is the one it pairs as — kept in the keystore on a phone, which has no localStorage —
+    // for what the window keeps of its own (where it stood, its layout).
+    if (!electron) deviceIdFrom(deviceId());
     if (ungated) setBridge(fleet.bridge, { sources: fleet.sources, ...(phoneMirror !== undefined ? { mirror: phoneMirror } : {}) });
     return true;
   });

@@ -24,7 +24,7 @@
  */
 import type { JairaDb } from "./db";
 import { SYNC_SQL } from "./sync";
-import { WINDOW_STATES_SQL } from "./windowStates";
+import { DEVICE_LAYOUTS_SQL, WINDOW_STATES_SQL } from "./windowStates";
 
 /** The version `SCHEMA` creates a database at. */
 export const SCHEMA_BASELINE = 24;
@@ -88,6 +88,11 @@ UPDATE event_waits SET name = CASE name
     version: 28,
     note: "decision 0018 §9: where each of a device's windows stood (window_states), so a window opening with nothing of its own stands where the device's most recently used one did",
     sql: WINDOW_STATES_SQL,
+  },
+  {
+    version: 29,
+    note: "decision 0018 §9: each device's layout (device_layouts) — panes, folds and read marks are the device's, not the machine's",
+    sql: DEVICE_LAYOUTS_SQL,
   },
 ];
 

@@ -162,6 +162,8 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "draft:get": ((request: { key: string }) => service.draftGet(request.key)) as Handler,
     "window:keep": ((request: { device: string; window: string; state: unknown }) => service.windowKeep(request.device, request.window, request.state)) as Handler,
     "window:last": ((request: { device: string }) => service.windowLast(request.device)) as Handler,
+    "layout:get": ((request: { device: string }) => service.layoutGet(request.device)) as Handler,
+    "layout:keep": ((request: { device: string; ui: unknown }) => service.layoutKeep(request.device, request.ui)) as Handler,
     "draft:put": ((request: { key: string; taskId?: string; text: string }) => service.draftPut(request.key, request.taskId ?? null, request.text)) as Handler,
     "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
     "run:records": ((request: Parameters<typeof service.runRecords>[0]) => service.runRecords(request)) as Handler,

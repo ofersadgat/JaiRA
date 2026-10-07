@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { openDb, type JairaDb } from "../src/db";
-import { keepWindowState, lastWindowState } from "../src/windowStates";
+import { deviceLayout, keepDeviceLayout, keepWindowState, lastWindowState } from "../src/windowStates";
 
 let dir: string;
 let db: JairaDb;
@@ -34,4 +34,13 @@ it("answers the state of the device's most recently used window, and nothing of 
 it("keeps a device's newest windows only", () => {
   for (let i = 0; i < 5; i++) keepWindowState(db, "desk", `w${i}`, { i }, i, 3);
   expect((db.prepare(`SELECT window FROM window_states WHERE device = 'desk' ORDER BY used_at`).all() as Array<{ window: string }>).map((r) => r.window)).toEqual(["w2", "w3", "w4"]);
+});
+
+it("keeps each device's layout as its own, the latest standing", () => {
+  expect(deviceLayout(db, "desk")).toBeNull();
+  keepDeviceLayout(db, "desk", { panes: { sidebar: 250 } }, 1);
+  keepDeviceLayout(db, "phone", { panes: { sidebar: 0 } }, 2);
+  keepDeviceLayout(db, "desk", { panes: { sidebar: 310 } }, 3);
+  expect(deviceLayout(db, "desk")).toEqual({ panes: { sidebar: 310 } });
+  expect(deviceLayout(db, "phone")).toEqual({ panes: { sidebar: 0 } });
 });

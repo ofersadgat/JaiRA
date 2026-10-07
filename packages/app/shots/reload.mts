@@ -103,6 +103,10 @@ async function main(): Promise<void> {
     await settle(1500);
     const kept = await app.ipc<{ text: string } | null>("draft:get", { key: `chat:${ours.taskId}`, taskId: ours.taskId });
     if (kept?.text !== DRAFT) throw new Error(`the engine kept ${JSON.stringify(kept)} for the draft`);
+    // The layout is the device's, kept by the engine under the device's id (decision 0018 §9).
+    const device = await app.evaluate<string>(`localStorage.getItem("jaira.device")`);
+    const layout = await app.ipc<unknown>("layout:get", { device });
+    if (layout === null || typeof layout !== "object") throw new Error(`the engine kept no layout for this device (${device})`);
 
     // The app quit and started again: no tab of its own to come back to, so the device's last window's place.
     await app.close();

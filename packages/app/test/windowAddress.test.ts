@@ -2,7 +2,7 @@
  * Where the window stands survives a reload — `windowAddress.ts`.
  */
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { deviceId, lastAddress, readAddress, windowId, writeAddress, type WindowIo } from "../src/renderer/windowAddress";
+import { deviceId, deviceIdFrom, deviceIdReady, lastAddress, readAddress, windowId, writeAddress, type WindowIo } from "../src/renderer/windowAddress";
 
 let stored: Map<string, string>;
 let local: Map<string, string>;
@@ -74,5 +74,20 @@ describe("the engine's copy", () => {
     stored.clear();
     expect(deviceId()).toBe(device);
     expect(windowId()).not.toBe(window);
+  });
+});
+
+describe("the device", () => {
+  it("is held for the run where no storage keeps it — a phone has none", () => {
+    delete (globalThis as { localStorage?: unknown }).localStorage;
+    delete (globalThis as { sessionStorage?: unknown }).sessionStorage;
+    expect(deviceId()).toBe(deviceId());
+    expect(windowId()).toBe(windowId());
+  });
+
+  it("is the one its host names, once the host has said", async () => {
+    deviceIdFrom(Promise.resolve("phone-from-its-keystore"));
+    expect(await deviceIdReady()).toBe("phone-from-its-keystore");
+    expect(deviceId()).toBe("phone-from-its-keystore");
   });
 });

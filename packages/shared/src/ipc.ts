@@ -1598,6 +1598,9 @@ export interface IpcContract {
    */
   "window:keep": { request: { device: string; window: string; state: JsonValue }; response: void };
   "window:last": { request: { device: string }; response: JsonValue | null };
+  /** A device's layout (decision 0018 §9): its panes, folds and read marks, kept per device. */
+  "layout:get": { request: { device: string }; response: JsonValue | null };
+  "layout:keep": { request: { device: string; ui: JsonValue }; response: void };
   /** The string a `$lazy` placeholder stands for, by its hash (decision 0018 §6). */
   "lazy:value": { request: { hash: string }; response: string };
   "task:detail": { request: { taskId: string; project?: string }; response: TaskDetail };
@@ -2386,6 +2389,8 @@ export const IPC_CHANNELS = [
   "draft:put",
   "window:keep",
   "window:last",
+  "layout:get",
+  "layout:keep",
   "task:detail",
   "task:create",
   "task:start",

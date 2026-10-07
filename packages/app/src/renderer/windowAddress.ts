@@ -33,21 +33,52 @@ export interface WindowIo {
   invoke(channel: "window:last", request: { device: string }): Promise<JsonValue | null>;
 }
 
+/** Ids made where no storage keeps them (a phone has none): the same for the whole run. */
+const held = new Map<string, string>();
+const newId = (): string => globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+
 function idIn(storage: Storage | undefined, key: string): string {
   try {
     const known = storage?.getItem(key);
     if (known !== null && known !== undefined && known !== "") return known;
-    const made = globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
-    storage?.setItem(key, made);
-    return made;
+    if (storage !== undefined) {
+      const made = newId();
+      storage.setItem(key, made);
+      if (storage.getItem(key) === made) return made;
+    }
   } catch {
-    return "unknown";
+    // Refused or gone: held for the run below.
   }
+  let id = held.get(key);
+  if (id === undefined) held.set(key, (id = newId()));
+  return id;
 }
 
-/** This install's or browser profile's id. */
-export const deviceId = (): string => idIn(globalThis.localStorage, DEVICE);
-/** This window's id. */
+let device: string | undefined;
+let deviceFrom: Promise<unknown> | undefined;
+
+/**
+ * Name this device from the host's own record of it — a phone's keystore (`savedPairing`), which a
+ * phone has where a browser has \`localStorage\` — before the window reads or writes anything of its own.
+ */
+export function deviceIdFrom(source: Promise<string>): void {
+  deviceFrom = source.then(
+    (id) => void (device = id),
+    () => undefined,
+  );
+}
+
+/**
+ * This install's or browser profile's id — the host's, when it named one; else kept in `localStorage`,
+ * or held for the run where nothing keeps it.
+ */
+export const deviceId = (): string => device ?? idIn(globalThis.localStorage, DEVICE);
+/** This device's id, once the host has said what it is. */
+export async function deviceIdReady(): Promise<string> {
+  if (deviceFrom !== undefined) await deviceFrom;
+  return deviceId();
+}
+/** This window's id: kept in `sessionStorage`, so a reload is the same window; held for the run where nothing keeps it. */
 export const windowId = (): string => idIn(globalThis.sessionStorage, WINDOW);
 
 function asAddress(saved: unknown): WindowAddress | null {
@@ -70,7 +101,7 @@ export function readAddress(): WindowAddress | null {
 /** Where the device's most recently used window stood — for a window with nothing of its own. */
 export async function lastAddress(io: WindowIo): Promise<WindowAddress | null> {
   try {
-    return asAddress(await io.invoke("window:last", { device: deviceId() }));
+    return asAddress(await io.invoke("window:last", { device: await deviceIdReady() }));
   } catch {
     return null;
   }
@@ -87,5 +118,5 @@ export function writeAddress(address: WindowAddress, io?: WindowIo): void {
   }
   if (io === undefined) return;
   clearTimeout(keeping);
-  keeping = setTimeout(() => void io.invoke("window:keep", { device: deviceId(), window: windowId(), state: address as unknown as JsonValue }).catch(() => undefined), 500);
+  keeping = setTimeout(() => void deviceIdReady().then((id) => io.invoke("window:keep", { device: id, window: windowId(), state: address as unknown as JsonValue })).catch(() => undefined), 500);
 }
