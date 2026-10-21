@@ -386,6 +386,17 @@ export function healthFixLabel(action: HealthAction): string {
 }
 
 /**
+ * What an item's × does, as its tooltip says it (main's `health.ts`): a log count is CLEARED; a lost
+ * tool — every Connections item — is forgotten as having worked, so only working and then failing
+ * again brings it back; anything else is hidden until it clears and happens again.
+ */
+export function healthDismissWords(item: Pick<HealthItem, "id" | "page">): string {
+  if (item.id === LOG_ERRORS_ID || item.id === LOG_WARNINGS_ID) return "Dismiss: clears the count";
+  if (item.page === "connections") return "Dismiss: shown again only if it works and then stops again";
+  return "Dismiss: hide until it happens again";
+}
+
+/**
  * "since 14:12" for an error — something that stopped and is still stopped — and "at 15:20" for a
  * warning, which is a thing that failed once. Another day's adds the date.
  */

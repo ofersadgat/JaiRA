@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { HealthItem, HealthPage } from "@jaira/shared/browser";
 import { PILL_GLYPH } from "@jaira/ui/pillModel";
-import { healthFixLabel, healthGroups, healthTally, sinceWords } from "@jaira/ui/updatesModel";
+import { healthDismissWords, healthFixLabel, healthGroups, healthTally, sinceWords } from "@jaira/ui/updatesModel";
 import { dismissAllHealth, dismissHealth } from "@jaira/ui/updatesStore";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { Press, Txt, edge, lengthToken, padToken, useHover } from "../../primitives";
@@ -73,9 +73,6 @@ export function HealthCard({ items, onFix, onOpenPage }: { items: readonly Healt
   );
 }
 
-/** A log count is CLEARED by dismissing it; a problem is hidden until it clears and happens again. */
-const dismissWords = (item: HealthItem): string => (item.id.startsWith("log:") ? "Dismiss: clears the count" : "Dismiss: hide until it happens again");
-
 /** A row: the mark, what and since when, the fix, and the × while it is under the pointer. */
 function Row({ item, onFix }: { item: HealthItem; onFix: (item: HealthItem) => void }): JSX.Element {
   const t = useTokens();
@@ -108,8 +105,8 @@ function Row({ item, onFix }: { item: HealthItem; onFix: (item: HealthItem) => v
       ) : null}
       <Press
         onPress={() => dismissHealth(item.id)}
-        title={dismissWords(item)}
-        label={dismissWords(item)}
+        title={healthDismissWords(item)}
+        label={healthDismissWords(item)}
         width={20}
         height={20}
         flexShrink={0}

@@ -2,7 +2,7 @@ import { createContext, useContext, type JSX } from "react";
 import { View } from "@tamagui/core";
 import type { HealthItem, HealthPage } from "@jaira/shared/browser";
 import type { ForgeOAuth } from "@jaira/ui/settingsShell";
-import { healthFixLabel, sinceWords } from "@jaira/ui/updatesModel";
+import { healthDismissWords, healthFixLabel, sinceWords } from "@jaira/ui/updatesModel";
 import { dismissHealth } from "@jaira/ui/updatesStore";
 import { Press, Txt, useHover } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -46,7 +46,11 @@ export function NeedsAttention({ page }: { page: HealthPage }): JSX.Element | nu
       <SettingsSection
         id="attention"
         title="Needs attention"
-        info="What was working and stopped, and what failed and can be tried again. Each goes away by itself once the check that raised it passes, or when you dismiss it."
+        info={
+          page === "connections"
+            ? "What was working here and stopped. Each goes away by itself once its check passes again; dismissed, it is shown again only if it works and then stops again."
+            : "What was working and stopped, and what failed and can be tried again. Each goes away by itself once the check that raised it passes, or when you dismiss it."
+        }
       >
         {mine.map((item, i) => (
           <Problem key={item.id} item={item} first={i === 0} last={i === mine.length - 1} onFix={fixHealth} />
@@ -55,9 +59,6 @@ export function NeedsAttention({ page }: { page: HealthPage }): JSX.Element | nu
     </SettingsLayerContext.Provider>
   );
 }
-
-/** A log count is CLEARED by dismissing it; a problem is hidden until it clears and happens again. */
-const dismissWords = (item: HealthItem): string => (item.id.startsWith("log:") ? "Dismiss: clears the count" : "Dismiss: hide until it happens again");
 
 function Problem({ item, first, last, onFix }: { item: HealthItem; first: boolean; last: boolean; onFix: (item: HealthItem) => void }): JSX.Element {
   const t = useTokens();
@@ -94,8 +95,8 @@ function Problem({ item, first, last, onFix }: { item: HealthItem; first: boolea
             ) : null}
             <Press
               onPress={() => dismissHealth(item.id)}
-              label={dismissWords(item)}
-              title={dismissWords(item)}
+              label={healthDismissWords(item)}
+              title={healthDismissWords(item)}
               width={20}
               height={20}
               alignItems="center"

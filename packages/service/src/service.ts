@@ -9620,8 +9620,8 @@ export class AppService {
     ]);
     this.scheduleForgeRenewal(marks);
     // A route or a forge connection that worked and now does not (a key revoked, a sign-in expired).
-    this.health.observe("route", routes, (name) => ({ title: ROUTE_TITLES[name] ?? name, action: "check", subject: name }));
-    this.health.observe("forge", forges ?? [], (name) => {
+    this.health.observe("route", where, routes, (name) => ({ title: ROUTE_TITLES[name] ?? name, action: "check", subject: name }));
+    this.health.observe("forge", where, forges ?? [], (name) => {
       const forge = forges?.find((f) => f.name === name);
       return { title: forge !== undefined ? `${name} (${forge.host})` : name, action: "sign-in", subject: name };
     });
@@ -9653,6 +9653,7 @@ export class AppService {
   /**
    * The default executor's tree, resolved for this configuration and this machine.
    *
+    const where = this.healthScope();
    * One place, so every UI-initiated operation — starting a task, proposing workflow changes,
    * summarizing a conversation — gets the SAME executor. They used to build their own from the same
    * ingredients, which is a coincidence rather than a guarantee.
@@ -9735,13 +9736,22 @@ export class AppService {
     // reason to re-lint the authoring surface.
     for (const result of results) this.lastProbes.set(result.name, result);
     // An agent that worked and now does not — a token that expired — is one of Settings' errors.
-    this.health.observe("executor", results, (name) => ({
+    this.health.observe("executor", where, results, (name) => ({
       title: EXECUTOR_TITLES[name] ?? name,
       ...(signInCommand(name, wanted.find((info) => info.name === name)?.command) !== undefined ? { action: "sign-in" as const } : { action: "check" as const }),
       subject: name,
     }));
     // A login that was not there before — signed in here or in a terminal — has its usage read now.
     this.limits.noticeAccounts();
+  /**
+   * The configuration a check reads, as the health board remembers what worked by: the one project
+   * open, or `""` for the shared root while none or several are — the same choice
+   * {@link effectiveConfig} and {@link secretResolver} make.
+   */
+  private healthScope(): string {
+    return this.sessionOf()?.key ?? "";
+  }
+
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return results;
   }
@@ -9769,6 +9779,7 @@ export class AppService {
         abortSignal: controller.signal,
       });
       if (outcome.ok) {
+    const where = this.healthScope();
         this.signInRefusals.delete(name);
         // Read even when it is the same login as before: the check below reads it.
         this.limits.signedIn(accountOfRoute(name));

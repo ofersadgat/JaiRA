@@ -7,8 +7,10 @@
  * An ERROR is something that worked and stopped: an agent, a model route or a forge connection a check
  * once found working and now finds failing, or errors written to the log since the person last dismissed
  * them (warnings written to the log count as warnings).
- * A tool that never worked on this machine is not one — it was never available to lose. A WARNING is a
- * thing that did not happen and can be tried again: a plugin or update download, an update check.
+ * A tool that never worked where it is checked — the one project open, or the shared root while none or
+ * several are — is not one: it was never available to lose. Nor is one the person dismissed, until a
+ * check sees it work again. A WARNING is a thing that did not happen and can be tried again: a plugin or
+ * update download, an update check.
  *
  * The main process keeps the board (`packages/app/src/main/health.ts`) and pushes it whole on every
  * change; the window draws a count on the Settings row and each item on the page it belongs to.

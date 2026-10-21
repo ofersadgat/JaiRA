@@ -10,6 +10,7 @@ import {
   buildDownloadBytes,
   busyWords,
   healthCounts,
+  healthDismissWords,
   healthFixLabel,
   healthGroups,
   healthTally,
@@ -205,6 +206,16 @@ describe("Settings' warnings and errors", () => {
     expect(healthFixLabel("sign-in")).toBe("Sign in again");
     expect(healthFixLabel("open-logs")).toBe("Open logs");
     expect(healthFixLabel("retry-plugin")).toBe("Try again");
+  });
+
+  it("say what each × does: a log count clears, a lost tool waits to work and stop again, the rest waits to happen again", () => {
+    expect(items.map(healthDismissWords)).toEqual([
+      "Dismiss: shown again only if it works and then stops again",
+      "Dismiss: shown again only if it works and then stops again",
+      "Dismiss: clears the count",
+      "Dismiss: hide until it happens again",
+      "Dismiss: hide until it happens again",
+    ]);
   });
 });
 
