@@ -611,7 +611,7 @@ string.
 | `claude-code` | Delegated agent, in-process SDK | `policyEnforcement: "callback"` |
 | `claude-cli` | Delegated agent, `claude` subprocess | `policyEnforcement: "callback"` via the MCP bridge |
 | `codex-cli` | Delegated agent, `codex exec` subprocess | `policyEnforcement: "config"` — see below |
-| `generic-cli` | Non-Claude agent CLI | Registered only for what `config.agents.genericCli` declares, under the name it declares; **`policyEnforcement: "none"`**, so §5.1 refuses it whenever the policy can escalate to a human — which it can exactly while `functions.bash.builtins` is on |
+| `generic-cli` | Non-Claude agent CLI | Registered only for what `config.agents.genericCli` declares, under the name it declares; **`policyEnforcement: "none"`**, so §5.1 refuses it whenever the policy can escalate to a human — which it can exactly while `functions.shell.builtins` is on |
 | `run_command` | Run one command, no agent | Takes `config.command`; gates itself against the project policy |
 
 A UI gate's answer is validated twice — in the main process against the
@@ -643,7 +643,7 @@ everything else to `workspace-write`. Project settings:
 **A codex state may hold tools, and runs held to its permission set as a claude state
 does.** What codex is handed (§5.1): the tools of ours the permission set holds, over the
 bridge, each call gated; and a sandbox that is `read-only` unless an entry keeps
-codex's own writer (`"bash": { "mode": "ask", "implementation": "native" }` keeps
+codex's own writer (`"shell": { "mode": "ask", "implementation": "native" }` keeps
 its `shell`, `edit` its `apply_patch`). A kept codex writer answers to the sandbox,
 not to the entry's mode — codex cannot ask.
 
@@ -757,7 +757,7 @@ defaults for this state's operation *and for every descendant's*.
   "kind": "prompt",
   "model": "anthropic/claude-sonnet-5",
   "session": "planning",
-  "tools": ["bash"]
+  "tools": ["shell"]
 }
 
 // feature/plan/goals.json — says only what is different
@@ -834,7 +834,7 @@ the same rule.
     "read_file": "allow", "glob": "allow", "grep": "allow",
     "web_fetch": "ask",
     "write_file": { "mode": "ask", "implementation": "native" },
-    "bash": "deny",
+    "shell": "deny",
     "git status": "allow", "git log": "allow",
     "other": "deny"
   }
@@ -845,7 +845,7 @@ the same rule.
     which decides each call (below). `"smart"` as a word is refused: it is the
     function JaiRA ships, and a line names it as one.
   - A **subject** is a standard tool (`read_file`, `glob`, `grep`, `edit`,
-    `write_file`, `show_artifact`, `bash`, `web_fetch`, `web_search`), a
+    `write_file`, `show_artifact`, `shell`, `web_fetch`, `web_search`), a
     **command** (`git commit`, or `git` for every command of that program),
     **`script`** (running a file — `./x.sh`, `npm run build`), or **`other`**:
     everything no entry names.
@@ -918,7 +918,7 @@ the same rule.
   | `codex-cli` | the held tools of ours over its MCP bridge, each call put to the gate at the bridge before it runs; and its sandbox, `workspace-write` only where an entry keeps codex's own `shell` or `apply_patch` (`"implementation": "native"`, not `deny`), `read-only` otherwise |
   | `generic-cli` | nothing — so a permission set that **denies** anything is **refused** there, naming what it denies |
 
-  **One shell line is several requests.** A `bash` call is not judged as a tool.
+  **One shell line is several requests.** A `shell` call is not judged as a tool.
   The line is taken apart — at `&&`, `||`, `;`, `&`, `|`, newlines, `( … )`,
   `{ … }`, `$( … )`, backticks and `<( … )` — and each part is a request for a
   subject of this same map:
@@ -938,7 +938,7 @@ the same rule.
     inline (`node -e …`), because what it does cannot be read off the line either.
   - **Anything else is a command subject**: the program and its subcommand. The
     most specific entry wins — `git push --force` (every flag an entry names must
-    be present), then `git push`, then `git` — and with none, the **`bash`
+    be present), then `git push`, then `git` — and with none, the **`shell`
     entry**, which is what "any other command" means; then `other`. A subject the
     map does not hold at all is not offered, and asks.
   - `cd`, `echo`, `pwd`, `test`, `true` are no request. Embedders are opened,
@@ -946,27 +946,27 @@ the same rule.
     `find … -exec`, `xargs`, `env`, `sudo`, `nohup`, `time`, `timeout`, `nice`,
     `watch`, `parallel`, `ssh host …`, `docker exec …`, `git -c alias.…`,
     `git submodule foreach`, `npx`, `pnpm dlx`. One the list does not know is an
-    ordinary command, and what it hides answers only to `bash` and `other`.
+    ordinary command, and what it hides answers only to `shell` and `other`.
 
   **The line runs only if every part may.** One denied part refuses it; any part
   that asks produces one approval, which shows the line in the colours of its
   parts and lets an answer be remembered for the run **per part, at a width**
   (`git commit`, or `git`) — never for the line, and never for the shell.
 
-  So `"bash": "deny", "git status": "allow"` offers the shell, runs `git status`
-  and refuses everything else: `bash`'s mode is the answer for a command nothing
+  So `"shell": "deny", "git status": "allow"` offers the shell, runs `git status`
+  and refuses everything else: `shell`'s mode is the answer for a command nothing
   else names, not a switch on the tool. (It reaches the engine as `ask`, with the
   mode you wrote carried in `permissions.subjects` — no line runs before the host
   has read it: the line is taken apart, and one every part of which the permission set
   allows runs without anybody being asked, in a run as in a conversation.)
 
   **A line may name a FUNCTION instead of a mode** — on a tool, a command,
-  `script`, `bash` or `other`:
+  `script`, `shell` or `other`:
 
   ```jsonc
   "tools": {
     "read_file": "allow",
-    "bash": { "function": "smart" },                       // JaiRA's own
+    "shell": { "function": "smart" },                       // JaiRA's own
     "write_file": { "function": "policy.judgeWrite" },     // a module of yours
     "git push": { "function": "$BASE/functions/push_ok" }, // a rooted document
     "edit": { "function": "smart", "implementation": "native" },
@@ -981,7 +981,7 @@ the same rule.
     document, a `.ts` module symbol, a host function — or an **expression document**
     (`{ "$expr": … }`) that reads `.inputs.request`.
   - It is handed **one argument**, `request`: what an approver would be shown.
-    `tool` (the tool called), `subject` (the line that answers for it — `bash`,
+    `tool` (the tool called), `subject` (the line that answers for it — `shell`,
     `git push`, `write_file`, `other`), `function` (its own reference), `input`
     (the call's input), and for a shell line `line` and `part` — the ONE part being
     judged, with `text`, `kind`, `subject`, `span`, `program`, `subcommand`,
@@ -994,7 +994,7 @@ the same rule.
     another line names (`"git status": "allow"`) never reaches it, the floor,
     `.jaira/`, a rule's deny and a line the parser cannot read are decided before
     any function is, and a built-in ask (a push, an install) is stricter than a
-    function on `bash` — unless the line that names the function names the program.
+    function on `shell` — unless the line that names the function names the program.
     One part denied refuses the line and the functions after it are not asked.
   - **To ask the person, a function calls the approval prompt**,
     `approve_tool_call(request)` — a function like `choose_option`, drawn in the
@@ -1011,7 +1011,7 @@ the same rule.
     `settings.json` (Settings → Tools → Functions a workflow calls); a file named `smart` on the path replaces
     it outright. The shipped `auto` permission sets give every line `{ "function": "smart" }`.
 
-  `"bash": "deny"` with no command and no `script` entry that allows, asks or
+  `"shell": "deny"` with no command and no `script` entry that allows, asks or
   names a function leaves nothing for the shell to run, so the shell is **withheld**: the
   agent gets no shell at all, not even its own, and codex's writing sandbox stays
   off. Reading a file goes through `read_file`, `glob` and `grep`.
@@ -1024,8 +1024,8 @@ the same rule.
   folded in as the **stricter of the two** — with one exception: an entry that
   **names the program** (`"git push": "allow"`, `"npm": "allow"`) replaces a
   built-in *ask*, because naming it is the decision the ask stands in for.
-  `"bash": "allow"` does not: "any other command" says nothing about pushing.
-  Nothing in a permission set lifts the destructive floor; `functions.bash.builtins:
+  `"shell": "allow"` does not: "any other command" says nothing about pushing.
+  Nothing in a permission set lifts the destructive floor; `functions.shell.builtins:
   false` in `settings.json` turns the built-ins off, for a disposable workspace,
   and is the only thing a project says above its permission sets. A line the parser
   cannot model (an unterminated quote, `$CMD …`, `git $(…) …`, a `case`, an
@@ -1109,7 +1109,7 @@ the same rule.
 
   Where no permission set judges the line (`run_command`, or a state with no permission set),
   the built-ins alone answer it, and the refusal says that only
-  `functions.bash.builtins: false` would let it run unasked. `--approve ask`
+  `functions.shell.builtins: false` would let it run unasked. `--approve ask`
   insists on a terminal and is a usage error without one. There is no flag that
   allows everything: a built-in ask is a question somebody should see, so an
   unattended way past it is written down in the permission set that asked.
@@ -2798,9 +2798,9 @@ Every one of these fails **silently or misleadingly**:
     or `Grep` either — hold `glob` and `grep`. A **list** is refused. A state
     that declares no `tools` at all leaves its agent as the executor built it.
     There is no `profile` to write; a map that must not write does not hold
-    `edit`, `write_file` or `bash`, and says `"other": "deny"`.
+    `edit`, `write_file` or `shell`, and says `"other": "deny"`.
 15. A `generic-cli` state is refused outright while the project's policy can
-    escalate to a human, which it can exactly while `functions.bash.builtins` is on.
+    escalate to a human, which it can exactly while `functions.shell.builtins` is on.
 16. Inside a `schema`, `$ref` is always **JSON Schema's** — ours is the bare-string
     form. Inside `args`, only `{"$ref": …}` works, because nothing types that
     position.

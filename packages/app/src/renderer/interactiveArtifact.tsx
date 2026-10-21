@@ -20,7 +20,7 @@ import { useEffect, useRef, type CSSProperties, type JSX } from "react";
  *
  * ## Why the bridge fills the composer instead of sending
  *
- * A page a model wrote posting straight into a live run is closer to `bash` than to rendering: it
+ * A page a model wrote posting straight into a live run is closer to `shell` than to rendering: it
  * would let generated markup drive the conversation that generated it. So a message lands in the
  * composer, where a person reads it and presses send. That keeps the useful half — a button in a
  * mockup that says what it would ask — without the half nobody asked for.

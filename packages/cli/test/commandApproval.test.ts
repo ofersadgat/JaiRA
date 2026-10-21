@@ -143,7 +143,7 @@ describe("a run started by jaira, at a terminal", () => {
     const project = openProject(dir, { baseDir: testHome() });
     try {
       const rows = project.commands.list(reportOf(cli).taskId!);
-      expect(rows).toEqual([expect.objectContaining({ tool: "bash", command: LINE, decidedBy: "policy", reason: ASKED })]);
+      expect(rows).toEqual([expect.objectContaining({ tool: "shell", command: LINE, decidedBy: "policy", reason: ASKED })]);
     } finally {
       project.close();
     }
@@ -174,7 +174,7 @@ describe("a run started by jaira, with nobody to ask", () => {
     expect(reason).toMatch(/run it at a terminal to be asked/);
     // A built-in asked and no permission set judges `run_command`'s line, so only turning the built-ins off answers it.
     expect(reason).toMatch(/nothing short of turning the built-ins off lets \\"node\\" run unasked here/);
-    expect(cli.err()).toMatch(/^refused: bash: node --version \.env — nobody was asked/m);
+    expect(cli.err()).toMatch(/^refused: shell: node --version \.env — nobody was asked/m);
   });
 
   it("refuses a BUILT-IN ask with the setting that would answer it, and runs nothing", async () => {
@@ -182,7 +182,7 @@ describe("a run started by jaira, with nobody to ask", () => {
     expect(await run(cli, "push", "--non-interactive")).toBe(1);
     const reason = JSON.stringify(reportOf(cli));
     expect(reason).toMatch(/--non-interactive refuses every approval/);
-    expect(reason).toContain('\\"functions\\": { \\"bash\\": { \\"builtins\\": false } } in .jaira/settings.json');
+    expect(reason).toContain('\\"functions\\": { \\"shell\\": { \\"builtins\\": false } } in .jaira/settings.json');
     // `run_command` has no permission set in reach, so a permission set line would be advice that changes nothing.
     expect(reason).not.toMatch(/permission set/);
     // …and the setting it names does answer it: with the built-ins off, the line is allowed.
@@ -209,7 +209,7 @@ describe("the request as a person reads it", () => {
   it("names the permission set line too where a PERMISSION_SET judged the line — an agent's shell, not run_command", () => {
     const command = "git push origin main";
     const parts = { ...decideCommand({}, command).parts, permissionSet: "$/permission-sets/feature/build" };
-    const request: ApprovalRequest = { requestId: "r", tool: "bash", command, input: { command }, sessionId: "s", at: 0, parts };
+    const request: ApprovalRequest = { requestId: "r", tool: "shell", command, input: { command }, sessionId: "s", at: 0, parts };
     expect(unattendedRefusal(request, "flag")).toMatch(/write a "git push": "allow" line in the permission set \$\/permission-sets\/feature\/build$/);
     // The line, numbered by part, with the words that matched underneath, and the permission set named.
     const drawn = renderApproval(request);
@@ -231,9 +231,9 @@ describe("permission sets under a CLI run", () => {
   };
   const ENVIRONMENTS: Record<string, HandedEnvironment> = {
     "read-only": lowered({ read_file: "allow", glob: "allow", grep: "allow", other: "deny" }),
-    "a shell with named commands": lowered({ bash: "deny", "git status": "allow", "node": "ask", read_file: "allow" }),
-    "a native built-in, other ask": lowered({ edit: { mode: "ask", implementation: "native" }, bash: "ask", other: "ask" }),
-    "a shell a FUNCTION judges": lowered({ bash: { function: "judge" }, write_file: { function: "judge" }, read_file: "allow", other: "deny" }),
+    "a shell with named commands": lowered({ shell: "deny", "git status": "allow", "node": "ask", read_file: "allow" }),
+    "a native built-in, other ask": lowered({ edit: { mode: "ask", implementation: "native" }, shell: "ask", other: "ask" }),
+    "a shell a FUNCTION judges": lowered({ shell: { function: "judge" }, write_file: { function: "judge" }, read_file: "allow", other: "deny" }),
     "no permission set": {},
   };
   /** What each host's runner would answer for `judge`: git and write_file may, nothing else. */
@@ -283,7 +283,7 @@ describe("permission sets under a CLI run", () => {
 describe("the approval prompt a function calls, at a terminal", () => {
   const config = defaultConfig();
   const REQUEST: PermissionFunctionRequest = {
-    tool: "bash",
+    tool: "shell",
     subject: "npm publish",
     function: "smart",
     input: { command: "npm publish" },
@@ -318,12 +318,12 @@ describe("the approval prompt a function calls, at a terminal", () => {
     const result = await approvals.prompt(APPROVAL_PROMPT_FUNCTION, { request: REQUEST as never });
     expect(result).toMatchObject({ error: { reason: expect.stringMatching(/^nobody can be asked — --non-interactive refuses every approval/) } });
     const run = governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } });
-    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet), { run });
+    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet({ shell: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet), { run });
     expect(handed.shell).toMatchObject({ command: "ask" });
   });
 
   it("lets a line through that the person allows at the terminal, and refuses one they deny", async () => {
-    const environment = lowerPermissionSet(parsePermissionSet({ bash: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet);
+    const environment = lowerPermissionSet(parsePermissionSet({ shell: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet);
     const handedWith = (typed: string) => {
       const approvals = cliApprovals({ mode: "ask", ask: async () => typed, write: () => {} });
       return handedToClaude(environment, { run: governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } }) });
@@ -334,6 +334,6 @@ describe("the approval prompt a function calls, at a terminal", () => {
     // Every line they deny is refused, and a shell every line of which is refused is not a shell.
     const denied = await handedWith("n");
     expect(denied.shell).toEqual({});
-    expect(denied.tools["bash"]).toEqual({ reachable: false, via: [] });
+    expect(denied.tools["shell"]).toEqual({ reachable: false, via: [] });
   });
 });

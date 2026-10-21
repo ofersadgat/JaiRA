@@ -626,7 +626,7 @@ describe("the stale inbox — what an interrupted agent asked is withdrawn by th
     // inside the running state, one in a sibling still running beside it.
     const open = (service as unknown as { session(p?: string): { approvals: { approver(c: { taskId?: string }): (r: unknown) => Promise<unknown> }; questions: { asker(c: { taskId?: string }): (r: unknown) => Promise<unknown> } } }).session();
     const ask = (instanceId: string) => ({
-      approved: open.approvals.approver({ taskId })({ tool: "bash", input: { command: "git push" }, sessionId: "s", instanceId }),
+      approved: open.approvals.approver({ taskId })({ tool: "shell", input: { command: "git push" }, sessionId: "s", instanceId }),
       asked: open.questions.asker({ taskId })({ questions: [{ question: `Which way, ${instanceId}?`, options: [{ label: "left" }, { label: "right" }] }], sessionId: "s", instanceId }),
     });
     const skippedAgent = ask(c);

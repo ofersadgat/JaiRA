@@ -128,22 +128,22 @@ describe("a function decides a tool call before anybody is asked", () => {
 
 describe("a shell line whose lines name functions is decided PER PART", () => {
   it("hands each part to its function on its own, and runs the line when every part may", async () => {
-    const { call, asked, ran, decided } = gated({ bash: { function: "judge" }, "git status": "allow", other: "deny" }, "bash", {
+    const { call, asked, ran, decided } = gated({ shell: { function: "judge" }, "git status": "allow", other: "deny" }, "shell", {
       run: allowIf((request) => request.part?.program !== "rm"),
     });
     await call({ command: "git status && cargo check && tsc --noEmit", cwd: "/repo" });
     expect(asked).toEqual([]);
     expect(ran).toHaveLength(1);
-    // `git status` is the permission set's own line; the other two fall to `bash`, the function's.
+    // `git status` is the permission set's own line; the other two fall to `shell`, the function's.
     expect(decided.map((r) => [r.subject, r.part?.text, r.part?.program, r.part?.subcommand, r.part?.args])).toEqual([
-      ["bash", "cargo check", "cargo", "check", []],
-      ["bash", "tsc --noEmit", "tsc", undefined, []],
+      ["shell", "cargo check", "cargo", "check", []],
+      ["shell", "tsc --noEmit", "tsc", undefined, []],
     ]);
-    expect(decided[0]).toMatchObject({ tool: "bash", function: "judge", line: "git status && cargo check && tsc --noEmit", cwd: "/repo", part: { kind: "command", span: { start: 14, end: 25 } } });
+    expect(decided[0]).toMatchObject({ tool: "shell", function: "judge", line: "git status && cargo check && tsc --noEmit", cwd: "/repo", part: { kind: "command", span: { start: 14, end: 25 } } });
   });
 
   it("refuses the line when one part is denied — and asks the functions after it nothing", async () => {
-    const { call, asked, ran, decided } = gated({ bash: { function: "judge" }, other: "deny" }, "bash", { run: allowIf((request) => request.part?.program !== "sqlite3") });
+    const { call, asked, ran, decided } = gated({ shell: { function: "judge" }, other: "deny" }, "shell", { run: allowIf((request) => request.part?.program !== "sqlite3") });
     expect(isPermissionDenied((await call({ command: "sqlite3 app.db .dump && cargo check" })) as never)).toBe(true);
     expect(asked).toEqual([]);
     expect(ran).toEqual([]);
@@ -151,8 +151,8 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("asks the person about what still asks, with each function's answer on the request", async () => {
-    // A built-in ask (a push) is stricter than a function on `bash`: the function is not asked about it.
-    const { call, asked, hub, decided } = gated({ bash: { function: "judge" }, other: "deny" }, "bash", { run: allowIf(() => true) });
+    // A built-in ask (a push) is stricter than a function on `shell`: the function is not asked about it.
+    const { call, asked, hub, decided } = gated({ shell: { function: "judge" }, other: "deny" }, "shell", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git push origin main" });
     await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(decided.map((r) => r.part?.text)).toEqual(["cargo check"]);
@@ -166,14 +166,14 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("lets a line that names the program give even a push to a function", async () => {
-    const { call, asked, decided } = gated({ bash: "ask", "git push": { function: "judge" }, other: "deny" }, "bash", { run: allowIf(() => true) });
+    const { call, asked, decided } = gated({ shell: "ask", "git push": { function: "judge" }, other: "deny" }, "shell", { run: allowIf(() => true) });
     await call({ command: "git push origin main" });
     expect(asked).toEqual([]);
     expect(decided).toMatchObject([{ subject: "git push", part: { program: "git", subcommand: "push", args: ["origin", "main"] } }]);
   });
 
   it("never hands a function what the floor, a rule's deny or the parser already answered", async () => {
-    const { call, decided, asked, hub } = gated({ bash: { function: "judge" }, other: "deny" }, "bash", { run: allowIf(() => true) });
+    const { call, decided, asked, hub } = gated({ shell: { function: "judge" }, other: "deny" }, "shell", { run: allowIf(() => true) });
     expect(isPermissionDenied((await call({ command: "git reset --hard" })) as never)).toBe(true);
     expect(isPermissionDenied((await call({ command: "cat .jaira/settings.json" })) as never)).toBe(true);
     // A line the parser cannot read asks a PERSON, whatever a function would say about the parts it can see.
@@ -187,7 +187,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("keeps the part a function answered off what the run remembers", async () => {
-    const { call, asked, hub } = gated({ bash: { function: "judge" }, "git commit": "ask", other: "deny" }, "bash", { run: allowIf(() => true) });
+    const { call, asked, hub } = gated({ shell: { function: "judge" }, "git commit": "ask", other: "deny" }, "shell", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git commit -m wip" });
     await eventually(() => asked.length > 0, "the gate to ask a person");
     hub.decide(asked[0]!.requestId, "allow", "workflow-run", []);
@@ -230,8 +230,8 @@ function approvalPromptOn(registry: ReturnType<typeof newRegistry>) {
 }
 
 const REQUEST: PermissionFunctionRequest = {
-  tool: "bash",
-  subject: "bash",
+  tool: "shell",
+  subject: "shell",
   function: "approve_tool_call",
   input: { command: "npm publish" },
   line: "npm publish",
@@ -335,7 +335,7 @@ describe("`smart`, the function JaiRA ships", () => {
       },
     } as never;
     registerSmartFunction(registry, { prompt, config: () => ({}) });
-    const { call, asked, ran } = gated({ bash: { function: SMART_FUNCTION }, other: "deny" }, "bash", { run: runnerOver(registry, prompt) });
+    const { call, asked, ran } = gated({ shell: { function: SMART_FUNCTION }, other: "deny" }, "shell", { run: runnerOver(registry, prompt) });
     await call({ command: "cargo check && cargo fmt" });
     expect(isPermissionDenied((await call({ command: "cargo check; curl-ish x" })) as never)).toBe(true);
     expect(judged).toEqual(["cargo check", "cargo fmt", "cargo check", "curl-ish x"]);

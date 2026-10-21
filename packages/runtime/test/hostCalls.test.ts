@@ -25,19 +25,19 @@ describe("the call that needs permission", () => {
 });
 
 describe("in the record", () => {
-  const call = approvalCallEntries("approve_1", "t1", { tool: "bash", command: LINE, reason: "command substitution" }, 1000).record;
+  const call = approvalCallEntries("approve_1", "t1", { tool: "shell", command: LINE, reason: "command substitution" }, 1000).record;
   const result = approvalResultEntries("approve_1", "t1", answer, 63_000).record;
 
   it("goes right after the call that made it, call then result, and leaves another record's for that one", () => {
     const entries = [bashCall("t1", LINE), bashResult("t1")];
-    const other = approvalCallEntries("approve_2", "t9", { tool: "bash" }, 5).record;
+    const other = approvalCallEntries("approve_2", "t9", { tool: "shell" }, 5).record;
     const merged = mergeHostCalls(entries, [call, result, other]);
     expect(merged.entries.map((e) => (e as { calledBy?: string; role: string }).calledBy ?? (e as { role: string }).role)).toEqual(["assistant", "t1", "t1", "user"]);
     expect(merged.left).toEqual([other]);
   });
 
   it("is a call with a result: named approve_tool_call, answered with the answer as its data", () => {
-    expect(call).toMatchObject({ kind: "message", role: "assistant", calledBy: "t1", content: [{ type: "tool_use", id: "approve_1", name: "approve_tool_call", input: { tool: "bash", command: LINE } }], timing: { at: 1000 } });
+    expect(call).toMatchObject({ kind: "message", role: "assistant", calledBy: "t1", content: [{ type: "tool_use", id: "approve_1", name: "approve_tool_call", input: { tool: "shell", command: LINE } }], timing: { at: 1000 } });
     expect(result).toMatchObject({ role: "user", calledBy: "t1", content: [{ type: "tool_result", tool_use_id: "approve_1", content: "allowed", data: answer }] });
     const closed = approvalResultEntries("approve_1", "t1", { ...answer, decision: "deny", by: "closed" }, 2).record;
     expect(closed).toMatchObject({ content: [{ content: "not answered: the app closed" }] });
@@ -51,7 +51,7 @@ describe("in the record", () => {
   it("is folded in when the record settles, and what it could not place is kept for the next", async () => {
     const finished: unknown[] = [];
     const inner = { append: (s: { id: string }) => ({ id: s.id }), finish: (_ref: unknown, settled: unknown) => void finished.push(settled) } as unknown as RecordStore;
-    let waiting: JsonValue[] = [call, result, approvalCallEntries("approve_2", "t9", { tool: "bash" }, 5).record];
+    let waiting: JsonValue[] = [call, result, approvalCallEntries("approve_2", "t9", { tool: "shell" }, 5).record];
     const store = withHostCalls(
       inner,
       () => {
@@ -74,14 +74,14 @@ describe("the one approval prompt, asked by a function", () => {
     const answered: string[] = [];
     const hub = new ApprovalHub({ onRequest: (r) => asked.push(r), onResolved: (_id, decision, by) => answered.push(`${decision.decision} by ${by}`) });
     const pending = hub.askFor(
-      { tool: "bash", subject: "git push", function: "smart", input: { command: "git push origin main" }, line: "git push origin main" },
+      { tool: "shell", subject: "git push", function: "smart", input: { command: "git push origin main" }, line: "git push origin main" },
       { taskId: "t1", prompt: "smart is unsure — allow this?" },
     );
     expect(asked).toEqual([expect.objectContaining({ asker: "smart", command: "git push origin main", reason: "smart is unsure — allow this?" })]);
     hub.decide(hub.list()[0]!.requestId, "allow");
     expect(await pending).toBe("allow");
     // Nobody answered this one: the app closed under it, and the record says so.
-    const later = hub.askFor({ tool: "bash", subject: "bash", function: "smart", input: { command: "ls" } }, { taskId: "t1" });
+    const later = hub.askFor({ tool: "shell", subject: "shell", function: "smart", input: { command: "ls" } }, { taskId: "t1" });
     hub.denyAll();
     expect(await later).toBe("deny");
     expect(answered).toEqual(["allow by person", "deny by closed"]);

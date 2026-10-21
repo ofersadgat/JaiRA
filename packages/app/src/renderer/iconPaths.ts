@@ -9,7 +9,7 @@
  * knowing which icon it drew.
  *
  * Icons here NEVER appear alone. Every one of them sits beside the word it illustrates — a terminal
- * next to `bash`, an eye next to `Read` — because a transcript is read at a glance for shape and
+ * next to `shell`, an eye next to `Read` — because a transcript is read at a glance for shape and
  * then in words for fact, and a glyph on its own is a guess.
  */
 import type { TypeFamily } from "@jaira/shared/browser";
@@ -39,6 +39,8 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // The workflow tools (decision 0005 §3) — the same forking path a `made` or `entered` note draws,
   // because a row that starts or moves work is the same kind of fact as the note it leaves behind.
   workflow: ["M6 3v6a3 3 0 0 0 3 3h7", "M6 21v-6", "m13 9 3 3-3 3"],
+  // The System tools (decision 0018): the machine itself — a screen on its stand.
+  system: ["M3 4h18v12H3Z", "M8 20h8", "M12 16v4"],
   // The Git tools (decision 0010 §1): a branch leaving the trunk and a commit on each.
   git: ["M6 3v12", "M18 9a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z", "M18 9a9 9 0 0 1-9 9"],
   // Something made to look at — `show_artifact`: a framed picture.

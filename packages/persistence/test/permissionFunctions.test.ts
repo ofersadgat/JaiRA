@@ -48,14 +48,14 @@ const JUDGE = `export const judge = {
 /** A state whose permission set hands every shell command nothing else names to `reference`. */
 const guarded = (reference: string): Record<string, unknown> => ({
   label: "Guarded",
-  environment: { tools: { read_file: "allow", bash: { function: reference }, other: "deny" } },
+  environment: { tools: { read_file: "allow", shell: { function: reference }, other: "deny" } },
   operation: { prompt: "go", output: { report: { schema: { type: "string" } } } },
   outputs: { report: { binding: ".operation.output.report" } },
 });
 
 const request = (program: string): PermissionFunctionRequest => ({
-  tool: "bash",
-  subject: "bash",
+  tool: "shell",
+  subject: "shell",
   function: "judge.decide",
   input: { command: `${program} status` },
   line: `${program} status`,
@@ -132,7 +132,7 @@ describe("a `.ts` function a permission set names goes through the module approv
     const entry = browseWorkflows(p).workflows.find((w) => w.rootId === "guarded")!;
     expect(entry.needsApproval?.[0]?.symbols).toEqual(["judge.decide"]);
     expect(entry.issues).toEqual([
-      expect.objectContaining({ stateId: "guarded", path: "environment.tools.bash", severity: "error", message: expect.stringMatching(/^the function 'judge\.decide' does not resolve: /) }),
+      expect.objectContaining({ stateId: "guarded", path: "environment.tools.shell", severity: "error", message: expect.stringMatching(/^the function 'judge\.decide' does not resolve: /) }),
     ]);
   });
 
@@ -169,7 +169,7 @@ describe("a `.ts` function a permission set names goes through the module approv
       (e: unknown) => e,
     );
     expect(error).not.toBeInstanceOf(ApprovalRequired);
-    expect((error as Error).message).toMatch(/environment\.tools\.bash: the function 'judge\.nope' does not resolve/);
+    expect((error as Error).message).toMatch(/environment\.tools\.shell: the function 'judge\.nope' does not resolve/);
   });
 });
 

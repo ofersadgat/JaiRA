@@ -1,7 +1,7 @@
 /**
  * One shell line, as the REQUESTS it is made of (decision 0007 §4).
  *
- * A `bash` call is not judged as a tool. It is taken apart — at separators, redirects, substitutions
+ * A `shell` call is not judged as a tool. It is taken apart — at separators, redirects, substitutions
  * and embedders — and each part is a request of its own, for a SUBJECT the permission set holds like any
  * other: a standard tool on a path (`rm foo.txt` → `write_file`), `script`, or a command
  * (`git commit`). This module is the shape that judgement travels in: what the policy produces, what
@@ -48,7 +48,7 @@ export type CommandPartKind =
 /**
  * The answers a part can have. A line runs only if every part is `allowed`.
  *
- * `function` is a part whose permission set entry names a FUNCTION (`"bash": { "function": "smart" }`) and
+ * `function` is a part whose permission set entry names a FUNCTION (`"shell": { "function": "smart" }`) and
  * which has not been put to it yet — `decidedBy.function` says which. It is never what a person is
  * shown: the approver the host hands the engine calls the function for each such part before anybody
  * is asked, and the part is then `allowed` or `denied` by it, or `asks` when the function failed. It
@@ -58,7 +58,7 @@ export type CommandPartVerdict = "allowed" | "function" | "asks" | "denied";
 
 /** Which layer decided a part, strictest layer named. */
 export type CommandPartDecider =
-  /** A permission set entry — `entry` names it (`git commit`, `git`, `bash`, `write_file`, `other`). */
+  /** A permission set entry — `entry` names it (`git commit`, `git`, `shell`, `write_file`, `other`). */
   | "permissionSet"
   /** The built-in destructive floor (deny) or a built-in ask (push, install, network, credentials). */
   | "builtin"
@@ -130,7 +130,8 @@ export interface CommandPart {
 export interface CommandApproval {
   /** The line exactly as the agent wrote it — every span indexes into this. */
   line: string;
-  dialect: "posix" | "powershell";
+  /** The language it was read in (`CommandDialect`): the shell that runs it. */
+  dialect: "posix" | "powershell" | "cmd";
   /** In source order. Empty only when the whole line was unparsable, which `unparsed` then explains. */
   parts: CommandPart[];
   /** The line's answer: the strictest part. */

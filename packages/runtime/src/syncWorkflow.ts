@@ -311,7 +311,7 @@ The implementation as it stands:
 /**
  * What a sync state may do — a permission set MAP (decision 0007): three readers, and nothing else.
  *
- * `edit`, `write_file` and `bash` are ABSENT rather than `deny`. In a map, present means offered —
+ * `edit`, `write_file` and `shell` are ABSENT rather than `deny`. In a map, present means offered —
  * the engine would resolve a denied tool against a registry that deliberately does not hold it — and
  * absent is the stronger statement anyway: a map is the whole grant, so a delegated agent loses the
  * built-in of every tool not held, and `other: "deny"` answers for whatever turns up by another name.
@@ -345,7 +345,7 @@ export function syncWorkflowFiles(options: SyncWorkflowOptions = {}): Record<str
   // `read_file`, inherited by every state below. The digest teaches by example and is the primary
   // evidence, but it CLIPS a long state (the run reports which ones), and a proposal written against a
   // truncation is a proposal against something that does not exist. One read-only tool closes that,
-  // and closes nothing else: there is deliberately no `write_file` and no `bash`, because a sync
+  // and closes nothing else: there is deliberately no `write_file` and no `shell`, because a sync
   // returns text for a human to accept and must not touch disk.
   //
   // A tool set also turns the prompt states into a bounded tool LOOP, which is what makes the same

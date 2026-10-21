@@ -27,14 +27,14 @@ import {
   type LineSegment,
 } from "../src/renderer/approvalModel";
 
-const PERMISSION_SET = { bash: "ask", read_file: "allow", glob: "allow", write_file: "allow", script: "ask", "git commit": "ask", "git log": "allow", other: "deny" } as const;
+const PERMISSION_SET = { shell: "ask", read_file: "allow", glob: "allow", write_file: "allow", script: "ask", "git commit": "ask", "git log": "allow", other: "deny" } as const;
 
 function judge(line: string, permissionSet: Record<string, string> = PERMISSION_SET, source = "$/permission-sets/feature/implementation/writes-asking"): CommandApproval {
   return decideCommand({}, line, "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet(permissionSet).permissionSet), permissionSetSource: source }).parts;
 }
 
 function pendingOf(parts: CommandApproval, permissionSet?: PendingApproval["permissionSet"]): PendingApproval {
-  return { requestId: "a1", tool: "bash", command: parts.line, parts, ...(permissionSet !== undefined ? { permissionSet } : {}), input: { command: parts.line }, taskId: "t1", project: "p", at: 0 };
+  return { requestId: "a1", tool: "shell", command: parts.line, parts, ...(permissionSet !== undefined ? { permissionSet } : {}), input: { command: parts.line }, taskId: "t1", project: "p", at: 0 };
 }
 
 /** The segments as a string a person can read: `[0:rm_ foo.txt]` — brackets a part, `_…_` underlined. */
@@ -122,7 +122,7 @@ describe("one row per part", () => {
 
   it("names the FALLBACK entry for a program no line names, and says so", () => {
     const [row] = partRows(judge("terraform plan -out tf.plan"));
-    expect(row).toMatchObject({ subject: "bash", verdict: "asks" });
+    expect(row).toMatchObject({ subject: "shell", verdict: "asks" });
     expect(row!.note).toBe("no line names terraform plan — any other command · terraform can deploy or change infrastructure");
   });
 
@@ -139,7 +139,7 @@ describe("one row per part", () => {
 
   it("shows why for a part no permission set decided", () => {
     const approval = judge("git commit -m 'unterminated");
-    expect(partRows(approval)).toMatchObject([{ subject: "bash", verdict: "asks", note: "command could not be parsed (unterminated quote)" }]);
+    expect(partRows(approval)).toMatchObject([{ subject: "shell", verdict: "asks", note: "command could not be parsed (unterminated quote)" }]);
   });
 });
 

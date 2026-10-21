@@ -4,7 +4,7 @@
  * This is what closes the policy chain. A delegated agent that calls its *own*
  * built-in shell is invisible to us; an agent calling a tool we injected goes
  * through `withPermission` → the compiled policy → our `smart` approver → the
- * command parser → allow/deny/ask. So registering `bash` here is not a
+ * command parser → allow/deny/ask. So registering `shell` here is not a
  * convenience, it is the mechanism by which SPEC §11.2/§11.3 apply to an agent at
  * all.
  *
@@ -12,7 +12,7 @@
  * task's workspace, so a WSL project's agent commands execute inside the distro.
  */
 import { createLogger } from "@declarative-ai/log";
-import { refusal, takeApart } from "@jaira/shared";
+import { DIRECTORY_CHANGERS, refusal, takeApart, type CommandDialect } from "@jaira/shared";
 import {
   hostFunction,
   type CapabilityRegistry,
@@ -49,11 +49,13 @@ import {
   type PermissionSet,
 } from "@jaira/shared";
 import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
+import { callDialectOf } from "./callDialect";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
 import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
 import { registerGitTools, type GitToolHost } from "./gitTools";
+import { registerSystemTools, type SystemToolOptions } from "./systemTools";
 import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
@@ -84,13 +86,15 @@ function clamp(text: string, max: number): string {
 }
 
 /**
- * A `bash` tool: run a command line in the workspace and return its output.
+ * The `shell` tool: run a command line in the workspace and return its output — in the shell the
+ * project runs (`interpreterFor`: bash in WSL, PowerShell on Windows), which is the language the policy
+ * reads the line in (`dialectFor`).
  *
  * `readOnly: false` is the UPSTREAM `Tool` field, and it is true of this tool. JaiRA's own vocabulary
  * no longer has such a flag (decision 0007): whether a state may run commands is whether its permission set
- * holds `bash`, and with what mode.
+ * holds `shell`, and with what mode.
  */
-export function createBashTool(options: ToolOptions = {}): Tool {
+export function createShellTool(options: ToolOptions = {}): Tool {
   const exec = options.exec ?? new NodeExec();
   return {
     description:
@@ -148,7 +152,7 @@ export function createBashTool(options: ToolOptions = {}): Tool {
 
 /** Register JaiRA's tool set on a registry's `tools` facet. */
 export function registerTools(registry: { tools: Map<string, Tool> }, options: ToolOptions = {}): void {
-  registry.tools.set("bash", createBashTool(options));
+  registry.tools.set("shell", createShellTool(options));
 }
 
 /**
@@ -171,6 +175,8 @@ export function registerAllTools(
     workflows?: WorkflowToolHost;
     /** Who serves the Git tools (decision 0010 §1). Absent ⇒ nobody, the same way. */
     git?: GitToolHost;
+    /** The System tools' (decision 0018): this machine, by default. */
+    system?: SystemToolOptions;
   },
 ): void {
   registerTools(registry, options);
@@ -179,6 +185,7 @@ export function registerAllTools(
   registerWebTools(registry, options.web ?? {});
   registerWorkflowTools(registry, options.workflows);
   registerGitTools(registry, options.git);
+  registerSystemTools(registry, options.system);
 }
 
 /** The registry name a workflow state uses to run a command directly. */
@@ -198,7 +205,7 @@ export function createRunCommandFunction(options: ToolOptions = {}): {
   capabilities: HostCapabilities;
   run: (inputs: FunctionInputs, ctx: ExecServices) => Promise<FunctionResult<ResolvedValue, WorkflowMetrics>>;
 } {
-  const bash = createBashTool(options);
+  const shell = createShellTool(options);
   return {
     // Not memoizable: running a command is a side effect, and its result depends on
     // a workspace this signature does not capture.
@@ -219,14 +226,14 @@ export function createRunCommandFunction(options: ToolOptions = {}): {
 
       const policy = ctx.policy;
       const sessionId = "run_command";
-      const gated = withPermission(bash, {
+      const gated = withPermission(shell, {
         ledger: new PermissionLedger({ baseline: policy?.baseline ?? {} }),
         sessionId,
-        toolName: "bash",
+        toolName: "shell",
         // With no approver wired, an `ask` denies — the same unattended default the
         // approval hub applies.
         approve: ctx.approve ?? (() => ({ decision: "deny", scope: "once" })),
-        ...(policy?.smart?.["bash"] !== undefined ? { smart: policy.smart["bash"] } : {}),
+        ...(policy?.smart?.["shell"] !== undefined ? { smart: policy.smart["shell"] } : {}),
         ...(policy?.profiles !== undefined ? { profiles: policy.profiles } : {}),
       });
 
@@ -559,11 +566,11 @@ export function scopeNarrowingFor(
     // A SHELL COMMAND is about more than one place, and the ordinary extractor cannot see them: its
     // paths are inside a string. See `commandSubjects` — the cwd it runs in plus every path it
     // names, strictest winning, with `cd` moving the directory for what follows it.
-    if (name === "bash") {
+    if (name === "shell") {
       const args = (input ?? {}) as { command?: unknown; cwd?: unknown };
       if (typeof args.command === "string" && workspaceRoot !== undefined) {
         const cwd = typeof args.cwd === "string" && args.cwd !== "" ? absolutize(args.cwd, workspaceRoot) : workspaceRoot;
-        const subjects = commandSubjects(args.command, cwd, execEnv);
+        const subjects = commandSubjects(args.command, cwd, execEnv, callDialectOf(input, tool.name));
         // A line nothing could parse is already `ask` under the policy's own rule; resolving its cwd
         // alone would be a quieter answer than the one the parser already gives.
         const mode = strictest2(floor, stateScopes, name, subjects.paths, options);
@@ -586,7 +593,7 @@ export function scopeNarrowingFor(
   };
 }
 
-/** The strictest verdict across two layers for a set of paths — the `bash` case of the above. */
+/** The strictest verdict across two layers for a set of paths — the `shell` case of the above. */
 function strictest2(
   floor: readonly Scope[] | undefined,
   scopes: readonly Scope[] | undefined,
@@ -630,8 +637,10 @@ export function commandSubjects(
   command: string,
   cwd: string,
   execEnv: ExecEnv = "windows",
+  /** The shell the line runs in, when it is not the project's (an agent's own `Bash` or `PowerShell`). */
+  dialect?: CommandDialect,
 ): { paths: string[]; unparsed: boolean } {
-  const parsed = takeApart(command, dialectFor(execEnv));
+  const parsed = takeApart(command, dialect ?? dialectFor(execEnv));
   if (parsed.unparsed) return { paths: [cwd], unparsed: true };
   const paths = new Set<string>([cwd]);
   let here = cwd;
@@ -641,7 +650,7 @@ export function commandSubjects(
     if (request.kind !== "command") continue;
     const one = request.command;
     const words = commandWords(one);
-    if (one.program === "cd" || one.program === "pushd") {
+    if (DIRECTORY_CHANGERS.includes(one.program)) {
       const target = words[0];
       if (target !== undefined) here = resolveAgainst(here, target);
       paths.add(here);
@@ -699,7 +708,7 @@ function resolveAgainst(cwd: string, value: string): string {
  * Verified against `claude 2.1.142`: its rules are path-scoped — `deny: ["Read(outside/**)"]` refuses
  * a read outside and lets the neighbouring one through. So a table need not be enforced one callback
  * at a time; it can be handed over, and the agent bounds its own built-ins up front. Our callback
- * stays underneath for everything the rule syntax cannot express — `bash` above all, whose paths
+ * stays underneath for everything the rule syntax cannot express — `shell` above all, whose paths
  * live inside a string.
  *
  * PRECEDENCE IS `deny > ask > allow`, which is why every rule emitted here is scoped. A bare

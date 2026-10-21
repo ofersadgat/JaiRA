@@ -300,7 +300,7 @@ describe("the tools probe against a real server", () => {
         `const { ListToolsRequestSchema } = require(${at("types.js")});`,
         `const server = new Server({ name: "fixture", version: "1" }, { capabilities: { tools: {} } });`,
         `server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [`,
-        `  { name: "get_code", description: "Read the code", inputSchema: { type: "object" }, annotations: { readOnlyHint: true } },`,
+        `  { name: "get_code", description: "Read the code", inputSchema: { type: "object", properties: { file: { type: "string" } } }, annotations: { readOnlyHint: true }, _meta: { "jaira/tool": { as: "read_file", args: { path: "file" } } } },`,
         `  { name: "delete_file", description: "Delete a file", inputSchema: { type: "object" }, annotations: { destructiveHint: true, title: "Delete" } },`,
         `] }));`,
         `server.connect(new StdioServerTransport());`,
@@ -314,7 +314,8 @@ describe("the tools probe against a real server", () => {
       state: "ready",
       transport: "stdio",
       tools: [
-        { name: "get_code", description: "Read the code", annotations: { readOnlyHint: true } },
+        // What the tool says it counts as (decision 0018, ruling 5), and its arguments, for a mapping to name.
+        { name: "get_code", description: "Read the code", annotations: { readOnlyHint: true }, claim: { as: "read_file", args: { path: "file" } }, inputs: ["file"] },
         { name: "delete_file", description: "Delete a file", annotations: { destructiveHint: true, title: "Delete" } },
       ],
     });

@@ -106,7 +106,7 @@ describe("the settings a message would run under", () => {
     expect(offered).toEqual(
       expect.arrayContaining([
         // Codex is served ours over its bridge, so keeping its own shell is a pick on its line too.
-        { name: "bash", natives: { "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" } },
+        { name: "shell", natives: { "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" } },
         { name: "read_file", natives: { "claude-code": "Read", "claude-cli": "Read" } },
         { name: "write_file", natives: { "claude-code": "Write", "claude-cli": "Write" } },
         // No agent has a built-in doing this job, so there is nothing to pick.
@@ -134,7 +134,7 @@ describe("the settings a message would run under", () => {
     expect(posture({ permissionSet: shipped("chat/read-only") })).toBe("read-only");
     expect(posture({ permissionSet: shipped("chat/full") })).toBe("full access");
     // …and one line changed makes it nobody's, which is what `custom` says.
-    expect(posture({ permissionSet: { ...shipped("chat/read-only"), bash: "ask" } })).toBe("custom");
+    expect(posture({ permissionSet: { ...shipped("chat/read-only"), shell: "ask" } })).toBe("custom");
     const { edit: _edit, ...unticked } = shipped("chat/read-only") as Record<string, PermissionSetDecl[string]>;
     expect(posture({ permissionSet: unticked })).toBe("custom");
 
@@ -143,12 +143,12 @@ describe("the settings a message would run under", () => {
     // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
     // Its command, runner and script lines arrive where lowering writes them, in `subjects`.
     const readOnly = shipped("chat/read-only") as Record<string, PermissionMode>;
-    const shellLine = (subject: string): boolean => subject === "bash" || ["command", "script", "runner"].includes(subjectKindOf(subject));
+    const shellLine = (subject: string): boolean => subject === "shell" || ["command", "script", "runner"].includes(subjectKindOf(subject));
     const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => shellLine(subject)));
-    const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "bash" || !shellLine(subject)));
+    const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "shell" || !shellLine(subject)));
     expect(posture({ tools: JAIRA_TOOLS.map((t) => t.name), permissions: { tools: toolLines, other: "deny", subjects } })).toBe("read-only");
     // A map naming three of the seventeen is not that permission set — it is a map with the rest unticked.
-    expect(posture({ tools: ["read_file", "bash", "write_file"], permissions: { tools: toolLines, other: "deny", subjects } })).toBe("custom");
+    expect(posture({ tools: ["read_file", "shell", "write_file"], permissions: { tools: toolLines, other: "deny", subjects } })).toBe("custom");
 
     // The card opens on the bucket whose permission set the map is, and the label is that bucket's.
     expect(planned({ permissionSet: shipped("chat/read-only") }).available.bucket).toBe("chat");
@@ -167,7 +167,7 @@ describe("the settings a message would run under", () => {
 
   it("keeps a map as a NEW permission set — in a writable layer, under a name a reference can carry, never over another", async () => {
     const { taskId, instanceId } = await ranTask();
-    const mine: PermissionSetDecl = { read_file: "allow", bash: "ask", "git commit": "allow", other: "deny" };
+    const mine: PermissionSetDecl = { read_file: "allow", shell: "ask", "git commit": "allow", other: "deny" };
     const saved = service.savePermissionSet({ bucket: "chat", name: "ask-but-commit", layer: "project", permissionSet: mine });
     expect(saved).toEqual({ id: "chat/ask-but-commit", bucket: "chat", name: "ask-but-commit", layer: "project", decl: mine });
     expect(JSON.parse(readFileSync(join(dir, ".jaira", "permission-sets", "chat", "ask-but-commit.json"), "utf8"))).toEqual(mine);
@@ -184,7 +184,7 @@ describe("the settings a message would run under", () => {
     expect(() => service.savePermissionSet({ bucket: "chat", name: "ask-but-commit", layer: "project", permissionSet: mine })).toThrow(/already exists/);
     expect(() => service.savePermissionSet({ bucket: "chat", name: "../../escape", layer: "project", permissionSet: mine })).toThrow(/a name is/);
     expect(() => service.savePermissionSet({ bucket: "../up", name: "x", layer: "project", permissionSet: mine })).toThrow(/not a bucket/);
-    expect(() => service.savePermissionSet({ bucket: "chat", name: "bad", layer: "project", permissionSet: { bash: "sometimes" } as never })).toThrow(/not a permission set/);
+    expect(() => service.savePermissionSet({ bucket: "chat", name: "bad", layer: "project", permissionSet: { shell: "sometimes" } as never })).toThrow(/not a permission set/);
   });
 
   it("ANSWERS null for a COMPOSITE rather than failing at being asked", async () => {
@@ -288,7 +288,7 @@ describe("sending a message", () => {
 
   it("hands over every tool the composer offers — all of them registered, none of them fatal", async () => {
     // `gateTools` throws on a name it cannot resolve, which is the right answer for a name nobody
-    // registered and the wrong one for a wiring gap. `sendChatMessage` registered `bash` only, so
+    // registered and the wrong one for a wiring gap. `sendChatMessage` registered `shell` only, so
     // ticking a file tool — offered by the very same plan — threw `not registered` and the turn never
     // ran. Granting all three is the assertion that the two halves of the registry are both wired.
     const { taskId, instanceId } = await ranTask();

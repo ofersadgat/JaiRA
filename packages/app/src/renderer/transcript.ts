@@ -25,10 +25,12 @@ import type { JsonValue } from "@declarative-ai/json";
 // puts it back here, with no restatement to drift.
 import { renderToolResult } from "@declarative-ai/llm/entry";
 import {
+  nativeShellDialect,
   takeApart,
   toolDisplayOf,
   workflowToolOf,
   workflowToolSummary,
+  type CommandDialect,
   type TakenApart,
   type ToolIconName,
   writingPath,
@@ -320,7 +322,7 @@ export function iconOf(entry: WorkEntry): WorkIconName {
   // drawn as the Git tools are: what the line DOES is version control, whatever tool carried it.
   if (icon === "terminal" && entry.kind === "tool") {
     const line = shellLineOf(entry);
-    if (line !== undefined && runsGit(line)) return "git";
+    if (line !== undefined && runsGit(line, nativeShellDialect(entry.name))) return "git";
   }
   return icon;
 }
@@ -329,7 +331,7 @@ export function iconOf(entry: WorkEntry): WorkIconName {
 
 /**
  * The line a shell call ran — its `command`, or an argv joined — when the tool is one of the shell
- * family (`Bash`, JaiRA's `bash`, codex's `shell`). `undefined` for every other call.
+ * family (`Bash`, JaiRA's `shell`, codex's `shell`). `undefined` for every other call.
  */
 export function shellLineOf(entry: ToolEntry): string | undefined {
   if (toolIconOf(entry.name) !== "terminal") return undefined;
@@ -346,25 +348,28 @@ const takenLines = new Map<string, TakenApart>();
 
 /**
  * A shell line as the requests it is made of — the same parse an approval draws its line from
- * (`takeApart`, decision 0007 §4). POSIX first, which is what Claude's `Bash` is everywhere; a line
- * POSIX cannot read at all is tried as PowerShell, which is what JaiRA's `bash` runs on Windows.
+ * (`takeApart`, decision 0007 §4) — in `dialect` when the tool that ran it says which (Claude's
+ * `PowerShell`: `nativeShellDialect`). Otherwise POSIX first, which is what Claude's `Bash` is
+ * everywhere; a line POSIX cannot read at all is tried as PowerShell, which is what JaiRA's `shell`
+ * runs on Windows.
  */
-export function takenApartOf(line: string): TakenApart {
-  const known = takenLines.get(line);
+export function takenApartOf(line: string, dialect?: CommandDialect): TakenApart {
+  const key = dialect === undefined ? line : `${dialect}\0${line}`;
+  const known = takenLines.get(key);
   if (known !== undefined) return known;
-  let taken = takeApart(line, "posix");
-  if (taken.unparsed && taken.commands.length === 0) {
+  let taken = takeApart(line, dialect ?? "posix");
+  if (dialect === undefined && taken.unparsed && taken.commands.length === 0) {
     const other = takeApart(line, "powershell");
     if (other.commands.length > 0) taken = other;
   }
   if (takenLines.size > 2000) takenLines.clear();
-  takenLines.set(line, taken);
+  takenLines.set(key, taken);
   return taken;
 }
 
 /** Whether any command on the line — however deep inside a runner — is `git`. */
-export function runsGit(line: string): boolean {
-  return takenApartOf(line).requests.some((request) => request.kind === "command" && request.command.program === "git");
+export function runsGit(line: string, dialect?: CommandDialect): boolean {
+  return takenApartOf(line, dialect).requests.some((request) => request.kind === "command" && request.command.program === "git");
 }
 
 /**

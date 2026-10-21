@@ -31,6 +31,7 @@
 import type { SecretOrigin } from "./executors";
 import { isFunctionMode, type PermissionSetMode } from "./operationVocabulary";
 import type { PermissionSet } from "./permissionSets";
+import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
 
 /** A value that NAMES a secret — looked up at run time, never written into `settings.json`. */
 export interface McpSecretRef {
@@ -40,6 +41,30 @@ export interface McpSecretRef {
 /** An `env` or `headers` value: the value itself, or the name of the secret that holds it. */
 export type McpValue = string | McpSecretRef;
 
+/**
+ * What one tool of a server COUNTS AS among JaiRA's permissions (decision 0018, ruling 5): a standard
+ * tool, whose line in a permission set then judges the tool's calls beside the tool's own line.
+ */
+export interface McpToolMapping {
+  /** A standard tool's name — `read_file`, `shell`, `screenshot` — or {@link SCREEN_MAPPING}. */
+  as: string;
+  /**
+   * Where the standard tool reads a PLACE, which of the server tool's arguments holds it — `{ "path":
+   * "file" }`: a path for the file tools, a url for the web tools, the line (`command`) and `cwd` for
+   * the shell. One not named is read from the server tool's argument of the same name.
+   */
+  args?: Record<string, string>;
+}
+
+/**
+ * The Screen & input pair, by the call: a computer-use tool that both looks and acts — Anthropic's
+ * `computer` — is `screenshot` when its `action` only looks, and `control_input` otherwise.
+ */
+export const SCREEN_MAPPING = "screen";
+
+/** The computer-use actions that only look: the rest move the mouse or press keys. */
+export const LOOKING_ACTIONS: readonly string[] = ["screenshot", "cursor_position", "zoom"];
+
 /** A server JaiRA starts: the command, its arguments, what it is handed in its environment, and where it runs. */
 export interface McpStdioServer {
   command: string;
@@ -48,6 +73,8 @@ export interface McpStdioServer {
   cwd?: string;
   /** Absent means on. */
   enabled?: boolean;
+  /** What its tools count as, by the tool's name — see {@link McpToolMapping}. */
+  tools?: Record<string, McpToolMapping>;
 }
 
 /** A server JaiRA calls: streamable HTTP, falling back to SSE, with the headers each request carries. */
@@ -56,6 +83,8 @@ export interface McpHttpServer {
   headers?: Record<string, McpValue>;
   /** Absent means on. */
   enabled?: boolean;
+  /** What its tools count as, by the tool's name — see {@link McpToolMapping}. */
+  tools?: Record<string, McpToolMapping>;
 }
 
 export type McpServerConfig = McpStdioServer | McpHttpServer;
@@ -99,8 +128,47 @@ export const MCP_SERVER_NAME = /^[A-Za-z0-9-]+(?:_[A-Za-z0-9-]+)*$/;
  */
 export const RESERVED_MCP_SERVERS: readonly string[] = ["dai"];
 
-const STDIO_FIELDS = ["command", "args", "env", "cwd", "enabled"] as const;
-const HTTP_FIELDS = ["url", "headers", "enabled"] as const;
+const STDIO_FIELDS = ["command", "args", "env", "cwd", "enabled", "tools"] as const;
+const HTTP_FIELDS = ["url", "headers", "enabled", "tools"] as const;
+
+/** The arguments a standard tool reads a place from — what a mapping's `args` may name. */
+export function placeArgsOf(standard: string): string[] {
+  const spec = TOOL_SPEC_BY_NAME.get(standard);
+  return [...(standard === "shell" ? ["command"] : []), ...(spec?.pathArgs ?? []), ...(spec?.urlArgs ?? [])];
+}
+
+/** What is wrong with a mapping, or `undefined` — the parser's sentence and the probe's alike. */
+export function mcpMappingProblem(raw: unknown): string | undefined {
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return 'a mapping is { "as": "<a standard tool>" }';
+  const mapping = raw as Record<string, unknown>;
+  for (const key of Object.keys(mapping)) if (key !== "as" && key !== "args") return `'${key}' is not part of a mapping — it takes as and args`;
+  const as = mapping["as"];
+  if (typeof as !== "string" || (as !== SCREEN_MAPPING && !TOOL_SPEC_BY_NAME.has(as))) return `as is a standard tool's name (read_file, shell, screenshot, …) or '${SCREEN_MAPPING}'`;
+  if (mapping["args"] === undefined) return undefined;
+  const args = mapping["args"];
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return "args maps a standard tool's argument to the server tool's";
+  const allowed = as === SCREEN_MAPPING ? [] : placeArgsOf(as);
+  for (const [key, value] of Object.entries(args)) {
+    if (!allowed.includes(key)) return allowed.length === 0 ? `${as} reads no place, so it takes no args` : `'${key}' is not an argument ${as} reads a place from — it reads ${allowed.join(", ")}`;
+    if (typeof value !== "string" || value.length === 0) return `args.${key} names the server tool's argument, a non-empty string`;
+  }
+  return undefined;
+}
+
+/** A mapping, copied to its canonical shape: `args` only when it names something. */
+const canonicalMapping = (m: McpToolMapping): McpToolMapping => ({ as: m.as, ...(m.args !== undefined && Object.keys(m.args).length > 0 ? { args: { ...m.args } } : {}) });
+
+/** A server's `tools` block, each mapping checked. */
+function toolMappings(raw: unknown, where: string): Record<string, McpToolMapping> {
+  const out: Record<string, McpToolMapping> = {};
+  for (const [tool, mapping] of Object.entries(plainObject(raw, where))) {
+    if (tool.length === 0 || /\s/.test(tool)) throw new Error(`${where} names a tool '${tool}' — a tool's name is one word, as the server lists it`);
+    const problem = mcpMappingProblem(mapping);
+    if (problem !== undefined) throw new Error(`${where}.${tool}: ${problem}`);
+    out[tool] = canonicalMapping(mapping as McpToolMapping);
+  }
+  return out;
+}
 
 function plainObject(value: unknown, where: string): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value)) throw new Error(`${where} must be an object`);
@@ -169,6 +237,7 @@ function parseServer(raw: unknown, where: string): McpServerConfig {
       ...(spec["env"] !== undefined ? { env: valueMap(spec["env"], `${where}.env`) } : {}),
       ...(cwd !== undefined ? { cwd: cwd as string } : {}),
       ...enabled,
+      ...(spec["tools"] !== undefined ? { tools: toolMappings(spec["tools"], `${where}.tools`) } : {}),
     };
   }
   const url = spec["url"];
@@ -177,6 +246,7 @@ function parseServer(raw: unknown, where: string): McpServerConfig {
     url: url.trim(),
     ...(spec["headers"] !== undefined ? { headers: valueMap(spec["headers"], `${where}.headers`) } : {}),
     ...enabled,
+    ...(spec["tools"] !== undefined ? { tools: toolMappings(spec["tools"], `${where}.tools`) } : {}),
   };
 }
 
@@ -301,6 +371,55 @@ export function mcpToolLines(permissionSet: PermissionSet, server: string): Arra
   return out;
 }
 
+// --- what a server's tool counts as -----------------------------------------------
+
+/**
+ * Where a server's tool may say itself what it counts as: a key of the tool's own `_meta` (the MCP
+ * spec's place for what a host defines), holding a {@link McpToolMapping}. A CLAIM, not a fact: it is
+ * shown on Connections for the person to accept, and only an accepted one — written into the server's
+ * `tools` — counts (decision 0018, ruling 5).
+ */
+export const MCP_TOOL_CLAIM = "jaira/tool";
+
+/** The mapping a tool's `_meta` claims, when it claims a well-formed one. */
+export function mcpClaimOf(meta: unknown): McpToolMapping | undefined {
+  if (meta === null || typeof meta !== "object" || Array.isArray(meta)) return undefined;
+  const claim = (meta as Record<string, unknown>)[MCP_TOOL_CLAIM];
+  return mcpMappingProblem(claim) === undefined ? canonicalMapping(claim as McpToolMapping) : undefined;
+}
+
+/** What a server's tool counts as, from the configured servers — `undefined` for one nobody mapped. */
+export function mcpMappingOf(mcp: JairaMcpConfig | undefined, subject: string): McpToolMapping | undefined {
+  const parsed = parseMcpSubject(subject);
+  if (parsed?.tool === undefined || mcp === undefined) return undefined;
+  const server = Object.hasOwn(mcp.servers, parsed.server) ? mcp.servers[parsed.server] : undefined;
+  return server?.tools !== undefined && Object.hasOwn(server.tools, parsed.tool) ? server.tools[parsed.tool] : undefined;
+}
+
+/**
+ * The standard tool ONE call counts as, and its input as that tool reads it: `screen` split by the call's
+ * `action`, and each place the standard tool reads taken from the server tool's argument the mapping
+ * names (or the one of the same name).
+ */
+export function mappedCallOf(mapping: McpToolMapping, input: unknown): { tool: string; input: Record<string, unknown> } {
+  const args = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : {};
+  if (mapping.as === SCREEN_MAPPING) {
+    const action = typeof args["action"] === "string" ? args["action"] : "";
+    return { tool: LOOKING_ACTIONS.includes(action) ? "screenshot" : "control_input", input: {} };
+  }
+  const renamed: Record<string, unknown> = {};
+  for (const arg of placeArgsOf(mapping.as)) {
+    const from = mapping.args?.[arg] ?? arg;
+    if (Object.hasOwn(args, from)) renamed[arg] = args[from];
+  }
+  return { tool: mapping.as, input: renamed };
+}
+
+/** The standard tools a mapping can stand for — both of the Screen & input pair for `screen`. */
+export function mappedToolsOf(mapping: McpToolMapping): string[] {
+  return mapping.as === SCREEN_MAPPING ? ["screenshot", "control_input"] : [mapping.as];
+}
+
 /** The annotations a server says about a tool, as the MCP spec names them. */
 export interface McpToolAnnotations {
   title?: string;
@@ -404,6 +523,10 @@ export interface McpToolInfo {
   name: string;
   description?: string;
   annotations: McpToolAnnotations;
+  /** What the tool's own `_meta` says it counts as ({@link MCP_TOOL_CLAIM}) — shown to accept, not yet counted. */
+  claim?: McpToolMapping;
+  /** The names of its arguments, from its input schema — what a mapping's `args` is picked from. */
+  inputs?: string[];
 }
 
 /** Whether a configured server answered when it was last asked. */
@@ -423,6 +546,11 @@ export interface McpServerStatus {
   where: string;
   /** What it listed — empty unless ready. */
   tools: McpToolInfo[];
+  /**
+   * What the configuration says its tools count as (`tools` in its settings), laid over the report each
+   * time it is read — a mapping is edited without starting the server again.
+   */
+  mappings?: Record<string, McpToolMapping>;
   /**
    * Each secret its `env` or `headers` names, and where the chain found it — absent where nothing
    * stores it. What Connections draws a credential box for; the value never leaves main.

@@ -50,7 +50,7 @@ const tool = (readOnly: boolean): Tool => ({ description: "a tool", inputSchema:
 function registry() {
   const out = newRegistry();
   for (const name of ["read_file", "glob", "grep", "web_fetch"]) out.tools.set(name, tool(true));
-  for (const name of ["edit", "write_file", "bash"]) out.tools.set(name, tool(false));
+  for (const name of ["edit", "write_file", "shell"]) out.tools.set(name, tool(false));
   return out;
 }
 
@@ -105,8 +105,8 @@ async function run(
 const ask = (opts: AgentQueryOptions, toolName: string, input: Record<string, unknown> = {}) =>
   opts.canUseTool!({ toolName, input: input as never }, { signal: new AbortController().signal });
 
-// `bash` is ABSENT. `"bash": "deny"` would take the shell away just the same — with no command that
-// allows anything it is withheld — but a map's `bash` entry is the answer for "any other command" on
+// `shell` is ABSENT. `"shell": "deny"` would take the shell away just the same — with no command that
+// allows anything it is withheld — but a map's `shell` entry is the answer for "any other command" on
 // a line that is taken apart (decision 0007 §4), and one allowed command would put the shell back.
 const READ_ONLY_MAP = { tools: { read_file: "allow", edit: "deny", write_file: "deny", other: "deny" } };
 
@@ -178,14 +178,14 @@ describe("a read-only permission set reaches codex as the same sandbox flag", ()
   it("is derived from the PERMISSION_SET: the writing sandbox is on only for a writer of codex's own it keeps", async () => {
     // A state that declared nothing keeps what codex has — the configured sandbox.
     expect((await run({}, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
-    // Holding `bash` with OUR implementation serves ours over the bridge and keeps codex's own shut…
-    const ours = (await run({ tools: { read_file: "allow", bash: "ask" } }, { agent: "codex-cli" })).opts!;
+    // Holding `shell` with OUR implementation serves ours over the bridge and keeps codex's own shut…
+    const ours = (await run({ tools: { read_file: "allow", shell: "ask" } }, { agent: "codex-cli" })).opts!;
     expect(ours.permissionMode).toBe("plan");
-    expect(Object.keys(ours.mcpTools ?? {})).toEqual(expect.arrayContaining(["bash", "read_file"]));
+    expect(Object.keys(ours.mcpTools ?? {})).toEqual(expect.arrayContaining(["shell", "read_file"]));
     // …keeping codex's OWN shell turns the switch on, and ours is not served beside it…
-    const kept = (await run({ tools: { read_file: "allow", bash: { mode: "ask", implementation: "native" } } }, { agent: "codex-cli" })).opts!;
+    const kept = (await run({ tools: { read_file: "allow", shell: { mode: "ask", implementation: "native" } } }, { agent: "codex-cli" })).opts!;
     expect(kept.permissionMode).toBeUndefined();
-    expect(Object.keys(kept.mcpTools ?? {})).not.toContain("bash");
+    expect(Object.keys(kept.mcpTools ?? {})).not.toContain("shell");
     // …and a permission set that holds only readers leaves it off, with no profile anywhere.
     expect((await run({ tools: { read_file: "allow", glob: "allow" } }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
     // A MAP that holds nothing is still a map: the marks say so, where `ctx.tools` alone could not.
@@ -194,19 +194,19 @@ describe("a read-only permission set reaches codex as the same sandbox flag", ()
 
   it("leaves the writing sandbox OFF for a shell the permission set denies — in a RUN, as in a conversation turn", async () => {
     // Denied outright: the shell is withheld, so nothing unlocks the switch.
-    const withheld = { read_file: "allow", bash: "deny", other: "deny" };
+    const withheld = { read_file: "allow", shell: "deny", other: "deny" };
     expect((await run({ tools: withheld }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
     // "No shell but these commands": the shell is OFFERED, the gate is told `ask` so the lines are
     // read — and the switch still follows the entry's authored `deny`, which the run reads off the
     // block's `subjects`.
-    const commandsOnly = { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" };
+    const commandsOnly = { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" };
     expect((await run({ tools: commandsOnly }, { agent: "codex-cli" })).opts!.permissionMode).toBe("plan");
     // …which is what a conversation turn, holding the permission set itself, derives.
     for (const decl of [withheld, commandsOnly]) {
       expect(planAgentTools(parsePermissionSet(decl).permissionSet, CODEX_TOOLS).switches).toEqual({ "workspace-write": false });
     }
     // Codex's own shell kept under `ask` may write: the switch is on, from either path.
-    const kept = { read_file: "allow", bash: { mode: "ask", implementation: "native" } };
+    const kept = { read_file: "allow", shell: { mode: "ask", implementation: "native" } };
     expect((await run({ tools: kept }, { agent: "codex-cli" })).opts!.permissionMode).toBeUndefined();
     expect(planAgentTools(parsePermissionSet(kept).permissionSet, CODEX_TOOLS).switches).toEqual({ "workspace-write": true });
   });
@@ -214,14 +214,14 @@ describe("a read-only permission set reaches codex as the same sandbox flag", ()
 
 describe("a shell the permission set denies outright is WITHHELD, in a run", () => {
   it("hands claude no shell at all: ours is not served, and its own Bash is on the deny list", async () => {
-    const { opts } = await run({ tools: { read_file: "allow", bash: "deny", other: "deny" } });
-    expect(Object.keys(opts!.mcpTools ?? {})).not.toContain("bash");
+    const { opts } = await run({ tools: { read_file: "allow", shell: "deny", other: "deny" } });
+    expect(Object.keys(opts!.mcpTools ?? {})).not.toContain("shell");
     expect(opts!.disallowedTools).toContain("Bash");
   });
 
   it("keeps the shell for a map that allows commands through it, and judges its lines by the MAP", async () => {
-    const { opts } = await run({ tools: { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" } });
-    expect(Object.keys(opts!.mcpTools ?? {})).toContain("bash");
+    const { opts } = await run({ tools: { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" } });
+    expect(Object.keys(opts!.mcpTools ?? {})).toContain("shell");
     expect(opts!.disallowedTools).toContain("Bash");
   });
 });
@@ -382,13 +382,13 @@ describe("an agent reached as a FUNCTION is held to its permission set — every
     const shut = await runFunction({ tools: { other: "deny" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(shut.opts!.permissionMode).toBe("plan");
     // A shell held with OUR implementation is served over the bridge, so codex's own stays shut…
-    const ours = await runFunction({ tools: { bash: "ask" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    const ours = await runFunction({ tools: { shell: "ask" } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(ours.opts!.permissionMode).toBe("plan");
-    expect(Object.keys(ours.opts!.mcpTools ?? {})).toContain("bash");
+    expect(Object.keys(ours.opts!.mcpTools ?? {})).toContain("shell");
     // …and a switch the permission set leaves on — codex's own shell kept — keeps the call's own mode…
-    const open = await runFunction({ tools: { bash: { mode: "ask", implementation: "native" } } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
+    const open = await runFunction({ tools: { shell: { mode: "ask", implementation: "native" } } }, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(open.opts!.permissionMode).toBe("acceptEdits");
-    expect(Object.keys(open.opts!.mcpTools ?? {})).not.toContain("bash");
+    expect(Object.keys(open.opts!.mcpTools ?? {})).not.toContain("shell");
     // …and a state that declares no permission set is handed on exactly as the engine built it.
     const undeclared = await runFunction({}, "codex-cli", { prompt: "go", permissionMode: "acceptEdits" }, codex);
     expect(undeclared.opts!.permissionMode).toBe("acceptEdits");

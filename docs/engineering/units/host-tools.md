@@ -18,19 +18,20 @@ siblings: [engineering/units/tool-policy, engineering/units/artifact-placement, 
 
 Each tool is an upstream `Tool` with a description, an `inputSchema`, a `readOnly` flag and `run(input, ctx)`. Every refusal is returned as `{error}` rather than thrown. The names, arguments and results are [host-tool-vocabulary](../contracts/host-tool-vocabulary.md).
 
-- `tools.ts`: `createBashTool` and `registerTools`, which registers `bash`. `bash` runs one command line through `interpreterFor(execEnv)` in `ctx.workspace.root`, else `options.cwd`, refuses a relative `cwd` containing `..` or `.jaira`, and returns a non-zero exit as a result. `registerAllTools` registers every family in one call and is used by tests; production callers call the four registration functions separately. `claudeReplacements()` maps each tool to the Claude built-in it displaces when injected, derived from `TOOL_SPECS`.
+- `tools.ts`: `createShellTool` and `registerTools`, which registers `shell`. `shell` runs one command line through `interpreterFor(execEnv)` in `ctx.workspace.root`, else `options.cwd`, refuses a relative `cwd` containing `..` or `.jaira`, and returns a non-zero exit as a result. `registerAllTools` registers every family in one call and is used by tests; production callers call the four registration functions separately. `claudeReplacements()` maps each tool to the Claude built-in it displaces when injected, derived from `TOOL_SPECS`.
 - `fileTools.ts`: `write_file`, `read_file`, `edit` and `show_artifact`, registered by `registerFileTools`. A path is normalized to a logical key, refused when empty or under `.jaira/`, placed through `resolveDestination`, and recorded in the `ArtifactStore`. A read consults the store first and falls through to the workspace through `withinWorkspace`. `edit` replaces exact text that must occur once unless `all` is set. `show_artifact` places under `$CENTRAL`, or nowhere when the destination is `virtual:`, records the media type and the `interactive` claim, and returns an `artifact://<taskId>/<logical>` reference; without `content` it shows what is already at the path and records nothing.
 - `searchTools.ts`: `glob` and `grep`, registered by `registerSearchTools`. Both walk from the workspace root or a contained `path`, never enter `.git`, `.jaira`, `node_modules` and the other skipped directory names, and drop every path `ctx.policy.scopeOf` denies without saying so.
 - `webTools.ts`: `web_fetch`, which reads an http or https URL and reduces HTML to text with `textOfHtml`, and `web_search`, which queries a `WebSearchConfig` endpoint or, with none, scrapes DuckDuckGo's HTML through `duckDuckGoResults`, after checking the endpoint against `ctx.policy.scopeOf`. Registered by `registerWebTools`.
 - `workflowTools.ts`: the eight WORKFLOW tools of [decision 0005](../decisions/0005-connect.md) §3 — `list_workflows`, `start_task`, `move_task`, `list_tasks`, `answer_question`, `hold_task`, `release_task`, `stop_task` — registered by `registerWorkflowTools`. They are the only tools here that reach nothing in the workspace: each validates the shape a model handed it and calls a `WorkflowToolHost`, which is `createWorkflowHost` in the app over `AppService`'s own operations. `noWorkflowHost` is the host for a caller that serves none (the CLI, a test registry): every name resolves and every call answers why it cannot be served there, so a state that holds one still loads and runs.
 - `gitTools.ts`: the Git tools of [decision 0010](../decisions/0010-git-tools-and-events.md) §1 — `list_merge_requests`, `read_merge_request`, `open_merge_request`, `comment_merge_request`, `git_merge`, `close_merge_request`, `git_push`, and `wait_for_event` — registered by `registerGitTools` over a `GitToolHost`: `workspaceGitHost` (the workspace, the exec, the connections and a `PublishAuthorizer`) in the app's run and typed-turn paths and the CLI, `noGitToolHost` where there is none. Each reads the workspace's remote, picks the connection by host (`forgeAccess`), and calls the `ForgeProvider`. `wait_for_event` waits on the task's project's event hub (`EventWaits`). `reachForge` and `forgeTool` are shared with `ciTools.ts`.
+- `systemTools.ts`: the System tools of [decision 0018](../decisions/0018-system-tools.md) — sixteen, a look and a change in each of eight areas — registered by `registerSystemTools` over a `SystemBackend` (`system/types.ts`): `system/windows.ts` (PowerShell 5.1 through `system/powershell.ts`, `Add-Type` for windows, the screen and `SendInput`, no WMI), `system/macos.ts` (macOS's programs and JXA's bridge to CoreGraphics), none on Linux. The tool layer holds what is the same everywhere: `protectedProcesses`, the open-app refusals, the picture kept through the host's `CiArtifactSink`, a screenshot's geometry per conversation for `control_input`, and the `onDriving`/`mayDrive` hooks the app's band and Stop hang on.
 - `ciTools.ts`: the CI tools of [decision 0016](../decisions/0016-git-and-ci-tools.md) — `list_pipelines`, `read_pipeline`, `read_pipeline_job`, `download_pipeline_artifact` — registered with the Git tools over the same host. Answers are shaped by `ciViews.ts`; a download goes through the host's `CiArtifactSink` (`ciArtifacts.ts`, `$CENTRAL` recorded in the artifact store), cleaned by `ciLog.ts`, unpacked by `zip.ts`.
 
 It deliberately does not own:
 
 - Whether a call may run, the tool table, profiles, scopes and `run_command`: [tool-policy](tool-policy.md).
 - The destination template, the artifact map's table and the post-run placement of returned blobs: [artifact-placement](artifact-placement.md). Serving an artifact to a frame: [uri-and-artifact-reads](uri-and-artifact-reads.md).
-- Spawning, path mapping and tree kill for `bash`: [process-exec](process-exec.md).
+- Spawning, path mapping and tree kill for `shell`: [process-exec](process-exec.md).
 - Injecting the tools into a delegated agent over MCP: upstream `@declarative-ai/agents-api` and `@declarative-ai/agents-cli`, driven by [agent-executors](agent-executors.md).
 - What a workflow tool actually DOES: the host's own operations — `connectTask` and `moveTask` ([adoption](adoption.md), `persistence/connect.ts`), the document generator ([workflow-snapshots](workflow-snapshots.md)), the hubs ([interaction-hub](interaction-hub.md)) and [task-lifecycle](task-lifecycle.md). `workflowTools.ts` implements none of them and is bound to one conversation by whoever registers it.
 
@@ -38,8 +39,8 @@ It deliberately does not own:
 
 - Layer `core`, package `@jaira/runtime`. It calls [artifact-placement](artifact-placement.md) for `parseDestination`, `resolveDestination`, `withinWorkspace` and `MemoryArtifactStore`, [tool-policy](tool-policy.md) for `isDeniedPath` and the shared `globToRegExp`, and [process-exec](process-exec.md) for `NodeExec` and `interpreterFor`.
 - Upstream seams: `registry.tools` of `@declarative-ai/exec`, which the engine resolves a state's `environment.tools` against, and `ExecServices`, from which a tool reads `workspace.root`, `abortSignal` and `policy.scopeOf`.
-- Boundaries: Windows and WSL, because `bash` runs inside the distro for a WSL project; derived and committed, because no tool reads or writes under `.jaira/`.
-- Callers: app `startRun` registers `bash` unless the caller supplies `capabilities`, and registers the file, search and web tools for every run after it; app `runChatMessage` registers all of them for a turn; CLI `buildRunEnvironment` registers `bash`, search and web tools, and file tools only for a task run.
+- Boundaries: Windows and WSL, because `shell` runs inside the distro for a WSL project; derived and committed, because no tool reads or writes under `.jaira/`.
+- Callers: app `startRun` registers `shell` unless the caller supplies `capabilities`, and registers the file, search and web tools for every run after it; app `runChatMessage` registers all of them for a turn; CLI `buildRunEnvironment` registers `shell`, search and web tools, and file tools only for a task run.
 
 ## The filesystem holds the bytes and the artifact map holds where each logical path went
 
@@ -54,7 +55,7 @@ It deliberately does not own:
 
 | # | Invariant | Asserted by |
 | --- | --- | --- |
-| 1 | `bash` is never read-only, never runs an empty command or a `cwd` that climbs out, and reports a failing command as a result | `tools.test.ts` "declares readOnly: false, which is what plan/read-only profiles gate on", "refuses an empty command and a cwd that escapes the workspace", "reports a non-zero exit rather than throwing" |
+| 1 | `shell` is never read-only, never runs an empty command or a `cwd` that climbs out, and reports a failing command as a result | `tools.test.ts` "declares readOnly: false, which is what plan/read-only profiles gate on", "refuses an empty command and a cwd that escapes the workspace", "reports a non-zero exit rather than throwing" |
 | 2 | A write of a logical path followed by a read of it returns the content under every destination, and the agent is never told where the bytes went | `fileTools.test.ts` `"write(P) then read(P) returns the content — ${destination}"`; `artifactAgent.test.ts` "cannot tell that its file moved", `"gets the same answers whatever the destination — so a workflow is portable"` |
 | 3 | A path under `.jaira/` is refused on the logical path before any destination applies, and `virtual:` writes nothing to disk | `fileTools.test.ts` "refuses .jaira/ on the LOGICAL path, before any destination is applied", "writes nothing to disk under virtual:" |
 | 4 | A file larger than the inline limit is recorded without an inline copy | `fileTools.test.ts` "drops the inline copy for a large file, so the journal does not carry it" |
@@ -89,18 +90,18 @@ It deliberately does not own:
 | `grep` gets a `glob` argument that does not compile | `globToRegExp` throws outside the tool's `try`, so the call rejects instead of returning `{error}` | none | the call fails without a tool error message |
 | A walk is large or a `grep` expression backtracks badly | the walk and the matching are synchronous, in the app's main process | none | the window stalls |
 | `web_fetch` is redirected | the fetch follows it; the gate judged only the URL named | none | a page from a host the url scopes deny |
-| A caller passes `capabilities` to `startRun`, as a description sync and a changeset review do | `bash`, `run_command` and the agent runtimes are left out, but the file, search and web tools are registered after the caller's, replacing a sync's own `read_file` | none | a sync's states can also call `show_artifact` |
+| A caller passes `capabilities` to `startRun`, as a description sync and a changeset review do | `shell`, `run_command` and the agent runtimes are left out, but the file, search and web tools are registered after the caller's, replacing a sync's own `read_file` | none | a sync's states can also call `show_artifact` |
 | The CLI runs a workflow without a task, as `jaira run --workflows <dir>` does | no file tools are registered, and no CLI run adds `show_artifact` to its states | run it inside a project, which mints a task | a state declaring `read_file` fails as not registered |
-| A tool call is retried | `write_file` converges on the same bytes and record; an `edit` whose old text is gone refuses; `bash` runs the command again | none | a repeated command's effects |
+| A tool call is retried | `write_file` converges on the same bytes and record; an `edit` whose old text is gone refuses; `shell` runs the command again | none | a repeated command's effects |
 
 ## The tools cap their own time, output and walks
 
-- `bash`: 120000 ms and 20000 characters per stream, `DEFAULT_TIMEOUT_MS` and `DEFAULT_MAX_OUTPUT` in `tools.ts`.
+- `shell`: 120000 ms and 20000 characters per stream, `DEFAULT_TIMEOUT_MS` and `DEFAULT_MAX_OUTPUT` in `tools.ts`.
 - File tools: an inline copy up to `artifacts.inlineMaxBytes`, and 65536 bytes when a caller passes none, `DEFAULT_INLINE_MAX` in `fileTools.ts`.
 - `glob` and `grep`: 20000 walked entries, 200 matches, files over 2000000 bytes and files containing NUL skipped, 400 characters per matched line, `MAX_VISIT`, `MAX_MATCHES` and `MAX_GREP_BYTES` in `searchTools.ts`.
 - Web tools: 30000 ms, 100000 characters of text, 20 search results, in `webTools.ts`.
 
 ## Two tools depart from the usual shape, each for a stated reason
 
-- `bash` names its interpreter and passes the line as one argument, where every other `Exec` caller passes argv, so that the dialect the policy judged is the dialect that runs.
+- `shell` names its interpreter and passes the line as one argument, where every other `Exec` caller passes argv, so that the dialect the policy judged is the dialect that runs.
 - Reads consult the artifact map before the disk, so a workflow reads its own writes wherever the destination put them, at the cost of stale reads after an outside change.

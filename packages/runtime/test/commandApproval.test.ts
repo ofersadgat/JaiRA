@@ -11,7 +11,7 @@ import { lowerPermissionSet, parsePermissionSet } from "@jaira/shared";
 import { ApprovalHub, type ApprovalRequest } from "../src/approval";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
 
-const PERMISSION_SET = { bash: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", other: "deny" } as const;
+const PERMISSION_SET = { shell: "ask", read_file: "allow", write_file: "ask", script: "ask", "git commit": "ask", "git log": "allow", "git rm": "deny", other: "deny" } as const;
 
 function harness(source?: string) {
   const asked: ApprovalRequest[] = [];
@@ -22,7 +22,7 @@ function harness(source?: string) {
   // `source` is what lowering a STATE writes beside the subjects: the reference its permission set was named by.
   const block = { ...lowerPermissionSet(parsePermissionSet(PERMISSION_SET).permissionSet).permissions!, ...(source !== undefined ? { source } : {}) };
   const ran: string[] = [];
-  const bash: Tool = {
+  const shell: Tool = {
     description: "shell",
     inputSchema: { type: "object" },
     readOnly: false,
@@ -31,13 +31,13 @@ function harness(source?: string) {
       return { ok: true };
     },
   } as Tool;
-  const gated = withPermission(bash, {
+  const gated = withPermission(shell, {
     ledger: new PermissionLedger({ baseline: policy.baseline ?? {} }),
     sessionId: "s1",
-    toolName: "bash",
+    toolName: "shell",
     approve: hub.approver({ taskId: "t1" }),
-    authoredMode: block.tools!["bash"]!,
-    smart: policy.smart!["bash"]!,
+    authoredMode: block.tools!["shell"]!,
+    smart: policy.smart!["shell"]!,
     scopeOf: policy.scopeOf!,
     authored: block as never,
   });
@@ -59,7 +59,7 @@ describe("an approval for a shell line", () => {
     expect(asked).toEqual([]);
     expect(ran).toEqual([]);
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ tool: "bash", action: "deny", reason: "the permission set's 'git rm' is deny" });
+    expect(audit[0]).toMatchObject({ tool: "shell", action: "deny", reason: "the permission set's 'git rm' is deny" });
     expect(audit[0]!.parts!.parts.map((p) => p.verdict)).toEqual(["asks", "denied"]);
   });
 
@@ -71,7 +71,7 @@ describe("an approval for a shell line", () => {
     expect(asked).toHaveLength(1);
     const request = asked[0]!;
     // Every existing consumer's fields are where they were…
-    expect(request).toMatchObject({ tool: "bash", command: line, taskId: "t1", reason: "the permission set's 'git commit' is ask" });
+    expect(request).toMatchObject({ tool: "shell", command: line, taskId: "t1", reason: "the permission set's 'git commit' is ask" });
     // …and the parts are beside them.
     expect(request.parts).toMatchObject({ line, dialect: "posix", verdict: "asks" });
     expect(request.parts!.parts.map((p) => ({ text: p.text, subject: p.subject, verdict: p.verdict, entry: p.decidedBy.entry, widths: p.widths }))).toEqual([
@@ -89,7 +89,7 @@ describe("an approval for a shell line", () => {
     const first = run("rm foo.txt && git commit -m wip");
     await Promise.resolve();
     // "Every command of the program", for this run. A wider upstream scope is NOT applied with it:
-    // that would remember `bash`, and the next line's parts would never be asked about.
+    // that would remember `shell`, and the next line's parts would never be asked about.
     hub.decide(asked[0]!.requestId, "allow", "workflow-run", ["git"]);
     await first;
     expect(hub.grants("t1").list()).toEqual({ rm: "allow", git: "allow" });

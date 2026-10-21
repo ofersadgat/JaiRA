@@ -23,13 +23,13 @@ describe("the command runners' lines", () => {
   });
 
   it("adds the group at ask, takes every runner line out with its minus, and counts the lines in Execution's badge", () => {
-    const bare = parsePermissionSet({ bash: "deny", other: "deny" }).permissionSet;
+    const bare = parsePermissionSet({ shell: "deny", other: "deny" }).permissionSet;
     expect(holdsRunners(bare)).toBe(false);
     const gated = withRunners(bare);
     expect(gated.entries["runner:*"]).toEqual({ kind: "runner", mode: "ask" });
     expect(withSubject(gated, "runner:npm", "allow").entries["runner:npm"]).toEqual({ kind: "runner", mode: "allow" });
     expect(holdsRunners(withoutRunners(READ_ONLY))).toBe(false);
-    expect(sectionCountOf(READ_ONLY, "execution") - sectionCountOf(withoutRunners(READ_ONLY), "execution")).toBe(8);
+    expect(sectionCountOf(READ_ONLY, "execution") - sectionCountOf(withoutRunners(READ_ONLY), "execution")).toBe(10);
   });
 });
 
@@ -39,13 +39,13 @@ describe("the group on the card", () => {
     expect(rows).toHaveLength(COMMAND_RUNNERS.length);
     // sudo and its kind have their own: the rows that can be taken out, and, closed, the runners the
     // group's head names.
-    expect(rows.filter((row) => row.own !== undefined).map((row) => row.program)).toEqual(["sudo", "doas", "su", "ssh", "docker", "podman", "kubectl"]);
+    expect(rows.filter((row) => row.own !== undefined).map((row) => row.program)).toEqual(["sudo", "doas", "su", "ssh", "invoke-command", "wsl", "docker", "podman", "kubectl"]);
     // Rows with no line of their own follow the group, faded.
-    expect(rows.filter((row) => row.own === undefined)).toHaveLength(COMMAND_RUNNERS.length - 7);
+    expect(rows.filter((row) => row.own === undefined)).toHaveLength(COMMAND_RUNNERS.length - 9);
   });
 
   it("is there for a set that has a runner line; one with none is offered the group in Execution's add-menu", () => {
-    const bare = parsePermissionSet({ bash: "ask", other: "ask" }).permissionSet;
+    const bare = parsePermissionSet({ shell: "ask", other: "ask" }).permissionSet;
     expect(holdsRunners(READ_ONLY)).toBe(true);
     expect(holdsRunners(bare)).toBe(false);
     // Picking it there is what puts the group on the card.

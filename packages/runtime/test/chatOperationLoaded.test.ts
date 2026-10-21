@@ -28,8 +28,8 @@ const files: Record<string, unknown> = {
     environment: {
       model: "root/model",
       temperature: 0.4,
-      tools: ["bash"],
-      permissions: { tools: { bash: "ask" }, other: "deny" },
+      tools: ["shell"],
+      permissions: { tools: { shell: "ask" }, other: "deny" },
       conversation: { mode: "summary" },
       system: "You are careful.",
     },
@@ -63,7 +63,7 @@ describe("the loader really does merge the chain into each state", () => {
     // is wrong rather than the test.
     const plan = chatPlanFor([stateOf("chat/review")]);
     expect(plan.settings.model).toBe("root/model");
-    expect(plan.settings.tools).toEqual(["bash"]);
+    expect(plan.settings.tools).toEqual(["shell"]);
     expect(plan.settings.permissions).toMatchObject({ other: "deny" });
     expect(plan.origin.model).toBe("inherited");
   });
@@ -73,7 +73,7 @@ describe("the loader really does merge the chain into each state", () => {
     expect(plan.settings.model).toBe("child/model");
     // The root's other fields survive the child's override of one of them, which is §5.2's
     // per-field rule and is the loader's job, not this module's.
-    expect(plan.settings.tools).toEqual(["bash"]);
+    expect(plan.settings.tools).toEqual(["shell"]);
     expect(plan.passthrough["temperature"]).toBe(0.4);
   });
 

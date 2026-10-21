@@ -32,6 +32,13 @@ tool of it no line names.
   with `{ "enabled": false }`. `parseMcpSubject` splits a subject at the first `__` after the server;
   `mcpModeOf(permissionSet, subject)` answers for one tool — its own line, then its server's, then a
   written `other` — the order a shell part answers in (`git commit`, `git`, the shell's line).
+  A server's `tools` maps a tool to what it COUNTS AS among the standard tools ([0018](../decisions/0018-system-tools.md),
+  ruling 5): `McpToolMapping` `{ as, args? }`, checked by `mcpMappingProblem`; `mcpMappingOf(mcp, subject)`
+  finds it, `mappedCallOf` reads one call as the standard tool reads it (`screen` split by `action`, each
+  place from the named argument). A tool may claim one in its own `_meta` (`MCP_TOOL_CLAIM`, read by
+  `mcpClaimOf`), which counts only once accepted into settings. The judging is `decideMappedMcpCall` in
+  `runtime/policy.ts`: the stricter of the tool's own line (or its server's) and what it counts as, and
+  withheld where the set holds JaiRA's own of that tool.
   `mcpFirstMode(annotations, answering)` is where a newly named tool starts: `readOnlyHint` allows,
   `destructiveHint` denies, anything else keeps what it answered to. `mcpServerOfForeign` and
   `mcpNameOfForeign` turn another tool's entry into ours, dropping its `type` and every field of its

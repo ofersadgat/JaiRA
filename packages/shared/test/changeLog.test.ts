@@ -34,7 +34,7 @@ const create: ChangeCall = {
 const shell = (id: string, command: string, parts: ChangeCallPart[], s: number, text?: string, description?: string): ChangeCall => ({
   id,
   name: "Bash",
-  standard: "bash",
+  standard: "shell",
   category: "execution",
   args: { command, ...(description !== undefined ? { description } : {}) },
   ...(text !== undefined ? { text } : {}),

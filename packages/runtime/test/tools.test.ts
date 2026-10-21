@@ -1,5 +1,5 @@
 /**
- * The `bash` tool (DESIGN §8, §10.1) and the chain it completes: an agent's tool
+ * The `shell` tool (DESIGN §8, §10.1) and the chain it completes: an agent's tool
  * call → `withPermission` → the compiled policy → the command parser → allow /
  * deny / ask. Registering this tool is *why* SPEC §11.2/§11.3 apply to an agent at
  * all, so the test drives the real gate rather than the policy in isolation.
@@ -12,10 +12,11 @@ import { isPermissionDenied, PermissionLedger, withPermission, type Approver } f
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { READ_ONLY_PRESET_TOOLS } from "@jaira/shared";
 import { compilePolicy, type PolicyAuditEntry } from "../src/policy";
-import { createBashTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
+import { createShellTool, gateTools, JAIRA_TOOLS, registerAllTools, registerTools } from "../src/tools";
 import { registerFileTools } from "../src/fileTools";
 import { GIT_TOOL_NAMES } from "../src/gitTools";
 import { CI_TOOL_NAMES } from "../src/ciTools";
+import { SYSTEM_TOOL_NAMES } from "../src/systemTools";
 import { newRegistry } from "../src/wiring";
 
 let dir: string;
@@ -33,26 +34,26 @@ const ctx = (over: Partial<ExecServices> = {}): ExecServices => ({ ...over }) as
 const call = async (tool: Tool, input: unknown, c: ExecServices = ctx()) =>
   (await (tool.run as (i: unknown, x: unknown) => Promise<Record<string, unknown>>)(input, c)) ?? {};
 
-describe("createBashTool", () => {
+describe("createShellTool", () => {
   it("runs a command in the workspace and returns its output", async () => {
-    const tool = createBashTool();
+    const tool = createShellTool();
     const result = await call(tool, { command: "echo hello-from-jaira" }, ctx({ workspace: { root: dir } }));
     expect(result.exitCode).toBe(0);
     expect(String(result.stdout)).toContain("hello-from-jaira");
   }, 60_000);
 
   it("reports a non-zero exit rather than throwing", async () => {
-    const tool = createBashTool();
+    const tool = createShellTool();
     const result = await call(tool, { command: "exit 3" }, ctx({ workspace: { root: dir } }));
     expect(result.exitCode).toBe(3);
   }, 60_000);
 
   it("declares the upstream `Tool.readOnly: false` — it runs commands", () => {
-    expect(createBashTool().readOnly).toBe(false);
+    expect(createShellTool().readOnly).toBe(false);
   });
 
   it("refuses an empty command and a cwd that escapes the workspace", async () => {
-    const tool = createBashTool();
+    const tool = createShellTool();
     expect(await call(tool, { command: "  " })).toMatchObject({ error: "no command given" });
     expect(await call(tool, { command: "echo x", cwd: "../elsewhere" })).toMatchObject({
       error: expect.stringMatching(/not allowed/) as unknown as string,
@@ -63,11 +64,11 @@ describe("createBashTool", () => {
     });
   });
 
-  it("registers under `bash` on the registry's tools facet", () => {
+  it("registers under `shell` on the registry's tools facet", () => {
     const registry = newRegistry();
     registerTools(registry, { cwd: dir });
-    expect(registry.tools.get("bash")).toBeDefined();
-    expect(registry.tools.get("bash")!.readOnly).toBe(false);
+    expect(registry.tools.get("shell")).toBeDefined();
+    expect(registry.tools.get("shell")!.readOnly).toBe(false);
   });
 });
 
@@ -81,11 +82,11 @@ describe("the whole gate: tool call → policy → verdict", () => {
   function gated(approve?: Approver, audit: PolicyAuditEntry[] = []) {
     const policy = compilePolicy({}, { onDecision: (e) => audit.push(e) });
     const ledger = new PermissionLedger({ baseline: policy.baseline ?? {} });
-    const smart = policy.smart?.["bash"];
-    const tool = withPermission(createBashTool({ cwd: dir }), {
+    const smart = policy.smart?.["shell"];
+    const tool = withPermission(createShellTool({ cwd: dir }), {
       ledger,
       sessionId: "agent-1",
-      toolName: "bash",
+      toolName: "shell",
       approve: approve ?? (() => ({ decision: "deny", scope: "once" })),
       ...(smart !== undefined ? { smart } : {}),
     });
@@ -208,7 +209,7 @@ describe("JAIRA_TOOLS — the gateable set", () => {
   /**
    * Everything JaiRA registers under its own policy — BOTH calls.
    *
-   * The pairing is the point. `registerTools` supplies `bash` alone and the file tools come from
+   * The pairing is the point. `registerTools` supplies `shell` alone and the file tools come from
    * `registerFileTools`, so a caller doing only the first has a registry that is two-thirds of what
    * the composer offers. That was live in `sendChatMessage`, where ticking `read_file` reached
    * `gateTools` and threw `tool 'read_file' is not registered` — the loud failure that call is
@@ -241,19 +242,21 @@ describe("JAIRA_TOOLS — the gateable set", () => {
     // The read-only preset's list is what `readOnly` said on the day the flag left the vocabulary.
     // It is frozen, not derived — so this is the one place that notices if a tool it calls a reader
     // starts writing.
-    const writers = ["edit", "write_file", "bash"];
+    const writers = ["edit", "write_file", "shell"];
     const registry = registered();
     for (const name of writers) expect(registry.tools.get(name)!.readOnly, name).toBe(false);
     for (const name of READ_ONLY_PRESET_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(true);
     // The frozen list and the writers are the tools that existed THEN, which is the whole of what
     // they claim. The workflow tools (decision 0005 §3) were served afterwards and say `readOnly` for
     // themselves: the two that only look are readers, the six that steer work are not.
-    expect([...writers, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS, ...GIT_TOOL_NAMES, ...CI_TOOL_NAMES].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
+    expect([...writers, ...READ_ONLY_PRESET_TOOLS, ...WORKFLOW_TOOLS, ...GIT_TOOL_NAMES, ...CI_TOOL_NAMES, ...SYSTEM_TOOL_NAMES].sort()).toEqual(JAIRA_TOOLS.map((t) => t.name).sort());
     for (const name of WORKFLOW_TOOLS) expect(registry.tools.get(name)!.readOnly, name).toBe(name === "list_workflows" || name === "list_tasks");
     // The Git tools (decision 0010 §1) likewise: the two that read, and the wait, are readers…
     for (const name of GIT_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["list_merge_requests", "read_merge_request", "wait_for_event"].includes(name));
     // …and every CI tool (decision 0016): a download is kept with the task, never in the workspace.
     for (const name of CI_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(true);
+    // …and the System tools (decision 0018): each area's look reads, its change does not.
+    for (const name of SYSTEM_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["read_system","list_processes","list_services","list_software","read_settings","read_clipboard","list_windows","screenshot"].includes(name));
   });
 
   it("names every tool JaiRA registers — the set is the WHOLE gateable one", () => {

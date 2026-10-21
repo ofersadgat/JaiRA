@@ -48,7 +48,7 @@ function seedTask(taskId: string, status: "completed" | "failed" | "canceled" | 
   const recorder = project.events.recorder(taskId);
   recorder.record(entered("i-1", "wf"), now - age - HOUR);
   recorder.record({ type: "instance.terminated", instanceId: "i-1", stateId: "wf", outcome: "success" }, now - age);
-  project.commands.record({ taskId, tool: "bash", command: "git status", decision: "allowed", decidedBy: "policy" });
+  project.commands.record({ taskId, tool: "shell", command: "git status", decision: "allowed", decidedBy: "policy" });
   // A `running`/`interrupted` task keeps its machine open, like a real crash.
   const open = status === "running" || status === "interrupted";
   if (!open) project.runtime.endTask(taskId, "success", now - age);

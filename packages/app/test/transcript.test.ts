@@ -41,13 +41,13 @@ describe("pairing tool calls with their results", () => {
     { type: "text", text: "reading" },
     { type: "tool-call", toolCallId: "c1", toolName: "read_file", args: { path: "src/spans.ts" } },
     { type: "tool-result", toolCallId: "c1", result: { bytes: 412 } },
-    { type: "tool-call", toolCallId: "c2", toolName: "bash", args: { command: "npm test" } },
+    { type: "tool-call", toolCallId: "c2", toolName: "shell", args: { command: "npm test" } },
     { type: "tool-result", toolCallId: "c2", result: { error: "exit 1" } },
   ];
 
   it("pairs each call with the result carrying its id", () => {
     const tools = toolsOf([{ role: "assistant", text: "reading", parts }]);
-    expect(tools.map((t) => t.name)).toEqual(["read_file", "bash"]);
+    expect(tools.map((t) => t.name)).toEqual(["read_file", "shell"]);
     expect(tools[0]).toMatchObject({ summary: "src/spans.ts", ok: true, result: { bytes: 412 } });
     expect(tools[1]).toMatchObject({ summary: "npm test", ok: false });
   });
@@ -93,7 +93,7 @@ describe("pairing tool calls with their results", () => {
 
   it("leaves a call with no result yet undecided, rather than calling it a failure", () => {
     const [tool] = toolsOf([
-      { role: "assistant", parts: [{ type: "tool-call", toolCallId: "c9", toolName: "bash", args: { command: "x" } }] },
+      { role: "assistant", parts: [{ type: "tool-call", toolCallId: "c9", toolName: "shell", args: { command: "x" } }] },
     ]);
     expect(tool!.ok).toBeUndefined();
     expect(tool!.result).toBeUndefined();
@@ -759,7 +759,7 @@ describe("a page the model made, in the conversation that asked for it", () => {
   });
 
   it("never summarises a produced page away, however far back in the stretch it is", () => {
-    const step = (n: number): ToolEntry => ({ kind: "tool", name: "bash", summary: `step ${n}`, ok: true, result: "" });
+    const step = (n: number): ToolEntry => ({ kind: "tool", name: "shell", summary: `step ${n}`, ok: true, result: "" });
     const drew: ToolEntry = { kind: "tool", name: "show_artifact", summary: "mocks/07.html", ok: true, result: envelope as never };
     // The page is a piece of the answer, not a step towards it: it stays drawn under the summary.
     expect(keptUnderSummary(drew)).toBe(true);
@@ -778,9 +778,9 @@ describe("what the model is doing right now, as one line", () => {
   it("says nothing at all when nothing is running", () => {
     // An unanswered call is not proof of activity: a record that ended mid-flight keeps one forever,
     // and reporting that as a run in progress is a bar that lies about last week.
-    const stalled: TranscriptEntry[] = [{ kind: "tool", name: "bash", summary: "npm test" }];
+    const stalled: TranscriptEntry[] = [{ kind: "tool", name: "shell", summary: "npm test" }];
     expect(liveStatusOf(stalled, null, false)).toBeNull();
-    expect(liveStatusOf(stalled, null, true)).toMatchObject({ kind: "running", name: "bash", summary: "npm test" });
+    expect(liveStatusOf(stalled, null, true)).toMatchObject({ kind: "running", name: "shell", summary: "npm test" });
   });
 
   it("reads the furthest-along state, because each step ends the one before it", () => {
@@ -799,9 +799,9 @@ describe("what the model is doing right now, as one line", () => {
   it("waits on the NEWEST unanswered call, since parallel ones settle one at a time", () => {
     const entries: TranscriptEntry[] = [
       { kind: "tool", name: "read_file", summary: "a.ts", ok: true, result: {} },
-      { kind: "tool", name: "bash", summary: "npm test", at: 900 },
+      { kind: "tool", name: "shell", summary: "npm test", at: 900 },
     ];
-    expect(liveStatusOf(entries, null, true)).toMatchObject({ kind: "running", name: "bash", since: 900 });
+    expect(liveStatusOf(entries, null, true)).toMatchObject({ kind: "running", name: "shell", since: 900 });
   });
 
   it("falls back to the honest floor: a turn has started and has said nothing", () => {
@@ -943,7 +943,7 @@ describe("a structured output that arrived through a tool", () => {
     // Agent transports emit it mid-loop and then go on to summarise, so the answer is routinely the
     // oldest interesting row in a long stretch — exactly what a summary would count away.
     const answer: ToolEntry = { kind: "tool", name: "StructuredOutput", summary: "", callId: "c2", output: { value } };
-    const noise: ToolEntry[] = Array.from({ length: 9 }, (_, i) => ({ kind: "tool", name: "bash", summary: `step ${i}`, ok: true, result: "" }));
+    const noise: ToolEntry[] = Array.from({ length: 9 }, (_, i) => ({ kind: "tool", name: "shell", summary: `step ${i}`, ok: true, result: "" }));
     expect(keptUnderSummary(answer)).toBe(true);
     expect(noise.filter((entry) => keptUnderSummary(entry))).toHaveLength(0);
   });

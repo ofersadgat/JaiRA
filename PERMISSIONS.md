@@ -6,7 +6,7 @@ Author a table in `config.executors.<name>.scopes` (parsed and validated by `sha
 or on a state's `environment.permissions.scopes` (carried by hw's `ExecEnvironmentDecl`), and it
 reaches: the permission gate for both routes a call travels — a wrapped tool and a delegated agent's
 callback (`scopeNarrowingFor`); the RESULTS of `glob` and `grep`, which withhold what an open would
-refuse (§6); `bash`, scoped by its working directory and every path it names (`commandSubjects`);
+refuse (§6); `shell`, scoped by its working directory and every path it names (`commandSubjects`);
 and the agent's OWN permission rules, compiled by `compileClaudeScopeRules` and folded over every
 prompt call by `withSecurityFloor` on both the run and chat paths.
 
@@ -24,7 +24,7 @@ in the project. The third was found by a test failing, not by reasoning about it
 
 **What is not built**: no authoring UI — the menu's scope selector (§7) does not exist, so a table is
 written by hand in JSON. And no end-to-end run against a real agent with a table in force; every
-assertion is unit-level, which matters most for `bash`, whose path extraction is best-effort by
+assertion is unit-level, which matters most for `shell`, whose path extraction is best-effort by
 construction.
 
 ---
@@ -107,7 +107,7 @@ silent policy change.
 `/mnt/c/work/**` is how anybody writes "the sandbox is `/mnt/c/work`", so it matches that directory
 as well as everything under it. Under the strict glob reading it would not, and the consequences are
 immediate: the project path falls outside its own sandbox (§3.1 would warn about a correct table),
-and a `bash` cwd of exactly that directory matches nothing and is therefore denied.
+and a `shell` cwd of exactly that directory matches nothing and is therefore denied.
 
 Only when trailing. `a/**/b` keeps its ordinary meaning.
 
@@ -129,7 +129,7 @@ from** — its `path` argument, defaulting to the workspace root. A pattern is n
 it is unleashed on is. A `grep` at the root under a table that denies `infra/**` must not return
 hits from `infra/`, which means the scope also **filters the walk**, not merely the call: see §6.
 
-### 2.2 `bash` — the sandbox is the working directory, and every path it names
+### 2.2 `shell` — the sandbox is the working directory, and every path it names
 
 The glob is a sandbox, so:
 
@@ -176,6 +176,15 @@ reverse.
 `web_search` is scoped on the **configured endpoint**, not on the query: the query is not a place.
 Whether the *results* should then constrain a following `web_fetch` is deliberately out of scope —
 see §9.
+
+### 2.4 The System tools — no place at all
+
+The System tools ([decision 0018](docs/engineering/decisions/0018-system-tools.md)) act on the machine and its
+desktop, not on a place in the workspace: a process, a service, a setting, the clipboard, a window, the
+screen. No scope table narrows them; their line's mode answers alone, and the shell's commands that do the
+same (`kill`, `Stop-Process`, `taskkill`) answer to the same line. What protects the machine is in the tools
+themselves — JaiRA's own processes and windows are refused — and in the two that always ask, `power` and
+`install_software`.
 
 ---
 
@@ -333,7 +342,7 @@ can hand over. Each scope entry becomes `allow` / `ask` / `deny` rules over the 
 names (the claude executor's own declaration, `CLAUDE_TOOLS`, read in reverse), emitted through the `settings` escape hatch both transports
 already carry. Scope enforcement then happens in the agent's own gate, up front, without a
 round-trip per call. Our callback stays underneath as the floor for everything the rules cannot
-express — `bash` path extraction (§2.2) above all.
+express — `shell` path extraction (§2.2) above all.
 
 Two traps found while testing, both worth writing into the compiler:
 
@@ -391,7 +400,7 @@ about rather than the one this function accommodates.
 4. **The rule compiler** (§8.1) — the table into the agent's own `allow`/`ask`/`deny` rules, so
    native tools are scoped up front rather than one callback at a time.
 5. **Web URL scopes** (§2.3).
-6. **`bash`** (§2.2) — last, because it is the least certain and the one whose failure mode is a
+6. **`shell`** (§2.2) — last, because it is the least certain and the one whose failure mode is a
    false sense of containment.
 7. **The menu's scope selector** (§7), once there is something behind it.
 

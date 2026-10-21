@@ -68,7 +68,7 @@ Each list spans every open project session, session by session in the order requ
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `requestId` | string | yes | the id to answer |
-| `tool` | string | yes | the logical tool name, such as `bash` or `write_file` |
+| `tool` | string | yes | the logical tool name, such as `shell` or `write_file` |
 | `command` | string | no | the tool input's `command` field |
 | `reason` | string | no | the policy's reason for escalating that command |
 | `input` | `Record<string, JsonValue>` | yes | the tool input as the model produced it |

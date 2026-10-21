@@ -111,7 +111,7 @@ export interface ChatSurface {
    * The command approval the open conversation's agent is blocked on, and the question it asked — drawn
    * inline under what it said before asking, as the task panel draws them. A conversation always
    * renders inline; before this they were drawn only when the same task was open in the Tasks view,
-   * so an agent in a chat waited on a `bash` approval for an hour and a half with nothing on screen
+   * so an agent in a chat waited on a `shell` approval for an hour and a half with nothing on screen
    * to answer (the person, 2026-09-26: "i restarted the app and dont see any permission ui").
    */
   approval?: PendingApproval | undefined;

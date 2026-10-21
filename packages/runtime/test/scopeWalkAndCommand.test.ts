@@ -83,7 +83,7 @@ describe("a listing withholds what an open would refuse", () => {
 });
 
 /**
- * `bash` — the sandbox is where the command RUNS, plus every path it names.
+ * `shell` — the sandbox is where the command RUNS, plus every path it names.
  *
  * The last piece to ship and the least certain, which is why its failure direction matters most: a
  * missed path costs a prompt, never a silent pass.
@@ -124,25 +124,25 @@ describe("the places a shell command is about", () => {
       "/work",
       POSIX,
     )!;
-    expect(narrow({ name: "bash" }, { command: "ls app" } as FunctionInputs)).toBe("allow");
+    expect(narrow({ name: "shell" }, { command: "ls app" } as FunctionInputs)).toBe("allow");
     // One denied argument decides the whole call…
-    expect(narrow({ name: "bash" }, { command: "cp app/x infra/x" } as FunctionInputs)).toBe("deny");
+    expect(narrow({ name: "shell" }, { command: "cp app/x infra/x" } as FunctionInputs)).toBe("deny");
     // …and so does a denied working directory.
-    expect(narrow({ name: "bash" }, { command: "ls", cwd: "infra" } as FunctionInputs)).toBe("deny");
+    expect(narrow({ name: "shell" }, { command: "ls", cwd: "infra" } as FunctionInputs)).toBe("deny");
   });
 
   it("escalates a line it could not parse", () => {
     // The existing "unparsable ⇒ ask" rule, kept: an unreadable command must not become an allowed
     // one just because its cwd happened to be permitted.
     const narrow = scopeNarrowingFor([{ path: "/work/**", default: "allow" }], "/work", POSIX)!;
-    expect(narrow({ name: "bash" }, { command: 'echo "unterminated' } as FunctionInputs)).toBe("ask");
+    expect(narrow({ name: "shell" }, { command: 'echo "unterminated' } as FunctionInputs)).toBe("ask");
   });
 });
 
 /**
  * One shell line is several requests (decision 0007 §4), and each is held to the scope table BY THE
  * STANDARD TOOL IT IS: `rm x` and `> x` are `write_file` at `x`. So a table written for the tools
- * binds the shell exactly as it binds them — no second table, and no `bash` row that has to
+ * binds the shell exactly as it binds them — no second table, and no `shell` row that has to
  * anticipate every way a line can write.
  */
 describe("a path scope binds the parts of a line as it binds the tools", () => {
@@ -154,7 +154,7 @@ describe("a path scope binds the parts of a line as it binds the tools", () => {
         workspaceRoot: "/work",
         scopes: [
           { path: "/work/**", default: "allow" },
-          // Readable, not writable — a thing a `bash` row alone could never say.
+          // Readable, not writable — a thing a `shell` row alone could never say.
           { path: "/work/docs/**", tools: { write_file: "deny" } },
           { url: "https://docs.example/**", default: "allow" },
         ],
@@ -163,7 +163,7 @@ describe("a path scope binds the parts of a line as it binds the tools", () => {
     );
   const ask = (policy: ExecPolicy, command: string, cwd?: string) => {
     const input = { command, ...(cwd !== undefined ? { cwd } : {}) } as FunctionInputs;
-    const mode = policy.scopeOf!({ name: "bash" }, input);
+    const mode = policy.scopeOf!({ name: "shell" }, input);
     const denied = commandDecisionOf(input)?.parts.parts.filter((p) => p.verdict === "denied").map((p) => `${p.text}: ${p.decidedBy.source}`);
     return { mode, denied };
   };
@@ -191,7 +191,7 @@ describe("a path scope binds the parts of a line as it binds the tools", () => {
   });
 
   it("asks where the permission set asks, inside the places the table allows", () => {
-    const policy = compiled({ bash: "allow", read_file: "allow", write_file: "ask", web_fetch: "allow" });
+    const policy = compiled({ shell: "allow", read_file: "allow", write_file: "ask", web_fetch: "allow" });
     expect(ask(policy, "cat src/a.ts").mode).toBe("allow");
     expect(ask(policy, "rm src/a.ts").mode).toBe("ask");
     expect(ask(policy, "rm docs/a.md").mode).toBe("deny");

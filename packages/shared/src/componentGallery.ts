@@ -1019,7 +1019,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
         sample: { prompt: "smart is unsure — allow this?" },
         inputs: {
           request: {
-            tool: "bash",
+            tool: "shell",
             subject: "git push",
             function: "smart",
             input: { command: "npm test && git push origin feature/probe", cwd: "/repo" },
@@ -1134,7 +1134,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
       {
         id: "function",
         title: "Parts a function decided",
-        note: "The permission set gives `bash` to the `smart` function, which allowed `npm test`; `git push` still asks, because the built-in ask on a push is stricter than a function. A part a function decided says which function and what it answered — and it is not asked about again.",
+        note: "The permission set gives `shell` to the `smart` function, which allowed `npm test`; `git push` still asks, because the built-in ask on a push is stricter than a function. A part a function decided says which function and what it answered — and it is not asked about again.",
         sample: {
           tool: "Bash",
           command: "npm test && git push origin feature/probe",
@@ -1151,7 +1151,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
                 kind: "command",
                 subject: "npm test",
                 verdict: "allowed",
-                decidedBy: { source: "function", entry: "bash", function: "smart", reason: "'smart' allowed it" },
+                decidedBy: { source: "function", entry: "shell", function: "smart", reason: "'smart' allowed it" },
                 widths: ["npm test", "npm"],
               },
               {

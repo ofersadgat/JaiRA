@@ -19,7 +19,7 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 
 **Use when.** Setting up a project, creating, starting, resuming, inspecting or cancelling tasks, checking workflows and trimming history from a terminal, a script or CI. Running a process against scripted answers with `--fake` and `--interactions`. Running a workflow whose tool calls and shell lines the project's policy may ask about: at a terminal the CLI asks, and without one it refuses them, saying what would let them run.
 
-**Do not use when.** A run must get past an `ask` with nobody at a terminal: the CLI refuses it and has no flag that allows everything; write the answer into the state's permission set instead, or, for a line no permission set judges, turn the built-ins off with `functions.bash.builtins`. A gate must be answered with no TTY attached and no `--interactions` script. A workflow mounts a hosted fan-out, which the CLI has no host for.
+**Do not use when.** A run must get past an `ask` with nobody at a terminal: the CLI refuses it and has no flag that allows everything; write the answer into the state's permission set instead, or, for a line no permission set judges, turn the built-ins off with `functions.shell.builtins`. A gate must be answered with no TTY attached and no `--interactions` script. A workflow mounts a hosted fan-out, which the CLI has no host for.
 
 ## The shape is one global layer and one table of commands
 
@@ -50,7 +50,7 @@ The `jaira` command line: its commands, flags, environment variables, what each 
 | `task <taskId>: workflow '<root>' snapshot <12 hex>[ (pinned)][ · worktree <path> (<branch>)]` | a durable run began |
 | `approved N function file(s): <files>` | a start approved modules |
 | `approval · <tool>[ — <reason>]`, the line as `$ <line>` with a row of part numbers and a row of `^` under the words each part's rule matched, one row per part (`<n>  <text>  <subject>  allowed\|ASKS\|DENIED  <what decided it>`), `permission set: <name>` when one judged the line, then `[y] allow once  [r] allow <widths> for this run  [w] allow every <program> command for this run  [n] deny  (default: deny) ›` | a run meets an `ask` at a terminal; `r` remembers the asking parts at their narrowest width, `w` at their widest where wider, a tool call that is not a line offers `r` for the tool, and anything but `y`, `r` or `w` is deny. One question at a time |
-| `refused: <tool>[: <line>] — nobody was asked: <why>. To let it run without asking, write <what>` | a run meets an `ask` with nobody to answer; `<why>` names no terminal, `--non-interactive` or `--approve deny`, and `<what>` names the permission set line that answers it, or `functions.bash.builtins: false` for a built-in ask on a line no permission set judges |
+| `refused: <tool>[: <line>] — nobody was asked: <why>. To let it run without asking, write <what>` | a run meets an `ask` with nobody to answer; `<why>` names no terminal, `--non-interactive` or `--approve deny`, and `<what>` names the permission set line that answers it, or `functions.shell.builtins: false` for a built-in ask on a line no permission set judges |
 | `warning: could not store artifact '<name>': <message>` | a returned artifact could not be placed |
 | `nothing was deleted — re-run with --apply to prune` | `prune` without `--apply` |
 
@@ -91,8 +91,8 @@ The `--fake` and `--interactions` documents are [fake-rules-format](fake-rules-f
 | The task's status cannot start, or it holds for a dependency | exit 1 with the refusal from [refusal-errors](refusal-errors.md) | resume or re-run it in the app, or complete the dependency |
 | Unapproved js/ts modules and nobody to ask, or the answer is no | exit 1, the files listed and `jaira functions approve <files>` appended | run the printed command, or pass `--approve-functions` |
 | A resume finds blocked or unreadable history | exit 1, `task '<id>' cannot be resumed: <reason>` | re-run as a new task |
-| The project's policy can escalate and a state runs an agent function that asks through a callback, with no terminal or under `--non-interactive` | exit 1 before any state runs, the state and reason, then advice to run at a terminal, pass `--approve deny`, use the app, or set `functions.bash.builtins` to false | run at a terminal |
-| A state's policy-enforcement is `none` (a generic CLI) and the policy can escalate | exit 1 before any state runs, as above | set `functions.bash.builtins` to false, or use another executor |
+| The project's policy can escalate and a state runs an agent function that asks through a callback, with no terminal or under `--non-interactive` | exit 1 before any state runs, the state and reason, then advice to run at a terminal, pass `--approve deny`, use the app, or set `functions.shell.builtins` to false | run at a terminal |
+| A state's policy-enforcement is `none` (a generic CLI) and the policy can escalate | exit 1 before any state runs, as above | set `functions.shell.builtins` to false, or use another executor |
 | `--approve` is neither `ask` nor `deny`; `--approve ask` with no terminal, or beside `--non-interactive` | exit 2 with usage, before a task is made | fix the command line |
 | A `run_command` line, or an agent's tool call, meets `ask` and nobody answers yes | the call is refused and the state fails: `command refused: <the policy's reason>; <the approver's reason>` for `run_command`; `refused: …` on stderr when nobody was asked | answer at a terminal, or write the permission set line, or turn off the built-ins, as the message names |
 | `changeset review` with no TTY and no `--interactions` | exit 1, `nothing can answer the gate: attach a terminal, or script it with --interactions`, before any work | attach a TTY or script it |

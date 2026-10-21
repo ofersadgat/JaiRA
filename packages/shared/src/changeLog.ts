@@ -46,7 +46,7 @@ export interface ChangeCall {
   id: string;
   /** As the agent called it (`Edit`, `mcp__dai__edit`, `mcp__linear__update_issue`). */
   name: string;
-  /** The standard tool it stands for, where it stands for one (`edit`, `bash`, `start_task`). */
+  /** The standard tool it stands for, where it stands for one (`edit`, `shell`, `start_task`). */
   standard?: string;
   /** The tool menu's group; `other` for a tool in none. */
   category: ToolCategoryId | "other";

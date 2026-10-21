@@ -138,14 +138,14 @@ describe("the settings of a conversation that has not started yet", () => {
     const plan = service.chatStartPlan({ stateId: CHAT_SESSION });
     expect(plan.from).toBe(CHAT_SESSION);
     // The file's permission set, as the lowered list and block a loaded state holds.
-    for (const name of ["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search", "start_task"]) {
+    for (const name of ["read_file", "glob", "grep", "edit", "write_file", "shell", "web_fetch", "web_search", "start_task"]) {
       expect(plan.settings.tools, name).toContain(name);
     }
     expect(plan.origin.tools).toBe("inherited");
-    expect(plan.settings.permissions).toMatchObject({ tools: { read_file: "ask", bash: "ask" }, other: "ask", subjects: { bash: "ask" } });
+    expect(plan.settings.permissions).toMatchObject({ tools: { read_file: "ask", shell: "ask" }, other: "ask", subjects: { shell: "ask" } });
     // Nothing is in flight before anything has started, and the machine's offer is still an offer.
     expect(plan.live).toBe("idle");
-    expect(plan.available.tools.map((t) => t.name)).toContain("bash");
+    expect(plan.available.tools.map((t) => t.name)).toContain("shell");
   });
 
   it("folds a pick over the file, and says it was a pick", () => {

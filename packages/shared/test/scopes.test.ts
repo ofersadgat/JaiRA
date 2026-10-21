@@ -119,7 +119,7 @@ describe("resolution", () => {
 
   it("covers the base directory itself with a trailing `/**`", () => {
     // `/mnt/c/work/**` is how anybody writes "the sandbox is /mnt/c/work". A reading that excluded
-    // the directory itself would put the project path outside its own sandbox, and leave a `bash`
+    // the directory itself would put the project path outside its own sandbox, and leave a `shell`
     // cwd of exactly that directory unmatched — therefore denied.
     expect(resolveScope(TABLE, "read_file", "/mnt/c/work")).toBe("allow");
     // Non-trailing `**` keeps its ordinary meaning.
@@ -179,9 +179,9 @@ describe("a call about several places", () => {
   it("takes the strictest — the multi-path rule", () => {
     const table: Scope[] = [{ path: "/mnt/c/test/**", default: "allow" }, { path: "/mnt/c/**", default: "ask" }];
     // `ls -al /mnt/c/test`, run from /mnt/c/test
-    expect(resolveScopes(table, "bash", ["/mnt/c/test", "/mnt/c/test/x"])).toBe("allow");
+    expect(resolveScopes(table, "shell", ["/mnt/c/test", "/mnt/c/test/x"])).toBe("allow");
     // `ls -al /mnt/c/test /mnt/c` — the second argument is the one that decides.
-    expect(resolveScopes(table, "bash", ["/mnt/c/test", "/mnt/c/test/x", "/mnt/c/other"])).toBe("ask");
+    expect(resolveScopes(table, "shell", ["/mnt/c/test", "/mnt/c/test/x", "/mnt/c/other"])).toBe("ask");
   });
 
   it("denies a set containing anything unmatched", () => {

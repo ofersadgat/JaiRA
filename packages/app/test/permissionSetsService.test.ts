@@ -97,17 +97,17 @@ describe("permissionSets:read", () => {
 
 describe("permissionSets:write", () => {
   it("writes an override of what ships, following it, holding only what differs — and says so", () => {
-    const decl: PermissionSetDecl = { ...shipped("chat/read-only"), bash: "ask" };
+    const decl: PermissionSetDecl = { ...shipped("chat/read-only"), shell: "ask" };
     const written = service.writePermissionSetSettings({ id: "chat/read-only", layer: "project", project: dir, permissionSet: decl });
     expect(written.kind).toBe("override");
-    expect(readFileSync(written.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "bash": "ask"\n}\n`);
+    expect(readFileSync(written.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "shell": "ask"\n}\n`);
     // The pane re-reads on this scope, so a permission set written here shows up everywhere a state is read.
     expect(pushes.some((p) => p.type === "store:invalidate" && p.scope === "workflows")).toBe(true);
 
     const after = permissionSetsAt(service.readPermissionSetSettings({ project: dir }).records, "project");
     const readOnly = after.find((at) => at.id === "chat/read-only")!;
     expect(permissionSetStanding(readOnly)).toEqual({ here: true, label: "this project · copied from built in" });
-    expect(readOnly.source.decl).toMatchObject({ bash: "ask", read_file: "allow" });
+    expect(readOnly.source.decl).toMatchObject({ shell: "ask", read_file: "allow" });
   });
 
   it("stops following when a line what ships holds is taken out, because an override cannot say that", () => {
@@ -139,7 +139,7 @@ describe("permissionSets:write", () => {
 
 describe("permissionSets:reset", () => {
   it("deletes the override, so what ships answers again", () => {
-    const written = service.writePermissionSetSettings({ id: "chat/read-only", layer: "project", project: dir, permissionSet: { ...shipped("chat/read-only"), bash: "ask" } });
+    const written = service.writePermissionSetSettings({ id: "chat/read-only", layer: "project", project: dir, permissionSet: { ...shipped("chat/read-only"), shell: "ask" } });
     expect(service.resetPermissionSetSettings({ id: "chat/read-only", layer: "project", project: dir }).file).toBe(written.file);
     expect(existsSync(written.file)).toBe(false);
     const at = permissionSetsAt(service.readPermissionSetSettings({ project: dir, usedBy: false }).records, "project").find((one) => one.id === "chat/read-only")!;
@@ -167,12 +167,12 @@ describe("copy on first edit", () => {
   it("on Shared: one write makes ~/.jaira's copy with the change in it, following what ships", () => {
     const before = readAt("base", "chat/ask-first");
     expect(before.here).toBe(false);
-    const written = service.writePermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir, permissionSet: { ...before.source.decl!, bash: "allow" } });
+    const written = service.writePermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir, permissionSet: { ...before.source.decl!, shell: "allow" } });
     expect(written.file).toBe(join(testHome(), "permission-sets", "chat", "ask-first.json"));
     expect(written.kind).toBe("override");
-    expect(readFileSync(written.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/ask-first",\n  "bash": "allow"\n}\n`);
+    expect(readFileSync(written.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/ask-first",\n  "shell": "allow"\n}\n`);
     // What ships is untouched.
-    expect(shipped("chat/ask-first").bash).not.toBe("allow");
+    expect(shipped("chat/ask-first").shell).not.toBe("allow");
 
     const after = readAt("base", "chat/ask-first");
     expect(permissionSetStanding(after)).toEqual({ here: true, label: "shared · copied from built in" });
@@ -183,7 +183,7 @@ describe("copy on first edit", () => {
   });
 
   it("on this project, over a shared copy: copies the set as it is IN EFFECT — the shared one — and says so", () => {
-    service.writePermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir, permissionSet: { ...shipped("chat/ask-first"), bash: "allow" } });
+    service.writePermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir, permissionSet: { ...shipped("chat/ask-first"), shell: "allow" } });
     const seen = readAt("project", "chat/ask-first");
     const written = service.writePermissionSetSettings({ id: "chat/ask-first", layer: "project", project: dir, permissionSet: { ...seen.source.decl!, web_fetch: "deny" } });
     expect(written.file).toBe(join(dir, ".jaira", "permission-sets", "chat", "ask-first.json"));
@@ -191,12 +191,12 @@ describe("copy on first edit", () => {
     const after = readAt("project", "chat/ask-first");
     expect(permissionSetStanding(after).label).toBe("this project · copied from Shared");
     // Shared's line is carried by the `$ref`, and the project's own sits over it.
-    expect(after.source.decl).toMatchObject({ bash: "allow", web_fetch: "deny" });
+    expect(after.source.decl).toMatchObject({ shell: "allow", web_fetch: "deny" });
     expect(copyDifferences(after)).toBe(1);
   });
 
   it("Put back the built-in deletes the layer's copy, and what ships answers again", () => {
-    const written = service.writePermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir, permissionSet: { ...shipped("chat/ask-first"), bash: "allow" } });
+    const written = service.writePermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir, permissionSet: { ...shipped("chat/ask-first"), shell: "allow" } });
     expect(service.resetPermissionSetSettings({ id: "chat/ask-first", layer: "base", project: dir }).file).toBe(written.file);
     expect(existsSync(written.file)).toBe(false);
     const after = readAt("base", "chat/ask-first");
@@ -214,9 +214,9 @@ describe("copy on first edit", () => {
       id: "chat/ask-first",
       layer: "base",
       project: dir,
-      permissionSet: rebasePermissionSetChange(shown, { ...shown, bash: "allow" }, onto),
+      permissionSet: rebasePermissionSetChange(shown, { ...shown, shell: "allow" }, onto),
     });
-    expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/chat/ask-first", bash: "allow" });
+    expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/chat/ask-first", shell: "allow" });
     // The project's copy still says what it said, and follows nothing new.
     expect(readAt("project", "chat/ask-first").source.decl).toMatchObject({ web_fetch: "deny" });
   });

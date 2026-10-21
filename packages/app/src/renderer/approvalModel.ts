@@ -125,7 +125,7 @@ export interface PartRow {
   index: number;
   hue: string;
   pieces: Piece[];
-  /** What the part is a request FOR — or the entry that stood in for it (`bash`, `other`). */
+  /** What the part is a request FOR — or the entry that stood in for it (`shell`, `other`). */
   subject: string;
   /** The place, where it was opened out of, and what else a person should know. */
   note?: string;
@@ -145,7 +145,7 @@ export interface PartRow {
 const VERDICT_LABEL: Record<CommandPartVerdict, string> = { allowed: "allowed", function: "to a function", asks: "asks", denied: "denied" };
 export const verdictLabel = (verdict: CommandPartVerdict): string => VERDICT_LABEL[verdict];
 
-const FALLBACK_ENTRIES: Record<string, string> = { bash: "any other command", other: "everything no line names" };
+const FALLBACK_ENTRIES: Record<string, string> = { shell: "any other command", other: "everything no line names" };
 
 /** Did the permission set's FALLBACK answer for a command — is there no line that names it? */
 function fellThrough(part: CommandPart): boolean {

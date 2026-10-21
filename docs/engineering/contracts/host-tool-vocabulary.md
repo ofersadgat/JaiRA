@@ -39,7 +39,7 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 
 | Name | readOnly | Registered by | Argument a scope judges | Claude built-ins that are this tool |
 | --- | --- | --- | --- | --- |
-| `bash` | false | `registerTools` | `cwd`, and the paths inside `command` | `Bash` |
+| `shell` | false | `registerTools` | `cwd`, and the paths inside `command` | `Bash`, `PowerShell` |
 | `read_file` | true | `registerFileTools` | `path` | `Read` |
 | `write_file` | false | `registerFileTools` | `path` | `Write` |
 | `edit` | false | `registerFileTools` | `path` | `Edit`, `MultiEdit`, `NotebookEdit` |
@@ -59,6 +59,8 @@ The `readOnly` column is the upstream `Tool.readOnly` of the tool as registered.
 | `open_merge_request`, `comment_merge_request`, `git_merge`, `close_merge_request`, `git_push` | false | `registerGitTools` | none | none |
 | `list_pipelines`, `read_pipeline`, `read_pipeline_job`, `download_pipeline_artifact` | true | `registerGitTools` (from `ciTools.ts`) | none | none |
 | `wait_for_event` | true | `registerGitTools` | none | none |
+| `read_system`, `list_processes`, `list_services`, `list_software`, `read_settings`, `read_clipboard`, `list_windows`, `screenshot` | true | `registerSystemTools` | none | none |
+| `power`, `stop_process`, `control_service`, `install_software`, `write_settings`, `write_clipboard`, `open_app`, `control_input` | false | `registerSystemTools` | none | none |
 
 The **Git tools** ([0010](../decisions/0010-git-tools-and-events.md) §1), category `git`, reach the forge of
 the WORKSPACE's git remote (the one named in `remote`, else the only one, else `origin`) through the
@@ -75,15 +77,38 @@ way and only read: a pipeline list (of a merge request, a ref or a sha), one pip
 named as the next call takes it (`pipeline_id`, `job_id`, `artifact_id`, `file_type`). `wait_for_event`
 (category `tasks`) waits for any event, JaiRA's own included; only a remote's event passes the forge's door.
 
+The **System tools** ([0018](../decisions/0018-system-tools.md)), category `system`, act on the machine the
+ENGINE runs on and its desktop — a WSL project's agent looks at the Windows desktop — in eight areas of a
+look and a change each (`SYSTEM_AREAS`). Windows' run in PowerShell 5.1 and .NET with no WMI and no native
+module; macOS's in its own programs and JavaScript for Automation; on Linux every call answers that none is
+built yet. A call's arguments reach a script as data, never as code. Every answer is JSON a model reads,
+with ids named as the next call takes them (`pid` and `started`, `window_id`, a service's `name`, a
+package's `id`); a list is cut to `limit` and says its `count`. Rules the same on every OS:
+
+- `stop_process` refuses JaiRA's own processes — the engine, what it runs inside, what it started, the
+  agents under it, the app's other processes by its program's name — and what the operating system needs,
+  and `tree` refuses a tree that holds one. `list_processes` marks them `protected` with why.
+- `control_input` refuses, step by step, to click or type into a window of JaiRA's own, and takes its
+  coordinates from the last `screenshot` of the same conversation (mapped back to the screen's own pixels).
+  The person can stop it from the band the app shows while it runs; a stopped task may not drive again until
+  the person next writes to it.
+- `open_app` launches an app or opens a document or a web, mail or settings link; it refuses an
+  interpreter, a command the shell judges as a System tool, a file that would run as a program, and a link
+  to any other protocol.
+- `screenshot` (and a picture on the clipboard) is kept as the task's artifact under `system/…` and handed
+  to the model as an image: the result carries it under `$images`, which every route sends as an image
+  (`@declarative-ai/json`'s `splitToolImages`).
+- `power` and `install_software` always ask, as a push does, unless `functions.shell.builtins` is off.
+
 The last eight are the **workflow tools** ([0005](../decisions/0005-connect.md) §3), and they are the tools of a
 CONVERSATION rather than of a workspace: none of them names a place, so no scope table narrows one, and no
 agent has a built-in that is one. `chat/control` holds these and nothing else; `chat/session` holds them
 beside the rest. Where nothing serves them — the CLI, a test registry — the names still resolve and every
 call answers that it cannot be served there, so a state that holds one still loads and runs.
 
-Claude's `Task`, `Agent` and `SlashCommand` are declared with no standard tool and answer to `other`. Codex declares `shell` as `bash` and `apply_patch` as `edit`, and one switch, its `workspace-write` sandbox, which `write_file`, `edit` or `bash` turns on. A generic CLI declares nothing.
+Claude's `Task`, `Agent` and `SlashCommand` are declared with no standard tool and answer to `other`. Claude declares both its shells, `Bash` and `PowerShell`, as `shell`. Codex declares its own `shell` as the standard `shell` and `apply_patch` as `edit`, and one switch, its `workspace-write` sandbox, which `write_file`, `edit` or `shell` turns on. A generic CLI declares nothing.
 
-### `bash` runs one command line in the workspace and reports its exit
+### `shell` runs one command line in the workspace and reports its exit
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -99,7 +124,7 @@ Claude's `Task`, `Agent` and `SlashCommand` are declared with no standard tool a
 | --- | --- | --- | --- |
 | in `config.command` | string | one of the two | the command, from the state's `args`; wins over `command` |
 | in `command` | string | one of the two | the command, as a bound input |
-| value | the `bash` result | on success | `exitCode`, `stdout`, `stderr`, `timedOut` |
+| value | the `shell` result | on success | `exitCode`, `stdout`, `stderr`, `timedOut` |
 | capabilities | `{interactive: false, readOnly: false, memoizable: false}` | yes | never memoized |
 
 ### The file tools address a logical path and never say where the bytes went
@@ -213,8 +238,8 @@ outside it.
 | Condition | Response | Caller does |
 | --- | --- | --- |
 | The permission gate refuses the call | upstream `PermissionDenied`, `{denied: true, tool, reason}` | read the reason; the model carries on without the tool |
-| `bash` gets an empty command, or a `cwd` containing `..` or `.jaira` | `{error: "no command given"}`, `{error: "cwd '<cwd>' is not allowed"}` | send a command, or a relative directory |
-| `bash` cannot start its interpreter | the call rejects with `failed to run '<command>': <message>` | fix the environment |
+| `shell` gets an empty command, or a `cwd` containing `..` or `.jaira` | `{error: "no command given"}`, `{error: "cwd '<cwd>' is not allowed"}` | send a command, or a relative directory |
+| `shell` cannot start its interpreter | the call rejects with `failed to run '<command>': <message>` | fix the environment |
 | A file tool gets an empty path or one under `.jaira/` | `{error: "no path given"}`, `{error: "'<path>' is inside .jaira/, which agents may not write"}`, for reads too | name another path |
 | A read resolves outside the workspace or cannot open | `{error: "'<path>' is outside the workspace"}`, `{error: "could not read '<path>': <message>"}` | name a workspace path |
 | A write's destination refuses the path or the disk refuses the write | `{error}` with the `DestinationError` message, `{error: "could not write '<path>': <message>"}`, or `could not show` for `show_artifact` | name a path the destination admits |

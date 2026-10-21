@@ -21,7 +21,7 @@ import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared";
 
 /** What `approve_tool_call` was called with, as the record keeps it. */
 export interface ApprovalCallInput {
-  /** The tool that needed permission — `bash`, `write_file`, an MCP tool. */
+  /** The tool that needed permission — `shell`, `write_file`, an MCP tool. */
   tool: string;
   command?: string;
   reason?: string;

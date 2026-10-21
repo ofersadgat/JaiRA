@@ -40,7 +40,7 @@ It deliberately does not own:
 - Layer `core`, package `@jaira/runtime`. It calls `node:child_process`, `node:fs` for program lookup, and `refusal` from `@jaira/shared`.
 - Upstream seam: `resolveProgram` and `ProgramDeps` from `@declarative-ai/agents-cli`. The engine never calls this unit; registered tools and functions do.
 - Boundary: Windows and WSL. `toWslPath` and `toWindowsPath` are the one translation, used by `resolveInvocation`, `Git.path`, `agentSpawn` and the CLI's `worktree list` join.
-- The app's `startRun` and the CLI's `buildRunEnvironment` build one `NodeExec` per run with the run's observer, shared by `bash`, `run_command` and generic agents. Chat turns, probes, `gitFor` and the git identity lookup build their own without one.
+- The app's `startRun` and the CLI's `buildRunEnvironment` build one `NodeExec` per run with the run's observer, shared by `shell`, `run_command` and generic agents. Chat turns, probes, `gitFor` and the git identity lookup build their own without one.
 
 ## Process exec owns no stored data, and the environment it runs in comes from settings
 

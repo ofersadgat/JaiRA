@@ -13,7 +13,7 @@
  * signature-driven renderer that draws the executor steps draws these. One declaration, read by the
  * form and by anyone reading the config.
  *
- * What a command may run is NOT here: that is each permission set's `bash` line and its command lines, edited
+ * What a command may run is NOT here: that is each permission set's `shell` line and its command lines, edited
  * in Settings → Permission sets. What is here is each shipped function's defaults, under `functions`.
  */
 import type { JsonValue } from "@declarative-ai/json";
@@ -314,11 +314,11 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
             },
           },
         },
-        bash: {
+        shell: {
           type: "object",
-          title: "bash",
+          title: "shell",
           description:
-            "The shell tool. What a line may run is each permission set's bash line and the command lines under it (git push, npm install); this is what stands above every permission set.",
+            "The shell tool — bash, PowerShell or cmd, whichever runs the line. What a line may run is each permission set's shell line and the command lines under it (git push, npm install); this is what stands above every permission set.",
           properties: {
             builtins: {
               type: "boolean",

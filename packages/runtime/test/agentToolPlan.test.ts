@@ -15,8 +15,11 @@ import {
   unmappedNatives,
   withAlwaysGranted,
 } from "@jaira/shared";
+import type { ExecServices } from "@declarative-ai/exec";
+import type { ToolGate } from "@declarative-ai/permissions";
 import { AGENT_TOOLS, agentToolsOf, nativeNamesByRoute } from "../src/agents";
-import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, planAgentTools, refusalsOf, viewOfPermissionSet } from "../src/agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, CODEX_WRITE_SWITCH, GENERIC_CLI_TOOLS, planAgentTools, refusalsOf, servicesUnder, viewOfPermissionSet } from "../src/agentTools";
+import { callDialectOf } from "../src/callDialect";
 import { claudePermissionSettings, claudeReplacements } from "../src/tools";
 
 /** A permission set MAP holding these tools — the form whose absences REMOVE (decision 0007 §3). */
@@ -63,10 +66,10 @@ describe("planAgentTools", () => {
   });
 
   it("keeps the two axes independent", () => {
-    const plan = planAgentTools(mapOf(["read_file", "glob", "bash"], { read_file: "app", glob: "native" }));
+    const plan = planAgentTools(mapOf(["read_file", "glob", "shell"], { read_file: "app", glob: "native" }));
     // TABLE order, not the order they were granted in — the plan walks `TOOL_SPECS`, which is why
     // `show_artifact` lands between the two rather than after them.
-    expect(plan.inject).toEqual(["read_file", "show_artifact", "bash"]);
+    expect(plan.inject).toEqual(["read_file", "show_artifact", "shell"]);
     expect(plan.askNatives).toEqual(["Glob"]);
     // Everything ungranted is still shut off.
     expect(plan.denyNatives).toContain("Write");
@@ -93,7 +96,7 @@ describe("planAgentTools", () => {
 /**
  * The tool a declared list does not get to leave out.
  *
- * A conversation asked for a mockup could not produce one: the old `chat/agent` declared `bash`, `read_file`
+ * A conversation asked for a mockup could not produce one: the old `chat/agent` declared `shell`, `read_file`
  * and `write_file`, so `show_artifact` was never handed over, `write_file` was refused by the
  * `.jaira/**` rule, and 29,000 characters of HTML went into the answer instead. The rule that fixes
  * it is narrow on purpose — a tool qualifies only by adding no reach, which today is exactly one.
@@ -109,7 +112,7 @@ describe("alwaysGranted", () => {
   });
 
   it("is injected by a permission set that never mentions it", () => {
-    expect(planAgentTools(mapOf(["bash", "read_file", "write_file"])).inject).toContain("show_artifact");
+    expect(planAgentTools(mapOf(["shell", "read_file", "write_file"])).inject).toContain("show_artifact");
   });
 
   it("is injected by a permission set that holds nothing — the conversation with no tools is the one that draws", () => {
@@ -120,7 +123,7 @@ describe("alwaysGranted", () => {
     // `withAlwaysGranted` is the fold, and a list that already names the tool must come back the
     // same length — a duplicate declaration is a second tool as far as an agent's schema is concerned.
     expect(planAgentTools(mapOf(["show_artifact"])).inject).toEqual(["show_artifact"]);
-    expect(withAlwaysGranted(["show_artifact", "bash"])).toEqual(["show_artifact", "bash"]);
+    expect(withAlwaysGranted(["show_artifact", "shell"])).toEqual(["show_artifact", "shell"]);
   });
 });
 
@@ -128,7 +131,7 @@ describe("claudeReplacements", () => {
   it("maps each tool onto the built-in it stands in for", () => {
     // Injection without displacement is a second set of tools the model ignores — observed on a live
     // run, where the agent reached for `Read` every time with `mcp__dai__read_file` sitting beside it.
-    expect(claudeReplacements()).toMatchObject({ read_file: ["Read"], glob: ["Glob"], bash: ["Bash"] });
+    expect(claudeReplacements()).toMatchObject({ read_file: ["Read"], glob: ["Glob"], shell: ["Bash", "PowerShell"] });
     // EVERY native doing the job, or denying `Edit` leaves `MultiEdit` to do the same thing.
     expect(claudeReplacements()["edit"]).toEqual(["Edit", "MultiEdit", "NotebookEdit"]);
   });
@@ -176,15 +179,38 @@ describe("the executors' declarations", () => {
     expect(agentToolsOf("claude-cli")).toBe(CLAUDE_TOOLS);
     expect(agentToolsOf("codex-cli")).toBe(CODEX_TOOLS);
     expect(agentToolsOf("aider")).toBe(GENERIC_CLI_TOOLS);
-    expect(CLAUDE_TOOLS.natives).toMatchObject({ Read: "read_file", Bash: "bash", Edit: "edit", Write: "write_file", Glob: "glob", Grep: "grep", WebFetch: "web_fetch", WebSearch: "web_search" });
-    expect(CODEX_TOOLS.switches).toEqual({ "workspace-write": ["write_file", "edit", "bash"] });
+    expect(CLAUDE_TOOLS.natives).toMatchObject({ Read: "read_file", Bash: "shell", Edit: "edit", Write: "write_file", Glob: "glob", Grep: "grep", WebFetch: "web_fetch", WebSearch: "web_search" });
+    expect(CODEX_TOOLS.switches).toEqual({ "workspace-write": ["write_file", "edit", "shell"] });
     expect(GENERIC_CLI_TOOLS).toEqual({ channel: "none", natives: {} });
+  });
+
+  it("declares Claude's two shells as the one shell, and asks the gate about either with the line's language beside it", async () => {
+    expect(CLAUDE_TOOLS.natives).toMatchObject({ Bash: "shell", PowerShell: "shell" });
+    const seen: Array<{ name: string; dialect: string | undefined }> = [];
+    const gate: ToolGate = {
+      profile: "default",
+      modeOf: () => "ask",
+      check: (tool, input) => {
+        seen.push({ name: tool.name, dialect: callDialectOf(input, tool.name) });
+        return Promise.resolve({ allow: true });
+      },
+    };
+    const translated = servicesUnder({ gate } as unknown as ExecServices, CLAUDE_TOOLS, []).gate!;
+    await translated.check({ name: "PowerShell" }, { command: "Get-ChildItem | % { Remove-Item $_ }" });
+    await translated.check({ name: "Bash" }, { command: "ls -la" });
+    // JaiRA's own shell runs where the project runs: nothing is noted, and `dialectFor` decides.
+    await translated.check({ name: "shell" }, { command: "ls" });
+    expect(seen).toEqual([
+      { name: "shell", dialect: "powershell" },
+      { name: "shell", dialect: "posix" },
+      { name: "shell", dialect: undefined },
+    ]);
   });
 
   it("tells the composer what a route calls its own tool — only where the implementation is a choice", () => {
     expect(nativeNamesByRoute("read_file")).toEqual({ "claude-code": "Read", "claude-cli": "Read" });
     // Codex is served ours over its bridge, so keeping its own shell is a pick too.
-    expect(nativeNamesByRoute("bash")).toEqual({ "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" });
+    expect(nativeNamesByRoute("shell")).toEqual({ "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" });
     expect(nativeNamesByRoute("edit")).toEqual({ "claude-code": "Edit", "claude-cli": "Edit", "codex-cli": "apply_patch" });
     expect(nativeNamesByRoute("show_artifact")).toEqual({});
   });
@@ -230,7 +256,7 @@ describe("the implementation choice, per tool", () => {
   });
 
   it("delivers a `deny` beside `native` as a removal, not as a question", () => {
-    const plan = planAgentTools(permissionSet({ bash: { mode: "deny", implementation: "native" } }));
+    const plan = planAgentTools(permissionSet({ shell: { mode: "deny", implementation: "native" } }));
     expect(plan.askNatives).not.toContain("Bash");
     expect(plan.denyNatives).toContain("Bash");
   });
@@ -258,21 +284,21 @@ describe("a coarse transport's switch is derived from the permission set", () =>
     // Held with OUR implementation: ours is served over the bridge and the native is displaced — shut.
     expect(on(permissionSet({ read_file: "allow", edit: "ask" }))).toBe(false);
     // A line a FUNCTION decides is held like any other: ours serves it, the function judging each call.
-    expect(on(permissionSet({ bash: { function: "smart" } }))).toBe(false);
+    expect(on(permissionSet({ shell: { function: "smart" } }))).toBe(false);
     expect(on(permissionSet({ write_file: "allow" }))).toBe(false);
     // Kept: codex's own `apply_patch` or `shell` does the job, and only the sandbox lets it.
     expect(on(permissionSet({ read_file: "allow", edit: { mode: "ask", implementation: "native" } }))).toBe(true);
-    expect(on(permissionSet({ bash: { function: "smart", implementation: "native" } }))).toBe(true);
+    expect(on(permissionSet({ shell: { function: "smart", implementation: "native" } }))).toBe(true);
     // Held and refused is not held, whoever's code it names.
-    expect(on(permissionSet({ read_file: "allow", bash: "deny", write_file: "deny" }))).toBe(false);
-    expect(on(permissionSet({ bash: { mode: "deny", implementation: "native" } }))).toBe(false);
+    expect(on(permissionSet({ read_file: "allow", shell: "deny", write_file: "deny" }))).toBe(false);
+    expect(on(permissionSet({ shell: { mode: "deny", implementation: "native" } }))).toBe(false);
   });
 });
 
 describe("what a transport that enforces nothing cannot run", () => {
   it("is a permission set that REFUSES something — named, so the refusal can say what", () => {
-    const refusing = parsePermissionSet({ read_file: "allow", edit: "deny", write_file: "deny", bash: "deny", other: "deny" }).permissionSet;
-    expect(refusalsOf(viewOfPermissionSet(refusing))).toEqual(["edit", "write_file", "bash", "other"]);
-    expect(refusalsOf(viewOfPermissionSet(parsePermissionSet({ read_file: "ask", bash: "ask" }).permissionSet))).toEqual([]);
+    const refusing = parsePermissionSet({ read_file: "allow", edit: "deny", write_file: "deny", shell: "deny", other: "deny" }).permissionSet;
+    expect(refusalsOf(viewOfPermissionSet(refusing))).toEqual(["edit", "write_file", "shell", "other"]);
+    expect(refusalsOf(viewOfPermissionSet(parsePermissionSet({ read_file: "ask", shell: "ask" }).permissionSet))).toEqual([]);
   });
 });

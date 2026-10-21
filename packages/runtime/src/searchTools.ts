@@ -4,7 +4,7 @@
  * These existed already, twice over, and neither copy was ours. An agent that reaches for its own
  * `Glob` is a call we never see: not gated, not journalled, not subject to the destination map that
  * makes `read_file` able to find an artifact somebody wrote to a virtual path. And a state that
- * declared only `bash` got the same capability through `find` and `rg` with none of the structure —
+ * declared only `shell` got the same capability through `find` and `rg` with none of the structure —
  * one opaque command line where there should be an intent we can read.
  *
  * That is the whole argument for implementing them rather than leaning on the shell: `glob` says

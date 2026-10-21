@@ -75,8 +75,20 @@ const EVENT_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
   wait_for_event: { "ask-first": "ask", auto: "allow", full: "allow", "read-only": "allow" },
 };
 
+/**
+ * The System tools (decision 0018 §5, as ruled 2026-10-20): "system should default to ask" — every one
+ * asks, except that read-only lets the looks go ahead (the clipboard and the screen too: they only
+ * read) and refuses the changes, and full allows all sixteen.
+ */
+const SYSTEM_LOOKS = ["read_system", "list_processes", "list_services", "list_software", "read_settings", "read_clipboard", "list_windows", "screenshot"];
+const SYSTEM_CHANGES = ["power", "stop_process", "control_service", "install_software", "write_settings", "write_clipboard", "open_app", "control_input"];
+const SYSTEM_TOOLS: Record<string, Record<string, PermissionSetMode>> = Object.fromEntries([
+  ...SYSTEM_LOOKS.map((name) => [name, { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "allow" }] as const),
+  ...SYSTEM_CHANGES.map((name) => [name, { "ask-first": "ask", auto: "ask", full: "allow", "read-only": "deny" }] as const),
+]);
+
 /** The tools with a table of their own here rather than a frozen preset's mode. */
-const TABLED = { ...FORGE_TOOLS, ...EVENT_TOOLS };
+const TABLED = { ...FORGE_TOOLS, ...EVENT_TOOLS, ...SYSTEM_TOOLS };
 
 /** Every tool a conversation can be HANDED today — the nine the presets knew, the eight since, and the Git tools. */
 const CONVERSATION_TOOLS = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true && spec.unserved !== true).map((spec) => spec.name);
@@ -100,7 +112,7 @@ describe("the chat bucket is the four presets, written down", () => {
     // including any tool named and not yet served, whose mode is inert until it is.
     expect(heldTools(permissionSet).sort()).toEqual([...CONVERSATION_TOOLS, ...TOOL_SPECS.filter((s) => s.unserved === true).map((s) => s.name)].sort());
     // …and every forge tool is handed on, and wait_for_event, which the event hub serves.
-    for (const name of Object.keys(TABLED)) expect(offeredTools(permissionSet), name).toContain(name);
+    for (const name of Object.keys(TABLED)) if (TOOL_SPEC_BY_NAME.get(name)?.unserved !== true) expect(offeredTools(permissionSet), name).toContain(name);
     // …with nobody's implementation chosen, because a preset never chose one.
     expect(toolImplementations(permissionSet)).toEqual({});
     // "A name the preset has never heard of gets its strictest" is what `other` says.

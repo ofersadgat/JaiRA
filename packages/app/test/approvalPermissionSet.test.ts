@@ -21,7 +21,7 @@ import { lowerPermissionSet, parsePermissionSet, setBuiltInDir, type Permissions
 import { AppService } from "@jaira/service";
 
 const REF = "$/permission-sets/chat/ask-first";
-const SHIPPED = { bash: "ask", read_file: "allow", write_file: "allow", "git commit": "ask", "git log": "allow", other: "deny" } as const;
+const SHIPPED = { shell: "ask", read_file: "allow", write_file: "allow", "git commit": "ask", "git log": "allow", other: "deny" } as const;
 
 let scratch: string;
 let dir: string;
@@ -67,7 +67,7 @@ function hub(): ApprovalHub {
 function park(command: string, source: string | undefined = REF): Promise<PermissionDecision> {
   const input = { command };
   expect(narrowingFor(input, source)).toBe("ask");
-  const request: PermissionRequest = { tool: "bash", input: input as never, sessionId: "agent-1" };
+  const request: PermissionRequest = { tool: "shell", input: input as never, sessionId: "agent-1" };
   return Promise.resolve(hub().approver({ taskId: "t-1" })(request));
 }
 
@@ -76,7 +76,7 @@ function narrowingFor(input: { command: string }, source: string | undefined = R
   const lowered = lowerPermissionSet(parsePermissionSet(SHIPPED).permissionSet).permissions!;
   const block: PermissionsDecl = { ...lowered, ...(source !== undefined ? { source } : {}) };
   const policy = compilePolicy({}, { execEnv: { wsl: "test" }, grants: hub().grants("t-1") });
-  return policy.scopeOf!({ name: "bash" } as never, input as never, block as never);
+  return policy.scopeOf!({ name: "shell" } as never, input as never, block as never);
 }
 
 const projectFile = (): string => join(dir, ".jaira", "permission-sets", "chat", "ask-first.json");

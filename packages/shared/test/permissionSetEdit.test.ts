@@ -35,7 +35,7 @@ describe("an override that keeps following what it overrides", () => {
   it("resolves to the lower file's entries with the new line over them, and parses clean", () => {
     const files: Record<string, unknown> = {
       "$/permission-sets/chat/ask-first": JSON.parse(overridePermissionSetText("$SYSTEM/permission-sets/chat/ask-first", { "git commit": "allow" })),
-      "$SYSTEM/permission-sets/chat/ask-first": { read_file: "allow", bash: "ask", "git commit": "ask", other: "deny" },
+      "$SYSTEM/permission-sets/chat/ask-first": { read_file: "allow", shell: "ask", "git commit": "ask", other: "deny" },
     };
     const read: PermissionSetReader = (reference) => {
       if (!Object.hasOwn(files, reference)) throw new Error(`no ${reference}`);
@@ -44,7 +44,7 @@ describe("an override that keeps following what it overrides", () => {
     const issues: never[] = [];
     const resolved = resolvePermissionSetDecl("$/permission-sets/chat/ask-first", read, "plan", issues);
     expect(issues).toEqual([]);
-    expect(resolved).toEqual({ read_file: "allow", bash: "ask", "git commit": "allow", other: "deny" });
+    expect(resolved).toEqual({ read_file: "allow", shell: "ask", "git commit": "allow", other: "deny" });
     expect(parsePermissionSet(resolved).issues).toEqual([]);
   });
 });
@@ -67,7 +67,7 @@ describe("a line added to a file somebody wrote", () => {
   });
 
   it("refuses what is not a permission set map, and what is not a subject", () => {
-    expect(() => addToPermissionSetText('["bash"]', { git: "allow" })).toThrow(/not a map/);
+    expect(() => addToPermissionSetText('["shell"]', { git: "allow" })).toThrow(/not a map/);
     expect(() => addToPermissionSetText('"$/permission-sets/chat/x"', { git: "allow" })).toThrow(/not a map/);
     expect(() => addToPermissionSetText("{ nope", { git: "allow" })).toThrow(/does not parse/);
     expect(() => addToPermissionSetText("{}", { other: "allow" })).toThrow(/not a subject/);
@@ -81,7 +81,7 @@ describe("a line added to a file somebody wrote", () => {
 });
 
 describe("where a lowered block's subjects came from", () => {
-  const read: PermissionSetReader = (reference) => ({ value: { bash: "ask", "git commit": "ask", read_file: "allow" }, key: reference, from: reference });
+  const read: PermissionSetReader = (reference) => ({ value: { shell: "ask", "git commit": "ask", read_file: "allow" }, key: reference, from: reference });
   const sourceOf = (tools: unknown): unknown => {
     const lowered = lowerStatePermissionSets("plan", { environment: { tools } }, read).def as { environment: { permissions?: { source?: string } } };
     return lowered.environment.permissions?.source;
@@ -89,13 +89,13 @@ describe("where a lowered block's subjects came from", () => {
 
   it("is the reference for a permission set named by one, and `inline` for a map — or a `$ref` that says more — on the state", () => {
     expect(sourceOf("$/permission-sets/chat/ask-first")).toBe("$/permission-sets/chat/ask-first");
-    expect(sourceOf({ bash: "ask" })).toBe(INLINE_PERMISSION_SET);
+    expect(sourceOf({ shell: "ask" })).toBe(INLINE_PERMISSION_SET);
     expect(sourceOf({ $ref: "$/permission-sets/chat/ask-first", "git commit": "allow" })).toBe(INLINE_PERMISSION_SET);
   });
 
   it("is written only beside `subjects`, so a block that judges no shell line is exactly what it was", () => {
     expect(sourceOf({ read_file: "allow", other: "deny" })).toBeUndefined();
-    expect(sourceOf(["bash"])).toBeUndefined();
+    expect(sourceOf(["shell"])).toBeUndefined();
   });
 });
 
@@ -105,7 +105,7 @@ describe("the widths an answer remembers", () => {
     matched: [],
     text: "",
     kind: "command",
-    subject: widths[0] ?? "bash",
+    subject: widths[0] ?? "shell",
     verdict,
     decidedBy: { source: "permissionSet", reason: "" },
     widths,

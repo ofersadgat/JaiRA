@@ -223,6 +223,8 @@ import {
   registerRemoteFunctions,
   PublishAuthorizer,
   registerGitTools,
+  registerSystemTools,
+  type DrivingEvent,
   workspaceGitHost,
   centralArtifactSink,
   reviewWithRemote,
@@ -630,6 +632,7 @@ import type {
   PruneRequest,
   PruneResult,
   PushMessage,
+  DesktopDriving,
   EventsNotice,
   MoveWorkflowRequest,
   ReadFileRequest,
@@ -2188,6 +2191,45 @@ export class AppService {
   /** The notices the events tasks posted in this process, oldest first. */
   notices(): EventsNotice[] {
     return [...this.postedNotices];
+  }
+
+  // --- an agent's hands on the desktop (decision 0018, ruling 6) ---------------------------------
+
+  /** The `control_input` call running now, and how to stop it — what the app's band shows while it lasts. */
+  private drivingNow: { driving: DesktopDriving; stop?: () => void } | undefined;
+  /** The tasks the person stopped from using the mouse and keyboard, until they next write to them. */
+  private readonly drivingStopped = new Set<string>();
+
+  /** What `desktop:driving` answers: the agent using the mouse and keyboard now, if one is. */
+  driving(): DesktopDriving | null {
+    return this.drivingNow?.driving ?? null;
+  }
+
+  /**
+   * The band's Stop (`desktop:stop`): the input call is ended where it stands, and the task may not
+   * use the mouse and keyboard again until the person next writes to it — a stopped agent that took
+   * the pointer straight back would make Stop a pause.
+   */
+  stopDriving(): void {
+    const now = this.drivingNow;
+    if (now === undefined) return;
+    this.drivingStopped.add(`${now.driving.project}/${now.driving.taskId}`);
+    now.stop?.();
+    this.log({ level: "info", source: "system", message: "the person stopped an agent using the mouse and keyboard", project: now.driving.project, taskId: now.driving.taskId });
+  }
+
+  /** The System tools' hooks for one task: the band, and whether the person has stopped it driving. */
+  private systemHooksFor(open: ProjectSession, taskId: string): { onDriving: (event: DrivingEvent) => void; mayDrive: () => string | undefined } {
+    const project = this.refOfSession(open);
+    const key = `${project}/${taskId}`;
+    return {
+      onDriving: (event) => {
+        if (event.active) this.drivingNow = { driving: { project, taskId, since: Date.now() }, ...(event.stop !== undefined ? { stop: event.stop } : {}) };
+        else if (this.drivingNow?.driving.project === project && this.drivingNow.driving.taskId === taskId) this.drivingNow = undefined;
+        this.publish({ type: "desktop:driving", driving: this.driving() });
+      },
+      mayDrive: () => (this.drivingStopped.has(key) ? "the person stopped you using the mouse and keyboard — ask them before you use it again" : undefined),
+    };
   }
 
   /** What has arrived of each event, per project — what Settings → Events says under an event that is on. */
@@ -5027,7 +5069,7 @@ export class AppService {
       /**
        * What the run may CALL, replacing the full host registry.
        *
-       * A sync deliberately gets `read_file` and nothing else — no `write_file`, no `bash`, no agent
+       * A sync deliberately gets `read_file` and nothing else — no `write_file`, no `shell`, no agent
        * runtimes — because it returns text for a person to accept and must not touch disk. That
        * refusal is load-bearing, so it is a parameter rather than something to remember.
        */
@@ -5264,6 +5306,8 @@ export class AppService {
         artifacts: centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }),
       }),
     );
+    // The System tools (decision 0018): this machine. A screenshot is the task's artifact, as a CI download is.
+    registerSystemTools(registry, { keep: () => centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }), ...this.systemHooksFor(open, taskId) });
 
     // The run's half of `ToolSpec.alwaysGranted` — the chat path gets it inside `planAgentTools`,
     // and a run resolves `environment.tools` through the engine instead, so it has to be folded in
@@ -6188,6 +6232,8 @@ export class AppService {
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
+    // The person writing again is what lets a task they stopped use the mouse and keyboard again.
+    if (origin.by !== "host") this.drivingStopped.delete(`${this.refOfSession(open)}/${request.taskId}`);
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
     const settledAhead = open.chatDone.get(request.taskId);
     let finished = (): void => undefined;
@@ -6404,7 +6450,7 @@ export class AppService {
     // JaiRA registered these and JaiRA compiled the policy, so it always knows what it is handing
     // over — see `gateTools`. An unresolvable name throws rather than quietly running without it.
     //
-    // BOTH registrations, exactly as `startTask` does them. `registerTools` supplies `bash` alone;
+    // BOTH registrations, exactly as `startTask` does them. `registerTools` supplies `shell` alone;
     // the file tools come from `registerFileTools`, and with only the first of the two a reader who
     // ticked `read_file` got `tool 'read_file' is not registered` — the loud failure that call is
     // designed to give for a name nobody registered, raised here for a wiring gap instead.
@@ -6460,6 +6506,7 @@ export class AppService {
         artifacts: centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }),
       }),
     );
+    registerSystemTools(registry, { keep: () => centralArtifactSink({ store: project.artifacts, vars: artifacts.vars }), ...this.systemHooksFor(open, request.taskId) });
     // A permission set line that names a FUNCTION is decided by it before anybody is asked (decision 0007,
     // amended 2026-09-22) — in a typed turn as in a run. The functions get a registry of their own:
     // this turn's holds tools, and a function is none.
@@ -6489,6 +6536,8 @@ export class AppService {
       askAboveBytes: config.artifacts.askAboveBytes,
       permissionSet,
       grants: open.approvals.grants(request.taskId),
+      // What the configured servers' tools count as (decision 0018, ruling 5).
+      mcp: config.mcp,
     });
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
@@ -6577,7 +6626,7 @@ export class AppService {
          *    escalates to. Absent, an un-gated adapter builds no callback at all.
          *  - `policy` is where an adapter reads its deny floor — the tools it is not offered in the
          *    first place. Folded with this message's choices above.
-         *  - `workspace` is what `bash` and the file tools resolve paths against, so without it a
+         *  - `workspace` is what `shell` and the file tools resolve paths against, so without it a
          *    command ran in whatever directory the app was launched from. The run's own root — read,
          *    never ensured (see above).
          */
@@ -9604,6 +9653,7 @@ export class AppService {
     // A signed-in forge token about to die is renewed FIRST, so the check below asks about the new
     // one rather than reporting the old one refused. Nothing to renew costs a settings read.
     await this.renewForgeTokens().catch(() => undefined);
+    const where = this.healthScope();
     const config = this.effectiveConfig();
     const secrets = this.secretResolver();
     const marks = this.readSettings().forgeSignIns ?? {};
@@ -9653,7 +9703,6 @@ export class AppService {
   /**
    * The default executor's tree, resolved for this configuration and this machine.
    *
-    const where = this.healthScope();
    * One place, so every UI-initiated operation — starting a task, proposing workflow changes,
    * summarizing a conversation — gets the SAME executor. They used to build their own from the same
    * ingredients, which is a coincidence rather than a guarantee.
@@ -9695,6 +9744,15 @@ export class AppService {
   }
 
   /**
+   * The configuration a check reads, as the health board remembers what worked by: the one project
+   * open, or `""` for the shared root while none or several are — the same choice
+   * {@link effectiveConfig} and {@link secretResolver} make.
+   */
+  private healthScope(): string {
+    return this.sessionOf()?.key ?? "";
+  }
+
+  /**
    * Start a refresh without waiting for it.
    *
    * The callers are lifecycle points — construction, project open, a config write — and none of them
@@ -9721,6 +9779,7 @@ export class AppService {
    * sign-in status. Pressing "Test" must not start a session or spend money.
    */
   async probeExecutors(name?: string): Promise<ProbeResult[]> {
+    const where = this.healthScope();
     const config = this.effectiveConfig();
     const wanted = listExecutors(config.agents).filter((info) => name === undefined || info.name === name);
     if (name !== undefined && wanted.length === 0) throw this.refusal("config", `unknown executor '${name}'`);
@@ -9743,15 +9802,6 @@ export class AppService {
     }));
     // A login that was not there before — signed in here or in a terminal — has its usage read now.
     this.limits.noticeAccounts();
-  /**
-   * The configuration a check reads, as the health board remembers what worked by: the one project
-   * open, or `""` for the shared root while none or several are — the same choice
-   * {@link effectiveConfig} and {@link secretResolver} make.
-   */
-  private healthScope(): string {
-    return this.sessionOf()?.key ?? "";
-  }
-
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return results;
   }
@@ -9779,7 +9829,6 @@ export class AppService {
         abortSignal: controller.signal,
       });
       if (outcome.ok) {
-    const where = this.healthScope();
         this.signInRefusals.delete(name);
         // Read even when it is the same login as before: the check below reads it.
         this.limits.signedIn(accountOfRoute(name));
@@ -9869,11 +9918,22 @@ export class AppService {
   mcpTools(request?: { recheck?: boolean }): Promise<McpToolsReport> {
     const open = this.sessionOf();
     const config = this.effectiveConfig();
-    const key = JSON.stringify([open?.dir ?? null, config.execEnvironment, config.mcp]);
+    // What a server's tools count as (decision 0018, ruling 5) is no reason to start it again: left out
+    // of what the probe is of, and laid over whichever report answers.
+    const started = Object.fromEntries(Object.entries(config.mcp.servers).map(([name, { tools: _tools, ...server }]) => [name, server]));
+    const key = JSON.stringify([open?.dir ?? null, config.execEnvironment, started]);
+    const mapped = (report: McpToolsReport): McpToolsReport => ({
+      ...report,
+      servers: report.servers.map((server) => {
+        const tools = config.mcp.servers[server.name]?.tools;
+        const { mappings: _old, ...rest } = server;
+        return tools !== undefined && Object.keys(tools).length > 0 ? { ...rest, mappings: tools } : rest;
+      }),
+    });
     const held = this.mcpProbe;
     if (held !== undefined && held.key === key) {
-      if (held.running !== undefined) return held.running;
-      if (held.report !== undefined && request?.recheck !== true) return Promise.resolve(held.report);
+      if (held.running !== undefined) return held.running.then(mapped);
+      if (held.report !== undefined && request?.recheck !== true) return Promise.resolve(mapped(held.report));
     }
     const secrets = this.secretResolver(open);
     const running = probeMcpServers(config.mcp, {
@@ -9885,7 +9945,7 @@ export class AppService {
       return report;
     });
     this.mcpProbe = { key, running };
-    return running;
+    return running.then(mapped);
   }
 
   /**
@@ -11230,8 +11290,9 @@ export class AppService {
     const policy = projectPolicy(config);
     const dialect = dialectFor(config.execEnvironment);
     for (const call of request.calls) {
-      // Claude's own `Bash` is a POSIX shell wherever it runs; JaiRA's and codex's run the project's.
-      out[call.id] = allowsCall(policy, permissionSet, call.name, call.args, call.name === "Bash" ? "posix" : dialect, { root: paths.projectDir, packages: filePackages }) ?? null;
+      // JaiRA's and codex's shells run the project's; Claude's own `Bash` and `PowerShell` run their
+      // own, which `allowsCall` reads off the call's name.
+      out[call.id] = allowsCall(policy, permissionSet, call.name, call.args, dialect, { root: paths.projectDir, packages: filePackages, mcp: config.mcp }) ?? null;
     }
     return out;
   }
@@ -11492,7 +11553,7 @@ export class AppService {
    * can open the file it was told about proposes an edit against what is actually there rather than
    * against a truncation.
    *
-   * `write_file` and `bash` are deliberately absent. A sync returns text for a person to accept; one
+   * `write_file` and `shell` are deliberately absent. A sync returns text for a person to accept; one
    * that could touch disk would be a model with commit rights. This is a parameter to `startRun`
    * rather than something the run assembles, so the refusal is stated where it is enforced.
    *
@@ -11779,7 +11840,7 @@ export class AppService {
     const config = project.config;
     const policy = projectPolicy(config);
     const judge: ReadOnlyJudge = (name, args, dialect) =>
-      permissionSet === undefined ? undefined : allowsCall(policy, permissionSet, name, args, dialect, { root: paths.projectDir, packages: filePackages });
+      permissionSet === undefined ? undefined : allowsCall(policy, permissionSet, name, args, dialect, { root: paths.projectDir, packages: filePackages, mcp: config.mcp });
     const options = { judge, dialect: dialectFor(config.execEnvironment) };
     const valuesOf = (taskId: string): JsonValue[] => sessionStoreFor(project, { taskId }).records().flatMap((row) => (row.result !== undefined ? [row.result] : []));
     const calls = judgedCallsOf(valuesOf(request.taskId), options);

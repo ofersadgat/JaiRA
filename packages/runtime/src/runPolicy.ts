@@ -2,7 +2,7 @@
  * A RUN's policy, built one way for every host that starts one (DESIGN §10.1, decision 0007).
  *
  * The app's `startRun` and the `jaira` CLI both start workflow runs, and what governs a run — the
- * built-in floor (`functions.bash.builtins`), the executor's scope floor, the size above which a produced payload asks,
+ * built-in floor (`functions.shell.builtins`), the executor's scope floor, the size above which a produced payload asks,
  * the per-run memory of answered parts, the audit — must not depend on which of them started it. It
  * did: the CLI handed `executeWorkflow` no policy at all, so a CLI run judged no line, bounded no
  * place and audited nothing. So the one recipe lives here and both hosts call it; what differs
@@ -16,7 +16,7 @@ import { compilePolicy, projectPolicy, type CommandGrants, type PolicyAuditEntry
 import { claudePermissionSettings, compileClaudeScopeRules } from "./tools";
 
 /** The parts of a project's configuration a run's policy is compiled from. */
-export type RunPolicyConfig = Pick<JairaConfig, "functions" | "execEnvironment" | "executors" | "artifacts">;
+export type RunPolicyConfig = Pick<JairaConfig, "functions" | "execEnvironment" | "executors" | "artifacts"> & Partial<Pick<JairaConfig, "mcp">>;
 
 /**
  * The scope floor an executor declares — §7's "the screen that configures an executor bounds it".
@@ -78,5 +78,7 @@ export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOpti
     // The number is artifact configuration; turning it into an escalation is the policy's job.
     askAboveBytes: config.artifacts.askAboveBytes,
     ...(options.grants !== undefined ? { grants: options.grants } : {}),
+    // What the configured servers' tools count as (decision 0018, ruling 5).
+    ...(config.mcp !== undefined ? { mcp: config.mcp } : {}),
   });
 }

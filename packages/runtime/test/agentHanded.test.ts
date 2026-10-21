@@ -20,7 +20,7 @@ describe("handedToClaude", () => {
     const handed = await handedToClaude(map({ read_file: "allow", edit: "deny", other: "deny" }));
     expect(handed.served).toEqual(["read_file", "show_artifact"]);
     expect(handed.tools["read_file"]).toEqual({ reachable: true, via: ["app"], decision: "allow" });
-    for (const name of ["glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"]) expect(handed.tools[name]!.reachable).toBe(false);
+    for (const name of ["glob", "grep", "edit", "write_file", "shell", "web_fetch", "web_search"]) expect(handed.tools[name]!.reachable).toBe(false);
     expect(handed.natives).toEqual({ Task: "removed", Agent: "removed", SlashCommand: "removed" });
     expect(handed.other).toBe("deny");
   });
@@ -28,9 +28,10 @@ describe("handedToClaude", () => {
   it("a state that declares NO permission set is handed on untouched: claude keeps everything it has, under the gate", async () => {
     const handed = await handedToClaude({});
     expect(handed.served).toEqual(["show_artifact"]);
-    for (const native of ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "WebFetch", "WebSearch", "Task"]) expect(handed.removed).not.toContain(native);
+    for (const native of ["Read", "Glob", "Grep", "Edit", "Write", "Bash", "PowerShell", "WebFetch", "WebSearch", "Task"]) expect(handed.removed).not.toContain(native);
     expect(handed.tools["edit"]).toEqual({ reachable: true, via: ["Edit", "MultiEdit", "NotebookEdit"], decision: "ask" });
-    expect(handed.tools["bash"]).toEqual({ reachable: true, via: ["Bash"] });
+    // Claude has two shells, and either runs the line: Git Bash (`Bash`) and PowerShell.
+    expect(handed.tools["shell"]).toEqual({ reachable: true, via: ["Bash", "PowerShell"] });
     expect(handed.natives).toEqual({ Task: "ask", Agent: "ask", SlashCommand: "ask" });
   });
 
@@ -45,7 +46,7 @@ describe("handedToClaude", () => {
   });
 
   it("judges a held shell's lines BY THE MAP, part by part: a file part answers to the file tool's entry", async () => {
-    const held = await handedToClaude(map({ read_file: "allow", write_file: "allow", bash: "ask", other: "ask" }));
+    const held = await handedToClaude(map({ read_file: "allow", write_file: "allow", shell: "ask", other: "ask" }));
     expect(held.shell).toEqual({ command: "ask", read: "allow", write: "allow", script: "ask" });
   });
 });
@@ -57,13 +58,13 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   };
 
   it("hands claude the shell and the tool the function answers for, and each CALL is what the function said", async () => {
-    const decl = { read_file: "allow", write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" };
+    const decl = { read_file: "allow", write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" };
     const handed = await handedToClaude(map(decl), judge);
     // Served like any held line — the function decides calls, not whether the tool exists.
-    expect(handed.served).toEqual(["bash", "read_file", "show_artifact", "write_file"]);
+    expect(handed.served).toEqual(["read_file", "shell", "show_artifact", "write_file"]);
     expect(handed.removed).toEqual(expect.arrayContaining(["Bash", "Write", "Edit", "Glob"]));
     // Nothing a function answers for is pre-approved: every call has to reach it.
-    expect(handed.preApproved).not.toContain("bash");
+    expect(handed.preApproved).not.toContain("shell");
     expect(handed.preApproved).not.toContain("write_file");
     expect(handed.tools["write_file"]).toEqual({ reachable: true, via: ["app"], decision: "allow" });
     // Per part: `git status` the function allows, `cat` is the map's `read_file`, `rm` its `other`.
@@ -71,16 +72,16 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   });
 
   it("is refused where the function refuses, without anybody being asked", async () => {
-    const handed = await handedToClaude(map({ write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" }), {
+    const handed = await handedToClaude(map({ write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" }), {
       functions: async () => "deny",
     });
     // A way in that is refused is not a way in, and a shell every line of which is refused is not a shell.
     expect(handed.tools["write_file"]).toEqual({ reachable: false, via: [] });
-    expect(handed.tools["bash"]).toEqual({ reachable: false, via: [] });
+    expect(handed.tools["shell"]).toEqual({ reachable: false, via: [] });
   });
 
   it("ASKS where nothing can run the function — a host with no runner lets nothing through", async () => {
-    const handed = await handedToClaude(map({ write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" }));
+    const handed = await handedToClaude(map({ write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" }));
     expect(handed.tools["write_file"]!.decision).toBe("ask");
     expect(handed.shell).toMatchObject({ command: "ask" });
   });
@@ -92,23 +93,23 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   });
 
   it("serves codex a writer a function answers for over the bridge, each call what the function said — its own sandbox shut", async () => {
-    const handed = await handedToCodex(map({ read_file: "allow", write_file: { function: "judge" }, bash: { function: "judge" }, other: "deny" }), judge);
-    expect(handed.served).toEqual(expect.arrayContaining(["bash", "read_file", "write_file"]));
+    const handed = await handedToCodex(map({ read_file: "allow", write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" }), judge);
+    expect(handed.served).toEqual(expect.arrayContaining(["shell", "read_file", "write_file"]));
     expect(handed.tools["write_file"]).toBe("allow");
     expect(handed.shell).toMatchObject({ command: "allow", write: "deny" });
     // Ours serves the line, so codex's own writers are displaced: the sandbox stays read-only.
     expect(handed.sandbox).toBe("read-only");
     // …and one whose line keeps codex's native opens it, the function still judging each call.
-    expect((await handedToCodex(map({ bash: { function: "judge", implementation: "native" }, other: "deny" }), judge)).sandbox).toBe("workspace-write");
+    expect((await handedToCodex(map({ shell: { function: "judge", implementation: "native" }, other: "deny" }), judge)).sandbox).toBe("workspace-write");
   });
 });
 
 describe("a shell the permission set denies, MEASURED in a run", () => {
   it("hands claude NO shell for `\"bash\": \"deny\"` — not ours, not its own", async () => {
-    const handed = await handedToClaude(map({ read_file: "allow", bash: "deny", other: "deny" }));
-    expect(handed.served).not.toContain("bash");
+    const handed = await handedToClaude(map({ read_file: "allow", shell: "deny", other: "deny" }));
+    expect(handed.served).not.toContain("shell");
     expect(handed.removed).toContain("Bash");
-    expect(handed.tools["bash"]).toEqual({ reachable: false, via: [] });
+    expect(handed.tools["shell"]).toEqual({ reachable: false, via: [] });
     expect(handed.shell).toEqual({});
   });
 
@@ -117,13 +118,13 @@ describe("a shell the permission set denies, MEASURED in a run", () => {
     const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet));
     // Claude's own `Bash` is gone; ours is served, and `git status` and `cat` run where `rm` and a script do not.
     expect(handed.removed).toContain("Bash");
-    expect(handed.tools["bash"]).toEqual({ reachable: true, via: ["app"] });
+    expect(handed.tools["shell"]).toEqual({ reachable: true, via: ["app"] });
     expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "deny", script: "deny" });
   });
 
   it("judges a \"no shell but these commands\" map's lines BY THE MAP, where the project's policy would have run them", async () => {
-    const handed = await handedToClaude(map({ read_file: "allow", bash: "deny", "git status": "allow", other: "deny" }));
-    expect(handed.tools["bash"]).toEqual({ reachable: true, via: ["app"] });
+    const handed = await handedToClaude(map({ read_file: "allow", shell: "deny", "git status": "allow", other: "deny" }));
+    expect(handed.tools["shell"]).toEqual({ reachable: true, via: ["app"] });
     expect(handed.removed).toContain("Bash");
     // `git status` is named; `cat` is `read_file`, allowed; `rm` is `write_file`, which the map
     // does not hold; `./build.sh` is `script`, which it does not name either.
@@ -159,15 +160,15 @@ describe("what a RUN reads off the state's block, MEASURED", () => {
   });
 
   it("a child's OWN shell entries win over a parent's that offered a shell", async () => {
-    const child = map({ read_file: "allow", bash: "ask", git: "allow", other: "deny" });
+    const child = map({ read_file: "allow", shell: "ask", git: "allow", other: "deny" });
     const alone = await handedToClaude(child);
     expect(alone.shell["command"]).toBe("allow");
-    // The child's map runs `git status`; the parent's `bash: "deny"` would have refused it.
-    const parent = map({ bash: "deny", "npm test": "allow" });
+    // The child's map runs `git status`; the parent's `shell: "deny"` would have refused it.
+    const parent = map({ shell: "deny", "npm test": "allow" });
     expect((await handedToClaude(child, { parent })).shell).toEqual(alone.shell);
     // And codex follows the CHILD's shell: its lines judged by the child's map at the bridge, and its
     // writing sandbox opened by the child keeping codex's own shell.
-    const keeps = map({ read_file: "allow", bash: { mode: "ask", implementation: "native" }, other: "deny" });
+    const keeps = map({ read_file: "allow", shell: { mode: "ask", implementation: "native" }, other: "deny" });
     for (const via of ["route", "function"] as const) {
       expect((await handedToCodex(child, { parent, via })).shell).toEqual((await handedToCodex(child, { via })).shell);
       expect((await handedToCodex(keeps, { parent, via })).sandbox).toBe("workspace-write");
@@ -182,10 +183,10 @@ describe("what a RUN reads off the state's block, MEASURED", () => {
  */
 describe("handedToCodex — a held tool reaches codex through the MCP bridge, and is gated there", () => {
   it.each(["route", "function"] as const)("%s: serves what the map holds, points codex at the bridge, and the ENTRY decides each call", async (via) => {
-    const handed = await handedToCodex(map({ read_file: "allow", write_file: "ask", edit: "deny", bash: "ask", git: "allow", other: "deny" }), { via });
+    const handed = await handedToCodex(map({ read_file: "allow", write_file: "ask", edit: "deny", shell: "ask", git: "allow", other: "deny" }), { via });
     // Held and not refused ⇒ served; `edit: "deny"` is not a way in, so it is not served at all.
     // (`show_artifact` is granted to prompt states only, so a function call is not served it.)
-    expect(handed.served).toEqual(via === "route" ? ["bash", "read_file", "show_artifact", "write_file"] : ["bash", "read_file", "write_file"]);
+    expect(handed.served).toEqual(via === "route" ? ["read_file", "shell", "show_artifact", "write_file"] : ["read_file", "shell", "write_file"]);
     // Codex approves our tools on its side and waits for the bridge's handshake — the gate is ours.
     expect(handed.bridge).toContain('mcp_servers.dai={url="<url>",required=true');
     expect(handed.bridge).toContain('"write_file"={approval_mode="approve"}');
@@ -199,10 +200,10 @@ describe("handedToCodex — a held tool reaches codex through the MCP bridge, an
   });
 
   it("decides a served tool exactly as claude's callback decides it", async () => {
-    const decl = { read_file: "allow", grep: "ask", write_file: "deny", bash: "ask", git: "allow", other: "deny" };
+    const decl = { read_file: "allow", grep: "ask", write_file: "deny", shell: "ask", git: "allow", other: "deny" };
     const claude = await handedToClaude(map(decl));
     const codex = await handedToCodex(map(decl));
-    for (const name of codex.served.filter((served) => served !== "bash")) expect(codex.tools[name], name).toBe(claude.tools[name]!.decision);
+    for (const name of codex.served.filter((served) => served !== "shell")) expect(codex.tools[name], name).toBe(claude.tools[name]!.decision);
     expect(codex.shell).toEqual(claude.shell);
   });
 });
@@ -210,17 +211,17 @@ describe("handedToCodex — a held tool reaches codex through the MCP bridge, an
 describe("handedToCodex — codex's sandbox opens only for a writer of its own the permission set keeps", () => {
   it.each(["route", "function"] as const)("%s: read-only unless an entry keeps codex's own shell or apply_patch; a state that declares none keeps the configured sandbox", async (via) => {
     expect((await handedToCodex(map({ other: "deny" }), { via })).sandbox).toBe("read-only");
-    expect((await handedToCodex(map({ bash: "deny", other: "deny" }), { via })).sandbox).toBe("read-only");
-    expect((await handedToCodex(map({ bash: "deny", "git status": "allow" }), { via })).sandbox).toBe("read-only");
+    expect((await handedToCodex(map({ shell: "deny", other: "deny" }), { via })).sandbox).toBe("read-only");
+    expect((await handedToCodex(map({ shell: "deny", "git status": "allow" }), { via })).sandbox).toBe("read-only");
     // Ours holds the shell: codex writes through it, under the gate, and its own stays shut.
-    expect((await handedToCodex(map({ bash: "ask" }), { via })).sandbox).toBe("read-only");
+    expect((await handedToCodex(map({ shell: "ask" }), { via })).sandbox).toBe("read-only");
     // The entry keeps codex's own: the sandbox is how it is kept, and ours is not served beside it.
-    const native = await handedToCodex(map({ bash: { mode: "ask", implementation: "native" } }), { via });
+    const native = await handedToCodex(map({ shell: { mode: "ask", implementation: "native" } }), { via });
     expect(native.sandbox).toBe("workspace-write");
-    expect(native.served).not.toContain("bash");
+    expect(native.served).not.toContain("shell");
     expect((await handedToCodex(map({ edit: { mode: "allow", implementation: "native" } }), { via })).sandbox).toBe("workspace-write");
     // A `deny` beside `native` keeps nothing.
-    expect((await handedToCodex(map({ bash: { mode: "deny", implementation: "native" } }), { via })).sandbox).toBe("read-only");
+    expect((await handedToCodex(map({ shell: { mode: "deny", implementation: "native" } }), { via })).sandbox).toBe("read-only");
     expect((await handedToCodex({}, { via })).sandbox).toBe("workspace-write");
   });
 });
@@ -247,7 +248,7 @@ describe("handedToClaude — a function call is handed exactly what the route is
     native: { read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" },
     "native beside deny": { read_file: "allow", grep: { mode: "deny", implementation: "native" }, other: "deny" },
     "written other": { read_file: "allow", other: "ask" },
-    "a shell by the map": { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" },
+    "a shell by the map": { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" },
     "holds nothing": { other: "ask" },
   };
   it.each(Object.keys(cases))("%s", async (name) => {
@@ -285,10 +286,10 @@ describe("a child's map does not inherit its parent's implementation choices", (
   });
 
   it("codex likewise: the child's shell is ours, served, and codex's own stays shut", async () => {
-    const keepsShell = map({ bash: { mode: "ask", implementation: "native" }, other: "deny" });
-    const oursShell = map({ bash: "ask", other: "deny" });
+    const keepsShell = map({ shell: { mode: "ask", implementation: "native" }, other: "deny" });
+    const oursShell = map({ shell: "ask", other: "deny" });
     const under = await handedToCodex(oursShell, { parent: keepsShell });
-    expect(under.served).toContain("bash");
+    expect(under.served).toContain("shell");
     expect(under.sandbox).toBe("read-only");
   });
 });

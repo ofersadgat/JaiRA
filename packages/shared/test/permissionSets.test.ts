@@ -44,7 +44,7 @@ const NO_FILES = readerOver({});
 describe("a subject", () => {
   it.each([
     ["read_file", "tool"],
-    ["bash", "tool"],
+    ["shell", "tool"],
     ["other", "other"],
     ["script", "script"],
     ["git commit", "command"],
@@ -73,47 +73,47 @@ describe("a subject", () => {
 
 describe("parsing the map", () => {
   it("reads subject → mode: present is offered with that mode, absent is not offered", () => {
-    const { permissionSet, issues } = parsePermissionSet({ read_file: "allow", web_fetch: "ask", bash: "ask" });
+    const { permissionSet, issues } = parsePermissionSet({ read_file: "allow", web_fetch: "ask", shell: "ask" });
     expect(issues).toEqual([]);
-    expect(offeredTools(permissionSet)).toEqual(["read_file", "web_fetch", "bash"]);
-    expect(toolModes(permissionSet)).toEqual({ read_file: "allow", web_fetch: "ask", bash: "ask" });
+    expect(offeredTools(permissionSet)).toEqual(["read_file", "web_fetch", "shell"]);
+    expect(toolModes(permissionSet)).toEqual({ read_file: "allow", web_fetch: "ask", shell: "ask" });
     expect(offeredTools(permissionSet)).not.toContain("write_file");
   });
 
   it("WITHHOLDS a shell it denies outright — held as written, handed to nobody", () => {
-    const { permissionSet } = parsePermissionSet({ read_file: "allow", bash: "deny", other: "deny" });
+    const { permissionSet } = parsePermissionSet({ read_file: "allow", shell: "deny", other: "deny" });
     expect(shellWithheld(permissionSet)).toBe(true);
-    expect(heldTools(permissionSet)).toEqual(["read_file", "bash"]);
+    expect(heldTools(permissionSet)).toEqual(["read_file", "shell"]);
     expect(offeredTools(permissionSet)).toEqual(["read_file"]);
-    expect(gateToolModes(permissionSet)).toEqual({ read_file: "allow", bash: "deny" });
+    expect(gateToolModes(permissionSet)).toEqual({ read_file: "allow", shell: "deny" });
     // A command subject that denies too leaves nothing to run: still withheld.
-    expect(shellWithheld(parsePermissionSet({ bash: "deny", "git push": "deny" }).permissionSet)).toBe(true);
+    expect(shellWithheld(parsePermissionSet({ shell: "deny", "git push": "deny" }).permissionSet)).toBe(true);
     // One that allows, asks or names a function keeps the shell OFFERED, for those lines.
     for (const mode of ["allow", "ask", { function: "smart" }]) {
-      const offered = parsePermissionSet({ bash: "deny", "git status": mode }).permissionSet;
+      const offered = parsePermissionSet({ shell: "deny", "git status": mode }).permissionSet;
       expect(shellWithheld(offered)).toBe(false);
-      expect(offeredTools(offered)).toEqual(["bash"]);
-      expect(gateToolModes(offered)).toEqual({ bash: "ask" });
+      expect(offeredTools(offered)).toEqual(["shell"]);
+      expect(gateToolModes(offered)).toEqual({ shell: "ask" });
     }
-    expect(shellWithheld(parsePermissionSet({ bash: "deny", script: "ask" }).permissionSet)).toBe(false);
+    expect(shellWithheld(parsePermissionSet({ shell: "deny", script: "ask" }).permissionSet)).toBe(false);
   });
 
   it("round-trips a WITHHELD shell through the lowered block: held, not offered, and its authored mode", () => {
-    const permissionSet = parsePermissionSet({ read_file: "allow", bash: "deny", other: "deny" }).permissionSet;
+    const permissionSet = parsePermissionSet({ read_file: "allow", shell: "deny", other: "deny" }).permissionSet;
     const lowered = lowerPermissionSet(permissionSet);
     expect(lowered.tools).toEqual(["read_file"]);
-    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", bash: "deny", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", subjects: { bash: "deny" }, functions: {} });
+    expect(lowered.permissions).toEqual({ tools: { read_file: "allow", shell: "deny", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", subjects: { shell: "deny" }, functions: {} });
     const back = permissionSetOfEnvironment(lowered.tools, lowered.permissions);
     expect(back).toEqual(permissionSet);
-    expect(declOfPermissionSet(back)).toEqual({ read_file: "allow", bash: "deny", other: "deny" });
+    expect(declOfPermissionSet(back)).toEqual({ read_file: "allow", shell: "deny", other: "deny" });
   });
 
   it("carries an offered shell's subjects in `subjects` alone — `permissions.tools` holds tools and the marks", () => {
-    const lowered = lowerPermissionSet(parsePermissionSet({ bash: "deny", "git status": "allow", other: "deny" }).permissionSet, undefined, "$/permission-sets/x/y");
+    const lowered = lowerPermissionSet(parsePermissionSet({ shell: "deny", "git status": "allow", other: "deny" }).permissionSet, undefined, "$/permission-sets/x/y");
     const tools = lowered.permissions!.tools!;
-    expect(tools).toEqual({ bash: "ask", ...PERMISSION_SET_MARKERS });
-    expect(lowered.permissions).toMatchObject({ subjects: { bash: "deny", "git status": "allow" }, source: "$/permission-sets/x/y" });
-    expect(Object.keys(permissionSetOfEnvironment(lowered.tools, lowered.permissions).entries)).toEqual(["bash", "git status"]);
+    expect(tools).toEqual({ shell: "ask", ...PERMISSION_SET_MARKERS });
+    expect(lowered.permissions).toMatchObject({ subjects: { shell: "deny", "git status": "allow" }, source: "$/permission-sets/x/y" });
+    expect(Object.keys(permissionSetOfEnvironment(lowered.tools, lowered.permissions).entries)).toEqual(["shell", "git status"]);
   });
 
   it("reads an object entry, with the implementation chosen too", () => {
@@ -131,15 +131,15 @@ describe("parsing the map", () => {
   });
 
   it("accepts command subjects and `script`, and carries them without offering them as tools", () => {
-    const { permissionSet, issues } = parsePermissionSet({ bash: "ask", "git status": "allow", "git  commit": "ask", git: "deny", script: "ask" });
+    const { permissionSet, issues } = parsePermissionSet({ shell: "ask", "git status": "allow", "git  commit": "ask", git: "deny", script: "ask" });
     expect(issues).toEqual([]);
-    expect(offeredTools(permissionSet)).toEqual(["bash"]);
+    expect(offeredTools(permissionSet)).toEqual(["shell"]);
     // Whitespace in a command subject is normalized, so two spellings of one command are one entry.
     // The shell's own entry is among them: it is the mode for any command no other entry names (§4).
-    expect(shellSubjects(permissionSet)).toEqual({ bash: "ask", "git status": "allow", "git commit": "ask", git: "deny", script: "ask" });
+    expect(shellSubjects(permissionSet)).toEqual({ shell: "ask", "git status": "allow", "git commit": "ask", git: "deny", script: "ask" });
     // …and the gate is handed `ask` for it, so no line runs before the host has read it.
-    expect(toolModes(permissionSet)).toEqual({ bash: "ask" });
-    expect(gateToolModes(permissionSet)).toEqual({ bash: "ask" });
+    expect(toolModes(permissionSet)).toEqual({ shell: "ask" });
+    expect(gateToolModes(permissionSet)).toEqual({ shell: "ask" });
   });
 
   it("WARNS about a tool name nothing knows, and drops it — it falls to `other`", () => {
@@ -177,13 +177,13 @@ describe("parsing the map", () => {
 
 describe("references", () => {
   const files = {
-    "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", bash: "deny", other: "deny" },
+    "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", shell: "deny", other: "deny" },
     "$/permission-sets/chat/writer": { $ref: "$/permission-sets/chat/read-only", write_file: { mode: "ask", implementation: "native" } },
-    "$/permission-sets/feature/implementation/build": { $ref: "$/permission-sets/chat/writer", bash: { function: "smart" } },
+    "$/permission-sets/feature/implementation/build": { $ref: "$/permission-sets/chat/writer", shell: { function: "smart" } },
     "$/permission-sets/loop/a": { $ref: "$/permission-sets/loop/b", read_file: "allow" },
     "$/permission-sets/loop/b": { $ref: "$/permission-sets/loop/a" },
     "$/permission-sets/loop/self": "$/permission-sets/loop/self",
-    "$/lib/list": ["bash"],
+    "$/lib/list": ["shell"],
   };
   const read = readerOver(files);
   const resolve = (node: unknown): { decl: Record<string, unknown> | undefined; issues: PermissionSetIssue[] } => {
@@ -196,9 +196,9 @@ describe("references", () => {
   });
 
   it("`$ref` with sibling keys starts from one and overrides per subject", () => {
-    const { decl, issues } = resolve({ $ref: "$/permission-sets/chat/read-only", write_file: "ask", bash: "ask" });
+    const { decl, issues } = resolve({ $ref: "$/permission-sets/chat/read-only", write_file: "ask", shell: "ask" });
     expect(issues).toEqual([]);
-    expect(decl).toEqual({ read_file: "allow", glob: "allow", bash: "ask", other: "deny", write_file: "ask" });
+    expect(decl).toEqual({ read_file: "allow", glob: "allow", shell: "ask", other: "deny", write_file: "ask" });
   });
 
   it("a permission set file may start from another, through a nested bucket, to any depth", () => {
@@ -207,7 +207,7 @@ describe("references", () => {
     expect(decl).toEqual({
       read_file: "allow",
       glob: "allow",
-      bash: { function: "smart" },
+      shell: { function: "smart" },
       other: "deny",
       write_file: { mode: "ask", implementation: "native" },
     });
@@ -229,19 +229,19 @@ describe("references", () => {
 
   it("a reference that names nothing, or names something that is not a map, is an error", () => {
     expect(resolve("$/permission-sets/chat/nope").issues[0]!.message).toMatch(/matches no file/);
-    expect(resolve({ $ref: "$/lib/list", bash: "ask" }).issues[0]!.message).toMatch(/is not a permission set/);
+    expect(resolve({ $ref: "$/lib/list", shell: "ask" }).issues[0]!.message).toMatch(/is not a permission set/);
   });
 });
 
 describe("reading a lowered block back", () => {
-  const map = { read_file: "allow", bash: "ask", write_file: "deny", other: "deny" };
+  const map = { read_file: "allow", shell: "ask", write_file: "deny", other: "deny" };
 
   it("lowers the shell's mode as a SUBJECT, and leaves the marks that say a permission set was declared", () => {
-    // `bash: "ask"` is the answer for any command nothing else names, not a mode for the tool: the
+    // `shell: "ask"` is the answer for any command nothing else names, not a mode for the tool: the
     // gate is handed `ask` so no line runs before it is taken apart, and the authored mode rides beside it.
-    expect(lowerPermissionSet(parsePermissionSet({ ...map, bash: "allow" }).permissionSet)).toEqual({
-      tools: ["read_file", "bash", "write_file"],
-      permissions: { tools: { read_file: "allow", bash: "ask", write_file: "deny", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", subjects: { bash: "allow" }, functions: {} },
+    expect(lowerPermissionSet(parsePermissionSet({ ...map, shell: "allow" }).permissionSet)).toEqual({
+      tools: ["read_file", "shell", "write_file"],
+      permissions: { tools: { read_file: "allow", shell: "ask", write_file: "deny", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", subjects: { shell: "allow" }, functions: {} },
     });
   });
 
@@ -270,12 +270,12 @@ describe("reading a lowered block back", () => {
   });
 
   it("round-trips through the lowered shape, command subjects and implementations included", () => {
-    const authored = parsePermissionSet({ read_file: { mode: "allow", implementation: "native" }, bash: "deny", "git commit": "ask", script: "deny", other: "ask" }).permissionSet;
+    const authored = parsePermissionSet({ read_file: { mode: "allow", implementation: "native" }, shell: "deny", "git commit": "ask", script: "deny", other: "ask" }).permissionSet;
     const lowered = lowerPermissionSet(authored);
     expect(lowered.permissions).toEqual({
-      tools: { read_file: "allow", bash: "ask", ...PERMISSION_SET_MARKERS },
+      tools: { read_file: "allow", shell: "ask", ...PERMISSION_SET_MARKERS },
       other: "ask",
-      subjects: { bash: "deny", "git commit": "ask", script: "deny" },
+      subjects: { shell: "deny", "git commit": "ask", script: "deny" },
       functions: {},
       implementations: { read_file: "native" },
     });
@@ -295,58 +295,58 @@ describe("a line that names a FUNCTION (decision 0007, amended 2026-09-22)", () 
       write_file: { function: "judge" },
       read_file: { function: "smart", implementation: "native" },
       glob: { mode: { function: "policy.judge" } },
-      bash: { function: "smart" },
+      shell: { function: "smart" },
       "git push": { function: "$BASE/functions/push_judge" },
       script: { function: "smart" },
       other: { function: "smart" },
     });
     expect(issues).toEqual([]);
-    expect(toolModes(permissionSet)).toEqual({ write_file: { function: "judge" }, read_file: { function: "smart" }, glob: { function: "policy.judge" }, bash: { function: "smart" } });
+    expect(toolModes(permissionSet)).toEqual({ write_file: { function: "judge" }, read_file: { function: "smart" }, glob: { function: "policy.judge" }, shell: { function: "smart" } });
     expect(toolImplementations(permissionSet)).toEqual({ read_file: "native" });
-    expect(shellSubjects(permissionSet)).toEqual({ bash: { function: "smart" }, "git push": { function: "$BASE/functions/push_judge" }, script: { function: "smart" } });
+    expect(shellSubjects(permissionSet)).toEqual({ shell: { function: "smart" }, "git push": { function: "$BASE/functions/push_judge" }, script: { function: "smart" } });
     expect(permissionSet.other).toEqual({ function: "smart" });
   });
 
   it("refuses the word `smart` — it is a function now — and a function with no name or with company", () => {
-    expect(parsePermissionSet({ bash: "smart" }).issues[0]!.message).toBe(`'bash' has the mode "smart" — smart is a function now: write { "function": "smart" }`);
-    expect(parsePermissionSet({ bash: { function: "  " } }).issues[0]!.message).toMatch(/a function mode is \{ "function": "<reference>" \}/);
-    expect(parsePermissionSet({ bash: { function: "smart", mode: "ask" } }).issues[0]!.message).toMatch(/says both 'mode' and 'function'/);
-    expect(parsePermissionSet({ bash: { mode: { function: "smart", extra: 1 } } }).issues[0]!.severity).toBe("error");
+    expect(parsePermissionSet({ shell: "smart" }).issues[0]!.message).toBe(`'shell' has the mode "smart" — smart is a function now: write { "function": "smart" }`);
+    expect(parsePermissionSet({ shell: { function: "  " } }).issues[0]!.message).toMatch(/a function mode is \{ "function": "<reference>" \}/);
+    expect(parsePermissionSet({ shell: { function: "smart", mode: "ask" } }).issues[0]!.message).toMatch(/says both 'mode' and 'function'/);
+    expect(parsePermissionSet({ shell: { mode: { function: "smart", extra: 1 } } }).issues[0]!.severity).toBe("error");
   });
 
   it("lowers a function as `ask` wherever the gate reads a mode, and names it in `functions`", () => {
-    const permissionSet = parsePermissionSet({ write_file: { function: "judge" }, bash: { function: "smart" }, "git push": "deny", other: { function: "smart" } }).permissionSet;
+    const permissionSet = parsePermissionSet({ write_file: { function: "judge" }, shell: { function: "smart" }, "git push": "deny", other: { function: "smart" } }).permissionSet;
     const lowered = lowerPermissionSet(permissionSet, undefined, "$/permission-sets/x/y");
     expect(lowered).toEqual({
-      tools: ["write_file", "bash"],
+      tools: ["write_file", "shell"],
       permissions: {
-        tools: { write_file: "ask", bash: "ask", ...PERMISSION_SET_MARKERS },
+        tools: { write_file: "ask", shell: "ask", ...PERMISSION_SET_MARKERS },
         implementations: {},
         other: "ask",
-        subjects: { bash: "ask", "git push": "deny" },
+        subjects: { shell: "ask", "git push": "deny" },
         source: "$/permission-sets/x/y",
-        functions: { write_file: "judge", bash: "smart", other: "smart" },
+        functions: { write_file: "judge", shell: "smart", other: "smart" },
       },
     });
     // …and reads back as the same map.
     expect(permissionSetOfEnvironment(lowered.tools, lowered.permissions)).toEqual(permissionSet);
-    expect(declOfPermissionSet(permissionSet)).toEqual({ write_file: { function: "judge" }, bash: { function: "smart" }, "git push": "deny", other: { function: "smart" } });
+    expect(declOfPermissionSet(permissionSet)).toEqual({ write_file: { function: "judge" }, shell: { function: "smart" }, "git push": "deny", other: { function: "smart" } });
     expect(functionReferencesOf(permissionSet)).toEqual(["judge", "smart"]);
   });
 
   it("writes `functions` on EVERY lowered map, so a child's own map never inherits its parent's function", () => {
     // `permissions` merges per key down the chain: a parent's `functions` beside a child's `tools` would
     // hand the child's `ask` to the parent's function. An empty map on the child replaces it.
-    const parent = lowerPermissionSet(parsePermissionSet({ bash: { function: "smart" } }).permissionSet).permissions!;
-    const child = lowerPermissionSet(parsePermissionSet({ bash: "ask" }).permissionSet).permissions!;
+    const parent = lowerPermissionSet(parsePermissionSet({ shell: { function: "smart" } }).permissionSet).permissions!;
+    const child = lowerPermissionSet(parsePermissionSet({ shell: "ask" }).permissionSet).permissions!;
     const merged = { ...parent, ...child, tools: { ...parent.tools, ...child.tools } };
     expect(merged.functions).toEqual({});
-    expect(permissionSetOfEnvironment(["bash"], merged).entries["bash"]!.mode).toBe("ask");
+    expect(permissionSetOfEnvironment(["shell"], merged).entries["shell"]!.mode).toBe("ask");
   });
 
   it("withholds nothing a function could let through", () => {
-    expect(shellWithheld(parsePermissionSet({ bash: { function: "smart" } }).permissionSet)).toBe(false);
-    expect(shellWithheld(parsePermissionSet({ bash: "deny", "git status": { function: "smart" } }).permissionSet)).toBe(false);
+    expect(shellWithheld(parsePermissionSet({ shell: { function: "smart" } }).permissionSet)).toBe(false);
+    expect(shellWithheld(parsePermissionSet({ shell: "deny", "git status": { function: "smart" } }).permissionSet)).toBe(false);
   });
 
   it("asks the host about every function a state's permission set names, and makes one it cannot find an ERROR there", () => {
@@ -355,7 +355,7 @@ describe("a line that names a FUNCTION (decision 0007, amended 2026-09-22)", () 
       asked.push(reference);
       return reference === "nope" ? "'nope' is not a known operation" : undefined;
     };
-    const { issues } = lowerStatePermissionSets("wf", { operation: { kind: "prompt", tools: { bash: { function: "smart" }, write_file: { function: "nope" }, edit: { function: "nope" } } } }, NO_FILES, check);
+    const { issues } = lowerStatePermissionSets("wf", { operation: { kind: "prompt", tools: { shell: { function: "smart" }, write_file: { function: "nope" }, edit: { function: "nope" } } } }, NO_FILES, check);
     expect(asked).toEqual(["smart", "nope"]);
     expect(issues).toEqual([
       { stateId: "wf", path: "operation.tools.write_file", message: "the function 'nope' does not resolve: 'nope' is not a known operation", severity: "error" },
@@ -367,7 +367,7 @@ describe("a line that names a FUNCTION (decision 0007, amended 2026-09-22)", () 
 describe("lowering a state file", () => {
   const read = readerOver({
     "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", other: "deny" },
-    "$/lib/list": ["bash"],
+    "$/lib/list": ["shell"],
   });
 
   it("leaves a state with no permission set as the SAME object", () => {
@@ -412,7 +412,7 @@ describe("lowering a state file", () => {
       "wf",
       {
         environment: { model: "m", tools: "$/permission-sets/chat/read-only" },
-        operation: { kind: "prompt", prompt: "go", tools: { bash: { function: "smart" }, "git status": "allow" } },
+        operation: { kind: "prompt", prompt: "go", tools: { shell: { function: "smart" }, "git status": "allow" } },
         children: { review: { state: "./review", environment: { tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask" } } } },
       },
       read,
@@ -424,13 +424,13 @@ describe("lowering a state file", () => {
       operation: {
         kind: "prompt",
         prompt: "go",
-        tools: ["bash"],
+        tools: ["shell"],
         permissions: {
-          tools: { bash: "ask", ...PERMISSION_SET_MARKERS },
+          tools: { shell: "ask", ...PERMISSION_SET_MARKERS },
           implementations: {},
-          subjects: { bash: "ask", "git status": "allow" },
+          subjects: { shell: "ask", "git status": "allow" },
           source: "inline",
-          functions: { bash: "smart" },
+          functions: { shell: "smart" },
         },
       },
       children: {
@@ -450,9 +450,9 @@ describe("lowering a state file", () => {
   });
 
   it("reports an issue at the path it was written, and lowers what could be read", () => {
-    const { def, issues } = lowerStatePermissionSets("wf", { environment: { tools: { read_file: "allow", bash: "maybe", Glob: "ask" } } }, read);
+    const { def, issues } = lowerStatePermissionSets("wf", { environment: { tools: { read_file: "allow", shell: "maybe", Glob: "ask" } } }, read);
     expect(issues).toEqual([
-      expect.objectContaining({ stateId: "wf", path: "environment.tools.bash", severity: "error" }),
+      expect.objectContaining({ stateId: "wf", path: "environment.tools.shell", severity: "error" }),
       expect.objectContaining({ stateId: "wf", path: "environment.tools.Glob", severity: "warning" }),
     ]);
     expect((def as { environment: unknown }).environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, functions: {} } });
@@ -467,14 +467,14 @@ describe("lowering a state file", () => {
 
 describe("lowering a permission set inside a REFERENCED block", () => {
   const scopes = [{ path: "app/**", default: "allow" }];
-  const map = { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" };
+  const map = { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" };
   const read = readerOver({
     "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", other: "deny" },
     "$/envs/inline": { model: "m", tools: map, permissions: { scopes } },
     "$/envs/named": { tools: "$/permission-sets/chat/read-only" },
     "$/envs/over": { $ref: "$/envs/inline", permissions: { scopes: [] } },
     "$/envs/plain": { model: "m" },
-    "$/envs/list": { tools: ["bash"] },
+    "$/envs/list": { tools: ["shell"] },
     "$/envs/old": { permissions: { default: "deny" } },
     "$/ops/plan": { kind: "prompt", prompt: "go", tools: map },
   });
@@ -535,18 +535,18 @@ describe("lowering a permission set inside a REFERENCED block", () => {
 describe("a message's settings", () => {
   it("reads a state's lowered declaration and the map form as the same permission set", () => {
     const inherited = permissionSetOfSettings({
-      tools: ["read_file", "bash"],
-      permissions: { tools: { read_file: "allow", bash: "ask", ...PERMISSION_SET_MARKERS }, other: "deny", subjects: { bash: "ask" } },
+      tools: ["read_file", "shell"],
+      permissions: { tools: { read_file: "allow", shell: "ask", ...PERMISSION_SET_MARKERS }, other: "deny", subjects: { shell: "ask" } },
       implementations: { read_file: "native" },
     });
-    const map = permissionSetOfSettings({ permissionSet: { read_file: { mode: "allow", implementation: "native" }, bash: "ask", other: "deny" } });
+    const map = permissionSetOfSettings({ permissionSet: { read_file: { mode: "allow", implementation: "native" }, shell: "ask", other: "deny" } });
     expect(map.issues).toEqual([]);
     expect(inherited.permissionSet).toEqual(map.permissionSet);
   });
 
   it("tells saying nothing about tools from granting none", () => {
     expect(declaresTools({})).toBe(false);
-    expect(declaresTools({ permissions: { tools: { bash: "deny" } } })).toBe(false);
+    expect(declaresTools({ permissions: { tools: { shell: "deny" } } })).toBe(false);
     expect(declaresTools({ tools: [] })).toBe(true);
     expect(declaresTools({ permissionSet: {} })).toBe(true);
   });
@@ -565,7 +565,7 @@ describe("the operation schema", () => {
     expect(validate(tools)).toBe(true);
   });
 
-  it.each([[{ read_file: "sometimes" }], [{ read_file: { implementation: "native" } }], [{ read_file: { mode: "ask", implementation: "theirs" } }], [7], [[1]], [["read_file", "bash"]], [[]]])(
+  it.each([[{ read_file: "sometimes" }], [{ read_file: { implementation: "native" } }], [{ read_file: { mode: "ask", implementation: "theirs" } }], [7], [[1]], [["read_file", "shell"]], [[]]])(
     "refuses %j",
     (tools) => {
       expect(validate(tools)).toBe(false);
@@ -579,7 +579,7 @@ describe("the operation schema", () => {
 
 describe("command runner lines (decision 0007, amended 2026-09-26, later)", () => {
   it("reads runner:* and runner:<program> as the runners' gate, and drops a runner it does not know", () => {
-    const { permissionSet, issues } = parsePermissionSet({ bash: "deny", "runner:*": "allow", "runner:sudo": "deny", "runner:frobnicate": "allow", other: "deny" });
+    const { permissionSet, issues } = parsePermissionSet({ shell: "deny", "runner:*": "allow", "runner:sudo": "deny", "runner:frobnicate": "allow", other: "deny" });
     expect(permissionSet.entries["runner:*"]).toEqual({ kind: "runner", mode: "allow" });
     expect(permissionSet.entries["runner:sudo"]).toEqual({ kind: "runner", mode: "deny" });
     expect(permissionSet.entries["runner:frobnicate"]).toBeUndefined();
@@ -589,11 +589,11 @@ describe("command runner lines (decision 0007, amended 2026-09-26, later)", () =
   });
 
   it("offers the shell for a runner line that lets runners through, and carries the lines lowered and back", () => {
-    const { permissionSet } = parsePermissionSet({ read_file: "allow", bash: "deny", "runner:*": "allow", other: "deny" });
+    const { permissionSet } = parsePermissionSet({ read_file: "allow", shell: "deny", "runner:*": "allow", other: "deny" });
     expect(shellWithheld(permissionSet)).toBe(false);
-    expect(shellWithheld(parsePermissionSet({ read_file: "allow", bash: "deny", "runner:*": "deny", other: "deny" }).permissionSet)).toBe(true);
+    expect(shellWithheld(parsePermissionSet({ read_file: "allow", shell: "deny", "runner:*": "deny", other: "deny" }).permissionSet)).toBe(true);
     const lowered = permissionsOfPermissionSet(permissionSet);
-    expect(lowered.subjects).toMatchObject({ bash: "deny", "runner:*": "allow" });
+    expect(lowered.subjects).toMatchObject({ shell: "deny", "runner:*": "allow" });
     expect(permissionSetOfEnvironment(offeredTools(permissionSet), lowered).entries["runner:*"]).toEqual({ kind: "runner", mode: "allow" });
   });
 });

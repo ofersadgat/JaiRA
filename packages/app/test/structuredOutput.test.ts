@@ -125,7 +125,7 @@ describe("finding the tool call that delivered a structured output", () => {
   });
 
   it("leaves the intermediate calls of the loop alone", () => {
-    const calls = [call("c1", "read_file", { path: "a.ts" }), call("c2", "StructuredOutput", OUTPUT), call("c3", "bash", { command: "ls" })];
+    const calls = [call("c1", "read_file", { path: "a.ts" }), call("c2", "StructuredOutput", OUTPUT), call("c3", "shell", { command: "ls" })];
     expect(structuredOutputOf(record(OUTPUT, null, calls), turns())?.callId).toBe("c2");
   });
 

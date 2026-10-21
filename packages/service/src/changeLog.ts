@@ -17,6 +17,7 @@ import {
   APPROVAL_PROMPT_FUNCTION,
   RESERVED_MCP_SERVERS,
   TOOL_SPEC_BY_NAME,
+  nativeShellDialect,
   parseMcpSubject,
   takeApart,
   type ChangeAuthor,
@@ -138,7 +139,7 @@ function partsOf(line: string, dialect: CommandDialect, judge: ReadOnlyJudge): C
       ...(part.tool !== undefined ? { tool: part.tool } : {}),
       paths: part.paths,
       ...(request.kind === "redirect" ? { redirect: request.direction } : {}),
-      change: judge("bash", { command: text }, dialect) === false,
+      change: judge("shell", { command: text }, dialect) === false,
     });
   }
   return out;
@@ -155,7 +156,7 @@ function commandOf(args: JsonValue): string | undefined {
 
 /**
  * The calls of every record, judged. `dialect` is what a JaiRA or codex shell runs; Claude's own
- * `Bash` is POSIX wherever it runs.
+ * `Bash` is POSIX wherever it runs, and its `PowerShell` PowerShell (`nativeShellDialect`).
  */
 export function judgedCallsOf(values: ReadonlyArray<JsonValue | undefined>, options: { judge: ReadOnlyJudge; dialect: CommandDialect; by?: ChangeAuthor }): ChangeCall[] {
   const out: ChangeCall[] = [];
@@ -167,9 +168,9 @@ export function judgedCallsOf(values: ReadonlyArray<JsonValue | undefined>, opti
     for (const call of calls) {
       if (spawners.has(call.id) || SUBAGENT_TOOLS.has(call.name)) continue;
       const { standard, category } = categoryOf(call.name);
-      const dialect: CommandDialect = call.name === "Bash" ? "posix" : options.dialect;
+      const dialect: CommandDialect = nativeShellDialect(call.name) ?? options.dialect;
       const verdict = options.judge(call.name, call.args, dialect);
-      const line = standard === "bash" ? commandOf(call.args) : undefined;
+      const line = standard === "shell" ? commandOf(call.args) : undefined;
       const parts = line !== undefined ? partsOf(line, dialect, options.judge) : undefined;
       out.push({
         ...call,

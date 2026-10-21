@@ -34,7 +34,7 @@
  */
 
 /** The groups a permission menu shows. Hard-coded: these are a taxonomy, not data. */
-export type ToolCategoryId = "files" | "execution" | "web" | "git" | "ci" | "tasks" | "mcp";
+export type ToolCategoryId = "files" | "execution" | "system" | "web" | "git" | "ci" | "tasks" | "mcp";
 
 export interface ToolCategory {
   id: ToolCategoryId;
@@ -46,6 +46,8 @@ export interface ToolCategory {
 export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "files", label: "File permissions", hint: "reading, searching and changing files in the workspace" },
   { id: "execution", label: "Execution", hint: "running commands on this machine" },
+  // Decision 0018: the machine the engine runs on and its desktop, each area a look and a change.
+  { id: "system", label: "System", hint: "this machine and its desktop: processes, services, software, settings, the clipboard, apps and the screen" },
   { id: "web", label: "Web", hint: "reaching the network" },
   // Decision 0010 §1: the repository's forge, reached through the connection signed in on Connections.
   { id: "git", label: "Git", hint: "the repository and its merge requests, through the connection signed in on Connections" },
@@ -60,7 +62,7 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
  * The glyph a tool is drawn with wherever a call to it is shown. Named here, drawn by the app's icon
  * set, which fails to compile if it cannot draw one of these.
  */
-export type ToolIconName = "read" | "search" | "write" | "terminal" | "web" | "git" | "workflow" | "artifact" | "agent" | "tool";
+export type ToolIconName = "read" | "search" | "write" | "terminal" | "system" | "web" | "git" | "workflow" | "artifact" | "agent" | "tool";
 
 export interface ToolSpec {
   /** The LOGICAL name — what a workflow authors, what a policy is written against. */
@@ -121,7 +123,8 @@ export interface ToolSpec {
    * implemented, deleting this mark is the whole change.
    *
    * The workflow tools of decision 0005 §3 carried it until step 6 built them, and `wait_for_event`
-   * (decision 0010 §1) until the event hub that serves it was built. Nothing carries it today.
+   * (decision 0010 §1) until the event hub that serves it was built, and the System tools (decision
+   * 0018) until `runtime/systemTools.ts` served them. Nothing carries it today.
    */
   unserved?: true;
 }
@@ -201,14 +204,32 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     // there is nothing to displace and nothing to remove when the tool is not held.
   },
   {
-    name: "bash",
-    label: "bash",
+    name: "shell",
+    label: "shell",
     title: "Run command",
     icon: "terminal",
     category: "execution",
     hint: "run shell commands, under the policy",
     pathArgs: ["cwd"],
   },
+  // The System tools (decision 0018, `runtime/systemTools.ts`): the machine the engine runs on and its
+  // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change.
+  { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs" },
+  { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine" },
+  { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using" },
+  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program" },
+  { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running" },
+  { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service" },
+  { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules" },
+  { name: "install_software", label: "install_software", title: "Install software", icon: "system", category: "system", hint: "install, update or remove a program, a package or a module" },
+  { name: "read_settings", label: "read_settings", title: "Read settings", icon: "system", category: "system", hint: "the machine's settings: the registry, preferences, environment, time and time zone" },
+  { name: "write_settings", label: "write_settings", title: "Change settings", icon: "system", category: "system", hint: "change a setting of the machine" },
+  { name: "read_clipboard", label: "read_clipboard", title: "Read clipboard", icon: "system", category: "system", hint: "what is on the clipboard" },
+  { name: "write_clipboard", label: "write_clipboard", title: "Write clipboard", icon: "system", category: "system", hint: "put text or an image on the clipboard" },
+  { name: "list_windows", label: "list_windows", title: "List windows", icon: "system", category: "system", hint: "the apps and windows open on the desktop" },
+  { name: "open_app", label: "open_app", title: "Open app", icon: "system", category: "system", hint: "launch an app, open a file or a link in its app, focus or close a window" },
+  { name: "screenshot", label: "screenshot", title: "Take screenshot", icon: "system", category: "system", hint: "a picture of the screen, or of one window" },
+  { name: "control_input", label: "control_input", title: "Control mouse & keyboard", icon: "system", category: "system", hint: "move and click the mouse, scroll, type and press keys" },
   {
     name: "web_fetch",
     label: "fetch",
@@ -259,6 +280,34 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   { name: "release_task", label: "release_task", title: "Release task", icon: "workflow", category: "tasks", hint: "release a held task" },
   { name: "stop_task", label: "stop_task", title: "Stop task", icon: "workflow", category: "tasks", hint: "stop a task" },
 ];
+
+/**
+ * The System category's areas (decision 0018 §1): each a LOOK and a CHANGE, so a permission set can let
+ * an agent look at the processes and refuse stopping one. The card draws an area as one row, the two
+ * modes side by side; each tool is its own line in the set all the same.
+ */
+export interface SystemArea {
+  id: string;
+  label: string;
+  /** What looking, then changing, does — one line under the area's name. */
+  hint: string;
+  look: string;
+  change: string;
+}
+
+export const SYSTEM_AREAS: readonly SystemArea[] = [
+  { id: "machine", label: "Machine", hint: "what it is: OS, hardware, disks, users, logs · restart, shut down, sleep, lock", look: "read_system", change: "power" },
+  { id: "processes", label: "Processes", hint: "the programs running · stop one", look: "list_processes", change: "stop_process" },
+  { id: "services", label: "Services", hint: "the services and their state · start, stop, restart, enable, disable", look: "list_services", change: "control_service" },
+  { id: "software", label: "Software", hint: "what is installed · install, update, remove", look: "list_software", change: "install_software" },
+  { id: "settings", label: "Settings", hint: "registry, preferences, environment, time · change one", look: "read_settings", change: "write_settings" },
+  { id: "clipboard", label: "Clipboard", hint: "what is on it · put text or an image on it", look: "read_clipboard", change: "write_clipboard" },
+  { id: "apps", label: "Apps & windows", hint: "what is open · launch, open a file or link, focus, close", look: "list_windows", change: "open_app" },
+  { id: "screen", label: "Screen & input", hint: "a picture of the screen · the mouse and keyboard", look: "screenshot", change: "control_input" },
+];
+
+/** The area a System tool belongs to, by the tool's name. */
+export const SYSTEM_AREA_OF: ReadonlyMap<string, SystemArea> = new Map(SYSTEM_AREAS.flatMap((area) => [[area.look, area], [area.change, area]] as const));
 
 /** By logical name — the lookup every consumer wants. */
 export const TOOL_SPEC_BY_NAME: ReadonlyMap<string, ToolSpec> = new Map(TOOL_SPECS.map((spec) => [spec.name, spec]));

@@ -20,7 +20,7 @@ let paths: JairaPaths;
 let builtIn: string;
 let home: string;
 
-const SHIPPED = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" } as const;
+const SHIPPED = { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" } as const;
 
 function write(root: string, relPath: string, body: unknown): string {
   const file = join(root, relPath);
@@ -51,7 +51,7 @@ afterEach(() => {
 
 describe("readPermissionSetLayers", () => {
   it("keeps every layer's file apart, nearest first, with what each follows and resolves to", () => {
-    write(paths.base.baseDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", bash: "ask" });
+    write(paths.base.baseDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", shell: "ask" });
     write(paths.jairaDir, "permission-sets/feature/writes.json", { edit: "ask", other: "ask" });
     const records = readPermissionSetLayers(paths);
     expect(records.map((r) => [r.id, r.files.map((f) => [f.layer, f.file, f.follows])])).toEqual([
@@ -64,7 +64,7 @@ describe("readPermissionSetLayers", () => {
       ],
       ["feature/writes", [["project", ".jaira/permission-sets/feature/writes.json", undefined]]],
     ]);
-    expect(records[0]!.files[0]!.decl).toEqual({ ...SHIPPED, bash: "ask" });
+    expect(records[0]!.files[0]!.decl).toEqual({ ...SHIPPED, shell: "ask" });
     expect(records[0]!.files[1]!.decl).toEqual(SHIPPED);
   });
 
@@ -90,13 +90,13 @@ describe("readPermissionSetLayers", () => {
 
 describe("writePermissionSet", () => {
   it("creates an override that follows what ships and holds only what differs — and a run reads the merge", () => {
-    const result = writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, bash: "ask", "git log": "allow" });
+    const result = writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, shell: "ask", "git log": "allow" });
     expect(result.kind).toBe("override");
-    expect(readFileSync(result.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "bash": "ask",\n  "git log": "allow"\n}\n`);
-    expect(winner("chat/read-only")).toEqual({ ...SHIPPED, bash: "ask", "git log": "allow" });
+    expect(readFileSync(result.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "shell": "ask",\n  "git log": "allow"\n}\n`);
+    expect(winner("chat/read-only")).toEqual({ ...SHIPPED, shell: "ask", "git log": "allow" });
     // What ships moved on: the override inherits it, which is the point of following.
     write(builtIn, "permission-sets/chat/read-only.json", { ...SHIPPED, grep: "allow" });
-    expect(winner("chat/read-only")).toMatchObject({ grep: "allow", bash: "ask" });
+    expect(winner("chat/read-only")).toMatchObject({ grep: "allow", shell: "ask" });
   });
 
   it("an override with nothing to say is still an override — what 'Override here' writes", () => {
@@ -107,9 +107,9 @@ describe("writePermissionSet", () => {
   });
 
   it("edits an override in place, still following, and keeps the person's layout", () => {
-    const file = write(paths.jairaDir, "permission-sets/chat/read-only.json", `{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "bash":   "ask"\n}\n`);
-    expect(writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, bash: "allow", edit: "ask" }).kind).toBe("edit");
-    expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "bash":   "allow",\n  "edit": "ask"\n}\n`);
+    const file = write(paths.jairaDir, "permission-sets/chat/read-only.json", `{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "shell":   "ask"\n}\n`);
+    expect(writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, shell: "allow", edit: "ask" }).kind).toBe("edit");
+    expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "shell":   "allow",\n  "edit": "ask"\n}\n`);
     // A line put back to what ships says goes out of the override again.
     writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, edit: "ask" });
     expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "edit": "ask"\n}\n`);
@@ -122,9 +122,9 @@ describe("writePermissionSet", () => {
     expect(JSON.parse(readFileSync(created.file, "utf8"))).toEqual(rest);
     expect(winner("chat/read-only")).toEqual(rest);
 
-    const file = write(paths.base.baseDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", bash: "ask" });
-    expect(writePermissionSet(paths, "chat/read-only", "base", { ...rest, bash: "ask" }).kind).toBe("detach");
-    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...rest, bash: "ask" });
+    const file = write(paths.base.baseDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", shell: "ask" });
+    expect(writePermissionSet(paths, "chat/read-only", "base", { ...rest, shell: "ask" }).kind).toBe("detach");
+    expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...rest, shell: "ask" });
   });
 
   it("edits a plain file in place, and creates one where no layer holds the id", () => {
@@ -150,7 +150,7 @@ describe("writePermissionSet", () => {
 
 describe("resetPermissionSet", () => {
   it("deletes the override, so the layer below answers again", () => {
-    const made = writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, bash: "ask" });
+    const made = writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, shell: "ask" });
     expect(resetPermissionSet(paths, "chat/read-only", "project").file).toBe(made.file);
     expect(existsSync(made.file)).toBe(false);
     expect(winner("chat/read-only")).toEqual(SHIPPED);

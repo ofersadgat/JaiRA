@@ -2,7 +2,7 @@ import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { Platform } from "react-native";
 import { Text, View } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
-import { choicesOfQuestions, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
+import { choicesOfQuestions, nativeShellDialect, toolDisplayOf, workflowOutcomeOf, type AgentQuestion, type SettledByView, type WorkflowOutcome } from "@jaira/shared/browser";
 import { answersOfValue, type Answer } from "@jaira/ui/choicesModel";
 import { hueOf, lineSegments } from "@jaira/ui/approvalModel";
 import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
@@ -10,7 +10,7 @@ import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { thoughtLiveOf } from "@jaira/ui/stillRunning";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
 import { isApprovalCall } from "@jaira/ui/workSummary";
-import { askedOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
+import { askedOf, pictureOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -20,6 +20,7 @@ import { Pulse } from "../chat/Pulse";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
 import { ValueView } from "./ValueView";
+import { Media } from "./ValueReadings";
 
 /**
  * The transcript's work rows: one line of work — a call, a thought, a call being written, a journal
@@ -51,10 +52,14 @@ export type TranscriptOf = (props: { entries: TranscriptEntry[]; working?: boole
 /** Walk into a subagent's conversation: the call that spawned it, and its name. */
 export type OpenSidechain = (call: string, name: string) => void;
 
-/** A command line in the colours of its parts: nested text, so it ellipses as one line. */
-export function ShellLine({ line, padding = 2 }: { line: string; padding?: number }): JSX.Element {
+/**
+ * A command line in the colours of its parts: nested text, so it ellipses as one line. `tool` is the
+ * call that ran it, when known — an agent's `PowerShell` line is taken apart as PowerShell.
+ */
+export function ShellLine({ line, padding = 2, tool }: { line: string; padding?: number; tool?: string | undefined }): JSX.Element {
   const t = useTokens();
-  const segments = useMemo(() => lineSegments(line, takenApartOf(line).requests.map((request) => ({ span: request.span, matched: [] }))), [line]);
+  const dialect = tool !== undefined ? nativeShellDialect(tool) : undefined;
+  const segments = useMemo(() => lineSegments(line, takenApartOf(line, dialect).requests.map((request) => ({ span: request.span, matched: [] }))), [line, dialect]);
   return (
     <>
       {segments.map((segment, at) =>
@@ -135,7 +140,7 @@ export function Row({
         </View>
       ) : null}
       <Txt spec={prose ? { voice: "app", scale: 12 / 12.5, color: ink.preview } : { voice: "data", scale: 11.5 / 12, color: ink.preview }} ellip flex={1} minWidth={0}>
-        {command !== undefined ? <ShellLine line={command} /> : preview}
+        {command !== undefined ? <ShellLine line={command} tool={called} /> : preview}
       </Txt>
       {note !== undefined ? note : null}
       <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", tabular: true }} flexShrink={0}>
@@ -249,6 +254,8 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, tra
       );
     }
     if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;
+    // A screenshot, a picture off the clipboard (decision 0018): what the agent saw, drawn as it saw it.
+    if (line.shown === "picture") return <Media src={pictureOf(entry.result)!} kind="image" />;
     if (line.shown === "output") return <ValueView value={entry.output!.value} label={entry.output!.name ?? "output"} {...(entry.output!.schema !== undefined ? { hint: { schema: entry.output!.schema } } : {})} />;
     return undefined;
   })();

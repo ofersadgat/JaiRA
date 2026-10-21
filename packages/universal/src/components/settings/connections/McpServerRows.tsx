@@ -14,11 +14,14 @@ import {
   newFromSource,
   newServerOf,
   secretTargetsOf,
+  serverSchemaOf,
+  unacceptedClaims,
   withServersAdded,
 } from "@jaira/ui/connectionsModel";
+import { countsAsWords } from "@jaira/ui/mcpBucketModel";
 import type { McpServerRowsProps } from "@jaira/ui/mcpServersRowsTypes";
 import { SchemaForm } from "../../form/SchemaForm";
-import { Code, Hint, PaneActions } from "../bits";
+import { Code, Hint, PaneActions, Stack } from "../bits";
 import { Button } from "../Button";
 import { SelectInput, TextField } from "../fields";
 import { SettingsLayerContext } from "../layers";
@@ -78,6 +81,9 @@ function McpServerRow({
   const enabled = mcpServerEnabled(server);
   const state = mcpRowState(enabled, status);
   const credentials: McpServerStatus["credentials"] = status?.credentials ?? mcpSecretsOf(server);
+  // What the server's tools say themselves they count as, and nobody has accepted yet (decision 0018, ruling 5).
+  const claims = unacceptedClaims(server, status);
+  const accept = (picked: typeof claims): void => set(`${path}.tools`, { ...(server.tools ?? {}), ...Object.fromEntries(picked.map((one) => [one.tool, one.claim])) });
 
   const boxes = [
     ...credentials.map((secret) => {
@@ -93,6 +99,9 @@ function McpServerRow({
       );
     }),
     credentials.length === 0 || storing ? null : <AddBox key="add" title="Store a secret" sub={credentials.map((secret) => secret.credential).join(", ")} disabled={locked} onPress={() => setStoring(true)} />,
+    claims.length === 0 || open ? null : (
+      <AddBox key="claims" title={`${claims.length} ${claims.length === 1 ? "tool says" : "tools say"} what ${claims.length === 1 ? "it counts" : "they count"} as`} sub="open to accept" disabled={locked} onPress={() => setOpen(true)} />
+    ),
   ];
 
   const wide = [
@@ -103,7 +112,30 @@ function McpServerRow({
     ) : null,
     open ? (
       <Wide key="form" body>
-        <SchemaForm schema={isMcpStdio(server) ? STDIO_SCHEMA : HTTP_SCHEMA} value={server} onChange={(next) => set(path, next)} ctx={{ path, disabled: locked, isSet: stated, setAt: set }} />
+        {claims.length > 0 ? (
+          <Stack gap={6}>
+            <Hint>
+              {claims.length === 1 ? "One of its tools says" : "Some of its tools say"} what {claims.length === 1 ? "it counts" : "they count"} as among JaiRA's permissions. Nothing counts until you accept it: a server could say that a tool which deletes files only reads them.
+            </Hint>
+            {claims.map((one) => (
+              <PaneActions key={one.tool}>
+                <Code>{one.tool}</Code>
+                <Hint>counts as {countsAsWords(one.claim)}</Hint>
+                <Button kind="ghost" disabled={locked} onPress={() => accept([one])}>
+                  Accept
+                </Button>
+              </PaneActions>
+            ))}
+            {claims.length > 1 ? (
+              <PaneActions>
+                <Button kind="ghost" disabled={locked} onPress={() => accept(claims)}>
+                  {`Accept all ${claims.length}`}
+                </Button>
+              </PaneActions>
+            ) : null}
+          </Stack>
+        ) : null}
+        <SchemaForm schema={serverSchemaOf(server, status)} value={server} onChange={(next) => set(path, next)} ctx={{ path, disabled: locked, isSet: stated, setAt: set }} />
         <PaneActions>
           <Button kind="danger" disabled={locked || !stated(path)} title="delete this server from the layer being edited" onPress={() => set(path, undefined)}>
             Remove

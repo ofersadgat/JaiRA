@@ -10,6 +10,7 @@ import {
   modeFunction,
   type PermissionSet,
   type PermissionSetMode,
+  type SystemArea,
   type ToolCategory,
   type ToolChoice,
   type ToolImplementation,
@@ -184,12 +185,15 @@ export function ModePicker({
   readOnly,
   faded = false,
   head = false,
+  onRemove,
 }: {
   mode: PermissionSetMode | undefined;
   title: string;
   onMode: (next: PermissionSetMode) => void;
   readOnly?: boolean | undefined;
   faded?: boolean;
+  /** A last row taking the line out of the permission set — for a line with no minus of its own. */
+  onRemove?: (() => void) | undefined;
   /**
    * In a fold's head or `Other`'s, not a line: the plain button — padding --control-pad, app 13/12.5 in
    * --text, hovered --panel-3 and --rule — its glyph --tok-hint whatever the mode, its › whole.
@@ -277,6 +281,17 @@ export function ModePicker({
                 hint="a function decides each call, and may ask you — smart, or your own"
                 onPress={() => setNaming(true)}
               />
+              {onRemove !== undefined ? (
+                <MenuRow
+                  icon="cross"
+                  name="remove"
+                  hint="out of the permission set — not offered"
+                  onPress={() => {
+                    onRemove();
+                    close();
+                  }}
+                />
+              ) : null}
             </>
           )}
         </SubMenu>
@@ -457,6 +472,89 @@ export function SubjectRow({
       <Grant icon={icon ?? (script ? "script" : "terminal")} name={subject} hint={hint ?? ""} mono={mono ?? !script} title={hint ?? subject} />
       <ModePicker mode={mode} title={`${subject}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} faded={follows} />
     </Line>
+  );
+}
+
+/**
+ * One side of a System area: the tool's name over nothing, then its mode — or, for a side the permission
+ * set does not hold, a dashed `add` (nothing at all when the set cannot be changed).
+ *
+ *   the side      row, centred, gap 6
+ *   its name      app 10.5/12.5 --tok-hint, right-aligned in a fixed width so the modes of every area
+ *                 stand in one column
+ *   its mode      in an 84 box, from its start
+ *   add           the mode's box dashed, --tok-hint: + add
+ */
+function AreaSide({ tool, width, held, mode, onMode, onAdd, onRemove, readOnly }: { tool: string; width: number; held: boolean; mode: PermissionSetMode; onMode: (next: PermissionSetMode) => void; onAdd?: (() => void) | undefined; onRemove?: (() => void) | undefined; readOnly?: boolean | undefined }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View flexDirection="row" alignItems="center" gap={6} flexShrink={0}>
+      <Txt spec={HINT} width={width} textAlign="right" ellip>
+        {tool}
+      </Txt>
+      <View width={84} alignItems="flex-start">
+        {held ? (
+          <ModePicker mode={mode} title={`${tool}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} onRemove={readOnly === true ? undefined : onRemove} />
+        ) : onAdd !== undefined && readOnly !== true ? (
+          <Press
+            onPress={onAdd}
+            title={`add ${tool}`}
+            label={`add ${tool}`}
+            flexDirection="row"
+            alignItems="center"
+            gap={5}
+            paddingVertical={4}
+            paddingHorizontal={6}
+            borderWidth={1}
+            borderStyle="dashed"
+            borderRadius={lengthToken(t, "control-radius", 7)}
+            box={({ hovered }) => ({ borderColor: t.v(hovered ? "rule" : "line"), backgroundColor: hovered ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}
+          >
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }}>+ add</Txt>
+          </Press>
+        ) : (
+          <Txt spec={HINT} paddingHorizontal={6}>
+            —
+          </Txt>
+        )}
+      </View>
+    </View>
+  );
+}
+
+/** One side of an area as the card hands it over: the tool, whether the set holds it, its mode and edits. */
+export interface AreaSideLine {
+  tool: string;
+  held: boolean;
+  mode: PermissionSetMode;
+  onMode: (next: PermissionSetMode) => void;
+  onAdd?: (() => void) | undefined;
+  onRemove?: (() => void) | undefined;
+}
+
+/**
+ * A System area (decision 0018 §1, ruling 1): its minus, its glyph, name and hint, then its look and
+ * its change side by side. Each side is its own line of the permission set; the minus takes out both,
+ * and a side's mode menu ends with taking out that one.
+ *
+ *   the row       row, wrapping, centred, gap 4 — the sides drop under the words when they do not fit,
+ *                 against the right
+ *   the sides     row, centred, gap 10, pushed right
+ */
+export function AreaRow({ area, look, change, onRemove, readOnly }: { area: SystemArea; look: AreaSideLine; change: AreaSideLine; onRemove?: (() => void) | undefined; readOnly?: boolean | undefined }): JSX.Element {
+  const t = useTokens();
+  const [hovered, hover] = useHover();
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={4} borderRadius={7} backgroundColor={hovered ? (t.mix(t.v("text"), 7, "transparent") as never) : "transparent"} {...hover}>
+      <View flexDirection="row" alignItems="center" gap={4} flexGrow={1} flexShrink={1} flexBasis={200} minWidth={0}>
+        {onRemove !== undefined ? <RemoveLine subject={area.label} onRemove={onRemove} /> : null}
+        <Grant icon="system" name={area.label} hint={area.hint} title={area.hint} />
+      </View>
+      <View flexDirection="row" alignItems="center" gap={10} marginLeft="auto" flexShrink={0}>
+        <AreaSide {...look} width={92} readOnly={readOnly} />
+        <AreaSide {...change} width={104} readOnly={readOnly} />
+      </View>
+    </View>
   );
 }
 

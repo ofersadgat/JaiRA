@@ -12,7 +12,9 @@
  */
 import {
   MODE_WHEN_UNSET,
+  SCREEN_MAPPING,
   isFunctionMode,
+  mappedToolsOf,
   mcpFirstMode,
   mcpServerSubject,
   mcpToolLines,
@@ -20,6 +22,7 @@ import {
   parseMcpSubject,
   type McpServerStatus,
   type McpToolInfo,
+  type McpToolMapping,
   type PermissionSet,
   type PermissionSetEntry,
   type PermissionSetMode,
@@ -91,10 +94,66 @@ export function withoutMcpServer(permissionSet: PermissionSet, server: string): 
   return edited(permissionSet, entries);
 }
 
-/** The tools of a server the probe listed that the map names no line for, by name. */
+/**
+ * The tools of a server the probe listed that the map names no line for, by name — less the ones that
+ * count as a standard tool, which the bucket draws already ({@link mappedMcpToolsOf}).
+ */
 export function unnamedMcpTools(permissionSet: PermissionSet, group: McpGroup): McpToolInfo[] {
   const named = new Set(mcpToolLines(permissionSet, group.server).map((line) => line.tool));
-  return (group.status?.tools ?? []).filter((tool) => !named.has(tool.name)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const mapped = group.status?.mappings ?? {};
+  return (group.status?.tools ?? []).filter((tool) => !named.has(tool.name) && !Object.hasOwn(mapped, tool.name)).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+}
+
+/** The stricter of two modes: allow, then a function, then ask, then deny. */
+function stricter(a: PermissionSetMode, b: PermissionSetMode): PermissionSetMode {
+  const rank = (mode: PermissionSetMode): number => (isFunctionMode(mode) ? 1 : { allow: 0, ask: 2, deny: 3 }[mode]);
+  return rank(b) > rank(a) ? b : a;
+}
+
+/** A tool of a server that counts as a standard tool (decision 0018, ruling 5), as the bucket draws it. */
+export interface MappedMcpTool {
+  tool: string;
+  subject: string;
+  mapping: McpToolMapping;
+  /**
+   * What its calls come to with no line of its own: the standard tool's line (or `other`), the stricter
+   * with the server's line where the set writes one — or `deny` when it is withheld.
+   */
+  mode: PermissionSetMode;
+  /** The set holds JaiRA's own of what it counts as, so the server's is withheld. */
+  withheld: boolean;
+  /** Does the set write the tool's own line? Then that row draws it, and this says what it counts as. */
+  named: boolean;
+  hint: string;
+}
+
+/** What a mapping counts as, in words: `screenshot`, or the pair by its action. */
+export function countsAsWords(mapping: McpToolMapping): string {
+  if (mapping.as === SCREEN_MAPPING) return "screenshot when it only looks, control_input otherwise";
+  const places = Object.entries(mapping.args ?? {}).map(([arg, from]) => `${arg} from ${from}`);
+  return `${mapping.as}${places.length > 0 ? ` (${places.join(", ")})` : ""}`;
+}
+
+/** The server's tools the configuration says count as standard tools, each with what it comes to in this map. */
+export function mappedMcpToolsOf(permissionSet: PermissionSet, group: McpGroup): MappedMcpTool[] {
+  const entry = (name: string) => (Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name] : undefined);
+  const serverLine = entry(mcpServerSubject(group.server));
+  const serverMode = serverLine?.kind === "mcp" ? serverLine.mode : undefined;
+  const standardMode = (name: string): PermissionSetMode => entry(name)?.mode ?? permissionSet.other ?? MODE_WHEN_UNSET;
+  return Object.entries(group.status?.mappings ?? {})
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([tool, mapping]) => {
+      const subject = mcpToolSubject(group.server, tool);
+      const ours = mappedToolsOf(mapping);
+      const withheld = ours.every((name) => entry(name)?.kind === "tool" && entry(name)!.implementation !== "native");
+      const standard = ours.map(standardMode).reduce(stricter);
+      const mode = withheld ? "deny" : serverMode !== undefined ? stricter(serverMode, standard) : standard;
+      const counts = countsAsWords(mapping);
+      const hint = withheld
+        ? `counts as ${counts} — withheld: this set uses JaiRA's own ${ours.join(" and ")}`
+        : `counts as ${counts} — answers to ${ours.length > 1 ? "their lines" : "its line"}${serverMode !== undefined ? " and the server's, the stricter" : ""}`;
+      return { tool, subject, mapping, mode, withheld, named: entry(subject)?.kind === "mcp", hint };
+    });
 }
 
 /** A mode as the short word a folded group's hint uses: `allowed`, `asks`, `denied`, `smart`. */

@@ -114,6 +114,7 @@ import {
   registerGitTools,
   workspaceGitHost,
   centralArtifactSink,
+  registerSystemTools,
   PublishAuthorizer,
   type ArtifactStore,
   type ExecObserver,
@@ -655,6 +656,8 @@ function buildRunEnvironment(
       ...(files ? { artifacts: centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {}),
     }),
   );
+  // The System tools (decision 0018): this machine. A screenshot is kept with a durable run's task.
+  registerSystemTools(registry, files ? { keep: () => centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {});
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —
   // failed such a state as "unregistered function" while the app ran it fine.
@@ -778,7 +781,7 @@ function assertCapabilities(
     throw new Error(
       `${issues.map((i) => `${i.stateId}: ${i.message}`).join("; ")}\n` +
         "  run it at a terminal, where jaira asks, or pass --approve deny to refuse every approval it meets; " +
-        "or run this task in the JaiRA app, or set functions.bash.builtins to false in .jaira/settings.json if this workspace is disposable",
+        "or run this task in the JaiRA app, or set functions.shell.builtins to false in .jaira/settings.json if this workspace is disposable",
     );
   }
 }

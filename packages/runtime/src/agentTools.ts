@@ -61,6 +61,7 @@ import {
   isLoweredPermissionSet,
   mcpModeOf,
   mcpServerSubject,
+  nativeShellDialect,
   parseMcpSubject,
   nativesOfStandard,
   offeredTools,
@@ -76,6 +77,7 @@ import {
   type PermissionSetMode,
   type McpLine,
 } from "@jaira/shared";
+import { noteCallDialect } from "./callDialect";
 import type { StackedExecutor } from "./executorStack";
 import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
 
@@ -86,6 +88,9 @@ import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
  *
  * `MultiEdit` and `NotebookEdit` ARE `edit`: they replace text in a file that exists, and an agent
  * denied `Edit` and left `MultiEdit` has been denied nothing.
+ *
+ * `Bash` and `PowerShell` ARE `shell`: one runs a POSIX line (Git Bash, on Windows), the
+ * other a PowerShell one, and each line is taken apart in its own language (`nativeShellDialect`).
  *
  * `Task`, `Agent` and `SlashCommand` have no standard tool: a sub-agent and a command file can each do
  * anything, which is exactly what `other` is for.
@@ -103,7 +108,8 @@ export const CLAUDE_TOOLS: AgentToolDeclaration = {
     MultiEdit: "edit",
     NotebookEdit: "edit",
     Write: "write_file",
-    Bash: "bash",
+    Bash: "shell",
+    PowerShell: "shell",
     WebFetch: "web_fetch",
     WebSearch: "web_search",
     Task: null,
@@ -118,15 +124,15 @@ export const CLAUDE_TOOLS: AgentToolDeclaration = {
  * and every call is put to the gate there (upstream `AgentExecutor`, for a transport with no
  * callback), exactly as claude's callback puts them. So the declaration says which standard subjects
  * the WRITING sandbox unlocks, and the flag is derived from the permission set: `workspace-write` only where
- * the permission set KEEPS one of codex's own writers (`shell` for `bash`, `apply_patch` for `edit`, held
+ * the permission set KEEPS one of codex's own writers (its `shell` for `shell`, `apply_patch` for `edit`, held
  * with `implementation: "native"`), `read-only` otherwise — ours doing the writing, under the gate.
  *
  * Its natives cannot be removed one by one: shutting the sandbox is how they are displaced.
  */
 export const CODEX_TOOLS: AgentToolDeclaration = {
   channel: "switches",
-  natives: { shell: "bash", apply_patch: "edit" },
-  switches: { "workspace-write": ["write_file", "edit", "bash"] },
+  natives: { shell: "shell", apply_patch: "edit" },
+  switches: { "workspace-write": ["write_file", "edit", "shell"] },
 };
 
 /** The switch {@link CODEX_TOOLS} declares — the sandbox that lets codex change the workspace. */
@@ -633,6 +639,9 @@ function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refus
         noteMcpCall(input, tool.name);
         return gate.check(asked, input);
       }
+      // `Bash` and `PowerShell` are both asked about as `shell`: which shell reads the line goes with it.
+      const dialect = nativeShellDialect(tool.name);
+      if (dialect !== undefined) noteCallDialect(input, dialect);
       return gate.check(asked, asked === tool ? input : standardInput(asked.name, input));
     },
   };

@@ -5,8 +5,8 @@
  * decision procedure into the `ExecPolicy` the engine and the delegated adapters
  * enforce (`@declarative-ai/permissions`). What a state may do is its PERMISSION_SET (decision
  * 0007); what stands above every permission set is JaiRA's own floor, which a project can turn
- * off and nothing else (`functions.bash.builtins`). There is no project rule list: a
- * command a project wants answered is a line under the `bash` tool of its permission sets
+ * off and nothing else (`functions.shell.builtins`). There is no project rule list: a
+ * command a project wants answered is a line under the `shell` tool of its permission sets
  * (decision 0007, amended 2026-09-23).
  *
  * The shape of the decision matters:
@@ -36,7 +36,8 @@
  *     directory layout.
  */
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
-import { describeCommand, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
+import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
+import { callDialectOf } from "./callDialect";
 import { SHELL_SUBJECT, classifyRequest, lookUp, makeCallOf, matchCommandEntry, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
 import { filePackages, makeRunsOf, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";
@@ -52,6 +53,10 @@ import {
   isLoweredPermissionSet,
   isPermissionSetMarkKey,
   gateToolModes,
+  isServedTool,
+  mappedCallOf,
+  mappedToolsOf,
+  mcpMappingOf,
   mcpModeOf,
   mcpServerSubject,
   parseMcpSubject,
@@ -67,6 +72,8 @@ import {
   RESERVED_MCP_SERVERS,
   TOOL_SPEC_BY_NAME,
   type CommandApproval,
+  type JairaMcpConfig,
+  type McpToolMapping,
   type CommandPart,
   type CommandPartDecider,
   type CommandPartVerdict,
@@ -102,7 +109,7 @@ interface FloorRule {
 
 /**
  * What a project says about JaiRA's own policy: whether the built-in floor stands
- * (`functions.bash.builtins`). Everything else a line is judged by is the permission set.
+ * (`functions.shell.builtins`). Everything else a line is judged by is the permission set.
  *
  * An empty policy is the built-ins on, which is the safe default.
  */
@@ -112,8 +119,8 @@ export interface JairaPolicy {
 }
 
 /** The project's policy, read off its configuration. */
-export function projectPolicy(config: { functions: { bash: { builtins: boolean } } }): JairaPolicy {
-  return config.functions.bash.builtins ? {} : { builtins: false };
+export function projectPolicy(config: { functions: { shell: { builtins: boolean } } }): JairaPolicy {
+  return config.functions.shell.builtins ? {} : { builtins: false };
 }
 
 /** Tools whose input is a command line, and therefore parsed rather than trusted. */
@@ -161,7 +168,11 @@ const DESTRUCTIVE: FloorRule[] = [
 
 // --- SPEC §11.3: require approval -------------------------------------------
 
-const NETWORK_PROGRAMS = new Set(["curl", "wget", "nc", "netcat", "ssh", "scp", "rsync", "ftp", "telnet"]);
+const NETWORK_PROGRAMS = new Set([
+  "curl", "wget", "nc", "netcat", "ssh", "scp", "rsync", "ftp", "telnet",
+  // PowerShell's, by the cmdlet's own name (`iwr` and Windows PowerShell's `curl` are `invoke-webrequest`).
+  "invoke-webrequest", "invoke-restmethod", "start-bitstransfer", "send-mailmessage", "new-pssession", "enter-pssession",
+]);
 const PUBLISH: Array<[string, string]> = [
   ["npm", "publish"],
   ["pnpm", "publish"],
@@ -170,8 +181,23 @@ const PUBLISH: Array<[string, string]> = [
   ["gem", "push"],
   ["twine", "upload"],
 ];
-const INSTALLERS = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "gem", "cargo", "apt", "apt-get", "brew", "choco", "winget"]);
+/** PowerShell's publishing and installing cmdlets — the cmdlet is the whole verb. */
+const PUBLISH_CMDLETS = new Set(["publish-module", "publish-script", "publish-psresource"]);
+const INSTALL_CMDLETS = new Set(["install-module", "install-package", "install-script", "install-psresource", "update-module", "update-script", "update-psresource", "save-module", "save-script"]);
+const INSTALLERS = new Set(["npm", "pnpm", "yarn", "pip", "pip3", "gem", "cargo", "apt", "apt-get", "brew", "choco", "winget", "scoop"]);
 const INSTALL_SUBCOMMANDS = new Set(["install", "add", "i", "ci", "update", "upgrade"]);
+/** `Start-Process`'s parameters, for reading them cut short (`-Cred`, `-Verb`). */
+const START_PROCESS_PARAMETERS = ["-filepath", "-argumentlist", "-credential", "-verb", "-workingdirectory", "-windowstyle", "-wait", "-passthru", "-nonewwindow", "-loaduserprofile", "-redirectstandardoutput", "-redirectstandarderror", "-redirectstandardinput", "-environment", "-useshellexecute"];
+/** `Invoke-Command`'s parameters that run it on another machine. */
+const REMOTE_PARAMETERS = ["-computername", "-cn", "-session", "-hostname", "-vmname", "-vmid", "-vmguid", "-containerid", "-connectionuri", "-uri", "-sshconnection"];
+
+/** Whether a command deletes recursively: `rm -r`, PowerShell's `Remove-Item -Recurse` (cut short too), cmd's `rd /s`. */
+function deletesRecursively(command: ParsedCommand): boolean {
+  if (command.program === "rm") return command.flags.some((f) => /^-[a-z]*[rR]/.test(f));
+  if (command.program === "remove-item") return command.flags.some((f) => powershellParameter(f, ["-recurse"]) !== undefined || /^-r$/i.test(f));
+  if (["rd", "rmdir", "del", "erase"].includes(command.program)) return commandWords(command).some((w) => /^\/s$/i.test(w));
+  return false;
+}
 const DEPLOY_PROGRAMS = new Set(["kubectl", "helm", "terraform", "vercel", "netlify", "fly", "heroku", "aws", "gcloud", "az", "docker"]);
 /** Paths that hold credentials — reading them is an approval, not a free action. */
 const SECRET_PATTERNS = [/(^|[\\/])\.env(\.|$)/i, /(^|[\\/])\.ssh([\\/]|$)/i, /(^|[\\/])\.aws([\\/]|$)/i, /(^|[\\/])\.npmrc$/i, /id_rsa/i, /credentials/i, /secrets?\./i];
@@ -200,8 +226,8 @@ export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; 
   for (const rule of DESTRUCTIVE) {
     if (matches(rule.match, command)) return { action: "deny", reason: rule.reason };
   }
-  // `rm -rf .git` — the non-git way to destroy history.
-  if (command.program === "rm" && command.flags.some((f) => /^-[a-z]*[rR]/.test(f)) && commandWords(command).some((a) => /(^|[\\/])\.git([\\/]|$)/.test(a))) {
+  // `rm -rf .git`, `Remove-Item -Recurse .git`, `rd /s .git` — the non-git ways to destroy history.
+  if (deletesRecursively(command) && commandWords(command).some((a) => /(^|[\\/])\.git([\\/]|$)/.test(a))) {
     return { action: "deny", reason: "removing .git destroys the repository" };
   }
 
@@ -217,11 +243,22 @@ export function builtinVerdict(command: ParsedCommand): { action: PolicyAction; 
     // Fetching a script and piping it to a shell is the shape worth naming.
     return ask(`${command.program} accesses the network`);
   }
-  if (PUBLISH.some(([program, sub]) => command.program === program && command.subcommand === sub)) {
+  if (command.program === "invoke-command" && command.flags.some((f) => powershellParameter(f, REMOTE_PARAMETERS) !== undefined)) {
+    return ask("invoke-command runs it on another machine");
+  }
+  if (PUBLISH.some(([program, sub]) => command.program === program && command.subcommand === sub) || PUBLISH_CMDLETS.has(command.program)) {
     return ask("publishing a package is public and irreversible");
   }
-  if (INSTALLERS.has(command.program) && command.subcommand !== undefined && INSTALL_SUBCOMMANDS.has(command.subcommand)) {
+  if ((INSTALLERS.has(command.program) && command.subcommand !== undefined && INSTALL_SUBCOMMANDS.has(command.subcommand)) || INSTALL_CMDLETS.has(command.program)) {
     return ask("installing packages runs third-party code");
+  }
+  if (command.program === "start-process") {
+    const words = command.words ?? [];
+    const elevated = words.some((w, i) => {
+      if (powershellParameter(w.value, START_PROCESS_PARAMETERS) === "-credential") return true;
+      return powershellParameter(w.value, START_PROCESS_PARAMETERS) === "-verb" && /^runas/i.test(words[i + 1]?.value ?? "");
+    });
+    if (elevated) return ask("start-process starts it as another user");
   }
   if (DEPLOY_PROGRAMS.has(command.program)) return ask(`${command.program} can deploy or change infrastructure`);
   if (commandWords(command).some((a) => SECRET_PATTERNS.some((p) => p.test(a)))) return ask("the command touches a credentials path");
@@ -401,9 +438,6 @@ function runnerPart(part: ClassifiedPart, gate: { mode: PermissionSetMode; line:
   };
 }
 
-/** Programs that move the directory the REST of the line runs in. */
-const DIRECTORY_CHANGERS = new Set(["cd", "chdir", "pushd", "sl", "set-location", "push-location"]);
-
 /** A part's answer while it is being composed: the layer that gave it is kept beside it. */
 interface Composed {
   verdict: CommandPartVerdict;
@@ -424,7 +458,7 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VE
  * The order, and what each layer may do:
  *
  *  1. `.jaira/` anywhere in the part ⇒ denied. Nothing below is consulted.
- *  2. The BUILT-INS (unless `functions.bash.builtins` is off): the destructive floor (deny), else a
+ *  2. The BUILT-INS (unless `functions.shell.builtins` is off): the destructive floor (deny), else a
  *     built-in ask, else nothing — `default`, which allows.
  *  3. The PERMISSION_SET's answer for the part's subject. It composes with (2) as the STRICTER of the two,
  *     with one exception: an entry that NAMES the program (`git push`, `git`) replaces a built-in ask
@@ -453,6 +487,8 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     if (part.command !== undefined) {
       const builtin = builtinVerdict(part.command);
       if (builtin !== undefined) fromPolicy = { verdict: VERDICT_OF[builtin.action], source: "builtin", reason: builtin.reason };
+      // `shutdown`, `Restart-Computer`, `systemctl reboot`: the power tool, which always asks (decision 0018 §6).
+      else if (part.tool === "power") fromPolicy = { verdict: "asks", source: "builtin", reason: "it restarts, shuts down, sleeps or locks the machine" };
     } else if (part.paths.some((p) => SECRET_PATTERNS.some((s) => s.test(p)))) {
       fromPolicy = { verdict: "asks", source: "builtin", reason: "the redirect touches a credentials path" };
     }
@@ -578,7 +614,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
     const judged = judgePart(policy, classified, options, here);
     // `cd infra && rm x` is about `infra/x`: the directory moves for what follows it on the line.
-    if (classified.noRequest === true && DIRECTORY_CHANGERS.has(classified.command?.program ?? "") && classified.paths[0] !== undefined && here !== undefined) {
+    if (classified.noRequest === true && DIRECTORY_CHANGERS.includes(classified.command?.program ?? "") && classified.paths[0] !== undefined && here !== undefined) {
       here = isAbsolutePath(classified.paths[0]) ? classified.paths[0] : absolutize(classified.paths[0], here);
     }
     if (judged === undefined) continue;
@@ -659,11 +695,12 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     }
   });
 
-  if ((taken.unparsed || taken.requests.length === 0) && worstVerdict !== "denied" && worstVerdict !== "asks") {
+  if ((taken.unparsed || line.trim().length === 0) && worstVerdict !== "denied" && worstVerdict !== "asks") {
     // DESIGN §10.1: "Unparsable commands default to require_approval." A deny beside the unreadable
     // piece stands; an allow does not — and neither does a function's: a line with a piece nobody
     // could read asks a PERSON, whatever a function would say about the pieces it can see. An empty
-    // line has nothing to judge, and still must not allow.
+    // line has nothing to judge, and still must not allow. A line that was read and holds no request
+    // (`$PSVersionTable`, `x=1`, a comment) runs nothing outside the shell: below, it is allowed.
     const reason = taken.reason !== undefined ? `command could not be parsed (${taken.reason})` : "command could not be parsed";
     if (!parts.some((part) => part.kind === "unparsed")) {
       parts.push({
@@ -741,6 +778,11 @@ function pathOf(input: Record<string, unknown>): string | undefined {
 export interface CompilePolicyOptions {
   /** Chooses the parser dialect: a WSL project's commands are POSIX. */
   execEnv?: ExecEnv;
+  /**
+   * The configured MCP servers — what each server's tools COUNT AS among the standard tools (decision
+   * 0018, ruling 5), so a mapped tool's call is judged by that tool's line too. Absent ⇒ none is mapped.
+   */
+  mcp?: JairaMcpConfig;
   /** Called for every decision — the audit trail (DESIGN §10.2's `command_log`). */
   onDecision?: (entry: PolicyAuditEntry) => void;
   /**
@@ -847,7 +889,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     }
     // The narrowing below has usually judged this very call already — with the STATE's permission set in
     // hand, which this approver is never given. `.jaira/` is screened inside, part by part.
-    const decision = lineDecisionFor(input, undefined);
+    const decision = lineDecisionFor(input, undefined, tool);
     auditLine(tool, line, decision, req.sessionId);
     return decision.action === "allow" ? "allow" : decision.action === "deny" ? "deny" : "ask";
   };
@@ -885,12 +927,13 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     return compiledFor !== undefined ? { permissionSet: compiledFor, source: INLINE_PERMISSION_SET } : undefined;
   };
 
-  const lineDecisionFor = (input: Record<string, unknown>, authored: PermissionsDecl | undefined): CommandDecision => {
+  /** `tool` is the name the gate was asked about: an agent's `PowerShell` reads its line as PowerShell wherever the project runs. */
+  const lineDecisionFor = (input: Record<string, unknown>, authored: PermissionsDecl | undefined, tool: string): CommandDecision => {
     const known = LINE_DECISIONS.get(input);
     if (known !== undefined) return known;
     const cwd = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
     const decideUnder = (judging: { permissionSet: ShellPermissionSet; source: string } | undefined): CommandDecision =>
-      decideCommand(policy, commandOf(input) ?? "", dialect, {
+      decideCommand(policy, commandOf(input) ?? "", callDialectOf(input, tool) ?? dialect, {
         permissionSet: judging?.permissionSet,
         permissionSetSource: judging?.source,
         grants: options.grants,
@@ -908,8 +951,8 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
    * The line's verdict, as a NARROWING — the one seam that runs whatever mode the tool resolved to.
    *
    * A `deny` always narrows, so the destructive floor, `.jaira/` and a permission set's deny stand above a
-   * state that authored `bash: "allow"` and above an "allow for this run" remembered against the
-   * whole tool. An `ask` narrows when a permission set is judging the line: a remembered `bash: allow` would
+   * state that authored `shell: "allow"` and above an "allow for this run" remembered against the
+   * whole tool. An `ask` narrows when a permission set is judging the line: a remembered `shell: allow` would
    * otherwise wave through the next line's asking parts, and it is parts that are remembered, never
    * lines. Without a permission set an ask is left to the `smart` approver, as it always was.
    */
@@ -934,7 +977,16 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         ? { permissionSet: options.permissionSet, source: INLINE_PERMISSION_SET }
         : undefined;
     if (judging === undefined) return undefined;
-    const decision = decideMcpCall(tool, judging.permissionSet, judging.source, options.grants);
+    const mapping = mcpMappingOf(options.mcp, tool);
+    const decision =
+      mapping !== undefined
+        ? decideMappedMcpCall(tool, input, mapping, judging.permissionSet, judging.source, {
+            shell: (call) => lineDecisionFor(call, block, SHELL_SUBJECT).parts,
+            scope: (name, call) => places?.({ name } as never, call as never, block as never),
+            builtins: policy.builtins !== false,
+            ...(options.grants !== undefined ? { grants: options.grants } : {}),
+          })
+        : decideMcpCall(tool, judging.permissionSet, judging.source, options.grants);
     if (decision === undefined) return undefined;
     if (input !== null && typeof input === "object") LINE_DECISIONS.set(input, decision);
     audit({ tool, action: decision.action, reason: decision.reason, parts: decision.parts, sessionId: "" });
@@ -964,7 +1016,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
       }
       return undefined;
     }
-    const decision = lineDecisionFor(args, block);
+    const decision = lineDecisionFor(args, block, tool.name);
     const judged = permissionSetFor(block) !== undefined;
     // A line a permission set judges is written down HERE, whatever it came to: the gate asks the approver
     // for a permission set's shell, not the `smart` rule, so nothing after this sees an allowed line again.
@@ -996,19 +1048,33 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // `perCall`: built even with no floor, because a STATE may author `permissions.scopes` and the
   // engine hands that block to this callback at the moment of decision.
   const places = scopeNarrowingFor(undefined, options.workspaceRoot, options.execEnv, options.scopes, true);
-  // Where, then what: the scope table's answer and the line's own, the stricter kept.
+  // What, by the call: the line's own judgement — and a tool that always asks (`power`,
+  // `install_software`) asks at least, whatever its line says. Both gates read this one.
+  const narrowing: ScopeNarrowing = (tool, input, authored) =>
+    policy.builtins !== false && ALWAYS_ASKING_TOOLS.has(tool.name) ? strictestMode(commandNarrowing(tool, input, authored), "ask") : commandNarrowing(tool, input, authored);
+  // Where, then what: the scope table's answer and the call's own, the stricter kept.
   const scopeOf: ScopeNarrowing = (tool, input, authored) => {
     const where = places?.(tool, input, authored);
-    const what = commandNarrowing(tool, input, authored);
+    const what = narrowing(tool, input, authored);
     if (where === undefined || what === undefined) return where ?? what;
     return MODE_RANK[where] >= MODE_RANK[what] ? where : what;
   };
   const compiled: ExecPolicy = { baseline, smart, scopeOf };
-  COMMAND_NARROWINGS.set(compiled, commandNarrowing);
+  COMMAND_NARROWINGS.set(compiled, narrowing);
   return compiled;
 }
 
 const MODE_RANK: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
+
+/** The stricter of two modes, either of which may be unsaid. */
+const strictestMode = (a: PermissionMode | undefined, b: PermissionMode): PermissionMode => (a !== undefined && MODE_RANK[a] > MODE_RANK[b] ? a : b);
+
+/**
+ * The tools a person is always asked about, as a push is: `power` takes the machine away, and
+ * `install_software` runs third-party code, which is the install ask the shell's package managers have
+ * (decision 0018 §6). The built-ins switch (`functions.shell.builtins`) turns them off with the rest.
+ */
+export const ALWAYS_ASKING_TOOLS: ReadonlySet<string> = new Set(["power", "install_software"]);
 
 /** Line decisions by the input object of the call they are about — see `lineDecisionFor`. */
 const LINE_DECISIONS = new WeakMap<object, CommandDecision>();
@@ -1140,6 +1206,136 @@ export function decideMcpCall(tool: string, permissionSet: PermissionSet, source
   };
 }
 
+/** How a mapped call's standard half is judged: its shell line, its places, the built-in asks, what this run remembers. */
+export interface MappedCallJudges {
+  /** A shell line, judged part by part — for a tool that counts as `shell`. */
+  shell?: (input: Record<string, unknown>) => CommandApproval;
+  /** What the scope tables say about the call's place, for a tool that takes one. */
+  scope?: (tool: string, input: Record<string, unknown>) => PermissionMode | undefined;
+  /** `power` and `install_software` always ask, unless `functions.shell.builtins` is off. */
+  builtins?: boolean;
+  grants?: CommandGrants;
+}
+
+/**
+ * One call to a server's tool that COUNTS AS a standard tool (decision 0018, ruling 5), judged twice and
+ * the stricter kept: by the tool's own line (or its server's) where the set writes one, and as the
+ * standard tool it counts as — that tool's line or `other`, its places under the scope tables, a shell
+ * line part by part, the built-in asks. With no line for the tool or its server the standard tool alone
+ * answers: a set that allows `screenshot` allows every way to the screen.
+ *
+ * And JaiRA's own tool is preferred, as it is over an agent's built-in: where the set holds JaiRA's own
+ * implementation of what the tool counts as, the server's tool is WITHHELD — refused, saying which of
+ * JaiRA's to call — unless that line picks `native`.
+ *
+ * The approval's line is the tool's name — or, for one that counts as `shell`, the name and the line it
+ * runs (`mcp__x__run: npm test`), so the line's parts are drawn where they are.
+ */
+export function decideMappedMcpCall(tool: string, input: unknown, mapping: McpToolMapping, permissionSet: PermissionSet, source: string, judges: MappedCallJudges = {}): CommandDecision {
+  const parsed = parseMcpSubject(tool);
+  const server = parsed !== undefined ? mcpServerSubject(parsed.server) : tool;
+  const entry = (name: string) => (Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name] : undefined);
+  const call = mappedCallOf(mapping, input);
+  const head: TextSpan = { start: 0, end: tool.length };
+  const decided = (parts: CommandPart[], line: string): CommandDecision => {
+    const verdict = parts.reduce<CommandPartVerdict>((worst, part) => (VERDICT_RANK[part.verdict] > VERDICT_RANK[worst] ? part.verdict : worst), "allowed");
+    const deciding = parts.find((part) => part.verdict === verdict) ?? parts[0]!;
+    return {
+      action: verdict === "denied" ? "deny" : verdict === "allowed" ? "allow" : "require_approval",
+      reason: deciding.decidedBy.reason,
+      parts: { line, dialect: "posix", parts, verdict, permissionSet: source },
+    };
+  };
+  const part = (verdict: CommandPartVerdict, subject: string, kind: CommandPart["kind"], decidedBy: CommandPart["decidedBy"], widths: string[], extra: Partial<CommandPart> = {}): CommandPart => ({
+    span: head,
+    matched: [head],
+    text: tool,
+    kind,
+    subject,
+    verdict,
+    decidedBy,
+    widths,
+    ...extra,
+  });
+
+  // Withheld: the set holds JaiRA's own of what this tool counts as.
+  const ours = mappedToolsOf(mapping);
+  if (ours.every((name) => entry(name)?.kind === "tool" && entry(name)!.implementation !== "native" && isServedTool(name))) {
+    const which = ours.join(" and ");
+    return decided(
+      [part("denied", tool, "mcp", { source: "permissionSet", entry: ours[0]!, reason: `'${tool}' counts as ${mapping.as}, and this permission set uses JaiRA's own ${which} — call that instead; the server's is withheld while it does` }, [tool, server])],
+      tool,
+    );
+  }
+
+  // The tool's own line, or its server's, where the set writes one — never `other`.
+  const parts: CommandPart[] = [];
+  const own = mcpModeOf(permissionSet, tool);
+  if (own !== undefined && own.line !== OTHER_SUBJECT) {
+    const reference = modeFunction(own.mode);
+    let composed: Composed = {
+      verdict: verdictOfMode(own.mode),
+      source: "permissionSet",
+      entry: own.line,
+      ...(reference !== undefined ? { function: reference } : {}),
+      reason: reference !== undefined ? `the permission set's '${own.line}' is decided by the function '${reference}'` : `the permission set's '${own.line}' is ${modeWord(own.mode)}`,
+    };
+    if (composed.verdict === "asks") {
+      const remembered = judges.grants?.answerFor([tool, server]);
+      if (remembered !== undefined) composed = { verdict: remembered.decision === "allow" ? "allowed" : "denied", source: "remembered", entry: remembered.width, reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run` };
+    }
+    parts.push(
+      part(composed.verdict, tool, "mcp", { source: composed.source, ...(composed.entry !== undefined ? { entry: composed.entry } : {}), ...(composed.function !== undefined ? { function: composed.function } : {}), reason: composed.reason }, [tool, server], {
+        matched: own.line === server ? [{ start: 0, end: server.length }] : [head],
+      }),
+    );
+  }
+
+  // As the standard tool: a shell line part by part, the parts moved past the tool's name.
+  if (call.tool === SHELL_SUBJECT && judges.shell !== undefined && typeof call.input["command"] === "string") {
+    const prefix = `${tool}: `;
+    const approval = judges.shell(call.input);
+    const shift = (span: TextSpan): TextSpan => ({ start: span.start + prefix.length, end: span.end + prefix.length });
+    for (const shellPart of approval.parts) parts.push({ ...shellPart, span: shift(shellPart.span), matched: shellPart.matched.map(shift) });
+    if (approval.parts.length === 0) parts.push(part(approval.verdict, SHELL_SUBJECT, "unparsed", { source: "parser", reason: approval.unparsed ?? "the line holds no request" }, [SHELL_SUBJECT]));
+    return decided(parts, `${prefix}${call.input["command"] as string}`);
+  }
+
+  // As any other standard tool: its line, else `other`; its place under the scope tables; the built-in asks.
+  const mode = entry(call.tool)?.mode ?? permissionSet.other;
+  const reference = mode !== undefined ? modeFunction(mode) : undefined;
+  let composed: Composed =
+    mode === undefined
+      ? { verdict: "asks", source: "default", reason: `'${tool}' counts as ${call.tool}, and the permission set says nothing of it` }
+      : {
+          verdict: verdictOfMode(mode),
+          source: "permissionSet",
+          entry: entry(call.tool)?.mode !== undefined ? call.tool : OTHER_SUBJECT,
+          ...(reference !== undefined ? { function: reference } : {}),
+          reason: `'${tool}' counts as ${call.tool}: ${reference !== undefined ? `decided by the function '${reference}'` : modeWord(mode)}`,
+        };
+  if (judges.builtins === true && ALWAYS_ASKING_TOOLS.has(call.tool) && VERDICT_RANK[composed.verdict] < VERDICT_RANK.asks) {
+    composed = { verdict: "asks", source: "builtin", reason: `'${tool}' counts as ${call.tool}, which always asks` };
+  }
+  const where = judges.scope?.(call.tool, call.input);
+  if (where === "deny" && composed.verdict !== "denied") composed = { verdict: "denied", source: "scope", reason: `'${tool}' counts as ${call.tool}, and the scope tables refuse where it would act` };
+  else if (where === "ask" && VERDICT_RANK[composed.verdict] < VERDICT_RANK.asks) composed = { verdict: "asks", source: "scope", reason: `'${tool}' counts as ${call.tool}, and the scope tables ask where it would act` };
+  if (composed.verdict === "asks") {
+    const remembered = judges.grants?.answerFor([call.tool]);
+    if (remembered !== undefined && composed.source !== "builtin") composed = { verdict: remembered.decision === "allow" ? "allowed" : "denied", source: "remembered", entry: remembered.width, reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run` };
+  }
+  const spec = TOOL_SPEC_BY_NAME.get(call.tool);
+  const paths = (spec?.pathArgs ?? []).flatMap((arg) => (typeof call.input[arg] === "string" ? [call.input[arg] as string] : []));
+  const url = (spec?.urlArgs ?? []).map((arg) => call.input[arg]).find((value): value is string => typeof value === "string");
+  parts.push(
+    part(composed.verdict, call.tool, "tool", { source: composed.source, ...(composed.entry !== undefined ? { entry: composed.entry } : {}), ...(composed.function !== undefined ? { function: composed.function } : {}), reason: composed.reason }, [call.tool], {
+      ...(paths.length > 0 ? { paths } : {}),
+      ...(url !== undefined ? { url } : {}),
+    }),
+  );
+  return decided(parts, tool);
+}
+
 /** A human-readable line for an approval prompt. */
 export function describeDecision(decision: CommandDecision): string {
   const what = decision.command !== undefined ? describeCommand(decision.command) : "an unparsable command";
@@ -1166,10 +1362,17 @@ export function allowsCall(
   name: string,
   args: unknown,
   dialect: CommandDialect,
-  where: { root?: string | undefined; packages?: PackageReader | undefined } = {},
+  where: { root?: string | undefined; packages?: PackageReader | undefined; mcp?: JairaMcpConfig | undefined } = {},
 ): boolean | undefined {
   const mcp = parseMcpSubject(name);
-  if (mcp !== undefined && !RESERVED_MCP_SERVERS.includes(mcp.server)) return mcpModeOf(permissionSet, name)?.mode === "allow";
+  if (mcp !== undefined && !RESERVED_MCP_SERVERS.includes(mcp.server)) {
+    const mapping = mcpMappingOf(where.mcp, name);
+    if (mapping === undefined) return mcpModeOf(permissionSet, name)?.mode === "allow";
+    return decideMappedMcpCall(name, args, mapping, permissionSet, INLINE_PERMISSION_SET, {
+      shell: (call) => decideCommand(policy, typeof call["command"] === "string" ? call["command"] : "", dialect, { permissionSet: { entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) }, root: where.root, packages: where.packages }).parts,
+      builtins: policy.builtins !== false,
+    }).action === "allow";
+  }
   const bare = mcp?.tool ?? name;
   const standard = TOOL_SPEC_BY_NAME.has(bare) ? bare : declaredNative(bare);
   if (standard === undefined) return undefined;
@@ -1180,7 +1383,8 @@ export function allowsCall(
   if (line === undefined) return false;
   const judging: ShellPermissionSet = { entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) };
   const cwd = args !== null && typeof args === "object" && typeof (args as Record<string, unknown>)["cwd"] === "string" ? ((args as Record<string, unknown>)["cwd"] as string) : undefined;
-  return decideCommand(policy, line, dialect, { permissionSet: judging, root: where.root, cwd, packages: where.packages }).action === "allow";
+  // An agent's own shell runs its line in its own language: Claude's `Bash` is POSIX, its `PowerShell` PowerShell.
+  return decideCommand(policy, line, nativeShellDialect(bare) ?? dialect, { permissionSet: judging, root: where.root, cwd, packages: where.packages }).action === "allow";
 }
 
 /** The line a shell call runs: its command string, or an argv (codex's `shell`) joined as a shell would read it. */

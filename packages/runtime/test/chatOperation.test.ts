@@ -55,9 +55,9 @@ describe("where the settings come from", () => {
   });
 
   it("takes tools and permissions off the merged execution environment", () => {
-    const plan = chatPlanFor([speaking({ environment: { tools: ["bash"], permissions: { tools: { bash: "ask" }, other: "deny" } } })]);
-    expect(plan.settings.tools).toEqual(["bash"]);
-    expect(plan.settings.permissions).toEqual({ tools: { bash: "ask" }, other: "deny" });
+    const plan = chatPlanFor([speaking({ environment: { tools: ["shell"], permissions: { tools: { shell: "ask" }, other: "deny" } } })]);
+    expect(plan.settings.tools).toEqual(["shell"]);
+    expect(plan.settings.permissions).toEqual({ tools: { shell: "ask" }, other: "deny" });
   });
 
   it("passes through every knob hw does not own, so a later one still reaches the model", () => {
@@ -84,20 +84,20 @@ describe("a composite has no conversation of its own", () => {
 });
 
 describe("what the composer changed, and what it inherited", () => {
-  const host = speaking({ config: { model: "inherited-model" }, environment: { tools: ["bash"] } });
+  const host = speaking({ config: { model: "inherited-model" }, environment: { tools: ["shell"] } });
 
   it("lets an override win per field, and says which is which", () => {
     const plan = chatPlanFor([host], { model: "picked-model" });
     expect(plan.settings.model).toBe("picked-model");
     expect(plan.origin.model).toBe("override");
     // Untouched fields stay inherited rather than being cleared by the presence of a neighbour.
-    expect(plan.settings.tools).toEqual(["bash"]);
+    expect(plan.settings.tools).toEqual(["shell"]);
     expect(plan.origin.tools).toBe("inherited");
   });
 
   it("treats an empty tool list as a real answer, not as absence", () => {
     // §5.2: `tools` merges by REPLACEMENT and `[]` is how an inherited tool is dropped. Reading it
-    // as "nothing was said" would silently hand `bash` back to a call the person just disarmed.
+    // as "nothing was said" would silently hand `shell` back to a call the person just disarmed.
     const plan = chatPlanFor([host], { tools: [] });
     expect(plan.settings.tools).toEqual([]);
     expect(plan.origin.tools).toBe("override");
@@ -121,7 +121,7 @@ describe("a setting the host declared as an expression", () => {
 });
 
 describe("the operation one message runs as", () => {
-  const plan = chatPlanFor([speaking({ system: "sys", config: { model: "m", temperature: 0.3 }, environment: { tools: ["bash"] } })]);
+  const plan = chatPlanFor([speaking({ system: "sys", config: { model: "m", temperature: 0.3 }, environment: { tools: ["shell"] } })]);
 
   it("binds the session to an exact position and asks for no fork", () => {
     // The whole of continue-or-fork: §3 appends when the position is still the head and forks when
@@ -155,18 +155,18 @@ describe("tools on a continued turn", () => {
     // They reach the operation as names. Resolving a name to something callable — and wrapping it in
     // the permission guard — is gateTools, which reuses the same withPermission the engine does,
     // so there is still one implementation of "resolve a mode, consult smart, escalate to the human".
-    const inherited = chatPlanFor([speaking({ environment: { tools: ["bash"] } })]);
+    const inherited = chatPlanFor([speaking({ environment: { tools: ["shell"] } })]);
     // Table order rather than grant order — `planAgentTools` walks `TOOL_SPECS`.
     expect(chatOperationOf(inherited, { message: "run the tests", session: { id: "s@1" } }).environment.tools).toEqual([
       "show_artifact",
-      "bash",
+      "shell",
     ]);
   });
 
   it("take the person's whole list over the state's, rather than adding to it", () => {
-    const asked = chatPlanFor([speaking({ environment: { tools: ["bash"] } })], { tools: [] });
+    const asked = chatPlanFor([speaking({ environment: { tools: ["shell"] } })], { tools: [] });
     // An empty list is how an inherited tool is DROPPED — reading it as "nothing was said" would hand bash
-    // back to a call the person just disarmed. `bash` is gone; what remains is the always-granted set,
+    // back to a call the person just disarmed. `shell` is gone; what remains is the always-granted set,
     // which is not a grant the person made and so is not one they can take back here.
     expect(chatOperationOf(asked, { message: "just answer", session: { id: "s@1" } }).environment.tools).toEqual([
       ...ALWAYS_GRANTED_TOOLS,
@@ -184,8 +184,8 @@ describe("tools on a continued turn", () => {
   });
 
   it("still report what the state had, so the composer can start from it", () => {
-    const plan = chatPlanFor([speaking({ environment: { tools: ["bash"] } })]);
-    expect(plan.settings.tools).toEqual(["bash"]);
+    const plan = chatPlanFor([speaking({ environment: { tools: ["shell"] } })]);
+    expect(plan.settings.tools).toEqual(["shell"]);
     expect(plan.origin.tools).toBe("inherited");
   });
 });

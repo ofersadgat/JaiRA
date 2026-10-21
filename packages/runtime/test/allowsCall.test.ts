@@ -66,6 +66,37 @@ describe("what the shipped chat/read-only lets through", () => {
     }
   });
 
+  it("reads Claude's PowerShell as PowerShell, wherever the project runs: its reading cmdlets through, its writing ones not", () => {
+    const powershell = (command: string): boolean | undefined => allows("PowerShell", { command });
+    for (const line of [
+      "Get-ChildItem -Recurse src -Filter *.ts | Select-String TODO",
+      "gci src | % FullName",
+      "Get-Content package.json | ConvertFrom-Json | Select-Object -ExpandProperty scripts",
+      "cd packages; git status; git log --oneline -n 5",
+      "if (Test-Path a.ts) { Get-Content a.ts -Raw }",
+      "$files = Get-ChildItem *.md; $files.Count",
+      "npx vitest run a.test.ts 2>&1 | Select-Object -Last 20",
+      "[IO.Path]::Combine('a', 'b'); 'x'.ToUpper()",
+    ]) {
+      expect(powershell(line), line).toBe(true);
+    }
+    for (const line of [
+      "Remove-Item a.ts",
+      "rm -r build",
+      "'x' | Out-File a.txt",
+      "Get-Content a.ts > b.ts",
+      "Set-Content -Path:a.ts -Value x",
+      "Get-ChildItem *.log | % Delete",
+      "[IO.File]::WriteAllText('a.ts', 'x')",
+      "$env:PATH = 'C:\\x'; git status",
+      "Get-ChildItem | ForEach-Object { git commit -m $_ }",
+      "iex (Get-Content run.ps1 -Raw)",
+      "Invoke-Command -ComputerName srv { Get-Content a.ts }",
+    ]) {
+      expect(powershell(line), line).toBe(false);
+    }
+  });
+
   it("refuses the ways a reading command can be made to run or write something", () => {
     for (const line of ["git diff --output=a.patch", "git diff --ext-diff", "git -c diff.external=./x diff", "git --config-env=diff.external=X diff", "git --exec-path=/tmp status", "git grep -Ovim x", "GIT_EXTERNAL_DIFF=./x git diff", "export PATH=/tmp/x; git status", "sort -o out.txt in.txt"]) {
       expect(bash(line), line).toBe(false);

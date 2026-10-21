@@ -310,15 +310,15 @@ export interface PermissionsDecl {
    * these are the entries neither has a place for.
    *
    * What a shell line's PARTS are judged against (decision 0007 §4). The shell's own entry is here
-   * too — `bash`, the mode for any command nothing else names — because `tools.bash` is lowered as
+   * too — `shell`, the mode for any command nothing else names — because `tools.shell` is lowered as
    * `ask`, so that no line runs before the host has read it. A subject whose entry is a function is
    * `ask` here, as it is at the gate, and named in {@link functions}.
    */
   subjects?: Record<string, PermissionMode>;
   /**
    * WRITTEN BY LOWERING, never authored, and on EVERY lowered map (empty when nothing is a function):
-   * the subjects whose entry is a function, by subject — a tool, a command, `script`, `bash` or
-   * `other` — each to the function's reference (`{ "bash": "smart" }`).
+   * the subjects whose entry is a function, by subject — a tool, a command, `script`, `shell` or
+   * `other` — each to the function's reference (`{ "shell": "smart" }`).
    *
    * Always written because `permissions` merges per key down the `environment` chain: a child whose
    * map named no function would otherwise inherit its parent's, and a line it meant to ASK about would
@@ -367,7 +367,7 @@ export const READ_ONLY_PRESET_TOOLS: readonly string[] = ["read_file", "glob", "
  *
  * `tools` is the WHOLE list rather than an addition, because the operation format merges it by
  * replacement and `[]` is how an inherited tool is dropped. A composer showing an empty box beside an
- * operation that inherits `bash` would be offering to add a tool the call already has — and taking it
+ * operation that inherits `shell` would be offering to add a tool the call already has — and taking it
  * away if the person sent without touching it.
  */
 export interface ChatSettings {

@@ -2,7 +2,7 @@
  * The permission set — what an agent may do, as one map from a SUBJECT to a MODE (decision 0007 §1).
  *
  * ```jsonc
- * { "read_file": "allow", "web_fetch": "ask", "bash": "deny", "git status": "allow", "other": "deny" }
+ * { "read_file": "allow", "web_fetch": "ask", "shell": "deny", "git status": "allow", "other": "deny" }
  * ```
  *
  * Present means offered, with that mode. Absent means not offered. `other` is everything no entry
@@ -32,23 +32,23 @@
  * line is decided: the line is taken apart and each part answers to its own subject (decision 0007
  * §4, `@jaira/runtime`'s `decideCommand`).
  *
- * The shell tool's OWN entry (`bash`) is the answer for "any other command" on such a line — not a
+ * The shell tool's OWN entry (`shell`) is the answer for "any other command" on such a line — not a
  * mode for the tool. So it lowers as `ask` in `permissions.tools` — no line runs before the host has
  * read it: the narrowing takes the line apart, and the approver JaiRA hands the engine lets a line
  * every part of which is allowed through without asking anybody — and its authored mode rides in
- * `subjects` beside the commands it stands behind. `"bash": "deny", "git status": "allow"` therefore
+ * `subjects` beside the commands it stands behind. `"shell": "deny", "git status": "allow"` therefore
  * offers the shell and runs `git status`; every reader that wants the authored mode back goes through
  * {@link permissionSetOfEnvironment}.
  *
- * A shell the map denies OUTRIGHT — `"bash": "deny"` and no command subject or `script` that allows,
+ * A shell the map denies OUTRIGHT — `"shell": "deny"` and no command subject or `script` that allows,
  * asks or names a function — is WITHHELD ({@link shellWithheld}): held as written, left off the
  * lowered list, `deny` at the gate, so an agent loses its own shell and codex's writing sandbox stays
  * off.
  *
  * ## A mode that is a function
  *
- * Any entry — a tool, a command, `script`, `bash`, `other` — may name a FUNCTION instead of a word:
- * `"bash": { "function": "smart" }` (see `FunctionMode`). It lowers as `ask` wherever the gate reads a
+ * Any entry — a tool, a command, `script`, `shell`, `other` — may name a FUNCTION instead of a word:
+ * `"shell": { "function": "smart" }` (see `FunctionMode`). It lowers as `ask` wherever the gate reads a
  * mode, and the reference rides in `permissions.functions`, by subject, which every lowered map
  * carries (empty when nothing is a function). The function is called per call — per PART of a shell
  * line — by the approver the host hands the engine, before any person is asked.
@@ -99,7 +99,7 @@ export const OTHER_SUBJECT = "other";
 /** The subject that answers for RUNNING A FILE — `./x.sh`, `npm run build` (decision 0007 §4). */
 export const SCRIPT_SUBJECT = "script";
 /** The shell tool: its entry answers for any command no other entry names (decision 0007 §4). */
-export const SHELL_TOOL = "bash";
+export const SHELL_TOOL = "shell";
 /** The key that starts a permission set from another — the same `$ref` every other block uses. */
 export const PERMISSION_SET_REF_KEY = "$ref";
 
@@ -410,7 +410,7 @@ export function offeredTools(permissionSet: PermissionSet): string[] {
 /**
  * Is this map's shell HELD and yet handed to nobody — a shell the permission set denies outright?
  *
- * Present means offered, and a map's `bash` entry is the answer for "any other command" on a line
+ * Present means offered, and a map's `shell` entry is the answer for "any other command" on a line
  * taken apart (decision 0007 §4). When that answer is `deny` and no command subject and no `script`
  * entry allows, asks or names a function, every line the shell could run is refused — or duplicates a
  * standard tool the permission set serves directly (`cat` is `read_file`). A runner line that lets a runner through
@@ -500,7 +500,7 @@ export function toolModes(permissionSet: PermissionSet): Record<string, Permissi
  * no line was ever judged at all. `ask` reaches the host with the line in hand, every time: the
  * narrowing takes it apart, and the approver the host hands the engine runs the functions it names
  * and lets through, without asking anybody, a line every part of which the permission set allows. The
- * authored mode is not lost: it is the `bash` subject a part falls to ({@link shellSubjects}).
+ * authored mode is not lost: it is the `shell` subject a part falls to ({@link shellSubjects}).
  */
 export function gateToolModes(permissionSet: PermissionSet): Record<string, PermissionMode> {
   const modes: Record<string, PermissionMode> = {};
@@ -548,7 +548,7 @@ export function toolImplementations(permissionSet: PermissionSet): Record<string
 
 /**
  * What a shell line's parts answer to beyond the standard tools: the command subjects, `script`, and
- * the shell's own entry (`bash`) as the mode for any other command — see the module header.
+ * the shell's own entry (`shell`) as the mode for any other command — see the module header.
  */
 export function shellSubjects(permissionSet: PermissionSet): Record<string, PermissionSetMode> {
   const out: Record<string, PermissionSetMode> = {};
@@ -767,7 +767,7 @@ export function lowerStatePermissionSets(
     if (Array.isArray(node)) {
       found.push({ path: "", message: MAP_FORM_MESSAGE, severity: "error" });
     } else {
-      // A reference that names a LIST fragment (`["bash"]` in a file) is the list form by reference.
+      // A reference that names a LIST fragment (`["shell"]` in a file) is the list form by reference.
       const reference = typeof node === "string" ? node : (node as Record<string, unknown>)[PERMISSION_SET_REF_KEY];
       let listed = false;
       if (typeof reference === "string") {

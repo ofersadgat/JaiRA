@@ -37,7 +37,7 @@ export function refusalOf(input: unknown): string | undefined {
 /** A parked approval, as the UI sees it. */
 export interface ApprovalRequest {
   requestId: string;
-  /** Logical tool name (`bash`, `write_file`). */
+  /** Logical tool name (`shell`, `write_file`). */
   tool: string;
   /** The command line, when the tool takes one — what the user is really judging. */
   command?: string;

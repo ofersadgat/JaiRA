@@ -61,7 +61,7 @@ import {
   type PermissionSetRailRow,
 } from "../src/renderer/permissionSetsHost";
 
-const SHIPPED: PermissionSetDecl = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" };
+const SHIPPED: PermissionSetDecl = { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" };
 
 const records: PermissionSetRecord[] = [
   {
@@ -69,11 +69,11 @@ const records: PermissionSetRecord[] = [
     bucket: "chat",
     name: "read-only",
     files: [
-      { layer: "project", file: ".jaira/permission-sets/chat/read-only.json", format: "json", follows: "$SYSTEM/permission-sets/chat/read-only", decl: { ...SHIPPED, bash: "ask" } },
+      { layer: "project", file: ".jaira/permission-sets/chat/read-only.json", format: "json", follows: "$SYSTEM/permission-sets/chat/read-only", decl: { ...SHIPPED, shell: "ask" } },
       { layer: "system", file: "built in/permission-sets/chat/read-only.json", format: "json", decl: SHIPPED },
     ],
   },
-  { id: "chat/full", bucket: "chat", name: "full", files: [{ layer: "system", file: "built in/permission-sets/chat/full.json", format: "json", decl: { bash: "allow", other: "allow" } }] },
+  { id: "chat/full", bucket: "chat", name: "full", files: [{ layer: "system", file: "built in/permission-sets/chat/full.json", format: "json", decl: { shell: "allow", other: "allow" } }] },
   {
     id: "feature/writes",
     bucket: "feature",
@@ -88,7 +88,7 @@ const tools: ToolChoice[] = [
   { name: "grep" },
   { name: "edit" },
   { name: "write_file" },
-  { name: "bash", natives: { "claude-cli": "Bash" } },
+  { name: "shell", natives: { "claude-cli": "Bash" } },
   { name: "web_fetch" },
 ];
 
@@ -192,7 +192,7 @@ describe("which files a layer of the page reads, and where its changes go", () =
 describe("what a save will do", () => {
   it("names the lines that make an override stop following, and nothing while none do", () => {
     const [readOnly] = permissionSetsAt(records, "project");
-    expect(detachingLines(readOnly!, parsePermissionSet({ ...SHIPPED, bash: "allow" }).permissionSet)).toEqual([]);
+    expect(detachingLines(readOnly!, parsePermissionSet({ ...SHIPPED, shell: "allow" }).permissionSet)).toEqual([]);
     const { glob: _gone, ...rest } = SHIPPED;
     expect(detachingLines(readOnly!, parsePermissionSet(rest).permissionSet)).toEqual(["glob"]);
     expect(detachingLines(readOnly!, undefined)).toEqual([]);
@@ -209,7 +209,7 @@ describe("what a save will do", () => {
 });
 
 describe("a section's add line and its minus", () => {
-  const permissionSet = parsePermissionSet({ read_file: "allow", bash: "ask", "git status": "allow", "git commit": "ask", script: "ask", other: "deny" }).permissionSet;
+  const permissionSet = parsePermissionSet({ read_file: "allow", shell: "ask", "git status": "allow", "git commit": "ask", script: "ask", other: "deny" }).permissionSet;
 
   it("offers only what the section does not hold, and only what this project registers", () => {
     expect(addableTools(permissionSet, "files", tools.map((t) => t.name))).toEqual(["glob", "grep", "edit", "write_file"]);
@@ -228,7 +228,7 @@ describe("a section's add line and its minus", () => {
   it("takes a whole program out with every subcommand under it, and nothing else", () => {
     const without = withoutProgram(permissionSet, "git");
     expect(commandGroupsOf(without)).toEqual([]);
-    expect(Object.keys(without.entries)).toEqual(["read_file", "bash", SCRIPT_SUBJECT]);
+    expect(Object.keys(without.entries)).toEqual(["read_file", "shell", SCRIPT_SUBJECT]);
   });
 
   it("removing a tool takes its line out — absent is how a map says not offered", () => {
@@ -313,11 +313,11 @@ describe("the state editor's one Tools field", () => {
   it("writes the permission set the picker chose, and the lines the rows changed", () => {
     const block = { kind: "prompt", tools: "$/permission-sets/chat/read-only" };
     const form = operationFieldsOf(block);
-    const next = applyOperationFields(block, { ...form, toolsField: { ...form.toolsField!, reference: "$/permission-sets/chat/full", lines: { bash: "deny" } } });
-    expect(next["tools"]).toEqual({ $ref: "$/permission-sets/chat/full", bash: "deny" });
+    const next = applyOperationFields(block, { ...form, toolsField: { ...form.toolsField!, reference: "$/permission-sets/chat/full", lines: { shell: "deny" } } });
+    expect(next["tools"]).toEqual({ $ref: "$/permission-sets/chat/full", shell: "deny" });
     // "none" is a real answer, and it leaves the lines behind as the whole statement.
-    const none = applyOperationFields(block, { ...form, toolsField: { reference: "", lines: { bash: "deny" }, unread: {} } });
-    expect(none["tools"]).toEqual({ bash: "deny" });
+    const none = applyOperationFields(block, { ...form, toolsField: { reference: "", lines: { shell: "deny" }, unread: {} } });
+    expect(none["tools"]).toEqual({ shell: "deny" });
   });
 
   it("lines are not a whole permission set: `other` is written only when a line says it", () => {

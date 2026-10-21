@@ -252,7 +252,7 @@ describe("what a chat turn hands the executor", () => {
     } as typeof ports.executor;
 
     const approve = () => ({ decision: "allow" as const, scope: "once" as const });
-    const policy = { baseline: { tools: { bash: "deny" as const } } };
+    const policy = { baseline: { tools: { shell: "deny" as const } } };
     const plan = chatPlanFor([host]);
     const { operation } = chatOperationOf(plan, { message: "hi", session: { id: "s@0" } });
     await runChatTurn(

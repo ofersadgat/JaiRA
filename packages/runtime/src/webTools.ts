@@ -1,7 +1,7 @@
 /**
  * `web_fetch` and `web_search` — the network, as two tools rather than as `curl`.
  *
- * The same argument as `glob` and `grep`, with more at stake. A state that grants `bash` has granted
+ * The same argument as `glob` and `grep`, with more at stake. A state that grants `shell` has granted
  * the network already: `curl`, `wget`, `nc`, and a policy left to reconstruct the intent from a
  * command line. Naming the capability makes it governable — a workflow can hold `web_fetch` and no
  * shell, which is a thing a reviewer can read off the state file, and the URL reaches the approver as
@@ -12,7 +12,7 @@
  * No cookie jar, no redirect chain the caller can steer, no POST. This is "read a page", which is
  * what a model wants the web for nine times in ten, and every one of those knobs is a way to make an
  * agent's network access mean something other than reading. A workflow that genuinely needs to POST
- * has `bash` and a policy written for it.
+ * has `shell` and a policy written for it.
  */
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 

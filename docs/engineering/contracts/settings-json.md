@@ -19,7 +19,7 @@ siblings: [engineering/contracts/user-settings-json, engineering/contracts/secre
 
 **Use when.** Configuring model routes and presets, the default executor tree, agent runtimes, the defaults of the functions JaiRA ships, artifact placement, storage modes, the exec environment, the workflow search path, the Files tree's hidden list, the MCP servers agents are handed, or how the app looks (`appearance`). Reading the configuration a run will use: parse the merged document with `parseConfig(mergeConfigLayers([builtIn, base, project, you]))`, or read `Project.config`.
 
-**Do not use when.** Storing a credential value: name it in a `credential` field and store it through [secret-sources](secret-sources.md). Recording the window's own state — pane sizes, folds, read marks, the log policy, the open projects: [user-settings-json](user-settings-json.md). Deciding where the files live: [jaira-layout](jaira-layout.md). Saying what a command may run: that is a line under the `bash` tool of a permission set ([tool-policy](../units/tool-policy.md)).
+**Do not use when.** Storing a credential value: name it in a `credential` field and store it through [secret-sources](secret-sources.md). Recording the window's own state — pane sizes, folds, read marks, the log policy, the open projects: [user-settings-json](user-settings-json.md). Deciding where the files live: [jaira-layout](jaira-layout.md). Saying what a command may run: that is a line under the `shell` tool of a permission set ([tool-policy](../units/tool-policy.md)).
 
 ## The shape is one object per layer, merged before it is parsed
 
@@ -187,11 +187,11 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 | `functions.smart.prompt` | string | no | what the judge is told; empty or absent is `DEFAULT_SMART_PROMPT`. The call is appended as JSON |
 | `functions.review_artifacts.publish` | `"ask"`, `"allow"` or `"deny"` | no, default `"ask"` | whether a workflow may push and open a merge request from here: once per task, without asking, or never |
 | `functions.review_artifacts.settleAfter` | duration string (`"10m"`, `"90s"`, `"2h"`, `"0"`) | no, default `"10m"` | the quiet window after the last comment on the forge; a state's `remote.settle_after` overrides it |
-| `functions.bash.builtins` | boolean | no, default `true` | `false` turns off the built-in destructive-git and `rm -r .git` refusals and the push, install, publish, network and credentials-path questions, which otherwise stand above every permission set |
+| `functions.shell.builtins` | boolean | no, default `true` | `false` turns off the built-in destructive-git and `rm -r .git` refusals and the push, install, publish, network and credentials-path questions, which otherwise stand above every permission set |
 
 **A model field may name a preset.** In `functions.smart.model`, `executors.default.prompt.defaults.model` and a state's own `model`, a value exactly equal to the name of a preset in the merged `models.presets` means that preset's model: its model alone, not its other settings (`resolveModelField`). Naming a preset that has no model fails the call. The name rule above keeps the two apart: every model id holds a `-`, `/`, `.` or `:`, or is a word a model family claims, and no preset name can. A call outside a session, such as the judge's, chooses afresh each time.
 
-A command rule has no place here. What a command may run is a line under the `bash` tool of a permission set (`"git push --force": "deny"`), and a line no permission set judges answers to the built-ins alone ([tool-policy](../units/tool-policy.md)).
+A command rule has no place here. What a command may run is a line under the `shell` tool of a permission set (`"git push --force": "deny"`), and a line no permission set judges answers to the built-ins alone ([tool-policy](../units/tool-policy.md)).
 
 ### The integrations block names forges, never holds a token, and refuses what it does not know
 
@@ -221,6 +221,7 @@ A command rule has no place here. What a command may run is a line under the `ba
 | `….url` | http(s) URL | one of `command` and `url` | a server JaiRA calls: streamable HTTP, SSE for an older one |
 | `….headers` | object of a string or `{credential}` | no, `url` only | sent with every request, a secret by name as in `env` |
 | `….enabled` | boolean | no, default on | `false` hands the server to no agent and starts it for no probe |
+| `….tools.<tool>` | `{as, args?}` | no | what one of its tools COUNTS AS ([0018](../decisions/0018-system-tools.md), ruling 5): `as` is a standard tool's name, or `screen` (`screenshot` when the call's `action` only looks, `control_input` otherwise); `args` maps each place the standard tool reads (`path`, `url`, `command`, `cwd`) to the tool's argument that holds it, one not named read from the argument of the same name. A call to it is judged by its own line (or its server's) and by what it counts as, the stricter kept; where a set holds JaiRA's own of that tool, it is withheld. Anything else in a mapping is refused |
 ### The appearance block is the look, strict about every field that is present
 
 `parseAppearanceConfig` in `@jaira/shared` `appearanceConfig.ts`; the types and defaults are `settings.ts`'s (`Appearance`, `EditorLook`, `RendererChoice`). The parsed block always carries every default. An unknown key, a value of the wrong kind, a palette this release does not have, a size outside its control's range and an editor knob its surface cannot honour are refused, naming the field. The renderer paints the EFFECTIVE block of the address it stands on; the window frame and the OS window controls are painted from the shared root and the personal layer alone (`AppService.windowAppearance`), because a window holds several projects.

@@ -4,7 +4,7 @@
  *
  * A call with no answer is one of two facts: still running (the record is still being written and the
  * call is in its last stretch), or never answered (the record went on, or ended, without one). A chat
- * whose last turn ended on an unanswered `bash` call pulsed "Running git fetch…" for good — so every
+ * whose last turn ended on an unanswered `shell` call pulsed "Running git fetch…" for good — so every
  * place the transcript says something is live now asks the same question, and only the caller (a
  * chat's task status) or the record's own status can answer it.
  *

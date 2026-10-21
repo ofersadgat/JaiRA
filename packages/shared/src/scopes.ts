@@ -93,7 +93,7 @@ export function globToRegExp(pattern: string, flags = ""): RegExp {
     const c = pattern[i]!;
     // A TRAILING `/**` covers the base directory too: `/mnt/c/work/**` is how anybody writes "the
     // sandbox is /mnt/c/work", and a reading under which it excludes `/mnt/c/work` itself makes the
-    // project path fall outside its own sandbox — and a `bash` cwd of exactly that directory
+    // project path fall outside its own sandbox — and a `shell` cwd of exactly that directory
     // unmatched, hence denied. Only when trailing: `a/**/b` keeps its ordinary meaning below.
     if (c === "/" && pattern.slice(i) === "/**") {
       out += "(?:/.*)?";

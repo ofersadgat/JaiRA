@@ -67,15 +67,15 @@ const choice = (id: string, decl: PermissionSetDecl, layer: PermissionSetChoice[
   const cut = id.lastIndexOf("/");
   return { id, bucket: id.slice(0, cut), name: id.slice(cut + 1), layer, decl };
 };
-const ASK_FIRST: PermissionSetDecl = { read_file: "ask", write_file: "ask", bash: "ask", other: "ask" };
-const READ_ONLY: PermissionSetDecl = { read_file: "allow", write_file: "deny", bash: "deny", other: "deny" };
+const ASK_FIRST: PermissionSetDecl = { read_file: "ask", write_file: "ask", shell: "ask", other: "ask" };
+const READ_ONLY: PermissionSetDecl = { read_file: "allow", write_file: "deny", shell: "deny", other: "deny" };
 const PERMISSION_SETS: PermissionSetChoice[] = [
   choice("chat/ask-first", ASK_FIRST),
   choice("chat/read-only", READ_ONLY),
   choice("chat_control/ask-first", { start_task: "ask", move_task: "ask", other: "deny" }),
   choice("feature/implementation/writes-asking", { write_file: "ask", other: "deny" }, "project"),
 ];
-const TOOLS = ["read_file", "write_file", "bash", "start_task", "move_task"].map((name) => ({ name }));
+const TOOLS = ["read_file", "write_file", "shell", "start_task", "move_task"].map((name) => ({ name }));
 
 /** A plan whose permission set is the person's own choice (`permission set`), or what a state declared (its lowered list and block). */
 const permissionSetPlan = (settings: ChatSettings, bucket?: string): ChatPlanView =>
@@ -112,7 +112,7 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
   });
 
   it("matches a state's OWN declaration too — the lowered list and block it arrives as", () => {
-    const lowered = lowerPermissionSet(parsePermissionSet({ read_file: "ask", write_file: "ask", bash: "ask", other: "ask" }).permissionSet);
+    const lowered = lowerPermissionSet(parsePermissionSet({ read_file: "ask", write_file: "ask", shell: "ask", other: "ask" }).permissionSet);
     const view = permissionSetPlan({ tools: lowered.tools, ...(lowered.permissions !== undefined ? { permissions: lowered.permissions } : {}) });
     expect(chipsOf(view).permissions).toBe("ask first");
     // Nobody chose it here, so the card says where the state's declaration came from.
@@ -120,7 +120,7 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
   });
 
   it("reads CUSTOM the moment one line differs, matches no row, and says what + would keep", () => {
-    const view = permissionSetPlan({ permissionSet: { ...READ_ONLY, bash: "ask" } });
+    const view = permissionSetPlan({ permissionSet: { ...READ_ONLY, shell: "ask" } });
     const facts = factsOf(view);
     expect(chipsOf(view).permissions).toBe("custom");
     expect(facts.matched).toBeUndefined();
@@ -169,7 +169,7 @@ describe("the Tools card", () => {
 
   it("counts the tools the map holds, as it always did", () => {
     expect(chipsOf(permissionSetPlan({ permissionSet: WITH_COMMANDS })).tools).toBe("3 tools");
-    expect(chipsOf(permissionSetPlan({ permissionSet: { bash: "ask", other: "ask" } })).tools).toBe("bash");
+    expect(chipsOf(permissionSetPlan({ permissionSet: { shell: "ask", other: "ask" } })).tools).toBe("shell");
     expect(chipsOf(permissionSetPlan({})).tools).toBe("no tools");
   });
 
@@ -204,10 +204,10 @@ describe("the Tools card", () => {
 });
 
 describe("what a click on the Tools card does to the map", () => {
-  const BASE = of({ read_file: "allow", bash: "ask", "git status": "allow", "git commit": "ask", other: "deny" });
+  const BASE = of({ read_file: "allow", shell: "ask", "git status": "allow", "git commit": "ask", other: "deny" });
 
   it("groups commands under their program, the bare program's entry being the group's OWN mode", () => {
-    const groups = commandGroupsOf(of({ bash: "ask", "git status": "allow", "npm test": "ask", git: "deny", "git push --force": "deny", terraform: "ask", other: "ask" }));
+    const groups = commandGroupsOf(of({ shell: "ask", "git status": "allow", "npm test": "ask", git: "deny", "git push --force": "deny", terraform: "ask", other: "ask" }));
     expect(groups).toEqual([
       { program: "git", own: "deny", subs: [{ subject: "git status", mode: "allow" }, { subject: "git push --force", mode: "deny" }] },
       { program: "npm", subs: [{ subject: "npm test", mode: "ask" }] },
@@ -226,7 +226,7 @@ describe("what a click on the Tools card does to the map", () => {
 
   it("setting a group's mode writes the BARE program and leaves its subcommands saying what they said", () => {
     const next = withSubject(BASE, "git", "deny");
-    expect(declOfPermissionSet(next)).toEqual({ read_file: "allow", bash: "ask", "git status": "allow", "git commit": "ask", git: "deny", other: "deny" });
+    expect(declOfPermissionSet(next)).toEqual({ read_file: "allow", shell: "ask", "git status": "allow", "git commit": "ask", git: "deny", other: "deny" });
   });
 
   it("reads what was typed as the subject it names — the program implied inside a group, and forgiven when repeated", () => {
@@ -244,20 +244,20 @@ describe("what a click on the Tools card does to the map", () => {
   });
 
   it("unticking a tool REMOVES its line, and ticking it again puts back the mode the row was showing", () => {
-    const without = withToolHeld(BASE, {}, "bash", false);
-    expect(declOfPermissionSet(without)).not.toHaveProperty("bash");
+    const without = withToolHeld(BASE, {}, "shell", false);
+    expect(declOfPermissionSet(without)).not.toHaveProperty("shell");
     // The row still shows a mode — kept beside the map, never in it.
-    const parked = { bash: { mode: "deny" as const } };
-    expect(toolModeOf(without, parked, "bash")).toBe("deny");
-    expect(declOfPermissionSet(withToolHeld(without, parked, "bash", true))["bash"]).toBe("deny");
-    expect(declOfPermissionSet(withToolHeld(without, {}, "bash", true))["bash"]).toBe("ask");
+    const parked = { shell: { mode: "deny" as const } };
+    expect(toolModeOf(without, parked, "shell")).toBe("deny");
+    expect(declOfPermissionSet(withToolHeld(without, parked, "shell", true))["shell"]).toBe("deny");
+    expect(declOfPermissionSet(withToolHeld(without, {}, "shell", true))["shell"]).toBe("ask");
   });
 
   it("a section's mode is derived from its lines — Execution's include the commands and script — and setting it writes them all", () => {
     expect(sectionModeOf(BASE, {}, "execution")).toBeUndefined(); // ask, allow, ask — `custom`
     expect(sectionCountOf(BASE, "execution")).toBe(3);
     const { permissionSet, parked } = withSectionMode(BASE, {}, "execution", "deny");
-    expect(declOfPermissionSet(permissionSet)).toEqual({ read_file: "allow", bash: "deny", "git status": "deny", "git commit": "deny", other: "deny" });
+    expect(declOfPermissionSet(permissionSet)).toEqual({ read_file: "allow", shell: "deny", "git status": "deny", "git commit": "deny", other: "deny" });
     expect(sectionModeOf(permissionSet, parked, "execution")).toBe("deny");
     // A tool the map does not hold takes the mode beside the map, and is still not offered.
     const files = withSectionMode(BASE, {}, "files", "ask");

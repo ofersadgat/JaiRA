@@ -3286,7 +3286,10 @@ remains the fastest debugging surface permanently.
   itself was also found to have been matching nothing (TODO.md) — a reminder that a
   mitigation needs a test proving it *fires*, not only that it compiles.
 - **PowerShell command parsing is heuristic.** Unparsable ⇒ require_approval
-  is the safe default; WSL projects get the robust POSIX parser.
+  is the safe default; WSL projects get the robust POSIX parser. Resolved
+  2026-10-20 ([0007](docs/engineering/decisions/0007-permissionSets.md), amended):
+  PowerShell has a parser of its own, calibrated against PowerShell's, and an
+  agent's own `PowerShell` tool is the shell, its line read as PowerShell.
 - **Claude Code hook loopback (approval flow) is the most intricate adapter
   plumbing.** Sequenced last among the Claude adapters (phase 7); the SDK
   adapter covers the same provider with a clean callback in phase 4. Resolved (§1j):

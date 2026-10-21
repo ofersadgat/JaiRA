@@ -2163,6 +2163,10 @@ export interface IpcContract {
    * once before following `notice:posted`. Machine-wide: every open project's, and Shared's.
    */
   "notices:list": { request: void; response: EventsNotice[] };
+  /** The agent using the mouse and keyboard now (decision 0018, ruling 6), if one is — then follow `desktop:driving`. */
+  "desktop:driving": { request: void; response: DesktopDriving | null };
+  /** The band's Stop: end the input call, and keep that task off the mouse and keyboard until the person next writes to it. */
+  "desktop:stop": { request: void; response: void };
   /** Create a plain file or a directory under a layer root, addressed by path. */
   "file:create": { request: CreateFileRequest; response: { file: string } };
   /** Rename or move a file or directory within a layer root. Refuses when it would break referrers. */
@@ -2450,6 +2454,8 @@ export const IPC_CHANNELS = [
   "permissionSets:judgeReadOnly",
   "events:status",
   "notices:list",
+  "desktop:driving",
+  "desktop:stop",
   "file:create",
   "file:rename",
   "file:delete",
@@ -2866,6 +2872,15 @@ export type PushMessage =
   | { type: "health:changed"; items: HealthItem[] }
   /** An events task posted a notice (decision 0010 §4, `notify`). Also written to the log. */
   | { type: "notice:posted"; notice: EventsNotice }
+  /** An agent began or ended using the mouse and keyboard (decision 0018, ruling 6); `null` when none is. */
+  | { type: "desktop:driving"; driving: DesktopDriving | null }
+
+/** An agent using the mouse and keyboard: which task, and since when (epoch ms). What the app's band names. */
+export interface DesktopDriving {
+  project: string;
+  taskId: string;
+  since: number;
+}
 
 /**
  * A notice an events task's `notify` step posted: something an automation wanted a person to know,

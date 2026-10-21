@@ -5,6 +5,7 @@ import {
   RUNNER_GROUP_SUBJECT,
   SCRIPT_SUBJECT,
   SHELL_TOOL,
+  SYSTEM_AREAS,
   TOOL_CATEGORIES,
   TOOL_SPEC_BY_NAME,
   holdsTool,
@@ -38,12 +39,13 @@ import {
   withToolHeld,
   withToolImplementation,
 } from "@jaira/ui/composerPermissionSet";
-import { holdsMcpServer, mcpAddLabel, mcpGroupHint, mcpGroupModeOf, mcpGroupsOf, mcpLineCount, mcpToolHint, unnamedMcpTools, withMcpServerMode, withMcpTool, withoutMcpServer, type McpGroup } from "@jaira/ui/mcpBucketModel";
+import { holdsMcpServer, mappedMcpToolsOf, mcpAddLabel, mcpGroupHint, mcpGroupModeOf, mcpGroupsOf, mcpLineCount, mcpToolHint, unnamedMcpTools, withMcpServerMode, withMcpTool, withoutMcpServer, type McpGroup } from "@jaira/ui/mcpBucketModel";
 import { modeMeta } from "@jaira/ui/permissionSetWords";
 import { Txt } from "../../../primitives";
 import type { IconName } from "../../panel/Icon";
 import {
   AddMenu,
+  AreaRow,
   CategoryRow,
   ChipIcon,
   CommandGroupRow,
@@ -61,6 +63,7 @@ import {
   TOOL_ICONS,
   ToolRow,
   type AddOption,
+  type AreaSideLine,
 } from "./rows";
 import { Press } from "../../../primitives";
 import { useTokens } from "../../../tokens";
@@ -137,19 +140,41 @@ export function PermissionSetCard({
         if (locked && held.length === 0 && groups.length === 0 && !script && !runners) return null;
         return (
           <CategoryRow key={category.id} first={isFirst()} category={category} granted={sectionCountOf(permissionSet, category.id)} open={open.has(category.id)} onOpen={() => toggle(category.id)}>
-            {held.map((tool) => (
-              <ToolRow
-                key={tool.name}
-                tool={tool}
-                spec={TOOL_SPEC_BY_NAME.get(tool.name)}
-                mode={toolModeOf(permissionSet, NO_PARKED, tool.name)}
-                impl={toolImplementationOf(permissionSet, NO_PARKED, tool.name)}
-                readOnly={locked}
-                onRemove={locked ? undefined : () => write(withToolHeld(permissionSet, NO_PARKED, tool.name, false))}
-                onMode={(next) => write(withSubjectMode(permissionSet, tool.name, next))}
-                onImpl={(next) => write(withToolImplementation(permissionSet, tool.name, next))}
-              />
-            ))}
+            {category.id === "system"
+              ? SYSTEM_AREAS.filter((area) => held.some((tool) => tool.name === area.look || tool.name === area.change)).map((area) => {
+                  // An area is one row and two lines of the set (decision 0018, ruling 1).
+                  const side = (name: string): AreaSideLine => ({
+                    tool: name,
+                    held: holdsTool(permissionSet, name),
+                    mode: toolModeOf(permissionSet, NO_PARKED, name),
+                    onMode: (next) => write(withSubjectMode(permissionSet, name, next)),
+                    ...(offered.includes(name) ? { onAdd: () => write(withToolHeld(permissionSet, NO_PARKED, name, true)) } : {}),
+                    onRemove: () => write(withToolHeld(permissionSet, NO_PARKED, name, false)),
+                  });
+                  return (
+                    <AreaRow
+                      key={area.id}
+                      area={area}
+                      look={side(area.look)}
+                      change={side(area.change)}
+                      readOnly={locked}
+                      onRemove={locked ? undefined : () => write(withToolHeld(withToolHeld(permissionSet, NO_PARKED, area.look, false), NO_PARKED, area.change, false))}
+                    />
+                  );
+                })
+              : held.map((tool) => (
+                  <ToolRow
+                    key={tool.name}
+                    tool={tool}
+                    spec={TOOL_SPEC_BY_NAME.get(tool.name)}
+                    mode={toolModeOf(permissionSet, NO_PARKED, tool.name)}
+                    impl={toolImplementationOf(permissionSet, NO_PARKED, tool.name)}
+                    readOnly={locked}
+                    onRemove={locked ? undefined : () => write(withToolHeld(permissionSet, NO_PARKED, tool.name, false))}
+                    onMode={(next) => write(withSubjectMode(permissionSet, tool.name, next))}
+                    onImpl={(next) => write(withToolImplementation(permissionSet, tool.name, next))}
+                  />
+                ))}
             {groups.map((group) => (
               <CommandGroupRow
                 key={group.program}
@@ -297,6 +322,9 @@ function McpServerGroup({ group, permissionSet, locked, write, open, onOpen }: {
   const held = holdsMcpServer(permissionSet, group.server) || lines.length > 0;
   const listed = new Map((group.status?.tools ?? []).map((tool) => [tool.name, tool]));
   const unnamed = unnamedMcpTools(permissionSet, group);
+  // What the server's tools count as (decision 0018, ruling 5): drawn under it, following that line.
+  const mapped = mappedMcpToolsOf(permissionSet, group);
+  const mappedBy = new Map(mapped.map((one) => [one.tool, one]));
   return (
     <View>
       <View flexDirection="row" alignItems="center" gap={4} minWidth={0} paddingVertical={1}>
@@ -329,7 +357,8 @@ function McpServerGroup({ group, permissionSet, locked, write, open, onOpen }: {
         <FoldBody sub>
           {lines.map((line) => {
             const mode = line.mode ?? MODE_WHEN_UNSET;
-            const hint = mcpToolHint(listed.get(line.tool));
+            const counts = mappedBy.get(line.tool);
+            const hint = counts !== undefined ? `${counts.hint}; its own line too, the stricter kept` : mcpToolHint(listed.get(line.tool));
             return (
               <SubjectRow
                 key={line.subject}
@@ -344,6 +373,21 @@ function McpServerGroup({ group, permissionSet, locked, write, open, onOpen }: {
               />
             );
           })}
+          {mapped
+            .filter((one) => !one.named)
+            .map((one) => (
+              <SubjectRow
+                key={one.subject}
+                subject={one.tool}
+                icon={(TOOL_ICONS[one.mapping.as] ?? "system") as IconName}
+                mono
+                follows
+                hint={one.hint}
+                mode={one.mode}
+                readOnly={locked}
+                onMode={(next) => write(withSubjectMode(permissionSet, one.subject, next))}
+              />
+            ))}
           {locked ? null : (
             <AddMenu
               label={mcpAddLabel(group.server, unnamed)}

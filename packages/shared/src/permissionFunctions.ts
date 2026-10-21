@@ -2,7 +2,7 @@
  * A PERMISSION FUNCTION's contract — what it is handed and what it may answer (decision 0007,
  * amended 2026-09-22).
  *
- * A permission set line may name a function instead of a mode: `"bash": { "function": "smart" }`. For every
+ * A permission set line may name a function instead of a mode: `"shell": { "function": "smart" }`. For every
  * call the line answers — every PART of a shell line — the function is handed one
  * {@link PermissionFunctionRequest}, exactly what an approver would be shown, and answers `"allow"`
  * or `"deny"`. Nothing else is an answer: a function that returns anything else, or fails, has not
@@ -52,10 +52,10 @@ export interface PermissionRequestPart {
 
 /** What a permission function is handed — the call, as an approver would be shown it. */
 export interface PermissionFunctionRequest {
-  /** The tool called — `bash`, `write_file`, or an agent's own built-in by its own name. */
+  /** The tool called — `shell`, `write_file`, or an agent's own built-in by its own name. */
   tool: string;
   /**
-   * The permission set line the function answers for — `git push`, `bash` (any other command), `write_file`,
+   * The permission set line the function answers for — `git push`, `shell` (any other command), `write_file`,
    * `script`, `other`.
    */
   subject: string;

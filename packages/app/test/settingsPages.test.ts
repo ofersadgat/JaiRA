@@ -4,7 +4,7 @@
  *
  *  1. Tools → Functions is the permission sets keyed by the FUNCTION — one row per tool, one column per
  *     set, the mode in each cell, a dash where a set does not offer it — with a set's commands as rows
- *     under `bash`, and whether a run may reach a function a workflow calls.
+ *     under `shell`, and whether a run may reach a function a workflow calls.
  *  2. Connections → Forges says who a connection acts as — signed in through the forge or by a token —
  *     which forge its + box signs in with, and which row's sign-in is waiting on the browser.
  *  3. Connections → Local models says what each server on the usual ports answered, and a weights
@@ -42,9 +42,9 @@ const view = (sets: Record<string, Record<string, unknown>>): PermissionSetsView
 
 describe("Tools → Functions", () => {
   const data = view({
-    "chat/ask-first": { read_file: "ask", bash: "ask", other: "ask" },
-    "chat/auto": { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } },
-    "chat/read-only": { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" },
+    "chat/ask-first": { read_file: "ask", shell: "ask", other: "ask" },
+    "chat/auto": { read_file: { function: "smart" }, shell: { function: "smart" }, other: { function: "smart" } },
+    "chat/read-only": { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" },
   });
   // The columns the Shared page's table has: the sets the layer its switch is on can see.
   const columns = columnsOf(data, permissionSetLayersOf("base", data.layers).reads);
@@ -65,7 +65,7 @@ describe("Tools → Functions", () => {
     expect(commandSubjectsOf(columns)).toEqual(["git status"]);
     // A command's row is drawn indented under its tool; the tool's own is not.
     expect(isSubRow("git status")).toBe(true);
-    expect(isSubRow("bash")).toBe(false);
+    expect(isSubRow("shell")).toBe(false);
     expect(rowOf("git status").map((cell) => cell.text)).toEqual(["—", "—", "allow"]);
   });
 

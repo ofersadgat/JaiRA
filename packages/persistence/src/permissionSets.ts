@@ -242,7 +242,7 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
  * followed — what the composer's Permissions card is drawn from (decision 0007 §5).
  *
  * Read through the same reader a state's `tools` reference goes through, so a permission set file that
- * starts from another (`{ "$ref": "$/permission-sets/chat/read-only", "bash": "ask" }`) is offered as the
+ * starts from another (`{ "$ref": "$/permission-sets/chat/read-only", "shell": "ask" }`) is offered as the
  * map it resolves to — the map picking it would write. A file that cannot be read, or whose
  * references do not resolve, is LEFT OUT rather than offered as half of itself: a row that writes
  * something other than what its file says is worse than a missing row, and the linter is where a

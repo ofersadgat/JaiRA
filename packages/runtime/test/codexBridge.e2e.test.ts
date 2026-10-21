@@ -112,7 +112,7 @@ async function runHeld(via: "route" | "function", answer: "allow" | "deny") {
   const { spawn, seen } = codexDouble([
     { name: "read_file", arguments: { path: "README.md" } },
     { name: "write_file", arguments: { path: "notes.md", content: "hi" } },
-    { name: "bash", arguments: { command: "rm -rf ." } },
+    { name: "shell", arguments: { command: "rm -rf ." } },
   ]);
   const reg = registry(ran);
   if (via === "function") registerAgentRuntimes(reg, { spawn, startBridge: host.start, adapters: ["codex"] });
@@ -144,7 +144,7 @@ describe("codex runs a state held to a permission set: served over MCP, gated at
     expect(seen.results.map((call) => [call.name, call.isError])).toEqual([
       ["read_file", false],
       ["write_file", false],
-      ["bash", true],
+      ["shell", true],
     ]);
   });
 

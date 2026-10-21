@@ -245,7 +245,7 @@ describe("in the transcript", () => {
   });
 
   it("does not call a finished conversation that ended on an unanswered call working", () => {
-    // A chat on 2026-09-25: its record ended on a `bash` call whose result was never written, the task
+    // A chat on 2026-09-25: its record ended on a `shell` call whose result was never written, the task
     // was completed — and the summary pulsed "Running git fetch…" with a clock that never stopped.
     const endedOnACall = [...stretch.slice(0, 12), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin", args: { command: "git fetch origin" }, at: t0 + 55_000 } as WorkEntry];
     const phases = phasesOf(endedOnACall, { merge: "withheld", dropIdle: true });
@@ -305,7 +305,7 @@ describe("in the transcript", () => {
   it("does not measure a turn from the note of the turn before it", () => {
     // A chat on 2026-09-26: the turn before had been left open by a quit, so all that stood between the
     // two turns' "went to" notes was the message the person had typed — and with that gone from the
-    // screen, the notes, a withheld thought and a running `bash` were one stretch "872 min 51 s" long.
+    // screen, the notes, a withheld thought and a running `shell` were one stretch "872 min 51 s" long.
     const went = (s: number): WorkEntry => ({ kind: "event", at: t0 + s * 1000, tone: "plain", text: "went to chat/session" });
     const stretchOf = [went(0), went(52_363), think(52_370), { kind: "tool", name: "mcp__dai__bash", summary: "git fetch origin --quiet", args: { command: "git fetch origin --quiet" }, at: t0 + 52_371_000 } as WorkEntry];
     const whole = spanOf(stretchOf, [0, 1, 2, 3]);
@@ -329,7 +329,7 @@ describe("in the transcript", () => {
     const LINE = 'git fetch origin --quiet && echo "master=$(git rev-parse origin/master)"';
     const bashCall = { kind: "tool", name: "mcp__dai__bash", summary: LINE, args: { command: LINE }, at: t0 + 8_000, callId: "t1" } as WorkEntry;
     const approve = (answered?: object): WorkEntry =>
-      ({ kind: "tool", name: "approve_tool_call", summary: "", args: { tool: "bash", command: LINE }, at: t0 + 9_000, callId: "approve_abc_approval-1", calledBy: "t1", ...(answered !== undefined ? { ok: true, result: "allowed", detail: answered } : {}) }) as WorkEntry;
+      ({ kind: "tool", name: "approve_tool_call", summary: "", args: { tool: "shell", command: LINE }, at: t0 + 9_000, callId: "approve_abc_approval-1", calledBy: "t1", ...(answered !== undefined ? { ok: true, result: "allowed", detail: answered } : {}) }) as WorkEntry;
     // The stretch while the prompt is open: the request the host can answer is `approval-1`.
     const asking = [think(7), bashCall, approve()];
     const phaseOf = (entries: WorkEntry[]) => phasesOf(entries, { merge: "withheld", dropIdle: true })[0]!;

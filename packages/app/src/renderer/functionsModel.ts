@@ -55,7 +55,7 @@ export function columnsOf(data: PermissionSetsView | null, layer: WorkflowLayer)
   );
 }
 
-/** Every command a set names (`git status`), for rows under `bash`. */
+/** Every command a set names (`git status`), for rows under `shell`. */
 export function commandSubjectsOf(columns: SetColumn[]): string[] {
   const seen = new Set<string>();
   for (const column of columns) for (const subject of Object.keys(column.decl)) if (subjectKindOf(subject) === "command") seen.add(subject);
@@ -123,7 +123,7 @@ export function valueAt(doc: Record<string, unknown>, path: string): unknown {
 export function defaultsSummary(name: string, writer: Writer | null): string {
   if (defaultsSchemaOf(name) === undefined || writer === null) return "—";
   const block = valueAt(writer.effective, `${DEFAULTS_BLOCK}.${name}`);
-  if (name === "bash") {
+  if (name === "shell") {
     const builtins = (block as { builtins?: unknown } | undefined)?.builtins;
     return builtins === false ? "built-in refusals off" : "built-in refusals on";
   }

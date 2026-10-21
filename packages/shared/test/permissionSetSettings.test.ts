@@ -24,46 +24,46 @@ import {
   type PermissionSetRecord,
 } from "../src/index";
 
-const SHIPPED = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" } as const;
+const SHIPPED = { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" } as const;
 
 describe("setPermissionSetText — a whole map, written over somebody's file", () => {
-  const text = `{\n  // what this project reads\n  "read_file": "allow",\n  "glob":      "allow",\n\n  "bash": { "mode": "ask", "implementation": "native" },\n  "other": "deny"\n}\n`;
+  const text = `{\n  // what this project reads\n  "read_file": "allow",\n  "glob":      "allow",\n\n  "shell": { "mode": "ask", "implementation": "native" },\n  "other": "deny"\n}\n`;
 
   it("leaves a file alone when the map is what it already says", () => {
-    expect(setPermissionSetText(text, { read_file: "allow", glob: "allow", bash: { mode: "ask", implementation: "native" }, other: "deny" })).toBe(text);
+    expect(setPermissionSetText(text, { read_file: "allow", glob: "allow", shell: { mode: "ask", implementation: "native" }, other: "deny" })).toBe(text);
   });
 
   it("replaces a changed value where it stands, keeping the comment, the alignment and the blank line", () => {
-    const out = setPermissionSetText(text, { read_file: "allow", glob: "ask", bash: "deny", other: "deny" });
-    expect(out).toBe(`{\n  // what this project reads\n  "read_file": "allow",\n  "glob":      "ask",\n\n  "bash": "deny",\n  "other": "deny"\n}\n`);
+    const out = setPermissionSetText(text, { read_file: "allow", glob: "ask", shell: "deny", other: "deny" });
+    expect(out).toBe(`{\n  // what this project reads\n  "read_file": "allow",\n  "glob":      "ask",\n\n  "shell": "deny",\n  "other": "deny"\n}\n`);
   });
 
   it("takes a removed line out with its line, and adds a new one BEFORE other", () => {
-    const out = setPermissionSetText(text, { read_file: "allow", bash: { mode: "ask", implementation: "native" }, "git status": "allow", other: "deny" });
+    const out = setPermissionSetText(text, { read_file: "allow", shell: { mode: "ask", implementation: "native" }, "git status": "allow", other: "deny" });
     expect(out).toBe(
-      `{\n  // what this project reads\n  "read_file": "allow",\n\n  "bash": { "mode": "ask", "implementation": "native" },\n  "git status": "allow",\n  "other": "deny"\n}\n`,
+      `{\n  // what this project reads\n  "read_file": "allow",\n\n  "shell": { "mode": "ask", "implementation": "native" },\n  "git status": "allow",\n  "other": "deny"\n}\n`,
     );
     expect(parsePermissionSet(JSON.parse(out.replace(/\/\/.*$/m, ""))).issues).toEqual([]);
   });
 
   it("removes the LAST line with the comma before it, and appends where there is no other", () => {
-    expect(setPermissionSetText(`{\n  "read_file": "allow",\n  "bash": "ask"\n}\n`, { read_file: "allow" })).toBe(`{\n  "read_file": "allow"\n}\n`);
+    expect(setPermissionSetText(`{\n  "read_file": "allow",\n  "shell": "ask"\n}\n`, { read_file: "allow" })).toBe(`{\n  "read_file": "allow"\n}\n`);
     expect(setPermissionSetText(`{\n  "read_file": "allow"\n}\n`, { read_file: "allow", edit: { mode: "ask", implementation: "native" } })).toBe(
       `{\n  "read_file": "allow",\n  "edit": { "mode": "ask", "implementation": "native" }\n}\n`,
     );
   });
 
   it("keeps a one-line file on one line, and CRLF as CRLF", () => {
-    expect(setPermissionSetText(`{ "read_file": "allow", "bash": "ask" }`, { bash: "deny", glob: "allow" })).toBe(`{ "bash": "deny", "glob": "allow" }`);
+    expect(setPermissionSetText(`{ "read_file": "allow", "shell": "ask" }`, { shell: "deny", glob: "allow" })).toBe(`{ "shell": "deny", "glob": "allow" }`);
     expect(setPermissionSetText(`{\r\n  "read_file": "allow"\r\n}\r\n`, { read_file: "allow", glob: "ask" })).toBe(`{\r\n  "read_file": "allow",\r\n  "glob": "ask"\r\n}\r\n`);
   });
 
   it("keeps a $ref it is told to keep, drops one it is not, and writes one first where there was none", () => {
-    const over = `{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "bash": "ask"\n}\n`;
-    expect(setPermissionSetText(over, { bash: "allow" }, "$SYSTEM/permission-sets/chat/read-only")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "bash": "allow"\n}\n`);
+    const over = `{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "shell": "ask"\n}\n`;
+    expect(setPermissionSetText(over, { shell: "allow" }, "$SYSTEM/permission-sets/chat/read-only")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "shell": "allow"\n}\n`);
     expect(setPermissionSetText(over, {}, "$SYSTEM/permission-sets/chat/read-only")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only"\n}\n`);
-    expect(setPermissionSetText(over, { bash: "ask", other: "deny" })).toBe(`{\n  "bash": "ask",\n  "other": "deny"\n}\n`);
-    expect(setPermissionSetText(`{\n  "bash": "ask"\n}\n`, { bash: "ask" }, "$BASE/permission-sets/x/y")).toBe(`{\n  "$ref": "$BASE/permission-sets/x/y",\n  "bash": "ask"\n}\n`);
+    expect(setPermissionSetText(over, { shell: "ask", other: "deny" })).toBe(`{\n  "shell": "ask",\n  "other": "deny"\n}\n`);
+    expect(setPermissionSetText(`{\n  "shell": "ask"\n}\n`, { shell: "ask" }, "$BASE/permission-sets/x/y")).toBe(`{\n  "$ref": "$BASE/permission-sets/x/y",\n  "shell": "ask"\n}\n`);
   });
 
   it("refuses a file that is not a map, having changed nothing", () => {
@@ -72,8 +72,8 @@ describe("setPermissionSetText — a whole map, written over somebody's file", (
   });
 
   it("writes a new file one line per subject, $ref first, and refuses a bare-$ follow", () => {
-    expect(newPermissionSetText({ bash: "ask", edit: { mode: "ask", implementation: "native" } }, "$SYSTEM/permission-sets/chat/full")).toBe(
-      `{\n  "$ref": "$SYSTEM/permission-sets/chat/full",\n  "bash": "ask",\n  "edit": { "mode": "ask", "implementation": "native" }\n}\n`,
+    expect(newPermissionSetText({ shell: "ask", edit: { mode: "ask", implementation: "native" } }, "$SYSTEM/permission-sets/chat/full")).toBe(
+      `{\n  "$ref": "$SYSTEM/permission-sets/chat/full",\n  "shell": "ask",\n  "edit": { "mode": "ask", "implementation": "native" }\n}\n`,
     );
     expect(() => newPermissionSetText({}, "$/permission-sets/chat/full")).toThrow(/explicit root/);
   });
@@ -81,8 +81,8 @@ describe("setPermissionSetText — a whole map, written over somebody's file", (
 
 describe("overridesOf — what $ref plus siblings can say", () => {
   it("holds only the lines that differ, reading a bare mode and { mode } as one statement", () => {
-    expect(overridesOf(SHIPPED, { ...SHIPPED, bash: "ask", "git log": "allow", glob: { mode: "allow" } })).toEqual({
-      siblings: { bash: "ask", "git log": "allow" },
+    expect(overridesOf(SHIPPED, { ...SHIPPED, shell: "ask", "git log": "allow", glob: { mode: "allow" } })).toEqual({
+      siblings: { shell: "ask", "git log": "allow" },
       dropped: [],
     });
   });
@@ -103,11 +103,11 @@ const records: PermissionSetRecord[] = [
     bucket: "chat",
     name: "read-only",
     files: [
-      { layer: "project", file: ".jaira/permission-sets/chat/read-only.json", format: "json", follows: "$SYSTEM/permission-sets/chat/read-only", decl: { ...SHIPPED, bash: "ask" } },
+      { layer: "project", file: ".jaira/permission-sets/chat/read-only.json", format: "json", follows: "$SYSTEM/permission-sets/chat/read-only", decl: { ...SHIPPED, shell: "ask" } },
       { layer: "system", file: "built in/permission-sets/chat/read-only.json", format: "json", decl: { ...SHIPPED } },
     ],
   },
-  { id: "chat/full", bucket: "chat", name: "full", files: [{ layer: "system", file: "built in/permission-sets/chat/full.json", format: "json", decl: { bash: "allow", other: "allow" } }] },
+  { id: "chat/full", bucket: "chat", name: "full", files: [{ layer: "system", file: "built in/permission-sets/chat/full.json", format: "json", decl: { shell: "allow", other: "allow" } }] },
   { id: "feature/writes-asking", bucket: "feature", name: "writes-asking", files: [{ layer: "project", file: ".jaira/permission-sets/feature/writes-asking.json", format: "json", decl: { edit: "ask", other: "ask" } }] },
   { id: "team/review", bucket: "team", name: "review", files: [{ layer: "base", file: "~/.jaira/permission-sets/team/review.json", format: "yaml", problem: "bad" }] },
 ];
@@ -118,7 +118,7 @@ describe("a copy, and what it says against what it was copied from", () => {
 
   it("is a layer's file over a lower one, named by both — whether or not it still follows", () => {
     const followed = permissionSetsAt(
-      [copy([{ layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", follows: "$SYSTEM/permission-sets/chat/ask-first", decl: { ...SHIPPED, bash: "allow" } }, shipped])],
+      [copy([{ layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", follows: "$SYSTEM/permission-sets/chat/ask-first", decl: { ...SHIPPED, shell: "allow" } }, shipped])],
       "base",
     )[0]!;
     expect(copiedFrom(followed)).toBe("system");
@@ -131,8 +131,8 @@ describe("a copy, and what it says against what it was copied from", () => {
     const ofShared = permissionSetsAt(
       [
         copy([
-          { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", format: "json", follows: "$BASE/permission-sets/chat/ask-first", decl: { ...SHIPPED, bash: "allow" } },
-          { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", decl: { ...SHIPPED, bash: "ask" } },
+          { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", format: "json", follows: "$BASE/permission-sets/chat/ask-first", decl: { ...SHIPPED, shell: "allow" } },
+          { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", decl: { ...SHIPPED, shell: "ask" } },
           shipped,
         ]),
       ],
@@ -147,7 +147,7 @@ describe("a copy, and what it says against what it was copied from", () => {
   it("counts the lines that differ, on the resolved maps: a changed line, an added one, one taken out", () => {
     const { glob: _gone, ...rest } = SHIPPED;
     const at = permissionSetsAt(
-      [copy([{ layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", decl: { ...rest, bash: "allow", web_fetch: "ask" } }, shipped])],
+      [copy([{ layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", format: "json", decl: { ...rest, shell: "allow", web_fetch: "ask" } }, shipped])],
       "base",
     )[0]!;
     expect(copyDifferences(at)).toBe(3);
@@ -158,11 +158,11 @@ describe("a copy, and what it says against what it was copied from", () => {
   });
 
   it("replays a change over another layer's map, leaving that layer's other lines as it says them", () => {
-    const shown = { ...SHIPPED, bash: "ask" } as const;
+    const shown = { ...SHIPPED, shell: "ask" } as const;
     const theirs = { ...SHIPPED, web_fetch: "allow" } as const;
     // bash changed, glob taken out: both land; web_fetch (only theirs) and bash's old value do not leak.
-    const { glob: _gone, ...changed } = { ...shown, bash: "allow" as const };
-    expect(rebasePermissionSetChange(shown, changed, theirs)).toEqual({ read_file: "allow", bash: "allow", "git status": "allow", other: "deny", web_fetch: "allow" });
+    const { glob: _gone, ...changed } = { ...shown, shell: "allow" as const };
+    expect(rebasePermissionSetChange(shown, changed, theirs)).toEqual({ read_file: "allow", shell: "allow", "git status": "allow", other: "deny", web_fetch: "allow" });
     expect(rebasePermissionSetChange(shown, shown, theirs)).toEqual(theirs);
   });
 
@@ -231,9 +231,9 @@ describe("what one layer's pane reads", () => {
   });
 
   it("compares with what ships, line by line", () => {
-    expect(comparePermissionSets(SHIPPED, { read_file: "allow", bash: { mode: "ask", implementation: "native" }, "git status": "allow", "git log": "allow", other: "deny" })).toEqual([
+    expect(comparePermissionSets(SHIPPED, { read_file: "allow", shell: { mode: "ask", implementation: "native" }, "git status": "allow", "git log": "allow", other: "deny" })).toEqual([
       { subject: "glob", theirs: "allow" },
-      { subject: "bash", theirs: "deny", ours: "ask · native" },
+      { subject: "shell", theirs: "deny", ours: "ask · native" },
       { subject: "git log", ours: "allow" },
     ]);
   });

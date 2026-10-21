@@ -25,12 +25,16 @@ import {
   type PermissionSet,
   type PermissionSetMode,
 } from "@jaira/shared";
-import { variableOf, type CommandDialect, type CommandWord, type ParsedCommand, type ShellRequest } from "@jaira/shared";
+import { openerOf, openerTool, powershellParameter, systemToolOf, variableOf, type CommandDialect, type CommandWord, type ParsedCommand, type ShellRequest } from "@jaira/shared";
 import {
+  CMD_UTILITIES,
   EMBEDDERS,
   NO_REQUEST,
   NULL_DEVICES,
   POSIX_UTILITIES,
+  POWERSHELL_HARMLESS_MEMBERS,
+  POWERSHELL_INTERPRETERS,
+  POWERSHELL_REDEFINERS,
   POWERSHELL_UTILITIES,
   SCRIPT_EXTENSIONS,
   SCRIPT_INTERPRETERS,
@@ -45,7 +49,7 @@ import {
 } from "@jaira/shared";
 
 /** The subject that answers for "any other command" — the shell tool's own entry. */
-export const SHELL_SUBJECT = "bash";
+export const SHELL_SUBJECT = "shell";
 
 /** A request with its subject named, and not yet judged. */
 export interface ClassifiedPart {
@@ -102,28 +106,57 @@ export function subjectWordSpans(command: ParsedCommand, subject: string): TextS
 
 const isFlag = (token: string): boolean => token.startsWith("-") && token !== "-" && token !== "--";
 
-/** A command's non-flag words after the program, skipping the value each of `valueFlags` takes. */
-function operandsOf(command: ParsedCommand, valueFlags: readonly string[] = [], lower = false): CommandWord[] {
+/**
+ * Whether a flag a command was given is one of `flags`: the same word — or, for PowerShell's own
+ * parameters (`powershell`), in any case and cut short to a prefix that names one of them alone
+ * (`-Pat` is `-path`, `-Dest` is `-destination`).
+ */
+type FlagNamer = (given: string, flags: readonly string[]) => boolean;
+const exactFlag: FlagNamer = (given, flags) => flags.includes(given);
+const powershellFlag: FlagNamer = (given, flags) => powershellParameter(given, flags) !== undefined;
+
+/**
+ * A command's arguments after the program, each with its PowerShell array elements (`a, b` is one
+ * argument), skipping the value each of `valueFlags` takes and a value given with a colon (`-Path:x`).
+ */
+function argumentsOf(command: ParsedCommand, valueFlags: readonly string[] = [], named: FlagNamer = exactFlag): CommandWord[][] {
   const words = command.words ?? [];
-  const out: CommandWord[] = [];
+  const out: CommandWord[][] = [];
+  const skip = (from: number): number => {
+    let at = from + 1;
+    while (words[at]?.element === true) at++;
+    return at - 1;
+  };
   for (let i = (command.programIndex ?? 0) + 1; i < words.length; i++) {
     const word = words[i]!;
     if (word.value === "--") continue;
     if (isFlag(word.value)) {
-      if (valueFlags.includes(lower ? word.value.toLowerCase() : word.value)) i++;
+      if (named(word.value, valueFlags) && words[i + 1] !== undefined && words[i + 1]!.bound !== true) i = skip(i + 1);
       continue;
     }
-    out.push(word);
+    if (word.bound === true) {
+      i = skip(i);
+      continue;
+    }
+    if (word.element === true && out.length > 0) out[out.length - 1]!.push(word);
+    else out.push([word]);
   }
   return out;
 }
 
-/** The value written after a named flag (`-Path x`, `-OutFile y`), for each that is present. */
-function valuesOf(command: ParsedCommand, flags: readonly string[]): CommandWord[] {
+/** A command's non-flag words after the program, skipping the value each of `valueFlags` takes. */
+function operandsOf(command: ParsedCommand, valueFlags: readonly string[] = [], named: FlagNamer = exactFlag): CommandWord[] {
+  return argumentsOf(command, valueFlags, named).flat();
+}
+
+/** The value written after a named flag (`-Path x`, `-OutFile y`, `-Path:a,b`), for each that is present. */
+function valuesOf(command: ParsedCommand, flags: readonly string[], named: FlagNamer = (given, list) => list.includes(given.toLowerCase())): CommandWord[] {
   const words = command.words ?? [];
   const out: CommandWord[] = [];
   for (let i = (command.programIndex ?? 0) + 1; i < words.length - 1; i++) {
-    if (flags.includes(words[i]!.value.toLowerCase()) && !isFlag(words[i + 1]!.value)) out.push(words[i + 1]!);
+    if (!named(words[i]!.value, flags) || isFlag(words[i + 1]!.value)) continue;
+    out.push(words[i + 1]!);
+    for (let at = i + 2; words[at]?.element === true; at++) out.push(words[at]!);
   }
   return out;
 }
@@ -136,13 +169,45 @@ const KNOWN_PROGRAMS = new Set<string>([
   ...Object.keys(EMBEDDERS),
   ...Object.keys(POSIX_UTILITIES),
   ...Object.keys(POWERSHELL_UTILITIES),
+  ...Object.keys(CMD_UTILITIES),
   ...Object.keys(SCRIPT_INTERPRETERS),
   ...SCRIPT_RUNNERS.map((r) => r.program),
 ]);
 
+/** The file utility a program is, as its dialect names it — a POSIX one beside it (`rg` under PowerShell). */
 function utilityOf(program: string, dialect: CommandDialect): UtilitySpec | undefined {
   const own = (table: Readonly<Record<string, UtilitySpec>>): UtilitySpec | undefined => (Object.hasOwn(table, program) ? table[program] : undefined);
-  return dialect === "powershell" ? (own(POWERSHELL_UTILITIES) ?? own(POSIX_UTILITIES)) : own(POSIX_UTILITIES);
+  if (dialect === "powershell") return own(POWERSHELL_UTILITIES) ?? own(POSIX_UTILITIES);
+  if (dialect === "cmd") return own(CMD_UTILITIES) ?? own(POSIX_UTILITIES);
+  return own(POSIX_UTILITIES);
+}
+
+/** A registry path as PowerShell's file cmdlets take one: a drive (`HKLM:\…`) or the provider's name. */
+const REGISTRY_PATH = /^(?:(?:microsoft\.powershell\.core\\)?registry::|hk(?:lm|cu|cr|u|cc):)/i;
+
+/** PowerShell's drives that are no files: setting an item there changes a variable, or what a name runs. */
+const POWERSHELL_DRIVE = /^(env|function|alias|variable):\\?(.*)$/i;
+
+/**
+ * What a PowerShell part does that its subject does not say, or `undefined`: a cmdlet that points a
+ * name elsewhere (`Set-Alias`), one handed a variable that changes every command after it, an item set
+ * on the `env:`, `function:` or `alias:` drive. The part is then one nobody can vouch for.
+ */
+function powershellUnmodelled(command: ParsedCommand, paths: readonly string[]): string | undefined {
+  if (Object.hasOwn(POWERSHELL_REDEFINERS, command.program)) return POWERSHELL_REDEFINERS[command.program];
+  if (command.program === "set-variable" || command.program === "new-variable") {
+    const named = valuesOf(command, ["-name"], powershellFlag)[0] ?? operandsOf(command, ["-value", "-scope", "-option", "-description", "-visibility"], powershellFlag)[0];
+    if (named !== undefined && /^(global:|script:|local:|private:)?psdefaultparametervalues$/i.test(named.value)) return "changes the parameters every command after it is given";
+  }
+  for (const path of paths) {
+    const drive = POWERSHELL_DRIVE.exec(path);
+    if (drive === null) continue;
+    const kind = drive[1]!.toLowerCase();
+    const name = drive[2]!;
+    if (kind === "env" && !isHarmlessVariable(`$env:${name}`)) return `sets ${name || "variables"} for what runs after it`;
+    if (kind === "function" || kind === "alias") return `defines what '${name}' runs`;
+  }
+  return undefined;
 }
 
 /** The variables a variable-setting builtin sets that are not harmless (`export PATH=…`, `read GIT_DIR`) — see {@link VARIABLE_SETTERS}. */
@@ -202,25 +267,35 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], paths: [raw], widths: [SCRIPT_SUBJECT] };
   }
 
+  const unmodelledBy = (why: string): ClassifiedPart => ({ ...base, kind: "command", subject: program, matched: programSpan, widths: [], unmodelled: why });
+  if (dialect === "powershell") {
+    const why = powershellUnmodelled(command, []);
+    if (why !== undefined) return unmodelledBy(why);
+  }
+
   if (NO_REQUEST[dialect].includes(program)) {
-    const setting = dialect === "posix" ? unsafeSetsOf(command) : [];
-    if (setting.length > 0) {
-      return { ...base, kind: "command", subject: program, matched: programSpan, widths: [], unmodelled: `it sets ${setting.join(", ")}, which can change what runs after it` };
-    }
+    const setting = dialect === "posix" ? unsafeSetsOf(command) : dialect === "cmd" ? cmdSetsOf(command) : [];
+    if (setting.length > 0) return unmodelledBy(`it sets ${setting.join(", ")}, which can change what runs after it`);
+    // `ForEach-Object Delete` calls `Delete` on every object it is handed — code the line does not show.
+    const member = program === "foreach-object" ? memberCalledBy(command) : undefined;
+    if (member !== undefined) return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], widths: [SCRIPT_SUBJECT] };
     return { ...base, kind: "command", subject: program, matched: programSpan, widths: [], noRequest: true, paths: operandsOf(command).map((w) => w.value) };
   }
 
-  // Running a file through its interpreter, or code the line carries inline.
+  // Running a file through its interpreter, or code the line carries inline. A cmdlet's flags are
+  // PowerShell's: any case, cut short.
   const interpreter = Object.hasOwn(SCRIPT_INTERPRETERS, program) ? SCRIPT_INTERPRETERS[program] : undefined;
   if (interpreter !== undefined) {
+    const named: FlagNamer = POWERSHELL_INTERPRETERS.includes(program) ? powershellFlag : exactFlag;
     const lower = words.map((w) => w.value.toLowerCase());
-    const has = (flags: readonly string[] | undefined): boolean => (flags ?? []).some((f) => words.some((w, i) => w.value === f || lower[i] === f));
+    const has = (flags: readonly string[] | undefined): boolean =>
+      (flags ?? []).some((f) => words.some((w, i) => w.value === f || lower[i] === f || (named === powershellFlag && isFlag(w.value) && powershellFlag(w.value, [f]))));
     const script = (paths: string[]): ClassifiedPart => ({ ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], paths, widths: [SCRIPT_SUBJECT] });
     if (!has(interpreter.moduleFlags)) {
       if (has(interpreter.inlineFlags)) return script([]);
-      const named = valuesOf(command, interpreter.fileFlags ?? [])[0];
-      if (named !== undefined) return script([named.value]);
-      const file = operandsOf(command, interpreter.valueFlags)[0];
+      const given = valuesOf(command, interpreter.fileFlags ?? [], named === powershellFlag ? powershellFlag : undefined)[0];
+      if (given !== undefined) return script([given.value]);
+      const file = operandsOf(command, interpreter.valueFlags, named)[0];
       const runner = SCRIPT_RUNNERS.some((r) => r.program === program && r.subcommands?.includes(command.subcommand ?? "") === true);
       if (file !== undefined && !runner && (interpreter.anyOperand === true || looksLikeFile(file.value))) return script([file.value]);
     }
@@ -231,24 +306,61 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
     return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], widths: [SCRIPT_SUBJECT] };
   }
 
+  // A program that opens something in its app — a file, a folder, a link, an app by name — is
+  // `open_app`; opening what would run as a program is running it (decision 0018 §3).
+  const opener = openerOf(program, dialect);
+  if (opener !== undefined && (opener.sub === undefined || command.subcommand === opener.sub)) {
+    const handed = command.flags.some((f) => (opener.passesArgs ?? []).includes(f));
+    const named: FlagNamer = dialect === "powershell" ? powershellFlag : exactFlag;
+    const given = [...operandsOf(command, opener.valueFlags ?? [], named).slice(opener.sub !== undefined ? 1 : 0), ...(dialect === "powershell" ? valuesOf(command, ["-path", "-literalpath", "-lp"], powershellFlag) : [])].map((w) => w.value);
+    if (handed || openerTool(given, dialect) === "script") return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], paths: given, widths: [SCRIPT_SUBJECT] };
+    return { ...base, kind: "tool", subject: "open_app", tool: "open_app", matched: programSpan, widths: [commandSubjectOk(program) ? program : "open_app"] };
+  }
+
+  // A program that acts on the machine, where a System tool does that: `kill` is `stop_process`,
+  // `systemctl start` is `control_service`. cmd's switches (`/release`) are its flags.
+  const switches = dialect === "posix" ? [] : operandsOf(command).filter((w) => /^\/[a-z0-9?]+(:.*)?$/i.test(w.value));
+  const system = systemToolOf(
+    program,
+    [...command.flags, ...switches.map((w) => w.value.toLowerCase())],
+    operandsOf(command).filter((w) => !switches.includes(w)).map((w) => w.value),
+    dialect,
+  );
+  if (system !== undefined) {
+    return { ...base, kind: "tool", subject: system, tool: system, matched: programSpan, widths: [commandSubjectOk(program) ? program : system] };
+  }
+
   // A file utility is the standard tool on its path.
   const utility = utilityOf(program, dialect);
   if (utility !== undefined) {
-    const powershell = utility.pathParams !== undefined || utility.urlParams !== undefined;
+    // A cmdlet's parameters are PowerShell's: in any case, and cut short to a prefix.
+    const named: FlagNamer = utility.pathParams !== undefined || utility.urlParams !== undefined ? powershellFlag : exactFlag;
     const flagged = (pattern: string): boolean => command.flags.some((f) => new RegExp(pattern).test(f));
-    const tool = utility.when?.find((w) => flagged(w.flag))?.tool ?? utility.tool;
-    const operands = operandsOf(command, utility.valueFlags, powershell);
-    const patternGiven = (utility.patternFlags ?? []).some((f) => command.flags.some((g) => (powershell ? g.toLowerCase() : g) === f));
+    let tool = utility.when?.find((w) => flagged(w.flag))?.tool ?? utility.tool;
+    // cmd's switches are written with a slash (`rd /s /q x`), and are no places.
+    const groups = argumentsOf(command, utility.valueFlags, named).filter((group) => dialect !== "cmd" || !/^\/[a-z0-9?]+(:.*)?$/i.test(group[0]!.value));
+    const operands = groups.flat();
+    const patternGiven = (utility.patternFlags ?? []).some((f) => command.flags.some((g) => named(g, [f])));
     let places: CommandWord[];
     if (utility.paths === "all" || (utility.paths === "after-first" && patternGiven)) places = operands;
-    else if (utility.paths === "after-first") places = operands.slice(1);
-    else if (utility.paths === "first") places = operands.slice(0, 1);
+    else if (utility.paths === "after-first") places = groups.slice(1).flat();
+    else if (utility.paths === "first") places = groups.slice(0, 1).flat();
     else if (utility.paths === "before-flags") {
       const firstFlag = words.findIndex((w, i) => i > (command.programIndex ?? 0) && isFlag(w.value));
       places = operands.filter((w) => firstFlag < 0 || words.indexOf(w) < firstFlag);
     } else places = [];
-    places = [...new Set([...places, ...valuesOf(command, utility.pathParams ?? [])])];
-    const urlWord = utility.url === true ? (valuesOf(command, utility.urlParams ?? [])[0] ?? operands.find((w) => looksLikeUrl(w.value)) ?? operands[0]) : undefined;
+    const byName = (flags: readonly string[]): CommandWord[] => valuesOf(command, flags, named === powershellFlag ? powershellFlag : undefined);
+    places = [...new Set([...places, ...byName(utility.pathParams ?? [])])];
+    const urlWord = utility.url === true ? (byName(utility.urlParams ?? [])[0] ?? operands.find((w) => looksLikeUrl(w.value)) ?? operands[0]) : undefined;
+    if (dialect === "powershell") {
+      const why = powershellUnmodelled(command, places.map((w) => w.value));
+      if (why !== undefined) return unmodelledBy(why);
+      // A file cmdlet handed the registry reads or changes the machine's settings, not a file.
+      if (places.length > 0 && places.every((w) => REGISTRY_PATH.test(w.value))) {
+        tool = tool === "write_file" ? "write_settings" : "read_settings";
+        return { ...base, kind: "tool", subject: tool, tool, matched: programSpan, widths: [commandSubjectOk(program) ? program : tool] };
+      }
+    }
     return {
       ...base,
       kind: "tool",
@@ -265,7 +377,9 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   // Anything else: the program and its subcommand — unless the subcommand is decided at run time
   // (`git $(cat x) --hard`), in which case nobody can say what it is a request for.
   if (command.dynamic === true) return undecided;
-  const sub = command.subcommand !== undefined && /^[a-z][a-z0-9_-]*$/.test(command.subcommand) ? command.subcommand : undefined;
+  // A cmdlet (`Install-Module`, Verb-Noun) is its whole verb: what follows it is no subcommand.
+  const cmdlet = dialect === "powershell" && /^[a-z]+-[a-z]/.test(program);
+  const sub = !cmdlet && command.subcommand !== undefined && /^[a-z][a-z0-9_-]*$/.test(command.subcommand) ? command.subcommand : undefined;
   const subject = sub !== undefined ? `${program} ${sub}` : program;
   return {
     ...base,
@@ -276,17 +390,41 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   };
 }
 
+/**
+ * The member `ForEach-Object` is told to call on every object it is handed (`ForEach-Object Delete`,
+ * `% -MemberName Kill`), when it is told one that may change something. A script block is no member,
+ * and a property it only reads (`% FullName`) is harmless.
+ */
+function memberCalledBy(command: ParsedCommand): string | undefined {
+  const member = valuesOf(command, ["-membername"], powershellFlag)[0] ?? argumentsOf(command, ["-begin", "-end", "-process", "-inputobject", "-argumentlist", "-throttlelimit", "-timeoutseconds"], powershellFlag).flat().find((w) => w.code !== true);
+  if (member === undefined || member.code === true) return undefined;
+  return POWERSHELL_HARMLESS_MEMBERS.includes(member.value.toLowerCase()) ? undefined : member.value;
+}
+
+/** What cmd's `set NAME=value` sets that changes what runs after it. */
+function cmdSetsOf(command: ParsedCommand): string[] {
+  if (command.program !== "set") return [];
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  const assigned = words.find((w) => !/^\/[a-z]$/i.test(w) && w.includes("="));
+  const name = assigned?.slice(0, assigned.indexOf("=")).replace(/^"/, "");
+  return name !== undefined && name.length > 0 && !isHarmlessVariable(name.toUpperCase()) ? [name] : [];
+}
+
 /** Name what one request is for. `undefined` for a redirect to nowhere (`> /dev/null`, `> $null`). */
 export function classifyRequest(request: ShellRequest, dialect: CommandDialect): ClassifiedPart | undefined {
   if (request.kind === "unparsed") {
     return { kind: "unparsed", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
+  }
+  // Code nobody can read off the line — a .NET call, a property set — is what `python -c` is.
+  if (request.kind === "code") {
+    return { kind: "script", subject: SCRIPT_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [SCRIPT_SUBJECT], ...(request.via !== undefined ? { via: request.via } : {}) };
   }
   if (request.kind === "redirect") {
     if (NULL_DEVICES.includes(request.target.toLowerCase()) || /^\/dev\/fd\/\d+$/.test(request.target)) return undefined;
     const tool = request.direction === "read" ? "read_file" : "write_file";
     return { kind: "redirect", subject: tool, tool, span: request.span, matched: [{ ...request.opSpan }], paths: [request.target], widths: [tool], ...(request.via !== undefined ? { via: request.via } : {}) };
   }
-  return classifyWithSets(request.command, request.span, dialect);
+  return classifyWithSets(request.command, request.span, request.dialect ?? dialect);
 }
 
 // --- the permission set, as the shell reads it ---------------------------------------
@@ -302,7 +440,7 @@ export interface ShellPermissionSet {
 
 /**
  * The map a shell line is judged against, from a {@link Permission set}. `undefined` when the permission set says
- * nothing about the shell — no mode for `bash`, no command subject, no `script` — which is the same
+ * nothing about the shell — no mode for `shell`, no command subject, no `script` — which is the same
  * test {@link shellPermissionSetOfBlock} applies to a lowered block, since lowering writes `subjects` from
  * exactly these.
  */
@@ -343,7 +481,7 @@ export function shellPermissionSetOfBlock(block: PermissionsDecl | undefined): J
 export interface PermissionSetAnswer {
   /** The entry's mode — a word, or a FUNCTION the part is to be put to. */
   mode?: PermissionSetMode;
-  /** The entry that answered — `git commit`, `git`, `bash`, `write_file`, `script`, `other` — or none. */
+  /** The entry that answered — `git commit`, `git`, `shell`, `write_file`, `script`, `other` — or none. */
   entry?: string;
   /** True when the entry NAMES this program (`git commit`, `rm`), as against a fallback. */
   specific: boolean;
@@ -387,14 +525,18 @@ const flagMatches = (named: string, given: string): boolean => {
   return /^-[A-Za-z0-9]$/.test(named) && /^-[^-]{2,}/.test(given) && given.slice(1).includes(named[1]!);
 };
 
-/** The most specific command entry that matches: program, then its subcommand words as a prefix, then every flag it names. */
+/**
+ * The most specific command entry that matches: program, then its subcommand words as a prefix, then
+ * every flag it names. A PowerShell command answers to its cmdlet's name and to the alias the line
+ * called it by (`Remove-Item`'s entry, or `rm`'s, for `rm x`).
+ */
 export function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
   const operands = operandsOf(command).filter((w) => w.dynamic !== true);
   // `git -C dir commit`: the value `-C` takes is not the subcommand.
   const subs = command.subcommand !== undefined ? operands.slice(operands.findIndex((w) => w.value.toLowerCase() === command.subcommand)) : [];
   let best: { entry: CommandEntry; words: CommandWord[]; score: number } | undefined;
   for (const entry of commandEntriesOf(permissionSet)) {
-    if (entry.program !== command.program) continue;
+    if (entry.program !== command.program && entry.program !== command.alias) continue;
     if (!entry.subs.every((s, i) => subs[i]?.value.toLowerCase() === s)) continue;
     if (!entry.flags.every((f) => command.flags.some((g) => flagMatches(f, g)))) continue;
     const score = entry.subs.length * 2 + entry.flags.length;
@@ -412,7 +554,7 @@ export function matchCommandEntry(permissionSet: ShellPermissionSet, command: Pa
  *
  * Lookup order: the most specific command entry naming the program (`git commit`, then `git`; for a
  * utility or a script runner that is `rm`, `npm run`), then the part's own subject — the standard
- * tool, or `script` — and for a plain command the shell's entry (`bash`, "any other command"), then
+ * tool, or `script` — and for a plain command the shell's entry (`shell`, "any other command"), then
  * `other`. With nothing at all the answer is `ask`: absent means not offered.
  */
 export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart): PermissionSetAnswer {

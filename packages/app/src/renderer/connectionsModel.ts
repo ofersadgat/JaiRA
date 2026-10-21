@@ -8,8 +8,11 @@ import {
   BUILTIN_FORGES,
   FORGE_LABELS,
   FORGE_PROVIDERS,
+  SCREEN_MAPPING,
+  TOOL_SPECS,
   isMcpStdio,
   mcpWhere,
+  placeArgsOf,
   parseIntegrations,
   parseMcp,
   toolsInCategory,
@@ -557,6 +560,69 @@ export const HTTP_SCHEMA: Schema = {
     },
   },
 };
+
+/** What a server's tool may count as: every standard tool, then the Screen & input pair by its action. */
+const COUNTS_AS: string[] = [...TOOL_SPECS.map((spec) => spec.name), SCREEN_MAPPING];
+
+/**
+ * The form of one server: its own settings, then — once the probe has listed its tools, and for every
+ * tool its settings already map — what each tool COUNTS AS among JaiRA's permissions (decision 0018,
+ * ruling 5): a standard tool (or the pair by its action) and, for one that acts on a place, which of
+ * the tool's arguments holds it. Built from the server as it is, so the places offered follow the
+ * standard tool picked.
+ */
+export function serverSchemaOf(server: McpServerConfig, status: McpServerStatus | undefined): Schema {
+  const base = isMcpStdio(server) ? STDIO_SCHEMA : HTTP_SCHEMA;
+  const listed = new Map((status?.tools ?? []).map((tool) => [tool.name, tool]));
+  const names = [...new Set([...listed.keys(), ...Object.keys(server.tools ?? {})])].sort();
+  if (names.length === 0) return base;
+  const properties: Record<string, Schema> = {};
+  for (const name of names) {
+    const tool = listed.get(name);
+    const as = server.tools?.[name]?.as;
+    const places = as !== undefined && as !== SCREEN_MAPPING ? placeArgsOf(as) : [];
+    properties[name] = {
+      type: "object",
+      description: tool === undefined ? "Not in the list the server last answered with." : (tool.description ?? tool.annotations.title ?? ""),
+      properties: {
+        as: {
+          type: "string",
+          title: "counts as",
+          enum: COUNTS_AS,
+          description: `The permission its calls answer to beside its own line, the stricter kept. ${SCREEN_MAPPING}: screenshot when its action only looks, control_input otherwise.`,
+        },
+        ...(places.length > 0
+          ? {
+              args: {
+                type: "object",
+                title: "where it reads a place",
+                description: `Which of its arguments holds what ${as} reads — empty is its argument of the same name.`,
+                properties: Object.fromEntries(places.map((place) => [place, { type: "string", title: place, ...(tool?.inputs !== undefined && tool.inputs.length > 0 ? { enum: tool.inputs } : {}) } as Schema])),
+              },
+            }
+          : {}),
+      },
+      required: ["as"],
+    };
+  }
+  return {
+    ...base,
+    properties: {
+      ...(base.properties as Record<string, Schema>),
+      tools: {
+        type: "object",
+        title: "what its tools count as",
+        description: "A tool that does what one of JaiRA's permissions does answers to that permission's line in every permission set too — the stricter of the two — so one line holds every way to do it. Where the set uses JaiRA's own tool for it, the server's is withheld.",
+        properties,
+      },
+    },
+  };
+}
+
+/** The tools whose own description says what they count as, and the configuration does not say yet — to accept. */
+export function unacceptedClaims(server: McpServerConfig, status: McpServerStatus | undefined): Array<{ tool: string; claim: NonNullable<McpServerStatus["tools"][number]["claim"]> }> {
+  return (status?.tools ?? []).flatMap((tool) => (tool.claim !== undefined && server.tools?.[tool.name] === undefined ? [{ tool: tool.name, claim: tool.claim }] : []));
+}
 
 export const NEW_SERVER_SCHEMA: Schema = {
   type: "object",

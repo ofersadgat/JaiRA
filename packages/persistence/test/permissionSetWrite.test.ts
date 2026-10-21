@@ -23,7 +23,7 @@ let paths: JairaPaths;
 let builtIn: string;
 
 const REF = "$/permission-sets/chat/ask-first";
-const SHIPPED = { read_file: "allow", bash: "ask", "git status": "allow", other: "deny" };
+const SHIPPED = { read_file: "allow", shell: "ask", "git status": "allow", other: "deny" };
 
 function write(root: string, relPath: string, body: unknown): string {
   const file = join(root, relPath);
@@ -138,10 +138,10 @@ describe("writing the line", () => {
     expect(loaded.issues).toEqual([]);
     expect(loaded.permissions).toEqual({
       // The two marks say the block was a MAP, which is how a run tells it from a state that declared none.
-      tools: { read_file: "allow", bash: "ask", ...PERMISSION_SET_MARKERS },
+      tools: { read_file: "allow", shell: "ask", ...PERMISSION_SET_MARKERS },
       implementations: {},
       other: "deny",
-      subjects: { bash: "ask", "git status": "allow", "terraform plan": "allow" },
+      subjects: { shell: "ask", "git status": "allow", "terraform plan": "allow" },
       source: REF,
       functions: {},
     });
@@ -172,7 +172,7 @@ describe("writing the line", () => {
       '\t"read_file": "allow",',
       '\t"write_file": { "mode": "ask", "implementation": "native" },',
       "",
-      '\t"bash": "ask",',
+      '\t"shell": "ask",',
       '\t"git commit": "ask",',
       '\t"other": "deny"',
       "}",
@@ -186,7 +186,7 @@ describe("writing the line", () => {
         '\t"read_file": "allow",',
         '\t"write_file": { "mode": "allow", "implementation": "native" },',
         "",
-        '\t"bash": "ask",',
+        '\t"shell": "ask",',
         '\t"git commit": "allow",',
         '\t"other": "deny",',
         '\t"terraform plan": "deny"',
@@ -209,7 +209,7 @@ describe("writing the line", () => {
     expect(existsSync(join(paths.jairaDir, "permission-sets"))).toBe(false);
 
     // A LIST is no permission set and has no place for a command subject: it is left exactly as it was.
-    const list = write(paths.jairaDir, "permission-sets/chat/ask-first.json", ["bash", "read_file"]);
+    const list = write(paths.jairaDir, "permission-sets/chat/ask-first.json", ["shell", "read_file"]);
     const listBefore = readFileSync(list, "utf8");
     expect(() => addToPermissionSet(paths, REF, "project", { git: "allow" })).toThrow(/not a map/);
     expect(readFileSync(list, "utf8")).toBe(listBefore);

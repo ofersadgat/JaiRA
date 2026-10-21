@@ -1,6 +1,6 @@
 /**
  * The `functions` block (decision 0007, amended 2026-09-23): each shipped function's defaults in one
- * place — `smart`'s judge, `review_artifacts` on a forge, and `bash`'s built-in refusals — layered like
+ * place — `smart`'s judge, `review_artifacts` on a forge, and `shell`'s built-in refusals — layered like
  * every other block, strict about what it accepts, and the only home of what the dissolved `policy`
  * block and the top-level `smart` block used to hold.
  */
@@ -9,7 +9,7 @@ import { CONFIG_SECTIONS, DEFAULT_SMART_PROMPT, defaultConfig, defaultFunctions,
 
 describe("functions", () => {
   it("carries every default when nothing is said", () => {
-    const expected = { smart: {}, review_artifacts: { publish: "ask", settleAfter: "10m" }, bash: { builtins: true } };
+    const expected = { smart: {}, review_artifacts: { publish: "ask", settleAfter: "10m" }, shell: { builtins: true } };
     expect(defaultFunctions()).toEqual(expected);
     expect(defaultConfig().functions).toEqual(expected);
     expect(parseConfig({}).functions).toEqual(expected);
@@ -18,9 +18,9 @@ describe("functions", () => {
 
   it("reads what a layer states and keeps the defaults for the rest", () => {
     const parsed = parseConfig({
-      functions: { smart: { model: "claude-haiku-4" }, review_artifacts: { publish: "allow" }, bash: { builtins: false } },
+      functions: { smart: { model: "claude-haiku-4" }, review_artifacts: { publish: "allow" }, shell: { builtins: false } },
     }).functions;
-    expect(parsed).toEqual({ smart: { model: "claude-haiku-4" }, review_artifacts: { publish: "allow", settleAfter: "10m" }, bash: { builtins: false } });
+    expect(parsed).toEqual({ smart: { model: "claude-haiku-4" }, review_artifacts: { publish: "allow", settleAfter: "10m" }, shell: { builtins: false } });
     // An empty model or prompt is "use the default", as it always was.
     expect(parseConfig({ functions: { smart: { model: "", prompt: "" } } }).functions.smart).toEqual({});
   });
@@ -28,12 +28,12 @@ describe("functions", () => {
   it("takes a project's value over the shared root's, key by key", () => {
     const merged = mergeConfigDocuments(
       { functions: { smart: { model: "claude-haiku-4", prompt: "be careful" }, review_artifacts: { settleAfter: "30m" } } },
-      { functions: { smart: { model: "claude-cli/haiku" }, bash: { builtins: false } } },
+      { functions: { smart: { model: "claude-cli/haiku" }, shell: { builtins: false } } },
     );
     expect(parseConfig(merged).functions).toEqual({
       smart: { model: "claude-cli/haiku", prompt: "be careful" },
       review_artifacts: { publish: "ask", settleAfter: "30m" },
-      bash: { builtins: false },
+      shell: { builtins: false },
     });
   });
 
@@ -43,8 +43,8 @@ describe("functions", () => {
     expect(() => parseConfig({ functions: { smart: { temperature: 0 } } })).toThrow(/config\.functions\.smart\.temperature is not a setting/);
     expect(() => parseConfig({ functions: { review_artifacts: { publish: "yes please" } } })).toThrow("config.functions.review_artifacts.publish must be one of ask, allow, deny");
     expect(() => parseConfig({ functions: { review_artifacts: { settleAfter: "a while" } } })).toThrow(/settleAfter must be a duration/);
-    expect(() => parseConfig({ functions: { bash: { builtins: "false" } } })).toThrow("config.functions.bash.builtins must be true or false");
-    expect(() => parseConfig({ functions: { bash: { rules: [] } } })).toThrow(/config\.functions\.bash\.rules is not a setting/);
+    expect(() => parseConfig({ functions: { shell: { builtins: "false" } } })).toThrow("config.functions.shell.builtins must be true or false");
+    expect(() => parseConfig({ functions: { shell: { rules: [] } } })).toThrow(/config\.functions\.shell\.rules is not a setting/);
     expect(() => parseConfig({ functions: [] })).toThrow("config.functions must be an object");
   });
 
@@ -58,7 +58,7 @@ describe("functions", () => {
         properties: {
           smart: { type: "object", properties: { model: { type: "string" }, prompt: { type: "string", default: DEFAULT_SMART_PROMPT } } },
           review_artifacts: { type: "object", properties: { publish: { enum: ["ask", "allow", "deny"], default: "ask" }, settleAfter: { type: "string", default: "10m" } } },
-          bash: { type: "object", properties: { builtins: { type: "boolean", default: true } } },
+          shell: { type: "object", properties: { builtins: { type: "boolean", default: true } } },
         },
       },
     });

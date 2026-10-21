@@ -344,15 +344,15 @@ export interface JairaConfig {
  * The defaults of the functions JaiRA ships, each under the name a workflow or a permission set calls it by.
  *
  * One block per function, so a function's settings live in one place and nowhere else: what the
- * `smart` judge runs on, what `review_artifacts` may do on a forge, and whether the `bash` tool keeps
+ * `smart` judge runs on, what `review_artifacts` may do on a forge, and whether the `shell` tool keeps
  * JaiRA's built-in refusals. It replaces the project `policy` block, whose command rules now belong to
- * the `bash` line of each permission set, and the top-level `smart` block. Every field layers like any other
+ * the `shell` line of each permission set, and the top-level `smart` block. Every field layers like any other
  * setting (the project over `~/.jaira`), and the parsed block always carries every default.
  */
 export interface JairaFunctionsConfig {
   smart: JairaSmartConfig;
   review_artifacts: JairaReviewArtifactsConfig;
-  bash: JairaBashConfig;
+  shell: JairaShellConfig;
 }
 
 /**
@@ -366,8 +366,8 @@ export interface JairaReviewArtifactsConfig {
   settleAfter: string;
 }
 
-/** The `bash` tool's own defaults. What a line may run is each permission set's `bash` line and its command lines. */
-export interface JairaBashConfig {
+/** The `shell` tool's own defaults. What a line may run is each permission set's `shell` line and its command lines. */
+export interface JairaShellConfig {
   /**
    * JaiRA's built-in refusals and questions (SPEC §11.2/§11.3): destructive git and `rm -r .git` are
    * refused, a push, an install, a package publish, a network program and a credentials path ask.
@@ -724,12 +724,12 @@ export function defaultFunctions(): JairaFunctionsConfig {
   return {
     smart: {},
     review_artifacts: { publish: DEFAULT_PUBLISH_MODE, settleAfter: DEFAULT_SETTLE_AFTER },
-    bash: { builtins: true },
+    shell: { builtins: true },
   };
 }
 
 /** The functions the `functions` block has a place for — each a function JaiRA ships. */
-export const CONFIGURED_FUNCTIONS = ["smart", "review_artifacts", "bash"] as const;
+export const CONFIGURED_FUNCTIONS = ["smart", "review_artifacts", "shell"] as const;
 
 /**
  * Parse the `functions` block.
@@ -773,12 +773,12 @@ function parseFunctions(raw: unknown): JairaFunctionsConfig {
     }
   }
 
-  if (block["bash"] !== undefined) {
-    const bash = plainObject(block["bash"], "config.functions.bash");
-    allowedFields(bash, ["builtins"], "config.functions.bash");
-    if (bash["builtins"] !== undefined) {
-      if (typeof bash["builtins"] !== "boolean") throw new Error("config.functions.bash.builtins must be true or false");
-      out.bash.builtins = bash["builtins"];
+  if (block["shell"] !== undefined) {
+    const shell = plainObject(block["shell"], "config.functions.shell");
+    allowedFields(shell, ["builtins"], "config.functions.shell");
+    if (shell["builtins"] !== undefined) {
+      if (typeof shell["builtins"] !== "boolean") throw new Error("config.functions.shell.builtins must be true or false");
+      out.shell.builtins = shell["builtins"];
     }
   }
   return out;

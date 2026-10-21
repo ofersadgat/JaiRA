@@ -77,7 +77,7 @@ function files(): Record<string, JsonValue> {
     "lib/approve": {
       label: "approve",
       outputs: {},
-      operation: { kind: "function", function: "approve_tool_call", args: { request: { tool: "bash", subject: "bash", function: "smart", input: { command: "npm publish" } } } },
+      operation: { kind: "function", function: "approve_tool_call", args: { request: { tool: "shell", subject: "shell", function: "smart", input: { command: "npm publish" } } } },
     },
   };
 }
@@ -186,7 +186,7 @@ describe("the two conversations", () => {
     const session = service.chatStartPlan({ stateId: "chat/session" });
     const control = service.chatStartPlan({ stateId: "chat/control" });
     const WORKFLOW = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
-    const PROJECT = ["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"];
+    const PROJECT = ["read_file", "glob", "grep", "edit", "write_file", "shell", "web_fetch", "web_search"];
 
     for (const name of [...WORKFLOW, ...PROJECT]) expect(session.settings.tools, name).toContain(name);
     // The whole of `chat/control`: the eight, and not one thing of the project's. Asserted as an
@@ -216,10 +216,10 @@ describe("the two conversations", () => {
     const plan = service.chatPlan({ taskId: control, instanceId: rootInstanceOf(control) });
     // Two separate refusals, and both matter. The tool is not OFFERED — a delegated agent's deny
     // floor is built from this list, so a tool that is not on it is never handed over at all…
-    for (const name of ["bash", "read_file", "write_file", "edit"]) expect(plan?.settings.tools, name).not.toContain(name);
+    for (const name of ["shell", "read_file", "write_file", "edit"]) expect(plan?.settings.tools, name).not.toContain(name);
     // …and a native the agent has anyway answers to `other`, which this permission set denies outright.
     expect(plan?.settings.permissions?.other).toBe("deny");
-    expect(plan?.settings.permissions?.tools?.["bash"]).toBeUndefined();
+    expect(plan?.settings.permissions?.tools?.["shell"]).toBeUndefined();
     // The eight it DOES hold are all it holds.
     expect([...(plan?.settings.tools ?? [])].sort()).toEqual(["answer_question", "hold_task", "list_tasks", "list_workflows", "move_task", "release_task", "start_task", "stop_task"]);
   });
@@ -411,7 +411,7 @@ describe("answer_question", () => {
     // not as a gate a conversation's tools could see.
     await until(() => service.pendingApprovals().length > 0, "the approval to park");
     const approval = service.pendingApprovals()[0]!;
-    expect(approval).toMatchObject({ tool: "bash", asker: "smart", input: { command: "npm publish" } });
+    expect(approval).toMatchObject({ tool: "shell", asker: "smart", input: { command: "npm publish" } });
     expect(service.pendingInteractions()).toEqual([]);
     // It is not listed as something the conversation's task is asking…
     const listed = (await call(session, "list_tasks", {})) as unknown as TasksResult;

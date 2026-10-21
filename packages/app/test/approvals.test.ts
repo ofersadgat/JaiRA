@@ -31,7 +31,7 @@ afterEach(() => {
 });
 
 const request = (command: string): PermissionRequest =>
-  ({ tool: "bash", input: { command } as never, sessionId: "agent-1" });
+  ({ tool: "shell", input: { command } as never, sessionId: "agent-1" });
 
 describe("ApprovalHub", () => {
   it("parks an ask, reports it, and resolves on the human's answer", async () => {
@@ -40,7 +40,7 @@ describe("ApprovalHub", () => {
     const pending = hub.approver({ taskId: "t-1" })(request("git push origin main"));
 
     expect(seen).toHaveLength(1);
-    expect(seen[0]).toMatchObject({ requestId: "a1", tool: "bash", command: "git push origin main", taskId: "t-1" });
+    expect(seen[0]).toMatchObject({ requestId: "a1", tool: "shell", command: "git push origin main", taskId: "t-1" });
     expect(hub.list()).toHaveLength(1);
 
     expect(hub.decide("a1", "allow", "workflow-run")).toBe(true);
@@ -55,12 +55,12 @@ describe("ApprovalHub", () => {
     const policy = compilePolicy({}, { onDecision: hub.noteDecision });
     // Run the policy first, exactly as a real call does: its audit entry carries
     // the reason the approval prompt should show.
-    await policy.smart!["bash"]!(request("npm publish"));
+    await policy.smart!["shell"]!(request("npm publish"));
 
     const seen: ApprovalRequest[] = [];
     const explaining = new ApprovalHub({ onRequest: (r) => seen.push(r), nextId: () => "a2" });
     explaining.noteDecision({
-      tool: "bash",
+      tool: "shell",
       command: "npm publish",
       action: "require_approval",
       reason: "publishing a package is public and irreversible",
@@ -155,16 +155,16 @@ describe("policy → approval → audit", () => {
     );
 
     // 1. Allowed outright.
-    expect(await policy.smart!["bash"]!(request("git status"))).toBe("allow");
+    expect(await policy.smart!["shell"]!(request("git status"))).toBe("allow");
     // 2. Blocked by the §11.2 list.
-    expect(await policy.smart!["bash"]!(request("git reset --hard"))).toBe("deny");
+    expect(await policy.smart!["shell"]!(request("git reset --hard"))).toBe("deny");
     // 3. Escalated, then approved by a human for the whole run.
-    expect(await policy.smart!["bash"]!(request("git push origin main"))).toBe("ask");
+    expect(await policy.smart!["shell"]!(request("git push origin main"))).toBe("ask");
     void hub.approver({ taskId: "t-1" })(request("git push origin main"));
     hub.decide("a1", "allow", "workflow-run");
     project.commands.record({
       taskId: "t-1",
-      tool: "bash",
+      tool: "shell",
       command: "git push origin main",
       decision: "approved",
       decidedBy: "user",
@@ -190,7 +190,7 @@ describe("policy → approval → audit", () => {
     project.runtime.beginTask("t-2", "hash", Date.now());
     project.commands.record({
       taskId: "t-2",
-      tool: "bash",
+      tool: "shell",
       command: "git -C /x reset --hard",
       parsed: { program: "git", subcommand: "reset", flags: ["--hard"] },
       decision: "blocked",

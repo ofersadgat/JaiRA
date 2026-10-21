@@ -27,8 +27,8 @@ const choice = (id: string, decl: PermissionSetDecl, layer: PermissionSetChoice[
   return { id, bucket: id.slice(0, cut), name: id.slice(cut + 1), layer, decl };
 };
 
-const READ_ONLY: PermissionSetDecl = { read_file: "allow", bash: "deny", "git status": "allow", other: "deny" };
-const ASK_FIRST: PermissionSetDecl = { read_file: "ask", bash: "ask", other: "ask" };
+const READ_ONLY: PermissionSetDecl = { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" };
+const ASK_FIRST: PermissionSetDecl = { read_file: "ask", shell: "ask", other: "ask" };
 
 const CHOICES: PermissionSetChoice[] = [
   choice("chat/ask-first", ASK_FIRST),
@@ -37,7 +37,7 @@ const CHOICES: PermissionSetChoice[] = [
   choice("feature/implementation/writes-asking", { write_file: "ask", other: "deny" }, "project"),
 ];
 
-const REGISTERED = ["read_file", "write_file", "bash", "start_task", "move_task"];
+const REGISTERED = ["read_file", "write_file", "shell", "start_task", "move_task"];
 const of = (decl: PermissionSetDecl) => parsePermissionSet(decl).permissionSet;
 
 describe("which permission set a map is", () => {
@@ -56,20 +56,20 @@ describe("which permission set a map is", () => {
   });
 
   it.each([
-    ["a mode", { ...READ_ONLY, bash: "ask" }],
+    ["a mode", { ...READ_ONLY, shell: "ask" }],
     ["a tool unticked", { read_file: "allow", "git status": "allow", other: "deny" }],
     ["a tool ticked", { ...READ_ONLY, write_file: "deny" }],
     ["an implementation", { ...READ_ONLY, read_file: { mode: "allow", implementation: "native" } }],
     ["a command subject's mode", { ...READ_ONLY, "git status": "ask" }],
     ["a command subject added", { ...READ_ONLY, "git commit": "ask" }],
-    ["a command subject removed", { read_file: "allow", bash: "deny", other: "deny" }],
+    ["a command subject removed", { read_file: "allow", shell: "deny", other: "deny" }],
     ["`other`", { ...READ_ONLY, other: "ask" }],
   ] as Array<[string, PermissionSetDecl]>)("becomes CUSTOM when %s differs", (_what, decl) => {
     expect(matchPermissionSet(of(decl), CHOICES, "chat", REGISTERED)).toBeUndefined();
   });
 
   it("does not care about the ORDER of the lines, or an implementation written out as ours", () => {
-    const shuffled: PermissionSetDecl = { other: "deny", "git status": "allow", bash: "deny", read_file: { mode: "allow", implementation: "app" } };
+    const shuffled: PermissionSetDecl = { other: "deny", "git status": "allow", shell: "deny", read_file: { mode: "allow", implementation: "app" } };
     expect(matchPermissionSet(of(shuffled), CHOICES, "chat", REGISTERED)?.id).toBe("chat/read-only");
   });
 
@@ -77,22 +77,22 @@ describe("which permission set a map is", () => {
     // `presetOf`'s contract, kept. A block that still holds a tool this project retired is a map with
     // a dead line in it; letting that hold the label at `custom` for ever would make every permission set
     // look unselectable for no reason the reader could see.
-    const stale = permissionSetOfEnvironment(["read_file", "bash", "retired_tool"], { tools: { read_file: "ask", bash: "ask", retired_tool: "deny" }, other: "ask" });
+    const stale = permissionSetOfEnvironment(["read_file", "shell", "retired_tool"], { tools: { read_file: "ask", shell: "ask", retired_tool: "deny" }, other: "ask" });
     expect(matchPermissionSet(stale, CHOICES, "chat", REGISTERED)?.id).toBe("chat/ask-first");
     // …and a MODE for a tool the list does not offer (a key inherited from a parent) is not a line.
-    const unGranted = permissionSetOfEnvironment(["read_file", "bash"], { tools: { read_file: "ask", bash: "ask", write_file: "deny" }, other: "ask" });
+    const unGranted = permissionSetOfEnvironment(["read_file", "shell"], { tools: { read_file: "ask", shell: "ask", write_file: "deny" }, other: "ask" });
     expect(matchPermissionSet(unGranted, CHOICES, "chat", REGISTERED)?.id).toBe("chat/ask-first");
     // The same line for a tool that IS registered is a real difference.
-    expect(matchPermissionSet(of({ read_file: "ask", bash: "ask", write_file: "ask", other: "ask" }), CHOICES, "chat", REGISTERED)).toBeUndefined();
+    expect(matchPermissionSet(of({ read_file: "ask", shell: "ask", write_file: "ask", other: "ask" }), CHOICES, "chat", REGISTERED)).toBeUndefined();
   });
 
   it("matches a map whose lines name FUNCTIONS by the function's name, and still after it is lowered", () => {
-    const auto = choice("chat/auto", { read_file: { function: "smart" }, bash: { function: "smart" }, other: { function: "smart" } });
+    const auto = choice("chat/auto", { read_file: { function: "smart" }, shell: { function: "smart" }, other: { function: "smart" } });
     const lowered = lowerPermissionSet(of(auto.decl));
     expect(matchPermissionSet(permissionSetOfEnvironment(lowered.tools, lowered.permissions), [auto], "chat", REGISTERED)?.id).toBe("chat/auto");
     // The same lines under ANOTHER function are another permission set — and a word is not a function.
-    expect(matchPermissionSet(of({ read_file: { function: "judge" }, bash: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
-    expect(matchPermissionSet(of({ read_file: "ask", bash: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
+    expect(matchPermissionSet(of({ read_file: { function: "judge" }, shell: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
+    expect(matchPermissionSet(of({ read_file: "ask", shell: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
   });
 
   it("still matches after a state LOWERED it — the shell's `ask`, a function, the marks, and a tool nothing serves", () => {
@@ -138,7 +138,7 @@ describe("the hierarchy the picker draws", () => {
   });
 
   it("a shipped bucket with one file overridden here is still the shipped bucket", () => {
-    const overridden = [choice("chat/ask-first", ASK_FIRST), choice("chat/read-only", { ...READ_ONLY, bash: "ask" }, "project")];
+    const overridden = [choice("chat/ask-first", ASK_FIRST), choice("chat/read-only", { ...READ_ONLY, shell: "ask" }, "project")];
     expect(permissionSetBuckets(overridden)[0]).toMatchObject({ path: "chat", layer: "system" });
   });
 });
@@ -149,14 +149,14 @@ describe("what a permission set is called", () => {
     expect(permissionSetHint(choice("chat/ask-first", ASK_FIRST))).toBe("stop and ask before every call");
     // An override keeps the NAME people know it by and loses the sentence, which may no longer be true.
     expect(permissionSetLabel(choice("chat/full", {}, "project"))).toBe("full access");
-    expect(permissionSetHint(choice("chat/full", { bash: "allow", other: "ask" }, "project"))).toBe("1 line · other ask");
+    expect(permissionSetHint(choice("chat/full", { shell: "allow", other: "ask" }, "project"))).toBe("1 line · other ask");
     expect(permissionSetLabel(CHOICES[3]!)).toBe("writes-asking");
   });
 
   it("summarises a map by its lines and its `other`", () => {
     expect(permissionSetSummary(of(ASK_FIRST))).toBe("2 lines · all ask");
     expect(permissionSetSummary(of(READ_ONLY))).toBe("3 lines · other deny");
-    expect(permissionSetSummary(of({ bash: { function: "smart" }, other: { function: "smart" } }))).toBe("1 line · all smart");
+    expect(permissionSetSummary(of({ shell: { function: "smart" }, other: { function: "smart" } }))).toBe("1 line · all smart");
   });
 });
 

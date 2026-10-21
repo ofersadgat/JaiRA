@@ -67,6 +67,7 @@ export * from "./permissionSetBuckets";
 export * from "./commandParts";
 export * from "./shellCommand";
 export * from "./shellTables";
+export * from "./systemCommands";
 export * from "./changeLog";
 export * from "./permissionFunctions";
 export * from "./permissionSetEdit";

@@ -304,7 +304,7 @@ export async function handedToClaude(environment: HandedEnvironment, options: Ha
         lines[kind] = least(decisions)!;
       }
       // A shell every line of which is refused is not a shell. The tool may be offered — a map's
-      // `"bash": "deny"` still offers it — but nothing can be run through it, and "the agent has a
+      // `"shell": "deny"` still offers it — but nothing can be run through it, and "the agent has a
       // shell it cannot use" and "the agent has no shell" are one grant.
       const usable = Object.values(lines).some((decision) => decision !== "deny");
       tools[spec.name] = usable ? { reachable: true, via: ways.map((way) => way.via) } : { reachable: false, via: [] };

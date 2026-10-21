@@ -34,7 +34,7 @@ describe("reading a record", () => {
 
   it("judges a shell line part by part: a status passes, a commit does not", () => {
     // A stand-in for the read-only set: git status and reads pass, anything else is a change.
-    const judge: ReadOnlyJudge = (name, args) => (name === "bash" || name === "Bash" ? /^git status$/.test(String((args as { command: string }).command)) : name === "Read");
+    const judge: ReadOnlyJudge = (name, args) => (name === "shell" || name === "Bash" ? /^git status$/.test(String((args as { command: string }).command)) : name === "Read");
     const [bash] = judgedCallsOf([record as never], { judge, dialect: "posix" });
     expect(bash!.change).toBe(true);
     expect(bash!.parts?.map((p) => [p.program, p.subcommand, p.change])).toEqual([

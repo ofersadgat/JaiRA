@@ -31,7 +31,7 @@ describe("the table", () => {
   it("covers the capabilities an agent actually reached for", () => {
     // The list from a real run: the sync's `read-only` state watched these go by ungoverned because
     // nothing here had a name for them.
-    for (const name of ["read_file", "glob", "grep", "edit", "write_file", "bash", "web_fetch", "web_search"]) {
+    for (const name of ["read_file", "glob", "grep", "edit", "write_file", "shell", "web_fetch", "web_search"]) {
       expect(TOOL_SPEC_BY_NAME.has(name), `no spec for '${name}'`).toBe(true);
     }
   });

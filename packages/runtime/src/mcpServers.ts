@@ -34,6 +34,7 @@ import type { McpServerSpec } from "@declarative-ai/agents-api";
 import type { ExecServices } from "@declarative-ai/exec";
 import {
   isMcpSecretRef,
+  mcpClaimOf,
   isMcpStdio,
   mcpSecretsOf,
   mcpNameOfForeign,
@@ -387,6 +388,10 @@ async function listOver(mcp: McpSdk, transport: Transport, signal: AbortSignal):
       const answer = await client.listTools(cursor !== undefined ? { cursor } : undefined, { signal });
       for (const tool of answer.tools) {
         const annotations = tool.annotations ?? {};
+        // What the tool says it counts as (decision 0018, ruling 5), and the arguments a mapping may name.
+        const claim = mcpClaimOf((tool as { _meta?: unknown })._meta);
+        const properties = (tool.inputSchema as { properties?: unknown } | undefined)?.properties;
+        const inputs = properties !== null && typeof properties === "object" && !Array.isArray(properties) ? Object.keys(properties) : [];
         tools.push({
           name: tool.name,
           ...(typeof tool.description === "string" && tool.description.length > 0 ? { description: tool.description } : {}),
@@ -395,6 +400,8 @@ async function listOver(mcp: McpSdk, transport: Transport, signal: AbortSignal):
             ...(typeof annotations.readOnlyHint === "boolean" ? { readOnlyHint: annotations.readOnlyHint } : {}),
             ...(typeof annotations.destructiveHint === "boolean" ? { destructiveHint: annotations.destructiveHint } : {}),
           },
+          ...(claim !== undefined ? { claim } : {}),
+          ...(inputs.length > 0 ? { inputs } : {}),
         });
       }
       cursor = typeof answer.nextCursor === "string" && answer.nextCursor.length > 0 ? answer.nextCursor : undefined;

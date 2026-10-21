@@ -102,13 +102,13 @@ describe("MCP subjects", () => {
   });
 
   it("lowers into the gate's tool modes and reads back as the same lines; never a shell subject, never a door for the shell", () => {
-    const { permissionSet } = parsePermissionSet({ bash: "deny", mcp__figma: "allow", mcp__figma__delete: { function: "smart" }, other: "deny" });
+    const { permissionSet } = parsePermissionSet({ shell: "deny", mcp__figma: "allow", mcp__figma__delete: { function: "smart" }, other: "deny" });
     // An allowing MCP line does not keep a denied shell: only a command or `script` can.
     expect(shellWithheld(permissionSet)).toBe(true);
-    expect(shellSubjects(permissionSet)).toEqual({ bash: "deny" });
+    expect(shellSubjects(permissionSet)).toEqual({ shell: "deny" });
     const lowered = lowerPermissionSet(permissionSet, undefined, "$/permission-sets/chat/figma");
     expect(lowered.tools).toEqual([]);
-    expect(lowered.permissions?.tools).toMatchObject({ mcp__figma: "allow", mcp__figma__delete: "ask", bash: "deny" });
+    expect(lowered.permissions?.tools).toMatchObject({ mcp__figma: "allow", mcp__figma__delete: "ask", shell: "deny" });
     expect(lowered.permissions?.functions).toEqual({ mcp__figma__delete: "smart" });
     // Where the lines came from rides along, for "add to the permission set".
     expect(lowered.permissions?.source).toBe("$/permission-sets/chat/figma");

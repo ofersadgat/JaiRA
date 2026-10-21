@@ -170,7 +170,41 @@ export type RowTone = "plain" | "muted" | "warn" | "bad";
 export type RowMark = "ok" | "bad" | "waiting" | "cut";
 
 /** What goes under a call's line without being asked for (`Tool`'s `shown`), by kind. */
-export type ToolShown = "sidechain" | "outcome" | "asked" | "produced" | "output" | undefined;
+export type ToolShown = "sidechain" | "outcome" | "asked" | "produced" | "picture" | "output" | undefined;
+
+/**
+ * The picture a tool handed back — a screenshot, a picture off the clipboard (decision 0018) — as a
+ * `data:` address, out of whichever envelope it travelled in: MCP's `image` content (`{ type, data,
+ * mimeType }`), the Anthropic block an agent's own record keeps (`{ type, source: { media_type, data } }`),
+ * or the value's own `$images`. The first picture, or `undefined`.
+ */
+export function pictureOf(result: JsonValue | undefined): string | undefined {
+  const fromBlock = (block: JsonValue): string | undefined => {
+    if (block === null || typeof block !== "object" || Array.isArray(block)) return undefined;
+    const b = block as Record<string, JsonValue>;
+    if (b["type"] !== "image") return undefined;
+    const source = b["source"] !== null && typeof b["source"] === "object" && !Array.isArray(b["source"]) ? (b["source"] as Record<string, JsonValue>) : b;
+    const mime = typeof source["media_type"] === "string" ? source["media_type"] : typeof source["mimeType"] === "string" ? source["mimeType"] : undefined;
+    const data = typeof source["data"] === "string" ? source["data"] : undefined;
+    return mime !== undefined && mime.startsWith("image/") && data !== undefined && data.length > 0 ? `data:${mime};base64,${data}` : undefined;
+  };
+  if (Array.isArray(result)) {
+    for (const block of result) {
+      const found = fromBlock(block);
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  if (result === null || typeof result !== "object") return undefined;
+  const images = (result as Record<string, JsonValue>)["$images"];
+  if (!Array.isArray(images)) return undefined;
+  for (const image of images) {
+    if (image === null || typeof image !== "object" || Array.isArray(image)) continue;
+    const { mimeType, data } = image as Record<string, JsonValue>;
+    if (typeof mimeType === "string" && mimeType.startsWith("image/") && typeof data === "string" && data.length > 0) return `data:${mimeType};base64,${data}`;
+  }
+  return undefined;
+}
 
 /**
  * One tool call's line — what `Tool` hands its `Row`: the name, what it was called as, the server, the
@@ -238,9 +272,11 @@ export function toolLineOf(
           ? "asked"
           : producedArtifact(entry.result) !== undefined
             ? "produced"
-            : entry.output !== undefined
-              ? "output"
-              : undefined;
+            : pictureOf(entry.result) !== undefined
+              ? "picture"
+              : entry.output !== undefined
+                ? "output"
+                : undefined;
   return {
     name: display.title,
     called: entry.name,

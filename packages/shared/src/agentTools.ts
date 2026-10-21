@@ -39,7 +39,7 @@ export interface AgentToolDeclaration {
    * For a `switches` transport: each switch, and the standard subjects turning it ON unlocks.
    *
    * A switch is left OFF unless the permission set holds one of its subjects with a mode that is not `deny`
-   * — codex's `workspace-write` sandbox is on for `write_file`, `edit` or `bash`, and off otherwise.
+   * — codex's `workspace-write` sandbox is on for `write_file`, `edit` or `shell`, and off otherwise.
    */
   switches?: Readonly<Record<string, readonly string[]>>;
 }

@@ -64,7 +64,7 @@ function writeConfig(config: Record<string, unknown>): void {
  * to run a policy-weak agent.
  */
 function neverEscalates(agent: Record<string, unknown>): Record<string, unknown> {
-  return { agents: { genericCli: [agent] }, functions: { bash: { builtins: false } } };
+  return { agents: { genericCli: [agent] }, functions: { shell: { builtins: false } } };
 }
 
 beforeEach(() => {

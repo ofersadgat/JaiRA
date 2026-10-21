@@ -20,7 +20,7 @@
  * files alone.
  *
  * The limit, stated where it is implemented: this only covers tools we serve. An
- * agent using its own native write, or `bash` with a redirection, never reaches
+ * agent using its own native write, or `shell` with a redirection, never reaches
  * here — see §7.6's reconciliation note.
  */
 import { createHash } from "node:crypto";

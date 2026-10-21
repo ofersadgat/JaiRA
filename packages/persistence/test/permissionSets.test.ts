@@ -67,10 +67,10 @@ const environmentOf = (rootId: string): unknown => load(rootId).states[rootId]!.
 
 describe("a permission set, referenced from a state", () => {
   it("resolves `$/permission-sets/<bucket>/<name>` and reaches the engine as a list and a block", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" });
+    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" });
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/read-only" }));
     expect(environmentOf("plan")).toEqual({
-      tools: ["read_file", "glob", "bash"],
+      tools: ["read_file", "glob", "shell"],
       // The shell is offered and its LINES are judged: the gate is handed `ask` for it, and the
       // `deny` its author wrote is the answer for any command no entry names (decision 0007 §4).
       // The two marks say the block was a MAP, which is how a run tells it from a state that declared none.
@@ -78,10 +78,10 @@ describe("a permission set, referenced from a state", () => {
       // names and what "add to the permission set" writes into.
       // A RUN is handed the block whole (upstream `ExecServices.authored`), so nothing is carried twice.
       permissions: {
-        tools: { read_file: "allow", glob: "allow", bash: "ask", ...PERMISSION_SET_MARKERS },
+        tools: { read_file: "allow", glob: "allow", shell: "ask", ...PERMISSION_SET_MARKERS },
         implementations: {},
         other: "deny",
-        subjects: { bash: "deny", "git status": "allow" },
+        subjects: { shell: "deny", "git status": "allow" },
         source: "$/permission-sets/chat/read-only",
         functions: {},
       },
@@ -89,19 +89,19 @@ describe("a permission set, referenced from a state", () => {
   });
 
   it("starts from one and says more — sibling keys override", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", bash: "deny", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask", bash: { function: "smart" } } }));
+    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", shell: "deny", other: "deny" });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask", shell: { function: "smart" } } }));
     expect(environmentOf("plan")).toEqual({
-      tools: ["read_file", "bash", "write_file"],
+      tools: ["read_file", "shell", "write_file"],
       // A `$ref` that says more is written on the STATE: a sibling is an entry no file holds, so a
       // line added to the file could be shadowed here, and the source says `inline`.
       permissions: {
-        tools: { read_file: "allow", bash: "ask", write_file: "ask", ...PERMISSION_SET_MARKERS },
+        tools: { read_file: "allow", shell: "ask", write_file: "ask", ...PERMISSION_SET_MARKERS },
         implementations: {},
         other: "deny",
-        subjects: { bash: "ask" },
+        subjects: { shell: "ask" },
         source: "inline",
-        functions: { bash: "smart" },
+        functions: { shell: "smart" },
       },
     });
   });
@@ -133,7 +133,7 @@ describe("a permission set, referenced from a state", () => {
     write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "wf.json", {
       environment: { tools: "$/permission-sets/chat/read-only" },
-      children: { a: {}, b: { environment: { tools: { bash: { function: "smart" } } } } },
+      children: { a: {}, b: { environment: { tools: { shell: { function: "smart" } } } } },
       sequence: ["a", "b"],
     });
     const leaf = (state({}) as Record<string, unknown>);
@@ -142,12 +142,12 @@ describe("a permission set, referenced from a state", () => {
     write(project.paths.workflowsDir, "wf/b.json", leaf);
     const bundle = load("wf");
     expect(bundle.states["wf/a"]!.environment).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", functions: {} } });
-    expect(callEnvironmentOf(bundle.states["wf/b"]!)?.tools).toEqual(["bash"]);
+    expect(callEnvironmentOf(bundle.states["wf/b"]!)?.tools).toEqual(["shell"]);
   });
 });
 
 describe("a permission set inside a REFERENCED block", () => {
-  const map = { read_file: "allow", glob: "allow", bash: "deny", "git status": "allow", other: "deny" };
+  const map = { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" };
   const scopes = [{ path: "app/**", default: "allow" }];
 
   it("reaches the engine exactly as the same map written on the state — environment, operation and a child's mount", () => {
@@ -170,7 +170,7 @@ describe("a permission set inside a REFERENCED block", () => {
     // Before 0007's follow-up this load FAILED: the map reached the engine inside the referenced
     // block and the engine refused it as `unrecognized binding form`.
     const same = callEnvironmentOf(load("written").states["written"]!);
-    expect(same?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(same?.tools).toEqual(["read_file", "glob", "shell"]);
     expect(load("byref").states["byref"]!.environment).toEqual(same);
     const dollar = callEnvironmentOf(load("bydollarref").states["bydollarref"]!);
     expect({ tools: dollar?.tools, permissions: dollar?.permissions }).toEqual(same);
@@ -182,7 +182,7 @@ describe("a permission set inside a REFERENCED block", () => {
       return { operation: resolved.operation, environment: resolved.environment };
     };
     expect(opOf("refop")).toEqual(opOf("writtenop"));
-    expect(callEnvironmentOf(opOf("refop"))?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(callEnvironmentOf(opOf("refop"))?.tools).toEqual(["read_file", "glob", "shell"]);
   });
 
   it("is inherited by a child exactly as a map written on the parent — or on the child's mount", () => {
@@ -196,10 +196,10 @@ describe("a permission set inside a REFERENCED block", () => {
       write(project.paths.workflowsDir, `m${id}/a.json`, leaf);
     }
     const written = callEnvironmentOf(load("wfw").states["wfw/a"]!);
-    expect(written?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(written?.tools).toEqual(["read_file", "glob", "shell"]);
     expect(load("wfr").states["wfr/a"]!.environment).toEqual(written);
     expect(load("mwfr").states["mwfr/a"]!.environment).toEqual(load("mwfw").states["mwfw/a"]!.environment);
-    expect(callEnvironmentOf(load("mwfr").states["mwfr/a"]!)?.tools).toEqual(["read_file", "glob", "bash"]);
+    expect(callEnvironmentOf(load("mwfr").states["mwfr/a"]!)?.tools).toEqual(["read_file", "glob", "shell"]);
   });
 
   it("is PINNED: the block's file is in the closure, and a pinned task does not see a later edit to it", async () => {
@@ -298,7 +298,7 @@ describe("the linter", () => {
 
   it("reports a mode that is not one as an ERROR at the entry, through a reference too", () => {
     write(project.paths.jairaDir, "permission-sets/chat/broken.json", { read_file: "sometimes" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/chat/broken", bash: "ask" } }));
+    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/chat/broken", shell: "ask" } }));
     const entry = issuesOf("plan");
     expect(entry.loadError).toBeUndefined();
     expect(entry.issues).toEqual([
@@ -396,11 +396,11 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     expect(environmentOf("plan")).toEqual({
       // The nine a conversation has always held, then the eight of decision 0005, served since its
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
-      // The shell is on the list: `"bash": "deny"`, but the commands that only read (`git status`,
+      // The shell is on the list: `"shell": "deny"`, but the commands that only read (`git status`,
       // `npm test`, …) allow, so it is a shell with those to run, each line judged by the map. The Git
       // tools of decision 0010 follow the web tools, then the CI tools of decision 0016, then `wait_for_event`
-      // with the tasks and workflows.
-      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "bash", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
+      // with the tasks and workflows. The System tools of decision 0018 sit between the shell and the web.
+      tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "read_system", "power", "list_processes", "stop_process", "list_services", "control_service", "list_software", "install_software", "read_settings", "write_settings", "read_clipboard", "write_clipboard", "list_windows", "open_app", "screenshot", "control_input", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
           read_file: "allow",
@@ -410,7 +410,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           write_file: "deny",
           show_artifact: "allow",
           // Offered, so the gate asks and every line is judged by `subjects` below: the file's `deny` stands for any command it does not name.
-          bash: "ask",
+          shell: "ask",
           web_fetch: "allow",
           web_search: "allow",
           list_merge_requests: "allow",
@@ -425,6 +425,23 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           read_pipeline: "allow",
           read_pipeline_job: "allow",
           download_pipeline_artifact: "allow",
+          // The System tools (decision 0018, ruling 2): read-only lets each look go ahead and refuses each change.
+          read_system: "allow",
+          power: "deny",
+          list_processes: "allow",
+          stop_process: "deny",
+          list_services: "allow",
+          control_service: "deny",
+          list_software: "allow",
+          install_software: "deny",
+          read_settings: "allow",
+          write_settings: "deny",
+          read_clipboard: "allow",
+          write_clipboard: "deny",
+          list_windows: "allow",
+          open_app: "deny",
+          screenshot: "allow",
+          control_input: "deny",
           list_workflows: "allow",
           start_task: "deny",
           move_task: "deny",
@@ -437,7 +454,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         },
         implementations: {},
         other: "deny",
-        subjects: { bash: "deny", ...commandLinesOf(SHIPPED_READ_ONLY) },
+        subjects: { shell: "deny", ...commandLinesOf(SHIPPED_READ_ONLY) },
         // Beside `subjects`: the file they came from, which is what an approval names.
         source: "$/permission-sets/chat/read-only",
         functions: {},
@@ -448,13 +465,13 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat_control/ask-first" }));
     const control = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
     expect(control.tools).toEqual(["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"]);
-    expect(control.tools).not.toContain("bash");
+    expect(control.tools).not.toContain("shell");
     expect(control.permissions.other).toBe("deny");
     expect(control.permissions.tools).toMatchObject({ list_workflows: "ask", start_task: "ask", stop_task: "ask" });
   });
 
   it("are READ for the composer with the layer that supplied each, a project's file winning and a `$ref` followed", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", bash: "ask" });
+    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", shell: "ask" });
     write(testHome(), "permission-sets/feature/implementation/writes-asking.json", { write_file: "ask", other: "deny" });
     write(project.paths.jairaDir, "permission-sets/chat/broken.json", { read_file: "sometimes" });
     const read = readPermissionSets(project.paths);
@@ -471,7 +488,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     ]);
     // The override is offered as the map it RESOLVES to — what picking its row would write.
     const overridden = read.find((t) => t.id === "chat/read-only")!.decl;
-    expect(overridden).toMatchObject({ read_file: "allow", edit: "deny", bash: "ask", other: "deny" });
+    expect(overridden).toMatchObject({ read_file: "allow", edit: "deny", shell: "ask", other: "deny" });
     expect(overridden).not.toHaveProperty("$ref");
     // A permission set nobody could read is left out rather than offered as half of itself.
     expect(read.some((t) => t.id === "chat/broken")).toBe(false);
