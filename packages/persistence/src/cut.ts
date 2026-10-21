@@ -58,6 +58,7 @@ import { PROCESS_NOTE_EVENTS, refusal, remoteBranchName, type SplitEntry, type T
 import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { Project } from "./project";
 import { sessionStoreFor } from "./project";
+import { CHAT_SETTINGS } from "./sessionStore";
 import type { StoredEvent } from "./eventLog";
 import { appendRewound, effectiveLines, journalFileFor } from "./journalFile";
 import { ConversationLog, type NameRow, type RecordRow, type SessionRow } from "./conversationFile";
@@ -575,8 +576,9 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
     const bump = project.db.prepare(`UPDATE blobs SET refs = refs + 1 WHERE hash = ?`);
     for (const row of records) {
       const request = parsedObject(row.request_json) as Record<string, unknown> | undefined;
-      // `openingBy` rides the ask, not the operation — see `withAuthors` — so it is not part of the identity either.
-      const { scope, session, openingBy, ...op } = request ?? {};
+      // `openingBy` and a chat message's settings ride the ask, not the operation — see `withAuthors` and
+      // `CHAT_SETTINGS` — so they are not part of the identity either.
+      const { scope, session, openingBy, [CHAT_SETTINGS]: chatSettings, ...op } = request ?? {};
       const oldScope = scope as { instanceId?: unknown; sequence?: unknown } | undefined;
       const scoped = typeof oldScope?.instanceId === "string" && typeof oldScope.sequence === "number";
       const newScope = scoped ? { instanceId: mapInstance(oldScope!.instanceId as string), sequence: oldScope!.sequence as number } : undefined;
@@ -598,6 +600,7 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
               ...(newScope !== undefined ? { scope: newScope } : scope !== undefined ? { scope } : {}),
               ...(newSession !== undefined ? { session: newSession } : session !== undefined ? { session } : {}),
               ...(openingBy !== undefined ? { openingBy } : {}),
+              ...(chatSettings !== undefined ? { [CHAT_SETTINGS]: chatSettings } : {}),
             });
       const metrics = parsedObject(row.metrics_json) as { sessionRef?: unknown } | undefined;
       const newMetrics =

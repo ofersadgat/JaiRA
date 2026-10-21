@@ -123,11 +123,14 @@ export function RunTranscript({
   const rootPath = useMemo(() => (parent === undefined ? "" : mountPathOf(detail.instances, parent.instanceId)), [detail, parent]);
   const askingHere = useMemo(() => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail.instances)), [gate, onGate, detail.instances]);
   const waits = useMemo(() => [...source.userEvents].filter((one) => one.taskId === detail.taskId).sort((a, b) => a.at - b.at), [source.userEvents, detail.taskId]);
-  // Where a running agent's question or approval is drawn: under the leaf whose call is running.
-  const agentHere = useMemo(
-    () => ((source.question !== undefined && source.onQuestion !== undefined) || (source.approval !== undefined && source.onApproval !== undefined) ? runningLeafOf(detail.instances) : undefined),
-    [source.question, source.onQuestion, source.approval, source.onApproval, detail.instances],
-  );
+  // Where a running agent's question or approval is drawn: under the leaf whose call is running — or,
+  // for one found in the record after the app closed under it, the leaf whose call asked it.
+  const agentHere = useMemo(() => {
+    const asking = (source.question !== undefined && source.onQuestion !== undefined) || (source.approval !== undefined && source.onApproval !== undefined);
+    if (!asking) return undefined;
+    const recovered = source.approval?.recovered === true ? source.approval.instanceId : source.question?.recovered === true ? source.question.instanceId : undefined;
+    return recovered ?? runningLeafOf(detail.instances);
+  }, [source.question, source.onQuestion, source.approval, source.onApproval, detail.instances]);
   // The workflow tools' notes are drawn on the RAIL (`jaira.moved`), and "Answer it yourself" under an
   // agent's question is the gate's own rewind.
   const calls = useMemo<CallSurface>(

@@ -100,6 +100,7 @@ import { CHAT_INSTANCE_PREFIX } from "@jaira/runtime";
 import type { InstanceAddress } from "@jaira/shared";
 import { SqliteEventLog } from "./eventLog";
 import { hydrate } from "./blobStore";
+import { CHAT_SETTINGS } from "./sessionStore";
 import type { JairaDb } from "./db";
 import type { Project } from "./project";
 import { adoptedStandInId } from "./adopt";
@@ -237,10 +238,17 @@ export const IDLE_CONVERSATION_VALUE = "";
  * did report a handle, is kept: its turns may exist remotely, the row is the only witness, and the
  * re-dispatch REOPENS it rather than asking twice. Delete what never happened; continue what
  * half-happened.
+ *
+ * A call that was CUT — a stop or the app closing, filed `failed` with a `canceled` classification by
+ * a transport that reports it so — is not a failure either, and is kept: what it said is in the row
+ * whether or not a remote holds it, and the re-dispatch continues from it.
  */
 export function releaseUnconsumedFailures(project: Project, taskId: string): number {
   const result = project.db
-    .prepare(`DELETE FROM operation_records WHERE task_id = ? AND status = 'failed' AND provider_session_id IS NULL`)
+    .prepare(
+      `DELETE FROM operation_records WHERE task_id = ? AND status = 'failed' AND provider_session_id IS NULL
+          AND COALESCE(json_extract(error_json, '$.classification'), '') NOT IN ('canceled', 'interrupted')`,
+    )
     .run(taskId);
   return result.changes;
 }
@@ -608,7 +616,9 @@ export function buildTaskLoad(project: Project, taskId: string, shape: SequenceS
     // back recomputes the engine's content key — except where a render changed the op on the way
     // out, and then the site is simply absent: the engine mints a fresh one and pays again, which
     // is a cost and never a collision.
-    const { scope: _scope, session: _session, ...op } = request as Record<string, unknown>;
+    // Who wrote the message and the settings a chat message was sent with are filed beside the op too
+    // (`withAuthors`, `CHAT_SETTINGS`) — never part of what the engine hashed.
+    const { scope: _scope, session: _session, openingBy: _openingBy, [CHAT_SETTINGS]: _settings, ...op } = request as Record<string, unknown>;
     const key = hashOperation(op as never);
     // The deferred exclusion compares CONTENT keys: `call.waiting` stamps the bare hash (an event
     // fires before any scope is claimed), while `row.id` is the scoped id — comparing those two

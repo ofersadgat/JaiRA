@@ -72,6 +72,17 @@ UPDATE event_waits SET name = CASE name
   ELSE name END;
 `,
   },
+  {
+    version: 26,
+    note: "a claim says which process and host made it (jobs.process_token, jobs.host_key), so a process that crashed is known dead at the next open instead of 30 s later",
+    // Idempotent by hand: SQLite has no ADD COLUMN IF NOT EXISTS, and a new database is born with the
+    // columns (`SCHEMA`) at the baseline and then runs every step.
+    run: (db) => {
+      const columns = new Set((db.prepare(`SELECT name FROM pragma_table_info('jobs')`).all() as Array<{ name: string }>).map((c) => c.name));
+      if (!columns.has("process_token")) db.exec(`ALTER TABLE jobs ADD COLUMN process_token TEXT`);
+      if (!columns.has("host_key")) db.exec(`ALTER TABLE jobs ADD COLUMN host_key TEXT`);
+    },
+  },
 ];
 
 /**

@@ -59,13 +59,26 @@ export type Activity =
  * (`plan → critique → human_review`), empty when there is none; `going` tells the caller to count, from
  * {@link startedAtOf}.
  */
-export function activityOf(detail: TaskDetail, asking: boolean, can: { rerun: boolean; resume: boolean }): Activity {
+export function activityOf(
+  detail: TaskDetail,
+  asking: boolean,
+  can: { rerun: boolean; resume: boolean },
+  /**
+   * The instance whose agent is asking, when the app closed under its run: the run has no active path
+   * any more, and this is where it is waiting — what the strip names, as it did before the close.
+   */
+  askedIn?: string,
+): Activity {
   if (detail.fastForward !== undefined) return { kind: "forward" };
   const deepest = detail.activePath[detail.activePath.length - 1];
   const node = deepest === undefined ? undefined : nodeAt(detail.instances, deepest.instanceId);
   const waiting = node?.status === "waiting_for_user" || asking;
   const going = detail.status === "running" || waiting;
-  const where = detail.activePath.map((step) => step.childKey ?? step.stateId.split("/").pop() ?? step.stateId).join(" → ");
+  const asked = detail.activePath.length === 0 && asking && askedIn !== undefined ? nodeAt(detail.instances, askedIn) : undefined;
+  const where =
+    asked !== undefined
+      ? (asked.stateId.split("/").pop() ?? asked.stateId)
+      : detail.activePath.map((step) => step.childKey ?? step.stateId.split("/").pop() ?? step.stateId).join(" → ");
   if (detail.status === "stopping") return { kind: "stopping", where };
   const listening = !waiting && detail.status === "running" && (detail.listening?.length ?? 0) > 0 && node?.operation?.status !== "running" && node?.status !== "waiting_for_user";
   if (listening) return { kind: "listening", listening: detail.listening! };
@@ -77,7 +90,12 @@ export function activityOf(detail: TaskDetail, asking: boolean, can: { rerun: bo
   return { kind: "stopped", where, tone: stopped.tone, said: stopped.said, resuming, verb: resuming ? stopped.verb : fallback.verb, hint: resuming ? stopped.hint : fallback.hint };
 }
 
-/** When the running run started — what the strip's counter counts from. */
-export function startedAtOf(detail: TaskDetail): number | undefined {
-  return detail.runs.find((run) => run.outcome === "running")?.startedAt;
+/**
+ * When the running run started — what the strip's counter counts from. A run the app closed under while
+ * it waited on the person (`asking`) still counts from its own start, as it did before the close.
+ */
+export function startedAtOf(detail: TaskDetail, asking = false): number | undefined {
+  const running = detail.runs.find((run) => run.outcome === "running")?.startedAt;
+  if (running !== undefined || !asking || detail.runs.length === 0) return running;
+  return Math.max(...detail.runs.map((run) => run.startedAt));
 }

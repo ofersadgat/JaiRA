@@ -42,7 +42,7 @@ import {
   type LoadedState,
   type WorkflowBundle,
 } from "@declarative-ai/hw";
-import { hostFunction, type ExecServices, type FunctionInputs, type MemoCache, type RecordRef } from "@declarative-ai/exec";
+import { hostFunction, type ExecServices, type FunctionInputs, type InlineFamily, type MemoCache, type PromptOp, type RecordRef } from "@declarative-ai/exec";
 import type { ExecPolicy, PermissionDecision } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import type { FetchText } from "@declarative-ai/llm";
@@ -141,6 +141,9 @@ import {
   jobOutput,
   SqliteMemoCache,
   SqliteSessionStore,
+  CHAT_SETTINGS,
+  DEFAULT_STALE_MS,
+  eventsTaskOf,
   messagesOfRecord,
   ownershipOf,
   projectSource,
@@ -330,6 +333,11 @@ import {
   callingCallOf,
   approvalCallEntries,
   approvalResultEntries,
+  unansweredAsksOf,
+  questionResultEntries,
+  rememberedAnswersOf,
+  approvalNote,
+  answersNote,
   captureNativeSession,
   foldIntoEntries,
   isEmptyCapture,
@@ -364,6 +372,8 @@ import {
   QuestionHub,
   type ApprovalRequest,
   type ApprovalAnsweredBy,
+  type ApprovalReach,
+  type ContinuationPorts,
   type ExecObserver,
   type FakeRule,
   type HubRequest,
@@ -541,7 +551,7 @@ import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
 import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
-import { ProjectSession, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
+import { ProjectSession, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
 import { EXECUTOR_TITLES } from "@jaira/shared";
 
@@ -566,6 +576,7 @@ import {
 } from "./hostModes";
 import type {
   ApprovalScope,
+  CommandApproval,
   BoardView,
   ComponentConfig,
   ConfigView,
@@ -1176,6 +1187,46 @@ function pendingQuestionOf(request: QuestionRequest, project: string): PendingQu
   };
 }
 
+/**
+ * The chat turn a cut record was, when it was one — what continuing it needs: the host it hangs off, its
+ * message index, the seat it holds, and the operation exactly as it was dispatched (the record's
+ * request, less what the store files beside it), so the re-dispatch IS the same call and the store
+ * reopens the same record.
+ */
+function chatTurnOf(request: JsonValue | undefined, store: SqliteSessionStore): RecoveredAsk["chat"] {
+  const ask = request as { scope?: { instanceId?: unknown; sequence?: unknown }; session?: { id?: unknown; seq?: unknown }; openingBy?: unknown } | undefined;
+  const instanceId = ask?.scope?.instanceId;
+  const index = ask?.scope?.sequence;
+  const seat = ask?.session;
+  if (typeof instanceId !== "string" || !isChatInstance(instanceId) || typeof index !== "number") return undefined;
+  if (typeof seat?.id !== "string" || typeof seat.seq !== "number") return undefined;
+  const { scope: _scope, session: _session, openingBy, [CHAT_SETTINGS]: settings, ...operation } = ask as Record<string, unknown>;
+  void _scope;
+  void _session;
+  return {
+    hostInstanceId: instanceId.slice(CHAT_INSTANCE_PREFIX.length),
+    index,
+    position: store.refAt({ id: seat.id, seq: seat.seq }),
+    operation: operation as unknown as PromptOp<InlineFamily>,
+    ...(openingBy === "host" || openingBy === "workflow" ? { openingBy } : {}),
+    ...(settings !== null && typeof settings === "object" && !Array.isArray(settings) ? { overrides: settings as ChatSettings } : {}),
+  };
+}
+
+/**
+ * Where a chat message comes from, when that is not simply the person typing it — never an IPC field.
+ *
+ *  - `by`: the app wrote it, on their behalf.
+ *  - `now`: send it whatever the account's limits say.
+ *  - `continuing`: it CONTINUES a turn the app closed under (`continueChatTurn`) — the turn's own
+ *    operation, message index and place, re-dispatched so the store reopens the turn's record.
+ */
+type ChatOrigin = {
+  by?: "host";
+  now?: boolean;
+  continuing?: { operation: PromptOp<InlineFamily>; index: number; position: string };
+};
+
 /** An approval as the renderer sees it (the hub's request, minus internals). */
 /**
  * The permission set behind an approval, as the answer menu needs it (decision 0007 §4): its name, and the
@@ -1781,10 +1832,12 @@ export class AppService {
         const session = this.sessions.get(key);
         if (session !== undefined) this.recordApprovalCall(session, request);
         this.publish({ type: "approval:requested", pending: pendingApprovalOf(request, this.refOf(key), this.sessions.get(key)?.project.paths) });
+        // The task is a run parked on a person now, and the sidebar counts it so (`listProjects`).
+        if (session !== undefined) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       },
-      onResolved: (requestId, decision, by) => {
+      onResolved: (requestId, decision, by, reach) => {
         const answered = this.sessions.get(key);
-        if (answered !== undefined) this.recordApprovalAnswer(answered, requestId, decision, by);
+        if (answered !== undefined) this.recordApprovalAnswer(answered, requestId, decision, by, reach);
         // The human's answer is the audit entry policy alone could not produce.
         const session = this.sessions.get(key);
         const run = session?.approvalRun.get(requestId);
@@ -1805,9 +1858,12 @@ export class AppService {
         }
         session?.approvalsSeen.delete(requestId);
         this.publish({ type: "approval:resolved", requestId, decision: decision.decision });
+        if (session !== undefined) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       },
-      // The same spelling the hub's own default uses, so ids are unchanged for anything reading them.
-      nextId: this.options.nextApprovalId ?? (() => `approval-${++this.approvalSeq}`),
+      // Stamped like a gate's, for the same reason: the request lives on in the record as the call
+      // `approve_<at>_<requestId>`, and a process numbering from one again would mint the id of a call an
+      // earlier one left there unanswered — and be taken for it.
+      nextId: this.options.nextApprovalId ?? (() => `approval-${this.interactionStamp}-${++this.approvalSeq}`),
     });
     // Mid-run questions (`AskUserQuestion`) — the third inbox channel. Same ownership discipline as
     // the other two: the owner is recorded at request so an answer can be routed by request id alone.
@@ -1818,12 +1874,18 @@ export class AppService {
         // An agent's AskUserQuestion is a question like any gate's: a fast-forward asks its conversation.
         const session = this.sessions.get(key);
         if (session !== undefined && request.taskId !== undefined) this.offerToControl(session, request.taskId, { kind: "question", request });
+        // Written down now, not on the next throttled flush: the question is the agent's own call in
+        // its record, and a record holding it unanswered is how the question outlives the app.
+        if (session !== undefined && request.taskId !== undefined) session.liveFlush.get(request.taskId)?.();
+        if (session !== undefined) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       },
       onResolved: (requestId) => {
         this.requestOwner.delete(requestId);
         this.publish({ type: "question:resolved", requestId });
+        const session = this.sessions.get(key);
+        if (session !== undefined) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       },
-      nextId: this.options.nextQuestionId ?? (() => `question-${++this.questionSeq}`),
+      nextId: this.options.nextQuestionId ?? (() => `question-${this.interactionStamp}-${++this.questionSeq}`),
     });
     /**
      * Transitions waiting on a gesture — the fourth channel, and the one with no dialog.
@@ -2007,6 +2069,8 @@ export class AppService {
   private readonly eventsSupervision = new Map<string, Promise<void>>();
   private eventsKick?: ReturnType<typeof setTimeout>;
   private readonly eventsRestart = new Map<string, ReturnType<typeof setTimeout>>();
+  /** Each session's pending look at the claims other processes hold on its tasks — see {@link watchClaims}. */
+  private readonly claimWatch = new Map<string, ReturnType<typeof setTimeout>>();
   /** What the events tasks have posted (`notify`), oldest first, the last {@link NOTICES_KEPT}. */
   private readonly postedNotices: EventsNotice[] = [];
 
@@ -3233,7 +3297,16 @@ export class AppService {
     session.resuming = this.resumeSuspended(session).then(() => this.finishOpenConnects(session));
     // Then its events task (decision 0010 §4) — after the resumes, which may already have resumed it.
     void session.resuming.then(() => this.superviseEvents(session));
-    void session.resuming.then(() => this.autoArchive(session));
+    // What the conversations the app closed under were left asking — read from their records once the
+    // suspended runs are back (a resumed run asks live), and before the archive rule, which leaves a
+    // task alone while it waits on the person.
+    void session.resuming.then(() => {
+      this.refreshRecoveredAsks(session);
+      this.autoArchive(session);
+      // A task still `running` under a claim this process does not hold is looked at again when that
+      // claim would have gone stale — not left `running` until the next open.
+      this.watchClaims(session);
+    });
     this.wakeSharedEvents();
     // A project brings its own config layer, so what was available a moment ago is not what is
     // available now: it can name different routes, different credentials, and different executors.
@@ -3371,14 +3444,14 @@ export class AppService {
    * Best-effort throughout, per the capture's own rule: a file that will not read leaves the record
    * exactly as the crash left it, which is still the streamed partial.
    */
-  private async recoverNativeSessions(session: ProjectSession): Promise<void> {
+  private async recoverNativeSessions(session: ProjectSession, tasks?: readonly string[]): Promise<void> {
     const { project } = session;
     let recoveredAny = false;
     // The interrupted tasks, and the tasks whose conversation lost a turn to the quit — see
     // `recoverUnsettledCalls`. The second is how a turn the app quit under gets back what the agent
     // went on to say after it: the process outlived the window and finished its answer into its own
     // file, which nothing else will ever read.
-    for (const taskId of new Set([...project.recovered, ...project.recoveredCalls])) {
+    for (const taskId of new Set(tasks ?? [...project.recovered, ...project.recoveredCalls])) {
       const store = sessionStoreFor(project);
       let rows: ReturnType<SqliteSessionStore["recoverable"]>;
       try {
@@ -3424,6 +3497,8 @@ export class AppService {
     // Only when something changed: the panels re-read on this, and an open that recovered nothing
     // must not make every viewer refetch to learn that.
     if (recoveredAny) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+    // An agent's own file can hold the question its stream never delivered before the process died.
+    if (recoveredAny) this.refreshRecoveredAsks(session);
   }
 
   /**
@@ -3625,6 +3700,8 @@ export class AppService {
     await session.resuming;
     clearTimeout(this.eventsRestart.get(key));
     this.eventsRestart.delete(key);
+    clearTimeout(this.claimWatch.get(key));
+    this.claimWatch.delete(key);
     await this.eventsSupervision.get(key);
     this.eventsSupervision.delete(key);
     await session.close();
@@ -4794,7 +4871,10 @@ export class AppService {
     this.sharedSession();
     const out: ProjectSummary[] = [];
     for (const session of this.sessions.values()) {
-      const tasks = taskSummaries(session.project);
+      // A task the app closed under while its agent asked is a run parked on a person, as it was before
+      // the close — counted so, not as the `canceled` its row says (`recoveredAsks`).
+      const asking = new Set([...session.recoveredAsks.values()].map((r) => r.taskId));
+      const tasks = taskSummaries(session.project).map((t) => (asking.has(t.taskId) ? { ...t, status: "running" as TaskStatus } : t));
       const statuses: Partial<Record<TaskStatus, number>> = {};
       for (const task of tasks) statuses[task.status] = (statuses[task.status] ?? 0) + 1;
       // Which of them are parked on a person. Read off the session's own hubs rather than projected
@@ -4811,6 +4891,7 @@ export class AppService {
       for (const request of [...session.approvals.list(), ...session.questions.list()]) {
         if (request.taskId !== undefined && running.has(request.taskId)) parked.add(request.taskId);
       }
+      for (const taskId of asking) if (running.has(taskId)) parked.add(taskId);
       const identity = session.kind === "user" ? this.repositoryOf(session.dir) : undefined;
       out.push({
         ...(identity !== undefined ? { identity } : {}),
@@ -5540,7 +5621,13 @@ export class AppService {
     // A run's calls are made with the WORKFLOW's words — a state's prompt, rendered — never with what somebody typed.
     // The limits board rides with the stores: every call below reports what it sends and every limit
     // reading it hears (`SessionStores.limits`).
-    const session = { ...sessionServicesFor({ inner: sessionStoreFor(project, { taskId }, "workflow") }), limits: this.limits.position };
+    const recordStore = sessionStoreFor(project, { taskId }, "workflow");
+    // A call this run continues — cut when the app closed, or by a stop — goes on from its own record.
+    const session = {
+      ...sessionServicesFor({ inner: recordStore }),
+      limits: this.limits.position,
+      continuation: this.continuationPorts(open, recordStore),
+    };
     // A delegated agent's record is its stream, and its stream is not its whole story: the agent's
     // own session file holds the context injections, `toolUseResult` records and line threading that
     // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
@@ -5579,6 +5666,14 @@ export class AppService {
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
     // task that can never touch a file, failing for a reason nothing on screen would explain.
     open.approvals.allow(taskId);
+    // A RESUME is the same run: what the person answered "for this run" is read back from the record,
+    // where it outlived the process that heard it. And whatever a cut conversation of this task was
+    // waiting on is the run's to ask again, live.
+    this.dropRecoveredAsks(open, (r) => r.taskId === taskId);
+    if (opts.loaded !== undefined) {
+      open.grantsRestored.delete(taskId);
+      this.restoreGrants(open, taskId);
+    }
     // Which state each instance is, so a permission function is told the state its call belongs to —
     // seeded from what the journal holds (a loaded run re-enters nothing it already entered), and kept
     // current as this run enters more (`persistence.record` below).
@@ -5817,6 +5912,9 @@ export class AppService {
         }
         open.fakeRules.delete(taskId);
         open.live.delete(taskId);
+        // An answer given ahead of a call this run never made again has nothing left to answer.
+        open.approvals.unseed(taskId);
+        open.questions.unseed(taskId);
         open.liveTurns.drop(taskId);
         liveFlush.dispose();
         open.liveFlush.delete(taskId);
@@ -6228,7 +6326,7 @@ export class AppService {
   async sendChatMessage(
     request: typeof AppService.chatSend,
     /** Who wrote the message, when the person did not: the app, sending it on their behalf. Never an IPC field. */
-    origin: { by?: "host"; now?: boolean } = {},
+    origin: ChatOrigin = {},
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
     const open = this.session(request.project);
@@ -6262,7 +6360,7 @@ export class AppService {
     request: typeof AppService.chatSend,
     /** The typed turn ahead of this one, if there is one — resolves when it has landed. */
     settledAhead?: Promise<void>,
-    origin: { by?: "host"; now?: boolean } = {},
+    origin: ChatOrigin = {},
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     const project = open.project;
     let context = this.chatContextOf(request.taskId, request.instanceId, request.project, request.branchAt);
@@ -6274,7 +6372,7 @@ export class AppService {
     // when they cannot, which is why this is a branch rather than an attempt.
     // An EDIT is never steering. Steering joins the turn in flight — which is the turn being
     // replaced, or one after it — and "say this instead" is the opposite of "also say this".
-    const steer = request.branchAt === undefined ? this.steerOf(open, context.position) : undefined;
+    const steer = request.branchAt === undefined && origin.continuing === undefined ? this.steerOf(open, context.position) : undefined;
     if (steer !== undefined) {
       await steer.send(request.message);
       return { instanceId: context.hostInstanceId, index: context.index, steered: true };
@@ -6377,8 +6475,9 @@ export class AppService {
     const workspaceRoot =
       recordedWorktree !== undefined && existsSync(recordedWorktree) ? recordedWorktree : project.paths.projectDir;
     // A message the app wrote for the person is marked so on the record's entry — see `MessageAuthor`.
-    const liveStore = sessionStoreFor(project, { taskId: request.taskId }, origin.by);
-    const stores = { ...sessionServicesFor({ inner: liveStore }), limits: this.limits.position };
+    // And the settings it was sent with, beside it — a turn the app closes under is continued with them.
+    const liveStore = sessionStoreFor(project, { taskId: request.taskId }, origin.by, (request.overrides ?? {}) as unknown as JsonValue);
+    const stores = { ...sessionServicesFor({ inner: liveStore }), limits: this.limits.position, continuation: this.continuationPorts(open, liveStore) };
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
     stores.records = withNativeCapture(stores.records, {
@@ -6564,7 +6663,14 @@ export class AppService {
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
     });
 
-    const { operation } = chatOperationOf(plan, { message: request.message, session: { id: context.position } });
+    // A CONTINUATION is the cut turn's own message, at its own place — the same call, so its record is
+    // reopened and carried on (`withContinuation`); the note it continues with is the layer's to send.
+    const { operation } =
+      origin.continuing !== undefined ? { operation: origin.continuing.operation } : chatOperationOf(plan, { message: request.message, session: { id: context.position } });
+    // A new message moves the conversation past whatever a cut turn of it was waiting on — the person
+    // went on instead of answering — and the "for this run" answers it was given come back with it.
+    if (origin.continuing === undefined) this.dropRecoveredAsks(open, (r) => r.taskId === request.taskId);
+    this.restoreGrants(open, request.taskId);
     const recorder = project.events.recorder(request.taskId);
     /** Push ordering for this turn's journal events — the renderer's own `seq`, as a run supplies. */
     let chatSeq = 0;
@@ -6659,10 +6765,11 @@ export class AppService {
           parentInstanceId: context.hostInstanceId,
           stateId: context.stateId,
           childKey: CHAT_CHILD_KEY,
-          index: context.index,
+          index: origin.continuing?.index ?? context.index,
         },
         operation,
-        position: context.position,
+        position: origin.continuing?.position ?? context.position,
+        ...(origin.continuing !== undefined ? { continuing: true } : {}),
       },
       ),
     );
@@ -6672,7 +6779,7 @@ export class AppService {
     this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
     // Refused because the account ran out: the message is kept with "Try again at …", which starts the
     // way the `limits.retryOnReset` setting says.
-    if (result.failureCode === USAGE_LIMIT_CODE && request.branchAt === undefined) {
+    if (result.failureCode === USAGE_LIMIT_CODE && request.branchAt === undefined && origin.continuing === undefined) {
       const account = heldAccount ?? "claude";
       const until =
         result.retryAfterMs !== undefined ? new Date(Date.now() + result.retryAfterMs).toISOString() : spentUntil(this.limits.board.state(account).reading);
@@ -6682,6 +6789,7 @@ export class AppService {
         taskId: request.taskId,
         instanceId: request.instanceId,
         message: request.message,
+        ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
         account,
         until,
         state: "refused",
@@ -6693,7 +6801,7 @@ export class AppService {
     // Refused because the key's balance is empty: kept as refused, with no "Try again at …" — there
     // is no reset — and the account marked, so the composer turns red until a call goes through.
     const creditAccount = result.failureRoute !== undefined ? accountOfRoute(result.failureRoute) : heldAccount;
-    if (result.failureCode === CREDIT_EXHAUSTED_CODE && request.branchAt === undefined && creditAccount !== undefined) {
+    if (result.failureCode === CREDIT_EXHAUSTED_CODE && request.branchAt === undefined && origin.continuing === undefined && creditAccount !== undefined) {
       this.limits.creditRefused(creditAccount);
       const waiting = this.waiting.add({
         kind: "message",
@@ -6701,6 +6809,7 @@ export class AppService {
         taskId: request.taskId,
         instanceId: request.instanceId,
         message: request.message,
+        ...(request.overrides !== undefined ? { overrides: request.overrides } : {}),
         account: creditAccount,
         until: null,
         state: "refused",
@@ -6737,7 +6846,10 @@ export class AppService {
   /** A waiting message's time has come (or "Send now anyway" was pressed): send it as typed. */
   private async sendWaitingMessage(item: WaitingItem): Promise<void> {
     if (item.instanceId === undefined || item.message === undefined) return;
-    await this.sendChatMessage({ taskId: item.taskId, instanceId: item.instanceId, message: item.message, project: item.project }, { now: true });
+    await this.sendChatMessage(
+      { taskId: item.taskId, instanceId: item.instanceId, message: item.message, project: item.project, ...(item.overrides !== undefined ? { overrides: item.overrides } : {}) },
+      { now: true },
+    );
   }
 
   /** What the limits board knows — see `limits:read`. */
@@ -6795,6 +6907,8 @@ export class AppService {
       if (!open.chatTurns.has(taskId)) {
         open.liveTurns.clear(taskId);
         open.liveFlush.delete(taskId);
+        open.approvals.unseed(taskId);
+        open.questions.unseed(taskId);
         this.publishFor(open, { type: "chat:turnEnded", taskId });
       }
     }
@@ -6821,6 +6935,10 @@ export class AppService {
     if (turns === undefined || turns.size === 0) return { canceled: false };
     // What it had said by now, written down BEFORE it is stopped — while the record is still open and
     // a partial can still reach it. See `ProjectSession.liveFlush`.
+    // What it was asking, answered as stopped — in the record, so the next open does not ask it again —
+    // without shutting the gate: the next message must be free to ask.
+    open.approvals.denyFor(request.taskId);
+    this.stopQuestions(open, request.taskId);
     open.liveFlush.get(request.taskId)?.();
     for (const abort of turns) abort.abort();
     open.chatTurns.delete(request.taskId);
@@ -7671,10 +7789,13 @@ export class AppService {
    */
   private activityOf(open: ProjectSession, taskId: string): TaskActivity {
     const row = open.project.runtime.get(taskId);
-    if (row?.status === "completed") return "finished";
-    const held = open.live.has(taskId) || open.project.jobs.liveRunJob(taskId, Date.now()) !== undefined || row?.status === "running" || row?.status === "stopping";
+    // Waiting on the person for what a conversation the app closed under was asking: not stopped.
+    const recovered = [...open.recoveredAsks.values()].some((r) => r.taskId === taskId);
+    if (row?.status === "completed" && !recovered) return "finished";
+    const held = recovered || open.live.has(taskId) || open.project.jobs.liveRunJob(taskId, Date.now()) !== undefined || row?.status === "running" || row?.status === "stopping";
     if (!held) return "stopped";
     const asking =
+      recovered ||
       open.hub.list().some((request) => (request.taskId ?? open.requestTask.get(request.requestId)) === taskId) ||
       open.questions.list().some((question) => question.taskId === taskId) ||
       open.approvals.list().some((approval) => approval.taskId === taskId) ||
@@ -8646,6 +8767,8 @@ export class AppService {
     const now = Date.now();
     const changed = request.taskIds.filter((taskId) => (request.undo === true ? session.project.runtime.unarchive(taskId, now) : session.project.runtime.archive(taskId, now)));
     if (changed.length > 0) {
+      // An archived task waits on nobody; an unarchived one is waiting again on whatever it was.
+      this.refreshRecoveredAsks(session);
       this.log({ level: "info", source: "run", message: `${request.undo === true ? "unarchived" : "archived"} ${changed.join(", ")}`, project: session.key });
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
       this.publishFor(session, { type: "store:invalidate", scope: "board" });
@@ -8662,7 +8785,8 @@ export class AppService {
    */
   autoArchive(session: ProjectSession, nowMs = Date.now()): string[] {
     if (this.closed || session.closing) return [];
-    const archived = autoArchive(session.project, session.project.config.archive, nowMs);
+    const waiting = new Set([...session.recoveredAsks.values()].map((r) => r.taskId));
+    const archived = autoArchive(session.project, session.project.config.archive, nowMs, waiting);
     if (archived.length > 0) {
       this.log({ level: "info", source: "run", message: `archived ${archived.length} finished task(s) by the archive rule: ${archived.join(", ")}`, project: session.key });
       this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
@@ -8758,8 +8882,9 @@ export class AppService {
       // the next, is refused, and winds down on its own: the cheapest boundary a stop has, and the
       // only one that works for a transport with no interrupt at all.
       session.approvals.stop(taskId);
-      // And so does a parked question — dismissed, not errored: nobody is going to answer it.
-      session.questions.dismissFor(taskId);
+      // And so does a parked question — answered as stopped in the record, then dismissed: nobody is
+      // going to answer it, and the next open must not ask it again.
+      this.stopQuestions(session, taskId);
       // A stopped task waits on nothing from the forge either. (A SHUTDOWN is different and leaves the
       // rows awaited — the question is still open; this is a person saying stop.)
       session.project.remotes.stopAwaiting(taskId);
@@ -8787,6 +8912,8 @@ export class AppService {
       // `canceled` — so the status transition is a no-op and the offer would be the only thing left,
       // which is a question about a task the person has just said they are done with.
       session.project.interactions.clearTask(taskId);
+      // And what a cut conversation of it was left asking: answered as stopped, in the record.
+      this.stopRecoveredAsks(session, taskId);
       // The same for the forge: a cancelled task waits on nothing, so its requests stop being polled.
       // The merge request itself is left as it is — closing it is the workflow's or the person's to do.
       session.project.remotes.stopAwaiting(taskId);
@@ -8826,7 +8953,11 @@ export class AppService {
     // Every session's, not the focused one's: an approval names its own request id, and a run in
     // another project parked on a tool call is still waiting for the same person.
     const local = [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir, s.project.paths)));
-    return [...local, ...(this.federation.pendingOf("approval") as unknown as PendingApproval[])];
+    // And what a conversation cut off by the app closing was left waiting on — found in its record.
+    const recovered = [...this.sessions.values()].flatMap((s) =>
+      [...s.recoveredAsks.values()].filter((r) => r.ask.kind === "approval").map((r) => this.pendingOfRecovered(s, r) as PendingApproval),
+    );
+    return [...local, ...recovered, ...(this.federation.pendingOf("approval") as unknown as PendingApproval[])];
   }
 
   /**
@@ -8850,19 +8981,17 @@ export class AppService {
     // answering it against the wrong session would deny a call nobody asked about while the one that
     // is actually parked waits forever.
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    const recovered = owner?.recoveredAsks.get(requestId);
+    if (owner !== undefined && recovered !== undefined && recovered.ask.kind === "approval") {
+      const parts = recovered.ask.request.parts as unknown as CommandApproval | undefined;
+      if (addTo !== undefined) remember = this.addToPermissionSet(owner, parts, decision, remember, addTo);
+      this.answerRecoveredAsk(owner, recovered, { kind: "approval", decision, scope, ...(remember !== undefined ? { remember } : {}) });
+      return { requestId };
+    }
     if (owner !== undefined && addTo !== undefined) {
       const request = owner.approvals.list().find((r) => r.requestId === requestId);
       if (request === undefined) throw this.refusal("run", `no pending approval '${requestId}'`);
-      this.writable(addTo);
-      if (request.parts === undefined) throw this.refusal("file", "this request is not a shell line, so there is no part of it to add to a permission set");
-      const widths = chosenWidths(request.parts, remember ?? []);
-      const entries: PermissionSetAddition = entriesToRemember(request.parts, decision, (part) => part.widths.find((w) => widths.includes(w))) as PermissionSetAddition;
-      try {
-        addToPermissionSet(owner.project.paths, request.parts.permissionSet, addTo, entries);
-      } catch (e) {
-        throw this.refusal("file", (e as Error).message);
-      }
-      remember = widths;
+      remember = this.addToPermissionSet(owner, request.parts, decision, remember, addTo);
     }
     if (owner === undefined || !owner.approvals.decide(requestId, decision, scope, remember)) {
       throw this.refusal("run", `no pending approval '${requestId}'`);
@@ -8870,10 +8999,37 @@ export class AppService {
     return { requestId };
   }
 
+  /**
+   * "Add to the permission set" (decision 0007 §4): the asking parts, at the widths `remember` names,
+   * written into the permission set file that asked, in that layer — refusing the submit when the write
+   * fails, so the question stays where it was. Answers the widths the run remembers as well.
+   */
+  private addToPermissionSet(
+    owner: ProjectSession,
+    parts: CommandApproval | undefined,
+    decision: "allow" | "deny",
+    remember: readonly string[] | undefined,
+    addTo: WorkflowLayer,
+  ): string[] {
+    this.writable(addTo);
+    if (parts === undefined) throw this.refusal("file", "this request is not a shell line, so there is no part of it to add to a permission set");
+    const widths = chosenWidths(parts, remember ?? []);
+    const entries: PermissionSetAddition = entriesToRemember(parts, decision, (part) => part.widths.find((w) => widths.includes(w))) as PermissionSetAddition;
+    try {
+      addToPermissionSet(owner.project.paths, parts.permissionSet, addTo, entries);
+    } catch (e) {
+      throw this.refusal("file", (e as Error).message);
+    }
+    return widths;
+  }
+
   /** Mid-run questions awaiting the person — `AskUserQuestion`, parked by a running agent. */
   pendingQuestions(): PendingQuestion[] {
     const local = [...this.sessions.values()].flatMap((s) => s.questions.list().map((r) => pendingQuestionOf(r, s.dir)));
-    return [...local, ...(this.federation.pendingOf("question") as unknown as PendingQuestion[])];
+    const recovered = [...this.sessions.values()].flatMap((s) =>
+      [...s.recoveredAsks.values()].filter((r) => r.ask.kind === "question").map((r) => this.pendingOfRecovered(s, r) as PendingQuestion),
+    );
+    return [...local, ...recovered, ...(this.federation.pendingOf("question") as unknown as PendingQuestion[])];
   }
 
   /**
@@ -8882,6 +9038,11 @@ export class AppService {
    */
   submitQuestion(requestId: string, answers?: Record<string, string | string[]>): { requestId: string } {
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    const recovered = owner?.recoveredAsks.get(requestId);
+    if (owner !== undefined && recovered !== undefined && recovered.ask.kind === "question") {
+      this.answerRecoveredAsk(owner, recovered, { kind: "question", ...(answers !== undefined ? { answers } : {}) });
+      return { requestId };
+    }
     if (owner === undefined || !owner.questions.answer(requestId, answers)) {
       throw this.refusal("run", `no pending question '${requestId}'`);
     }
@@ -9210,10 +9371,13 @@ export class AppService {
     if (taskId === undefined) return;
     const snap = session.liveTurns.snapshot(taskId);
     const calledBy = snap !== null ? callingCallOf(snap.entries, request.input) : undefined;
-    // Unique across the conversation, not the process: request ids count from one in every process,
-    // and a conversation outlives them.
+    // Unique across the conversation, not the process: a conversation outlives the process that asked,
+    // and the request id is stamped with that process's start.
     const callId = `approve_${request.at.toString(36)}_${request.requestId}`;
     session.approvalCalls.set(request.requestId, { callId, ...(calledBy !== undefined ? { calledBy } : {}), taskId, at: request.at });
+    // The WHOLE request: a question the app closes under is found again in the record and put to the
+    // person from it (`recoveredAsksOf`), so what the prompt draws and what a call made again is matched
+    // by have to be here. The tool's input only when the call it belongs to is not beside it.
     const { live, record } = approvalCallEntries(
       callId,
       calledBy,
@@ -9222,19 +9386,36 @@ export class AppService {
         ...(request.command !== undefined ? { command: request.command } : {}),
         ...(request.reason !== undefined ? { reason: request.reason } : {}),
         ...(request.asker !== undefined ? { asker: request.asker } : {}),
+        ...(request.parts !== undefined ? { parts: request.parts as unknown as JsonValue } : {}),
+        ...(calledBy === undefined ? { input: request.input as JsonValue } : {}),
+        ...(request.instanceId !== undefined ? { instanceId: request.instanceId } : {}),
       },
       request.at,
     );
     this.hostCall(session, taskId, live, record, request.at);
   }
 
-  /** Its result — who answered, how, and how long the call waited — beside it, the same two ways. */
-  private recordApprovalAnswer(session: ProjectSession, requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy): void {
+  /**
+   * Its result — who answered, how far the answer reached, and how long the call waited — beside it,
+   * the same two ways.
+   *
+   * Nothing is written when the app CLOSED under it: closing is not an answer. The call stays in the
+   * record without a result, which is what a question still waiting looks like, and the next open puts
+   * it to the person again.
+   */
+  private recordApprovalAnswer(session: ProjectSession, requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy, reach: ApprovalReach): void {
     const call = session.approvalCalls.get(requestId);
     if (call === undefined) return;
     session.approvalCalls.delete(requestId);
+    if (by === "closed") return;
     const at = Date.now();
-    const answer = { decision: decision.decision, scope: decision.scope, by, waitedMs: Math.max(0, at - call.at) };
+    const answer = {
+      decision: decision.decision,
+      scope: reach.scope,
+      ...(reach.remember !== undefined ? { remember: [...reach.remember] } : {}),
+      by,
+      waitedMs: Math.max(0, at - call.at),
+    };
     const { live, record } = approvalResultEntries(call.callId, call.calledBy, answer, at);
     this.hostCall(session, call.taskId, live, record, at);
   }
@@ -9264,6 +9445,22 @@ export class AppService {
     session.liveFlush.get(taskId)?.();
   }
 
+  /**
+   * How a cut call continues from its own record (`withContinuation`): read through the store that
+   * reopened it, with the words the person's answers since then made — taken once, by the record.
+   */
+  private continuationPorts(open: ProjectSession, store: ReturnType<typeof sessionStoreFor>): ContinuationPorts {
+    return {
+      continuationAt: (at) => store.continuationAt(at),
+      noteContinuation: (recordId, text) => store.noteContinuation(recordId, text),
+      noteFor: (recordId) => {
+        const note = open.continuationNotes.get(recordId);
+        open.continuationNotes.delete(recordId);
+        return note;
+      },
+    };
+  }
+
   /** A record store that folds this task's waiting host calls into the record of the call that made them. */
   private withHostCallsOf<S extends Parameters<typeof withHostCalls>[0]>(open: ProjectSession, taskId: string, records: S): S {
     return withHostCalls(
@@ -9275,6 +9472,304 @@ export class AppService {
       },
       (left) => open.hostCalls.set(taskId, [...left, ...(open.hostCalls.get(taskId) ?? [])]),
     ) as S;
+  }
+
+  /**
+   * Tasks `running` under a claim this process does not hold — another process's, or one whose process
+   * could not be judged dead at the open (another host, no pid: `JobStore.deadOwners`) — looked at again
+   * when the claim's heartbeat would have gone stale.
+   *
+   * A claim still beating is a live process, and is looked at again after that. One gone stale was
+   * abandoned, and its task is recovered here exactly as the next open would recover it: settled
+   * interrupted, the agent's own session file folded into its record, and what it was asking offered.
+   * Before this, nothing looked again: a task an open found claimed stayed `running` with nothing
+   * running until the project was opened again.
+   */
+  private watchClaims(session: ProjectSession): void {
+    clearTimeout(this.claimWatch.get(session.key));
+    this.claimWatch.delete(session.key);
+    if (this.closed || session.closing || this.sessions.get(session.key) !== session) return;
+    const project = session.project;
+    const now = Date.now();
+    const isLive = (taskId: string): boolean => project.jobs.liveRunJob(taskId, now) !== undefined;
+    let next: number | undefined;
+    const recovered: string[] = [];
+    // The events task has a supervisor of its own that does this and then resumes it (`EventsSupervisor`).
+    const events = eventsTaskOf(project)?.id;
+    for (const row of project.runtime.list()) {
+      if (row.status !== "running" || session.live.has(row.taskId) || row.taskId === events) continue;
+      const claim = project.jobs.liveRunJob(row.taskId, now);
+      if (claim === undefined) {
+        recovered.push(...project.runtime.recoverInterrupted(now, isLive, row.taskId));
+        continue;
+      }
+      const due = claim.heartbeatAt + DEFAULT_STALE_MS + 250;
+      next = next === undefined ? due : Math.min(next, due);
+    }
+    if (recovered.length > 0) {
+      project.jobs.reapStale(now);
+      this.log({ level: "info", source: "project", message: `recovered ${recovered.join(", ")}: the process that was running ${recovered.length === 1 ? "it" : "them"} is gone`, project: session.key });
+      this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      this.publishFor(session, { type: "store:invalidate", scope: "board" });
+      void this.recoverNativeSessions(session, recovered).then(() => this.refreshRecoveredAsks(session));
+      this.refreshRecoveredAsks(session);
+    }
+    if (next === undefined) return;
+    const timer = setTimeout(() => this.watchClaims(session), Math.max(250, next - now));
+    timer.unref?.();
+    this.claimWatch.set(session.key, timer);
+  }
+
+  // --- questions a cut conversation was left asking ---------------------------------------------
+
+  /**
+   * Every question this project's conversations were cut off asking — a tool's permission, an agent's
+   * own question — read out of their records (the person, 2026-10-21: "permissions and permission
+   * requests should persist across restarts … the data should already support this as it should be in
+   * the record").
+   *
+   * A record cut while it waited holds the call it made to the person and no result for it, and nothing
+   * of its task began after it: that is a question still waiting. A task running now, or a chat turn in
+   * flight, is asking live — its questions are on the hubs, not here — and an archived task is waiting
+   * on nobody.
+   */
+  private recoveredAsksOf(session: ProjectSession): RecoveredAsk[] {
+    const project = session.project;
+    const out: RecoveredAsk[] = [];
+    for (const row of project.runtime.list()) {
+      if (row.archivedFrom !== undefined || session.live.has(row.taskId) || (session.chatTurns.get(row.taskId)?.size ?? 0) > 0) continue;
+      const store = sessionStoreFor(project, { taskId: row.taskId });
+      for (const cut of store.cutAtEnd()) {
+        const chat = chatTurnOf(cut.request, store);
+        const instanceId = (cut.request as { scope?: { instanceId?: unknown } } | undefined)?.scope?.instanceId;
+        for (const ask of unansweredAsksOf(cut.entries)) {
+          out.push({
+            id: ask.kind === "approval" ? ask.callId : `ask_${ask.toolUseId}`,
+            taskId: row.taskId,
+            recordId: cut.recordId,
+            ...(typeof instanceId === "string" ? { instanceId } : {}),
+            ask,
+            endedAt: cut.endedAt,
+            ...(chat !== undefined ? { chat } : {}),
+          });
+        }
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Read the waiting questions again and tell the renderer what changed: the ones found are asked, the
+   * ones gone are resolved. On open, once the suspended runs have resumed, and again when an agent's
+   * own session file has been folded into a record cut by a crash.
+   */
+  private refreshRecoveredAsks(session: ProjectSession): void {
+    if (this.sessions.get(session.key) !== session) return;
+    let found: RecoveredAsk[];
+    try {
+      found = this.recoveredAsksOf(session);
+    } catch (e) {
+      this.log({ level: "warn", source: "run", message: `could not read what the project's conversations were waiting on: ${(e as Error).message}`, project: session.key, ...stackDetail(e) });
+      return;
+    }
+    const ids = new Set(found.map((r) => r.id));
+    this.dropRecoveredAsks(session, (r) => !ids.has(r.id));
+    let added = false;
+    for (const recovered of found) {
+      if (session.recoveredAsks.has(recovered.id)) continue;
+      added = true;
+      session.recoveredAsks.set(recovered.id, recovered);
+      this.requestOwner.set(recovered.id, session.key);
+      if (recovered.ask.kind === "approval") {
+        this.publish({ type: "approval:requested", pending: this.pendingOfRecovered(session, recovered) as PendingApproval });
+      } else {
+        this.publish({ type: "question:requested", pending: this.pendingOfRecovered(session, recovered) as PendingQuestion });
+      }
+    }
+    // The task lists and the sidebar's counts read waiting tasks from these, so they are read again.
+    if (added) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+  }
+
+  /** Forget waiting questions — answered, or overtaken by the task moving on — and tell the renderer. */
+  private dropRecoveredAsks(session: ProjectSession, which: (recovered: RecoveredAsk) => boolean): void {
+    let dropped = false;
+    for (const recovered of [...session.recoveredAsks.values()]) {
+      if (!which(recovered)) continue;
+      dropped = true;
+      session.recoveredAsks.delete(recovered.id);
+      this.requestOwner.delete(recovered.id);
+      if (recovered.ask.kind === "approval") this.publish({ type: "approval:resolved", requestId: recovered.id, decision: "deny" });
+      else this.publish({ type: "question:resolved", requestId: recovered.id });
+    }
+    if (dropped) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+  }
+
+  /** A waiting question, as the renderer draws one — the same shape a live one has. */
+  private pendingOfRecovered(session: ProjectSession, recovered: RecoveredAsk): PendingApproval | PendingQuestion {
+    const { ask } = recovered;
+    const project = this.refOf(session.key);
+    const at = ask.at ?? recovered.endedAt;
+    if (ask.kind === "approval") {
+      const parts = ask.request.parts as unknown as CommandApproval | undefined;
+      return {
+        requestId: recovered.id,
+        tool: ask.request.tool,
+        ...(ask.request.command !== undefined ? { command: ask.request.command } : {}),
+        ...(ask.request.reason !== undefined ? { reason: ask.request.reason } : {}),
+        ...(parts !== undefined ? { parts } : {}),
+        ...(parts?.permissionSet !== undefined ? { permissionSet: approvalPermissionSetOf(session.project.paths, parts.permissionSet) } : {}),
+        input: (ask.toolInput ?? {}) as Record<string, JsonValue>,
+        taskId: recovered.taskId,
+        ...(recovered.instanceId !== undefined ? { instanceId: recovered.instanceId } : {}),
+        ...(ask.request.asker !== undefined ? { asker: ask.request.asker } : {}),
+        recovered: true,
+        project,
+        at,
+      };
+    }
+    const questions = ((ask.input as { questions?: unknown } | null)?.questions ?? []) as PendingQuestion["questions"];
+    return {
+      requestId: recovered.id,
+      questions,
+      taskId: recovered.taskId,
+      ...(recovered.instanceId !== undefined ? { instanceId: recovered.instanceId } : {}),
+      toolCallId: ask.toolUseId,
+      recovered: true,
+      project,
+      at,
+    };
+  }
+
+  /**
+   * The person's answer to a question a cut conversation was waiting on: written into the record beside
+   * the question, given ahead of time to the call it answers (the agent, continued, asks again — and
+   * meets it), and then the cut call CONTINUED from its record, told what was answered.
+   *
+   * The continuation is started, not awaited: the answer is the person's act, and the conversation it
+   * sets going reports on itself. A continuation that cannot start says so in the log, and the task is
+   * left as it was — answered, and resumable.
+   */
+  private answerRecoveredAsk(
+    session: ProjectSession,
+    recovered: RecoveredAsk,
+    answer:
+      | { kind: "approval"; decision: "allow" | "deny"; scope: ApprovalScope; remember?: readonly string[] }
+      | { kind: "question"; answers?: Record<string, string | string[]> },
+  ): void {
+    const { taskId, recordId, ask } = recovered;
+    const store = sessionStoreFor(session.project, { taskId });
+    const at = Date.now();
+    let note: string;
+    if (ask.kind === "approval" && answer.kind === "approval") {
+      const reach: ApprovalReach = { scope: answer.scope, ...(answer.remember !== undefined ? { remember: [...answer.remember] } : {}) };
+      const { record } = approvalResultEntries(
+        ask.callId,
+        ask.calledBy,
+        { decision: answer.decision, scope: reach.scope, ...(reach.remember !== undefined ? { remember: [...reach.remember] } : {}), by: "person", waitedMs: Math.max(0, at - (ask.at ?? recovered.endedAt)) },
+        at,
+      );
+      if (!store.answerInRecord(recordId, ask.callId, record)) throw this.refusal("run", `the conversation no longer holds the request '${recovered.id}'`);
+      session.approvals.seed(taskId, { tool: ask.request.tool, input: ask.toolInput, decision: answer.decision, reach });
+      note = approvalNote(ask.request.tool, ask.request.command, answer.decision);
+    } else if (ask.kind === "question" && answer.kind === "question") {
+      const { record } = questionResultEntries(ask.toolUseId, answer.answers !== undefined ? { answers: answer.answers } : { leftToAgent: true }, at);
+      if (!store.answerInRecord(recordId, ask.toolUseId, record)) throw this.refusal("run", `the conversation no longer holds the question '${recovered.id}'`);
+      const questions = ((ask.input as { questions?: Array<{ question?: unknown }> } | null)?.questions ?? []).map((q) => String(q.question ?? ""));
+      session.questions.seed(taskId, questions, answer.answers);
+      note = answersNote(answer.answers);
+    } else {
+      throw this.refusal("run", `'${recovered.id}' is not that kind of request`);
+    }
+    // Everything this record was asking goes with it: the call continues, and whatever else it was
+    // waiting on it will ask again, live.
+    this.dropRecoveredAsks(session, (r) => r.recordId === recordId);
+    session.continuationNotes.set(recordId, note);
+    const started = recovered.chat !== undefined ? this.continueChatTurn(session, recovered, note) : this.resumeTask({ taskId, project: session.dir });
+    void started.catch((e: unknown) => {
+      session.continuationNotes.delete(recordId);
+      this.log({
+        level: "error",
+        source: "run",
+        message: `answered what ${taskId} was waiting on, but could not continue it: ${(e as Error).message}`,
+        project: session.key,
+        taskId,
+        ...stackDetail(e),
+      });
+    });
+  }
+
+  /**
+   * Continue a chat turn the app closed under: the same message at the same place — so the store reopens
+   * the turn's own record and the continuation layer carries it on — sent with the note.
+   */
+  private continueChatTurn(session: ProjectSession, recovered: RecoveredAsk, note: string): Promise<unknown> {
+    const chat = recovered.chat!;
+    // A scripted conversation goes on scripted (the same rules a run of the task was given).
+    const fake = session.fakeRules.get(recovered.taskId);
+    return this.sendChatMessage(
+      {
+        taskId: recovered.taskId,
+        instanceId: chat.hostInstanceId,
+        message: note,
+        project: session.dir,
+        // The settings the cut message was sent with — its tools, their modes, its model — not today's defaults.
+        ...(chat.overrides !== undefined ? { overrides: chat.overrides } : {}),
+        ...(fake !== undefined ? { fake } : {}),
+      },
+      { ...(chat.openingBy === "host" ? { by: "host" as const } : {}), now: true, continuing: { operation: chat.operation, index: chat.index, position: chat.position } },
+    );
+  }
+
+  /**
+   * Say no to what a task's cut conversations were waiting on, because the person stopped the task:
+   * written into the record as STOPPED, beside each question, so it is not asked again.
+   */
+  private stopRecoveredAsks(session: ProjectSession, taskId: string): void {
+    const at = Date.now();
+    for (const recovered of [...session.recoveredAsks.values()]) {
+      if (recovered.taskId !== taskId) continue;
+      const store = sessionStoreFor(session.project, { taskId });
+      const { ask } = recovered;
+      if (ask.kind === "approval") {
+        const { record } = approvalResultEntries(ask.callId, ask.calledBy, { decision: "deny", scope: "once", by: "stopped", waitedMs: Math.max(0, at - (ask.at ?? recovered.endedAt)) }, at);
+        store.answerInRecord(recovered.recordId, ask.callId, record);
+      } else {
+        store.answerInRecord(recovered.recordId, ask.toolUseId, questionResultEntries(ask.toolUseId, { stopped: true }, at).record);
+      }
+    }
+    this.dropRecoveredAsks(session, (r) => r.taskId === taskId);
+  }
+
+  /**
+   * The questions a task's agent is asking LIVE, answered as stopped — in the record, beside each, the
+   * way a stopped approval is — then dismissed. Without the record entry a stopped question would read,
+   * after the next restart, as one the app closed under, and be asked again.
+   */
+  private stopQuestions(session: ProjectSession, taskId: string): void {
+    const at = Date.now();
+    for (const request of session.questions.listFor(taskId)) {
+      if (request.toolCallId === undefined) continue;
+      const { live, record } = questionResultEntries(request.toolCallId, { stopped: true }, at);
+      this.hostCall(session, taskId, live, record, at);
+    }
+    session.questions.dismissFor(taskId);
+  }
+
+  /**
+   * Remember again what the person answered "for this run" in a task's conversations — read back from
+   * the record, once per process, when the task's work resumes here. The hub's memory of it went with
+   * the process that heard the answer.
+   */
+  private restoreGrants(session: ProjectSession, taskId: string): void {
+    if (session.grantsRestored.has(taskId)) return;
+    session.grantsRestored.add(taskId);
+    const answers = sessionStoreFor(session.project, { taskId })
+      .entriesMentioning("\"remember\"")
+      .flatMap((entries) => rememberedAnswersOf(entries));
+    session.approvals.rememberAgain(
+      taskId,
+      answers.map((a) => ({ parts: a.parts as unknown as CommandApproval, decision: a.decision, remember: a.remember })),
+    );
   }
 
   /**

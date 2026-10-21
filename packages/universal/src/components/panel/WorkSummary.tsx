@@ -367,6 +367,12 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
   );
 }
 
+/**
+ * Below this width the prompt under a row stands at the summary's edge (`afterRow`'s indent) rather than
+ * at the row's text: in a side panel the deeper indent left the prompt a column a word wide.
+ */
+const NARROW_SUMMARY = 520;
+
 /** The approval the step waits on, under its row. */
 function Ask({ children, afterRow }: { children: ReactNode; afterRow: boolean }): JSX.Element {
   const t = useTokens();
@@ -413,10 +419,15 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const took = whole.start === undefined ? undefined : (working ? now : (whole.end ?? whole.start)) - whole.start;
   const foot = useHoverFloat();
   const ask = useContext(ApprovalAskContext);
-  const askAt = working && ask !== undefined ? approvalCallIndex(entries, ask.pending.requestId) : -1;
+  // A request found in the record after the app closed under it is asked with nothing working: the
+  // agent that asked is gone until the answer continues it.
+  const askAt = ask !== undefined && (working || ask.pending.recovered === true) ? approvalCallIndex(entries, ask.pending.requestId) : -1;
+  // How wide the summary is drawn: a side panel is too narrow for the prompt to stand at a row's text.
+  const [width, setWidth] = useState<number | undefined>(undefined);
+  const narrow = width !== undefined && width < NARROW_SUMMARY;
   const prompt = (afterRow: boolean): ReactNode =>
     askAt >= 0 && ask !== undefined ? (
-      <Ask afterRow={afterRow}>
+      <Ask afterRow={afterRow || narrow}>
         <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} heading={false} />
       </Ask>
     ) : null;
@@ -425,7 +436,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const wash = t.mix(t.v("panel-2"), 55, "transparent");
   const footRadius = open ? (bare ? { borderTopLeftRadius: 8, borderTopRightRadius: 8, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 } : { borderRadius: 0 }) : bare ? { borderRadius: 8 } : { borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: 8, borderBottomRightRadius: 8 };
   return (
-    <View testID="work-summary" marginTop={6} marginHorizontal={-6} marginBottom={10} minWidth={0}>
+    <View testID="work-summary" marginTop={6} marginHorizontal={-6} marginBottom={10} minWidth={0} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       {bare ? null : (
         <View flexDirection="column" gap={2} paddingVertical={5} paddingHorizontal={6} borderTopLeftRadius={8} borderTopRightRadius={8} backgroundColor={wash as never} minWidth={0} {...(edge(t, { top: 1, right: 1, left: 1 }) as object)}>
           {phases.map((phase, n) => {

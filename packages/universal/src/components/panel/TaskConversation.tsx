@@ -44,7 +44,8 @@ export function TaskConversation({
       source={source}
       project={project}
       {...(gate !== undefined ? { gate, onGate } : {})}
-      asking={gate !== undefined}
+      // A gate, the agent's question and its approval each hold the run WAITING, as in the run view.
+      asking={gate !== undefined || source.approval !== undefined || source.question !== undefined}
       {...(focus !== undefined ? { focus } : {})}
       onRerun={onRerun}
       onResume={onResume}

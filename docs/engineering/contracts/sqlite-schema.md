@@ -129,6 +129,7 @@ Indexes `jobs_open (ended_at, heartbeat_at)`, `jobs_task (task_id, id)`, `jobs_o
 | `jobs.started_at`, `jobs.heartbeat_at` | INTEGER | yes | start and last heartbeat |
 | `jobs.cancel_requested_at`, `jobs.ended_at` | INTEGER | no | the cross-process cancel flag and the end |
 | `jobs.outcome` | TEXT | no | how the job ended, such as `exit:0`, `released` or `abandoned` |
+| `jobs.process_token`, `jobs.host_key` | TEXT | no | the process that made the row (one token per process) and the host and pid namespace it ran in — what lets an open know a claim's process is gone (migration 26) |
 | `job_output.id` | INTEGER, autoincrement | yes | row id |
 | `job_output.job_id`, `job_output.stream` | INTEGER, TEXT | yes | the job and `stdout` or `stderr` |
 | `job_output.seq` | INTEGER | yes | 0 for the head chunk, 1 for the tail chunk |

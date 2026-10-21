@@ -24,7 +24,7 @@ siblings: [engineering/units/project-store, engineering/units/task-lifecycle, en
 - `requestCancel(taskId, now)` stamps `cancel_requested_at` on the open run job that has none and says whether a row changed; `cancelRequested(jobId)` reads it.
 - `orphans(now)` lists open `process` jobs with a stale heartbeat, and `reapStale(now)` ends every stale open job with outcome `abandoned`. `live(now)` and `list(taskId)` serve `job:list`.
 
-`RunOwner` in `jobOwner.ts` is one claim. Constructing it claims the run with `process.pid` and a fresh `newOwnerToken()`, so a token names a claim and not a process. An `unref`'d interval calls `beat`, which heartbeats and, when `onCancelRequested` is set, polls the flag. `observer()` returns the `ExecObserver<number>` that records spawn, output and exit. `release(outcome)` stops the interval and calls `endOwner`.
+`RunOwner` in `jobOwner.ts` is one claim. Constructing it claims the run with `process.pid` and a fresh `newOwnerToken()`, so a token names a claim and not a process; every row is also stamped with `PROCESS_TOKEN` (one per process) and `HOST_KEY` (platform, host name and pid namespace). `deadOwners(now)` lists the owner tokens of fresh run claims made on this host by another process whose pid no longer runs (or is now this process's own), and `childrenOf(tokens)` their open children; the open ends those claims `abandoned` and reports the children as orphans before it recovers. An `unref`'d interval calls `beat`, which heartbeats and, when `onCancelRequested` is set, polls the flag. `observer()` returns the `ExecObserver<number>` that records spawn, output and exit. `release(outcome)` stops the interval and calls `endOwner`.
 
 `JobOutputSink` in `jobOutput.ts` keeps a head and a tail per job and stream, flushes on a debounce, and `end(jobId)` flushes and forgets one job. `jobOutput(db, {jobId, stream?, limit?})` reads the rows back.
 
@@ -57,7 +57,7 @@ It deliberately does not own:
 | # | Invariant | Asserted by |
 | --- | --- | --- |
 | 1 | A run claim reads live only while its heartbeat is inside the stale window, and a released claim never reads live | `jobs.test.ts` "reports a claim as live while it keeps beating", "treats a released claim as gone even within the window" |
-| 2 | Liveness keys on the owner token and never on the pid | `jobs.test.ts` "identifies an owner by token, not pid" |
+| 2 | Liveness keys on the owner token, and the pid only proves a claim dead: one made on this host, by another process, whose pid no longer runs | `jobs.test.ts` "identifies an owner by token, not pid", "is known dead at the next open, though its heartbeat is fresh — and its task recovered there", "is believed while its process runs, when it was made on another host, and when it is this process's own" |
 | 3 | A child is recorded under its run job with its command and pid, and closed with its exit | `jobs.test.ts` "records a spawn against the run that owns it, and closes it on exit" |
 | 4 | Releasing a claim closes every child it never saw exit, so a finished run leaves no orphan | `jobs.test.ts` "releasing an owner closes children it never saw exit"; `jobs.e2e.test.ts` "leaves no phantom orphans behind a clean run" |
 | 5 | An open child of a dead owner is reported once, at the open that then reaps it | `jobs.test.ts` "surfaces a child abandoned by a dead owner as an orphan"; `jobs.e2e.test.ts` "warns about a process a dead session left running" |
@@ -71,7 +71,7 @@ It deliberately does not own:
 
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
-| The owning process crashes | beats stop; the first open after the stale window recovers its task, reports its open children, then ends every job `abandoned` | kill the reported process by its pid | the CLI prints `warning: process left running by a previous session: <command> (pid <pid>)`; the app shows nothing |
+| The owning process crashes | beats stop; the next open on this host knows the claim dead by its pid and recovers its task at once, reporting its open children; an open that cannot judge it (another host, no pid) waits out the stale window, and the app looks again then (`watchClaims`) | kill the reported process by its pid | the CLI prints `warning: process left running by a previous session: <command> (pid <pid>)`; the app shows nothing |
 | The owner's event loop misses beats for longer than the window, under a debugger or a suspended machine | another process's open recovers the task and reaps the claim; `heartbeat` skips ended rows, so the claim never returns while the run goes on | none | the task reads interrupted while its run still writes, and it is startable elsewhere |
 | Two processes start one task | `claimRun` has no uniqueness; the guard is the CLI's `liveRunJob` check and `beginTaskRun` refusing a `running` status, and `liveRunJob` answers the newest open claim | none needed | refusal naming the other process or the status |
 | Another process opens the project between `beginTaskRun` committing `running` and the `RunOwner` insert | it finds no claim and recovers the task | none | the task reads interrupted while its run continues |

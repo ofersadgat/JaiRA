@@ -226,6 +226,13 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
      * flush, the settle — marks the same entry whichever store instance makes it.
      */
     private readonly openingBy?: OpeningAuthor,
+    /**
+     * The settings a chat message was sent with (the composer's choices — tools, their modes, the
+     * model), filed beside the request of every record this store opens (`chatSettings`). Part of the
+     * record because the operation does not carry them all, and a turn the app closed under is
+     * continued with exactly the settings it was sent with.
+     */
+    private readonly chatSettings?: JsonValue,
   ) {}
 
   // --- the file half ------------------------------------------------------------
@@ -405,10 +412,15 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // times exist exactly once, in the stream that measured them, and dropping them at the settle is
     // why a finished run's thinking rows had no "thought for 12 s" while a live one did. Times only:
     // the messages themselves still come from the authoritative result.
+    // A CONTINUATION settles as everything it said: what it said before it was cut, then what the
+    // provider reports of this attempt — whose request half is the note it was made with, already
+    // carried, so it is not written twice.
+    const carried = this.carriedOf(row.id);
+    const settledResult = carried !== undefined ? continuedResult(carried, settled.result as JsonValue) : (settled.result as JsonValue);
     const folded = withAuthors(
       error !== undefined
-        ? preservePartial(settled.result as JsonValue, settled.sessionOutcome, row.result_json, row.request_json)
-        : carryTurnTiming(settled.result as JsonValue, row.result_json),
+        ? preservePartial(settledResult, settled.sessionOutcome, row.result_json, row.request_json)
+        : carryTurnTiming(settledResult, row.result_json),
       row.request_json,
     );
     // The outcome's one earned case — a payload that is NOT a conversation — normalises into the
@@ -418,9 +430,16 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     // call. `projectValue` turns the sibling into entries at read, exactly as it did the old column.
     const reported = (settled.sessionOutcome as { messages?: unknown } | undefined)?.messages;
     const carriesConversation = (folded as { value?: { entries?: unknown } } | undefined)?.value?.entries !== undefined;
+    // A continuation whose executor REPORTS its turns rather than carrying them in its payload: the
+    // conversation is what it said before it was cut, then what it reports — less the note, already
+    // carried. As messages, the shape this case has always been stored in.
+    const conversation =
+      carried !== undefined && Array.isArray(reported)
+        ? [...messagesOfRecord({ value: { entries: carried } } as JsonValue), ...withoutLeadingNote(carried, reported as JsonValue[])]
+        : reported;
     const result =
       reported !== undefined && !carriesConversation
-        ? ({ ...((folded ?? {}) as object), messages: reported } as JsonValue)
+        ? ({ ...((folded ?? {}) as object), messages: conversation } as JsonValue)
         : folded;
     this.db
       .prepare(
@@ -711,6 +730,9 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       | { id: string; request_json: string | null }
       | undefined;
     if (row === undefined) return;
+    // A continuation's flush is what it says NOW, after what it said before it was cut.
+    const carried = this.carriedOf(row.id);
+    const written = carried !== undefined ? afterCarried(carried, value) : value;
     // The provider handle is stamped EARLY when the stream carried one — it rides nearly every
     // envelope, and waiting for the settle is why a crashed call used to have no handle to resume
     // or resync from. First writer wins (COALESCE on the existing value); the settle's own
@@ -723,7 +745,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         `UPDATE operation_records SET result_json = ?, provider_session_id = COALESCE(provider_session_id, ?)
           WHERE id = ? AND status = 'open'`,
       )
-      .run(JSON.stringify(withOpening(value, row.request_json)), providerSessionId ?? null, row.id);
+      .run(JSON.stringify(withOpening(written, row.request_json)), providerSessionId ?? null, row.id);
     // The session's own handle moves as early as the stream carries one, for the same reason the
     // record's does: a crashed call's conversation must still know its remote. Provider unknown
     // mid-stream; the settle's report fills it.
@@ -938,6 +960,86 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     this.logRecordRow(recordRowId);
   }
 
+  /**
+   * This task's records that were CUT — by the app closing, or a stop — and that nothing has begun
+   * after: where each of its conversations stood when it was last left. What a question still waiting
+   * when the app closed is found in (the service reads the asks out of `entries`).
+   *
+   * Only rows that mention an ask are read whole: the name of the call is in the column, and the rest
+   * of the task's records are history nobody is waiting on.
+   */
+  cutAtEnd(): Array<{ recordId: string; request: JsonValue | undefined; entries: JsonValue[]; endedAt: number }> {
+    const rows = this.db
+      .prepare(
+        `SELECT r.id, r.status, r.error_json, r.request_json, r.result_json, COALESCE(r.ended_at, r.started_at) AS ended
+           FROM operation_records r
+          WHERE r.task_id IS ? AND r.status IN ('interrupted', 'failed')
+            AND (r.result_json LIKE '%approve_tool_call%' OR r.result_json LIKE '%AskUserQuestion%')
+            AND NOT EXISTS (
+              SELECT 1 FROM operation_records l
+               WHERE l.task_id IS r.task_id AND l.id <> r.id AND l.started_at > COALESCE(r.ended_at, r.started_at))
+          ORDER BY r.started_at`,
+      )
+      .all(this.scope.taskId ?? null) as Array<{ id: string; status: string; error_json: string | null; request_json: string | null; result_json: string | null; ended: number }>;
+    const out: Array<{ recordId: string; request: JsonValue | undefined; entries: JsonValue[]; endedAt: number }> = [];
+    for (const row of rows) {
+      if (!wasCut(row.status, row.error_json) || row.result_json === null) continue;
+      let held: { value?: { entries?: unknown } };
+      try {
+        held = hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as typeof held;
+      } catch {
+        continue;
+      }
+      const entries = Array.isArray(held?.value?.entries) ? (held.value.entries as JsonValue[]) : [];
+      out.push({ recordId: row.id, request: parsed<JsonValue>(row.request_json), entries, endedAt: row.ended });
+    }
+    return out;
+  }
+
+  /**
+   * The entries of every record of this task whose payload mentions `text` — a cheap filter in the
+   * column before anything is parsed. Oldest first.
+   */
+  entriesMentioning(text: string): JsonValue[][] {
+    const rows = this.db
+      .prepare(`SELECT result_json FROM operation_records WHERE task_id IS ? AND instr(result_json, ?) > 0 ORDER BY started_at`)
+      .all(this.scope.taskId ?? null, text) as Array<{ result_json: string }>;
+    const out: JsonValue[][] = [];
+    for (const row of rows) {
+      try {
+        const held = hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as { value?: { entries?: unknown } };
+        if (Array.isArray(held?.value?.entries)) out.push(held.value.entries as JsonValue[]);
+      } catch {
+        // A malformed payload is a record to leave alone.
+      }
+    }
+    return out;
+  }
+
+  /**
+   * Write an entry into a record that is no longer being written, right after the entry holding the
+   * call `callId` it answers — the person's answer to a question the app closed under, put beside the
+   * question. `false` when the record, or the call in it, is not there.
+   */
+  answerInRecord(recordId: string, callId: string, entry: JsonValue): boolean {
+    const row = this.db.prepare(`SELECT result_json FROM operation_records WHERE id = ? AND status <> 'open'`).get(recordId) as
+      | { result_json: string | null }
+      | undefined;
+    if (row === undefined || row.result_json === null) return false;
+    const held = hydrate(this.db, JSON.parse(row.result_json) as JsonValue) as { value?: { entries?: unknown } };
+    const entries = Array.isArray(held?.value?.entries) ? [...(held.value.entries as JsonValue[])] : [];
+    const at = entries.findIndex((e) => {
+      const content = (e as { content?: unknown } | null)?.content;
+      return Array.isArray(content) && content.some((part) => (part as { type?: unknown; id?: unknown })?.type === "tool_use" && (part as { id?: unknown }).id === callId);
+    });
+    if (at < 0) return false;
+    entries.splice(at + 1, 0, entry);
+    const written = { ...(held as object), value: { ...((held.value ?? {}) as object), entries } };
+    this.db.prepare(`UPDATE operation_records SET result_json = ? WHERE id = ?`).run(JSON.stringify(dehydrate(this.db, written as JsonValue)), recordId);
+    this.logRecordRow(recordId);
+    return true;
+  }
+
   // --- Internals ---------------------------------------------------------------
 
   /**
@@ -971,6 +1073,7 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
     if (stub.scope !== undefined) ask["scope"] = stub.scope;
     // Who wrote the message it is made with, beside it — see `withAuthors`. Only on a request that has one.
     if (this.openingBy !== undefined && typeof ask["user"] === "string") ask[OPENING_BY] = this.openingBy;
+    if (this.chatSettings !== undefined) ask[CHAT_SETTINGS] = this.chatSettings;
     if (at !== undefined) {
       ask["session"] = {
         id: at.id,
@@ -999,13 +1102,25 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
       // ourselves read as a live competitor's claim, and the re-dispatch forked away from its own
       // conversation. Only a seat conflict with no row of our own is somebody else's seat.
       const existing = this.db
-        .prepare(`SELECT status FROM operation_records WHERE id = ?`)
-        .get(stub.id) as { status: string } | undefined;
+        .prepare(`SELECT status, error_json, result_json FROM operation_records WHERE id = ?`)
+        .get(stub.id) as { status: string; error_json: string | null; result_json: string | null } | undefined;
       if (existing === undefined && isSeatConflict(e)) throw e;
       if (existing === undefined || existing.status === "completed") {
         throw new Error(
           `record '${stub.id}' has already settled — an identical scoped request cannot be dispatched twice`,
         );
+      }
+      // A call that was CUT and had already said something CONTINUES: what it said is the start of what
+      // it will say, kept in front of everything written from here on (`carried`). It used to be kept
+      // only until the re-dispatch's first flush, which replaced it wholesale — so a resumed call both
+      // started over and lost the record of having started. A call that FAILED is a retry, not a
+      // continuation, and keeps the old rule.
+      const carried = wasCut(existing.status, existing.error_json) ? this.carriedFrom(existing.result_json) : undefined;
+      if (carried !== undefined) {
+        this.db
+          .prepare(`UPDATE operation_records SET status = 'open', ended_at = NULL, error_json = NULL, request_json = ?, result_json = ? WHERE id = ?`)
+          .run(request, JSON.stringify({ value: { entries: carried }, [CARRIED]: carried.length }), stub.id);
+        return true;
       }
       // Reopened, not re-inserted: the partial stays (it may be the only witness to turns already in
       // the remote stream), the error is cleared, and the original started_at keeps naming when this
@@ -1022,6 +1137,72 @@ export class SqliteSessionStore implements SessionStore<JsonValue>, RecordStore 
         .run(request, stub.id);
       return true;
     }
+  }
+
+  /**
+   * What a cut record had said, as the turns a continuation keeps: every entry it holds except the one
+   * that was being written when it was cut (`partial`) — or `undefined` when it had said nothing
+   * beyond the message it was made with, which leaves nothing to continue from.
+   */
+  private carriedFrom(resultJson: string | null): JsonValue[] | undefined {
+    if (resultJson === null) return undefined;
+    let held: { value?: { entries?: unknown } };
+    try {
+      held = hydrate(this.db, JSON.parse(resultJson) as JsonValue) as typeof held;
+    } catch {
+      return undefined;
+    }
+    const entries = Array.isArray(held?.value?.entries) ? (held.value.entries as JsonValue[]) : [];
+    const kept = entries.filter((e) => (e as { partial?: unknown } | null)?.partial !== true);
+    const said = kept.length > 1 || (kept.length === 1 && (kept[0] as { role?: unknown }).role !== "user");
+    return said ? kept : undefined;
+  }
+
+  /** The turns an OPEN record carries from its cut attempts, or `undefined` when it carries none. */
+  private carriedOf(recordId: string): JsonValue[] | undefined {
+    const row = this.db
+      .prepare(`SELECT json_extract(result_json, '$.${CARRIED}') AS n, result_json FROM operation_records WHERE id = ? AND status = 'open'`)
+      .get(recordId) as { n: number | null; result_json: string | null } | undefined;
+    if (row === undefined || typeof row.n !== "number" || row.result_json === null) return undefined;
+    const held = parsed<{ value?: { entries?: unknown } }>(row.result_json);
+    const entries = Array.isArray(held?.value?.entries) ? (held.value.entries as JsonValue[]) : [];
+    return entries.slice(0, row.n);
+  }
+
+  /**
+   * The cut call a dispatch at this seat is CONTINUING — what it said before it was cut, the turns of it
+   * a provider is replayed, and the provider conversation it ran in — or `undefined` for a dispatch
+   * that is not one. Asked by the continuation layer right after `append` reopened the record
+   * (`withContinuation`), before the call says anything.
+   */
+  continuationAt(at: { id: string; seq: number }): { recordId: string; entries: JsonValue[]; messages: JsonValue[]; providerSessionId?: string } | undefined {
+    const ref = this.recordAt(at);
+    if (ref === undefined) return undefined;
+    const entries = this.carriedOf(ref.id);
+    if (entries === undefined) return undefined;
+    const row = this.db.prepare(`SELECT provider_session_id FROM operation_records WHERE id = ?`).get(ref.id) as { provider_session_id: string | null } | undefined;
+    return {
+      recordId: ref.id,
+      entries,
+      messages: messagesOfRecord({ value: { entries } } as JsonValue),
+      ...(row !== undefined && row.provider_session_id !== null ? { providerSessionId: row.provider_session_id } : {}),
+    };
+  }
+
+  /**
+   * The message a continuation is made with, written into its record at once — after what the cut call
+   * had said, marked as JaiRA's words (`by: "host"`): the person did not type it. Part of what is
+   * carried from here on, so a continuation cut in its turn still says what it was asked.
+   */
+  noteContinuation(recordId: string, text: string, atMs: number = Date.now()): void {
+    const carried = this.carriedOf(recordId);
+    if (carried === undefined) return;
+    const note = { kind: "message", role: "user", content: text, provider: "unknown", by: "host", timestamp: new Date(atMs).toISOString(), timing: { at: atMs } } as JsonValue;
+    const entries = [...carried, note];
+    this.db
+      .prepare(`UPDATE operation_records SET result_json = ? WHERE id = ? AND status = 'open'`)
+      .run(JSON.stringify({ value: { entries }, [CARRIED]: entries.length }), recordId);
+    this.logRecordRow(recordId);
   }
 
   /** Walk the lineage, taking each ancestor's records below the cursor its child took. */
@@ -1475,6 +1656,51 @@ function carryTurnTiming(settledResult: JsonValue | undefined, existingJson: str
   return { ...(settledResult as object), value: { ...(settled.value as object), entries: merged } } as JsonValue;
 }
 
+/** Where a record value says how many of its entries a cut attempt of the call left — see `carriedFrom`. */
+const CARRIED = "carried";
+
+/**
+ * Was this row CUT — stopped, or left open by a process that died — rather than failed? Only a cut
+ * call continues; a failed one is retried from its question (`insertRecord`).
+ */
+function wasCut(status: string, errorJson: string | null): boolean {
+  if (status === "open" || status === "interrupted") return true;
+  if (status !== "failed") return false;
+  const classification = parsed<{ classification?: unknown }>(errorJson)?.classification;
+  return classification === "canceled" || classification === "interrupted";
+}
+
+/** Reported turns without the ones that only repeat what a continuation SENT — its note, and any system frame. */
+function withoutLeadingNote(carried: readonly JsonValue[], reported: readonly JsonValue[]): JsonValue[] {
+  return (continuedResult(carried, { value: { entries: [...reported] } } as JsonValue) as { value: { entries: JsonValue[] } }).value.entries.slice(carried.length);
+}
+
+/** A flushed partial, after the turns a continuation carries. */
+function afterCarried(carried: readonly JsonValue[], value: JsonValue): JsonValue {
+  const incoming = (value as { value?: { entries?: unknown } } | null)?.value?.entries;
+  const entries = [...carried, ...(Array.isArray(incoming) ? (incoming as JsonValue[]) : [])];
+  return { ...((value ?? {}) as object), value: { ...(((value as { value?: object } | null)?.value ?? {}) as object), entries }, [CARRIED]: carried.length } as JsonValue;
+}
+
+/**
+ * A continuation's settled result, after the turns it carries. The result opens with what this attempt
+ * SENT — the note it was made with (already the last carried turn) and any system frame — which is
+ * dropped rather than written twice.
+ */
+function continuedResult(carried: readonly JsonValue[], result: JsonValue | undefined): JsonValue | undefined {
+  const held = result as { value?: { entries?: unknown } } | undefined;
+  if (!Array.isArray(held?.value?.entries)) return result;
+  const lastSent = [...carried].reverse().find((e) => (e as { role?: unknown }).role === "user") as { content?: unknown } | undefined;
+  const note = textOfContent(lastSent?.content);
+  const entries = [...(held.value.entries as JsonValue[])];
+  while (entries.length > 0) {
+    const first = entries[0] as { role?: unknown; content?: unknown };
+    if (first.role === "system" || (first.role === "user" && note !== undefined && textOfContent(first.content) === note)) entries.shift();
+    else break;
+  }
+  return { ...(result as object), value: { ...(held.value as object), entries: [...carried, ...entries] } } as JsonValue;
+}
+
 function preservePartial(
   settledResult: JsonValue | undefined,
   sessionOutcome: { messages?: unknown } | undefined,
@@ -1533,6 +1759,9 @@ function withOpening(value: JsonValue, requestJson: string | null): JsonValue {
 
 /** Where a record's request says who wrote the message it was made with — see {@link withAuthors}. */
 const OPENING_BY = "openingBy";
+
+/** Where a chat record's request keeps the settings its message was sent with — see the store's `chatSettings`. */
+export const CHAT_SETTINGS = "chatSettings";
 
 /** The text of a message's content, however the provider shaped it. */
 function textOfContent(content: unknown): string | undefined {

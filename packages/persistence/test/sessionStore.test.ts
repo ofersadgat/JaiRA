@@ -1249,3 +1249,101 @@ describe("pruning conversations", () => {
     expect(db.prepare(`SELECT COUNT(*) AS n FROM sessions WHERE id = 'fresh'`).get()).toEqual({ n: 1 });
   });
 });
+
+/**
+ * A call that was CUT — the app closing, a stop — and is dispatched again goes ON from its own record
+ * (the person, 2026-10-21: the record is the call's state). What it said stays in front of everything
+ * the continuation writes, the note it continues with is written in at once as JaiRA's words, and the
+ * settle is everything: before, then after.
+ */
+describe("a cut call, continued from its own record", () => {
+  const op = { kind: "prompt", user: "do the thing" };
+  const shell = { kind: "message", role: "assistant", content: [{ type: "tool_use", id: "t1", name: "mcp__dai__shell", input: { command: "git push" } }], provider: "unknown" };
+  const asking = {
+    kind: "message",
+    role: "assistant",
+    calledBy: "t1",
+    content: [{ type: "tool_use", id: "approve_x_approval-1", name: "approve_tool_call", input: { tool: "shell", command: "git push" } }],
+    provider: "jaira",
+  };
+  const tail = { kind: "message", role: "assistant", content: [{ type: "text", text: "half a sen" }], partial: true, provider: "unknown" };
+
+  /** A call that said something, asked for permission, and was cut while it waited. */
+  async function cut(store: SqliteSessionStore, classification = "interrupted"): Promise<{ id: string; seq: number }> {
+    const at = (await store.resolve({ ref: "chat" })).at;
+    const ref = store.append({ id: "cut", source: op as never, session: at, startMs: 1 });
+    store.update(ref, { value: { value: { entries: [said("let me look"), shell, asking, tail] } }, providerSessionId: "OWN" });
+    store.finish(ref, { result: { error: { classification, reason: "the app was closed" } } as never });
+    return at;
+  }
+
+  const entriesOf = (id: string): Array<Record<string, unknown>> => {
+    const row = db.prepare(`SELECT result_json FROM operation_records WHERE id = ?`).get(id) as { result_json: string };
+    return (JSON.parse(row.result_json) as { value: { entries: Array<Record<string, unknown>> } }).value.entries;
+  };
+  const words = (id: string): string[] => entriesOf(id).map((e) => `${e["role"]}${e["by"] !== undefined ? `(${String(e["by"])})` : ""}: ${typeof e["content"] === "string" ? e["content"] : (e["content"] as Array<{ type: string; name?: string; text?: string }>).map((p) => p.name ?? p.text ?? p.type).join(",")}`);
+
+  it("is found waiting on the person, and takes the answer beside the question", async () => {
+    const store = new SqliteSessionStore(db, { taskId: "t-cut" });
+    await cut(store);
+    const [found] = store.cutAtEnd();
+    expect(found!.recordId).toBe("cut");
+    expect(words("cut")).toEqual(["user: do the thing", "assistant: let me look", "assistant: mcp__dai__shell", "assistant: approve_tool_call", "assistant: half a sen"]);
+    const answer = { kind: "message", role: "user", calledBy: "t1", content: [{ type: "tool_result", tool_use_id: "approve_x_approval-1", content: "allowed" }], provider: "jaira" };
+    expect(store.answerInRecord("cut", "approve_x_approval-1", answer as never)).toBe(true);
+    expect(words("cut").slice(3, 5)).toEqual(["assistant: approve_tool_call", "user: tool_result"]);
+    // Anything begun after it in the task means the conversation moved on.
+    const later = store.append({ id: "later", source: undefined as never, startMs: Date.now() + 10_000 });
+    store.finish(later, { sessionOutcome: { messages: [turn("moved on")] } });
+    expect(store.cutAtEnd()).toEqual([]);
+  });
+
+  it("keeps what it said in front of the note and of everything the continuation writes", async () => {
+    const store = new SqliteSessionStore(db, { taskId: "t-cut" });
+    const at = await cut(store);
+    store.append({ id: "cut", source: op as never, session: at, startMs: 2 });
+    // Reopened: the half-written tail is gone, everything finished stays, and the call's own handle is offered.
+    const continuing = store.continuationAt(at)!;
+    expect(continuing.recordId).toBe("cut");
+    expect(continuing.providerSessionId).toBe("OWN");
+    expect(continuing.messages.map((m) => (m as { role: string }).role)).toEqual(["user", "assistant", "assistant"]);
+
+    store.noteContinuation("cut", "they allowed it");
+    store.update({ id: "cut" }, { value: { value: { entries: [said("running it")] } } });
+    expect(words("cut")).toEqual(["user: do the thing", "assistant: let me look", "assistant: mcp__dai__shell", "assistant: approve_tool_call", "user(host): they allowed it", "assistant: running it"]);
+
+    // The settle opens with what it SENT — the note — which is carried already and not written twice.
+    store.finish({ id: "cut" }, { result: { value: { entries: [said("they allowed it", "user"), said("running it"), said("done")], finishReason: "stop" } } as never });
+    expect(words("cut")).toEqual([
+      "user: do the thing",
+      "assistant: let me look",
+      "assistant: mcp__dai__shell",
+      "assistant: approve_tool_call",
+      "user(host): they allowed it",
+      "assistant: running it",
+      "assistant: done",
+    ]);
+    const settled = db.prepare(`SELECT status, json_extract(result_json, '$.carried') AS carried FROM operation_records WHERE id = 'cut'`).get();
+    expect(settled).toEqual({ status: "completed", carried: null });
+  });
+
+  it("is continued whether its transport filed the cut as interrupted or as a canceled failure — and a real failure is retried", async () => {
+    const canceled = new SqliteSessionStore(db, { taskId: "t-canceled" });
+    const at = await cut(canceled, "canceled");
+    canceled.append({ id: "cut", source: op as never, session: at, startMs: 2 });
+    expect(canceled.continuationAt(at)).toBeDefined();
+
+    db.prepare(`DELETE FROM operation_records`).run();
+    const failed = new SqliteSessionStore(db, { taskId: "t-failed" });
+    const again = await cut(failed, "permanent");
+    failed.append({ id: "cut", source: op as never, session: again, startMs: 2 });
+    expect(failed.continuationAt(again)).toBeUndefined();
+  });
+
+  it("finds a task's records by what their payload mentions", async () => {
+    const store = new SqliteSessionStore(db, { taskId: "t-cut" });
+    await cut(store);
+    expect(store.entriesMentioning("approve_tool_call")).toHaveLength(1);
+    expect(store.entriesMentioning("nothing like this")).toEqual([]);
+  });
+});

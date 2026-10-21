@@ -5,7 +5,7 @@ import { boardCardOrderOf, pickCard, type BoardPick } from "@jaira/ui/boardModel
 import { openColumnMenu, openTaskMenu, type BoardMenuHost } from "@jaira/ui/boardMenus";
 import type { AskSpec } from "@jaira/ui/menuTypes";
 import { dragOffersOf, undoableOn } from "@jaira/ui/taskDrag";
-import { groupOf, groupProjects, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
+import { askingTasksOf, groupOf, groupProjects, markAsking, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
 import { Board, StickyScroll, type Mods, type StickyScrollValue } from "../components/Board";
 import { AskDialog } from "../components/files/AskDialog";
 import { ContextMenu, type MenuAt } from "../components/Menu";
@@ -77,7 +77,12 @@ export function BoardColumn(): JSX.Element {
   const namedProjects = useMemo(() => state.projects.map((p) => ({ ...p, label: groupOf(groups, p.project)?.label ?? p.label })), [state.projects, groups]);
   // One board per group, its workspaces merged by column (decision 0013 §4) — kept between draws, since
   // a merge or a queued mark makes new cards, and a card is drawn again only when it is a new one.
-  const merged = useMemo(() => new Map(groups.map((g) => [g.key, markQueued(mergeBoards(g, state.boards), state.queue)])), [groups, state.boards, state.queue]);
+  // And every card whose task waits on the person — a gate, an agent's approval or question — marked so.
+  const asking = useMemo(() => askingTasksOf(state.pending, state.approvals, state.questions), [state.pending, state.approvals, state.questions]);
+  const merged = useMemo(
+    () => new Map(groups.map((g) => [g.key, markAsking(markQueued(mergeBoards(g, state.boards), state.queue), asking)])),
+    [groups, state.boards, state.queue, asking],
+  );
   // What `track` reads: each group's top in the column's content, and how far the column is scrolled.
   const tops = useRef(new Map<string, number>());
   const scrolled = useRef(0);

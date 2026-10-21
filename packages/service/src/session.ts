@@ -20,8 +20,9 @@ import type { FSWatcher } from "node:fs";
 import type { DirectedTransitions } from "@declarative-ai/hw";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
-import type { ApprovalHub, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UserEventHub } from "@jaira/runtime";
-import type { SyncDirection, WorkflowLayer } from "@jaira/shared";
+import type { ApprovalHub, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UnansweredAsk, UserEventHub } from "@jaira/runtime";
+import type { InlineFamily, PromptOp } from "@declarative-ai/exec";
+import type { ChatSettings, SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
 import type { FastForwardRun } from "./fastForward";
 
@@ -131,6 +132,35 @@ export const SUSPENDED_FORWARDING = "suspended while running forward: the app cl
  * "Pause + update" (decision 0011 §4). The pause was only for the update, so the next open resumes it.
  */
 export const SUSPENDED_UPDATE = "suspended to install an update";
+
+/**
+ * How long a closing project waits for its stopped agents before letting go of what they were asking
+ * (see `ProjectSession.close`). A killed agent's call settles at once; this bounds only a transport that
+ * holds a tool call open past its own abort, which would otherwise hold the close forever.
+ */
+const ASK_RELEASE_MS = 2_000;
+
+/**
+ * A question a cut conversation was left asking, found in its record: the call it made to the person
+ * that has no result. Answering it writes the answer beside it and continues the cut call.
+ */
+export interface RecoveredAsk {
+  /** What the person answers it by: the `approve_tool_call` call's id, or `ask_<the agent's call id>`. */
+  id: string;
+  taskId: string;
+  /** The cut record it was asked in. */
+  recordId: string;
+  /** The instance whose call it was — a workflow instance, or a chat's (`chat:<host>`). */
+  instanceId?: string;
+  ask: UnansweredAsk;
+  /** When the record was cut — how long the question has been waiting is measured from its asking. */
+  endedAt: number;
+  /**
+   * The chat turn it was cut in, when it was one: what continuing it re-dispatches — the same message
+   * at the same place, so the store reopens the same record.
+   */
+  chat?: { hostInstanceId: string; index: number; position: string; operation: PromptOp<InlineFamily>; openingBy?: "host" | "workflow"; overrides?: ChatSettings };
+}
 
 export class ProjectSession {
   readonly key: string;
@@ -253,6 +283,18 @@ export class ProjectSession {
    */
   readonly approvalCalls = new Map<string, { callId: string; calledBy?: string; taskId: string; at: number }>();
   /**
+   * record id → the words a cut call is continued with: what the person answered, since the app closed
+   * under it, to what it was asking (`Service.answerRecoveredAsk`). Taken by the continuation layer.
+   */
+  readonly continuationNotes = new Map<string, string>();
+  /**
+   * Questions a cut conversation was left asking — a tool's permission, an agent's question — found in
+   * its record when the project opened, by the id the person answers them by. See `Service.recoveredAsksOf`.
+   */
+  readonly recoveredAsks = new Map<string, RecoveredAsk>();
+  /** Tasks whose "for this run" answers this process has read back from the record (`rememberAgain`). */
+  readonly grantsRestored = new Set<string>();
+  /**
    * The calls a TOOL made (`hostCalls.ts`), by task, in the record's own entry shape — waiting for the
    * record of the call that made them to settle, where `withHostCalls` folds each in after its caller.
    */
@@ -361,8 +403,11 @@ export class ProjectSession {
    * and the event hub's durable starts keeping what the watcher catches up on. An AGENT's
    * `wait_for_event` is not this: its turn is cut like any other work in flight.
    *
-   * A tool approval or an agent's question is NOT counted: the agent that asked is a process mid-turn,
-   * and a quit cuts that turn.
+   * A tool approval or an agent's question is NOT counted, and is not resumed on the next open: the
+   * agent that asked is a process mid-turn, and a quit cuts that turn. The question is not lost with it —
+   * it is in the record, unanswered — and the next open puts it to the person from there
+   * (`recoveredAsksOf`). Answering it is what continues the cut call, so the model call that costs
+   * money is made on the person's decision, not on the app opening.
    */
   parkedRuns(): Set<string> {
     const parked = new Set<string>();
@@ -391,10 +436,6 @@ export class ProjectSession {
     // closes; that is a fact about this process and not an answer to the question, so the row stays
     // and the next open asks the same thing again. See `RequestFate`.
     this.hub.rejectAll(reason, "abandoned");
-    this.approvals.denyAll();
-    // A parked question parks the agent's tool loop just as hard — dismissed, the agent proceeds
-    // on its own judgment, which is the honest answer from a project that is going away.
-    this.questions.dismissAll();
     // A wait on a gesture nobody can make any more answers `false`: the transitions behind it get
     // their turn, which is what an author's fallback rule is for.
     this.userEvents.declineAll();
@@ -418,13 +459,26 @@ export class ProjectSession {
     }
     this.chatTurns.clear();
     const inFlight = [...this.live.values()];
+    // A run's turn is written down before it is cut, as a hand-typed one is.
+    for (const run of inFlight) this.liveFlush.get(run.taskId)?.();
     for (const run of inFlight) run.abort.abort();
     // And WAITED for, like the runs. Aborting only asked: the turn still has to settle its record and
     // its agent still has to be killed, and neither can happen after the database below is closed or
     // the process has exited. Not waiting is how a quit left a turn's record open for good — its
     // settle threw "The database connection is not open" — and its agent running on with nobody
     // listening, finishing its answer into its own file a minute after the app was gone (2026-09-26).
-    await Promise.allSettled([...inFlight.map((run) => run.done), ...this.chatDone.values()]);
+    const settled = Promise.allSettled([...inFlight.map((run) => run.done), ...this.chatDone.values()]);
+    // What an agent was asking — a tool's permission, a question — is let go of only AFTER the agent is
+    // stopped, and is never answered: closing the app is not an answer. Answered first, the agent read
+    // a no (or "decide yourself") and wrote its reaction into the record before the abort reached it,
+    // and the record said the question had been answered. Left unanswered, the record keeps the ask
+    // with no result, and the next open puts it to the person again (`recoveredAsksOf`). The promises
+    // still have to settle, so the cut call can unwind: after the agents have gone, or a moment, if a
+    // transport holds a tool call open past its own abort.
+    await Promise.race([settled, new Promise((resolve) => setTimeout(resolve, ASK_RELEASE_MS))]);
+    this.approvals.denyAll("closed");
+    this.questions.dismissAll();
+    await settled;
     this.live.clear();
     this.project.close();
   }

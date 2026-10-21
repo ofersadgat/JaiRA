@@ -6,13 +6,15 @@
  * it. These tests pin the fix, plus the two things the table bought on the way —
  * child-process visibility and cross-process cancel.
  */
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { testHome } from "@jaira/testing";
 import { initProject, openProject, type Project } from "../src/project";
-import { DEFAULT_STALE_MS, JobStore, newOwnerToken } from "../src/jobs";
+import { DEFAULT_STALE_MS, HOST_KEY, JobStore, newOwnerToken, PROCESS_TOKEN } from "../src/jobs";
 import { RunOwner } from "../src/jobOwner";
 
 let dir: string;
@@ -173,5 +175,89 @@ describe("cross-process cancel", () => {
 
   it("reports that there was nothing to cancel", () => {
     expect(project.jobs.requestCancel("t-nope", Date.now())).toBe(false);
+  });
+});
+
+/**
+ * A claim whose process is GONE — the app crashed, and opened again before the heartbeat went stale. It
+ * used to be believed for the rest of the window and, since nothing looked again, until the next open:
+ * the task stayed `running` with nothing running (task-lifecycle's "the app reopens inside the claim's
+ * stale window after a crash").
+ */
+describe("a claim whose process is gone", () => {
+  /** A pid nothing runs under any more: a child that has exited. */
+  async function deadPid(): Promise<number> {
+    const child = spawn(process.execPath, ["-e", ""]);
+    await once(child, "exit");
+    return child.pid!;
+  }
+
+  /** A claim as another process on `host` wrote it, its heartbeat fresh. */
+  function foreignClaim(pid: number | undefined, host = HOST_KEY, taskId = "t-1"): string {
+    const ownerToken = newOwnerToken();
+    const id = project.jobs.claimRun({ taskId, ownerToken, ...(pid !== undefined ? { pid } : {}), nowMs: Date.now() });
+    project.db.prepare(`UPDATE jobs SET process_token = 'another-process', host_key = ? WHERE id = ?`).run(host, id);
+    return ownerToken;
+  }
+
+  /** The call the crashed run was making, left open. */
+  function openCall(taskId = "t-1"): void {
+    project.db.prepare(`INSERT INTO operation_records (id, task_id, status, started_at) VALUES ('r-1', ?, 'open', ?)`).run(taskId, Date.now());
+  }
+
+  it("is known dead at the next open, though its heartbeat is fresh — and its task recovered there", async () => {
+    runningTask();
+    openCall();
+    foreignClaim(await deadPid());
+    project.close();
+
+    project = openProject(dir, { baseDir: testHome() });
+
+    expect(project.recovered).toEqual(["t-1"]);
+    expect(project.runtime.get("t-1")?.status).toBe("interrupted");
+    expect(project.db.prepare(`SELECT status FROM operation_records WHERE id = 'r-1'`).get()).toEqual({ status: "interrupted" });
+    expect(project.jobs.liveRunJob("t-1", Date.now())).toBeUndefined();
+  });
+
+  it("puts the agents it started on the orphan report", async () => {
+    runningTask();
+    const owner = foreignClaim(await deadPid());
+    project.jobs.spawned({ ownerToken: owner, taskId: "t-1", command: "claude -p", pid: 4242, nowMs: Date.now() });
+    project.close();
+
+    project = openProject(dir, { baseDir: testHome() });
+
+    expect(project.orphans).toMatchObject([{ command: "claude -p", pid: 4242 }]);
+  });
+
+  it("is believed while its process runs, when it was made on another host, and when it is this process's own", async () => {
+    runningTask("t-alive");
+    runningTask("t-elsewhere");
+    runningTask("t-mine");
+    foreignClaim(process.ppid, HOST_KEY, "t-alive");
+    foreignClaim(await deadPid(), "linux|another-machine|pid:[1]", "t-elsewhere");
+    // Written by this process, as every claim it makes is: never judged dead by this process.
+    project.jobs.claimRun({ taskId: "t-mine", ownerToken: newOwnerToken(), pid: await deadPid(), nowMs: Date.now() });
+    project.close();
+
+    project = openProject(dir, { baseDir: testHome() });
+
+    expect(project.recovered).toEqual([]);
+    for (const taskId of ["t-alive", "t-elsewhere", "t-mine"]) expect(project.runtime.get(taskId)?.status).toBe("running");
+  });
+
+  it("is dead when its pid is now this process's own", () => {
+    runningTask();
+    foreignClaim(process.pid);
+    project.close();
+
+    project = openProject(dir, { baseDir: testHome() });
+
+    expect(project.recovered).toEqual(["t-1"]);
+  });
+
+  it("is stamped with the process and the host that made it", () => {
+    const id = project.jobs.claimRun({ taskId: "t-1", ownerToken: newOwnerToken(), pid: process.pid, nowMs: Date.now() });
+    expect(project.db.prepare(`SELECT process_token, host_key FROM jobs WHERE id = ?`).get(id)).toEqual({ process_token: PROCESS_TOKEN, host_key: HOST_KEY });
   });
 });

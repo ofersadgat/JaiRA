@@ -57,3 +57,22 @@ describe("step 25 (decision 0016)", () => {
     db.close();
   });
 });
+
+describe("step 26", () => {
+  it("lets a claim say which process and host made it, and runs again harmlessly", () => {
+    const old = new Database(join(dir, "jaira.db"));
+    old.exec(`CREATE TABLE jobs (id INTEGER PRIMARY KEY AUTOINCREMENT, kind TEXT NOT NULL, task_id TEXT, parent_job_id INTEGER, owner_token TEXT NOT NULL, pid INTEGER, command TEXT, started_at INTEGER NOT NULL, heartbeat_at INTEGER NOT NULL, cancel_requested_at INTEGER, ended_at INTEGER, outcome TEXT, cwd TEXT);
+      INSERT INTO jobs (kind, owner_token, started_at, heartbeat_at) VALUES ('run', 'o', 1, 1);`);
+    old.pragma(`user_version = 25`);
+    const step = MIGRATIONS.filter((m) => m.version === 26);
+    expect(migrate(old, step)).toBe(26);
+    expect(old.prepare(`SELECT process_token, host_key FROM jobs`).get()).toEqual({ process_token: null, host_key: null });
+    // A new database is born with the columns, at the baseline, and then takes every step.
+    old.pragma(`user_version = 25`);
+    expect(() => migrate(old, step)).not.toThrow();
+    old.close();
+    const fresh = openDb(join(dir, "fresh.db"));
+    expect((fresh.prepare(`SELECT name FROM pragma_table_info('jobs')`).all() as Array<{ name: string }>).map((c) => c.name)).toEqual(expect.arrayContaining(["process_token", "host_key"]));
+    fresh.close();
+  });
+});

@@ -444,10 +444,15 @@ describe("freeing what never happened remotely (§05)", () => {
     insert.run("r-witness", "failed", "prov-1"); // its turns exist in the remote stream — keep
     insert.run("r-cut", "interrupted", null); // a cut call reopens its own record — keep
     insert.run("r-done", "completed", null);
+    // A cut its transport filed as a CANCELED failure is a cut all the same: what it said is in the row,
+    // and the re-dispatch continues from it — keep.
+    project.db
+      .prepare(`INSERT INTO operation_records (id, task_id, status, error_json, started_at) VALUES ('r-stopped', 't', 'failed', ?, 1000)`)
+      .run(JSON.stringify({ classification: "canceled", reason: "the app was closed" }));
 
     expect(releaseUnconsumedFailures(project, "t")).toBe(1);
     const left = project.db.prepare(`SELECT id FROM operation_records ORDER BY id`).all() as Array<{ id: string }>;
-    expect(left.map((row) => row.id)).toEqual(["r-cut", "r-done", "r-witness"]);
+    expect(left.map((row) => row.id)).toEqual(["r-cut", "r-done", "r-stopped", "r-witness"]);
   });
 });
 

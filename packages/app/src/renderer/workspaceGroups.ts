@@ -125,6 +125,42 @@ export function mergeBoards(group: ProjectGroup, boards: Readonly<Record<string,
   };
 }
 
+/**
+ * Which tasks are waiting on the person, and for what — from the inbox: a gate (not a move's question),
+ * an agent's approval, an agent's question, live or found in the record after the app closed. A
+ * question outranks an approval, which outranks a gate: the one an agent is blocked on is the one named.
+ */
+export function askingTasksOf(
+  pending: ReadonlyArray<{ taskId?: string; about?: string; moves?: boolean }>,
+  approvals: ReadonlyArray<{ taskId?: string }>,
+  questions: ReadonlyArray<{ taskId?: string }>,
+): Map<string, NonNullable<BoardCard["asking"]>> {
+  const asking = new Map<string, NonNullable<BoardCard["asking"]>>();
+  // A gate is the parked run's (`taskId`) and the task it is about (`about`) alike, as `parkedGateOf` reads it.
+  for (const gate of pending) {
+    if (gate.moves === true) continue;
+    for (const taskId of [gate.taskId, gate.about]) if (taskId !== undefined) asking.set(taskId, "gate");
+  }
+  for (const approval of approvals) if (approval.taskId !== undefined) asking.set(approval.taskId, "approval");
+  for (const question of questions) if (question.taskId !== undefined) asking.set(question.taskId, "question");
+  return asking;
+}
+
+/** Cards whose task is waiting on the person, marked so — see `BoardCard.asking`. */
+export function markAsking(board: BoardView | null, asking: ReadonlyMap<string, NonNullable<BoardCard["asking"]>>): BoardView | null {
+  if (board === null || asking.size === 0) return board;
+  const mark = (card: BoardCard): BoardCard => {
+    const kind = asking.get(card.taskId);
+    return kind === undefined || card.archived !== undefined ? card : { ...card, asking: kind };
+  };
+  return {
+    ...board,
+    columns: board.columns.map((c) => ({ ...c, cards: c.cards.map(mark) })),
+    atLevel: board.atLevel.map(mark),
+    finished: board.finished.map(mark),
+  };
+}
+
 /** Cards waiting for a workspace, chipped so (decision 0013 §5): the dashed "no machine yet". */
 export function markQueued(board: BoardView | null, queue: ReadonlyArray<{ taskId: string; requires: string[] }>): BoardView | null {
   if (board === null || queue.length === 0) return board;

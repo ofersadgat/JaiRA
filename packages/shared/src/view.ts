@@ -281,6 +281,13 @@ export interface BoardCard {
   workflow: string;
   /** The deepest active instance's status — what the badge shows. */
   activeStatus?: InstanceStatus;
+  /**
+   * What the task is waiting on the PERSON for — a gate, an agent's approval, an agent's question —
+   * stamped by the board's reader from what is pending (`markAsking`). The card reads as waiting
+   * whatever the task's status says: one the app closed under is still waiting, and so is one whose
+   * agent is asking right now, which the run's status alone calls running.
+   */
+  asking?: "gate" | "approval" | "question";
   /** State id of the deepest active instance. */
   activeStateId?: string;
   activePath: PathStep[];

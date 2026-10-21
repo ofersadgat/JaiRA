@@ -73,8 +73,10 @@ CREATE INDEX command_log_task ON command_log(task_id, id);
 --   kind='run'     : a process claiming a task's run.
 --   kind='process' : a child JaiRA spawned (git, claude, a shell command), under the run job that owns
 --                    it — so an orphaned agent still running and spending is found.
--- owner_token is a random per-PROCESS id: liveness is "did that token heartbeat recently". pid is kept
--- only to report a process to a person and, carefully, to end an orphan.
+-- owner_token is a random per-CLAIM id: liveness is "did that token heartbeat recently". pid is kept to
+-- report a process to a person, carefully to end an orphan, and — with process_token (one per process)
+-- and host_key (the machine and pid namespace it ran in) — to know at once that a claim's process on THIS
+-- host is gone, rather than waiting out its heartbeat (JobStore.deadOwners).
 CREATE TABLE jobs (
   id                  INTEGER PRIMARY KEY AUTOINCREMENT,
   kind                TEXT NOT NULL,
@@ -88,7 +90,9 @@ CREATE TABLE jobs (
   cancel_requested_at INTEGER,
   ended_at            INTEGER,
   outcome             TEXT,
-  cwd                 TEXT
+  cwd                 TEXT,
+  process_token       TEXT,
+  host_key            TEXT
 );
 CREATE INDEX jobs_open ON jobs(ended_at, heartbeat_at);
 CREATE INDEX jobs_task ON jobs(task_id, id);

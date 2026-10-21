@@ -69,3 +69,20 @@ describe("QuestionHub", () => {
     ]);
   });
 });
+
+describe("answers given ahead of the question (one the app closed under)", () => {
+  it("answer the same questions asked again, without asking, once — a dismissal included", async () => {
+    const asked: string[] = [];
+    const hub = new QuestionHub({ onRequest: (r) => asked.push(r.requestId) });
+    const questions = [{ question: "Which library?", header: "Library", options: [{ label: "luxon" }], multiSelect: false }];
+    hub.seed("t1", ["Which library?"], { "Which library?": "luxon" });
+    await expect(hub.asker({ taskId: "t1" })({ questions, sessionId: "s1" })).resolves.toEqual({ "Which library?": "luxon" });
+    hub.seed("t1", ["Which library?"], undefined);
+    await expect(hub.asker({ taskId: "t1" })({ questions, sessionId: "s1" })).resolves.toBeUndefined();
+    expect(asked).toEqual([]);
+    void hub.asker({ taskId: "t1" })({ questions, sessionId: "s1" });
+    expect(asked).toHaveLength(1);
+    expect(hub.listFor("t1")).toHaveLength(1);
+    expect(hub.listFor("t2")).toEqual([]);
+  });
+});

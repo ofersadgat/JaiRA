@@ -30,6 +30,7 @@ import { journalFiles, replayJournal } from "./journalFile";
 import { conversationFiles, ConversationLog, replayConversations } from "./conversationFile";
 import { ARTIFACT_ROWS, fingerprintOf, replayRows, RowLog, rowFiles, TASK_ROWS } from "./rowFile";
 import { SqliteSessionStore, type OpeningAuthor, type SessionScope } from "./sessionStore";
+import type { JsonValue } from "@declarative-ai/json";
 import { SqliteArtifactStore } from "./artifactStore";
 import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
@@ -313,13 +314,13 @@ export function openSharedProject(opts?: { now?: () => number; staleMs?: number;
  * database is thrown away and the conversations are not there. An unscoped store — no task — gets no
  * log because it has nothing to name a file by; it is a read already narrowed.
  */
-export function sessionStoreFor(project: Project, scope: SessionScope = {}, openingBy?: OpeningAuthor): SqliteSessionStore {
+export function sessionStoreFor(project: Project, scope: SessionScope = {}, openingBy?: OpeningAuthor, chatSettings?: JsonValue): SqliteSessionStore {
   const filed = isFileBacked(project.config.storage.conversations);
   const log =
     filed && scope.taskId !== undefined
       ? new ConversationLog(project.paths.conversationsDir, project.config.storage.format, scope.taskId)
       : undefined;
-  return new SqliteSessionStore(project.db, scope, log, openingBy);
+  return new SqliteSessionStore(project.db, scope, log, openingBy, chatSettings);
 }
 
 /**
@@ -428,7 +429,13 @@ function openAt(
   // Read orphans BEFORE reaping: the rows are the only record those processes ever
   // existed, and an abandoned agent is still running and still billing.
   const at = now();
-  const orphans = replica ? [] : jobs.orphans(at);
+  // A claim whose process is GONE — a crash a moment ago, its heartbeat still fresh — is ended now, as
+  // abandoned, rather than believed for another half a minute: its task reads as the crash it was at
+  // this open, not `running` with nothing running (`JobStore.deadOwners`). Its children go on the orphan
+  // report first: the agents it started may still be running.
+  const dead = replica ? [] : jobs.deadOwners(at);
+  const orphans = replica ? [] : [...jobs.orphans(at), ...jobs.childrenOf(dead)];
+  for (const token of dead) jobs.endOwner(token, "abandoned", at);
   // A task with a live claim is being driven by another process right now — the
   // whole point of §4.2a. Only genuinely abandoned tasks are recovered.
   const recovered = replica ? [] : runtime.recoverInterrupted(at, (taskId) => jobs.liveRunJob(taskId, at) !== undefined);

@@ -153,6 +153,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     // The questions MOVES parked in task conversations: each drawn where its move asked it.
     moveQuestions: state.pending.filter((p) => p.moves === true),
     onMoveQuestion: (requestId: string, value: unknown) => actions.answer(requestId, value),
+    // The selected task's agent's approval and question, drawn where they were asked — the panel is
+    // where the board and the inbox open a task, so it is where a person finds what it waits on.
+    ...(run.runApproval !== undefined && run.onRunApproval !== undefined ? { approval: run.runApproval, onApproval: run.onRunApproval } : {}),
+    ...(run.runQuestion !== undefined && run.onRunQuestion !== undefined ? { question: run.runQuestion, onQuestion: run.onRunQuestion } : {}),
   };
 
   const host: FaceHost = {

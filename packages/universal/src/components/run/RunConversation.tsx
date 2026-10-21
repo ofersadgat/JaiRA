@@ -245,7 +245,7 @@ export function RunComposer({
           {cutStrip}
         </CxDoing>
       ) : (
-        <RunActivity detail={detail} asking={asking} onStop={stop} onSkip={skip} onRerun={onRerun} onResume={onResume} lead={lead} />
+        <RunActivity detail={detail} asking={asking} askedIn={source.approval?.instanceId ?? source.question?.instanceId} onStop={stop} onSkip={skip} onRerun={onRerun} onResume={onResume} lead={lead} />
       );
     return strip;
   }

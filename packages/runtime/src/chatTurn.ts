@@ -117,6 +117,11 @@ export interface ChatTurnRequest {
   operation: PromptOp<InlineFamily>;
   /** The exact position the displayed transcript ends at. */
   position: string;
+  /**
+   * The turn CONTINUES one the app closed under — the same message at the same index — so the instance
+   * is not entered again even at index 0: it takes the transition back into the same message.
+   */
+  continuing?: boolean;
 }
 
 export interface ChatTurnResult {
@@ -166,7 +171,7 @@ export async function runChatTurn(ports: ChatTurnPorts, request: ChatTurnRequest
 
   // Entering once and transitioning after is what keeps a long conversation one node — see the
   // module header on why a second `instance.entered` under this key would hide everything above it.
-  if (instance.index === 0) {
+  if (instance.index === 0 && request.continuing !== true) {
     emit(
       {
         type: "instance.entered",

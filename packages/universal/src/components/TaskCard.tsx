@@ -105,7 +105,8 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
   const { card, selected, onSelect, onDrill, onMenu, onDragStart, onDragEnd, onUndo, onMove, onOrigin, child = false, last = false, inTray = false } = props;
 
   // An ARCHIVED card wears the pill of how it finished.
-  const status = card.archived !== undefined ? card.archived.from : (card.activeStatus ?? card.status);
+  // One waiting on the person wears the waiting pill, whatever its run's status says (`BoardCard.asking`).
+  const status = card.archived !== undefined ? card.archived.from : card.asking !== undefined ? "waiting_for_user" : (card.activeStatus ?? card.status);
   const archived = card.archived !== undefined;
   const pill = pillKindOf(status as TaskStatus | InstanceStatus | undefined);
   const { wash, ground, ring, hoverGround, hoverRing, radius, below } = tileChromeOf(t, look, { pill, selected, last, inTray });
@@ -119,16 +120,22 @@ const CardFace = memo(function CardFace(props: TaskCardProps & { ages: string })
       ? `archived ${endedLabel(card.archived.at)}`
       : card.under !== undefined
         ? `adopted · ${card.workflow}`
-        : (card.activeStateId ?? card.status);
+        : card.asking !== undefined
+          ? (card.activeStateId ?? card.activePath.at(-1)?.stateId ?? card.status)
+          : (card.activeStateId ?? card.status);
   const whereTitle = card.endedAt !== undefined && card.archived !== undefined ? `archived ${new Date(card.archived.at).toLocaleString()}` : undefined;
   const far =
-    card.endedAt !== undefined
+    card.asking !== undefined
+      ? { text: card.asking, title: `waiting for your answer to ${card.asking === "gate" ? "a question the workflow asks" : `the agent's ${card.asking}`}` }
+      : card.endedAt !== undefined
       ? { text: endedLabel(card.endedAt), title: new Date(card.endedAt).toLocaleString() }
       : waitingKindOf(card) !== undefined
         ? { text: waitingKindOf(card)!, title: holdingLabelOf(card) }
         : undefined;
   const tip =
-    card.endedAt !== undefined
+    card.asking !== undefined
+      ? `waiting for you · ${card.asking}`
+      : card.endedAt !== undefined
       ? `${card.status} · ${new Date(card.endedAt).toLocaleString()}`
       : onDrill
         ? "double-click to open this run"

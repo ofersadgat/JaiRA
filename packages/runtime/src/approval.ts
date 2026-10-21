@@ -18,6 +18,7 @@ import type { CommandApproval, PermissionAnswer, PermissionFunctionRequest } fro
 import { CommandGrants, approvalReasonOf, commandDecisionOf, type PolicyAuditEntry } from "./policy";
 import { withPermissionFunctions, type PermissionFunctionsOptions } from "./permissionFunctions";
 import { mcpCallOf } from "./mcpServers";
+import { canonical } from "./hostCalls";
 
 /** Why an approval was refused, by the call's own input object — see {@link refusalOf}. */
 const REFUSALS = new WeakMap<object, string>();
@@ -77,9 +78,32 @@ export interface ApprovalRequest {
  */
 export type ApprovalAnsweredBy = "person" | "stopped" | "closed";
 
+/**
+ * How far the person's answer reached, as they chose it — before the hub narrows what it hands
+ * upstream to `once` (a remembered PART is the run's reach, never the whole tool's). What the record
+ * says of the answer, and what a run resumed after the app closed remembers again.
+ */
+export interface ApprovalReach {
+  scope: PermissionScope;
+  /** The widths of the asking parts the answer covers, when it was given "for this run". */
+  remember?: readonly string[];
+}
+
+/**
+ * An answer given ahead of the call it answers — a question the app closed under, answered when it was
+ * found again in the record. The call is made again when the conversation continues, and meets its
+ * answer here instead of the person being asked twice (see {@link ApprovalHub.seed}).
+ */
+export interface SeededApproval {
+  tool: string;
+  input: unknown;
+  decision: "allow" | "deny";
+  reach: ApprovalReach;
+}
+
 export interface ApprovalHubOptions {
   onRequest?: (request: ApprovalRequest) => void;
-  onResolved?: (requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy) => void;
+  onResolved?: (requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy, reach: ApprovalReach) => void;
   nextId?: () => string;
   now?: () => number;
   /**
@@ -114,8 +138,52 @@ export class ApprovalHub {
    * made yet. Denying the parked ones alone unblocked the loop and then let it ask again.
    */
   private readonly stopping = new Set<string>();
+  /** Answers given ahead of their calls, by task — see {@link seed}. */
+  private readonly seeded = new Map<string, SeededApproval[]>();
 
   constructor(private readonly options: ApprovalHubOptions = {}) {}
+
+  /**
+   * Answer a call before it is made: the next request this task makes for `tool` with exactly this
+   * input is answered with it, without anybody being asked. One shot, first in first out.
+   *
+   * What a question the app closed under needs. The record still holds it, so it is put to the person
+   * again on the next open — but the agent that asked is gone, and continuing its conversation makes it
+   * ask again. That second asking IS the first one, answered already, and meets the answer here. Kept
+   * out of the record as an ask of its own: the answer is written beside the question it answered.
+   */
+  seed(taskId: string, answer: SeededApproval): void {
+    const list = this.seeded.get(taskId) ?? [];
+    list.push(answer);
+    this.seeded.set(taskId, list);
+  }
+
+  /** Forget what was seeded for a task and never asked for — its conversation has stopped. */
+  unseed(taskId: string): void {
+    this.seeded.delete(taskId);
+  }
+
+  /** The seeded answer for this call, taken — or `undefined`. */
+  private takeSeed(taskId: string | undefined, tool: string, input: unknown): SeededApproval | undefined {
+    if (taskId === undefined) return undefined;
+    const list = this.seeded.get(taskId);
+    if (list === undefined) return undefined;
+    const want = canonical(input);
+    const at = list.findIndex((s) => s.tool === tool && canonical(s.input) === want);
+    if (at < 0) return undefined;
+    const [taken] = list.splice(at, 1);
+    if (list.length === 0) this.seeded.delete(taskId);
+    return taken;
+  }
+
+  /**
+   * Remember again, for a task's run, what the person answered "for this run" about the parts of shell
+   * lines — read back from the record when the run resumes in a new process. The answers are the
+   * record's own: each was given about these parts, at these widths.
+   */
+  rememberAgain(taskId: string, answers: ReadonlyArray<{ parts: CommandApproval; decision: "allow" | "deny"; remember: readonly string[] }>): void {
+    for (const answer of answers) this.grants(taskId).rememberParts(answer.parts, answer.decision, answer.remember.length > 0 ? answer.remember : undefined);
+  }
 
   list(): ApprovalRequest[] {
     return [...this.pending.values()].map((p) => p.request);
@@ -217,7 +285,19 @@ export class ApprovalHub {
       ...(req.instanceId !== undefined ? { instanceId: req.instanceId } : {}),
       at: this.options.now?.() ?? Date.now(),
     };
+    const seeded = this.takeSeed(taskId, request.tool, req.input);
+    if (seeded !== undefined) return Promise.resolve(this.answerSeeded(request, seeded));
     return this.hold(request);
+  }
+
+  /** A seeded answer, given to the call it was given for — remembering its parts as the person said. */
+  private answerSeeded(request: ApprovalRequest, seeded: SeededApproval): PermissionDecision {
+    const { parts, taskId } = request;
+    if (seeded.reach.remember !== undefined && parts !== undefined && taskId !== undefined) {
+      this.grants(taskId).rememberParts(parts, seeded.decision, seeded.reach.remember.length > 0 ? seeded.reach.remember : undefined);
+      return { decision: seeded.decision, scope: "once" };
+    }
+    return { decision: seeded.decision, scope: seeded.reach.scope };
   }
 
   /**
@@ -245,6 +325,8 @@ export class ApprovalHub {
       asker: request.function,
       at: this.options.now?.() ?? Date.now(),
     };
+    const seeded = this.takeSeed(context.taskId, parked.tool, request.input);
+    if (seeded !== undefined) return Promise.resolve(this.answerSeeded(parked, seeded).decision);
     return this.hold(parked).then((decided) => decided.decision);
   }
 
@@ -283,14 +365,26 @@ export class ApprovalHub {
     this.pending.delete(requestId);
     if (decision === "deny" && why !== undefined) REFUSALS.set(entry.request.input, why);
     const { parts, taskId } = entry.request;
+    // What the person chose, before it is narrowed for upstream — the record keeps THIS.
+    const reach: ApprovalReach = { scope, ...(remember !== undefined ? { remember: [...remember] } : {}) };
     if (remember !== undefined && parts !== undefined && taskId !== undefined) {
       this.grants(taskId).rememberParts(parts, decision, remember.length > 0 ? remember : undefined);
       scope = "once";
     }
     const resolved: PermissionDecision = { decision, scope };
     entry.resolve(resolved);
-    this.options.onResolved?.(requestId, resolved, by);
+    this.options.onResolved?.(requestId, resolved, by, reach);
     return true;
+  }
+
+  /**
+   * Refuse what one task's agent is waiting on, as STOPPED — without shutting its gate. A chat turn's
+   * stop: the conversation goes on with the next message, which must be free to ask.
+   */
+  denyFor(taskId: string): void {
+    for (const [requestId, entry] of [...this.pending]) {
+      if (entry.request.taskId === taskId) this.decide(requestId, "deny", "once", undefined, undefined, "stopped");
+    }
   }
 
   /**

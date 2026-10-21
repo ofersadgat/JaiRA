@@ -1039,6 +1039,16 @@ is running, and killing an orphan — and killing needs pid **plus** start time 
 be safe, which is why v1 should *report* orphans and offer to kill rather than
 auto-killing.
 
+**A dead process is known by its pid — on its own host only (2026-10-21).** Waiting
+out the heartbeat left a task the app had just crashed under `running` with nothing
+running after a quick reopen. So every row also carries `process_token` (one per
+process) and `host_key` (platform, host name, pid namespace), and an open ends at
+once a fresh claim made on THIS host by ANOTHER process whose pid no longer runs:
+`JobStore.deadOwners`. A claim made elsewhere, or with no pid, is still judged by
+its heartbeat — and the app looks at such a claim again when it would go stale
+(`watchClaims`) instead of leaving its task `running` until the next open. A reused
+pid only makes the rule cautious; it never declares a live process dead.
+
 **Child processes are the strong argument, and were the thing missing entirely.**
 JaiRA spawns real OS children — git, `wsl.exe`, `claude`, a `generic-cli` agent, a
 `bash` command — and tracks none of them. If the app dies mid-run, an orphaned

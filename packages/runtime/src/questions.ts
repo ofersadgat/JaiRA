@@ -44,11 +44,47 @@ interface Pending {
   resolve: (answers: UserAnswers | undefined) => void;
 }
 
+/** The questions a batch asks, as the key an answer given ahead of time is found by. */
+function keyOf(questions: readonly UserQuestion[]): string {
+  return JSON.stringify(questions.map((q) => q.question));
+}
+
 export class QuestionHub {
   private readonly pending = new Map<string, Pending>();
   private counter = 0;
+  /** Answers given ahead of their questions, by task — see {@link seed}. */
+  private readonly seeded = new Map<string, Array<{ key: string; answers: UserAnswers | undefined }>>();
 
   constructor(private readonly options: QuestionHubOptions = {}) {}
+
+  /**
+   * Answer a batch of questions before it is asked: the next time this task's agent asks exactly these
+   * questions, it gets these answers and nobody is asked. One shot.
+   *
+   * The question twin of `ApprovalHub.seed`: a question the app closed under is found again in the
+   * record and answered there, and the agent — its conversation continued — may ask it again.
+   */
+  seed(taskId: string, questions: readonly string[], answers: UserAnswers | undefined): void {
+    const list = this.seeded.get(taskId) ?? [];
+    list.push({ key: JSON.stringify(questions), answers });
+    this.seeded.set(taskId, list);
+  }
+
+  /** Forget what was seeded for a task and never asked — its conversation has stopped. */
+  unseed(taskId: string): void {
+    this.seeded.delete(taskId);
+  }
+
+  /** The seeded answer for this batch, taken — `undefined` answers being "left to the agent" — or `undefined` when none was seeded. */
+  private takeSeed(taskId: string | undefined, questions: readonly UserQuestion[]): { answers: UserAnswers | undefined } | undefined {
+    if (taskId === undefined) return undefined;
+    const list = this.seeded.get(taskId);
+    const at = list?.findIndex((s) => s.key === keyOf(questions)) ?? -1;
+    if (list === undefined || at < 0) return undefined;
+    const [taken] = list.splice(at, 1);
+    if (list.length === 0) this.seeded.delete(taskId);
+    return { answers: taken!.answers };
+  }
 
   list(): QuestionRequest[] {
     return [...this.pending.values()].map((p) => p.request);
@@ -60,6 +96,8 @@ export class QuestionHub {
   }
 
   private park(req: UserQuestionRequest, taskId?: string): Promise<UserAnswers | undefined> {
+    const seeded = this.takeSeed(taskId, req.questions);
+    if (seeded !== undefined) return Promise.resolve(seeded.answers);
     if (this.options.onRequest === undefined) {
       // Nobody is listening — an unattended run. `undefined` is the real answer here ("decide
       // yourself"), which the adapter turns into "use your own best judgment and continue";
@@ -102,6 +140,11 @@ export class QuestionHub {
    */
   dismissAll(): void {
     for (const requestId of [...this.pending.keys()]) this.answer(requestId, undefined);
+  }
+
+  /** The parked questions one task raised. */
+  listFor(taskId: string): QuestionRequest[] {
+    return this.list().filter((r) => r.taskId === taskId);
   }
 
   /** Dismiss the parked questions raised by one task — the cancel path's half of {@link dismissAll}. */

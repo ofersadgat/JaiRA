@@ -1,4 +1,4 @@
-import { useMemo, useState, type JSX, type ReactNode } from "react";
+import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { Platform } from "react-native";
 import { Text, View } from "@tamagui/core";
 import type { JsonValue } from "@declarative-ai/json";
@@ -10,6 +10,7 @@ import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { thoughtLiveOf } from "@jaira/ui/stillRunning";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
 import { isApprovalCall } from "@jaira/ui/workSummary";
+import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { askedOf, pictureOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
@@ -233,7 +234,11 @@ function served(artifacts: ArtifactSurface | undefined): { serve?: ArtifactSurfa
 function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
   const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
   // A doorway is drawn for a chain that is here to unfold, or one the host can walk into.
-  const line = toolLineOf(entry, open, sub !== undefined || onOpenSidechain !== undefined, calls);
+  // The approval a conversation cut off by the app closing is still waiting on: asked, though its
+  // stretch is no longer being written.
+  const ask = useContext(ApprovalAskContext);
+  const askedHere = ask?.pending.recovered === true && entry.callId === ask.pending.requestId;
+  const line = toolLineOf(entry, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
   const { running, unanswered, pathMime } = line;
   const head = { entry, name: line.name, called: line.called, server: line.server, preview: line.preview, command: line.command, prose: line.prose, tone: line.tone, mark: line.mark };
   // The approval prompt: its line is the whole of it.

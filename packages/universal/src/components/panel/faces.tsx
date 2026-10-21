@@ -127,11 +127,21 @@ function Glyph({ name }: { name: Parameters<typeof Icon>[0]["name"] }): JSX.Elem
   return <Icon name={name} size={useContext(GlyphSizeContext)} color={String(t.v("dim"))} />;
 }
 
+/**
+ * Is the task the host holds waiting on the person — a gate, or its agent's approval or question, live or
+ * found in the record after the app closed under it? Its status alone can say `canceled` about one that is.
+ */
+function askingOf(host: FaceHost, detail: TaskDetail | null): boolean {
+  if (detail === null) return false;
+  const gate = host.gate !== undefined && (host.gate.taskId === detail.taskId || host.gate.about === detail.taskId);
+  return gate || host.source.approval?.taskId === detail.taskId || host.source.question?.taskId === detail.taskId;
+}
+
 /** The head's line for a task: its status, its name, and what identifies it. */
-function taskHeadOf(detail: TaskDetail | null, taskId: string): Pick<PanelFace, "glyph" | "title" | "titleText" | "sub"> {
+function taskHeadOf(detail: TaskDetail | null, taskId: string, asking = false): Pick<PanelFace, "glyph" | "title" | "titleText" | "sub"> {
   if (detail === null) return { title: taskId, titleText: taskId, glyph: <Badge status="queued" /> };
   return {
-    glyph: <Badge status={detail.status} />,
+    glyph: <Badge status={asking ? "waiting_for_user" : detail.status} />,
     title: taskNameOf(detail),
     titleText: detail.title,
     // The id in its own run: one run for the whole line shapes differently at the seam.
@@ -329,7 +339,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
   }
   switch (entry.kind) {
     case "task": {
-      const head = taskHeadOf(detail, entry.taskId);
+      const head = taskHeadOf(detail, entry.taskId, askingOf(host, detail));
       const project = entry.project ?? host.project;
       const body = (): ReactNode => {
         if (detail === null) return reading();
@@ -363,8 +373,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
       };
       return {
         ...head,
-        verbs: detail === null ? [] : taskVerbsOf({ startAgain: host.startAgain, cancel: host.cancel, onStack: host.onStack, adoptTask: host.adoptTask }, detail, project, true),
-        tabs: taskTabs(host.gate !== undefined ? { pending: host.gate } : undefined, detail, true),
+        verbs: detail === null ? [] : taskVerbsOf({ startAgain: host.startAgain, cancel: host.cancel, onStack: host.onStack, adoptTask: host.adoptTask }, detail, project, true, askingOf(host, detail)),
+        tabs: taskTabs(host.gate !== undefined ? { pending: host.gate } : undefined, detail, true, askingOf(host, detail)),
         tab: entry.tab,
         body: body(),
         scroll: detail === null || !((entry.tab === "conversation" && loaded) || entry.tab === "steps"),
@@ -372,7 +382,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
     }
 
     case "convo": {
-      const head = taskHeadOf(detail, entry.taskId);
+      const head = taskHeadOf(detail, entry.taskId, askingOf(host, detail));
       const project = entry.project ?? host.project;
       const body = (): ReactNode => {
         if (detail === null) return reading();
@@ -391,7 +401,7 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         }
       };
       const verbs: PanelVerb[] = [
-        ...(detail === null ? [] : taskVerbsOf({ startAgain: host.startAgain, cancel: host.cancel, onStack: host.onStack, adoptTask: host.adoptTask }, detail, project, false)),
+        ...(detail === null ? [] : taskVerbsOf({ startAgain: host.startAgain, cancel: host.cancel, onStack: host.onStack, adoptTask: host.adoptTask }, detail, project, false, askingOf(host, detail))),
         ...(host.giveBack !== undefined ? [{ icon: "back" as const, label: "Give the conversation back to the panel", onClick: host.giveBack }] : []),
       ];
       return {

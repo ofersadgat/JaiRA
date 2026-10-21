@@ -14,6 +14,8 @@
  * provides, which is why this module reports orphans and never kills them.
  */
 import { randomUUID } from "node:crypto";
+import { readlinkSync } from "node:fs";
+import { hostname } from "node:os";
 import type { JairaDb } from "./db";
 import { OWNED_BY } from "./workspace";
 
@@ -65,9 +67,45 @@ function toJob(row: RawJob): JobRow {
 export const DEFAULT_HEARTBEAT_MS = 5_000;
 export const DEFAULT_STALE_MS = 30_000;
 
-/** A fresh per-process identity. Not a pid — see the module note. */
+/** A fresh identity for one claim. Not a pid — see the module note. */
 export function newOwnerToken(): string {
   return randomUUID();
+}
+
+/**
+ * THIS process, once — what every claim and child it records is stamped with (`process_token`). An owner
+ * token names a claim, and one process makes many; this names the process, so a claim of this very
+ * process is never mistaken for a dead one.
+ */
+export const PROCESS_TOKEN = randomUUID();
+
+/**
+ * The machine and the pid namespace a process runs in (`host_key`): a pid means something only beside it.
+ * WSL and Windows, two WSL distributions, or a container sharing one base root each see their own pids,
+ * so a pid is checked only for a claim made where this process stands.
+ */
+export const HOST_KEY = ((): string => {
+  let namespace = "";
+  try {
+    namespace = readlinkSync("/proc/self/ns/pid");
+  } catch {
+    // Not Linux, or no procfs: the platform and host name are the whole key.
+  }
+  return `${process.platform}|${hostname()}|${namespace}`;
+})();
+
+/**
+ * Is a process with this pid running? `EPERM` is somebody else's process, and running. Used only for a
+ * claim made on this host, beside a token that is not this process's (`deadOwners`) — a pid alone is not
+ * an identity, and a reused one only makes the answer cautious.
+ */
+function pidAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (e) {
+    return (e as NodeJS.ErrnoException).code === "EPERM";
+  }
 }
 
 export class JobStore {
@@ -86,10 +124,10 @@ export class JobStore {
   claimRun(input: { taskId: string; ownerToken: string; pid?: number; nowMs: number }): number {
     const res = this.db
       .prepare(
-        `INSERT INTO jobs (kind, task_id, owner_token, pid, started_at, heartbeat_at)
-         VALUES ('run', ?, ?, ?, ?, ?)`,
+        `INSERT INTO jobs (kind, task_id, owner_token, pid, started_at, heartbeat_at, process_token, host_key)
+         VALUES ('run', ?, ?, ?, ?, ?, ?, ?)`,
       )
-      .run(input.taskId, input.ownerToken, input.pid ?? null, input.nowMs, input.nowMs);
+      .run(input.taskId, input.ownerToken, input.pid ?? null, input.nowMs, input.nowMs, PROCESS_TOKEN, HOST_KEY);
     return Number(res.lastInsertRowid);
   }
 
@@ -106,8 +144,8 @@ export class JobStore {
   }): number {
     const res = this.db
       .prepare(
-        `INSERT INTO jobs (kind, task_id, parent_job_id, owner_token, pid, command, cwd, started_at, heartbeat_at)
-         VALUES ('process', ?, ?, ?, ?, ?, ?, ?, ?)`,
+        `INSERT INTO jobs (kind, task_id, parent_job_id, owner_token, pid, command, cwd, started_at, heartbeat_at, process_token, host_key)
+         VALUES ('process', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
       .run(
         input.taskId ?? null,
@@ -118,8 +156,40 @@ export class JobStore {
         input.cwd ?? null,
         input.nowMs,
         input.nowMs,
+        PROCESS_TOKEN,
+        HOST_KEY,
       );
     return Number(res.lastInsertRowid);
+  }
+
+  /**
+   * The owner tokens of run claims whose PROCESS is gone, though their heartbeat is still fresh — a crash
+   * a moment ago, found by the next process to open the project.
+   *
+   * Waiting out the heartbeat was the only rule, and it left a task the app had just crashed under
+   * `running` for half a minute after the reopen — and, since nothing looked again, until the next one.
+   * A claim made on THIS host (`host_key`), by a process that is not this one (`process_token`), whose
+   * pid no longer runs — or is this very process's, reused — was made by a process that is dead. A claim
+   * made elsewhere, or with no pid or token to go on, is still judged by its heartbeat alone.
+   */
+  deadOwners(nowMs: number): string[] {
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT owner_token, pid FROM jobs
+          WHERE kind = 'run' AND ended_at IS NULL AND heartbeat_at > ?
+            AND host_key = ? AND process_token IS NOT NULL AND process_token != ? AND pid IS NOT NULL`,
+      )
+      .all(nowMs - this.staleMs, HOST_KEY, PROCESS_TOKEN) as Array<{ owner_token: string; pid: number }>;
+    return rows.filter((row) => row.pid === process.pid || !pidAlive(row.pid)).map((row) => row.owner_token);
+  }
+
+  /** The open children of these claims — a dead owner's agents, which may outlive it. */
+  childrenOf(ownerTokens: readonly string[]): JobRow[] {
+    if (ownerTokens.length === 0) return [];
+    const rows = this.db
+      .prepare(`SELECT * FROM jobs WHERE kind = 'process' AND ended_at IS NULL AND owner_token IN (${ownerTokens.map(() => "?").join(", ")}) ORDER BY id`)
+      .all(...ownerTokens) as RawJob[];
+    return rows.map(toJob);
   }
 
   /**

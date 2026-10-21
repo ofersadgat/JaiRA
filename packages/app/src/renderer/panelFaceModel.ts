@@ -72,9 +72,12 @@ export function countSteps(nodes: readonly InstanceNode[]): number {
   return nodes.reduce((sum, node) => sum + (node.children.length === 0 ? 1 : countSteps(node.children)), 0);
 }
 
-/** Badges for a task's tabs: a question waiting, a run going. `gate` is the parked gate the host holds. */
-export function taskTabs(gate: { pending: PendingInteraction } | undefined, detail: TaskDetail | null, withConversation: boolean): PanelTabSpec[] {
-  const waiting = gate !== undefined && detail !== null && (gate.pending.taskId === detail.taskId || gate.pending.about === detail.taskId);
+/**
+ * Badges for a task's tabs: a question waiting, a run going. `gate` is the parked gate the host holds;
+ * `asking`, that the task's agent is waiting on an approval or a question of its own.
+ */
+export function taskTabs(gate: { pending: PendingInteraction } | undefined, detail: TaskDetail | null, withConversation: boolean, asking = false): PanelTabSpec[] {
+  const waiting = asking || (gate !== undefined && detail !== null && (gate.pending.taskId === detail.taskId || gate.pending.about === detail.taskId));
   const live = detail?.status === "running";
   const steps = detail === null ? 0 : countSteps(detail.instances);
   return [
@@ -94,10 +97,14 @@ export interface VerbHost {
   adoptTask: (taskId: string, project: string | undefined, workflow: string) => void;
 }
 
-/** The verbs every task-shaped entry carries, as icons. */
-export function taskVerbsOf(host: VerbHost, detail: TaskDetail, project: string | undefined, adopt: boolean): PanelVerb[] {
+/**
+ * The verbs every task-shaped entry carries, as icons. A task `asking` — waiting on the person for a gate,
+ * an approval or a question, though the app closed under its run — is not stopped: it carries what a
+ * running one does (Cancel), never Resume or Start again, which would ask over the question it is waiting on.
+ */
+export function taskVerbsOf(host: VerbHost, detail: TaskDetail, project: string | undefined, adopt: boolean, asking = false): PanelVerb[] {
   const action = stoppedAction(detail);
-  const live = detail.status === "running" || detail.status === "queued" || detail.status === "stopping";
+  const live = detail.status === "running" || detail.status === "queued" || detail.status === "stopping" || asking;
   const verbs: PanelVerb[] = [];
   if (!live) {
     verbs.push({ icon: "play", label: action?.verb ?? (detail.runs.length > 0 ? "Re-run" : "Start"), primary: true, onClick: () => host.startAgain(detail.taskId) });

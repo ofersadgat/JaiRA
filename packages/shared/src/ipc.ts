@@ -199,11 +199,19 @@ export interface PendingApproval {
   permissionSet?: ApprovalPermissionSet;
   input: Record<string, JsonValue>;
   taskId?: string;
+  /** The workflow instance whose operation asked — what a run view draws the prompt under. */
+  instanceId?: string;
   /**
    * The permission FUNCTION that asked, when one put the call to you (`smart`, unsure) — absent when
    * the policy asked. Its answer reaches this call alone: what a function remembers is its own.
    */
   asker?: string;
+  /**
+   * Found in the RECORD rather than asked by a running agent: the conversation was cut off — the app
+   * closed — while it waited on this. Answering it writes the answer beside it and continues the cut
+   * call (the person, 2026-10-21: "permissions and permission requests should persist across restarts").
+   */
+  recovered?: true;
   /**
    * The project whose database holds {@link taskId} — the session this request parked in.
    *
@@ -298,6 +306,8 @@ export interface PendingQuestion {
   instanceId?: string;
   /** The asking `AskUserQuestion` call's own id, when the agent's transport reported it. */
   toolCallId?: string;
+  /** Found in the record, not asked live — see {@link PendingApproval.recovered}. */
+  recovered?: true;
   /** Where {@link taskId} is recorded. Same reason as {@link PendingApproval.project}. */
   project: ProjectRef;
   at: number;

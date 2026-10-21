@@ -26,10 +26,10 @@ import { lengthOf } from "./SidePanel";
  *                        a button's radius --control-radius, padding --control-pad, the strip's font
  *   the primary button   --size-app × 11/12.5, 500, padding 3 12, --on-accent on --fill-accent
  */
-export function RunActivity({ detail, asking, onStop, onRerun, onResume, onSkip, lead }: { detail: TaskDetail; asking: boolean; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined; /** What stands in the same band before the strip (the offline banner). */ lead?: ReactNode }): JSX.Element | null {
+export function RunActivity({ detail, asking, askedIn, onStop, onRerun, onResume, onSkip, lead }: { detail: TaskDetail; asking: boolean; /** Where its agent asks, when the app closed under the run — see `activityOf`. */ askedIn?: string | undefined; onStop: () => void; onRerun?: ((taskId: string) => void) | undefined; onResume?: ((taskId: string) => void) | undefined; onSkip?: (() => void) | undefined; /** What stands in the same band before the strip (the offline banner). */ lead?: ReactNode }): JSX.Element | null {
   const t = useTokens();
-  const activity = activityOf(detail, asking, { rerun: onRerun !== undefined, resume: onResume !== undefined });
-  const elapsed = useElapsed(startedAtOf(detail), activity.kind === "going", 1000);
+  const activity = activityOf(detail, asking, { rerun: onRerun !== undefined, resume: onResume !== undefined }, askedIn);
+  const elapsed = useElapsed(startedAtOf(detail, asking), activity.kind === "going", 1000);
   // A run that did what it was asked says nothing — but the band still stands there, empty: its
   // padding (10 over 14) is the room kept under the conversation either way.
   if (activity.kind === "none") {

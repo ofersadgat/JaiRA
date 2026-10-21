@@ -42,6 +42,7 @@ import {
   type WorkflowMetrics,
 } from "@declarative-ai/hw";
 import { register, type LiveCalls } from "./liveHandles";
+import { withContinuation, type ContinuationPorts } from "./continuation";
 import { createPromptExecutor, PromptRouterExecutor } from "@declarative-ai/promptop";
 import { createModelRouter, type ModelRouterOptions } from "@declarative-ai/llm";
 import { SchemaValidator } from "@declarative-ai/validate";
@@ -396,6 +397,11 @@ export interface SessionStores {
    * app has one board per process; a run with none reports nothing, which is an ordinary run.
    */
   limits?: PositionLimits;
+  /**
+   * How a CUT call is continued from its own record rather than made again — see `withContinuation`.
+   * Absent, a reopened record is re-dispatched with the question it was first made with.
+   */
+  continuation?: ContinuationPorts;
 }
 
 /**
@@ -432,9 +438,12 @@ export function withSessionLayers(
   // nothing. So every operation is recorded, and placement decides only whether a record also
   // claims a seat in a conversation. What remains of the old filter is a retention question
   // (§10.5), answered by the pruning surface.
+  // The continuation layer INSIDE the record layer: `withRecord` reopens a cut call's record, and only
+  // then can the layer below read what the call had said.
+  const continued = stores.continuation !== undefined ? withContinuation(executor, stores.continuation) : executor;
   return withSessionPosition(
     { sessions: stores.sessions, ...(stores.limits ?? {}) },
-    withRecord({ records: stores.records }, executor),
+    withRecord({ records: stores.records }, continued),
   ) as Executor<ExecServices, WorkflowMetrics>;
 }
 

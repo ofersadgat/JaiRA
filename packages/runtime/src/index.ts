@@ -45,6 +45,7 @@ export * from "./sessionServices";
 // (attachments, toolUseResult, threading) that never ride the stream and outlive nothing.
 export * from "./nativeCapture";
 export * from "./hostCalls";
+export * from "./continuation";
 export * from "./genericAgent";
 export * from "./artifactPath";
 export * from "./artifacts";

@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { messagesOfRecord } from "@jaira/persistence";
-import { approvalCallEntries, approvalResultEntries, callingCallOf, mergeHostCalls, withHostCalls } from "../src/hostCalls";
+import { approvalCallEntries, approvalResultEntries, callingCallOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
 import { ApprovalHub } from "../src/approval";
 
 const LINE = 'git fetch origin --quiet && echo "master=$(git rev-parse origin/master)"';
@@ -85,5 +85,54 @@ describe("the one approval prompt, asked by a function", () => {
     hub.denyAll();
     expect(await later).toBe("deny");
     expect(answered).toEqual(["allow by person", "deny by closed"]);
+  });
+});
+
+describe("a question a cut record was left asking", () => {
+  const caller = bashCall("t1", LINE);
+  const call = approvalCallEntries("approve_1", "t1", { tool: "shell", command: LINE, parts: { line: LINE } as never }, 1000).record;
+
+  it("is an approve_tool_call with no result, matched again by the input of the call that asked", () => {
+    const [ask] = unansweredAsksOf([caller, call]);
+    expect(ask).toMatchObject({ kind: "approval", callId: "approve_1", calledBy: "t1", request: { tool: "shell", command: LINE }, toolInput: { command: LINE }, at: 1000 });
+  });
+
+  it("is not one once it has a result — any result, a stop's included", () => {
+    const stopped = approvalResultEntries("approve_1", "t1", { decision: "deny", scope: "once", by: "stopped", waitedMs: 5 }, 2000).record;
+    expect(unansweredAsksOf([caller, call, stopped])).toEqual([]);
+  });
+
+  it("carries the tool's own input when the call that asked is not in the record beside it", () => {
+    const alone = approvalCallEntries("approve_2", undefined, { tool: "write_file", input: { path: "a.txt" } }, 5).record;
+    expect(unansweredAsksOf([alone])).toMatchObject([{ kind: "approval", callId: "approve_2", toolInput: { path: "a.txt" } }]);
+  });
+
+  it("is the agent's own AskUserQuestion with no result — of the main conversation, not a subagent's", () => {
+    const asked = (id: string, sidechain?: object): JsonValue =>
+      ({ kind: "message", role: "assistant", ...(sidechain ? { sidechain } : {}), content: [{ type: "tool_use", id, name: "AskUserQuestion", input: { questions: [{ question: "Which?", options: [] }] } }] }) as JsonValue;
+    const asks = unansweredAsksOf([asked("q1"), asked("q2", { id: "c", parentToolUseId: "c" })]);
+    expect(asks).toEqual([{ kind: "question", toolUseId: "q1", input: { questions: [{ question: "Which?", options: [] }] } }]);
+    const answered = questionResultEntries("q1", { answers: { "Which?": "this" } }, 3).record;
+    expect(unansweredAsksOf([asked("q1"), answered])).toEqual([]);
+    expect(answered).toMatchObject({ role: "user", provider: "jaira", content: [{ type: "tool_result", tool_use_id: "q1", content: "The person answered:\nWhich? → this", data: { by: "person" } }] });
+  });
+
+  it("is answered as stopped right after the agent's call when the run stops — a result the host gave the model's own call", () => {
+    const asked = { kind: "message", role: "assistant", content: [{ type: "tool_use", id: "q1", name: "AskUserQuestion", input: {} }] } as JsonValue;
+    const stopped = questionResultEntries("q1", { stopped: true }, 9).record;
+    const merged = mergeHostCalls([asked, bashCall("t2", "ls")], [stopped]);
+    expect(merged.entries).toEqual([asked, stopped, bashCall("t2", "ls")]);
+    expect(merged.left).toEqual([]);
+  });
+});
+
+describe("what the person answered for this run, read back from the record", () => {
+  it("is each answer the person gave with widths to remember, with the parts its call carried", () => {
+    const parts = { line: "git push", parts: [] } as never;
+    const call = approvalCallEntries("approve_1", "t1", { tool: "shell", command: "git push", parts }, 1).record;
+    const remembered = approvalResultEntries("approve_1", "t1", { decision: "allow", scope: "workflow-run", remember: ["git"], by: "person", waitedMs: 1 }, 2).record;
+    const once = approvalCallEntries("approve_2", "t2", { tool: "shell", command: "ls", parts }, 3).record;
+    const onceAnswer = approvalResultEntries("approve_2", "t2", { decision: "allow", scope: "once", by: "person", waitedMs: 1 }, 4).record;
+    expect(rememberedAnswersOf([call, remembered, once, onceAnswer])).toEqual([{ parts, decision: "allow", remember: ["git"] }]);
   });
 });

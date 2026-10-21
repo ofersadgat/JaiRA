@@ -7,6 +7,7 @@
  * account produces, and how a reset time or a context figure is written for a person.
  */
 import type { ContextPart, ContextReading, LimitReading, LimitStatus, LimitWindow } from "@declarative-ai/json";
+import type { ChatSettings } from "./operationVocabulary";
 import { contextPercent, limitStatusAt, remainingPercent, tightestWindow, weeklyWindow, windowIsCurrent, windowStatus, windowsForModel } from "@declarative-ai/json";
 
 export type { ContextPart, ContextReading, LimitReading, LimitStatus, LimitWindow };
@@ -109,6 +110,8 @@ export interface WaitingItem {
   instanceId?: string;
   /** A message's text. */
   message?: string;
+  /** The settings a message was sent with — the composer's choices — so it goes, when it goes, as sent. */
+  overrides?: ChatSettings;
   /** The account that ran out. */
   account: string;
   /** When it will be tried (ISO-8601); `null` when the reset time is not known. */

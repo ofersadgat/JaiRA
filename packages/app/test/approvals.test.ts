@@ -202,3 +202,48 @@ describe("policy → approval → audit", () => {
     expect(entry!.reason).toBe("hard reset discards work");
   });
 });
+
+describe("an answer given ahead of its call (a question the app closed under)", () => {
+  it("answers the call made again without asking anybody, once", async () => {
+    const asked: ApprovalRequest[] = [];
+    const hub = new ApprovalHub({ onRequest: (r) => asked.push(r), nextId: () => `a${asked.length + 1}` });
+    hub.seed("t-1", { tool: "shell", input: { command: "git push" }, decision: "allow", reach: { scope: "once" } });
+    // A different call, or another task's, is still asked.
+    void hub.approver({ taskId: "t-2" })(request("git push"));
+    expect(asked).toHaveLength(1);
+    await expect(hub.approver({ taskId: "t-1" })(request("git push"))).resolves.toEqual({ decision: "allow", scope: "once" });
+    expect(asked).toHaveLength(1);
+    // One shot: the same call again is a new question.
+    void hub.approver({ taskId: "t-1" })(request("git push"));
+    expect(asked).toHaveLength(2);
+  });
+
+  it("is forgotten when its conversation stops without making the call again", () => {
+    const asked: ApprovalRequest[] = [];
+    const hub = new ApprovalHub({ onRequest: (r) => asked.push(r) });
+    hub.seed("t-1", { tool: "shell", input: { command: "ls" }, decision: "deny", reach: { scope: "once" } });
+    hub.unseed("t-1");
+    void hub.approver({ taskId: "t-1" })(request("ls"));
+    expect(asked).toHaveLength(1);
+  });
+});
+
+describe("how far an answer reached", () => {
+  it("is what the person chose — reported beside the narrowed decision handed upstream", async () => {
+    const reached: unknown[] = [];
+    const hub = new ApprovalHub({ onRequest: () => undefined, onResolved: (_id, decision, by, reach) => reached.push({ decision, by, reach }), nextId: () => "a1" });
+    void hub.approver({ taskId: "t-1" })(request("git push"));
+    hub.decide("a1", "allow", "workflow-run", ["git"]);
+    expect(reached).toEqual([{ decision: { decision: "allow", scope: "workflow-run" }, by: "person", reach: { scope: "workflow-run", remember: ["git"] } }]);
+  });
+
+  it("a chat's stop refuses what its agent is waiting on as stopped, and leaves the gate open", async () => {
+    const answered: string[] = [];
+    const hub = new ApprovalHub({ onRequest: () => undefined, onResolved: (_id, _d, by) => answered.push(by), nextId: () => `a${answered.length}` });
+    const waiting = hub.approver({ taskId: "t-1" })(request("git push"));
+    hub.denyFor("t-1");
+    await expect(waiting).resolves.toEqual({ decision: "deny", scope: "once" });
+    expect(answered).toEqual(["stopped"]);
+    expect(hub.stopped("t-1")).toBe(false);
+  });
+});

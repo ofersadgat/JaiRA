@@ -76,4 +76,11 @@ describe("the archive rule", () => {
     expect(autoArchive(project, { ...DEFAULT_ARCHIVE, keepLatest: 0 }, NOW)).toEqual([old]);
     expect(project.runtime.get(chat)?.status).toBe("completed");
   });
+
+  it("leaves a task waiting on the person alone, whatever its status says", () => {
+    const waiting = finished("cut while it asked", "canceled", 10);
+    const old = finished("old work", "canceled", 10);
+    expect(autoArchive(project, { ...DEFAULT_ARCHIVE, keepLatest: 0 }, NOW, new Set([waiting]))).toEqual([old]);
+    expect(project.runtime.get(waiting)?.status).toBe("canceled");
+  });
 });

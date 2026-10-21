@@ -14,11 +14,17 @@ import type { Project } from "./project";
 const DAY_MS = 86_400_000;
 
 /** Archive what the rule says is due. Returns the task ids archived. */
-export function autoArchive(project: Project, rule: JairaArchiveConfig = project.config.archive, nowMs = Date.now()): string[] {
+export function autoArchive(
+  project: Project,
+  rule: JairaArchiveConfig = project.config.archive,
+  nowMs = Date.now(),
+  /** Tasks still waiting on the person — a question a cut conversation was left asking — which are not finished, whatever their status says. */
+  waiting: ReadonlySet<string> = new Set(),
+): string[] {
   if (!rule.auto) return [];
   const finished = project.runtime
     .list()
-    .filter((row) => isArchivableStatus(row.status))
+    .filter((row) => isArchivableStatus(row.status) && !waiting.has(row.taskId))
     .filter((row) => {
       const meta = project.tasks.tryRead(row.taskId);
       return meta !== undefined && !isChatWorkflow(meta.workflow) && meta.system === undefined;
