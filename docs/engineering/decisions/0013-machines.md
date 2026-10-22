@@ -2,7 +2,7 @@
 id: engineering/decisions/0013-machines
 type: decision
 status: accepted
-updated: 2026-10-04
+updated: 2026-10-06
 decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, engineering/units/project-store, engineering/units/project-sessions, engineering/units/cli]
 ---
 
@@ -22,6 +22,9 @@ The person's rulings of 2026-09-27 are quoted where they settle something.
   - `jaira.db` is only an index replayed from those files.
   - The files are meant to be committed. A `git pull` already brings another clone's tasks into the
     index.
+  - Amended by [0018](0018-one-truth-per-side.md) §11 (2026-10-06): the database is now the truth while
+    JaiRA runs, for every concern; a file-backed concern's files are its export, imported at open only
+    when they moved since JaiRA last had them.
 - **What t3code does** (read 2026-09-27, commit c9a0e8a1):
   - **Reach:** its server stays on loopback. It is reached through `tailscale serve` HTTPS, an SSH port
     forward, or a Cloudflare tunnel that its relay only introduces.
@@ -491,6 +494,11 @@ the workspace specific stuff remains in the the workspace".
   empty the whole `main` table, which in a shared file is every other workspace's history. A replayed
   journal lets the shared table mint its sequence numbers again. A replayed task no workspace owns is
   claimed by the one that replayed it.
+  - Amended by [0018](0018-one-truth-per-side.md) §11 (2026-10-06): there are no `TEMP` shadow tables
+    and no `both` write-back any more. An import at open stages the files in `TEMP` tables, replaces in
+    `main` the rows of the tasks they name that this workspace owns or that no workspace owns (claiming
+    the latter), leaves another workspace's untouched, and drops the staging tables; `both` is read as
+    `file`, and `claimReplayed` is gone.
 - **The shared root's rows,** the only ones in the file before, were claimed for it on its next open
   (`claimUnowned`), removed on 2026-09-27 (the person: "lets get rid of all the back compat code");
   the shared root no longer claims unowned records at open.

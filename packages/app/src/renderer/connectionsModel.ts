@@ -566,7 +566,7 @@ const COUNTS_AS: string[] = [...TOOL_SPECS.map((spec) => spec.name), SCREEN_MAPP
 
 /**
  * The form of one server: its own settings, then — once the probe has listed its tools, and for every
- * tool its settings already map — what each tool COUNTS AS among JaiRA's permissions (decision 0018,
+ * tool its settings already map — what each tool COUNTS AS among JaiRA's permissions (decision 0019,
  * ruling 5): a standard tool (or the pair by its action) and, for one that acts on a place, which of
  * the tool's arguments holds it. Built from the server as it is, so the places offered follow the
  * standard tool picked.

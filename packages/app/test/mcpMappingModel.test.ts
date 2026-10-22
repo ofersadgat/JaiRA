@@ -1,5 +1,5 @@
 /**
- * A server's tools counted as standard tools (decision 0018, ruling 5), as Settings draws them: under the
+ * A server's tools counted as standard tools (decision 0019, ruling 5), as Settings draws them: under the
  * server in a permission set's MCP bucket, following what they count as (withheld where the set uses
  * JaiRA's own), and on Connections, a field per tool and the claims a tool makes, to accept.
  */

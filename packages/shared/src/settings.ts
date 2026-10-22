@@ -830,7 +830,8 @@ export function clampSize(key: keyof typeof SIZE_LIMITS, size: number): number {
  * configuration anyone authored, so one unreadable value is not a reason to throw away the other
  * forty — an id whose meaning changed between versions should cost its own pane and nothing else.
  */
-function parseUiState(raw: unknown): JairaUiState {
+/** A layout as kept — a settings document's `ui`, or a device's own (decision 0018 §9) — with what is not one dropped. */
+export function parseUiState(raw: unknown): JairaUiState {
   const ui = defaultUiState();
   const doc = objectOf(raw);
   for (const [id, size] of Object.entries(objectOf(doc["panes"]))) {

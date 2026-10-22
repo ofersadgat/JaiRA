@@ -1,5 +1,5 @@
 /**
- * The System tools on Windows itself (decision 0018 §2): what only reads — so it runs on any Windows,
+ * The System tools on Windows itself (decision 0019 §2): what only reads — so it runs on any Windows,
  * a CI runner's included, and changes nothing. What changes the machine (power, a service, the
  * clipboard, the mouse) is covered over a fake machine in `systemTools.test.ts`.
  */

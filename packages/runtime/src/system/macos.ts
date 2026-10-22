@@ -1,5 +1,5 @@
 /**
- * The System tools on macOS (decision 0018 §2, ruling 3: right after Windows) — macOS's own programs
+ * The System tools on macOS (decision 0019 §2, ruling 3: right after Windows) — macOS's own programs
  * and nothing to install: `ps`, `launchctl`, `defaults`, `pbcopy`/`pbpaste`, `pmset`, `screencapture`,
  * `sips`, `brew` where it is, and JavaScript for Automation (`osascript -l JavaScript`) where a program
  * does not reach: the windows, the screen's geometry and the mouse and keyboard, through its bridge to

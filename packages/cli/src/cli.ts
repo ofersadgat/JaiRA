@@ -656,7 +656,7 @@ function buildRunEnvironment(
       ...(files ? { artifacts: centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {}),
     }),
   );
-  // The System tools (decision 0018): this machine. A screenshot is kept with a durable run's task.
+  // The System tools (decision 0019): this machine. A screenshot is kept with a durable run's task.
   registerSystemTools(registry, files ? { keep: () => centralArtifactSink({ store: files.store, vars: files.artifacts.vars }) } : {});
   // Agent runtimes, so a workflow with a `claude-code` state runs the same way here
   // as in the app. Without them the CLI — the documented fastest debugging surface —

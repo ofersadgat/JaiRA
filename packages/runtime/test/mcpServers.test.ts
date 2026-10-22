@@ -314,7 +314,7 @@ describe("the tools probe against a real server", () => {
       state: "ready",
       transport: "stdio",
       tools: [
-        // What the tool says it counts as (decision 0018, ruling 5), and its arguments, for a mapping to name.
+        // What the tool says it counts as (decision 0019, ruling 5), and its arguments, for a mapping to name.
         { name: "get_code", description: "Read the code", annotations: { readOnlyHint: true }, claim: { as: "read_file", args: { path: "file" } }, inputs: ["file"] },
         { name: "delete_file", description: "Delete a file", annotations: { destructiveHint: true, title: "Delete" } },
       ],

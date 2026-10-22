@@ -1,5 +1,5 @@
 /**
- * The shell's commands that ARE System tools (decision 0018 §3) — as `cat` and `Get-Content` are
+ * The shell's commands that ARE System tools (decision 0019 §3) — as `cat` and `Get-Content` are
  * `read_file`, `kill`, `taskkill` and `Stop-Process` are `stop_process`, so a permission set's
  * `stop_process` line holds all three and the agent's own call to the tool alike.
  *

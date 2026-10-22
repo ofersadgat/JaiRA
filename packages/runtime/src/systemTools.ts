@@ -1,5 +1,5 @@
 /**
- * The System tools (decision 0018): the machine the engine runs on and its desktop, each area a LOOK and a
+ * The System tools (decision 0019): the machine the engine runs on and its desktop, each area a LOOK and a
  * CHANGE — `read_system`/`power`, `list_processes`/`stop_process`, `list_services`/`control_service`,
  * `list_software`/`install_software`, `read_settings`/`write_settings`, `read_clipboard`/`write_clipboard`,
  * `list_windows`/`open_app`, `screenshot`/`control_input`.
@@ -20,7 +20,7 @@
  *  - **Bounded.** Lists are cut to a `limit`, text to a length, waits to a ceiling.
  *
  * The tools act on the machine the ENGINE runs on, whatever the project's shell: a WSL project's agent
- * looks at the Windows desktop, where the screen is (decision 0018, ruling 4). On Linux none is built
+ * looks at the Windows desktop, where the screen is (decision 0019, ruling 4). On Linux none is built
  * yet, and each says so.
  */
 import { isAbsolute, resolve as resolvePath } from "node:path";
@@ -81,7 +81,7 @@ export const SYSTEM_TOOL_NAMES = [
  */
 export { TOOL_IMAGES } from "@declarative-ai/json";
 
-/** The long side a picture is scaled to for the model (decision 0018 §2). */
+/** The long side a picture is scaled to for the model (decision 0019 §2). */
 export const SCREENSHOT_MAX_SIDE = 1568;
 
 export interface SystemToolOptions {
@@ -93,7 +93,7 @@ export interface SystemToolOptions {
   keep?: (ctx: ExecServices | undefined) => CiArtifactSink | undefined;
   /** Workspace root for a relative path when the call has none. */
   cwd?: string;
-  /** Told when an agent starts and stops driving the mouse and keyboard — the app's band (decision 0018, ruling 6). */
+  /** Told when an agent starts and stops driving the mouse and keyboard — the app's band (decision 0019, ruling 6). */
   onDriving?: (event: DrivingEvent) => void;
   /** Why this call may not drive the mouse and keyboard — the person stopped it — or `undefined`. */
   mayDrive?: (ctx: ExecServices | undefined) => string | undefined;
@@ -908,7 +908,7 @@ export function inputStepOf(step: Record<string, unknown>, index: number, geo: G
   }
 }
 
-/** Register the System tools (decision 0018) over `options`, beside the others. */
+/** Register the System tools (decision 0019) over `options`, beside the others. */
 export function registerSystemTools(registry: { tools: Map<string, Tool> }, options: SystemToolOptions = {}): void {
   for (const [name, tool] of Object.entries(createSystemTools(options))) registry.tools.set(name, tool);
 }

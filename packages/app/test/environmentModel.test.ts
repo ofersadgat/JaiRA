@@ -24,7 +24,7 @@ import {
 } from "../src/renderer/environmentModel";
 import { MACHINE_ANCHORS, MACHINE_MARKS, MACHINE_SHAPES, WORK_RING, machineIconAt, machineIconSizes } from "../src/renderer/machineIcons";
 import { askNameOf, placementSummaryOf } from "../src/renderer/placementSummary";
-import { conversationsAt } from "../src/renderer/chatSurface";
+import { conversationsAt, conversationsSpan } from "../src/renderer/chatSurface";
 
 const GB = 1024 ** 3;
 const HERE = "C:/code/mist-server-3";
@@ -373,22 +373,33 @@ describe("a project's conversations", () => {
     { project: "/solo", kind: "user" },
   ] as never;
   const all = [task("t-a", "chat/session", "/a"), task("t-b", "chat/session", "/b"), task("t-c", "chat/session", "/c")];
-  const tasks = [task("t-a", "chat/session"), task("t-plan", "feature/plan")];
 
   it("are every workspace's when the project is one repository in several, each stamped with its own", () => {
-    expect(conversationsAt({ at: "/a", allConversations: all, tasks, projects }).map((c) => [c.taskId, c.project])).toEqual([
+    expect(conversationsAt({ at: "/a", allConversations: all, projects }).map((c) => [c.taskId, c.project])).toEqual([
       ["t-a", "/a"],
       ["t-b", "/b"],
     ]);
+    expect(conversationsSpan({ at: "/a", projects })).toBe(true);
   });
 
-  it("are the open workspace's alone when it is the only one, or when workspaces are listed apart", () => {
-    expect(conversationsAt({ at: "/c", allConversations: all, tasks, projects }).map((c) => c.taskId)).toEqual(["t-a"]);
-    expect(conversationsAt({ at: "/solo", allConversations: all, tasks, projects }).map((c) => c.taskId)).toEqual(["t-a"]);
-    expect(conversationsAt({ at: "/a", allConversations: all, tasks, projects }, false).map((c) => [c.taskId, c.project])).toEqual([["t-a", undefined]]);
+  it("are the open workspace's alone when it is the only one, or when workspaces are listed apart — stamped all the same", () => {
+    expect(conversationsAt({ at: "/c", allConversations: all, projects }).map((c) => [c.taskId, c.project])).toEqual([["t-c", "/c"]]);
+    expect(conversationsAt({ at: "/solo", allConversations: all, projects })).toEqual([]);
+    expect(conversationsAt({ at: "/a", allConversations: all, projects }, false).map((c) => [c.taskId, c.project])).toEqual([["t-a", "/a"]]);
+    expect(conversationsSpan({ at: "/c", projects })).toBe(false);
+    expect(conversationsSpan({ at: "/a", projects }, false)).toBe(false);
+  });
+
+  it("follow the address and nothing else — no second list to fall behind it", () => {
+    // 2026-10-06: standing on one project, the list was another's, because it was a separate read
+    // that had not caught up. A function of the address and the one list cannot be another's.
+    for (const at of ["/a", "/c", "/solo"]) {
+      for (const row of conversationsAt({ at, allConversations: all, projects }, false)) expect(row.project).toBe(at);
+    }
   });
 
   it("are everything at the root", () => {
-    expect(conversationsAt({ at: null, allConversations: all, tasks, projects })).toBe(all);
+    expect(conversationsAt({ at: null, allConversations: all, projects })).toBe(all);
+    expect(conversationsSpan({ at: null, projects })).toBe(true);
   });
 });

@@ -13,7 +13,14 @@ import { parseTaskMeta, readJsonFile, type TaskMeta } from "@jaira/shared";
 const log = createLogger("jaira.persistence.taskStore");
 
 export class TaskFileStore {
-  constructor(private readonly tasksDir: string) {}
+  /**
+   * `changed` is told of every write and removal: a task's file is not in the database, so the change
+   * log (decision 0018, `sync.ts`) learns of it from here rather than from a trigger.
+   */
+  constructor(
+    private readonly tasksDir: string,
+    private readonly changed?: (taskId: string, removed: boolean) => void,
+  ) {}
 
   private file(taskId: string): string {
     return join(this.tasksDir, `${taskId}.json`);
@@ -22,6 +29,7 @@ export class TaskFileStore {
   write(meta: TaskMeta): void {
     mkdirSync(this.tasksDir, { recursive: true });
     writeFileSync(this.file(meta.id), JSON.stringify(meta, null, 2) + "\n", "utf8");
+    this.changed?.(meta.id, false);
   }
 
   read(taskId: string): TaskMeta {
@@ -33,6 +41,7 @@ export class TaskFileStore {
   /** Idempotent: deleting a file that is already gone is the outcome asked for, not an error. */
   remove(taskId: string): void {
     rmSync(this.file(taskId), { force: true });
+    this.changed?.(taskId, true);
   }
 
   tryRead(taskId: string): TaskMeta | undefined {

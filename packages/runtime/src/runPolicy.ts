@@ -78,7 +78,7 @@ export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOpti
     // The number is artifact configuration; turning it into an escalation is the policy's job.
     askAboveBytes: config.artifacts.askAboveBytes,
     ...(options.grants !== undefined ? { grants: options.grants } : {}),
-    // What the configured servers' tools count as (decision 0018, ruling 5).
+    // What the configured servers' tools count as (decision 0019, ruling 5).
     ...(config.mcp !== undefined ? { mcp: config.mcp } : {}),
   });
 }

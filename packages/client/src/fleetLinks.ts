@@ -2,10 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
 import { hostOfUrl, type JairaBridge, type MachinesView } from "@jaira/shared/browser";
 import { connectionLost, connectionRestored } from "@jaira/universal";
+import { syncCache } from "@jaira/ui/store";
+import type { SyncSources } from "@jaira/ui/syncCache";
+import { SyncMirror } from "@jaira/ui/syncMirror";
 import { CLIENT_VERSION } from "../bridges/clientVersion";
 import { deviceLabel } from "../bridges/deviceInfo";
 import { engineBridge, type EngineBridge } from "../bridges/engineBridge";
 import { fleetBridge, type FleetMember } from "../bridges/fleetBridge";
+import { mirrorStore } from "../bridges/mirrorStore";
 import { tailnet } from "../bridges/nearby";
 import { addPairing, forgetMachine, loadPairings, type SavedPairing } from "../bridges/savedPairing";
 import { tailnetEngineUrl, tailnetHostname } from "../bridges/tailnetJoin";
@@ -21,6 +25,12 @@ import { tailnetEngineUrl, tailnetHostname } from "../bridges/tailnetJoin";
  * shell is live; when the last one goes the shell says so across its top (`connectionLost`), and is
  * itself again when one comes back.
  */
+/**
+ * What this phone keeps of its machines (decision 0018 §7): one mirror for the app's life, read before
+ * any machine answers. A browser keeps none.
+ */
+export const phoneMirror: SyncMirror | undefined = mirrorStore !== undefined ? new SyncMirror(mirrorStore) : undefined;
+
 export type LinkState = "connecting" | "connected" | "waiting" | "mismatch";
 
 export interface MachineLink {
@@ -42,6 +52,8 @@ interface Connection {
 
 export function useFleetLinks(enabled: boolean): {
   bridge: JairaBridge;
+  /** The machines answering, each its own clock: what the store's cache follows. */
+  sources: SyncSources;
   loaded: boolean;
   links: MachineLink[];
   /** A machine was refused (forgotten there), in words, until something else is said. */
@@ -113,6 +125,7 @@ export function useFleetLinks(enabled: boolean): {
               // The token is dead: the machine forgot this phone. Kept, it would be refused at every launch.
               void forgetMachine(pairing.machine.id);
               drop(pairing.machine.id);
+              syncCache().forget(pairing.machine.id);
               setNotice(`${pairing.machine.label} no longer knows this phone — it was forgotten there. Pair again with a new code`);
               update();
               return;
@@ -196,9 +209,11 @@ export function useFleetLinks(enabled: boolean): {
     (machineId: string): void => {
       void forgetMachine(machineId);
       drop(machineId);
+      // What it showed goes from the phone with it.
+      syncCache().forget(machineId);
       update();
     },
     [drop, update],
   );
-  return { bridge: fleet.bridge, loaded, links, notice, add, forget, retry };
+  return { bridge: fleet.bridge, sources: fleet.sources, loaded, links, notice, add, forget, retry };
 }

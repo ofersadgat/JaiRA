@@ -1,5 +1,5 @@
 /**
- * An MCP server's tools counted as standard tools (decision 0018, ruling 5): the mapping in settings and
+ * An MCP server's tools counted as standard tools (decision 0019, ruling 5): the mapping in settings and
  * the claim a tool makes, and a mapped call judged by its own line (or its server's) and the standard
  * tool it counts as, the stricter kept — with JaiRA's own tool preferred over the server's.
  */

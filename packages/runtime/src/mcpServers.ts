@@ -388,7 +388,7 @@ async function listOver(mcp: McpSdk, transport: Transport, signal: AbortSignal):
       const answer = await client.listTools(cursor !== undefined ? { cursor } : undefined, { signal });
       for (const tool of answer.tools) {
         const annotations = tool.annotations ?? {};
-        // What the tool says it counts as (decision 0018, ruling 5), and the arguments a mapping may name.
+        // What the tool says it counts as (decision 0019, ruling 5), and the arguments a mapping may name.
         const claim = mcpClaimOf((tool as { _meta?: unknown })._meta);
         const properties = (tool.inputSchema as { properties?: unknown } | undefined)?.properties;
         const inputs = properties !== null && typeof properties === "object" && !Array.isArray(properties) ? Object.keys(properties) : [];

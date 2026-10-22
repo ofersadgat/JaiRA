@@ -1,5 +1,5 @@
 /**
- * The System tools on Windows (decision 0018 §2): PowerShell, .NET and the programs every Windows has —
+ * The System tools on Windows (decision 0019 §2): PowerShell, .NET and the programs every Windows has —
  * and no WMI, because a hung WMI is what hangs `taskkill` (`killTree.ts`). What PowerShell 5.1 does
  * not expose (parent pids, windows, input, the screen) is reached through `Add-Type`, as the tree
  * walk already does, so nothing native ships.

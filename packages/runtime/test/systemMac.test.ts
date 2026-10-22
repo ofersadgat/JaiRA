@@ -1,5 +1,5 @@
 /**
- * The System tools on macOS (decision 0018, ruling 3): what macOS's own programs print, read — on any
+ * The System tools on macOS (decision 0019, ruling 3): what macOS's own programs print, read — on any
  * machine, from what they print — and, on a Mac, the tools that only read, run for real.
  */
 import { describe, expect, it } from "vitest";

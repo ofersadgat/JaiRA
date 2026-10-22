@@ -76,7 +76,7 @@ const EVENT_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
 };
 
 /**
- * The System tools (decision 0018 §5, as ruled 2026-10-20): "system should default to ask" — every one
+ * The System tools (decision 0019 §5, as ruled 2026-10-20): "system should default to ask" — every one
  * asks, except that read-only lets the looks go ahead (the clipboard and the screen too: they only
  * read) and refuses the changes, and full allows all sixteen.
  */

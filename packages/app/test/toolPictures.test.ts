@@ -1,5 +1,5 @@
 /**
- * A picture a tool handed back — a screenshot, a picture off the clipboard (decision 0018) — drawn under
+ * A picture a tool handed back — a screenshot, a picture off the clipboard (decision 0019) — drawn under
  * its call, out of whichever envelope it travelled in.
  */
 import { describe, expect, it } from "vitest";

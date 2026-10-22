@@ -55,6 +55,31 @@ export interface ConnectProps {
    * every one), each with what it is doing and a way to forget it — over the way to pair another.
    */
   paired?: readonly PairedMachine[] | undefined;
+  /**
+   * What this phone keeps of its machines (decision 0018 §7): its mirror's size, against a limit the
+   * person sets — or none, a permanent store — and a way to drop the conversations it holds.
+   */
+  kept?: KeptOnDevice | undefined;
+}
+
+/** A phone's mirror, as its Connect screen says it. */
+export interface KeptOnDevice {
+  bytes: number;
+  limit: number | null;
+  onLimit: (limit: number | null) => void;
+  onClear: () => void;
+}
+
+/** The limits offered for a phone's mirror; `null` is none. */
+export const KEPT_LIMITS: readonly (number | null)[] = [50 * 2 ** 20, 200 * 2 ** 20, 2 ** 30, null];
+
+/** A size in words: "12.3 MB". */
+export function sizeWords(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 2 ** 20) return `${Math.round(bytes / 1024)} KB`;
+  if (bytes < 2 ** 30) return `${(bytes / 2 ** 20).toFixed(bytes < 10 * 2 ** 20 ? 1 : 0)} MB`;
+  const gb = bytes / 2 ** 30;
+  return `${Number.isInteger(gb) ? gb : gb.toFixed(1)} GB`;
 }
 
 /** One machine a phone is paired with, as its Connect screen lists it. */
@@ -81,7 +106,7 @@ function useNow(on: boolean): number {
   return now;
 }
 
-export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForget, nearby, onSearchAgain, onPairNearby, pairing, signIn, paired }: ConnectProps): JSX.Element {
+export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForget, nearby, onSearchAgain, onPairNearby, pairing, signIn, paired, kept }: ConnectProps): JSX.Element {
   const t = useTokens();
   const [address, setAddress] = useState(initial?.address ?? "");
   const [code, setCode] = useState(initial?.code ?? "");
@@ -163,6 +188,32 @@ export function Connect({ saved, initial, problem, busy, onPair, onRetry, onForg
           </Pressable>
         </View>
       ))}
+      {kept !== undefined ? (
+        <View gap={6} marginTop={6}>
+          {heading("Kept on this phone")}
+          {words(
+            kept.limit === null
+              ? `${sizeWords(kept.bytes)} of what its machines showed, read here when none answers — with no limit, nothing is dropped.`
+              : `${sizeWords(kept.bytes)} of ${sizeWords(kept.limit)}: what its machines showed, read here when none answers. Past the limit, what was read longest ago goes.`,
+          )}
+          <View flexDirection="row" flexWrap="wrap" gap={6}>
+            {KEPT_LIMITS.map((limit) => {
+              const on = limit === kept.limit;
+              const label = limit === null ? "No limit" : sizeWords(limit);
+              return (
+                <Pressable key={label} role="button" accessibilityLabel={`Keep ${limit === null ? "with no limit" : `up to ${label}`}`} accessibilityState={{ selected: on }} onPress={() => kept.onLimit(limit)}>
+                  <View borderWidth={1} borderColor={(on ? t.v("fill-accent") : t.v("line")) as never} backgroundColor={(on ? t.v("fill-accent") : "transparent") as never} borderRadius={14} paddingHorizontal={10} paddingVertical={5}>
+                    <Text {...(app as object)} fontSize={12} fontWeight="600" color={(on ? t.v("on-accent") : t.v("text")) as never}>
+                      {label}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+          {button("Clear what is kept", kept.onClear, "quiet")}
+        </View>
+      ) : null}
     </View>
   ) : null;
   const where = (machine: NearbyChoice): string | undefined =>

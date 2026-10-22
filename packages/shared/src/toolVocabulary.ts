@@ -46,7 +46,7 @@ export interface ToolCategory {
 export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "files", label: "File permissions", hint: "reading, searching and changing files in the workspace" },
   { id: "execution", label: "Execution", hint: "running commands on this machine" },
-  // Decision 0018: the machine the engine runs on and its desktop, each area a look and a change.
+  // Decision 0019: the machine the engine runs on and its desktop, each area a look and a change.
   { id: "system", label: "System", hint: "this machine and its desktop: processes, services, software, settings, the clipboard, apps and the screen" },
   { id: "web", label: "Web", hint: "reaching the network" },
   // Decision 0010 §1: the repository's forge, reached through the connection signed in on Connections.
@@ -124,7 +124,7 @@ export interface ToolSpec {
    *
    * The workflow tools of decision 0005 §3 carried it until step 6 built them, and `wait_for_event`
    * (decision 0010 §1) until the event hub that serves it was built, and the System tools (decision
-   * 0018) until `runtime/systemTools.ts` served them. Nothing carries it today.
+   * 0019) until `runtime/systemTools.ts` served them. Nothing carries it today.
    */
   unserved?: true;
 }
@@ -212,7 +212,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     hint: "run shell commands, under the policy",
     pathArgs: ["cwd"],
   },
-  // The System tools (decision 0018, `runtime/systemTools.ts`): the machine the engine runs on and its
+  // The System tools (decision 0019, `runtime/systemTools.ts`): the machine the engine runs on and its
   // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change.
   { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs" },
   { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine" },
@@ -282,7 +282,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
 ];
 
 /**
- * The System category's areas (decision 0018 §1): each a LOOK and a CHANGE, so a permission set can let
+ * The System category's areas (decision 0019 §1): each a LOOK and a CHANGE, so a permission set can let
  * an agent look at the processes and refuse stopping one. The card draws an area as one row, the two
  * modes side by side; each tool is its own line in the set all the same.
  */

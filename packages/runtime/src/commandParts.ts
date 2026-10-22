@@ -307,7 +307,7 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   }
 
   // A program that opens something in its app — a file, a folder, a link, an app by name — is
-  // `open_app`; opening what would run as a program is running it (decision 0018 §3).
+  // `open_app`; opening what would run as a program is running it (decision 0019 §3).
   const opener = openerOf(program, dialect);
   if (opener !== undefined && (opener.sub === undefined || command.subcommand === opener.sub)) {
     const handed = command.flags.some((f) => (opener.passesArgs ?? []).includes(f));

@@ -110,7 +110,7 @@ function stricter(a: PermissionSetMode, b: PermissionSetMode): PermissionSetMode
   return rank(b) > rank(a) ? b : a;
 }
 
-/** A tool of a server that counts as a standard tool (decision 0018, ruling 5), as the bucket draws it. */
+/** A tool of a server that counts as a standard tool (decision 0019, ruling 5), as the bucket draws it. */
 export interface MappedMcpTool {
   tool: string;
   subject: string;

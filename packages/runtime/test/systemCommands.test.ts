@@ -1,5 +1,5 @@
 /**
- * The shell's commands that are System tools (decision 0018 §3): as `cat` is `read_file`, `kill`,
+ * The shell's commands that are System tools (decision 0019 §3): as `cat` is `read_file`, `kill`,
  * `taskkill` and `Stop-Process` are `stop_process` — in every dialect, by subcommand, flag and operand
  * where the program does both — and judged against the shipped sets as the tools are (§5, as ruled).
  */

@@ -42,7 +42,7 @@ export interface McpSecretRef {
 export type McpValue = string | McpSecretRef;
 
 /**
- * What one tool of a server COUNTS AS among JaiRA's permissions (decision 0018, ruling 5): a standard
+ * What one tool of a server COUNTS AS among JaiRA's permissions (decision 0019, ruling 5): a standard
  * tool, whose line in a permission set then judges the tool's calls beside the tool's own line.
  */
 export interface McpToolMapping {
@@ -377,7 +377,7 @@ export function mcpToolLines(permissionSet: PermissionSet, server: string): Arra
  * Where a server's tool may say itself what it counts as: a key of the tool's own `_meta` (the MCP
  * spec's place for what a host defines), holding a {@link McpToolMapping}. A CLAIM, not a fact: it is
  * shown on Connections for the person to accept, and only an accepted one — written into the server's
- * `tools` — counts (decision 0018, ruling 5).
+ * `tools` — counts (decision 0019, ruling 5).
  */
 export const MCP_TOOL_CLAIM = "jaira/tool";
 

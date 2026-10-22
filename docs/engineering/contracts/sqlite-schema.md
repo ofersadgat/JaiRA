@@ -2,11 +2,11 @@
 id: engineering/contracts/sqlite-schema
 type: engineering-contract
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 visibility: internal
 kind: schema
 owned_by: [engineering/units/project-store]
-consumers: ["@jaira/persistence stores, views.ts, load.ts, cut.ts, prune.ts and lifecycle.ts", "@jaira/app main service.ts through SqliteMemoCache, JobOutputSink and jobOutput over project.db", "shadow.ts, which copies each file-backed table's statement and indexes", "people reading system/jaira.db to diagnose"]
+consumers: ["@jaira/persistence stores, views.ts, load.ts, cut.ts, prune.ts and lifecycle.ts", "@jaira/app main service.ts through SqliteMemoCache, JobOutputSink and jobOutput over project.db", "fileStorage.ts, which copies each file-backed table's statement and indexes into a `TEMP` staging table for an import", "people reading system/jaira.db to diagnose"]
 since: migration 17
 siblings: [engineering/contracts/journal-events, engineering/contracts/storage-files, engineering/contracts/jaira-layout]
 ---
@@ -129,7 +129,7 @@ Indexes `jobs_open (ended_at, heartbeat_at)`, `jobs_task (task_id, id)`, `jobs_o
 | `jobs.started_at`, `jobs.heartbeat_at` | INTEGER | yes | start and last heartbeat |
 | `jobs.cancel_requested_at`, `jobs.ended_at` | INTEGER | no | the cross-process cancel flag and the end |
 | `jobs.outcome` | TEXT | no | how the job ended, such as `exit:0`, `released` or `abandoned` |
-| `jobs.process_token`, `jobs.host_key` | TEXT | no | the process that made the row (one token per process) and the host and pid namespace it ran in — what lets an open know a claim's process is gone (migration 26) |
+| `jobs.process_token`, `jobs.host_key` | TEXT | no | the process that made the row (one token per process) and the host and pid namespace it ran in — what lets an open know a claim's process is gone (migration 30) |
 | `job_output.id` | INTEGER, autoincrement | yes | row id |
 | `job_output.job_id`, `job_output.stream` | INTEGER, TEXT | yes | the job and `stdout` or `stderr` |
 | `job_output.seq` | INTEGER | yes | 0 for the head chunk, 1 for the tail chunk |
@@ -166,13 +166,16 @@ Indexes `command_log_task (task_id, id)`, `artifacts_task (task_id, id)`, UNIQUE
 | `module_approvals.hash`, `mac` | TEXT | yes | the approved content hash and its HMAC under the machine key |
 | `module_approvals.approved_at` | INTEGER | yes | approval time |
 
-### `storage_index` appears only once a `both` concern has replayed
+### `storage_index` appears only once a concern is kept in files
+
+It records what a concern's files were when JaiRA last had them: written at an export, at an import, and at a project's close when every file is as JaiRA left it; set to `stale` when the concern is opened in `db` ([decision 0018](../decisions/0018-one-truth-per-side.md) §11).
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
-| `concern` | TEXT, primary key | yes | `journal`, `conversations`, `tasks` or `artifacts` |
-| `fingerprint` | TEXT | yes | see [storage-files](storage-files.md) |
-| `built_at` | INTEGER | yes | when the index was rebuilt |
+| `workspace` | TEXT, primary key with `concern` | yes | the workspace whose files these are |
+| `concern` | TEXT, primary key with `workspace` | yes | `journal`, `conversations`, `tasks` or `artifacts` |
+| `fingerprint` | TEXT | yes | see [storage-files](storage-files.md), or `stale` |
+| `built_at` | INTEGER | yes | when the fingerprint was recorded |
 
 ## Errors surface at open, and a constraint refusal is the store's signal rather than a fault
 
@@ -197,10 +200,10 @@ Indexes `command_log_task (task_id, id)`, `artifacts_task (task_id, id)`, UNIQUE
 ## Several tables mean less, or something else, than their names suggest
 
 - The bootstrap `SCHEMA` still creates `events` and `runs` on every open; `openDb` drops each only when empty, so a non-empty one is left in place.
-- For a file-backed concern, unqualified names read a `TEMP` shadow without foreign keys, and `main.<table>` holds rows frozen at the switch under `file` or as of the last replay under `both`. The `op_position` claim then holds per connection.
+- `main` is the truth for every concern, file-backed or not, and no `TEMP` table stands in front of it while JaiRA runs. An import at open replays a concern's files into `TEMP` staging tables of the same names, without foreign keys or change-log triggers, then replaces the rows of the tasks they speak for in `main` and drops the staging tables before anything else reads ([decision 0018](../decisions/0018-one-truth-per-side.md) §11).
 - `module_approvals` exists in every database, and only the shared root's is read.
 - `blobs` belongs to no storage concern, so it stays in the database whatever `storage` says.
 - `call_memo` has no task column, and neither deleting a task nor pruning history removes a memo row.
 - On a database older than migration 12, `artifacts.instance_id` and `task_runtime.root_instance_id` keep their old affinity and may hold numbers; readers coerce.
 - `session_id` in `operation_records` and `sessions.id` hold legacy `task/run/name` spellings for conversations recorded before migration 15.
-- `forked_at_seq` and `fork_boundary_seq` are `seq` values, which a file-backed journal re-mints at each replay; see [journal-events](journal-events.md).
+- `forked_at_seq` and `fork_boundary_seq` are `seq` values, which a file-backed journal's import re-mints; see [journal-events](journal-events.md).

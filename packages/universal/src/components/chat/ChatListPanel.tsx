@@ -16,6 +16,10 @@ import { Spinner } from "./Spinner";
 /** What the list needs from the shell — `ChatSurface`'s list half (`chatSurface.ts`). */
 export interface ChatListSurface {
   conversations: readonly ChatRow[];
+  /** The project a row without its own is in — `ChatSurface.listed`. */
+  listed: string | null;
+  /** Whether the rows are of several projects, so each names its own — `ChatSurface.spans`. Absent: they do. */
+  spans?: boolean;
   taskId: string | null;
   project: string | null;
   hues?: Readonly<Record<string, string>> | undefined;
@@ -27,6 +31,11 @@ export interface ChatListSurface {
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
   onDelete: (taskIds: readonly string[], project?: string) => void;
+}
+
+/** Where a row's conversation is: its own project, else the one the list was read from. */
+function homeOf(task: ChatRow, surface: ChatListSurface): string | undefined {
+  return task.project ?? surface.listed ?? surface.project ?? undefined;
 }
 
 /**
@@ -57,7 +66,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
   const [ask, setAsk] = useState<AskSpec | null>(null);
   const [renaming, setRenaming] = useState<{ taskId: string; title: string } | null>(null);
   const shown = useMemo(() => shownConversations(surface.conversations, query), [surface.conversations, query]);
-  const open = (task: ChatRow): void => surface.onOpen(task.taskId, task.project ?? surface.project ?? undefined);
+  const open = (task: ChatRow): void => surface.onOpen(task.taskId, homeOf(task, surface));
   const menuAt = (task: ChatRow, x: number, y: number): void =>
     setMenu({
       x,
@@ -70,7 +79,7 @@ export function ChatListPanel({ surface, find = false }: { surface: ChatListSurf
           setAsk(
             deleteAskOf(task, () => {
               setAsk(null);
-              surface.onDelete([task.taskId], surface.project ?? undefined);
+              surface.onDelete([task.taskId], homeOf(task, surface));
             }),
           ),
       }),
@@ -152,7 +161,7 @@ function Row({
   if (renaming !== undefined) {
     const commit = (): void => {
       const title = renamedTitle(renaming, task.title);
-      if (title !== undefined) surface.onRename(task.taskId, title, surface.project ?? undefined);
+      if (title !== undefined) surface.onRename(task.taskId, title, homeOf(task, surface));
       onRenaming(null);
     };
     return (
@@ -223,7 +232,7 @@ function Row({
           </Txt>
         </View>
       ) : null}
-      {task.project !== undefined ? <ProjectChip label={surface.names?.[task.project] ?? projectName(task.project)} hue={surface.hues?.[task.project] ?? "var(--p0)"} /> : null}
+      {task.project !== undefined && surface.spans !== false ? <ProjectChip label={surface.names?.[task.project] ?? projectName(task.project)} hue={surface.hues?.[task.project] ?? "var(--p0)"} /> : null}
       {surface.unplaced?.[task.taskId] === "waiting" ? (
         <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Waiting for a workspace with room" } : {}) as object)}>
           <Icon name="clock" size={12} color={String(t.v("warn"))} />

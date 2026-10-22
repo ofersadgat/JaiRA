@@ -487,7 +487,7 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     if (part.command !== undefined) {
       const builtin = builtinVerdict(part.command);
       if (builtin !== undefined) fromPolicy = { verdict: VERDICT_OF[builtin.action], source: "builtin", reason: builtin.reason };
-      // `shutdown`, `Restart-Computer`, `systemctl reboot`: the power tool, which always asks (decision 0018 §6).
+      // `shutdown`, `Restart-Computer`, `systemctl reboot`: the power tool, which always asks (decision 0019 §6).
       else if (part.tool === "power") fromPolicy = { verdict: "asks", source: "builtin", reason: "it restarts, shuts down, sleeps or locks the machine" };
     } else if (part.paths.some((p) => SECRET_PATTERNS.some((s) => s.test(p)))) {
       fromPolicy = { verdict: "asks", source: "builtin", reason: "the redirect touches a credentials path" };
@@ -780,7 +780,7 @@ export interface CompilePolicyOptions {
   execEnv?: ExecEnv;
   /**
    * The configured MCP servers — what each server's tools COUNT AS among the standard tools (decision
-   * 0018, ruling 5), so a mapped tool's call is judged by that tool's line too. Absent ⇒ none is mapped.
+   * 0019, ruling 5), so a mapped tool's call is judged by that tool's line too. Absent ⇒ none is mapped.
    */
   mcp?: JairaMcpConfig;
   /** Called for every decision — the audit trail (DESIGN §10.2's `command_log`). */
@@ -1072,7 +1072,7 @@ const strictestMode = (a: PermissionMode | undefined, b: PermissionMode): Permis
 /**
  * The tools a person is always asked about, as a push is: `power` takes the machine away, and
  * `install_software` runs third-party code, which is the install ask the shell's package managers have
- * (decision 0018 §6). The built-ins switch (`functions.shell.builtins`) turns them off with the rest.
+ * (decision 0019 §6). The built-ins switch (`functions.shell.builtins`) turns them off with the rest.
  */
 export const ALWAYS_ASKING_TOOLS: ReadonlySet<string> = new Set(["power", "install_software"]);
 
@@ -1218,7 +1218,7 @@ export interface MappedCallJudges {
 }
 
 /**
- * One call to a server's tool that COUNTS AS a standard tool (decision 0018, ruling 5), judged twice and
+ * One call to a server's tool that COUNTS AS a standard tool (decision 0019, ruling 5), judged twice and
  * the stricter kept: by the tool's own line (or its server's) where the set writes one, and as the
  * standard tool it counts as — that tool's line or `other`, its places under the scope tables, a shell
  * line part by part, the built-in asks. With no line for the tool or its server the standard tool alone

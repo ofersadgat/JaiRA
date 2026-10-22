@@ -175,7 +175,7 @@ export function registerAllTools(
     workflows?: WorkflowToolHost;
     /** Who serves the Git tools (decision 0010 §1). Absent ⇒ nobody, the same way. */
     git?: GitToolHost;
-    /** The System tools' (decision 0018): this machine, by default. */
+    /** The System tools' (decision 0019): this machine, by default. */
     system?: SystemToolOptions;
   },
 ): void {

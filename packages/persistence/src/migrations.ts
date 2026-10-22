@@ -23,6 +23,8 @@
  *  - **Change `SCHEMA` too**, so a fresh database is born in the shape the step leaves an old one in.
  */
 import type { JairaDb } from "./db";
+import { SYNC_SQL } from "./sync";
+import { DEVICE_LAYOUTS_SQL, WINDOW_STATES_SQL } from "./windowStates";
 
 /** The version `SCHEMA` creates a database at. */
 export const SCHEMA_BASELINE = 24;
@@ -74,9 +76,32 @@ UPDATE event_waits SET name = CASE name
   },
   {
     version: 26,
+    note: "decision 0018: the change log readers sync from (sync_changes, written by triggers on every table a reader reads), and the horizon below which its tombstones were dropped (sync_meta)",
+    sql: SYNC_SQL,
+  },
+  {
+    version: 27,
+    note: "decision 0018 §9: a composer's unsent words kept by the engine that owns its conversation (drafts), in the change log so they reach the person's other devices",
+    sql: SYNC_SQL,
+  },
+  {
+    version: 28,
+    note: "decision 0018 §9: where each of a device's windows stood (window_states), so a window opening with nothing of its own stands where the device's most recently used one did",
+    sql: WINDOW_STATES_SQL,
+  },
+  {
+    version: 29,
+    note: "decision 0018 §9: each device's layout (device_layouts) — panes, folds and read marks are the device's, not the machine's",
+    sql: DEVICE_LAYOUTS_SQL,
+  },
+  {
+    version: 30,
     note: "a claim says which process and host made it (jobs.process_token, jobs.host_key), so a process that crashed is known dead at the next open instead of 30 s later",
-    // Idempotent by hand: SQLite has no ADD COLUMN IF NOT EXISTS, and a new database is born with the
-    // columns (`SCHEMA`) at the baseline and then runs every step.
+    // Numbered 26 on a line of history that met the one above only at its merge, by which time that
+    // line's 26–28 had already been taken by the one database every checkout on a machine opens — so
+    // this step's columns may be there before it runs (2026-10-21: added by hand to the person's own).
+    // Idempotent by hand for that, and because SQLite has no ADD COLUMN IF NOT EXISTS: a new database
+    // is born with the columns (`SCHEMA`) at the baseline and then runs every step.
     run: (db) => {
       const columns = new Set((db.prepare(`SELECT name FROM pragma_table_info('jobs')`).all() as Array<{ name: string }>).map((c) => c.name));
       if (!columns.has("process_token")) db.exec(`ALTER TABLE jobs ADD COLUMN process_token TEXT`);

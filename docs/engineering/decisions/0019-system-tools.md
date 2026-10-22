@@ -1,12 +1,12 @@
 ---
-id: engineering/decisions/0018-system-tools
+id: engineering/decisions/0019-system-tools
 type: decision
 status: built
 updated: 2026-10-20
 decides_for: [engineering/units/tool-policy, engineering/units/host-tools]
 ---
 
-# 0018. System tools
+# 0019. System tools
 
 Amends decision 0007 (§3 and §4, and its amendment of 2026-10-20). Mockup — the real Settings →
 Tools card as shipped, and the same component drawn over the proposed vocabulary:

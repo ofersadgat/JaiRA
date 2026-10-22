@@ -6,7 +6,7 @@
  * the line is no request; one that runs code is `script` or opens what it runs; one that points a
  * name elsewhere is not vouched for; one that acts on the machine with no standard tool for it
  * is a command, answering to its own line or the shell's; one that acts on the machine where a System
- * tool does (`Stop-Process` is `stop_process`, `Set-Service` is `control_service`, decision 0018) is that
+ * tool does (`Stop-Process` is `stop_process`, `Set-Service` is `control_service`, decision 0019) is that
  * tool — as `kill` and `systemctl start` are.
  *
  * The list is Windows PowerShell 5.1's, as this ran to make it:
@@ -54,7 +54,7 @@ const RUNNERS: Record<string, string> = {
   "start-job": "Start-Job { git status }",
 };
 const REDEFINERS = words(`add-pssnapin import-alias import-pssession invoke-history new-alias new-module set-alias`);
-/** What acts on the machine where a System tool does that (decision 0018 §3): each is the tool. */
+/** What acts on the machine where a System tool does that (decision 0019 §3): each is the tool. */
 const SYSTEM: Record<string, string[]> = {
   read_system: words(`get-computerinfo get-computerrestorepoint get-controlpanelitem get-eventlog get-hotfix get-wmiobject`),
   power: words(`restart-computer stop-computer`),
@@ -68,7 +68,7 @@ const SYSTEM: Record<string, string[]> = {
   read_clipboard: words(`get-clipboard`),
   write_clipboard: words(`set-clipboard`),
 };
-/** What opens a file, a folder or a link in its app: `open_app` — and running it, when it would run (decision 0018 §3). */
+/** What opens a file, a folder or a link in its app: `open_app` — and running it, when it would run (decision 0019 §3). */
 const OPENS = words(`invoke-item`);
 const COMMANDS = words(`
   add-bitsfile complete-bitstransfer complete-transaction connect-pssession debug-job debug-process debug-runspace disable-psbreakpoint

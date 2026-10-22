@@ -173,7 +173,7 @@ export type RowMark = "ok" | "bad" | "waiting" | "cut";
 export type ToolShown = "sidechain" | "outcome" | "asked" | "produced" | "picture" | "output" | undefined;
 
 /**
- * The picture a tool handed back — a screenshot, a picture off the clipboard (decision 0018) — as a
+ * The picture a tool handed back — a screenshot, a picture off the clipboard (decision 0019) — as a
  * `data:` address, out of whichever envelope it travelled in: MCP's `image` content (`{ type, data,
  * mimeType }`), the Anthropic block an agent's own record keeps (`{ type, source: { media_type, data } }`),
  * or the value's own `$images`. The first picture, or `undefined`.

@@ -9,7 +9,7 @@ import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, p
 import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
-import { invoke } from "@jaira/ui/store";
+import { useViews } from "@jaira/ui/useView";
 import { faceOf, type FaceHost } from "../components/panel/faces";
 import { EventsTaskAutomations } from "../components/workflow/ConfigPanel";
 import { wantPart } from "../components/settings/parts";
@@ -96,30 +96,21 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
    * The detail of a task the panel shows that is not the selection — a subtask pushed on the stack, an
    * entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
    */
-  const [heldDetails, setHeldDetails] = useState<Record<string, TaskDetail>>({});
-  const shownTasks = [...new Set(panelStack.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [`${entry.taskId}\u0000${entry.project ?? ""}`] : [])))]
-    .filter((key) => key.split("\u0000")[0] !== detail?.taskId)
+  const shownTasks = [...new Set(panelStack.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [entry.taskId] : [])))]
+    .filter((taskId) => taskId !== detail?.taskId)
     .sort();
-  const shownSig = shownTasks.join("|");
-  useEffect(() => {
-    let live = true;
-    const wanted = new Set(shownTasks.map((key) => key.split("\u0000")[0]!));
-    setHeldDetails((was) => {
-      const kept = Object.fromEntries(Object.entries(was).filter(([taskId]) => wanted.has(taskId)));
-      return Object.keys(kept).length === Object.keys(was).length ? was : kept;
+  // Held in the window's store (decision 0018) while the panel shows them, kept current from the change
+  // log, by id — wherever the task is.
+  const shownDetails = useViews("task:detail", useMemo(() => shownTasks.map((taskId) => ({ taskId })), [shownTasks.join("|")]));
+  const heldDetails = useMemo(() => {
+    const out: Record<string, TaskDetail> = {};
+    shownTasks.forEach((taskId, i) => {
+      const found = shownDetails[i]?.value;
+      if (found !== undefined) out[taskId] = found;
     });
-    for (const key of shownTasks) {
-      const [taskId, project] = key.split("\u0000") as [string, string];
-      if (heldDetails[taskId] !== undefined) continue;
-      void invoke("task:detail", { taskId, ...(project !== "" ? { project } : {}) })
-        .then((found) => live && setHeldDetails((was) => ({ ...was, [taskId]: found })))
-        .catch(() => undefined);
-    }
-    return () => {
-      live = false;
-    };
+    return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [shownSig]);
+  }, [shownDetails]);
 
   // A state the panel shows that the store is not holding — a pinned one, one a value opened here
   // (`panelHost.ts`' `useHeldStates`).

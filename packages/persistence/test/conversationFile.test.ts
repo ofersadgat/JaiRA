@@ -229,25 +229,27 @@ describe("native turn lines — for the other tool's reader, never for replay", 
 });
 
 describe("switching the concern on", () => {
-  it("seeds from the database the first time, then prefers the files", async () => {
+  it("starts its files from the database, and the next open reads nothing from them", async () => {
     const before = project("db");
     createTask(before, { id: "t-1", title: "one", workflow: "w" });
     await call(before, "already recorded");
     before.close();
     open.pop();
 
+    // The files are written from what the database holds (decision 0018 §11): its session, name and record.
     const flipped = project("file");
-    expect(flipped.storage.seeded).toMatchObject({ operation_records: 1, sessions: 1 });
+    expect(flipped.storage.exported).toEqual({ conversations: 3 });
+    expect(existsSync(conversationFileFor(convDir(), "t-1"))).toBe(true);
     const reader = sessionStoreFor(flipped, { taskId: "t-1" }) as unknown as Store;
     expect(await reader.messages("conv")).toEqual([turn("already recorded")]);
     flipped.close();
     open.pop();
 
-    // Nothing was written to disk by the seed itself, so the second open seeds again rather than
-    // replaying — the file becomes the truth from the first WRITE, not from the first read.
+    // As JaiRA left them: the database is the truth, and nothing is read.
     const again = project("file");
-    expect(again.storage.replayed).toEqual({});
-    expect(again.storage.seeded).toMatchObject({ operation_records: 1 });
+    expect(again.storage).toEqual({ imported: {}, exported: {}, current: ["conversations"] });
+    const after = sessionStoreFor(again, { taskId: "t-1" }) as unknown as Store;
+    expect(await after.messages("conv")).toEqual([turn("already recorded")]);
   });
 });
 

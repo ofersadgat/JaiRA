@@ -11,7 +11,7 @@
  *    decision 0005's Open list, closed 2026-09-22). Each reader is a fold over the rows IN ORDER — an
  *    opening row is open until a closing row follows it.
  */
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -33,6 +33,7 @@ import {
   type StoredConnectUndo,
 } from "@jaira/shared";
 import { initProject, openProject, type Project } from "../src/project";
+import { journalFileFor } from "../src/journalFile";
 import { conversationView } from "../src/conversation";
 import { createTask, hasJournalHistory } from "../src/lifecycle";
 import { forkTask, rewindTask as cutTaskJournal } from "../src/cut";
@@ -224,7 +225,7 @@ describe("where an Undo is measured from — a row, which nothing can make drift
     expect(staleReason(project, { undo: { kind: "move", taskId: id, mark: "m-1" }, landing: ["b"] })).toBe("the task was rewound to before the move");
   });
 
-  it("is found again after a file-backed journal's replay re-mints every seq", () => {
+  it("is found again after a file-backed journal's import re-mints every seq", () => {
     project.close();
     writeFileSync(join(dir, ".jaira", "settings.json"), JSON.stringify({ storage: { journal: "file" } }), "utf8");
     project = openProject(dir, { baseDir: testHome() });
@@ -236,6 +237,9 @@ describe("where an Undo is measured from — a row, which nothing can make drift
     engine(other.id, { type: "instance.entered", instanceId: "q", stateId: "w", inputs: {} });
     const was = (keptConnectUndo(project, id) as { cutAt: number }).cutAt;
     project.close();
+    // The files moved since the close (a pull touched them): the open brings them in again.
+    const later = new Date(Date.now() + 60_000);
+    utimesSync(journalFileFor(join(dir, ".jaira", "system", "journal"), id), later, later);
     project = openProject(dir, { baseDir: testHome() });
     const now = keptConnectUndo(project, id) as { cutAt: number };
     expect(now.cutAt).not.toBe(was);

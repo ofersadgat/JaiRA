@@ -533,7 +533,7 @@ export interface AreaSideLine {
 }
 
 /**
- * A System area (decision 0018 §1, ruling 1): its minus, its glyph, name and hint, then its look and
+ * A System area (decision 0019 §1, ruling 1): its minus, its glyph, name and hint, then its look and
  * its change side by side. Each side is its own line of the permission set; the minus takes out both,
  * and a side's mode menu ends with taking out that one.
  *

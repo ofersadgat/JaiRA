@@ -179,7 +179,7 @@ see §9.
 
 ### 2.4 The System tools — no place at all
 
-The System tools ([decision 0018](docs/engineering/decisions/0018-system-tools.md)) act on the machine and its
+The System tools ([decision 0019](docs/engineering/decisions/0019-system-tools.md)) act on the machine and its
 desktop, not on a place in the workspace: a process, a service, a setting, the clipboard, a window, the
 screen. No scope table narrows them; their line's mode answers alone, and the shell's commands that do the
 same (`kill`, `Stop-Process`, `taskkill`) answer to the same line. What protects the machine is in the tools

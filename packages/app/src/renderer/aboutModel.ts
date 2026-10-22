@@ -22,7 +22,8 @@ import {
   type UpdateState,
 } from "@jaira/shared/browser";
 import { SOURCE_WORDS } from "./layerLabels";
-import { invoke, subscribe as subscribePush } from "./store";
+import { invoke, subscribe as subscribePush, syncCache } from "./store";
+import { useView } from "./useView";
 import { waitedFor, type PluginFamily, type PluginRow } from "./updatesModel";
 
 export const TRACK_CHOICES: ReadonlyArray<readonly [string, UpdateChannel]> = [
@@ -121,17 +122,15 @@ export function commandWords(status: CliCommandStatus): string {
 
 /** The `jaira` command's status, and installing it. */
 export function useCliCommand(): { status: CliCommandStatus | undefined; busy: boolean; error: string | undefined; install: () => void } {
-  const [status, setStatus] = useState<CliCommandStatus | undefined>(undefined);
+  // A view of the window's cache (decision 0018, group 7); installing reads it again.
+  const status = useView("cli:status", undefined).value;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  useEffect(() => {
-    void invoke("cli:status", undefined).then(setStatus, () => undefined);
-  }, []);
   const install = (): void => {
     setBusy(true);
     setError(undefined);
     invoke("cli:install", undefined)
-      .then(setStatus, (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
+      .then(() => syncCache().refresh("cli:status", undefined), (e: unknown) => setError(e instanceof Error ? e.message : String(e)))
       .finally(() => setBusy(false));
   };
   return { status, busy, error, install };

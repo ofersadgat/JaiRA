@@ -1,5 +1,5 @@
 /**
- * The System tools (decision 0018) over a machine that is not this one: what is the same on every
+ * The System tools (decision 0019) over a machine that is not this one: what is the same on every
  * operating system — JaiRA's own processes, what `open_app` will not open, a picture's coordinates,
  * the person's Stop, the tools that always ask. `systemWindows.test.ts` runs them on Windows itself.
  */
@@ -231,7 +231,7 @@ describe("where no System tool is built", () => {
   });
 });
 
-describe("the tools that always ask (decision 0018 §6)", () => {
+describe("the tools that always ask (decision 0019 §6)", () => {
   const gated = (set: Record<string, unknown>, builtins = true) => {
     const registry = newRegistry();
     registerSystemTools(registry, { backend: fakeMachine(), enginePid: 100 });

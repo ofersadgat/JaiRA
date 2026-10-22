@@ -399,7 +399,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       // The shell is on the list: `"shell": "deny"`, but the commands that only read (`git status`,
       // `npm test`, …) allow, so it is a shell with those to run, each line judged by the map. The Git
       // tools of decision 0010 follow the web tools, then the CI tools of decision 0016, then `wait_for_event`
-      // with the tasks and workflows. The System tools of decision 0018 sit between the shell and the web.
+      // with the tasks and workflows. The System tools of decision 0019 sit between the shell and the web.
       tools: ["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "read_system", "power", "list_processes", "stop_process", "list_services", "control_service", "list_software", "install_software", "read_settings", "write_settings", "read_clipboard", "write_clipboard", "list_windows", "open_app", "screenshot", "control_input", "web_fetch", "web_search", "list_merge_requests", "read_merge_request", "open_merge_request", "comment_merge_request", "git_merge", "close_merge_request", "git_push", "list_pipelines", "read_pipeline", "read_pipeline_job", "download_pipeline_artifact", "wait_for_event", "list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"],
       permissions: {
         tools: {
@@ -425,7 +425,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
           read_pipeline: "allow",
           read_pipeline_job: "allow",
           download_pipeline_artifact: "allow",
-          // The System tools (decision 0018, ruling 2): read-only lets each look go ahead and refuses each change.
+          // The System tools (decision 0019, ruling 2): read-only lets each look go ahead and refuses each change.
           read_system: "allow",
           power: "deny",
           list_processes: "allow",

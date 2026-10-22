@@ -142,7 +142,7 @@ export function PermissionSetCard({
           <CategoryRow key={category.id} first={isFirst()} category={category} granted={sectionCountOf(permissionSet, category.id)} open={open.has(category.id)} onOpen={() => toggle(category.id)}>
             {category.id === "system"
               ? SYSTEM_AREAS.filter((area) => held.some((tool) => tool.name === area.look || tool.name === area.change)).map((area) => {
-                  // An area is one row and two lines of the set (decision 0018, ruling 1).
+                  // An area is one row and two lines of the set (decision 0019, ruling 1).
                   const side = (name: string): AreaSideLine => ({
                     tool: name,
                     held: holdsTool(permissionSet, name),
@@ -322,7 +322,7 @@ function McpServerGroup({ group, permissionSet, locked, write, open, onOpen }: {
   const held = holdsMcpServer(permissionSet, group.server) || lines.length > 0;
   const listed = new Map((group.status?.tools ?? []).map((tool) => [tool.name, tool]));
   const unnamed = unnamedMcpTools(permissionSet, group);
-  // What the server's tools count as (decision 0018, ruling 5): drawn under it, following that line.
+  // What the server's tools count as (decision 0019, ruling 5): drawn under it, following that line.
   const mapped = mappedMcpToolsOf(permissionSet, group);
   const mappedBy = new Map(mapped.map((one) => [one.tool, one]));
   return (

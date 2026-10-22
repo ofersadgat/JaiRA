@@ -587,7 +587,7 @@ export interface JairaMemoConfig {
 }
 
 /**
- * Where each kind of run state lives — on disk, in SQLite, or both (DESIGN §4.4).
+ * Whether each kind of run state is kept in files as well as the database (DESIGN §4.4, decision 0018 §11).
  *
  * §4.1 drew this line once, in code, for everyone. It became configuration because the right answer
  * is not the same in every root: a shared base root is one machine and wants a database, while a
@@ -595,12 +595,12 @@ export interface JairaMemoConfig {
  * readability, is the whole argument. Because `settings.json` layers, the base can answer `db` and a
  * project `file` with nothing extra to write.
  *
- * A `file` concern keeps the FILE as its truth and replays it into a temp table on open, so the
- * runtime still has one read source and every query is unchanged. `both` means the same, plus the
- * table copy persisting across a close so startup can skip the replay — **with no staleness check**,
- * deliberately and provisionally (§4.4). It is not a second source of truth.
+ * The database is the truth while JaiRA runs, whatever this says. A `file` concern is ALSO written to
+ * files as each change is saved — an export, never read back while running — and what its files say
+ * is brought into the database at open when they moved since JaiRA last had them (a pull, a clone).
+ * `db` keeps it in the database alone. The old `both` is read as `file`, which is what it now means.
  */
-export type JairaStorageMode = "file" | "db" | "both";
+export type JairaStorageMode = "file" | "db";
 
 /** The line shape a file-backed conversation is written in. Reading accepts either, whatever this says. */
 export type JairaSessionFormat = "claude" | "codex";
@@ -612,10 +612,9 @@ export type JairaSessionFormat = "claude" | "codex";
  * `operation_records` in the database, which splits one run's truth across two stores with different
  * durability and different merge behaviour, and nothing would catch it.
  *
- * `jobs` and `job_output` are absent on purpose and {@link parseStorage} says so by name: a replayed
- * table is `TEMP` and therefore per-connection, so anything whose value is cross-process
- * coordination cannot be file-backed. Process claims are exactly that (DESIGN §4.2a), and they mean
- * nothing past a single run.
+ * `jobs` and `job_output` are absent on purpose and {@link parseStorage} says so by name: process
+ * claims are cross-process coordination (DESIGN §4.2a) that mean nothing past a single run, so there
+ * is nothing in them for a file to carry to another checkout.
  */
 export const STORAGE_CONCERNS = ["journal", "conversations", "tasks", "artifacts"] as const;
 export type JairaStorageConcern = (typeof STORAGE_CONCERNS)[number];
@@ -623,14 +622,14 @@ export type JairaStorageConcern = (typeof STORAGE_CONCERNS)[number];
 /** What each concern covers, for an error message and for anyone reading the config. */
 export const STORAGE_CONCERN_TABLES: Record<JairaStorageConcern, string> = {
   journal: "state_machine_events",
-  conversations: "operation_records + session_positions",
+  conversations: "operation_records + sessions + session_names",
   tasks: "task_runtime + the task metadata files",
   artifacts: "the artifact map",
 };
 
 /** Why a concern that looks like one is refused. Named, because "unknown key" explains nothing. */
 const STORAGE_REFUSED: Record<string, string> = {
-  jobs: "process claims are cross-process by definition and a replayed table is per-connection (DESIGN §4.2a)",
+  jobs: "process claims mean nothing past the run that holds them, so nothing in them belongs in a file (DESIGN §4.2a)",
   job_output: "a child's output is debounced chunks written on the main thread, and nothing wants it in git",
   jobOutput: "a child's output is debounced chunks written on the main thread, and nothing wants it in git",
   sessions: "the lineage rows hang off `conversations` — choose that",
@@ -656,7 +655,7 @@ export function defaultStorage(): JairaStorageConfig {
   return { journal: "db", conversations: "db", tasks: "db", artifacts: "db", format: "claude" };
 }
 
-const MODES: readonly JairaStorageMode[] = ["file", "db", "both"];
+const MODES: readonly JairaStorageMode[] = ["file", "db"];
 const FORMATS: readonly JairaSessionFormat[] = ["claude", "codex"];
 
 function parseStorage(raw: unknown): JairaStorageConfig {
@@ -681,6 +680,11 @@ function parseStorage(raw: unknown): JairaStorageConfig {
     }
     if (!STORAGE_CONCERNS.includes(key as JairaStorageConcern)) {
       throw new Error(`config.storage.${key} is not a storage concern (${STORAGE_CONCERNS.join(", ")})`);
+    }
+    // Retired (decision 0018 §11): a persisted index beside a file truth is what `file` is now.
+    if (value === "both") {
+      out[key as JairaStorageConcern] = "file";
+      continue;
     }
     if (!MODES.includes(value as JairaStorageMode)) {
       throw new Error(`config.storage.${key} must be one of ${MODES.join(", ")}`);

@@ -13,6 +13,7 @@ import { isApprovalCall } from "@jaira/ui/workSummary";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { askedOf, pictureOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
+import { useFilled } from "@jaira/ui/useView";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
@@ -204,7 +205,9 @@ function Note({ live, children }: { live: boolean; children: string }): JSX.Elem
 }
 
 /** `Payload`: a payload block, or the honest statement that the record kept none. */
-function Payload({ label, value, hint, artifacts }: { label: string; value: JsonValue | undefined; hint?: string | undefined; artifacts?: ArtifactSurface | undefined }): JSX.Element {
+function Payload({ label, value: held, hint, artifacts }: { label: string; value: JsonValue | undefined; hint?: string | undefined; artifacts?: ArtifactSurface | undefined }): JSX.Element {
+  // Drawn only when the row is opened, so this is where a large value is fetched (decision 0018 §6).
+  const value = useFilled(held);
   if (value === undefined) return <EmptyPayload>{`no ${label} was recorded`}</EmptyPayload>;
   return (
     <View paddingTop={4} paddingBottom={6} minWidth={0}>
@@ -231,14 +234,20 @@ function served(artifacts: ArtifactSurface | undefined): { serve?: ArtifactSurfa
 }
 
 /** `Tool`: one tool call — a line, both its halves when asked for, and what it made, drawn unasked. */
-function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
-  const sub = entry.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(entry.sidechain) : undefined;
+function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, calls, transcript }: { entry: ToolEntry; open: boolean; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; onOpenSidechain?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined; calls?: CallSurface | undefined; transcript: TranscriptOf }): JSX.Element {
+  const sub = held.sidechain !== undefined && sidechainOf !== undefined ? sidechainOf(held.sidechain) : undefined;
   // A doorway is drawn for a chain that is here to unfold, or one the host can walk into.
   // The approval a conversation cut off by the app closing is still waiting on: asked, though its
   // stretch is no longer being written.
   const ask = useContext(ApprovalAskContext);
-  const askedHere = ask?.pending.recovered === true && entry.callId === ask.pending.requestId;
-  const line = toolLineOf(entry, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
+  const askedHere = ask?.pending.recovered === true && held.callId === ask.pending.requestId;
+  const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
+  // What is drawn unasked under the line — a page it produced, its output, a question, an outcome —
+  // has its large values fetched; the rest wait for the row to be opened (`Payload`).
+  const unasked = line.shown === "produced" || line.shown === "output" || line.shown === "asked" || line.shown === "outcome";
+  const args = useFilled(unasked ? held.args : undefined);
+  const result = useFilled(unasked ? held.result : undefined);
+  const entry: ToolEntry = unasked ? { ...held, ...(args !== undefined ? { args } : {}), ...(result !== undefined ? { result } : {}) } : held;
   const { running, unanswered, pathMime } = line;
   const head = { entry, name: line.name, called: line.called, server: line.server, preview: line.preview, command: line.command, prose: line.prose, tone: line.tone, mark: line.mark };
   // The approval prompt: its line is the whole of it.
@@ -259,7 +268,7 @@ function Tool({ entry, open, sidechainOf, onOpenSidechain, artifacts, calls, tra
       );
     }
     if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;
-    // A screenshot, a picture off the clipboard (decision 0018): what the agent saw, drawn as it saw it.
+    // A screenshot, a picture off the clipboard (decision 0019): what the agent saw, drawn as it saw it.
     if (line.shown === "picture") return <Media src={pictureOf(entry.result)!} kind="image" />;
     if (line.shown === "output") return <ValueView value={entry.output!.value} label={entry.output!.name ?? "output"} {...(entry.output!.schema !== undefined ? { hint: { schema: entry.output!.schema } } : {})} />;
     return undefined;

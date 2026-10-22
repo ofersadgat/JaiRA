@@ -2,7 +2,7 @@
 id: engineering/units/run-load
 type: engineering-unit
 status: shipped
-updated: 2026-09-22
+updated: 2026-10-06
 implements: [product/pick-up-where-it-left-off, ux/patterns/button-says-what-will-happen]
 layer: service
 owns_contracts: []
@@ -61,7 +61,7 @@ A frontier entry is `mid-operation` when its operation started and never settled
 
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
-| `state_machine_events` of the task | read in `seq` order; `releaseRevivedFailures` deletes, for live instance ids, non-success `instance.terminated`, `operation.failed`, `call.waiting`, `call.settled`, and `value.settled` with no value and no fallback | event-journal: the table, or the file when file-backed | every journal reader; rewind-and-fork cuts it |
+| `state_machine_events` of the task | read in `seq` order; `releaseRevivedFailures` deletes, for live instance ids, non-success `instance.terminated`, `operation.failed`, `call.waiting`, `call.settled`, and `value.settled` with no value and no fallback | event-journal: the table | every journal reader; rewind-and-fork cuts it |
 | `operation_records` `id`, `status`, `request_json`, `result_json`, `instance_id`, `sequence` | read; `releaseUnconsumedFailures` deletes `failed` rows with a null `provider_session_id` | operation-record-store | the run that continues reopens `interrupted` records |
 | `blobs` | read through `hydrate` | the blob store | none |
 | `task_runtime.root_instance_id` | read | the row, stamped by migration 16 or mapped by `stampFork` | task-lifecycle |
@@ -94,7 +94,7 @@ A frontier entry is `mid-operation` when its operation started and never settled
 | --- | --- | --- | --- |
 | A completed operation's record is missing or unreadable | `unreadable` lists it; `resumeTask` refuses, and `resumable` answers `none` with the first reason as `blocked` | rerun as a new task | refusal naming the state; the strip's hint says resuming is unavailable |
 | The releases run and the start then refuses, as `resumeTask` does on holding or a git failure and `jaira task start` does on any `beginTaskRun` refusal | the freed records and failure rows stay deleted; the next load reads the failed chain as never terminated, so its cause becomes `interrupted` | none needed: the next resume continues the same chain | the failure note leaves the conversation, and Retry reads Resume |
-| The journal or conversations are file-backed | both releases delete table rows only, and the next open replays them from the files | none | the old failure is drawn again beside the retry |
+| The journal or conversations are file-backed | both releases delete table rows only, and an import, at an open that finds the files moved since the last close, brings them back from the files | none | the old failure is drawn again beside the retry |
 | The process is killed between the two releases | each release is one `DELETE`, and the failure rows stay until the next resume deletes them | resume again | none beyond the resume |
 | A killed append cost a journal file its last line | an instance whose settle or end was on that line reads as live | none | that state is entered again on resume |
 | An op renders differently on its way out, so its request no longer hashes to the engine's key | its site is absent while `nextSite` stays above it, so the engine mints a fresh site | none | the call is made and paid for again |

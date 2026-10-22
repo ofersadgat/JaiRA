@@ -77,7 +77,7 @@ way and only read: a pipeline list (of a merge request, a ref or a sha), one pip
 named as the next call takes it (`pipeline_id`, `job_id`, `artifact_id`, `file_type`). `wait_for_event`
 (category `tasks`) waits for any event, JaiRA's own included; only a remote's event passes the forge's door.
 
-The **System tools** ([0018](../decisions/0018-system-tools.md)), category `system`, act on the machine the
+The **System tools** ([0019](../decisions/0019-system-tools.md)), category `system`, act on the machine the
 ENGINE runs on and its desktop — a WSL project's agent looks at the Windows desktop — in eight areas of a
 look and a change each (`SYSTEM_AREAS`). Windows' run in PowerShell 5.1 and .NET with no WMI and no native
 module; macOS's in its own programs and JavaScript for Automation; on Linux every call answers that none is

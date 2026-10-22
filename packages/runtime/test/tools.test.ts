@@ -255,7 +255,7 @@ describe("JAIRA_TOOLS — the gateable set", () => {
     for (const name of GIT_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["list_merge_requests", "read_merge_request", "wait_for_event"].includes(name));
     // …and every CI tool (decision 0016): a download is kept with the task, never in the workspace.
     for (const name of CI_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(true);
-    // …and the System tools (decision 0018): each area's look reads, its change does not.
+    // …and the System tools (decision 0019): each area's look reads, its change does not.
     for (const name of SYSTEM_TOOL_NAMES) expect(registry.tools.get(name)!.readOnly, name).toBe(["read_system","list_processes","list_services","list_software","read_settings","read_clipboard","list_windows","screenshot"].includes(name));
   });
 

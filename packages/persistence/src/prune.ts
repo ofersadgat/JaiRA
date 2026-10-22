@@ -18,7 +18,7 @@ import type { HistorySize, PruneResult } from "@jaira/shared";
 import type { Project } from "./project";
 import { removeTaskJournal } from "./journalFile";
 import { removeTaskConversations } from "./conversationFile";
-import { isFileBacked } from "./shadow";
+import { isFileBacked } from "./fileStorage";
 import { collectBlobs, release } from "./blobStore";
 import type { JsonValue } from "@declarative-ai/json";
 

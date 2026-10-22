@@ -3,7 +3,7 @@
  * draw from (`useChatSurface`, `packages/universal/src/components/chat/surface.ts`).
  */
 import type { AppState, useApp } from "./store";
-import { chatProjectOf, conversationsOf } from "./chatWorkflow";
+import { chatProjectOf } from "./chatWorkflow";
 import type {
   ApprovalScope,
   ChatSettings,
@@ -25,9 +25,17 @@ export interface ChatSurface {
    *
    * A row may carry its OWN project, which is what makes the list work at the root of the address:
    * "all conversations" spans every open project, and a row that cannot say whose task it is cannot
-   * be opened. Absent falls back to {@link project}, which is the case inside one project.
+   * be opened. Absent falls back to {@link listed}, which is the case inside one project.
    */
   conversations: Array<TaskSummary & { project?: string }>;
+  /**
+   * The project a row WITHOUT its own is in: where the address stands, which is where the list was
+   * read from. Not {@link project}, which is the OPEN conversation's — a row in JaiRA's list opened
+   * "in" mist-server because mist-server's conversation was the last one opened.
+   */
+  listed: string | null;
+  /** Whether the rows are of several projects, so each names its own (`conversationsSpan`). */
+  spans: boolean;
   /** The open one, and the project it belongs to. */
   taskId: string | null;
   project: string | null;
@@ -129,13 +137,29 @@ type Actions = ReturnType<typeof useApp>["actions"];
  * A project that is one repository in several workspaces (`grouped`, decision 0013 §4) lists the
  * conversations of ALL of them, each stamped with its workspace: a conversation is placed on whichever
  * has room (§5), and one that went to another clone is still this project's.
+ *
+ * Always the ONE list, filtered by where the window stands — a function of the two, and never a second
+ * list kept beside it. Inside a single project it used to be `tasks`, that project's own list, fetched
+ * whenever the address moved: two reads in flight, or a move that forgot to re-read, left one project's
+ * conversations drawn under another's name, and a row with no project of its own then opened in the
+ * wrong one (2026-10-06). Every row here carries the project it is in.
  */
-export function conversationsAt(state: Pick<AppState, "at" | "allConversations" | "tasks" | "projects">, grouped = true): ChatSurface["conversations"] {
+export function conversationsAt(state: Pick<AppState, "at" | "allConversations" | "projects">, grouped = true): ChatSurface["conversations"] {
   if (state.at === null) return state.allConversations;
+  const here = projectsAt(state, grouped);
+  return state.allConversations.filter((c) => c.project !== undefined && here.has(c.project));
+}
+
+/** Whether the list at this address spans projects — the root, or a project's several workspaces — and so names each row's. */
+export function conversationsSpan(state: Pick<AppState, "at" | "projects">, grouped = true): boolean {
+  return state.at === null || projectsAt(state, grouped).size > 1;
+}
+
+/** The projects whose conversations are listed while standing on `at`: its workspaces when grouped, else itself. */
+function projectsAt(state: Pick<AppState, "at" | "projects">, grouped: boolean): Set<string> {
   const identity = grouped ? state.projects.find((p) => p.project === state.at)?.identity : undefined;
   const group = identity !== undefined ? new Set(state.projects.filter((p) => p.kind === "user" && p.identity === identity).map((p) => p.project)) : new Set<string>();
-  if (group.size <= 1) return conversationsOf(state.tasks);
-  return state.allConversations.filter((c) => c.project !== undefined && group.has(c.project));
+  return group.size > 1 ? group : new Set(state.at === null ? [] : [state.at]);
 }
 
 /**
@@ -152,6 +176,7 @@ export function chatSurfaceOf(
   actions: Actions,
   parts: {
     conversations: ChatSurface["conversations"];
+    spans: boolean;
     hues: Readonly<Record<string, string>>;
     names: Readonly<Record<string, string>>;
   },
@@ -161,6 +186,8 @@ export function chatSurfaceOf(
     conversations: parts.conversations,
     hues: parts.hues,
     names: parts.names,
+    listed: state.at,
+    spans: parts.spans,
     taskId: state.chat.taskId,
     project: chatProjectOf(state.chat.project, state.at),
     busy: state.chat.busy,

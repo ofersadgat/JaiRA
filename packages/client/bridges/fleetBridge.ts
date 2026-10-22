@@ -1,4 +1,6 @@
-import { SHARED_SESSION, type IpcChannel, type JairaBridge, type PushMessage } from "@jaira/shared/browser";
+import { SHARED_SESSION, type IpcChannel, type JairaBridge, type PushMessage, type SyncPage } from "@jaira/shared/browser";
+// By path, not `@jaira/ui`: the app's tests type-check this file, where that name is not mapped.
+import type { SyncSources } from "../../app/src/renderer/syncCache";
 
 /**
  * A phone's window onto every machine it is paired with (decision 0015, amended 2026-10-04: "the ui
@@ -19,6 +21,9 @@ import { SHARED_SESSION, type IpcChannel, type JairaBridge, type PushMessage } f
  *   anything else to the fleet of the project last opened, else the first.
  * - **Pushed**: every fleet's pushes reach the store. A fleet arriving or leaving tells the store every
  *   scope may have changed, as a reconnection does.
+ * - **Synced** (decision 0018 §7): the change log is each answering machine's own — its clock, its
+ *   cursor — so the store's cache follows each as a source of its own (`sources`), and each one's
+ *   `sync:changed` reaches it saying which machine sent it.
  *
  * With one fleet every request goes straight to its engine, as before.
  */
@@ -90,7 +95,7 @@ export function mergeLists(channel: string, answers: readonly (readonly unknown[
 }
 
 /** The fleet bridge: install `bridge` in the store, and say which machines answer with `setMembers`. */
-export function fleetBridge(): { bridge: JairaBridge; setMembers: (members: readonly FleetMember[]) => void; answering: () => readonly FleetMember[] } {
+export function fleetBridge(): { bridge: JairaBridge; sources: SyncSources; setMembers: (members: readonly FleetMember[]) => void; answering: () => readonly FleetMember[] } {
   let answering: FleetMember[] = [];
   /** Which answering machine holds a project, and a waiting thing — learned from the merged lists. */
   const projectOwner = new Map<string, string>();
@@ -98,6 +103,7 @@ export function fleetBridge(): { bridge: JairaBridge; setMembers: (members: read
   let current: string | undefined;
   const listeners = new Set<(message: PushMessage) => void>();
   const unsubscribes = new Map<string, () => void>();
+  const sourceListeners = new Set<() => void>();
   /** Requests made while no machine answers: sent once one does. */
   let waiting: Array<() => void> = [];
 
@@ -162,15 +168,33 @@ export function fleetBridge(): { bridge: JairaBridge; setMembers: (members: read
       unsubscribes.delete(id);
     }
     for (const member of answering) {
-      if (!unsubscribes.has(member.id)) unsubscribes.set(member.id, member.bridge.subscribe((message) => listeners.forEach((on) => on(message))));
+      if (unsubscribes.has(member.id)) continue;
+      const tagged = (message: PushMessage): PushMessage => (message.type === "sync:changed" ? { ...message, source: member.id } : message);
+      unsubscribes.set(member.id, member.bridge.subscribe((message) => listeners.forEach((on) => on(tagged(message)))));
     }
     if (answering.length > 0 && waiting.length > 0) {
       const now = waiting;
       waiting = [];
       now.forEach((go) => go());
     }
-    if (changed) for (const message of RESYNC) listeners.forEach((on) => on(message));
+    if (changed) {
+      sourceListeners.forEach((on) => on());
+      for (const message of RESYNC) listeners.forEach((on) => on(message));
+    }
   };
 
-  return { bridge, setMembers, answering: () => answering };
+  const sources: SyncSources = {
+    ids: () => answering.map((m) => m.id),
+    onChange: (listener) => {
+      sourceListeners.add(listener);
+      return () => void sourceListeners.delete(listener);
+    },
+    since: (source, since) => {
+      const member = byId(source);
+      if (member === undefined) return Promise.reject(new Error(`${source} is not answering`));
+      return member.bridge.invoke("sync:since", { since }) as Promise<SyncPage>;
+    },
+  };
+
+  return { bridge, sources, setMembers, answering: () => answering };
 }

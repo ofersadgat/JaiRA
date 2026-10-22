@@ -1,5 +1,5 @@
 /**
- * What the System tools (decision 0018) ask of the machine, and what it answers — one interface each
+ * What the System tools (decision 0019) ask of the machine, and what it answers — one interface each
  * operating system implements (`windows.ts`, `macos.ts`), so the tools themselves (`../systemTools.ts`)
  * hold the rules that are the same everywhere: what is refused, what is JaiRA's own, how much comes
  * back.

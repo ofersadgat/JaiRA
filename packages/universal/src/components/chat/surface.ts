@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
-import { chatSurfaceOf, conversationsAt } from "@jaira/ui/chatSurface";
+import { chatSurfaceOf, conversationsAt, conversationsSpan } from "@jaira/ui/chatSurface";
 import { hueOf } from "@jaira/ui/pillModel";
 import { useShell } from "../../app/shell";
 
@@ -12,10 +12,11 @@ export function useChatSurface(): ChatSurface {
   const { state, actions } = useShell();
   const grouped = state.settings.ui.groupWorkspaces !== false;
   const conversations = useMemo(
-    () => conversationsAt({ at: state.at, allConversations: state.allConversations, tasks: state.tasks, projects: state.projects }, grouped),
-    [state.at, state.allConversations, state.tasks, state.projects, grouped],
+    () => conversationsAt({ at: state.at, allConversations: state.allConversations, projects: state.projects }, grouped),
+    [state.at, state.allConversations, state.projects, grouped],
   );
   const hues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
   const names = useMemo(() => Object.fromEntries(state.projects.map((p) => [p.project, p.label])), [state.projects]);
-  return chatSurfaceOf(state, actions, { conversations, hues, names });
+  const spans = conversationsSpan({ at: state.at, projects: state.projects }, grouped);
+  return chatSurfaceOf(state, actions, { conversations, spans, hues, names });
 }

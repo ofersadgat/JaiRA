@@ -2,7 +2,7 @@
 id: engineering/units/rewind-and-fork
 type: engineering-unit
 status: shipped
-updated: 2026-09-13
+updated: 2026-10-06
 implements: [product/rewind-to-where-it-went-wrong, product/try-another-direction, product/large-work-splits-into-independent-pieces]
 layer: service
 owns_contracts: [engineering/contracts/task-channels]
@@ -38,7 +38,7 @@ It deliberately does not own:
 
 - Resuming the cut task or the copy: [task-lifecycle](task-lifecycle.md), through [run-load](run-load.md). Neither verb enters a state.
 - Cutting a conversation's rows and branches and stamping its remote: `cutSession` in [operation-record-store](operation-record-store.md).
-- The tombstone lines and their replay: [journal-events](../contracts/journal-events.md) and [storage-files](../contracts/storage-files.md).
+- The tombstone lines and how an import applies them: [journal-events](../contracts/journal-events.md) and [storage-files](../contracts/storage-files.md).
 - When a split copies a task and what it stamps on the copy: [fan-out-host](fan-out-host.md).
 - The message sent into a chat fork: [chat-turns](chat-turns.md). The origin label drawn at the seam: [board-projection](board-projection.md).
 
@@ -54,7 +54,7 @@ It deliberately does not own:
 | Data | Read / written | Source of truth | Who else touches it |
 | --- | --- | --- | --- |
 | `state_machine_events` | rewind deletes the dropped seqs; fork records the kept events under the copy's ids | event-journal | every journal reader |
-| `system/journal/<taskId>/journal.jsonl` | rewind appends `jaira.rewound` naming dropped lines by ordinal; fork appends the copy's lines | the file when the journal is file-backed | replay at open |
+| `system/journal/<taskId>/journal.jsonl` | rewind appends `jaira.rewound` naming dropped lines by ordinal; fork appends the copy's lines | the table while JaiRA runs; the file at an import, when the journal is file-backed | an import at open when the files moved |
 | `operation_records` | rewind deletes doomed records and releases their blobs; fork inserts copies with rewritten `scope`, `session` and `metrics.sessionRef` | operation-record-store | the resume that follows reopens `interrupted` records |
 | `sessions` and `session_names` | rewind drops branches past a seat and restamps `provider_session_id` and `cut_at`; fork inserts the lineage and names under new ids, with `#i<id>` names following their instance | operation-record-store | conversation readers |
 | `blobs.refs` | fork adds one per copied record per distinct blob | the blob store | history-pruning collects zero-ref blobs |
@@ -70,7 +70,7 @@ It deliberately does not own:
 | 2 | A cut at a transition drops the rule and keeps the state that took it entered | `cut.test.ts` "at a transition: the rule is what goes, the state that took it stays entered" |
 | 3 | A call already running when the cut lands keeps its settle | `cut.test.ts` "keeps the settle of a call that was already running when the cut landed" |
 | 4 | A cut in a chat thread keeps the turns before the point and drops that turn and every later one | `cut.test.ts` "cuts a chat thread at a turn: the turns before stay, the turn and everything typed after go" |
-| 5 | A rewind deletes from the table, the record store and the file alike, and a replay of the file after the database is gone holds the same history | `cut.test.ts` "deletes everything from the state's entry on, in the table, the store and the file", `"survives a reopen — the file, replayed, holds what the table held"` |
+| 5 | A rewind deletes from the table, the record store and the file alike, and an import of the file after the database is gone holds the same history | `cut.test.ts` "deletes everything from the state's entry on, in the table, the store and the file", `"survives a reopen — the file, replayed, holds what the table held"` |
 | 6 | A cut conversation holds no row past its seat, loses every branch that left past it, and offers its remote only as a copy cut at the last kept message | `cut.test.ts` "deletes the tail, and offers the remote as a copy cut at the last kept message", "takes every branch that left the tail with it, and leaves branches above the cut alone", "drops the handle when the kept rows carry no message id to cut at" |
 | 7 | A running task and a seq the journal does not hold are refused | `cut.test.ts` "refuses a running task and a point the journal does not have"; `runCut.test.ts` "refuses while the task is running" |
 | 8 | A fork shares no instance, record or session id with its parent, never resumes the parent's remote, and outlives the parent's deletion | `cut.test.ts` "copies the kept prefix under new ids, and the copy outlives its parent" |
@@ -85,7 +85,7 @@ It deliberately does not own:
 | When | Behavior | Recovery | UX state |
 | --- | --- | --- | --- |
 | The task runs in this process or another, or is `stopping` | refused: `is running — stop it before rewinding it` or `forking it`, or `is stopping — stop it before cutting its journal` | stop it and let it settle | refusal |
-| The journal file's surviving lines disagree with the table, as after a retry while file-backed | the rewind refuses after `cutSession` and `dropRecords` ran, and the transaction rolls back | reopen the project before rewinding | refusal naming both counts |
+| The journal file's surviving lines disagree with the table, as after a retry while file-backed | the rewind refuses after `cutSession` and `dropRecords` ran, and the transaction rolls back | have the file imported before rewinding: it is at an open that finds the files moved since the last close, and deleting the journal's `storage_index` row forces it | refusal naming both counts |
 | A rewind's transaction does not commit after a file append: that refusal, or a kill | SQLite rolls back, and the files keep every line already appended: `jaira.tombstone` and cut session rows, and `jaira.rewound` once the check passed | none | after reopen the files win: records are gone while journal events still name them, and a resume can refuse as unreadable |
 | The fork's transaction throws, or the process is killed inside it | `createTask` already wrote the copy's file and `queued` row, and conversation lines appended before the throw stay in the copy's file | delete the copy | an extra queued task with the parent's title |
 | A rewind is retried at the same seq | refused `has no journal event <seq>`, because that event is gone | none needed | refusal |
@@ -99,7 +99,7 @@ It deliberately does not own:
 ## The fork stamp needs migration 17, and a cut is never taken back
 
 - Migration 17 added `sessions.cut_at`, `task_runtime.forked_at_seq` and `task_runtime.fork_boundary_seq`. It does not roll back.
-- `forked_at_seq` is a seq of the parent's journal, which a file-backed replay re-mints at each open; [journal-events](../contracts/journal-events.md) says what that does to the label.
+- `forked_at_seq` is a seq of the parent's journal, which a file-backed journal's import re-mints; [journal-events](../contracts/journal-events.md) says what that does to the label.
 
 ## A cut appends tombstones and copies rows, where a store would ordinarily delete and share
 

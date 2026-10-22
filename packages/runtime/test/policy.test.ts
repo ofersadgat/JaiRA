@@ -311,7 +311,7 @@ describe("a line is judged part by part, against the permission set", () => {
     ["$out = git log; $out | Out-Null", "allow", ["«git log» git log allowed by permissionSet:git log ~git log~"]],
     // Parameters cut short and arrays are read as PowerShell reads them.
     ["Get-Content a.txt, b.txt | Out-File -FilePath c.txt", "require_approval", ["«Get-Content a.txt, b.txt» read_file allowed by permissionSet:read_file ~Get-Content~", "«Out-File -FilePath c.txt» write_file asks by permissionSet:write_file ~Out-File~"]],
-    // A cmdlet is its whole verb: `Install-Module` is `install_software` (decision 0018 §3), which this set
+    // A cmdlet is its whole verb: `Install-Module` is `install_software` (decision 0019 §3), which this set
     // does not hold, so its `other` answers — stricter than the built-in install ask.
     ["Install-Module Pester", "deny", ["«Install-Module Pester» install_software denied by permissionSet:other ~Install-Module~"]],
     ["iwr https://example.com -OutFile x.zip", "require_approval", ["«iwr https://example.com -OutFile x.zip» web_fetch asks by permissionSet:web_fetch ~iwr~"]],

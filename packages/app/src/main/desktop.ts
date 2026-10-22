@@ -240,7 +240,7 @@ function pushToWindow(message: PushMessage): void {
   // A sign-in page from an engine with no screen of its own (`jaira serve`): opened here, where the
   // person is (decision 0013 §8). Only http(s), for the reason `openExternal` gives.
   if (message.type === "open:external" && /^https?:\/\//i.test(message.url)) void shell.openExternal(message.url).catch(() => undefined);
-  // An agent using the mouse and keyboard (decision 0018, ruling 6): the band above every window, with Stop.
+  // An agent using the mouse and keyboard (decision 0019, ruling 6): the band above every window, with Stop.
   if (message.type === "desktop:driving") showDrivingBand(message.driving, () => void link?.invoke("desktop:stop", undefined).catch(() => undefined));
 }
 

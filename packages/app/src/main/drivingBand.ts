@@ -1,5 +1,5 @@
 /**
- * While an agent uses the mouse and keyboard (decision 0018, ruling 6): a band above every other window,
+ * While an agent uses the mouse and keyboard (decision 0019, ruling 6): a band above every other window,
  * at the top of the screen, saying so — with Stop.
  *
  * A window of its own rather than a strip inside JaiRA's, because while an agent drives, JaiRA's window is

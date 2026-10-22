@@ -2,7 +2,7 @@
 id: engineering/contracts/journal-events
 type: engineering-contract
 status: shipped
-updated: 2026-10-02
+updated: 2026-10-06
 visibility: public
 kind: event
 owned_by: [engineering/units/event-journal]
@@ -43,12 +43,12 @@ The file is `system/journal/<taskId>/journal.jsonl`: UTF-8, one JSON object per 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
 | `type` | string | yes | the event's `type`, or `jaira.rewound` |
-| `timestamp` | ISO 8601 string | yes | becomes `created_at` on replay |
-| `taskId` | string | yes | the task a replay inserts the row under |
+| `timestamp` | ISO 8601 string | yes | becomes `created_at` at an import |
+| `taskId` | string | yes | the task an import inserts the row under |
 | `instanceId` | string | no | written when the event has one |
 | `event` | `EngineEvent` or `RewoundEvent` | yes | the event, verbatim |
 
-A replay reads each task directory's `journal.jsonl` in directory-name order; lines in file order once tombstones are applied. `seq` is minted by that insert order.
+An import, at an open that finds the files moved since JaiRA last had them, reads each task directory's `journal.jsonl` in directory-name order; lines in file order once tombstones are applied. `seq` is minted by `main` in that order. An export, when a file-backed journal has no files or its fingerprint is `stale` after a spell in the database alone, replaces each task's file with its rows in `seq` order ([decision 0018](../decisions/0018-one-truth-per-side.md) §11).
 
 ### JaiRA's own line names the lines a rewind removed
 
@@ -143,7 +143,7 @@ The reading rules, which `openFastForward`, `heldMoves`, `reopenedAfter` and `op
 
 - A fast-forward is open when its start row has no end row after it. `resumeTask` puts an open one back on the session (`restoreHostModes` in `app/main/hostModes.ts`), with `answered` recounted from the `jaira.answered` rows after it, `left` from the `jaira.left` rows after it — whose keys are seeded back, so a question left to the person before the restart is theirs when the resumed run parks it again under a new request id, and is not offered to the conversation — and `step` and `at` from the entries after it. `hasJournalHistory` counts neither fast-forward row, because the start is written before a task that has never run starts.
 - A connect is OPEN when its newest `intent` has no `done` with its `mark` after it; the `step` rows say what is done and what each made, and a `stopped` row after the last of them says the last attempt stopped rather than being cut off. The same drop again, or the app's next open for an intent with no `stopped` row, carries out the rest.
-- A connect's Undo is measured from its rows, found by `mark` wherever they now sit: a move's cut is its `intent` row, an adoption is judged from the adopted task's `intent` row, and the drop's own host rows are those before its `done` row on the watched journal. A row is the one position here that nothing makes drift: a count of rows did when a retry deleted rows before the drop, and a `seq` is re-minted by a file-backed replay. A cut at or before the `intent` row takes the drop, and its Undo, with it.
+- A connect's Undo is measured from its rows, found by `mark` wherever they now sit: a move's cut is its `intent` row, an adoption is judged from the adopted task's `intent` row, and the drop's own host rows are those before its `done` row on the watched journal. A row is the one position here that nothing makes drift: a count of rows did when a retry deleted rows before the drop, and a `seq` is re-minted by a file-backed journal's import. A cut at or before the `intent` row takes the drop, and its Undo, with it.
 - `jaira.supplied` carries the `mark` of the connect that wrote it, when one did — how that connect's retry knows it already did.
 - A hold is outstanding until a directed `transition.taken` (one carrying `by`) on the instance it names, a `jaira.moveDropped` for that instance, or a later hold for it. A hold naming no instance is the root's, and a directed transition on a parentless instance takes it. `resumeTask` re-queues every outstanding hold on the resumed run's port.
 - A cut drops these rows like any row with no instance at or past the point. A cut that takes away a fast-forward's end leaves its start open, so `rewindTask` writes a fresh end after every cut that leaves one open. A cut at or before a `jaira.reopened` row puts the task back as the row says, outputs and all, when the machine has nothing left to run.
@@ -168,25 +168,25 @@ The first message writes `instance.entered` with `inputs: {}`, and each later on
 
 | Condition | Response | Caller does |
 | --- | --- | --- |
-| A line does not parse, or has no string `type` or `taskId` | skipped by `readJournalFile`, so replay and `effectiveLines` never see it | nothing; that event is gone from the table |
+| A line does not parse, or has no string `type` or `taskId` | skipped by `readJournalFile`, so an import and `effectiveLines` never see it | nothing; after an import that event is gone from the table |
 | A journal file cannot be read | treated as empty | nothing |
 | A line's `timestamp` does not parse | `created_at` becomes 0 | nothing |
-| A rewind finds the file's surviving line count differs from the table's row count | `rewindTask` refuses with `task '<id>': the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | reopen the project so the table is replayed from the file |
-| The table insert in `record` throws | the error reaches the engine or the caller; a file-backed line is already written | the run fails; the next open replays the line |
+| A rewind finds the file's surviving line count differs from the table's row count | `rewindTask` refuses with `task '<id>': the journal file holds N events and the table M — refusing to cut a journal that disagrees with its file` | have the file imported: it is when the files moved since the last close, and deleting the journal's `storage_index` row forces it at the next open |
+| The table insert in `record` throws | the error reaches the engine or the caller; a file-backed line is already written | the run fails; the next import brings the line in |
 
 ## A change to any event or to the envelope breaks every stored journal, and no deprecation path exists
 
 - Dropping `by` from a directed `transition.taken`, or writing it on a rule-taken one, breaks reopening and the owed entry in `load.ts`, the reopened status in `projection.ts`, and the end of a held move in `hostRows.ts`.
 - Renaming a `jaira.fastForward*`, `jaira.move*`, `jaira.reopened`, `jaira.connect` or `jaira.left` row, or giving one a top-level `instanceId`, loses every open fast-forward, held move, open connect and question left to the person in stored journals, or files the row under an instance every reader then sees.
 - Renaming or reshaping an upstream event breaks projections, load, cut and fork together. Stored journals are migrated to the new shape first; no reader keeps accepting the old one.
-- Changing the line envelope, its field names or the ordinal rule of `jaira.rewound` breaks replay of every committed journal file.
+- Changing the line envelope, its field names or the ordinal rule of `jaira.rewound` breaks the import of every committed journal file.
 - Changing the `chat:` prefix or the `ask` key breaks resume filtering in `load.ts`, the id mapping in `cut.ts` and the conversation readers for existing journals.
 - Changing `fanout.made` breaks the fan-out host's reuse of recorded ids and the line at the mount for existing tasks.
 - A re-stated `instance.entered` for a known id merges into that instance rather than growing a second one.
 
 ## Sequence numbers, ordinals and operation ids each mean less than their names suggest
 
-- `seq` lasts only as long as the table that minted it. A file-backed journal re-mints every `seq` at each open that replays, so a `seq` kept across a reopen, such as `task_runtime.forked_at_seq` and `fork_boundary_seq`, can name a different event.
+- `seq` lasts only as long as the table that minted it. A file-backed journal's import re-mints the `seq` of every event of the tasks its files name, so a `seq` kept across a reopen, such as `task_runtime.forked_at_seq` and `fork_boundary_seq`, can name a different event.
 - A tombstone's ordinals count only lines that parse. A line that stops parsing after a rewind, such as one a merge broke, shifts every later ordinal, and the tombstone then removes different events.
 - `operationId` on `operation.*` is scoped to the dispatch site, and on `call.*` it is the bare content hash. Both fill the `operation_id` column, and comparing one kind with the other matches nothing.
 - A chat turn writes no `operation.dispatched`, and its `operation.completed` and `operation.failed` carry no `operationId`; its record joins through `session_ref`.

@@ -15,6 +15,8 @@ import type { HealthItem, LogLevel, MachineForm } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
 import type { EngineClientInfo } from "./engineHost";
 import type { AppService, CrashKind } from "./service";
+import { LAZY_OVER_LOCAL } from "./lazy";
+import type { ChatThreadView, SessionView } from "@jaira/shared";
 
 /** A channel's handler: its request in, its answer (or a promise of it) out. */
 export type Handler = (request: never) => unknown;
@@ -46,14 +48,23 @@ export type ServiceChannel = Exclude<IpcChannel, HostChannel>;
  * Every request the service answers, by channel — this machine's projects here, another machine's
  * forwarded to it (decision 0013 §7, `Federation.route`).
  */
-export function serviceHandlers(service: AppService, options: { local?: boolean } = {}): Record<ServiceChannel, Handler> {
-  const table = localHandlers(service);
+export function serviceHandlers(service: AppService, options: { local?: boolean; lazyOver?: number } = {}): Record<ServiceChannel, Handler> {
+  const table = homed(service, localHandlers(service));
   // Another machine asking: answered with THIS machine's workspaces only. Forwarding on would send its
-  // own requests back to it, and two machines asking each other for everything would never stop.
+  // own requests back to it, and two machines asking each other for everything would never stop. And
+  // whole: a machine keeping a copy keeps what it copies.
   if (options.local === true) return table;
+  // A window: a transcript's large values as placeholders, fetched when drawn (decision 0018 §6).
+  // `JAIRA_LAZY_OVER` sets it for a window on this machine — to see a phone's transcripts on a desktop.
+  const fromEnv = Number(process.env["JAIRA_LAZY_OVER"]);
+  lazyViews(service, table, options.lazyOver ?? (Number.isFinite(fromEnv) && fromEnv > 0 ? fromEnv : LAZY_OVER_LOCAL));
   const routed = {} as Record<ServiceChannel, Handler>;
   for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
-    routed[channel] = ((request: unknown) => service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request)) as Handler;
+    // Homed BEFORE routing too: a task another machine owns is forwarded there whatever the window named.
+    routed[channel] = ((asked: unknown) => {
+      const request = withHome(service, asked);
+      return service.federation.route(channel, request) ?? (handler as (request: unknown) => unknown)(request);
+    }) as Handler;
   }
   // Starting a task PLACES it, where its project has several workspaces (decision 0013 §5). Only a
   // request made here: one forwarded from another machine was placed there already.
@@ -67,6 +78,42 @@ export function serviceHandlers(service: AppService, options: { local?: boolean 
     return [...local, ...remote, ...service.offlineTasks(request as { workflows?: string[] } | undefined)];
   }) as Handler;
   return routed;
+}
+
+/**
+ * A request about a task answered where the task is (`AppService.homeOf`), whatever project it named.
+ *
+ * Every channel whose request names a `taskId` (or `taskIds`, all of one project) means that task's
+ * own project by its `project`, so this is one rule rather than one per method — and a new channel
+ * gets it without anybody remembering to. The project a request names is the window's guess; the
+ * owner is a row in the database, and where they differ the guess is the one that is wrong.
+ */
+function homed(service: AppService, table: Record<ServiceChannel, Handler>): Record<ServiceChannel, Handler> {
+  const out = {} as Record<ServiceChannel, Handler>;
+  for (const [channel, handler] of Object.entries(table) as Array<[ServiceChannel, Handler]>) {
+    out[channel] = ((request: unknown) => (handler as (request: unknown) => unknown)(withHome(service, request))) as Handler;
+  }
+  return out;
+}
+
+function withHome(service: AppService, request: unknown): unknown {
+  if (request === null || typeof request !== "object") return request;
+  const { taskId, taskIds, project } = request as { taskId?: unknown; taskIds?: unknown; project?: unknown };
+  const id = typeof taskId === "string" ? taskId : Array.isArray(taskIds) && typeof taskIds[0] === "string" ? taskIds[0] : undefined;
+  if (id === undefined) return request;
+  const home = service.homeOf(id, typeof project === "string" ? project : undefined);
+  return home === undefined || home === project ? request : { ...request, project: home };
+}
+
+/**
+ * A window's transcripts with their large values as placeholders over `over` (`lazy.ts`): the session
+ * views and chat threads, the only views a tool's whole input and output reach.
+ */
+export function lazyViews(service: AppService, table: Record<string, Handler>, over: number): void {
+  const view = table["session:view"] as (request: unknown) => unknown;
+  const thread = table["chat:thread"] as (request: unknown) => unknown;
+  table["session:view"] = (async (request: unknown) => service.lazy.session((await view(request)) as SessionView, over)) as Handler;
+  table["chat:thread"] = (async (request: unknown) => service.lazy.thread((await thread(request)) as ChatThreadView | null, over)) as Handler;
 }
 
 function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
@@ -110,6 +157,14 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "task:system": (() => service.listSystemTasks()) as Handler,
     "project:list": (() => service.listProjects()) as Handler,
     "task:all": ((request: { workflows?: string[] } | undefined) => service.listAllTasks(request ?? {})) as Handler,
+    "sync:since": ((request: { since: number }) => service.syncSince(request.since)) as Handler,
+    "lazy:value": ((request: { hash: string }) => service.lazy.value(request.hash)) as Handler,
+    "draft:get": ((request: { key: string }) => service.draftGet(request.key)) as Handler,
+    "window:keep": ((request: { device: string; window: string; state: unknown }) => service.windowKeep(request.device, request.window, request.state)) as Handler,
+    "window:last": ((request: { device: string }) => service.windowLast(request.device)) as Handler,
+    "layout:get": ((request: { device: string }) => service.layoutGet(request.device)) as Handler,
+    "layout:keep": ((request: { device: string; ui: unknown }) => service.layoutKeep(request.device, request.ui)) as Handler,
+    "draft:put": ((request: { key: string; taskId?: string; text: string }) => service.draftPut(request.key, request.taskId ?? null, request.text)) as Handler,
     "session:history": ((request: Parameters<typeof service.sessionHistory>[0]) => service.sessionHistory(request)) as Handler,
     "run:records": ((request: Parameters<typeof service.runRecords>[0]) => service.runRecords(request)) as Handler,
     "session:view": ((request: Parameters<typeof service.sessionView>[0]) => service.sessionView(request)) as Handler,

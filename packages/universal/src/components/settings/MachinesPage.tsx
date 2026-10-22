@@ -1,7 +1,7 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useMemo, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import type { CopyChoice, DeviceView, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
-import { chipStateOf, type MachineChipState } from "@jaira/ui/machinesModel";
+import { chipStateOf, machinesMoved, type MachineChipState } from "@jaira/ui/machinesModel";
 import {
   ADD_SCHEMA,
   COPY_CHOICES,
@@ -23,7 +23,8 @@ import {
   useAddMachine,
   useMachines,
 } from "@jaira/ui/machinesModel";
-import { invoke, subscribe as subscribePush } from "@jaira/ui/store";
+import { invoke } from "@jaira/ui/store";
+import { useView } from "@jaira/ui/useView";
 import { useShell } from "../../app/shell";
 import { copyText } from "../../clipboard";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
@@ -332,14 +333,7 @@ function DeviceRow({ device, onView }: { device: DeviceView; onView: (v: Machine
 /** Answers waiting for machines that are offline, each of which can be taken back. */
 function Outbox(): JSX.Element | null {
   const t = useTokens();
-  const [items, setItems] = useState<OutboxView[]>([]);
-  useEffect(() => {
-    const read = (): void => void invoke("machines:outbox", undefined).then(setItems, () => undefined);
-    read();
-    return subscribePush((message) => {
-      if (message.type === "machines:changed" || (message.type === "store:invalidate" && message.scope === "tasks")) read();
-    });
-  }, []);
+  const items: OutboxView[] = useView("machines:outbox", undefined).value ?? [];
   if (items.length === 0) return null;
   return (
     <SettingsSection id="outbox" title={W.outbox.title} info={W.outbox.info}>
@@ -349,7 +343,7 @@ function Outbox(): JSX.Element | null {
           name={<NameChip label={item.machine} state="off" />}
           description={`${item.what.charAt(0).toUpperCase()}${item.what.slice(1)}, given ${new Date(item.at).toLocaleString()}.`}
           control={
-            <Button kind="ghost" onPress={() => void invoke("machines:withdraw", { id: item.id }).then(setItems, () => undefined)}>
+            <Button kind="ghost" onPress={() => void invoke("machines:withdraw", { id: item.id }).then(machinesMoved, () => undefined)}>
               Take it back
             </Button>
           }
@@ -388,12 +382,9 @@ function Copies({ view, onView }: { view: MachinesView; onView: (v: MachinesView
   const choice = view.self.copy;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>(undefined);
-  const [disk, setDisk] = useState<{ bytes: number; machines: number; dir: string } | undefined>(undefined);
-  const [projects, setProjects] = useState<ProjectSummary[]>([]);
-  useEffect(() => {
-    void invoke("machines:copies", undefined).then(setDisk, () => undefined);
-    void invoke("project:list", undefined).then((all) => setProjects(all.filter((p) => p.machine !== undefined && p.machine.self !== true)), () => undefined);
-  }, [choice]);
+  const disk = useView("machines:copies", undefined).value;
+  const listed = useView("project:list", undefined).value;
+  const projects: ProjectSummary[] = useMemo(() => (listed ?? []).filter((p) => p.machine !== undefined && p.machine.self !== true), [listed]);
   const choose = (next: CopyChoice): void => {
     setBusy(true);
     setError(undefined);

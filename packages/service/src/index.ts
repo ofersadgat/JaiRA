@@ -24,3 +24,4 @@ export * from "./federation";
 export * from "./placement";
 export * from "./resources";
 export * from "./tailnetHelper";
+export * from "./lazy";

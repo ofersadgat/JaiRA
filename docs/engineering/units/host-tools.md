@@ -2,7 +2,7 @@
 id: engineering/units/host-tools
 type: engineering-unit
 status: shipped
-updated: 2026-09-21
+updated: 2026-10-06
 implements: [product/read-what-work-produced, product/agents-act-only-where-allowed, product/hand-work-to-agents]
 layer: core
 owns_contracts: [engineering/contracts/host-tool-vocabulary]
@@ -24,7 +24,7 @@ Each tool is an upstream `Tool` with a description, an `inputSchema`, a `readOnl
 - `webTools.ts`: `web_fetch`, which reads an http or https URL and reduces HTML to text with `textOfHtml`, and `web_search`, which queries a `WebSearchConfig` endpoint or, with none, scrapes DuckDuckGo's HTML through `duckDuckGoResults`, after checking the endpoint against `ctx.policy.scopeOf`. Registered by `registerWebTools`.
 - `workflowTools.ts`: the eight WORKFLOW tools of [decision 0005](../decisions/0005-connect.md) §3 — `list_workflows`, `start_task`, `move_task`, `list_tasks`, `answer_question`, `hold_task`, `release_task`, `stop_task` — registered by `registerWorkflowTools`. They are the only tools here that reach nothing in the workspace: each validates the shape a model handed it and calls a `WorkflowToolHost`, which is `createWorkflowHost` in the app over `AppService`'s own operations. `noWorkflowHost` is the host for a caller that serves none (the CLI, a test registry): every name resolves and every call answers why it cannot be served there, so a state that holds one still loads and runs.
 - `gitTools.ts`: the Git tools of [decision 0010](../decisions/0010-git-tools-and-events.md) §1 — `list_merge_requests`, `read_merge_request`, `open_merge_request`, `comment_merge_request`, `git_merge`, `close_merge_request`, `git_push`, and `wait_for_event` — registered by `registerGitTools` over a `GitToolHost`: `workspaceGitHost` (the workspace, the exec, the connections and a `PublishAuthorizer`) in the app's run and typed-turn paths and the CLI, `noGitToolHost` where there is none. Each reads the workspace's remote, picks the connection by host (`forgeAccess`), and calls the `ForgeProvider`. `wait_for_event` waits on the task's project's event hub (`EventWaits`). `reachForge` and `forgeTool` are shared with `ciTools.ts`.
-- `systemTools.ts`: the System tools of [decision 0018](../decisions/0018-system-tools.md) — sixteen, a look and a change in each of eight areas — registered by `registerSystemTools` over a `SystemBackend` (`system/types.ts`): `system/windows.ts` (PowerShell 5.1 through `system/powershell.ts`, `Add-Type` for windows, the screen and `SendInput`, no WMI), `system/macos.ts` (macOS's programs and JXA's bridge to CoreGraphics), none on Linux. The tool layer holds what is the same everywhere: `protectedProcesses`, the open-app refusals, the picture kept through the host's `CiArtifactSink`, a screenshot's geometry per conversation for `control_input`, and the `onDriving`/`mayDrive` hooks the app's band and Stop hang on.
+- `systemTools.ts`: the System tools of [decision 0019](../decisions/0019-system-tools.md) — sixteen, a look and a change in each of eight areas — registered by `registerSystemTools` over a `SystemBackend` (`system/types.ts`): `system/windows.ts` (PowerShell 5.1 through `system/powershell.ts`, `Add-Type` for windows, the screen and `SendInput`, no WMI), `system/macos.ts` (macOS's programs and JXA's bridge to CoreGraphics), none on Linux. The tool layer holds what is the same everywhere: `protectedProcesses`, the open-app refusals, the picture kept through the host's `CiArtifactSink`, a screenshot's geometry per conversation for `control_input`, and the `onDriving`/`mayDrive` hooks the app's band and Stop hang on.
 - `ciTools.ts`: the CI tools of [decision 0016](../decisions/0016-git-and-ci-tools.md) — `list_pipelines`, `read_pipeline`, `read_pipeline_job`, `download_pipeline_artifact` — registered with the Git tools over the same host. Answers are shaped by `ciViews.ts`; a download goes through the host's `CiArtifactSink` (`ciArtifacts.ts`, `$CENTRAL` recorded in the artifact store), cleaned by `ciLog.ts`, unpacked by `zip.ts`.
 
 It deliberately does not own:
@@ -48,7 +48,7 @@ It deliberately does not own:
 | --- | --- | --- | --- |
 | Workspace files under `ctx.workspace.root`, else `options.cwd` | read by `read_file`, `edit`, `glob`, `grep` and a content-less `show_artifact`; written by `write_file` and `edit` when the destination is the workspace | the filesystem | agents' own built-ins, git, the person |
 | Artifact bytes at a resolved destination | written by `write_file`, `edit` and `show_artifact` | the filesystem | artifact-placement resolves the path; uri-and-artifact-reads serves them |
-| `artifacts` rows | `put` after every write, every edit and every `show_artifact` given `content`; `get` before every read | `SqliteArtifactStore` in the project database, or its row files when `storage.artifacts` is file-backed | artifact-placement owns the store and places returned blobs |
+| `artifacts` rows | `put` after every write, every edit and every `show_artifact` given `content`; `get` before every read | `SqliteArtifactStore` in the project database, also written to its row files when `storage.artifacts` is file-backed | artifact-placement owns the store and places returned blobs |
 | Pages and search results | fetched | the remote host | none |
 
 ## The invariants keep a logical path round-tripping and a tool inside its workspace

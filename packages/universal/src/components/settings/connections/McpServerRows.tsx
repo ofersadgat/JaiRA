@@ -81,7 +81,7 @@ function McpServerRow({
   const enabled = mcpServerEnabled(server);
   const state = mcpRowState(enabled, status);
   const credentials: McpServerStatus["credentials"] = status?.credentials ?? mcpSecretsOf(server);
-  // What the server's tools say themselves they count as, and nobody has accepted yet (decision 0018, ruling 5).
+  // What the server's tools say themselves they count as, and nobody has accepted yet (decision 0019, ruling 5).
   const claims = unacceptedClaims(server, status);
   const accept = (picked: typeof claims): void => set(`${path}.tools`, { ...(server.tools ?? {}), ...Object.fromEntries(picked.map((one) => [one.tool, one.claim])) });
 
