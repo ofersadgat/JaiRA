@@ -2,9 +2,9 @@
 #
 # They run on the mistlabs group's own machines, and on GitLab's hosted runners only while those are
 # down. A job's runner is fixed by its tags when it is created, so this pipeline first asks which
-# machines are up (the `runners` job, `scripts/ci/runners.mjs`, on a small hosted runner: the one
-# that is always there) and then starts the jobs as a child pipeline with their tags set. Run pipeline
-# with RUNNERS = own or hosted to choose by hand.
+# machines are up (the `runners` job, `scripts/ci/runners.mjs`: untagged, so the group's Docker runner
+# or a small hosted one takes it, whichever is free) and then starts the jobs as a child pipeline with
+# their tags set. Run pipeline with RUNNERS = own or hosted to choose by hand.
 #
 # A release pipeline runs for:
 #
@@ -57,7 +57,6 @@ workflow:
 
 runners:
   stage: runners
-  tags: [saas-linux-small-amd64]
   image: node:22-alpine
   variables:
     GIT_DEPTH: 1
