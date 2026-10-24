@@ -1,5 +1,6 @@
 import { useMemo } from "react";
 import { lookOf } from "@jaira/ui/appearanceLayer";
+import { askOfTask } from "@jaira/ui/approvalCall";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
 import { leafWaitOf, parkedGateOf, reviewerServicesOf, startAgainOf } from "@jaira/ui/panelHost";
 import { push } from "@jaira/ui/panelStack";
@@ -35,7 +36,7 @@ export function useRunContext(): RunFields {
   const gate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
   // …and the agent question and command approval this conversation is holding, hosted the same way.
   const question = state.view === "tasks" && detail !== null ? state.questions.find((q) => q.taskId === detail.taskId) : undefined;
-  const approval = state.view === "tasks" && detail !== null ? state.approvals.find((a) => a.taskId === detail.taskId) : undefined;
+  const approval = state.view === "tasks" && detail !== null ? askOfTask(state.approvals, detail.taskId) : undefined;
   // What the shell lends a changeset reviewer (`panelHost.ts`' `reviewerServicesOf`).
   const services = useMemo(() => reviewerServicesOf(state.drafts, actions), [state.drafts, actions]);
   const batches = useMemo(() => lookOf(state.config).conversation.sequentialBatches, [state.config]);

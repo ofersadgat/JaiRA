@@ -10,6 +10,7 @@ import type { ConversationTurn, InstanceNode, SessionView } from "@jaira/shared/
 import { CUT_OFF_EVENT, foldWriting, isStreamBookkeeping, workflowOutcomeOf, writingPath, type WritingTool } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { MESSAGE_SOURCE, workflowSourceTitleOf } from "../src/renderer/messageReading";
+import { statusToneOf, statusVerbOf, statusWhatOf } from "../src/renderer/liveStatusModel";
 import { keptUnderSummary, producedArtifact, toolLineOf } from "../src/renderer/transcriptRows";
 import {
   agentTitleOf,
@@ -806,6 +807,23 @@ describe("what the model is doing right now, as one line", () => {
 
   it("falls back to the honest floor: a turn has started and has said nothing", () => {
     expect(liveStatusOf([], null, true)).toEqual({ kind: "working" });
+  });
+
+  it("says WHO it waits on: auto checking the call, you, or the call itself (2026-10-24)", () => {
+    // "When permissions are on Auto the UI says that it's asking me for permission when it's actually
+    // waiting for the llm to answer" — three different waits, and the line names each.
+    const fetch: TranscriptEntry = { kind: "tool", name: "mcp__dai__web_fetch", summary: "https://example.com", callId: "f1", at: 100 };
+    const check: TranscriptEntry = { kind: "tool", name: "check_permission", summary: "smart", args: { function: "smart", tool: "web_fetch" }, callId: "c1", calledBy: "f1", at: 200 };
+    const checking = liveStatusOf([fetch, check], null, true)!;
+    expect(checking).toMatchObject({ kind: "running", name: "check_permission", checker: "smart", about: { name: "mcp__dai__web_fetch", summary: "https://example.com" }, since: 200 });
+    expect([statusVerbOf(checking), statusWhatOf(checking), statusToneOf(checking)]).toEqual(["Checking with auto", "Fetch page · https://example.com", "check"]);
+
+    const asked: TranscriptEntry = { kind: "tool", name: "approve_tool_call", summary: "web_fetch", args: { tool: "web_fetch", asker: "smart" }, callId: "a1", calledBy: "f1", at: 300 };
+    const waiting = liveStatusOf([fetch, { ...check, ok: true, result: "unsure: put to the person" } as TranscriptEntry, asked], null, true)!;
+    expect([statusVerbOf(waiting), statusWhatOf(waiting), statusToneOf(waiting)]).toEqual(["Waiting for you", "to approve · Fetch page · https://example.com", "you"]);
+
+    const running = liveStatusOf([fetch, { ...check, ok: true, result: "allowed" } as TranscriptEntry], null, true)!;
+    expect([statusVerbOf(running), statusWhatOf(running), statusToneOf(running)]).toEqual(["Running", "Fetch page · https://example.com", "work"]);
   });
 });
 

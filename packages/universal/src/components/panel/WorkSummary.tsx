@@ -13,6 +13,8 @@ import {
   isQuiet,
   liveIndexOf,
   phasesOf,
+  runToneOf,
+  checkedAbove,
   secondsOf,
   sentenceOf,
   spanOf,
@@ -102,6 +104,7 @@ const HUES: Record<WorkKind, string> = {
   wait: "warn",
   note: "tok-hint",
   approval: "tok-hint",
+  check: "accent",
 };
 function hueOfKind(t: Tokens, kind: WorkKind): string {
   return String(t.v(HUES[kind]));
@@ -314,24 +317,28 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
   const first = entries[run.rows[0]!]!;
   const startedAt = live !== undefined ? entries[live]!.at : undefined;
   const wait = run.kind === "wait";
-  const iconInk = failedCount > 0 ? "bad" : wait ? "warn" : "dim";
+  // Waiting for YOU is the waiting amber (the status line's, the board's); a check, the ink of its verdict.
+  const tone = runToneOf(entries, run, live);
+  const yours = running && tone === "warn";
+  const live_ = yours ? "warn" : "accent";
+  const iconInk = failedCount > 0 ? "bad" : wait ? "warn" : (tone ?? "dim");
   const kind = chipsOf(entries, run.rows)[0]?.icon ?? "tool";
   return (
     <>
-      <View flexDirection="row" alignItems="center" gap={6} minWidth={0} paddingVertical={2} paddingHorizontal={6} borderRadius={6} backgroundColor={(running ? t.mix(t.v("accent"), 7, "transparent") : "transparent") as never}>
+      <View flexDirection="row" alignItems="center" gap={6} minWidth={0} paddingVertical={2} paddingHorizontal={6} borderRadius={6} backgroundColor={(running ? t.mix(t.v(live_), yours ? 12 : 7, "transparent") : "transparent") as never}>
         <Txt spec={{ voice: "data", scale: 10 / 12, color: "tok-hint", tabular: true }} {...normalLineOf(t, "data", 10 / 12)} flexShrink={0}>
           {clock(first.at)}
         </Txt>
         <View width={18} flexShrink={0} flexDirection="row" justifyContent="center">
-          {running ? <Pulse color="dim" /> : <Icon name={kind as IconName} size={13} color={String(t.v(iconInk))} />}
+          {yours ? <Icon name="pause" size={13} color={String(t.v("warn"))} /> : running ? <Pulse color="dim" /> : <Icon name={kind as IconName} size={13} color={String(t.v(iconInk))} />}
         </View>
         <View flex={1} minWidth={0} flexDirection="row" alignItems="center" gap={6}>
           <Tap hover={hover} style={{ flexGrow: 0, flexShrink: 1, minWidth: 0 }}>
           <View ref={hover.anchor as never} flexGrow={0} flexShrink={1} minWidth={0} borderRadius={4} {...REACHED} {...hover.bind}>
-            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: wait ? "warn" : "text" }} ellip>
+            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: wait ? "warn" : (tone ?? "text") }} ellip>
               <SaidText said={said} />
               {doing !== undefined ? (
-                <Text color={t.v("accent") as never}>
+                <Text color={t.v(live_) as never} {...(yours ? { fontWeight: "600" as never } : {})}>
                   <SaidText said={doing} />
                 </Text>
               ) : null}
@@ -355,7 +362,7 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
             </Txt>
           ) : null}
         </View>
-        <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "accent", tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)} flexShrink={0}>
+        <Txt spec={{ voice: "data", scale: 10.5 / 12, color: live_, tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)} flexShrink={0}>
           {running && startedAt !== undefined ? secondsOf(Math.max(0, now - startedAt)) : ""}
         </Txt>
       </View>
@@ -428,7 +435,8 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const prompt = (afterRow: boolean): ReactNode =>
     askAt >= 0 && ask !== undefined ? (
       <Ask afterRow={afterRow || narrow}>
-        <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} heading={false} />
+        {/* A function's question sits under the check that put it, whose row says why: not said twice. */}
+        <ApprovalSurface key={ask.pending.requestId} pending={ask.pending} onDecide={ask.onDecide} heading={false} reasons={!checkedAbove(entries, askAt)} />
       </Ask>
     ) : null;
   let promptPlaced = false;
@@ -472,7 +480,12 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
                     {win.shown.map((run, k) => {
                       const here = askAt >= 0 && k === win.shown.length - 1 && run.rows.includes(askAt);
                       if (here) promptPlaced = true;
-                      return <RunRow key={run.rows[0]} entries={entries} run={run} live={live} now={now} clock={clock} rowOf={rowOf} {...(here ? { below: prompt(false) } : {})} />;
+                      // A call a tool made — its permission checked, or put to you — sits under the call it is about.
+                      return (
+                        <Nested key={run.rows[0]} entry={entries[run.rows[0]!]}>
+                          <RunRow entries={entries} run={run} live={live} now={now} clock={clock} rowOf={rowOf} {...(here ? { below: prompt(false) } : {})} />
+                        </Nested>
+                      );
                     })}
                   </View>
                 ) : null}

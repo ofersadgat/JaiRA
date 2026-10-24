@@ -5,7 +5,7 @@
 import { artifactOf, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { answersOfAnsweredText } from "./choicesModel";
-import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, isApprovalCall } from "./workSummary";
+import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall } from "./workSummary";
 import { shellLineOf, type ToolEntry, type WorkEntry } from "./transcript";
 
 /**
@@ -252,6 +252,25 @@ export function toolLineOf(
       preview: words.preview,
       command: approvalAnswerOf(entry) === undefined ? approvalAboutOf(entry).command : undefined,
       prose: approvalAnswerOf(entry) !== undefined,
+      tone: words.tone,
+      ...(words.mark !== undefined ? { mark: words.mark } : {}),
+      shown: undefined,
+      unanswered,
+      running,
+      chainName,
+      pathMime,
+    };
+  }
+  // A permission function asked about the call, the same way: who is checking it, then what it came to
+  // and why (the person, 2026-10-24, option B).
+  if (isCheckCall(entry)) {
+    const words = checkWordsOf(entry, unanswered && open);
+    return {
+      name: words.name,
+      called: entry.name,
+      preview: words.preview,
+      command: undefined,
+      prose: true,
       tone: words.tone,
       ...(words.mark !== undefined ? { mark: words.mark } : {}),
       shown: undefined,

@@ -32,6 +32,7 @@ import {
   registerSmartFunction,
   smartJudgeOperation,
   type PermissionFunctionRunner,
+  type PermissionFunctionsOptions,
 } from "../src/permissionFunctions";
 import { hostCalleeSignatures } from "../src/userEvents";
 import { newRegistry } from "../src/wiring";
@@ -40,7 +41,7 @@ import { newRegistry } from "../src/wiring";
 function gated(
   decl: PermissionSetDecl,
   tool: string,
-  options: { run?: PermissionFunctionRunner; policy?: Parameters<typeof compilePolicy>[0] } = {},
+  options: { run?: PermissionFunctionRunner; policy?: Parameters<typeof compilePolicy>[0]; hooks?: Pick<PermissionFunctionsOptions, "onAsking" | "onDecided"> } = {},
 ) {
   const asked: ApprovalRequest[] = [];
   const decided: PermissionFunctionRequest[] = [];
@@ -68,7 +69,7 @@ function gated(
     ledger: new PermissionLedger({ baseline: policy.baseline ?? {} }),
     sessionId: "s1",
     toolName: tool,
-    approve: hub.approver({ taskId: "t1", functions: { ...(run !== undefined ? { run } : {}), state: "wf/build" } }),
+    approve: hub.approver({ taskId: "t1", functions: { ...(run !== undefined ? { run } : {}), state: "wf/build", ...options.hooks } }),
     authoredMode: block.tools![tool]!,
     ...(policy.smart?.[tool] !== undefined ? { smart: policy.smart[tool] } : {}),
     scopeOf: policy.scopeOf!,
@@ -114,6 +115,27 @@ describe("a function decides a tool call before anybody is asked", () => {
     expect(asked[0]!.reason).toBe(`the function 'judge' could not decide: 'judge' returned "maybe", which is not allow or deny`);
     hub.decide(asked[0]!.requestId, "deny");
     expect(isPermissionDenied((await pending) as never)).toBe(true);
+  });
+
+  it("tells the host a function is being asked BEFORE it answers, then what it answered (option B, 2026-10-24)", async () => {
+    const heard: string[] = [];
+    let release: (answer: "allow") => void = () => undefined;
+    const { call, ran } = gated({ write_file: { function: "judge" }, other: "deny" }, "write_file", {
+      run: () => new Promise((resolve) => (release = resolve)),
+      hooks: {
+        onAsking: (request) => void heard.push(`asking ${request.function} about ${request.tool}`),
+        onDecided: (decided) => void heard.push(`${decided.request.function} said ${decided.answer ?? decided.failure}`),
+      },
+    });
+    const pending = call({ path: "notes.md", content: "x" });
+    await eventually(() => heard.length > 0, "the function to be asked");
+    // Asked, and nothing has run: the host can say the call is being checked, not running.
+    expect(heard).toEqual(["asking judge about write_file"]);
+    expect(ran).toEqual([]);
+    release("allow");
+    await pending;
+    expect(heard).toEqual(["asking judge about write_file", "judge said allow"]);
+    expect(ran).toHaveLength(1);
   });
 
   it("puts such a call to the person when nothing here can run a function — never lets it through", async () => {
@@ -305,6 +327,21 @@ describe("`smart`, the function JaiRA ships", () => {
       hub.submit(parked[0]!.requestId, { decision: answer });
       expect(await pending).toBe(answer);
     }
+  });
+
+  it("says what its judge came to the moment it does — an unsure one BEFORE the person is asked (option B, 2026-10-24)", async () => {
+    const registry = newRegistry();
+    const { hub, parked } = approvalPromptOn(registry);
+    const judge = answering({ verdict: "unsure", reason: "publishing is irreversible" });
+    const told: Array<{ verdict: string; reason?: string; parkedYet: number }> = [];
+    registerSmartFunction(registry, { prompt: judge.prompt, config: () => ({}), onJudged: (_request, judged) => void told.push({ ...judged, parkedYet: parked.length }) });
+    const pending = runnerOver(registry, judge.prompt)(SMART_FUNCTION, REQUEST);
+    await eventually(() => parked.length > 0, "the approval prompt to park");
+    expect(told).toEqual([{ verdict: "unsure", reason: "publishing is irreversible", parkedYet: 0 }]);
+    hub.submit(parked[0]!.requestId, { decision: "allow" });
+    expect(await pending).toBe("allow");
+    // The person's answer is not the judge's: it is told once.
+    expect(told).toHaveLength(1);
   });
 
   it("treats a judge that failed, or said something else, as unsure — and asks", async () => {

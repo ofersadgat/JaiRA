@@ -52,9 +52,11 @@ import { GateTitle } from "./GateTitle";
  *   the answers              row, wrapping, gap 8, 14 above; `Split`s; the error under them (--bad, app
  *                            11/12.5)
  */
-export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading = true }: ApprovalSurfaceProps & {
+export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading = true, reasons: saysWhy = true }: ApprovalSurfaceProps & {
   /** Its heading; not under a work summary's row, which says it already. */
   heading?: boolean;
+  /** Its reasons; not under a check's row that said why already ("Auto is unsure · …", option B). */
+  reasons?: boolean;
 }): JSX.Element {
   const t = useTokens();
   // One of the two menus open at a time, anchored to its own split button.
@@ -76,7 +78,7 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
   const rows = drawn ? partRows(approval) : [];
   const hover = (index: number): Record<string, unknown> => (isWeb ? { onMouseEnter: () => setHot(index), onMouseLeave: () => setHot(null) } : {});
   const em = Number(t.scaled("size-data", 12 / 12)) || 12;
-  const reasons = reasonLines(pending);
+  const reasons = saysWhy ? reasonLines(pending) : [];
 
   return (
     <View testID="approval" flexDirection="column">

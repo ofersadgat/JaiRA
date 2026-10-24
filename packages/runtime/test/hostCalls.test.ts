@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { messagesOfRecord } from "@jaira/persistence";
-import { approvalCallEntries, approvalResultEntries, callingCallOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
+import { approvalCallEntries, approvalResultEntries, callingCallOf, checkCallEntries, checkResultEntries, endedCallsOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
 import { ApprovalHub } from "../src/approval";
 
 const LINE = 'git fetch origin --quiet && echo "master=$(git rev-parse origin/master)"';
@@ -85,6 +85,47 @@ describe("the one approval prompt, asked by a function", () => {
     hub.denyAll();
     expect(await later).toBe("deny");
     expect(answered).toEqual(["allow by person", "deny by closed"]);
+  });
+
+  it("is let go of as abandoned when the call that asked ends without it — and only once", async () => {
+    const answered: string[] = [];
+    const hub = new ApprovalHub({ onRequest: () => undefined, onResolved: (_id, decision, by) => answered.push(`${decision.decision} by ${by}`) });
+    const pending = hub.askFor({ tool: "shell", subject: "shell", function: "smart", input: { command: "Get-Content a.jsonl" } }, { taskId: "t1", prompt: "smart is unsure" });
+    const { requestId } = hub.list()[0]!;
+    expect(hub.abandon(requestId)).toBe(true);
+    expect(await pending).toBe("deny");
+    expect(hub.list()).toEqual([]);
+    expect(hub.abandon(requestId)).toBe(false);
+    expect(answered).toEqual(["deny by abandoned"]);
+    const words = approvalResultEntries("approve_1", "t1", { decision: "deny", scope: "once", by: "abandoned", waitedMs: 288_000 }, 2).record;
+    expect(words).toMatchObject({ content: [{ content: "not answered: the call ended without it", data: { by: "abandoned" } }] });
+  });
+});
+
+describe("a permission function asked about the call — `check_permission` (option B, 2026-10-24)", () => {
+  it("is a call the call made, with what the function came to as its result's data — and never replayed to a model", () => {
+    const call = checkCallEntries("check_1", "t1", { function: "smart", tool: "shell", subject: "shell", command: LINE, part: "git fetch origin --quiet" }, 1000);
+    const unsure = checkResultEntries("check_1", "t1", { verdict: "unsure", reason: "pushes are irreversible", tookMs: 11_000 }, 12_000);
+    expect(call.record).toMatchObject({ role: "assistant", calledBy: "t1", content: [{ type: "tool_use", id: "check_1", name: "check_permission", input: { function: "smart", tool: "shell", part: "git fetch origin --quiet" } }] });
+    expect(unsure.record).toMatchObject({ role: "user", calledBy: "t1", content: [{ type: "tool_result", tool_use_id: "check_1", content: "unsure: put to the person", data: { verdict: "unsure", reason: "pushes are irreversible", tookMs: 11_000 } }] });
+    expect(checkResultEntries("c", "t1", { verdict: "failed", reason: "the judge failed", tookMs: 1 }, 2).record).toMatchObject({ content: [{ content: "could not decide: the judge failed" }] });
+    // Folded in right after the call it is about, before the approval it led to, and asked of nobody again.
+    const approval = approvalCallEntries("approve_1", "t1", { tool: "shell", command: LINE, asker: "smart" }, 12_500).record;
+    const merged = mergeHostCalls([bashCall("t1", LINE), bashResult("t1")], [call.record, unsure.record, approval]);
+    expect(merged.entries.map((e) => (e as { content: Array<{ id?: string; tool_use_id?: string }> }).content[0]!.id ?? (e as { content: Array<{ tool_use_id?: string }> }).content[0]!.tool_use_id)).toEqual(["t1", "check_1", "check_1", "approve_1", "t1"]);
+    expect(unansweredAsksOf([bashCall("t1", LINE), call.record])).toEqual([]);
+    expect(messagesOfRecord({ value: { entries: merged.entries } } as JsonValue)).toHaveLength(2);
+  });
+});
+
+describe("the calls an entry ends", () => {
+  it("are the ids its tool results answer, streamed or recorded — and none for a call or a text", () => {
+    const streamedResult = { kind: "message", role: "user", content: { role: "user", content: [{ type: "tool_result", tool_use_id: "t1", content: "MCP server \"dai\" tool \"shell\" sent no response or progress for 300s; aborting." }] } } as JsonValue;
+    expect(endedCallsOf(streamedResult)).toEqual(["t1"]);
+    expect(endedCallsOf(bashResult("t2"))).toEqual(["t2"]);
+    expect(endedCallsOf(bashCall("t3", "ls"))).toEqual([]);
+    expect(endedCallsOf({ kind: "message", role: "assistant", content: "done" } as JsonValue)).toEqual([]);
+    expect(endedCallsOf(undefined)).toEqual([]);
   });
 });
 

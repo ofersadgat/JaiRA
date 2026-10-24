@@ -14,7 +14,7 @@ import { useWaiting } from "./limitsStore";
 import { invoke, syncCache } from "./store";
 import { useView } from "./useView";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
-import { approvalCallIndex } from "./approvalCall";
+import { askDrawnAtItsCall } from "./approvalCall";
 
 /**
  * What the box is ARMED for beyond a reply — see `EditMessage`.
@@ -404,7 +404,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
         : undefined,
     [surface.approval, surface.onApproval],
   );
-  const approvalInThread = surface.approval !== undefined && approvalCallIndex(entries as never, surface.approval.requestId) >= 0;
+  // Drawn at its call only where a summary really draws it; otherwise under the page (`askDrawnAtItsCall`).
+  const approvalInThread = surface.approval !== undefined && askDrawnAtItsCall(entries, surface.approval, answering);
 
   /** Turn index → the position a replacement is sent at. Built once per thread, read per message. */
   const points = useMemo(() => new Map((thread?.points ?? []).map((p) => [p.turn, p.at] as const)), [thread]);

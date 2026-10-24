@@ -74,9 +74,11 @@ export interface ApprovalRequest {
 
 /**
  * Who answered an approval: the person, or — without asking anybody — a stop (the run is winding
- * down) or the app closing. What the conversation's record says of an answer nobody gave.
+ * down), the app closing, or the call that asked ENDING without it (`abandoned`: the agent gave up on
+ * the call — the claude CLI ends an MCP call it has heard nothing from in five minutes — so nobody
+ * waits on the answer any more). What the conversation's record says of an answer nobody gave.
  */
-export type ApprovalAnsweredBy = "person" | "stopped" | "closed";
+export type ApprovalAnsweredBy = "person" | "stopped" | "closed" | "abandoned";
 
 /**
  * How far the person's answer reached, as they chose it — before the hub narrows what it hands
@@ -385,6 +387,15 @@ export class ApprovalHub {
     for (const [requestId, entry] of [...this.pending]) {
       if (entry.request.taskId === taskId) this.decide(requestId, "deny", "once", undefined, undefined, "stopped");
     }
+  }
+
+  /**
+   * Let go of a parked approval whose call has ended without it — see `abandoned` on
+   * {@link ApprovalAnsweredBy}. Refused, so the tool that was waiting unwinds, but nobody reads the
+   * refusal: the agent already has the call's end. Returns false for an unknown or answered id.
+   */
+  abandon(requestId: string): boolean {
+    return this.decide(requestId, "deny", "once", undefined, undefined, "abandoned");
   }
 
   /**

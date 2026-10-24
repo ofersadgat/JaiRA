@@ -256,6 +256,35 @@ const SHOWN: TranscriptEntry[] = [
 ];
 TRANSCRIPT_SPECIMENS["transcript-shown"] = pair(SHOWN);
 
+/**
+ * Auto's check, a step of the call it is about (decision 0007, amended 2026-10-24): one allowed, one
+ * unsure and put to the person, settled — the summary counts them beside the pages and the approval.
+ */
+const EXAMPLE = "https://example.com";
+const DOCS = "https://code.claude.com/docs/en/whats-new";
+TRANSCRIPT_SPECIMENS["transcript-auto-check"] = pair([
+  say("user", "Fetch the two pages and tell me their titles.", s(0), 0),
+  { kind: "tool", name: "mcp__dai__web_fetch", summary: EXAMPLE, at: s(2), args: { url: EXAMPLE }, callId: "f1", ok: true, result: "<title>Example Domain</title>" },
+  { kind: "tool", name: "check_permission", summary: "smart", at: s(2), args: { function: "smart", tool: "web_fetch", subject: "web_fetch" }, callId: "c1", calledBy: "f1", ok: true, result: "allowed", detail: { verdict: "allow", reason: "a read of a public page the task asked for", tookMs: 11_000 } },
+  { kind: "tool", name: "mcp__dai__web_fetch", summary: DOCS, at: s(14), args: { url: DOCS }, callId: "f2", ok: true, result: "<title>What's new</title>" },
+  { kind: "tool", name: "check_permission", summary: "smart", at: s(14), args: { function: "smart", tool: "web_fetch", subject: "web_fetch" }, callId: "c2", calledBy: "f2", ok: true, result: "unsure: put to the person", detail: { verdict: "unsure", reason: "an outside fetch the task did not ask for", tookMs: 9_000 } },
+  { kind: "tool", name: "approve_tool_call", summary: "web_fetch", at: s(23), args: { tool: "web_fetch", asker: "smart" }, callId: "approve_a2", calledBy: "f2", ok: true, result: "allowed", detail: { decision: "allow", scope: "once", by: "person", waitedMs: 62_000 } },
+  say("assistant", "Example Domain, and What's new.", s(88), 1),
+]);
+
+/** While auto decides: the call has not run, and the step under it says who is checking it. */
+TRANSCRIPT_SPECIMENS["transcript-auto-checking"] = pair(
+  (() => {
+    const at = Date.now() - 3_000;
+    return [
+      say("user", "Fetch the example page.", at - 4_000, 0),
+      { kind: "tool", name: "mcp__dai__web_fetch", summary: EXAMPLE, at: at - 1_000, args: { url: EXAMPLE }, callId: "f1" },
+      { kind: "tool", name: "check_permission", summary: "smart", at, args: { function: "smart", tool: "web_fetch", subject: "web_fetch" }, callId: "c1", calledBy: "f1" },
+    ] as TranscriptEntry[];
+  })(),
+  true,
+);
+
 /** Several questions keep their stepper under the row, Back and Next included. */
 TRANSCRIPT_SPECIMENS["transcript-asked-steps"] = pair([
   say("user", "Plan the pause feature with me.", s(0), 0),

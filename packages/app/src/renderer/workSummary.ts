@@ -13,13 +13,13 @@
  * Pure: entries in, a description out. The view (the universal tree's `WorkSummary.tsx`) draws it; this
  * is tested without a window.
  */
-import { APPROVAL_PROMPT_FUNCTION, toolDisplayOf } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, PERMISSION_CHECK, permissionFunctionLabel, toolDisplayOf } from "@jaira/shared/browser";
 import { iconOf, shellLineOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
 
 // --- kinds ---------------------------------------------------------------------------------------
 
 /** What kind of work one entry is — the unit a chip counts. */
-export type WorkKind = "think" | "read" | "search" | "write" | "run" | "git" | "web" | "agent" | "tool" | "wait" | "note" | "approval";
+export type WorkKind = "think" | "read" | "search" | "write" | "run" | "git" | "web" | "agent" | "tool" | "wait" | "note" | "approval" | "check";
 
 /** A rate limit, as the agents word it: a wait the run sat through, not a fact about the work. */
 const RATE_LIMIT = /rate[\s_-]?limit/i;
@@ -28,6 +28,7 @@ export function kindOf(entry: WorkEntry): WorkKind {
   if (entry.kind === "thought") return "think";
   if (entry.kind === "event") return RATE_LIMIT.test(entry.text) ? "wait" : "note";
   if (isApprovalCall(entry)) return "approval";
+  if (isCheckCall(entry)) return "check";
   switch (iconOf(entry)) {
     case "read":
       return "read";
@@ -125,15 +126,142 @@ export function isApprovalCall(entry: WorkEntry): boolean {
   return entry.kind === "tool" && entry.name === APPROVAL_PROMPT_FUNCTION;
 }
 
+/**
+ * A call a TOOL made rather than the model — the approval prompt, or a permission function asked about
+ * the call (`check_permission`). It is a step of the call it is about: it changes nothing, checks
+ * nothing, and is no work of the agent's.
+ */
+export function isHostCall(entry: WorkEntry): boolean {
+  return isApprovalCall(entry) || isCheckCall(entry);
+}
+
+/**
+ * The call a held call is waiting on: a call it made — its permission being checked, or put to the
+ * person — still unanswered. Such a call has not run yet: it is held, not running, and not done.
+ */
+export function heldBy(entries: readonly WorkEntry[], entry: WorkEntry): ToolEntry | undefined {
+  if (entry.kind !== "tool" || entry.callId === undefined || !inFlight(entry)) return undefined;
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.kind === "tool" && e.calledBy === entry.callId && inFlight(e)) return e;
+  }
+  return undefined;
+}
+
+// --- a permission function asked about the call, as a step ----------------------------------------
+
+/** `check_permission` — a permission function (`smart`) asked about the call that made it (`hostCalls.ts`). */
+export function isCheckCall(entry: WorkEntry): boolean {
+  return entry.kind === "tool" && entry.name === PERMISSION_CHECK;
+}
+
+/** Which function was asked, off its arguments — `smart`. */
+export function checkFunctionOf(entry: ToolEntry): string {
+  const fn = (entry.args as { function?: unknown } | undefined)?.function;
+  return typeof fn === "string" ? fn : "a permission function";
+}
+
+/** What it came to — its result's `data` — or `undefined` while it decides. */
+export function checkAnswerOf(entry: ToolEntry): { verdict: "allow" | "deny" | "unsure" | "failed"; reason?: string; tookMs: number } | undefined {
+  const data = entry.detail as { verdict?: unknown; reason?: unknown; tookMs?: unknown } | undefined;
+  if (data === undefined || data === null || typeof data !== "object") return undefined;
+  const verdict = data.verdict;
+  if (verdict !== "allow" && verdict !== "deny" && verdict !== "unsure" && verdict !== "failed") return undefined;
+  return { verdict, ...(typeof data.reason === "string" && data.reason.length > 0 ? { reason: data.reason } : {}), tookMs: typeof data.tookMs === "number" ? data.tookMs : 0 };
+}
+
+/** A word opening a sentence — but a function's own reference is its name, and stays as written. */
+const capital = (word: string, reference: string): string => (word === reference || word.length === 0 ? word : word[0]!.toUpperCase() + word.slice(1));
+
+/**
+ * A check as a row reads it (the person, 2026-10-24, option B): who is checking it while it decides —
+ * "Auto is checking it · smart" — then what it came to: "Allowed by auto", "Denied by auto", "Auto is
+ * unsure" (the question to the person follows), "Auto could not decide", with its reason and how long.
+ * `waiting`: its stretch is still being written; with no answer in a stretch that is over, nobody is
+ * deciding any more — it reads "Not finished".
+ */
+export function checkWordsOf(entry: ToolEntry, waiting = true): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" | "cut" } {
+  const fn = checkFunctionOf(entry);
+  const who = permissionFunctionLabel(fn);
+  const answer = checkAnswerOf(entry);
+  if (answer === undefined) {
+    if (!waiting) return { name: "Not finished", preview: `${who} was checking it`, tone: "warn", mark: "cut" };
+    return { name: `${capital(who, fn)} is checking it`, preview: who === fn ? "" : fn, tone: "plain", mark: "waiting" };
+  }
+  const why = [answer.reason, answer.tookMs >= 1000 ? secondsOf(answer.tookMs) : undefined].filter((s): s is string => s !== undefined).join(" · ");
+  switch (answer.verdict) {
+    case "allow":
+      return { name: `Allowed by ${who}`, preview: why, tone: "plain", mark: "ok" };
+    case "deny":
+      return { name: `Denied by ${who}`, preview: why, tone: "bad", mark: "bad" };
+    case "unsure":
+      return { name: `${capital(who, fn)} is unsure`, preview: why, tone: "warn" };
+    case "failed":
+      return { name: `${capital(who, fn)} could not decide`, preview: why, tone: "warn", mark: "bad" };
+  }
+}
+
+/**
+ * Whether the approval at `at` was put to the person by a check its call made, which the summary draws
+ * above it with its reason ("Auto is unsure · …") — so the prompt under it need not say why again.
+ */
+export function checkedAbove(entries: readonly WorkEntry[], at: number): boolean {
+  const ask = entries[at];
+  if (ask === undefined || ask.kind !== "tool" || ask.calledBy === undefined) return false;
+  for (let i = at - 1; i >= 0; i--) {
+    const e = entries[i]!;
+    if (e.kind === "tool" && e.callId === ask.calledBy) return false;
+    if (isCheckCall(e) && (e as ToolEntry).calledBy === ask.calledBy && checkAnswerOf(e as ToolEntry)?.verdict === "unsure") return true;
+  }
+  return false;
+}
+
+/**
+ * The ink a summary row is drawn in, when it is not the plain one (option B, 2026-10-24): the approval
+ * the turn is waiting on is the person's — the waiting amber, as the status line and the board draw it —
+ * and a check reads by what it came to: allowed in --ok, denied in --bad, unsure or undecided in --warn.
+ */
+export function runToneOf(entries: readonly WorkEntry[], run: WorkRun, live?: number): "warn" | "bad" | "ok" | undefined {
+  if (run.kind === "approval") return live !== undefined && run.rows.includes(live) ? "warn" : undefined;
+  if (run.kind !== "check" || run.rows.length !== 1) return undefined;
+  const answer = checkAnswerOf(entries[run.rows[0]!] as ToolEntry);
+  if (answer === undefined) return undefined;
+  return answer.verdict === "allow" ? "ok" : answer.verdict === "deny" ? "bad" : "warn";
+}
+
+/** The words a held call reads by: what it will do, and that it has not yet — "Fetch `url` · not run yet". */
+function heldWordsOf(kind: WorkKind, entry: WorkEntry, shell: Said): Said[] {
+  const what = ((): Said[] => {
+    switch (kind) {
+      case "read":
+        return [{ text: "Read " }, { code: base(pathOf(entry)) }];
+      case "write":
+        return [{ text: "Edit " }, { code: base(pathOf(entry)) }];
+      case "search":
+        return [{ text: "Search for " }, { code: summaryOf(entry) }];
+      case "run":
+      case "git":
+        return [{ text: "Run " }, shell];
+      case "web":
+        return [{ text: "Fetch " }, { code: summaryOf(entry) }];
+      case "agent":
+        return [{ text: "Run a subagent" }];
+      default:
+        return [{ text: entry.kind === "tool" || entry.kind === "writing" ? toolDisplayOf(entry.name).title : "A call" }, ...(summaryOf(entry) ? [{ text: " " }, { code: summaryOf(entry) }] : [])];
+    }
+  })();
+  return [...what, { text: " · not run yet" }];
+}
+
 /** How it was answered — its result's `data` — or `undefined` while it waits. */
-export function approvalAnswerOf(entry: ToolEntry): { decision: "allow" | "deny"; scope: string; by: "person" | "stopped" | "closed"; waitedMs: number } | undefined {
+export function approvalAnswerOf(entry: ToolEntry): { decision: "allow" | "deny"; scope: string; by: "person" | "stopped" | "closed" | "abandoned"; waitedMs: number } | undefined {
   const data = entry.detail as { decision?: unknown; scope?: unknown; by?: unknown; waitedMs?: unknown } | undefined;
   if (data === undefined || data === null || typeof data !== "object") return undefined;
   if (data.decision !== "allow" && data.decision !== "deny") return undefined;
   return {
     decision: data.decision,
     scope: typeof data.scope === "string" ? data.scope : "once",
-    by: data.by === "stopped" || data.by === "closed" ? data.by : "person",
+    by: data.by === "stopped" || data.by === "closed" || data.by === "abandoned" ? data.by : "person",
     waitedMs: typeof data.waitedMs === "number" ? data.waitedMs : 0,
   };
 }
@@ -168,7 +296,8 @@ export function approvalWordsOf(entry: ToolEntry, waiting = true): { name: strin
   }
   const after = answer.waitedMs >= 1000 ? ` · after ${secondsOf(answer.waitedMs)}` : "";
   if (answer.by !== "person") {
-    return { name: "Not answered", preview: `${answer.by === "closed" ? "the app closed" : "the run stopped"} while it waited${after}`, tone: "warn", mark: "bad" };
+    const why = answer.by === "closed" ? "the app closed" : answer.by === "abandoned" ? "the agent gave up on the call" : "the run stopped";
+    return { name: "Not answered", preview: `${why} while it waited${after}`, tone: "warn", mark: "bad" };
   }
   const who = about.asker !== undefined ? `by you, for ${about.asker}` : "by you";
   const reach = REACH[answer.scope] ?? answer.scope;
@@ -263,6 +392,10 @@ export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[
           return plural(n, "note", "notes");
         case "approval":
           return plural(n, "approval", "approvals");
+        case "check": {
+          const who = permissionFunctionLabel(checkFunctionOf(items[0] as ToolEntry));
+          return plural(n, `${who} check`, `${who} checks`);
+        }
         case "tool": {
           const title = key.slice("tool:".length);
           return n > 1 ? `${title} ×${n}` : title;
@@ -333,6 +466,9 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
   const done = running === undefined ? items : items.filter((e) => e !== running);
   const say = (list: WorkEntry[]): Said[] => {
     if (list.length === 0) return [];
+    // A call waiting on what it called — its permission being checked, or put to you — has not run:
+    // not "Fetched", not "Fetching" (2026-10-24: a held fetch read "Fetched" for five minutes).
+    if (live !== undefined && list.length === 1 && heldBy(entries, list[0]!) !== undefined) return heldWordsOf(run.kind, list[0]!, shellOf(list[0]!));
     const files = unique(list.map(pathOf));
     const where = commonDir(files);
     switch (run.kind) {
@@ -344,8 +480,7 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
         return list.length === 1 ? [{ text: "Searched for " }, { code: summaryOf(list[0]!) }] : [{ text: `Searched for ${list.length} patterns` }];
       case "run":
       case "git":
-        // A command still waiting on what it called — the approval that is the turn's live edge — has
-        // not run yet: it is running, held, not ran.
+        // A command still going beside the turn's live edge (another call made after it) is running, not ran.
         if (live !== undefined && list.length === 1 && inFlight(list[0]!)) return [{ text: "Running " }, shellOf(list[0]!)];
         return list.length === 1 ? [{ text: "Ran " }, shellOf(list[0]!)] : [{ text: `Ran ${list.length} ${run.kind === "git" ? "git commands" : "commands"}` }];
       case "web":
@@ -362,8 +497,13 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
         if (list.length > 1) return [{ text: `${list.length} approvals` }];
         // Only a stretch still being worked on has anybody waiting on an answer.
         const words = approvalWordsOf(list[0] as ToolEntry, live !== undefined);
-        const command = approvalAboutOf(list[0] as ToolEntry).command;
-        return [{ text: `${words.name} ` }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
+        const command = aboutLineOf(list[0] as ToolEntry);
+        return [{ text: command !== undefined ? `${words.name} ` : words.name }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
+      }
+      case "check": {
+        if (list.length > 1) return [{ text: `${list.length} ${permissionFunctionLabel(checkFunctionOf(list[0] as ToolEntry))} checks` }];
+        const words = checkWordsOf(list[0] as ToolEntry, live !== undefined);
+        return [{ text: words.name }, ...(words.preview.length > 0 ? [{ text: ` · ${words.preview}` }] : [])];
       }
       case "tool": {
         const title = run.key.slice("tool:".length);
@@ -389,8 +529,12 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
       case "think":
         return [{ text: "Thinking" }];
       case "approval": {
-        const command = approvalAboutOf(running as ToolEntry).command;
-        return [{ text: "Waiting for you to approve " }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
+        const command = aboutLineOf(running as ToolEntry);
+        return [{ text: command !== undefined ? "Waiting for you to approve " : "Waiting for you to approve" }, ...(command !== undefined ? [{ code: command, shell: true }] : [])];
+      }
+      case "check": {
+        const words = checkWordsOf(running as ToolEntry, true);
+        return [{ text: words.name }, ...(words.preview.length > 0 ? [{ text: ` · ${words.preview}` }] : [])];
       }
       default:
         return [{ text: running.kind === "tool" || running.kind === "writing" ? toolDisplayOf(running.name).title : "Working" }];
@@ -398,6 +542,14 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
   })();
   return { said: said.length > 0 ? [...said, { text: ", then " }] : [], now: doing };
 }
+/**
+ * The line an approval is about, said beside it only when the call it is about is not drawn above it: an
+ * approval its call made sits under that call, which already says it.
+ */
+function aboutLineOf(entry: ToolEntry): string | undefined {
+  return entry.calledBy !== undefined ? undefined : approvalAboutOf(entry).command;
+}
+
 /** A command, as the line it ran — drawn in the colours of its parts, as an approval draws it. */
 function shellOf(entry: WorkEntry): Said {
   const line = entry.kind === "tool" ? shellLineOf(entry) : undefined;
@@ -430,7 +582,7 @@ export function verdictKeyOf(entry: ToolEntry): string {
  */
 export function isChange(entry: WorkEntry, verdicts?: ReadOnlyVerdicts): boolean {
   if (entry.kind === "writing") return kindOf(entry) === "write";
-  if (entry.kind !== "tool" || isApprovalCall(entry)) return false;
+  if (entry.kind !== "tool" || isHostCall(entry)) return false;
   const said = verdicts?.(entry);
   return said === undefined ? kindOf(entry) === "write" : said === false;
 }
@@ -510,8 +662,9 @@ export function phasesOf(
       const entry = entries[i]!;
       if (entry.kind === "writing") changed ||= isChange(entry, options.verdicts);
       if (entry.kind !== "tool") continue;
-      // The approval prompt changes nothing and checks nothing: it is the person being asked.
-      if (isApprovalCall(entry)) continue;
+      // The approval prompt and a permission check change nothing and check nothing: they are the call's
+      // permission being decided, not the agent's work.
+      if (isHostCall(entry)) continue;
       const action = actionOf(entry);
       if (failing.has(action) && entry.ok === true) fixed = true;
       if (isChange(entry, options.verdicts)) changed = true;

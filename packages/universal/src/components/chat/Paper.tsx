@@ -3,8 +3,9 @@ import { View } from "@tamagui/core";
 import type { LiveStatus } from "@jaira/ui/transcript";
 import { useLook, useTokens } from "../../tokens";
 import { Press, Txt, edge } from "../../primitives";
-import { statusFigureOf, statusVerbOf, statusWhatOf } from "@jaira/ui/liveStatusModel";
+import { statusFigureOf, statusToneOf, statusVerbOf, statusWhatOf } from "@jaira/ui/liveStatusModel";
 import { useElapsed } from "@jaira/ui/runActivityModel";
+import { Icon } from "../panel/Icon";
 import { Pulse } from "./Pulse";
 
 /**
@@ -45,19 +46,24 @@ export function Sheet({ children, dark }: { children: ReactNode; dark: boolean }
 
 /**
  * `LiveStatusBar`: what the model is doing right now, in one fixed place between the record and the
- * box. The words are `liveStatusModel.ts`'s.
+ * box. The words, and who it waits on, are `liveStatusModel.ts`'s.
  *
  *   the bar             row, centred, gap 8, padding 5 14, a --line above, --accent 5% over transparent,
  *                       app 11.5/12.5, --dim, tabular
  *   the verb            600, --accent
  *   what it is on       the data voice, flex 1, one line
  *   the jump            --accent, pressed to go back to the live edge
+ *   waiting for you     the pulse is the pause mark (13); the bar --warn 12%, its line --warn 30% into
+ *                       --line; the verb --warn
+ *   checking with auto  the pulse is the star (13, --accent)
  */
 export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
   const t = useTokens();
   const since = status.kind === "writing" || status.kind === "working" ? undefined : status.since;
   const elapsed = useElapsed(since, true);
   const figure = statusFigureOf(status, elapsed);
+  const tone = statusToneOf(status);
+  const ink = tone === "you" ? "warn" : "accent";
   const face = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim", tabular: true };
   return (
     <View
@@ -68,11 +74,11 @@ export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?:
       minWidth={0}
       paddingVertical={5}
       paddingHorizontal={14}
-      backgroundColor={t.mix(t.v("accent"), 5, "transparent") as never}
-      {...(edge(t, { top: 1 }) as object)}
+      backgroundColor={t.mix(t.v(ink), tone === "you" ? 12 : 5, "transparent") as never}
+      {...(edge(t, { top: 1 }, tone === "you" ? t.mix(t.v("warn"), 30, t.v("line")) : undefined) as object)}
     >
-      <Pulse />
-      <Txt spec={{ ...face, weight: 600, color: "accent" }} flexShrink={0}>
+      {tone === "you" ? <Icon name="pause" size={13} color={String(t.v("warn"))} /> : tone === "check" ? <Icon name="star" size={13} color={String(t.v("accent"))} /> : <Pulse />}
+      <Txt spec={{ ...face, weight: 600, color: ink }} flexShrink={0}>
         {statusVerbOf(status)}
       </Txt>
       <Txt spec={{ ...face, voice: "data" }} fontSize={t.scaled("size-app", 11.5 / 12.5)} ellip flex={1} minWidth={0}>

@@ -15,6 +15,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import {
   APPROVAL_PROMPT_FUNCTION,
+  PERMISSION_CHECK,
   RESERVED_MCP_SERVERS,
   TOOL_SPEC_BY_NAME,
   nativeShellDialect,
@@ -87,7 +88,7 @@ export function rawCallsOf(value: JsonValue | undefined): RawCall[] {
       if (typeof id !== "string") continue;
       if (type === "tool_use" || type === "tool-call") {
         const name = pick(part, ["name", "toolName"]);
-        if (typeof name !== "string" || name === APPROVAL_PROMPT_FUNCTION) continue;
+        if (typeof name !== "string" || name === APPROVAL_PROMPT_FUNCTION || name === PERMISSION_CHECK) continue;
         const input = (pick(part, ["input", "args", "arguments"]) ?? null) as JsonValue;
         if (isRecord(input) && typeof input["description"] === "string") described.set(id, input["description"]);
         const spawner = chain?.parentToolUseId;

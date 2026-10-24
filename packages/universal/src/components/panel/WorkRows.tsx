@@ -9,7 +9,7 @@ import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
 import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { thoughtLiveOf } from "@jaira/ui/stillRunning";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
-import { isApprovalCall } from "@jaira/ui/workSummary";
+import { isHostCall } from "@jaira/ui/workSummary";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { askedOf, pictureOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
@@ -250,8 +250,8 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const entry: ToolEntry = unasked ? { ...held, ...(args !== undefined ? { args } : {}), ...(result !== undefined ? { result } : {}) } : held;
   const { running, unanswered, pathMime } = line;
   const head = { entry, name: line.name, called: line.called, server: line.server, preview: line.preview, command: line.command, prose: line.prose, tone: line.tone, mark: line.mark };
-  // The approval prompt: its line is the whole of it.
-  if (isApprovalCall(entry)) return <Row {...head} />;
+  // The approval prompt, and a permission check: its line is the whole of it.
+  if (isHostCall(entry)) return <Row {...head} />;
   const shown = ((): ReactNode => {
     if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />;
     if (line.shown === "outcome") {

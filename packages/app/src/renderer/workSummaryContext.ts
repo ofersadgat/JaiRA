@@ -7,7 +7,7 @@ import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import type { PendingApproval, WorkNotes, WorkRows } from "@jaira/shared/browser";
 import type { ApprovalSurfaceProps } from "./approvalSurfaceTypes";
 import type { ToolEntry, WorkEntry } from "./transcript";
-import { isApprovalCall, verdictKeyOf, type ReadOnlyVerdicts } from "./workSummary";
+import { isHostCall, verdictKeyOf, type ReadOnlyVerdicts } from "./workSummary";
 
 /** The three settings, as the transcript reads them. */
 export interface WorkLook {
@@ -81,8 +81,9 @@ export function useReadOnlyVerdicts(entries: readonly WorkEntry[]): { verdicts: 
     if (judge === undefined) return;
     const wanted = new Map<string, ToolEntry>();
     for (const entry of entries) {
-      // The approval prompt is no call a permission set holds: it is the person being asked.
-      if (entry.kind !== "tool" || isApprovalCall(entry)) continue;
+      // The approval prompt and a permission check are no calls a permission set holds: they are the
+      // call's own permission being decided.
+      if (entry.kind !== "tool" || isHostCall(entry)) continue;
       const key = verdictKeyOf(entry);
       if (!judge.known.has(key) && !judge.asking.has(key) && !judge.failed.has(key)) wanted.set(key, entry);
     }

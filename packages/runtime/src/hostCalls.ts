@@ -1,5 +1,6 @@
 /**
- * Calls a TOOL made — `approve_tool_call` — as the ordinary calls they are, in the conversation's
+ * Calls a TOOL made — `approve_tool_call`, and `check_permission` (a permission function asked about the
+ * call, 2026-10-24) — as the ordinary calls they are, in the conversation's
  * record (the person, 2026-09-26: "this should essentially function like a tool calling another tool
  * … the tool call with result should be a normal part of the conversation record. therefore, it
  * should be able to survive a restart with no special mechanics").
@@ -18,7 +19,7 @@
  */
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { ASK_USER_TOOL } from "@declarative-ai/agents-api";
-import { APPROVAL_PROMPT_FUNCTION } from "@jaira/shared";
+import { APPROVAL_PROMPT_FUNCTION, PERMISSION_CHECK } from "@jaira/shared";
 
 /**
  * What `approve_tool_call` was called with, as the record keeps it — the WHOLE request, because the
@@ -50,10 +51,36 @@ export interface ApprovalCallAnswer {
   scope: string;
   /** "For this run", for a shell line: the widths of its asking parts the answer covers. */
   remember?: string[];
-  /** Who answered: the person, or nobody — a stop, or the app closing. */
-  by: "person" | "stopped" | "closed";
+  /** Who answered: the person, or nobody — a stop, the app closing, or the call that asked ending without it. */
+  by: "person" | "stopped" | "closed" | "abandoned";
   /** How long the call waited on the answer. */
   waitedMs: number;
+}
+
+/** What `check_permission` was called with: which function was asked, about what. */
+export interface CheckCallInput {
+  /** The function asked, as the permission set names it — `smart`. */
+  function: string;
+  /** The tool called — `shell`, `web_fetch`. */
+  tool: string;
+  /** The permission set line the function answers for. */
+  subject: string;
+  /** For a shell line: the whole line. */
+  command?: string;
+  /** For a shell line: the PART being judged — a line of several parts is checked once per part. */
+  part?: string;
+  /** The workflow instance whose operation asked. */
+  instanceId?: string;
+}
+
+/** What the function came to — the `data` on its result. */
+export interface CheckCallAnswer {
+  /** `unsure`: it put the call to the person (an approval follows); `failed`: it could not decide. */
+  verdict: "allow" | "deny" | "unsure" | "failed";
+  /** Why, in one sentence, when it said. */
+  reason?: string;
+  /** How long it took to decide. */
+  tookMs: number;
 }
 
 /** An entry as the live stream carries it: the provider-shaped message under `content`. */
@@ -82,7 +109,36 @@ export function approvalCallEntries(callId: string, calledBy: string | undefined
 
 /** Its result — the words the call it gated reads, and the answer itself as `data`. */
 export function approvalResultEntries(callId: string, calledBy: string | undefined, answer: ApprovalCallAnswer, at: number): { live: JsonValue; record: JsonValue } {
-  const words = answer.decision === "allow" ? "allowed" : answer.by === "person" ? "denied" : answer.by === "closed" ? "not answered: the app closed" : "not answered: the run stopped";
+  const words =
+    answer.decision === "allow"
+      ? "allowed"
+      : answer.by === "person"
+        ? "denied"
+        : answer.by === "closed"
+          ? "not answered: the app closed"
+          : answer.by === "abandoned"
+            ? "not answered: the call ended without it"
+            : "not answered: the run stopped";
+  const parts: JsonValue[] = [{ type: "tool_result", tool_use_id: callId, content: words, data: answer as unknown as JsonValue }];
+  return { live: streamed("user", calledBy, parts), record: recorded("user", calledBy, parts, at) };
+}
+
+/** `check_permission` being called — the live entry, and the record's. */
+export function checkCallEntries(callId: string, calledBy: string | undefined, input: CheckCallInput, at: number): { live: JsonValue; record: JsonValue } {
+  const parts: JsonValue[] = [{ type: "tool_use", id: callId, name: PERMISSION_CHECK, input: input as unknown as JsonValue }];
+  return { live: streamed("assistant", calledBy, parts), record: recorded("assistant", calledBy, parts, at) };
+}
+
+/** Its result — what the function came to, in words, and as `data`. */
+export function checkResultEntries(callId: string, calledBy: string | undefined, answer: CheckCallAnswer, at: number): { live: JsonValue; record: JsonValue } {
+  const words =
+    answer.verdict === "allow"
+      ? "allowed"
+      : answer.verdict === "deny"
+        ? "denied"
+        : answer.verdict === "unsure"
+          ? "unsure: put to the person"
+          : `could not decide${answer.reason !== undefined ? `: ${answer.reason}` : ""}`;
   const parts: JsonValue[] = [{ type: "tool_result", tool_use_id: callId, content: words, data: answer as unknown as JsonValue }];
   return { live: streamed("user", calledBy, parts), record: recorded("user", calledBy, parts, at) };
 }
@@ -164,6 +220,17 @@ function partsOf(entry: JsonValue): Array<Record<string, unknown>> {
   if (e === null || typeof e !== "object" || e.kind !== "message") return [];
   const content = Array.isArray(e.content) ? e.content : (e.content as { content?: unknown } | undefined)?.content;
   return Array.isArray(content) ? (content as Array<Record<string, unknown>>) : [];
+}
+
+/**
+ * The calls an entry ENDS — the ids its `tool_result` parts answer — in either shape. What tells a host
+ * that a call it is still asking the person about is over (`abandoned` on `ApprovalAnsweredBy`).
+ */
+export function endedCallsOf(entry: JsonValue | undefined): string[] {
+  if (entry === undefined) return [];
+  const out: string[] = [];
+  for (const part of partsOf(entry)) if (part["type"] === "tool_result" && typeof part["tool_use_id"] === "string") out.push(part["tool_use_id"]);
+  return out;
 }
 
 /** The host clock an entry was stamped with, when it carries one. */

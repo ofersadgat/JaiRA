@@ -28,7 +28,7 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
-  | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow", string[]> = {
+  | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow" | "pause", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -159,6 +159,8 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   adopt: ["M4 4v16", "M20 12H8", "m12 8-4 4 4 4"],
   play: ["M7 5v14l11-7Z"],
   stop: ["M7 7h10v10H7Z"],
+  // A conversation waiting for you (the status line, 2026-10-24): the board's waiting pill's two bars.
+  pause: ["M9 5v14", "M15 5v14"],
   back: ["m15 18-6-6 6-6"],
   // Where something went: a placed task's workspace (`placementSummary.ts`).
   arrow: ["M5 12h14", "m13 6 6 6-6 6"],

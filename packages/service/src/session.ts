@@ -283,6 +283,11 @@ export class ProjectSession {
    */
   readonly approvalCalls = new Map<string, { callId: string; calledBy?: string; taskId: string; at: number }>();
   /**
+   * `check_permission` calls still open — a permission function asked about a call, not yet come to
+   * anything — by `Service.checkKeyOf` (task, the call's input, the function, the part), oldest first.
+   */
+  readonly checkCalls = new Map<string, Array<{ callId: string; calledBy?: string; at: number }>>();
+  /**
    * record id → the words a cut call is continued with: what the person answered, since the app closed
    * under it, to what it was asking (`Service.answerRecoveredAsk`). Taken by the continuation layer.
    */

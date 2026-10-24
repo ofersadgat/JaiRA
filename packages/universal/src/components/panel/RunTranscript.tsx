@@ -16,7 +16,7 @@ import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type Se
 import { sessionKey } from "@jaira/ui/sessionCache";
 import { partHoldsEnd, writingOf } from "@jaira/ui/stillRunning";
 import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurfaceModel";
-import { approvalCallIndex } from "@jaira/ui/approvalCall";
+import { askDrawnAtItsCall } from "@jaira/ui/approvalCall";
 import type { ApprovalSurfaceProps } from "@jaira/ui/approvalSurfaceTypes";
 import type { CallSurface } from "@jaira/ui/transcriptRows";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
@@ -318,13 +318,14 @@ export function RunTranscript({
       entered !== undefined && onCut !== undefined && opening !== undefined
         ? { can: () => false, edit: () => undefined, cut: (turn) => (turn === opening ? "before" : undefined), rewind: () => onCut.rewind(entered), fork: () => onCut.fork(entered) }
         : undefined;
+    // A record drawn in parts is in progress only in the part that reaches its end.
+    const working = writingOf(undefined, view) && partHoldsEnd(whole, piece.part);
     const transcript = (
       <Transcript
         session={view}
         entries={entries}
         live={live}
-        // A record drawn in parts is in progress only in the part that reaches its end.
-        working={writingOf(undefined, view) && partHoldsEnd(whole, piece.part)}
+        working={working}
         calls={calls}
         rails
         onEdit={onEdit}
@@ -335,9 +336,9 @@ export function RunTranscript({
     // The agent's question or the command it is waiting to run, under what it said before asking.
     if (piece.node.instanceId !== agentHere) return transcript;
     const { approval, onApproval, question, onQuestion } = source;
-    // The approval as the step it is: when this piece's conversation holds its call, the work summary
-    // draws the prompt in that step's row (`ApprovalAskContext`) and it is not drawn again here.
-    const inTranscript = approval !== undefined && approvalCallIndex(entries as never, approval.requestId) >= 0;
+    // The approval as the step it is: where a work summary draws the prompt in that step's row
+    // (`ApprovalAskContext`), it is not drawn again here — and only there (`askDrawnAtItsCall`).
+    const inTranscript = approval !== undefined && askDrawnAtItsCall(entries, approval, working);
     return (
       <>
         {approval !== undefined && onApproval !== undefined && inTranscript ? <ApprovalAskContext.Provider value={{ pending: approval, onDecide: onApproval }}>{transcript}</ApprovalAskContext.Provider> : transcript}

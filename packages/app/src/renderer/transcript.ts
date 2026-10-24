@@ -44,7 +44,7 @@ import {
   type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
-import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, knownText, type ContextReading } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, knownText, PERMISSION_CHECK, type ContextReading } from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -272,7 +272,7 @@ export function blocksOf(entries: readonly TranscriptEntry[]): TranscriptBlock[]
  * Declared here rather than beside the paths, because this is a fact about the transcript and not
  * about SVG: `iconPaths.ts` imports it and will not compile until it has a path for every member.
  */
-export type WorkIconName = ToolIconName | "think" | "note" | "alert" | "shield";
+export type WorkIconName = ToolIconName | "think" | "note" | "alert" | "shield" | "star";
 
 /**
  * Which family of thing a tool name belongs to.
@@ -289,6 +289,8 @@ export type WorkIconName = ToolIconName | "think" | "note" | "alert" | "shield";
 function toolIconOf(name: string): WorkIconName {
   // The approval prompt: a tool the tool called, drawn as the permission it asks for.
   if (name === APPROVAL_PROMPT_FUNCTION) return "shield";
+  // A permission function asked about the call: the star `smart` is drawn with wherever it is named.
+  if (name === PERMISSION_CHECK) return "star";
   // The WORKFLOW tools first, and by exact name (decision 0005 §3): they are eight known names, not
   // a family to be guessed at, and three of them — `tasks`, `move`, `release` — would otherwise be
   // read by the patterns below as an agent, a write and a write. They draw as the forking path the
@@ -959,8 +961,12 @@ export type LiveStatus =
   | { kind: "answering"; since?: number }
   /** The model is reasoning and has not begun to answer. */
   | { kind: "thinking"; since?: number }
-  /** A call has been made and its result has not come back — the wait that is somebody else's. */
-  | { kind: "running"; name: string; summary: string; since?: number }
+  /**
+   * A call has been made and its result has not come back — the wait that is somebody else's. `about`:
+   * for a call a TOOL made (the approval prompt, a permission check), the call it is about — what a
+   * person reads the wait by ("Fetch page · https://example.com"), not the host call's own arguments.
+   */
+  | { kind: "running"; name: string; summary: string; since?: number; about?: { name: string; summary: string }; checker?: string }
   /** Something is running and has said nothing yet. The honest floor: a turn that has started. */
   | { kind: "working" };
 
@@ -1001,9 +1007,28 @@ export function liveStatusOf(
     const entry = entries[i]!;
     if (entry.kind === "message") break;
     if (entry.kind !== "tool" || entry.ok !== undefined || entry.result !== undefined) continue;
-    return { kind: "running", name: entry.name, summary: entry.summary, ...(entry.at !== undefined ? { since: entry.at } : {}) };
+    const about = entry.calledBy !== undefined ? callerOf(entries, i, entry.calledBy) : undefined;
+    // A permission check says which function is checking: "Checking with auto".
+    const checker = entry.name === PERMISSION_CHECK ? (entry.args as { function?: unknown } | undefined)?.function : undefined;
+    return {
+      kind: "running",
+      name: entry.name,
+      summary: entry.summary,
+      ...(entry.at !== undefined ? { since: entry.at } : {}),
+      ...(about !== undefined ? { about: { name: about.name, summary: about.summary } } : {}),
+      ...(typeof checker === "string" ? { checker } : {}),
+    };
   }
   return { kind: "working" };
+}
+
+/** The call a tool's call was made BY — searched back from it, since a caller comes before what it calls. */
+function callerOf(entries: readonly TranscriptEntry[], from: number, callId: string): ToolEntry | undefined {
+  for (let i = from - 1; i >= 0; i -= 1) {
+    const entry = entries[i]!;
+    if (entry.kind === "tool" && entry.callId === callId) return entry;
+  }
+  return undefined;
 }
 
 /**

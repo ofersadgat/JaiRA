@@ -158,6 +158,11 @@ export interface PermissionFunctionsOptions {
   stateOf?: ((instanceId: string) => string | undefined) | undefined;
   /** The state, when the caller knows it without an instance — a conversation turn's. */
   state?: string | undefined;
+  /**
+   * Told each function as it is about to be asked, before it answers — what lets a host show the call
+   * being checked while it is (`check_permission`), rather than as the tool running.
+   */
+  onAsking?: ((request: PermissionFunctionRequest) => void) | undefined;
   /** Told every answer (and every failure) — the audit. */
   onDecided?: ((decision: PermissionFunctionDecision) => void) | undefined;
 }
@@ -227,6 +232,7 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
       options.onDecided?.({ request, failure });
       return { failure };
     }
+    options.onAsking?.(request);
     try {
       const answer = await options.run(reference, request);
       options.onDecided?.({ request, answer });
@@ -421,6 +427,11 @@ export interface SmartFunctionOptions {
   prompt: Executor<ExecServices, WorkflowMetrics>;
   /** `functions.smart.model` and `.prompt`, from Settings → Tools → smart. Read at every call. */
   config: () => JairaSmartConfig;
+  /**
+   * Told what the judge came to, the moment it does — before an unsure call is put to the person, so a
+   * host can say "auto is unsure" (and why) above the question rather than after the answer.
+   */
+  onJudged?: ((request: PermissionFunctionRequest, judged: { verdict: "allow" | "deny" | "unsure"; reason?: string }) => void) | undefined;
 }
 
 /**
@@ -446,6 +457,7 @@ export function registerSmartFunction(registry: CapabilityRegistry<WorkflowMetri
         } catch (e) {
           judged = { verdict: "unsure", reason: `the judge failed: ${(e as Error).message}` };
         }
+        options.onJudged?.(request, judged);
         if (judged.verdict !== "unsure") return { value: judged.verdict, metrics: metrics() };
         const prompt = registry.functions.get(APPROVAL_PROMPT_FUNCTION);
         if (prompt === undefined) return { value: "deny", metrics: metrics() };

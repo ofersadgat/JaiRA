@@ -229,6 +229,24 @@ export const APPROVAL_PROMPT_FUNCTION = "approve_tool_call";
 /** `{ "function": "smart" }` — the mode the shipped `auto` permission sets give every line. */
 export const SMART_MODE: FunctionMode = Object.freeze({ function: SMART_FUNCTION }) as FunctionMode;
 
+/**
+ * A permission FUNCTION being asked about a call, as the conversation records it (the person,
+ * 2026-10-24, option B): a call the tool made, beside `approve_tool_call` and the same kind of thing — a
+ * `tool_use` marked `calledBy` the call it is about, with `{ function, tool, subject, command?, part? }`
+ * as its input and `{ verdict, reason?, tookMs }` as its result's data. What lets the conversation say
+ * "auto is checking it" while a judge decides, and what it decided after, instead of calling the wait
+ * the tool running. Never replayed to a model: the model made no such call.
+ */
+export const PERMISSION_CHECK = "check_permission";
+
+/**
+ * A permission function as a person reads its name: the shipped `smart` is "auto" — the permission set
+ * they chose — and any other by its reference.
+ */
+export function permissionFunctionLabel(reference: string): string {
+  return reference === SMART_FUNCTION ? "auto" : reference;
+}
+
 /** Is this mode a function rather than one of the fixed words? */
 export function isFunctionMode(mode: unknown): mode is FunctionMode {
   return (

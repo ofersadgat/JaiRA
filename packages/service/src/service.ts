@@ -347,6 +347,11 @@ import {
   approvalCallEntries,
   approvalResultEntries,
   unansweredAsksOf,
+  endedCallsOf,
+  checkCallEntries,
+  checkResultEntries,
+  canonical,
+  type CheckCallAnswer,
   questionResultEntries,
   rememberedAnswersOf,
   approvalNote,
@@ -1451,6 +1456,8 @@ export class AppService {
   private readonly interactionStamp = Date.now().toString(36);
   private interactionSeq = 0;
   private approvalSeq = 0;
+  /** `check_permission` calls (`recordCheckCall`), numbered under the same stamp as the asks. */
+  private checkSeq = 0;
   private questionSeq = 0;
   private userEventSeq = 0;
   private readonly requestOwner = new Map<string, string>();
@@ -1863,7 +1870,8 @@ export class AppService {
         const run = session?.approvalRun.get(requestId);
         session?.approvalRun.delete(requestId);
         this.requestOwner.delete(requestId);
-        if (run && session) {
+        // An ask whose call ended without it was refused by nobody, and is no line in the audit.
+        if (run && session && by !== "abandoned") {
           const request = session.approvalsSeen.get(requestId);
           session.project.commands.record({
             taskId: run.taskId,
@@ -5829,6 +5837,7 @@ export class AppService {
       // partial all hold the same stamps.
       const { n, entry } = open.liveTurns.apply(taskId, delta);
       liveFlush.note();
+      this.abandonEndedAsks(open, taskId, entry);
       this.publish({
         type: "session:turn",
         taskId,
@@ -6764,6 +6773,7 @@ export class AppService {
     const streaming = withTurnStream((delta) => {
       const { n, entry } = open.liveTurns.apply(request.taskId, delta);
       liveFlush.note();
+      this.abandonEndedAsks(open, request.taskId, entry);
       this.publish({
         type: "session:turn",
         taskId: request.taskId,
@@ -9651,6 +9661,71 @@ export class AppService {
     this.hostCall(session, call.taskId, live, record, at);
   }
 
+  /** Which open check a request is: the task, the call's own input, the function, and the part it judges. */
+  private checkKeyOf(taskId: string, request: PermissionFunctionRequest): string {
+    return `${taskId}\u0000${canonical(request.input)}\u0000${request.function}\u0000${request.part?.text ?? request.subject}`;
+  }
+
+  /**
+   * A permission function being asked about a call — `check_permission`, a call the tool made, beside the
+   * call it is about in the conversation of the task that asked, the way `approve_tool_call` is (the person,
+   * 2026-10-24, option B). Open until the function comes to something: `recordCheckResult`.
+   */
+  private recordCheckCall(session: ProjectSession, taskId: string, request: PermissionFunctionRequest): void {
+    const snap = session.liveTurns.snapshot(taskId);
+    const calledBy = snap !== null ? callingCallOf(snap.entries, request.input) : undefined;
+    const at = Date.now();
+    const callId = `check_${at.toString(36)}_${this.interactionStamp}-${++this.checkSeq}`;
+    const key = this.checkKeyOf(taskId, request);
+    // A queue: two identical calls checked at once are two checks, closed in the order they opened.
+    const open = session.checkCalls.get(key) ?? [];
+    open.push({ callId, ...(calledBy !== undefined ? { calledBy } : {}), at });
+    session.checkCalls.set(key, open);
+    const { live, record } = checkCallEntries(
+      callId,
+      calledBy,
+      {
+        function: request.function,
+        tool: request.tool,
+        subject: request.subject,
+        ...(request.line !== undefined ? { command: request.line } : {}),
+        ...(request.part !== undefined ? { part: request.part.text } : {}),
+      },
+      at,
+    );
+    this.hostCall(session, taskId, live, record, at);
+  }
+
+  /** What the function came to, beside its call — once; a second word about the same check is no news. */
+  private recordCheckResult(session: ProjectSession, taskId: string, request: PermissionFunctionRequest, verdict: CheckCallAnswer["verdict"], reason?: string): void {
+    const key = this.checkKeyOf(taskId, request);
+    const open = session.checkCalls.get(key);
+    const call = open?.shift();
+    if (call === undefined) return;
+    if (open!.length === 0) session.checkCalls.delete(key);
+    const at = Date.now();
+    const { live, record } = checkResultEntries(call.callId, call.calledBy, { verdict, ...(reason !== undefined ? { reason } : {}), tookMs: Math.max(0, at - call.at) }, at);
+    this.hostCall(session, taskId, live, record, at);
+  }
+
+  /**
+   * What this task's live turn just ENDED, let go of where a question still waits on it: a call that
+   * has its result is over, and an approval it asked for is waited on by nobody. The claude CLI ends an
+   * MCP call it has heard nothing from in five minutes (2026-10-24: four `smart is unsure` asks, each cut
+   * at 300 s), and the ask stayed parked — so the turn read "Waiting for you to approve" while the model
+   * worked, and the chat offered the oldest dead ask instead of the live one. Answered `abandoned`, in
+   * the record and off the hub. Not while the app closes: a call cut by a quit is a question still
+   * waiting, which the next open asks again (`recoveredAsksOf`).
+   */
+  private abandonEndedAsks(session: ProjectSession, taskId: string, entry: JsonValue | undefined): void {
+    if (session.closing || session.approvalCalls.size === 0) return;
+    const ended = new Set(endedCallsOf(entry));
+    if (ended.size === 0) return;
+    for (const [requestId, call] of [...session.approvalCalls]) {
+      if (call.taskId === taskId && call.calledBy !== undefined && ended.has(call.calledBy)) session.approvals.abandon(requestId);
+    }
+  }
+
   /**
    * One entry of a call a tool made: onto the task's live turn — at the turn's own position, so it
    * joins the tail rather than replacing it, and flushed at once, so a turn cut off keeps it — and into
@@ -10026,7 +10101,12 @@ export class AppService {
       const decision = await open.approvals.askFor(request, { taskId, ...(prompt !== undefined ? { prompt } : {}) });
       return { value: { decision }, metrics: { startMs: Date.now(), durationMs: 0, costUsd: 0, costSource: "unknown" } };
     });
-    registerSmartFunction(registry, { prompt, config: () => project.config.functions.smart });
+    registerSmartFunction(registry, {
+      prompt,
+      config: () => project.config.functions.smart,
+      // What the judge came to, in the conversation the moment it does — an unsure one above the question it asks.
+      onJudged: (request, judged) => this.recordCheckResult(open, taskId, request, judged.verdict, judged.reason),
+    });
     const modules = userModules();
     return permissionFunctionRunner({
       registry,
@@ -10060,7 +10140,11 @@ export class AppService {
         run,
         ...(where.stateOf !== undefined ? { stateOf: where.stateOf } : {}),
         ...(where.state !== undefined ? { state: where.state } : {}),
+        // Each function asked is a step of the call it is about (`check_permission`, option B, 2026-10-24).
+        onAsking: (request) => this.recordCheckCall(open, taskId, request),
         onDecided: (decided) => {
+          // `smart` said what it came to already (`onJudged`); any other function says it here.
+          this.recordCheckResult(open, taskId, decided.request, decided.answer ?? "failed", decided.failure);
           if (decided.answer === undefined) return;
           const request = decided.request;
           open.project.commands.record({

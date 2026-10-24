@@ -4,9 +4,9 @@
  * rows, and the thinking line where the provider kept the reasoning.
  */
 import { describe, expect, it } from "vitest";
-import { iconOf, takenApartOf, type ToolEntry, type WorkEntry } from "../src/renderer/transcript";
-import { ACTIVE_NAME, approvalWordsOf, chipsOf, countOf, currentPhaseOf, inFlight, isIdle, isQuiet, liveIndexOf, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
-import { approvalCallIndex } from "../src/renderer/approvalCall";
+import { iconOf, takenApartOf, type ToolEntry, type TranscriptEntry, type WorkEntry } from "../src/renderer/transcript";
+import { ACTIVE_NAME, approvalWordsOf, checkedAbove, checkWordsOf, chipsOf, runToneOf, countOf, currentPhaseOf, inFlight, isIdle, isQuiet, liveIndexOf, phasesOf, runsOf, secondsOf, sentenceOf, spanOf, thoughtLineOf, windowOf, WITHHELD } from "../src/renderer/workSummary";
+import { approvalCallIndex, askDrawnAtItsCall, askOfTask } from "../src/renderer/approvalCall";
 import { toolLineOf } from "../src/renderer/transcriptRows";
 import { durationOf } from "../src/renderer/runActivityModel";
 import { thoughtTime } from "../src/renderer/liveStatusModel";
@@ -342,7 +342,11 @@ describe("in the transcript", () => {
       // That call is the latest row the summary shows, on its own, and the row says what the turn waits on.
       const latest = windowOf(asking, phaseOf(asking).indices, 3).shown.at(-1)!;
       expect(latest.rows).toEqual([at]);
-      expect(sentenceOf(asking, latest, at).now).toEqual([{ text: "Waiting for you to approve " }, { code: LINE, shell: true }]);
+      // Under the call it is about (option B, 2026-10-24), which already says the line: not said twice.
+      expect(sentenceOf(asking, latest, at).now).toEqual([{ text: "Waiting for you to approve" }]);
+      // An approval no call of the record made (a transport that keeps no calls) still says it.
+      const alone = { ...(approve() as ToolEntry), calledBy: undefined } as WorkEntry;
+      expect(sentenceOf([think(7), alone], runsOf([think(7), alone], [1])[0]!, 1).now).toEqual([{ text: "Waiting for you to approve " }, { code: LINE, shell: true }]);
     });
 
     it("with rows set to None, draws it under the summary with its own row", () => {
@@ -363,6 +367,40 @@ describe("in the transcript", () => {
       expect(approvalWordsOf(approve(allowed) as never)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", mark: "ok" });
       expect(approvalWordsOf(approve({ decision: "deny", scope: "run", by: "person", waitedMs: 3_000 }) as never)).toMatchObject({ name: "Denied", preview: "by you · for this run · after 3 s", tone: "bad" });
       expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "closed", waitedMs: 5_460_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the app closed while it waited · after 1 h 31 min", tone: "warn" });
+      // The call that asked ended without it — the agent gave up on the call (the claude CLI's five minutes).
+      expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "abandoned", waitedMs: 288_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the agent gave up on the call while it waited · after 4 min 48 s", tone: "warn" });
+    });
+
+    it("is always drawn somewhere: at its call in the open stretch's summary, else under the page — and the newest is the one shown", () => {
+      // 2026-10-24, as it stood at 12:59: an ask the agent had given up on at 12:43 (its call answered by
+      // the CLI's timeout, the ask left pending), a message, then the live ask the agent was blocked on.
+      const fetchCall = { kind: "tool", name: "mcp__dai__web_fetch", summary: "", args: { url: "https://example.com" }, at: t0, callId: "f1", ok: false, result: "aborted" } as WorkEntry;
+      const dead = { kind: "tool", name: "approve_tool_call", summary: "", args: { tool: "web_fetch" }, at: t0 + 1_000, callId: "approve_a_approval-2", calledBy: "f1" } as WorkEntry;
+      const said = { kind: "message", role: "assistant", text: "I'm checking your past sessions." } as TranscriptEntry;
+      const live = { kind: "tool", name: "approve_tool_call", summary: "", args: { tool: "shell", command: LINE }, at: t0 + 9_000, callId: "approve_b_approval-5", calledBy: "t1" } as WorkEntry;
+      const thread = [fetchCall, dead, said, think(7), bashCall, live] as TranscriptEntry[];
+      // The page showed the OLDEST: its call was in the thread, so the page stood down — and no open
+      // summary held it. Drawn nowhere.
+      expect(askDrawnAtItsCall(thread, { requestId: "approval-2" }, true)).toBe(false);
+      // The newest is the one shown, and its summary draws it at its call.
+      const asks = [{ requestId: "approval-2", taskId: "t" }, { requestId: "approval-9", taskId: "other" }, { requestId: "approval-5", taskId: "t" }];
+      expect(askOfTask(asks, "t")?.requestId).toBe("approval-5");
+      expect(askDrawnAtItsCall(thread, { requestId: "approval-5" }, true)).toBe(true);
+      // Not while nothing is being written, and not in a stretch of one step (a row, not a summary)…
+      expect(askDrawnAtItsCall(thread, { requestId: "approval-5" }, false)).toBe(false);
+      expect(askDrawnAtItsCall([said, live] as TranscriptEntry[], { requestId: "approval-5" }, true)).toBe(false);
+      // …but a question found in the record after the app closed is drawn at its call wherever it is.
+      expect(askDrawnAtItsCall(thread, { requestId: "approval-2", recovered: true }, false)).toBe(true);
+    });
+
+    it("is no longer waited on once answered as abandoned — the turn stops saying it waits for you", () => {
+      // The agent gave up on the call (its result is the CLI's timeout). Left unanswered, the ask was the
+      // turn's live edge, and the summary said "Waiting for you to approve" while the model worked.
+      const cut = { ...bashCall, ok: false, result: 'MCP server "dai" tool "shell" sent no response or progress for 300s; aborting.' } as WorkEntry;
+      expect(liveIndexOf([think(7), cut, approve()], true)).toBe(2);
+      const ended = [think(7), cut, approve({ decision: "deny", scope: "once", by: "abandoned", waitedMs: 300_000 })];
+      expect(approvalCallIndex(ended, "approval-1")).toBe(-1);
+      expect(liveIndexOf(ended, true)).toBeUndefined();
     });
 
     it("reads Not answered, not Approve, once nobody is being asked any more", () => {
@@ -374,12 +412,70 @@ describe("in the transcript", () => {
       expect(toolLineOf(approve() as ToolEntry, false, false)).toMatchObject({ name: "Not answered", mark: "cut", running: false, tone: "warn" });
       // Its sentence in a summary row follows: waiting only in a stretch still being worked on.
       const run = runsOf(asking, [2])[0]!;
-      expect(sentenceOf(asking, run, undefined).said[0]).toEqual({ text: "Not answered " });
-      expect(sentenceOf(asking, run, 2).now![0]).toEqual({ text: "Waiting for you to approve " });
+      expect(sentenceOf(asking, run, undefined).said[0]).toEqual({ text: "Not answered" });
+      expect(sentenceOf(asking, run, 2).now![0]).toEqual({ text: "Waiting for you to approve" });
     });
 
     it("is never what names a phase — the person being asked changes nothing and checks nothing", () => {
       expect(phasesOf([bashCall, approve({ decision: "allow", scope: "once", by: "person", waitedMs: 1 })], { merge: "all", dropIdle: true }).map((p) => p.name)).toEqual(["Explored"]);
+    });
+  });
+
+  describe("auto's check — a step the tool called (option B, 2026-10-24)", () => {
+    // `smart` judging a call is `check_permission`, called by the call, beside the approval: "Auto is
+    // checking it", then what it came to. The call it holds has not run; nothing says it has.
+    const URL = "https://example.com";
+    const fetchCall = { kind: "tool", name: "mcp__dai__web_fetch", summary: URL, args: { url: URL, raw: true }, at: t0 + 8_000, callId: "f1" } as WorkEntry;
+    const check = (answered?: object): WorkEntry =>
+      ({ kind: "tool", name: "check_permission", summary: "smart", args: { function: "smart", tool: "web_fetch", subject: "web_fetch" }, at: t0 + 8_200, callId: "check_a_1", calledBy: "f1", ...(answered !== undefined ? { ok: true, result: "allowed", detail: answered } : {}) }) as WorkEntry;
+    const approve = { kind: "tool", name: "approve_tool_call", summary: "web_fetch", args: { tool: "web_fetch", asker: "smart" }, at: t0 + 19_000, callId: "approve_b_approval-1", calledBy: "f1" } as WorkEntry;
+
+    it("says auto is checking it while it decides, and the call it holds has not run", () => {
+      const checking = [think(7), fetchCall, check()];
+      const live = liveIndexOf(checking, true)!;
+      expect(live).toBe(2);
+      const runs = runsOf(checking, [1, 2]);
+      expect(runs.map((r) => r.kind)).toEqual(["web", "check"]);
+      // Not "Fetched", not "Fetching": held.
+      expect(sentenceOf(checking, runs[0]!, live).said).toEqual([{ text: "Fetch " }, { code: URL }, { text: " · not run yet" }]);
+      expect(sentenceOf(checking, runs[1]!, live).now).toEqual([{ text: "Auto is checking it" }, { text: " · smart" }]);
+      expect(chipsOf(checking, [1, 2], live).find((chip) => chip.kind === "check")).toMatchObject({ label: "1 auto check", live: true, icon: "star" });
+      expect(toolLineOf(check() as ToolEntry, true, false)).toMatchObject({ name: "Auto is checking it", preview: "smart", mark: "waiting", running: true });
+    });
+
+    it("says what it came to, why and how long — and an unsure one sits above the question it asks", () => {
+      const allowed = check({ verdict: "allow", reason: "a read of a public page the task asked for", tookMs: 11_000 });
+      expect(checkWordsOf(allowed as ToolEntry)).toEqual({ name: "Allowed by auto", preview: "a read of a public page the task asked for · 11 s", tone: "plain", mark: "ok" });
+      expect(checkWordsOf(check({ verdict: "deny", tookMs: 400 }) as ToolEntry)).toEqual({ name: "Denied by auto", preview: "", tone: "bad", mark: "bad" });
+      expect(checkWordsOf(check({ verdict: "failed", reason: "the judge failed: timeout", tookMs: 3_000 }) as ToolEntry)).toMatchObject({ name: "Auto could not decide", preview: "the judge failed: timeout · 3 s", tone: "warn" });
+      const unsure = check({ verdict: "unsure", reason: "an outside fetch the task did not ask for", tookMs: 11_000 });
+      const asking = [think(7), fetchCall, unsure, approve];
+      const live = liveIndexOf(asking, true)!;
+      expect(live).toBe(3);
+      const runs = runsOf(asking, [1, 2, 3]);
+      expect(sentenceOf(asking, runs[0]!, live).said).toEqual([{ text: "Fetch " }, { code: URL }, { text: " · not run yet" }]);
+      expect(sentenceOf(asking, runs[1]!, live).said).toEqual([{ text: "Auto is unsure" }, { text: " · an outside fetch the task did not ask for · 11 s" }]);
+      expect(sentenceOf(asking, runs[2]!, live).now).toEqual([{ text: "Waiting for you to approve" }]);
+      // With nothing deciding any more, an unfinished check says so.
+      expect(checkWordsOf(check() as ToolEntry, false)).toMatchObject({ name: "Not finished", preview: "auto was checking it", mark: "cut" });
+      // Drawn in the ink of what it came to; the approval it waits on is the person's waiting amber; and the
+      // question under it leaves the reason to the check's row above it.
+      expect(runToneOf(asking, runs[1]!, live)).toBe("warn");
+      expect(runToneOf(asking, runs[2]!, live)).toBe("warn");
+      expect(runToneOf(asking, runs[2]!, undefined)).toBeUndefined();
+      expect(runToneOf([fetchCall, allowed], runsOf([fetchCall, allowed], [1])[0]!)).toBe("ok");
+      expect(runToneOf([fetchCall, check({ verdict: "deny", tookMs: 1 })], runsOf([fetchCall, check({ verdict: "deny", tookMs: 1 })], [1])[0]!)).toBe("bad");
+      expect(checkedAbove(asking, 3)).toBe(true);
+      expect(checkedAbove([think(7), fetchCall, approve], 2)).toBe(false);
+      // Another function is named as itself.
+      expect(checkWordsOf({ ...(check() as ToolEntry), args: { function: "policy.judge" } } as ToolEntry)).toMatchObject({ name: "policy.judge is checking it", preview: "" });
+    });
+
+    it("is no work of the agent's: it names no phase, and once allowed the call is the call again", () => {
+      const allowed = check({ verdict: "allow", tookMs: 11_000 });
+      const done = [{ ...(fetchCall as ToolEntry), ok: true, result: "<html>" } as WorkEntry, allowed];
+      expect(phasesOf(done, { merge: "all", dropIdle: true }).map((p) => p.name)).toEqual(["Explored"]);
+      expect(sentenceOf(done, runsOf(done, [0])[0]!, undefined).said).toEqual([{ text: "Fetched " }, { code: URL }]);
     });
   });
 });

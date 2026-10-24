@@ -3,6 +3,7 @@
  * draw from (`useChatSurface`, `packages/universal/src/components/chat/surface.ts`).
  */
 import type { AppState, useApp } from "./store";
+import { askOfTask } from "./approvalCall";
 import { chatProjectOf } from "./chatWorkflow";
 import type {
   ApprovalScope,
@@ -219,7 +220,7 @@ export function chatSurfaceOf(
     onCancelRun: actions.cancelTask,
     onRewind: actions.rewindConversation,
     onFork: actions.forkConversation,
-    approval: state.chat.taskId === null ? undefined : state.approvals.find((a) => a.taskId === state.chat.taskId),
+    approval: askOfTask(state.approvals, state.chat.taskId),
     onApproval: actions.decideApproval,
     question: state.chat.taskId === null ? undefined : state.questions.find((q) => q.taskId === state.chat.taskId),
     onQuestion: actions.answerQuestion,
