@@ -267,7 +267,8 @@ export const WORK_ROWS: readonly WorkRows[] = [0, 1, 3, 5];
  *  - `"hide-blocks"`: as `hide-groups`, and a stretch of nothing else is not drawn at all.
  *  - `"hide"`: left out of the summary altogether, and a stretch of nothing else is not drawn.
  *
- * "Every step" lists them wherever it is drawn.
+ * "Every step" lists them wherever it is drawn — and where there is one phase, and so no "Every step",
+ * that phase's own list does.
  */
 export type WorkNotes = "show" | "hide-groups" | "hide-blocks" | "hide";
 export const WORK_NOTES: readonly WorkNotes[] = ["show", "hide-groups", "hide-blocks", "hide"];

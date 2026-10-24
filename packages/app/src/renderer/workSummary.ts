@@ -629,7 +629,8 @@ export interface WorkPhase {
  * Changing until the answer comes, and Fixed after.
  *
  * With `dropIdle`, a piece whose only lines are rate limits and system notes is left out — it did no
- * work anybody asked for, and its lines are still in "Every step". Even when it is the only piece:
+ * work anybody asked for, and its lines are still in "Every step" (or, where one phase is left, in that
+ * phase's own list, which is every line). Even when it is the only piece:
  * then there is no phase at all, only the foot.
  *
  * `merge` says when neighbours that got the same name become one — the thinking line is the only

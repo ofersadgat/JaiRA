@@ -701,11 +701,12 @@ export const SCENES: readonly Scene[] = [
     },
   },
   {
-    // The same conversation with its "Every step" open under the summary.
+    // The same conversation with its steps open under the summary: it thinks once, so its work is one
+    // phase, which has no "Every step" — its own chevron opens them.
     name: "conversation-steps",
     reach: async (app) => {
       await SCENES.find((s) => s.name === "conversation-tools")!.reach(app);
-      await clickFirst(app, "Every step");
+      await clickTitled(app, ["Show steps"]);
       await app.until(says("scrollbar-styling"), "every step to open");
       await settle(600);
     },

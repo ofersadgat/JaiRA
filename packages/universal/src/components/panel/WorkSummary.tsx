@@ -37,15 +37,17 @@ import { ShellLine } from "./WorkRows";
 
 /**
  * The work between two messages, summarised — a box of phases (a number, a name, a chip per kind of
- * work, the first line of its thinking, how long it took), the latest steps of the phase in progress,
- * and the foot, "Every step", that opens every row in place. Everything that counts something opens the
+ * work, the first line of its thinking, how many steps it took and how long, a chevron that opens its
+ * rows under it), the latest steps of the phase in progress, and — where there is more than one phase —
+ * the foot, "Every step", that opens every row in place. Everything that counts something opens the
  * rows it counts in a card: on hover under a pointer, on a press under a finger, where it is a modal a
  * press outside closes (`floats/hoverFloat.tsx`; the foot's own press opens its rows in place instead). What it says is `workSummary.ts`'s; the
  * settings, the read-only judge and the approval its host can answer are `workSummaryContext.ts`'s
  * providers. How it looks:
  *
  *   the summary     margin 6 −6 10
- *   the box         column, gap 2, padding 5 6, 1px --line but the bottom, radius 8 8 0 0, --panel-2 55%
+ *   the box         column, gap 2, padding 5 6, 1px --line but the bottom, radius 8 8 0 0, --panel-2 55%;
+ *                   a lone phase's all round, radius 8 (no foot)
  *   a phase         radius 7; the current one --accent 5%, 3 under
  *   its head        row, centred, gap 8, at least 28 tall, padding 2 6
  *   its number      14 wide, right, data 600 10/12 (line normal), --tok-hint
@@ -56,7 +58,11 @@ import { ShellLine } from "./WorkRows";
  *                   22% (live: --accent, 1.5px); app 500 11.5/12.5 on 1, --text; its glyph 12 in the hue
  *   the thought     flex 1 1 0, row, gap 5, padding 0 3, radius 4, app 11.5/12.5 italic --dim; the glyph 11
  *                   --accent; hovered --text on --fill-ghost-hover
- *   how long        pushed right, 8 before, data 10.5/12 (line normal) --dim (current --accent), tabular
+ *   its tail        pushed right, 8 before, row, centred, gap 4: the steps (padding 0 3, radius 4; hovered
+ *                   --text on --fill-ghost-hover), "· how long", both data 10.5/12 (line normal) --dim
+ *                   (current --accent), tabular; the chevron 20 × 20, radius 4, its glyph 13 --tok-hint
+ *                   (hovered --text on --fill-ghost-hover), turned over while open
+ *   its rows, open  margin 1 0 0 22, in place of the runs
  *   the runs        margin 1 0 0 22
  *   a run           row (the time, 18 for the glyph, the sentence in what is left, how long so far),
  *                   gap 6, centred, padding 2 6, radius 6, app 12/12.5 --text; live --accent 7%; failed
@@ -410,6 +416,14 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const t = useTokens();
   const look = useContext(WorkLookContext);
   const [open, setOpen] = useState(false);
+  // The phases opened under their heads, each by its first line.
+  const [opened, setOpened] = useState<ReadonlySet<number>>(() => new Set());
+  const toggle = (at: number): void =>
+    setOpened((was) => {
+      const next = new Set(was);
+      if (!next.delete(at)) next.add(at);
+      return next;
+    });
   const live = useMemo(() => liveIndexOf(entries, working), [entries, working]);
   const now = useNow(working);
   const all = useMemo(() => entries.map((_, i) => i), [entries]);
@@ -441,17 +455,38 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
     ) : null;
   let promptPlaced = false;
   const bare = phases.length === 0;
+  // One phase is the whole stretch: its own count, time and list say what the foot would, so there is no
+  // foot — and its list is every line, the notes a dropped phase held among them.
+  const lone = phases.length === 1;
+  const everyOpen = open && !lone;
+  const rowsOfPhase = (phase: { indices: readonly number[] }): readonly number[] => (lone ? all : phase.indices);
+  // The lines drawn in an opened phase are not drawn again below the summary.
+  const unfolded = new Set(phases.filter((phase) => opened.has(phase.indices[0]!)).flatMap(rowsOfPhase));
+  const listed = (i: number): boolean => everyOpen || unfolded.has(i);
   const wash = t.mix(t.v("panel-2"), 55, "transparent");
   const footRadius = open ? (bare ? { borderTopLeftRadius: 8, borderTopRightRadius: 8, borderBottomLeftRadius: 0, borderBottomRightRadius: 0 } : { borderRadius: 0 }) : bare ? { borderRadius: 8 } : { borderTopLeftRadius: 0, borderTopRightRadius: 0, borderBottomLeftRadius: 8, borderBottomRightRadius: 8 };
   return (
     <View testID="work-summary" marginTop={6} marginHorizontal={-6} marginBottom={10} minWidth={0} onLayout={(e) => setWidth(e.nativeEvent.layout.width)}>
       {bare ? null : (
-        <View flexDirection="column" gap={2} paddingVertical={5} paddingHorizontal={6} borderTopLeftRadius={8} borderTopRightRadius={8} backgroundColor={wash as never} minWidth={0} {...(edge(t, { top: 1, right: 1, left: 1 }) as object)}>
+        <View
+          flexDirection="column"
+          gap={2}
+          paddingVertical={5}
+          paddingHorizontal={6}
+          {...(lone ? { borderRadius: 8 } : { borderTopLeftRadius: 8, borderTopRightRadius: 8 })}
+          backgroundColor={wash as never}
+          minWidth={0}
+          {...(edge(t, lone ? { top: 1, right: 1, bottom: 1, left: 1 } : { top: 1, right: 1, left: 1 }) as object)}
+        >
           {phases.map((phase, n) => {
             const current = n === currentAt;
-            const win = current ? windowOf(entries, counted(phase.indices), look.rows) : { rolled: counted(phase.indices), shown: [] as WorkRun[] };
-            const span = spanOf(entries, phase.indices);
-            const phaseTook = span.start === undefined ? undefined : (current ? now : (span.end ?? span.start)) - span.start;
+            // A phase is known by its first line: it keeps that while lines join it.
+            const at = phase.indices[0]!;
+            const isOpen = opened.has(at);
+            // Opened, every row of it is drawn under the head: its latest rows are among them, so its chips count all of it.
+            const win = current && !isOpen ? windowOf(entries, counted(phase.indices), look.rows) : { rolled: counted(phase.indices), shown: [] as WorkRun[] };
+            const span = lone ? whole : spanOf(entries, phase.indices);
+            const phaseTook = span.start === undefined ? undefined : (current || (lone && working) ? now : (span.end ?? span.start)) - span.start;
             return (
               <View key={n} minWidth={0} borderRadius={7} {...(current ? { backgroundColor: t.mix(t.v("accent"), 5, "transparent") as never, paddingBottom: 3 } : {})}>
                 <View flexDirection="row" alignItems="center" gap={8} minWidth={0} minHeight={28} paddingVertical={2} paddingHorizontal={6}>
@@ -460,7 +495,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
                       <Txt spec={{ voice: "data", scale: 10 / 12, weight: 600, color: "tok-hint" }} {...normalLineOf(t, "data", 10 / 12)} width={14} flexShrink={0} textAlign="right">
                         {String(n + 1)}
                       </Txt>
-                      <PhaseName name={current ? ACTIVE_NAME[phase.name] : phase.name} label={phase.name} current={current} indices={phase.indices} rowOf={rowOf} />
+                      <PhaseName name={current ? ACTIVE_NAME[phase.name] : phase.name} current={current} />
                     </>
                   ) : win.shown.length > 0 && win.rolled.length > 0 ? (
                     <Txt spec={{ voice: "app", scale: 10 / 12.5, weight: 600, ls: 0.07, upper: true, color: "dim", lineHeight: 1 }} flexShrink={0}>
@@ -469,13 +504,22 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
                   ) : null}
                   <Chips entries={entries} indices={win.rolled} live={live} rowOf={rowOf} />
                   {look.thinking ? <ThoughtLine entries={entries} indices={phase.indices} /> : <View flexGrow={1} flexShrink={1} flexBasis={0} />}
-                  {phase.name !== undefined && phaseTook !== undefined ? (
-                    <Txt spec={{ voice: "data", scale: 10.5 / 12, color: current ? "accent" : "dim", tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)} flexShrink={0} marginLeft="auto" paddingLeft={8}>
-                      {secondsOf(phaseTook)}
-                    </Txt>
-                  ) : null}
+                  <PhaseTail
+                    entries={entries}
+                    indices={rowsOfPhase(phase)}
+                    label={phase.name ?? "Every step"}
+                    took={phaseTook}
+                    current={current}
+                    open={isOpen}
+                    onToggle={() => toggle(at)}
+                    rowOf={rowOf}
+                  />
                 </View>
-                {win.shown.length > 0 ? (
+                {isOpen ? (
+                  <View marginTop={1} marginLeft={22} minWidth={0}>
+                    <RowsList indices={rowsOfPhase(phase)} rowOf={rowOf} entries={entries} />
+                  </View>
+                ) : win.shown.length > 0 ? (
                   <View marginTop={1} marginLeft={22} minWidth={0}>
                     {win.shown.map((run, k) => {
                       const here = askAt >= 0 && k === win.shown.length - 1 && run.rows.includes(askAt);
@@ -496,6 +540,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
       )}
       {/* The foot's own box is what its card is opened from and placed against: the whole button, under
           the pointer or the keyboard's focus (the button is in the Tab order itself). */}
+      {lone ? null : (
       <View ref={foot.anchor as never} minWidth={0} {...(!open ? foot.bind : {})}>
       <Press
         onPress={() => {
@@ -530,55 +575,97 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
         )}
       </Press>
       </View>
-      {!open ? (
+      )}
+      {!lone && !open ? (
         <Card hover={foot} label="Every step" count={`${entries.length} lines`}>
           <RowsList indices={all} rowOf={rowOf} entries={entries} />
         </Card>
       ) : null}
-      {open ? (
+      {everyOpen ? (
         <View flexDirection="column" minWidth={0} paddingTop={4} paddingHorizontal={2} paddingBottom={6} borderBottomLeftRadius={8} borderBottomRightRadius={8} {...(edge(t, { right: 1, bottom: 1, left: 1 }) as object)}>
           <RowsList indices={all} rowOf={rowOf} entries={entries} />
         </View>
-      ) : kept.length > 0 ? (
+      ) : kept.some((i) => !listed(i)) ? (
         <View flexDirection="column" minWidth={0} marginTop={6}>
-          {kept.map((i) => (
-            <View key={i} minWidth={0}>
-              {rowOf(i)}
-            </View>
-          ))}
+          {kept
+            .filter((i) => !listed(i))
+            .map((i) => (
+              <View key={i} minWidth={0}>
+                {rowOf(i)}
+              </View>
+            ))}
         </View>
       ) : null}
       {askAt >= 0 && !promptPlaced ? (
         <>
-          {open ? null : (
+          {listed(askAt) ? null : (
             <View flexDirection="column" minWidth={0} marginTop={6}>
               {rowOf(askAt)}
             </View>
           )}
-          {prompt(!open)}
+          {prompt(!listed(askAt))}
         </>
       ) : null}
     </View>
   );
 }
 
-/** The phase's name (a pulse before it while it is the one in progress), and its rows on hover. */
-function PhaseName({ name, label, current, indices, rowOf }: Rows & { name: string; label: string; current: boolean; indices: readonly number[] }): JSX.Element {
-  const hover = useHoverFloat();
+/** The phase's name, a pulse before it while it is the one in progress. */
+function PhaseName({ name, current }: { name: string; current: boolean }): JSX.Element {
   return (
-    <>
-      <Tap hover={hover} style={{ width: 92, flexShrink: 0 }}>
-      <View ref={hover.anchor as never} width={92} flexShrink={0} flexDirection="row" alignItems="center" gap={5} borderRadius={4} {...REACHED} {...hover.bind}>
-        {current ? <Pulse /> : null}
-        <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: current ? "accent" : "text" }} numberOfLines={1}>
-          {name}
+    <View width={92} flexShrink={0} flexDirection="row" alignItems="center" gap={5}>
+      {current ? <Pulse /> : null}
+      <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: current ? "accent" : "text" }} numberOfLines={1}>
+        {name}
+      </Txt>
+    </View>
+  );
+}
+
+/**
+ * The end of a phase's head: how many steps it took and how long, from the start of the first to the
+ * end of the last (so far, while it is the one in progress). The count opens its rows in a card; the
+ * chevron opens them under the head instead.
+ */
+function PhaseTail({ entries, indices, label, took, current, open, onToggle, rowOf }: Rows & { entries: readonly WorkEntry[]; indices: readonly number[]; label: string; took: number | undefined; current: boolean; open: boolean; onToggle: () => void }): JSX.Element {
+  const t = useTokens();
+  const hover = useHoverFloat();
+  const ink = current ? "accent" : "dim";
+  return (
+    <View flexShrink={0} marginLeft="auto" paddingLeft={8} flexDirection="row" alignItems="center" gap={4}>
+      <Tap hover={hover} style={{ flexShrink: 0 }}>
+      <View ref={hover.anchor as never} testID="ws-phase-steps" flexShrink={0} paddingHorizontal={3} borderRadius={4} backgroundColor={(hover.open ? t.v("fill-ghost-hover") : "transparent") as never} {...REACHED} {...hover.bind}>
+        <Txt spec={{ voice: "data", scale: 10.5 / 12, color: hover.open ? "text" : ink, tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)}>
+          {countOf(indices.map((i) => entries[i]!))}
         </Txt>
       </View>
       </Tap>
+      {took !== undefined ? (
+        <Txt spec={{ voice: "data", scale: 10.5 / 12, color: ink, tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)}>
+          {`· ${secondsOf(took)}`}
+        </Txt>
+      ) : null}
+      <Press
+        onPress={onToggle}
+        label={open ? "Hide steps" : "Show steps"}
+        {...({ "aria-expanded": open } as object)}
+        width={20}
+        height={20}
+        alignItems="center"
+        justifyContent="center"
+        borderRadius={4}
+        box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+      >
+        {({ hovered }) => (
+          <View flexDirection="row" transform={open ? [{ rotate: "180deg" }] : []}>
+            <Icon name="chevron" size={13} color={String(t.v(hovered ? "text" : "tok-hint"))} />
+          </View>
+        )}
+      </Press>
       <Card hover={hover} label={label} count={lines(indices.length)}>
-        <RowsList indices={indices} rowOf={rowOf} />
+        <RowsList indices={indices} rowOf={rowOf} entries={entries} />
       </Card>
-    </>
+    </View>
   );
 }
 

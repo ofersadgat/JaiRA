@@ -163,10 +163,10 @@ export const APPEARANCE_ROWS = {
   },
   workNotes: {
     name: "Rate limits and system notes",
-    description: "Lines about the run rather than work: a rate limit waited out, a context injected, a hook that ran. Every step lists them whatever this says.",
+    description: "Lines about the run rather than work: a rate limit waited out, a context injected, a hook that ran. The list of every step shows them whatever this says.",
     info: "Show: counted in the chips like any work. Hide phases of only these: counted, but a phase that has nothing else is left out, and a stretch that has nothing else shows only Every step. Hide phases and stretches of only these: the same, but such a stretch is not drawn at all. Hide everywhere: left out of the summary, and such a stretch is not drawn.",
   },
-  workPreview: { name: "Preview", description: "One request's work, three times: early on, well into it, and when it is done. Hover a chip, a phase or Every step." },
+  workPreview: { name: "Preview", description: "One request's work, three times: early on, well into it, and when it is done. Hover a chip, a phase's steps or Every step." },
   appFont: { name: "App font", description: "JaiRA's own words: the names of rooms, actions and states." },
   dataFont: { name: "Data font", description: "Everything else: paths, task titles, commands, counts." },
   editorSize: { name: "Editor size", description: "Editors follow the data font until you give them a size of their own." },
