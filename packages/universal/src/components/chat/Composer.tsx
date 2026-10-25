@@ -551,7 +551,8 @@ function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; i
   return (
     // A chip that does not fit its line goes to the next (the foot wraps); one wider than a line alone
     // cuts its words — and folded, the model's gives way to the controls.
-    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK, ...(Platform.OS === "web" ? { alignItems: "flex-start" } : {}) } as never}>
+    // The chip stretches to the wrap rather than sizing to its words, so a wrap squeezed below them cuts them.
+    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK } as never}>
     <Press
       onPress={press}
       title={`${label}: ${value}`}

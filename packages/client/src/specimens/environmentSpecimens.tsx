@@ -14,7 +14,7 @@ import { Composer, EnvironmentBar, EnvironmentRows, MachineIcon, PhoneContext, P
  *  - `environment-bar` — the bar tucked under the composer in each stage: nothing decided, a machine
  *    chosen, a workspace chosen (its checkout on the right), being placed, waiting, running.
  *  - `composer-widths` — the composer and its bar in every column it stands in: a desktop's from 900
- *    down to 320, idle and with a turn going it can join, then a phone's.
+ *    down to 240, idle and with a turn going it can join, then a phone's.
  *  - `environment-list` — the list the bar opens: Automatic, each machine with its load, each workspace
  *    with its work ring and checkout, a machine connecting and one offline.
  *  - `placement-placing`, `placement-waiting`, `placement-starting`, `placement-started` — the summary
@@ -250,7 +250,7 @@ function Sized({ width, phone, busy }: { width: number; phone: boolean; busy: bo
 function Widths(): JSX.Element {
   return (
     <View gap={10} alignItems="flex-start">
-      {[900, 720, 600, 500, 420, 360, 320].map((width) => (
+      {[900, 720, 600, 500, 420, 360, 320, 240].map((width) => (
         <Sized key={width} width={width} phone={false} busy={false} />
       ))}
       <Sized width={600} phone={false} busy />
