@@ -12,7 +12,7 @@
 import type { JsonValue } from "@declarative-ai/exec";
 import type { ExecPolicy } from "@declarative-ai/permissions";
 import type { JairaConfig, Scope } from "@jaira/shared";
-import { compilePolicy, projectPolicy, type CommandGrants, type PolicyAuditEntry } from "./policy";
+import { compilePolicy, projectPolicy, type CommandGrants, type PolicyAuditEntry, type RuleRefusal } from "./policy";
 import { claudePermissionSettings, compileClaudeScopeRules } from "./tools";
 
 /** The parts of a project's configuration a run's policy is compiled from. */
@@ -58,6 +58,8 @@ export interface RunPolicyOptions {
   onDecision?: ((entry: PolicyAuditEntry) => void) | undefined;
   /** The run's remembered part answers — `ApprovalHub.grants(taskId)`. */
   grants?: CommandGrants | undefined;
+  /** Every call a rule refused — see `CompilePolicyOptions.onRefused`. */
+  onRefused?: ((refused: RuleRefusal) => void) | undefined;
 }
 
 /**
@@ -78,6 +80,7 @@ export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOpti
     // The number is artifact configuration; turning it into an escalation is the policy's job.
     askAboveBytes: config.artifacts.askAboveBytes,
     ...(options.grants !== undefined ? { grants: options.grants } : {}),
+    ...(options.onRefused !== undefined ? { onRefused: options.onRefused } : {}),
     // What the configured servers' tools count as (decision 0019, ruling 5).
     ...(config.mcp !== undefined ? { mcp: config.mcp } : {}),
   });

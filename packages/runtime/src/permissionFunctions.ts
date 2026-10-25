@@ -59,7 +59,8 @@ import {
   type PermissionFunctionRequest,
   type PermissionRequestPart,
 } from "@jaira/shared";
-import { commandDecisionOf, functionCallOf, noteApprovalReason, setCommandDecision, type CommandDecision } from "./policy";
+import { commandDecisionOf, functionCallOf, noteApprovalReason, refusedByOfDecision, setCommandDecision, type CommandDecision } from "./policy";
+import { noteRefusal } from "./refusals";
 import { INTERACTIVE } from "./scriptedFunctions";
 import { executeWorkflow } from "./wiring";
 
@@ -261,6 +262,8 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
         ...(call.permissionSet !== undefined ? { permissionSet: call.permissionSet } : {}),
       };
       const { answer, failure } = await ask(call.function, request);
+      // A function's no is the function's — unless it asked the person, whose answer it handed on.
+      if (answer === "deny") noteRefusal(req.input, { kind: "function", function: call.function }, true);
       if (answer !== undefined) return ONCE(answer);
       noteApprovalReason(req.input, `the function '${call.function}' could not decide: ${failure}`);
       return approve(req);
@@ -273,7 +276,10 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
     // that no line runs unread. What the parts came to is the answer, and a person is asked only when
     // one of them asks.
     if (decided.action === "allow") return ONCE("allow");
-    if (decided.action === "deny") return ONCE("deny");
+    if (decided.action === "deny") {
+      noteRefusal(req.input, refusedByOfDecision(decided));
+      return ONCE("deny");
+    }
     const parts = [...decided.parts.parts];
     let changed = false;
     for (let index = 0; index < parts.length; index++) {
@@ -317,7 +323,11 @@ export function withPermissionFunctions(approve: Approver, options: PermissionFu
       parts: approval,
     };
     if (changed) setCommandDecision(req.input, updated);
-    if (verdict === "denied") return ONCE("deny");
+    if (verdict === "denied") {
+      // The part that refused says who: a function a line named (unless it asked the person), or a rule.
+      noteRefusal(req.input, refusedByOfDecision(updated), worst?.decidedBy.source === "function");
+      return ONCE("deny");
+    }
     if (verdict === "allowed") return ONCE("allow");
     return approve(req);
   };
@@ -458,6 +468,8 @@ export function registerSmartFunction(registry: CapabilityRegistry<WorkflowMetri
           judged = { verdict: "unsure", reason: `the judge failed: ${(e as Error).message}` };
         }
         options.onJudged?.(request, judged);
+        // The judge's own no, with its reason, for the words the agent reads (`refusals.ts`).
+        if (judged.verdict === "deny") noteRefusal(request.input, { kind: "function", function: SMART_FUNCTION, ...(judged.reason !== undefined ? { reason: judged.reason } : {}) });
         if (judged.verdict !== "unsure") return { value: judged.verdict, metrics: metrics() };
         const prompt = registry.functions.get(APPROVAL_PROMPT_FUNCTION);
         if (prompt === undefined) return { value: "deny", metrics: metrics() };

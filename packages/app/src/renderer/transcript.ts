@@ -44,7 +44,7 @@ import {
   type TurnKind,
   type WritingTool,
 } from "@jaira/shared/browser";
-import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, knownText, PERMISSION_CHECK, type ContextReading } from "@jaira/shared/browser";
+import { APPROVAL_PROMPT_FUNCTION, compactionOfEvent, CUT_OFF_EVENT, knownText, permissionFunctionLabel, PERMISSION_CHECK, type ContextReading } from "@jaira/shared/browser";
 
 // --- entries ------------------------------------------------------------------
 
@@ -101,6 +101,15 @@ export interface CompactionEntry {
   durationMs?: number;
 }
 
+/**
+ * A call that did not do its work for a reason not its own (decision 0007, amended 2026-10-24): a rule,
+ * a function or the person REFUSED it (`denied`, and `by` says who — "the permission set", "auto",
+ * "you"), or it was put to the person and nobody answered before it ended (`not run`). Read off the
+ * steps drawn under the call — `check_permission`, `approve_tool_call` — never off its result's words: a
+ * refusal and a tool that broke both reach the agent as an error, and only the steps tell them apart.
+ */
+export type Refusal = { kind: "denied"; by: string } | { kind: "not run" };
+
 /** One tool call and its result, paired. Collapsed to a line until asked. */
 export interface ToolEntry {
   kind: "tool";
@@ -123,6 +132,8 @@ export interface ToolEntry {
   callId?: string;
   /** The call that made this one, when a tool made it — `approve_tool_call`. See `SessionTurn.calledBy`. */
   calledBy?: string;
+  /** Set when the call did not do its work for a reason not its own — see {@link Refusal}. */
+  refused?: Refusal;
   /**
    * Set when this call SPAWNED a subagent whose conversation the record kept — the key into
    * `SessionView.sidechains`. The row becomes the doorway: the subagent's turns render behind it,
@@ -1200,6 +1211,7 @@ export function entriesOf(
   } else if (session?.status === "error") {
     entries.push({ kind: "event", tone: "bad", text: "this call failed" });
   }
+  markRefusals(entries);
   // A call whose subagent conversation exists becomes the doorway to it — whether the record kept
   // the chain, or its turns are still streaming by. After the live append on purpose: while the run
   // is going the Task call itself is a live entry, and it is a doorway the moment its chain speaks.
@@ -1244,6 +1256,7 @@ export function sidechainEntriesOf(
   for (const turn of session?.sidechains?.[call] ?? []) said.push(...messageOf(turn));
   for (const entry of live ?? []) said.push(...liveEntriesOf(entry, call));
   const entries = pairResults(said);
+  markRefusals(entries);
   const chains = session?.sidechains ?? {};
   for (const entry of entries) {
     if (entry.kind === "tool" && entry.callId !== undefined && entry.callId !== call && chains[entry.callId] !== undefined) {
@@ -1251,6 +1264,41 @@ export function sidechainEntriesOf(
     }
   }
   return entries;
+}
+
+/**
+ * Mark each call the steps under it say was refused or never answered ({@link Refusal}). The later step
+ * wins: auto unsure, then the person's no, is the person's.
+ *
+ * A step is read by what it came to: a check that denied names its function ("auto") or its rule ("the
+ * permission set"); an approval the person denied is "you"; one answered by nobody — a stop, the app
+ * closing, the call ending first — or never answered at all by a call that has its result is not run.
+ */
+export function markRefusals(entries: readonly TranscriptEntry[]): void {
+  const calls = new Map<string, ToolEntry>();
+  for (const entry of entries) if (entry.kind === "tool" && entry.callId !== undefined && entry.calledBy === undefined) calls.set(entry.callId, entry);
+  for (const step of entries) {
+    if (step.kind !== "tool" || step.calledBy === undefined) continue;
+    const call = calls.get(step.calledBy);
+    if (call === undefined) continue;
+    const refusal = refusalOfStep(step, call);
+    if (refusal !== undefined) call.refused = refusal;
+  }
+}
+
+/** What one step under a call says of it — see {@link markRefusals}. */
+function refusalOfStep(step: ToolEntry, call: ToolEntry): Refusal | undefined {
+  const args = (step.args ?? {}) as { function?: unknown; rule?: unknown };
+  const data = (step.detail ?? {}) as { verdict?: unknown; decision?: unknown; by?: unknown };
+  if (step.name === PERMISSION_CHECK) {
+    if (data.verdict !== "deny") return undefined;
+    const fn = typeof args.function === "string" ? args.function : "a permission function";
+    return { kind: "denied", by: args.rule === true ? fn : permissionFunctionLabel(fn) };
+  }
+  if (step.name !== APPROVAL_PROMPT_FUNCTION) return undefined;
+  if (data.decision === undefined) return call.ok !== undefined || call.result !== undefined ? { kind: "not run" } : undefined;
+  if (data.decision !== "deny") return undefined;
+  return data.by === undefined || data.by === "person" ? { kind: "denied", by: "you" } : { kind: "not run" };
 }
 
 /** Journal turns belonging to one state. See {@link entriesOf} on why this is by state, not instance. */

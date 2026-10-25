@@ -30,6 +30,7 @@ export * from "./packageScripts";
 // A run's policy, one recipe for the app and the CLI alike.
 export * from "./runPolicy";
 export * from "./approval";
+export * from "./refusals";
 export * from "./permissionFunctions";
 export * from "./questions";
 export * from "./agents";

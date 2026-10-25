@@ -35,7 +35,7 @@
  *     `.jaira/` (§1g item 5) — the deny rule is the real enforcement, not the
  *     directory layout.
  */
-import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
+import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
 import { SHELL_SUBJECT, classifyRequest, lookUp, makeCallOf, matchCommandEntry, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
@@ -88,6 +88,7 @@ import {
 import { declaredNative, standardOfAnyNative } from "./agentTools";
 import { partScopeFor, scopeNarrowingFor } from "./tools";
 import { mcpCallOf } from "./mcpServers";
+import { deniedEarlier, refusalWords, takeRefusal, type RefusedBy } from "./refusals";
 
 /** What a line comes to — DESIGN §10.1's vocabulary. */
 export type PolicyAction = "allow" | "deny" | "require_approval";
@@ -786,6 +787,13 @@ export interface CompilePolicyOptions {
   /** Called for every decision — the audit trail (DESIGN §10.2's `command_log`). */
   onDecision?: (entry: PolicyAuditEntry) => void;
   /**
+   * Told every call a RULE refused without anybody being asked — the permission set, the built-in
+   * rules, the scopes, an earlier answer, the profile — so a host can draw that refusal as a step under
+   * the call, the way a function's verdict and the person's answer are drawn (decision 0007, amended
+   * 2026-10-24). Calls a function or a person refused are not told: their own steps already say so.
+   */
+  onRefused?: (refused: RuleRefusal) => void;
+  /**
    * WHERE anything under this policy may act — the executor's scope floor.
    *
    * Compiled onto `ExecPolicy.scopeOf`, which the engine hands to every gate and every wrapped tool,
@@ -1059,7 +1067,16 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     if (where === undefined || what === undefined) return where ?? what;
     return MODE_RANK[where] >= MODE_RANK[what] ? where : what;
   };
-  const compiled: ExecPolicy = { baseline, smart, scopeOf };
+  /**
+   * What the agent reads for a refused call: who refused it, from what upstream says of WHICH step did
+   * and what the deciders wrote down on the way (`refusals.ts`).
+   */
+  const refusal: RefusalWords = (refused) => {
+    const by = refusedByOf(refused);
+    if (by.kind === "rule") options.onRefused?.({ tool: refused.tool, input: refused.input, by });
+    return refusalWords(by, COMMAND_TOOLS.has(refused.tool) ? SHELL_SUBJECT : (standardOfAnyNative(refused.tool) ?? refused.tool));
+  };
+  const compiled: ExecPolicy = { baseline, smart, scopeOf, refusal };
   COMMAND_NARROWINGS.set(compiled, narrowing);
   return compiled;
 }
@@ -1075,6 +1092,59 @@ const strictestMode = (a: PermissionMode | undefined, b: PermissionMode): Permis
  * (decision 0019 §6). The built-ins switch (`functions.shell.builtins`) turns them off with the rest.
  */
 export const ALWAYS_ASKING_TOOLS: ReadonlySet<string> = new Set(["power", "install_software"]);
+
+/** A call a rule refused, as `CompilePolicyOptions.onRefused` is told it. */
+export interface RuleRefusal {
+  /** The tool as the gate was asked about it. */
+  tool: string;
+  /** The call's own input — what the call it is about is found by. */
+  input: unknown;
+  by: Extract<RefusedBy, { kind: "rule" }>;
+}
+
+/**
+ * Who refused a call, from which step of the one decision did (`RefusalCause`) and what the deciders
+ * wrote down: a line's or an MCP call's decision, kept against its input, names its rule; the approver
+ * wrote down who answered it; a mode's `deny` is the permission set — or the person, who denied the
+ * tool for longer than one call.
+ */
+function refusedByOf(refused: RefusedCall): RefusedBy {
+  const noted = takeRefusal(refused.input);
+  const decided = commandDecisionOf(refused.input);
+  switch (refused.cause) {
+    case "profile":
+      return { kind: "rule", rule: "profile", ...(refused.profile !== undefined ? { profile: refused.profile } : {}) };
+    case "mode":
+      return { kind: "rule", rule: deniedEarlier(refused.sessionId, refused.tool) ? "earlier answer" : "permission set" };
+    case "narrowed":
+      // The line's own judgement refused it, or — when that let it through — the scope table did.
+      return decided?.action === "deny" ? refusedByOfDecision(decided) : { kind: "rule", rule: "scopes" };
+    case "smart": {
+      const path = pathOf((refused.input ?? {}) as Record<string, unknown>);
+      if (path !== undefined && isDeniedPath(path)) return { kind: "rule", rule: "built-in rules", reason: ".jaira/ is engine-owned" };
+      return decided?.action === "deny" ? refusedByOfDecision(decided) : (noted ?? { kind: "rule", rule: "built-in rules" });
+    }
+    case "approver":
+      return noted ?? { kind: "approver" };
+  }
+}
+
+/**
+ * The rule behind a refused line or MCP call: its denied part's decider. A part a FUNCTION denied is the
+ * function's; a part denied by an answer remembered for this run is the person's earlier answer.
+ */
+export function refusedByOfDecision(decision: CommandDecision): RefusedBy {
+  const part = decision.parts.parts.find((p) => p.verdict === "denied");
+  const decider = part?.decidedBy;
+  if (decider?.source === "function" && decider.function !== undefined) {
+    return { kind: "function", function: decider.function, ...(part !== undefined ? { reason: part.text } : {}) };
+  }
+  const rule = decider?.source === "permissionSet" ? "permission set" : decider?.source === "scope" ? "scopes" : decider?.source === "remembered" ? "earlier answer" : "built-in rules";
+  // The part itself is what a permission set's line or an earlier answer denied; a built-in or a scope
+  // says why in its own sentence.
+  const reason = rule === "permission set" || rule === "earlier answer" ? part?.text : (decider?.reason ?? decision.reason);
+  return { kind: "rule", rule, ...(reason !== undefined && reason.length > 0 ? { reason } : {}) };
+}
 
 /** Line decisions by the input object of the call they are about — see `lineDecisionFor`. */
 const LINE_DECISIONS = new WeakMap<object, CommandDecision>();

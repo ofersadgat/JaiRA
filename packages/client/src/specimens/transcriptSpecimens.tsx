@@ -2,7 +2,7 @@ import type { JSX, ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { InstanceNode, SessionRef } from "@jaira/shared/browser";
 import { bandsOf, piecesOf, type BandNote } from "@jaira/ui/sessionBands";
-import type { TranscriptEntry } from "@jaira/ui/transcript";
+import { markRefusals, type TranscriptEntry } from "@jaira/ui/transcript";
 import { ValuePanelContext, type ValuePanel } from "@jaira/ui/valuePanel";
 import { SessionBands, Transcript, useTokens } from "@jaira/universal";
 
@@ -271,6 +271,37 @@ TRANSCRIPT_SPECIMENS["transcript-auto-check"] = pair([
   { kind: "tool", name: "approve_tool_call", summary: "web_fetch", at: s(23), args: { tool: "web_fetch", asker: "smart" }, callId: "approve_a2", calledBy: "f2", ok: true, result: "allowed", detail: { decision: "allow", scope: "once", by: "person", waitedMs: 62_000 } },
   say("assistant", "Example Domain, and What's new.", s(88), 1),
 ]);
+
+/**
+ * Every way a call can end, in one finished turn (decision 0007, amended 2026-10-24 later — the person's
+ * D+E): one that worked; refused by the permission set, by you after auto was unsure, and by auto — red,
+ * a lock, and who in grey, the step that denied it in the plain ink; one that broke, a cross; one nobody
+ * answered before the agent gave up on it, a dash. Marked by the steps under each, as `entriesOf` marks.
+ */
+TRANSCRIPT_SPECIMENS["transcript-outcomes"] = (() => {
+  const SPEC = "https://example.com/spec";
+  const LLMS = "https://code.claude.com/docs/llms.txt";
+  const SETTINGS = "src/settings.json";
+  const entries: TranscriptEntry[] = [
+    say("user", "Move the settings defaults into the project, and check them against the spec page.", s(0), 0),
+    { kind: "tool", name: "mcp__dai__read_file", summary: "docs/settings.md", args: { path: "docs/settings.md" }, at: s(3), callId: "r1", ok: true, result: "# Settings" },
+    { kind: "tool", name: "mcp__dai__edit", summary: SETTINGS, args: { path: SETTINGS }, at: s(9), callId: "e1", ok: false, result: "Not run: this conversation's permission set denies edit. Nothing was changed." },
+    { kind: "tool", name: "check_permission", summary: "the permission set", at: s(9), args: { function: "the permission set", rule: true, tool: "edit", subject: "edit" }, callId: "k1", calledBy: "e1", ok: true, result: "denied", detail: { verdict: "deny", reason: "the permission set's 'edit' is deny", tookMs: 0 } },
+    { kind: "tool", name: "mcp__dai__web_fetch", summary: SPEC, args: { url: SPEC }, at: s(14), callId: "f1", ok: false, result: "Not run: the person denied this call. Nothing was fetched." },
+    { kind: "tool", name: "check_permission", summary: "smart", at: s(14), args: { function: "smart", tool: "web_fetch", subject: "web_fetch" }, callId: "k2", calledBy: "f1", ok: true, result: "unsure: put to the person", detail: { verdict: "unsure", reason: "an outside fetch the task did not ask for", tookMs: 9_000 } },
+    { kind: "tool", name: "approve_tool_call", summary: "web_fetch", at: s(23), args: { tool: "web_fetch", asker: "smart" }, callId: "a2", calledBy: "f1", ok: true, result: "denied", detail: { decision: "deny", scope: "once", by: "person", waitedMs: 41_000 } },
+    { kind: "tool", name: "Agent", summary: "Survey every settings reader", args: { description: "Survey every settings reader", subagent_type: "Explore" }, at: s(66), callId: "g1", ok: false, result: "Not run: auto denied it. Nothing was done." },
+    { kind: "tool", name: "check_permission", summary: "smart", at: s(66), args: { function: "smart", tool: "Agent", subject: "Agent" }, callId: "k3", calledBy: "g1", ok: true, result: "denied", detail: { verdict: "deny", reason: "a subagent the task did not ask for", tookMs: 11_000 } },
+    { kind: "tool", name: "mcp__dai__read_file", summary: "src/settingsDefaults.ts", args: { path: "src/settingsDefaults.ts" }, at: s(80), callId: "r2", ok: false, result: "tool 'read_file' failed: ENOENT: no such file or directory, open 'src/settingsDefaults.ts'" },
+    { kind: "tool", name: "mcp__dai__web_fetch", summary: LLMS, args: { url: LLMS }, at: s(84), callId: "f2", ok: false, result: "MCP server \"dai\" tool \"web_fetch\" sent no response or progress for 300s; aborting." },
+    { kind: "tool", name: "check_permission", summary: "smart", at: s(84), args: { function: "smart", tool: "web_fetch", subject: "web_fetch" }, callId: "k4", calledBy: "f2", ok: true, result: "unsure: put to the person", detail: { verdict: "unsure", reason: "fetching outside content should be confirmed", tookMs: 12_000 } },
+    { kind: "tool", name: "approve_tool_call", summary: "web_fetch", at: s(96), args: { tool: "web_fetch", asker: "smart" }, callId: "a4", calledBy: "f2", ok: true, result: "not answered: the call ended without it", detail: { decision: "deny", scope: "once", by: "abandoned", waitedMs: 288_000 } },
+    { kind: "tool", name: "mcp__dai__shell", summary: "npm test -- settings", args: { command: "npm test -- settings" }, at: s(390), callId: "x1", ok: true, result: { exitCode: 0, stdout: "12 passed", stderr: "" } },
+    say("assistant", "The defaults stay where they are: the edit and the spec fetch were refused, and `src/settingsDefaults.ts` does not exist. The settings tests pass.", s(396), 1),
+  ];
+  markRefusals(entries);
+  return pair(entries);
+})();
 
 /** While auto decides: the call has not run, and the step under it says who is checking it. */
 TRANSCRIPT_SPECIMENS["transcript-auto-checking"] = pair(

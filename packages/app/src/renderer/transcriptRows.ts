@@ -5,7 +5,7 @@
 import { artifactOf, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { answersOfAnsweredText } from "./choicesModel";
-import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall } from "./workSummary";
+import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall, refusalWordsOf } from "./workSummary";
 import { shellLineOf, type ToolEntry, type WorkEntry } from "./transcript";
 
 /**
@@ -166,8 +166,11 @@ export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean
 
 /** How a row's glyph and name are coloured. Not the same axis as the mark at the end. */
 export type RowTone = "plain" | "muted" | "warn" | "bad";
-/** The verdict at the end of a row, when there is one to give. */
-export type RowMark = "ok" | "bad" | "waiting" | "cut";
+/**
+ * The verdict at the end of a row, when there is one to give: ✓ it worked, ✕ it broke, a lock it was
+ * denied, "–" nobody answered; `waiting` while it waits.
+ */
+export type RowMark = "ok" | "bad" | "waiting" | "cut" | "denied";
 
 /** What goes under a call's line without being asked for (`Tool`'s `shown`), by kind. */
 export type ToolShown = "sidechain" | "outcome" | "asked" | "produced" | "picture" | "output" | undefined;
@@ -226,6 +229,8 @@ export function toolLineOf(
   prose: boolean;
   tone: RowTone;
   mark?: RowMark;
+  /** Grey words before the time saying who stopped a refused call — "denied by auto", "not answered". */
+  note?: string;
   shown: ToolShown;
   /** No answer recorded — still running (the call's stretch is open) or never answered. */
   unanswered: boolean;
@@ -303,8 +308,22 @@ export function toolLineOf(
     preview: entry.sidechain !== undefined ? `⑂ ${entry.summary}` : entry.summary,
     command: entry.sidechain === undefined ? shellLineOf(entry) : undefined,
     prose: false,
-    tone: entry.ok === false ? "bad" : "plain",
-    mark: entry.ok === undefined ? (running || !unanswered ? "waiting" : "cut") : entry.ok ? "ok" : "bad",
+    // A call that did not do its work FAILED, whatever stopped it (the person, 2026-10-24, D+E): red, and
+    // its glyph says why — ✕ it broke, a lock it was denied, "–" nobody answered — and grey words, who.
+    tone: entry.ok === false || entry.refused !== undefined ? "bad" : "plain",
+    mark:
+      entry.refused !== undefined
+        ? entry.refused.kind === "denied"
+          ? "denied"
+          : "cut"
+        : entry.ok === undefined
+          ? running || !unanswered
+            ? "waiting"
+            : "cut"
+          : entry.ok
+            ? "ok"
+            : "bad",
+    ...(entry.refused !== undefined ? { note: refusalWordsOf(entry.refused) } : {}),
     shown,
     unanswered,
     running,

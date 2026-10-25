@@ -59,8 +59,17 @@ export interface ApprovalCallAnswer {
 
 /** What `check_permission` was called with: which function was asked, about what. */
 export interface CheckCallInput {
-  /** The function asked, as the permission set names it — `smart`. */
+  /**
+   * The function asked, as the permission set names it — `smart`. For a {@link rule}, what the
+   * conversation calls the rule: `the permission set`, `the built-in rules`.
+   */
   function: string;
+  /**
+   * Set when no function was asked: a RULE refused the call — the permission set, the built-in rules,
+   * the scopes, an earlier answer — and this is that refusal, drawn as a step under the call the way a
+   * function's verdict is (decision 0007, amended 2026-10-24).
+   */
+  rule?: true;
   /** The tool called — `shell`, `web_fetch`. */
   tool: string;
   /** The permission set line the function answers for. */

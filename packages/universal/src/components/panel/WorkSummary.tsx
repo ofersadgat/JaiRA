@@ -13,6 +13,8 @@ import {
   isQuiet,
   liveIndexOf,
   phasesOf,
+  refusalWordsOf,
+  refusedOf,
   runToneOf,
   checkedAbove,
   secondsOf,
@@ -203,7 +205,8 @@ export function SaidText({ said }: { said: readonly Said[] }): JSX.Element {
 function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
   const t = useTokens();
   const hover = useHoverFloat();
-  const hue = chip.live ? String(t.v("accent")) : chip.failed > 0 ? String(t.v("bad")) : hueOfKind(t, chip.kind);
+  // Red when any of it did not do its work — broke, refused or unanswered (2026-10-24, D+E).
+  const hue = chip.live ? String(t.v("accent")) : chip.failed + chip.denied + chip.notRun > 0 ? String(t.v("bad")) : hueOfKind(t, chip.kind);
   const [hovered, setHovered] = useState(false);
   const on = hover.open || hovered;
   return (
@@ -244,6 +247,19 @@ function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
         {chip.failed > 0 ? (
           <Txt spec={{ voice: "data", scale: 10 / (Number(t.scaled("size-data", 1)) || 12), weight: 700, color: "bad", lineHeight: 1 }}>
             {`${chip.failed}✕`}
+          </Txt>
+        ) : null}
+        {chip.denied > 0 ? (
+          <View flexDirection="row" alignItems="center" gap={2}>
+            <Icon name="lock" size={10} color={String(t.v("bad"))} />
+            <Txt spec={{ voice: "data", scale: 10 / (Number(t.scaled("size-data", 1)) || 12), weight: 700, color: "bad", lineHeight: 1 }}>
+              {`${chip.denied}`}
+            </Txt>
+          </View>
+        ) : null}
+        {chip.notRun > 0 ? (
+          <Txt spec={{ voice: "data", scale: 10 / (Number(t.scaled("size-data", 1)) || 12), weight: 700, color: "bad", lineHeight: 1 }}>
+            {`${chip.notRun}–`}
           </Txt>
         ) : null}
       </View>
@@ -312,10 +328,15 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
   const hover = useHoverFloat();
   const { said, now: doing } = sentenceOf(entries, run, live);
   const running = doing !== undefined;
+  // What did not do its work, by why: broke, refused, or nobody answered (2026-10-24, D+E).
   const failedCount = run.rows.filter((i) => {
     const e = entries[i]!;
-    return e.kind === "tool" && e.ok === false;
+    return e.kind === "tool" && e.ok === false && e.refused === undefined;
   }).length;
+  const deniedCount = run.rows.filter((i) => refusedOf(entries[i]!)?.kind === "denied").length;
+  const notRunCount = run.rows.filter((i) => refusedOf(entries[i]!)?.kind === "not run").length;
+  // Who stopped a lone call, after its pill: "by the permission set", "nobody answered".
+  const lone = run.rows.length === 1 ? refusedOf(entries[run.rows[0]!]!) : undefined;
   const thoughtMs = run.thoughts.reduce((sum, i) => {
     const e = entries[i]!;
     return sum + (e.kind === "thought" ? (e.durationMs ?? 0) : 0);
@@ -327,7 +348,7 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
   const tone = runToneOf(entries, run, live);
   const yours = running && tone === "warn";
   const live_ = yours ? "warn" : "accent";
-  const iconInk = failedCount > 0 ? "bad" : wait ? "warn" : (tone ?? "dim");
+  const iconInk = failedCount + deniedCount + notRunCount > 0 ? "bad" : wait ? "warn" : (tone ?? "dim");
   const kind = chipsOf(entries, run.rows)[0]?.icon ?? "tool";
   return (
     <>
@@ -355,6 +376,22 @@ function RunRow({ entries, run, live, now, clock, rowOf, below }: Rows & { entri
             <View flexShrink={0} paddingHorizontal={5} borderRadius={4} backgroundColor={t.mix(t.v("bad"), 12, "transparent") as never}>
               <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: "bad" }}>{`${failedCount} failed`}</Txt>
             </View>
+          ) : null}
+          {deniedCount > 0 ? (
+            <View flexShrink={0} flexDirection="row" alignItems="center" gap={3} paddingHorizontal={5} borderRadius={4} backgroundColor={t.mix(t.v("bad"), 12, "transparent") as never}>
+              <Icon name="lock" size={10} color={String(t.v("bad"))} />
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: "bad" }}>{`${deniedCount} denied`}</Txt>
+            </View>
+          ) : null}
+          {notRunCount > 0 ? (
+            <View flexShrink={0} paddingHorizontal={5} borderRadius={4} backgroundColor={t.mix(t.v("bad"), 12, "transparent") as never}>
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, weight: 600, color: "bad" }}>{`– ${notRunCount} not run`}</Txt>
+            </View>
+          ) : null}
+          {lone !== undefined ? (
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} flexShrink={0} numberOfLines={1}>
+              {refusalWordsOf(lone, true)}
+            </Txt>
           ) : null}
           {thoughtMs > 0 ? (
             <View flexShrink={0} flexDirection="row" alignItems="center" gap={3}>

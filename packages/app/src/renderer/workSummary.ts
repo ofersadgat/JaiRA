@@ -14,7 +14,7 @@
  * is tested without a window.
  */
 import { APPROVAL_PROMPT_FUNCTION, PERMISSION_CHECK, permissionFunctionLabel, toolDisplayOf } from "@jaira/shared/browser";
-import { iconOf, shellLineOf, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
+import { iconOf, shellLineOf, type Refusal, type ThoughtEntry, type ToolEntry, type WorkEntry, type WorkIconName } from "./transcript";
 
 // --- kinds ---------------------------------------------------------------------------------------
 
@@ -104,7 +104,23 @@ function pathOf(entry: WorkEntry): string {
   return entry.summary;
 }
 
-const failed = (entry: WorkEntry): boolean => (entry.kind === "tool" && entry.ok === false) || (entry.kind === "event" && entry.tone === "bad");
+/** A call that broke, or a fact gone bad — a refused call is counted on its own ({@link refusedOf}). */
+const failed = (entry: WorkEntry): boolean => (entry.kind === "tool" && entry.ok === false && entry.refused === undefined) || (entry.kind === "event" && entry.tone === "bad");
+
+/** How a call that did not do its work ended, when it was not the tool's doing — see `Refusal`. */
+export function refusedOf(entry: WorkEntry): Refusal | undefined {
+  return entry.kind === "tool" ? entry.refused : undefined;
+}
+
+/**
+ * Who stopped a refused call, in the grey words beside it (the person, 2026-10-24, D+E): "denied by the
+ * permission set", "denied by you", "not answered". `after` drops what a pill before them already says:
+ * "by the permission set", "nobody answered".
+ */
+export function refusalWordsOf(refusal: Refusal, after = false): string {
+  if (refusal.kind === "not run") return after ? "nobody answered" : "not answered";
+  return after ? `by ${refusal.by}` : `denied by ${refusal.by}`;
+}
 
 /** How long one entry took, where the record says: a thought's own timing; a wait parsed from its line. */
 function tookOf(entry: WorkEntry): number {
@@ -155,6 +171,11 @@ export function isCheckCall(entry: WorkEntry): boolean {
   return entry.kind === "tool" && entry.name === PERMISSION_CHECK;
 }
 
+/** Whether no function was asked: a RULE refused the call, and this step is that refusal (`CheckCallInput.rule`). */
+export function isRuleCheck(entry: ToolEntry): boolean {
+  return (entry.args as { rule?: unknown } | undefined)?.rule === true;
+}
+
 /** Which function was asked, off its arguments — `smart`. */
 export function checkFunctionOf(entry: ToolEntry): string {
   const fn = (entry.args as { function?: unknown } | undefined)?.function;
@@ -180,9 +201,10 @@ const capital = (word: string, reference: string): string => (word === reference
  * `waiting`: its stretch is still being written; with no answer in a stretch that is over, nobody is
  * deciding any more — it reads "Not finished".
  */
-export function checkWordsOf(entry: ToolEntry, waiting = true): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" | "cut" } {
+export function checkWordsOf(entry: ToolEntry, waiting = true): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" | "cut" | "denied" } {
   const fn = checkFunctionOf(entry);
-  const who = permissionFunctionLabel(fn);
+  // A rule's step is named for the rule already ("the permission set"); a function's, by its label.
+  const who = isRuleCheck(entry) ? fn : permissionFunctionLabel(fn);
   const answer = checkAnswerOf(entry);
   if (answer === undefined) {
     if (!waiting) return { name: "Not finished", preview: `${who} was checking it`, tone: "warn", mark: "cut" };
@@ -193,7 +215,8 @@ export function checkWordsOf(entry: ToolEntry, waiting = true): { name: string; 
     case "allow":
       return { name: `Allowed by ${who}`, preview: why, tone: "plain", mark: "ok" };
     case "deny":
-      return { name: `Denied by ${who}`, preview: why, tone: "bad", mark: "bad" };
+      // The denial itself did not fail — the call it refused did, and says so on its own row.
+      return { name: `Denied by ${who}`, preview: why, tone: "plain", mark: "denied" };
     case "unsure":
       return { name: `${capital(who, fn)} is unsure`, preview: why, tone: "warn" };
     case "failed":
@@ -219,14 +242,15 @@ export function checkedAbove(entries: readonly WorkEntry[], at: number): boolean
 /**
  * The ink a summary row is drawn in, when it is not the plain one (option B, 2026-10-24): the approval
  * the turn is waiting on is the person's — the waiting amber, as the status line and the board draw it —
- * and a check reads by what it came to: allowed in --ok, denied in --bad, unsure or undecided in --warn.
+ * and a check reads by what it came to: allowed in --ok, unsure or undecided in --warn, denied in the
+ * plain ink (2026-10-24, D+E: the denial did not fail; the call it refused did, and says so on its own row).
  */
 export function runToneOf(entries: readonly WorkEntry[], run: WorkRun, live?: number): "warn" | "bad" | "ok" | undefined {
   if (run.kind === "approval") return live !== undefined && run.rows.includes(live) ? "warn" : undefined;
   if (run.kind !== "check" || run.rows.length !== 1) return undefined;
   const answer = checkAnswerOf(entries[run.rows[0]!] as ToolEntry);
   if (answer === undefined) return undefined;
-  return answer.verdict === "allow" ? "ok" : answer.verdict === "deny" ? "bad" : "warn";
+  return answer.verdict === "allow" ? "ok" : answer.verdict === "deny" ? undefined : "warn";
 }
 
 /** The words a held call reads by: what it will do, and that it has not yet — "Fetch `url` · not run yet". */
@@ -287,7 +311,7 @@ const REACH: Record<string, string> = { once: "once", run: "for this run", sessi
  * `waiting`: its stretch is still being written, so no answer YET is somebody still being asked. With no
  * answer in a stretch that is over, nobody is: it reads Not answered, and is marked as cut off.
  */
-export function approvalWordsOf(entry: ToolEntry, waiting = true): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" | "cut" } {
+export function approvalWordsOf(entry: ToolEntry, waiting = true): { name: string; preview: string; tone: "plain" | "warn" | "bad"; mark?: "ok" | "bad" | "waiting" | "cut" | "denied" } {
   const answer = approvalAnswerOf(entry);
   const about = approvalAboutOf(entry);
   if (answer === undefined) {
@@ -297,13 +321,13 @@ export function approvalWordsOf(entry: ToolEntry, waiting = true): { name: strin
   const after = answer.waitedMs >= 1000 ? ` · after ${secondsOf(answer.waitedMs)}` : "";
   if (answer.by !== "person") {
     const why = answer.by === "closed" ? "the app closed" : answer.by === "abandoned" ? "the agent gave up on the call" : "the run stopped";
-    return { name: "Not answered", preview: `${why} while it waited${after}`, tone: "warn", mark: "bad" };
+    return { name: "Not answered", preview: `${why} while it waited${after}`, tone: "warn", mark: "cut" };
   }
   const who = about.asker !== undefined ? `by you, for ${about.asker}` : "by you";
   const reach = REACH[answer.scope] ?? answer.scope;
   return answer.decision === "allow"
     ? { name: "Approved", preview: `${who} · ${reach}${after}`, tone: "plain", mark: "ok" }
-    : { name: "Denied", preview: `${who} · ${reach}${after}`, tone: "bad", mark: "bad" };
+    : { name: "Denied", preview: `${who} · ${reach}${after}`, tone: "plain", mark: "denied" };
 }
 
 // --- words ---------------------------------------------------------------------------------------
@@ -341,8 +365,12 @@ export interface WorkChip {
   label: string;
   /** The entries it counts, by index into the stretch. */
   indices: number[];
-  /** How many of them failed. */
+  /** How many of them failed — broke, the tool's doing. */
   failed: number;
+  /** How many were refused — a rule, a function or the person said no. */
+  denied: number;
+  /** How many were put to the person and ended before anybody answered. */
+  notRun: number;
   /** One of them is still running. */
   live: boolean;
 }
@@ -374,8 +402,11 @@ export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[
           return took > 0 ? secondsOf(took) : "thinking";
         case "read":
           return plural(files, "file", "files");
-        case "write":
-          return `${files} edited`;
+        case "write": {
+          // Only what went through was edited; a run of refused edits is that many edits, not done.
+          const done = unique(items.filter((e) => refusedOf(e) === undefined).map(pathOf)).length;
+          return done > 0 ? `${done} edited` : plural(files, "edit", "edits");
+        }
         case "search":
           return plural(n, "search", "searches");
         case "run":
@@ -393,7 +424,10 @@ export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[
         case "approval":
           return plural(n, "approval", "approvals");
         case "check": {
-          const who = permissionFunctionLabel(checkFunctionOf(items[0] as ToolEntry));
+          // One function's checks are that function's ("auto checks"); a rule's, or a mix, are the permission's.
+          const fns = unique(items.map((e) => checkFunctionOf(e as ToolEntry)));
+          if (fns.length > 1 || items.some((e) => isRuleCheck(e as ToolEntry))) return plural(n, "permission check", "permission checks");
+          const who = permissionFunctionLabel(fns[0]!);
           return plural(n, `${who} check`, `${who} checks`);
         }
         case "tool": {
@@ -402,7 +436,17 @@ export function chipsOf(entries: readonly WorkEntry[], indices: readonly number[
         }
       }
     })();
-    return { key, kind, icon: iconOf(items[0]!), label, indices: at, failed: items.filter(failed).length, live: live !== undefined && at.includes(live) };
+    return {
+      key,
+      kind,
+      icon: iconOf(items[0]!),
+      label,
+      indices: at,
+      failed: items.filter(failed).length,
+      denied: items.filter((e) => refusedOf(e)?.kind === "denied").length,
+      notRun: items.filter((e) => refusedOf(e)?.kind === "not run").length,
+      live: live !== undefined && at.includes(live),
+    };
   });
 }
 
@@ -469,6 +513,9 @@ export function sentenceOf(entries: readonly WorkEntry[], run: WorkRun, live?: n
     // A call waiting on what it called — its permission being checked, or put to you — has not run:
     // not "Fetched", not "Fetching" (2026-10-24: a held fetch read "Fetched" for five minutes).
     if (live !== undefined && list.length === 1 && heldBy(entries, list[0]!) !== undefined) return heldWordsOf(run.kind, list[0]!, shellOf(list[0]!));
+    // A call refused, or never answered, did not do it: it reads as what it would have done, and the
+    // row's pill says why — "Edit `settings.json`", not "Edited".
+    if (list.length === 1 && refusedOf(list[0]!) !== undefined) return heldWordsOf(run.kind, list[0]!, shellOf(list[0]!)).slice(0, -1);
     const files = unique(list.map(pathOf));
     const where = commonDir(files);
     switch (run.kind) {
@@ -666,6 +713,8 @@ export function phasesOf(
       // The approval prompt and a permission check change nothing and check nothing: they are the call's
       // permission being decided, not the agent's work.
       if (isHostCall(entry)) continue;
+      // Nor is a call that was refused, or never answered: it did no work.
+      if (entry.refused !== undefined) continue;
       const action = actionOf(entry);
       if (failing.has(action) && entry.ok === true) fixed = true;
       if (isChange(entry, options.verdicts)) changed = true;

@@ -351,7 +351,9 @@ import {
   checkCallEntries,
   checkResultEntries,
   canonical,
+  ruleLabel,
   type CheckCallAnswer,
+  type RuleRefusal,
   questionResultEntries,
   rememberedAnswersOf,
   approvalNote,
@@ -5901,6 +5903,8 @@ export class AppService {
       onDecision: auditPolicy,
       workspaceRoot: workspace.root,
       grants: open.approvals.grants(taskId),
+      // A call a rule refused is a step under the call, as a function's verdict is.
+      onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
     });
     // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
@@ -6878,6 +6882,8 @@ export class AppService {
       grants: open.approvals.grants(request.taskId),
       // What the configured servers' tools count as (decision 0019, ruling 5).
       mcp: config.mcp,
+      // A call a rule refused is a step under the call, as a function's verdict is.
+      onRefused: (refused) => this.recordRuleRefusal(open, request.taskId, refused),
     });
     // The tools to RESOLVE are the ones being injected, which is not the same set as the ones
     // granted: a tool granted with a NATIVE implementation is not ours to wrap — the agent runs its
@@ -9706,6 +9712,29 @@ export class AppService {
     const at = Date.now();
     const { live, record } = checkResultEntries(call.callId, call.calledBy, { verdict, ...(reason !== undefined ? { reason } : {}), tookMs: Math.max(0, at - call.at) }, at);
     this.hostCall(session, taskId, live, record, at);
+  }
+
+  /**
+   * A call a RULE refused — the permission set, the built-in rules, the scopes, an earlier answer — as a
+   * `check_permission` step under it that has already come to `deny`, the way a function's verdict is a
+   * step (the person, 2026-10-24: "a recorded step for the permission set's own refusals"). Named for the
+   * rule, not a function: the conversation reads "Denied by the permission set".
+   */
+  private recordRuleRefusal(session: ProjectSession, taskId: string, refused: RuleRefusal): void {
+    const snap = session.liveTurns.snapshot(taskId);
+    const calledBy = snap !== null ? callingCallOf(snap.entries, refused.input) : undefined;
+    const at = Date.now();
+    const callId = `check_${at.toString(36)}_${this.interactionStamp}-${++this.checkSeq}`;
+    const command = (refused.input as { command?: unknown } | null)?.command;
+    const call = checkCallEntries(
+      callId,
+      calledBy,
+      { function: ruleLabel(refused.by.rule), rule: true, tool: refused.tool, subject: refused.tool, ...(typeof command === "string" ? { command } : {}) },
+      at,
+    );
+    this.hostCall(session, taskId, call.live, call.record, at);
+    const result = checkResultEntries(callId, calledBy, { verdict: "deny", ...(refused.by.reason !== undefined ? { reason: refused.by.reason } : {}), tookMs: 0 }, at);
+    this.hostCall(session, taskId, result.live, result.record, at);
   }
 
   /**

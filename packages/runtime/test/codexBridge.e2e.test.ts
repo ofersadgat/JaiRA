@@ -152,7 +152,9 @@ describe("codex runs a state held to a permission set: served over MCP, gated at
     const { ran, asked, seen } = await runHeld(via, "deny");
     expect(asked).toEqual(["write_file"]);
     expect(ran).toEqual(['read_file {"path":"README.md"}']);
+    // As an error, in words: the call did not run, and nothing changed.
     const refused = seen.results.find((call) => call.name === "write_file")!;
-    expect(JSON.parse(refused.text)).toMatchObject({ denied: true, tool: "write_file" });
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toBe("Not run: this call was not approved. Nothing was changed. Do not make it again; carry on without it.");
   });
 });

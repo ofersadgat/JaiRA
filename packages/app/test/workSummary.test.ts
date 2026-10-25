@@ -365,10 +365,11 @@ describe("in the transcript", () => {
       expect(chipsOf(answered, [0, 1, 2]).find((chip) => chip.kind === "approval")).toMatchObject({ label: "1 approval", live: false });
       expect(toolLineOf(approve(allowed) as ToolEntry, false, false)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", prose: true, mark: "ok" });
       expect(approvalWordsOf(approve(allowed) as never)).toMatchObject({ name: "Approved", preview: "by you · once · after 1 min 2 s", mark: "ok" });
-      expect(approvalWordsOf(approve({ decision: "deny", scope: "run", by: "person", waitedMs: 3_000 }) as never)).toMatchObject({ name: "Denied", preview: "by you · for this run · after 3 s", tone: "bad" });
-      expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "closed", waitedMs: 5_460_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the app closed while it waited · after 1 h 31 min", tone: "warn" });
+      // A no is in the plain ink, with the lock: the denial worked — the call it refused is what failed (D+E).
+      expect(approvalWordsOf(approve({ decision: "deny", scope: "run", by: "person", waitedMs: 3_000 }) as never)).toMatchObject({ name: "Denied", preview: "by you · for this run · after 3 s", tone: "plain", mark: "denied" });
+      expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "closed", waitedMs: 5_460_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the app closed while it waited · after 1 h 31 min", tone: "warn", mark: "cut" });
       // The call that asked ended without it — the agent gave up on the call (the claude CLI's five minutes).
-      expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "abandoned", waitedMs: 288_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the agent gave up on the call while it waited · after 4 min 48 s", tone: "warn" });
+      expect(approvalWordsOf(approve({ decision: "deny", scope: "once", by: "abandoned", waitedMs: 288_000 }) as never)).toMatchObject({ name: "Not answered", preview: "the agent gave up on the call while it waited · after 4 min 48 s", tone: "warn", mark: "cut" });
     });
 
     it("is always drawn somewhere: at its call in the open stretch's summary, else under the page — and the newest is the one shown", () => {
@@ -446,7 +447,7 @@ describe("in the transcript", () => {
     it("says what it came to, why and how long — and an unsure one sits above the question it asks", () => {
       const allowed = check({ verdict: "allow", reason: "a read of a public page the task asked for", tookMs: 11_000 });
       expect(checkWordsOf(allowed as ToolEntry)).toEqual({ name: "Allowed by auto", preview: "a read of a public page the task asked for · 11 s", tone: "plain", mark: "ok" });
-      expect(checkWordsOf(check({ verdict: "deny", tookMs: 400 }) as ToolEntry)).toEqual({ name: "Denied by auto", preview: "", tone: "bad", mark: "bad" });
+      expect(checkWordsOf(check({ verdict: "deny", tookMs: 400 }) as ToolEntry)).toEqual({ name: "Denied by auto", preview: "", tone: "plain", mark: "denied" });
       expect(checkWordsOf(check({ verdict: "failed", reason: "the judge failed: timeout", tookMs: 3_000 }) as ToolEntry)).toMatchObject({ name: "Auto could not decide", preview: "the judge failed: timeout · 3 s", tone: "warn" });
       const unsure = check({ verdict: "unsure", reason: "an outside fetch the task did not ask for", tookMs: 11_000 });
       const asking = [think(7), fetchCall, unsure, approve];
@@ -464,7 +465,8 @@ describe("in the transcript", () => {
       expect(runToneOf(asking, runs[2]!, live)).toBe("warn");
       expect(runToneOf(asking, runs[2]!, undefined)).toBeUndefined();
       expect(runToneOf([fetchCall, allowed], runsOf([fetchCall, allowed], [1])[0]!)).toBe("ok");
-      expect(runToneOf([fetchCall, check({ verdict: "deny", tookMs: 1 })], runsOf([fetchCall, check({ verdict: "deny", tookMs: 1 })], [1])[0]!)).toBe("bad");
+      // A denial is in the plain ink: it worked — the call it refused is what failed (D+E, 2026-10-24).
+      expect(runToneOf([fetchCall, check({ verdict: "deny", tookMs: 1 })], runsOf([fetchCall, check({ verdict: "deny", tookMs: 1 })], [1])[0]!)).toBeUndefined();
       expect(checkedAbove(asking, 3)).toBe(true);
       expect(checkedAbove([think(7), fetchCall, approve], 2)).toBe(false);
       // Another function is named as itself.

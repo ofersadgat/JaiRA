@@ -19,6 +19,7 @@ import { CommandGrants, approvalReasonOf, commandDecisionOf, type PolicyAuditEnt
 import { withPermissionFunctions, type PermissionFunctionsOptions } from "./permissionFunctions";
 import { mcpCallOf } from "./mcpServers";
 import { canonical } from "./hostCalls";
+import { forgetRefusal, noteRefusal, rememberDenial } from "./refusals";
 
 /** Why an approval was refused, by the call's own input object — see {@link refusalOf}. */
 const REFUSALS = new WeakMap<object, string>();
@@ -253,14 +254,22 @@ export class ApprovalHub {
     const decide = withPermissionFunctions(park, { ...context.functions, ...(context.taskId !== undefined ? { task: context.taskId } : {}) });
     // A stopping run's gate is shut before any function is asked: a judge's model call, or a function's
     // own question, about a run that is winding down is one nobody should pay for or answer.
-    return async (req: PermissionRequest) =>
-      context.taskId !== undefined && this.stopping.has(context.taskId) ? { decision: "deny", scope: "once" } : decide(req);
+    return async (req: PermissionRequest) => {
+      // Who refused an earlier call with the same input is not who refuses this one (`refusals.ts`).
+      forgetRefusal(req.input);
+      if (context.taskId !== undefined && this.stopping.has(context.taskId)) {
+        noteRefusal(req.input, { kind: "nobody", why: "stopped" });
+        return { decision: "deny", scope: "once" };
+      }
+      return decide(req);
+    };
   }
 
   private park(req: PermissionRequest, taskId?: string): Promise<PermissionDecision> {
     // The gate is shut: answer without asking anybody. Parking here would put a question on screen
     // about a run that is stopping, and the only honest answer to it is the one given here.
     if (taskId !== undefined && this.stopping.has(taskId)) {
+      noteRefusal(req.input, { kind: "nobody", why: "stopped" });
       return Promise.resolve({ decision: "deny", scope: "once" });
     }
     const requestId = this.options.nextId?.() ?? `approval-${++this.counter}`;
@@ -309,7 +318,10 @@ export class ApprovalHub {
    * `prompt` is the function's own sentence (`smart is unsure — …`), shown as the reason.
    */
   askFor(request: PermissionFunctionRequest, context: { taskId?: string; prompt?: string } = {}): Promise<PermissionAnswer> {
-    if (context.taskId !== undefined && this.stopping.has(context.taskId)) return Promise.resolve("deny");
+    if (context.taskId !== undefined && this.stopping.has(context.taskId)) {
+      noteRefusal(request.input, { kind: "nobody", why: "stopped" });
+      return Promise.resolve("deny");
+    }
     const command = request.line ?? request.part?.text;
     // The line as the policy took it apart, kept against the call's own input — the same breakdown
     // the policy's ask draws, the function's part among the rest. Absent when a function document
@@ -336,7 +348,9 @@ export class ApprovalHub {
   private hold(request: ApprovalRequest): Promise<PermissionDecision> {
     if (this.options.onRequest === undefined) {
       // Nobody is listening: refuse rather than hang the agent's tool loop.
-      return Promise.resolve(this.options.unattended ?? { decision: "deny", scope: "once" });
+      const unattended = this.options.unattended ?? { decision: "deny", scope: "once" };
+      if (unattended.decision === "deny") noteRefusal(request.input, { kind: "nobody", why: "unattended" });
+      return Promise.resolve(unattended);
     }
     return new Promise<PermissionDecision>((resolve) => {
       this.pending.set(request.requestId, { request, resolve });
@@ -367,6 +381,13 @@ export class ApprovalHub {
     this.pending.delete(requestId);
     if (decision === "deny" && why !== undefined) REFUSALS.set(entry.request.input, why);
     const { parts, taskId } = entry.request;
+    if (decision === "deny") {
+      // Who said no, for the words the agent reads (`refusals.ts`): a person's plain no, or nobody — a
+      // stop, the app closing, the call ending first, or a host answering for nobody there (`why`).
+      noteRefusal(entry.request.input, by !== "person" ? { kind: "nobody", why: by } : why !== undefined ? { kind: "nobody", why: "unattended", reason: why } : { kind: "person" });
+      // A no for longer than this call is the ledger's to remember, and its next refusal is this answer's.
+      if (by === "person" && why === undefined && scope !== "once" && remember === undefined) rememberDenial(entry.request.sessionId, entry.request.tool);
+    }
     // What the person chose, before it is narrowed for upstream — the record keeps THIS.
     const reach: ApprovalReach = { scope, ...(remember !== undefined ? { remember: [...remember] } : {}) };
     if (remember !== undefined && parts !== undefined && taskId !== undefined) {

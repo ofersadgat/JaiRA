@@ -40,7 +40,8 @@ import { Media } from "./ValueReadings";
  *   a note           row, centred, gap 5, app 11/12.5 --dim, tabular; live --accent
  *   the time         data 11/12 --dim, tabular
  *   the chevron      14 wide, --tok-hint, the chevron 13 (turned 180° open)
- *   the mark         14 wide, --ok (bad --bad), the glyph 13; "–" for a call that never answered
+ *   the mark         14 wide, --ok (bad --bad), the glyph 13; "–" for a call that never answered;
+ *                    a lock for a denied call — --bad on the call, --dim on the step that denied it
  *   the body         margin 1 0 6 28, padding-left 12, a 1px --rule on the left
  *   what is shown    margin 2 0 10 28
  *   a payload        padding 4 0 6; none recorded: app 11.5/12.5 italic --tok-hint
@@ -160,6 +161,8 @@ export function Row({
           <Icon name="check" size={13} color={String(t.v(markInk))} />
         ) : mark === "bad" ? (
           <Icon name="cross" size={13} color={String(t.v("bad"))} />
+        ) : mark === "denied" ? (
+          <Icon name="lock" size={13} color={String(t.v(tone === "bad" ? "bad" : "dim"))} />
         ) : mark === "cut" ? (
           <Txt spec={{ voice: "app", scale: 13 / 12.5, color: markInk }} title="No result was recorded">
             –
@@ -249,7 +252,19 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const result = useFilled(unasked ? held.result : undefined);
   const entry: ToolEntry = unasked ? { ...held, ...(args !== undefined ? { args } : {}), ...(result !== undefined ? { result } : {}) } : held;
   const { running, unanswered, pathMime } = line;
-  const head = { entry, name: line.name, called: line.called, server: line.server, preview: line.preview, command: line.command, prose: line.prose, tone: line.tone, mark: line.mark };
+  const head = {
+    entry,
+    name: line.name,
+    called: line.called,
+    server: line.server,
+    preview: line.preview,
+    command: line.command,
+    prose: line.prose,
+    tone: line.tone,
+    mark: line.mark,
+    // Who stopped a refused call, in grey before the time (2026-10-24, D+E).
+    ...(line.note !== undefined ? { note: <Note live={false}>{line.note}</Note> } : {}),
+  };
   // The approval prompt, and a permission check: its line is the whole of it.
   if (isHostCall(entry)) return <Row {...head} />;
   const shown = ((): ReactNode => {

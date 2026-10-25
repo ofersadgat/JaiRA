@@ -368,6 +368,8 @@ export function gateTools(options: {
     // has never registered — is the permission set's `other`, which rides on `authored`.
     ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
     ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
+    // What the agent reads when a call is refused, through the gate as through a wrapped tool.
+    ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
   });
   if (options.names.length === 0) return { tools: {}, gate };
   const out: Record<string, Tool> = {};
@@ -394,6 +396,7 @@ export function gateTools(options: {
       // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
       // decision, and a scope that bound only one of them would be a sandbox with a door in it.
       ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
+      ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
     });
   }
   return { tools: out, gate };
