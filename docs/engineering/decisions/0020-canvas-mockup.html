@@ -1,0 +1,175 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><title>0020 · The design canvas in JaiRA — mockup v2</title>
+<style>
+:root{--bg:#f5f6fa;--panel:#fff;--panel-2:#eef0f6;--panel-3:#e5e8f1;--line:#e0e3ec;--rule:#c5cadb;--text:#121526;--dim:#5a5f7a;--hint:#8a8fa8;--accent:#4a4fd1;
+--font-app:"DM Sans",-apple-system,"Segoe UI",system-ui,sans-serif;--font-data:"JetBrains Mono",Consolas,ui-monospace,monospace}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--text);font:13px/1.5 var(--font-app);padding:26px 30px 60px}
+h1{font-size:18px;margin:0 0 4px}.lead{color:var(--dim);margin:0 0 22px;max-width:900px}
+.cap{font-size:11px;letter-spacing:.07em;text-transform:uppercase;color:var(--hint);margin:22px 0 8px;font-weight:600}.cap b{color:var(--accent)}
+.note{color:var(--dim);font-size:12px;margin:8px 2px 0;max-width:900px}.note em{font-style:normal;color:var(--text);font-weight:500}
+.mono{font-family:var(--font-data);font-size:11.5px}
+.win{background:var(--panel);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+/* shared value-view head, today's style */
+.titlebar{display:flex;align-items:center;gap:8px;padding:7px 10px;border-bottom:1px solid var(--line)}
+.titlebar .t{font-weight:600}.titlebar .d{font-size:11px;color:var(--dim)}.sp{flex:1}
+.glyph{width:16px;height:16px;border-radius:4px;background:var(--panel-3);display:grid;place-items:center;font-size:10px;color:var(--accent)}
+.vv-head{display:flex;align-items:center;gap:6px;padding:5px 10px}
+.vv-label{font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--hint);flex:1}
+.toggle{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}
+.toggle span{padding:1px 7px;font-size:10.5px;color:var(--hint);line-height:18px}.toggle span+span{border-left:1px solid var(--line)}
+.toggle .on{background:var(--panel-3);color:var(--text);font-weight:600}
+.more{width:22px;text-align:center;color:var(--hint)}
+.btn{font-size:11.5px;border:1px solid var(--line);background:var(--panel);border-radius:6px;padding:1px 8px;color:var(--text)}
+/* canvas editor */
+.editor{display:grid;grid-template-columns:44px 1fr 250px;height:600px;border-top:1px solid var(--line)}
+.tools{border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 0;background:var(--panel)}
+.tool{width:30px;height:30px;border-radius:7px;display:grid;place-items:center;color:var(--dim);position:relative}
+.tool.on{background:var(--panel-3);color:var(--text)}
+.tool svg{width:16px;height:16px;stroke:currentColor;fill:none;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round}
+.tsep{width:20px;height:1px;background:var(--line);margin:4px 0}
+.board{position:relative;overflow:hidden;background:#eceef3;background-image:radial-gradient(#cfd3de 1px,transparent 1px);background-size:16px 16px}
+.frame{position:absolute;background:#fff;box-shadow:0 1px 3px rgba(18,21,38,.12)}
+.strip{position:absolute;top:-20px;left:0;font-size:11px;color:var(--dim);white-space:nowrap;display:flex;gap:6px;align-items:center}
+.strip .play{font-size:10px;color:#fff;background:var(--accent);border-radius:4px;padding:0 5px}
+.strip .ia{width:7px;height:7px;border-radius:50%;background:var(--accent)}
+.sel{outline:1.5px solid var(--accent);outline-offset:0}
+.h{position:absolute;width:7px;height:7px;background:#fff;border:1.5px solid var(--accent)}
+.dims{position:absolute;font-size:10px;background:var(--accent);color:#fff;border-radius:3px;padding:0 4px}
+.sticky{position:absolute;background:#fdf3c4;padding:10px 12px;font-size:12px;box-shadow:0 1px 2px rgba(0,0,0,.12);border-radius:2px}
+.zoom{position:absolute;right:10px;bottom:10px;display:flex;gap:6px;align-items:center;background:var(--panel);border:1px solid var(--line);border-radius:7px;padding:2px 8px;font-size:11.5px;color:var(--dim)}
+.boardtitle{position:absolute;font:700 26px/1 var(--font-app);color:var(--text)}
+/* inside the artboards (the model's .dc.html) */
+.ab{font-family:"DM Sans",system-ui;color:#2B1E16;background:#F3E7D7;height:100%;padding:12px;display:flex;flex-direction:column;gap:7px}
+.ab h4{margin:0;font:400 15px Georgia,serif}.ab p{margin:0;font-size:8px;color:#6B5545}
+.thumbs{display:grid;grid-template-columns:repeat(3,1fr);gap:4px}.thumbs div{aspect-ratio:16/9;border-radius:4px}
+.menu{background:#FBF5EC;border:1px solid #E3D3BD;border-radius:8px;padding:5px;display:flex;flex-direction:column;gap:3px}
+.mrow{display:flex;gap:5px;align-items:center;font-size:8px;padding:3px;border-radius:5px}.mrow i{width:28px;height:16px;border-radius:3px;background:#56735B;flex:none}
+.tabs{display:grid;grid-template-columns:repeat(4,1fr);gap:2px;background:#EFE3D2;border-radius:6px;padding:2px;font-size:8px;text-align:center}
+.tabs span{padding:4px 0;border-radius:4px}.tabs .on{background:#fff;font-weight:700}
+/* properties panel */
+.props{border-left:1px solid var(--line);background:var(--panel);display:flex;flex-direction:column}
+.ptabs{display:flex;gap:0;border-bottom:1px solid var(--line);padding:0 10px}
+.ptabs span{padding:8px 8px 7px;font-size:12px;color:var(--dim)}.ptabs .on{color:var(--text);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent)}
+.psec{padding:10px 12px;border-bottom:1px solid var(--line)}
+.psec h5{margin:0 0 7px;font-size:10px;letter-spacing:.07em;text-transform:uppercase;color:var(--hint)}
+.prow{display:grid;grid-template-columns:62px 1fr;gap:6px;align-items:center;margin-bottom:6px;font-size:12px}
+.prow label{color:var(--dim)}
+.field{border:1px solid var(--line);border-radius:6px;padding:2px 7px;font-size:12px;background:var(--panel);display:flex;gap:6px;align-items:center}
+.sw{width:12px;height:12px;border-radius:3px;border:1px solid var(--rule)}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:6px}
+.seg{display:flex;border:1px solid var(--line);border-radius:6px;overflow:hidden}.seg span{flex:1;text-align:center;font-size:11px;padding:2px 0;color:var(--dim)}.seg span+span{border-left:1px solid var(--line)}.seg .on{background:var(--panel-3);color:var(--text);font-weight:600}
+.tip{position:absolute;left:52px;background:var(--text);color:#fff;font-size:11px;border-radius:5px;padding:2px 7px;white-space:nowrap}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:22px}
+.list .lrow{display:flex;align-items:center;gap:8px;padding:6px 12px;font-size:12.5px}.list .lrow .d{margin-left:auto;font-size:11.5px;color:var(--dim)}.list .on{background:var(--panel-2)}
+.newtag{font-size:10px;color:var(--accent);font-weight:600;letter-spacing:.05em;text-transform:uppercase}
+.thumbcanvas{height:200px;position:relative;background:#eceef3;background-image:radial-gradient(#cfd3de 1px,transparent 1px);background-size:12px 12px;overflow:hidden}
+</style></head><body>
+<h1>0020 · The design canvas in JaiRA — mockup v2</h1>
+<p class="lead">Applies the five comments on v1: the view toggle is always there, with a new <b>Artifact</b> view; the version picker sits beside it in the toggle's own style; an artifact's title bar is ABOVE that row, never instead of it; the list draws inline and in the side panel. The canvas is the model's own files — <span class="mono">project/canvas.json</span> and one <span class="mono">.dc.html</span> per artboard, Claude Design's format — drawn by JaiRA's own editor. Ink palette.</p>
+
+<p class="cap">1 · Today — the closest thing JaiRA has: an HTML artifact, its header row</p>
+<div class="win" style="max-width:640px">
+ <div class="vv-head"><span class="vv-label">html</span><span class="toggle"><span class="on">Rendered</span><span>Source</span></span><span class="more">⋯</span></div>
+ <div style="height:90px;margin:0 10px 10px;border:1px solid var(--line);border-radius:6px;display:grid;place-items:center;color:var(--hint);font-size:12px">one page, inert — a canvas's files would show as separate text artifacts</div>
+</div>
+
+<div class="grid2">
+<div>
+<p class="cap"><b>Proposed</b> — a canvas in the conversation</p>
+<div class="win">
+ <div class="titlebar"><span class="glyph">◫</span><span class="t">Video picker by place</span><span class="d">4 artboards</span><span class="sp"></span><span class="btn">Open</span></div>
+ <div class="vv-head"><span class="vv-label">canvas</span><span class="toggle"><span class="on">Artifact</span><span>Rendered</span><span>Source</span><span>v4 ▾</span></span><span class="more">⋯</span></div>
+ <div class="thumbcanvas">
+  <div class="frame" style="left:16px;top:28px;width:90px;height:150px"><div class="strip" style="top:-14px;font-size:9px">A · Nearest first</div><div class="ab" style="padding:6px;gap:4px"><h4 style="font-size:9px">The Door</h4><div class="thumbs"><div style="background:#6E5A7E"></div><div style="background:#4F6D7A"></div><div style="background:#56735B"></div></div><div class="menu" style="padding:3px"><div class="mrow" style="font-size:6px"><i style="width:16px;height:9px"></i>tutorial</div><div class="mrow" style="font-size:6px"><i style="width:16px;height:9px"></i>tutorial</div></div></div></div>
+  <div class="frame" style="left:122px;top:28px;width:90px;height:150px"><div class="strip" style="top:-14px;font-size:9px">B · Pick the scope</div><div class="ab" style="padding:6px"><h4 style="font-size:9px">The Door</h4><div class="tabs" style="font-size:5px"><span class="on">Here</span><span>CA</span><span>US</span><span>All</span></div></div></div>
+  <div class="frame" style="left:228px;top:28px;width:90px;height:150px"><div class="strip" style="top:-14px;font-size:9px">C · Badges</div><div class="ab" style="padding:6px"><h4 style="font-size:9px">The Door</h4></div></div>
+  <div class="frame" style="left:334px;top:28px;width:60px;height:120px"><div class="strip" style="top:-14px;font-size:9px">Phone</div><div class="ab" style="padding:5px"></div></div>
+ </div>
+</div>
+<p class="note"><span class="newtag">new</span> Title bar on top (title from <span class="mono">canvas.json</span>'s <span class="mono">title</span>, the artboard count, Open). The row under it is today's, always there: <em>Artifact</em> is the canvas, read-only here (pan only); <em>Rendered</em> the entry artboard alone; <em>Source</em> the files; <em>v4 ▾</em> a segment in the same box, same type. Open sends it to the side panel's editor.</p>
+</div>
+
+<div>
+<p class="cap"><b>Proposed</b> — the task's artifacts, inline</p>
+<div class="win list">
+ <div class="titlebar"><span class="t">Artifacts</span><span class="d">this task · 3</span></div>
+ <div class="lrow on"><span class="glyph">◫</span>Video picker by place<span class="d">canvas · v4 · 4 artboards · 2 min ago</span></div>
+ <div class="lrow"><span class="glyph">▥</span>Pipeline durations<span class="d">page · v3 · 1 h ago</span></div>
+ <div class="lrow"><span class="glyph">¶</span>report.md<span class="d">markdown · v1 · yesterday</span></div>
+</div>
+<p class="note"><span class="newtag">new</span> One render function: the same list in the conversation (here, under a reply that published) and in the side panel's Artifacts tab. A row opens the artifact where the list is.</p>
+</div>
+</div>
+
+<p class="cap"><b>Proposed</b> — the canvas editor, opened in the side panel (or a window of its own)</p>
+<div class="win">
+ <div class="titlebar"><span class="glyph">◫</span><span class="t">Video picker by place</span><span class="d">saved · your edit is v5</span><span class="sp"></span><span class="btn">▶ Play</span><span class="btn">Export ▾</span></div>
+ <div class="vv-head"><span class="vv-label">canvas</span><span class="toggle"><span class="on">Artifact</span><span>Rendered</span><span>Source</span><span>v5 · yours ▾</span></span><span class="more">⋯</span></div>
+ <div class="editor">
+  <div class="tools">
+   <div class="tool on" title="Pointer (V)"><svg viewBox="0 0 24 24"><path d="M5 3l13 8-6 1.5L9 19z"/></svg></div>
+   <div class="tool" title="Hand (H)"><svg viewBox="0 0 24 24"><path d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 10V4a1.5 1.5 0 0 1 3 0v7M14 10.5V6a1.5 1.5 0 0 1 3 0v8a6 6 0 0 1-6 6h-1a6 6 0 0 1-5-3l-2-4a1.5 1.5 0 0 1 2.6-1.5L8 14"/></svg></div>
+   <div class="tsep"></div>
+   <div class="tool" title="Text (T)"><svg viewBox="0 0 24 24"><path d="M5 6V4h14v2M12 4v16M9 20h6"/></svg></div>
+   <div class="tool" title="Artboard (A)"><svg viewBox="0 0 24 24"><path d="M7 3v18M17 3v18M3 7h18M3 17h18"/></svg></div>
+   <div class="tool" title="Note (N)"><svg viewBox="0 0 24 24"><path d="M5 4h14v11l-5 5H5z"/><path d="M14 20v-5h5"/></svg></div>
+   <div class="tsep"></div>
+   <div class="tool" title="Pen (P)"><svg viewBox="0 0 24 24"><path d="M4 20c4-1 6-4 8-8s4-6 8-8"/><path d="M15 4l5 5"/></svg></div>
+   <div class="tool" title="Rectangle (R)"><svg viewBox="0 0 24 24"><rect x="4" y="6" width="16" height="12" rx="1"/></svg></div>
+   <div class="tool" title="Oval (O)"><svg viewBox="0 0 24 24"><ellipse cx="12" cy="12" rx="8" ry="6"/></svg></div>
+   <div class="tool" title="Arrow (Shift+L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5M10 5h9v9"/></svg></div>
+   <div class="tool" title="Line (L)"><svg viewBox="0 0 24 24"><path d="M5 19L19 5"/></svg></div>
+  </div>
+  <div class="board">
+   <div class="boardtitle" style="left:40px;top:22px">Video picker — four directions</div>
+   <!-- artboard A -->
+   <div class="frame" style="left:40px;top:90px;width:200px;height:420px">
+    <div class="strip">A · Nearest first: a ladder in the ⌄</div>
+    <div class="ab"><h4>The Door</h4><p>Teddy Swims · Danced as <b>The Door (Show Me)</b> · at Bootloose</p>
+     <div class="thumbs"><div style="background:#6E5A7E"></div><div style="background:#4F6D7A"></div><div style="background:#56735B"></div></div>
+     <div class="menu sel" style="position:relative">
+      <div class="mrow" style="font-weight:700">At Bootloose · 11 dancers there</div>
+      <div class="mrow" style="background:#F3DCCF"><i></i>The Door (Show Me) tutorial</div>
+      <div class="mrow"><i></i>Tutorial · Channel B</div>
+      <div class="mrow" style="font-weight:700">In California</div>
+      <div class="mrow"><i></i>Tutorial · Channel C</div>
+      <span class="h" style="left:-4px;top:-4px"></span><span class="h" style="right:-4px;top:-4px"></span><span class="h" style="left:-4px;bottom:-4px"></span><span class="h" style="right:-4px;bottom:-4px"></span>
+      <span class="dims" style="left:50%;bottom:-17px;transform:translateX(-50%)">176 × 128</span>
+     </div>
+    </div>
+   </div>
+   <!-- artboard B -->
+   <div class="frame" style="left:280px;top:90px;width:200px;height:420px">
+    <div class="strip"><span class="ia"></span>B · Pick the scope <span class="play">▶</span></div>
+    <div class="ab"><h4>The Door</h4><p>Teddy Swims · at Bootloose</p>
+     <div class="thumbs"><div style="background:#6E5A7E"></div><div style="background:#4F6D7A"></div><div style="background:#56735B"></div></div>
+     <div class="menu"><div class="tabs"><span class="on">Here</span><span>CA</span><span>US</span><span>All</span></div>
+      <div class="mrow"><i></i>1 · tutorial · 7 of 11</div><div class="mrow"><i></i>2 · tutorial · 3 of 11</div></div>
+    </div>
+   </div>
+   <!-- the person's own drawing: notes kinds oval + arrow + sticky -->
+   <svg style="position:absolute;left:150px;top:180px;overflow:visible" width="10" height="10"><ellipse cx="45" cy="62" rx="70" ry="36" fill="none" stroke="#d6453d" stroke-width="2"/></svg>
+   <svg style="position:absolute;left:0;top:0;overflow:visible" width="10" height="10"><path d="M520 300 C 470 290, 430 270, 300 250" fill="none" stroke="#d6453d" stroke-width="2"/><path d="M300 250 l10 -8 M300 250 l12 5" stroke="#d6453d" stroke-width="2" fill="none"/></svg>
+   <div class="sticky" style="left:520px;top:270px;width:150px">Scope tabs beat the ladder — but keep "Here" first.<div style="font-size:10px;color:#8a7a3a;margin-top:6px">you · note</div></div>
+   <div class="zoom">− <b style="color:var(--text);font-weight:600">62%</b> + · Fit</div>
+  </div>
+  <div class="props">
+   <div class="ptabs"><span class="on">Properties</span><span>Tweaks</span><span>Layers</span></div>
+   <div class="psec"><h5>Selected · div.menu in A</h5>
+    <div class="prow"><label>Layout</label><div class="seg"><span>Block</span><span class="on">Stack</span><span>Grid</span></div></div>
+    <div class="prow"><label>Direction</label><div class="seg"><span class="on">↓</span><span>→</span></div></div>
+    <div class="prow"><label>Gap</label><div class="field">3 px</div></div>
+    <div class="prow"><label>Padding</label><div class="field">5 px</div></div>
+   </div>
+   <div class="psec"><h5>Size</h5><div class="two"><div class="field">W 176</div><div class="field">H 128 · hug</div></div></div>
+   <div class="psec"><h5>Fill &amp; border</h5>
+    <div class="prow"><label>Fill</label><div class="field"><span class="sw" style="background:#FBF5EC"></span>#FBF5EC</div></div>
+    <div class="prow"><label>Border</label><div class="field"><span class="sw" style="background:#E3D3BD"></span>1 px #E3D3BD</div></div>
+    <div class="prow"><label>Radius</label><div class="field">16 px</div></div>
+   </div>
+   <div class="psec" style="border:0;color:var(--dim);font-size:11.5px">Writes the element's inline <span class="mono">style</span> in <span class="mono">Main.dc.html</span>. Tweaks shows the artboard's <span class="mono">data-props</span> levers.</div>
+  </div>
+ </div>
+</div>
+<p class="note"><span class="newtag">new</span> Everything Claude Design's canvas does, drawn in JaiRA's chrome. <em>Tools</em> (left): pointer moves and resizes elements and artboards, hand pans, text retypes copy in place, artboard draws a new frame (or wraps the selection in a stack or grid), note drops a sticky, pen draws freehand, rectangle, oval, arrow and line draw shapes. Edits to an element write its <span class="mono">.dc.html</span>; notes and shapes are <span class="mono">notes</span> entries in <span class="mono">canvas.json</span>, the person's (red oval, arrow and sticky above). <em>Name strips</em> carry each artboard's <span class="mono">title</span>; an <span class="mono">is_interactive</span> one gets the blue mark and ▶. <em>Play</em> runs the artboards, links between them included; <em>Export</em> gives PNG or PDF per artboard. A save is a new version marked yours; the model's next publish over it is refused and it re-reads, as on claude.ai.</p>
+</body></html>
