@@ -173,6 +173,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "chat:startPlan": ((request: Parameters<typeof service.chatStartPlan>[0]) => service.chatStartPlan(request)) as Handler,
     "chat:send": ((request: Parameters<typeof service.sendChatMessage>[0]) => service.sendChatMessage(request)) as Handler,
     "chat:cancel": ((request: Parameters<typeof service.cancelChatTurn>[0]) => service.cancelChatTurn(request)) as Handler,
+    "chat:settings": ((request: Parameters<typeof service.changeChatSettings>[0]) => service.changeChatSettings(request)) as Handler,
     "chat:thread": ((request: Parameters<typeof service.chatThread>[0]) => service.chatThread(request)) as Handler,
     "log:list": ((request: Parameters<typeof service.readLogs>[0]) => service.readLogs(request)) as Handler,
     "job:list": ((request: Parameters<typeof service.listJobs>[0]) => service.listJobs(request)) as Handler,

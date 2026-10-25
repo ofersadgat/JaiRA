@@ -104,7 +104,21 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   const thread = kept(lastThread.current, held.value ?? null);
   lastThread.current = thread;
   const [plan, setPlan] = useState<ChatPlanView | null | undefined>(undefined);
-  const [overrides, setOverrides] = useState<ChatSettings>({});
+  /**
+   * What the composer says: the conversation's own settings (`TaskMeta.chatSettings`), as last picked
+   * in it — here, in another window, on another machine — and each change kept on it again
+   * (`changeOverrides`). Read off the detail, which is this conversation's whenever there is one; an
+   * answer that lands while a change of this window's is still being kept is older than it, and waits.
+   */
+  const ownSettings = surface.detail === null ? undefined : (surface.detail.chatSettings ?? {});
+  const ownKey = ownSettings === undefined ? null : JSON.stringify(ownSettings);
+  const [overrides, setOverrides] = useState<ChatSettings>(ownSettings ?? {});
+  const keeping = useRef(0);
+  useEffect(() => {
+    if (ownSettings !== undefined && keeping.current === 0) setOverrides(ownSettings);
+    // On what the settings SAY, not on the object a re-read hands back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownKey]);
   /**
    * How many messages are in flight, and what they said.
    *
@@ -544,6 +558,21 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    */
   const starting = running && thread === null && surface.live === null && afterglow === null;
 
+  /**
+   * The composer's chips changed: kept on the conversation, so it opens with them again and its next
+   * message is sent with them, and a new permission set also reaches whatever it is answering with now,
+   * which decides its next call under it (`chat:settings`).
+   */
+  const changeOverrides = (next: ChatSettings): void => {
+    setOverrides(next);
+    keeping.current++;
+    void invoke("chat:settings", { taskId, overrides: next, ...(project !== undefined ? { project } : {}) })
+      .catch(() => undefined)
+      .finally(() => {
+        keeping.current--;
+      });
+  };
+
   return {
     taskId,
     project,
@@ -556,7 +585,7 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     thread,
     plan,
     overrides,
-    setOverrides,
+    setOverrides: changeOverrides,
     sending,
     error: error ?? unreadable,
     draft,

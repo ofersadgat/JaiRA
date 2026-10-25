@@ -13,6 +13,7 @@ import type { ModuleApproval } from "./refusal";
 import type { NextMove } from "./move";
 import type { ConnectMissingInput } from "./connect";
 import type { MachineForm, MachineOsTag, PlacementNote } from "./machines";
+import type { ChatSettings } from "./operationVocabulary";
 
 /**
  * Per-instance status, derived from the event journal (SPEC §10.1). `blocked` is
@@ -445,6 +446,8 @@ export interface TaskDetail {
   worktreePath?: string;
   createdAt: string;
   inputs?: Record<string, JsonValue>;
+  /** What the task's composer is set to — see `TaskMeta.chatSettings`. What a composer opens with. */
+  chatSettings?: ChatSettings;
   /** Where this task was forked from, when it is a fork — see {@link TaskOrigin}. */
   origin?: TaskOrigin;
   /** The dependencies still unfinished — non-empty means the task is holding. See {@link Holding}. */

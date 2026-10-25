@@ -67,5 +67,5 @@ The first line quoted in a banner is cut at 60 characters. Rewinding to a reply 
 - **Live edge.** While the reader is at the bottom, arriving text keeps the view there. Opening another conversation starts at its end, and sending pins the view to the end again.
 - **Theme.** Sheet, bubbles, washes and seams are tokens with a light and a dark value.
 - **Focus.** Nothing takes focus on arrival, the composer's box included.
-- **Unsaved work.** The unsent message, its attachments, its per-message settings and an armed banner belong to the open conversation and are lost on opening another or leaving the room, with no warning. Where the next conversation is to run is kept until that conversation is started.
+- **Unsaved work.** The unsent message, its attachments and an armed banner belong to the open conversation and are lost on opening another or leaving the room, with no warning. What its chips are set to is the conversation's, kept on it, and comes back when it is opened again. Where the next conversation is to run is kept until that conversation is started.
 - **Waiting.** A waiting conversation keeps its message, where it was sent and what it runs under across a restart, and starts as it was asked to when room opens.

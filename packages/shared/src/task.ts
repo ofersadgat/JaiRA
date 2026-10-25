@@ -6,6 +6,7 @@
 import type { JsonValue } from "@declarative-ai/json";
 import type { InputProvenance } from "./adopt";
 import type { StoredConnectUndo } from "./connect";
+import type { ChatSettings } from "./operationVocabulary";
 
 export type TaskStatus =
   | "queued"
@@ -95,6 +96,15 @@ export interface TaskMeta {
    * (decision 0010 §4), found by this marker and its workflow, and supervised — never started by hand.
    */
   system?: "events";
+  /**
+   * What this conversation's composer is set to — its model, thinking, permission set and tools as
+   * last picked in it, sent or not — and so what its next message runs under. Kept on the task, not in
+   * a window, because a conversation's permission set is the conversation's: opening it again, here or
+   * on another machine, shows what it was left at (the person, 2026-10-05: "the composer should read the
+   * currently set permissions / permission set from the conversation and show it in the composer").
+   * Written by `chat:settings` and when a conversation starts with settings; absent ⇒ nothing picked.
+   */
+  chatSettings?: ChatSettings;
   createdAt: string; // ISO 8601
 }
 

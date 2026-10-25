@@ -1863,6 +1863,17 @@ export interface IpcContract {
    */
   "chat:cancel": { request: { taskId: string; project?: string }; response: { canceled: boolean } };
   /**
+   * The composer's settings changed: they are the conversation's now (`TaskMeta.chatSettings`), what
+   * its composer opens with next time, and what its next message is sent with.
+   *
+   * While the conversation answers, the PERMISSION SET also applies from the next call of the turn or
+   * run in flight, not from the next message. Only it moves — the model and the effort are the call's,
+   * already made — and a turn has the tools it started with, so a set that allows one the turn began
+   * without offers it from the next message. `changed` is how many calls in flight took it: `0` when
+   * the conversation is not answering, which is not an error.
+   */
+  "chat:settings": { request: { taskId: string; project?: string; overrides: ChatSettings }; response: { changed: number } };
+  /**
    * A task's conversation, whole — every turn of the chain, forks walked (see {@link ChatThreadView}).
    *
    * `null` for a task that holds no conversation to read: one that has never run, or whose states
@@ -2437,6 +2448,7 @@ export const IPC_CHANNELS = [
   "chat:startPlan",
   "chat:send",
   "chat:cancel",
+  "chat:settings",
   "chat:thread",
   "log:list",
   "job:list",

@@ -503,6 +503,8 @@ export function forkTask(project: Project, taskId: string, seq: number, options:
       ...(meta.description !== undefined ? { description: meta.description } : {}),
       ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
       ...(meta.inputs !== undefined ? { inputs: meta.inputs } : {}),
+      // What the conversation's composer was left at: the copy is the same conversation up to the cut.
+      ...(meta.chatSettings !== undefined ? { chatSettings: meta.chatSettings } : {}),
       ...(options.branch === undefined ? (meta.branch !== undefined ? { branch: meta.branch } : {}) : options.branch === null ? {} : { branch: options.branch }),
       parentTaskId: options.parentTaskId ?? taskId,
       ...(options.origin !== undefined ? { origin: options.origin } : {}),

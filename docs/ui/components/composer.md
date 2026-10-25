@@ -89,7 +89,7 @@ The first line quoted in a banner is its first non-empty line, cut at 60 charact
 - Popovers and the mention list open upward, because the composer sits at the foot of its column.
 - Theme: ring, shell, pills, washes and buttons are tokens with a light and a dark value.
 - Focus: Tab reaches the box, then each chip, then stop and send. The paperclip cannot be reached by keyboard. Arrow keys do not move through the mention list.
-- Unsaved work: in a chat the typed text belongs to the open conversation, as the chat view states. Attachments and per-message settings belong to the composer and are lost when it goes.
+- Unsaved work: in a chat the typed text belongs to the open conversation, as the chat view states. The chips' settings are the conversation's and are kept on it (see [composer-setting-chip](composer-setting-chip.md)). Attachments belong to the composer and are lost when it goes.
 
 ## The send button and the banner depart from the direction
 

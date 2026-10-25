@@ -56,7 +56,7 @@ A gate's prompt is set in the small uppercase `--dim` heading style, its glyph a
 - **Theme.** Grounds, tones and lane hues are tokens with a light and a dark value.
 - **Focus.** Arrival moves focus nowhere. Letterheads, links and strip buttons are in the tab order, and an entered row's glyphs appear on focus as well as on hover.
 - **Remembered.** Which states are folded is kept per task and survives a restart. Whether a concurrent band shows columns or tabs is not kept.
-- **Unsaved work.** A message typed but not sent, and its per-message settings, are lost when another task is selected.
+- **Unsaved work.** A message typed but not sent is lost when another task is selected. What the chips are set to is the task's, kept on it, and comes back when it is selected again.
 
 ## A gate's prompt departs from the type registers
 

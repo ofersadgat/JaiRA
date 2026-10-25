@@ -108,7 +108,7 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
     expect(permissionSetHint(facts.matched!)).toBe("reading goes ahead, anything that writes is refused");
     // The head: the bucket, then where the value came from.
     expect(facts.bucket).toBe("chat");
-    expect(originWordsOf(facts.permissionsOrigin, view.from)).toEqual({ text: "your choice for this message", tone: "own" });
+    expect(originWordsOf(facts.permissionsOrigin, view.from)).toEqual({ text: "your choice for this conversation", tone: "own" });
   });
 
   it("matches a state's OWN declaration too — the lowered list and block it arrives as", () => {

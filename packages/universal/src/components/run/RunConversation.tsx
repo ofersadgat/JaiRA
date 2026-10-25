@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { ChatPlanView, ChatSettings, InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
 import { actOnWaiting, useWaiting } from "@jaira/ui/limitsStore";
@@ -162,7 +162,16 @@ export function RunComposer({
 }): JSX.Element | null {
   const taskId = detail.taskId;
   const running = detail.status === "running";
-  const [overrides, setOverrides] = useState<ChatSettings>({});
+  // What the composer says: the task's own settings as last picked in it, kept on it again at each
+  // change (`changeOverrides`) — the Chat room's rule (`chatThreadModel.ts`), so the two agree.
+  const ownKey = JSON.stringify([taskId, detail.chatSettings ?? {}]);
+  const [overrides, setOverrides] = useState<ChatSettings>(detail.chatSettings ?? {});
+  const keeping = useRef(0);
+  useEffect(() => {
+    if (keeping.current === 0) setOverrides(detail.chatSettings ?? {});
+    // On what the settings SAY, and whose they are — not on the object a re-read hands back.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ownKey]);
   // Three states: `undefined` not asked yet, `null` asked and there is no conversation, else the plan.
   const [plan, setPlan] = useState<ChatPlanView | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -184,6 +193,16 @@ export function RunComposer({
     };
   }, [taskId, instanceId, overrides, project, sent]);
 
+  // Kept on the task, and a new permission set reaches what it is answering with now — see `chat:settings`.
+  const changeOverrides = (next: ChatSettings): void => {
+    setOverrides(next);
+    keeping.current++;
+    void invoke("chat:settings", { taskId, overrides: next, ...(project !== undefined ? { project } : {}) })
+      .catch(() => undefined)
+      .finally(() => {
+        keeping.current--;
+      });
+  };
   const send = (message: string): void => {
     if (instanceId === undefined) return;
     setBusy(true);
@@ -270,7 +289,7 @@ export function RunComposer({
         // …and a state that holds a conversation can be typed into while it runs.
         joinable={disabled === undefined}
         overrides={overrides}
-        onOverrides={setOverrides}
+        onOverrides={changeOverrides}
         onSend={send}
         onStop={stop}
         onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}

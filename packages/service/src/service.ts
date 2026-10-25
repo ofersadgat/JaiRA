@@ -43,7 +43,7 @@ import {
   type WorkflowBundle,
 } from "@declarative-ai/hw";
 import { hostFunction, type ExecServices, type FunctionInputs, type InlineFamily, type MemoCache, type PromptOp, type RecordRef } from "@declarative-ai/exec";
-import type { ExecPolicy, PermissionDecision } from "@declarative-ai/permissions";
+import type { AuthoredPermissions, ExecPolicy, PermissionDecision } from "@declarative-ai/permissions";
 import type { JsonValue } from "@declarative-ai/json";
 import type { FetchText } from "@declarative-ai/llm";
 import {
@@ -516,7 +516,9 @@ import {
   permissionSetLabel,
   permissionSetNameProblem,
   permissionSetOfSettings,
+  permissionsOfPermissionSet,
   type PermissionSetChoice,
+  type PermissionsDecl,
   withAlwaysGranted,
   isTerminalStatus,
   ApprovalRequired,
@@ -572,7 +574,7 @@ import { LimitsService } from "./limits";
 import { WaitingQueue } from "./waiting";
 import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
-import { ProjectSession, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
+import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
 import { EXECUTOR_TITLES } from "@jaira/shared";
 
@@ -5319,6 +5321,8 @@ export class AppService {
     // a workflow that lives in the shared root wants.
     const open = this.session(request.project);
     const bundle = this.overriddenBundle(open, request.taskId, request.overrides);
+    // A conversation started with settings picked keeps them as its own — what its composer opens with.
+    if (request.overrides !== undefined && Object.keys(request.overrides).length > 0) this.keepChatSettings(open, request.taskId, request.overrides);
     try {
       const started = await this.startRun(open, request.taskId, {
         config: open.project.config,
@@ -5899,13 +5903,27 @@ export class AppService {
       open.approvals.noteDecision(entry);
       project.commands.record(policyAuditRow(taskId, entry));
     };
-    const policy = compileRunPolicy(config, {
-      onDecision: auditPolicy,
-      workspaceRoot: workspace.root,
-      grants: open.approvals.grants(taskId),
-      // A call a rule refused is a step under the call, as a function's verdict is.
-      onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
-    });
+    /**
+     * The permission set the conversation's own state decides its calls under once the person picks
+     * another in the composer while the run answers (`chat:settings`) — the opening message of a
+     * conversation IS this run. The ROOT's calls only (`instanceStates`, below): the composer's
+     * settings were written into the root (`overriddenBundle`), and a child state keeps its own block.
+     * Until a pick, every state's calls are decided under the block it was entered with.
+     */
+    const live: LivePermissions = { permissionSet: undefined };
+    const policy: ExecPolicy = {
+      ...compileRunPolicy(config, {
+        onDecision: auditPolicy,
+        workspaceRoot: workspace.root,
+        grants: open.approvals.grants(taskId),
+        // A call a rule refused is a step under the call, as a function's verdict is.
+        onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
+      }),
+      permissionsOf: (call, stated) =>
+        live.permissionSet === undefined || instanceStates.get(call.instanceId) !== started.bundle.rootId
+          ? stated
+          : (permissionsOfPermissionSet(live.permissionSet, (stated as PermissionsDecl | undefined)?.scopes) as AuthoredPermissions),
+    };
     // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
     // task that can never touch a file, failing for a reason nothing on screen would explain.
@@ -5931,7 +5949,6 @@ export class AppService {
     const approve = this.approverWithFunctions(open, taskId, this.permissionFunctionsFor(open, taskId, registry, prompt, abort.signal), {
       stateOf: (instanceId) => instanceStates.get(instanceId),
     });
-
     const recorder = project.events.recorder(taskId);
     let seq = 0;
     /** A call this run made was refused because the account ran out — see the run's end. */
@@ -5950,6 +5967,8 @@ export class AppService {
     });
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
 
+    // Where `chat:settings` reaches this run's permission set, let go of in the run's `finally`.
+    const releasePermissions = this.holdPermissions(open, taskId, live);
     void (async () => {
       try {
         // Compile the workflow's own TypeScript before anything calls it — the step SPEC §7.5.5
@@ -6156,6 +6175,7 @@ export class AppService {
         }
         open.fakeRules.delete(taskId);
         open.live.delete(taskId);
+        releasePermissions();
         // An answer given ahead of a call this run never made again has nothing left to answer.
         open.approvals.unseed(taskId);
         open.questions.unseed(taskId);
@@ -6891,6 +6911,10 @@ export class AppService {
     // plus the gate below, asked about the native by its standard name. Wrapping it here as well
     // would build a tool nothing would ever call.
     const wiring = planAgentTools(permissionSet);
+    // What this turn decides its calls under: the message's own set, until the person picks another
+    // in the composer while it runs (`chat:settings`) — the gate and every wrapped tool read it at
+    // each call. Held for the length of the turn (`whileChatting`).
+    const live: LivePermissions = { permissionSet: declaresTools(plan.settings) ? permissionSet : undefined };
     const { tools, gate } = gateTools({
       registry,
       // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
@@ -6902,9 +6926,9 @@ export class AppService {
       policy,
       approve,
       // The permission set, when the message declares one — the composer's map, or a state's lowered block
-      // read back. `authored` goes either way, for its `scopes`: where a tool may act is not part of
-      // a permission set.
-      ...(declaresTools(plan.settings) ? { permissionSet } : {}),
+      // read back — as it stands at each call. `authored` goes either way, for its `scopes`: where a tool
+      // may act is not part of a permission set.
+      permissionSet: () => live.permissionSet,
       ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
       // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
@@ -6937,7 +6961,7 @@ export class AppService {
     const turns = open.chatTurns.get(request.taskId) ?? new Set<AbortController>();
     turns.add(abort);
     open.chatTurns.set(request.taskId, turns);
-    const result = await this.whileChatting(open, request.taskId, abort, liveFlush, () =>
+    const result = await this.whileChatting(open, request.taskId, abort, liveFlush, live, () =>
       runChatTurn(
       {
         executor,
@@ -7136,17 +7160,22 @@ export class AppService {
    * The live tail is cleared as a BACKSTOP — the settle event clears it first in the ordinary case,
    * and a turn that failed before reaching one would otherwise leave a tail on screen forever. Only
    * once nothing is left in flight, or a settling turn would take a live one's tail off the screen.
+   *
+   * The turn's permission set is held where `chat:settings` reaches it for the same length of time.
    */
   private async whileChatting<T>(
     open: ProjectSession,
     taskId: string,
     abort: AbortController,
     liveFlush: LiveTurnFlusher,
+    live: LivePermissions,
     run: () => Promise<T>,
   ): Promise<T> {
+    const release = this.holdPermissions(open, taskId, live);
     try {
       return await run();
     } finally {
+      release();
       const turns = open.chatTurns.get(taskId);
       turns?.delete(abort);
       if (turns?.size === 0) open.chatTurns.delete(taskId);
@@ -7190,6 +7219,63 @@ export class AppService {
     for (const abort of turns) abort.abort();
     open.chatTurns.delete(request.taskId);
     return { canceled: true };
+  }
+
+  /** Hold a turn's or a run's permission set where `chat:settings` reaches it; the answer lets go. */
+  private holdPermissions(open: ProjectSession, taskId: string, live: LivePermissions): () => void {
+    const held = open.livePermissions.get(taskId) ?? new Set<LivePermissions>();
+    held.add(live);
+    open.livePermissions.set(taskId, held);
+    return () => {
+      held.delete(live);
+      if (held.size === 0 && open.livePermissions.get(taskId) === held) open.livePermissions.delete(taskId);
+    };
+  }
+
+  /**
+   * The composer's settings changed — see `chat:settings`. They are the conversation's from now on,
+   * kept on its task; and every turn and run of it in flight decides its NEXT call under the permission
+   * set they name.
+   *
+   * That set is read the way a message's is (`chatPlanFor` over the conversation's host): a set picked,
+   * or the one the state declares when the composer was reset.
+   */
+  changeChatSettings(request: { taskId: string; project?: string; overrides: ChatSettings }): { changed: number } {
+    const open = this.session(request.project);
+    this.keepChatSettings(open, request.taskId, request.overrides);
+    const held = open.livePermissions.get(request.taskId);
+    if (held === undefined || held.size === 0) return { changed: 0 };
+    // The conversation's states, for a composer that was RESET — what the state declares. A set that
+    // was picked needs none of it, which is what lets a pick reach an opening message whose instance
+    // the journal does not hold yet.
+    let path: ReturnType<AppService["chatContextOf"]>["path"] = [];
+    const host = this.chatHostOf(request.taskId, request.project);
+    if (host !== null) {
+      try {
+        path = this.chatContextOf(request.taskId, host, request.project).path;
+      } catch (e) {
+        if (!(e instanceof NoConversationHere)) throw e;
+      }
+    }
+    const plan = chatPlanFor(path, request.overrides);
+    const permissionSet = declaresTools(plan.settings) ? permissionSetOfSettings(plan.settings).permissionSet : undefined;
+    for (const live of held) live.permissionSet = permissionSet;
+    return { changed: held.size };
+  }
+
+  /**
+   * Keep what a conversation's composer says on its task (`TaskMeta.chatSettings`) — nothing picked
+   * leaves no key. Unchanged settings write nothing, so a composer that says the same thing again does
+   * not move the task.
+   */
+  private keepChatSettings(open: ProjectSession, taskId: string, settings: ChatSettings): void {
+    const meta = open.project.tasks.tryRead(taskId);
+    if (meta === undefined) return;
+    const picked = Object.keys(settings).length > 0;
+    if (JSON.stringify(meta.chatSettings ?? null) === JSON.stringify(picked ? settings : null)) return;
+    const { chatSettings: _was, ...rest } = meta;
+    open.project.tasks.write(picked ? { ...rest, chatSettings: settings } : rest);
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId });
   }
 
   /**
@@ -7639,6 +7725,8 @@ export class AppService {
     }
     const host = this.chatHostOf(fork.taskId, request.project);
     if (host === null) throw this.refusal("run", `the fork of '${taskId}' holds no conversation to continue`);
+    // The composer that sent it is the new conversation's from here — see `TaskMeta.chatSettings`.
+    if (request.overrides !== undefined) this.keepChatSettings(session, fork.taskId, request.overrides);
     void this.sendChatMessage({
       taskId: fork.taskId,
       instanceId: host,

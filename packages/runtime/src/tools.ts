@@ -324,8 +324,14 @@ export function gateTools(options: {
    * `script` ride on the block handed to the gate and to each wrapped tool, where the policy's
    * narrowing reads them to judge a shell line part by part (decision 0007 §4) — which is also why
    * the shell's own mode reaches both as `ask`: see `gateToolModes`.
+   *
+   * A FUNCTION is asked at each decision, by the gate and by every wrapped tool, and nothing it said
+   * is kept: what lets a person switch a conversation to another permission set mid-turn and have the
+   * very next call decided under it. Only the MODES move — which tools were handed over is settled
+   * when the turn starts, so a tool the turn began without is not offered by a switch that allows it.
+   * A function answering `undefined` is a turn that declares none, read back from `names` as above.
    */
-  permissionSet?: PermissionSet | undefined;
+  permissionSet?: PermissionSet | (() => PermissionSet | undefined) | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
   workspaceRoot?: string | undefined;
   /**
@@ -337,10 +343,16 @@ export function gateTools(options: {
   scopeFloor?: readonly Scope[] | undefined;
 }): { tools: Record<string, Tool>; gate: ToolGate } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
-  const permissionSet = options.permissionSet ?? permissionSetOfEnvironment(options.names, options.authored);
-  // The block the upstream gate takes, written FROM the map. Absent when nothing was authored at all.
-  const authored =
-    options.permissionSet === undefined && options.authored === undefined ? undefined : permissionsOfPermissionSet(permissionSet, options.authored?.scopes);
+  /**
+   * The map as it stands at this decision — see `permissionSet` — and the block the upstream gate
+   * takes, written FROM it. The block is absent when nothing was authored at all.
+   */
+  const now = (): { permissionSet: PermissionSet; authored: PermissionsDecl | undefined } => {
+    const given = typeof options.permissionSet === "function" ? options.permissionSet() : options.permissionSet;
+    const permissionSet = given ?? permissionSetOfEnvironment(options.names, options.authored);
+    const authored = given === undefined && options.authored === undefined ? undefined : permissionsOfPermissionSet(permissionSet, options.authored?.scopes);
+    return { permissionSet, authored };
+  };
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
   const placeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
@@ -357,46 +369,52 @@ export function gateTools(options: {
           return where === undefined || what === undefined ? (where ?? what) : strictestOf(where, what);
         };
   /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
-  const gate = createToolGate({
-    ledger,
-    sessionId: options.sessionId,
-    approve,
-    preGated: options.names,
-    ...(authored !== undefined ? { authored } : {}),
-    ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
-    // No profile tables (decision 0007 §1). What they existed for — an opinion about a name the gate
-    // has never registered — is the permission set's `other`, which rides on `authored`.
-    ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
-    ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
-    // What the agent reads when a call is refused, through the gate as through a wrapped tool.
-    ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
+  const gate = createToolGate(() => {
+    const { authored } = now();
+    return {
+      ledger,
+      sessionId: options.sessionId,
+      approve,
+      preGated: options.names,
+      ...(authored !== undefined ? { authored } : {}),
+      ...(options.policy?.smart !== undefined ? { smart: options.policy.smart } : {}),
+      // No profile tables (decision 0007 §1). What they existed for — an opinion about a name the gate
+      // has never registered — is the permission set's `other`, which rides on `authored`.
+      ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
+      ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
+      // What the agent reads when a call is refused, through the gate as through a wrapped tool.
+      ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
+    };
   });
   if (options.names.length === 0) return { tools: {}, gate };
   const out: Record<string, Tool> = {};
   for (const name of options.names) {
     const tool = options.registry.tools.get(name);
     if (tool === undefined) throw refusal(log, `tool '${name}' is not registered`);
-    // OWN entries only. The map is keyed by TOOL NAME, so a tool called `constructor` would
-    // otherwise resolve its mode — and its smart rule — to a prototype member.
-    // Read off the LOWERED block where there is one, so the wrapper and the gate resolve one mode:
-    // the shell's entry is `ask` there, and a FUNCTION's line too — see `gateToolModes`.
-    const lowered = authored?.tools !== undefined && Object.hasOwn(authored.tools, name) ? authored.tools[name] : undefined;
-    const own = Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name]!.mode : undefined;
-    const authoredMode = lowered ?? (own !== undefined ? gateModeOf(own) : undefined);
-    out[name] = withPermission(tool, {
-      ledger,
-      sessionId: options.sessionId,
-      toolName: name,
-      approve,
-      ...(authoredMode !== undefined ? { authoredMode } : {}),
-      // The block itself, so the narrowing sees the permission set's command subjects at the moment of decision.
-      ...(authored !== undefined ? { authored } : {}),
-      ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
-      ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
-      // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
-      // decision, and a scope that bound only one of them would be a sandbox with a door in it.
-      ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
-      ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
+    out[name] = withPermission(tool, () => {
+      const { permissionSet, authored } = now();
+      // OWN entries only. The map is keyed by TOOL NAME, so a tool called `constructor` would
+      // otherwise resolve its mode — and its smart rule — to a prototype member.
+      // Read off the LOWERED block where there is one, so the wrapper and the gate resolve one mode:
+      // the shell's entry is `ask` there, and a FUNCTION's line too — see `gateToolModes`.
+      const lowered = authored?.tools !== undefined && Object.hasOwn(authored.tools, name) ? authored.tools[name] : undefined;
+      const own = Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name]!.mode : undefined;
+      const authoredMode = lowered ?? (own !== undefined ? gateModeOf(own) : undefined);
+      return {
+        ledger,
+        sessionId: options.sessionId,
+        toolName: name,
+        approve,
+        ...(authoredMode !== undefined ? { authoredMode } : {}),
+        // The block itself, so the narrowing sees the permission set's command subjects at the moment of decision.
+        ...(authored !== undefined ? { authored } : {}),
+        ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
+        ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
+        // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
+        // decision, and a scope that bound only one of them would be a sandbox with a door in it.
+        ...(scopeNarrowing !== undefined ? { scopeOf: scopeNarrowing } : {}),
+        ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
+      };
     });
   }
   return { tools: out, gate };

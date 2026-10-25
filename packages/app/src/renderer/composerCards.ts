@@ -142,7 +142,7 @@ export function cascadeOf(
 
 /** Where a value came from — what a chip's card says in its head (`CardHead`). */
 export function originWordsOf(origin: "override" | "unset" | "inherited" | string, from?: string): { text: string; tone: "own" | "unset" | "plain" } {
-  if (origin === "override") return { text: "your choice for this message", tone: "own" };
+  if (origin === "override") return { text: "your choice for this conversation", tone: "own" };
   if (origin === "unset") return { text: "nothing here sets it", tone: "unset" };
   return { text: from === undefined ? "inherited" : `inherited from ${from}`, tone: "plain" };
 }

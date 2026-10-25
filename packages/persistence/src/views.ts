@@ -860,6 +860,7 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
     ...(row.worktreePath !== undefined ? { worktreePath: row.worktreePath } : {}),
     createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
     ...(meta?.inputs !== undefined ? { inputs: meta.inputs } : {}),
+    ...(meta?.chatSettings !== undefined ? { chatSettings: meta.chatSettings } : {}),
     ...(origin !== undefined ? { origin } : {}),
     ...(waitingFor.length > 0 ? { waitingFor } : {}),
     instances: run.instances,

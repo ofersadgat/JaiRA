@@ -22,9 +22,20 @@ import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
 import type { ApprovalHub, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UnansweredAsk, UserEventHub } from "@jaira/runtime";
 import type { InlineFamily, PromptOp } from "@declarative-ai/exec";
-import type { ChatSettings, SyncDirection, WorkflowLayer } from "@jaira/shared";
+import type { ChatSettings, PermissionSet, SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
 import type { FastForwardRun } from "./fastForward";
+
+/**
+ * The permission set one turn or run in flight decides its calls under — read at EACH decision, and
+ * changed while it runs when the person picks another in the composer (`chat:settings`).
+ *
+ * `undefined` is the call's own declaration: a turn whose message named no permission set, a run whose
+ * state's block stands as it was entered.
+ */
+export interface LivePermissions {
+  permissionSet: PermissionSet | undefined;
+}
 
 /** A run this session started and has not yet settled. */
 export interface LiveRun {
@@ -220,6 +231,15 @@ export class ProjectSession {
    * this thread has going.
    */
   readonly chatTurns = new Map<string, Set<AbortController>>();
+  /**
+   * What each turn and run in flight decides its calls under, by task — see {@link LivePermissions}.
+   *
+   * A SET per task for the reason {@link chatTurns} is one: more than one call can be in flight in a
+   * thread, and a person switching the conversation to another permission set means all of them. Each
+   * turn and run adds its own when it starts and takes it out when it ends, so nothing here outlives
+   * the call it governs and a message sent later is decided under its own settings.
+   */
+  readonly livePermissions = new Map<string, Set<LivePermissions>>();
   /**
    * The tasks a person has let publish while this session is open — `functions.review_artifacts.publish`
    * answered yes (decision 0010 §1). A run and every typed turn of a task build their own publish

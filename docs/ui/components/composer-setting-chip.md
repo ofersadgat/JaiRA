@@ -8,7 +8,7 @@ serves: [product/chat-with-agents, product/steer-agents-mid-task, product/risky-
 surfaces: [ui/surfaces/chat-view, ui/surfaces/run-conversation, ui/surfaces/task-context]
 reuses: [ui/components/model-cascade, ui/components/icon]
 implemented_by: [packages/universal/src/components/chat/Composer.tsx, packages/universal/src/components/chat/ComposerCards.tsx, packages/universal/src/components/chat/ComposerTools.tsx, packages/app/src/renderer/composerCards.ts, packages/app/src/renderer/composerPermissionSet.ts, packages/shared/src/permissionSetBuckets.ts]
-verified_by: [packages/app/test/composer.test.ts, packages/app/test/runnerGroup.test.ts, packages/shared/test/permissionSetBuckets.test.ts, packages/app/shots/parityWorld.mts#composer-model, packages/app/shots/parityWorld.mts#composer-thinking, packages/app/shots/parityWorld.mts#composer-permissions, packages/app/shots/parityWorld.mts#composer-tools]
+verified_by: [packages/app/test/composer.test.ts, packages/app/test/livePermissions.test.ts, packages/app/shots/permission-switch.mts, packages/app/shots/sticky-composer.mts, packages/app/test/runnerGroup.test.ts, packages/shared/test/permissionSetBuckets.test.ts, packages/app/shots/parityWorld.mts#composer-model, packages/app/shots/parityWorld.mts#composer-thinking, packages/app/shots/parityWorld.mts#composer-permissions, packages/app/shots/parityWorld.mts#composer-tools]
 mockups: [ui/assets/composer-setting-chip/resting.html, ui/assets/composer-setting-chip/inherited.html, ui/assets/composer-setting-chip/overridden.html, ui/assets/composer-setting-chip/buckets.html, ui/assets/composer-setting-chip/custom.html, ui/assets/composer-setting-chip/tools.html]
 siblings: [ui/components/composer, ui/components/model-cascade, ui/components/context-menu, ui/components/preset-chips]
 ---
@@ -26,7 +26,7 @@ A borderless rounded chip in the composer's footer, a small grey glyph and a dim
 ## The value reads first, and the card says where it came from before offering the choices
 
 - **Chip.** A glyph at 13px in `--tok-hint`, 5px, then the value in the app face at 11.5/12.5 in `--dim`, padded 3px by 9px, fully rounded, at most 210px wide with the value ending in an ellipsis. The model chip's glyph is the route's brand mark in its own colour; the others are a spark for Thinking, a shield for Permissions and a wrench for Tools.
-- **Chosen for this message.** Word and glyph in `--accent`.
+- **Chosen for this conversation.** Word and glyph in `--accent`.
 - **Open.** `--fill-ghost-selected` ground, a 1px `--line` edge and `--text`.
 - **Card.** 7px above the chip, left-aligned to it, on `--panel` with a 1px `--line` edge, 12px corners and the lifted shadow, padded 10px by 12px, between 250px and 560px wide as its content needs.
 - **Card head.** The setting's name at 11/12.5 and weight 600 in `--text`, then its origin at 10.5/12.5 in `--tok-hint`, and a `reset` pill in `--panel-2` at the far end when the value was chosen here. The head keeps 132px clear at its right.
@@ -42,25 +42,27 @@ A borderless rounded chip in the composer's footer, a small grey glyph and a dim
 | --- | --- | --- |
 | empty | Cannot occur: a chip always names a value. Where nothing sets one it names what decides instead: `the model's default`, `default tools` for an agent route, `no tools`, or `no model configured` beside a faint grey square. | |
 | loading | Until the settings are read, Thinking and Permissions read `…` and the model reads `no model configured`. Drawn third in the resting mockup. | [resting.html](../assets/composer-setting-chip/resting.html) |
-| resting | Four dim chips. A value chosen for this message turns its chip `--accent`. Permissions reads the name of the permission set the tools and modes exactly match in the card's bucket, and `custom` when they match none. A call that declares no tools reads what decides instead, `ask by default`. Drawn: inherited, chosen here, nothing declared, and loading. | [resting.html](../assets/composer-setting-chip/resting.html) |
+| resting | Four dim chips. A value chosen for this conversation turns its chip `--accent`. Permissions reads the name of the permission set the tools and modes exactly match in the card's bucket, and `custom` when they match none. A call that declares no tools reads what decides instead, `ask by default`. Drawn: inherited, chosen here, nothing declared, and loading. | [resting.html](../assets/composer-setting-chip/resting.html) |
 | inherited | The chip open over its card: `inherited from {state}` or `inherited`, and the value in force ticked. On Permissions the head names the bucket before the origin and ends in a dim `+`. With nothing setting it the origin reads `nothing here sets it` in italic and no row is ticked. | [inherited.html](../assets/composer-setting-chip/inherited.html) |
-| overridden | A row picked here: the chip `--accent`, the origin `your choice for this message` in `--accent`, the picked row washed and ticked, and `reset` in the head. | [overridden.html](../assets/composer-setting-chip/overridden.html) |
+| overridden | A row picked here: the chip `--accent`, the origin `your choice for this conversation` in `--accent`, the picked row washed and ticked, and `reset` in the head. | [overridden.html](../assets/composer-setting-chip/overridden.html) |
 | buckets | The bucket picker open over the rows: every bucket with what it holds and the layer that defines it, nested ones indented, the card's own ticked. Below it, the card on another bucket: the same four names with that bucket's own hints. | [buckets.html](../assets/composer-setting-chip/buckets.html) |
 | custom | The tools and modes match no permission set of the bucket: the chip reads `custom`, no row is ticked, `+` is lit and the closing sentence says what it does. Below it, `+` open on its form. | [custom.html](../assets/composer-setting-chip/custom.html) |
 | tools | The Tools card with Execution open: the shell, `git` open onto its subcommands and the line that adds one, `npm` shut, `script`, and the line that adds a command; a section whose lines disagree reads `custom`, and MCP has nothing in it. Below it, Tasks & workflows open over a permission set that holds only those tools, each saying it is not served yet. With no tools registered every section reads `nothing here`, Other keeps its mode, and the closing sentence says so. | [tools.html](../assets/composer-setting-chip/tools.html) |
 | error | Cannot occur on the chip: a setting that is an expression is named by the composer's amber note, and a send that fails is reported above the composer. | |
 
-## Picking a row changes this message only, and reset gives it back
+## Picking a row changes the conversation, and the answer in progress from its next call; reset gives it back
+
+What the chips say is the conversation's: kept on it as they change, sent or not, and what it opens with again — after another conversation, in another window, after a restart (the person, 2026-10-05 and 2026-10-24). Its next message is sent with them.
 
 | On | Does | Feedback |
 | --- | --- | --- |
 | Click a chip | Opens its card, or closes it | Chip ground and edge, card above |
 | Click outside the card, or Escape | Closes the card | The card is gone |
-| A Thinking row | Sets the effort for this message | The row washed and ticked, the chip `--accent` |
-| A Permissions row | Writes that permission set's ticks, implementations and modes onto the Tools card for this message | The row ticked and the chip reading its name; the Tools card shows the new lines |
+| A Thinking row | Sets the effort for the conversation's messages | The row washed and ticked, the chip `--accent` |
+| A Permissions row | Writes that permission set's ticks, implementations and modes onto the Tools card for the conversation. While it answers, its next call is decided under them too, with the tools the answer started with | The row ticked and the chip reading its name; the Tools card shows the new lines |
 | The bucket in the Permissions head | Opens the bucket hierarchy; picking one changes the rows | The head names the bucket; the chip reads the match in that bucket, or `custom` |
 | `+` in the Permissions head | Opens a name and where it goes; `Add` keeps the tools and modes as a new permission set in the bucket, in this project or for all projects | The form closes, the permission set is a row of the bucket and is ticked, and `+` dims. A name that cannot be a file, or one the layer already holds, is said under the form |
-| `reset` | Drops the choice for this message, on both cards, and returns to the bucket the state's own tools open on | The chip dims to the inherited value |
+| `reset` | Drops the conversation's choice, on both cards, and returns to the bucket the state's own tools open on | The chip dims to the inherited value |
 | A section's fold, or a program's | Opens or closes what is under it | `›` turns a quarter |
 | A section's mode | Writes that mode onto every line in the section | Each line's mode button changes |
 | A program's mode | Sets the mode for any command of that program its lines do not name | The button changes; the subcommands keep theirs |
@@ -78,7 +80,7 @@ A borderless rounded chip in the composer's footer, a small grey glyph and a dim
 | Card titles | `Model` · `Thinking` · `Permissions` · `Tools` |
 | Chip tooltip | `{title}: {value}` |
 | Chip values | `{route}/{model}` or `no model configured` · `low` `medium` `high` `xhigh` or `the model's default` · `{permissionSet}`, which for what ships is `ask first` `read-only` `auto` `full access`, or `custom`, or `{mode} by default` when no tools are declared · `{n} tools` · `{tool}` · `no tools` · `default tools` |
-| Origin | `your choice for this message` · `nothing here sets it` · `inherited` · `inherited from {state}` |
+| Origin | `your choice for this conversation` · `nothing here sets it` · `inherited` · `inherited from {state}` |
 | Reset | `reset` |
 | Thinking rows | `low` quickest, least deliberation · `medium` a balance · `high` works the problem · `xhigh` `deepest — slowest and dearest` |
 | Thinking sentence | `A model that tops out lower clamps rather than refusing.` |

@@ -2,10 +2,12 @@
  * The consumers of a grant and its modes read ONE map (decision 0007 §1) — and a permission set, and the
  * lowered block a loaded state holds for it, come out of each of them the same.
  */
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
-import type { Approver } from "@declarative-ai/permissions";
+import { isPermissionDenied, type Approver } from "@declarative-ai/permissions";
 import type { LoadedState } from "@declarative-ai/hw";
-import { lowerPermissionSet, parsePermissionSet, PERMISSION_SET_MARKERS, permissionSetOfEnvironment, type ChatSettings } from "@jaira/shared";
+import { lowerPermissionSet, parsePermissionSet, PERMISSION_SET_MARKERS, permissionSetOfEnvironment, type ChatSettings, type PermissionSet } from "@jaira/shared";
 import { chatOperationOf, chatPlanFor, stateWithChatSettings } from "../src/chatOperation";
 import { commandDecisionOf, compilePolicy } from "../src/policy";
 import { noteCallDialect } from "../src/callDialect";
@@ -166,7 +168,7 @@ describe("gateTools", () => {
     asked.push(req.tool);
     return { decision: "deny", scope: "once" };
   };
-  const gated = (options: { permissionSet?: typeof mapPermissionSet; authored?: ChatSettings["permissions"] }) => {
+  const gated = (options: { permissionSet?: PermissionSet | (() => PermissionSet | undefined); authored?: ChatSettings["permissions"] }) => {
     const registry = newRegistry();
     registerAllTools(registry, { cwd: "/work", files: { vars: { taskId: "t", worktree: "/work" } } as never });
     return gateTools({ registry, names: ["read_file", "write_file"], sessionId: "s1", approve, ...options });
@@ -194,6 +196,46 @@ describe("gateTools", () => {
   it("seeds NO profile: the restriction is the map", () => {
     expect(gated({ permissionSet: mapPermissionSet }).gate.profile).toBe("full");
     expect(gated({ authored: { ...LOWERED.permissions } }).gate.profile).toBe("full");
+  });
+
+  /**
+   * A permission set given as a FUNCTION is read at each call, by the gate and by every wrapped tool —
+   * the person, 2026-10-24: "changing the permissions from auto to full still isnt taking immediate
+   * affect. tool calls are still going through auto even after changing to full". The shipped presets,
+   * so the case is the one the composer's chip makes.
+   */
+  it("decides each call under the permission set as it stands — Auto, then Full, then Ask, in one turn", async () => {
+    const preset = (name: string) =>
+      parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/chat/${name}.json`, import.meta.url)), "utf8")) as unknown).permissionSet;
+    let current = preset("auto");
+    const { gate, tools } = gated({ permissionSet: () => current });
+    asked.length = 0;
+    // Auto: a function line, which the gate puts to the approver (where the function runs first) —
+    // through the gate for an agent's own `edit`, through the wrapper for `read_file`, which was handed over.
+    expect(gate.modeOf({ name: "edit" })).toBe("ask");
+    expect((await gate.check({ name: "edit" }, { path: "a.ts" })).allow).toBe(false);
+    expect(isPermissionDenied((await tools["read_file"]!.run({ path: "a.ts" }, {})) as never)).toBe(true);
+    expect(asked).toEqual(["edit", "read_file"]);
+
+    current = preset("full");
+    expect(gate.modeOf({ name: "edit" })).toBe("allow");
+    expect((await gate.check({ name: "edit" }, { path: "a.ts" })).allow).toBe(true);
+    expect(isPermissionDenied((await tools["read_file"]!.run({ path: "a.ts" }, {})) as never)).toBe(false);
+    // An agent's own built-in answers to the map's `other`, which Full allows too.
+    expect((await gate.check({ name: "SomeMcpTool" }, {})).allow).toBe(true);
+    expect(asked).toEqual(["edit", "read_file"]);
+
+    current = preset("ask-first");
+    expect((await gate.check({ name: "edit" }, { path: "a.ts" })).allow).toBe(false);
+    expect(asked).toEqual(["edit", "read_file", "edit"]);
+  });
+
+  it("a function answering nothing is a turn that declared no permission set", async () => {
+    const { gate } = gated({ permissionSet: () => undefined });
+    const plain = gated({}).gate;
+    asked.length = 0;
+    expect((await gate.check({ name: "read_file" }, { path: "a.ts" })).allow).toBe((await plain.check({ name: "read_file" }, { path: "a.ts" })).allow);
+    expect(gate.modeOf({ name: "SomeMcpTool" })).toBe(plain.modeOf({ name: "SomeMcpTool" }));
   });
 });
 
