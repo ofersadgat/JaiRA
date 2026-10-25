@@ -18,36 +18,56 @@ export interface Viewport {
   max: number;
 }
 
-/** How many pieces are wholly or partly out of view on each side. A row not yet measured hides none. */
-export function outOfView(spots: readonly Spot[], view: Pick<Viewport, "x" | "width">): { before: number; after: number } {
-  if (view.width <= 0) return { before: 0, after: 0 };
-  let before = 0;
-  let after = 0;
-  for (const s of spots) {
-    if (s.x < view.x - 1) before++;
-    if (s.x + s.w > view.x + view.width + 1) after++;
-  }
-  return { before, after };
+/** What lies over each edge of the row, in pixels from that edge. */
+export interface Edges {
+  left: number;
+  right: number;
 }
 
 /**
- * Where a press on a side's count scrolls the row: a screenful that way. The first piece cut off on that
- * side is brought to the other edge, `fade` in from it so the fade does not cover it — and a piece wider
- * than the view still moves the row along by the view, less a fade at each edge.
+ * How many pieces are hidden on each side: wholly or partly out of view, or under that side's count.
+ * The counts are drawn OVER the row's edges (`cover`, their widths), so the row's box never changes as
+ * one comes or goes — beside it, each one moved and narrowed the row under a scroll, and a press on "+1"
+ * stopped short of the end and the chips jumped back. Whether a side has a count at all is decided from
+ * the box alone, so drawing one cannot take itself away. A row not yet measured hides none.
  */
-export function pageTo(spots: readonly Spot[], view: Viewport, dir: 1 | -1, fade: number): number {
-  const stride = Math.max(1, view.width - 2 * fade);
-  let to: number;
+export function outOfView(spots: readonly Spot[], view: Pick<Viewport, "x" | "width">, cover: Edges = { left: 0, right: 0 }): { before: number; after: number } {
+  if (view.width <= 0) return { before: 0, after: 0 };
+  const count = (from: number, to: number): { before: number; after: number } => {
+    let before = 0;
+    let after = 0;
+    for (const s of spots) {
+      if (s.x < from - 1) before++;
+      if (s.x + s.w > to + 1) after++;
+    }
+    return { before, after };
+  };
+  const bare = count(view.x, view.x + view.width);
+  return count(view.x + (bare.before > 0 ? cover.left : 0), view.x + view.width - (bare.after > 0 ? cover.right : 0));
+}
+
+/** How far a piece may stand off where a press would bring it and still count as brought there. */
+const BROUGHT = 4;
+
+/**
+ * Where a press on a side's count scrolls the row: a screenful that way. The first piece cut off on that
+ * side is brought to the other edge, clear of what lies over it there (`inset`: a count and its fade).
+ * A piece already standing there is passed over for the next: in a side panel the clear stretch between
+ * the two counts is narrower than a chip, and bringing the same cut chip to the edge again moved the row
+ * by a pixel a press. With none left that way, the row goes to its end.
+ */
+export function pageTo(spots: readonly Spot[], view: Viewport, dir: 1 | -1, inset: Edges): number {
+  const from = view.x + inset.left;
+  const to = view.x + view.width - inset.right;
+  let at: number;
   if (dir > 0) {
-    const cut = spots.find((s) => s.x + s.w > view.x + view.width - fade + 1);
-    to = cut === undefined ? view.max : cut.x - fade;
-    if (to <= view.x) to = view.x + stride;
+    const cut = spots.find((s) => s.x + s.w > to + 1 && s.x > from + BROUGHT);
+    at = cut === undefined ? view.max : cut.x - inset.left;
   } else {
-    const cut = spots.filter((s) => s.x < view.x + fade - 1).pop();
-    to = cut === undefined ? 0 : cut.x + cut.w - view.width + fade;
-    if (to >= view.x) to = view.x - stride;
+    const cut = spots.filter((s) => s.x < from - 1 && s.x + s.w < to - BROUGHT).pop();
+    at = cut === undefined ? 0 : cut.x + cut.w - view.width + inset.right;
   }
-  return Math.min(view.max, Math.max(0, to));
+  return Math.min(view.max, Math.max(0, at));
 }
 
 /** A mouse wheel turn, as the browser reports it. */

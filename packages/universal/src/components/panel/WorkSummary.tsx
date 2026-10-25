@@ -1,5 +1,5 @@
 import { useContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { ScrollView, useWindowDimensions } from "react-native";
+import { ScrollView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { approvalCallIndex } from "@jaira/ui/approvalCall";
 import { ApprovalAskContext, WorkLookContext, useNow, useReadOnlyVerdicts } from "@jaira/ui/workSummaryContext";
@@ -27,7 +27,7 @@ import {
   type WorkKind,
   type WorkRun,
 } from "@jaira/ui/workSummary";
-import { outOfView, pageTo, wheelOver, type Spot } from "@jaira/ui/sidewaysRow";
+import { outOfView, pageTo, wheelOver, type Edges, type Spot } from "@jaira/ui/sidewaysRow";
 import type { WorkEntry } from "@jaira/ui/transcript";
 import { Press, Txt, edge, faceOf } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -57,12 +57,12 @@ import { ShellLine } from "./WorkRows";
  *   its name        92 wide, row, gap 5, app 600 12/12.5, --text (current --accent)
  *   "Earlier"       app 600 10/12.5 on 1, 0.07em, upper, --dim
  *   the chips       flex 0 1 auto, row, gap 4: a row that scrolls sideways, its scrollbar hidden; on web a
- *                   22 fade on a side with more beyond, the wheel turned sideways over it (then the
- *                   page's, `sidewaysRow.ts`), and a drag with the middle button held moves it; the phase
- *                   in progress kept at its end
- *   a count         "+2" on a side with chips out of view: 22 tall, padding 0 7, round, an inset 1px
- *                   --line ring, app 500 11.5/12.5 --dim, tabular (hovered --text on --fill-ghost-hover);
- *                   a press moves the row a screenful that way
+ *                   fade from under a side's count into the chips over 16, the wheel turned sideways over
+ *                   it (then the page's, `sidewaysRow.ts`), and a drag with the middle button held moves
+ *                   it; the phase in progress kept at its end
+ *   a count         "+2" over the row's edge on a side with chips hidden: 22 tall, padding 0 7, round,
+ *                   --panel with an inset 1px --line ring, app 500 11.5/12.5 --dim, tabular (hovered
+ *                   --text on --panel-2); a press moves the row a screenful that way
  *   a chip          22 tall, padding 0 8 0 6, round, gap 5, the kind's hue 11% with an inset 1px ring at
  *                   22% (live: --accent, 1.5px); app 500 11.5/12.5 on 1, --text; its glyph 12 in the hue
  *   the thought     flex 1 1 0, row, gap 5, padding 0 3, radius 4, app 11.5/12.5 italic --dim; the glyph 11
@@ -280,8 +280,13 @@ function Chip({ chip, rowOf }: Rows & { chip: WorkChip }): JSX.Element {
 
 /** Between two chips. */
 const CHIP_GAP = 4;
-/** The fade on a side of the chips with more beyond it — web only: a phone has no mask, and shows the counts alone. */
-const CHIP_FADE = 22;
+/**
+ * The fade from under a side's count into the chips — web only: a phone has no mask, and its counts
+ * stand on their own ground over the chips.
+ */
+const CHIP_FADE = 16;
+/** A count's width until it is drawn: "+1" in the app face. */
+const COUNT_WIDTH = 28;
 
 /** The chip rows on the page, and when the page last took a wheel turn (web): a turn over a row soon after is still the page's. */
 const chipRows = new Set<HTMLElement>();
@@ -350,22 +355,29 @@ function moveAlong(node: HTMLElement): () => void {
   };
 }
 
-/** "+2": how many chips are out of view on that side of the row; a press brings them in. */
-function More({ n, before, onPress }: { n: number; before: boolean; onPress: () => void }): JSX.Element {
+/**
+ * "+2": how many chips are hidden on that side of the row; a press brings them in. It lies over the
+ * row's edge, on a ground of its own, so it never moves or narrows the row (`sidewaysRow.ts`).
+ */
+function More({ n, before, onPress, onWidth }: { n: number; before: boolean; onPress: () => void; onWidth: (width: number) => void }): JSX.Element {
   const t = useTokens();
   const which = n === 1 ? "the chip" : `the ${n} chips`;
   return (
     <Press
       onPress={onPress}
       label={`Show ${which} ${before ? "before" : "after"}`}
-      flexShrink={0}
+      position="absolute"
+      top={0}
+      {...(before ? { left: 0 } : { right: 0 })}
+      zIndex={1}
       height={22}
       paddingHorizontal={7}
       borderRadius={999}
       alignItems="center"
       justifyContent="center"
+      onLayout={(e: LayoutChangeEvent) => onWidth(e.nativeEvent.layout.width)}
       {...({ boxShadow: `inset 0px 0px 0px 1px ${String(t.v("line"))}` } as object)}
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : t.v("panel") })}
     >
       {({ hovered }) => (
         <Txt spec={{ voice: "app", scale: 11.5 / 12.5, weight: 500, color: hovered ? "text" : "dim", lineHeight: 1, tabular: true }}>
@@ -388,6 +400,10 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
   const widths = useRef(new Map<string, number>());
   const view = useRef({ x: 0, width: 0, content: 0 });
   const [hidden, setHidden] = useState({ before: 0, after: 0 });
+  // How wide each side's count is drawn: what it covers of the row.
+  const [cover, setCover] = useState<Edges>({ left: COUNT_WIDTH, right: COUNT_WIDTH });
+  const covered = useRef(cover);
+  covered.current = cover;
   // Where each chip lies along the row, from the widths drawn: a chip moved by one before it growing is not told.
   const spots = (): Spot[] => {
     let x = 0;
@@ -399,7 +415,7 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
     });
   };
   const recount = (): void => {
-    const next = outOfView(spots(), view.current);
+    const next = outOfView(spots(), view.current, covered.current);
     setHidden((was) => (was.before === next.before && was.after === next.after ? was : next));
   };
   const toEnd = (): void => {
@@ -407,9 +423,14 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
   };
   const page = (dir: 1 | -1): void => {
     const v = view.current;
-    const to = pageTo(spots(), { x: v.x, width: v.width, max: Math.max(0, v.content - v.width) }, dir, isWeb ? CHIP_FADE : 8);
-    scroller.current?.scrollTo({ x: to, animated: true });
+    const clear = isWeb ? CHIP_FADE : 4;
+    const inset = { left: covered.current.left + clear, right: covered.current.right + clear };
+    const to = pageTo(spots(), { x: v.x, width: v.width, max: Math.max(0, v.content - v.width) }, dir, inset);    scroller.current?.scrollTo({ x: to, animated: true });
   };
+  const measured = (side: keyof Edges) => (width: number): void => {
+    setCover((was) => (Math.abs(was[side] - width) < 0.5 ? was : { ...was, [side]: width }));
+  };
+  useEffect(recount, [cover.left, cover.right]);
   const empty = chips.length === 0;
   useEffect(() => {
     if (!isWeb || empty) return undefined;
@@ -417,21 +438,26 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
     node.current = found;
     return found === null ? undefined : moveAlong(found);
   }, [empty]);
-  // The fade, on the scrolling box itself (it stays put while the chips move under it).
+  // The fade, on the scrolling box itself (it stays put while the chips move under it): none under a
+  // side's count, then the chips coming in over CHIP_FADE.
   const fadeLeft = hidden.before > 0;
   const fadeRight = hidden.after > 0;
   useEffect(() => {
     const el = node.current;
     if (el === null) return;
-    const image = fadeLeft || fadeRight ? `linear-gradient(to right, transparent, #000 ${fadeLeft ? CHIP_FADE : 0}px, #000 calc(100% - ${fadeRight ? CHIP_FADE : 0}px), transparent)` : "";
+    const l = fadeLeft ? cover.left : 0;
+    const r = fadeRight ? cover.right : 0;
+    const image =
+      fadeLeft || fadeRight
+        ? `linear-gradient(to right, transparent ${l}px, #000 ${fadeLeft ? l + CHIP_FADE : 0}px, #000 calc(100% - ${fadeRight ? r + CHIP_FADE : 0}px), transparent calc(100% - ${r}px))`
+        : "";
     el.style.setProperty("mask-image", image);
     el.style.setProperty("-webkit-mask-image", image);
-  }, [fadeLeft, fadeRight, empty]);
+  }, [fadeLeft, fadeRight, cover.left, cover.right, empty]);
   useEffect(toEnd, [follow]);
   if (empty) return null;
   return (
-    <View flexGrow={0} flexShrink={1} minWidth={0} flexDirection="row" alignItems="center" gap={CHIP_GAP}>
-      {hidden.before > 0 ? <More n={hidden.before} before onPress={() => page(-1)} /> : null}
+    <View position="relative" flexGrow={0} flexShrink={1} minWidth={0} flexDirection="row" alignItems="center">
       <ScrollView
         ref={scroller}
         horizontal
@@ -466,7 +492,8 @@ function Chips({ entries, indices, live, follow, rowOf }: Rows & { entries: read
           </View>
         ))}
       </ScrollView>
-      {hidden.after > 0 ? <More n={hidden.after} before={false} onPress={() => page(1)} /> : null}
+      {hidden.before > 0 ? <More n={hidden.before} before onPress={() => page(-1)} onWidth={measured("left")} /> : null}
+      {hidden.after > 0 ? <More n={hidden.after} before={false} onPress={() => page(1)} onWidth={measured("right")} /> : null}
     </View>
   );
 }
