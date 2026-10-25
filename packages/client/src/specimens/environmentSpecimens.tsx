@@ -1,10 +1,10 @@
 import type { ComponentType, JSX, ReactNode } from "react";
 import { Text, View } from "@tamagui/core";
-import type { EnvironmentView, PlacementAsk, PlacementNote, QueuedPlacement } from "@jaira/shared/browser";
+import type { ChatPlanView, ContextReading, EnvironmentView, PlacementAsk, PlacementNote, QueuedPlacement } from "@jaira/shared/browser";
 import { facesOf, type EnvironmentStage, type MachineFace } from "@jaira/ui/environmentModel";
 import { placementSummaryOf } from "@jaira/ui/placementSummary";
 import { clockOf } from "@jaira/ui/runActivityModel";
-import { Composer, EnvironmentBar, EnvironmentRows, MachineIcon, PlacementSummary, QueuedMessage, WorkRing, useTokens } from "@jaira/universal";
+import { Composer, EnvironmentBar, EnvironmentRows, MachineIcon, PhoneContext, PlacementSummary, QueuedMessage, WorkRing, useTokens } from "@jaira/universal";
 
 /**
  * Where a conversation runs, as specimens (decision 0013 §5, ruled 2026-10-02), each from a fixture:
@@ -13,6 +13,8 @@ import { Composer, EnvironmentBar, EnvironmentRows, MachineIcon, PlacementSummar
  *    at the sizes it is used; and the work ring.
  *  - `environment-bar` — the bar tucked under the composer in each stage: nothing decided, a machine
  *    chosen, a workspace chosen (its checkout on the right), being placed, waiting, running.
+ *  - `composer-widths` — the composer and its bar in every column it stands in: a desktop's from 900
+ *    down to 320, idle and with a turn going it can join, then a phone's.
  *  - `environment-list` — the list the bar opens: Automatic, each machine with its load, each workspace
  *    with its work ring and checkout, a machine connecting and one offline.
  *  - `placement-placing`, `placement-waiting`, `placement-starting`, `placement-started` — the summary
@@ -206,6 +208,61 @@ function Bars(): JSX.Element {
   );
 }
 
+/** What a conversation's composer runs as: long words on every chip, as the person's own do. */
+const PLAN = {
+  settings: {},
+  origin: { model: "unset", reasoning: "unset", tools: "unset", permissions: "unset" },
+  unresolved: [],
+  live: "idle",
+  effective: { model: "claude-cli/claude-opus-5-5", reasoning: "the model's default", permissions: "full access" },
+  available: { routes: [], tools: [], models: [] },
+} as unknown as ChatPlanView;
+const CONTEXT: ContextReading = { used: 52_000, window: 200_000, model: "claude-opus-5-5", at: new Date(T0).toISOString() };
+
+/** The composer, its bar tucked under it, as wide as `width` — idle, or with a turn going it can join. */
+function Sized({ width, phone, busy }: { width: number; phone: boolean; busy: boolean }): JSX.Element {
+  return (
+    <View gap={2}>
+      <Label>{`${width}${phone ? " · phone" : ""}${busy ? " · a turn going" : ""}`}</Label>
+      <PhoneContext.Provider value={phone}>
+        <View width={width}>
+          <Composer
+            plan={busy ? ({ ...PLAN, live: "steerable" } as ChatPlanView) : PLAN}
+            busy={busy}
+            joinable
+            {...(busy ? { onStop: NOOP } : {})}
+            overrides={{}}
+            onOverrides={NOOP}
+            onSend={NOOP}
+            value=""
+            onValue={NOOP}
+            placeholder="Reply…"
+            usage={{ context: CONTEXT }}
+            tray={<EnvironmentBar view={VIEW} stage={{ kind: "running", project: HERE, placed: NOTE }} />}
+          />
+        </View>
+      </PhoneContext.Provider>
+    </View>
+  );
+}
+
+/** The composer in every column it stands in: a desktop's, narrowing, then a phone's. */
+function Widths(): JSX.Element {
+  return (
+    <View gap={10} alignItems="flex-start">
+      {[900, 720, 600, 500, 420, 360, 320].map((width) => (
+        <Sized key={width} width={width} phone={false} busy={false} />
+      ))}
+      <Sized width={600} phone={false} busy />
+      <Sized width={420} phone={false} busy />
+      {[390, 360].map((width) => (
+        <Sized key={`p${width}`} width={width} phone busy={false} />
+      ))}
+      <Sized width={390} phone busy />
+    </View>
+  );
+}
+
 function List(): JSX.Element {
   const t = useTokens();
   return (
@@ -223,6 +280,7 @@ export const ENVIRONMENT_SPECIMENS: Record<string, EnvironmentSpecimen> = {
   "machine-icons": { width: 760, rn: Icons },
   "environment-bar": { width: 760, rn: Bars },
   "environment-list": { width: 710, rn: List },
+  "composer-widths": { width: 924, rn: Widths },
   "placement-placing": {
     width: 760,
     rn: () => (

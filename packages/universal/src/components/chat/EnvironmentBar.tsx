@@ -31,7 +31,8 @@ import { Spinner } from "./Spinner";
  *   the slash          / at .45
  *   the workspace      row, gap 6: a folder (a clock while it waits, the spinner while one is chosen)
  *                      13, its name --text (--dim for what is not a workspace yet)
- *   the checkout       pushed right; row, gap 9: the branch (its glyph 13, its name --text), ↑n and
+ *   the checkout       pushed right — on a line of its own (4 under) where the bar has no room for it,
+ *                      the branch's name cut first; row, gap 9: the branch (its glyph 13, its name --text), ↑n and
  *                      +a −d tabular (+ --ok, − --bad), a 1 × 13 --rule, the forge's mark 12 with the
  *                      request's number --text and its state in its tone
  */
@@ -54,7 +55,7 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
     </>
   );
   return (
-    <View testID="environment-bar" flexDirection="row" alignItems="center" gap={10} minWidth={0} paddingTop={28} paddingHorizontal={16} paddingBottom={6} borderBottomLeftRadius={20} borderBottomRightRadius={20} backgroundColor={wash as never} {...(edge(t, { right: 1, bottom: 1, left: 1 }) as object)} {...({ title: bar.title } as object)}>
+    <View testID="environment-bar" flexDirection="row" flexWrap="wrap" alignItems="center" gap={10} rowGap={4} minWidth={0} paddingTop={28} paddingHorizontal={16} paddingBottom={6} borderBottomLeftRadius={20} borderBottomRightRadius={20} backgroundColor={wash as never} {...(edge(t, { right: 1, bottom: 1, left: 1 }) as object)} {...({ title: bar.title } as object)}>
       <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
         {opens ? (
           <Press onPress={() => measure((at) => setOpen((was) => (was === null ? at : null)))} label="Where this conversation runs" {...({ "aria-expanded": open !== null } as object)} flexDirection="row" alignItems="center" gap={7}>
@@ -79,8 +80,12 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
           </View>
         </>
       ) : null}
-      <View flex={1} minWidth={0} />
-      {bar.git !== undefined ? <GitLine t={t} git={bar.git} /> : null}
+      {/* The checkout at the right end; where the line has no room for it, on a line of its own. */}
+      {bar.git !== undefined ? (
+        <View marginLeft="auto" minWidth={0} maxWidth="100%" flexShrink={1}>
+          <GitLine t={t} git={bar.git} />
+        </View>
+      ) : null}
       {open !== null && onChoose !== undefined ? (
         <EnvironmentList
           anchor={open}
@@ -117,17 +122,18 @@ export function GitLine({ t, git, dim = false, face = FACE, link = true }: { t: 
       </>
     );
   return (
-    <View flexDirection="row" alignItems="center" gap={9} flexShrink={0}>
+    // Squeezed, the branch's name is what is cut.
+    <View flexDirection="row" alignItems="center" gap={9} flexShrink={1} minWidth={0}>
       {git.branch !== undefined ? (
-        <View flexDirection="row" alignItems="center" gap={6}>
+        <View flexDirection="row" alignItems="center" gap={6} flexShrink={1} minWidth={0}>
           <Icon name="git" size={13} color={String(t.v("dim"))} />
-          <Txt spec={{ ...face, color: dim ? "dim" : "text" }} numberOfLines={1}>
+          <Txt spec={{ ...face, color: dim ? "dim" : "text" }} ellip minWidth={0} flexShrink={1}>
             {git.branch}
           </Txt>
         </View>
       ) : null}
       {git.ahead !== undefined ? (
-        <Txt spec={num} numberOfLines={1} {...({ title: "commits not pushed" } as object)}>
+        <Txt spec={num} numberOfLines={1} flexShrink={0} {...({ title: "commits not pushed" } as object)}>
           {git.ahead}
         </Txt>
       ) : null}

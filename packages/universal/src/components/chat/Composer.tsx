@@ -66,8 +66,10 @@ import { useKeyboardShown } from "../floats/keyboard";
  *   the `@` list      over the box, its width, 4 apart: column, at most 240, padding 4, 1px --line,
  *                     radius 10, --panel, 0 8 24 rgb(0 0 0 / 18%); a path padding 4 8, radius 6, app
  *                     12/12.5 (hovered --panel-2)
- *   the foot          row, centred, gap 5, padding 5 7 7 8
- *   a chip            pill, padding 3 9, 1px transparent, gap 5, at most 210, app 11.5/12.5, --dim;
+ *   the foot          row, centred, gap 5 (4 between lines), padding 5 7 7 8, wrapping at every width:
+ *                     a chip that does not fit goes to the next line, and the live note, the meter, ⤢,
+ *                     the clip and send stand together at the right end of the last
+ *   a chip            pill, padding 3 9, 1px transparent, gap 5, at most 210 (and its line), app 11.5/12.5, --dim;
  *                     hovered --fill-ghost-hover and --text; open --fill-ghost-selected, a --line edge,
  *                     --text; overridden --accent; the icon 13, --tok-hint (overridden --accent)
  *   the figure        the account's figure: data 500 11/12, line 1, padding 2 5, radius 6, 2 in on
@@ -77,7 +79,7 @@ import { useKeyboardShown } from "../floats/keyboard";
  *   the clip          26 round, the paperclip 15, --dim; hovered --panel-2 and --text
  *   send              30 round, --accent, the arrow 16 in --panel; disabled --panel-2, --tok-hint, at
  *                     half opacity; stop --bad, a 10 square (radius 2) of --panel
- *   on a phone        16 → 8 either side; the chips wrap. While the keyboard is up the chips fold to the
+ *   on a phone        16 → 8 either side. While the keyboard is up the chips fold to the
  *                     model's and a ⋯ that puts the keyboard down to show them all, and the tray steps
  *                     aside (decision 0015, amended 2026-10-04). ⤢ writes in a full screen of its own.
  *   the tray          what is tucked under the frame (`EnvironmentBar.tsx`): the frame's width, its top
@@ -346,7 +348,9 @@ export function Composer({
               ...(isWeb ? { outlineStyle: "none", resize: "none", fieldSizing: "content" } : {}),
             } as never}
           />
-          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0} {...(phone && !folded ? { flexWrap: "wrap", rowGap: 4 } : {})}>
+          {/* What does not fit wraps, at every width: the chips onto the next line, the controls as one
+              group at the right end of the last. Folded, it is one line, the model's chip giving way. */}
+          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0} {...(folded ? {} : { flexWrap: "wrap", rowGap: 4 })}>
             <Chip t={t} lead={<BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />} label="Model" value={chips.model} own={origin.model === "override"} open={card?.which === "Model"} onOpen={opener("Model")} />
             {folded ? (
               <Press onPress={() => Keyboard.dismiss()} label="Show every setting" title="show every setting" height={26} paddingHorizontal={8} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("panel-2") as never}>
@@ -361,48 +365,50 @@ export function Composer({
               </>
             )}
             {plan !== null && plan.unresolved.length > 0 ? (
-              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} ellip minWidth={0} paddingLeft={4}>
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} ellip minWidth={0} flexShrink={1} maxWidth="100%" paddingLeft={4}>
                 {plan.unresolved.map((u) => u.field).join(", ")} {plan.unresolved.length === 1 ? "is" : "are"} an expression here
               </Txt>
             ) : null}
-            <View flex={1} minWidth={0} />
-            {plan?.live === "steerable" || plan?.live === "busy" ? (
-              <View flexDirection="row" alignItems="center" gap={6} flexShrink={0}>
-                <Pulse color={plan.live === "busy" ? "dim" : "accent"} />
-                <Txt spec={{ voice: "app", scale: 11 / 12.5, color: plan.live === "busy" ? "dim" : "accent" }} numberOfLines={1}>
-                  {plan.live === "steerable" ? "joins this turn" : "waits for this turn"}
-                </Txt>
-              </View>
-            ) : null}
-            {usage !== undefined ? <ContextMeter t={t} context={usage.context} route={route} open={card?.which === "context"} onOpen={opener("context")} /> : null}
-            {phone ? (
-              <Press onPress={() => setFull(true)} disabled={off} title="Write in a full screen" label="Write in a full screen" width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999}>
-                <Txt spec={{ voice: "app", scale: 1.1, color: "dim" }}>⤢</Txt>
+            {/* The controls, together: pushed to the right end of whichever line they stand on. */}
+            <View flexDirection="row" alignItems="center" gap={5} marginLeft="auto" minWidth={0} maxWidth="100%" flexShrink={folded ? 0 : 1}>
+              {plan?.live === "steerable" || plan?.live === "busy" ? (
+                <View flexDirection="row" alignItems="center" gap={6} minWidth={0} flexShrink={1} {...({ title: plan.live === "steerable" ? "A message now joins this turn" : "A message now waits for this turn" } as object)}>
+                  <Pulse color={plan.live === "busy" ? "dim" : "accent"} />
+                  <Txt spec={{ voice: "app", scale: 11 / 12.5, color: plan.live === "busy" ? "dim" : "accent" }} ellip minWidth={0} flexShrink={1}>
+                    {plan.live === "steerable" ? "joins this turn" : "waits for this turn"}
+                  </Txt>
+                </View>
+              ) : null}
+              {usage !== undefined ? <ContextMeter t={t} context={usage.context} route={route} open={card?.which === "context"} onOpen={opener("context")} /> : null}
+              {phone ? (
+                <Press onPress={() => setFull(true)} disabled={off} title="Write in a full screen" label="Write in a full screen" width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999}>
+                  <Txt spec={{ voice: "app", scale: 1.1, color: "dim" }}>⤢</Txt>
+                </Press>
+              ) : null}
+              <Press
+                onPress={attach}
+                disabled={off}
+                title="Attach files"
+                label="Attach files"
+                width={26}
+                height={26}
+                flexShrink={0}
+                alignItems="center"
+                justifyContent="center"
+                borderRadius={999}
+                box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : "transparent" })}
+              >
+                {({ hovered }) => <Icon name="clip" size={15} color={String(t.v(hovered ? "text" : "dim"))} />}
               </Press>
-            ) : null}
-            <Press
-              onPress={attach}
-              disabled={off}
-              title="Attach files"
-              label="Attach files"
-              width={26}
-              height={26}
-              flexShrink={0}
-              alignItems="center"
-              justifyContent="center"
-              borderRadius={999}
-              box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : "transparent" })}
-            >
-              {({ hovered }) => <Icon name="clip" size={15} color={String(t.v(hovered ? "text" : "dim"))} />}
-            </Press>
-            {busy === true && onStop !== undefined ? (
-              <Press onPress={onStop} label="Stop" title="Stop this turn" width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("bad") as never}>
-                <View width={10} height={10} borderRadius={2} backgroundColor={t.v("panel") as never} />
-              </Press>
-            ) : null}
-            {busy === true && onStop !== undefined && !canSend ? null : (
-              <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy)} disabled={(draft.trim() === "" && files.length === 0) || !canSend} onPress={send} />
-            )}
+              {busy === true && onStop !== undefined ? (
+                <Press onPress={onStop} label="Stop" title="Stop this turn" width={30} height={30} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("bad") as never}>
+                  <View width={10} height={10} borderRadius={2} backgroundColor={t.v("panel") as never} />
+                </Press>
+              ) : null}
+              {busy === true && onStop !== undefined && !canSend ? null : (
+                <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy)} disabled={(draft.trim() === "" && files.length === 0) || !canSend} onPress={send} />
+              )}
+            </View>
           </View>
         </View>
       </View>
@@ -543,9 +549,8 @@ function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNV
 function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
   const [ref, press] = useOpener(onOpen);
   return (
-    // The wrap gives way (`minWidth: 0`); on web the chip in it does not: squeezed, the chips keep their
-    // words and run over one another, which is what the reference pictures hold (`pair.mts`). A phone,
-    // which is always narrow, cuts each chip's words instead.
+    // A chip that does not fit its line goes to the next (the foot wraps); one wider than a line alone
+    // cuts its words — and folded, the model's gives way to the controls.
     <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK, ...(Platform.OS === "web" ? { alignItems: "flex-start" } : {}) } as never}>
     <Press
       onPress={press}
@@ -553,7 +558,7 @@ function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; i
       label={label}
       {...({ "aria-expanded": open } as object)}
       minWidth={0}
-      flexShrink={Platform.OS === "web" ? 0 : 1}
+      flexShrink={1}
       maxWidth={210}
       flexDirection="row"
       alignItems="center"

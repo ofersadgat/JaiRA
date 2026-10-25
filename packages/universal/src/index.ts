@@ -11,6 +11,7 @@ export { PreviewCard } from "./components/panel/PreviewCard";
 export { FileInspector } from "./components/files/FileAddressBar";
 export { UniversalApp } from "./app/UniversalApp";
 export { useShell } from "./app/shell";
+export { PhoneContext } from "./app/phone";
 export { phoneMachines, remoteStatus, type PhoneMachines, type RemoteStatus } from "./app/remoteStatus";
 export { SchemaForm, registerWidget } from "./components/form/SchemaForm";
 export { Field, FieldGrid, FormRowsContext, Level } from "./components/form/Field";
