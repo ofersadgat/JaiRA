@@ -29,7 +29,7 @@ import {
 } from "@jaira/ui/workSummary";
 import { outOfView, pageTo, wheelOver, type Edges, type Spot } from "@jaira/ui/sidewaysRow";
 import type { WorkEntry } from "@jaira/ui/transcript";
-import { Press, Txt, edge, faceOf } from "../../primitives";
+import { Press, Txt, edge, faceOf, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Pulse } from "../chat/Pulse";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
@@ -76,9 +76,10 @@ import { ShellLine } from "./WorkRows";
  *   a run           row (the time, 18 for the glyph, the sentence in what is left, how long so far),
  *                   gap 6, centred, padding 2 6, radius 6, app 12/12.5 --text; live --accent 7%; failed
  *                   its glyph --bad; wait all --warn
- *   the foot        row, centred, gap 8, padding 3 10, 1px --line, radius 0 0 8 8 (bare 8; open 0; bare
- *                   and open 8 8 0 0), --panel-2 55%, app 11.5/12.5 (line normal) --dim; hovered --text on
- *                   --panel-2
+ *   the foot        row, centred, gap 8, padding 1 12 1 10 (its tail under the phases'), 1px --line, radius 0 0 8 8 (bare 8; open 0;
+ *                   bare and open 8 8 0 0), --panel-2 55%; "Every step" app 11.5/12.5 (line normal) --dim,
+ *                   a press on it opens every row; then a phase's tail over every row, the time "so far"
+ *                   while it works; hovered, the words --text on --panel-2
  *   every row, open padding 4 2 6, 1px --line but the top, radius 0 0 8 8
  *   the kept rows   6 above
  *   a hover card    at most 560 (the window less 32), padding 6, 1px --line, radius 10, --panel, --lift;
@@ -691,7 +692,7 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
   const currentAt = currentPhaseOf(phases, live, working);
   const whole = spanOf(entries, all);
   const took = whole.start === undefined ? undefined : (working ? now : (whole.end ?? whole.start)) - whole.start;
-  const foot = useHoverFloat();
+  const [footHovered, footHover] = useHover();
   const ask = useContext(ApprovalAskContext);
   // A request found in the record after the app closed under it is asked with nothing working: the
   // agent that asked is gone until the answer continues it.
@@ -791,49 +792,33 @@ export function WorkSummary({ entries, working, kept, rowOf, clock }: Rows & { e
           })}
         </View>
       )}
-      {/* The foot's own box is what its card is opened from and placed against: the whole button, under
-          the pointer or the keyboard's focus (the button is in the Tab order itself). */}
+      {/* The foot: its words, and the tail every phase has — the count opens every row in a card, the
+          chevron (or a press on the words) opens them in place. The words are out of the Tab order: the
+          chevron is the control the keyboard reaches. */}
       {lone ? null : (
-      <View ref={foot.anchor as never} minWidth={0} {...(!open ? foot.bind : {})}>
-      <Press
-        onPress={() => {
-          foot.close();
-          setOpen((was) => !was);
-        }}
-        {...({ "aria-expanded": open } as object)}
-        width="100%"
-        flexDirection="row"
-        alignItems="center"
-        gap={8}
-        paddingVertical={3}
-        paddingHorizontal={10}
-        borderWidth={1}
-        borderStyle="solid"
-        borderColor={t.v("line") as never}
-        {...footRadius}
-        box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : wash })}
-      >
-        {({ hovered }) => (
-          <View flex={1} flexDirection="row" alignItems="center" gap={8} minWidth={0}>
-            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: hovered ? "text" : "dim" }} {...normalLineOf(t, "app", 11.5 / 12.5)} flex={1} minWidth={0}>
+        <View
+          flexDirection="row"
+          alignItems="center"
+          gap={8}
+          minWidth={0}
+          paddingVertical={1}
+          paddingLeft={10}
+          paddingRight={12}
+          borderWidth={1}
+          borderStyle="solid"
+          borderColor={t.v("line") as never}
+          {...footRadius}
+          backgroundColor={(footHovered ? t.v("panel-2") : wash) as never}
+          {...footHover}
+        >
+          <Press onPress={() => setOpen((was) => !was)} focusable={false} {...({ "aria-expanded": open } as object)} flex={1} alignSelf="stretch" minWidth={0} justifyContent="center">
+            <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: footHovered ? "text" : "dim" }} {...normalLineOf(t, "app", 11.5 / 12.5)} minWidth={0}>
               Every step
             </Txt>
-            <Txt spec={{ voice: "data", scale: 10.5 / 12, color: hovered ? "text" : "dim", tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)} flexShrink={0}>
-              {`${countOf(entries)}${took !== undefined ? ` · ${secondsOf(took)}${working ? " so far" : ""}` : ""}`}
-            </Txt>
-            <View width={14} flexShrink={0} flexDirection="row" transform={open ? [{ rotate: "180deg" }] : []}>
-              <Icon name="chevron" size={13} color={String(t.v("tok-hint"))} />
-            </View>
-          </View>
-        )}
-      </Press>
-      </View>
+          </Press>
+          <PhaseTail entries={entries} indices={all} label="Every step" took={took} soFar={working} current={false} open={open} onToggle={() => setOpen((was) => !was)} rowOf={rowOf} />
+        </View>
       )}
-      {!lone && !open ? (
-        <Card hover={foot} label="Every step" count={`${entries.length} lines`}>
-          <RowsList indices={all} rowOf={rowOf} entries={entries} />
-        </Card>
-      ) : null}
       {everyOpen ? (
         <View flexDirection="column" minWidth={0} paddingTop={4} paddingHorizontal={2} paddingBottom={6} borderBottomLeftRadius={8} borderBottomRightRadius={8} {...(edge(t, { right: 1, bottom: 1, left: 1 }) as object)}>
           <RowsList indices={all} rowOf={rowOf} entries={entries} />
@@ -876,11 +861,11 @@ function PhaseName({ name, current }: { name: string; current: boolean }): JSX.E
 }
 
 /**
- * The end of a phase's head: how many steps it took and how long, from the start of the first to the
- * end of the last (so far, while it is the one in progress). The count opens its rows in a card; the
- * chevron opens them under the head instead.
+ * The end of a phase's head, and of the foot: how many steps it took and how long, from the start of the
+ * first to the end of the last (so far, while it is the one in progress; `soFar` says so in words, as the
+ * foot does while the agent works). The count opens its rows in a card; the chevron opens them in place.
  */
-function PhaseTail({ entries, indices, label, took, current, open, onToggle, rowOf }: Rows & { entries: readonly WorkEntry[]; indices: readonly number[]; label: string; took: number | undefined; current: boolean; open: boolean; onToggle: () => void }): JSX.Element {
+function PhaseTail({ entries, indices, label, took, soFar = false, current, open, onToggle, rowOf }: Rows & { entries: readonly WorkEntry[]; indices: readonly number[]; label: string; took: number | undefined; soFar?: boolean; current: boolean; open: boolean; onToggle: () => void }): JSX.Element {
   const t = useTokens();
   const hover = useHoverFloat();
   const ink = current ? "accent" : "dim";
@@ -895,7 +880,7 @@ function PhaseTail({ entries, indices, label, took, current, open, onToggle, row
       </Tap>
       {took !== undefined ? (
         <Txt spec={{ voice: "data", scale: 10.5 / 12, color: ink, tabular: true }} {...normalLineOf(t, "data", 10.5 / 12)}>
-          {`· ${secondsOf(took)}`}
+          {`· ${secondsOf(took)}${soFar ? " so far" : ""}`}
         </Txt>
       ) : null}
       <Press
