@@ -2,6 +2,7 @@
  * The address bar's crumb MODEL — the part of `Crumbs.tsx` that is not drawing: what a crumb says, what
  * its chevron offers, and where clicking it goes. Nothing here renders; `CrumbBar` draws them.
  */
+import type { PillCounts } from "./pillModel";
 import type { BoardCard, InstanceNode } from "@jaira/shared/browser";
 import type { MenuItem } from "./menuTypes";
 import { taskNameOf } from "./taskNameModel";
@@ -55,6 +56,17 @@ export interface Crumb {
    * that does nothing, so the chevron stays a plain glyph. See {@link alternatives}.
    */
   options?: MenuItem[];
+  /**
+   * What is going on inside this level, as the sidebar's pills say it of a row (`Pills`): a walked-into
+   * run's waits, counted at each crumb the way the sidebar counts — a level includes what is in it.
+   */
+  counts?: PillCounts;
+  /**
+   * This crumb takes the width the bar has spare and is the one cut when there is none — a
+   * conversation's title, which is the most there is to read (the person, 2026-10-25: "try to keep as
+   * much of the session title as you can"). The other crumbs keep their whole names.
+   */
+  wide?: boolean;
 }
 
 /**

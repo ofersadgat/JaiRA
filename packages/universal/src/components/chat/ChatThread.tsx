@@ -26,6 +26,8 @@ import { EnvironmentBar } from "./EnvironmentBar";
 import { PlacementSummary } from "./PlacementSummary";
 import { QueuedMessage } from "./QueuedMessage";
 import { useChatEnvironment } from "./environment";
+import { useChildRunHost } from "./childRunHost";
+import { OutcomeHostContext } from "../panel/outcomeHost";
 
 /**
  * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
@@ -67,6 +69,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const jumpRef = useRef(jump);
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
+  /** The runs this conversation started: their lines, the one walked into, and the waits over the box. */
+  const runs = useChildRunHost(surface, () => jumpRef.current());
   const mentions = useMentions(surface.hasProject, m.project);
   const env = useChatEnvironment(surface);
   const placement = placementSummaryOf({
@@ -125,15 +129,18 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const doomed = m.doomedFrom !== undefined ? { doomedFrom: m.doomedFrom } : {};
   // What the agent is blocked on — the command it waits to run, the question it asked — drawn where the
   // turn is arriving, under what it said before asking. Keyed on the request.
+  // A run the conversation started draws its own agent's asks in the run's page (`childRunHost.tsx`).
+  const ownApproval = surface.approval !== undefined && surface.onApproval !== undefined && runs.ownApproval;
+  const ownQuestion = surface.question !== undefined && surface.onQuestion !== undefined && runs.ownQuestion;
   const asking =
-    (surface.approval !== undefined && surface.onApproval !== undefined && !m.approvalInThread) || (surface.question !== undefined && surface.onQuestion !== undefined) ? (
+    (ownApproval && !m.approvalInThread) || ownQuestion ? (
       <>
-        {surface.approval !== undefined && surface.onApproval !== undefined && !m.approvalInThread ? (
+        {ownApproval && !m.approvalInThread && surface.approval !== undefined ? (
           <InlineHost>
             <ApprovalSurface key={surface.approval.requestId} pending={surface.approval} onDecide={(decision, scope, extras) => surface.onApproval!(surface.approval!.requestId, decision, scope, extras)} />
           </InlineHost>
         ) : null}
-        {surface.question !== undefined && surface.onQuestion !== undefined ? (
+        {ownQuestion && surface.question !== undefined ? (
           <InlineHost>
             <QuestionSurface key={surface.question.requestId} pending={surface.question} onSubmit={(answers) => surface.onQuestion!(surface.question!.requestId, answers)} />
           </InlineHost>
@@ -143,6 +150,12 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const plain = m.split === null && (m.seam === null || m.seam.own.length === 0);
   return (
     <View flex={1} minHeight={0} minWidth={0} flexDirection="column">
+      {/* Walked into a run the conversation started: that run is the page, and nothing outside it. */}
+      {runs.walkedIn !== null ? (
+        <View flex={1} minHeight={0} flexDirection="column">
+          {runs.walkedIn}
+        </View>
+      ) : (
       <ScrollView
         ref={scroller}
         {...(scrollbarProps(t) as object)}
@@ -161,6 +174,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       >
         {/* Which day you are reading, floating over the thread (sticky, 0 tall). */}
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
+        <OutcomeHostContext.Provider value={runs.outcomeHost}>
         <ApprovalAskContext.Provider value={m.askValue}>
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
@@ -226,9 +240,15 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           </>
         ) : null}
         </ApprovalAskContext.Provider>
+        </OutcomeHostContext.Provider>
+        {/* The end the pills over the box would cover, left free while they show. */}
+        {runs.pillSpace > 0 ? <View height={runs.pillSpace} flexShrink={0} /> : null}
       </ScrollView>
+      )}
 
-      {m.status !== null ? <LiveStatusBar status={m.status} {...(away ? { onJump: jump } : {})} /> : null}
+      {/* The box and what stands over it: the pills hang from the top of all of it, painted last. */}
+      <View flexShrink={0} position="relative">
+      {m.status !== null && runs.walkedIn === null ? <LiveStatusBar status={m.status} {...(away ? { onJump: jump } : {})} /> : null}
 
       {m.waitingHere.length > 0 ? <WaitingHost items={m.waitingHere} /> : null}
 
@@ -287,6 +307,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
           {...mentions}
         />
+      </View>
+      {runs.pills}
       </View>
     </View>
   );

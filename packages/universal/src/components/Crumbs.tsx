@@ -5,7 +5,11 @@ import { isAllCrumb, type Crumb } from "@jaira/ui/crumbModel";
 import { PLAIN_SCROLLER, font, Press, Txt, edge } from "../primitives";
 import { useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
+import { Pills } from "./Pills";
 import { colorOf } from "./Sidebar";
+
+/** How wide a crumb's pills may run — two of them, as a sidebar row's narrowest. */
+const CRUMB_PILL_BUDGET = 90;
 
 /**
  * An address — each crumb after the chevron that joins it to the level on its left, then the view's
@@ -32,6 +36,9 @@ import { colorOf } from "./Sidebar";
  *                            hue first; hovered: the hue at 30%
  *   "All projects"           app voice at 0.96, 600, no spacing, no ground, no dot; hovered --panel-2
  *   a pending crumb          italic, --dim — but a run that is last keeps --text
+ *   a wide crumb             no cap on its width; with one on the bar the others keep their names and
+ *                            only it is cut
+ *   a crumb's pills          the sidebar's (`Pills`), 2 after the crumb, at most 90 wide, never cut
  *   the slack                between the path and what follows it
  *   the tools                row, centred, gap 6, flex none
  */
@@ -68,7 +75,8 @@ export function CrumbBar({
         : { flexShrink: 0, backgroundColor: t.v("panel"), ...edge(t, { top: 1, bottom: 1 }) })}
     >
       {crumbs.map((crumb, i) => (
-        <View key={`${i}:${crumb.kind}:${crumb.text}`} flexDirection="row" alignItems="center" gap={2} flexShrink={1} minWidth={0}>
+        // With a `wide` crumb on the bar, only it gives way.
+        <View key={`${i}:${crumb.kind}:${crumb.text}`} flexDirection="row" alignItems="center" gap={2} flexShrink={crumb.wide === true || !crumbs.some((c) => c.wide === true) ? 1 : 0} minWidth={0}>
           {crumb.options === undefined ? (
             // The root has nothing to its left, so its chevron would be a separator between the bar and
             // the window. It keeps the menu and loses the glyph.
@@ -85,6 +93,11 @@ export function CrumbBar({
             />
           )}
           <CrumbButton crumb={crumb} last={i === crumbs.length - 1} t={t} />
+          {crumb.counts !== undefined ? (
+            <View flexShrink={0} marginLeft={2}>
+              <Pills counts={crumb.counts} budget={CRUMB_PILL_BUDGET} />
+            </View>
+          ) : null}
         </View>
       ))}
       <View flexGrow={1} flexShrink={1} minWidth={0} />
@@ -163,7 +176,7 @@ function CrumbButton({ crumb, last, t }: { crumb: Crumb; last: boolean; t: Token
     paddingVertical: 2,
     paddingHorizontal: 5,
     borderRadius: project ? 4 : 5,
-    maxWidth: project ? 240 : run ? 190 : 220,
+    ...(crumb.wide === true ? {} : { maxWidth: project ? 240 : run ? 190 : 220 }),
     // A project crumb's button centres its name: one longer than its 240px overflows BOTH sides and is
     // clipped there — no ellipsis.
     ...(project && crumb.go !== undefined ? { justifyContent: "center" as const } : {}),

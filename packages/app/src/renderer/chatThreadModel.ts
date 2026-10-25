@@ -14,6 +14,7 @@ import { useWaiting } from "./limitsStore";
 import { invoke, syncCache } from "./store";
 import { useView } from "./useView";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
+import { conversationAnswering, openingRunAnswering } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
 
 /**
@@ -314,8 +315,14 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    * `running` alone drew every later turn as already finished while its call was still going: no
    * rows, no pulse, a running call reading "no result was recorded". The sidebar's spinner has always
    * asked both (`answering` in the list); what is drawn live asks the same.
+   *
+   * Not while only a run the conversation STARTED holds the task (`start_task`, decision 0005): that
+   * run is the conversation's child, so the task reads `running` — and holds a record open — for as
+   * long as it works or waits on someone, and the conversation would say "Working" over an idle thread
+   * and take no message. The child's state is said by its own line and its pills (`childRunModel.ts`).
    */
-  const answering = running || (surface.producing[taskId] ?? 0) > 0;
+  const runAnswering = openingRunAnswering(surface.detail?.instances, running);
+  const answering = conversationAnswering(surface.detail?.instances, running, surface.producing[taskId] ?? 0);
   /** This conversation's messages waiting for the allowance — held, or refused and set to try again. */
   const waitingHere = useWaiting().filter((item) => item.kind === "message" && item.taskId === taskId);
   /** How full the conversation is: the reading on its last answer. */
@@ -333,7 +340,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    * `task:cancel` in turn knows nothing about. One button, and it has to pick.
    */
   const stop = (): void => {
-    if (running) {
+    // The conversation's own run — never the run it started, which a turn answering beside it is not.
+    if (runAnswering) {
       surface.onCancelRun(taskId, project);
       return;
     }

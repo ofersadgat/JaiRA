@@ -9,7 +9,7 @@ import { execFileSync } from "node:child_process";
  * "task status is derived from the instance tree" is enforced: every view goes
  * through the projection, never through a UI-side copy of engine semantics.
  */
-import { CUT_OFF_EVENT, MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
+import { COMPONENT_NAMES, CUT_OFF_EVENT, MOVE_EVENTS, type ChoiceQuestion, type ChooseOptionConfig, type PermissionFunctionRequest } from "@jaira/shared";
 import {
   copyFileSync,
   existsSync,
@@ -4511,9 +4511,14 @@ export class AppService {
    * — is `choose_option` something this process routes to a human? — and the answer does not vary by
    * project. Empty with nothing open, which is the honest answer and not an error: the shared root is
    * browsable with no project, and a state view there must still render.
+   *
+   * The built-in components are in it always. A session only learns a run's functions when it STARTS
+   * the run, so after a restart a run parked on `choose_option` (its gate seeded back from
+   * `pending_interactions`) was projected as a plain call — "CALLED", with its form drawn nowhere in
+   * place — until something started a run that named the component again.
    */
   private gateVocabulary(): ReadonlySet<string> {
-    const names = new Set<string>();
+    const names = new Set<string>(COMPONENT_NAMES);
     for (const session of this.sessions.values()) for (const name of session.interactive) names.add(name);
     return names;
   }

@@ -852,6 +852,12 @@ export interface ChatState {
    * replace it from the first change.
    */
   settings?: ChatSettings;
+  /**
+   * The run this conversation started that is walked into — its instance — so the run, not the
+   * conversation, is the main view and the title is a breadcrumb (`start_task`, decision 0005; the
+   * mockups of 2026-10-25). Absent: the conversation itself. Cleared when another conversation opens.
+   */
+  walkedInto?: string;
 }
 
 /** The rooms — the destinations the sidebar lists. */
@@ -3158,7 +3164,8 @@ export function useApp() {
         // Unnamed — a reload restoring it by id — its own project where a list knows it, so the
         // thread's header and composer say where it is rather than where the window stands.
         const at = project ?? (taskId === null ? undefined : projectOfTask(taskId));
-        patch({ chat: { ...ref.current.chat, taskId, project: at ?? null, opening: null, error: null } });
+        const { walkedInto: was, ...chat } = ref.current.chat;
+        patch({ chat: { ...chat, taskId, project: at ?? null, opening: null, error: null, ...(was !== undefined && taskId === chat.taskId ? { walkedInto: was } : {}) } });
         actionsRef.current.select(taskId, at);
       },
 
@@ -3235,6 +3242,12 @@ export function useApp() {
        * Choose where the next conversation runs: a machine, one workspace, or — with nothing — wherever
        * has room first.
        */
+      /** Walk into a run the open conversation started, or (null) back out to the conversation. */
+      walkIntoChildRun: (instanceId: string | null) => {
+        const { walkedInto: _was, ...chat } = ref.current.chat;
+        patch({ chat: { ...chat, ...(instanceId !== null ? { walkedInto: instanceId } : {}) } });
+      },
+
       setRunOn: (target: RunTarget | undefined) => {
         const { runOn: _was, ...chat } = ref.current.chat;
         patch({ chat: { ...chat, ...(target !== undefined && (target.project !== undefined || target.machine !== undefined) ? { runOn: target } : {}) } });

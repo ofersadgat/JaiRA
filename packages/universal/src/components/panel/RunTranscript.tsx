@@ -90,6 +90,7 @@ export function RunTranscript({
   focus,
   onHere,
   nested = false,
+  bottomInset = 0,
 }: {
   detail: TaskDetail;
   /** The run being READ — the trail's tail in the middle column, the task's root in the panel. */
@@ -113,6 +114,8 @@ export function RunTranscript({
    * the workflow's link, the origin seam, the cut on its rows).
    */
   nested?: boolean;
+  /** What the page leaves free at its end for something laid over it there (the Chat view's pills). */
+  bottomInset?: number;
 }): JSX.Element {
   const t = useTokens();
   const { conversation, sessions, sessionHistory, records, liveTurn, onLoadSessions, shutStates, onToggleShutState, onSetShutStates } = source;
@@ -422,7 +425,7 @@ export function RunTranscript({
         trackSoon();
       }}
     >
-      <View ref={content as never} flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22}>
+      <View ref={content as never} flexGrow={1} flexDirection="column" backgroundColor={t.v("bg") as never} paddingTop={14} paddingHorizontal={16} paddingBottom={22 + bottomInset}>
         <RowSpyContext.Provider value={spy}>
         {empty ? (
           <Empty>This run has not entered a child yet.</Empty>

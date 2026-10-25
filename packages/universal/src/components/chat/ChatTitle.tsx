@@ -12,6 +12,8 @@ import { Icon } from "../panel/Icon";
 import { useAnchorRect } from "./ComposerCards";
 import { EnvironmentList } from "./EnvironmentBar";
 import { useChatEnvironment } from "./environment";
+import { childRunsOf, waitCountsByLevel, waitsOf } from "@jaira/ui/childRunModel";
+import { CrumbBar } from "../Crumbs";
 
 /**
  * The open conversation's name in the title bar: where the other rooms put their address, set as the
@@ -28,7 +30,7 @@ import { useChatEnvironment } from "./environment";
  *                       11/12.5 --text (--dim while nothing is decided), a ⌄ 11 when it opens the list;
  *                       hovered --fill-ghost-hover
  */
-export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversations" | "taskId" | "project" | "queued" | "runOn" | "detail" | "onRunOn"> }): JSX.Element {
+export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversations" | "taskId" | "project" | "queued" | "runOn" | "detail" | "onRunOn" | "walkedInto" | "onWalkInto" | "gate" | "approval" | "question"> }): JSX.Element {
   const t = useTokens();
   const env = useChatEnvironment(surface);
   const chip = titleChipOf(barFactsOf(env.view, env.stage));
@@ -46,13 +48,31 @@ export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversatio
         {opens ? <Icon name="chevron" size={11} color={String(t.v("dim"))} /> : null}
       </>
     );
+  const title = chatTitleOf(surface.conversations, surface.taskId);
+  const walked = surface.walkedInto !== undefined ? childRunsOf(surface.detail?.instances).find((run) => run.instanceId === surface.walkedInto) : undefined;
+  const walkedKey = walked !== undefined ? (walked.childKey ?? walked.stateId) : undefined;
+  const counts = walkedKey !== undefined ? waitCountsByLevel(waitsOf({ instances: surface.detail?.instances, gate: surface.gate, approval: surface.approval, question: surface.question }), [walkedKey]) : [];
   const box = { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 2, paddingLeft: 7, paddingRight: 9, borderWidth: 1, borderStyle: chip?.dashed === true ? "dashed" : "solid", borderColor: t.v("line"), borderRadius: 999 } as const;
   return (
     <View flexDirection="row" alignItems="center" gap={7} flexShrink={1} minWidth={0} paddingHorizontal={16}>
       <Icon name="comment" size={14} color={String(t.v("dim"))} />
-      <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600, lineHeight: 1.3 }} ellip flexShrink={1} minWidth={0}>
-        {chatTitleOf(surface.conversations, surface.taskId)}
-      </Txt>
+      {walked !== undefined ? (
+        // Walked into a run the conversation started: the conversation and the run as run crumbs, the
+        // way the Tasks view's address draws a run walked into — the first goes back out. Each carries
+        // what waits inside it, as the sidebar's pills; the conversation's name gives way last.
+        <View flexShrink={1} minWidth={0} marginLeft={-12}>
+          <CrumbBar
+            crumbs={[
+              { text: title, kind: "run", title: "back to the conversation", go: () => surface.onWalkInto(null), wide: true, ...(counts[0]! > 0 ? { counts: { waiting: counts[0]! } } : {}) },
+              { text: walkedKey!, kind: "run", title: `the run of ${walked.stateId} this conversation started`, ...(counts[1]! > 0 ? { counts: { waiting: counts[1]! } } : {}) },
+            ]}
+          />
+        </View>
+      ) : (
+        <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600, lineHeight: 1.3 }} ellip flexShrink={1} minWidth={0}>
+          {title}
+        </Txt>
+      )}
       {chip !== undefined ? (
         <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, marginLeft: 3, ...NO_STACK, ...NO_DRAG } as never}>
           {opens ? (

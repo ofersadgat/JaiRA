@@ -359,7 +359,10 @@ function OwnAnswer({ choice, answer, onAnswer, readOnly }: { choice: Choice; ans
             cursor: "text",
           }
         : {}) as object)}
-      flexBasis="100%"
+      // The whole width, as a line of its own. Not `flexBasis: 100%`: among a stepped question's options
+      // the box is in a COLUMN, where a basis is a height, and it was cut to the column's — the box and
+      // its Next button clipped (seen 2026-10-25 on a five-question gate).
+      width="100%"
       flexShrink={0}
       paddingVertical={8}
       paddingHorizontal={12}

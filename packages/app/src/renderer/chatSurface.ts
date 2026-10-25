@@ -5,11 +5,13 @@
 import type { AppState, useApp } from "./store";
 import { askOfTask } from "./approvalCall";
 import { chatProjectOf } from "./chatWorkflow";
+import { parkedGateOf } from "./panelHost";
 import type {
   ApprovalScope,
   ChatSettings,
   ConversationView,
   PendingApproval,
+  PendingInteraction,
   PendingQuestion,
   QueuedPlacement,
   RunTarget,
@@ -127,6 +129,15 @@ export interface ChatSurface {
   onApproval?: (requestId: string, decision: "allow" | "deny", scope: ApprovalScope, extras?: ApprovalAnswerExtras) => void;
   question?: PendingQuestion | undefined;
   onQuestion?: (requestId: string, answers: Record<string, string | string[]> | undefined) => void;
+  /**
+   * The gate a run this conversation STARTED is parked on (`start_task`, decision 0005): drawn where
+   * the run asks it, nested under the line that started the run or in the run walked into.
+   */
+  gate?: PendingInteraction | undefined;
+  onGate?: (requestId: string, value: unknown) => void;
+  /** The started run walked into — see `ChatState.walkedInto` — and the way in and back out (null). */
+  walkedInto?: string | undefined;
+  onWalkInto: (instanceId: string | null) => void;
 }
 
 type Actions = ReturnType<typeof useApp>["actions"];
@@ -224,5 +235,9 @@ export function chatSurfaceOf(
     onApproval: actions.decideApproval,
     question: state.chat.taskId === null ? undefined : state.questions.find((q) => q.taskId === state.chat.taskId),
     onQuestion: actions.answerQuestion,
+    gate: state.chat.taskId === null ? undefined : parkedGateOf(state.pending, state.chat.taskId),
+    onGate: (requestId, value) => void actions.answer(requestId, value),
+    walkedInto: state.chat.walkedInto,
+    onWalkInto: actions.walkIntoChildRun,
   };
 }

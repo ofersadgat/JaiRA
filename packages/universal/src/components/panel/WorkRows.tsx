@@ -21,6 +21,7 @@ import { ChoiceList, ChoiceSteps, FieldFrame } from "../floats/Choices";
 import { Pulse } from "../chat/Pulse";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
+import { OutcomeHostContext } from "./outcomeHost";
 import { ValueView } from "./ValueView";
 import { Media } from "./ValueReadings";
 
@@ -512,6 +513,9 @@ export function AnsweredForYou({ by, onAnswerYourself }: { by: SettledByView; on
  */
 export function OutcomeNote({ outcome }: { outcome: WorkflowOutcome }): JSX.Element {
   const t = useTokens();
+  // A host with more to say about the run this call started draws it instead (`outcomeHost.ts`).
+  const hosted = useContext(OutcomeHostContext)?.(outcome);
+  if (hosted !== undefined) return <>{hosted}</>;
   const { verb, standsAt: where, workflow, adoptedAs, held, through } = outcome;
   const size = Number(t.scaled("size-app", 11.5 / 12.5)) || 11.5;
   const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
