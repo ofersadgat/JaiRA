@@ -16,8 +16,10 @@ import {
   AppService,
   connectEngine,
   discoverEngine,
+  ENGINE_PROTOCOL,
   hostEngine,
   pidAlive,
+  protocolMismatch,
   resolveBaseDir,
   type EngineClient,
   type EngineClientInfo,
@@ -97,7 +99,7 @@ export async function withEngine<T>(
       if (client.limited) {
         client.close();
         throw new Error(
-          `the engine runs JaiRA ${client.host.version} in ${hostWords(client.host)}, which speaks another contract than this jaira (${cliVersion()}); ` +
+          `the engine runs JaiRA ${client.host.version} in ${hostWords(client.host)}, which speaks protocol ${client.host.protocol ?? "from before protocol numbers"} and this jaira ${ENGINE_PROTOCOL}; ` +
             (client.host.kind === "server" ? "stop it with `jaira server stop`, or use the jaira that came with it" : "use the jaira that came with it"),
         );
       }
@@ -537,7 +539,7 @@ export async function serverCommand(sub: string | undefined, io: EngineIo): Prom
         host: { kind: info.host.kind, pid: info.host.pid, version: info.host.version, since: new Date(info.host.startedAt).toISOString(), address: info.host.port !== undefined ? `127.0.0.1:${info.host.port}` : info.host.pipe },
         // This command is one of them; the others are who else uses the engine.
         clients: info.clients.filter((c) => c.pid !== process.pid).map((c) => ({ name: c.name, ...(c.pid !== undefined ? { pid: c.pid } : {}), version: c.version })),
-        ...(client.limited ? { note: `it speaks another contract than this jaira (${cliVersion()})` } : {}),
+        ...(client.limited ? { note: protocolMismatch("the engine", info.host.protocol, "this jaira") } : {}),
       }),
     );
     return 0;

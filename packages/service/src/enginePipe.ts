@@ -23,7 +23,7 @@ import type { ClientFrame, EngineHostInfo, HostFrame } from "@jaira/shared";
 
 // The frames and the contract are `@jaira/shared`'s (`engineFrames.ts`): a phone and a browser speak
 // them too, and have no `node:` module to import this file through.
-export { ENGINE_CONTRACT, type ClientFrame, type EngineHostInfo, type HostFrame, type PairingDevice, type PeerMachine } from "@jaira/shared";
+export { ENGINE_PROTOCOL, protocolMismatch, type ClientFrame, type EngineHostInfo, type HostFrame, type PairingDevice, type PeerMachine } from "@jaira/shared";
 
 /** `engine.json`: the host's info and the token a client needs. */
 export interface EngineFile extends EngineHostInfo {

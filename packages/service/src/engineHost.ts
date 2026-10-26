@@ -11,7 +11,7 @@ import { createConnection, createServer, type Server } from "node:net";
 import { dirname } from "node:path";
 import type { DeviceKind, PushMessage } from "@jaira/shared";
 import {
-  ENGINE_CONTRACT,
+  ENGINE_PROTOCOL,
   ENGINE_PORT,
   enginePipePath,
   homeHash,
@@ -82,8 +82,10 @@ interface Client {
   channel: FrameChannel;
   /** Past `hello`: may send requests and hears pushes. */
   admitted: boolean;
-  /** Admitted with another contract: only `engine:*` answers. */
+  /** Admitted speaking another protocol: only `engine:*` answers. */
   limited: boolean;
+  /** The protocol it said in its hello. */
+  protocol?: number;
   info?: EngineClientInfo;
   connection?: EngineConnection;
 }
@@ -104,7 +106,7 @@ export class EngineHost {
       kind: options.kind,
       pid: process.pid,
       version: options.version,
-      contract: ENGINE_CONTRACT,
+      protocol: ENGINE_PROTOCOL,
       pipe: address.pipe,
       ...(address.port !== undefined ? { port: address.port } : {}),
       home: homeHash(options.baseDir),
@@ -204,12 +206,14 @@ export class EngineHost {
         if (holder.device !== undefined) device = { id: holder.id, label: holder.label, kind: holder.device };
         else machine = { id: holder.id, label: holder.label };
       }
-      const limited = frame.contract !== ENGINE_CONTRACT;
+      // Another protocol, not another version: builds that speak the same one share everything.
+      const limited = frame.protocol !== ENGINE_PROTOCOL;
       // Welcome BEFORE admitting and logging: the log line is itself a push, broadcast to the admitted,
       // and a client's first frame must be its welcome.
       this.send(client, { t: "welcome", host: this.publicInfo(client.channel.transport), ...(limited ? { limited: true as const } : {}) });
       client.admitted = true;
       client.limited = limited;
+      if (typeof frame.protocol === "number") client.protocol = frame.protocol;
       client.info = {
         id: `c${nextClient++}`,
         name: frame.client,
@@ -224,7 +228,9 @@ export class EngineHost {
       const who = machine !== undefined ? `${frame.client} on ${machine.label}` : device !== undefined ? `${device.label} (a ${device.kind})` : frame.client;
       this.options.log?.(
         "info",
-        limited ? `${who} (JaiRA ${frame.version}) connected to the engine with another contract; it may only ask about it or stop it` : `${who} connected to the engine`,
+        limited
+          ? `${who} (JaiRA ${frame.version}) connected to the engine speaking protocol ${frame.protocol ?? "none"}, not this engine's ${ENGINE_PROTOCOL}; it may only ask about it or stop it`
+          : `${who} connected to the engine`,
       );
       return;
     }
@@ -241,7 +247,7 @@ export class EngineHost {
         t: "res",
         id: frame.id,
         ok: false,
-        error: { message: `this engine runs JaiRA ${this.info.version}, which speaks another contract than ${client.info?.version ?? "yours"}` },
+        error: { message: `this engine speaks protocol ${ENGINE_PROTOCOL}, and ${client.info?.name ?? "yours"} ${client.protocol === undefined ? "an older one" : client.protocol}: only engine:* channels answer` },
       });
       return;
     }

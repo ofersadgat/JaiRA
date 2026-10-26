@@ -12,7 +12,7 @@
  */
 import { createServer, type Server } from "node:http";
 import type { Duplex } from "node:stream";
-import { ENGINE_CONTRACT } from "./enginePipe";
+import { ENGINE_PROTOCOL } from "./enginePipe";
 import { wsHostChannel } from "./engineChannel";
 import type { EngineHost } from "./engineHost";
 import type { MachineIdentity } from "./machine";
@@ -58,7 +58,7 @@ export async function listenNetwork(options: NetworkListenerOptions): Promise<Ne
     if (request.method === "GET" && request.url === "/.well-known/jaira") {
       const identity = options.identity();
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
-      response.end(JSON.stringify({ jaira: true, machineId: identity.id, label: identity.label, os: identity.os, version: options.version, contract: ENGINE_CONTRACT }));
+      response.end(JSON.stringify({ jaira: true, machineId: identity.id, label: identity.label, os: identity.os, version: options.version, protocol: ENGINE_PROTOCOL }));
       return;
     }
     response.writeHead(404, { "content-type": "text/plain" });

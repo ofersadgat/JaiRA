@@ -11,7 +11,7 @@
  * - **Revocation.** Forgetting it drops its connection and refuses its next hello, which the bridge
  *   reports as final.
  * - **The bridge.** A dropped connection is retried with a fresh hello, the store is told to read again,
- *   and another contract is said, not retried.
+ *   and another protocol is said, with which side to update, not retried.
  * - **The client's files.** The listener serves no client (a browser is not a device until the website
  *   exists); the window's own protocol resolves the built client read-only, and nothing outside it.
  */
@@ -24,7 +24,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { AppService, askOnce, clientFile, connectEngine, hostEngine, loopbackTailnet, type HostedEngine } from "@jaira/service";
 import { peersFile } from "@jaira/service/machineTokens";
-import type { MachinesView, PairingDevice, PushMessage } from "@jaira/shared";
+import { ENGINE_PROTOCOL, type MachinesView, type PairingDevice, type PushMessage } from "@jaira/shared";
 import { engineBridge, pairDevice, type BridgeState, type EngineBridge, type Pairing } from "../../client/bridges/engineBridge";
 
 let base: string;
@@ -75,7 +75,7 @@ async function paired(device: PairingDevice = PHONE): Promise<Pairing> {
   return pairDevice(address(), await code(device), device);
 }
 
-function bridgeOf(pairing: Pairing, options: { contract?: string } = {}): EngineBridge {
+function bridgeOf(pairing: Pairing, options: { protocol?: number } = {}): EngineBridge {
   const bridge = engineBridge({ url: pairing.url, token: pairing.token, client: "Pixel 8", version: "0.2.0", retryMs: 20, maxRetryMs: 80, ...options });
   bridges.push(bridge);
   return bridge;
@@ -245,9 +245,9 @@ describe("the device's bridge", { timeout: 60_000 }, () => {
     await expect(away.invoke("machines:view", undefined)).rejects.toThrow(/nothing answers|did not answer|could not reach/);
   });
 
-  it("says so when the machine speaks another contract, and stops", async () => {
-    const other = bridgeOf(await paired(), { contract: "another" });
-    await expect(other.ready).rejects.toThrow(/another build of JaiRA 0\.2\.0/);
+  it("says so when the machine speaks another protocol, which side to update, and stops", async () => {
+    const other = bridgeOf(await paired(), { protocol: ENGINE_PROTOCOL + 1 });
+    await expect(other.ready).rejects.toThrow(/runs an older JaiRA, whose protocol this app no longer speaks: update JaiRA on 127\.0\.0\.1/);
     expect(other.state().state).toBe("mismatch");
     await new Promise((r) => setTimeout(r, 100));
     expect(hosted.host.connected()).toEqual([]);

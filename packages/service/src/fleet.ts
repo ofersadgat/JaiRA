@@ -26,6 +26,7 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { PAIRING_CODE_MS, engineUrlOf, machineFormOf, normalizePairingCode, type DeviceView, type MachineForm, type MachineOsTag, type MachinesView, type PairingDevice, type PeerView, type CopyChoice, type TailnetDeviceView, type TailnetJaira, type TailnetView } from "@jaira/shared";
 import { askOnce, connectEngine, type EngineClient } from "./engineClient";
+import { protocolMismatch } from "./enginePipe";
 import type { EngineHost, PreAuthHandler } from "./engineHost";
 import type { HostFrame, PeerMachine } from "./enginePipe";
 import type { Handler } from "./handlers";
@@ -1131,11 +1132,7 @@ export class Fleet {
       const client = await connectEngine({ baseDir: this.options.baseDir, client: `machine ${this.identity().label}`, version: this.options.version, address: { url }, token, timeoutMs: 10_000 });
       link.client = client;
       link.state = client.limited ? "mismatch" : "online";
-      link.reason = client.limited
-        ? client.host.version === this.options.version
-          ? `it runs another build of JaiRA ${client.host.version}, which cannot share work with this one: update both to the same build`
-          : `it runs JaiRA ${client.host.version}, which cannot share work with ${this.options.version}`
-        : undefined;
+      link.reason = client.limited ? protocolMismatch(machine.label, client.host.protocol, "this machine") : undefined;
       link.wait = this.options.retryMs ?? 3000;
       this.remember(machine, { lastSeenAt: Date.now(), version: client.host.version });
       client.onPush((message) => {

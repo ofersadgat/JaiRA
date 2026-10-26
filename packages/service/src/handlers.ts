@@ -333,7 +333,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
 /**
  * What one engine host's PEERS ask of it over the pipe (decision 0012 §3): the desktop's main process
  * when another process hosts the engine, and `jaira server status|stop`. Never the renderer's — these
- * are not IPC channels, and a client admitted with another contract may still ask them (`limited`).
+ * are not IPC channels, and a client admitted with another protocol may still ask them (`limited`).
  *
  * The desktop's main process uses the engine for more than the window's requests: it logs its own
  * launch and crashes, keeps the updater's and plugins' items on the health board, asks what a quit

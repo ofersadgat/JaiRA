@@ -102,7 +102,7 @@ export interface MachineView {
 
 export interface PeerView extends MachineView {
   url?: string;
-  /** `online`: connected now. `mismatch`: connected, but on another contract — see {@link version}. */
+  /** `online`: connected now. `mismatch`: connected, but on another protocol — see {@link reason}. */
   state: "online" | "offline" | "connecting" | "mismatch";
   version?: string;
   lastSeenAt?: number;

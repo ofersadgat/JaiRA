@@ -24,7 +24,7 @@ import { tailnetEngineUrl, tailnetHostname, tailnetJoin, tailnetWords } from "..
  * In Electron none of this happens: the window has its preload's bridge, and the children draw at once.
  *
  * A machine that refuses the token (the device was forgotten there) forgets the token here too and
- * brings the form back, saying so. One that speaks another contract keeps the pairing and says which
+ * brings the form back, saying so. One that speaks another protocol keeps the pairing and says which
  * side to update.
  *
  * A phone also lists the machines on its Wi-Fi that are showing a code, and pairs with one by its code
