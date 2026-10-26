@@ -142,7 +142,7 @@ export function startedTaskOf(project: Project, eventsTaskId: string, at: Pick<S
     const origin = meta.origin;
     if (origin?.kind === "started") return origin.taskId === eventsTaskId && origin.key === at.key && (origin.occurrence ?? 0) === at.occurrence && origin.index === at.call;
     const by = meta.startedBy;
-    return by !== undefined && by.fromTask === eventsTaskId && by.state !== undefined && by.state.key === at.key && by.state.occurrence === at.occurrence && by.state.call === at.call;
+    return by?.by === "events" && by.fromTask === eventsTaskId && by.state !== undefined && by.state.key === at.key && by.state.occurrence === at.occurrence && by.state.call === at.call;
   });
 }
 

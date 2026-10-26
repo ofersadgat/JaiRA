@@ -12,6 +12,7 @@ import { ContextMenu, type MenuAt } from "./Menu";
 import { Press, Txt, edge, useHover } from "../primitives";
 import { useLook, useTokens, type Look, type Tokens } from "../tokens";
 import { ConnectPop, Kind } from "./ConnectPop";
+import { Chip } from "./files/Chip";
 import { Button } from "./settings/Button";
 import { Lift } from "./Lift";
 import { ghostAt, ghostOf, ghostScrolled, useEdgeScroll, useLiftTargets, type EdgeScroller, type Ghost } from "./liftTargets";
@@ -177,7 +178,7 @@ export interface BoardProps extends DragProps {
         /** The dry run: what a drop of this card on that column would do (`connectDrag.ts`). */
         ask?: ConnectAsk;
         /** The commit — `confirmed` once the person said yes to the move table's question. */
-        onDrop?: (card: BoardCard, column: BoardColumn, confirmed?: boolean) => void;
+        onDrop?: (card: BoardCard, column: BoardColumn, confirmed?: boolean, conversation?: string) => void;
         onMove?: (card: BoardCard, move: NextMove, confirmed?: boolean) => void;
         undoable?: ReadonlySet<string>;
         onUndo?: (taskId: string) => void;
@@ -329,6 +330,7 @@ export function Board({
       look={look}
       index={index}
       name={column.label ?? column.key}
+      {...(column.disabledBy !== undefined ? { badge: <DisabledChip stateId={column.stateId} by={column.disabledBy} /> } : {})}
       {...(numbered ? { seq: index + 1 } : {})}
       count={column.cards.filter((card) => card.status !== "archived").length}
       empty="—"
@@ -345,6 +347,17 @@ export function Board({
               <MoveConfirm
                 sentence={confirming.sentence}
                 yes={confirming.yes}
+                {...(confirming.choices !== undefined
+                  ? {
+                      choices: confirming.choices.map((choice) => ({
+                        ...choice,
+                        go: () => {
+                          setConfirming(null);
+                          choice.go();
+                        },
+                      })),
+                    }
+                  : {})}
                 onYes={() => {
                   const go = confirming.go;
                   setConfirming(null);
@@ -716,6 +729,24 @@ function columnStyle(t: Tokens, look: Look, index: number, selected: boolean, ho
 }
 
 /**
+ * A disabled column's mark (decision 0021): the tree's own chip, "disabled", saying on hover what that
+ * means here — or which state above it switched it off.
+ */
+function DisabledChip({ stateId, by }: { stateId: string; by: string }): JSX.Element {
+  return (
+    <Chip
+      title={
+        by === stateId
+          ? "Disabled: a new run of it is refused, and nothing moves into it. Tasks already running carry on."
+          : `Disabled with '${by}': a new run of it is refused, and nothing moves into it. Tasks already running carry on.`
+      }
+    >
+      disabled
+    </Chip>
+  );
+}
+
+/**
  * A board column: the track, its heading, and whatever was put in it. A click anywhere that is not a
  * card describes the column; a double-click (a long press on a phone) walks in.
  */
@@ -725,6 +756,7 @@ export function Column({
   wide = false,
   index,
   name,
+  badge,
   seq,
   count,
   empty,
@@ -745,6 +777,8 @@ export function Column({
   wide?: boolean;
   index: number;
   name: ReactNode;
+  /** A mark beside the name — a disabled workflow's chip (decision 0021). */
+  badge?: ReactNode;
   seq?: number;
   count: number;
   empty: string;
@@ -821,6 +855,7 @@ export function Column({
       <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...((s.head.nameInk ?? s.head.ink) !== undefined ? { color: s.head.nameInk ?? s.head.ink } : {})}>
         {name}
       </Txt>
+      {badge !== undefined ? <View alignSelf="center" flexShrink={0}>{badge}</View> : null}
       <Txt register="app-secondary" spec={{ tabular: true, ...(s.head.ink !== undefined ? { color: String(s.head.ink) } : {}) }} flexShrink={0} marginLeft="auto">
         {count}
       </Txt>
@@ -1016,7 +1051,20 @@ function ArchivedFoot({ count, archived }: { count: number; archived: { shown: b
  * kind (`ConnectPop`'s `Kind`: data 600 at `--size-app` × 10.5/12.5), the sentence (1.45), and a primary
  * and a ghost button at the box's `--size-app`, gap 6, 14 above.
  */
-function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: string; onYes: () => void; onNo: () => void }): JSX.Element {
+function MoveConfirm({
+  sentence,
+  yes,
+  choices,
+  onYes,
+  onNo,
+}: {
+  sentence: string;
+  yes: string;
+  /** A pick in place of a yes — what steers the task (decision 0021): a button each, the first primary. */
+  choices?: ReadonlyArray<{ label: string; title?: string | undefined; go: () => void }>;
+  onYes: () => void;
+  onNo: () => void;
+}): JSX.Element {
   const t = useTokens();
   const stop = isWeb
     ? {
@@ -1043,9 +1091,21 @@ function MoveConfirm({ sentence, yes, onYes, onNo }: { sentence: string; yes: st
       <Txt spec={{ voice: "app", scale: 1, lineHeight: 1.45 }}>{sentence}</Txt>
       {/* The answers: 14 above, on top of the box's gap; the buttons in the box's own size. */}
       <View flexDirection="row" flexWrap="wrap" gap={6} marginTop={14}>
-        <Button kind="primary" font={{ scale: 1 }} onPress={onYes}>
-          {yes}
-        </Button>
+        {choices !== undefined ? (
+          choices.length === 0 ? (
+            <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>No other workflow can steer it. Enable one, or choose another in Settings → Runs → Conversations.</Txt>
+          ) : (
+            choices.map((choice, i) => (
+              <Button key={choice.label} kind={i === 0 ? "primary" : "ghost"} font={{ scale: 1 }} {...(choice.title !== undefined ? { title: choice.title } : {})} onPress={choice.go}>
+                {choice.label}
+              </Button>
+            ))
+          )
+        ) : (
+          <Button kind="primary" font={{ scale: 1 }} onPress={onYes}>
+            {yes}
+          </Button>
+        )}
         <Button kind="ghost" font={{ scale: 1 }} onPress={onNo}>
           Cancel
         </Button>

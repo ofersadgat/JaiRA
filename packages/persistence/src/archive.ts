@@ -8,7 +8,7 @@
  * finished, and one that succeeded `succeededAfterDays` after. Conversations and JaiRA's own tasks
  * are left alone — a chat is read from the Chat list, not the board.
  */
-import { isArchivableStatus, isChatWorkflow, type JairaArchiveConfig } from "@jaira/shared";
+import { isArchivableStatus, isConversation, type JairaArchiveConfig } from "@jaira/shared";
 import type { Project } from "./project";
 
 const DAY_MS = 86_400_000;
@@ -27,7 +27,7 @@ export function autoArchive(
     .filter((row) => isArchivableStatus(row.status) && !waiting.has(row.taskId))
     .filter((row) => {
       const meta = project.tasks.tryRead(row.taskId);
-      return meta !== undefined && !isChatWorkflow(meta.workflow) && meta.system === undefined;
+      return meta !== undefined && !isConversation(meta) && meta.system === undefined;
     })
     .sort((a, b) => (b.endedAt ?? 0) - (a.endedAt ?? 0));
   const archived: string[] = [];

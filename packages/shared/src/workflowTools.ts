@@ -69,7 +69,7 @@ export type WorkflowsResult =
         inputs: Record<string, WorkflowSlotView>;
         outputs: Record<string, WorkflowSlotView>;
         /** ONE level: the states this one mounts. Ask again with a child's `state` to go down. */
-        children: Array<{ key: string; state: string; label?: string; description?: string }>;
+        children: Array<{ key: string; state: string; label?: string; description?: string; /** Switched off (decision 0021): entering it fails the run. */ disabled?: true }>;
       };
     }
   | { error: string };

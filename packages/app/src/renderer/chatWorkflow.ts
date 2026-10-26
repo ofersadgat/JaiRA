@@ -45,11 +45,69 @@
  */
 // Which tasks are conversations lives in `@jaira/shared` (`task.ts`): the engine archives tasks by themselves
 // and leaves conversations alone, so it has to ask the same question the Chat view does.
-export { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, isChatWorkflow, type ChatKind } from "@jaira/shared/browser";
-import { CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX, SHARED_SESSION, isChatWorkflow, type TaskSummary } from "@jaira/shared/browser";
+export { CHAT_CONTROL, CHAT_SESSION, DYNAMIC_WORKFLOW_PREFIX, isConversation } from "@jaira/shared/browser";
+import type { JsonValue } from "@declarative-ai/json";
+import { DEFAULT_CONVERSATIONS, SHARED_SESSION, isConversation, type TaskSummary, type WorkflowEntry } from "@jaira/shared/browser";
 
-/** What `task:all` is asked for to list every conversation — the states, and the dynamic namespace. */
-export const CHAT_LIST_WORKFLOWS: readonly string[] = [...CHAT_STATES, DYNAMIC_WORKFLOW_PREFIX];
+/**
+ * What the empty Chat room starts a conversation as (decision 0021): the workflow the settings name
+ * (`conversations.workflow`), and — for the room to ask between when that one is disabled here — the
+ * enabled workflows that can be a conversation, each with the input a message fills.
+ */
+export interface ConversationStart {
+  workflow: string;
+  label?: string | undefined;
+  /** The input the message fills; absent when the named workflow cannot be a conversation. */
+  input?: string | undefined;
+  /** Switched off where the conversation would run, so the room asks which to run instead. */
+  disabled: boolean;
+  choices: Array<{ stateId: string; label?: string | undefined; input: string }>;
+}
+
+/**
+ * What a conversation was opened with: the one text input its workflow takes (decision 0021) — `message`
+ * for `chat/session`, whatever another workflow calls it. `null` when the inputs hold no single text.
+ */
+export function openingOf(inputs: Readonly<Record<string, JsonValue>> | undefined): string | null {
+  const texts = Object.values(inputs ?? {}).filter((value): value is string => typeof value === "string");
+  return texts.length === 1 ? texts[0]! : null;
+}
+
+/**
+ * Settings → Runs → Conversations (decision 0021): each row a choice of the workflows that can be a
+ * conversation, named as a person knows them ("Session — chat/session"), and the value in effect kept
+ * in the list even where it does not qualify or is disabled, so the row says what is set.
+ */
+export function conversationsSchemaOf<S extends Record<string, unknown>>(schema: S, workflows: readonly WorkflowEntry[], effective: unknown): S {
+  const properties = (schema["properties"] ?? {}) as Record<string, Record<string, unknown>>;
+  const set = (effective ?? {}) as Record<string, unknown>;
+  const able = workflows.filter((w) => w.conversationInput !== undefined && w.loadError === undefined);
+  const name = (w: WorkflowEntry): string => `${w.label ?? w.rootId} — ${w.rootId}${w.disabled === true ? " (disabled)" : ""}`;
+  const row = (key: string): Record<string, unknown> => {
+    const ids = able.map((w) => w.rootId);
+    const current = typeof set[key] === "string" ? (set[key] as string) : (properties[key]?.["default"] as string | undefined);
+    if (current !== undefined && !ids.includes(current)) ids.push(current);
+    return { ...properties[key], enum: ids, enumDescriptions: ids.map((id) => {
+      const entry = able.find((w) => w.rootId === id);
+      return entry !== undefined ? name(entry) : `${id} — cannot be a conversation`;
+    }) };
+  };
+  return { ...schema, properties: Object.fromEntries(Object.keys(properties).map((key) => [key, row(key)])) };
+}
+
+/** {@link ConversationStart}, from the effective settings and the workflows where the conversation would run. */
+export function conversationStartOf(effective: JsonValue | undefined, workflows: readonly WorkflowEntry[]): ConversationStart {
+  const said = (effective as { conversations?: { workflow?: unknown } } | null | undefined)?.conversations?.workflow;
+  const workflow = typeof said === "string" && said.length > 0 ? said : DEFAULT_CONVERSATIONS.workflow;
+  const entry = workflows.find((w) => w.rootId === workflow);
+  return {
+    workflow,
+    label: entry?.label,
+    input: entry?.conversationInput,
+    disabled: entry?.disabled === true,
+    choices: workflows.flatMap((w) => (w.conversationInput !== undefined && w.disabled !== true && w.loadError === undefined ? [{ stateId: w.rootId, label: w.label, input: w.conversationInput }] : [])),
+  };
+}
 
 /**
  * A conversation's name, from the words it opened with.
@@ -92,5 +150,5 @@ export function chatProjectOf(open: string | null, at: string | null): string {
 
 /** Which of a project's tasks are conversations — the list the Chat drawer shows. */
 export function conversationsOf(tasks: readonly TaskSummary[]): TaskSummary[] {
-  return tasks.filter((task) => isChatWorkflow(task.workflow));
+  return tasks.filter(isConversation);
 }

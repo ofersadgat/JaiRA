@@ -6,6 +6,7 @@ import { openColumnMenu, openTaskMenu, type BoardMenuHost } from "@jaira/ui/boar
 import type { AskSpec } from "@jaira/ui/menuTypes";
 import { dragOffersOf, undoableOn } from "@jaira/ui/taskDrag";
 import { askingTasksOf, groupOf, groupProjects, markAsking, markQueued, mergeBoards } from "@jaira/ui/workspaceGroups";
+import { SHUT } from "@jaira/ui/uiState";
 import { Board, StickyScroll, type Mods, type StickyScrollValue } from "../components/Board";
 import { AskDialog } from "../components/files/AskDialog";
 import { ContextMenu, type MenuAt } from "../components/Menu";
@@ -186,7 +187,11 @@ export function BoardColumn(): JSX.Element {
       >
         {state.projects.length === 0 ? empty("Open a project to see its board.") : null}
         {shown.map((g, i) => {
-          const board = merged.get(g.key) ?? null;
+          // The workflows' own board without the columns hidden from it — a view setting of this window
+          // (decision 0021); the title bar's "N hidden" brings them back.
+          const hidden = ui.shut[SHUT.board(g.key)] ?? [];
+          const whole = merged.get(g.key) ?? null;
+          const board = whole !== null && whole.level === "" && hidden.length > 0 ? { ...whole, columns: whole.columns.filter((c) => !hidden.includes(c.stateId)) } : whole;
           const own = (card: { project?: string }): string => card.project ?? g.key;
           const owner = (taskId: string): string =>
             [...(board?.columns.flatMap((c) => c.cards) ?? []), ...(board?.atLevel ?? []), ...(board?.finished ?? [])].find((c) => c.taskId === taskId)?.project ?? g.key;
@@ -247,7 +252,8 @@ export function BoardColumn(): JSX.Element {
                   // dry run asked once per column per drag, the drop the commit.
                   connect={{
                     ask: (card, column) => actions.connectPreview(own(card), card.taskId, column.stateId),
-                    onDrop: (card, column, confirmed) => void actions.connectTask(own(card), card.taskId, column.stateId, confirmed === true ? { confirmed: true } : {}),
+                    onDrop: (card, column, confirmed, conversation) =>
+                      void actions.connectTask(own(card), card.taskId, column.stateId, { ...(confirmed === true ? { confirmed: true } : {}), ...(conversation !== undefined ? { conversation } : {}) }),
                     onMove: (card, move, confirmed) => void actions.connectTask(own(card), card.taskId, move.target, { path: move.path, ...(confirmed === true ? { confirmed: true } : {}) }),
                     undoable: undoableOn(board),
                     onUndo: (taskId) => void actions.undoConnect(taskId, owner(taskId)),

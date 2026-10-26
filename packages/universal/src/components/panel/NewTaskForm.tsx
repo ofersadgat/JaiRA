@@ -57,7 +57,12 @@ export function NewTaskForm({
     <View ref={box as never} flexDirection="column" gap={10} paddingTop={2} paddingHorizontal={2} paddingBottom={12}>
       <View flexDirection="column" gap={4}>
         <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: 0.04, upper: true, color: "dim" }}>Workflow</Txt>
-        <SelectInput value={workflow} options={[["choose a workflow…", ""], ...workflows.map((entry): [string, string] => [entry.label ?? entry.rootId, entry.rootId])]} onChange={pick} />
+        <SelectInput
+          value={workflow}
+          // A disabled workflow is listed, greyed, and cannot be chosen (decision 0021).
+          options={[["choose a workflow…", ""], ...workflows.map((entry): readonly [string, string, { note: string }?] => (entry.disabled === true ? [entry.label ?? entry.rootId, entry.rootId, { note: "disabled" }] : [entry.label ?? entry.rootId, entry.rootId]))]}
+          onChange={pick}
+        />
       </View>
       {picked?.loadError !== undefined ? (
         <Notice tone="bad">{picked.loadError}</Notice>

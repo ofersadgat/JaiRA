@@ -7,7 +7,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject } from "react";
 import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn } from "@jaira/shared/browser";
 import { keepDraft, useKeptDraft } from "./composerDrafts";
-import { CHAT_SESSION, titleOf } from "./chatWorkflow";
+import { openingOf, titleOf } from "./chatWorkflow";
 import type { ChatSurface } from "./chatSurface";
 import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import { useWaiting } from "./limitsStore";
@@ -157,15 +157,20 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   useEffect(() => {
     if (!notStarted) return;
     let live = true;
-    void invoke("chat:startPlan", { stateId: CHAT_SESSION, overrides: queuedSettings, ...(project !== undefined ? { project } : {}) })
+    // The workflow the waiting conversation was made to run, or — not read yet — the one the settings name.
+    const stateId = surface.detail?.workflow;
+    void invoke("chat:startPlan", { ...(stateId !== undefined ? { stateId } : {}), overrides: queuedSettings, ...(project !== undefined ? { project } : {}) })
       .then((next) => live && setStartPlan(next))
       .catch(() => live && setStartPlan(null));
     return () => {
       live = false;
     };
   }, [notStarted, queuedSettings, project]);
-  /** The message it will open with: what was just typed here, or what the task was made with. */
-  const openingMessage = surface.opening ?? (typeof surface.detail?.inputs?.["message"] === "string" ? (surface.detail.inputs["message"] as string) : null);
+  /**
+   * The message it will open with: what was just typed here, or what the task was made with — the one
+   * text input a conversation's workflow takes, whatever it is called (decision 0021).
+   */
+  const openingMessage = surface.opening ?? openingOf(surface.detail?.inputs);
   /** Take the waiting message back to the start page to be said again: its words go with it. */
   const takeBack = (): void => {
     if (openingMessage !== null) keepDraft(`chat:new:${project ?? ""}`, openingMessage);

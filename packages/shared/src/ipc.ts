@@ -130,6 +130,11 @@ export interface CreateTaskRequest {
   branch?: string;
   /** Where the task is recorded. See {@link ProjectRef}. */
   project?: ProjectRef;
+  /**
+   * The Chat view is starting it: the task is a CONVERSATION (decision 0021), whatever workflow it
+   * runs — recorded as `startedBy: { by: "chat" }`.
+   */
+  conversation?: true;
 }
 
 export interface StartTaskRequest {
@@ -610,6 +615,18 @@ export interface WriteWorkflowRequest {
   project?: ProjectRef;
   /** The full file contents. Must parse as JSON; the workflow is re-linted after the write. */
   text: string;
+}
+
+/**
+ * Switch a state off, or back on (decision 0021) — the `disabled` field in its file in `layer`, or a
+ * file there that follows the nearest one below. See `AppService.setWorkflowDisabled`.
+ */
+export interface SetWorkflowDisabledRequest {
+  stateId: string;
+  layer: WorkflowLayer;
+  /** WHICH project — see {@link ReadWorkflowRequest.project}. */
+  project?: ProjectRef;
+  disabled: boolean;
 }
 
 /**
@@ -1811,7 +1828,8 @@ export interface IpcContract {
    * rather than a refusal, since the Chat view writes its states on the first send.
    */
   "chat:startPlan": {
-    request: { stateId: string; project?: string; overrides?: ChatSettings };
+    /** `stateId` absent ⇒ the workflow a new conversation runs by the settings (`conversations.workflow`, decision 0021). */
+    request: { stateId?: string; project?: string; overrides?: ChatSettings };
     response: ChatPlanView;
   };
   /**
@@ -1996,6 +2014,8 @@ export interface IpcContract {
   "workflow:browse": { request: { project?: ProjectRef } | void; response: WorkflowBrowser };
   "workflow:read": { request: ReadWorkflowRequest; response: WorkflowSource };
   "workflow:write": { request: WriteWorkflowRequest; response: WorkflowSource };
+  /** Switch a state off or back on, in one layer (decision 0021). Answers with the file after — `exists: false` when Enable removed it. */
+  "workflow:setDisabled": { request: SetWorkflowDisabledRequest; response: WorkflowSource };
   /** Rename, duplicate, or copy a state into the other layer. */
   "workflow:move": { request: MoveWorkflowRequest; response: WorkflowMutationResult };
   /** Which of the description and the state files has moved since they were last in step. */
@@ -2477,6 +2497,7 @@ export const IPC_CHANNELS = [
   "workflow:browse",
   "workflow:read",
   "workflow:write",
+  "workflow:setDisabled",
   "workflow:move",
   "workflow:delete",
   "workflow:syncStatus",

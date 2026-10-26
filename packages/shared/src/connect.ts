@@ -71,6 +71,12 @@ export interface TaskConnectRequest {
   /** Say what WOULD happen — which resolution, where the task will stand, what is missing — and change nothing. */
   dryRun?: boolean;
   /**
+   * The workflow a move that makes a dynamic workflow gives the task to steer it, chosen for THIS
+   * move — what a person picks when the configured one is disabled (`ConnectPlan.chooseConversation`).
+   * Absent ⇒ the configured one.
+   */
+  conversation?: string;
+  /**
    * `false` leaves a task this connect MAKES queued where nothing has to run for the move to be made
    * (an adoption whose target is the state that comes next anyway). A move that an engine has to
    * take starts one regardless. Absent ⇒ start.
@@ -137,7 +143,11 @@ export interface ConnectRefusal {
     /** The target cannot be reached from where the task stands by anything the workflow defines. */
     | "illegal"
     /** An ASK cell the caller has not confirmed: `message` is the question. */
-    | "confirm";
+    | "confirm"
+    /** The target is switched off in the live files (decision 0021): nothing is moved there. */
+    | "disabled"
+    /** The workflow the move would give the task to steer it is disabled: choose one (`ConnectPlan.chooseConversation`). */
+    | "conversation";
   message: string;
   /** `inputs-missing`: exactly which, with their schemas. */
   missing?: ConnectMissingInput[];
@@ -222,6 +232,18 @@ export interface ConnectPlan {
   judgement?: MoveJudgement;
   /** The branch the new parent takes up, when the adopted task had one. */
   branch?: string;
+  /**
+   * The workflow this move would give the task to steer it is DISABLED (decision 0021), so the move
+   * asks which to use instead — the person's pick rides the drop again as `TaskConnectRequest.conversation`.
+   * `choices` are the enabled workflows that can be a conversation.
+   */
+  chooseConversation?: { disabled: string; choices: ConversationChoice[] };
+}
+
+/** A workflow that can be a conversation (decision 0021), as a choice is offered. */
+export interface ConversationChoice {
+  stateId: string;
+  label?: string;
 }
 
 /**

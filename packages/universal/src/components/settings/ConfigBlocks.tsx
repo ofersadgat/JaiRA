@@ -22,13 +22,24 @@ import { SettingsSection } from "./SettingsPage";
  */
 
 /** One declared block (`CONFIG_SECTIONS`) as a section of rows; each field is written at its own path. */
-export function ConfigBlockSection({ writer, block, title }: { writer: Writer; block: string; title?: string }): JSX.Element | null {
+export function ConfigBlockSection({
+  writer,
+  block,
+  title,
+  schemaOf,
+}: {
+  writer: Writer;
+  block: string;
+  title?: string;
+  /** The block's schema with what only the window knows filled in — the workflows a value may name. */
+  schemaOf?: ((schema: Schema) => Schema) | undefined;
+}): JSX.Element | null {
   const section = CONFIG_SECTIONS.find((s) => s.key === block);
   if (section === undefined) return null;
   return (
     <SettingsSection id={section.key} title={title ?? section.title} info={section.hint}>
       <SchemaForm
-        schema={section.schema as Schema}
+        schema={schemaOf !== undefined ? schemaOf(section.schema as Schema) : (section.schema as Schema)}
         value={writer.effective[section.key]}
         onChange={(next) => writer.set(section.key, next)}
         ctx={{ path: section.key, disabled: writer.locked, isSet: writer.stated, setAt: writer.set }}

@@ -55,6 +55,7 @@ import { LinkInput, LinkPreview, ReadValue } from "./Links";
 import { Field, OperationFieldsEditor } from "./OperationFields";
 import { Grid, Hung, RowControls, SlotGroup, SlotTable } from "./SlotTable";
 import { StateGraphView } from "./StateGraph";
+import { Checkbox } from "../form/inputs";
 
 /**
  * The workflow editor: one state file as a form, its JSON and its graph, over one document. Everything
@@ -581,6 +582,15 @@ export function WorkflowEditor({
               {readOnly && form.description.length === 0 ? null : (
                 <InlineField name="Description">
                   <Area value={form.description} onChange={(description) => editForm({ description })} rows={2} placeholder="an author's note — also useful prompt context" />
+                </InlineField>
+              )}
+              {/* The switch (decision 0021): the same field as the JSON tab's `"disabled": true`. */}
+              {readOnly && !form.disabled ? null : (
+                <InlineField name="Disabled">
+                  <View flexDirection="row" alignItems="center" gap={7} minWidth={0}>
+                    <Checkbox checked={form.disabled} disabled={readOnly} label="Disabled" onChange={(disabled) => editForm({ disabled })} />
+                    <Sub flexShrink={1} minWidth={0}>no new run starts here or under it, and a run that reaches it fails</Sub>
+                  </View>
                 </InlineField>
               )}
             </View>

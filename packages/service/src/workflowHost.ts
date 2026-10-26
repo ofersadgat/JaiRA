@@ -33,6 +33,8 @@ import type { JsonValue } from "@declarative-ai/json";
 import { sourceStateId } from "@declarative-ai/hw";
 import {
   ANSWERED_EVENT,
+  disabledBy,
+  disabledWords,
   MOVED_EVENT,
   workflowOutcomeOf,
   type AnsweredEvent,
@@ -68,6 +70,7 @@ import {
 import {
   boardPathOf,
   bundleFor,
+  disabledRefusalOf,
   generateDocumentVersion,
   generatorSupplied,
   holdingOf,
@@ -241,11 +244,13 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
 
   return {
     workflows(input: WorkflowsInput): WorkflowsResult {
+      const browser = deps.browse();
       if (input.state === undefined) {
         return {
-          workflows: deps
-            .browse()
-            .workflows.filter((entry) => entry.loadError === undefined)
+          // A disabled workflow is left out (decision 0021): the person's ruling — disabled "should be
+          // hidden from the workflow list sent to an agent".
+          workflows: browser.workflows
+            .filter((entry) => entry.loadError === undefined && entry.disabled !== true)
             .map((entry) => {
               const bundle = bundleFor(project, entry.rootId);
               const description = bundle?.states[bundle.rootId]?.description;
@@ -253,6 +258,8 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
             }),
         };
       }
+      const off = disabledBy(browser.disabled, input.state);
+      if (off !== undefined) return { error: `${disabledWords(sourceStateId(input.state), off)}: no run starts there` };
       const bundle = bundleFor(project, input.state);
       const root = bundle?.states[bundle.rootId];
       if (bundle === undefined || root === undefined) return { error: `no state '${input.state}' was found on the workflow path` };
@@ -270,7 +277,14 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
           outputs: slots(surface.outputs, false),
           children: Object.entries(root.children ?? {}).map(([key, child]) => {
             const state = bundle.states[child.state];
-            return { key, state: sourceStateId(child.state), ...(state?.label !== undefined ? { label: state.label } : {}), ...(state?.description !== undefined ? { description: state.description } : {}) };
+            return {
+              key,
+              state: sourceStateId(child.state),
+              ...(state?.label !== undefined ? { label: state.label } : {}),
+              ...(state?.description !== undefined ? { description: state.description } : {}),
+              // Entering it fails the run, so a conversation is told before it moves anything there.
+              ...(disabledBy(browser.disabled, child.state) !== undefined ? { disabled: true as const } : {}),
+            };
           }),
         },
       };
@@ -282,6 +296,9 @@ export function createWorkflowHost(deps: WorkflowHostDeps): WorkflowToolHost {
       if (row === undefined || meta === undefined) return { ok: false, code: "unknown-task", reason: `this conversation's task '${taskId}' is gone` };
       const target = sourceStateId(input.state);
       if (targetSurface(target) === undefined) return { ok: false, code: "unknown-target", reason: `no state '${target}' was found on the workflow path — \`list_workflows\` lists what there is` };
+      // A disabled target (decision 0021) is started by nobody — a conversation included.
+      const off = disabledRefusalOf(project, target);
+      if (off !== undefined) return { ok: false, code: "disabled", reason: off };
       if (row.snapshotHash === undefined && row.documentId === undefined) return { ok: false, code: "never-run", reason: "this conversation has not run yet" };
       const supplied = suppliedOfTool(input);
       const literals = generatorSupplied(supplied);

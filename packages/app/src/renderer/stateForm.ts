@@ -113,6 +113,11 @@ export interface FormModel {
   label: string;
   /** The author's note — also useful prompt context, which is why it is worth a box. */
   description: string;
+  /**
+   * `"disabled": true` — the state switched off (decision 0021). A file's `"disabled": false` (a
+   * project switching back on what it follows) reads as unticked and is left as written.
+   */
+  disabled: boolean;
   operationKind: OperationKind;
   /**
    * `operationKind === "ref"` only: the reference the whole block IS.
@@ -150,6 +155,7 @@ export interface FormModel {
 export const EMPTY_FORM: FormModel = {
   label: "",
   description: "",
+  disabled: false,
   operationKind: "",
   operationRef: "",
   operation: EMPTY_OPERATION_FIELDS,
@@ -288,6 +294,7 @@ export function formOf(doc: unknown): FormModel {
   return {
     label: typeof state["label"] === "string" ? state["label"] : "",
     description: typeof state["description"] === "string" ? state["description"] : "",
+    disabled: state["disabled"] === true,
     operationKind,
     operationRef: operationKind === "ref" ? (typeof operation === "string" ? operation : JSON.stringify(operation)) : "",
     operation: op,
@@ -426,6 +433,8 @@ export function applyForm(doc: unknown, form: FormModel): unknown {
   else delete state["label"];
   if (form.description.trim().length > 0) state["description"] = form.description;
   else delete state["description"];
+  if (form.disabled) state["disabled"] = true;
+  else if (state["disabled"] === true) delete state["disabled"];
 
   applyLimits(state, form.limits);
 

@@ -232,6 +232,8 @@ export function previewOf(answer: ColumnAnswer | undefined, card: Pick<BoardCard
     const refused = missing.length > 0 ? `${count(missing.length, "required input")} would not be bound.` : result.refusal.message;
     return { kind: KIND[plan.resolution], say, facts, refused };
   }
+  // What would steer it is disabled (decision 0021): the drop asks which to use, in the column.
+  if (plan.chooseConversation !== undefined) return { kind: KIND[plan.resolution], say, facts, drop: "Drop, then choose what steers it" };
   // The move table's ASK cells: the drop still commits, once the person has said yes to this.
   const judgement = plan.judgement;
   if (judgement?.confirm !== undefined) {

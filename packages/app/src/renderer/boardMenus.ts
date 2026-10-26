@@ -13,11 +13,12 @@
  * says so, because "Re-run 3 tasks" doing something to two of them is how trust in a menu dies.
  * Right-clicking outside the selection collapses it to the clicked card first, explorer-style.
  */
-import { isArchivableStatus, type BoardCard } from "@jaira/shared/browser";
+import { isArchivableStatus, isConversation, SHARED_SESSION, type BoardCard } from "@jaira/shared/browser";
 import { boardCardOrderOf, type BoardPick } from "./boardModel";
-import { isChatWorkflow } from "./chatWorkflow";
 import type { AskSpec, MenuItem } from "./menuTypes";
 import { invoke, type useApp } from "./store";
+import { SHUT } from "./uiState";
+import { switchItems } from "./workflowSwitch";
 
 type Actions = ReturnType<typeof useApp>["actions"];
 type State = ReturnType<typeof useApp>["state"];
@@ -35,7 +36,19 @@ export type BoardMenu<P extends MenuPlace> = P & { items: MenuItem[]; title?: st
 export interface BoardMenuHost<P extends MenuPlace> {
   actions: Pick<
     Actions,
-    "rerunTasks" | "cancelTasks" | "archiveTasks" | "deleteTasks" | "select" | "openTask" | "rerunTask" | "cancelTask" | "runQueuedOn" | "drillProject" | "selectWorkflow"
+    | "rerunTasks"
+    | "cancelTasks"
+    | "archiveTasks"
+    | "deleteTasks"
+    | "select"
+    | "openTask"
+    | "rerunTask"
+    | "cancelTask"
+    | "runQueuedOn"
+    | "drillProject"
+    | "selectWorkflow"
+    | "toggleShut"
+    | "setWorkflowDisabled"
   >;
   boards: State["boards"];
   queue: State["queue"];
@@ -207,9 +220,9 @@ export function openTaskMenu<P extends MenuPlace>(host: BoardMenuHost<P>, projec
       // start a second conversation in the same task, and a thread is read from the latest run —
       // so everything already said would still be in the database and reachable from nowhere.
       // `task:rerun` copies it instead, and this is where that stops being a surprise.
-      label: card.status === "queued" ? "Start" : terminal || isChatWorkflow(card.workflow) ? "Re-run as a new task" : "Re-run",
+      label: card.status === "queued" ? "Start" : terminal || isConversation(card) ? "Re-run as a new task" : "Re-run",
       disabled: running,
-      ...(terminal || isChatWorkflow(card.workflow) ? { note: "fresh copy" } : {}),
+      ...(terminal || isConversation(card) ? { note: "fresh copy" } : {}),
       onSelect: () => void actions.rerunTask(card.taskId, project),
     },
     {
@@ -257,6 +270,11 @@ export function openTaskMenu<P extends MenuPlace>(host: BoardMenuHost<P>, projec
  * The menu is the column's own two verbs, then "select", then the group's. "Select" is what joins
  * this to the multi-selection: it fills the same set a shift-click builds, so a column is a way of
  * GATHERING tasks rather than a second, parallel way of acting on them.
+ *
+ * Between them, the column's two switches (decision 0021): Hide column — on the board of every
+ * workflow, a view setting of this window — and Disable, in the words the layer of its file calls
+ * for. The board is where a project reaches a Shared workflow at all: its file tree does not show
+ * them, so this is how `feature` is switched off for one project.
  */
 export function openColumnMenu<P extends MenuPlace>(host: BoardMenuHost<P>, project: string, stateId: string, at: P): void {
   const { actions, setPicked, setTaskMenu } = host;
@@ -282,7 +300,23 @@ export function openColumnMenu<P extends MenuPlace>(host: BoardMenuHost<P>, proj
           actions.select(cards[cards.length - 1]!.taskId, project);
         },
       },
+      ...switchesOf(host, project, stateId),
       ...groupItems(host, project, cards).map((item, i) => (i === 0 ? { ...item, separator: true } : item)),
     ],
   });
+}
+
+/** Hide column, and the column's Disable or Enable — see {@link openColumnMenu}. */
+function switchesOf<P extends MenuPlace>(host: BoardMenuHost<P>, project: string, stateId: string): MenuItem[] {
+  const board = host.boards[project];
+  const column = board?.columns.find((c) => c.stateId === stateId);
+  const hide: MenuItem[] = board?.level === "" ? [{ label: "Hide column", separator: true, onSelect: () => host.actions.toggleShut(SHUT.board(project), stateId) }] : [];
+  const layer = column?.layer;
+  const switches =
+    layer === undefined
+      ? []
+      : switchItems({ stateId, layer, disabledBy: column?.disabledBy, hasProject: project !== SHARED_SESSION }, (at, disabled) =>
+          void host.actions.setWorkflowDisabled(stateId, at, disabled, project),
+        );
+  return [...hide, ...switches.map((item, i) => (i === 0 ? { ...item, separator: true } : item))];
 }

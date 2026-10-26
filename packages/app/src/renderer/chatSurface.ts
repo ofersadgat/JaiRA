@@ -4,7 +4,7 @@
  */
 import type { AppState, useApp } from "./store";
 import { askOfTask } from "./approvalCall";
-import { chatProjectOf } from "./chatWorkflow";
+import { chatProjectOf, conversationStartOf, type ConversationStart } from "./chatWorkflow";
 import { parkedGateOf } from "./panelHost";
 import type {
   ApprovalScope,
@@ -89,8 +89,13 @@ export interface ChatSurface {
   /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
   onSeen: (taskId: string, at: number) => void;
   onOpen: (taskId: string | null, project?: string) => void;
-  /** Start one. The settings are the composer's, and reach the first message by riding its run. */
-  onNew: (message: string, overrides?: ChatSettings) => Promise<string | null>;
+  /**
+   * Start one. The settings are the composer's, and reach the first message by riding its run.
+   * `workflow` is what the person chose to run it as, where the room asked (decision 0021).
+   */
+  onNew: (message: string, overrides?: ChatSettings, workflow?: string) => Promise<string | null>;
+  /** What a new conversation runs, and — where that is disabled here — what it could run instead (decision 0021). */
+  start: ConversationStart;
   /**
    * The open conversation while it has not started: being placed, or waiting for a workspace with room
    * (decision 0013 §5). Its counts, what it asked last and what it waits for are what the thread draws
@@ -218,6 +223,7 @@ export function chatSurfaceOf(
     onSeen: actions.markSeen,
     onOpen: actions.openConversation,
     onNew: actions.newConversation,
+    start: conversationStartOf(state.config?.effective, state.workflows),
     queued,
     runOn: queued !== undefined ? queued.target : state.chat.runOn,
     onRunOn: (target) => (queued !== undefined ? void actions.changeQueued(queued.taskId, queued.project, { runOn: target ?? null }) : actions.setRunOn(target)),

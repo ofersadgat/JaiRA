@@ -205,6 +205,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "functions:approve": ((request: { files: string[]; project?: string }) => service.functionsApprove(request)) as Handler,
     "workflow:read": ((request: Parameters<typeof service.readWorkflow>[0]) => service.readWorkflow(request)) as Handler,
     "workflow:write": ((request: Parameters<typeof service.writeWorkflow>[0]) => service.writeWorkflow(request)) as Handler,
+    "workflow:setDisabled": ((request: Parameters<typeof service.setWorkflowDisabled>[0]) => service.setWorkflowDisabled(request)) as Handler,
     "workflow:move": ((request: Parameters<typeof service.moveWorkflow>[0]) => service.moveWorkflow(request)) as Handler,
     "workflow:syncStatus": ((request: Parameters<typeof service.syncStatus>[0]) => service.syncStatus(request)) as Handler,
     "workflow:sync": ((request: Parameters<typeof service.runSync>[0]) => service.runSync(request)) as Handler,

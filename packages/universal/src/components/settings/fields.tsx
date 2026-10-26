@@ -47,7 +47,8 @@ export function SelectInput({
   fill = false,
 }: {
   value: string;
-  options: ReadonlyArray<readonly [label: string, value: string]>;
+  /** Each choice: its words, its value, and — for one that is listed but cannot be chosen — why. */
+  options: ReadonlyArray<readonly [label: string, value: string, off?: { note: string }]>;
   onChange: (v: string) => void;
   disabled?: boolean | undefined;
   /** `width: 100%`, for one that is a field's control. */
@@ -71,7 +72,7 @@ export function SelectInput({
       setMenu({
         x,
         y: y + h + 3,
-        items: options.map(([label, v]) => ({ label, checked: v === value, onSelect: () => onChange(v) })),
+        items: options.map(([label, v, off]) => ({ label, checked: v === value, onSelect: () => onChange(v), ...(off !== undefined ? { disabled: true, note: off.note } : {}) })),
       }),
     );
   return (

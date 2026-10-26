@@ -224,6 +224,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
       return { view: held, ...(run !== undefined ? { run } : {}) };
     },
     inEditor: (stateId) => state.view === "files" && state.doc?.stateId === stateId,
+    onEnable: (stateId, layer, project) => void actions.setWorkflowDisabled(stateId, layer, false, project),
     openInFiles: (stateId) => {
       actions.setView("files");
       actions.selectState(stateId, { run: false });

@@ -234,7 +234,8 @@ export function initProject(projectDir: string, baseDir?: string): JairaPaths {
     //
     // `limits` likewise: whether a refused message tries again when the allowance resets is yours.
     // `archive` too: when finished work leaves the board is a habit of yours, not of a checkout.
-    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, limits: _yourLimits, archive: _yourArchive, ...starter } = defaultConfig();
+    // `conversations` too: a starter spelling out the built-in defaults would override what Shared picks.
+    const { integrations: _machineWide, autopilot: _yours, functions: _alsoYours, appearance: _yourLook, limits: _yourLimits, archive: _yourArchive, conversations: _none, ...starter } = defaultConfig();
     writeFileSync(paths.settingsFile, JSON.stringify(starter, null, 2) + "\n", "utf8");
   }
   const ignoreFile = join(paths.jairaDir, ".gitignore");
@@ -443,6 +444,12 @@ function openAt(
   const artifactLog = isFileBacked(config.storage.artifacts) ? new RowLog(paths.artifactRowsDir) : undefined;
   const runtime = new RuntimeStore(db, workspace, taskLog);
   const jobs = new JobStore(db, opts?.staleMs, workspace);
+  // A task's file is not in the database: its writes reach the change log from here (decision 0018).
+  // Its removal is the task's deletion too — after the runtime row's, whose tombstone it must not
+  // turn back into a change.
+  const tasks = new TaskFileStore(paths.tasksDir, replica ? undefined : (taskId, removed) => touch(db, "task", taskId, taskId, removed));
+  // The conversations made before decision 0021 said what they were by their workflow's id — see there.
+  if (!replica) tasks.stampConversations();
 
   // Read orphans BEFORE reaping: the rows are the only record those processes ever
   // existed, and an abandoned agent is still running and still billing.
@@ -466,10 +473,7 @@ function openAt(
     workspace,
     config,
     db,
-    // A task's file is not in the database: its writes reach the change log from here (decision 0018).
-    // Its removal is the task's deletion too — after the runtime row's, whose tombstone it must not
-    // turn back into a change.
-    tasks: new TaskFileStore(paths.tasksDir, replica ? undefined : (taskId, removed) => touch(db, "task", taskId, taskId, removed)),
+    tasks,
     runtime,
     events: new SqliteEventLog(db, journalDir),
     commands: new CommandLog(db),

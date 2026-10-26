@@ -269,6 +269,7 @@ describe("what the schema offers the editor", () => {
       "id",
       "label",
       "description",
+      "disabled",
       "inputs",
       "outputs",
       "operation",

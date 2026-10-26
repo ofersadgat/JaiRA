@@ -356,6 +356,13 @@ export interface BoardColumn {
   stateId: string;
   label?: string;
   cards: BoardCard[];
+  /**
+   * The state that switches this column's state off (decision 0021) — itself, or one above it. The
+   * column stays on the board, its head marked; nothing new starts in it or moves into it.
+   */
+  disabledBy?: string;
+  /** Which layer's file wins for the column's state — what Disable writes into, or follows. Absent ⇒ no file. */
+  layer?: WorkflowLayer;
 }
 
 /**
@@ -597,6 +604,11 @@ export interface WorkflowFileEntry {
    * this project: it is listed so the override is visible rather than looking like a missing file.
    */
   shadowed?: boolean;
+  /**
+   * Set on the file that wins for its state when it says `"disabled": true` — itself, or through the
+   * file it follows (decision 0021). Never on a shadowed copy: that one decides nothing here.
+   */
+  disabled?: true;
 }
 
 /** A workflow root and its lint state. */
@@ -623,6 +635,13 @@ export interface WorkflowEntry {
   driftedTasks: string[];
   /** Which layer supplied this root's own state file. */
   layer: WorkflowLayer;
+  /** The root's file says `"disabled": true` (decision 0021): no new run of it starts. */
+  disabled?: true;
+  /**
+   * The input a conversation's words fill, when this workflow can BE a conversation (decision 0021):
+   * its one required input, which takes text. Absent ⇒ it cannot be one — it takes none, or several.
+   */
+  conversationInput?: string;
 }
 
 export interface WorkflowBrowser {
@@ -630,6 +649,11 @@ export interface WorkflowBrowser {
   files: WorkflowFileEntry[];
   /** States no root reaches — a reference cycle, or a failed load above them. */
   unreachable: string[];
+  /**
+   * Every state whose winning file says `"disabled": true`, in id order (decision 0021) — each
+   * switching off itself and every state under its id; {@link disabledBy} reads it. Absent ⇒ none.
+   */
+  disabled?: string[];
 }
 
 // --- the file tree (DESIGN §11.1, the Files view) ----------------------------
@@ -702,6 +726,11 @@ export interface FileNode {
    * ships" without the tree that holds it also having to hold the built-in root.
    */
   overridesBuiltIn?: boolean;
+  /**
+   * Set on the state file that wins for its id when it says `"disabled": true` (decision 0021) — the
+   * tree's `disabled` chip. Never on a shadowed copy: that one decides nothing.
+   */
+  disabled?: true;
   /** Set when the file could not be read or parsed. */
   error?: string;
   /** Lint state, joined from the workflow browser. Absent on a node nothing is known about. */
@@ -886,6 +915,11 @@ export interface StateView {
   referencedBy: string[];
   /** Tasks in this state pinned to a snapshot older than what is on disk (DESIGN §5.3). */
   driftedTasks: string[];
+  /**
+   * The state that switches this one off (decision 0021) — itself, or one above it — when one does:
+   * the Run tab says so, and a run of it is refused.
+   */
+  disabledBy?: string;
   /**
    * True when this was read from the file alone, with no project open.
    *

@@ -297,6 +297,7 @@ function FilesDrawer({ find, draft, onDraft, floats }: { find: boolean; draft: T
       onRenameFile={actions.renameFile}
       onDeleteFile={actions.deleteFile}
       onReveal={actions.revealFile}
+      onSetDisabled={(stateId, layer, disabled, project) => void actions.setWorkflowDisabled(stateId, layer, disabled, project)}
       find={find}
       draft={draft}
       onDraft={onDraft}

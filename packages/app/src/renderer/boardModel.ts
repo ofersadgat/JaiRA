@@ -119,7 +119,7 @@ export function lanesOf(cards: readonly BoardCard[]): { lane: Lane; cards: Board
 export function originLineOf(card: Pick<BoardCard, "startedBy" | "origin">): { words: string; taskId: string; stateId?: string } | undefined {
   const say = (key: string | undefined, summary: string | undefined): string => ["started by events", key, summary].filter((part) => part !== undefined && part.length > 0).join(" · ");
   const by = card.startedBy;
-  if (by !== undefined) return { words: say(by.state?.key, by.summary), taskId: by.fromTask, ...(by.state !== undefined ? { stateId: by.state.stateId } : {}) };
+  if (by?.by === "events") return { words: say(by.state?.key, by.summary), taskId: by.fromTask, ...(by.state !== undefined ? { stateId: by.state.stateId } : {}) };
   const made = card.origin;
   if (made?.kind === "started") return { words: say(made.key, made.event), taskId: made.taskId, ...(made.stateId !== undefined ? { stateId: made.stateId } : {}) };
   return undefined;

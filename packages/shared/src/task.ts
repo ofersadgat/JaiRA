@@ -86,9 +86,10 @@ export interface TaskMeta {
    */
   connectUndo?: StoredConnectUndo;
   /**
-   * What STARTED this task ON ITS OWN, when the events task did (decision 0010 §4, the rulings of
-   * 2026-09-25): a `start_task` asked with `top_level: true`. A task the events task starts as its
-   * CHILD (the default) says so in {@link origin} instead — `kind: "started"` — and is never both.
+   * What STARTED this task, when it was not a person's New task: the events task, ON ITS OWN (decision
+   * 0010 §4, the rulings of 2026-09-25: a `start_task` asked with `top_level: true` — a task the events
+   * task starts as its CHILD says so in {@link origin} instead, `kind: "started"`, and is never both);
+   * or the Chat view, which makes the task a CONVERSATION (decision 0021) — see {@link isConversation}.
    */
   startedBy?: TaskStartedBy;
   /**
@@ -108,8 +109,20 @@ export interface TaskMeta {
   createdAt: string; // ISO 8601
 }
 
-/** Where a task the events task started ON ITS OWN came from — see {@link TaskMeta.startedBy}. */
-export interface TaskStartedBy {
+/** What started a task — see {@link TaskMeta.startedBy}. */
+export type TaskStartedBy = TaskStartedByEvents | TaskStartedByChat;
+
+/**
+ * The Chat view started it: the task IS a conversation (decision 0021), a row in the Chat list whatever
+ * workflow it runs. A conversation used to be known by its workflow's id (`chat/session`), which stopped
+ * being true once a conversation could run any workflow that takes one text input.
+ */
+export interface TaskStartedByChat {
+  by: "chat";
+}
+
+/** Where a task the events task started ON ITS OWN came from. */
+export interface TaskStartedByEvents {
   by: "events";
   /** The events task that started it. */
   fromTask: string;
@@ -267,16 +280,11 @@ export const CHAT_CONTROL = "chat/control";
 /** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
 export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
 
-/** Every state a Chat-view conversation can be. Both ship in the built-in layer. */
-export const CHAT_STATES = [CHAT_SESSION, CHAT_CONTROL] as const;
-
-/** Which conversation a task is: the workflow it was created from, or `null` for a task that is not one. */
-export type ChatKind = (typeof CHAT_STATES)[number];
-
 /**
- * True for a task the Chat view owns — its workflow is one of {@link CHAT_STATES}, or a dynamic
- * workflow, which IS a conversation: a row in the Chat list and not a column of its own.
+ * True for a task the Chat view owns — one the Chat view STARTED, whatever workflow it runs (decision
+ * 0021), or one running a dynamic workflow, which IS a conversation: a row in the Chat list and not a
+ * column of its own.
  */
-export function isChatWorkflow(workflow: string | undefined): boolean {
-  return workflow !== undefined && ((CHAT_STATES as readonly string[]).includes(workflow) || workflow.startsWith(DYNAMIC_WORKFLOW_PREFIX));
+export function isConversation(task: { workflow: string; startedBy?: TaskStartedBy | undefined }): boolean {
+  return task.startedBy?.by === "chat" || task.workflow.startsWith(DYNAMIC_WORKFLOW_PREFIX);
 }

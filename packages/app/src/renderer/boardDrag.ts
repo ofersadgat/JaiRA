@@ -19,7 +19,17 @@ import { canDrag, requestFor, type DragOffers } from "./taskDrag";
 export const CONFIRM_YES: Record<MoveConfirmKind, string> = { "stop-and-rewind": "Stop and go back", "pause-and-move": "Pause and move" };
 
 /** A move's question, put in the column the task would land in until the person answers it. */
-export type MoveQuestion = { column: string; sentence: string; yes: string; go: () => void };
+export type MoveQuestion = {
+  column: string;
+  sentence: string;
+  yes: string;
+  go: () => void;
+  /**
+   * A question answered by a PICK rather than a yes — which workflow steers the task, when the one the
+   * settings name is disabled (decision 0021): one button per choice in place of {@link yes}.
+   */
+  choices?: ReadonlyArray<{ label: string; title?: string; go: () => void }>;
+};
 
 /** What a drop on a column would do, while a card is in the air (`Board.tsx`'s `Column`'s `drop`). */
 export type ColumnDrop = { accepts: boolean; onDrop: () => void; preview?: () => ConnectPreview | "asking" | undefined };
@@ -27,8 +37,11 @@ export type ColumnDrop = { accepts: boolean; onDrop: () => void; preview?: () =>
 /** The board's connect, as a drag needs it: the dry run and the commit. */
 export type ConnectDrop = {
   ask: ConnectAsk;
-  /** The commit. `confirmed` once the person said yes to the move table's question, where it asks one. */
-  onDrop: (card: BoardCard, column: BoardColumn, confirmed?: boolean) => void;
+  /**
+   * The commit. `confirmed` once the person said yes to the move table's question, where it asks one;
+   * `conversation` once they picked what steers the task, where the configured one is disabled.
+   */
+  onDrop: (card: BoardCard, column: BoardColumn, confirmed?: boolean, conversation?: string) => void;
 };
 
 /**
@@ -103,10 +116,24 @@ export function columnDropOf({
       const preview = previewOf(drag.answer(columnKey), card, column);
       putDown();
       if (!accepted) return;
-      const judgement = (() => {
+      const plan = (() => {
         const answer = drag.answer(columnKey);
-        return answer?.status === "answered" ? answer.result.plan?.judgement : undefined;
+        return answer?.status === "answered" ? answer.result.plan : undefined;
       })();
+      const judgement = plan?.judgement;
+      // What steers the task is disabled (decision 0021): the box asks which instead, and a pick is the commit
+      // — the move table's yes as well, where it asks one, since picking is agreeing to the move.
+      const choose = plan?.chooseConversation;
+      if (choose !== undefined) {
+        confirm({
+          column: columnKey,
+          sentence: `'${choose.disabled}', which a move gives a task to steer it, is disabled here. Choose what steers ${card.title}:`,
+          yes: "",
+          go: () => undefined,
+          choices: choose.choices.map((choice) => ({ label: choice.label ?? choice.stateId, title: choice.stateId, go: () => connect.onDrop(card, column, true, choice.stateId) })),
+        });
+        return;
+      }
       if (judgement?.confirm !== undefined) {
         confirm({ column: columnKey, sentence: preview?.confirm ?? "Take this move?", yes: CONFIRM_YES[judgement.confirm], go: () => connect.onDrop(card, column, true) });
         return;

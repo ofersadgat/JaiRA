@@ -1,6 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { projectNameOf, type PlacementView } from "@jaira/shared/browser";
+import { conversationsSchemaOf } from "@jaira/ui/chatWorkflow";
 import { configWriter } from "@jaira/ui/configWriter";
 import { invoke, subscribe as subscribePush } from "@jaira/ui/store";
 import { useShell } from "../../app/shell";
@@ -53,6 +54,7 @@ export function RunsPage(): JSX.Element {
       <ConfigBlockSection writer={writer} block="autopilot" />
       <ConfigBlockSection writer={writer} block="limits" />
       <ConfigBlockSection writer={writer} block="archive" />
+      <ConfigBlockSection writer={writer} block="conversations" schemaOf={(schema) => conversationsSchemaOf(schema, state.workflows, writer.effective["conversations"])} />
       <ConfigBlockSection writer={writer} block="workflows" />
     </>
   );

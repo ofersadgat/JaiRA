@@ -363,6 +363,8 @@ export interface RunContext {
  */
 export function runBlocker({ state, target, exists, fields, check, busy }: RunContext): string | null {
   if (state === null) return "select a state to run";
+  // Refused at the start whoever starts it (decision 0021), so the button says it first.
+  if (state.disabledBy !== undefined) return state.disabledBy === state.stateId ? "it is disabled" : `'${state.disabledBy}' is disabled`;
   if (!target.open) return "open a project to run this";
   if (!exists) return "save this file before running it";
   if (fields === null) return "this file does not parse";

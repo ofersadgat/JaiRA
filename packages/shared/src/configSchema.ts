@@ -17,7 +17,7 @@
  * in Settings → Permission sets. What is here is each shipped function's defaults, under `functions`.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import { DEFAULT_SMART_PROMPT } from "./config";
+import { DEFAULT_CONVERSATIONS, DEFAULT_SMART_PROMPT } from "./config";
 import { DEFAULT_PUBLISH_MODE, DEFAULT_SETTLE_AFTER, PUBLISH_MODES } from "./forge";
 
 /** A JSON Schema node, the same shape the executor steps use. */
@@ -328,6 +328,29 @@ export const CONFIG_SECTIONS: ConfigSectionSpec[] = [
                 "JaiRA's own floor, above every permission set: destructive git (a force push, a hard reset, a rebase) and removing .git are refused; a push, an install, a package publish, a network program or a credentials path asks. Turn it off only for a disposable workspace.",
             },
           },
+        },
+      },
+    },
+  },
+  {
+    key: "conversations",
+    title: "Conversations",
+    hint: "Which workflow a conversation runs (decision 0021). Any workflow that takes one required text input can be one: what is typed fills it.",
+    schema: {
+      $type: "conversations",
+      type: "object",
+      properties: {
+        workflow: {
+          type: "string",
+          title: "a new conversation runs",
+          default: DEFAULT_CONVERSATIONS.workflow,
+          description: `What the Chat view starts a conversation as. Where it is disabled, the Chat view asks which workflow to run instead. Default ${DEFAULT_CONVERSATIONS.workflow}.`,
+        },
+        moved: {
+          type: "string",
+          title: "a moved task's conversation runs",
+          default: DEFAULT_CONVERSATIONS.moved,
+          description: `What a move that makes a dynamic workflow gives the task to steer it. Where it is disabled, the move asks which to use instead. Default ${DEFAULT_CONVERSATIONS.moved}.`,
         },
       },
     },

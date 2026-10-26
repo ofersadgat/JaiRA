@@ -60,6 +60,34 @@ function Notice({ tone, children }: { tone: "warn" | "bad"; children: ReactNode 
 
 const SUB: FontSpec = { voice: "app", scale: 11 / 12.5, color: "dim" };
 
+/**
+ * A disabled state's notice (decision 0021), at the head of its Run tab whether or not the tab can
+ * start a run here: what the switch is and what it does, and Enable while the state's OWN file is
+ * what switches it off. One switched off by a state above it is enabled there.
+ *
+ *   the notice   `Notice` on --tint-warn, the button after it, 6 above
+ */
+export function DisabledNotice({ state, onEnable }: { state: StateView; onEnable?: (() => void) | undefined }): JSX.Element {
+  const name = state.label ?? state.stateId;
+  const own = state.disabledBy === state.stateId;
+  // A workflow's tasks are inside it already; a state within one is still ahead of some of them.
+  const after = state.rootId === state.stateId ? "Tasks already running carry on." : "A running workflow that reaches it fails there.";
+  return (
+    <View flexDirection="column" gap={6} marginBottom={6}>
+      <Notice tone="warn">
+        {own
+          ? `${name} is disabled: its file says "disabled": true. A new run of it is refused, whoever starts it. ${after}`
+          : `${name} is under '${state.disabledBy}', which is disabled. A new run of it is refused, whoever starts it. ${after}`}
+      </Notice>
+      {own && onEnable !== undefined ? (
+        <View flexDirection="row">
+          <Button onPress={onEnable}>Enable</Button>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 /** `RunSection`: a box per declared input, and the button. */
 function RunSection({ state, run, startedHere }: { state: StateView | null; run: RunSurface; startedHere: number }): JSX.Element {
   const { fields, values, provenance, target, targetDir, exists, dirty, busy, onChange, onRun } = run;

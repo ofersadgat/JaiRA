@@ -59,7 +59,8 @@ export function useNewTaskForm({
   };
   const check = useRunCheck(fields, form, from);
   const { touched, touch } = useTouched(workflow);
-  const blocked = createBlocker({ workflow, fields, check, busy });
+  // Picked before it was switched off: the start would be refused, so the button says so first.
+  const blocked = picked?.disabled === true ? `'${workflow}' is disabled` : createBlocker({ workflow, fields, check, busy });
   const filled = (fields ?? []).filter(isFilled);
 
   const pick = (stateId: string): void => {

@@ -74,6 +74,7 @@ import type {
   ConnectMissingInput,
   ConnectMove,
   ConnectPlan,
+  ConversationChoice,
   ConnectRefusal,
   ConnectUndo,
   InputProvenance,
@@ -113,6 +114,7 @@ import { generateDocumentVersion, type GenerateVersionResult } from "./dynamicDo
 import { createTask, pinWorkflow } from "./lifecycle";
 import { buildTaskLoad } from "./load";
 import { dropConnectUndo } from "./connectUndo";
+import { disabledRefusalOf } from "./disabled";
 import { openConnectIntent, recordConnectRow, type OpenConnectIntent } from "./hostRows";
 import { activityFromRow, enteredPaths, reachAhead, unreachableSentence, whereIs } from "./moveLegality";
 import type { Project } from "./project";
@@ -138,6 +140,8 @@ export interface ConnectHost {
   functions?: ReadonlyMap<string, FunctionCapabilities>;
   /** The conversation state a new document is rooted in. Absent ⇒ {@link CONNECT_CONVERSATION}. */
   conversation?: string;
+  /** The enabled workflows that can be a conversation — offered when {@link conversation} is disabled (decision 0021). */
+  conversations?: () => ConversationChoice[];
   /** The `to_state`s transitions of this task are waiting on right now (`on_user_event`). */
   offered?: (taskId: string) => readonly string[];
   /** Whether an engine is running this task — here, or in another process. */
@@ -804,6 +808,10 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
   if (target === own && (request.workflow === undefined || sourceStateId(request.workflow) === own)) {
     return refused(dryRun, { code: "already-there", message: `'${meta.title}' already runs '${own}'` });
   }
+  // A target switched off in the live files (decision 0021) is moved to by nobody — refused before
+  // any rule, so a drop over its column says why rather than failing the run at the entry.
+  const off = disabledRefusalOf(project, target, "moved");
+  if (off !== undefined) return refused(dryRun, { code: "disabled", message: off });
   let bundle: WorkflowBundle | undefined;
   if (row.snapshotHash !== undefined || row.documentId !== undefined) {
     try {
@@ -892,7 +900,10 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
       message: `'${meta.title}' is running, and no workflow relates '${own}' to '${target}': the move is a new transition, which a task picks up the next time it loads. Pause it, then move it`,
     });
   }
-  const conversation = host.conversation ?? CONNECT_CONVERSATION;
+  const conversation = request.conversation ?? host.conversation ?? CONNECT_CONVERSATION;
+  // One the person picked for this move is held to the same rule as a target: a disabled one is refused.
+  const pickedOff = request.conversation !== undefined ? disabledRefusalOf(project, request.conversation, "moved") : undefined;
+  if (pickedOff !== undefined) return refused(dryRun, { code: "disabled", message: pickedOff });
   const suppliedLiterals = generatorSupplied(request.supplied);
   const generate = (dry: boolean): Promise<GenerateVersionResult> =>
     generateDocumentVersion(project, {
@@ -925,6 +936,13 @@ async function connectOnce(project: Project, request: TaskConnectRequest, host: 
     judgement: elsewhere,
   });
   const wouldStandIn = modification === "new" ? `${DYNAMIC_ROOT_PREFIX}…` : meta.workflow;
+  // The workflow that would steer it is switched off (decision 0021): the move asks which to use, in the
+  // box it confirms in — a dry run says so, and the drop comes back with the pick.
+  if (request.conversation === undefined && disabledRefusalOf(project, conversation) !== undefined) {
+    const plan: ConnectPlan = { ...planOf(wouldStandIn), chooseConversation: { disabled: conversation, choices: host.conversations?.() ?? [] } };
+    if (dryRun) return { ok: true, dryRun, plan, ...(modification !== "new" ? { taskId } : {}) };
+    return refused(false, { code: "conversation", message: `'${conversation}', which a move gives a task to steer it, is disabled — choose another` }, plan);
+  }
   const confirm = unconfirmed(request, elsewhere, planOf(wouldStandIn));
   if (confirm !== undefined) return confirm;
   if (!generated.ok) {

@@ -1,8 +1,9 @@
 import { useMemo, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { taskNameOf, taskNamePending } from "@jaira/ui/taskNameModel";
-import { FOLD } from "@jaira/ui/uiState";
+import { FOLD, SHUT, shutOf } from "@jaira/ui/uiState";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
+import { HiddenColumns } from "../components/HiddenColumns";
 import { NewTask } from "../components/NewTask";
 import { RunModeToggle } from "../components/RunModeToggle";
 import { TaskAddressBar } from "../components/TaskAddressBar";
@@ -81,14 +82,28 @@ function TasksAddress(): JSX.Element {
     // No panel column to push the form onto yet: unfold it, as `openNewTaskWith` does after pushing.
     actions.setFold(FOLD.panelTasks, true);
   };
+  // The board under the bar, while it is the workflows' own (no run walked into): what it hides, and
+  // the way back to it (decision 0021).
+  const boardKey = state.trail.length === 0 ? (state.taskFocus ?? atProject) : null;
+  const rootBoard = boardKey !== null ? state.boards[boardKey] : undefined;
+  const hiddenColumns = boardKey !== null ? shutOf(ui, SHUT.board(boardKey)) : new Set<string>();
+  const hides = rootBoard?.level === "" && rootBoard.columns.some((column) => hiddenColumns.has(column.stateId));
   const tools = (
     <>
       {state.trail.length > 0 && state.taskFocus !== null ? <RunModeToggle mode={mode} onMode={runMode.set} /> : null}
+      {hides && boardKey !== null ? (
+        <HiddenColumns
+          columns={rootBoard!.columns}
+          hidden={hiddenColumns}
+          onToggle={(stateId) => actions.toggleShut(SHUT.board(boardKey), stateId)}
+          onShowAll={() => actions.setShut(SHUT.board(boardKey), [...hiddenColumns], false)}
+        />
+      ) : null}
       {(state.taskFocus ?? atProject) === state.at && state.at !== null ? <NewTask onOpen={openNewTask} open={top === "newTask"} /> : null}
     </>
   );
   // A phone's bar has no room for the crumbs and the tools side by side: the tools take a row under them.
-  const hasTools = (state.trail.length > 0 && state.taskFocus !== null) || ((state.taskFocus ?? atProject) === state.at && state.at !== null);
+  const hasTools = (state.trail.length > 0 && state.taskFocus !== null) || hides || ((state.taskFocus ?? atProject) === state.at && state.at !== null);
   const bar = (withTools: boolean): JSX.Element => (
     <TaskAddressBar
       projects={namedProjects}

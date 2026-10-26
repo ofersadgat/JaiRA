@@ -204,7 +204,13 @@ export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
   onPermissionSetIssue?: (issue: StatePermissionSetIssue) => void;
 }
 
-/** `loadBundle`, with permission sets lowered — in the files handed over and in any state read on demand. */
+/**
+ * `loadBundle`, with permission sets lowered — in the files handed over and in any state read on demand —
+ * and without the switch a state FILE carries (`disabled`, decision 0021). The switch says whether a run may
+ * start or enter a state, which is asked of the live files (`disabled.ts`); kept in the loaded states it
+ * would be part of every snapshot, and switching a workflow off would read as a change to the definition
+ * every running task of it follows.
+ */
 export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: string, options: LoadWorkflowBundleOptions = {}): WorkflowBundle {
   const { onPermissionSetIssue, ...loadOptions } = options;
   const read = permissionSetReader(loadOptions);
@@ -216,10 +222,14 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
       else if (issue.severity === "error") throw new WorkflowLoadError(`${issue.path}: ${issue.message}`, issue.stateId);
     }
   };
-  const lowered = lowerWorkflowPermissionSets(files, loadOptions, check);
+  const lowered = lowerWorkflowPermissionSets(
+    Object.fromEntries(Object.entries(files).map(([file, def]) => [file, followedOf(stateIdFromPath(file), def, read)])),
+    loadOptions,
+    check,
+  );
   report(lowered.issues);
   const loadState = loadOptions.loadState;
-  return loadBundle(lowered.files, rootRef, {
+  return withoutSwitches(loadBundle(lowered.files, rootRef, {
     ...loadOptions,
     ...(loadState !== undefined
       ? {
@@ -228,13 +238,52 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
           loadState: (id: string) => {
             const def = loadState(id);
             if (def === undefined) return undefined;
-            const one = lowerStatePermissionSets(id, def, read, check);
+            const one = lowerStatePermissionSets(id, followedOf(id, def, read), read, check);
             report(one.issues);
             return one.def;
           },
         }
       : {}),
-  });
+  }));
+}
+
+/** What a file that only FOLLOWS another may say beside its `$ref`: the switch (decision 0021). */
+const SWITCH_ONLY: ReadonlySet<string> = new Set(["$ref", "disabled"]);
+
+/**
+ * A state file that only follows another and switches it — `{ "$ref": "$SYSTEM/workflows/chat/session",
+ * "disabled": … }`, what Disable writes (decision 0021) — read AS the file it follows, a chain of them
+ * to its end. The switch is no part of a load ({@link withoutSwitches}), so the two load the same. Done
+ * here, BEFORE lowering, because the engine's own `$ref` expansion runs after it and would meet the
+ * followed file's permission set (`"tools": "$/permission-sets/chat/ask-first"`) unlowered. A file that
+ * cannot be followed is left as it is: the load reports the reference the way it reports any other.
+ */
+function followedOf(stateId: string, def: unknown, read: PermissionSetReader): unknown {
+  let at = def;
+  for (let hop = 0; hop < 8; hop++) {
+    if (at === null || typeof at !== "object" || Array.isArray(at)) return at;
+    const doc = at as Record<string, unknown>;
+    const reference = doc["$ref"];
+    if (typeof reference !== "string" || !Object.keys(doc).every((key) => SWITCH_ONLY.has(key))) return at;
+    try {
+      at = read(reference, stateId).value;
+    } catch {
+      return def;
+    }
+  }
+  return at;
+}
+
+/** A loaded bundle with no state carrying `disabled` — see {@link loadWorkflowBundle}. */
+function withoutSwitches(bundle: WorkflowBundle): WorkflowBundle {
+  if (!Object.values(bundle.states).some((state) => "disabled" in state)) return bundle;
+  const states = Object.fromEntries(
+    Object.entries(bundle.states).map(([id, state]) => {
+      const { disabled: _switch, ...rest } = state as typeof state & { disabled?: unknown };
+      return [id, rest];
+    }),
+  );
+  return { ...bundle, states };
 }
 
 /**

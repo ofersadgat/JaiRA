@@ -31,8 +31,8 @@ afterEach(() => {
 });
 
 /** A task that finished `status` some days before NOW. */
-function finished(title: string, status: "completed" | "failed" | "canceled", daysAgo: number, workflow = "w"): string {
-  const task = createTask(project, { title, workflow });
+function finished(title: string, status: "completed" | "failed" | "canceled", daysAgo: number, workflow = "w", conversation = false): string {
+  const task = createTask(project, { title, workflow, ...(conversation ? { startedBy: { by: "chat" as const } } : {}) });
   project.runtime.setStatus(task.id, status, NOW - daysAgo * DAY);
   project.runtime.endTask(task.id, status === "completed" ? "success" : status === "failed" ? "error" : "canceled", NOW - daysAgo * DAY);
   return task.id;
@@ -70,7 +70,8 @@ describe("the archive rule", () => {
   });
 
   it("leaves conversations alone, and does nothing when switched off", () => {
-    const chat = finished("a chat", "completed", 10, "chat/session");
+    // A conversation because the Chat view started it (decision 0021) — here, one that runs a plain workflow.
+    const chat = finished("a chat", "completed", 10, "w", true);
     const old = finished("old work", "completed", 10);
     expect(autoArchive(project, { ...DEFAULT_ARCHIVE, keepLatest: 0, auto: false }, NOW)).toEqual([]);
     expect(autoArchive(project, { ...DEFAULT_ARCHIVE, keepLatest: 0 }, NOW)).toEqual([old]);

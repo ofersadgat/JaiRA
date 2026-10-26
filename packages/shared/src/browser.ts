@@ -80,6 +80,10 @@ export { DEFAULT_SMART_PROMPT } from "./config";
 // Which events are on — what Settings → Tools → Events and Automations read of the merged document.
 export { isEventEnabled, enabledEvents, type JairaEventsConfig, type JairaEventSetting, type EnabledEvent } from "./config";
 export type { JairaEngineConfig } from "./config";
+// Which workflow a conversation runs (decision 0021) — the Chat room and Settings → Runs read it.
+export { DEFAULT_CONVERSATIONS, conversationWorkflowOf, type JairaConversationsConfig } from "./config";
+// Which states are switched off, and the text edits that switch them (decision 0021).
+export * from "./disabled";
 // What the Licenses page reads: the build's manifest of third-party notices, its decoder and search.
 export * from "./thirdPartyLicenses";
 export * from "./sync";

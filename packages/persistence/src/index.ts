@@ -24,6 +24,7 @@ export * from "./worktrees";
 export * from "./commandLog";
 export * from "./prune";
 export * from "./workflows";
+export * from "./disabled";
 export * from "./eventsWorkflow";
 export * from "./digest";
 export * from "./workflowRefs";

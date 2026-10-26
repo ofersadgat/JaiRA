@@ -18,17 +18,21 @@
  *
  * Pure, so the rules can be tested: the components read it.
  */
-import { isChatWorkflow, type InstanceNode, type PendingApproval, type PendingInteraction, type PendingQuestion, type WorkflowOutcome } from "@jaira/shared/browser";
+import type { InstanceNode, PendingApproval, PendingInteraction, PendingQuestion, WorkflowOutcome } from "@jaira/shared/browser";
 import { isAsking } from "./stateSurfaceModel";
 
-/** The conversation's own states — `chat/session`, `chat/control` — which a started run never is. */
-const isChatState = (stateId: string): boolean => stateId.startsWith("chat/");
+/**
+ * The conversation's own turns: a child under the conversation's own state — the instance its
+ * messages are journaled as (`chatTurn.ts`), whatever workflow the conversation runs (decision 0021).
+ * A run it started is a child under some OTHER state.
+ */
+const isOwnTurn = (root: InstanceNode, child: InstanceNode): boolean => child.stateId === root.stateId;
 
 /** The runs a conversation started: its root's children that are not its own turns, oldest first. */
 export function childRunsOf(instances: readonly InstanceNode[] | undefined): InstanceNode[] {
   const root = instances?.[0];
-  if (root === undefined || !isChatWorkflow(root.stateId)) return [];
-  return root.children.filter((child) => !child.superseded && !isChatState(child.stateId)).sort((a, b) => a.startedAt - b.startedAt);
+  if (root === undefined) return [];
+  return root.children.filter((child) => !child.superseded && !isOwnTurn(root, child)).sort((a, b) => a.startedAt - b.startedAt);
 }
 
 /** The run a workflow tool's outcome stands for: the newest child under the key it entered. */
@@ -60,13 +64,14 @@ export function openingRunAnswering(instances: readonly InstanceNode[] | undefin
  *
  * `producing` is the index's word that a call of the TASK is in flight (an open record). While a run
  * the conversation started is live that call may be the run's — a gate parked on you holds its record
- * open for as long as it waits — so then only the conversation's own turn says so: its root's `chat/`
- * child, the one instance every message reopens (`chatTurn.ts`).
+ * open for as long as it waits — so then only the conversation's own turn says so: its root's child
+ * under its own state, the one instance every message reopens (`chatTurn.ts`).
  */
 export function conversationAnswering(instances: readonly InstanceNode[] | undefined, running: boolean, producing: number): boolean {
   if (openingRunAnswering(instances, running)) return true;
   if (!childRunLive(instances)) return producing > 0;
-  return (instances?.[0]?.children ?? []).some((child) => isChatState(child.stateId) && (child.status === "running" || child.operation?.status === "running"));
+  const root = instances?.[0];
+  return root !== undefined && root.children.some((child) => isOwnTurn(root, child) && (child.status === "running" || child.operation?.status === "running"));
 }
 
 // --- waits --------------------------------------------------------------------------------------------

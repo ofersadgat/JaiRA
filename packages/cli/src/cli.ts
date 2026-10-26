@@ -71,6 +71,7 @@ import {
   type Project,
   type TaskLoad,
   type WorkflowBrowser,
+  disabledRefusalOf,
 } from "@jaira/persistence";
 import {
   defaultConfig,
@@ -1456,6 +1457,8 @@ async function runTaskNow(
       session,
       persistence: recorder,
       ...(directed !== undefined ? { directed } : {}),
+      // A state switched off in the live files is not entered (decision 0021), as in the app.
+      entryRefusal: (stateId: string) => disabledRefusalOf(project, stateId),
       workspace: { root: workspace.root, ...(workspace.treeHash !== undefined ? { treeHash: workspace.treeHash } : {}) },
       // The project's policy, audited into `command_log`, and the approver — as an app run gets them.
       ...governed,

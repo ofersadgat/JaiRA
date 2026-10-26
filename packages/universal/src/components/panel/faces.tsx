@@ -1,6 +1,6 @@
 import { issueReveal } from "../../app/viewState";
 import { useContext, type JSX, type ReactNode } from "react";
-import type { ArtifactSummary, InstanceNode, PendingInteraction, StateView, TaskDetail } from "@jaira/shared/browser";
+import { isWritableLayer, type ArtifactSummary, type InstanceNode, type PendingInteraction, type StateView, type TaskDetail, type WritableLayer } from "@jaira/shared/browser";
 import { BADGE, CHAT_PANEL_SUB, chatPanelTitleOf, chatTabs, countSteps, indexCutOf, isEventsTask, landingFocusOf, tab, taskTabs, taskVerbsOf, type PanelVerb } from "@jaira/ui/panelFaceModel";
 import { pop, push, selectStep, setTab, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { View } from "@tamagui/core";
@@ -26,7 +26,7 @@ import { RerunForm, type RerunSurface } from "./RerunForm";
 import type { TranscriptSource } from "./RunTranscript";
 import { GlyphSizeContext, SpIcon, type PanelFace } from "./SidePanel";
 import { StateChecks } from "./StateChecks";
-import { RunPanel } from "./RunPanel";
+import { DisabledNotice, RunPanel } from "./RunPanel";
 import type { RunSurface } from "@jaira/ui/runPanelTypes";
 import { StepsBody } from "./StepsView";
 import { TaskConversation } from "./TaskConversation";
@@ -77,6 +77,8 @@ export interface FaceHost {
   inEditor: (stateId: string) => boolean;
   /** ⇤ — open a state in the Files view. */
   openInFiles: (stateId: string) => void;
+  /** Switch a disabled state back on, in the layer of the file that switched it off (decision 0021). */
+  onEnable?: ((stateId: string, layer: WritableLayer, project?: string) => void) | undefined;
   held: readonly PinnedValue[];
   hold: (item: PinnedValue) => void;
   unhold: (item: PinnedValue) => void;
@@ -451,8 +453,18 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
       const body = (): ReactNode => {
         if (view === undefined || view === null) return <PanelEmpty>Reading {name}…</PanelEmpty>;
         switch (open) {
-          case "run":
-            return found?.run !== undefined ? <RunPanel state={view} run={found.run} /> : <PanelEmpty>Nothing here can start a run of this state.</PanelEmpty>;
+          case "run": {
+            const run = found?.run !== undefined ? <RunPanel state={view} run={found.run} /> : <PanelEmpty>Nothing here can start a run of this state.</PanelEmpty>;
+            if (view.disabledBy === undefined) return run;
+            const layer = view.layer;
+            const enable = host.onEnable !== undefined && isWritableLayer(layer) ? () => host.onEnable!(entry.stateId, layer, entry.project ?? undefined) : undefined;
+            return (
+              <>
+                <DisabledNotice state={view} {...(enable !== undefined ? { onEnable: enable } : {})} />
+                {run}
+              </>
+            );
+          }
           case "checks":
             return (
               <StateChecks

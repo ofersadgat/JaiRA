@@ -15,6 +15,7 @@ import { currentPin, recordVersionPickUp, versionAt, WORKFLOW_VERSION_EVENT } fr
 import { freezeForRun, moduleApprovalsFor, moduleEntriesOf, userModules, watchingForUnapproved, type WithheldSymbol } from "./userModules";
 import { nodeVfs } from "./vfs";
 import { workflowLoadOptions } from "./workflowRefs";
+import { refuseIfDisabled } from "./disabled";
 import type { Project } from "./project";
 import { ownerOf } from "./workspace";
 import { removeTaskJournal } from "./journalFile";
@@ -258,7 +259,9 @@ export async function beginTaskRun(project: Project, taskId: string, options: Be
   } else if (options.bundle !== undefined) {
     // Supplied whole: nothing to read, nothing to validate against a directory it was never in. It is
     // still snapshotted, so a re-run of this task replays the same definition through the branch
-    // above rather than depending on the caller synthesizing an identical one.
+    // above rather than depending on the caller synthesizing an identical one. Whether the state it
+    // runs is switched off is still the live files' to say (decision 0021), as for a pin below.
+    refuseIfDisabled(project, meta.workflow);
     bundle = options.bundle;
     const snap = await snapshotWithModules(project, bundle);
     hash = snap.hash;
@@ -299,6 +302,9 @@ export async function pinWorkflow(
   workflow: string,
   options: Pick<BeginRunOptions, "functions"> = {},
 ): Promise<{ bundle: WorkflowBundle; hash: string; dir: string }> {
+  // A disabled state (decision 0021) starts no new run, whoever asks: every fresh start and every
+  // adoption pins here, so this is the one refusal they share: `Not run: 'x' is disabled.`
+  refuseIfDisabled(project, workflow);
   let bundle: WorkflowBundle;
   {
     // Unreadable files are collected rather than thrown: only the root's transitive

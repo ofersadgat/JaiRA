@@ -84,7 +84,7 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
   return (only === undefined ? rows : rows.filter((row) => only.has(row.taskId))).map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
     const startedBy =
-      meta?.startedBy === undefined || project.runtime.get(meta.startedBy.fromTask) !== undefined
+      meta?.startedBy?.by !== "events" || project.runtime.get(meta.startedBy.fromTask) !== undefined
         ? meta?.startedBy
         : { ...meta.startedBy, fromTask: eventsNow() ?? meta.startedBy.fromTask };
     const made = taskOriginOf(project, row, meta);

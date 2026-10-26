@@ -26,7 +26,7 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
-import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle } from "@declarative-ai/hw";
+import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle, type LoadedState } from "@declarative-ai/hw";
 import { baseAsProjectPaths, componentConfigIssues, isEventEnabled, isEventName, parseJsonText, type JairaConfig, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
 import type { LintIssue, StatePermissionSetIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry, WorkflowLayer, WritableLayer } from "@jaira/shared";
@@ -37,6 +37,7 @@ import { scriptStatesIn } from "./workflowScripts";
 import { loadWorkflowBundle } from "./permissionSets";
 import { userModules, watchingForUnapproved, withheldApprovalsOf } from "./userModules";
 import { workflowLoadOptions } from "./workflowRefs";
+import { disabledAmong } from "./disabled";
 
 // The view models live in `@jaira/shared` so the renderer can name them without
 // reaching into this Node-only package.
@@ -49,7 +50,11 @@ export type { LintIssue, LintSeverity, WorkflowBrowser, WorkflowEntry, WorkflowF
  * surfaces look at a directory the user is editing, and both would rather report
  * one bad file than lose the other twenty.
  */
-export function readWorkflowsTolerantly(workflowsDir: string): {
+export function readWorkflowsTolerantly(
+  workflowsDir: string,
+  /** `scripts: false` reads the state FILES alone, compiling no script — for a question only a file can answer. */
+  options: { scripts?: boolean } = {},
+): {
   files: Record<string, unknown>;
   errors: Map<string, string>;
   /** A workflow script's state, by its `files` key, to the script a person edits to change it. */
@@ -87,6 +92,7 @@ export function readWorkflowsTolerantly(workflowsDir: string): {
   // them by id (`scriptStateFor`). A script that does not compile is reported against its file, as a
   // malformed state file is.
   const scripts = new Map<string, string>();
+  if (options.scripts === false) return { files, errors, scripts };
   for (const { key, script, root, document } of scriptStatesIn(workflowsDir, (file, message) => errors.set(file, message))) {
     if (!root) continue;
     if (files[key] !== undefined) {
@@ -338,6 +344,11 @@ function browseLayers(
   // the one a bundle loads while the base copy sits inert beside it in the listing.
   const effective: Record<string, unknown> = {};
   for (const [stateId, { raw }] of byStateId) effective[stateId] = raw;
+  // What is switched off (decision 0021), from the same winning files — a follow file answering with
+  // what it follows — so the tree, the board and a start all read one list.
+  const disabled = disabledAmong(new Map([...byStateId].map(([stateId, { raw }]) => [stateId, raw])), refOptions);
+  const off = new Set(disabled);
+  for (const entry of fileEntries) if (entry.shadowed !== true && entry.error === undefined && off.has(entry.stateId)) entry.disabled = true;
   const referenced = new Set<string>();
   for (const [stateId, { raw }] of byStateId) {
     for (const state of childStatesOf(raw)) {
@@ -378,6 +389,7 @@ function browseLayers(
       taskIds,
       driftedTasks: [],
       layer: source?.layer ?? "project",
+      ...(off.has(rootId) ? { disabled: true as const } : {}),
     };
     let bundle;
     // Per ROOT, not per browse: two roots must not pool their withheld symbols, or a workflow that
@@ -505,6 +517,9 @@ function browseLayers(
       }
     }
 
+    const speaks = conversationInputOf(bundle.states[bundle.rootId]);
+    // A file that only follows another (decision 0021) says no label of its own: the one it follows does.
+    const followedLabel = base.label === undefined ? bundle.states[bundle.rootId]?.label : undefined;
     const hash = snapshotHash(bundle);
     // A task pinned to a different hash is running older source — worth showing,
     // since execution reads the snapshot and never live `workflows/` (§5.3).
@@ -512,11 +527,20 @@ function browseLayers(
     // A permission set line whose FUNCTION is an unapproved module still loads — lint reports the line — and
     // the file to approve is what that line is about, so it is said here as on a load that failed.
     const withheld = modules !== undefined && watch !== undefined ? withheldApprovalsOf(modules, watch.withheld()) : [];
-    return { ...base, states, snapshotHash: hash, issues, driftedTasks: drifted, ...(withheld.length > 0 ? { needsApproval: withheld } : {}) };
+    return {
+      ...base,
+      ...(followedLabel !== undefined ? { label: followedLabel } : {}),
+      states,
+      snapshotHash: hash,
+      issues,
+      driftedTasks: drifted,
+      ...(withheld.length > 0 ? { needsApproval: withheld } : {}),
+      ...(speaks !== undefined ? { conversationInput: speaks } : {}),
+    };
   });
 
   const unreachable = [...byStateId.keys()].filter((id) => !covered.has(id)).sort();
-  return { workflows, files: fileEntries, unreachable };
+  return { workflows, files: fileEntries, unreachable, ...(disabled.length > 0 ? { disabled } : {}) };
 }
 
 /** `on_event('git.pushed'` — the event a guard waits on, where it names one literally. */
@@ -548,6 +572,22 @@ export function switchedOffEventGuards(stateId: string, state: unknown, config: 
     }
   }
   return out;
+}
+
+/**
+ * The input a conversation's words fill, when a root can be a conversation (decision 0021): the ONE
+ * input nothing else fills - required, with no default and no binding - and it takes text. A root with
+ * none, or with several, is no conversation: there would be nothing, or too much, for a message to say.
+ */
+export function conversationInputOf(state: LoadedState | undefined): string | undefined {
+  if (state === undefined) return undefined;
+  const open = Object.entries(state.inputs ?? {}).filter(([name, decl]) => {
+    const meta = state.slotMeta?.[`inputs.${name}`];
+    return meta?.optional !== true && meta?.default === undefined && meta?.defaultRef === undefined && (decl as { binding?: unknown }).binding === undefined;
+  });
+  if (open.length !== 1) return undefined;
+  const [name, decl] = open[0]!;
+  return (decl as { schema?: { type?: unknown } }).schema?.type === "string" ? name : undefined;
 }
 
 /** Errors only, across every workflow — the "can I run anything?" question. */

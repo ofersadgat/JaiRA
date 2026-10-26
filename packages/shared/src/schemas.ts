@@ -538,6 +538,10 @@ export function stateSchema(kind?: "prompt" | "function"): SchemaDoc {
       id: { type: "string", description: "the state's own path reference — derived from the file's location" },
       label: { type: "string", description: "display name on the board; falls back to the id" },
       description: { type: "string", description: "author's note; also useful prompt context" },
+      disabled: {
+        type: "boolean",
+        description: "switched off: no new run starts here or under this state's id, and a running workflow entering one fails; running tasks carry on",
+      },
       inputs: leaf(slotMapSchema("declared input slots (§3)")),
       outputs: leaf(slotMapSchema("declared output slots (§3); a state with none produces nothing")),
       operation: {

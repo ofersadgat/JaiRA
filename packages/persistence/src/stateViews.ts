@@ -19,7 +19,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { basename, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
-import { compileHidden, hiddenRules, isHiddenPath, jairaBuiltInPaths, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
+import { compileHidden, disabledBy, hiddenRules, isHiddenPath, jairaBuiltInPaths, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
 import type {
   BoardCard,
   BoardView,
@@ -208,6 +208,7 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
     (browser?.files ?? []).filter((f) => f.error !== undefined).map((f) => [`${f.layer}:${f.stateId}`, f.error!]),
   );
   const lint = lintByStateId(browser);
+  const disabled = disabledFilesOf(browser);
   const rules = hidden ?? defaultRules();
   // The project layer is rooted at the CHECKOUT, not at `.jaira/`. A person's project is their
   // files, and `.jaira/` is one directory in it — the tree said otherwise, and for a project that
@@ -245,6 +246,7 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
         if (node.stateId !== undefined) {
           const key = `${layer}:${node.stateId}`;
           if (shadowed.has(key)) node.shadowed = true;
+          if (disabled.has(key)) node.disabled = true;
           if (layer !== "system" && shipped.has(node.stateId)) node.overridesBuiltIn = true;
           const error = errors.get(key);
           if (error !== undefined) node.error = error;
@@ -280,6 +282,11 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
 
 /** What the built-in root is called, wherever a tree lists it (decision 0006). */
 export const BUILT_IN_LABEL = "Built in";
+
+/** The winning state files that switch their state off (decision 0021), as `layer:stateId`. */
+function disabledFilesOf(browser: WorkflowBrowser | undefined): Set<string> {
+  return new Set((browser?.files ?? []).filter((f) => f.disabled === true).map((f) => `${f.layer}:${f.stateId}`));
+}
 
 /** Every state id the built-in layer supplies a file for — what a person's file of that id overrides. */
 function shippedIds(browser: WorkflowBrowser | undefined): Set<string> {
@@ -458,8 +465,15 @@ export function baseStateView(
     references: [...refsIn(def)].map((ref) => ({ ref, resolved: true, layer: "base" as const })),
     referencedBy: [],
     driftedTasks: [],
+    ...switchOf(browser, stateId),
     fileOnly: true,
   };
+}
+
+/** `StateView.disabledBy`, from the browser's list (decision 0021) — nothing when there is no browser. */
+function switchOf(browser: WorkflowBrowser | undefined, stateId: string): { disabledBy?: string } {
+  const by = disabledBy(browser?.disabled, stateId);
+  return by !== undefined ? { disabledBy: by } : {};
 }
 
 /**
@@ -482,11 +496,13 @@ export function baseFileTree(baseDir: string, browser?: WorkflowBrowser, hidden?
     (browser?.files ?? []).filter((f) => f.error !== undefined && f.layer === "base").map((f) => [f.stateId, f.error!]),
   );
   const shipped = shippedIds(browser);
+  const disabled = disabledFilesOf(browser);
   const mark = (list: FileNode[]): void => {
     for (const node of list) {
       if (node.stateId !== undefined) {
         const error = errors.get(node.stateId);
         if (error !== undefined) node.error = error;
+        if (disabled.has(`base:${node.stateId}`)) node.disabled = true;
         if (shipped.has(node.stateId)) node.overridesBuiltIn = true;
         const found = lint?.get(node.stateId);
         if (found !== undefined) node.lint = found;
@@ -777,9 +793,30 @@ export function boardForState(
   const interactive = options?.interactiveFunctions;
   const shape = workflowShape(bundle, interactive !== undefined ? { interactiveFunctions: interactive } : {});
   if (shape[stateId] === undefined) return null;
-  return projectBoard(shape, stateId, projectionsFor(project, shape, root.rootId), {
-    breadcrumb: breadcrumbOf(shape, root.rootId, stateId),
-  });
+  return withSwitches(
+    projectBoard(shape, stateId, projectionsFor(project, shape, root.rootId), {
+      breadcrumb: breadcrumbOf(shape, root.rootId, stateId),
+    }),
+    browser,
+  );
+}
+
+/**
+ * What a column's head and menu need about its state's switch (decision 0021): the state that
+ * switches it off, when one does, and which layer's file decides — what Disable writes into, or
+ * follows. A variant (`x#1`, one state mounted twice) is its state's file.
+ */
+function withSwitches(view: BoardView, browser: WorkflowBrowser): BoardView {
+  const winning = new Map(browser.files.filter((f) => f.shadowed !== true && f.error === undefined).map((f) => [f.stateId, f.layer]));
+  return {
+    ...view,
+    columns: view.columns.map((column) => {
+      const off = disabledBy(browser.disabled, column.stateId);
+      const at = column.stateId.lastIndexOf("#");
+      const layer = winning.get(at > 0 ? column.stateId.slice(0, at) : column.stateId);
+      return { ...column, ...(off !== undefined ? { disabledBy: off } : {}), ...(layer !== undefined ? { layer } : {}) };
+    }),
+  };
 }
 
 /**
@@ -914,7 +951,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
     if (over) finished.push(card);
   }
 
-  return { level: "", label: "All workflows", breadcrumb: [], columns, atLevel: [], finished };
+  return withSwitches({ level: "", label: "All workflows", breadcrumb: [], columns, atLevel: [], finished }, browser);
 }
 
 // --- one state ---------------------------------------------------------------
@@ -1086,6 +1123,7 @@ export function stateView(
   const drifted = (owning?.driftedTasks ?? []).filter((taskId) => tasksHere.some((c) => c.taskId === taskId));
 
   return {
+    ...switchOf(browser, stateId),
     stateId,
     ...(shape[stateId]?.label !== undefined ? { label: shape[stateId]!.label } : {}),
     layer,

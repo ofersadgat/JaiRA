@@ -134,7 +134,7 @@ export function createWorkflowTools(host: WorkflowToolHost): Record<string, Tool
   return {
     list_workflows: {
       description:
-        "List the project's workflows, or — given `state` — say what one state is: its label and description, the inputs it takes and the outputs it produces (each with its schema and description), and the states it mounts, ONE level down. Ask again with a child's `state` to go further.",
+        "List the project's workflows, or — given `state` — say what one state is: its label and description, the inputs it takes and the outputs it produces (each with its schema and description), and the states it mounts, ONE level down. Ask again with a child's `state` to go further. A workflow the project has disabled is not listed and cannot be started; a child marked `disabled` cannot be entered.",
       inputSchema: { type: "object", properties: { state: { type: "string", description: "A state id, e.g. `feature` or `feature/ux`. Absent lists the workflows." } } },
       readOnly: true,
       run: async (input) => {

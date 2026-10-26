@@ -50,6 +50,38 @@ export class TaskFileStore {
     return parseTaskMeta(readJsonFile(file), taskId);
   }
 
+  /**
+   * A ONE-TIME STEP over this workspace's task files (decision 0021), run at every open and writing
+   * only what it has not written before. A conversation used to be known by its workflow's id
+   * (`chat/session`, `chat/control`) and is now one because the Chat view started it — `startedBy:
+   * { by: "chat" }`, which every conversation made since carries. A file from before is stamped here,
+   * so nothing reads the old form. Delete it with its call in `openAt` once every workspace has opened
+   * (written 2026-10-26). Answers how many it stamped.
+   */
+  stampConversations(): number {
+    let names: string[];
+    try {
+      names = readdirSync(this.tasksDir).filter((n) => n.endsWith(".json"));
+    } catch {
+      return 0;
+    }
+    let stamped = 0;
+    for (const name of names) {
+      // At OPEN, so one file that does not read is passed over rather than failing the project: it is
+      // reported where it is read for itself, as it always was.
+      let meta: TaskMeta | undefined;
+      try {
+        meta = this.tryRead(name.slice(0, -".json".length));
+      } catch {
+        continue;
+      }
+      if (meta === undefined || meta.startedBy !== undefined || (meta.workflow !== "chat/session" && meta.workflow !== "chat/control")) continue;
+      this.write({ ...meta, startedBy: { by: "chat" } });
+      stamped += 1;
+    }
+    return stamped;
+  }
+
   list(): TaskMeta[] {
     let names: string[];
     try {

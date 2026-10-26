@@ -8,6 +8,7 @@
  * root. Exec environment, policy, and agent runtimes arrive in later phases.
  */
 import type { Scope } from "./scopes";
+import { CHAT_CONTROL, CHAT_SESSION } from "./task";
 import { PERMISSION_MODES, type PermissionMode } from "./operationVocabulary";
 import type { JsonValue } from "@declarative-ai/json";
 import type { CredentialUse } from "./executors";
@@ -322,6 +323,8 @@ export interface JairaConfig {
   limits: JairaLimitsConfig;
   /** When finished tasks are archived by themselves (see {@link JairaArchiveConfig}). */
   archive: JairaArchiveConfig;
+  /** Which workflow a conversation runs (decision 0021, see {@link JairaConversationsConfig}). */
+  conversations: JairaConversationsConfig;
   /** The app's own updates (decision 0011 §5): the machine's to decide, so read from the base and personal layers. */
   updates: JairaUpdatesConfig;
   /** Where the engine runs when the desktop starts it (decision 0012 §5): the machine's, like `updates`. */
@@ -448,6 +451,42 @@ export interface JairaArchiveConfig {
 }
 
 export const DEFAULT_ARCHIVE: JairaArchiveConfig = { auto: true, keepLatest: 5, failedAfterDays: 2, succeededAfterDays: 1 };
+
+/**
+ * Which workflow a conversation runs (decision 0021; the person, 2026-10-26: "What does make sense as a
+ * setting is: what is the default workflow to use for a chat session").
+ *
+ * `workflow` is what the Chat view starts a conversation as; `moved` is what a move that makes a dynamic
+ * workflow gives the task to steer it. Either can be any workflow that takes ONE required text input —
+ * what the person typed fills it. Unstated ⇒ the built-in ones, {@link DEFAULT_CONVERSATIONS}, which the
+ * parse fills in so the effective settings say what is in force. A conversation whose workflow is
+ * disabled is not started: the Chat view asks which to run instead.
+ */
+export interface JairaConversationsConfig {
+  workflow: string;
+  moved: string;
+}
+
+export const DEFAULT_CONVERSATIONS: JairaConversationsConfig = { workflow: CHAT_SESSION, moved: CHAT_CONTROL };
+
+/** The workflow a conversation of this kind runs, by the effective settings. */
+export function conversationWorkflowOf(config: Pick<JairaConfig, "conversations">, kind: keyof JairaConversationsConfig): string {
+  return config.conversations[kind];
+}
+
+function parseConversations(raw: unknown): JairaConversationsConfig {
+  if (raw === undefined) return { ...DEFAULT_CONVERSATIONS };
+  if (raw === null || typeof raw !== "object" || Array.isArray(raw)) throw new Error("config.conversations must be an object");
+  const doc = raw as Record<string, unknown>;
+  const out: JairaConversationsConfig = { ...DEFAULT_CONVERSATIONS };
+  for (const key of ["workflow", "moved"] as const) {
+    const value = doc[key];
+    if (value === undefined) continue;
+    if (typeof value !== "string" || value.trim().length === 0) throw new Error(`config.conversations.${key} must be a workflow's id`);
+    out[key] = value.trim();
+  }
+  return out;
+}
 
 function parseArchive(raw: unknown): JairaArchiveConfig {
   if (raw === undefined) return { ...DEFAULT_ARCHIVE };
@@ -714,6 +753,7 @@ export function defaultConfig(): JairaConfig {
     autopilot: { askBelow: DEFAULT_ASK_BELOW },
     limits: { retryOnReset: true },
     archive: { ...DEFAULT_ARCHIVE },
+    conversations: { ...DEFAULT_CONVERSATIONS },
     updates: {},
     engine: {},
     functions: defaultFunctions(),
@@ -1366,6 +1406,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     autopilot: parseAutopilot(cfg["autopilot"]),
     limits: parseLimits(cfg["limits"]),
     archive: parseArchive(cfg["archive"]),
+    conversations: parseConversations(cfg["conversations"]),
     updates: parseUpdates(cfg["updates"]),
     engine: parseEngineConfig(cfg["engine"]),
     functions: parseFunctions(cfg["functions"]),

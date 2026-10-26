@@ -27,7 +27,7 @@ import { jairaBuiltInPaths, SHARED_SESSION, type FileNode, type FileRoot, type P
 import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 import { layerBarOf } from "../src/renderer/builtInModel";
-import { CHAT_CONTROL, CHAT_SESSION, CHAT_STATES, titleOf } from "../src/renderer/chatWorkflow";
+import { CHAT_CONTROL, CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 import { debugFileStatus } from "../src/renderer/debugModel";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "../src/renderer/debugWorkflow";
 import { builtInItems } from "../src/renderer/filesModel";
@@ -85,7 +85,7 @@ function installInShared(stateId: string, text: string): string {
 
 describe("starting with nothing installed", () => {
   it("ships every state the Chat view and the self-test name", () => {
-    for (const stateId of [...CHAT_STATES, ...SELF_TEST_STATES]) {
+    for (const stateId of [CHAT_SESSION, CHAT_CONTROL, ...SELF_TEST_STATES]) {
       expect(service.readWorkflow({ stateId, layer: "system" }).exists).toBe(true);
     }
   });

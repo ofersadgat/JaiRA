@@ -253,7 +253,16 @@ export async function generateDocumentVersion(project: Project, request: Generat
     if (conversation === null || typeof conversation !== "object" || Array.isArray(conversation)) {
       throw refusal(log, `conversation state '${request.conversation}' was not found on the workflow path`);
     }
-    if ((conversation as { operation?: unknown }).operation === undefined) {
+    // Whether it SPEAKS is asked of the state as it LOADS: a file that follows another
+    // (`{ "$ref": "$SYSTEM/workflows/chat/control", … }`, a project's override of what ships) has no
+    // operation of its own to read, and is a conversation all the same.
+    let loadedConversation: WorkflowBundle;
+    try {
+      loadedConversation = loadLive(project, request.conversation);
+    } catch (e) {
+      throw refusal(log, `conversation state '${request.conversation}' does not load: ${(e as Error).message}`);
+    }
+    if (loadedConversation.states[loadedConversation.rootId]?.operation === undefined) {
       throw refusal(log, `conversation state '${request.conversation}' has no operation — a dynamic workflow's root is a state with an operation and children`);
     }
     const source: Producer = {

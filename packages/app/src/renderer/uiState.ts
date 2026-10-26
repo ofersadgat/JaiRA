@@ -170,6 +170,13 @@ export const SHUT = {
    * would key on an id the engine chose (`default` on most runs) and collide across tasks.
    */
   runStates: "run.states",
+  /**
+   * The workflow columns hidden from one board, by root id — the board of a project, or of a
+   * workspace group, by its key (decision 0021). How the board LOOKS and nothing more: a hidden
+   * workflow still starts from New task and is still listed to an agent (the person, 2026-10-26:
+   * "Hide is just a view property"). Per window on this machine, beside what is folded.
+   */
+  board: (project: string): string => `board:${project}`,
 } as const;
 
 /**

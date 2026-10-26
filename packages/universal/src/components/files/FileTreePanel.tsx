@@ -2,7 +2,7 @@ import { copyText } from "../../clipboard";
 import { useRef, useState, type JSX } from "react";
 import { ScrollView, TextInput, View as RNView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import type { FileMutationResult, FileNode, FileRoot, FileTree, MoveWorkflowRequest, WorkflowLayer, WorkflowMutationResult } from "@jaira/shared/browser";
+import type { FileMutationResult, FileNode, FileRoot, FileTree, MoveWorkflowRequest, WorkflowLayer, WorkflowMutationResult, WritableLayer } from "@jaira/shared/browser";
 import { isWritableLayer } from "@jaira/shared/browser";
 import {
   KIND_GLYPH,
@@ -22,6 +22,7 @@ import type { AskSpec } from "@jaira/ui/menuTypes";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { AskDialog } from "./AskDialog";
 import { Chip } from "./Chip";
+import { disabledChipTitle } from "@jaira/ui/workflowSwitch";
 
 /**
  * The Files drawer under the sidebar's Files row — every root's tree, folded as the person left it,
@@ -71,6 +72,8 @@ export interface FileTreePanelProps {
   onRenameFile: (layer: WorkflowLayer, path: string, to: string, force?: boolean) => Promise<FileMutationResult | null>;
   onDeleteFile: (layer: WorkflowLayer, path: string, force?: boolean) => Promise<FileMutationResult | null>;
   onReveal: (file: string) => void;
+  /** Switch a state off or back on in a layer (decision 0021). Absent ⇒ no switch in the menus. */
+  onSetDisabled?: ((stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => void) | undefined;
   find?: boolean;
   draft: TreeDraft | null;
   onDraft: (draft: TreeDraft | null) => void;
@@ -102,6 +105,7 @@ export function FileTreePanel({
   onRenameFile,
   onDeleteFile,
   onReveal,
+  onSetDisabled,
   find = false,
   draft,
   onDraft,
@@ -139,7 +143,7 @@ export function FileTreePanel({
     return at.under === key ? <DraftRow key="draft" draft={draft} depth={at.depth} missing={at.missing} onCommit={commitDraft} onCancel={() => onDraft(null)} /> : null;
   };
   const openNew = (root: FileRoot, dir: string, x: number, y: number): void => setMenu({ x, y, items: newItems(root, dir, startDraft) });
-  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, copy: copyText, setAsk, startDraft });
+  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, copy: copyText, setAsk, startDraft, onSetDisabled });
 
   return (
     <View flexDirection="column" flex={1} minHeight={0} gap={8} paddingTop={2} paddingBottom={4}>
@@ -298,7 +302,8 @@ function TreeNode({
   const row = treeRowOf(node, selected, dirty, expanded);
   const lint = node.lint;
   const weight = row.isSelected ? 600 : 400;
-  const nameInk = row.tone === " has-error" ? "bad" : row.tone === " has-warning" ? "warn" : row.inert ? "dim" : "text";
+  // A disabled state's name dims, beside its chip (decision 0021).
+  const nameInk = row.tone === " has-error" ? "bad" : row.tone === " has-warning" ? "warn" : row.inert || node.disabled === true ? "dim" : "text";
   const dotInk = row.tone === " has-error" ? "bad" : "warn";
   return (
     <>
@@ -353,6 +358,11 @@ function TreeNode({
             {node.overridesBuiltIn === true ? (
               <Chip spec={{ weight }} title="Overrides built in: JaiRA ships a state with this id, and this file runs instead of it">
                 override
+              </Chip>
+            ) : null}
+            {node.disabled === true ? (
+              <Chip spec={{ weight }} title={disabledChipTitle(node.layer)}>
+                disabled
               </Chip>
             ) : null}
             {row.isDir && isWritableLayer(node.layer) ? <AddButton label={node.name} shown={hovered} onNew={(x, y) => onNew(node, x, y)} /> : null}

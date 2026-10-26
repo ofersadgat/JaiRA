@@ -126,7 +126,7 @@ import {
 } from "./runForm";
 import { instanceOf, nodeAt, prunedTrail, sameTrail, stepOf, type TrailStep } from "./trail";
 import { SELF_TEST_ROOT, SELF_TEST_STATES, selfTestScript } from "./debugWorkflow";
-import { CHAT_LIST_WORKFLOWS, CHAT_SESSION, titleOf } from "./chatWorkflow";
+import { conversationStartOf, isConversation, titleOf } from "./chatWorkflow";
 import { deviceIdReady, lastAddress, readAddress, writeAddress, type WindowIo } from "./windowAddress";
 
 /** The engine as the window's address module needs it — its copy of where each window stood. */
@@ -1080,9 +1080,8 @@ function filterIndex(all: readonly ProjectTask[], key: string, keep: (task: Proj
   return out;
 }
 
-/** A conversation, as the Chat lists count one — `CHAT_LIST_WORKFLOWS`, an entry ending in `/` a namespace. */
-const listedConversation = (task: ProjectTask): boolean =>
-  CHAT_LIST_WORKFLOWS.some((w) => (w.endsWith("/") ? task.workflow.startsWith(w) : task.workflow === w));
+/** A conversation, as the Chat lists count one — a task the Chat view started, or a dynamic workflow's (`isConversation`). */
+const listedConversation = (task: ProjectTask): boolean => isConversation(task);
 
 /** The board a project's group shows: its roots, or the level drilled into. */
 function boardRequest(project: string | null, level: string | null): readonly ["board:roots" | "board:view", unknown] {
@@ -3182,9 +3181,18 @@ export function useApp() {
        * JaiRA's own root — the same routing every base-layer workflow uses (`runTargetOf`), and the
        * reason a conversation can be had on an empty window at all.
        */
-      newConversation: async (message: string, overrides: ChatSettings = {}): Promise<string | null> => {
+      newConversation: async (message: string, overrides: ChatSettings = {}, workflow?: string): Promise<string | null> => {
         const text = message.trim();
         if (text === "") return null;
+        // What it runs (decision 0021): the person's pick where the room asked, else what the settings
+        // name — and the one text input of that workflow is what the message fills.
+        const start = conversationStartOf(ref.current.config?.effective, ref.current.workflows);
+        const runs = workflow ?? start.workflow;
+        const input = workflow !== undefined ? start.choices.find((c) => c.stateId === workflow)?.input : start.input;
+        if (input === undefined) {
+          patch({ chat: { ...ref.current.chat, error: `'${runs}' cannot be a conversation: it does not take one text input` } });
+          return null;
+        }
         // Where it was sent, taken with the message: the next conversation starts from automatic again.
         const { runOn, settings: _carried, ...chat } = ref.current.chat;
         patch({ chat: { ...chat, busy: true, opening: text, error: null } });
@@ -3201,10 +3209,11 @@ export function useApp() {
           // the project still wins, which is what an override is.
           const summary = await invoke("task:create", {
             title: titleOf(text),
-            // Always the session — see `chatWorkflow.ts` on why the view never asks.
-            workflow: CHAT_SESSION,
-            inputs: { message: text },
+            workflow: runs,
+            inputs: { [input]: text },
             project,
+            // A conversation because the Chat view started it, whatever it runs (decision 0021).
+            conversation: true,
           });
           // Selected BEFORE it starts, so the thread is pointed at the run when its first delta
           // arrives — selecting afterwards means watching the opening in the past tense.
@@ -3368,7 +3377,7 @@ export function useApp() {
        * host parks a question in the task's OWN conversation, and the task is selected so the person
        * is looking at it. Answering it takes the move.
        */
-      connectTask: async (project: string | undefined, taskId: string, target: string, extra: { path?: string[]; confirmed?: boolean } = {}) => {
+      connectTask: async (project: string | undefined, taskId: string, target: string, extra: { path?: string[]; confirmed?: boolean; conversation?: string } = {}) => {
         try {
           const result = await invoke("task:connect", {
             taskId,
@@ -3376,6 +3385,7 @@ export function useApp() {
             start: false,
             ...(extra.path !== undefined ? { path: extra.path } : {}),
             ...(extra.confirmed === true ? { confirmed: true } : {}),
+            ...(extra.conversation !== undefined ? { conversation: extra.conversation } : {}),
             ...(project !== undefined ? { project } : {}),
           });
           // The token that takes it back is kept on the card's task in main; the board's refresh says
@@ -4279,6 +4289,22 @@ export function useApp() {
         } catch (e) {
           fail(e);
           return null;
+        }
+      },
+
+      /**
+       * Switch a state off or back on in one layer (decision 0021) — `AppService.setWorkflowDisabled`.
+       * The open document is read again, so its Configuration form and JSON say what was written.
+       */
+      setWorkflowDisabled: async (stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => {
+        patch({ error: null });
+        try {
+          await invoke("workflow:setDisabled", { stateId, layer, disabled, ...inLayer(layer, project) });
+          await Promise.all([refreshTree(), refreshWorkflows(), refreshState(ref.current.stateId)]);
+          const doc = ref.current.doc;
+          if (doc !== null && doc.stateId === stateId) await refreshDoc(doc.layer, doc.path, doc.project);
+        } catch (e) {
+          fail(e);
         }
       },
 

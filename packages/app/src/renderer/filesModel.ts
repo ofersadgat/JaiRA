@@ -5,7 +5,7 @@
  * everything from here: which rows a tree shows and what each says, what the `+` menus offer and where
  * a new row lands, which crumbs an address has, how the panel splits. Nothing here renders.
  */
-import type { BoardCard, FileMutationResult, FileNode, FileRoot, FileSource, FileTree, InstanceNode, MoveWorkflowRequest, StateView, WorkflowLayer, WorkflowMutationResult } from "@jaira/shared/browser";
+import type { BoardCard, FileMutationResult, FileNode, FileRoot, FileSource, FileTree, InstanceNode, MoveWorkflowRequest, StateView, WorkflowLayer, WorkflowMutationResult, WritableLayer } from "@jaira/shared/browser";
 import { isTextMime, isWritableLayer } from "@jaira/shared/browser";
 import { alternatives, runCrumbs, type Crumb } from "./crumbModel";
 import { editorPick, viewerPick, type FileSurfaceContext, type SurfaceRegistry } from "./fileTypes";
@@ -13,6 +13,7 @@ import type { AskSpec, MenuItem } from "./menuTypes";
 import { taskNameOf, taskNamePending } from "./taskNameModel";
 import type { TrailStep } from "./trail";
 import { HALVES, type HalfMode } from "./uiState";
+import { switchItems } from "./workflowSwitch";
 
 /**
  * The three positions of the lower half, as the bar says them.
@@ -279,6 +280,8 @@ export function builtInItems(
     hasProject: boolean;
     onOpen: (stateId: string, layer: WorkflowLayer) => void;
     onOverride: (stateId: string, toLayer: "base" | "project") => void;
+    /** Switch the state off in a layer above (decision 0021) — absent where the host cannot. */
+    onSetDisabled?: ((stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => void) | undefined;
     onCopy: (text: string) => void;
     onReveal: (file: string) => void;
   },
@@ -294,6 +297,13 @@ export function builtInItems(
     { label: "Open", note: "an edit copies it", onSelect: () => act.onOpen(id, root.layer) },
     { label: "Edit a copy in Shared", note: "~/.jaira", separator: true, onSelect: () => act.onOverride(id, "base") },
     { label: "Override here", note: ".jaira", disabled: !act.hasProject, onSelect: () => act.onOverride(id, "project") },
+    // Switched off with a file in a layer above that follows this one (decision 0021) — never in
+    // place, and not at all once a nearer file shadows it: that file decides.
+    ...(act.onSetDisabled !== undefined && node.shadowed !== true
+      ? switchItems({ stateId: id, layer: "system", hasProject: act.hasProject }, (layer, disabled) => act.onSetDisabled!(id, layer, disabled)).map((item, i) =>
+          i === 0 ? { ...item, separator: true } : item,
+        )
+      : []),
     { label: "Copy state id", separator: true, onSelect: () => act.onCopy(id) },
     ...look,
   ];
@@ -822,6 +832,8 @@ export interface TreeVerbs {
   setAsk: (spec: AskSpec | null) => void;
   /** Start typing a new row's name — see {@link TreeDraft}. */
   startDraft: (draft: TreeDraft) => void;
+  /** Switch a state off or back on in a layer (decision 0021). Absent ⇒ the menus offer no switch. */
+  onSetDisabled?: ((stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => void) | undefined;
 }
 
 /**
@@ -829,7 +841,7 @@ export interface TreeVerbs {
  * ask a refused move or delete makes. `FileTreePanel` opens them (a long press on a phone).
  */
 export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: FileRoot) => MenuItem[]; rootItems: (root: FileRoot, writable: boolean) => MenuItem[] } {
-  const { hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, setAsk, startDraft } = verbs;
+  const { hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, setAsk, startDraft, onSetDisabled } = verbs;
   const copyText = verbs.copy;
   /**
    * Run a move, and if it was refused because other states point at this one, say who and offer to
@@ -969,6 +981,7 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
         hasProject,
         onOpen,
         onOverride: (id, toLayer) => void move({ stateId: id, layer: "system", to: id, toLayer, copy: true }, "Override"),
+        onSetDisabled,
         onCopy: copyText,
         onReveal,
       });
@@ -1032,6 +1045,13 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
             },
           }),
       },
+      // Disable, or Enable (decision 0021), in the words the file's layer calls for. A shadowed copy
+      // decides nothing in this project, so it offers no switch.
+      ...(onSetDisabled !== undefined && node.shadowed !== true
+        ? switchItems({ stateId: id, layer: node.layer, disabledBy: node.disabled === true ? id : undefined, hasProject }, (layer, disabled) => onSetDisabled(id, layer, disabled, node.project)).map(
+            (item, i) => (i === 0 ? { ...item, separator: true } : item),
+          )
+        : []),
       {
         // The point of the shared layer: changing a shared workflow for ONE project should not mean
         // copying files by hand. Shadowed already means the project has its own copy.

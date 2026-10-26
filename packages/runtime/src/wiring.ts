@@ -335,6 +335,12 @@ export interface WorkflowRunConfig {
   /** The lists this task is split on — hw's `EngineConfig.split`; a split mount over one of them narrows to this task's element. */
   split?: readonly SplitEntry[];
   /**
+   * Why a child may not be entered now — hw's `EngineConfig.entryRefusal`, asked at every entry. A
+   * project run answers from its live files: a state switched off there blocks the entry (decision
+   * 0021), and the run fails at it unless a rule on the mount handles the failure.
+   */
+  entryRefusal?: (stateId: string) => string | undefined;
+  /**
    * The port a person's MOVE reaches this run through — hw's `EngineConfig.directed` (decision 0005).
    * The caller keeps it: a move handed over while the run is live goes straight to the engine, and
    * one queued before the run began is claimed at load, which is how a finished task takes a move.
@@ -495,6 +501,7 @@ export async function executeWorkflow(cfg: WorkflowRunConfig): Promise<WorkflowE
     ...(cfg.persistence !== undefined ? { persistence: cfg.persistence } : {}),
     ...(cfg.fanOut !== undefined ? { fanOut: cfg.fanOut } : {}),
     ...(cfg.split !== undefined ? { split: cfg.split } : {}),
+    ...(cfg.entryRefusal !== undefined ? { entryRefusal: cfg.entryRefusal } : {}),
     ...(cfg.directed !== undefined ? { directed: cfg.directed } : {}),
     ...(cfg.scripts !== undefined ? { scripts: cfg.scripts } : {}),
   });

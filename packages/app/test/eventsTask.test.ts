@@ -409,7 +409,7 @@ describe("an automation, end to end", () => {
     // Not the events task's child: nothing in its journal, and its card is among the roots with the line.
     expect(flattenInstances(service.taskDetail(events.taskId).instances).some((n) => n.instanceId === started.taskId)).toBe(false);
     const card = service.boardRoots({ project: dir }).columns.flatMap((c) => c.cards).find((c) => c.taskId === started.taskId);
-    expect(card?.startedBy?.state?.stateId).toBe(automationStateIdOf("push_main"));
+    expect(card?.startedBy?.by === "events" ? card.startedBy.state?.stateId : undefined).toBe(automationStateIdOf("push_main"));
   });
 
   it("the lint says when a line's event is switched off in Settings", async () => {

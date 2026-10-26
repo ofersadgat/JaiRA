@@ -60,7 +60,6 @@ import {
   openMoveQuestion,
   parkMoveQuestion,
   type MoveQuestion,
-  CONNECT_CONVERSATION,
   dropConnectUndo,
   keepConnectUndo,
   keptConnectUndo,
@@ -100,6 +99,8 @@ import {
   browseSource,
   browseWorkflows,
   commitSync,
+  disabledRefusalOf,
+  disabledStatesIn,
   digestSource,
   conversationView,
   ensureWorkspace,
@@ -443,6 +444,10 @@ import {
   jairaBasePaths,
   jairaBuiltInPaths,
   baseAsProjectPaths,
+  conversationWorkflowOf,
+  followFileText,
+  followsOnly,
+  withDisabledText,
   DEFAULT_EXECUTOR,
   mergeConfigLayers,
   modelAvailabilityIn,
@@ -721,6 +726,8 @@ import type {
   ResetPermissionSetRequest,
   PermissionSetsView,
   WriteWorkflowRequest,
+  SetWorkflowDisabledRequest,
+  ConversationChoice,
   InstanceNode,
   ChatBranch,
   ChatEditPoint,
@@ -809,8 +816,8 @@ export interface AppServiceOptions {
   baseDir?: string;
   /**
    * The conversation state a connect roots a NEW dynamic workflow in (decision 0005 §3). Absent ⇒
-   * `CONNECT_CONVERSATION`, the one constant step 6 changes; a seam here so a test can name a state
-   * that needs no model.
+   * the settings' `conversations.moved` (decision 0021); a seam here so a test can name a state that
+   * needs no model.
    */
   connectConversation?: string;
   /**
@@ -5259,6 +5266,7 @@ export class AppService {
       inputProvenance: provenance,
       ...(waitsFor.length > 0 ? { dependsOn: waitsFor } : {}),
       ...(request.branch !== undefined ? { branch: request.branch } : {}),
+      ...(request.conversation === true ? { startedBy: { by: "chat" as const } } : {}),
     });
     this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
     const row = project.runtime.get(meta.id)!;
@@ -5267,6 +5275,7 @@ export class AppService {
       title: meta.title,
       status: row.status,
       workflow: meta.workflow,
+      ...(meta.startedBy !== undefined ? { startedBy: meta.startedBy } : {}),
       ...(meta.labels !== undefined ? { labels: meta.labels } : {}),
       createdAt: meta.createdAt,
       updatedAt: row.updatedAt,
@@ -6009,6 +6018,8 @@ export class AppService {
             log: (level, message, at) => this.log({ level, source: "run", message, project: open.key, ...(at !== undefined ? { taskId: at } : {}) }),
           }),
           ...(started.meta.split !== undefined ? { split: started.meta.split } : {}),
+          // A state switched off in the live files is not entered (decision 0021): asked at each entry.
+          entryRefusal: (stateId) => disabledRefusalOf(project, stateId),
           directed,
           // A workflow script's imports — resolved along this project's path, run only when approved.
           ...(scripts !== undefined ? { scripts } : {}),
@@ -6358,19 +6369,20 @@ export class AppService {
    * whose every origin is `unset`: no inheritance to report, and the machine's own defaults reported
    * around it. The composer renders exactly that, and the first message installs the file.
    */
-  chatStartPlan(request: { stateId: string; project?: string; overrides?: ChatSettings }): ChatPlanView {
+  chatStartPlan(request: { stateId?: string; project?: string; overrides?: ChatSettings }): ChatPlanView {
     const open = this.session(request.project);
+    const stateId = request.stateId ?? conversationWorkflowOf(open.project.config, "workflow");
     // Live files, never a snapshot: this conversation has not pinned one, and what it will run is
     // whatever `beginTaskRun` reads a moment from now — which is this.
-    const bundle = bundleFor(open.project, request.stateId);
-    const plan = chatPlanFor([bundle?.states[request.stateId]], request.overrides ?? {});
+    const bundle = bundleFor(open.project, stateId);
+    const plan = chatPlanFor([bundle?.states[stateId]], request.overrides ?? {});
     // The router, built over an EMPTY bundle. `defaultExecutorTree` refuses when a workflow's prompt
     // states name no model and nothing on this machine can answer one — a refusal that belongs to the
     // attempt and not to the preview. Raised here it would blank the composer on precisely the
     // machine where somebody needs to read it: the one where they have to pick a route by hand
     // before the first message can go anywhere. The routes and defaults come from the configuration
     // either way; the bundle only decides whether to throw.
-    const router = this.defaultTree(open.project.config, { rootId: request.stateId, states: {} }, false, this.secretResolver(open), false)
+    const router = this.defaultTree(open.project.config, { rootId: stateId, states: {} }, false, this.secretResolver(open), false)
       .prompt as {
       defaults?: Record<string, JsonValue>;
       routes?: Record<string, JairaPromptNode>;
@@ -8069,7 +8081,10 @@ export class AppService {
     const project = open.project;
     const result = await connectTaskIn(project, { ...request, project: open.dir }, {
       check: this.valueCheck(),
-      ...(this.options.connectConversation !== undefined ? { conversation: this.options.connectConversation } : {}),
+      // What a move that makes a dynamic workflow gives the task to steer it, by the settings (decision
+      // 0021) — and, where that one is disabled, what else could.
+      conversation: this.options.connectConversation ?? conversationWorkflowOf(project.config, "moved"),
+      conversations: () => this.conversationChoices(open),
       offered: (taskId) =>
         open.userEvents
           .list()
@@ -8343,8 +8358,19 @@ export class AppService {
   private async controlOf(open: ProjectSession, taskId: string): Promise<string> {
     const found = this.speakingControlOf(open, taskId);
     if (found !== undefined) return found;
-    await ensureControlConversation(open.project, { taskId, conversation: this.options.connectConversation ?? CONNECT_CONVERSATION });
+    const conversation = this.options.connectConversation ?? conversationWorkflowOf(open.project.config, "moved");
+    // A disabled one is not given to a task (decision 0021). A drop asks for another; this has no one to ask.
+    const off = disabledRefusalOf(open.project, conversation, "moved");
+    if (off !== undefined) throw this.refusal("run", `${off} It is the conversation a fast-forward answers through — choose another in Settings → Runs → Conversations.`);
+    await ensureControlConversation(open.project, { taskId, conversation });
     return taskId;
+  }
+
+  /** The enabled workflows that can be a conversation (decision 0021) — what is offered in place of a disabled one. */
+  private conversationChoices(open: ProjectSession): ConversationChoice[] {
+    return this.browseWorkflowsIn(open)
+      .workflows.filter((entry) => entry.conversationInput !== undefined && entry.disabled !== true && entry.loadError === undefined)
+      .map((entry) => ({ stateId: entry.rootId, ...(entry.label !== undefined ? { label: entry.label } : {}) }));
   }
 
   /** The task's own root when it speaks, else the nearest task above it whose root does. Nothing is written. */
@@ -11414,6 +11440,51 @@ export class AppService {
     rmSync(file);
     this.publish({ type: "store:invalidate", scope: "workflows" });
     return { stateId: request.stateId, layer: request.layer, applied: true, referencedBy };
+  }
+
+  /**
+   * Switch a state off, or back on (decision 0021): the `disabled` field in its file in `request.layer`.
+   *
+   * A layer that holds the file has the field set, or taken out, by a format-preserving edit. A layer
+   * that does not gets a file FOLLOWING the nearest one below that does —
+   * `{ "$ref": "$BASE/workflows/feature", "disabled": true }` — so switching an inherited workflow off
+   * copies nothing that would stop hearing about the original. Enable takes the field out and deletes a
+   * file left saying nothing but whose file it follows; and where the state is STILL off from this
+   * layer — what it follows says so — it writes `"disabled": false` instead, since taking the field out
+   * would have changed nothing.
+   */
+  setWorkflowDisabled(request: SetWorkflowDisabledRequest): WorkflowSource {
+    this.writable(request.layer);
+    const { stateId, layer, project } = request;
+    const file = this.workflowFile(stateId, layer, project);
+    const follow = (disabled: boolean): string => {
+      const below = (layer === "project" ? (["base", "system"] as const) : (["system"] as const)).find((l) => existsSync(this.workflowFile(stateId, l, project)));
+      if (below === undefined) throw this.refusal("file", `'${stateId}' has no file in the ${layer} layer or below it to switch`);
+      return followFileText(`$${below === "base" ? "BASE" : "SYSTEM"}/workflows/${stateId}`, disabled);
+    };
+    const write = (text: string): void => {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, text, "utf8");
+    };
+    if (request.disabled) {
+      write(existsSync(file) ? withDisabledText(readFileSync(file, "utf8"), true) : follow(true));
+    } else {
+      if (existsSync(file)) {
+        const rest = withDisabledText(readFileSync(file, "utf8"), undefined);
+        if (followsOnly(rest)) rmSync(file);
+        else write(rest);
+      }
+      // Seen from this layer: a project's whole path, or what Shared and the built-in layer say.
+      const paths = layer === "project" ? this.requireProject(project).paths : baseAsProjectPaths(this.baseDir);
+      const searchPath = layer === "project" ? this.requireProject(project).config.workflows.path : undefined;
+      if (disabledStatesIn(paths, searchPath).includes(stateId)) {
+        write(existsSync(file) ? withDisabledText(readFileSync(file, "utf8"), false) : follow(false));
+      }
+    }
+    this.publish({ type: "store:invalidate", scope: "workflows" });
+    this.noteSyncWrite(layer, `workflows/${stateId}.json`);
+    const exists = existsSync(file);
+    return { stateId, layer, file, text: exists ? readFileSync(file, "utf8") : "", exists };
   }
 
   /**

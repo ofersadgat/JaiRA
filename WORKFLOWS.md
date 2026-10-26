@@ -148,6 +148,7 @@ adapter, or a scripted test double without editing a single state file.
   "id": "feature/plan",            // optional; derived from the path. If present it must resolve to the same state.
   "label": "Planning",             // shown on the board
   "description": "…",              // author's note; also useful prompt context
+  "disabled": true,                // optional; switched off — no new run starts here (§2.3)
 
   "inputs":  { /* §3 */ },
   "outputs": { /* §3 */ },
@@ -167,6 +168,7 @@ adapter, or a scripted test double without editing a single state file.
 | `id` | optional | The state's own path reference (§2.1). Derived from the file's location; a present one must resolve to that same state. |
 | `label` | optional | Display name on the board. Falls back to the id. |
 | `description` | optional | Author's note. |
+| `disabled` | optional | `true` switches the state off, and every state under its id (§2.3). |
 | `inputs` | optional | Declared input slots (§3). |
 | `outputs` | optional | Declared output slots (§3). A state with no outputs produces nothing. |
 | `operation` | optional | The one thing this state does (§4). Absent ⇒ a pure composite. `{}` ⇒ "the operation my `environment` chain describes". |
@@ -351,6 +353,45 @@ A reference cycle is a load error naming the cycle.
 
 Other fields have their own default roots — `config.artifacts.destination` hangs
 off the worktree (§10).
+
+### 2.3 Switching a workflow off: `disabled`
+
+`"disabled": true` switches a state off, and with it every state under its id —
+disabling `feature` disables `feature/review`. It is the workflow's own
+configuration, kept in its file, not a setting (decision 0021):
+
+- **No new run starts there**, whoever starts it — New task, the Run tab, a re-run,
+  an automation, a conversation's `start_task`, a move onto its column, the CLI.
+  Each is refused with `Not run: 'feature' is disabled.`
+- **A running workflow that would enter one fails at the entry.** The child is
+  blocked with the same words, and like any child failure a rule on the mount may
+  handle it (`.children.review.outcome === 'error'`); with none the parent fails.
+  The check is made at the entry, against the files as they stand then — so
+  switching a state off reaches the runs already going, the next time one enters
+  it.
+- **Tasks and conversations already running carry on.** A run that is past the
+  state, or inside it, is not stopped.
+- **An agent is not shown it.** `list_workflows` leaves a disabled workflow out
+  and marks a disabled child `disabled`.
+
+The file that decides is the one that wins for the id (§1, "Two places a state
+file can live"). A workflow a project only inherits is switched off in that
+project with a two-line file that follows the original instead of copying it:
+
+```jsonc
+// .jaira/workflows/chat/session.json — the built-in one, off in this project only
+{ "$ref": "$SYSTEM/workflows/chat/session", "disabled": true }
+
+// .jaira/workflows/feature.json — a Shared one switched off in ~/.jaira, back on here
+{ "$ref": "$BASE/workflows/feature", "disabled": false }
+```
+
+`disabled` is never part of what a run follows: it is left out of a task's
+snapshot, so switching a workflow off or on does not make its running tasks read
+as running older source. A file that says nothing but `$ref` and `disabled` loads as
+exactly the file it follows. A workflow script has no field to set, so it cannot be
+switched off. Hiding a board column is something else — a view setting kept per
+machine, which stops nothing.
 
 ---
 
