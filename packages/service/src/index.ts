@@ -25,3 +25,4 @@ export * from "./placement";
 export * from "./resources";
 export * from "./tailnetHelper";
 export * from "./lazy";
+export * from "./tailnet";

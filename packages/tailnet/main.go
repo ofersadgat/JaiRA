@@ -1,40 +1,47 @@
-// jaira-tailnet: JaiRA's own way onto a tailnet, for a machine without the Tailscale app (decision 0013
-// §2, ruled 2026-09-27: "Both now"). It joins the person's tailnet as its own node with Tailscale's
-// embeddable library (tsnet) and forwards what arrives to the engine's loopback listener, so the other
-// machines reach this one exactly as through `tailscale serve`.
+// jaira-tailnet: JaiRA's own way onto a tailnet, for a machine without the Tailscale app (decisions
+// 0013 §2 and 0022). It is one node on the person's tailnet, made with Tailscale's embeddable library
+// (./node), and JaiRA drives it over stdin and stdout for as long as JaiRA runs:
 //
-//	jaira-tailnet --dir <state dir> --hostname jaira-desk --target 127.0.0.1:47318
+//	jaira-tailnet --dir <state dir> --hostname jaira-desk [--target 127.0.0.1:47318]
 //
-// It says what it is doing as one JSON object per line on stdout, which JaiRA reads:
+// What it says, one JSON object per line on stdout, is ./node's events, and these answers:
 //
-//	{"state":"needs-login","url":"https://login.tailscale.com/a/…"}   the one-time sign-in, to open
-//	{"state":"running","url":"https://jaira-desk.tail4c2e.ts.net","dnsName":"jaira-desk.tail4c2e.ts.net"}
-//	{"state":"error","message":"…"}
+//	{"door":"https://mac-mini.tail4c2e.ts.net","local":"127.0.0.1:53211"}   a door, asked for
+//	{"door":"…","error":"…"}
+//	{"state":"signed-out"}                                                 after logout; then it exits
 //
-// HTTPS when the tailnet has certificates turned on; plain HTTP on the tailnet otherwise, which WireGuard
-// already encrypts. Nothing is exposed outside the tailnet (no Funnel).
+// What it is told, one JSON object per line on stdin:
+//
+//	{"cmd":"login"}       a new sign-in page
+//	{"cmd":"logout"}      sign out, keeping the identity, and exit
+//	{"cmd":"devices"}     say the devices now
+//	{"cmd":"serve","target":"127.0.0.1:47318"}
+//	{"cmd":"door","url":"https://mac-mini.tail4c2e.ts.net"}
+//
+// It exits when stdin closes, so it never outlives the JaiRA that started it. Nothing is exposed outside
+// the tailnet (no Funnel).
 package main
 
 import (
-	"context"
+	"bufio"
 	"encoding/json"
 	"flag"
 	"fmt"
-	"net"
-	"net/http"
-	"net/http/httputil"
-	"net/url"
 	"os"
 	"os/signal"
-	"strings"
+	"sync"
 	"syscall"
 
-	"tailscale.com/tsnet"
+	"github.com/ofersadgat/jaira/packages/tailnet/node"
 )
+
+var out sync.Mutex
 
 func say(fields map[string]any) {
 	line, _ := json.Marshal(fields)
+	out.Lock()
 	fmt.Println(string(line))
+	out.Unlock()
 }
 
 func fail(message string) {
@@ -45,55 +52,68 @@ func fail(message string) {
 func main() {
 	dir := flag.String("dir", "", "where the node keeps its state (its identity on the tailnet)")
 	hostname := flag.String("hostname", "jaira", "the node's name on the tailnet")
-	target := flag.String("target", "", "the engine's loopback listener, host:port")
+	target := flag.String("target", "", "the engine's loopback listener, host:port, to publish")
 	flag.Parse()
-	if *dir == "" || *target == "" {
-		fail("--dir and --target are required")
-	}
-	if host, _, err := net.SplitHostPort(*target); err != nil || (host != "127.0.0.1" && host != "localhost" && host != "::1") {
-		fail("--target must be a loopback address")
+	if *dir == "" {
+		fail("--dir is required")
 	}
 
-	server := &tsnet.Server{Dir: *dir, Hostname: *hostname, Logf: func(string, ...any) {}}
-	// The sign-in link is only ever said in the library's user log, and said again every few seconds
-	// while nobody has signed in: passed on once per link.
-	lastLink := ""
-	server.UserLogf = func(format string, args ...any) {
-		line := fmt.Sprintf(format, args...)
-		if at := strings.Index(line, "https://login.tailscale.com/"); at >= 0 {
-			link := strings.Fields(line[at:])[0]
-			if link != lastLink {
-				lastLink = link
-				say(map[string]any{"state": "needs-login", "url": link})
-			}
-		}
-	}
-	defer server.Close()
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-	status, err := server.Up(ctx)
-	if err != nil {
-		fail(err.Error())
-	}
-	dnsName := strings.TrimSuffix(status.Self.DNSName, ".")
-
-	proxy := httputil.NewSingleHostReverseProxy(&url.URL{Scheme: "http", Host: *target})
-	scheme := "https"
-	listener, err := server.ListenTLS("tcp", ":443")
-	if err != nil {
-		scheme = "http"
-		listener, err = server.Listen("tcp", ":80")
-		if err != nil {
+	n := node.New(*dir, *hostname, say)
+	if *target != "" {
+		if err := n.Serve(*target); err != nil {
 			fail(err.Error())
 		}
 	}
-	say(map[string]any{"state": "running", "url": scheme + "://" + dnsName, "dnsName": dnsName})
-	go func() {
-		<-ctx.Done()
-		listener.Close()
-	}()
-	if err := http.Serve(listener, proxy); err != nil && ctx.Err() == nil {
+	if err := n.Start(); err != nil {
 		fail(err.Error())
 	}
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		<-stop
+		n.Close()
+		os.Exit(0)
+	}()
+
+	lines := bufio.NewScanner(os.Stdin)
+	lines.Buffer(make([]byte, 64*1024), 1024*1024)
+	for lines.Scan() {
+		var command struct {
+			Cmd    string `json:"cmd"`
+			Target string `json:"target"`
+			URL    string `json:"url"`
+		}
+		if json.Unmarshal(lines.Bytes(), &command) != nil {
+			continue
+		}
+		switch command.Cmd {
+		case "login":
+			if err := n.Login(); err != nil {
+				say(map[string]any{"state": "error", "message": err.Error()})
+			}
+		case "logout":
+			if err := n.Logout(); err != nil {
+				say(map[string]any{"state": "error", "message": err.Error()})
+				continue
+			}
+			say(map[string]any{"state": "signed-out"})
+			n.Close()
+			os.Exit(0)
+		case "devices":
+			n.Devices()
+		case "serve":
+			if err := n.Serve(command.Target); err != nil {
+				say(map[string]any{"state": "error", "message": err.Error()})
+			}
+		case "door":
+			local, err := n.Door(command.URL)
+			if err != nil {
+				say(map[string]any{"door": command.URL, "error": err.Error()})
+			} else {
+				say(map[string]any{"door": command.URL, "local": local})
+			}
+		}
+	}
+	n.Close()
 }

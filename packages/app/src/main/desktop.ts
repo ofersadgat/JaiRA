@@ -39,6 +39,7 @@ import {
   HOST_CHANNELS,
   connectEngine,
   discoverEngine,
+  ENGINE_PROTOCOL,
   hostEngine,
   machineSettings,
   pidAlive,
@@ -1047,9 +1048,8 @@ async function hostLocally(): Promise<EngineLink | undefined> {
       kind: "desktop",
       version: app.getVersion(),
       service: () => buildService(),
-      // Other machines reach this engine through Tailscale, to loopback (decision 0013 §2) — and so do
-      // phones and browsers, which are served the client this window loads (amended 2026-09-30).
-      network: { clientDir: CLIENT_DIR },
+      // Other machines and phones reach this engine through Tailscale, to loopback (decisions 0013 §2, 0022).
+      network: {},
       stopRefusal: "this engine is a JaiRA window's own; quit that window to stop it",
       onFailure: (channel, error) => link?.recordIpcFailure(channel, error),
       log: (level, message) => link?.recordApp(level, message),
@@ -1096,9 +1096,12 @@ async function startServer(): Promise<EngineClient | undefined> {
 }
 
 /**
- * The host runs another version, which speaks another contract (§3). A server can be restarted on this
- * version; a window or a command is the person's to end.
+ * The host speaks another protocol (§3) — another version alone never stops two sharing it. A server
+ * can be restarted on this version; a window or a command is the person's to end.
  */
+/** Another engine's protocol, for the dialogs: versions do not decide whether two can share it, protocols do. */
+const protocolWords = (protocol: number | undefined): string => (protocol === undefined ? "a protocol from before protocol numbers" : `protocol ${protocol}`);
+
 async function answerMismatch(client: EngineClient): Promise<"retry" | "quit"> {
   const host = client.host;
   const what = host.kind === "server" ? "A JaiRA server" : host.kind === "desktop" ? "Another JaiRA window" : "A jaira command";
@@ -1108,7 +1111,7 @@ async function answerMismatch(client: EngineClient): Promise<"retry" | "quit"> {
       buttons: [`Restart it on ${app.getVersion()}`, "Quit"],
       defaultId: 0,
       cancelId: 1,
-      message: `${what} is running JaiRA ${host.version}, and this is ${app.getVersion()}.`,
+      message: `${what} is running JaiRA ${host.version}, which speaks ${protocolWords(host.protocol)}; this is ${app.getVersion()}, on protocol ${ENGINE_PROTOCOL}.`,
       detail: "They cannot share the engine. Restarting the server drains its runs first; they resume when it starts again.",
     });
     if (response !== 0) return "quit";
@@ -1124,7 +1127,7 @@ async function answerMismatch(client: EngineClient): Promise<"retry" | "quit"> {
     buttons: ["Try again", "Quit"],
     defaultId: 0,
     cancelId: 1,
-    message: `${what} (process ${host.pid}) is running JaiRA ${host.version}, and this is ${app.getVersion()}.`,
+    message: `${what} (process ${host.pid}) is running JaiRA ${host.version}, which speaks ${protocolWords(host.protocol)}; this is ${app.getVersion()}, on protocol ${ENGINE_PROTOCOL}.`,
     detail: host.kind === "desktop" ? "Quit that window, then try again." : "Let that command finish, then try again.",
   });
   return response === 0 ? "retry" : "quit";

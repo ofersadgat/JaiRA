@@ -7,7 +7,7 @@
 import { createConnection } from "node:net";
 import type { PushMessage } from "@jaira/shared";
 import { streamChannel, wsClientChannel, type FrameChannel } from "./engineChannel";
-import { ENGINE_CONTRACT, enginePipePath, readEngineFile, type EngineHostInfo, type HostFrame } from "./enginePipe";
+import { ENGINE_PROTOCOL, enginePipePath, readEngineFile, type EngineHostInfo, type HostFrame } from "./enginePipe";
 
 /** Where a host listens: its pipe (or Unix socket), the loopback port, or another machine's URL. */
 export type EngineAddress = { pipe: string } | { port: number } | { url: string };
@@ -45,8 +45,8 @@ export interface EngineClientOptions {
   address?: EngineAddress;
   /** The token to say hello with: `engine.json`'s by default; a machine token for a network address. */
   token?: string;
-  /** Tests: another contract. */
-  contract?: string;
+  /** Tests: another protocol. */
+  protocol?: number;
   /** How long to wait for the host's answer to hello. */
   timeoutMs?: number;
 }
@@ -64,7 +64,7 @@ export class EngineClient {
   constructor(
     private readonly channel: FrameChannel,
     readonly host: EngineHostInfo,
-    /** The host speaks another contract: only `engine:*` channels answer (see `HostFrame`). */
+    /** The host speaks another protocol: only `engine:*` channels answer (see `HostFrame`). */
     readonly limited: boolean,
   ) {}
 
@@ -208,6 +208,6 @@ export async function connectEngine(options: EngineClientOptions): Promise<Engin
       if (client === undefined) reject(new EngineUnavailable(`${describeAddress(address)} closed the connection`));
       else client.ended();
     });
-    channel.send({ t: "hello", token, contract: options.contract ?? ENGINE_CONTRACT, version: options.version, client: options.client, pid: process.pid });
+    channel.send({ t: "hello", token, protocol: options.protocol ?? ENGINE_PROTOCOL, version: options.version, client: options.client, pid: process.pid });
   });
 }

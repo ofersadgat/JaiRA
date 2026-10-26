@@ -17,7 +17,8 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
 import { Git, NodeExec, parseShortstat } from "@jaira/runtime";
-import { AppService, hostEngine, loopbackReach, machineFile, machineIdentity, serviceHandlers, updateMachineIdentity, workspaceKey, type HostedEngine } from "@jaira/service";
+import { AppService, hostEngine, loopbackTailnet, machineFile, machineIdentity, serviceHandlers, updateMachineIdentity, workspaceKey, type HostedEngine } from "@jaira/service";
+import { pairMachines } from "./pairMachines";
 import { SHARED_SESSION, type EnvironmentView, type MachinesView, type ProjectSummary, type PushMessage } from "@jaira/shared";
 import { eventually } from "@jaira/testing";
 
@@ -240,11 +241,11 @@ describe("another machine's workspaces", () => {
   async function machine(label: string): Promise<Machine> {
     const base = temp(label);
     let hosted: HostedEngine | undefined;
-    const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
+    const service = new AppService({ baseDir: base, version: "0.2.0", tailnet: loopbackTailnet(), announce: false, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
     hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
     closing.push(() => hosted!.close());
     service.fleet.rename(label);
-    await service.fleet.setReachable(true);
+    await service.fleet.signIn();
     const handlers = serviceHandlers(service) as Record<string, (request: unknown) => unknown>;
     return { base, service, hosted, call: async (channel, request) => handlers[channel]!(request) };
   }
@@ -255,7 +256,7 @@ describe("another machine's workspaces", () => {
     const here = await clone(a.service, a.base, "main");
     const there = await clone(b.service, b.base, "release");
     b.service.fleet.setForm("mini");
-    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await pairMachines(a.service.fleet, b.service.fleet);
     await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
     await expect.poll(async () => ((await a.call("project:list")) as ProjectSummary[]).filter((p) => p.identity !== undefined).length, { timeout: 8000 }).toBe(2);
     writeFileSync(join(there, "notes.txt"), "one\n");

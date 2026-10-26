@@ -741,8 +741,9 @@ import type {
 import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from "@jaira/shared";
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
-import { Fleet, type ReachPort } from "./fleet";
+import { Fleet, TAILNET_HEALTH } from "./fleet";
 import type { AnnouncePort } from "./lanPairing";
+import type { TailnetPort } from "./tailnet";
 import { Federation } from "./federation";
 import { Replicator } from "./replicator";
 import { machineTags } from "./machine";
@@ -758,8 +759,8 @@ export interface AppServiceOptions {
   publish?: Publish;
   /** The JaiRA version this engine runs, as other machines are told it. */
   version?: string;
-  /** How this machine is published on the tailnet. Default: the installed Tailscale app. */
-  reach?: ReachPort;
+  /** Which Tailscale this machine signs in with (decision 0022). Default: the one it has (`tailnet.ts`). */
+  tailnet?: TailnetPort;
   /** How a pairing machine is announced to phones on its local network; `false` announces nothing (tests). */
   announce?: AnnouncePort | false;
   /** Tests: where the pairing listener binds — loopback, so no firewall asks. */
@@ -1504,8 +1505,14 @@ export class AppService {
       version: options.version ?? "dev",
       ...(options.keychain !== undefined ? { secrets: options.keychain } : {}),
       publish: (view) => this.publish({ type: "machines:changed", view }),
-      log: (level, message) => this.log({ level, source: "machines", message }),
-      ...(options.reach !== undefined ? { reach: options.reach } : {}),
+      log: (level, message, raised) => this.log({ level, source: "machines", message, ...(raised !== undefined ? { raised } : {}) }),
+      // Tailscale going down is an error among Settings' (on the Machines page), cleared once it is back.
+      // Called only once the engine is hosted, after the board below exists.
+      health: (down) =>
+        down === undefined
+          ? this.health.clear(TAILNET_HEALTH)
+          : this.health.set({ id: TAILNET_HEALTH, level: "error", page: "machines", title: "Tailscale", detail: down.detail, fix: down.fix, ...(down.reconnect ? { action: "reconnect" as const } : {}) }),
+      ...(options.tailnet !== undefined ? { tailnet: options.tailnet } : {}),
       ...(options.announce !== undefined ? { announce: options.announce } : {}),
       ...(options.lanBindHost !== undefined ? { lanBindHost: options.lanBindHost } : {}),
       openPage: (url) => this.openPage(url),

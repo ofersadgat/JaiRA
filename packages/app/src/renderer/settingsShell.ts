@@ -122,6 +122,10 @@ export function fixHealthItem(item: HealthItem, f: HealthFixers): void {
     case "open-logs":
       f.setView("logs");
       return;
+    case "reconnect":
+      void invoke("machines:signIn", undefined).catch(() => undefined);
+      openHealthPage(item.page, f);
+      return;
     case undefined:
       openHealthPage(item.page, f);
   }

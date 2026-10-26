@@ -6,20 +6,76 @@ import type { ChatSettings } from "./operationVocabulary";
 
 export type MachineOsTag = "windows" | "mac" | "linux";
 
-/** How this machine is reached from the others. */
-export interface MachineReach {
-  /**
-   * `off`: not published. `on`: published at {@link url}. `starting`: being published.
-   * `unavailable`: wanted, but nothing can publish it — see {@link reason}.
-   */
-  state: "off" | "on" | "starting" | "unavailable";
-  /** `https://desk.tail4c2e.ts.net` — what another machine types to pair with this one. */
-  url?: string;
-  /** Which Tailscale publishes it: the installed app, or JaiRA's bundled helper. */
-  via?: "tailscale" | "helper";
-  reason?: string;
-  /** The helper needs a one-time sign-in to the tailnet: the page to open. */
+/**
+ * This machine on the tailnet (decision 0022 §3): the one Tailscale sign-in, which is also what makes it
+ * reachable from the machines paired with it.
+ *
+ * - `off`: not signed in. With {@link node} it is still registered (signed out); without, it never was.
+ * - `signing-in`: waiting for the person to sign in at {@link signInUrl}.
+ * - `on`: signed in as {@link user}, called {@link node} on {@link tailnet}, published at {@link url}.
+ * - `removing`: waiting for Tailscale to remove it ({@link consoleUrl} is where).
+ * - `down`: it was on the tailnet and stopped without being asked to — the helper or the Tailscale app
+ *   went away, see {@link reason}. Still wanted: JaiRA tries again by itself, and Settings counts it an
+ *   error until it is back.
+ * - `unavailable`: it cannot sign in here — see {@link reason} (another home, no helper, the Tailscale
+ *   app signed out).
+ */
+export interface TailnetView {
+  state: "off" | "signing-in" | "on" | "removing" | "down" | "unavailable";
+  /** Which Tailscale: JaiRA's bundled helper, or the installed app (which signs in and out itself). */
+  via?: "helper" | "tailscale";
   signInUrl?: string;
+  /** The account signed in, or signed in last. */
+  user?: string;
+  /** This machine's name on the tailnet: `jaira-desktop-vuvo7fl`; for one never signed in, the name it will have. */
+  node?: string;
+  /** The tailnet's DNS suffix: `tail0b4faa.ts.net`. */
+  tailnet?: string;
+  /** Where this machine's engine is published: `https://jaira-desk.tail4c2e.ts.net`. */
+  url?: string;
+  /** This machine's page in Tailscale's admin console. */
+  consoleUrl?: string;
+  /** Why it is unavailable, or what went wrong. */
+  reason?: string;
+  /** For `unavailable` because this is not the default home: the home this engine runs from. */
+  home?: string;
+}
+
+/** What a device on the tailnet answered at `/.well-known/jaira`: a JaiRA machine, or a phone running JaiRA. */
+export interface TailnetJaira {
+  kind: "machine" | "phone";
+  /** The machine's id, or the phone's device id. */
+  id: string;
+  label: string;
+  version: string;
+  os?: MachineOsTag | "android" | "ios";
+  form?: MachineForm;
+  /** The address that answered: what pairing and the connection use. */
+  url: string;
+}
+
+/**
+ * One device on the tailnet (decision 0022 §4), as Tailscale describes it, and what answered on it.
+ */
+export interface TailnetDeviceView {
+  /** Tailscale's stable id for the device. */
+  id: string;
+  /** Its host name: `mac-mini`, `jaira-desktop-vuvo7fl`. */
+  name: string;
+  /** `mac-mini.tail4c2e.ts.net`. */
+  dnsName: string;
+  /** Tailscale's word for its system: `windows`, `macOS`, `linux`, `android`, `iOS`. */
+  os: string;
+  online: boolean;
+  lastSeenAt?: number;
+  /** JaiRA answered there; absent when nothing did, or the device is offline, or it was not asked yet. */
+  jaira?: TailnetJaira;
+  /** It was asked, and nothing answered as JaiRA. */
+  noJaira?: boolean;
+  /** An older registration of this machine (its name with a `-N`, offline). */
+  olderSelf?: boolean;
+  /** Its page in Tailscale's admin console. */
+  consoleUrl?: string;
 }
 
 /**
@@ -46,7 +102,7 @@ export interface MachineView {
 
 export interface PeerView extends MachineView {
   url?: string;
-  /** `online`: connected now. `mismatch`: connected, but on another contract — see {@link version}. */
+  /** `online`: connected now. `mismatch`: connected, but on another protocol — see {@link reason}. */
   state: "online" | "offline" | "connecting" | "mismatch";
   version?: string;
   lastSeenAt?: number;
@@ -57,13 +113,13 @@ export interface PeerView extends MachineView {
 }
 
 /**
- * A phone or a browser paired with this machine (decision 0013, amended 2026-09-30): a window onto its
- * engine, which holds a token this machine issued and nothing else. Listed so it can be forgotten.
+ * A phone paired with this machine (decisions 0013, amended 2026-09-30, and 0022 §6): it runs no engine
+ * and keeps no copy, and holds a token this machine issued.
  */
 export interface DeviceView {
   id: string;
   label: string;
-  kind: "phone" | "browser";
+  kind: "phone";
   pairedAt: number;
   /** When it last said hello with its token. */
   lastUsedAt?: number;
@@ -77,12 +133,20 @@ export interface MachinesView {
    * loopback port its engine listens on for other machines and devices, while it does — what Tailscale
    * publishes, and what `adb reverse` points an emulator at.
    */
-  self: MachineView & { reach: MachineReach; version: string; copy: CopyChoice; port?: number };
+  self: MachineView & { tailnet: TailnetView; version: string; copy: CopyChoice; port?: number };
   machines: PeerView[];
-  /** The phones and browsers that hold a token for this machine. */
+  /** The phones that hold a token for this machine. */
   devices: DeviceView[];
+  /** Every device on the tailnet, while signed in (decision 0022 §4). */
+  tailnetDevices: TailnetDeviceView[];
+  /** When the tailnet's devices were last asked whether JaiRA runs there. */
+  checkedAt?: number;
+  /** This machine asked a device to show a code (Pair), and waits for the person to type it here. */
+  asking?: { device: string; expiresAt: number };
+  /** Another machine or a phone asked this one to show a code: the pop-up's. */
+  asked?: { by: { label: string; kind: "machine" | "phone"; os?: MachineOsTag | "android" | "ios"; form?: MachineForm }; code: string; expiresAt: number };
   /**
-   * The code being shown under Pair a machine, while it is valid. `nearby`: phones on this machine's
+   * The code being shown under Pair a phone, while it is valid. `nearby`: phones on this machine's
    * local network can find it to pair (decision 0013, amended 2026-10-04) — its pairing listener's port
    * and the addresses it is announced on, the likeliest first.
    */

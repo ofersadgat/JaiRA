@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { AppService, hostEngine, loopbackReach, serviceHandlers, whyNot, DEFAULT_THRESHOLDS, workspaceKey, type HostedEngine, type MachineCapacity } from "@jaira/service";
+import { AppService, hostEngine, loopbackTailnet, serviceHandlers, whyNot, DEFAULT_THRESHOLDS, workspaceKey, type HostedEngine, type MachineCapacity } from "@jaira/service";
+import { pairMachines } from "./pairMachines";
 import type { ProjectSummary } from "@jaira/shared";
 
 describe("whether a machine takes a run", () => {
@@ -69,10 +70,10 @@ async function machine(label: string): Promise<Machine> {
   dirs.push(base);
   let hosted: HostedEngine | undefined;
   // Both engines run on this one computer, so a busy test run would read as both machines being busy.
-  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
+  const service = new AppService({ baseDir: base, version: "0.2.0", tailnet: loopbackTailnet(), announce: false, watchWorkflows: false, placementThresholds: { cpuLimit: 2, memoryFloor: 0 }, publish: (m) => hosted?.host.broadcast(m) });
   hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
   service.fleet.rename(label);
-  await service.fleet.setReachable(true);
+  await service.fleet.signIn();
   const handlers = serviceHandlers(service) as Record<string, (request: unknown) => unknown>;
   const m: Machine = { base, service, hosted, call: async (channel, request) => handlers[channel]!(request) };
   made.push(m);
@@ -95,7 +96,7 @@ async function clone(m: Machine): Promise<string> {
 const FAKE = [{ output: { said: "hi" } }];
 
 async function pair(a: Machine, b: Machine): Promise<void> {
-  await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+  await pairMachines(a.service.fleet, b.service.fleet);
   await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
   await expect.poll(() => b.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
   await expect.poll(async () => ((await a.call("project:list")) as ProjectSummary[]).filter((p) => p.identity !== undefined).length, { timeout: 8000 }).toBe(2);

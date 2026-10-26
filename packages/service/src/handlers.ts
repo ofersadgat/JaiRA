@@ -290,7 +290,11 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "machines:view": (() => service.fleet.view()) as Handler,
     "machines:rename": ((request: { label: string }) => service.fleet.rename(request.label)) as Handler,
     "machines:tags": ((request: { tags: string[] }) => service.fleet.setTags(request.tags)) as Handler,
-    "machines:reach": ((request: { on: boolean }) => service.fleet.setReachable(request.on === true)) as Handler,
+    "machines:signIn": (() => service.fleet.signIn()) as Handler,
+    "machines:signOut": (() => service.fleet.signOut()) as Handler,
+    "machines:remove": (() => service.fleet.remove()) as Handler,
+    "machines:removeCancel": (() => service.fleet.removeCancel()) as Handler,
+    "machines:refresh": (() => service.fleet.refresh()) as Handler,
     "machines:copy": ((request: CopyChoice) => {
       const view = service.fleet.setCopy(request);
       // Applied now rather than at the next minute: what is newly wanted is copied, what is no longer
@@ -299,9 +303,12 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
       return view;
     }) as Handler,
     "machines:copies": (() => service.replicator.onDisk()) as Handler,
+    "machines:pairAsk": ((request: { device: string }) => service.fleet.pairAsk(String(request.device))) as Handler,
+    "machines:pair": ((request: { device: string; code: string }) => service.fleet.pair(String(request.device), String(request.code))) as Handler,
+    "machines:pairCancel": (() => service.fleet.pairCancel()) as Handler,
     "machines:pairCode": (() => service.fleet.pairingCode()) as Handler,
-    "machines:pairCancel": (() => service.fleet.cancelPairing()) as Handler,
-    "machines:add": ((request: { address: string; code: string }) => service.fleet.add(request.address, request.code)) as Handler,
+    "machines:pairCodeCancel": (() => service.fleet.cancelPairing()) as Handler,
+    "machines:refuse": (() => service.fleet.refuse()) as Handler,
     "machines:forget": ((request: { id: string }) => service.fleet.forget(request.id)) as Handler,
     "placement:view": ((request: { project: string }) => service.placementView(request.project)) as Handler,
     "placement:setRules": ((request: { project: string; order: string[]; caps: Record<string, number> }) =>
@@ -327,7 +334,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
 /**
  * What one engine host's PEERS ask of it over the pipe (decision 0012 §3): the desktop's main process
  * when another process hosts the engine, and `jaira server status|stop`. Never the renderer's — these
- * are not IPC channels, and a client admitted with another contract may still ask them (`limited`).
+ * are not IPC channels, and a client admitted with another protocol may still ask them (`limited`).
  *
  * The desktop's main process uses the engine for more than the window's requests: it logs its own
  * launch and crashes, keeps the updater's and plugins' items on the health board, asks what a quit

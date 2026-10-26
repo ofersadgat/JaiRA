@@ -240,7 +240,7 @@ If every step finds nothing, there is no host.
   - Host to client: `welcome {host}` or `refused {reason}`, then `res {id, ok, result | error}` and
     `push {message}`.
   - Every frame is length-prefixed JSON (4 bytes, big-endian), at most 256 MB.
-- **The contract** is a hash of the sorted channel names. A client with another is refused, with both
+- **The contract** (since 2026-10-26 a protocol number: see the amendment at the end) is a hash of the sorted channel names. A client with another is refused, with both
   versions named. Offering to restart the host on the client's version is the desktop client's job
   (step 4).
 - **What the pipe answers:**
@@ -378,3 +378,29 @@ rule.
 
 The alternative was to start a detached `jaira serve` and go through it. It would have made the CLI a
 pure client, but it leaves a server running after the command ends.
+
+## Amendment, 2026-10-26: a protocol number, not a hash of the channels
+
+The person's phone, on another build than the desktop, said the machine "runs another build of JaiRA
+than this one: update both". The person: "They shouldnt need to be the exact same version. The only
+boundary for communication is whether the communication protocol or data protocol has a breaking
+change. Not the app version."
+
+The hash of the sorted channel names changed whenever a channel was added, though an older side never
+asks for a channel it does not know, and a newer side asking an older host for one is already answered
+"this engine does not answer" for that request alone. So the contract is now `ENGINE_PROTOCOL`
+(`@jaira/shared`'s `engineFrames.ts`), a number raised only for a **breaking** change: a frame or a
+channel removed or renamed, or a request, response, push or frame reshaped so the other side would
+misread it. Adding a channel, a push or an optional field is not one.
+
+- `hello` says `protocol` (a number) where it said `contract`; `engine.json`, the welcome's host info
+  and `/.well-known/jaira` say `protocol` too. A side on another protocol is admitted `limited` as
+  before.
+- Every mismatch says which side to update, the one on the older protocol (`protocolMismatch`): the
+  phone's Connect screen, a paired machine's row, `jaira`'s refusal, the desktop's dialogs. A JaiRA
+  from before protocol numbers says no protocol and counts as older.
+- `engineProtocol.test.ts` holds the channels of the current protocol (`engineProtocol.json`): one
+  gone without a raise fails it, and so does a new one not written down, so that taking it away later
+  is seen.
+- A phone or a machine built before this speaks no protocol number, so it is limited by one built
+  after it, and the other way round: both sides need this build once. After that only a raise does.

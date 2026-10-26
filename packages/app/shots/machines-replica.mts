@@ -15,6 +15,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import { App } from "./driver.mjs";
+import { pairWithServer, serverOnTailnet } from "./pairLoopback.mjs";
 import { clickFirst, drawn, says } from "./parityWorld.mjs";
 import { buildWorld } from "./world.mjs";
 
@@ -76,8 +77,7 @@ async function main(): Promise<void> {
       await sleep(500);
     }
     jaira("machine", "rename", "mac-mini");
-    const reach = JSON.parse(jaira("machine", "reach", "on")) as { url: string };
-    const pair = JSON.parse(jaira("machine", "pair")) as { code: string };
+    const otherUrl = serverOnTailnet(jaira);
     const made = JSON.parse(jaira("task", "create", "--title", "port the updater to arm", "--workflow", "feature/plan", "--inputs", '{"issue":"arm"}', "--project", clone)) as { taskId: string };
     jaira("task", "start", made.taskId, "--fake", JSON.stringify(happyRules()), "--interactions", JSON.stringify({ "feature/plan/critique/human_review": [{ decision: "approve" }] }), "--project", clone);
 
@@ -86,8 +86,7 @@ async function main(): Promise<void> {
       await app.until(drawn, "the window to draw");
       await app.resize(1360, 820);
       await app.ipc("machines:rename", { label: "desk" });
-      await app.ipc("machines:reach", { on: true });
-      await app.ipc("machines:add", { address: reach.url, code: pair.code });
+      await pairWithServer(app, jaira);
       await app.until(`document.body.innerText.includes("port the updater to arm")`, "the other machine's task on the board");
       // The copy: the window's engine keeps one by default.
       for (let i = 0; i < 60 && !copied(world.home).includes(`${made.taskId}.json`); i += 1) await sleep(500);

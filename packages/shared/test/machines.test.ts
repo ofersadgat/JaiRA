@@ -4,10 +4,7 @@
  * the project key of a workspace on another machine.
  */
 import { describe, expect, it } from "vitest";
-import { createHash } from "node:crypto";
 import { engineUrlOf, hostOfUrl, normalizePairingCode, parseRemoteProjectKey, projectNameOf, remoteProjectKey, repositoryIdentity } from "../src/machines";
-import { ENGINE_CONTRACT, sha256Hex } from "../src/engineFrames";
-import { IPC_CHANNELS } from "../src/ipc";
 
 describe("a repository's identity", () => {
   it("is the same for every way its remote is written", () => {
@@ -50,13 +47,6 @@ describe("addresses and codes", () => {
     expect(engineUrlOf("ws://127.0.0.1:47318/engine")).toBe("ws://127.0.0.1:47318/engine");
     expect(() => engineUrlOf("")).toThrow(/not an address/);
     expect(hostOfUrl("wss://desk.tail4c2e.ts.net:8443/engine")).toBe("desk.tail4c2e.ts.net:8443");
-  });
-
-  it("hashes the contract the same with or without node:crypto", () => {
-    for (const text of ["", "abc", "x".repeat(55), "x".repeat(56), "x".repeat(64), [...IPC_CHANNELS].sort().join("\n")]) {
-      expect(sha256Hex(text)).toBe(createHash("sha256").update(text).digest("hex"));
-    }
-    expect(ENGINE_CONTRACT).toBe(createHash("sha256").update([...IPC_CHANNELS].sort().join("\n")).digest("hex").slice(0, 12));
   });
 
   it("reads a pairing code however it is typed", () => {

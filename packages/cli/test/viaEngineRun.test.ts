@@ -21,7 +21,7 @@ function fakeClient(script: Script = {}): { client: EngineClient; calls: Array<[
   let starts = 0;
   let approved = false;
   const client = {
-    host: { kind: "desktop", pid: 1, version: "0.1.0", contract: "x", pipe: "p", home: "h", exe: "e", startedAt: 0 },
+    host: { kind: "desktop", pid: 1, version: "0.1.0", protocol: 1, pipe: "p", home: "h", exe: "e", startedAt: 0 },
     limited: false,
     invoke: async (channel: string, request?: unknown) => {
       calls.push([channel, request]);

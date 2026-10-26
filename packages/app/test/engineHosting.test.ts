@@ -72,7 +72,7 @@ describe("the host", () => {
     expect(JSON.stringify(who)).not.toContain(readEngineFile(base)!.token);
   });
 
-  it("admits a client of another contract to the engine:* channels only", async () => {
+  it("admits a client of another protocol to the engine:* channels only", async () => {
     track(
       await claimEngine({
         baseDir: base,
@@ -81,10 +81,10 @@ describe("the host", () => {
         handlers: { "engine:info": () => ({ ok: true }), "task:list": () => [] },
       }).then((h) => h!),
     );
-    const client = track(await connectEngine({ baseDir: base, client: "old desktop", version: "0.1.0", contract: "000000000000" }));
+    const client = track(await connectEngine({ baseDir: base, client: "old desktop", version: "0.1.0", protocol: 0 }));
     expect(client.limited).toBe(true);
     expect(await client.invoke("engine:info")).toEqual({ ok: true });
-    await expect(client.invoke("task:list", {})).rejects.toThrow(/another contract/);
+    await expect(client.invoke("task:list", {})).rejects.toThrow(/speaks protocol 1, and old desktop 0: only engine:\* channels answer/);
   });
 
   it("listens on the loopback port when its pipe cannot be created, and is found there", async () => {
@@ -185,7 +185,7 @@ describe("discovery", () => {
       kind: "desktop",
       pid: process.pid,
       version: "0.2.0",
-      contract: "x",
+      protocol: 1,
       pipe: unmakeablePipe(),
       home: homeHash(base),
       exe: process.execPath,
@@ -201,7 +201,7 @@ describe("discovery", () => {
       kind: "server",
       pid: 2_000_000_000,
       version: "0.2.0",
-      contract: "x",
+      protocol: 1,
       pipe: unmakeablePipe(),
       home: homeHash(base),
       exe: process.execPath,

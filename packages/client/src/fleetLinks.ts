@@ -21,7 +21,7 @@ import { tailnetEngineUrl, tailnetHostname } from "../bridges/tailnetJoin";
  * shell's projects are those of the machines it reaches.
  *
  * A machine that refuses the token (the phone was forgotten there) is forgotten here too; one that speaks
- * another contract stays listed, saying which side to update. While at least one machine answers the
+ * another protocol stays listed, saying which side to update. While at least one machine answers the
  * shell is live; when the last one goes the shell says so across its top (`connectionLost`), and is
  * itself again when one comes back.
  */

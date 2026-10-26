@@ -1,7 +1,8 @@
 import {
-  ENGINE_CONTRACT,
+  ENGINE_PROTOCOL,
   engineUrlOf,
   hostOfUrl,
+  protocolMismatch,
   type ClientFrame,
   type EngineHostInfo,
   type HostFrame,
@@ -94,11 +95,11 @@ export type BridgeState =
   | { state: "waiting"; reason: string }
   /** The machine no longer takes this device's token: its pairing was removed there. */
   | { state: "refused"; reason: string }
-  /** The machine speaks another contract than this build: one of the two needs updating. */
+  /** The machine speaks another protocol than this app: the older of the two needs updating. */
   | { state: "mismatch"; reason: string };
 
 export interface EngineBridge extends JairaBridge {
-  /** Settles on the first welcome; rejects when the machine refuses the token or speaks another contract. */
+  /** Settles on the first welcome; rejects when the machine refuses the token or speaks another protocol. */
   readonly ready: Promise<EngineHostInfo>;
   state(): BridgeState;
   /** Hears every change of state, from the next one on. */
@@ -120,8 +121,8 @@ export interface EngineBridgeOptions {
   maxRetryMs?: number;
   /** How long an attempt may take to be welcomed. */
   timeoutMs?: number;
-  /** Tests: another contract. */
-  contract?: string;
+  /** Tests: another protocol. */
+  protocol?: number;
   /** How the machine is named in what the bridge says, when the URL does not say it (a loopback proxy). */
   where?: string;
 }
@@ -209,13 +210,8 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
       if (frame.t === "refused") return stop({ state: "refused", reason: frame.reason });
       if (frame.t !== "welcome") return;
       if (frame.limited === true) {
-        return stop({
-          state: "mismatch",
-          reason:
-            frame.host.version === options.version
-              ? `${where} runs another build of JaiRA ${frame.host.version} than this one: update both to the same build`
-              : `${where} runs JaiRA ${frame.host.version}, which this JaiRA ${options.version} cannot talk to: update both to the same version`,
-        });
+        // Another protocol, never merely another version or build: say which side to update.
+        return stop({ state: "mismatch", reason: protocolMismatch(where, frame.host.protocol, "this app", options.protocol ?? ENGINE_PROTOCOL) });
       }
       admitted = true;
       wait = first;
@@ -271,7 +267,7 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
     mine.onopen = () => {
       if (socket !== mine) return;
       opened = true;
-      send({ t: "hello", token: options.token, contract: options.contract ?? ENGINE_CONTRACT, version: options.version, client: options.client });
+      send({ t: "hello", token: options.token, protocol: options.protocol ?? ENGINE_PROTOCOL, version: options.version, client: options.client });
     };
     mine.onmessage = (event) => {
       if (socket !== mine) return;
