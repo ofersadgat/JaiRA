@@ -4,7 +4,7 @@ import { FOOTER_VIEWS, PANEL_VIEWS, ROOT_VIEWS, VIEWS, roomCountsOf, sidebarProj
 import type { SidebarAct, SidebarView } from "@jaira/ui/sidebarTypes";
 import type { View as AppView } from "@jaira/ui/store";
 import { newItems, standingRoot, type TreeDraft } from "@jaira/ui/filesModel";
-import { FOLD, OPENED, PANE, openOf, paneOf, unfoldedOf } from "@jaira/ui/uiState";
+import { FOLD, OPENED, PANE, paneOf, unfoldedOf } from "@jaira/ui/uiState";
 import { healthCounts, logUnseen } from "@jaira/ui/updatesModel";
 import { checkForUpdate, useHealth } from "@jaira/ui/updatesStore";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
@@ -26,6 +26,7 @@ import { useMachines } from "@jaira/ui/machinesModel";
 import { UpdateRow } from "../components/floats/UpdateRow";
 import { PointerMenus } from "../components/floats/PointerMenus";
 import { useShell } from "./shell";
+import { useColumnsFit } from "./columnsFit";
 import { aboutNotes } from "./viewState";
 import { phoneMachines } from "./remoteStatus";
 import { View } from "@tamagui/core";
@@ -54,6 +55,7 @@ export type PhoneSidebar = {
 export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {}): JSX.Element {
   const { state, actions, appearance } = useShell();
   const ui = state.settings.ui;
+  const fit = useColumnsFit();
   const health = useHealth();
   /**
    * Settings' warnings and errors: the card the Settings and Logs rows' pills open, placed beside the
@@ -193,7 +195,8 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
         // A row with a drawer of its own (Files, Chat) stays open on it, to choose from; the rest close.
         if (![...roots, ...views].some((v) => v.id === id && v.panel !== undefined)) phone.onClose();
       }}
-      collapsed={phone === undefined ? !openOf(ui, FOLD.shellSidebar) : false}
+      // Folded as the window has it: by the person, or to keep the room beside it wide enough (`columnsFit.ts`).
+      collapsed={phone === undefined ? !fit.sidebar : false}
       onCollapsed={(shut) => (phone !== undefined ? phone.onClose() : actions.setFold(FOLD.shellSidebar, !shut))}
       width={phone?.width ?? paneOf(ui, PANE.shellSidebar)}
       projects={sidebarProjectsOf(groups, projectHues, ui.seen, actions.markProjectSeen)}

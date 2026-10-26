@@ -84,6 +84,29 @@ export interface GitFacts {
   request?: { provider: "gitlab" | "github"; label: string; state: string; tone: "ok" | "accent" | "bad" | "dim"; url: string };
 }
 
+/**
+ * How a narrow bar keeps the checkout on its one line (the composer mockups, 2026-10-25): the merge
+ * request goes first, then the lines changed, then what is unpushed; the branch's name is cut last.
+ */
+export type GitDrop = 0 | 1 | 2 | 3;
+
+/** The checkout's facts with `drop` of them gone. */
+export function gitAtDrop(git: GitFacts, drop: GitDrop): GitFacts {
+  const { request, added, removed, ahead, ...rest } = git;
+  return {
+    ...rest,
+    ...(drop < 3 && ahead !== undefined ? { ahead } : {}),
+    ...(drop < 2 && added !== undefined && removed !== undefined ? { added, removed } : {}),
+    ...(drop < 1 && request !== undefined ? { request } : {}),
+  };
+}
+
+/** The fewest facts to drop for the checkout to fit `room`, by its width at each drop; all three when none fits. */
+export function gitDropOf(room: number, widths: readonly number[]): GitDrop {
+  for (const drop of [0, 1, 2] as const) if ((widths[drop] ?? Infinity) <= room) return drop;
+  return 3;
+}
+
 export function gitFactsOf(git: WorkspaceGit | undefined): GitFacts | undefined {
   if (git === undefined) return undefined;
   const out: GitFacts = {};

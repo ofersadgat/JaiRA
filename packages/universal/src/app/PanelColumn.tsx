@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState, type JSX } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { SHARED_SESSION, type TaskDetail } from "@jaira/shared/browser";
 import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
@@ -26,8 +26,9 @@ import { Splitter } from "../components/files/Splitter";
 import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
-import { newTaskOpener, panelTopKind, runMode, sheetAsk } from "./viewState";
+import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, runMode, sheetAsk } from "./viewState";
 import { usePhone } from "./phone";
+import { useColumnsFit } from "./columnsFit";
 
 /**
  * A room's side panel: the splitter and the panel stack's top entry (`SidePanel.tsx`) — a task's run, a
@@ -64,7 +65,24 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const selectedProject = state.selectedProject ?? undefined;
   const startAgain = useCallback((taskId: string) => startAgainOf(actions, detail, selectedProject, taskId), [actions, detail, selectedProject]);
   const top = topOf(panelStack);
-  const geometry = panelGeometryOf(ui, room, top);
+  const phone = usePhone();
+  // Published as the person left it, for the window to fit its columns by (`columnsFit.ts`); drawn as
+  // the window has it — folded to its rail where the room between the columns would be too narrow.
+  const left = panelGeometryOf(ui, room, top);
+  const openWidth = panelGeometryOf(ui, room, top, true).width;
+  useLayoutEffect(() => {
+    panelOpenWidth.set(openWidth);
+    panelLeftOpen.set(left.open);
+  }, [openWidth, left.open]);
+  useEffect(
+    () => () => {
+      panelOpenWidth.set(0);
+      panelLeftOpen.set(true);
+    },
+    [],
+  );
+  const fit = useColumnsFit();
+  const geometry = phone ? left : panelGeometryOf(ui, room, top, fit.panel);
   // The width animates when the kind on top changes or the panel folds, not while it is dragged.
   const tween = usePanelTween(geometry.widthKey, geometry.open, top === undefined);
   // The New-task button's side of the stack (`viewState.ts`): what is on top, and how to open the form.
@@ -287,7 +305,6 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   };
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
   void roomRef;
-  const phone = usePhone();
   const ask = sheetAsk.use();
 
   if (top === undefined) return null;

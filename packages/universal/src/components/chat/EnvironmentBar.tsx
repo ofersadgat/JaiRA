@@ -1,8 +1,8 @@
 import { useState, type JSX, type ReactNode } from "react";
-import { Linking, View as RNView, useWindowDimensions } from "react-native";
+import { Linking, View as RNView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { View } from "@tamagui/core";
 import type { EnvironmentView, RunTarget } from "@jaira/shared/browser";
-import { AUTO_FACE, barFactsOf, listRowsOf, type EnvironmentStage, type GitFacts, type ListRow, type Meter } from "@jaira/ui/environmentModel";
+import { AUTO_FACE, barFactsOf, gitAtDrop, gitDropOf, listRowsOf, type EnvironmentStage, type GitDrop, type GitFacts, type ListRow, type Meter } from "@jaira/ui/environmentModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { NO_STACK, Press, Txt, edge } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -31,8 +31,9 @@ import { Spinner } from "./Spinner";
  *   the slash          / at .45
  *   the workspace      row, gap 6: a folder (a clock while it waits, the spinner while one is chosen)
  *                      13, its name --text (--dim for what is not a workspace yet)
- *   the checkout       pushed right — on a line of its own (4 under) where the bar has no room for it,
- *                      the branch's name cut first; row, gap 9: the branch (its glyph 13, its name --text), ↑n and
+ *   the checkout       pushed right, on the bar's one line: where it has no room, the request goes first,
+ *                      then +a −d, then ↑n, and the branch's name is cut last (`gitDropOf`, measured off
+ *                      screen); row, gap 9: the branch (its glyph 13, its name --text), ↑n and
  *                      +a −d tabular (+ --ok, − --bad), a 1 × 13 --rule, the forge's mark 12 with the
  *                      request's number --text and its state in its tone
  */
@@ -40,8 +41,18 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
   const t = useTokens();
   const [ref, measure] = useAnchorRect();
   const [open, setOpen] = useState<FloatRect | null>(null);
+  // One line at every width: the bar's width, the left's as written out, and the checkout's with each
+  // number of its facts dropped (`gitDropOf`) — the last two measured off screen, in the ruler below.
+  const [width, setWidth] = useState(0);
+  const [ruler, setRuler] = useState<Readonly<Record<string, number>>>({});
+  const measured = (key: string) => (e: LayoutChangeEvent) => {
+    const w = e.nativeEvent.layout.width;
+    setRuler((was) => (was[key] !== undefined && Math.abs(was[key] - w) < 0.5 ? was : { ...was, [key]: w }));
+  };
   const bar = barFactsOf(view, stage);
   if (bar === undefined || view === undefined) return null;
+  // The bar's padding (16 + 16) and the gap before the checkout.
+  const drop: GitDrop = width === 0 || ruler["left"] === undefined ? 0 : gitDropOf(width - 32 - ruler["left"] - 10, [0, 1, 2].map((d) => ruler[`git:${d}`] ?? Infinity));
   const wash = String(t.mix(t.v("accent"), 3, t.v("panel")));
   const opens = bar.open && onChoose !== undefined;
   const target = stage.kind === "choosing" ? stage.target : stage.kind === "running" ? undefined : stage.queued.target;
@@ -55,7 +66,36 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
     </>
   );
   return (
-    <View testID="environment-bar" flexDirection="row" flexWrap="wrap" alignItems="center" gap={10} rowGap={4} minWidth={0} paddingTop={28} paddingHorizontal={16} paddingBottom={6} borderBottomLeftRadius={20} borderBottomRightRadius={20} backgroundColor={wash as never} {...(edge(t, { right: 1, bottom: 1, left: 1 }) as object)} {...({ title: bar.title } as object)}>
+    <View testID="environment-bar" flexDirection="row" alignItems="center" gap={10} minWidth={0} paddingTop={28} paddingHorizontal={16} paddingBottom={6} borderBottomLeftRadius={20} borderBottomRightRadius={20} backgroundColor={wash as never} {...(edge(t, { right: 1, bottom: 1, left: 1 }) as object)} {...({ title: bar.title } as object)} onLayout={(e: LayoutChangeEvent) => setWidth(e.nativeEvent.layout.width)}>
+      {/* The ruler: the left as written out, and the checkout with none, one and two of its facts
+          dropped, laid out in a box of no size that clips. */}
+      <View position="absolute" left={0} top={0} width={0} height={0} overflow="hidden" pointerEvents="none" {...({ "aria-hidden": true, importantForAccessibility: "no-hide-descendants" } as object)}>
+        <View flexDirection="row" alignItems="flex-start" width={4000}>
+          <View flexDirection="row" alignItems="center" gap={10} onLayout={measured("left")}>
+            <View flexDirection="row" alignItems="center" gap={7}>
+              {machine(false)}
+            </View>
+            {bar.workspace !== undefined ? (
+              <>
+                <Txt spec={FACE}>/</Txt>
+                <View flexDirection="row" alignItems="center" gap={6}>
+                  <Icon name={bar.workspace.icon === "spinner" ? "folder" : bar.workspace.icon} size={13} color={String(t.v("dim"))} />
+                  <Txt spec={FACE} numberOfLines={1}>
+                    {bar.workspace.text}
+                  </Txt>
+                </View>
+              </>
+            ) : null}
+          </View>
+          {bar.git !== undefined
+            ? ([0, 1, 2] as const).map((d) => (
+                <View key={d} onLayout={measured(`git:${d}`)}>
+                  <GitLine t={t} git={gitAtDrop(bar.git!, d)} link={false} />
+                </View>
+              ))
+            : null}
+        </View>
+      </View>
       <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
         {opens ? (
           <Press onPress={() => measure((at) => setOpen((was) => (was === null ? at : null)))} label="Where this conversation runs" {...({ "aria-expanded": open !== null } as object)} flexDirection="row" alignItems="center" gap={7}>
@@ -80,10 +120,10 @@ export function EnvironmentBar({ view, stage, onChoose }: { view: EnvironmentVie
           </View>
         </>
       ) : null}
-      {/* The checkout at the right end; where the line has no room for it, on a line of its own. */}
+      {/* The checkout at the right end, with as many of its facts as the line has room for. */}
       {bar.git !== undefined ? (
-        <View marginLeft="auto" minWidth={0} maxWidth="100%" flexShrink={1}>
-          <GitLine t={t} git={bar.git} />
+        <View marginLeft="auto" minWidth={0} flexShrink={1}>
+          <GitLine t={t} git={gitAtDrop(bar.git, drop)} />
         </View>
       ) : null}
       {open !== null && onChoose !== undefined ? (

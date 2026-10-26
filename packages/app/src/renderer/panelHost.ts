@@ -259,9 +259,10 @@ export function reviewerServicesOf(
  * the width. Remembered per KIND of thing on top (`widthKeyOf`) — a form wants more room than a task's
  * tabs, and the column says so by moving.
  */
-export function panelGeometryOf(ui: JairaUiState, room: PanelRoom | null, top: PanelEntry | undefined): { foldKey: string | null; open: boolean; widthKey: string; width: number } {
+export function panelGeometryOf(ui: JairaUiState, room: PanelRoom | null, top: PanelEntry | undefined, shown?: boolean): { foldKey: string | null; open: boolean; widthKey: string; width: number } {
   const foldKey = room === null ? null : PANEL_FOLD[room];
-  const open = foldKey === null ? true : openOf(ui, foldKey);
+  // `shown`: open or folded as the window has it (`shellFit.ts`), rather than as the person left it.
+  const open = foldKey === null ? true : (shown ?? openOf(ui, foldKey));
   const widthKey = top === undefined ? PANE.panelTask : widthKeyOf(top.kind);
   const width = top === undefined ? 0 : open ? Math.max(PANEL_MIN, Math.min(paneOf(ui, widthKey), PANE_WIDE)) : PANEL_RAIL;
   return { foldKey, open, widthKey, width };

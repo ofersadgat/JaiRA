@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, type JSX } from "react";
+import { useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { SHARED_SESSION } from "@jaira/shared/browser";
 import { publishUsageFigures, useNow } from "@jaira/ui/limitsStore";
@@ -8,12 +9,12 @@ import { hueOf } from "@jaira/ui/pillModel";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { invoke, subscribe, useApp } from "@jaira/ui/store";
 import { ReadOnlyJudgeContext, WorkLookContext, forgetReadOnly, readOnlyJudgeOf } from "@jaira/ui/workSummaryContext";
-import { FOLD, PANE, openOf, paneDefault, paneOf } from "@jaira/ui/uiState";
+import { PANE, paneDefault, paneOf } from "@jaira/ui/uiState";
 import { MessageTypeContext, type MessageTypeStore } from "@jaira/ui/messageTypes";
 import { PANEL_FOLD, roomOf } from "@jaira/ui/panelHost";
 import { push } from "@jaira/ui/panelStack";
 import { windowTitle } from "@jaira/ui/shellModel";
-import { phoneTypography } from "@jaira/ui/phoneModel";
+import { isPhoneWidth, phoneTypography } from "@jaira/ui/phoneModel";
 import { ValuePanelContext, type PinnedValue, type ValuePanel } from "@jaira/ui/valuePanel";
 import { panelOnStack } from "../components/panel/panelBridge";
 import { InboxStrip } from "../components/InboxStrip";
@@ -33,6 +34,7 @@ import { LogsView } from "./LogsView";
 import { PanelColumn } from "./PanelColumn";
 import { SettingsView } from "./SettingsView";
 import { AppContext, useShell } from "./shell";
+import { useColumnsFit } from "./columnsFit";
 import { PhoneContext } from "./phone";
 import { PhoneFrame, RemoteLine } from "./PhoneFrame";
 import { ShellSidebar } from "./SidebarRegion";
@@ -45,10 +47,14 @@ import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
  * every region reads it through `useShell`. Every `View` has a room here.
  *
  * `phone`: the host is a phone's window (decision 0015, amended 2026-10-04) — the shell lays itself out
- * for it (`PhoneFrame`), and its text is larger (`phoneModel.ts`' `phoneTypography`).
+ * for it (`PhoneFrame`), and its text is larger (`phoneModel.ts`' `phoneTypography`). A desktop window or
+ * a browser narrower than a phone's (`PHONE_WIDTH`) takes the same layout at the desktop's own text size
+ * (the narrow-window rulings, 2026-10-25: "A + E"); wider, its columns give way (`columnsFit.ts`).
  */
 export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.Element {
   const model = useApp();
+  const { width } = useWindowDimensions();
+  const layout = phone || isPhoneWidth(width);
   const { state } = model;
   // What every transcript is provided, however deep: how work between two messages is summarised
   // (the person's Appearance → Conversation), and the read-only judge that names a phase Changed —
@@ -98,7 +104,7 @@ export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.E
   }, [actions]);
   const appearance = useMemo(() => (phone ? { ...model.appearance, overrides: phoneTypography(model.appearance.overrides) } : model.appearance), [phone, model.appearance]);
   return (
-    <PhoneContext.Provider value={phone}>
+    <PhoneContext.Provider value={layout}>
     <AppContext.Provider value={model}>
       <ValuePanelContext.Provider value={valuePanel}>
         <MessageTypeContext.Provider value={messageTypes}>
@@ -107,7 +113,7 @@ export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.E
               <TokenRoot {...appearance}>
                 <CrashBoundary>
                   <TouchRoot>
-                    {phone ? <PhoneFrame /> : <Frame />}
+                    {layout ? <PhoneFrame /> : <Frame />}
                   </TouchRoot>
                 </CrashBoundary>
                 {/* Outside the boundary: a report about a failure must not go down with what it
@@ -134,6 +140,7 @@ function Frame(): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const { state, actions } = useShell();
+  const fit = useColumnsFit();
   // The window's name outside the window (`shellModel.ts`' `windowTitle`), and the page's own rules — the
   // keyboard's focus ring, the one scrollbar. Web only; a phone has neither.
   useWindowTitle(windowTitle(state.at, state.view, state.doc?.path ?? state.dir?.path ?? null));
@@ -146,8 +153,9 @@ function Frame(): JSX.Element {
     <View flex={1} flexDirection="row" overflow="hidden" {...((isWeb ? { position: "relative" } : {}) as object)} {...((pageGround(t) ? {} : { backgroundColor: t.v("bg") }) as object)} {...(shellTouch as object)}>
       <ShellSidebar />
       {/* The sidebar's splitter: a drag writes `PANE.shellSidebar` (180–520). None on a collapsed
-          sidebar: the rail is a fixed strip of glyphs. */}
-      {openOf(state.settings.ui, FOLD.shellSidebar) ? (
+          sidebar — folded by the person or by a narrow window (`columnsFit.ts`): the rail is a fixed
+          strip of glyphs. */}
+      {fit.sidebar ? (
         <Splitter
           label="Resize the sidebar"
           value={paneOf(state.settings.ui, PANE.shellSidebar)}

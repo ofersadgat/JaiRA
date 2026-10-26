@@ -175,5 +175,7 @@ export function PanelSheet({
 const HANDLE = 22;
 /** The sheet at its head: the handle and the panel's head (44 at least, two lines of title at a phone's size). */
 const PEEK = HANDLE + 60;
+/** What a room keeps clear at its foot while its sheet is up: the sheet at its head (`useSheetInset`). */
+export const SHEET_PEEK = PEEK;
 
 export type { SheetHeights };

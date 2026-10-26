@@ -32,6 +32,14 @@ function shared<T>(initial: T): { get: () => T; set: (next: T) => void; use: () 
 export const runMode = shared<"board" | "conversation">("board");
 
 /**
+ * The side panel as the person left it, for the window to fit the columns by (`columnsFit.ts`): how wide
+ * it stands open (0 while the room has none, or nothing is on it) and whether they left it open. The
+ * panel column sets both — as it would be, never as it is drawn, so fitting it cannot move it.
+ */
+export const panelOpenWidth = shared<number>(0);
+export const panelLeftOpen = shared<boolean>(true);
+
+/**
  * The board group the Tasks column is scrolled to, while it lists every group. The column sets it as it
  * scrolls (`BoardColumn`'s `track`); null until it has, and then the address stands on the first group,
  * which is the one at the top of an unscrolled column.

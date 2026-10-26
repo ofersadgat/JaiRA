@@ -109,6 +109,56 @@ export function chipValuesOf(plan: ChatPlanView | null, facts: ComposerFacts, th
   };
 }
 
+/** The chips' words, by chip — `chipValuesOf`'s. */
+export type ChipWords = ReturnType<typeof chipValuesOf>;
+
+/**
+ * How a narrow composer keeps its chips on one line (the composer mockups, 2026-10-25: design 1, "words
+ * drop in steps", the rule the wait pills follow): every word; then shorter words; then the model's
+ * name, and an icon for each other chip; then icons alone. A chip without words still names itself and
+ * its answer in its title, and its card says it in full.
+ */
+export type ChipStep = 0 | 1 | 2 | 3;
+export const CHIP_ORDER = ["model", "thinking", "permissions", "tools"] as const;
+
+/** The shorter words: the model without its route, "default" for the model's own level, a count without "tools". */
+export function shortChipWords(words: ChipWords): ChipWords {
+  const cut = words.model.indexOf("/");
+  const count = /^(\d+) tools$/.exec(words.tools);
+  return {
+    model: cut >= 0 && cut < words.model.length - 1 ? words.model.slice(cut + 1) : words.model,
+    thinking: words.thinking === "the model's default" ? "default" : words.thinking,
+    permissions: words.permissions,
+    tools: count !== null ? count[1]! : words.tools === "default tools" ? "default" : words.tools === "no tools" ? "none" : words.tools,
+  };
+}
+
+/** Each chip's words at a step; `null` is its icon alone. */
+export function chipWordsAt(words: ChipWords, step: ChipStep): Record<keyof ChipWords, string | null> {
+  if (step === 0) return words;
+  const short = shortChipWords(words);
+  if (step === 1) return short;
+  return { model: step === 2 ? short.model : null, thinking: null, permissions: null, tools: null };
+}
+
+/** A chip's width, drawn, in each of its looks. */
+export interface ChipWidths {
+  full: number;
+  short: number;
+  icon: number;
+}
+
+/**
+ * The first step whose chips fit `room`, `gap` apart — with the live note's words beside them while
+ * there are words (`noteWords`, its gap in); icons alone when nothing does.
+ */
+export function chipStepOf(room: number, chips: readonly ChipWidths[], gap: number, noteWords = 0): ChipStep {
+  const width = (step: ChipStep): number =>
+    chips.reduce((sum, chip, i) => sum + (step === 0 ? chip.full : step === 1 ? chip.short : step === 2 && i === 0 ? chip.short : chip.icon), 0) + gap * Math.max(0, chips.length - 1) + (step <= 1 ? noteWords : 0);
+  for (const step of [0, 1, 2] as const) if (width(step) <= room) return step;
+  return 3;
+}
+
 /** The send button's tooltip: what Enter will do right now. */
 export function sendTitleOf(spent: boolean, busy: boolean | undefined): string {
   return spent ? "Enter to send — it waits until the limit resets" : busy === true ? "Enter to send — this joins the turn in flight" : "Enter to send, Shift+Enter for a new line";

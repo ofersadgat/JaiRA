@@ -172,6 +172,7 @@ import {
   withSeen,
   withSeenAll,
 } from "./uiState";
+import { noteFold } from "./shellFit";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -3579,7 +3580,11 @@ export function useApp() {
       setPane: (id: string, size: number) => setUi(withPane(ref.current.settings.ui, id, size)),
 
       /** Open or close a disclosure — the Files editor half, the field reference, "Show effective". */
-      setFold: (id: string, open: boolean) => setUi(withOpen(ref.current.settings.ui, id, open)),
+      // A column opened is one the person wants: kept open in a narrow window (`shellFit.ts`).
+      setFold: (id: string, open: boolean) => {
+        noteFold(id, open);
+        setUi(withOpen(ref.current.settings.ui, id, open));
+      },
 
       /** Put a control with more than two positions into one of them — see `uiState`'s `modes`. */
       setMode: (id: string, mode: string) => setUi(withMode(ref.current.settings.ui, id, mode)),

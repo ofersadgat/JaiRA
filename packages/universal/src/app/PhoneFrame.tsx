@@ -10,7 +10,7 @@ import { InboxRoom } from "../components/InboxRoom";
 import { Pill } from "../components/Pill";
 import { ShellFloats } from "../components/floats/ShellFloats";
 import { useKeyboardTop } from "../components/floats/keyboard";
-import { Press, Txt, edge, landmark } from "../primitives";
+import { Press, Txt, WINDOW_GUTTER, edge, landmark } from "../primitives";
 import { useLook, useTokens } from "../tokens";
 import { shellTouch } from "../touchElsewhere";
 import { BoardColumn } from "./BoardColumn";
@@ -22,6 +22,7 @@ import { LogsView } from "./LogsView";
 import { PanelColumn } from "./PanelColumn";
 import { SettingsView } from "./SettingsView";
 import { useShell } from "./shell";
+import { useSheetInset } from "./columnsFit";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
 import { phoneDrawer, phoneInbox, sheetAsk } from "./viewState";
@@ -84,6 +85,8 @@ export function PhoneFrame(): JSX.Element {
         backgroundColor={t.v("panel") as never}
         {...(edge(t, { bottom: look.palette === "contrast" ? 1.5 : 1 }, look.palette === "contrast" || look.palette === "blueprint" ? "rule" : "line") as object)}
       >
+        {/* A desktop window narrower than a phone draws this frame too: clear of the buttons a Mac puts on the left. */}
+        <View width={WINDOW_GUTTER.left(0) as never} flexShrink={0} />
         <Press onPress={() => phoneDrawer.set(true)} label="Open the sidebar" title="open the sidebar" width={44} flexShrink={0} alignItems="center" justifyContent="center" position="relative">
           <View flexDirection="row" alignItems="flex-start">
             <Txt spec={{ voice: "app", scale: 13 / 12.5, ls: -0.05 }}>▸|</Txt>
@@ -129,10 +132,12 @@ export function RemoteLine(): JSX.Element | null {
 /** The open room, the whole width. In Tasks the board, with the context panel as a sheet over it. */
 function Room(): JSX.Element | null {
   const { state } = useShell();
+  const inset = useSheetInset();
   if (state.view === "tasks") {
     return (
       <>
-        <View flex={1} minWidth={0} minHeight={0}>
+        {/* The board stops above the sheet's head. */}
+        <View flex={1} minWidth={0} minHeight={0} paddingBottom={inset}>
           <BoardColumn />
         </View>
         <PanelColumn />

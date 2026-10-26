@@ -13,6 +13,8 @@ import {
   dotOf,
   facesOf,
   folderOf,
+  gitAtDrop,
+  gitDropOf,
   gitFactsOf,
   listRowsOf,
   machineKindOf,
@@ -401,5 +403,21 @@ describe("a project's conversations", () => {
   it("are everything at the root", () => {
     expect(conversationsAt({ at: null, allConversations: all, projects })).toBe(all);
     expect(conversationsSpan({ at: null, projects })).toBe(true);
+  });
+});
+
+describe("the checkout on a narrow bar", () => {
+  const git = { branch: "feature/session-cache", ahead: "↑2", added: "+128", removed: "−34", request: { provider: "gitlab" as const, label: "!17", state: "open", tone: "ok" as const, url: "https://gitlab.com/x/-/merge_requests/17" } };
+  it("drops the request first, then the lines changed, then what is unpushed", () => {
+    expect(gitAtDrop(git, 0)).toEqual(git);
+    expect(gitAtDrop(git, 1)).toEqual({ branch: git.branch, ahead: "↑2", added: "+128", removed: "−34" });
+    expect(gitAtDrop(git, 2)).toEqual({ branch: git.branch, ahead: "↑2" });
+    expect(gitAtDrop(git, 3)).toEqual({ branch: git.branch });
+  });
+  it("drops the fewest that fit", () => {
+    expect(gitDropOf(400, [355, 280, 210])).toBe(0);
+    expect(gitDropOf(300, [355, 280, 210])).toBe(1);
+    expect(gitDropOf(220, [355, 280, 210])).toBe(2);
+    expect(gitDropOf(100, [355, 280, 210])).toBe(3);
   });
 });

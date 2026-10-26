@@ -5,6 +5,7 @@ import { ChatStart } from "../components/chat/ChatStart";
 import { ChatThread } from "../components/chat/ChatThread";
 import { useChatSurface } from "../components/chat/surface";
 import { ChatPanel } from "../components/chat/ChatPanel";
+import { useSheetInset } from "./columnsFit";
 
 /**
  * The Chat room: a conversation, or the offer to start one — then the side panel, which in this room is
@@ -15,9 +16,11 @@ export function ChatView(): JSX.Element {
   const surface = useChatSurface();
   // Reading a conversation is what marks it read (`useReadMark`).
   useReadMark(surface);
+  // On a phone the panel is a sheet over the room: the thread stops above its head.
+  const inset = useSheetInset();
   return (
     <View flex={1} minWidth={0} minHeight={0} flexDirection="row">
-      <View flex={1} minWidth={0} minHeight={0}>
+      <View flex={1} minWidth={0} minHeight={0} paddingBottom={inset}>
         {surface.taskId === null ? <ChatStart surface={surface} /> : <ChatThread surface={surface} key={surface.taskId} />}
       </View>
       <ChatPanel surface={surface} />

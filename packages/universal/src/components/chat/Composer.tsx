@@ -1,5 +1,5 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
-import { Keyboard, Modal, Platform, TextInput, View as RNView, useWindowDimensions } from "react-native";
+import { Keyboard, Modal, Platform, TextInput, View as RNView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import {
   REASONING_EFFORTS,
@@ -22,7 +22,7 @@ import {
 } from "@jaira/shared/browser";
 import { fileFromText, mentionAt, permissionsHintOf, withFiles, withMention, type ComposerFile } from "@jaira/ui/composerCards";
 import { useKeptDraft } from "@jaira/ui/composerDrafts";
-import { canSendOf, chipValuesOf, composerFactsOf, routeOf, sendTitleOf } from "@jaira/ui/composerModel";
+import { CHIP_ORDER, canSendOf, chipStepOf, chipValuesOf, chipWordsAt, composerFactsOf, routeOf, sendTitleOf, shortChipWords, type ChipStep } from "@jaira/ui/composerModel";
 import type { Parked } from "@jaira/ui/composerPermissionSet";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
@@ -66,10 +66,13 @@ import { useKeyboardShown } from "../floats/keyboard";
  *   the `@` list      over the box, its width, 4 apart: column, at most 240, padding 4, 1px --line,
  *                     radius 10, --panel, 0 8 24 rgb(0 0 0 / 18%); a path padding 4 8, radius 6, app
  *                     12/12.5 (hovered --panel-2)
- *   the foot          row, centred, gap 5 (4 between lines), padding 5 7 7 8, wrapping at every width:
- *                     a chip that does not fit goes to the next line, and the live note, the meter, ⤢,
- *                     the clip and send stand together at the right end of the last
- *   a chip            pill, padding 3 9, 1px transparent, gap 5, at most 210 (and its line), app 11.5/12.5, --dim;
+ *   the foot          row, centred, gap 5, padding 5 7 7 8, ONE line at every width: as the room narrows the
+ *                     chips' words drop in steps (`chipStepOf`; the composer mockups, 2026-10-25, design
+ *                     1) — every word; shorter (the model without its route, "default", a count); the
+ *                     model's name and the other chips' icons; icons alone — and the live note's words go
+ *                     at the third. The live note, the meter, ⤢, the clip and send stand together at the
+ *                     right end. Each chip's width in each look is measured off screen (the ruler)
+ *   a chip            pill, padding 3 9, 1px transparent, gap 5, at most 210, app 11.5/12.5, --dim;
  *                     hovered --fill-ghost-hover and --text; open --fill-ghost-selected, a --line edge,
  *                     --text; overridden --accent; the icon 13, --tok-hint (overridden --accent)
  *   the figure        the account's figure: data 500 11/12, line 1, padding 2 5, radius 6, 2 in on
@@ -257,6 +260,35 @@ export function Composer({
   const tucked = has(tray) && !folded;
   const [full, setFull] = useState(false);
 
+  // The foot on one line, its chips' words dropping in steps as the room narrows (`chipStepOf`): the
+  // foot's width, the controls' (less the live note's words, which go with the chips), the account's
+  // figure's, and each chip's in each of its looks — measured off screen, in the ruler below.
+  const [footWidth, setFootWidth] = useState(0);
+  const [controls, setControls] = useState({ width: 0, words: 0 });
+  const [figureWidth, setFigureWidth] = useState(0);
+  const [ruler, setRuler] = useState<Readonly<Record<string, number>>>({});
+  const measure = (key: string) => (e: LayoutChangeEvent) => {
+    const width = e.nativeEvent.layout.width;
+    setRuler((was) => (was[key] !== undefined && Math.abs(was[key] - width) < 0.5 ? was : { ...was, [key]: width }));
+  };
+  const figures = useUsageFigures();
+  const figure = account !== undefined && figures !== "off";
+  const live = plan?.live === "steerable" || plan?.live === "busy" ? plan.live : undefined;
+  const chipLooks = {
+    model: { lead: <BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />, own: origin.model === "override" },
+    thinking: { icon: "think" as IconName, own: origin.reasoning === "override" },
+    permissions: { icon: "shield" as IconName, own: permissionsOrigin === "override" },
+    tools: { icon: "tool" as IconName, own: toolsOrigin === "override" },
+  };
+  const short = shortChipWords(chips);
+  const noteWords = live !== undefined && ruler["note"] !== undefined ? ruler["note"] + 6 : 0;
+  const measured = footWidth > 0 && controls.width > 0 && ruler["icon"] !== undefined && CHIP_ORDER.every((name) => ruler[`${name}:full`] !== undefined && ruler[`${name}:short`] !== undefined);
+  // The foot's padding (8 + 7), the gap before the controls, and the figure with its gap.
+  const room = footWidth - 15 - (controls.width - controls.words) - 5 - (figure ? figureWidth + 5 : 0);
+  const step: ChipStep = !measured ? 0 : chipStepOf(room, CHIP_ORDER.map((name) => ({ full: ruler[`${name}:full`]!, short: ruler[`${name}:short`]!, icon: ruler["icon"]! })), 5, noteWords);
+  const shown = chipWordsAt(chips, step);
+  const noteShown = live !== undefined && step <= 1;
+
   return (
     <View paddingTop={10} paddingHorizontal={phone ? 8 : 16} paddingBottom={tucked ? 10 : phone ? 8 : 14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
       <View
@@ -275,6 +307,27 @@ export function Composer({
         {/* Positioned: painted after the conversation above it, with what else is. */}
         <View position="relative" flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
           {!off ? <SpentLine route={route} /> : null}
+          {/* The ruler: each chip in each of its looks, and the live note's words, laid out where nothing
+              shows them — a box of no size that clips — for the foot to be fitted by. */}
+          <View position="absolute" left={0} top={0} width={0} height={0} overflow="hidden" pointerEvents="none" {...({ "aria-hidden": true, importantForAccessibility: "no-hide-descendants" } as object)}>
+            <View flexDirection="row" alignItems="flex-start" width={4000}>
+              {CHIP_ORDER.flatMap((name) =>
+                (["full", "short"] as const).map((look) => (
+                  <View key={`${name}:${look}`} {...CHIP_BOX} borderColor="transparent" onLayout={measure(`${name}:${look}`)}>
+                    <ChipFace t={t} {...chipLooks[name]} words={look === "full" ? chips[name] : short[name]} lit={false} />
+                  </View>
+                )),
+              )}
+              <View {...CHIP_BOX} borderColor="transparent" onLayout={measure("icon")}>
+                <ChipFace t={t} icon="think" own={false} words={null} lit={false} />
+              </View>
+              {live !== undefined ? (
+                <Txt spec={{ voice: "app", scale: 11 / 12.5 }} numberOfLines={1} onLayout={measure("note")}>
+                  {LIVE_WORDS[live]}
+                </Txt>
+              ) : null}
+            </View>
+          </View>
           {files.length > 0 ? (
             <View flexDirection="row" flexWrap="wrap" gap={6} paddingTop={9} paddingHorizontal={12}>
               {files.map((file, i) => (
@@ -348,35 +401,46 @@ export function Composer({
               ...(isWeb ? { outlineStyle: "none", resize: "none", fieldSizing: "content" } : {}),
             } as never}
           />
-          {/* What does not fit wraps, at every width: the chips onto the next line, the controls as one
-              group at the right end of the last. Folded, it is one line, the model's chip giving way. */}
-          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0} {...(folded ? {} : { flexWrap: "wrap", rowGap: 4 })}>
-            <Chip t={t} lead={<BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />} label="Model" value={chips.model} own={origin.model === "override"} open={card?.which === "Model"} onOpen={opener("Model")} />
+          {/* One line at every width: the chips' words drop in steps as the room narrows (`chipStepOf`).
+              Folded, the model's chip and ⋯, the model's chip giving way. */}
+          <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0} onLayout={(e) => setFootWidth(e.nativeEvent.layout.width)}>
+            <Chip t={t} {...chipLooks.model} label="Model" value={chips.model} words={folded ? chips.model : shown.model} open={card?.which === "Model"} onOpen={opener("Model")} />
             {folded ? (
               <Press onPress={() => Keyboard.dismiss()} label="Show every setting" title="show every setting" height={26} paddingHorizontal={8} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("panel-2") as never}>
                 <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>⋯</Txt>
               </Press>
             ) : (
               <>
-                <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} />
-                <Chip t={t} icon="think" label="Thinking" value={chips.thinking} own={origin.reasoning === "override"} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
-                <Chip t={t} icon="shield" label="Permissions" value={chips.permissions} own={permissionsOrigin === "override"} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
-                <Chip t={t} icon="tool" label="Tools" value={chips.tools} own={toolsOrigin === "override"} open={card?.which === "Tools"} onOpen={opener("Tools")} />
+                <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} onWidth={setFigureWidth} />
+                <Chip t={t} {...chipLooks.thinking} label="Thinking" value={chips.thinking} words={shown.thinking} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
+                <Chip t={t} {...chipLooks.permissions} label="Permissions" value={chips.permissions} words={shown.permissions} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
+                <Chip t={t} {...chipLooks.tools} label="Tools" value={chips.tools} words={shown.tools} open={card?.which === "Tools"} onOpen={opener("Tools")} />
               </>
             )}
             {plan !== null && plan.unresolved.length > 0 ? (
-              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} ellip minWidth={0} flexShrink={1} maxWidth="100%" paddingLeft={4}>
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} ellip minWidth={0} flexShrink={1} paddingLeft={4}>
                 {plan.unresolved.map((u) => u.field).join(", ")} {plan.unresolved.length === 1 ? "is" : "are"} an expression here
               </Txt>
             ) : null}
-            {/* The controls, together: pushed to the right end of whichever line they stand on. */}
-            <View flexDirection="row" alignItems="center" gap={5} marginLeft="auto" minWidth={0} maxWidth="100%" flexShrink={folded ? 0 : 1}>
-              {plan?.live === "steerable" || plan?.live === "busy" ? (
-                <View flexDirection="row" alignItems="center" gap={6} minWidth={0} flexShrink={1} {...({ title: plan.live === "steerable" ? "A message now joins this turn" : "A message now waits for this turn" } as object)}>
-                  <Pulse color={plan.live === "busy" ? "dim" : "accent"} />
-                  <Txt spec={{ voice: "app", scale: 11 / 12.5, color: plan.live === "busy" ? "dim" : "accent" }} ellip minWidth={0} flexShrink={1}>
-                    {plan.live === "steerable" ? "joins this turn" : "waits for this turn"}
-                  </Txt>
+            {/* The controls, together at the right end. Measured with the live note's words in or out, so
+                what they take is known whichever is drawn. */}
+            <View
+              flexDirection="row"
+              alignItems="center"
+              gap={5}
+              marginLeft="auto"
+              flexShrink={0}
+              onLayout={(e) => setControls({ width: e.nativeEvent.layout.width, words: noteShown ? noteWords : 0 })}
+            >
+              {live !== undefined ? (
+                // Its words go with the chips': drawn while they have words, the pulse alone after.
+                <View flexDirection="row" alignItems="center" gap={6} flexShrink={0} {...({ title: live === "steerable" ? "A message now joins this turn" : "A message now waits for this turn" } as object)}>
+                  <Pulse color={live === "busy" ? "dim" : "accent"} />
+                  {noteShown ? (
+                    <Txt spec={{ voice: "app", scale: 11 / 12.5, color: live === "busy" ? "dim" : "accent" }} numberOfLines={1}>
+                      {LIVE_WORDS[live]}
+                    </Txt>
+                  ) : null}
                 </View>
               ) : null}
               {usage !== undefined ? <ContextMeter t={t} context={usage.context} route={route} open={card?.which === "context"} onOpen={opener("context")} /> : null}
@@ -545,13 +609,35 @@ function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNV
   return [ref, () => ref.current?.measureInWindow((x, y, w, h) => onOpen({ left: x, top: y, right: x + w, bottom: y + h }))];
 }
 
-/** A chip: one question, its icon and its answer; open, its card's ground and edge. */
-function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
+/** The live note's words: what a message sent now would do. */
+const LIVE_WORDS = { steerable: "joins this turn", busy: "waits for this turn" } as const;
+
+/** A chip's box: a pill, padding 3 9, a 1px edge, at most 210; its icon and its words 5 apart. */
+const CHIP_BOX = { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, borderWidth: 1, borderStyle: "solid", maxWidth: 210 } as const;
+
+/** What a chip shows: its icon (or `lead`), then its words — none at the narrowest steps. */
+function ChipFace({ t, icon, lead, own, words, lit }: { t: Tokens; icon?: IconName; lead?: ReactNode; own: boolean; words: string | null; lit: boolean }): JSX.Element {
+  return (
+    <>
+      {lead ?? (icon !== undefined ? <Icon name={icon} size={13} color={String(t.v(own ? "accent" : "tok-hint"))} /> : null)}
+      {words === null ? null : (
+        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: own ? "accent" : lit ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
+          {words}
+        </Txt>
+      )}
+    </>
+  );
+}
+
+/**
+ * A chip: one question, its icon and its answer; open, its card's ground and edge. `words`: the answer
+ * as the foot's step has it — shorter, or none — while its title says it in full.
+ */
+function Chip({ t, icon, lead, label, value, words, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; words: string | null; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
   const [ref, press] = useOpener(onOpen);
   return (
-    // A chip that does not fit its line goes to the next (the foot wraps); one wider than a line alone
-    // cuts its words — and folded, the model's gives way to the controls.
-    // The chip stretches to the wrap rather than sizing to its words, so a wrap squeezed below them cuts them.
+    // The chip stretches to its wrap rather than sizing to its words, so a wrap squeezed below them (the
+    // folded foot's model chip; a foot narrower than the icons) cuts them.
     <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK } as never}>
     <Press
       onPress={press}
@@ -560,32 +646,17 @@ function Chip({ t, icon, lead, label, value, own, open, onOpen }: { t: Tokens; i
       {...({ "aria-expanded": open } as object)}
       minWidth={0}
       flexShrink={1}
-      maxWidth={210}
-      flexDirection="row"
-      alignItems="center"
-      gap={5}
-      paddingVertical={3}
-      paddingHorizontal={9}
-      borderRadius={999}
-      borderWidth={1}
-      borderStyle="solid"
+      {...CHIP_BOX}
       box={({ hovered }) => ({ backgroundColor: open ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: open ? t.v("line") : "transparent" })}
     >
-      {({ hovered }) => (
-        <>
-          {lead ?? (icon !== undefined ? <Icon name={icon} size={13} color={String(t.v(own ? "accent" : "tok-hint"))} /> : null)}
-          <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: own ? "accent" : hovered || open ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
-            {value}
-          </Txt>
-        </>
-      )}
+      {({ hovered }) => <ChipFace t={t} {...(icon !== undefined ? { icon } : {})} {...(lead !== undefined ? { lead } : {})} own={own} words={words} lit={hovered || open} />}
     </Press>
     </RNView>
   );
 }
 
-/** The account's figure after the model chip — as a number, a ring, or both. */
-function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element | null {
+/** The account's figure after the model chip — as a number, a ring, or both. `onWidth`: how wide it is drawn. */
+function Allowance({ t, route, model, cost, open, onOpen, onWidth }: { t: Tokens; route: string | undefined; model: string | undefined; cost: number | undefined; open: boolean; onOpen: (at: FloatRect) => void; onWidth: (width: number) => void }): JSX.Element | null {
   const [ref, press] = useOpener(onOpen);
   const limits = useLimits();
   const mode = useUsageFigures();
@@ -600,7 +671,7 @@ function Allowance({ t, route, model, cost, open, onOpen }: { t: Tokens; route: 
   // where an inline button sits on that line's baseline (measured) — and it is the WRAP the row centres.
   const line = Number(t.scaled("size-app", (13 / 12.5) * 1.5));
   return (
-    <View flexShrink={0} position="relative" marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})}>
+    <View flexShrink={0} position="relative" marginLeft={-2} {...(Number.isFinite(line) ? { height: line } : {})} onLayout={(e: LayoutChangeEvent) => onWidth(e.nativeEvent.layout.width - 2)}>
     <RNView ref={ref} collapsable={false} style={{ marginTop: 2.67, ...PLAIN_SCROLLER } as never}>
     <Press
       onPress={press}
