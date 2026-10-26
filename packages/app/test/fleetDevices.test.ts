@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { AppService, hostEngine, loopbackReach, type HostedEngine } from "@jaira/service";
+import { AppService, hostEngine, loopbackTailnet, type HostedEngine } from "@jaira/service";
 import type { MachinesView, PairingDevice, ProjectSummary } from "@jaira/shared";
 import { engineBridge, pairDevice, type EngineBridge } from "../../client/bridges/engineBridge";
 import { fleetBridge, type FleetMember } from "../../client/bridges/fleetBridge";
@@ -31,7 +31,7 @@ async function machine(label: string): Promise<Machine> {
   const base = mkdtempSync(join(tmpdir(), `jaira-fleet-${label}-`));
   dirs.push(base);
   let host: HostedEngine | undefined;
-  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
+  const service = new AppService({ baseDir: base, version: "0.2.0", tailnet: loopbackTailnet(), announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
   host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
   service.fleet.rename(label);
   const made = { base, service, hosted: host };

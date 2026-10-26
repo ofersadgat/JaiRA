@@ -1,12 +1,13 @@
 /**
- * Settings → Machines' model (decision 0013 §1–§3): what its rows say and the fleet it reads — the
+ * Settings → Machines' model (decisions 0013 §1–§3, 0022): what its rows say and the fleet it reads — the
  * words and the reading `MachinesPage` (`packages/universal/src/components/settings/MachinesPage.tsx`)
  * draws. A sentence that holds a link or a value is a list of {@link WordPart}s, which the page draws
  * run by run (`Words.tsx`).
  */
-import { useState } from "react";
-import { LAN_PAIRING_PORT, PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type DeviceView, type MachineForm, type MachinesView, type NearbyEvent, type PeerView } from "@jaira/shared/browser";
-import { invoke, syncCache } from "./store";
+import { LAN_PAIRING_PORT, PAIRING_CODE_MS, parseRemoteProjectKey, type CopyChoice, type MachineForm, type MachinesView, type NearbyEvent, type PeerView } from "@jaira/shared/browser";
+import { dotOf, faceOf, machineKindOf, type MachineFace } from "./environmentModel";
+import type { MachineMark } from "./machineIcons";
+import { syncCache } from "./store";
 import { useView } from "./useView";
 
 /** A run of a sentence: words, a value (drawn as code), an error, a quiet note, or a link. */
@@ -82,51 +83,250 @@ export function sentence(text: string): string {
   return /[.!?]$/.test(c) ? c : `${c}.`;
 }
 
-/** Whether this machine is reachable, and the sentence that says how. */
-export function reachWords(view: MachinesView): { description: WordPart[]; on: boolean } {
-  const reach = view.self.reach;
-  const signIn = (url: string): WordPart => ({ link: "Sign in to your tailnet", href: url });
-  switch (reach.state) {
-    case "off":
-      return { on: false, description: ["Off: your other machines cannot reach this one, and it cannot be paired with."] };
-    case "starting":
+/** What the Tailscale row says (decision 0022 §3), and which of its buttons it has. */
+export type TailnetAction = "signIn" | "signOut" | "remove" | "cancel" | "removeCancel" | "reconnect";
+
+export function tailnetWords(view: MachinesView): { description: WordPart[]; actions: TailnetAction[] } {
+  const tn = view.self.tailnet;
+  const named = (node: string | undefined, tailnet: string | undefined): WordPart[] =>
+    node === undefined ? [] : [" This machine is ", { code: node }, ...(tailnet !== undefined ? [" on ", { code: tailnet }] : []), "."];
+  switch (tn.state) {
+    case "unavailable":
+      if (tn.home !== undefined) return { description: ["Only JaiRA's default home, ", { code: "~/.jaira" }, ", connects to Tailscale. This window runs from ", { code: tn.home }, "."], actions: [] };
       return {
-        on: true,
-        description: reach.signInUrl !== undefined ? ["JaiRA's Tailscale helper needs you to sign in to your tailnet once.", " ", signIn(reach.signInUrl)] : ["Publishing this machine through Tailscale…"],
+        description: [{ error: sentence(tn.reason ?? "Tailscale cannot be used here.") }, ...((tn.reason ?? "").includes("not installed") ? [" ", { link: "Get Tailscale", href: "https://tailscale.com/download" }] : [])],
+        actions: [],
+      };
+    case "off": {
+      const reason: WordPart[] = tn.reason !== undefined ? [" ", { error: sentence(tn.reason) }] : [];
+      if (tn.user === undefined) {
+        return {
+          description: ["Sign in to reach your other machines and phones and pair with them.", ...(tn.node !== undefined ? [" JaiRA joins your tailnet as ", { code: tn.node }, "."] : []), " Nothing is opened to the internet.", ...reason],
+          actions: ["signIn"],
+        };
+      }
+      return {
+        description: ["Signed out.", ...(tn.node !== undefined ? [" This machine is still ", { code: tn.node }, ...(tn.tailnet !== undefined ? [" on ", { code: tn.tailnet }] : []), `; ${tn.user} signed in last.`] : []), ...reason],
+        actions: tn.via === "tailscale" ? ["signIn"] : ["signIn", "remove"],
+      };
+    }
+    case "signing-in":
+      return {
+        description: tn.signInUrl !== undefined ? ["Finish signing in in your browser. ", { link: "Open the sign-in page again", href: tn.signInUrl }] : ["Connecting to Tailscale…", ...(tn.reason !== undefined ? [" ", { error: sentence(tn.reason) }] : [])],
+        actions: ["cancel"],
       };
     case "on":
+      if (tn.via === "tailscale") {
+        return { description: [`Through the Tailscale app, signed in as ${tn.user ?? "?"}.`, ...named(tn.node, tn.tailnet), " Sign this computer in or out in the Tailscale app."], actions: [] };
+      }
+      return { description: [`Signed in as ${tn.user ?? "?"}.`, ...named(tn.node, tn.tailnet)], actions: ["signOut", "remove"] };
+    case "removing":
       return {
-        on: true,
-        description: [`On, through ${reach.via === "helper" ? "JaiRA's Tailscale helper" : "Tailscale"}: `, { code: reach.url ?? "" }, ". Nothing is opened to the internet, and only paired machines get in."],
+        description: ["Waiting for Tailscale to remove ", { code: tn.node ?? "this machine" }, ". ", ...(tn.consoleUrl !== undefined ? [{ link: "Open it in the admin console", href: tn.consoleUrl }] : [])],
+        actions: ["removeCancel"],
       };
-    case "unavailable":
+    case "down":
       return {
-        on: true,
         description: [
-          { error: sentence(reach.reason ?? "It cannot be published.") },
-          ...((reach.reason ?? "").includes("not installed") ? [" ", { link: "Get Tailscale", href: "https://tailscale.com/download" }] : []),
-          ...(reach.signInUrl !== undefined ? [" ", signIn(reach.signInUrl)] : []),
+          { error: sentence(`Tailscale went down: ${tn.reason ?? "it stopped"}`) },
+          " ",
+          ...(tn.node !== undefined ? [{ code: tn.node }, " is off your tailnet, so your other machines and phones cannot reach it."] : ["This machine is off your tailnet, so your other machines and phones cannot reach it."]),
+          " JaiRA tries again by itself.",
         ],
+        actions: tn.via === "tailscale" ? ["reconnect"] : ["reconnect", "signOut"],
       };
   }
 }
 
-/** The Pair a machine row's sentence. */
-export function pairWords(view: MachinesView): string {
-  return view.self.reach.state === "on"
-    ? `Show a code to type on the other machine, or in JaiRA on a phone or in a browser. It works once, for ${PAIRING_CODE_MS / 60_000} minutes.`
-    : "Turn on Reachable first: the other machine connects to this one to pair.";
+/** What the Remove dialog says: signed in, JaiRA waits for Tailscale to drop it; signed out, it forgets it now. */
+export function removeSpecWords(view: MachinesView): { title: string; note: string; confirmLabel: string } {
+  const node = view.self.tailnet.node ?? "this machine";
+  return view.self.tailnet.state === "on"
+    ? {
+        title: "Remove this machine from your tailnet?",
+        note: `JaiRA opens ${node} in the Tailscale admin console: press Remove there. Once Tailscale drops it, JaiRA forgets it here, and signing in again later registers it new.`,
+        confirmLabel: "Open the admin console",
+      }
+    : {
+        title: "Remove this machine from your tailnet?",
+        note: `JaiRA forgets ${node} here now and opens it in the Tailscale admin console: press Remove there too, or Tailscale keeps listing it. Signing in again later registers it new.`,
+        confirmLabel: "Forget it and open the admin console",
+      };
 }
 
-/** The code-for-pairing row's sentence. */
+/** A machine's icon mark, from the word Tailscale uses for its system. */
+export function markOfTailscaleOs(os: string): MachineMark | undefined {
+  const o = os.toLowerCase();
+  return o === "windows" ? "windows" : o === "macos" ? "mac" : o === "linux" ? "linux" : o === "android" ? "android" : o === "ios" ? "ios" : undefined;
+}
+
+const SYSTEM_WORDS: Record<MachineMark, string> = { windows: "Windows", mac: "Mac", linux: "Linux", android: "Android", ios: "iOS" };
+
+/** One row of the machine list (decision 0022 §4): a device on the tailnet, or a paired one that is not on it now. */
+export interface MachineRow {
+  key: string;
+  /** The bold name: "this machine", a machine's own name, a phone's, or the device's tailnet name. */
+  name: string;
+  /** What it is, in grey: "Windows desktop", "Android phone", "Linux". */
+  kind: string;
+  face: MachineFace;
+  /** The words at the right, and their tone. */
+  state?: { text: string; tone: "ok" | "warn" | "bad" | "dim" };
+  /** A second line. */
+  sub?: string;
+  /** No JaiRA there, or offline and unpaired: drawn in grey. */
+  grey: boolean;
+  /** The button at the right. */
+  action?: { kind: "pair"; device: string } | { kind: "unpair"; id: string; label: string } | { kind: "console"; href: string };
+  /** Pair was pressed for it: the code field is open, until then. */
+  asking?: number;
+}
+
+function day(at: number | undefined): string {
+  return at === undefined ? "a while" : new Date(at).toLocaleDateString([], { day: "numeric", month: "short" });
+}
+
+function pairedState(state: PeerView["state"]): { text: string; tone: "ok" | "warn" | "bad" } {
+  return state === "online" ? { text: "paired · connected", tone: "ok" } : state === "connecting" ? { text: "paired · connecting…", tone: "warn" } : state === "mismatch" ? { text: "paired · another version", tone: "warn" } : { text: "paired · offline", tone: "bad" };
+}
+
+/** The host of a paired machine's address, to find it among the tailnet's devices while it is offline. */
+function hostOf(url: string | undefined): string | undefined {
+  return url === undefined ? undefined : /^[a-z]+:\/\/([^/:]+)/i.exec(url)?.[1]?.toLowerCase();
+}
+
+/** Paired first, then JaiRA to pair, then devices still being asked, then ones without JaiRA, then offline ones. */
+const RANK = (row: MachineRow): number =>
+  row.key === "self" ? 0 : row.action?.kind === "unpair" ? 1 : row.action?.kind === "pair" ? 2 : row.state?.text === "checking…" ? 3 : row.state?.tone !== "bad" ? 4 : 5;
+
+/**
+ * The machine list: this machine, then every device on the tailnet — paired ones with Unpair, JaiRA
+ * machines and phones with Pair, the rest saying JaiRA is not running there or that they are offline —
+ * and paired ones that are not on the tailnet now.
+ */
+export function machineRowsOf(view: MachinesView): MachineRow[] {
+  const self: MachineRow = { key: "self", name: "this machine", kind: machineKindOf(view.self), face: { shape: view.self.form, mark: view.self.os, dot: view.self.tailnet.state === "on" ? "on" : "off" }, grey: false };
+  const usedMachines = new Set<string>();
+  const usedPhones = new Set<string>();
+  const rows: MachineRow[] = [];
+  for (const d of view.tailnetDevices) {
+    const mark = markOfTailscaleOs(d.os);
+    const phone = mark === "android" || mark === "ios";
+    const system = mark !== undefined ? SYSTEM_WORDS[mark] : d.os;
+    const paired = d.jaira?.kind === "machine" ? view.machines.find((m) => m.id === d.jaira!.id) : view.machines.find((m) => hostOf(m.url) === d.dnsName.toLowerCase());
+    const pairedPhone = d.jaira?.kind === "phone" ? view.devices.find((p) => p.id === d.jaira!.id) : undefined;
+    const asking = view.asking?.device === d.id ? view.asking.expiresAt : undefined;
+    // The tailnet's own name for it, which is unique where host names are not (a re-registered machine keeps its host name and gets a `-1`).
+    const shown = d.dnsName.split(".")[0] || d.name;
+    if (paired !== undefined) {
+      usedMachines.add(paired.id);
+      rows.push({
+        key: d.id,
+        name: paired.label,
+        kind: machineKindOf(paired),
+        face: { shape: paired.form, mark: paired.os, dot: dotOf(paired.state === "mismatch" ? "online" : paired.state) },
+        state: pairedState(paired.state),
+        ...(paired.state === "offline" ? { sub: ago(paired.lastSeenAt).replace(/^l/, "L") + "." } : {}),
+        grey: false,
+        action: { kind: "unpair", id: paired.id, label: paired.label },
+      });
+      continue;
+    }
+    if (pairedPhone !== undefined) {
+      usedPhones.add(pairedPhone.id);
+      rows.push({
+        key: d.id,
+        name: pairedPhone.label,
+        kind: `${system} phone`,
+        face: { shape: "phone", ...(mark !== undefined ? { mark } : {}), dot: pairedPhone.connected ? "on" : "off" },
+        state: pairedPhone.connected ? { text: "paired · connected", tone: "ok" } : { text: "paired · offline", tone: "bad" },
+        ...(!pairedPhone.connected ? { sub: "A phone is online while JaiRA is open on it." } : {}),
+        grey: false,
+        action: { kind: "unpair", id: pairedPhone.id, label: pairedPhone.label },
+      });
+      continue;
+    }
+    if (d.jaira !== undefined) {
+      const isPhone = d.jaira.kind === "phone";
+      const jmark = d.jaira.os ?? mark;
+      rows.push({
+        key: d.id,
+        name: d.jaira.label,
+        kind: isPhone ? `${jmark !== undefined ? SYSTEM_WORDS[jmark] : system} phone` : machineKindOf({ form: d.jaira.form ?? "desktop", os: d.jaira.os === "windows" || d.jaira.os === "mac" || d.jaira.os === "linux" ? d.jaira.os : "linux" }),
+        face: { shape: isPhone ? "phone" : (d.jaira.form ?? "desktop"), ...(jmark !== undefined ? { mark: jmark } : {}), dot: "on" },
+        state: { text: isPhone ? "JaiRA open" : `JaiRA ${d.jaira.version}`, tone: "dim" },
+        grey: false,
+        action: { kind: "pair", device: d.id },
+        ...(asking !== undefined ? { asking } : {}),
+      });
+      continue;
+    }
+    const face: MachineFace = { shape: phone ? "phone" : "auto", ...(mark !== undefined ? { mark } : {}), dot: d.online ? "on" : "off" };
+    if (d.olderSelf === true) {
+      rows.push({ key: d.id, name: shown, kind: system, face, state: { text: "offline", tone: "bad" }, sub: "An older registration of this machine.", grey: true, ...(d.consoleUrl !== undefined ? { action: { kind: "console", href: d.consoleUrl } } : {}) });
+      continue;
+    }
+    if (!d.online) {
+      rows.push({ key: d.id, name: shown, kind: system, face, state: { text: "offline", tone: "bad" }, sub: `Since ${day(d.lastSeenAt)}. Whether JaiRA runs there is checked when it comes online.`, grey: true });
+      continue;
+    }
+    if (d.noJaira === true) {
+      rows.push({
+        key: d.id,
+        name: shown,
+        kind: system,
+        face,
+        state: { text: phone ? "JaiRA isn't open" : "JaiRA isn't running", tone: "dim" },
+        sub: phone ? "Open JaiRA there and sign in to Tailscale, then Refresh." : "Start JaiRA there, then Refresh.",
+        grey: true,
+      });
+      continue;
+    }
+    rows.push({ key: d.id, name: shown, kind: system, face, state: { text: "checking…", tone: "dim" }, grey: true });
+  }
+  for (const m of view.machines) {
+    if (usedMachines.has(m.id)) continue;
+    rows.push({
+      key: `m:${m.id}`,
+      name: m.label,
+      kind: machineKindOf(m),
+      face: faceOf({ form: m.form, os: m.os, state: m.state === "mismatch" ? "online" : m.state }),
+      state: pairedState(m.state),
+      ...(m.state === "offline" ? { sub: `${ago(m.lastSeenAt).replace(/^l/, "L")}. Not on your tailnet now.` } : {}),
+      grey: false,
+      action: { kind: "unpair", id: m.id, label: m.label },
+    });
+  }
+  for (const p of view.devices) {
+    if (usedPhones.has(p.id)) continue;
+    rows.push({
+      key: `p:${p.id}`,
+      name: p.label,
+      kind: "Phone",
+      face: { shape: "phone", dot: p.connected ? "on" : "off" },
+      state: p.connected ? { text: "paired · connected", tone: "ok" } : { text: "paired · offline", tone: "bad" },
+      ...(!p.connected ? { sub: p.lastUsedAt === undefined ? "Not connected yet." : `${ago(p.lastUsedAt).replace(/^l/, "L")}.` } : {}),
+      grey: false,
+      action: { kind: "unpair", id: p.id, label: p.label },
+    });
+  }
+  rows.sort((a, b) => RANK(a) - RANK(b) || a.name.localeCompare(b.name));
+  return [self, ...rows];
+}
+
+/** The Pair a phone row's sentence: a phone reaches this machine through the tailnet, so only once signed in. */
+export function pairWords(view: MachinesView): string {
+  return view.self.tailnet.state === "on"
+    ? `Show a code, then pick this machine in JaiRA on a phone on this Wi-Fi and type the code there. It works once, for ${PAIRING_CODE_MS / 60_000} minutes.`
+    : "Sign in to Tailscale first: a phone reaches this machine through your tailnet.";
+}
+
+/** The Pair a phone row's sentence, while its code shows (decision 0013, amended 2026-10-04). */
 export function pairCodeWords(view: MachinesView, expiresAt: number): WordPart[] {
   return [
-    "On the other machine: Settings → Machines → Add a machine, with ",
-    { code: view.self.reach.url ?? "" },
-    ".",
-    // Announced on the local network (decision 0013, amended 2026-10-04): a phone lists it by name, or
-    // takes its local address where the network hides it.
-    ...(view.pairing?.nearby !== undefined ? nearbyWords(view.self.label, view.pairing.nearby) : []),
+    // Announced on the local network: a phone lists it by name, or takes its local address where the
+    // network hides it.
+    ...(view.pairing?.nearby !== undefined ? nearbyWords(view.self.label, view.pairing.nearby) : ["Finding this machine's address on the local network…"]),
     ` Works until ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`,
   ];
 }
@@ -134,8 +334,8 @@ export function pairCodeWords(view: MachinesView, expiresAt: number): WordPart[]
 /** How a phone on this Wi-Fi finds the machine: by name in its list, else by the address typed. */
 export function nearbyWords(label: string, nearby: { port: number; addresses: string[] }): WordPart[] {
   const first = nearby.addresses[0];
-  if (first === undefined) return [" This machine has no address on a local network, so no phone nearby can find it."];
-  return [` On a phone on this Wi-Fi: open JaiRA and pick ${label}. Not listed? Type `, { code: nearby.port === LAN_PAIRING_PORT ? first : `${first}:${nearby.port}` }, " there."];
+  if (first === undefined) return ["This machine has no address on a local network, so no phone nearby can find it."];
+  return [`On a phone on this Wi-Fi: open JaiRA and pick ${label}. Not listed? Type `, { code: nearby.port === LAN_PAIRING_PORT ? first : `${first}:${nearby.port}` }, " there."];
 }
 
 /** What phones did on the pairing listener lately, one line each, oldest first. */
@@ -165,27 +365,29 @@ export function phoneJoinWords(phone: NonNullable<MachinesView["phone"]>): WordP
     : [`${phone.label} is paired, and is joining your tailnet…`];
 }
 
-/** A paired machine's line: whether it is there, what it runs, and where. */
-export function peerWords(peer: PeerView): WordPart[] {
-  const where: WordPart[] = peer.url !== undefined ? [" · ", { code: new URL(peer.url).host }] : [];
-  switch (peer.state) {
-    case "online":
-      return [`Online · JaiRA ${peer.version ?? "?"}`, ...where];
-    case "connecting":
-      return ["Connecting…"];
-    case "mismatch":
-      return [{ error: sentence(peer.reason ?? `It runs JaiRA ${peer.version ?? "?"}`) }, ` ${ago(peer.lastSeenAt)}`];
-    case "offline":
-      return [`Offline · ${ago(peer.lastSeenAt)}`, ...(peer.reason !== undefined ? [{ hint: ` · ${peer.reason}` }] : [])];
-  }
+/** When the list was last asked, for the line beside Refresh. */
+export function checkedWords(checkedAt: number | undefined, now = Date.now()): string {
+  if (checkedAt === undefined) return "Checking…";
+  const minutes = Math.round((now - checkedAt) / 60_000);
+  return minutes < 1 ? "Checked just now" : minutes === 1 ? "Checked a minute ago" : minutes < 60 ? `Checked ${minutes} minutes ago` : "Checked over an hour ago";
 }
 
-/** The phones and browsers paired with this machine (decision 0013, amended 2026-09-30), by name. */
-export const devicesOf = (view: MachinesView): DeviceView[] => [...(view.devices ?? [])].sort((a, b) => a.label.localeCompare(b.label));
+/** The code-field row's sentence, while a device shows a code. */
+export function askingWords(name: string, expiresAt: number): string {
+  return `${name} is showing a code now. Type it here. It works until ${new Date(expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}.`;
+}
 
-/** A paired phone's or browser's line: what it is, and whether it is there. */
-export function deviceWords(device: DeviceView): string {
-  return `${device.kind === "phone" ? "Phone" : "Browser"} · ${device.connected ? "connected now" : device.lastUsedAt === undefined ? "not connected yet" : ago(device.lastUsedAt)}`;
+/** The pop-up's words, on the machine asked to show a code. */
+export function askedWords(view: MachinesView): { title: string; note: string } | undefined {
+  const asked = view.asked;
+  if (asked === undefined) return undefined;
+  const until = new Date(asked.expiresAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  return { title: `${asked.by.label} wants to pair with this machine`, note: `Type this code on ${asked.by.label}. It works once, until ${until}. If you didn't ask for this, refuse it.` };
+}
+
+/** The Unpair dialog's words. */
+export function unpairSpecWords(label: string): { title: string; note: string; confirmLabel: string } {
+  return { title: `Unpair ${label}?`, note: "It leaves the group: none of your machines or phones can reach it, and it can't reach them. You can pair it again from this list.", confirmLabel: "Unpair" };
 }
 
 /** The Projects across machines row's sentence. */
@@ -203,24 +405,19 @@ export const MACHINES_WORDS = {
   name: { name: "Name", description: "How other machines and the task chips call this one." },
   tags: { name: "Tags", description: "What a workflow can ask for. The operating system is added by itself." },
   form: { name: "What it is", description: "The shape of this machine's icon, wherever it is named. Guessed once; yours to correct." },
-  reach: {
-    name: "Reachable from my other machines",
-    info: "JaiRA publishes its own port on your tailnet with Tailscale (tailscale serve) — or, without the Tailscale app, with the Tailscale helper it ships with — and turns it off again with this switch. Funnel is never used.",
+  tailnet: {
+    name: "Tailscale",
+    info: "Signed in, JaiRA is on your tailnet, through the Tailscale app or the Tailscale helper it ships with, and your paired machines and phones can reach this one. Nothing is opened to the internet (Funnel is never used), and only what you paired gets in.",
   },
-  pair: { name: "Pair a machine", button: "Show a code" },
+  yours: {
+    title: "Your machines",
+    info: "Every device on your tailnet. Pair asks the other one to show a code, which you type here. Pairing one machine introduces it to the rest; Unpair takes it out of all of them.",
+  },
+  pair: { name: "Pair a phone", button: "Show a code" },
   pairCode: { name: "Code for pairing" },
   nearbyLog: { name: "Phones nearby" },
   phone: { name: "A phone joining" },
-  yours: { title: "Your machines", info: "Remembered on every machine you pair: pairing one new machine with any of these introduces it to the rest." },
-  none: { name: "None yet", description: "Pair a machine below, or show a code here and type it there." },
-  devices: {
-    title: "Phones and browsers",
-    info: "A phone or a browser paired with this machine is a window onto it: it shows and does what a window here does, keeps no copy of anything, and no task runs on it. Forgetting one disconnects it, and its pairing no longer works.",
-    forget: "Its pairing stops working, and it is disconnected",
-  },
-  add: { title: "Add a machine", info: "Pairing is once per machine: after that they find each other by themselves, and a machine paired with any of yours joins all of them." },
-  other: { name: "The other machine" },
-  paired: "Paired. It is listed under Your machines, with any machines it was already paired with.",
+  notSignedIn: { name: "Not signed in", description: "The devices on your tailnet are listed here once this machine is signed in." },
   copies: {
     title: "Copies of other machines' work",
     info: "Kept so you can read and answer other machines' tasks here while they are off. Deleting a task anywhere deletes it everywhere; a machine clearing old history for space does not delete your copies.",
@@ -236,47 +433,13 @@ export const MACHINES_WORDS = {
   reading: "Reading this machine…",
 } as const;
 
-export const ADD_SCHEMA = {
+export const CODE_SCHEMA = {
   type: "object",
   properties: {
-    address: { type: "string", title: "address", minLength: 1, description: "The other machine's address, shown on its Machines page: mac-mini.tail4c2e.ts.net" },
-    code: { type: "string", title: "code", minLength: 1, description: "The code the other machine shows under Pair a machine." },
+    code: { type: "string", title: "code", minLength: 1, description: "The code the other machine or phone is showing now." },
   },
-  required: ["address", "code"],
+  required: ["code"],
 } as const;
-
-/**
- * Pairing with another machine (`MachinesPage.tsx`'s `AddMachine`): the address and code typed, whether
- * Pair can be pressed, and what it came to — the page's view refreshed, or why not.
- */
-export function useAddMachine(onView: (v: MachinesView) => void): {
-  value: { address?: string; code?: string };
-  setValue: (next: { address?: string; code?: string }) => void;
-  busy: boolean;
-  error: string | undefined;
-  done: string | undefined;
-  ready: boolean;
-  pair: () => void;
-} {
-  const [value, setValue] = useState<{ address?: string; code?: string }>({});
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | undefined>(undefined);
-  const [done, setDone] = useState<string | undefined>(undefined);
-  const ready = (value.address ?? "").trim() !== "" && (value.code ?? "").trim() !== "";
-  const pair = (): void => {
-    setBusy(true);
-    setError(undefined);
-    setDone(undefined);
-    invoke("machines:add", { address: value.address!.trim(), code: value.code!.trim() })
-      .then((view) => {
-        onView(view);
-        setValue({});
-        setDone(MACHINES_WORDS.paired);
-      }, (e: unknown) => setError(errorOf(e)))
-      .finally(() => setBusy(false));
-  };
-  return { value, setValue, busy, error, done, ready, pair };
-}
 
 export type MachineChipState = "on" | "off" | "warn" | "none";
 

@@ -19,7 +19,7 @@
 export type HealthLevel = "error" | "warning";
 
 /** The Settings page an item belongs to, where its fix is. `logs` is the Logs panel. */
-export type HealthPage = "connections" | "about" | "logs";
+export type HealthPage = "connections" | "machines" | "about" | "logs";
 
 /** What the item's button does. */
 export type HealthAction =
@@ -32,10 +32,12 @@ export type HealthAction =
   /** Check for updates again, or download the update again. */
   | "retry-update"
   /** Open the Logs panel. */
-  | "open-logs";
+  | "open-logs"
+  /** Bring this machine back onto the tailnet now, rather than at JaiRA's next try. */
+  | "reconnect";
 
 export interface HealthItem {
-  /** Stable per problem: `executor:<name>`, `route:<name>`, `forge:<name>`, `plugin:<id>`, `update`, `log:errors`, `log:warnings`. */
+  /** Stable per problem: `executor:<name>`, `route:<name>`, `forge:<name>`, `plugin:<id>`, `update`, `tailnet`, `log:errors`, `log:warnings`. */
   id: string;
   level: HealthLevel;
   page: HealthPage;

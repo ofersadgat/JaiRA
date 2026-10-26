@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { AppService, hostEngine, loopbackReach, type HostedEngine } from "@jaira/service";
+import { AppService, hostEngine, loopbackTailnet, type HostedEngine } from "@jaira/service";
 import type { AnnouncePort } from "@jaira/service/lanPairing";
 import { announcementOf, engineUrlOf, typedLanMachine, type LanAnnouncement, type MachinesView } from "@jaira/shared";
 import { engineBridge } from "../../client/bridges/engineBridge";
@@ -44,11 +44,11 @@ beforeEach(async () => {
   announced = [];
   opened.length = 0;
   let host: HostedEngine | undefined;
-  service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce, lanBindHost: "127.0.0.1", openExternal: (url) => opened.push(url), watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
+  service = new AppService({ baseDir: base, version: "0.2.0", tailnet: loopbackTailnet(), announce, lanBindHost: "127.0.0.1", openExternal: (url) => opened.push(url), watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
   host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
   hosted = host;
   service.fleet.rename("desk");
-  await service.fleet.setReachable(true);
+  await service.fleet.signIn();
 });
 
 afterEach(async () => {
@@ -116,7 +116,7 @@ describe("pairing a phone over the local network", () => {
     const paired = await pairNearby({ machine, code: code.toLowerCase(), device: PHONE, random, onPaired: (p) => void (kept = p), onStep: (s) => steps.push(s) });
     expect(kept).toEqual(paired);
     expect(paired.machine).toMatchObject({ id: service.fleet.identity().id, label: "desk" });
-    expect(paired.address).toBe(view().self.reach.url);
+    expect(paired.address).toBe(view().self.tailnet.url);
     expect(steps).toEqual(["reaching", "proving"]);
     expect(view().pairing).toBeUndefined();
     await expect.poll(() => announced.at(-1)).toBeUndefined();
@@ -191,9 +191,9 @@ describe("pairing a phone over the local network", () => {
     expect(opened).toEqual([]);
   });
 
-  it("will not pair while the machine is not reachable on the tailnet", async () => {
+  it("will not pair while the machine is not signed in to the tailnet", async () => {
     const { code, machine } = await showCode();
-    await service.fleet.setReachable(false);
-    await expect(pairNearby({ machine, code, device: PHONE, random, onPaired: () => undefined })).rejects.toThrow("not reachable on the tailnet");
+    await service.fleet.signOut();
+    await expect(pairNearby({ machine, code, device: PHONE, random, onPaired: () => undefined })).rejects.toThrow("not on the tailnet");
   });
 });

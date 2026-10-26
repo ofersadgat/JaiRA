@@ -1,18 +1,19 @@
 /**
- * A phone or a browser as a WINDOW onto one engine (decision 0013, amended 2026-09-30), with the real
+ * A phone as a WINDOW onto one engine (decisions 0013, amended 2026-09-30, and 0022), with the real
  * pieces end to end: an `AppService` hosted by `hostEngine`, its loopback listener, and the bridge a
  * device installs (`packages/client/bridges/engineBridge.ts`) over Node's own `WebSocket`.
  *
- * - **Pairing.** The code a machine shows pairs a device too: it is issued a token and listed, and is
- *   NOT a machine — nothing is remembered in the fleet, held for it, or linked to it. The code is spent;
- *   a wrong one is refused, and too many void it.
+ * - **Pairing.** The phone asks the machine to show a code (`pair-ask`), and the code pairs it: it is
+ *   issued a token and listed, and is NOT a machine — nothing is remembered in the fleet, held for it, or
+ *   linked to it. The code is spent; a wrong one is refused, and too many void it.
  * - **Admission.** Its `hello` is welcomed as a window: the service's channels, this connection's own
  *   current project, every push, and writes — less the host's own channels and the engine's controls.
  * - **Revocation.** Forgetting it drops its connection and refuses its next hello, which the bridge
  *   reports as final.
  * - **The bridge.** A dropped connection is retried with a fresh hello, the store is told to read again,
  *   and another contract is said, not retried.
- * - **The client's files.** The listener serves the built client read-only, and nothing outside it.
+ * - **The client's files.** The listener serves no client (a browser is not a device until the website
+ *   exists); the window's own protocol resolves the built client read-only, and nothing outside it.
  */
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -21,7 +22,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { AppService, clientFile, clientPolicy, connectEngine, hostEngine, loopbackReach, type HostedEngine } from "@jaira/service";
+import { AppService, askOnce, clientFile, connectEngine, hostEngine, loopbackTailnet, type HostedEngine } from "@jaira/service";
 import { peersFile } from "@jaira/service/machineTokens";
 import type { MachinesView, PairingDevice, PushMessage } from "@jaira/shared";
 import { engineBridge, pairDevice, type BridgeState, type EngineBridge, type Pairing } from "../../client/bridges/engineBridge";
@@ -34,7 +35,7 @@ const dirs: string[] = [];
 const bridges: EngineBridge[] = [];
 
 const PHONE: PairingDevice = { id: "d-pixel8-0123456789", label: "Pixel 8", kind: "phone" };
-const TAB: PairingDevice = { id: "d-chrome-0123456789", label: "Chrome on Windows", kind: "browser" };
+const TAB: PairingDevice = { id: "d-tablet-0123456789", label: "Pixel Tablet", kind: "phone" };
 
 beforeEach(async () => {
   base = mkdtempSync(join(tmpdir(), "jaira-device-"));
@@ -47,8 +48,8 @@ beforeEach(async () => {
   // Beside the client, not in it: what a traversal would reach.
   writeFileSync(join(client, "..", "jaira-device-secret.txt"), "secret");
   let host: HostedEngine | undefined;
-  service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
-  host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0, clientDir: client } }))!;
+  service = new AppService({ baseDir: base, version: "0.2.0", tailnet: loopbackTailnet(), announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
+  host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
   hosted = host;
   service.fleet.rename("desk");
 });
@@ -63,10 +64,15 @@ afterEach(async () => {
 const port = (): number => hosted.networkPort()!;
 const address = (): string => `127.0.0.1:${port()}`;
 const view = (): MachinesView => service.fleet.view();
-const code = (): string => service.fleet.pairingCode().pairing!.code;
+/** What a phone does before typing a code: ask the machine to show one. */
+async function code(device: PairingDevice = PHONE): Promise<string> {
+  const answer = await askOnce({ url: `ws://${address()}/engine` }, { t: "pair-ask", device }, 5000);
+  if (answer.t !== "asked") throw new Error(answer.t === "refused" ? answer.reason : "no code");
+  return view().asked!.code;
+}
 
 async function paired(device: PairingDevice = PHONE): Promise<Pairing> {
-  return pairDevice(address(), code(), device);
+  return pairDevice(address(), await code(device), device);
 }
 
 function bridgeOf(pairing: Pairing, options: { contract?: string } = {}): EngineBridge {
@@ -108,25 +114,26 @@ describe("pairing a device", { timeout: 60_000 }, () => {
     expect(issued).toEqual([expect.objectContaining({ machineId: PHONE.id, label: "Pixel 8", device: "phone" })]);
     expect(JSON.stringify(issued)).not.toContain(pairing.token);
     // The code is spent.
-    expect(view().pairing).toBeUndefined();
+    expect(view().asked).toBeUndefined();
   });
 
   it("refuses a spent code, a wrong one, and voids the code after too many", async () => {
-    const shown = code();
+    const shown = await code();
     await pairDevice(address(), shown, PHONE);
-    await expect(pairDevice(address(), shown, TAB)).rejects.toThrow(/no pairing code is being shown/);
+    await expect(pairDevice(address(), shown, TAB)).rejects.toThrow(/no code is showing/);
 
-    code();
+    await code(TAB);
     for (let i = 0; i < 5; i += 1) await expect(pairDevice(address(), "AMBER RIVER 0000", TAB)).rejects.toThrow(/not the code/);
-    expect(view().pairing).toBeUndefined();
+    expect(view().asked).toBeUndefined();
     expect(view().devices.map((d) => d.id)).toEqual([PHONE.id]);
   });
 
   it("refuses a device that is not one, or that takes a machine's id", async () => {
     const me = service.fleet.identity().id;
-    await expect(pairDevice(address(), code(), { ...PHONE, id: me })).rejects.toThrow(/a machine's/);
-    await expect(pairDevice(address(), code(), { ...PHONE, id: "../x" })).rejects.toThrow(/needs its id/);
-    await expect(pairDevice(address(), code(), { ...PHONE, kind: "toaster" as never })).rejects.toThrow(/needs its id/);
+    await expect(pairDevice(address(), await code(), { ...PHONE, id: me })).rejects.toThrow(/a machine's/);
+    await expect(pairDevice(address(), await code(), { ...PHONE, id: "../x" })).rejects.toThrow(/needs its id/);
+    await expect(pairDevice(address(), await code(), { ...PHONE, kind: "browser" as never })).rejects.toThrow(/needs its id/);
+    await expect(askOnce({ url: `ws://${address()}/engine` }, { t: "pair-ask", device: { ...PHONE, kind: "browser" as never } }, 5000)).resolves.toMatchObject({ t: "refused" });
     expect(view().devices).toEqual([]);
   });
 
@@ -152,11 +159,11 @@ describe("a device's connection", { timeout: 60_000 }, () => {
     // Listed as connected, as a device and not a machine.
     expect(view().devices.map((d) => [d.label, d.connected])).toEqual([
       ["Pixel 8", true],
-      ["Chrome on Windows", true],
+      ["Pixel Tablet", true],
     ]);
     expect(hosted.host.connected().map((c) => [c.transport, c.device?.label, c.machine])).toEqual([
       ["network", "Pixel 8", undefined],
-      ["network", "Chrome on Windows", undefined],
+      ["network", "Pixel Tablet", undefined],
     ]);
 
     // Per-connection state: each stands on the project it opened.
@@ -261,66 +268,22 @@ function raw(path: string, method = "GET"): Promise<{ status: number; headers: R
   });
 }
 
-describe("the client's files, from the engine's listener", { timeout: 60_000 }, () => {
-  it("serves the page, a route's own page, and an asset, each with its headers", async () => {
-    const index = await raw("/");
-    expect(index).toMatchObject({ status: 200, body: expect.stringContaining("index") });
-    expect(index.headers["content-type"]).toBe("text/html; charset=utf-8");
-    expect(index.headers["x-content-type-options"]).toBe("nosniff");
-    expect(index.headers["cache-control"]).toBe("no-cache");
-    // The window's own policy, with the page's one inline script admitted by its hash.
-    expect(index.headers["content-security-policy"]).toBe(clientPolicy(readFileSync(join(client, "index.html"), "utf8")));
-    expect(index.headers["content-security-policy"]).toMatch(/default-src 'none'; script-src 'self' 'wasm-unsafe-eval' 'sha256-[A-Za-z0-9+/=]+'; .*connect-src 'self'/);
-
-    expect((await raw("/native?code=abc")).body).toContain("native");
-    const asset = await raw("/assets/app-abc123.js");
-    expect(asset).toMatchObject({ status: 200, body: "export const app = 1;\n" });
-    expect(asset.headers["content-type"]).toBe("text/javascript; charset=utf-8");
-    expect(asset.headers["cache-control"]).toMatch(/immutable/);
-    expect(asset.headers["content-security-policy"]).toBeUndefined();
-    // A route with no file is the SPA's page; a folder is never listed.
-    expect((await raw("/tasks/some/where")).body).toContain("index");
-    expect((await raw("/assets/")).body).toContain("index");
-    expect((await raw("/assets")).body).toContain("index");
-    const head = await raw("/", "HEAD");
-    expect(head).toMatchObject({ status: 200, body: "" });
-    // The two paths the engine answers itself are still its own.
+describe("the client's files", { timeout: 60_000 }, () => {
+  it("are not served by the engine's listener, which answers its two paths alone", async () => {
+    expect((await raw("/")).status).toBe(404);
+    expect((await raw("/index.html")).status).toBe(404);
+    expect((await raw("/assets/app-abc123.js")).status).toBe(404);
     expect(JSON.parse((await raw("/.well-known/jaira")).body)).toMatchObject({ jaira: true });
     expect((await raw("/engine")).status).toBe(404);
   });
 
-  it("refuses every way out of the folder, and anything but reading", async () => {
-    for (const path of ["/../jaira-device-secret.txt", "/assets/../../jaira-device-secret.txt", "/..%2Fjaira-device-secret.txt", "/%2e%2e/jaira-device-secret.txt", "/assets/%2e%2e%2f%2e%2e%2fjaira-device-secret.txt"]) {
-      const answer = await raw(path);
-      expect([path, answer.status]).toEqual([path, 403]);
-      expect(answer.body).not.toContain("secret");
-    }
-    // A backslash is a separator on Windows and a letter elsewhere: outside the folder, or no such file.
-    const backslash = await raw("/..%5Cjaira-device-secret.txt");
-    expect(backslash.body).not.toBe("secret");
-    if (process.platform === "win32") expect(backslash.status).toBe(403);
-    expect((await raw("/a%00b")).status).toBe(400);
-    expect((await raw("/%E0%A4%A")).status).toBe(400);
-    expect((await raw("/", "POST")).status).toBe(404);
-    expect((await raw("/index.html", "DELETE")).status).toBe(404);
-  });
-
-  it("resolves a path the same for the window's own protocol", () => {
+  it("are resolved for the window's own protocol, and nothing outside them", () => {
     expect(clientFile(client, "/")).toMatchObject({ file: join(client, "index.html"), html: true });
     expect(clientFile(client, "/native")).toMatchObject({ file: join(client, "native.html"), html: true });
     expect(clientFile(client, "/assets/app-abc123.js")).toMatchObject({ html: false, type: "text/javascript; charset=utf-8" });
-    expect(clientFile(client, "/..%2f..%2fetc%2fpasswd")).toEqual({ status: 403, reason: expect.any(String) });
+    for (const path of ["/../jaira-device-secret.txt", "/assets/../../jaira-device-secret.txt", "/..%2Fjaira-device-secret.txt", "/%2e%2e/jaira-device-secret.txt", "/..%2f..%2fetc%2fpasswd"]) {
+      expect([path, (clientFile(client, path) as { status?: number }).status]).toEqual([path, 403]);
+    }
     expect(clientFile(join(client, "nowhere"), "/")).toMatchObject({ status: 404 });
-  });
-
-  it("serves nothing but its two paths when the host gave it no client", async () => {
-    await hosted.close();
-    let host: HostedEngine | undefined;
-    service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => host?.host.broadcast(m) });
-    host = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
-    hosted = host;
-    expect((await raw("/")).status).toBe(404);
-    expect((await raw("/index.html")).status).toBe(404);
-    expect((await raw("/.well-known/jaira")).status).toBe(200);
   });
 });

@@ -1,27 +1,33 @@
-import { useEffect, useMemo, useState, type JSX } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX } from "react";
+import { Linking } from "react-native";
 import { View } from "@tamagui/core";
-import type { CopyChoice, DeviceView, MachinesView, OutboxView, PeerView, ProjectSummary } from "@jaira/shared/browser";
-import { chipStateOf, machinesMoved, type MachineChipState } from "@jaira/ui/machinesModel";
+import type { CopyChoice, MachinesView, OutboxView, ProjectSummary } from "@jaira/shared/browser";
+import { machinesMoved } from "@jaira/ui/machinesModel";
+import type { AskSpec } from "@jaira/ui/menuTypes";
 import {
-  ADD_SCHEMA,
+  CODE_SCHEMA,
   COPY_CHOICES,
   COPY_WORDS,
   FORM_CHOICES,
   MACHINES_WORDS as W,
-  deviceWords,
-  devicesOf,
+  askingWords,
+  checkedWords,
   diskWords,
   errorOf,
   groupedWords,
+  machineRowsOf,
+  nearbyLogLines,
   pairCodeWords,
   pairWords,
-  peerWords,
-  nearbyLogLines,
   phoneJoinWords,
-  reachWords,
+  removeSpecWords,
   sentence,
-  useAddMachine,
+  tailnetWords,
+  unpairSpecWords,
   useMachines,
+  type MachineChipState,
+  type MachineRow,
+  type TailnetAction,
 } from "@jaira/ui/machinesModel";
 import { invoke } from "@jaira/ui/store";
 import { useView } from "@jaira/ui/useView";
@@ -29,8 +35,10 @@ import { useShell } from "../../app/shell";
 import { copyText } from "../../clipboard";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { AskDialog } from "../files/AskDialog";
 import { MachineChip } from "../MachineChip";
 import { MachineIcon } from "../MachineIcon";
+import { NeedsAttention } from "./NeedsAttention";
 import { SchemaForm } from "../form/SchemaForm";
 import { Button } from "./Button";
 import { Segmented, Switch } from "./controls";
@@ -40,20 +48,21 @@ import { SettingsRow, SettingsSection } from "./SettingsPage";
 import { Words } from "./Words";
 
 /**
- * Settings → Machines: this machine's name, tags and reach, pairing, the machines it is paired with,
- * the phones and browsers that are windows onto it, and copies of the machines' work. What every row
- * says, and the fleet it reads, are `machinesModel.ts`'s; its reads and writes are `invoke` calls.
- * What it adds to the page's look:
+ * Settings → Machines (decisions 0013 and 0022): this machine's name, tags, what it is, and its one
+ * Tailscale sign-in; every device on the tailnet, with Pair or Unpair; and copies of the machines' work.
+ * What every row says, and the fleet it reads, are `machinesModel.ts`'s; its reads and writes are
+ * `invoke` calls. What it adds to the page's look:
  *
  *   a machine's tags     row, wraps, centred, gap 6; the OS a dashed chip (app 10/12.5, --dim, 1px
  *                        --line, round, padding 0 6), each tag a chip with its × (padding 0 0 0 4, --dim)
  *   what it is           its icon (20: the shape, the system's mark on it) before the four it can be
  *   the box adding one   a text box 80 wide
- *   the pairing code     its row on --tint-accent; the code the data face at 15/12.5, 0.08em, padding
- *                        4 10, a dashed --line, radius --control-radius
- *   Add a machine        column, gap 10, 6 above; its foot a row, centred, gap 10
+ *   a device's name      as the conversation's machine list draws a machine: its icon (20), its name app
+ *                        600 (--dim when greyed), what it is app 11/12.5 --dim, gap 11
+ *   its state            app 11/12.5, --ok paired and connected, --warn connecting, --bad offline, else --dim
+ *   the code field       under the row's sentence: a `SchemaForm` of the one code, and Pair
  *
- * The Add a machine form is a `SchemaForm`, keyed by the schema's own names.
+ * Unpair and Remove ask first (`AskDialog`).
  */
 export function MachinesPage(): JSX.Element {
   const { state, actions } = useShell();
@@ -65,23 +74,10 @@ export function MachinesPage(): JSX.Element {
         <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>{W.reading}</Txt>
       ) : (
         <>
+          <NeedsAttention page="machines" />
           <ThisMachine view={view} onView={setView} />
-          <SettingsSection id="yours" title={W.yours.title} info={W.yours.info}>
-            {view.machines.length === 0 ? (
-              <SettingsRow {...W.none} />
-            ) : (
-              [...view.machines].sort((a, b) => a.label.localeCompare(b.label)).map((peer) => <PeerRow key={peer.id} peer={peer} onView={setView} />)
-            )}
-          </SettingsSection>
-          {devicesOf(view).length > 0 ? (
-            <SettingsSection id="devices" title={W.devices.title} info={W.devices.info}>
-              {devicesOf(view).map((device) => (
-                <DeviceRow key={device.id} device={device} onView={setView} />
-              ))}
-            </SettingsSection>
-          ) : null}
+          <YourMachines view={view} onView={setView} />
           <Outbox />
-          <AddMachine onView={setView} />
           <Copies view={view} onView={setView} />
           <SettingsSection id="projects" title={W.projects.title} info={W.projects.info}>
             <SettingsRow name={W.grouped.name} description={groupedWords(grouped)} control={<Switch on={grouped} label={W.grouped.name} onChange={actions.setGroupWorkspaces} />} />
@@ -128,8 +124,6 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
   const rename = (): void => {
     if (label.trim() !== "" && label.trim() !== view.self.label) act(invoke("machines:rename", { label: label.trim() }));
   };
-  const reach = reachWords(view);
-  const pairing = view.pairing;
   return (
     <SettingsSection id="this" title={W.this.title} info={W.this.info}>
       <SettingsRow
@@ -148,70 +142,7 @@ function ThisMachine({ view, onView }: { view: MachinesView; onView: (v: Machine
           </>
         }
       />
-      <SettingsRow
-        name={W.reach.name}
-        description={<Words parts={reach.description} />}
-        info={W.reach.info}
-        control={<Switch on={reach.on} label={W.reach.name} disabled={busy} onChange={(on) => act(invoke("machines:reach", { on }))} />}
-      />
-      <SettingsRow
-        name={W.pair.name}
-        description={pairWords(view)}
-        control={
-          pairing === undefined ? (
-            <Button disabled={busy || view.self.reach.state !== "on"} onPress={() => act(invoke("machines:pairCode", undefined))}>
-              {W.pair.button}
-            </Button>
-          ) : undefined
-        }
-      />
-      {pairing !== undefined ? (
-        <View backgroundColor={t.v("tint-accent") as never}>
-          <SettingsRow
-            name={W.pairCode.name}
-            description={<Words parts={pairCodeWords(view, pairing.expiresAt)} />}
-            control={
-              <>
-                <Txt
-                  spec={{ voice: "data", scale: (15 / 12.5) * (12.5 / 12), ls: 0.08 }}
-                  paddingVertical={4}
-                  paddingHorizontal={10}
-                  borderRadius={lengthToken(t, "control-radius", 7)}
-                  {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, "line", "dashed") as object)}
-                  selectable
-                >
-                  {pairing.code}
-                </Txt>
-                <Button kind="ghost" onPress={() => void copyText(pairing.code)}>
-                  Copy
-                </Button>
-                <Button kind="ghost" onPress={() => act(invoke("machines:pairCancel", undefined))}>
-                  Stop
-                </Button>
-              </>
-            }
-          />
-        </View>
-      ) : null}
-      {view.phone !== undefined ? (
-        <View backgroundColor={t.v("tint-accent") as never}>
-          <SettingsRow name={W.phone.name} description={<Words parts={phoneJoinWords(view.phone)} />} />
-        </View>
-      ) : null}
-      {view.nearbyLog !== undefined ? (
-        <SettingsRow
-          name={W.nearbyLog.name}
-          description={
-            <View gap={2}>
-              {nearbyLogLines(view.nearbyLog).map((line, i) => (
-                <Txt key={i} spec={{ voice: "data", scale: 11 / 12.5, color: "dim" }} selectable>
-                  {line}
-                </Txt>
-              ))}
-            </View>
-          }
-        />
-      ) : null}
+      <TailnetRow view={view} onView={onView} />
     </SettingsSection>
   );
 }
@@ -258,75 +189,281 @@ function Tags({ os, tags, onChange, disabled = false }: { os: string; tags: stri
   );
 }
 
-function PeerRow({ peer, onView }: { peer: PeerView; onView: (v: MachinesView) => void }): JSX.Element {
-  const t = useTokens();
-  const [confirming, setConfirming] = useState(false);
+const TAILNET_LABELS: Record<TailnetAction, { label: string; kind: "primary" | "ghost" | "danger" }> = {
+  signIn: { label: "Sign in to Tailscale", kind: "primary" },
+  signOut: { label: "Sign out", kind: "ghost" },
+  remove: { label: "Remove this machine…", kind: "danger" },
+  cancel: { label: "Cancel", kind: "ghost" },
+  removeCancel: { label: "Stop waiting", kind: "ghost" },
+  reconnect: { label: "Reconnect", kind: "primary" },
+};
+
+/** The one Tailscale sign-in (decision 0022 §3): what it is now, and Sign in, Sign out, Remove. */
+function TailnetRow({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
   const [busy, setBusy] = useState(false);
-  const forget = (): void => {
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [asking, setAsking] = useState<AskSpec | undefined>(undefined);
+  // The sign-in page opens by itself once, for the Sign in that was pressed here.
+  const opening = useRef(false);
+  const signInUrl = view.self.tailnet.signInUrl;
+  useEffect(() => {
+    if (opening.current && signInUrl !== undefined) {
+      opening.current = false;
+      void Linking.openURL(signInUrl);
+    }
+  }, [signInUrl]);
+  const act = (work: Promise<MachinesView>, then?: (v: MachinesView) => void): void => {
     setBusy(true);
-    invoke("machines:forget", { id: peer.id })
-      .then(onView, () => undefined)
+    setError(undefined);
+    work
+      .then((v) => {
+        onView(v);
+        then?.(v);
+      }, (e: unknown) => setError(errorOf(e)))
       .finally(() => setBusy(false));
   };
+  const press = (action: TailnetAction): void => {
+    if (action === "signIn") {
+      opening.current = true;
+      act(invoke("machines:signIn", undefined));
+    } else if (action === "reconnect") act(invoke("machines:signIn", undefined));
+    else if (action === "signOut" || action === "cancel") act(invoke("machines:signOut", undefined));
+    else if (action === "removeCancel") act(invoke("machines:removeCancel", undefined));
+    else {
+      const words = removeSpecWords(view);
+      setAsking({
+        ...words,
+        danger: true,
+        onConfirm: () => {
+          setAsking(undefined);
+          const page = view.self.tailnet.consoleUrl;
+          act(invoke("machines:remove", undefined), (v) => {
+            const href = v.self.tailnet.consoleUrl ?? page;
+            if (href !== undefined) void Linking.openURL(href);
+          });
+        },
+      });
+    }
+  };
+  const words = tailnetWords(view);
   return (
-    <SettingsRow
-      name={<NameChip label={peer.label} state={chipStateOf(peer.state)} />}
-      description={<Words parts={peerWords(peer)} />}
-      control={
-        <>
-          <Tags os={peer.os} tags={peer.tags} />
-          {confirming ? (
+    <>
+      <SettingsRow
+        name={W.tailnet.name}
+        info={W.tailnet.info}
+        description={<Words parts={error !== undefined ? [...words.description, " ", { error: sentence(error) }] : words.description} />}
+        control={
+          words.actions.length > 0 ? (
             <>
-              <Button kind="danger" disabled={busy} onPress={forget}>
-                {`Forget ${peer.label}`}
-              </Button>
-              <Button kind="ghost" onPress={() => setConfirming(false)}>
-                Keep
-              </Button>
+              {words.actions.map((action) => (
+                <Button key={action} kind={TAILNET_LABELS[action].kind} disabled={busy} onPress={() => press(action)}>
+                  {TAILNET_LABELS[action].label}
+                </Button>
+              ))}
             </>
-          ) : (
-            <Button kind="ghost" title="Forget this machine here and on every machine you use" onPress={() => setConfirming(true)}>
-              Forget…
-            </Button>
-          )}
-        </>
-      }
-    />
+          ) : undefined
+        }
+      />
+      {asking !== undefined ? <AskDialog spec={asking} onCancel={() => setAsking(undefined)} /> : null}
+    </>
   );
 }
 
-/** A phone or a browser paired with this machine: what it is, whether it is there, and Forget. */
-function DeviceRow({ device, onView }: { device: DeviceView; onView: (v: MachinesView) => void }): JSX.Element {
-  const t = useTokens();
-  const [confirming, setConfirming] = useState(false);
+/** Every device on the tailnet (decision 0022 §4), with Pair or Unpair; Refresh asks them all again. */
+function YourMachines({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
   const [busy, setBusy] = useState(false);
-  const forget = (): void => {
+  const signedIn = view.self.tailnet.state === "on" || view.self.tailnet.state === "removing";
+  const rows = machineRowsOf(view);
+  const refresh = (): void => {
     setBusy(true);
-    invoke("machines:forget", { id: device.id })
+    invoke("machines:refresh", undefined)
       .then(onView, () => undefined)
       .finally(() => setBusy(false));
   };
   return (
-    <SettingsRow
-      name={<NameChip label={device.label} state={device.connected ? "on" : "off"} />}
-      description={deviceWords(device)}
-      control={
-        confirming ? (
-          <>
-            <Button kind="danger" disabled={busy} onPress={forget}>
-              {`Forget ${device.label}`}
+    <SettingsSection
+      id="yours"
+      title={W.yours.title}
+      info={W.yours.info}
+      action={
+        signedIn ? (
+          <View flexDirection="row" alignItems="center" gap={10}>
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>{checkedWords(view.checkedAt)}</Txt>
+            <Button kind="ghost" disabled={busy} onPress={refresh}>
+              Refresh
             </Button>
-            <Button kind="ghost" onPress={() => setConfirming(false)}>
-              Keep
-            </Button>
-          </>
-        ) : (
-          <Button kind="ghost" title={W.devices.forget} onPress={() => setConfirming(true)}>
-            Forget…
-          </Button>
-        )
+          </View>
+        ) : undefined
       }
-    />
+    >
+      {!signedIn && rows.length === 1 ? <SettingsRow {...W.notSignedIn} /> : rows.map((row) => <DeviceRow key={row.key} row={row} onView={onView} />)}
+      <PairPhone view={view} onView={onView} />
+    </SettingsSection>
+  );
+}
+
+/**
+ * Pair a phone (decision 0013, amended 2026-10-04): the code it shows, while this machine is announced to
+ * phones on the local network; the phone that proved it and is joining the tailnet; what phones did.
+ */
+function PairPhone({ view, onView }: { view: MachinesView; onView: (v: MachinesView) => void }): JSX.Element {
+  const t = useTokens();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const act = (work: Promise<MachinesView>): void => {
+    setBusy(true);
+    setError(undefined);
+    work.then(onView, (e: unknown) => setError(errorOf(e))).finally(() => setBusy(false));
+  };
+  const pairing = view.pairing;
+  return (
+    <>
+      <SettingsRow
+        name={W.pair.name}
+        description={error !== undefined ? <ErrorWords error={error} /> : pairWords(view)}
+        control={
+          pairing === undefined ? (
+            <Button disabled={busy || view.self.tailnet.state !== "on"} onPress={() => act(invoke("machines:pairCode", undefined))}>
+              {W.pair.button}
+            </Button>
+          ) : undefined
+        }
+      />
+      {pairing !== undefined ? (
+        <View backgroundColor={t.v("tint-accent") as never}>
+          <SettingsRow
+            name={W.pairCode.name}
+            description={<Words parts={pairCodeWords(view, pairing.expiresAt)} />}
+            control={
+              <>
+                <Txt
+                  spec={{ voice: "data", scale: (15 / 12.5) * (12.5 / 12), ls: 0.08 }}
+                  paddingVertical={4}
+                  paddingHorizontal={10}
+                  borderRadius={lengthToken(t, "control-radius", 7)}
+                  {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, "line", "dashed") as object)}
+                  selectable
+                >
+                  {pairing.code}
+                </Txt>
+                <Button kind="ghost" onPress={() => void copyText(pairing.code)}>
+                  Copy
+                </Button>
+                <Button kind="ghost" onPress={() => act(invoke("machines:pairCodeCancel", undefined))}>
+                  Stop
+                </Button>
+              </>
+            }
+          />
+        </View>
+      ) : null}
+      {view.phone !== undefined ? (
+        <View backgroundColor={t.v("tint-accent") as never}>
+          <SettingsRow name={W.phone.name} description={<Words parts={phoneJoinWords(view.phone)} />} />
+        </View>
+      ) : null}
+      {view.nearbyLog !== undefined ? (
+        <SettingsRow
+          name={W.nearbyLog.name}
+          description={
+            <View gap={2}>
+              {nearbyLogLines(view.nearbyLog).map((line, i) => (
+                <Txt key={i} spec={{ voice: "data", scale: 11 / 12.5, color: "dim" }} selectable>
+                  {line}
+                </Txt>
+              ))}
+            </View>
+          }
+        />
+      ) : null}
+    </>
+  );
+}
+
+const TONES: Record<NonNullable<MachineRow["state"]>["tone"], "ok" | "warn" | "bad" | "dim"> = { ok: "ok", warn: "warn", bad: "bad", dim: "dim" };
+
+/** One device: its icon, name and what it is; its state; Pair, Unpair, or its admin console page; and the code field while asked. */
+function DeviceRow({ row, onView }: { row: MachineRow; onView: (v: MachinesView) => void }): JSX.Element {
+  const t = useTokens();
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | undefined>(undefined);
+  const [value, setValue] = useState<{ code?: string }>({});
+  const [asking, setAsking] = useState<AskSpec | undefined>(undefined);
+  const act = (work: Promise<MachinesView>): void => {
+    setBusy(true);
+    setError(undefined);
+    work.then(onView, (e: unknown) => setError(errorOf(e))).finally(() => setBusy(false));
+  };
+  const small = { voice: "app", scale: 11 / 12.5 } as const;
+  const action = row.action;
+  const open = row.asking !== undefined && action?.kind === "pair";
+  const button =
+    action === undefined || open ? null : action.kind === "pair" ? (
+      <Button kind="ghost" disabled={busy} onPress={() => act(invoke("machines:pairAsk", { device: action.device }))}>
+        Pair
+      </Button>
+    ) : action.kind === "unpair" ? (
+      <Button
+        kind="ghost"
+        disabled={busy}
+        onPress={() =>
+          setAsking({
+            ...unpairSpecWords(action.label),
+            onConfirm: () => {
+              setAsking(undefined);
+              act(invoke("machines:forget", { id: action.id }));
+            },
+          })
+        }
+      >
+        Unpair
+      </Button>
+    ) : (
+      <Button kind="danger" onPress={() => void Linking.openURL(action.href)}>
+        Remove in Tailscale ↗
+      </Button>
+    );
+  const sub = open && row.asking !== undefined ? askingWords(row.name, row.asking) : row.sub;
+  return (
+    <>
+      <SettingsRow
+        name={
+          <View flexDirection="row" alignItems="center" gap={11} minWidth={0} flexShrink={1}>
+            <MachineIcon face={row.face} size={20} {...(row.grey ? { color: String(t.v("dim")) } : {})} />
+            <Txt spec={{ voice: "app", scale: 1.1, weight: 600, lineHeight: 1.3, color: row.grey ? "dim" : "text" }} numberOfLines={1} flexShrink={0}>
+              {row.name}
+            </Txt>
+            <Txt spec={{ ...small, color: "dim" }} ellip minWidth={0} flexShrink={1}>
+              {row.kind}
+            </Txt>
+          </View>
+        }
+        {...(sub !== undefined || error !== undefined ? { description: <Words parts={[...(sub !== undefined ? [sub] : []), ...(error !== undefined ? [" ", { error: sentence(error) }] : [])]} /> } : {})}
+        control={
+          <>
+            {row.state !== undefined && !open ? <Txt spec={{ ...small, color: TONES[row.state.tone] }}>{row.state.text}</Txt> : null}
+            {button}
+            {open ? (
+              <Button kind="quiet" disabled={busy} onPress={() => act(invoke("machines:pairCancel", undefined))}>
+                Cancel
+              </Button>
+            ) : null}
+          </>
+        }
+      >
+        {open && action?.kind === "pair" ? (
+          <View flexDirection="row" alignItems="flex-end" gap={10} paddingTop={8}>
+            <View flex={1} minWidth={0}>
+              <SchemaForm schema={CODE_SCHEMA as never} value={value} onChange={(next) => setValue(next as typeof value)} ctx={{ path: "", labels: "keys", disabled: busy }} />
+            </View>
+            <Button kind="primary" disabled={busy || (value.code ?? "").trim() === ""} onPress={() => act(invoke("machines:pair", { device: action.device, code: (value.code ?? "").trim() }))}>
+              {busy ? "Pairing…" : "Pair"}
+            </Button>
+          </View>
+        ) : null}
+      </SettingsRow>
+      {asking !== undefined ? <AskDialog spec={asking} onCancel={() => setAsking(undefined)} /> : null}
+    </>
   );
 }
 
@@ -349,30 +486,6 @@ function Outbox(): JSX.Element | null {
           }
         />
       ))}
-    </SettingsSection>
-  );
-}
-
-/** Pairing with another machine: its address and code (the schema form), and Pair. */
-function AddMachine({ onView }: { onView: (v: MachinesView) => void }): JSX.Element {
-  // The form's state and Pair are `machinesModel.ts`'s (`useAddMachine`).
-  const { value, setValue, busy, error, done, ready, pair } = useAddMachine(onView);
-  const body = { voice: "app", scale: 13 / 12.5 } as const;
-  return (
-    <SettingsSection id="add" title={W.add.title} info={W.add.info}>
-      <SettingsRow name={W.other.name} full>
-        <View gap={10} paddingTop={6}>
-          <SchemaForm schema={ADD_SCHEMA as never} value={value} onChange={(next) => setValue(next as typeof value)} ctx={{ path: "", labels: "keys", disabled: busy }} />
-          <View flexDirection="row" alignItems="center" gap={10}>
-            <View flex={1} minWidth={0}>
-              {error !== undefined ? <Txt spec={{ ...body, color: "bad" }}>{sentence(error)}</Txt> : done !== undefined ? <Txt spec={{ voice: "app", scale: 11 / 12.5, lineHeight: 1.4, color: "dim" }}>{done}</Txt> : null}
-            </View>
-            <Button kind="primary" disabled={!ready || busy} onPress={pair}>
-              {busy ? "Pairing…" : "Pair"}
-            </Button>
-          </View>
-        </View>
-      </SettingsRow>
     </SettingsSection>
   );
 }

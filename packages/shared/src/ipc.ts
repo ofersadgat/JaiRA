@@ -2337,18 +2337,37 @@ export interface IpcContract {
   "machines:view": { request: void; response: MachinesView };
   "machines:rename": { request: { label: string }; response: MachinesView };
   "machines:tags": { request: { tags: string[] }; response: MachinesView };
-  /** Publish this machine on the tailnet, or stop. */
-  "machines:reach": { request: { on: boolean }; response: MachinesView };
+  /**
+   * The Tailscale sign-in (decision 0022 §3): sign in (and so be reachable), sign out keeping the
+   * registration, or remove this machine from the tailnet — which opens its admin console page and
+   * waits for Tailscale to drop it — or stop waiting.
+   */
+  "machines:signIn": { request: void; response: MachinesView };
+  "machines:signOut": { request: void; response: MachinesView };
+  "machines:remove": { request: void; response: MachinesView };
+  "machines:removeCancel": { request: void; response: MachinesView };
+  /** Ask every device on the tailnet again whether JaiRA runs there. */
+  "machines:refresh": { request: void; response: MachinesView };
   /** What of the other machines' tasks to keep a copy of here (decision 0013 §6). */
   "machines:copy": { request: CopyChoice; response: MachinesView };
   /** How much the copies take, and where: what the Machines page's On disk row says. */
   "machines:copies": { request: undefined; response: { bytes: number; machines: number; dir: string } };
-  /** Show a one-time pairing code, or stop showing it. */
-  "machines:pairCode": { request: void; response: MachinesView };
+  /**
+   * Pair with a device on the tailnet (decision 0022 §5): ask it to show a code, then send the code the
+   * person typed; or give up. `device` is the tailnet device's id.
+   */
+  "machines:pairAsk": { request: { device: string }; response: MachinesView };
+  "machines:pair": { request: { device: string; code: string }; response: MachinesView };
   "machines:pairCancel": { request: void; response: MachinesView };
-  /** Pair with the machine at an address, by the code it shows. */
-  "machines:add": { request: { address: string; code: string }; response: MachinesView };
-  /** Forget a machine, here and across the fleet. */
+  /**
+   * Pair a phone (decision 0013, amended 2026-10-04): show a one-time code, and announce this machine to
+   * phones on the local network while it shows; or stop showing it.
+   */
+  "machines:pairCode": { request: void; response: MachinesView };
+  "machines:pairCodeCancel": { request: void; response: MachinesView };
+  /** Refuse the code another machine or a phone asked this one to show. */
+  "machines:refuse": { request: void; response: MachinesView };
+  /** Unpair a machine or a phone, here and across the group. */
   "machines:forget": { request: { id: string }; response: MachinesView };
   /** A project's workspaces in the order tasks are placed, each with its cap and why it would be passed over now. */
   "placement:view": { request: { project: string }; response: PlacementView };
@@ -2569,12 +2588,19 @@ export const IPC_CHANNELS = [
   "machines:view",
   "machines:rename",
   "machines:tags",
-  "machines:reach",
+  "machines:signIn",
+  "machines:signOut",
+  "machines:remove",
+  "machines:removeCancel",
+  "machines:refresh",
   "machines:copy",
   "machines:copies",
-  "machines:pairCode",
+  "machines:pairAsk",
+  "machines:pair",
   "machines:pairCancel",
-  "machines:add",
+  "machines:pairCode",
+  "machines:pairCodeCancel",
+  "machines:refuse",
   "machines:forget",
   "placement:view",
   "files:browse",

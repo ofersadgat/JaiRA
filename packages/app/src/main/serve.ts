@@ -66,8 +66,8 @@ void app.whenReady().then(async () => {
       kind: "server",
       version: app.getVersion(),
       eager: true,
-      // The client this install ships, for a browser paired as a device (decision 0013, amended 2026-09-30).
-      network: { clientDir: join(__dirname, "client") },
+      // Other machines and phones reach this engine through Tailscale, to loopback (decisions 0013 §2, 0022).
+      network: {},
       service: (publish) =>
         new AppService({
           baseDir,

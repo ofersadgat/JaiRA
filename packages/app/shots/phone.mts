@@ -6,7 +6,8 @@
  *
  * A desktop with a couple of finished tasks on its board and a pairing code showing, and a phone-sized
  * headless Chrome on `/native` — `NativeApp` through react-native-web, the same component tree Metro
- * bundles for Android and iOS — served by the desktop's engine. The address arrives with the page and
+ * bundles for Android and iOS — served from the built client by this script (the engine serves no
+ * client: decision 0022 §6). The address arrives with the page and
  * the code is typed, as a person would from the desktop's Settings → Machines; it pairs (decision 0013,
  * amended 2026-09-30), then photographs the universal shell the phone draws at a tablet's width — the
  * desktop's frame from the copies, fitted and then at its own size — and checks there is no frame
@@ -17,6 +18,7 @@ import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import type { MachinesView } from "@jaira/shared";
 import { App } from "./driver.mjs";
+import { serveClient } from "./serveClient.mjs";
 import { buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "parity", "phone");
@@ -31,6 +33,7 @@ async function main(): Promise<void> {
   const world = buildWorld(join(import.meta.dirname, ".world-phone"));
   const desktop = await App.launch(world, { out: OUT, port: 9280 });
   let phone: App | undefined;
+  const served = await serveClient();
   try {
     await desktop.until("document.getElementById('root')?.children.length > 0", "the desktop to draw");
     for (const title of ["add dark mode", "rework the sync lint"]) {
@@ -43,7 +46,7 @@ async function main(): Promise<void> {
     const shown = await desktop.ipc<MachinesView>("machines:pairCode", undefined);
     const port = shown.self.port;
     if (port === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
-    const url = `http://127.0.0.1:${port}/native?address=${encodeURIComponent(`127.0.0.1:${port}`)}`;
+    const url = `http://127.0.0.1:${served.port}/native?address=${encodeURIComponent(`127.0.0.1:${port}`)}`;
     // A tablet's width: a phone's lays the shell out for itself (`phoneLayout.mts`); wider, it is the
     // desktop's, fitted. The shell is drawn at once, and its line opens the Connect screen.
     phone = await App.browse(CHROME, url, { out: OUT, port: 9281, phone: { width: 1024, height: 768, scale: 2 } });
@@ -73,6 +76,7 @@ async function main(): Promise<void> {
     const complaints = [...phone.complaints].filter((c) => !/disk_cache|gpu_disk|Gpu Cache/.test(c));
     if (complaints.length > 0) console.log(`the phone spoke up:\n  ${complaints.slice(0, 8).join("\n  ")}`);
   } finally {
+    served.server.close();
     await phone?.close();
     await desktop.close();
   }

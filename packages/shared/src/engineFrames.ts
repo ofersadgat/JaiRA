@@ -40,12 +40,12 @@ export interface PeerMachine {
   url?: string;
 }
 
-/** What kind of device a window is on, for the row that lists it. */
-export type DeviceKind = "phone" | "browser";
+/** What kind of device a window is on, for the row that lists it. A browser is not one until the website exists (decision 0022 §6). */
+export type DeviceKind = "phone";
 
 /**
- * A phone or a browser tab (decision 0013, amended 2026-09-30): a WINDOW onto one engine, not an engine.
- * It has nothing to replicate and nothing connects back to it, so it says who it is and no more.
+ * A phone (decisions 0013, amended 2026-09-30, and 0022 §6): it runs no engine and keeps no copy, so it
+ * says who it is and no more.
  */
 export interface PairingDevice {
   /** An id the device made once and keeps: pairing again replaces its token rather than adding a row. */
@@ -66,7 +66,15 @@ export type ClientFrame =
    */
   | { t: "pair"; code: string; machine: PeerMachine; token: string }
   /** A device pairing: the same code, and no token — nothing connects back to a device. */
-  | { t: "pair"; code: string; device: PairingDevice };
+  | { t: "pair"; code: string; device: PairingDevice }
+  /**
+   * Pair was pressed on the asker for this machine (decision 0022 §5): show a one-time code, which the
+   * person types on the asker. Who asks is said so the code's pop-up can name it.
+   */
+  | { t: "pair-ask"; machine: PeerMachine }
+  | { t: "pair-ask"; device: PairingDevice; os?: "android" | "ios" }
+  /** The asker gave up: stop showing the code. */
+  | { t: "pair-cancel"; id: string };
 
 /** Host → client. */
 export type HostFrame =
@@ -81,7 +89,11 @@ export type HostFrame =
    * Paired: who this machine is, the token it issued for the asker, and the machines it knows, for
    * introductions. A device is told of no other machine: it is introduced to none.
    */
-  | { t: "paired"; machine: PeerMachine; token: string; fleet: PeerMachine[] };
+  | { t: "paired"; machine: PeerMachine; token: string; fleet: PeerMachine[] }
+  /** A code is showing on this machine now, until `expiresAt`. */
+  | { t: "asked"; expiresAt: number }
+  /** `pair-cancel` heard. */
+  | { t: "ok" };
 
 // --- the contract ---------------------------------------------------------------------------------------
 

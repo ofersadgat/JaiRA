@@ -125,7 +125,7 @@ npx tsx packages/app/shots/pair.mts --port 9301 --record-coverage          # wha
 | `pair.mts` | The page against its reference pictures, graded region by region; `--accept`; `--changed`, only what a change reaches, by the coverage `--record-coverage` keeps. | The gate. Reworked: the goldens are what it compares against; `--freeze` points to the tag. |
 | `peek.mts` | What a studio's window shows, and an expression evaluated in it. | Looking at things. |
 | `islands.mts` | The island pages (Monaco, CodeMirror, frames) in a browser standing in for a phone's WebView, with their timings. | The phone's islands; drives no page of the app's. |
-| `android.mts` | The phone app on the emulator, end to end: pairs by the desktop's code, reaches each room. | The device check. |
+| `android.mts` | The phone app on the emulator, end to end: pairs by a code the desktop shows when asked, reaches each room. | The device check. |
 | `android-check.mts` | The same rig kept up, to drive a phone state by state (`screen`, `tap`, `shot`). | The device loop. |
 | `phone.mts` | The phone app (`/native`) in a phone-sized headless Chrome, paired with a desktop. | The phone's shell without an emulator. |
 | `phoneLayout.mts` | The phone's own layout (decision 0015, amended 2026-10-04) in a phone-sized headless Chrome paired with a desktop with a parked gate: the drawer and its INBOX row, the Inbox room, the context panel's sheet at each height and into the main view, the Steps rail scrubbed and pulled out, the board's strip, Files and Settings. Pictures in `parity/phone-layout/`; `--only drawer,inbox,sheet,board,files,settings,chat`. | The phone's layout without an emulator. Not the keyboard: a browser has none. |
@@ -141,13 +141,12 @@ npx tsx packages/app/shots/pair.mts --port 9301 --record-coverage          # wha
 
 | Script | What it does | What changed |
 | --- | --- | --- |
-| `machines-real.mts` | Two engines pairing: a second base root runs `jaira serve`, the window pairs with it by its code, and Settings → Machines must show it online. | The Settings section and "Show a code" by their words. |
+| `machines-real.mts` | Two engines pairing: a second base root runs `jaira serve`, the window signs in, finds it on the loopback tailnet (`JAIRA_LOOPBACK_PEERS`), presses Pair and types the code it shows; Settings → Machines must show it connected, and a code another machine asks for pops up. | The Settings section and the pop-up by their words. |
 | `machines-replica.mts` | Another machine's task copied here, and still on the board and readable once that machine is away. | The Settings section by its words. |
 | `machines-grouped.mts` | One project across two machines: the merged board, a task no machine can take, Where tasks run, the other machine's folders browsed through its engine. | The sidebar's `+` by its title, the menu and dialog by their words; the browser is known to be the other machine's by its listing that machine's clone. |
 | `chat-placement.mts` | Where a conversation runs, in one window with two clones of one repository: the bar, the chip and the sentence choosing; the list (photographed as the window stands — `shot(name, of, false)` — since a capture past the viewport resizes the page and a menu closes on that); a conversation sent to this machine waiting while neither clone has room; then starting in the clone that has room, the thread following it there. | The bar's machine and the chip by their name, `Where this conversation runs`; everything else by its words. `--pages http://127.0.0.1:8081/` loads a dev server instead of the built client. |
 | `monaco.mts` | Monaco in the development build and the packaged app: the Appearance preview coloured by the TextMate grammars, a file opened and typed into, a type error underlined, a patch in the diff editor, the workers started. | The sidebar by its landmark, the preview by its test id and island. |
 | `tokens-check.mts` | The token replay (`resolveAt`) against Chromium's own cascade over `styles.css`, for every palette, scheme and scope. | Asked the DOM page; now puts the stylesheet on an empty page of its own. |
-| `remote.mts` | The client in an ordinary browser as a device on a desktop's engine: pairs, hears pushes, answers a gate, reconnects, is forgotten, says when it is disconnected. | The shell's page is `PAGE`, not a second route beside the DOM page. |
 
 **Retired** (deleted). Each drew or drove a DOM component; what it photographed is now a golden, a scene
 or a specimen, unless the last column says coverage went with it.

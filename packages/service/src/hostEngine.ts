@@ -38,10 +38,8 @@ export interface HostEngineOptions {
   /**
    * Listen for other machines on loopback (decision 0013 §2) and attach the engine's fleet: the desktop
    * and `jaira serve` do; a command's claim does not. `port` for tests; 0 takes any free one.
-   * `clientDir`: the built One client, served from the same listener to a browser that has no other
-   * place to load it from (`clientFiles.ts`); the desktop passes the one it ships.
    */
-  network?: { port?: number; clientDir?: string };
+  network?: { port?: number };
   /** Tests. */
   pipe?: string;
   port?: number;
@@ -206,7 +204,6 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
         identity: () => service.fleet.identity(),
         version: options.version,
         ...(options.network.port !== undefined ? { port: options.network.port } : {}),
-        ...(options.network.clientDir !== undefined ? { clientDir: options.network.clientDir } : {}),
         ...(options.log !== undefined ? { log: options.log } : {}),
       });
       await service.fleet.attach(claimed, net.port);

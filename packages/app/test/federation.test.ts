@@ -11,7 +11,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { initProject, openDb } from "@jaira/persistence";
-import { AppService, hostEngine, loopbackReach, serviceHandlers, type HostedEngine } from "@jaira/service";
+import { AppService, hostEngine, loopbackTailnet, serviceHandlers, type HostedEngine } from "@jaira/service";
+import { pairMachines } from "./pairMachines";
 import { parseRemoteProjectKey, type ProjectSummary, type PushMessage } from "@jaira/shared";
 
 interface Machine {
@@ -35,13 +36,13 @@ async function machine(label: string): Promise<Machine> {
   dirs.push(base);
   const pushes: PushMessage[] = [];
   let hosted: HostedEngine | undefined;
-  const service = new AppService({ baseDir: base, version: "0.2.0", reach: loopbackReach, announce: false, watchWorkflows: false, publish: (m) => {
+  const service = new AppService({ baseDir: base, version: "0.2.0", tailnet: loopbackTailnet(), announce: false, watchWorkflows: false, publish: (m) => {
     pushes.push(m);
     hosted?.host.broadcast(m);
   } });
   hosted = (await hostEngine({ baseDir: base, kind: "desktop", version: "0.2.0", service, network: { port: 0 } }))!;
   service.fleet.rename(label);
-  await service.fleet.setReachable(true);
+  await service.fleet.signIn();
   const handlers = serviceHandlers(service) as Record<string, (request: unknown) => unknown>;
   const m: Machine = { base, service, hosted, pushes, call: async (channel, request) => handlers[channel]!(request) };
   made.push(m);
@@ -70,7 +71,7 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
     const mine = clone();
     initProject(mine, a.base);
     await a.service.open(mine);
-    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await pairMachines(a.service.fleet, b.service.fleet);
 
     await expect.poll(async () => (await remotes(a)).map((p) => [p.label, p.identity, p.machine?.label]), { timeout: 8000 }).toEqual([[expect.any(String), "github.com/ofersadgat/jaira", "mac-mini"]]);
     const [remote] = await remotes(a);
@@ -97,7 +98,7 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
   it("browses another machine's folders and opens a project there", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");
-    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await pairMachines(a.service.fleet, b.service.fleet);
     await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
     const dir = clone();
     initProject(dir, b.base);
@@ -119,7 +120,7 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
     initProject(dir, b.base);
     await b.service.open(dir);
     const task = (await b.call("task:create", { title: "written on the mini", workflow: "chat/session", project: dir })) as { taskId: string };
-    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await pairMachines(a.service.fleet, b.service.fleet);
     await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
     const [remote] = await remotes(a);
     const bId = b.service.fleet.identity().id;
@@ -165,7 +166,7 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
       JSON.stringify({ prompt: "Ship it?", options: ["yes", "no"] }),
     );
     db.close();
-    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await pairMachines(a.service.fleet, b.service.fleet);
     await expect.poll(async () => (await remotes(a)).length, { timeout: 8000 }).toBe(1);
     const bId = b.service.fleet.identity().id;
     await a.service.replicator.pull(bId);
@@ -187,7 +188,7 @@ describe("another machine's workspaces", { timeout: 60_000 }, () => {
   it("keeps an answer for a machine that went away, and says it is waiting", async () => {
     const a = await machine("desk");
     const b = await machine("mac-mini");
-    await a.service.fleet.add(b.service.fleet.view().self.reach.url!, b.service.fleet.pairingCode().pairing!.code);
+    await pairMachines(a.service.fleet, b.service.fleet);
     await expect.poll(() => a.service.fleet.view().machines[0]?.state, { timeout: 5000 }).toBe("online");
     const bId = b.service.fleet.identity().id;
     await b.hosted.close();

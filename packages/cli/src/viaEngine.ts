@@ -549,8 +549,8 @@ export async function serverCommand(sub: string | undefined, io: EngineIo): Prom
 // --- jaira machine ---------------------------------------------------------------------------------------
 
 /**
- * `jaira machine list | pair | add <address> <code> | forget <machine> | reach on|off | rename <name> |
- * tags <tag,...>` (decision 0013 §1–§3). Always through the running engine: pairing codes and the
+ * `jaira machine list | signin | signout | pair <device> [<code>] | unpair <machine> | rename <name> |
+ * tags <tag,...>` (decisions 0013 §1–§3, 0022). Always through the running engine: pairing codes and the
  * connections to other machines live there, and a command that ends would take them with it.
  */
 export async function machineCommand(sub: string | undefined, args: string[], io: EngineIo): Promise<number> {
@@ -569,42 +569,56 @@ export async function machineCommand(sub: string | undefined, args: string[], io
         const v = await view();
         io.stdout(
           json({
-            self: { id: v.self.id, label: v.self.label, os: v.self.os, tags: v.self.tags, reach: v.self.reach },
+            self: { id: v.self.id, label: v.self.label, os: v.self.os, tags: v.self.tags, tailnet: v.self.tailnet },
             machines: v.machines.map((m) => ({ id: m.id, label: m.label, os: m.os, tags: m.tags, state: m.state, ...(m.url !== undefined ? { url: m.url } : {}), ...(m.version !== undefined ? { version: m.version } : {}) })),
+            tailnet: v.tailnetDevices.map((d) => ({ name: d.name, dnsName: d.dnsName, os: d.os, online: d.online, jaira: d.jaira !== undefined ? { kind: d.jaira.kind, label: d.jaira.label, version: d.jaira.version } : d.noJaira === true ? false : null })),
+            // A machine with no window shows a code it was asked for here (decision 0022 §5).
+            ...(v.asked !== undefined ? { asked: { by: v.asked.by.label, code: v.asked.code, expiresAt: new Date(v.asked.expiresAt).toISOString() } } : {}),
           }),
         );
         return 0;
       }
+      case "signin": {
+        let v = (await client.invoke("machines:signIn")) as MachinesView;
+        // The sign-in page comes a moment later; a person runs this to be shown it.
+        for (let i = 0; i < 40 && v.self.tailnet.state === "signing-in" && v.self.tailnet.signInUrl === undefined; i += 1) {
+          await new Promise((r) => setTimeout(r, 250));
+          v = await view();
+        }
+        if (v.self.tailnet.signInUrl !== undefined) io.stderr(`Sign in to Tailscale: ${v.self.tailnet.signInUrl}\n`);
+        io.stdout(json(v.self.tailnet));
+        return v.self.tailnet.state === "unavailable" || v.self.tailnet.state === "down" ? 1 : 0;
+      }
+      case "signout": {
+        const v = (await client.invoke("machines:signOut")) as MachinesView;
+        io.stdout(json(v.self.tailnet));
+        return 0;
+      }
       case "pair": {
-        const v = (await client.invoke("machines:pairCode")) as MachinesView;
-        if (v.pairing === undefined) throw new Error("no code was made");
-        if (v.self.reach.state !== "on") io.stderr("warning: this machine is not reachable, so the other one cannot use the code yet — `jaira machine reach on`\n");
-        io.stderr(`On the other machine: jaira machine add ${v.self.reach.url ?? "<this machine's address>"} "${v.pairing.code}"\n`);
-        io.stdout(json({ code: v.pairing.code, address: v.self.reach.url ?? null, expiresAt: new Date(v.pairing.expiresAt).toISOString() }));
+        const [which, ...code] = args;
+        if (which === undefined) throw new Error("usage: jaira machine pair <device> [<code>]");
+        const v = await view();
+        const device = v.tailnetDevices.find((d) => d.name === which || d.dnsName === which || d.jaira?.label === which || d.id === which);
+        if (device === undefined) throw new Error(`nothing on the tailnet is called '${which}': \`jaira machine list\` lists them`);
+        if (code.length === 0) {
+          const asked = (await client.invoke("machines:pairAsk", { device: device.id })) as MachinesView;
+          io.stderr(`${device.jaira?.label ?? device.name} is showing a code now: jaira machine pair ${which} "<code>"\n`);
+          io.stdout(json({ asked: device.name, expiresAt: asked.asking !== undefined ? new Date(asked.asking.expiresAt).toISOString() : null }));
+          return 0;
+        }
+        const paired = (await client.invoke("machines:pair", { device: device.id, code: code.join(" ") })) as MachinesView;
+        io.stdout(json({ paired: true, machines: paired.machines.map((m) => m.label) }));
         return 0;
       }
-      case "add": {
-        const [address, ...code] = args;
-        if (address === undefined || code.length === 0) throw new Error("usage: jaira machine add <address> <code>");
-        const v = (await client.invoke("machines:add", { address, code: code.join(" ") })) as MachinesView;
-        io.stdout(json({ paired: true, machines: v.machines.map((m) => m.label) }));
-        return 0;
-      }
-      case "forget": {
+      case "forget":
+      case "unpair": {
         const [which] = args;
         const v = await view();
-        const target = v.machines.find((m) => m.id === which || m.label === which);
-        if (target === undefined) throw new Error(`no paired machine is called '${which ?? ""}'`);
+        const target = v.machines.find((m) => m.id === which || m.label === which) ?? v.devices.find((d) => d.id === which || d.label === which);
+        if (target === undefined) throw new Error(`no paired machine or phone is called '${which ?? ""}'`);
         await client.invoke("machines:forget", { id: target.id });
-        io.stdout(json({ forgot: target.label }));
+        io.stdout(json({ unpaired: target.label }));
         return 0;
-      }
-      case "reach": {
-        const [state] = args;
-        if (state !== "on" && state !== "off") throw new Error("usage: jaira machine reach on|off");
-        const v = (await client.invoke("machines:reach", { on: state === "on" })) as MachinesView;
-        io.stdout(json(v.self.reach));
-        return v.self.reach.state === "unavailable" ? 1 : 0;
       }
       case "rename": {
         const name = args.join(" ").trim();

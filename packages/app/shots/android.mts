@@ -32,6 +32,7 @@ import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
+import { askOnce } from "@jaira/service/engineClient";
 import type { MachinesView } from "@jaira/shared";
 import { App } from "./driver.mjs";
 import { blockedAtTheGate, buildWorld } from "./world.mjs";
@@ -166,11 +167,13 @@ async function main(): Promise<void> {
     // first screen (and the pairing code's ten minutes) does not wait on it.
     if (metro !== undefined) await fetch(`http://127.0.0.1:${METRO}/index.bundle?platform=android&dev=true&minify=false`).then((r) => r.arrayBuffer(), () => undefined);
 
-    // What "Pair a machine" shows, and where this engine listens (on loopback, like everything of its).
-    // Asked for last: the code works for ten minutes.
-    const shown = await desktop.ipc<MachinesView>("machines:pairCode", undefined);
-    const PORT = shown.self.port;
-    if (PORT === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
+    // Where this engine listens (on loopback, like everything of its), and a code it shows when asked
+    // (decision 0022 §5), carried to the phone by its link. Asked for last: the code works for ten minutes.
+    const PORT = (await desktop.ipc<MachinesView>("machines:view", undefined)).self.port;
+    if (PORT === undefined) throw new Error("the desktop's engine is not listening for devices");
+    await askOnce({ url: `ws://127.0.0.1:${PORT}/engine` }, { t: "pair-ask", device: { id: "d-android-shot-00000000", label: "the emulator", kind: "phone" }, os: "android" });
+    const shown = await desktop.ipc<MachinesView>("machines:view", undefined);
+    if (shown.asked === undefined) throw new Error("the desktop showed no code");
 
     // The emulator reaches the host's Metro and the desktop engine's listener as its own localhost.
     adb("reverse", "tcp:8081", `tcp:${METRO}`);
@@ -189,7 +192,7 @@ async function main(): Promise<void> {
     adb("logcat", "-c");
     // The code as its letters and digits alone — however it is typed is read the same — so nothing in
     // the link needs escaping on its way through `adb shell`.
-    const link = `jaira:///?address=${encodeURIComponent(`127.0.0.1:${PORT}`)}&code=${shown.pairing.code.replace(/[^A-Za-z0-9]/g, "")}&still=1`;
+    const link = `jaira:///?address=${encodeURIComponent(`127.0.0.1:${PORT}`)}&code=${shown.asked.code.replace(/[^A-Za-z0-9]/g, "")}&still=1`;
     const started = Date.now();
     adb("shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", `'${link}'`, PACKAGE);
 

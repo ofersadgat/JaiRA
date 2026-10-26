@@ -310,8 +310,8 @@ const USAGE = `usage:
   jaira plugin remove <plugin>
   jaira serve [--detach]              host the engine until stopped (jaira server stop)
   jaira server status | stop
-  jaira machine list | pair | add <address> <code> | forget <machine>
-  jaira machine reach on|off | rename <name> | tags <tag,...>
+  jaira machine list | signin | signout | pair <device> [<code>] | unpair <machine>
+  jaira machine rename <name> | tags <tag,...>
                                       your machines (decision 0013): pair once, and tasks and
                                       conversations are shared between them
 

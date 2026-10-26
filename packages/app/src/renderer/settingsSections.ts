@@ -143,7 +143,7 @@ export function settingsProjectLabel(projects: readonly { project: string; label
   return at === null ? null : (projects.find((p) => p.project === at)?.label ?? projectName(at));
 }
 
-/** What needs attention on a page, as the Settings row's pills say it for all of them — only Connections and About have any. */
+/** What needs attention on a page, as the Settings row's pills say it for all of them — only Connections, Machines and About have any. */
 export function settingsPageProblems(health: readonly HealthItem[], id: SettingsSection): PillCounts {
-  return id === "connections" || id === "about" ? healthCounts(health, id) : {};
+  return id === "connections" || id === "machines" || id === "about" ? healthCounts(health, id) : {};
 }

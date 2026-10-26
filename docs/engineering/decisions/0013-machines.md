@@ -8,6 +8,11 @@ decides_for: [engineering/units/ipc-bridge, engineering/units/app-shell, enginee
 
 # 0013. Machines: one fleet, tasks placed across it, and every window seeing all of it
 
+Reach and pairing (§1–§3) and the 2026-09-30 amendment on phones and browsers are amended by
+[0022](0022-one-tailscale-sign-in.md): one Tailscale sign-in in place of Reachable, the tailnet's devices
+listed with Pair (the other device shows the code), and no browser pairing until the website exists.
+Phones keep pairing by a code found on the Wi-Fi (amended 2026-10-04, below).
+
 This is the remote step that [0012](0012-local-server.md) left for later. It is wider than "connect to a
 remote engine": the person wants the machine a task runs on to be close to an implementation detail.
 The person's rulings of 2026-09-27 are quoted where they settle something.
@@ -754,6 +759,9 @@ room, starts in the second clone when it has, and the thread follows it there.
 - Moving a started conversation between machines (a third phase in the summary).
 
 ### Amended 2026-10-04: a phone finds the machine on its Wi-Fi, and joins the tailnet with Tailscale built in
+
+(Since 2026-10-26, [0022](0022-one-tailscale-sign-in.md)'s amendment: the code below is shown by
+**Pair a phone** under Your machines, and "reachable on the tailnet" is signed in to Tailscale.)
 
 The person, about pairing a phone: "I dont like the phone bootstrap process." Until now a phone needed the
 Tailscale app, signed in to the same tailnet, and then the machine's `*.ts.net` address typed with the

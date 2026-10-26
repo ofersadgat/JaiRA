@@ -409,6 +409,19 @@ export function defaultBaseDir(env: NodeJS.ProcessEnv = process.env): string {
   return join(homedir(), JAIRA_DIR_NAME);
 }
 
+/**
+ * Whether `baseDir` is the person's own home, `~/.jaira`, rather than a second one (`--home`,
+ * `JAIRA_BASE_DIR`): only that one connects to Tailscale (decision 0022 §2), so a test harness's home
+ * never registers on the person's tailnet.
+ */
+export function isDefaultHome(baseDir: string, home: string = homedir()): boolean {
+  const norm = (p: string): string => {
+    const r = resolve(p).replace(/[\\/]+$/, "");
+    return process.platform === "win32" || process.platform === "darwin" ? r.toLowerCase() : r;
+  };
+  return norm(baseDir) === norm(join(home, JAIRA_DIR_NAME));
+}
+
 export function jairaBasePaths(baseDir: string = defaultBaseDir()): JairaBasePaths {
   const root = resolve(baseDir);
   const system = join(root, SYSTEM_DIR_NAME);

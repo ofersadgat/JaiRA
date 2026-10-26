@@ -340,6 +340,7 @@ export function buildDownloadBytes(family: PluginFamily, build: PluginRow): numb
 /** The pages problems are listed under, in the card's order: where a fix is. */
 export const HEALTH_PAGES: ReadonlyArray<{ page: HealthPage; label: string }> = [
   { page: "connections", label: "Connections" },
+  { page: "machines", label: "Machines" },
   { page: "logs", label: "Logs" },
   { page: "about", label: "About" },
 ];
@@ -382,6 +383,8 @@ export function healthFixLabel(action: HealthAction): string {
       return "Check again";
     case "open-logs":
       return "Open logs";
+    case "reconnect":
+      return "Reconnect";
   }
 }
 

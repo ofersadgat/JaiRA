@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { happyRules } from "@jaira/runtime";
 import type { MachinesView } from "@jaira/shared";
 import { App } from "./driver.mjs";
+import { serveClient } from "./serveClient.mjs";
 import { blockedAtTheGate, buildWorld } from "./world.mjs";
 
 const OUT = join(import.meta.dirname, "parity", "phone-layout");
@@ -73,6 +74,7 @@ async function main(): Promise<void> {
   const world = buildWorld(join(import.meta.dirname, ".world-phone-layout"));
   const desktop = await App.launch(world, { out: OUT, port: 9282 });
   let phone: App | undefined;
+  const served = await serveClient();
   const failures: string[] = [];
   const check = (ok: boolean, what: string): void => {
     console.log(`  ${ok ? "ok  " : "FAIL"} ${what}`);
@@ -95,7 +97,7 @@ async function main(): Promise<void> {
     const shown = await desktop.ipc<MachinesView>("machines:pairCode", undefined);
     const port = shown.self.port;
     if (port === undefined || shown.pairing === undefined) throw new Error("the desktop's engine is not listening for devices, or showed no code");
-    const url = `http://127.0.0.1:${port}/native?address=${encodeURIComponent(`127.0.0.1:${port}`)}`;
+    const url = `http://127.0.0.1:${served.port}/native?address=${encodeURIComponent(`127.0.0.1:${port}`)}`;
     phone = await App.browse(CHROME, url, { out: OUT, port: 9283, phone: { width: 390, height: 844, scale: 3 } });
     // The shell is drawn at once, empty, saying it has no machine; its line opens the Connect screen.
     await phone.until(`!!document.querySelector('[aria-label="Open the sidebar"]') && ${says("No machine connected")}`, "the phone's shell, drawn before any machine answers");
@@ -240,6 +242,7 @@ async function main(): Promise<void> {
   } finally {
     const said = [...(phone?.complaints ?? [])].filter((c) => !/disk_cache|gpu_disk|Gpu Cache/.test(c));
     if (said.length > 0) console.log(`the phone spoke up:\n  ${said.slice(0, 20).join("\n  ")}`);
+    served.server.close();
     await phone?.close();
     await desktop.close();
   }

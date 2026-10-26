@@ -1047,9 +1047,8 @@ async function hostLocally(): Promise<EngineLink | undefined> {
       kind: "desktop",
       version: app.getVersion(),
       service: () => buildService(),
-      // Other machines reach this engine through Tailscale, to loopback (decision 0013 §2) — and so do
-      // phones and browsers, which are served the client this window loads (amended 2026-09-30).
-      network: { clientDir: CLIENT_DIR },
+      // Other machines and phones reach this engine through Tailscale, to loopback (decisions 0013 §2, 0022).
+      network: {},
       stopRefusal: "this engine is a JaiRA window's own; quit that window to stop it",
       onFailure: (channel, error) => link?.recordIpcFailure(channel, error),
       log: (level, message) => link?.recordApp(level, message),

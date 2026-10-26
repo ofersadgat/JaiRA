@@ -1,12 +1,13 @@
 import type { DeviceKind } from "@jaira/shared/browser";
 
 /**
- * What this device says it is when it pairs (decision 0013, amended 2026-09-30): the row it gets on the
- * machine's Settings → Machines. In a browser, the browser and the system it runs on, read from the
- * user agent — a name for a person to recognise, not a fact anything depends on.
- * `deviceInfo.native.ts` is a phone's.
+ * What this device says it is when it pairs (decisions 0013, amended 2026-09-30, and 0022): the row it
+ * gets on the machine's Settings → Machines. The web build pairs only as the phone it previews (the
+ * `/native` route): a browser is not a device until the website exists (0022 §6). Its name is the
+ * browser and the system it runs on, read from the user agent — a name for a person to recognise, not a
+ * fact anything depends on. `deviceInfo.native.ts` is a phone's.
  */
-export const DEVICE_KIND: DeviceKind = "browser";
+export const DEVICE_KIND: DeviceKind = "phone";
 
 export function deviceLabel(): string {
   const agent = typeof navigator === "undefined" ? "" : navigator.userAgent;

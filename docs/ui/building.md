@@ -331,8 +331,9 @@ npx tsx packages/app/shots/android-check.mts screen [filter] | tap "<text>" | sh
 - A long press is `input swipe x y x y 800`; a lift and a drag is `input motionevent DOWN x y`, a pause,
   `MOVE`s, `UP` in one `adb shell`; a selection in Monaco is `input mouse swipe`. `settings put system
   user_rotation 1` turns the emulator on its side, where the shell is twice the size and can be read.
-- `packages/app/shots/phone.mts` is the phone app in a phone-sized headless Chrome (`/native`), and
-  `remote.mts` the client in an ordinary browser as a paired device: neither needs an emulator.
+- `packages/app/shots/phone.mts` is the phone app in a phone-sized headless Chrome (`/native`), served by
+  the script itself: it needs no emulator. (`remote.mts`, a browser as a paired device, went with browser
+  pairing: decision 0022 §6.)
 - What a phone still lacks is in `TODO.md`, "Open inside the universal client, on a phone only".
 
 ## What trips a component

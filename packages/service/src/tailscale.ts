@@ -1,7 +1,8 @@
 /**
- * The installed Tailscale app, as JaiRA uses it (decision 0013 §2, the first of two ways): read who this
- * machine is on the tailnet, and publish the engine's loopback listener as HTTPS with `tailscale serve` —
- * never `funnel`, so nothing reaches it from outside the tailnet.
+ * The installed Tailscale app, as JaiRA uses it (decisions 0013 §2 and 0022): read who this machine is on
+ * the tailnet and which devices share it, and publish the engine's loopback listener as HTTPS with
+ * `tailscale serve` — never `funnel`, so nothing reaches it from outside the tailnet. Signing in and out
+ * is the app's: JaiRA never runs `tailscale logout`, which would take the whole computer off the tailnet.
  *
  * `serve` takes one of the three HTTPS ports Tailscale allows (443, 8443, 10000). One already serving
  * something else is left alone: the person may be using it.
@@ -9,6 +10,7 @@
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import type { TailnetEvent, TailnetPeer, TailnetPort } from "./tailnet";
 
 export interface TailscaleState {
   /** The CLI was found. */
@@ -113,4 +115,102 @@ export async function tailscaleUnserve(loopbackPort: number, cli = tailscaleCli(
   for (const [port, proxy] of await serveTargets(cli)) {
     if (proxy === target) await run(cli, ["serve", `--https=${port}`, "off"], 30_000);
   }
+}
+
+interface CliStatus {
+  BackendState?: string;
+  Self?: CliPeer & { UserID?: number };
+  Peer?: Record<string, CliPeer>;
+  User?: Record<string, { LoginName?: string }>;
+  CurrentTailnet?: { MagicDNSSuffix?: string };
+  MagicDNSSuffix?: string;
+}
+interface CliPeer {
+  ID?: string;
+  HostName?: string;
+  DNSName?: string;
+  OS?: string;
+  Online?: boolean;
+  LastSeen?: string;
+  TailscaleIPs?: string[];
+}
+
+async function cliStatus(cli: string): Promise<CliStatus | undefined> {
+  const result = await run(cli, ["status", "--json"]);
+  try {
+    return JSON.parse(result.stdout) as CliStatus;
+  } catch {
+    return undefined;
+  }
+}
+
+/** The devices `tailscale status` lists. */
+export function peersOf(status: CliStatus): TailnetPeer[] {
+  return Object.values(status.Peer ?? {}).flatMap((p) => {
+    const dnsName = (p.DNSName ?? "").replace(/.$/, "");
+    if (p.ID === undefined || dnsName === "") return [];
+    const seen = p.LastSeen !== undefined ? Date.parse(p.LastSeen) : NaN;
+    // A machine served by the app may be on any of serve's three ports.
+    return [{ id: p.ID, name: p.HostName ?? dnsName.split(".")[0] ?? p.ID, dnsName, os: p.OS ?? "", online: p.Online === true, ...(Number.isFinite(seen) && seen > 0 ? { lastSeenAt: seen } : {}), ips: p.TailscaleIPs ?? [] }];
+  });
+}
+
+/** The Tailscale app as a {@link TailnetPort}: the devices read every 20 seconds while it is used. */
+export function tailscaleApp(cli = tailscaleCli()): TailnetPort {
+  let hear: ((event: TailnetEvent) => void) | undefined;
+  let timer: ReturnType<typeof setInterval> | undefined;
+  const say = async (): Promise<void> => {
+    if (cli === undefined || hear === undefined) return;
+    const status = await cliStatus(cli);
+    if (status === undefined) return;
+    if (status.BackendState !== "Running") {
+      hear({ kind: "dropped" });
+      return;
+    }
+    hear({ kind: "devices", devices: peersOf(status) });
+  };
+  const halt = (): void => {
+    if (timer !== undefined) clearInterval(timer);
+    timer = undefined;
+    hear = undefined;
+  };
+  return {
+    via: "tailscale",
+    unavailable: async () => {
+      const status = await tailscaleStatus(cli);
+      return status.running ? undefined : { reason: `${status.reason ?? "Tailscale is not running"}: sign in in the Tailscale app` };
+    },
+    nodeName: () => undefined,
+    start: async (port, listener) => {
+      if (cli === undefined) throw new Error("Tailscale is not installed");
+      hear = listener;
+      const published = await tailscaleServe(port, cli);
+      const status = await cliStatus(cli);
+      const self = status?.Self;
+      const user = self?.UserID !== undefined ? status?.User?.[String(self.UserID)]?.LoginName : undefined;
+      const tailnet = status?.CurrentTailnet?.MagicDNSSuffix ?? status?.MagicDNSSuffix;
+      listener({
+        kind: "running",
+        self: { ...(self?.ID !== undefined ? { id: self.ID } : {}), name: self?.HostName ?? "", dnsName: (self?.DNSName ?? "").replace(/.$/, ""), ips: self?.TailscaleIPs ?? [] },
+        ...(user !== undefined ? { user } : {}),
+        ...(tailnet !== undefined ? { tailnet } : {}),
+        url: published.url,
+      });
+      if (status !== undefined) listener({ kind: "devices", devices: peersOf(status) });
+      timer ??= setInterval(() => void say(), 20_000);
+      timer.unref?.();
+    },
+    login: () => undefined,
+    logout: async () => {
+      throw new Error("this computer signs in and out of Tailscale in the Tailscale app");
+    },
+    devices: () => void say(),
+    door: async (base) => base,
+    stop: async (port) => {
+      halt();
+      await tailscaleUnserve(port, cli);
+    },
+    forget: () => undefined,
+    close: halt,
+  };
 }
