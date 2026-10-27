@@ -54,25 +54,43 @@ async function downloadedGo() {
   return go;
 }
 
+/** Tries at fetching the modules, and the wait before the next (it grows: 10 s, 20 s, 30 s). */
+const DOWNLOAD_TRIES = 4;
+const DOWNLOAD_WAIT_MS = 10_000;
+
+/**
+ * The modules go.mod needs (and the toolchain it asks for), fetched before the build and fetched again
+ * when that fails: the module proxy fails now and then, and a build fetching as it went failed with it
+ * (the linux-arm64 nightly, 2026-10-26: "stream error: stream ID 1; INTERNAL_ERROR" reading
+ * github.com/klauspost/compress). The build then finds every module in the cache.
+ */
+async function downloadModules(go, env) {
+  for (let attempt = 1; ; attempt++) {
+    if (spawnSync(go, ["mod", "download"], { cwd: source, stdio: "inherit", env }).status === 0) return;
+    if (attempt === DOWNLOAD_TRIES) throw new Error(`go mod download failed ${DOWNLOAD_TRIES} times`);
+    const wait = DOWNLOAD_WAIT_MS * attempt;
+    console.log(`buildTailnet: go mod download failed (try ${attempt} of ${DOWNLOAD_TRIES}); again in ${wait / 1000} s`);
+    await new Promise((resolve) => setTimeout(resolve, wait));
+  }
+}
+
 export async function buildTailnet() {
   if (GOOS === undefined || GOARCH === undefined) throw new Error(`no helper for ${process.platform}/${process.arch}`);
   const go = pathGo() ?? (await downloadedGo());
   mkdirSync(TAILNET_OUT, { recursive: true });
   const cache = join(tmpdir(), "jaira-go-cache");
-  execFileSync(go, ["build", "-trimpath", "-ldflags=-s -w", "-o", join(TAILNET_OUT, exe), "."], {
-    cwd: source,
-    stdio: "inherit",
-    env: {
-      ...process.env,
-      CGO_ENABLED: "0",
-      GOOS,
-      GOARCH,
-      // The toolchain go.mod asks for, fetched when this one is older.
-      GOTOOLCHAIN: process.env.GOTOOLCHAIN ?? "auto",
-      GOMODCACHE: process.env.GOMODCACHE ?? join(cache, "mod"),
-      GOCACHE: process.env.GOCACHE ?? join(cache, "build"),
-    },
-  });
+  const env = {
+    ...process.env,
+    CGO_ENABLED: "0",
+    GOOS,
+    GOARCH,
+    // The toolchain go.mod asks for, fetched when this one is older.
+    GOTOOLCHAIN: process.env.GOTOOLCHAIN ?? "auto",
+    GOMODCACHE: process.env.GOMODCACHE ?? join(cache, "mod"),
+    GOCACHE: process.env.GOCACHE ?? join(cache, "build"),
+  };
+  await downloadModules(go, env);
+  execFileSync(go, ["build", "-trimpath", "-ldflags=-s -w", "-o", join(TAILNET_OUT, exe), "."], { cwd: source, stdio: "inherit", env });
   return join(TAILNET_OUT, exe);
 }
 

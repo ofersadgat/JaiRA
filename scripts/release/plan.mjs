@@ -22,6 +22,10 @@
  * - A release is filled in, never refused (decision 0017 §8): the plan is skipped only when the release
  *   already holds every build this pipeline makes (`BUILDS`, recorded as `build-<name>.json`), and each
  *   build job checks its own again before building (`builds.mjs`).
+ * - It answers which of those builds the release lacks (`builds`, space-separated like `BUILDS`): all
+ *   of them for a release not made yet. GitHub asks machines only for those — a run filling in a release
+ *   that lacked only linux-arm64 waited 15 minutes for macOS runners that never came, and failed
+ *   (2026-10-27).
  *
  * The releases live in another repository (`RELEASES_REPO`), so a release's JaiRA commit is read back
  * from its notes (`jaira-commit: <sha>`), which the plan writes. A nightly's last number counts that
@@ -75,7 +79,7 @@ function output(values) {
 
 function skip(reason) {
   console.log(`nothing to release: ${reason}`);
-  output({ skip: "true", reason });
+  output({ skip: "true", reason, builds: "" });
 }
 
 /** One line per JaiRA commit in `(from, to]`, or `to` alone when there is no earlier release. */
@@ -155,8 +159,8 @@ async function plan() {
   // A release already there is filled in: only the builds it lacks are made (each job checks again, in
   // case the other system finishes one meanwhile). With every build this pipeline makes in it, nothing is.
   const release = all.filter((r) => r.tag_name === tag).sort((a, b) => a.id - b.id)[0];
+  const missing = release !== undefined ? missingFrom(release) : builds;
   if (release !== undefined) {
-    const missing = missingFrom(release);
     if (builds.length > 0 && missing.length === 0) return skip(`${tag} already has ${builds.join(", ")}`);
     console.log(`${tag} is in ${RELEASES_REPO}${release.draft ? " as a draft" : ""}; still to build here: ${missing.join(", ") || "(each job checks)"}`);
   }
@@ -180,7 +184,7 @@ async function plan() {
 
   // What the iOS build is uploaded as: Apple takes no nightly suffix in a version (decision 0017).
   const apple = appleVersionOf(version);
-  output({ skip: "false", channel, version, tag, commit, upstream, prerelease: String(channel !== "stable"), ios_version: apple.version, ios_build: apple.build, notes });
+  output({ skip: "false", channel, version, tag, commit, upstream, prerelease: String(channel !== "stable"), builds: missing.join(" "), ios_version: apple.version, ios_build: apple.build, notes });
 }
 
 await plan();

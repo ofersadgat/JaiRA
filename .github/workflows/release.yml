@@ -11,9 +11,10 @@ name: Release
 #
 # Either system may build any release, in any order, and again (decision 0017 §8): a release is filled
 # in. The plan reuses a commit's nightly if one exists and is skipped when the release already has every
-# build this workflow makes; each build job first asks the release for its own record
-# (`scripts/release/builds.mjs check`) and stops if it is there; publishing adds only what the release
-# lacks, and publishes what finished even when another build failed.
+# build this workflow makes; otherwise only the builds the release lacks get a machine (the plan's
+# `builds`: the build matrix and the iOS job), and each first asks the release for its own record again
+# (`scripts/release/builds.mjs check`), stopping if the other system made it meanwhile; publishing adds
+# only what the release lacks, and publishes what finished even when another build failed.
 #
 # Needs one secret: RELEASES_TOKEN, a fine-grained token with Contents read/write on the releases
 # repository and nothing else.
@@ -57,6 +58,19 @@ env:
 jobs:
   plan:
     runs-on: ubuntu-latest
+    env:
+      # The machine each installer is built on. The build matrix is those whose build the release lacks,
+      # so a run filling a release in asks for no runner it does not need: on 2026-10-27 one that lacked
+      # only linux-arm64 waited 15 minutes for macOS runners that never came, and failed.
+      MACHINES: |
+        [
+          { "name": "win-x64", "os": "windows-latest" },
+          { "name": "win-arm64", "os": "windows-11-arm" },
+          { "name": "mac-arm64", "os": "macos-latest" },
+          { "name": "mac-x64", "os": "macos-15-intel" },
+          { "name": "linux-x64", "os": "ubuntu-latest" },
+          { "name": "linux-arm64", "os": "ubuntu-24.04-arm" }
+        ]
     outputs:
       skip: ${{ steps.plan.outputs.skip }}
       channel: ${{ steps.plan.outputs.channel }}
@@ -68,7 +82,8 @@ jobs:
       notes: ${{ steps.plan.outputs.notes }}
       ios_version: ${{ steps.plan.outputs.ios_version }}
       ios_build: ${{ steps.plan.outputs.ios_build }}
-      ios: ${{ steps.ios.outputs.enabled }}
+      machines: ${{ steps.wanted.outputs.machines }}
+      ios: ${{ steps.wanted.outputs.ios }}
     steps:
       - name: Require the releases token
         env:
@@ -79,7 +94,7 @@ jobs:
             exit 1
           fi
 
-      # A job's `if` cannot read secrets, so whether the iOS job runs is decided here.
+      # A job's `if` cannot read secrets, so whether the iOS app is built is decided here.
       - id: ios
         run: echo "enabled=${{ secrets.ASC_KEY_P8_BASE64 != '' }}" >> "$GITHUB_OUTPUT"
 
@@ -91,31 +106,42 @@ jobs:
         with:
           node-version: 22
 
+      # What this workflow builds (BUILDS): every machine's installer, and the iOS app when its secrets are
+      # set. The plan is skipped when the release already has all of it.
       - id: plan
-        run: node scripts/release/plan.mjs
+        run: |
+          export BUILDS="$(node -p 'JSON.parse(process.env.MACHINES).map((m) => m.name).join(" ")') $IOS"
+          node scripts/release/plan.mjs
         env:
           EVENT: ${{ github.event_name }}
           REF_NAME: ${{ github.ref_name }}
           INPUT_CHANNEL: ${{ inputs.channel }}
           INPUT_VERSION: ${{ inputs.version }}
           GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
-          # What this workflow builds: the plan is skipped when the release already has all of it.
-          BUILDS: win-x64 win-arm64 mac-arm64 mac-x64 linux-x64 linux-arm64${{ steps.ios.outputs.enabled == 'true' && ' ios' || '' }}
+          IOS: ${{ steps.ios.outputs.enabled == 'true' && 'ios' || '' }}
+
+      # Of those, what the release lacks (the plan's `builds`): the machines of the build matrix, and
+      # whether the iOS job runs.
+      - id: wanted
+        env:
+          BUILDS: ${{ steps.plan.outputs.builds }}
+        run: |
+          node -e '
+            const want = process.env.BUILDS.split(" ");
+            console.log(`machines=${JSON.stringify(JSON.parse(process.env.MACHINES).filter((m) => want.includes(m.name)))}`);
+            console.log(`ios=${want.includes("ios")}`);
+          ' >> "$GITHUB_OUTPUT"
 
   build:
     needs: plan
-    if: needs.plan.outputs.skip != 'true'
+    # The machines whose build the release lacks (the plan job's MACHINES); none is an empty matrix,
+    # which GitHub refuses, so the job is skipped.
+    if: needs.plan.outputs.skip != 'true' && needs.plan.outputs.machines != '[]'
     name: build (${{ matrix.name }})
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { name: win-x64, os: windows-latest }
-          - { name: win-arm64, os: windows-11-arm }
-          - { name: mac-arm64, os: macos-latest }
-          - { name: mac-x64, os: macos-15-intel }
-          - { name: linux-x64, os: ubuntu-latest }
-          - { name: linux-arm64, os: ubuntu-24.04-arm }
+        include: ${{ fromJSON(needs.plan.outputs.machines) }}
     runs-on: ${{ matrix.os }}
     env:
       GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
