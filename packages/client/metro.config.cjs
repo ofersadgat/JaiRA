@@ -26,11 +26,17 @@ const aliases = [
 ];
 const single = new Set(["react", "react-dom", "react-native"]);
 /**
- * Packages whose `main` Metro cannot use, sent to their ES-module entry (what Vite and esbuild pick).
- * jsonc-parser's `main` is a UMD build whose requires sit inside a factory Metro does not see, so on a
- * device it threw `Unknown named module: "./impl/format"` the moment @jaira/shared's schemas loaded.
+ * Packages whose entry Metro would pick cannot run on a phone, sent to one that can.
+ * - jsonc-parser's `main` is a UMD build whose requires sit inside a factory Metro does not see, so on a
+ *   device it threw `Unknown named module: "./impl/format"` the moment @jaira/shared's schemas loaded:
+ *   its ES-module entry (what Vite and esbuild pick).
+ * - mdurl's `import` entry is an `.mjs` file taking its own `lib/*.mjs` modules' defaults, and the worker
+ *   lowers each module to CommonJS with esbuild, which gives a `.mjs` file Node's interop — the default
+ *   it takes is the whole module. `mdurl.parse` was an object, and markdown-it threw "Object is not a
+ *   function" at every link (the iOS app, 2026-10-26): its CommonJS build. `nativeGraph.mjs` fails on
+ *   any other `.mjs` file that would do the same.
  */
-const esmEntries = { "jsonc-parser": "lib/esm/main.js" };
+const entries = { "jsonc-parser": "lib/esm/main.js", mdurl: "build/index.cjs.js" };
 /**
  * What Metro must not crawl or watch under the repository root: build output and scratch worlds.
  * Watching the root is what makes the workspace packages visible, and it also made a `npm run app:dist`
@@ -81,9 +87,9 @@ module.exports = (one) => {
           if (name.startsWith(`${alias}/`) && !/\.tsx?$/.test(target)) return next(context, join(target, name.slice(alias.length + 1)), platform);
         }
         if (single.has(name)) return next({ ...context, originModulePath: join(root, "package.json") }, name, platform);
-        if (name in esmEntries) {
+        if (name in entries) {
           const dir = require("node:path").dirname(require.resolve(`${name}/package.json`, { paths: [root] }));
-          return { type: "sourceFile", filePath: join(dir, esmEntries[name]) };
+          return { type: "sourceFile", filePath: join(dir, entries[name]) };
         }
         return next(context, name, platform);
       },
