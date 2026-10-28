@@ -23,6 +23,8 @@ import { WorkSummary } from "./WorkSummary";
 import { useTokens } from "../../tokens";
 import { ValueView } from "./ValueView";
 import { Markdown } from "../Markdown";
+import { LongText } from "../LongText";
+import { Virtual } from "../Virtual";
 import { Icon } from "./Icon";
 import { Empty } from "./RunTranscript";
 import { MessageRail } from "./MessageRail";
@@ -150,9 +152,11 @@ export const Transcript = memo(function Transcript({
             <Fragment key={i}>
               {before}
               {cutLine}
-              <View minWidth={0} {...fade}>
-                <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, blocks.length)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} />
-              </View>
+              <Virtual>
+                <View minWidth={0} {...fade}>
+                  <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, blocks.length)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} />
+                </View>
+              </Virtual>
             </Fragment>
           );
         }
@@ -183,34 +187,34 @@ export const Transcript = memo(function Transcript({
               {before}
               {cutLine}
               {dropped}
-              <View minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})}>
-                <Message
-                  entry={block}
-                  {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
-                  {...(rails
-                    ? {
-                        rails: {
-                          onEdit,
-                          scope,
-                          ...(pressed
-                            ? { press: { held: railAt === i, toggle: () => setRailAt((was) => (was === i ? null : i)), touch: () => void (touched.current = i) } }
-                            : {}),
-                        },
-                      }
-                    : {})}
-                  {...(context !== undefined && prior !== undefined ? { contextBefore: prior } : {})}
-                  doomed={doomed}
-                />
-              </View>
+              <Virtual>
+                <View minWidth={0} {...(block.role === "user" ? { alignSelf: "flex-end", maxWidth: "78%" } : {})}>
+                  <Message
+                    entry={block}
+                    {...(session?.stateId !== undefined ? { workflow: session.stateId } : {})}
+                    {...(rails
+                      ? {
+                          rails: {
+                            onEdit,
+                            scope,
+                            ...(pressed
+                              ? { press: { held: railAt === i, toggle: () => setRailAt((was) => (was === i ? null : i)), touch: () => void (touched.current = i) } }
+                              : {}),
+                          },
+                        }
+                      : {})}
+                    {...(context !== undefined && prior !== undefined ? { contextBefore: prior } : {})}
+                    doomed={doomed}
+                  />
+                </View>
+              </Virtual>
             </Fragment>
           );
         }
         return (
           <View key={i} minWidth={0} marginTop={10} marginBottom={14} {...fade}>
             {/* Plain text, not markdown: a half-arrived answer has half a fenced block in it. */}
-            <Txt spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)}>
-              {block.text}
-            </Txt>
+            <LongText text={block.text} spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)} />
             {writing ? (
               <View flexDirection="row" alignItems="center" gap={7} marginTop={6}>
                 <Pulse color="dim" />
@@ -324,9 +328,7 @@ function Message({
     ) : view === "text" && typeof value === "string" ? (
       // The line height as a factor (unitless) on web: Blink multiplies it out in float and floors to
       // its layout unit, so five lines of 13 × 1.6 are 103.98 tall, not 104.
-      <Txt spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: entry.role === "user" || entry.role === "assistant" ? "text" : "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)} {...(Platform.OS === "web" ? { lineHeight: "1.6" } : {})}>
-        {value}
-      </Txt>
+      <LongText text={value} spec={{ voice: "app", scale: 13 / 12.5, lineHeight: 1.6, color: entry.role === "user" || entry.role === "assistant" ? "text" : "dim" }} whiteSpace="pre-wrap" {...({ overflowWrap: "anywhere" } as object)} {...(Platform.OS === "web" ? { lineHeight: "1.6" } : {})} />
     ) : (
       <ValueView value={value} hint={reading.hint} view={view} chrome={false} />
     );

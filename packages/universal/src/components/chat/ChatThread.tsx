@@ -28,6 +28,7 @@ import { QueuedMessage } from "./QueuedMessage";
 import { useChatEnvironment } from "./environment";
 import { useChildRunHost } from "./childRunHost";
 import { OutcomeHostContext } from "../panel/outcomeHost";
+import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 
 /**
  * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
@@ -56,6 +57,8 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const t = useTokens();
   const look = useLook();
   const scroller = useRef<ScrollView | null>(null);
+  // What a phone keeps drawn of the thread: what shows and three screens either side (`Virtual`).
+  const scrollWindow = useScrollWindow(scroller);
   /** Whether the reader is at the live edge. */
   const pinned = useRef(true);
   const [away, setAway] = useState(false);
@@ -65,6 +68,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     setAway(false);
     // To the very end: `scrollToEnd` stops a fraction short on web.
     scroller.current?.scrollTo({ y: 1e9, animated: false });
+    scrollWindow.atEnd();
   };
   const jumpRef = useRef(jump);
   jumpRef.current = jump;
@@ -86,7 +90,10 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const follow = useRef(true);
   useEffect(() => {
     follow.current = true;
-    if (pinned.current) scroller.current?.scrollTo({ y: 1e9, animated: false });
+    if (pinned.current) {
+      scroller.current?.scrollTo({ y: 1e9, animated: false });
+      scrollWindow.atEnd();
+    }
     const settleTimer = setTimeout(() => {
       follow.current = false;
     }, 400);
@@ -119,6 +126,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       idle.current = setTimeout(() => setMoving(false), 900);
     }
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
+    scrollWindow.scrolled(contentOffset.y);
     // Within 24px of the end is at it.
     const at = contentSize.height - contentOffset.y - layoutMeasurement.height <= 24;
     pinned.current = at;
@@ -161,17 +169,26 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {...(scrollbarProps(t) as object)}
         style={{ flex: 1, minHeight: 0, ...PLAIN_SCROLLER } as never}
         contentContainerStyle={{ flexDirection: "column", flexGrow: 1, ...PLAIN_SCROLLER } as never}
-        onLayout={(e) => setViewport(e.nativeEvent.layout.height)}
+        onLayout={(e) => {
+          setViewport(e.nativeEvent.layout.height);
+          scrollWindow.sized(e.nativeEvent.layout.height);
+        }}
         onScroll={onScroll}
         scrollEventThrottle={32}
         // Follow the live edge while the reader is standing on it.
-        onContentSizeChange={() => {
+        onContentSizeChange={(width, height) => {
+          // Whatever grew moved what is under it: a phone measures its pieces again (`Virtual`).
+          scrollWindow.moved(width, height);
           // Only what `follow` covers moves the pin: the thread and the live tail — not a row
           // opened, or a summary unfolded, by the reader.
-          if (pinned.current && follow.current) scroller.current?.scrollTo({ y: 1e9, animated: false });
+          if (pinned.current && follow.current) {
+            scroller.current?.scrollTo({ y: 1e9, animated: false });
+            scrollWindow.atEnd();
+          }
           if (isWeb) readDay();
         }}
       >
+        <ScrollWindowProvider window={scrollWindow.window}>
         {/* Which day you are reading, floating over the thread (sticky, 0 tall). */}
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
         <OutcomeHostContext.Provider value={runs.outcomeHost}>
@@ -243,6 +260,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         </OutcomeHostContext.Provider>
         {/* The end the pills over the box would cover, left free while they show. */}
         {runs.pillSpace > 0 ? <View height={runs.pillSpace} flexShrink={0} /> : null}
+        </ScrollWindowProvider>
       </ScrollView>
       )}
 

@@ -22,6 +22,7 @@ import {
 } from "@jaira/shared/browser";
 import { editorLook } from "@jaira/ui/editorLook";
 import { highlightJson } from "@jaira/ui/jsonHighlight";
+import { RUN_CHARS, RUN_LINES, runsOf } from "@jaira/ui/textRuns";
 import { textRendererFor, useRenderChoice } from "@jaira/ui/renderChoice";
 import { useArtifactFrame } from "@jaira/ui/artifactFrame";
 import type { Schema } from "@jaira/ui/schemaForm/types";
@@ -36,6 +37,8 @@ import { DataView } from "../files/DataView";
 import { ReadingForm } from "../form/Field";
 import { SchemaForm } from "../form/SchemaForm";
 import { FenceLineContext, Markdown, registerFenceRenderer } from "../Markdown";
+import { LongText } from "../LongText";
+import { Virtual } from "../Virtual";
 import { Icon } from "./Icon";
 import { ChangesView, EmptyNote, Media, PatchView, Scroll, TableView, type ChangeOutcome } from "./ValueReadings";
 
@@ -447,11 +450,11 @@ function CodeReading({ text, mime, inline, t }: { text: string; mime: string; in
       </View>
     );
   }
+  // A phone wraps the lines, in runs (`LongText`), as a fence does: sideways it was one text as wide as
+  // the longest line and as tall as all of them — one bitmap that size on iOS.
   return (
-    <View backgroundColor={t.v("bg") as never} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6}>
-      <ScrollView horizontal nestedScrollEnabled contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 10 }}>
-        <Txt spec={{ voice: "data", scale: face, lineHeight: 1.5 }}>{text}</Txt>
-      </ScrollView>
+    <View backgroundColor={t.v("bg") as never} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} paddingVertical={8} paddingHorizontal={10} minWidth={0}>
+      <LongText text={text} spec={{ voice: "data", scale: face, lineHeight: 1.5 }} />
     </View>
   );
 }
@@ -539,9 +542,7 @@ function jsonTextOf(value: unknown): string {
 function Source({ value, ceiling, t }: { value: unknown; ceiling: number; t: Tokens }): JSX.Element {
   return (
     <Scroll maxHeight={ceiling} t={t}>
-      <Txt spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)}>
-        {jsonTextOf(value)}
-      </Txt>
+      <LongText text={jsonTextOf(value)} spec={{ voice: "data", scale: 11.5 / 12, lineHeight: 1.55, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)} />
     </Scroll>
   );
 }
@@ -562,35 +563,55 @@ function JsonSource({ value, schema, ceiling, t }: { value: unknown; schema: unk
   const lines = useMemo(() => highlightJson(text, describe), [text, describe]);
   const base = { voice: "data" as const, scale: 11.5 / 12, lineHeight: 1.55 };
   const ghost = font(t, { ...base, color: "tok-hint", italic: true });
-  return (
-    <Scroll maxHeight={ceiling} both t={t}>
-      {/* The line height unitless on web: Blink multiplies it out in float. */}
-      <Txt spec={{ ...base, color: "dim" }} {...((isWeb ? { whiteSpace: "pre-wrap", lineHeight: "1.55", style: { overflowWrap: "anywhere" } } : {}) as object)}>
-        {lines.map((line, i) => (
-          <Text key={i}>
-            {line.tokens.map((token, j) => (
-              // Each token keeps the line's own height (web: the parent's unitless 1.55), not one of its own.
-              <Text key={j} {...(font(t, { ...base, color: TOKEN_INK[token.kind] ?? "text", ...(token.kind === "comment" ? { italic: true } : {}) }) as object)} {...(isWeb ? { lineHeight: "inherit" } : {})}>
-                {token.text}
-              </Text>
-            ))}
-            {line.hint === undefined ? null : isWeb ? (
-              // The hint's slot: an inline block of no width whose text overflows it, `pre`.
-              <Text style={{ display: "inline-block", width: 0, overflow: "visible", whiteSpace: "pre" } as never}>
-                <Text {...(ghost as object)} lineHeight="inherit" style={{ paddingLeft: "1.6em" } as never}>
-                  {hintText(line.hint)}
-                </Text>
-              </Text>
-            ) : (
-              <Text {...(ghost as object)}>
-                {"   "}
-                {hintText(line.hint)}
-              </Text>
-            )}
-            {i < lines.length - 1 ? "\n" : null}
+  const drawn = (run: typeof lines, from: number): ReactNode =>
+    run.map((line, k) => (
+      <Text key={from + k}>
+        {line.tokens.map((token, j) => (
+          // Each token keeps the line's own height (web: the parent's unitless 1.55), not one of its own.
+          <Text key={j} {...(font(t, { ...base, color: TOKEN_INK[token.kind] ?? "text", ...(token.kind === "comment" ? { italic: true } : {}) }) as object)} {...(isWeb ? { lineHeight: "inherit" } : {})}>
+            {token.text}
           </Text>
         ))}
-      </Txt>
+        {line.hint === undefined ? null : isWeb ? (
+          // The hint's slot: an inline block of no width whose text overflows it, `pre`.
+          <Text style={{ display: "inline-block", width: 0, overflow: "visible", whiteSpace: "pre" } as never}>
+            <Text {...(ghost as object)} lineHeight="inherit" style={{ paddingLeft: "1.6em" } as never}>
+              {hintText(line.hint)}
+            </Text>
+          </Text>
+        ) : (
+          <Text {...(ghost as object)}>
+            {"   "}
+            {hintText(line.hint)}
+          </Text>
+        )}
+        {k < run.length - 1 ? "\n" : null}
+      </Text>
+    ));
+  if (isWeb) {
+    return (
+      <Scroll maxHeight={ceiling} both t={t}>
+        {/* The line height unitless on web: Blink multiplies it out in float. */}
+        <Txt spec={{ ...base, color: "dim" }} whiteSpace="pre-wrap" lineHeight="1.55" style={{ overflowWrap: "anywhere" }}>
+          {drawn(lines, 0)}
+        </Txt>
+      </Scroll>
+    );
+  }
+  // A phone wraps the lines, a run of them to a text (`textRuns.ts`) kept near the screen (`Virtual`):
+  // one text of every line, sideways, was one bitmap as wide as the longest and as tall as all of them.
+  let from = 0;
+  return (
+    <Scroll maxHeight={ceiling} t={t}>
+      {runsOf(lines, (line) => line.tokens.reduce((n, token) => n + token.text.length, 0) + 1, RUN_CHARS, RUN_LINES).map((run) => {
+        const at = from;
+        from += run.length;
+        return (
+          <Virtual key={at}>
+            <Txt spec={{ ...base, color: "dim" }}>{drawn(run, at)}</Txt>
+          </Virtual>
+        );
+      })}
     </Scroll>
   );
 }

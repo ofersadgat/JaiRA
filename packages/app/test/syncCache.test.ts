@@ -148,6 +148,35 @@ describe("views", () => {
     expect(cache.peek("task:detail", { taskId: "t-a" }).value).toEqual({ n: 2 });
   });
 
+  it("are read ONCE when refreshed before anything has read them", async () => {
+    // Opening a conversation refreshes its records and transcript as it first holds them: the read
+    // that starts is the fresh one asked for, and reading again after it fetched 6.4 MB twice.
+    const e = engine(() => ({ ok: true }));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    const before = e.asked.length;
+    await cache.refresh("run:records", { taskId: "t-a" });
+    cache.hold("store", [["run:records", { taskId: "t-a" }]]);
+    await settle();
+    expect(e.asked.slice(before).map((a) => a.channel)).toEqual(["run:records"]);
+    expect(cache.peek("run:records", { taskId: "t-a" }).value).toEqual({ ok: true });
+  });
+
+  it("are read again when refreshed during a read already under way, which may predate the change", async () => {
+    let n = 0;
+    const e = engine(() => ({ n: ++n }));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    e.hold();
+    cache.hold("store", [["task:detail", { taskId: "t-a" }]]);
+    const refreshed = cache.refresh("task:detail", { taskId: "t-a" });
+    e.release();
+    await refreshed;
+    expect(cache.peek("task:detail", { taskId: "t-a" }).value).toEqual({ n: 2 });
+  });
+
   it("keep the error of a read that failed, instead of looking empty", async () => {
     const e = engine(() => new Error("unknown task 't-x'"));
     e.answerSince(() => page(10, [], { whole: true }));

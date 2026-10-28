@@ -1203,12 +1203,15 @@ export function useApp() {
    * are held still — the live tail is drawing that turn — and read again as it ends.
    */
   const shownInstance = selectedViews(state).sessionInstance;
+  // Which run's transcript is shown is known once the task's runs are: held before then, the newest
+  // run's was read under the task alone, and again under its own id as soon as they arrived.
+  const runsKnown = shownInstance !== null || (state.selected !== null && store.peek("session:history", { taskId: state.selected }).value !== undefined);
   const streaming = state.liveTurn !== null;
   useEffect(() => {
     const taskId = state.selected;
     if (taskId === null) return void store.hold("selected", []);
     const transcripts: Array<readonly [IpcChannel, unknown]> = [
-      ["session:view", { taskId, ...(shownInstance !== null ? { instanceId: shownInstance } : {}) }],
+      ...(runsKnown ? [["session:view", { taskId, ...(shownInstance !== null ? { instanceId: shownInstance } : {}) }] as const] : []),
       ...state.sessionsOpen.map((instanceId) => ["session:view", { taskId, instanceId }] as const),
     ];
     const always: Array<readonly [IpcChannel, unknown]> = [
@@ -1219,7 +1222,7 @@ export function useApp() {
     ];
     if (streaming) store.hold("selected", always, transcripts);
     else store.hold("selected", [...always, ...transcripts]);
-  }, [store, state.selected, shownInstance, state.sessionsOpen, streaming]);
+  }, [store, state.selected, shownInstance, runsKnown, state.sessionsOpen, streaming]);
 
   /**
    * What the window holds of the place it stands, told to the cache: the project summaries, the queue,

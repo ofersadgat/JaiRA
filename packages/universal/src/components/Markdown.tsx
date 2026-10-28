@@ -4,7 +4,9 @@ import { View } from "@tamagui/core";
 import { HREF_SCHEMES, SRC_SCHEMES, attr, parseMarkdown, safeUrl, splitFrontMatter, type FenceBlock, type Token } from "@jaira/ui/markdownParse";
 import { InkContext, Press, Txt, edge, type FontSpec } from "../primitives";
 import { useTokens } from "../tokens";
+import { LongText } from "./LongText";
 import { Picture } from "./Picture";
+import { Virtual } from "./Virtual";
 
 /**
  * Markdown in the page's own views: the same parse (`parseMarkdown`, markdown-it with `html: false`), the
@@ -171,8 +173,11 @@ export function Markdown({ text, fence, scale = 13 / 12.5, lineHeight = 1.6, tri
   return (
     <View paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={padding[3]} minWidth={0}>
       {front !== undefined ? <FrontMatter text={front} fence={drawn} /> : null}
-      {/* The first block has no margin on top, and in a transcript the last none under it. */}
-      {stack(blocks, { firstTop: 0, ...(trimEnd ? { lastBottom: 0 } : {}) })}
+      {/* The first block has no margin on top, and in a transcript the last none under it. Each is
+          drawn on a phone only near the screen (`Virtual`): a long document is many blocks. */}
+      {stack(blocks, { firstTop: 0, ...(trimEnd ? { lastBottom: 0 } : {}) }).map((block, i) => (
+        <Virtual key={i}>{block}</Virtual>
+      ))}
     </View>
   );
 }
@@ -466,13 +471,23 @@ function Pre({ code, ink, marginTop, marginBottom }: { code: string; ink?: Ink; 
   // a device pixel and a length to the nearest, and a block of several lines stood that much taller a line.
   const size = Number(t.scaled("size-data", 1));
   const factor = Platform.OS === "web" && t.replayed && size > 0 ? { lineHeight: String(strut / size) } : {};
+  const spec = { voice: "data", scale: 1, lineHeight: t.replayed ? { px: strut } : 1.5 } as const;
   return (
     <View marginTop={marginTop} marginBottom={marginBottom} backgroundColor={t.v("bg") as never} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)} borderRadius={6}>
-      <ScrollView horizontal contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 10 }}>
-        <Txt spec={{ voice: "data", scale: 1, lineHeight: t.replayed ? { px: strut } : 1.5 }} {...factor} whiteSpace="pre">
-          {code.replace(/\n$/, "")}
-        </Txt>
-      </ScrollView>
+      {Platform.OS === "web" ? (
+        <ScrollView horizontal contentContainerStyle={{ paddingVertical: 8, paddingHorizontal: 10 }}>
+          <Txt spec={spec} {...factor} whiteSpace="pre">
+            {code.replace(/\n$/, "")}
+          </Txt>
+        </ScrollView>
+      ) : (
+        // A phone wraps the lines, in runs (`LongText`): sideways, the text is as wide as its longest line
+        // and as tall as all of them, one bitmap that size on iOS — and the sideways scroll view, not the
+        // conversation, would be the one its runs are kept near the screen of.
+        <View paddingVertical={8} paddingHorizontal={10} minWidth={0}>
+          <LongText text={code.replace(/\n$/, "")} spec={spec} />
+        </View>
+      )}
     </View>
   );
 }

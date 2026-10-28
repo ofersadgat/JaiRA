@@ -1,4 +1,4 @@
-import { useState, type JSX, type ReactNode } from "react";
+import { useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { Change, MediaKind, PatchFile } from "@jaira/shared/browser";
@@ -7,6 +7,7 @@ import { Island } from "../../islands";
 import { Press, Txt, edge, font, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Picture } from "../Picture";
+import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 import { Icon } from "./Icon";
 
 /**
@@ -76,6 +77,9 @@ export function ChangesHead({ count, added, removed }: { count: number; added: n
 
 /** A box that scrolls past `maxHeight`: on web the element itself (`overflow: auto`), on a phone scroll views. */
 export function Scroll({ maxHeight, both, children, t }: { maxHeight: number; both?: boolean; children: ReactNode; t: Tokens }): JSX.Element {
+  const scroller = useRef<ScrollView | null>(null);
+  // Its own window (`Virtual`): what is drawn in here follows this box's scroll, not the page's.
+  const scrollWindow = useScrollWindow(scroller);
   if (isWeb) {
     return (
       <View maxHeight={maxHeight} minWidth={0} {...({ overflow: "auto" } as object)} {...viewScrollbarProps(t)}>
@@ -84,14 +88,24 @@ export function Scroll({ maxHeight, both, children, t }: { maxHeight: number; bo
     );
   }
   return (
-    <ScrollView style={{ maxHeight }} nestedScrollEnabled>
-      {both === true ? (
-        <ScrollView horizontal nestedScrollEnabled>
-          {children}
-        </ScrollView>
-      ) : (
-        children
-      )}
+    <ScrollView
+      ref={scroller}
+      style={{ maxHeight }}
+      nestedScrollEnabled
+      scrollEventThrottle={32}
+      onScroll={(e) => scrollWindow.scrolled(e.nativeEvent.contentOffset.y)}
+      onLayout={(e) => scrollWindow.sized(e.nativeEvent.layout.height)}
+      onContentSizeChange={scrollWindow.moved}
+    >
+      <ScrollWindowProvider window={scrollWindow.window}>
+        {both === true ? (
+          <ScrollView horizontal nestedScrollEnabled>
+            {children}
+          </ScrollView>
+        ) : (
+          children
+        )}
+      </ScrollWindowProvider>
     </ScrollView>
   );
 }

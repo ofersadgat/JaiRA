@@ -430,9 +430,15 @@ export class SyncCache {
     };
   }
 
-  /** Read one view again now — after something this window did to it, before the change log says so. */
+  /**
+   * Read one view again now — after something this window did to it, before the change log says so.
+   * A view nothing has read yet is read by {@link ensure}, after the asking: that read is the fresh one,
+   * and asking for one more behind it read every conversation's records twice as it was opened.
+   */
   refresh<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<void> {
-    return this.read(this.ensure(channel, request));
+    const unread = this.entries.get(viewKey(channel, request))?.asked !== true;
+    const key = this.ensure(channel, request);
+    return unread ? (this.entries.get(key)?.idle ?? Promise.resolve()) : this.read(key);
   }
 
   private ensure(channel: IpcChannel, request: unknown): string {
