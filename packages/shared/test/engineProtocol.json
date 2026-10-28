@@ -49,6 +49,7 @@
     "file:write",
     "files:browse",
     "files:hiddenReport",
+    "files:list",
     "files:tree",
     "files:whyHidden",
     "forge:cancelSignIn",

@@ -62,6 +62,7 @@ import type {
   SessionRef,
   OperationRecordView,
   SessionView,
+  FileNode,
   FileTree,
   HistorySize,
   PruneResult,
@@ -1724,6 +1725,12 @@ export interface IpcContract {
    */
   "files:tree": { request: { project?: ProjectRef } | void; response: FileTree };
   /**
+   * What ONE folder of a project holds, a level deep — the entries the tree left out of an
+   * {@link FileNode.unlisted} folder, asked for when it is opened. Its folders come back unlisted in
+   * turn, so nothing below the one opened is walked. Hidden paths stay hidden.
+   */
+  "files:list": { request: { project?: ProjectRef; path: string }; response: FileNode[] };
+  /**
    * What each hidden-path rule does to the tree here — the Files tree section's rule list.
    *
    * ONE walk of the root (the project's checkout, or the shared root with no project), every hidden
@@ -2471,6 +2478,7 @@ export const IPC_CHANNELS = [
   "board:view",
   "board:roots",
   "files:tree",
+  "files:list",
   "files:hiddenReport",
   "files:whyHidden",
   "state:view",

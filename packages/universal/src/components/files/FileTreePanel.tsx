@@ -370,6 +370,15 @@ function TreeNode({
         )}
       </Press>
       {draftUnder(row.key)}
+      {row.open && node.unlisted === true ? (
+        // Git ignores it: its entries are being asked for (`files:list`), not carried with the tree.
+        <View flexDirection="row" paddingVertical={3} paddingHorizontal={6} gap={5}>
+          <Guides depth={depth + 1} t={t} />
+          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", lineHeight: 1.45 }} paddingLeft={18}>
+            Listing…
+          </Txt>
+        </View>
+      ) : null}
       {row.open
         ? (node.children ?? []).map((child) => (
             <TreeNode

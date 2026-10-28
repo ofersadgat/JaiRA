@@ -15,7 +15,7 @@ import { specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
 import { testHome } from "@jaira/testing";
 import { createTask } from "../src/lifecycle";
 import { initProject, openProject, type Project } from "../src/project";
-import { baseFileTree, baseStateView, boardForState, fileTree, rootContaining, rootsBoard, stateView } from "../src/stateViews";
+import { baseFileTree, baseStateView, boardForState, fileTree, listDirectory, rootContaining, rootsBoard, stateView } from "../src/stateViews";
 import { browseWorkflows } from "../src/workflows";
 import { compileHidden, hiddenRules } from "@jaira/shared";
 
@@ -390,5 +390,50 @@ describe("fileTree", () => {
     const rules = compileHidden(hiddenRules(["!.jaira/system"]));
     const layer = fileTree(project, browseWorkflows(project), rules).roots[0]!.nodes.find((n) => n.name === ".jaira");
     expect(layer?.children?.map((n) => n.name)).toContain("system");
+  });
+
+  it("names what git ignores and does not walk into it", () => {
+    // A build's thousands of entries were most of what a phone was sent, and killed for (2026-10-27).
+    mkdirSync(join(dir, "build", "obj", "deep"), { recursive: true });
+    writeFileSync(join(dir, "build", "obj", "deep", "a.o"), "", "utf8");
+    mkdirSync(join(dir, "src"), { recursive: true });
+    writeFileSync(join(dir, "src", "main.ts"), "", "utf8");
+    writeFileSync(join(dir, "src", "main.log"), "", "utf8");
+
+    const tree = fileTree(project, browseWorkflows(project), undefined, { dirs: new Set(["build"]), files: new Set(["src/main.log"]) });
+    const top = tree.roots[0]!.nodes;
+    expect(top.find((n) => n.name === "build")).toMatchObject({ kind: "directory", ignored: true, unlisted: true, children: [] });
+    const src = top.find((n) => n.name === "src");
+    expect(src?.unlisted).toBeUndefined();
+    expect(src?.children?.map((n) => [n.name, n.ignored ?? false])).toEqual([
+      ["main.log", true],
+      ["main.ts", false],
+    ]);
+  });
+});
+
+describe("listDirectory", () => {
+  const ignored = { dirs: new Set(["build"]), files: new Set<string>() };
+  beforeEach(() => {
+    mkdirSync(join(dir, "build", "obj", "deep"), { recursive: true });
+    writeFileSync(join(dir, "build", "out.bin"), "", "utf8");
+    mkdirSync(join(dir, "build", "node_modules", "x"), { recursive: true });
+  });
+
+  it("lists one level of an ignored folder, its folders unlisted in turn and everything in it ignored", () => {
+    const nodes = listDirectory(project, "build", undefined, ignored);
+    // Hidden paths stay hidden inside an ignored folder too: `**/node_modules`.
+    expect(nodes.map((n) => [n.name, n.kind, n.ignored, n.unlisted])).toEqual([
+      ["obj", "directory", true, true],
+      ["out.bin", "other", true, undefined],
+    ]);
+    expect(nodes[0]!.children).toEqual([]);
+    expect(listDirectory(project, "build/obj", undefined, ignored).map((n) => [n.path, n.ignored])).toEqual([["build/obj/deep", true]]);
+  });
+
+  it("holds nothing outside the checkout, or hidden", () => {
+    expect(listDirectory(project, "..", undefined, ignored)).toEqual([]);
+    expect(listDirectory(project, "build/../../elsewhere", undefined, ignored)).toEqual([]);
+    expect(listDirectory(project, ".jaira/system", undefined, ignored)).toEqual([]);
   });
 });

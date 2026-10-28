@@ -17,7 +17,7 @@
  *    beside the file, rather than a failure discovered part-way through a run.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { basename, join, relative, sep } from "node:path";
+import { basename, isAbsolute, join, relative, sep } from "node:path";
 import { parseReferencedFile, stateFilePath } from "@declarative-ai/hw";
 import { compileHidden, disabledBy, hiddenRules, isHiddenPath, jairaBuiltInPaths, mimeOfPath, SETTINGS_FILE_NAME } from "@jaira/shared";
 import type {
@@ -123,6 +123,29 @@ export type HiddenRules = ReturnType<typeof compileHidden>;
 /** The rules a caller that has expressed no opinion gets: `system/` and dependencies. */
 const defaultRules = (): HiddenRules => compileHidden(hiddenRules(undefined));
 
+/**
+ * What git ignores in a checkout, root-relative and forward-slashed: whole folders — git names a
+ * folder once when everything in it is ignored — and single files. Asked of git by the caller
+ * (`AppService`), so this module reads no repository.
+ *
+ * The tree names what is ignored and does not walk into it: a build, a cache, a worktree is most of
+ * a checkout by count — 97% of the four open on 2026-10-27, 357,000 entries, the 80 MB answer that
+ * a phone was killed for holding — and none of it is the project's.
+ */
+export interface IgnoredPaths {
+  dirs: ReadonlySet<string>;
+  files: ReadonlySet<string>;
+}
+
+/** How far a walk goes: past what git ignores (`ignored`), or one level only (`shallow`). */
+interface Reach {
+  ignored?: IgnoredPaths | undefined;
+  /** Everything under the walk is ignored: it is inside an ignored folder. */
+  inIgnored?: boolean;
+  /** One level: every folder comes back unlisted. */
+  shallow?: boolean;
+}
+
 function walkDir(
   root: string,
   dir: string,
@@ -131,6 +154,7 @@ function walkDir(
   /** Where this root's LAYER sits inside it — see {@link layerRelative}. */
   prefix: string,
   project?: string,
+  reach: Reach = {},
 ): FileNode[] {
   let entries;
   try {
@@ -148,6 +172,7 @@ function walkDir(
     // "skip dot-entries"; it is the hidden list, which names `.git` and the rest and can be read.
     if (isHiddenPath(rel, hidden)) continue;
     if (entry.isDirectory()) {
+      const ignored = reach.inIgnored === true || reach.ignored?.dirs.has(rel) === true;
       nodes.push({
         path: rel,
         name: entry.name,
@@ -155,7 +180,9 @@ function walkDir(
         mime: mimeOfPath(rel, true),
         layer,
         ...(project !== undefined ? { project } : {}),
-        children: walkDir(root, full, layer, hidden, prefix, project),
+        ...(ignored ? { ignored: true } : {}),
+        // An ignored folder is named, not walked: its entries are listed when it is opened.
+        ...(ignored || reach.shallow === true ? { unlisted: true, children: [] } : { children: walkDir(root, full, layer, hidden, prefix, project, reach) }),
       });
       continue;
     }
@@ -170,6 +197,7 @@ function walkDir(
       layer,
       // Every node says which project it is in, so a file identifies itself — see `FileNode.project`.
       ...(project !== undefined ? { project } : {}),
+      ...(reach.inIgnored === true || reach.ignored?.files.has(rel) === true ? { ignored: true as const } : {}),
     };
     if (kind === "workflow" && layerPath !== undefined) {
       // The state id is the path under `workflows/`, minus the suffix — the same derivation the
@@ -199,8 +227,11 @@ function walkDir(
  * treats an unreadable directory as empty rather than an error, so an absent root costs one
  * `existsSync` and yields an empty, still-usable branch: writing a state into it creates the
  * directory chain on the way.
+ *
+ * `ignored` is what git ignores in the CHECKOUT (the project root alone: the shared and built-in
+ * roots are no checkout of the person's): named, not walked — see {@link IgnoredPaths}.
  */
-export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: HiddenRules): FileTree {
+export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: HiddenRules, ignored?: IgnoredPaths): FileTree {
   const shadowed = new Set(
     (browser?.files ?? []).filter((f) => f.shadowed === true).map((f) => `${f.layer}:${f.stateId}`),
   );
@@ -239,7 +270,7 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
     (dir): dir is string => dir !== undefined && dir !== project.paths.builtIn.dir,
   );
   const roots = layerRoots.map(({ dir, layer, prefix }) => {
-    const nodes = walkDir(dir, dir, layer, rules, prefix, layer === "project" ? project.paths.projectDir : undefined);
+    const nodes = layer === "project" ? walkDir(dir, dir, layer, rules, prefix, project.paths.projectDir, { ignored }) : walkDir(dir, dir, layer, rules, prefix);
     const mark = (list: FileNode[]): void => {
       for (const node of list) {
         if (layer === "system" && shadowedFile(node, overrideDirs)) node.shadowed = true;
@@ -278,6 +309,24 @@ export function fileTree(project: Project, browser?: WorkflowBrowser, hidden?: H
     };
   });
   return { roots };
+}
+
+/**
+ * What ONE folder of the project's checkout holds, a level deep: the entries {@link fileTree} left
+ * out of an unlisted folder, read when it is opened. Its folders come back unlisted in turn; inside
+ * an ignored folder, everything is ignored. A path that leaves the checkout, or is hidden, holds
+ * nothing.
+ */
+export function listDirectory(project: Project, path: string, hidden?: HiddenRules, ignored?: IgnoredPaths): FileNode[] {
+  const root = project.paths.projectDir;
+  const rules = hidden ?? defaultRules();
+  const full = join(root, path);
+  const rel = relative(root, full).split(sep).join("/");
+  if (rel.startsWith("..") || isAbsolute(rel) || (rel !== "" && isHiddenPath(rel, rules))) return [];
+  const prefix = prefixOf(root, project.paths.roots[0] ?? root);
+  const steps = rel === "" ? [] : rel.split("/");
+  const inIgnored = steps.some((_, i) => ignored?.dirs.has(steps.slice(0, i + 1).join("/")) === true);
+  return walkDir(root, full, "project", rules, prefix, root, { ignored, inIgnored, shallow: true });
 }
 
 /** What the built-in root is called, wherever a tree lists it (decision 0006). */

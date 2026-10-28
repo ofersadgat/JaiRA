@@ -145,6 +145,7 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "board:view": ((request: { level?: string; project?: string } | undefined) => service.board(request ?? {})) as Handler,
     "board:roots": ((request: { project?: string } | undefined) => service.boardRoots(request ?? {})) as Handler,
     "files:tree": ((request: { project?: string } | undefined) => service.filesTree(request)) as Handler,
+    "files:list": ((request: { project?: string; path: string }) => service.filesList(request)) as Handler,
     "files:hiddenReport": ((request: Parameters<typeof service.hiddenReport>[0]) => service.hiddenReport(request)) as Handler,
     "files:whyHidden": ((request: Parameters<typeof service.whyHidden>[0]) => service.whyHidden(request)) as Handler,
     "state:view": ((request: { stateId: string; project?: string }) =>

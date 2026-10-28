@@ -6,7 +6,8 @@
  * plus the phase-4 seam (a run parking on a human decision that only the UI
  * channel can answer).
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { execFileSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, resolve } from "node:path";
 import { setMaxListeners } from "node:events";
@@ -392,6 +393,24 @@ describe("sessions — one process, several projects", () => {
     // A stale address is an address, not a fault: the panel shows the root rather than nothing.
     const tree = service.filesTree({ project: join(tmpdir(), "never-opened") });
     expect(tree.roots.filter((r) => r.layer === "project").map((r) => r.project)).toEqual([dir]);
+  });
+
+  it("names what git ignores in the tree, and lists it a level at a time when it is opened", () => {
+    // 2026-10-27: the root's tree was 80 MB, 97% of it git-ignored, and a phone was killed holding it.
+    execFileSync("git", ["init", "-q", dir], { windowsHide: true });
+    writeFileSync(join(dir, ".gitignore"), "build/\n", "utf8");
+    mkdirSync(join(dir, "build", "cache"), { recursive: true });
+    writeFileSync(join(dir, "build", "cache", "blob"), "", "utf8");
+    writeFileSync(join(dir, "build", "out.bin"), "", "utf8");
+
+    const build = service.filesTree({ project: dir }).roots[0]!.nodes.find((n) => n.name === "build");
+    expect(build).toMatchObject({ ignored: true, unlisted: true, children: [] });
+    const listed = service.filesList({ project: dir, path: "build" });
+    expect(listed.map((n) => [n.path, n.ignored, n.unlisted])).toEqual([
+      ["build/cache", true, true],
+      ["build/out.bin", true, undefined],
+    ]);
+    expect(() => service.filesList({ project: join(tmpdir(), "never-opened"), path: "build" })).toThrow(/not an open project/);
   });
 
   it("lists every project's tasks as one recency-ordered list, each stamped with its project", async () => {

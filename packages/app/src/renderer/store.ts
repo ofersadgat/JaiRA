@@ -109,7 +109,7 @@ import {
   type ExecutorTarget,
 } from "./executorConfig";
 import { applyModelPatch, type ModelPatch } from "./modelsConfig";
-import type { FileSelection } from "./filesModel";
+import { unlistedOpen, withListing, type FileSelection } from "./filesModel";
 import type { EditorTab } from "./stateEditorModel";
 import {
   instanceAt,
@@ -161,9 +161,11 @@ import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./
 import {
   emptyUiState,
   forgetSeen,
+  OPENED,
   SHUT,
   toggleShut,
   toggleUnfolded,
+  unfoldedOf,
   withShut,
   withUnfolded,
   withMode,
@@ -1446,6 +1448,29 @@ export function useApp() {
       patch({ tree: null });
     }
   }, [patch]);
+
+  /**
+   * An unlisted folder (`FileNode.unlisted`: git ignores it) is listed when someone looks into it —
+   * opened in the tree, or stood in by the Files view — a level at a time, and afresh after every
+   * read of the tree, which brings it back unlisted. Nothing of it is kept but the tree on screen.
+   * A folder that cannot be listed (an engine from before `files:list`) shows as empty.
+   */
+  const listing = useRef(new Set<string>());
+  const openFolders = useMemo(() => unfoldedOf(state.settings.ui, OPENED.folders), [state.settings.ui]);
+  useEffect(() => {
+    for (const folder of unlistedOpen(state.tree, openFolders, state.dir)) {
+      const key = `${folder.project ?? folder.layer}:${folder.path}`;
+      if (listing.current.has(key)) continue;
+      listing.current.add(key);
+      void invoke("files:list", { ...(folder.project !== undefined ? { project: folder.project } : {}), path: folder.path })
+        .catch(() => [])
+        .then((children) => {
+          const tree = ref.current.tree;
+          if (tree !== null) patch({ tree: withListing(tree, folder, children) });
+        })
+        .finally(() => listing.current.delete(key));
+    }
+  }, [state.tree, openFolders, state.dir, patch]);
 
   /**
    * Every workflow root that can be started here — what the New-task picker offers.

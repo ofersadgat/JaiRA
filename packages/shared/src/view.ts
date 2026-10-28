@@ -735,6 +735,17 @@ export interface FileNode {
   error?: string;
   /** Lint state, joined from the workflow browser. Absent on a node nothing is known about. */
   lint?: FileLint;
+  /**
+   * Git ignores it (`.gitignore`, `.git/info/exclude`, the global excludes). It is named in the tree,
+   * but what an ignored folder holds is not: see {@link unlisted}.
+   */
+  ignored?: true;
+  /**
+   * A folder whose entries the tree does not carry — git ignores it — asked for when it is opened
+   * (`files:list`), one level at a time and kept nowhere. Its `children` are empty until then. The
+   * person, 2026-10-27: "Everything ignored by git should be lazy fetched for ui purposes."
+   */
+  unlisted?: true;
   children?: FileNode[];
 }
 

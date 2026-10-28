@@ -23,6 +23,8 @@ import {
   standingRoot,
   stateDraft,
   statePrefixOf,
+  unlistedOpen,
+  withListing,
   workflowsDirOf,
 } from "../src/renderer/filesModel";
 
@@ -240,5 +242,43 @@ describe("standingRoot", () => {
   it("is nothing at all with no tree, so the row's + can decline rather than guess", () => {
     expect(standingRoot(null, "/w/atlas")).toBeNull();
     expect(standingRoot({ roots: [] }, null)).toBeNull();
+  });
+});
+
+/**
+ * A folder git ignores comes unlisted (`FileNode.unlisted`) and is asked for when someone looks into it
+ * (the store's `files:list`): opened in the tree, or stood in by the Files view.
+ */
+describe("unlisted folders", () => {
+  const dirNode = (path: string, extra: Partial<FileNode> = {}): FileNode => ({ path, name: path.split("/").pop()!, kind: "directory", mime: "inode/directory", layer: "project", project: "/w/atlas", children: [], ...extra });
+  const tree: FileTree = {
+    roots: [
+      {
+        layer: "project",
+        project: "/w/atlas",
+        label: "atlas",
+        dir: "/w/atlas",
+        prefix: ".jaira",
+        exists: true,
+        nodes: [dirNode("build", { ignored: true, unlisted: true }), dirNode("src", { children: [dirNode("src/gen", { ignored: true, unlisted: true })] })],
+      },
+    ],
+  };
+
+  it("asks for the ones opened or stood in, and no others", () => {
+    expect(unlistedOpen(tree, new Set(), null)).toEqual([]);
+    expect(unlistedOpen(tree, new Set(["project:build", "project:src"]), null).map((n) => n.path)).toEqual(["build"]);
+    expect(unlistedOpen(tree, new Set(["project:src/gen"]), null).map((n) => n.path)).toEqual(["src/gen"]);
+    expect(unlistedOpen(tree, new Set(), { layer: "project", path: "src/gen" }).map((n) => n.path)).toEqual(["src/gen"]);
+  });
+
+  it("puts a listing in its place, listed now, and leaves the rest of the tree as it was", () => {
+    const listed = withListing(tree, tree.roots[0]!.nodes[1]!.children![0]!, [dirNode("src/gen/x", { ignored: true, unlisted: true })]);
+    const gen = listed.roots[0]!.nodes[1]!.children![0]!;
+    expect(gen.unlisted).toBeUndefined();
+    expect(gen.children?.map((n) => n.path)).toEqual(["src/gen/x"]);
+    expect(listed.roots[0]!.nodes[0]).toBe(tree.roots[0]!.nodes[0]);
+    // Nothing more to ask for once listed — what the store's effect relies on not to ask again.
+    expect(unlistedOpen(listed, new Set(["project:src/gen"]), null)).toEqual([]);
   });
 });

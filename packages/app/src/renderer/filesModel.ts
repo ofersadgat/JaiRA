@@ -730,6 +730,38 @@ export function nextHalf(at: HalfMode): HalfMode {
   return HALVES[(HALVES.indexOf(at) + 1) % HALVES.length]!;
 }
 
+/**
+ * The unlisted folders someone is looking into ({@link FileNode.unlisted}): opened in the tree — the
+ * fold key, `layer:path` — or the folder the Files view stands in. What `files:list` is asked for.
+ */
+export function unlistedOpen(tree: FileTree | null, open: ReadonlySet<string>, dir: { layer: WorkflowLayer; path: string } | null): FileNode[] {
+  const wanted: FileNode[] = [];
+  const visit = (nodes: readonly FileNode[]): void => {
+    for (const node of nodes) {
+      if (node.kind !== "directory") continue;
+      const looked = open.has(`${node.layer}:${node.path}`) || (dir !== null && dir.layer === node.layer && dir.path === node.path);
+      if (node.unlisted === true && looked) wanted.push(node);
+      if (node.children !== undefined) visit(node.children);
+    }
+  };
+  for (const root of tree?.roots ?? []) visit(root.nodes);
+  return wanted;
+}
+
+/** The tree with one unlisted folder's entries in it, as `files:list` answered: listed now. */
+export function withListing(tree: FileTree, folder: FileNode, children: FileNode[]): FileTree {
+  const same = (node: FileNode): boolean => node.layer === folder.layer && node.path === folder.path && node.project === folder.project;
+  const place = (nodes: FileNode[]): FileNode[] =>
+    nodes.map((node) => {
+      if (same(node)) {
+        const { unlisted: _listed, ...rest } = node;
+        return { ...rest, children };
+      }
+      return node.children !== undefined && folder.path.startsWith(`${node.path}/`) ? { ...node, children: place(node.children) } : node;
+    });
+  return { ...tree, roots: tree.roots.map((root) => (root.layer === folder.layer && root.project === folder.project ? { ...root, nodes: place(root.nodes) } : root)) };
+}
+
 /** What {@link FolderInspector} says about a folder: what it holds, and the root it is under. */
 export function folderFactsOf(tree: FileTree | null, layer: WorkflowLayer, path: string): { entries: FileNode[]; dirs: number; states: number; root: FileRoot | undefined } {
   const entries = entriesUnder(tree, layer, path);
