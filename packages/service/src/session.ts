@@ -232,6 +232,12 @@ export class ProjectSession {
    */
   readonly chatTurns = new Map<string, Set<AbortController>>();
   /**
+   * The same turns as promises that settle when each has ended — written down, permissions let go.
+   * Kept apart from {@link chatTurns} because a stop forgets the controllers at once, and a rewind,
+   * which stops them, must then wait for what they were still writing before it cuts.
+   */
+  readonly chatTurnEnds = new Map<string, Set<Promise<unknown>>>();
+  /**
    * What each turn and run in flight decides its calls under, by task — see {@link LivePermissions}.
    *
    * A SET per task for the reason {@link chatTurns} is one: more than one call can be in flight in a

@@ -100,18 +100,28 @@ export function partitionAt(events: readonly StoredEvent[], seq: number): Partit
   const droppedRecords = new Set<string>();
   /** The seq of each instance's newest `operation.started`, as the scan reaches it. */
   const lastStarted = new Map<string, number>();
+  /** Instances that had ENDED since their newest call started, before the cut. */
+  const endedBefore = new Set<string>();
   for (const row of events) {
     const inst = row.instanceId;
-    if (row.type === "operation.started" && inst !== undefined) lastStarted.set(inst, row.seq);
+    if (row.type === "operation.started" && inst !== undefined) {
+      lastStarted.set(inst, row.seq);
+      endedBefore.delete(inst);
+    }
     let keep: boolean;
-    if (row.seq < seq) keep = true;
-    else if (inst === undefined || doomed.has(inst)) keep = false;
+    if (row.seq < seq) {
+      keep = true;
+      if (row.type === "instance.terminated" && inst !== undefined) endedBefore.add(inst);
+    } else if (inst === undefined || doomed.has(inst)) keep = false;
     else {
       // A kept instance's event past the cut: only the settle of a call that had already started
       // survives — and the instance's own end, when that end is the settle's (a leaf finishing).
-      // A composite's end, a transition, a child entered, a turn typed: the machine moving, cut.
+      // A composite's end, a transition, a child entered, a turn typed: the machine moving, cut. So
+      // is an end for an instance that had ALREADY ended by the cut — a conversation's root, opened
+      // again as the parent of a run it started, and ended `canceled` by the stop a rewind makes:
+      // there is no call of it in flight for that end to settle.
       const started = lastStarted.get(inst);
-      const before = started !== undefined && started < seq;
+      const before = started !== undefined && started < seq && !endedBefore.has(inst);
       switch (row.type) {
         case "operation.dispatched":
         case "operation.completed":

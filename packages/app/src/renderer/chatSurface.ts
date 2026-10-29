@@ -22,6 +22,9 @@ import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import type { LiveTail } from "./transcript";
 
 /** What the Chat view needs from the shell. Assembled by {@link chatSurfaceOf}. */
+/** How a conversation's rewind ended: cut, put off because something still runs, or refused (why). */
+export type RewindOutcome = "done" | "busy" | { failure: string };
+
 export interface ChatSurface {
   /**
    * Every conversation this window can show — already filtered to the chat workflows.
@@ -119,8 +122,10 @@ export interface ChatSurface {
   /**
    * Cut the conversation before a message and carry on from there ("task:rewind"). `seq` is the
    * message's journal position (`ChatEditPoint.seq`). Confirmed in the banner before it is called.
+   * `stop` false stops nothing: while anything runs it answers `busy` and cuts nothing. Otherwise
+   * it answers `done`, or why it could not be done — the thread draws the refusal itself.
    */
-  onRewind: (taskId: string, seq: number, project?: string) => Promise<void>;
+  onRewind: (taskId: string, seq: number, project?: string, stop?: boolean) => Promise<RewindOutcome>;
   /** A second conversation sharing everything before `seq`, with `message` as its next turn ("task:fork"). */
   onFork: (taskId: string, seq: number, message: string, overrides?: ChatSettings, project?: string) => Promise<string | null>;
   /**

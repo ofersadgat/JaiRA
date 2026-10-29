@@ -8,13 +8,13 @@ import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObjec
 import type { ApprovalScope, ChatPlanView, ChatSettings, ChatThreadView, SessionTurn } from "@jaira/shared/browser";
 import { keepDraft, useKeptDraft } from "./composerDrafts";
 import { openingOf, titleOf } from "./chatWorkflow";
-import type { ChatSurface } from "./chatSurface";
+import type { ChatSurface, RewindOutcome } from "./chatSurface";
 import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import { useWaiting } from "./limitsStore";
 import { invoke, syncCache } from "./store";
 import { useView } from "./useView";
 import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from "./transcript";
-import { conversationAnswering, openingRunAnswering } from "./childRunModel";
+import { conversationAnswering, openingRunAnswering, stillRunningIn } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
 
 /**
@@ -24,10 +24,13 @@ import { askDrawnAtItsCall } from "./approvalCall";
  * nothing at all and deletes when the banner's button is pressed. One state rather than three,
  * because they share the banner above the box and the box itself, and only one can be meant.
  * `from` is the first turn a cut would take, which is what the transcript fades from.
+ *
+ * A rewind that is `waiting` was told to wait for what runs to finish, and is made once nothing does;
+ * one that is `busy` was answered busy by the engine although this window had not seen anything run.
  */
 export type Arming =
   | { kind: "edit"; at: string; was: string }
-  | { kind: "rewind"; seq: number; from: number; was: string; side: "before" | "after" }
+  | { kind: "rewind"; seq: number; from: number; was: string; side: "before" | "after"; waiting?: true; busy?: true }
   | { kind: "fork"; seq: number; from: number; was: string; side: "before" | "after" };
 
 /**
@@ -74,12 +77,29 @@ export function namedMessage(was: string): string {
   return `“${was.split("\n").find((line) => line.trim() !== "")?.trim().slice(0, 60) ?? ""}”`;
 }
 
-/** What the banner over the box says while something is armed — see {@link Arming}. */
-export function armingText(arming: Arming): string {
+/** What still runs in the conversation, said — what an armed rewind would wait for or stop. */
+export function runningText(running: { agent: boolean; workflow: boolean }): string | null {
+  if (running.agent && running.workflow) return "The agent and a workflow it started are still running";
+  if (running.agent) return "The agent is still answering";
+  if (running.workflow) return "A workflow it started is still running";
+  return null;
+}
+
+/**
+ * What the banner over the box says while something is armed — see {@link Arming}. `running` is what
+ * still runs, said by {@link runningText}: a rewind armed over it asks whether to wait or to stop.
+ */
+export function armingText(arming: Arming, running: string | null = null): string {
   if (arming.kind === "edit") return `Replacing ${namedMessage(arming.was)} — everything after it is left behind.`;
   if (arming.kind === "fork")
     return `Forking ${arming.side === "before" ? "before" : "after"} ${namedMessage(arming.was)} — your next message starts a new conversation from there. This one is not changed.`;
-  return `Rewind to ${arming.side === "before" ? "before" : ""} ${namedMessage(arming.was)} — the messages after it are deleted. This cannot be undone.`;
+  const where = arming.side === "before" ? `to before ${namedMessage(arming.was)}` : `to ${namedMessage(arming.was)}`;
+  if (arming.waiting === true) return `Rewinding ${where} once nothing is running here${running !== null ? ` — ${running.charAt(0).toLowerCase()}${running.slice(1)}` : ""}.`;
+  const what =
+    arming.side === "before"
+      ? `Rewind ${where} — it and everything after it are deleted, and it goes back in the box. This cannot be undone.`
+      : `Rewind ${where} — everything after it is deleted. This cannot be undone.`;
+  return running !== null ? `${what} ${running}: wait for it to finish, or stop it now.` : what;
 }
 
 /** What the empty box says: a reply, or what an armed edit or fork will send. */
@@ -531,15 +551,14 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       },
       cut: (turn: number) => cutAt(turn)?.side,
       /**
-       * ARMS a deletion: the transcript fades what would go and the banner asks. Nothing is typed
-       * for a rewind — the box empties so what is said next is said after the cut, not instead of
-       * anything — and nothing happens until the banner's button is pressed.
+       * ARMS a deletion: the transcript fades what would go and the banner asks, and nothing happens
+       * until the banner's button is pressed. The box is left as it is until then; see
+       * {@link confirmRewind} for what it holds after.
        */
       rewind: (turn: number, text: string) => {
         const cut = cutAt(turn);
         if (cut === undefined) return;
         setArming({ kind: "rewind", seq: cut.seq, from: cut.from, was: text, side: cut.side });
-        setDraft("");
       },
       /** Arms the box: the next message starts a new conversation that shares everything before the cut. */
       fork: (turn: number, text: string) => {
@@ -553,16 +572,66 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
   );
   /** What the transcript fades: everything from the cut an armed rewind would take. */
   const doomedFrom = arming?.kind === "rewind" ? arming.from : undefined;
-  const confirmRewind = (): void => {
-    if (arming?.kind !== "rewind") return;
-    const { seq } = arming;
-    setArming(null);
-    void surface.onRewind(taskId, seq, project).then(read);
+  /** What still runs here, as far as this window has heard — what the banner offers to wait for or stop. */
+  const stillRunning = stillRunningIn(surface.detail?.instances, running, surface.producing[taskId] ?? 0);
+  const runningNow = stillRunning.agent || stillRunning.workflow;
+  /**
+   * What a rewind's answer leaves. A cut BEFORE a message deletes the person's own words with it, so
+   * they come back into the box to be sent again, changed or not; a cut after a reply deletes only
+   * what came after it, and the box keeps what it held. A refusal is said under the box, and nothing
+   * moves. `busy` — the engine saw something run that this window had not yet — arms it again, now
+   * offering to wait or to stop.
+   */
+  const rewound = (armed: Extract<Arming, { kind: "rewind" }>, outcome: RewindOutcome): void => {
+    if (outcome === "busy") {
+      setArming((now) => (now === null || now === armed ? { ...armed, busy: true } : now));
+      return;
+    }
+    if (outcome !== "done") setError(outcome.failure);
+    else if (armed.side === "before") setDraft(armed.was);
+    setArming((now) => (now === armed ? null : now));
+    read();
   };
-  /** The banner's Cancel: nothing armed, and the box emptied of what the arming put there. */
-  const disarm = (): void => {
+  /**
+   * The banner's buttons. `now` (nothing seen running) and `stop` cut at once — `now` is answered
+   * busy rather than stopping anything, so a turn that began after the banner was drawn is not cut off
+   * by a press that never saw it; `wait` holds the rewind until nothing runs, and the effect below
+   * makes it then.
+   */
+  const confirmRewind = (how: "now" | "stop" | "wait"): void => {
+    if (arming?.kind !== "rewind") return;
+    const armed = arming;
+    setError(null);
+    if (how === "wait") {
+      setArming({ ...armed, waiting: true });
+      return;
+    }
     setArming(null);
-    setDraft("");
+    void surface.onRewind(taskId, armed.seq, project, how === "stop").then((outcome) => rewound(armed, outcome));
+  };
+  /**
+   * The rewind that waits, made once nothing runs. Asked of the engine without stopping anything, so
+   * a window a beat behind is answered `busy` and asks again a second later; one ask at a time.
+   * Cancel ends the wait; leaving the conversation ends it too, since it is held here.
+   */
+  const waitingFor = arming?.kind === "rewind" && arming.waiting === true ? arming : null;
+  const asking = useRef(false);
+  const [again, setAgain] = useState(0);
+  useEffect(() => {
+    if (waitingFor === null || runningNow || asking.current) return;
+    asking.current = true;
+    void surface.onRewind(taskId, waitingFor.seq, project, false).then((outcome) => {
+      asking.current = false;
+      if (outcome === "busy") setTimeout(() => setAgain((n) => n + 1), 1000);
+      else rewound(waitingFor, outcome);
+    });
+    // On what it waits for and whether anything runs; `surface` is rebuilt every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [waitingFor, runningNow, again, taskId, project]);
+  /** The banner's Cancel: nothing armed, and the box emptied of what an edit or a fork put there. */
+  const disarm = (): void => {
+    if (arming?.kind !== "rewind") setDraft("");
+    setArming(null);
   };
 
   /**
@@ -604,6 +673,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     draft,
     setDraft,
     arming,
+    /** What still runs, said — null when nothing does (and nothing was answered busy). */
+    runningSaid: runningText(stillRunning) ?? (arming?.kind === "rewind" && arming.busy === true ? "Something is still running here" : null),
     disarm,
     confirmRewind,
     send,

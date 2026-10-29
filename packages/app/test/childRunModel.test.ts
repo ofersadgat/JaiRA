@@ -17,6 +17,7 @@ import {
   scopedWaits,
   secondLine,
   stepsIn,
+  stillRunningIn,
   waitCountsByLevel,
   waitsOf,
   type RunWait,
@@ -72,6 +73,17 @@ describe("whether the conversation itself is answering", () => {
     expect(openingRunAnswering(instances, true)).toBe(false);
     expect(openingRunAnswering([{ ...root, operation: { kind: "prompt" as const, status: "running" as const } }], true)).toBe(true);
     expect(openingRunAnswering([node("r", "chat/session", "running")], true)).toBe(true);
+  });
+});
+
+describe("what still runs, for a rewind to wait for or stop", () => {
+  it("is the workflow while only a run it started holds the task, the agent while a turn runs, both together", () => {
+    expect(stillRunningIn(instances, true, 1)).toEqual({ agent: false, workflow: true });
+    const turn = node("chat:root", "chat/session", "running", [], { operation: { kind: "prompt", status: "running" } });
+    expect(stillRunningIn([{ ...root, children: [turn, feature] }], true, 1)).toEqual({ agent: true, workflow: true });
+    expect(stillRunningIn([node("r", "chat/session", "running")], true, 0)).toEqual({ agent: true, workflow: false });
+    expect(stillRunningIn([{ ...root, status: "completed" as const, children: [] }], false, 1)).toEqual({ agent: true, workflow: false });
+    expect(stillRunningIn([{ ...root, status: "completed" as const, children: [] }], false, 0)).toEqual({ agent: false, workflow: false });
   });
 });
 

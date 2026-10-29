@@ -117,13 +117,43 @@ describe("rewinding a run to before a state", () => {
     expect(service.taskDetail(taskId).runs[0]?.outcome).toBe("success");
   });
 
-  it("refuses while the task is running", async () => {
+  it("stops a task that is running here, then rewinds it", async () => {
     const { taskId } = service.createTask({ title: "Cut", workflow: ROOT });
     void service.startTask({ taskId });
     await until(() => service.pendingInteractions().some((p) => p.component === "confirm_action"), "the first question");
+    const asked = service.pendingInteractions().find((p) => p.component === "confirm_action")!.requestId;
     const first = ticks(taskId)[0]!;
-    await expect(service.rewindTask({ taskId, at: enteredAt(taskId, first) })).rejects.toThrow(/running/);
-    service.cancelTask(taskId);
+
+    await service.rewindTask({ taskId, at: enteredAt(taskId, first), interactions: { confirm_action: [{ confirmed: false }] } });
+    await until(() => service.taskDetail(taskId).status === "completed", "the resumed run to finish");
+    // The question that was parked went with the stop; the tick was entered again and answered.
+    expect(service.pendingInteractions().some((p) => p.requestId === asked)).toBe(false);
+    const after = ticks(taskId);
+    expect(after).toHaveLength(1);
+    expect(after[0]!.instanceId).not.toBe(first.instanceId);
+    expect(service.taskDetail(taskId).runs.at(-1)?.outcome).toBe("success");
+  });
+
+  it("without stopping, answers busy while the task runs and cuts nothing — then rewinds once it has ended", async () => {
+    const { taskId } = service.createTask({ title: "Cut", workflow: ROOT });
+    void service.startTask({ taskId });
+    await until(() => service.pendingInteractions().some((p) => p.component === "confirm_action"), "the first question");
+    const asked = service.pendingInteractions().find((p) => p.component === "confirm_action")!.requestId;
+    const first = ticks(taskId)[0]!;
+    const at = enteredAt(taskId, first);
+
+    expect(await service.rewindTask({ taskId, at, stop: false })).toEqual({ taskId, busy: true });
+    // Still asking the same question, from the same tick.
+    expect(service.taskDetail(taskId).status).toBe("running");
+    expect(service.pendingInteractions().some((p) => p.requestId === asked)).toBe(true);
+    expect(ticks(taskId)[0]!.instanceId).toBe(first.instanceId);
+
+    // Answered "no", the run ends — and the waited-for rewind is made then, asking it again.
+    service.submitInteraction(asked, { confirmed: false } as never);
+    await until(() => service.taskDetail(taskId).status === "completed", "the run to finish");
+    expect(await service.rewindTask({ taskId, at, stop: false, interactions: { confirm_action: [{ confirmed: false }] } })).toEqual({ taskId });
+    await until(() => service.taskDetail(taskId).status === "completed" && ticks(taskId)[0]?.instanceId !== first.instanceId, "the rewound run to finish");
+    expect(ticks(taskId)).toHaveLength(1);
   });
 });
 

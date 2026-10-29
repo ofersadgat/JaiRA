@@ -74,6 +74,14 @@ export function conversationAnswering(instances: readonly InstanceNode[] | undef
   return root !== undefined && root.children.some((child) => isOwnTurn(root, child) && (child.status === "running" || child.operation?.status === "running"));
 }
 
+/**
+ * What still runs in a conversation: the agent (its opening run or a turn), and a run it started.
+ * What an armed rewind offers to wait for or to stop — a rewind cuts both off.
+ */
+export function stillRunningIn(instances: readonly InstanceNode[] | undefined, running: boolean, producing: number): { agent: boolean; workflow: boolean } {
+  return { agent: conversationAnswering(instances, running, producing), workflow: running && !openingRunAnswering(instances, running) };
+}
+
 // --- waits --------------------------------------------------------------------------------------------
 
 /** One thing the conversation, or a run it started, waits on the person for. */

@@ -118,6 +118,27 @@ describe("what a cut keeps", () => {
     expect(part.kept.map((e) => e.seq)).toEqual([1, 2, 3, 4, 5, 6, 7]);
     expect([...part.droppedRecords].sort()).toEqual(["r-m1", "r-m2"]);
   });
+
+  it("drops a second end of an instance that had already ended — a conversation's root, stopped while a run it started waited", () => {
+    // The opening call ended the root; a turn later started a run under it, and the stop a rewind
+    // makes ended the root again, `canceled`, past the cut.
+    const events = [
+      stored(1, "instance.entered", "host"),
+      stored(2, "operation.started", "host"),
+      stored(3, "operation.completed", "host", { operationId: "r-host" }),
+      stored(4, "instance.terminated", "host", { outcome: "success" }),
+      stored(5, "instance.entered", "chat:host"),
+      stored(6, "operation.started", "chat:host"),
+      stored(7, "operation.completed", "chat:host", { operationId: "r-m1" }),
+      stored(8, "transition.taken", "host", { to: "feature" }),
+      stored(9, "instance.entered", "feature", { parentInstanceId: "host" }),
+      stored(10, "operation.started", "feature"),
+      stored(11, "instance.terminated", "feature", { outcome: "canceled" }),
+      stored(12, "instance.terminated", "host", { outcome: "canceled" }),
+    ];
+    const part = partitionAt(events, 5);
+    expect(part.kept.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
+  });
 });
 
 // --- the store's cut -------------------------------------------------------------------------

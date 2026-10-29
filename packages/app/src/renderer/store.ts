@@ -175,6 +175,7 @@ import {
   withSeenAll,
 } from "./uiState";
 import { noteFold } from "./shellFit";
+import type { RewindOutcome } from "./chatSurface";
 
 /** A prune plan or result, as `history:prune` returns it. */
 export type PruneReport = Response<"history:prune">;
@@ -3086,15 +3087,23 @@ export function useApp() {
           return null;
         }
       },
-      /** The Chat view's rewind: the conversation is cut before a message and stays the one being read. */
-      rewindConversation: async (taskId: string, seq: number, project?: string): Promise<void> => {
+      /**
+       * The Chat view's rewind: the conversation is cut before a message and stays the one being read.
+       * A refusal is ANSWERED rather than kept on `chat.error`, which only the start page draws — the
+       * thread says it under its own box. `stop` false is the rewind somebody waits for: `busy` while
+       * anything still runs, and nothing cut.
+       */
+      rewindConversation: async (taskId: string, seq: number, project?: string, stop?: boolean): Promise<RewindOutcome> => {
         patch({ chat: { ...ref.current.chat, busy: true, error: null } });
         try {
-          await invoke("task:rewind", { taskId, at: seq, ...(project !== undefined ? { project } : {}) });
+          const answer = await invoke("task:rewind", { taskId, at: seq, ...(stop === false ? { stop } : {}), ...(project !== undefined ? { project } : {}) });
           patch({ chat: { ...ref.current.chat, busy: false } });
+          if (answer.busy === true) return "busy";
           await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard(), refreshDetail(taskId, project)]);
+          return "done";
         } catch (e) {
-          patch({ chat: { ...ref.current.chat, busy: false, error: e instanceof Error ? e.message : String(e) } });
+          patch({ chat: { ...ref.current.chat, busy: false } });
+          return { failure: e instanceof Error ? e.message : String(e) };
         }
       },
       /**

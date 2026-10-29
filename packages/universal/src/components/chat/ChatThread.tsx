@@ -277,8 +277,10 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {m.arming !== null ? (
           <View
             flexDirection="row"
+            flexWrap="wrap"
             alignItems="center"
-            gap={8}
+            columnGap={8}
+            rowGap={4}
             width="100%"
             maxWidth={900}
             alignSelf="center"
@@ -288,17 +290,45 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             borderRadius={8}
             backgroundColor={t.mix(t.v(m.arming.kind === "rewind" ? "bad" : "accent"), 10, "transparent") as never}
           >
-            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: m.arming.kind === "rewind" ? "bad" : "dim" }} ellip flex={1} minWidth={0}>
-              {armingText(m.arming)}
+            {/* A rewind's words wrap: over something still running they say what, and what each button does. */}
+            <Txt
+              spec={{ voice: "app", scale: 12 / 12.5, color: m.arming.kind === "rewind" ? "bad" : "dim" }}
+              {...(m.arming.kind === "rewind" ? {} : { ellip: true })}
+              flexGrow={1}
+              flexShrink={1}
+              flexBasis={240}
+              minWidth={0}
+            >
+              {armingText(m.arming, m.arming.kind === "rewind" ? m.runningSaid : null)}
             </Txt>
-            <Press onPress={m.disarm} paddingVertical={3} paddingHorizontal={10} borderRadius={7} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
-              <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "text" }}>Cancel</Txt>
-            </Press>
-            {m.arming.kind === "rewind" ? (
-              <Press onPress={m.confirmRewind} paddingVertical={3} paddingHorizontal={10} borderRadius={7} backgroundColor={t.v("bad") as never}>
-                <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "panel" }}>Rewind</Txt>
+            <View flexDirection="row" alignItems="center" gap={8} marginLeft="auto">
+              <Press onPress={m.disarm} paddingVertical={3} paddingHorizontal={10} borderRadius={7} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+                <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "text" }}>Cancel</Txt>
               </Press>
-            ) : null}
+              {m.arming.kind !== "rewind" ? null : m.runningSaid === null && m.arming.waiting !== true ? (
+                <Press onPress={() => m.confirmRewind("now")} paddingVertical={3} paddingHorizontal={10} borderRadius={7} backgroundColor={t.v("bad") as never}>
+                  <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "panel" }}>Rewind</Txt>
+                </Press>
+              ) : (
+                <>
+                  {/* Waiting already, the wait is what Cancel ends; stopping is still on offer. */}
+                  {m.arming.waiting === true ? null : (
+                    <Press
+                      onPress={() => m.confirmRewind("wait")}
+                      paddingVertical={3}
+                      paddingHorizontal={10}
+                      borderRadius={7}
+                      box={({ hovered }) => ({ backgroundColor: t.mix(t.v("bad"), hovered ? 22 : 14, "transparent") as never })}
+                    >
+                      <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "bad" }}>Wait for agents to finish</Txt>
+                    </Press>
+                  )}
+                  <Press onPress={() => m.confirmRewind("stop")} paddingVertical={3} paddingHorizontal={10} borderRadius={7} backgroundColor={t.v("bad") as never}>
+                    <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "panel" }}>Stop agents</Txt>
+                  </Press>
+                </>
+              )}
+            </View>
           </View>
         ) : null}
         {m.error !== null ? <ChatError text={m.error} /> : null}

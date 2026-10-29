@@ -7211,6 +7211,12 @@ export class AppService {
     run: () => Promise<T>,
   ): Promise<T> {
     const release = this.holdPermissions(open, taskId, live);
+    // Settled as the LAST thing below, so whoever waits on it finds the turn wholly ended.
+    let settle!: () => void;
+    const ended = new Promise<void>((resolve) => (settle = resolve));
+    const ends = open.chatTurnEnds.get(taskId) ?? new Set<Promise<unknown>>();
+    ends.add(ended);
+    open.chatTurnEnds.set(taskId, ends);
     try {
       return await run();
     } finally {
@@ -7226,6 +7232,9 @@ export class AppService {
         open.questions.unseed(taskId);
         this.publishFor(open, { type: "chat:turnEnded", taskId });
       }
+      ends.delete(ended);
+      if (ends.size === 0 && open.chatTurnEnds.get(taskId) === ends) open.chatTurnEnds.delete(taskId);
+      settle();
     }
   }
 
@@ -7655,23 +7664,41 @@ export class AppService {
   /**
    * Delete everything past a point in a task's journal and carry on from there ("task:rewind").
    *
-   * The deletion is `cut.ts`'s; what this adds is the boundary a service owns. A running task is
-   * refused — here, and by the same test `deleteTask` makes for a run driven by another process —
-   * and a question parked on the task is dismissed, because it was asked by a state that no longer
-   * ran. Then the ordinary resume: the truncated journal loads exactly as a crash does, and the
-   * machine picks up at the cut.
+   * The deletion is `cut.ts`'s; what this adds is the boundary a service owns. A rewind is a person
+   * taking the work back, so what runs HERE is stopped first and waited out — the run (a conversation
+   * holds one whenever it started a workflow, parked on a question or not) and every turn in flight —
+   * and only a run another process drives is refused, by the same test `deleteTask` makes. A question
+   * parked on the task is dismissed, because it was asked by a state that no longer ran. Then the
+   * ordinary resume: the truncated journal loads exactly as a crash does, and the machine picks up at
+   * the cut.
+   *
+   * With `stop: false` nothing is stopped: while anything runs here the answer is `busy` and nothing
+   * is cut. That is the rewind a person chose to WAIT for — the window asks again once the task is
+   * idle, and a turn that began in between is not cut off by a press made before it.
    */
   async rewindTask(request: {
     taskId: string;
     at: number;
     project?: string;
+    stop?: boolean;
     interactions?: Record<string, JsonValue[]>;
     fake?: JsonValue;
-  }): Promise<{ taskId: string }> {
+  }): Promise<{ taskId: string; busy?: true }> {
     const session = this.session(request.project);
     const { taskId } = request;
-    if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
-      throw this.refusal("run", `task '${taskId}' is running — stop it before rewinding it`);
+    const live = session.live.get(taskId);
+    if (live === undefined && session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
+      throw this.refusal("run", `task '${taskId}' is running in another process — stop it there before rewinding it`);
+    }
+    const turns = [...(session.chatTurnEnds.get(taskId) ?? [])];
+    if (request.stop === false && (live !== undefined || turns.length > 0)) return { taskId, busy: true };
+    if (live !== undefined) {
+      this.cancelTaskIn(session, taskId);
+      await live.done;
+    }
+    if (turns.length > 0) {
+      this.cancelChatTurn({ taskId, ...(request.project !== undefined ? { project: request.project } : {}) });
+      await Promise.all(turns);
     }
     const before = session.project.runtime.get(taskId);
     if (before === undefined) throw this.refusal("run", `unknown task '${taskId}'`);
@@ -8525,19 +8552,14 @@ export class AppService {
    * "ANSWER IT YOURSELF" ("task:answerYourself") — take back an answer the conversation gave.
    *
    * A rewind to the `jaira.answered` row and nothing more: the cut deletes the answer and the
-   * completion that followed it, and the state dispatches its gate again. What a service adds is the
-   * order — a fast-forward still running is stopped first (a rewind refuses a running task), and the
-   * mode is over: the person has taken the work back, and the questions after this one are theirs.
+   * completion that followed it, and the state dispatches its gate again. What this adds is that the
+   * mode is over — the person has taken the work back, and the questions after this one are theirs;
+   * the fast-forward still running is stopped by the rewind, as anything running is.
    */
   async answerYourself(request: { taskId: string; at: number; project?: string; interactions?: Record<string, JsonValue[]>; fake?: JsonValue }): Promise<{ taskId: string }> {
     const open = this.session(request.project);
     const { taskId } = request;
     this.endFastForward(open, taskId, "stopped", "a person took an answer back");
-    const live = open.live.get(taskId);
-    if (live !== undefined) {
-      this.cancelTaskIn(open, taskId);
-      await live.done;
-    }
     return this.rewindTask({
       taskId,
       at: request.at,

@@ -1668,11 +1668,13 @@ export interface IpcContract {
    * state's entry or a transition (`ConversationTurn.seq`). Every instance entered before the point
    * keeps everything it did; everything entered at or after it goes, with its conversations, and the
    * task resumes through the ordinary load — a parent whose child was cut advances again, a state
-   * whose answer was cut asks again. Refused while the task runs. Nothing comes back.
+   * whose answer was cut asks again. What runs in this process — the run, a turn in flight — is
+   * stopped first and waited out; a run another process drives is refused. With `stop: false` nothing
+   * is stopped: while anything runs the answer is `busy`, and nothing is cut.
    */
   "task:rewind": {
-    request: { taskId: string; at: number; project?: ProjectRef; interactions?: Record<string, JsonValue[]>; fake?: JsonValue };
-    response: { taskId: string };
+    request: { taskId: string; at: number; project?: ProjectRef; stop?: boolean; interactions?: Record<string, JsonValue[]>; fake?: JsonValue };
+    response: { taskId: string; busy?: true };
   };
   /**
    * A second task that shares everything up to a point — a COPY of what a rewind at `at` would

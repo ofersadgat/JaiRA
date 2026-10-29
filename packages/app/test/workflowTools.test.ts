@@ -291,6 +291,27 @@ describe("start_task", () => {
     expect(movedRows(session)).toEqual([{ type: MOVED_EVENT, tool: "start_task", task: session, outcome: { verb: "entered", standsAt: (done as { key: string }).key }, toolCallId: "toolu_start" }]);
   });
 
+  it("is taken back by a REWIND to before the message that started it: the run is stopped, cut, and the conversation stands as it did", async () => {
+    const session = await conversation("chat/session");
+    const instanceId = rootInstanceOf(session);
+    await service.sendChatMessage({ taskId: session, instanceId, message: "start the gate", fake: [{ output: "starting it." }] as unknown as JsonValue });
+    await call(session, "start_task", { state: "lib/done" });
+    const gate = await parked();
+    // The conversation HOLDS the run while it waits on the person — what made a rewind refuse it.
+    expect(statusOf(session)).toBe("running");
+
+    const point = service.chatThread({ taskId: session })!.points.at(-1)!;
+    await service.rewindTask({ taskId: session, at: point.seq! });
+    const thread = service.chatThread({ taskId: session })!;
+    expect(thread.session.turns.map((turn) => turn.text)).toEqual(["let's work on this", "right."]);
+    expect(statusOf(session)).toBe("completed");
+    expect(service.pendingInteractions().some((p) => p.requestId === gate.requestId)).toBe(false);
+    expect(movedRows(session)).toEqual([]);
+    // …and it takes a message again.
+    await service.sendChatMessage({ taskId: session, instanceId: thread.instanceId, message: "something else", fake: [{ output: "sure." }] as unknown as JsonValue });
+    expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual(["let's work on this", "right.", "something else", "sure."]);
+  });
+
   it("dispatches no second model call of its own: what it starts is a CHILD, not another turn", async () => {
     const session = await conversation("chat/session");
     const opening = prompts(session);
