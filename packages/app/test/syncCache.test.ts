@@ -275,6 +275,28 @@ describe("views about no one task", () => {
     expect(reads("board:roots")).toBe(before.board + 1);
   });
 
+  it("are read again when the workflow files change — every board held, and nothing else", async () => {
+    const e = engine(() => ({}));
+    e.answerSince(() => page(10, [], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("store", [
+      ["board:roots", { project: "/a" }],
+      ["board:view", { level: "feature", project: "/b" }],
+      ["approval:pending", undefined],
+    ]);
+    await settle();
+    const reads = (channel: string): number => e.asked.filter((a) => a.channel === channel).length;
+    const before = { roots: reads("board:roots"), view: reads("board:view"), approvals: reads("approval:pending") };
+    // A workflow switched off writes a file, and no page says so: its columns are read from the files.
+    await new Promise((r) => setTimeout(r, 600));
+    cache.filesChanged();
+    await settle();
+    expect(reads("board:roots")).toBe(before.roots + 1);
+    expect(reads("board:view")).toBe(before.view + 1);
+    expect(reads("approval:pending")).toBe(before.approvals);
+  });
+
   it("include the settings pages', each read again only for its own kind of change (group 7)", async () => {
     const e = engine(() => ({}));
     e.answerSince(() => page(10, [], { whole: true }));

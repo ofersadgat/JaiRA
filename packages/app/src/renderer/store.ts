@@ -2404,6 +2404,7 @@ export function useApp() {
             void refreshTaskState(ref.current.taskWorkflow);
           }
           if (message.scope === "workflows") {
+            store.filesChanged();
             void refreshTree();
             void refreshState(ref.current.stateId);
             void refreshWorkflows();

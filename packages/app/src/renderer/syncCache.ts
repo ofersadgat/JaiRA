@@ -173,6 +173,13 @@ const SHOWS: Partial<Record<string, readonly string[]>> = {
   "licenses:read": [],
 };
 
+/**
+ * Views drawn in part from the workflow files, which the change log does not carry: a board's columns
+ * are its workflows, with their labels and which are disabled (decision 0021). Read again when the
+ * files change ({@link SyncCache.filesChanged}).
+ */
+const FROM_FILES = new Set<string>(["board:roots", "board:view"]);
+
 /** Views whose answer never changes once had — a placeholder's string, by its hash: never read again. */
 const IMMUTABLE = new Set<string>(["lazy:value"]);
 
@@ -385,6 +392,18 @@ export class SyncCache {
       else entry.stale = true;
     }
     this.bump();
+  }
+
+  /**
+   * The workflow files changed on disk (an engine's `workflows` invalidation): every held view drawn
+   * from them is read again — now if held live, else when next it is.
+   */
+  filesChanged(): void {
+    for (const [key, entry] of this.entries) {
+      if (!FROM_FILES.has(entry.channel) || !this.isHeld(entry)) continue;
+      if (this.isLive(entry)) this.readForChange(key, entry);
+      else entry.stale = true;
+    }
   }
 
   /** What is known of one view, reading it first if nothing has. Does not hold it. */

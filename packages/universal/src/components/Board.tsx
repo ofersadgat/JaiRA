@@ -330,7 +330,7 @@ export function Board({
       look={look}
       index={index}
       name={column.label ?? column.key}
-      {...(column.disabledBy !== undefined ? { badge: <DisabledChip stateId={column.stateId} by={column.disabledBy} /> } : {})}
+      {...(column.disabledBy !== undefined ? { disabled: true, badge: <DisabledChip stateId={column.stateId} by={column.disabledBy} /> } : {})}
       {...(numbered ? { seq: index + 1 } : {})}
       count={column.cards.filter((card) => card.status !== "archived").length}
       empty="—"
@@ -757,6 +757,7 @@ export function Column({
   index,
   name,
   badge,
+  disabled = false,
   seq,
   count,
   empty,
@@ -779,6 +780,11 @@ export function Column({
   name: ReactNode;
   /** A mark beside the name — a disabled workflow's chip (decision 0021). */
   badge?: ReactNode;
+  /**
+   * A disabled workflow's column (decision 0021): drawn at the opacity of a disabled control, its
+   * cards with it — except while a dragged card is over it, so the refusal it shows reads in full.
+   */
+  disabled?: boolean;
   seq?: number;
   count: number;
   empty: string;
@@ -822,6 +828,7 @@ export function Column({
     borderStyle: s.column.style,
     borderColor: s.column.border,
     borderRadius: s.column.radius,
+    ...(disabled && !over ? { opacity: 0.55 } : {}),
   } as const;
   const head = (
     <View
