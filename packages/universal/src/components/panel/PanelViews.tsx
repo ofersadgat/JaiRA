@@ -6,6 +6,7 @@ import { countOf, durationWords, previewOf, runMetricsOf, valueRowsOf } from "@j
 import { invoke } from "@jaira/ui/store";
 import { Press, Txt, edge, lengthToken, type FontSpec } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { PublishedList } from "./PublishedList";
 
 /**
  * The panel's small shared pieces and the tabs made only of them: a heading over one card of rows
@@ -321,10 +322,13 @@ export function ProducedView({ taskId, project, signal, onShow }: { taskId: stri
     };
   }, [selected, taskId, project]);
   if (list === undefined) return <PanelEmpty>Reading what it produced…</PanelEmpty>;
-  if (list.length === 0) return <PanelEmpty>Nothing produced yet.</PanelEmpty>;
+  if (list.length === 0) return <PublishedList taskId={taskId} project={project} signal={signal} empty={<PanelEmpty>Nothing produced yet.</PanelEmpty>} />;
+  const published = <PublishedList taskId={taskId} project={project} signal={signal} />;
   const shown = list.find((row) => row.path === selected);
   return (
     <>
+      {/* What Claude published (decision 0020): each artifact once, at its latest version. */}
+      {published}
       <PanelSection title="Produced" action={<SectionCount>{list.length}</SectionCount>}>
         {list.map((row) => (
           <PanelRow

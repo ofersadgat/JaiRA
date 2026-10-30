@@ -173,7 +173,18 @@ export type RowTone = "plain" | "muted" | "warn" | "bad";
 export type RowMark = "ok" | "bad" | "waiting" | "cut" | "denied";
 
 /** What goes under a call's line without being asked for (`Tool`'s `shown`), by kind. */
-export type ToolShown = "sidechain" | "outcome" | "asked" | "published" | "produced" | "picture" | "output" | undefined;
+export type ToolShown = "sidechain" | "outcome" | "asked" | "published" | "publishedList" | "produced" | "picture" | "output" | undefined;
+
+/**
+ * Whether a call LISTED the task's published artifacts (`show_artifact`'s `action: "list"`): drawn as the
+ * same list the side panel shows (decision 0020 §3). Under any of the tool's names, as an agent reaches it.
+ */
+export function listedPublished(entry: ToolEntry): boolean {
+  if (entry.name !== "show_artifact" && !entry.name.endsWith("__show_artifact")) return false;
+  if (entry.ok === false) return false;
+  const args = entry.args;
+  return args !== null && typeof args === "object" && !Array.isArray(args) && (args as Record<string, JsonValue>)["action"] === "list" && !("type" in (args as object));
+}
 
 /** A published artifact, as `show_artifact` names it in what it returns (decision 0020): which one, and at which version. */
 export interface PublishedRef {
@@ -336,6 +347,8 @@ export function toolLineOf(
           ? "asked"
           : publishedOf(entry.result) !== undefined
             ? "published"
+          : listedPublished(entry)
+            ? "publishedList"
           : producedArtifact(entry.result) !== undefined
             ? "produced"
             : pictureOf(entry.result) !== undefined

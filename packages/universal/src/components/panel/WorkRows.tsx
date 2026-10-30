@@ -24,6 +24,7 @@ import { Icon } from "./Icon";
 import { OutcomeHostContext } from "./outcomeHost";
 import { ValueView } from "./ValueView";
 import { PublishedView } from "./PublishedView";
+import { PublishedList } from "./PublishedList";
 import { Media } from "./ValueReadings";
 
 /**
@@ -285,6 +286,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
       );
     }
     if (line.shown === "published") return <PublishedView published={publishedOf(entry.result)!} artifacts={artifacts} />;
+    if (line.shown === "publishedList") return artifacts?.taskId !== undefined ? <PublishedList taskId={artifacts.taskId} project={artifacts.project} artifacts={artifacts} /> : undefined;
     if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;
     // A screenshot, a picture off the clipboard (decision 0019): what the agent saw, drawn as it saw it.
     if (line.shown === "picture") return <Media src={pictureOf(entry.result)!} kind="image" />;

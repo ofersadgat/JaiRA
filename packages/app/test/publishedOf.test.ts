@@ -25,6 +25,12 @@ describe("publishedOf", () => {
 
   it("is what a show_artifact line shows unasked", () => {
     const entry = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { action: "publish" }, result } as unknown as ToolEntry;
-    expect(toolLineOf(entry).shown).toBe("published");
+    expect(toolLineOf(entry, false, false).shown).toBe("published");
+  });
+
+  it("draws a call that listed the task's artifacts as the list, and a list of the Design System type as nothing", () => {
+    const listed = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { action: "list" }, result: { answer: "- Video picker (mine) — canvas" } } as unknown as ToolEntry;
+    expect(toolLineOf(listed, false, false).shown).toBe("publishedList");
+    expect(toolLineOf({ ...listed, args: { action: "list", type: "Design System" } } as ToolEntry, false, false).shown).toBeUndefined();
   });
 });
