@@ -16,6 +16,7 @@
   "git ls-tree": "allow",
   "git describe": "allow",
   "git grep": "allow",
+  "git worktree list": "allow",
   "git diff --output": "deny",
   "git diff --ext-diff": "deny",
   "git diff --no-index": "deny",

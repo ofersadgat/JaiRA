@@ -58,10 +58,10 @@ describe("what the shipped chat/read-only lets through", () => {
   });
 
   it("lets the commands that only read through, and nothing that writes", () => {
-    for (const line of ["git status", "git diff HEAD~1", "git log --oneline -n 5", "git show HEAD:a.ts", "cat a.ts | wc -l", "npx vitest run a.test.ts", "tsc --noEmit -p .", "git grep -c TODO", "git log -c"]) {
+    for (const line of ["git status", "git diff HEAD~1", "git log --oneline -n 5", "git show HEAD:a.ts", "cat a.ts | wc -l", "npx vitest run a.test.ts", "tsc --noEmit -p .", "git grep -c TODO", "git log -c", "git worktree list", "git worktree list --porcelain"]) {
       expect(bash(line), line).toBe(true);
     }
-    for (const line of ["git push", "git commit -m x", "rm a.ts", "npm install", "vitest run -u", "eslint --fix .", "prettier --check --write .", "tsc -p ."]) {
+    for (const line of ["git push", "git commit -m x", "rm a.ts", "npm install", "vitest run -u", "eslint --fix .", "prettier --check --write .", "tsc -p .", "git worktree add ../x", "git worktree remove x", "git worktree prune"]) {
       expect(bash(line), line).toBe(false);
     }
   });
@@ -77,6 +77,7 @@ describe("what the shipped chat/read-only lets through", () => {
       "$files = Get-ChildItem *.md; $files.Count",
       "npx vitest run a.test.ts 2>&1 | Select-Object -Last 20",
       "[IO.Path]::Combine('a', 'b'); 'x'.ToUpper()",
+      String.raw`Test-Path C:\a; if (Test-Path C:\a) { git -C C:\a log --oneline -3; Select-String -Path C:\a\b.ts -Pattern "version: \d+" | Select-Object -Last 2 | ForEach-Object Line }; git worktree list`,
     ]) {
       expect(powershell(line), line).toBe(true);
     }
