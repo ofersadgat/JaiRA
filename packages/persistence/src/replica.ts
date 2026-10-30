@@ -54,6 +54,8 @@ export interface TaskBundle {
   sessions: Row[];
   sessionNames: Row[];
   artifacts: Row[];
+  /** Decision 0020: every publish of the task's artifacts. */
+  artifactVersions: Row[];
   commands: Row[];
   interactions: Row[];
   /** Every blob the records name. */
@@ -85,7 +87,8 @@ export function taskVersion(project: Project, taskId: string): string {
          (SELECT COUNT(*) || ':' || COALESCE(SUM(LENGTH(result_json)), 0) || ':' || COALESCE(MAX(COALESCE(ended_at, started_at)), 0)
                  || ':' || COALESCE(SUM(status = 'open'), 0) FROM operation_records WHERE task_id = :t) AS records,
          (SELECT COUNT(*) FROM pending_interactions WHERE task_id = :t) AS gates,
-         (SELECT COUNT(*) || ':' || COALESCE(MAX(created_at), 0) FROM artifacts WHERE task_id = :t) AS artifacts,
+         (SELECT COUNT(*) || ':' || COALESCE(MAX(created_at), 0) FROM artifacts WHERE task_id = :t)
+                 || '+' || (SELECT COUNT(*) FROM artifact_versions WHERE task_id = :t) AS artifacts,
          (SELECT COUNT(*) FROM session_names WHERE task_id = :t) AS names`,
     )
     .get({ t: taskId }) as Record<string, string | number | null>;
@@ -156,6 +159,7 @@ export function exportTask(project: Project, taskId: string, known?: ReplicaKnow
     sessions,
     sessionNames: rows(db, "session_names", "task_id = ?", [taskId]),
     artifacts: rows(db, "artifacts", "task_id = ?", [taskId]).map(({ id: _id, ...rest }) => rest),
+    artifactVersions: rows(db, "artifact_versions", "task_id = ?", [taskId]),
     commands: rows(db, "command_log", "task_id = ?", [taskId]).map(({ id: _id, ...rest }) => rest),
     interactions: rows(db, "pending_interactions", "task_id = ?", [taskId]),
     blobs: [...blobs],
@@ -352,6 +356,9 @@ export function importTask(db: JairaDb, workspace: string, bundle: TaskBundle, b
     for (const row of bundle.sessionNames) insert(db, "session_names", row);
     db.prepare(`DELETE FROM main.artifacts WHERE task_id = ?`).run(id);
     for (const row of bundle.artifacts) insert(db, "artifacts", row);
+    db.prepare(`DELETE FROM main.artifact_versions WHERE task_id = ?`).run(id);
+    // `?? []`: an owner running a JaiRA from before decision 0020 sends no versions, and speaks the same protocol.
+    for (const row of bundle.artifactVersions ?? []) insert(db, "artifact_versions", row);
     db.prepare(`DELETE FROM main.pending_interactions WHERE task_id = ?`).run(id);
     for (const row of bundle.interactions) insert(db, "pending_interactions", row);
 
@@ -379,7 +386,7 @@ export function removeReplicaTask(db: JairaDb, workspace: string, taskId: string
     db.pragma("defer_foreign_keys = ON");
     releaseRecords(db, taskId);
     db.prepare(`DELETE FROM replica_seqs WHERE workspace = ? AND local_seq IN (SELECT seq FROM main.state_machine_events WHERE task_id = ?)`).run(workspace, taskId);
-    for (const table of ["state_machine_events", "operation_records", "session_names", "artifacts", "command_log", "pending_interactions", "task_runtime"]) {
+    for (const table of ["state_machine_events", "operation_records", "session_names", "artifacts", "artifact_versions", "command_log", "pending_interactions", "task_runtime"]) {
       db.prepare(`DELETE FROM main."${table}" WHERE task_id = ?`).run(taskId);
     }
     db.prepare(`DELETE FROM replica_versions WHERE workspace = ? AND task_id = ?`).run(workspace, taskId);

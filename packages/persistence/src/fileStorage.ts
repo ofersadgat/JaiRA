@@ -44,7 +44,7 @@ export const CONCERN_TABLES: Record<JairaStorageConcern, readonly string[]> = {
   journal: ["state_machine_events"],
   conversations: ["operation_records", "sessions", "session_names"],
   tasks: ["task_runtime"],
-  artifacts: ["artifacts"],
+  artifacts: ["artifacts", "artifact_versions"],
 };
 
 /** Whether a mode keeps the concern in files too. `"both"`, retired, is read as `"file"`. */

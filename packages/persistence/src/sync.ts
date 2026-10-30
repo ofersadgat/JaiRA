@@ -39,6 +39,7 @@ const TRACKED: readonly Tracked[] = [
   { table: "operation_records", collection: "record", id: "R.id", task: "R.task_id" },
   { table: "pending_interactions", collection: "gate", id: "R.request_id", task: "R.task_id" },
   { table: "artifacts", collection: "artifact", id: "CAST(R.id AS TEXT)", task: "R.task_id" },
+  { table: "artifact_versions", collection: "artifactVersion", id: "R.task_id || '/' || R.artifact || '/' || CAST(R.version AS TEXT)", task: "R.task_id" },
   { table: "session_names", collection: "sessionName", id: "R.task_id || '/' || R.name", task: "NULLIF(R.task_id, '')" },
   { table: "sessions", collection: "session", id: "R.id", task: "NULL" },
   { table: "remote_handles", collection: "remote", id: "R.task_id || '/' || R.key", task: "R.task_id" },
@@ -79,6 +80,24 @@ CREATE TABLE IF NOT EXISTS drafts (
   task_id    TEXT,
   text       TEXT NOT NULL,
   updated_at INTEGER NOT NULL
+);
+-- Every publish of an artifact (decision 0020): made here, as drafts is, because its trigger below needs it.
+-- A row holds what that version changed (changes_json: path to text, or null for a file it removed).
+CREATE TABLE IF NOT EXISTS artifact_versions (
+  task_id           TEXT NOT NULL,
+  artifact          TEXT NOT NULL,
+  version           INTEGER NOT NULL,
+  author            TEXT NOT NULL CHECK (author IN ('model', 'person')),
+  kind              TEXT NOT NULL CHECK (kind IN ('page', 'markdown', 'canvas')),
+  type              TEXT,
+  title             TEXT,
+  icon              TEXT,
+  entry             TEXT NOT NULL,
+  changes_json      TEXT NOT NULL,
+  capabilities_json TEXT,
+  record_id         TEXT,
+  created_at        INTEGER NOT NULL,
+  PRIMARY KEY (task_id, artifact, version)
 );
 CREATE TABLE IF NOT EXISTS sync_changes (
   collection TEXT NOT NULL,

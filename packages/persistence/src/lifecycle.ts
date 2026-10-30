@@ -506,6 +506,7 @@ export function deleteTask(project: Project, taskId: string): void {
     project.db.prepare(`DELETE FROM operation_records WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM session_names WHERE task_id = ?`).run(taskId);
     project.db.prepare(`DELETE FROM artifacts WHERE task_id = ?`).run(taskId);
+    project.db.prepare(`DELETE FROM artifact_versions WHERE task_id = ?`).run(taskId);
     // A gate outlives the process that parked it, so it also has to leave with its task — otherwise
     // the strip goes on offering a question about a task that is no longer there to answer it.
     project.db.prepare(`DELETE FROM pending_interactions WHERE task_id = ?`).run(taskId);

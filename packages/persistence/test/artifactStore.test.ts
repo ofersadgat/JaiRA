@@ -10,7 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ArtifactRecord } from "@jaira/runtime";
-import { createReadFileTool, createWriteFileTool, parseDestination } from "@jaira/runtime";
+import { createReadFileTool, createWriteFileTool, filesAt, parseDestination } from "@jaira/runtime";
 import { testHome } from "@jaira/testing";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { initProject, openProject, type Project } from "../src/project";
@@ -115,5 +115,56 @@ describe("the tools against the durable store", () => {
     const read: Tool = createReadFileTool({ ...options, store: project.artifacts });
 
     expect(await read.run({ path: "docs/plan.md" } as never, ctx)).toMatchObject({ content: "# the plan" });
+  });
+});
+
+describe("published versions (decision 0020)", () => {
+  const publish = (artifact: string, changes: Record<string, string | null>, over: Record<string, unknown> = {}) =>
+    project.artifacts.publish({
+      taskId: "t-1",
+      artifact,
+      author: "model",
+      kind: "canvas",
+      type: "design",
+      title: "Video picker",
+      entry: "project/canvas.json",
+      changes,
+      createdAt: 1_000,
+      ...over,
+    });
+
+  it("numbers each publish of an artifact, and keeps what it changed", () => {
+    expect(publish("a-1", { "project/canvas.json": "{}", "project/Main.dc.html": "<x-dc>A</x-dc>" }).version).toBe(1);
+    expect(publish("a-1", { "project/Tabs.dc.html": "<x-dc>B</x-dc>" }, { author: "person" }).version).toBe(2);
+    expect(project.artifacts.versions("t-1", "a-1").map((v) => [v.version, v.author])).toEqual([
+      [1, "model"],
+      [2, "person"],
+    ]);
+  });
+
+  it("folds the changes into what the artifact holds at a version — a later one keeps what it did not send, and null removes", () => {
+    publish("a-1", { "project/canvas.json": "{}", "project/Main.dc.html": "A" });
+    publish("a-1", { "project/Main.dc.html": "A2", "project/Tabs.dc.html": "B" });
+    publish("a-1", { "project/Tabs.dc.html": null });
+    expect(filesAt(project.artifacts, "t-1", "a-1", 2)).toEqual({ "project/canvas.json": "{}", "project/Main.dc.html": "A2", "project/Tabs.dc.html": "B" });
+    expect(filesAt(project.artifacts, "t-1", "a-1")).toEqual({ "project/canvas.json": "{}", "project/Main.dc.html": "A2" });
+  });
+
+  it("lists each artifact of a task once, at its latest version, in the order they were first published", () => {
+    publish("a-2", { "chart.html": "<p>1</p>" }, { kind: "page", entry: "chart.html", createdAt: 500 });
+    publish("a-1", { "project/canvas.json": "{}" }, { createdAt: 900 });
+    publish("a-2", { "chart.html": "<p>2</p>" }, { kind: "page", entry: "chart.html", createdAt: 1_500 });
+    expect(project.artifacts.latest("t-1").map((v) => [v.artifact, v.version])).toEqual([
+      ["a-2", 2],
+      ["a-1", 1],
+    ]);
+    expect(project.artifacts.latest("t-other")).toEqual([]);
+  });
+
+  it("round-trips every field, and survives a reopen", () => {
+    const written = publish("a-1", { "x.html": "<p/>" }, { kind: "page", entry: "x.html", icon: "chart", capabilities: { downloads: {} }, recordId: "r-1" });
+    project.close();
+    project = openProject(dir, { baseDir: testHome() });
+    expect(project.artifacts.versions("t-1", "a-1")).toEqual([written]);
   });
 });

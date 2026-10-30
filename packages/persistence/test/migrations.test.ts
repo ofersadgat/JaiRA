@@ -78,3 +78,25 @@ describe("step 30", () => {
     fresh.close();
   });
 });
+
+describe("step 31 (decision 0020)", () => {
+  it("adds the artifact versions and their change-log triggers to a database at 30, and runs again harmlessly", () => {
+    // A database at 30 is this schema without the table: made fresh, then put back.
+    const db = openDb(join(dir, "jaira.db"));
+    db.exec(`DROP TABLE artifact_versions`);
+    db.pragma(`user_version = 30`);
+    const step = MIGRATIONS.filter((m) => m.version === 31);
+    expect(migrate(db, step)).toBe(31);
+    db.prepare(
+      `INSERT INTO artifact_versions (task_id, artifact, version, author, kind, entry, changes_json, created_at) VALUES ('t-1', 'a-1', 1, 'model', 'page', 'a.html', '{}', 1)`,
+    ).run();
+    expect(db.prepare(`SELECT collection, id, task_id FROM sync_changes WHERE collection = 'artifactVersion'`).get()).toEqual({
+      collection: "artifactVersion",
+      id: "t-1/a-1/1",
+      task_id: "t-1",
+    });
+    db.pragma(`user_version = 30`);
+    expect(() => migrate(db, step)).not.toThrow();
+    db.close();
+  });
+});

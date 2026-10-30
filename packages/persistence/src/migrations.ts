@@ -108,6 +108,11 @@ UPDATE event_waits SET name = CASE name
       if (!columns.has("host_key")) db.exec(`ALTER TABLE jobs ADD COLUMN host_key TEXT`);
     },
   },
+  {
+    version: 31,
+    note: "decision 0020: every publish of an artifact is a version (artifact_versions), and a canvas is one artifact of many files",
+    sql: SYNC_SQL,
+  },
 ];
 
 /**

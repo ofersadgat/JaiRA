@@ -9,7 +9,7 @@
  * the state that wrote it; a later state, a later run, and the artifacts panel all
  * need the same answer, and "where did that file go" must survive a restart.
  */
-import type { ArtifactRecord, ArtifactStore } from "@jaira/runtime";
+import type { ArtifactRecord, ArtifactStore, ArtifactVersion, ArtifactVersionInput } from "@jaira/runtime";
 import type { JairaDb } from "./db";
 import type { RowLog } from "./rowFile";
 
@@ -110,4 +110,100 @@ export class SqliteArtifactStore implements ArtifactStore {
       .all(taskId) as RawArtifact[];
     return rows.map(toRecord);
   }
+
+  /**
+   * Numbered inside an IMMEDIATE transaction: several processes open one database, and two publishes of
+   * one artifact must not both read the same latest and write the same number.
+   */
+  publish(input: ArtifactVersionInput): ArtifactVersion {
+    const write = this.db.transaction((): ArtifactVersion => {
+      const at = this.db
+        .prepare(`SELECT COALESCE(MAX(version), 0) AS v FROM artifact_versions WHERE task_id = ? AND artifact = ?`)
+        .get(input.taskId, input.artifact) as { v: number };
+      const version: ArtifactVersion = { ...input, version: at.v + 1 };
+      this.db
+        .prepare(
+          `INSERT INTO artifact_versions
+             (task_id, artifact, version, author, kind, type, title, icon, entry, changes_json, capabilities_json, record_id, created_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        )
+        .run(
+          version.taskId,
+          version.artifact,
+          version.version,
+          version.author,
+          version.kind,
+          version.type ?? null,
+          version.title ?? null,
+          version.icon ?? null,
+          version.entry,
+          JSON.stringify(version.changes),
+          version.capabilities !== undefined ? JSON.stringify(version.capabilities) : null,
+          version.recordId ?? null,
+          version.createdAt,
+        );
+      return version;
+    });
+    const version = write.immediate();
+    this.log?.appendFrom(this.db, input.taskId, "artifact_versions", "task_id = ? AND artifact = ? AND version = ?", [
+      input.taskId,
+      input.artifact,
+      version.version,
+    ]);
+    return version;
+  }
+
+  versions(taskId: string, artifact: string): ArtifactVersion[] {
+    const rows = this.db
+      .prepare(`SELECT * FROM artifact_versions WHERE task_id = ? AND artifact = ? ORDER BY version`)
+      .all(taskId, artifact) as RawVersion[];
+    return rows.map(toVersion);
+  }
+
+  latest(taskId: string): ArtifactVersion[] {
+    const rows = this.db
+      .prepare(
+        `SELECT v.* FROM artifact_versions v
+           JOIN (SELECT artifact, MAX(version) AS top, MIN(created_at) AS born FROM artifact_versions WHERE task_id = ? GROUP BY artifact) m
+             ON v.artifact = m.artifact AND v.version = m.top
+          WHERE v.task_id = ?
+          ORDER BY m.born, v.artifact`,
+      )
+      .all(taskId, taskId) as RawVersion[];
+    return rows.map(toVersion);
+  }
+}
+
+interface RawVersion {
+  task_id: string;
+  artifact: string;
+  version: number;
+  author: "model" | "person";
+  kind: ArtifactVersion["kind"];
+  type: string | null;
+  title: string | null;
+  icon: string | null;
+  entry: string;
+  changes_json: string;
+  capabilities_json: string | null;
+  record_id: string | null;
+  created_at: number;
+}
+
+function toVersion(row: RawVersion): ArtifactVersion {
+  return {
+    taskId: row.task_id,
+    artifact: row.artifact,
+    version: row.version,
+    author: row.author,
+    kind: row.kind,
+    ...(row.type !== null ? { type: row.type } : {}),
+    ...(row.title !== null ? { title: row.title } : {}),
+    ...(row.icon !== null ? { icon: row.icon } : {}),
+    entry: row.entry,
+    changes: JSON.parse(row.changes_json) as Record<string, string | null>,
+    ...(row.capabilities_json !== null ? { capabilities: JSON.parse(row.capabilities_json) as Record<string, unknown> } : {}),
+    ...(row.record_id !== null ? { recordId: row.record_id } : {}),
+    createdAt: row.created_at,
+  };
 }
