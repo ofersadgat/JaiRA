@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type JSX } from "react";
 import type { RenderView, SchemaFormat } from "@jaira/shared/browser";
 import { Markdown } from "@jaira/ui/markdown";
+import { readCanvasIndex } from "@jaira/ui/canvasIndex";
 import type { CodeIntel, DiffActions, MonacoDiffProps } from "@jaira/ui/monacoDiffTypes";
 import { useLook } from "../tokens";
 import { dress, islandStyles, islandStylesIn } from "./islandStyles";
@@ -18,6 +19,7 @@ const SchemaTextField = lazy(() => import("@jaira/ui/schemaEditor").then((m) => 
 const MarkdownDocument = lazy(() => import("@jaira/ui/markdownDocument").then((m) => ({ default: m.MarkdownDocument })));
 const Html = lazy(() => import("@jaira/ui/htmlFrame").then((m) => ({ default: m.Html })));
 const InteractiveArtifact = lazy(() => import("@jaira/ui/interactiveArtifact").then((m) => ({ default: m.InteractiveArtifact })));
+const CanvasBoard = lazy(() => import("@jaira/ui/canvasBoard").then((m) => ({ default: m.CanvasBoard })));
 
 export function Island(props: IslandProps): JSX.Element {
   const look = useLook();
@@ -125,7 +127,7 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
       const frame = (
         <Suspense fallback={null}>
           {typeof p["url"] === "string" ? (
-            <InteractiveArtifact url={p["url"]} onPrompt={event("prompt")} style={style} />
+            <InteractiveArtifact url={p["url"]} onPrompt={event("prompt")} style={style} published={p["published"] === true} />
           ) : (
             <Html text={String(p["text"] ?? "")} style={style} />
           )}
@@ -133,6 +135,18 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
       );
       return strut === undefined ? frame : <div style={strut}>{frame}</div>;
     }
+    // A design canvas (decision 0020 §5): its index, and the grant its artboards are framed from.
+    case "canvas":
+      return (
+        <Suspense fallback={null}>
+          <CanvasBoard
+            index={readCanvasIndex(typeof p["index"] === "string" ? p["index"] : undefined)}
+            base={String(p["base"] ?? "")}
+            {...(p["style"] !== undefined ? { style: p["style"] as CSSProperties } : {})}
+            {...(onEvent !== undefined ? { onOpen: () => onEvent("open", null) } : {})}
+          />
+        </Suspense>
+      );
     case "schemaText":
       return (
         <div style={box}>

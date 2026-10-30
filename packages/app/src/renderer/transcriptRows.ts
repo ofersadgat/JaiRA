@@ -173,7 +173,47 @@ export type RowTone = "plain" | "muted" | "warn" | "bad";
 export type RowMark = "ok" | "bad" | "waiting" | "cut" | "denied";
 
 /** What goes under a call's line without being asked for (`Tool`'s `shown`), by kind. */
-export type ToolShown = "sidechain" | "outcome" | "asked" | "produced" | "picture" | "output" | undefined;
+export type ToolShown = "sidechain" | "outcome" | "asked" | "published" | "produced" | "picture" | "output" | undefined;
+
+/** A published artifact, as `show_artifact` names it in what it returns (decision 0020): which one, and at which version. */
+export interface PublishedRef {
+  /** The task it belongs to, read off its url (`artifact://<task>/@<id>`). */
+  taskId: string;
+  id: string;
+  url: string;
+  version: number;
+  kind: "page" | "markdown" | "canvas";
+  type?: string;
+  title?: string;
+  icon?: string;
+  entry: string;
+}
+
+/**
+ * The artifact a call published, out of its result's `artifact` — read off the result, not the tool's
+ * name, for the reason {@link producedArtifact} gives. `undefined` for anything else, a refusal included.
+ */
+export function publishedOf(result: JsonValue | undefined): PublishedRef | undefined {
+  if (result === null || typeof result !== "object" || Array.isArray(result)) return undefined;
+  const artifact = (result as Record<string, JsonValue>)["artifact"];
+  if (artifact === null || typeof artifact !== "object" || Array.isArray(artifact)) return undefined;
+  const a = artifact as Record<string, JsonValue>;
+  const url = typeof a["url"] === "string" ? a["url"] : "";
+  const at = /^artifact:\/\/([^/]+)\/@([A-Za-z0-9_-]+)$/.exec(url);
+  const kind = a["kind"];
+  if (at === null || typeof a["version"] !== "number" || typeof a["entry"] !== "string" || (kind !== "page" && kind !== "markdown" && kind !== "canvas")) return undefined;
+  return {
+    taskId: at[1]!,
+    id: at[2]!,
+    url,
+    version: a["version"],
+    kind,
+    ...(typeof a["type"] === "string" ? { type: a["type"] } : {}),
+    ...(typeof a["title"] === "string" ? { title: a["title"] } : {}),
+    ...(typeof a["icon"] === "string" ? { icon: a["icon"] } : {}),
+    entry: a["entry"],
+  };
+}
 
 /**
  * The picture a tool handed back — a screenshot, a picture off the clipboard (decision 0019) — as a
@@ -294,6 +334,8 @@ export function toolLineOf(
           : "outcome"
         : askedOf(entry) !== undefined
           ? "asked"
+          : publishedOf(entry.result) !== undefined
+            ? "published"
           : producedArtifact(entry.result) !== undefined
             ? "produced"
             : pictureOf(entry.result) !== undefined

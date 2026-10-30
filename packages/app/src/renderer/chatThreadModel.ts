@@ -387,6 +387,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     () => ({
       serve: (path: string) => invoke("artifact:serve", { taskId, path, ...(project !== undefined ? { project } : {}) }),
       onPrompt: (text: string) => setDraft(text),
+      taskId,
+      project,
     }),
     [taskId, project],
   );

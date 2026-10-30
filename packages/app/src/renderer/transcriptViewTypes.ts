@@ -3,7 +3,7 @@
  * way to run an artifact. A transcript handed neither offers neither. `Transcript`
  * (`packages/universal/src/components/panel/SessionTranscript.tsx`) takes them. Types only.
  */
-import type { ServedArtifact } from "@jaira/shared/browser";
+import type { ProjectRef, ServedArtifact } from "@jaira/shared/browser";
 
 /**
  * Replacing a message that was already sent — what the Chat view lends its transcript.
@@ -52,4 +52,10 @@ export interface ArtifactSurface {
   serve: (path: string) => Promise<ServedArtifact>;
   /** Put text in front of the user, for them to send or discard. Never sends by itself. */
   onPrompt?: ((text: string) => void) | undefined;
+  /**
+   * The task the transcript is of, and its project: what a PUBLISHED artifact's view (decision 0020)
+   * reads its versions and files with, and asks its frames' grants of.
+   */
+  taskId?: string | undefined;
+  project?: ProjectRef | undefined;
 }

@@ -217,7 +217,7 @@ function serveOf(taskId: string, project: string | undefined): ArtifactSurface {
   const key = `${taskId}\u0000${project ?? ""}`;
   let surface = surfaces.get(key);
   if (surface === undefined) {
-    surface = { serve: (path: string) => invoke("artifact:serve", { taskId, path, ...(project !== undefined ? { project } : {}) }) };
+    surface = { serve: (path: string) => invoke("artifact:serve", { taskId, path, ...(project !== undefined ? { project } : {}) }), taskId, project };
     surfaces.set(key, surface);
   }
   return surface;

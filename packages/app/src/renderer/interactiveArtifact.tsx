@@ -29,7 +29,7 @@ import { useEffect, useRef, type CSSProperties, type JSX } from "react";
  * string `"null"`, which every other sandboxed frame also reports, so matching on it would accept a
  * message from any of them. Identity here is the window object itself.
  */
-export function InteractiveArtifact({ url, onPrompt, style }: { url: string; onPrompt?: ((text: string) => void) | undefined; style?: CSSProperties | undefined }): JSX.Element {
+export function InteractiveArtifact({ url, onPrompt, style, published = false }: { url: string; onPrompt?: ((text: string) => void) | undefined; style?: CSSProperties | undefined; published?: boolean }): JSX.Element {
   const frame = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
@@ -49,5 +49,14 @@ export function InteractiveArtifact({ url, onPrompt, style }: { url: string; onP
   }, [onPrompt]);
 
   // `style`: the frame's box, stated inline by the host (`Island.tsx`), as `Html`'s is.
+  //
+  // A PUBLISHED artifact (decision 0020 §4) is served from a grant that is an origin of its own
+  // (`jaira-artifact://<token>/`), never this window's — so `allow-same-origin` gives the page its own
+  // storage and lets it fetch its own files, and reaches nothing of the app. A page written for Claude
+  // Code's artifacts expects both. `allow-popups` opens its links in the browser, and `clipboard-write`
+  // is what its "Copy as prompt" buttons use.
+  if (published) {
+    return <iframe className="vv-html" ref={frame} sandbox="allow-scripts allow-same-origin allow-popups" allow="clipboard-write" src={url} title="Published artifact" style={style} />;
+  }
   return <iframe className="vv-html" ref={frame} sandbox="allow-scripts" src={url} title="Interactive artifact" style={style} />;
 }

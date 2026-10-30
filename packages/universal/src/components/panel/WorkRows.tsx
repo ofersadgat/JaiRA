@@ -11,7 +11,7 @@ import { thoughtLiveOf } from "@jaira/ui/stillRunning";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
 import { isHostCall } from "@jaira/ui/workSummary";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
-import { askedOf, pictureOf, producedArtifact, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
+import { askedOf, pictureOf, producedArtifact, publishedOf, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useFilled } from "@jaira/ui/useView";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
@@ -23,6 +23,7 @@ import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
 import { OutcomeHostContext } from "./outcomeHost";
 import { ValueView } from "./ValueView";
+import { PublishedView } from "./PublishedView";
 import { Media } from "./ValueReadings";
 
 /**
@@ -283,6 +284,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
         </>
       );
     }
+    if (line.shown === "published") return <PublishedView published={publishedOf(entry.result)!} artifacts={artifacts} />;
     if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;
     // A screenshot, a picture off the clipboard (decision 0019): what the agent saw, drawn as it saw it.
     if (line.shown === "picture") return <Media src={pictureOf(entry.result)!} kind="image" />;

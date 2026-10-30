@@ -102,6 +102,9 @@ export function ValueView({
   serve,
   onPrompt,
   pinned = false,
+  lead,
+  segment,
+  titleBar,
 }: {
   value: unknown;
   hint?: ViewHint | undefined;
@@ -136,10 +139,21 @@ export function ValueView({
    * the body taking what is left and scrolling, a page in it full bleed.
    */
   pinned?: boolean;
+  /**
+   * A published artifact's own view (decision 0020 §3): the first button of the toggle, named `label`,
+   * drawing `body` — the page running, the canvas — while the value's own views stay beside it.
+   */
+  lead?: { label: string; hint: string; body: ReactNode } | undefined;
+  /** Drawn INSIDE the toggle's box, after its buttons and in their type: a published artifact's version picker. */
+  segment?: ReactNode;
+  /** Drawn above the head row, never instead of it: a published artifact's title bar. */
+  titleBar?: ReactNode;
 }): JSX.Element {
   const t = useTokens();
   const views = viewsFor(value, hint ?? {});
   const [picked, setPicked] = useState<ViewId | null>(null);
+  const [leadOn, setLeadOn] = useState(lead !== undefined);
+  const leading = lead !== undefined && leadOn;
   const view = controlled !== undefined && views.includes(controlled) ? controlled : picked !== null && views.includes(picked) ? picked : views[0]!;
   const artifact = artifactOf(value);
   const showing = artifact?.content !== undefined && view !== "json" ? artifact.content : value;
@@ -287,7 +301,8 @@ export function ValueView({
     return rect !== undefined ? { x: rect[side], y: rect.bottom + dy } : { x: e.nativeEvent.pageX + dx, y: e.nativeEvent.pageY + 12 };
   };
 
-  const head = chrome && (label !== undefined || views.length > 1 || actions !== undefined);
+  const head = chrome && (label !== undefined || views.length > 1 || actions !== undefined || lead !== undefined);
+  const toggled = views.length > 1 || lead !== undefined;
   // The head, pinned: padded 7 10 0, 5 over the body.
   const fenceLine = useContext(FenceLineContext);
   const lifted = inline ? { position: "absolute", zIndex: 2, top: 3, right: 3 } : pinned ? { flexShrink: 0, paddingTop: 7, paddingHorizontal: 10, marginBottom: 5 } : { marginBottom: 3 };
@@ -299,32 +314,55 @@ export function ValueView({
   });
   return (
     <View minWidth={0} {...(inline ? { position: "relative" } : {})} {...(pinned ? { flex: 1, flexDirection: "column" } : {})}>
+      {titleBar}
       {head ? (
         <View flexDirection="row" alignItems="center" gap={6} minWidth={0} {...(lifted as object)}>
           {label !== undefined ? <Txt spec={{ voice: "app", scale: 10 / 12.5, upper: true, ls: 0.07, color: "tok-hint" }}>{label}</Txt> : null}
           {inline ? null : <View flex={1} minWidth={0} />}
           {actions}
-          {views.length > 1 ? (
+          {toggled ? (
             <View role="group" aria-label="How to show this" flexDirection="row" flexShrink={0} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} overflow="hidden" {...(glass !== undefined ? { backgroundColor: glass as never } : {})}>
+              {lead !== undefined ? (
+                <Press
+                  key="lead"
+                  onPress={() => {
+                    setLeadOn(true);
+                    setRendMenu(null);
+                  }}
+                  title={lead.hint}
+                  {...({ "aria-pressed": leading } as object)}
+                  paddingVertical={1}
+                  paddingHorizontal={7}
+                  box={({ hovered }) => toggleInk(leading, hovered).box}
+                >
+                  {({ hovered }) => (
+                    <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: leading ? 600 : 400, color: toggleInk(leading, hovered).color }} textAlign="center" numberOfLines={1}>
+                      {lead.label}
+                    </Txt>
+                  )}
+                </Press>
+              ) : null}
               {views.flatMap((id, i) => {
                 const choices = renderersFor(id, mime, editable);
+                const on = id === view && !leading;
                 const button = (
                   <Press
                     key={id}
                     onPress={() => {
                       setPicked(id);
+                      setLeadOn(false);
                       setRendMenu(null);
                     }}
                     title={VIEW_META[id].hint}
-                    {...({ "aria-pressed": id === view } as object)}
+                    {...({ "aria-pressed": on } as object)}
                     paddingVertical={1}
                     paddingHorizontal={7}
-                    {...(edge(t, { left: i === 0 ? 0 : 1 }) as object)}
-                    box={({ hovered }) => toggleInk(id === view, hovered).box}
+                    {...(edge(t, { left: i === 0 && lead === undefined ? 0 : 1 }) as object)}
+                    box={({ hovered }) => toggleInk(on, hovered).box}
                   >
                     {({ hovered }) => (
                       // In a fence the toggle's line is the document's (inherited, unitless), not the body's 1.5.
-                      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: id === view ? 600 : 400, color: toggleInk(id === view, hovered).color, ...(fenceLine !== undefined ? { lineHeight: fenceLine } : {}) }} {...(fenceLine !== undefined && isWeb ? { lineHeight: String(fenceLine) } : {})} textAlign="center" numberOfLines={1}>
+                      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: on ? 600 : 400, color: toggleInk(on, hovered).color, ...(fenceLine !== undefined ? { lineHeight: fenceLine } : {}) }} {...(fenceLine !== undefined && isWeb ? { lineHeight: String(fenceLine) } : {})} textAlign="center" numberOfLines={1}>
                         {VIEW_META[id].label}
                       </Txt>
                     )}
@@ -367,6 +405,7 @@ export function ValueView({
                   </Press>,
                 ];
               })}
+              {segment !== undefined ? <View {...(edge(t, { left: 1 }) as object)}>{segment}</View> : null}
             </View>
           ) : null}
           <Press
@@ -395,8 +434,8 @@ export function ValueView({
           </Press>
         </View>
       ) : null}
-      <View minWidth={0} {...(pinned ? pinnedBody(view === "html", t) : {})}>
-        {body}
+      <View minWidth={0} {...(pinned ? pinnedBody(leading || view === "html", t) : {})}>
+        {leading ? lead!.body : body}
       </View>
       {more !== null ? <ContextMenu anchor={more} onClose={() => setMore(null)} /> : null}
       {rendMenu !== null ? <ContextMenu anchor={rendMenu} onClose={() => setRendMenu(null)} /> : null}
