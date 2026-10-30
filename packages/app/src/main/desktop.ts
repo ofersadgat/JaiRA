@@ -14,6 +14,7 @@ import { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, nativeTheme, 
 import { isProject } from "@jaira/persistence";
 import {
   ARTIFACT_SCHEME,
+  artifactPolicy,
   IPC_CHANNELS,
   PALETTE_FRAME,
   PUSH_CHANNEL,
@@ -950,7 +951,9 @@ function startupProject(): string | undefined {
  * served CSP says so too — this just removes the capability rather than relying on the policy alone.
  */
 protocol.registerSchemesAsPrivileged([
-  { privileges: { standard: true, secure: true, supportFetchAPI: false, corsEnabled: false }, scheme: ARTIFACT_SCHEME },
+  // `supportFetchAPI`: an artboard `dc-import`s its sibling `.dc.html` by fetching it from its own origin
+  // (decision 0020 §5); its policy's `connect-src 'self'` is what limits that to its own grant.
+  { privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: false }, scheme: ARTIFACT_SCHEME },
   CLIENT_SCHEME_PRIVILEGES,
 ]);
 
@@ -973,16 +976,17 @@ protocol.registerSchemesAsPrivileged([
  */
 function registerArtifactProtocol(): void {
   protocol.handle(ARTIFACT_SCHEME, async (request) => {
-    const token = new URL(request.url).pathname.replace(/^\/+/, "");
-    const granted = await link?.servedArtifact(token).catch(() => undefined);
+    // `jaira-artifact://<token>/<path>`: the grant is the host, so every grant is an origin of its own,
+    // and the path is the file of it asked for — a published artifact's frame loads its siblings,
+    // `./support.js` and `/_blob/` assets by relative URL (decision 0020 §4).
+    const url = new URL(request.url);
+    const granted = await link?.servedArtifact(url.hostname, url.pathname).catch(() => undefined);
     if (granted === undefined) return new Response("no such artifact", { status: 404 });
-    const scripts = granted.interactive ? "script-src 'unsafe-inline'; " : "";
-    return new Response(granted.body, {
+    const body = granted.body;
+    return new Response(typeof body === "string" ? body : new Uint8Array(body).buffer, {
       headers: {
-        "Content-Type": `${granted.mediaType}; charset=utf-8`,
-        "Content-Security-Policy":
-          `default-src 'none'; ${scripts}style-src 'unsafe-inline'; img-src data: blob:; ` +
-          `font-src data:; connect-src 'none'; form-action 'none'; frame-src 'none'; base-uri 'none'`,
+        "Content-Type": typeof body === "string" ? `${granted.mediaType}; charset=utf-8` : granted.mediaType,
+        "Content-Security-Policy": artifactPolicy(granted.policy),
         // Belt and braces with the CSP: nothing here is meant to be interpreted as another type.
         "X-Content-Type-Options": "nosniff",
       },

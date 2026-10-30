@@ -745,6 +745,9 @@ import { changeLogOf, EMPTY_CHANGE_LOG, toolDisplayOf, type TaskChangeLog } from
 import { judgedCallsOf, type ReadOnlyJudge } from "./changeLog";
 import { fanOutHostFor } from "./fanOut";
 import { Fleet, TAILNET_HEALTH } from "./fleet";
+import { designRuntimeSource, type ServedBody } from "./designRuntime";
+import { artifactUrl, filesAt } from "@jaira/runtime";
+import { publishedMime, type PublishedArtifact, type PublishedVersion, type SaveArtifactRequest } from "@jaira/shared";
 import type { AnnouncePort } from "./lanPairing";
 import type { TailnetPort } from "./tailnet";
 import { Federation } from "./federation";
@@ -11988,7 +11991,12 @@ export class AppService {
    * grant stays live: a window open all day should not accumulate an unbounded set of addresses that
    * still resolve, and an artifact reopened after eviction simply mints a new one.
    */
-  private readonly served = new Map<string, { body: string; mediaType: string; interactive: boolean }>();
+  private readonly served = new Map<
+    string,
+    | { kind: "body"; body: string; mediaType: string; interactive: boolean }
+    // Decision 0020: a published artifact at one version, every file of it loadable by its own path.
+    | { kind: "published"; session: ProjectSession; taskId: string; artifact: string; version: number; artifactKind: "page" | "markdown" | "canvas" }
+  >();
 
   /**
    * Who git would sign a commit as here — the name a review note carries (decision 0002).
@@ -12071,6 +12079,7 @@ export class AppService {
   async serveArtifact(request: ServeArtifactRequest): Promise<ServedArtifact> {
     const session = request.project !== undefined ? this.sessionOf(request.project) : this.sessionOf();
     if (session === undefined) throw this.refusal("file", "no project is open");
+    if (request.artifact !== undefined) return this.servePublished(session, request);
     const record = session.project.artifacts.get(request.taskId, request.path);
     if (record === undefined) throw this.refusal("file", `no artifact at '${request.path}' for task ${request.taskId}`);
 
@@ -12085,25 +12094,147 @@ export class AppService {
 
     const mediaType = request.mediaType ?? record.format ?? mimeOfPath(request.path);
     const interactive = record.interactive === true;
-    const token = randomUUID();
-    this.served.set(token, { body, mediaType, interactive });
+    const token = this.grant({ kind: "body", body, mediaType, interactive });
+    return { url: `${ARTIFACT_SCHEME}://${token}/`, mediaType, bytes: Buffer.byteLength(body, "utf8"), interactive };
+  }
+
+  /**
+   * A grant's token is the URL's HOST (`jaira-artifact://<token>/<path>`), not a path segment: an
+   * artboard loads `./support.js`, the siblings it `dc-import`s and the `/_blob/` assets it names by
+   * relative URL, which resolve under the host — and each grant is an origin of its own.
+   */
+  private grant(entry: AppService["served"] extends Map<string, infer V> ? V : never): string {
+    const token = randomUUID().replaceAll("-", "");
+    this.served.set(token, entry);
     // Oldest-first eviction, so the map cannot grow without bound in a long-lived window.
     while (this.served.size > 64) {
       const oldest = this.served.keys().next();
       if (oldest.done === true) break;
       this.served.delete(oldest.value);
     }
-    return { url: `${ARTIFACT_SCHEME}://frame/${token}`, mediaType, bytes: Buffer.byteLength(body, "utf8"), interactive };
+    return token;
+  }
+
+  /** Grant a frame one published artifact at one version (decision 0020 §4), opening on `request.path`. */
+  private servePublished(session: ProjectSession, request: ServeArtifactRequest): ServedArtifact {
+    const versions = session.project.artifacts.versions(request.taskId, request.artifact!);
+    const at = request.version !== undefined ? versions.find((v) => v.version === request.version) : versions.at(-1);
+    if (at === undefined) throw this.refusal("file", `no artifact ${request.artifact} at that version for task ${request.taskId}`);
+    const files = filesAt(session.project.artifacts, request.taskId, at.artifact, at.version);
+    const path = request.path.replace(/^\/+/, "");
+    const body = files[path];
+    if (body === undefined) throw this.refusal("file", `artifact ${at.artifact} has no file ${path}`);
+    const token = this.grant({ kind: "published", session, taskId: request.taskId, artifact: at.artifact, version: at.version, artifactKind: at.kind });
+    const mediaType = publishedMime(path);
+    return { url: `${ARTIFACT_SCHEME}://${token}/${path.split("/").map(encodeURIComponent).join("/")}`, mediaType, bytes: Buffer.byteLength(body, "utf8"), interactive: true };
   }
 
   /**
-   * What the protocol handler serves for a token, or `undefined` when nothing was granted for it.
+   * What the protocol handler serves for a token and a path, or `undefined` when nothing was granted.
    *
    * Kept here rather than in the Electron layer so the whole grant/serve cycle is testable without a
-   * browser — the handler above it does nothing but turn this into a response.
+   * browser — the handler above it does nothing but turn this into a response. A single-body grant
+   * answers its body at any path; a published artifact's answers the file at that path, an artboard's
+   * `support.js` (the `.dc.html` runtime, JaiRA's own) and a `/_blob/` asset.
    */
-  servedArtifact(token: string): { body: string; mediaType: string; interactive: boolean } | undefined {
-    return this.served.get(token);
+  servedArtifact(token: string, path = "/"): ServedBody | undefined {
+    const grant = this.served.get(token);
+    if (grant === undefined) return undefined;
+    if (grant.kind === "body") return { body: grant.body, mediaType: grant.mediaType, policy: grant.interactive ? "scripts" : "static" };
+    const file = decodeURIComponent(path).replace(/^\/+/, "");
+    const policy = grant.artifactKind === "canvas" ? "canvas" : "page";
+    if (grant.artifactKind === "canvas" && (file === "support.js" || file.endsWith("/support.js"))) {
+      const runtime = designRuntimeSource();
+      return runtime === undefined ? undefined : { body: runtime, mediaType: "text/javascript", policy };
+    }
+    const files = filesAt(grant.session.project.artifacts, grant.taskId, grant.artifact, grant.version);
+    const blob = /^_blob\/([0-9a-f]+)$/.exec(file);
+    if (blob !== null) {
+      const data = /^data:([^;,]+);base64,(.*)$/s.exec(files[file] ?? "");
+      return data === null ? undefined : { body: Buffer.from(data[2]!, "base64"), mediaType: data[1]!, policy };
+    }
+    const text = files[file];
+    return text === undefined ? undefined : { body: text, mediaType: publishedMime(file), policy };
+  }
+
+  /** A task's published artifacts, each at its latest version (decision 0020). */
+  publishedArtifacts(request: { taskId: string; project?: ProjectRef }): PublishedArtifact[] {
+    const store = this.projectFor(request.project).artifacts;
+    return store.latest(request.taskId).map((v) => ({
+      taskId: v.taskId,
+      id: v.artifact,
+      url: artifactUrl(v.taskId, v.artifact),
+      version: v.version,
+      kind: v.kind,
+      ...(v.type !== undefined ? { type: v.type } : {}),
+      ...(v.title !== undefined ? { title: v.title } : {}),
+      ...(v.icon !== undefined ? { icon: v.icon } : {}),
+      entry: v.entry,
+      author: v.author,
+      createdAt: v.createdAt,
+      firstAt: store.versions(v.taskId, v.artifact)[0]?.createdAt ?? v.createdAt,
+    }));
+  }
+
+  /** Every version of one published artifact, oldest first. */
+  artifactVersions(request: { taskId: string; artifact: string; project?: ProjectRef }): PublishedVersion[] {
+    return this.projectFor(request.project)
+      .artifacts.versions(request.taskId, request.artifact)
+      .map((v) => ({
+        version: v.version,
+        author: v.author,
+        createdAt: v.createdAt,
+        changed: Object.fromEntries(Object.entries(v.changes).map(([path, text]) => [path, text === null ? "removed" : "changed"])),
+        ...(v.title !== undefined ? { title: v.title } : {}),
+      }));
+  }
+
+  /** What a published artifact holds at a version. */
+  artifactFiles(request: { taskId: string; artifact: string; version?: number; project?: ProjectRef }): { version: number; files: Record<string, string> } {
+    const store = this.projectFor(request.project).artifacts;
+    const versions = store.versions(request.taskId, request.artifact);
+    const at = request.version ?? versions.at(-1)?.version;
+    if (at === undefined) throw this.refusal("file", `no artifact ${request.artifact} for task ${request.taskId}`);
+    return { version: at, files: filesAt(store, request.taskId, request.artifact, at) };
+  }
+
+  /**
+   * A person's save in the canvas editor (decision 0020 §5): a version marked theirs. Refused when a
+   * version after `base` changed one of the same files — the model published meanwhile — naming them,
+   * so the editor can reload them rather than silently undo the model's work.
+   */
+  saveArtifact(request: SaveArtifactRequest): { version: number } | { refused: string; files: string[] } {
+    const store = this.projectFor(request.project).artifacts;
+    const versions = store.versions(request.taskId, request.artifact);
+    const latest = versions.at(-1);
+    if (latest === undefined) throw this.refusal("file", `no artifact ${request.artifact} for task ${request.taskId}`);
+    const paths = Object.keys(request.changes);
+    const moved = [...new Set(versions.filter((v) => v.version > request.base).flatMap((v) => Object.keys(v.changes).filter((p) => paths.includes(p))))].sort();
+    if (moved.length > 0) return { refused: `changed since this was opened: ${moved.join(", ")}`, files: moved };
+    for (const path of paths) {
+      if (!path.startsWith("project/") || path.split("/").some((s) => s === ".." || s === "")) throw this.refusal("file", `'${path}' is not a file of the canvas`);
+    }
+    const version = store.publish({
+      taskId: request.taskId,
+      artifact: request.artifact,
+      author: "person",
+      kind: latest.kind,
+      ...(latest.type !== undefined ? { type: latest.type } : {}),
+      ...(latest.title !== undefined ? { title: latest.title } : {}),
+      ...(latest.icon !== undefined ? { icon: latest.icon } : {}),
+      entry: latest.entry,
+      changes: request.changes,
+      ...(latest.capabilities !== undefined ? { capabilities: latest.capabilities } : {}),
+      createdAt: Date.now(),
+    });
+    return { version: version.version };
+  }
+
+  /** The open project a request names, else the current one; refused when none is open. */
+  private projectFor(ref: ProjectRef | undefined): Project {
+    const session = ref !== undefined ? this.sessionOf(ref) : this.sessionOf();
+    if (session === undefined) throw this.refusal("file", "no project is open");
+    return session.project;
   }
 
   /**

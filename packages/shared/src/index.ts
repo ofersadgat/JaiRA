@@ -71,3 +71,4 @@ export * from "./refusal";
 export * from "./thirdPartyLicenses";
 export * from "./sync";
 export * from "./lazy";
+export * from "./artifactPolicy";

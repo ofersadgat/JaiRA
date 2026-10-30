@@ -11,12 +11,13 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { EngineConnections, serviceHandlers, type AppService, type CrashKind, type EngineClient, type EngineHostInfo, type Handler, type HostedEngine } from "@jaira/service";
-import type { HealthItem, LogLevel } from "@jaira/shared";
+import type { ArtifactPolicy, HealthItem, LogLevel } from "@jaira/shared";
 
+/** What a frame is answered with for a granted path: the bytes, their type, and the policy to serve them under (decision 0020 §4). */
 export interface ServedArtifact {
-  body: string;
+  body: string | Uint8Array;
   mediaType: string;
-  interactive: boolean;
+  policy: ArtifactPolicy;
 }
 
 export interface EngineLink {
@@ -38,7 +39,7 @@ export interface EngineLink {
   probeExecutors(): Promise<void>;
   kickRemotes(): void;
   kickRepoWatch(): void;
-  servedArtifact(token: string): Promise<ServedArtifact | undefined>;
+  servedArtifact(token: string, path: string): Promise<ServedArtifact | undefined>;
   /** Re-open the projects remembered from the last session. */
   restore(): Promise<void>;
   /** Open one project, and stand this window at it. */
@@ -78,7 +79,7 @@ export function localLink(service: AppService, hosted: HostedEngine | undefined)
     },
     kickRemotes: () => service.kickRemotes(),
     kickRepoWatch: () => service.kickRepoWatch(),
-    servedArtifact: async (token) => service.servedArtifact(token),
+    servedArtifact: async (token, path) => service.servedArtifact(token, path),
     restore: async () => {
       await service.restore();
     },
@@ -130,7 +131,12 @@ export function remoteLink(client: EngineClient): EngineLink {
     },
     kickRemotes: () => tell("engine:kickRemotes"),
     kickRepoWatch: () => tell("engine:kickRepoWatch"),
-    servedArtifact: async (token) => ((await client.invoke("engine:servedArtifact", { token })) as ServedArtifact | null) ?? undefined,
+    servedArtifact: async (token, path) => {
+      // Over the pipe a binary body (a canvas's image or font) travels as base64.
+      const served = (await client.invoke("engine:servedArtifact", { token, path })) as (Omit<ServedArtifact, "body"> & { body: string; base64?: true }) | null;
+      if (served === null) return undefined;
+      return { body: served.base64 === true ? Buffer.from(served.body, "base64") : served.body, mediaType: served.mediaType, policy: served.policy };
+    },
     restore: async () => {
       await client.invoke("engine:restore");
     },

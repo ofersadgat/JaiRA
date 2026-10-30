@@ -42,6 +42,10 @@ export const REPLICA_READS = new Set([
   "task:changes",
   "artifact:list",
   "artifact:serve",
+  // Decision 0020: a published artifact's versions travel in the replica's bundle.
+  "artifact:published",
+  "artifact:versions",
+  "artifact:files",
   "job:output",
   "events:status",
   "state:view",

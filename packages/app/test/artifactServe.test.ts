@@ -60,18 +60,29 @@ function record(path: string, content: string, extra: { format?: string; interac
   }
 }
 
+/** A published version, written the same way: its own handle, closed again. */
+function publishRow(input: Parameters<ReturnType<typeof openProject>["artifacts"]["publish"]>[0]): void {
+  const project = openProject(dir, { baseDir: testHome() });
+  try {
+    project.artifacts.publish(input);
+  } finally {
+    project.close();
+  }
+}
+
+/** A grant's token: the URL's host (`jaira-artifact://<token>/<path>`). */
+const tokenOf = (url: string): string => new URL(url).hostname;
 describe("artifact:serve", () => {
   it("grants an address for an artifact the caller named", async () => {
     record("mockups/dash.html", "<h1>hi</h1>", { format: "text/html", interactive: true });
     const granted = await service.serveArtifact({ taskId: "t-1", path: "mockups/dash.html" });
 
-    expect(granted.url).toMatch(/^jaira-artifact:\/\/frame\//);
+    expect(granted.url).toMatch(/^jaira-artifact:\/\/[0-9a-f]{32}\/$/);
     expect(granted.mediaType).toBe("text/html");
     expect(granted.bytes).toBe(11);
     expect(granted.interactive).toBe(true);
 
-    const token = granted.url.split("/").pop()!;
-    expect(service.servedArtifact(token)).toMatchObject({ body: "<h1>hi</h1>", mediaType: "text/html", interactive: true });
+    expect(service.servedArtifact(tokenOf(granted.url))).toMatchObject({ body: "<h1>hi</h1>", mediaType: "text/html", policy: "scripts" });
   });
 
   it("lets the RECORD decide whether anything may run, not the request or the type", async () => {
@@ -81,7 +92,7 @@ describe("artifact:serve", () => {
     record("notes/page.html", "<h1>static</h1>", { format: "text/html" });
     const granted = await service.serveArtifact({ taskId: "t-1", path: "notes/page.html" });
     expect(granted.interactive).toBe(false);
-    expect(service.servedArtifact(granted.url.split("/").pop()!)?.interactive).toBe(false);
+    expect(service.servedArtifact(tokenOf(granted.url))?.policy).toBe("static");
   });
 
   it("serves nothing for a token nobody was granted", () => {
@@ -107,6 +118,69 @@ describe("artifact:serve", () => {
   it("falls back to the path's type when the record kept none", async () => {
     record("chart.svg", "<svg/>");
     expect((await service.serveArtifact({ taskId: "t-1", path: "chart.svg" })).mediaType).toBe("image/svg+xml");
+  });
+});
+
+describe("artifact:serve of a published artifact (decision 0020)", () => {
+  const publish = (changes: Record<string, string | null>, kind: "page" | "canvas" = "canvas") =>
+    publishRow({ taskId: "t-1", artifact: "a-1", author: "model", kind, ...(kind === "canvas" ? { type: "design" } : {}), entry: kind === "canvas" ? "project/canvas.json" : "chart.html", changes, createdAt: 1 });
+
+  it("grants the whole artifact at one version, every file at its own path under the grant's own origin", async () => {
+    publish({ "project/canvas.json": "{}", "project/Main.dc.html": "<x-dc>main</x-dc>", "project/Card.dc.html": "<x-dc>card</x-dc>", "_blob/abc123": "data:image/png;base64,iVBORw==" });
+    const granted = await service.serveArtifact({ taskId: "t-1", artifact: "a-1", path: "project/Main.dc.html" });
+    expect(granted.url).toMatch(/^jaira-artifact:\/\/[0-9a-f]{32}\/project\/Main\.dc\.html$/);
+    expect(granted.interactive).toBe(true);
+    const token = tokenOf(granted.url);
+    expect(service.servedArtifact(token, "/project/Main.dc.html")).toEqual({ body: "<x-dc>main</x-dc>", mediaType: "text/html", policy: "canvas" });
+    expect(service.servedArtifact(token, "/project/Card.dc.html")?.body).toBe("<x-dc>card</x-dc>");
+    expect(service.servedArtifact(token, "/_blob/abc123")).toEqual({ body: Buffer.from([0x89, 0x50, 0x4e, 0x47]), mediaType: "image/png", policy: "canvas" });
+    expect(service.servedArtifact(token, "/project/Nope.dc.html")).toBeUndefined();
+  });
+
+  it("keeps serving the version it granted after a later publish", async () => {
+    publish({ "project/Main.dc.html": "one" });
+    const token = tokenOf((await service.serveArtifact({ taskId: "t-1", artifact: "a-1", path: "project/Main.dc.html" })).url);
+    publish({ "project/Main.dc.html": "two" });
+    expect(service.servedArtifact(token, "/project/Main.dc.html")?.body).toBe("one");
+    expect((await service.serveArtifact({ taskId: "t-1", artifact: "a-1", version: 1, path: "project/Main.dc.html" })).bytes).toBe(3);
+  });
+
+  it("serves a page under the page policy, and refuses a file it does not hold", async () => {
+    publish({ "chart.html": "<title>x</title>" }, "page");
+    const token = tokenOf((await service.serveArtifact({ taskId: "t-1", artifact: "a-1", path: "chart.html" })).url);
+    expect(service.servedArtifact(token, "/chart.html")?.policy).toBe("page");
+    // A page has no runtime to load: support.js is a canvas's alone.
+    expect(service.servedArtifact(token, "/support.js")).toBeUndefined();
+    await expect(service.serveArtifact({ taskId: "t-1", artifact: "a-1", path: "other.html" })).rejects.toThrow(/no file/);
+  });
+});
+
+describe("published artifacts: the list, the versions, the files, a person's save", () => {
+  const publish = (changes: Record<string, string | null>, author: "model" | "person" = "model") =>
+    publishRow({ taskId: "t-1", artifact: "a-1", author, kind: "canvas", type: "design", title: "Picker", entry: "project/canvas.json", changes, createdAt: 5 });
+
+  it("lists each artifact at its latest version, its versions with what each changed, and its files at a version", () => {
+    publish({ "project/canvas.json": "{}", "project/Main.dc.html": "A" });
+    publish({ "project/Main.dc.html": "B" });
+    expect(service.publishedArtifacts({ taskId: "t-1" })).toEqual([
+      expect.objectContaining({ id: "a-1", url: "artifact://t-1/@a-1", version: 2, kind: "canvas", type: "design", title: "Picker", author: "model", firstAt: 5 }),
+    ]);
+    expect(service.artifactVersions({ taskId: "t-1", artifact: "a-1" }).map((v) => v.changed)).toEqual([
+      { "project/canvas.json": "changed", "project/Main.dc.html": "changed" },
+      { "project/Main.dc.html": "changed" },
+    ]);
+    expect(service.artifactFiles({ taskId: "t-1", artifact: "a-1", version: 1 })).toEqual({ version: 1, files: { "project/canvas.json": "{}", "project/Main.dc.html": "A" } });
+  });
+
+  it("saves a person's edit as a version marked theirs, and refuses one built on a version the model has since moved past in the same file", () => {
+    publish({ "project/canvas.json": "{}", "project/Main.dc.html": "A" });
+    expect(service.saveArtifact({ taskId: "t-1", artifact: "a-1", base: 1, changes: { "project/Main.dc.html": "A, edited" } })).toEqual({ version: 2 });
+    expect(service.artifactVersions({ taskId: "t-1", artifact: "a-1" })[1]).toMatchObject({ author: "person" });
+    publish({ "project/Main.dc.html": "C" });
+    expect(service.saveArtifact({ taskId: "t-1", artifact: "a-1", base: 2, changes: { "project/Main.dc.html": "late" } })).toEqual({ refused: expect.stringMatching(/Main\.dc\.html/) as unknown as string, files: ["project/Main.dc.html"] });
+    // Another file is not in the way.
+    expect(service.saveArtifact({ taskId: "t-1", artifact: "a-1", base: 2, changes: { "project/canvas.json": "{\"v\":3}" } })).toEqual({ version: 4 });
+    expect(() => service.saveArtifact({ taskId: "t-1", artifact: "a-1", base: 4, changes: { "../x": "y" } })).toThrow(/not a file of the canvas/);
   });
 });
 

@@ -3,8 +3,12 @@
   "channels": [
     "approval:pending",
     "approval:submit",
+    "artifact:files",
     "artifact:list",
+    "artifact:published",
+    "artifact:save",
     "artifact:serve",
+    "artifact:versions",
     "availability:read",
     "availability:refresh",
     "board:roots",

@@ -88,3 +88,4 @@ export * from "./disabled";
 export * from "./thirdPartyLicenses";
 export * from "./sync";
 export * from "./lazy";
+export * from "./artifactPolicy";

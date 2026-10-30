@@ -228,6 +228,10 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "file:release": ((request: Parameters<typeof service.releaseFile>[0]) => service.releaseFile(request)) as Handler,
     "uri:read": ((request: Parameters<typeof service.readUri>[0]) => service.readUri(request)) as Handler,
     "artifact:serve": ((request: Parameters<typeof service.serveArtifact>[0]) => service.serveArtifact(request)) as Handler,
+    "artifact:published": ((request: Parameters<typeof service.publishedArtifacts>[0]) => service.publishedArtifacts(request)) as Handler,
+    "artifact:versions": ((request: Parameters<typeof service.artifactVersions>[0]) => service.artifactVersions(request)) as Handler,
+    "artifact:files": ((request: Parameters<typeof service.artifactFiles>[0]) => service.artifactFiles(request)) as Handler,
+    "artifact:save": ((request: Parameters<typeof service.saveArtifact>[0]) => service.saveArtifact(request)) as Handler,
     "artifact:list": ((request: Parameters<typeof service.listArtifacts>[0]) => service.listArtifacts(request)) as Handler,
     "git:identity": ((request: Parameters<typeof service.gitIdentity>[0]) => service.gitIdentity(request)) as Handler,
     "file:find": ((request: Parameters<typeof service.findFiles>[0]) => service.findFiles(request)) as Handler,
@@ -377,7 +381,12 @@ export function enginePeerHandlers(service: AppService, control: EngineControl):
     "engine:probeExecutors": (() => service.probeExecutors()) as Handler,
     "engine:kickRemotes": (() => service.kickRemotes()) as Handler,
     "engine:kickRepoWatch": (() => service.kickRepoWatch()) as Handler,
-    "engine:servedArtifact": ((request: { token: string }) => service.servedArtifact(request.token) ?? null) as Handler,
+    "engine:servedArtifact": ((request: { token: string; path?: string }) => {
+      const served = service.servedArtifact(request.token, request.path);
+      if (served === undefined) return null;
+      // A binary body (a canvas's image or font) crosses the pipe as base64.
+      return typeof served.body === "string" ? served : { ...served, body: served.body.toString("base64"), base64: true };
+    }) as Handler,
     "engine:restore": (() => service.restore()) as Handler,
   };
 }

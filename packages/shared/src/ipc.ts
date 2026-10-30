@@ -1452,11 +1452,66 @@ export const ARTIFACT_SCHEME = "jaira-artifact";
 export interface ServeArtifactRequest {
   /** The task whose artifact map holds it. */
   taskId: string;
-  /** The logical path, as the producer addressed it. */
+  /**
+   * The logical path, as the producer addressed it — or, with {@link artifact}, the file of a published
+   * artifact the frame opens on (a page's own name, a canvas's `project/Main.dc.html`).
+   */
   path: string;
   project?: ProjectRef;
   /** Overrides the recorded media type; the record's own is used when absent. */
   mediaType?: string;
+  /**
+   * A PUBLISHED artifact (decision 0020): the grant is the whole artifact at one version, and the frame
+   * may load any of its files by relative URL — an artboard's `./support.js`, a sibling it `dc-import`s,
+   * the `/_blob/` assets it names.
+   */
+  artifact?: string;
+  /** Which version; its latest when absent. */
+  version?: number;
+}
+
+/** One published artifact of a task, at its latest version (decision 0020) — a row of the artifact list. */
+export interface PublishedArtifact {
+  taskId: string;
+  /** The artifact's id (`a-…`). */
+  id: string;
+  /** What the model calls it: `artifact://<task>/@<id>`. */
+  url: string;
+  version: number;
+  kind: "page" | "markdown" | "canvas";
+  type?: string;
+  title?: string;
+  icon?: string;
+  /** The file it opens on. */
+  entry: string;
+  /** Who made the latest version. */
+  author: "model" | "person";
+  createdAt: number;
+  /** When it was first published. */
+  firstAt: number;
+}
+
+/** One version of a published artifact: who made it, when, and which files it changed. */
+export interface PublishedVersion {
+  version: number;
+  author: "model" | "person";
+  createdAt: number;
+  /** The files this version changed; `null` marks one it removed. */
+  changed: Record<string, "changed" | "removed">;
+  title?: string;
+}
+
+/**
+ * A person's save in the canvas editor (decision 0020 §5): the files it changed, as of the version the
+ * editor opened. Refused when the artifact moved past `base` in one of those files, so a save never
+ * silently undoes what the model published meanwhile.
+ */
+export interface SaveArtifactRequest {
+  taskId: string;
+  artifact: string;
+  base: number;
+  changes: Record<string, string | null>;
+  project?: ProjectRef;
 }
 
 export interface ServedArtifact {
@@ -2189,6 +2244,17 @@ export interface IpcContract {
   "git:identity": { request: { project?: ProjectRef }; response: { name?: string; email?: string } };
   /** Everything one task produced, oldest first — what the artifacts panel lists. */
   "artifact:list": { request: { taskId: string; project?: ProjectRef }; response: ArtifactSummary[] };
+  /** A task's published artifacts, each at its latest version, in the order they were first published (decision 0020). */
+  "artifact:published": { request: { taskId: string; project?: ProjectRef }; response: PublishedArtifact[] };
+  /** Every version of one published artifact, oldest first. */
+  "artifact:versions": { request: { taskId: string; artifact: string; project?: ProjectRef }; response: PublishedVersion[] };
+  /** What a published artifact holds at a version (its latest when absent): every file, by path. */
+  "artifact:files": {
+    request: { taskId: string; artifact: string; version?: number; project?: ProjectRef };
+    response: { version: number; files: Record<string, string> };
+  };
+  /** A person's save in the canvas editor — a new version marked theirs. */
+  "artifact:save": { request: SaveArtifactRequest; response: { version: number } | { refused: string; files: string[] } };
   /**
    * Project files whose path matches a query — what an `@` in the composer completes against.
    *
@@ -2545,6 +2611,10 @@ export const IPC_CHANNELS = [
   "uri:read",
   "artifact:serve",
   "artifact:list",
+  "artifact:published",
+  "artifact:versions",
+  "artifact:files",
+  "artifact:save",
   "git:identity",
   "file:find",
   "changeset:review",
