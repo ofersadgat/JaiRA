@@ -144,6 +144,12 @@ export type ShellRequest =
    * handed (`ForEach-Object Delete`). It is the subject `script`, as code handed to `python -c` is.
    */
   | { kind: "code"; span: TextSpan; what: string; via?: string[] }
+  /**
+   * A piece read perfectly well that changes what the rest of the line does, so that nothing can be
+   * said for it: a variable set for what runs after it, a function redefined. It asks as `unparsed`
+   * does, and says why, not that it could not be read.
+   */
+  | { kind: "unvouched"; span: TextSpan; reason: string; via?: string[] }
   | { kind: "unparsed"; span: TextSpan; reason: string; via?: string[] };
 
 export interface ParseResult {
@@ -926,8 +932,8 @@ function argv(words: Token[], dialect: CommandDialect, via: string[], depth: num
     // Not exported: a shell-local name (`x=1`) reaches no program; `PATH` is in every environment already.
     const sets = words.map((t) => variableOf(t.value)).filter((name) => !isHarmlessVariable(name) && !isShellLocalName(name));
     if (sets.length === 0) return { requests: [] };
-    const reason = `sets ${sets.join(", ")} for what runs after it`;
-    return { requests: [{ kind: "unparsed", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason, ...(via.length > 0 ? { via } : {}) }] };
+    const reason = `it sets ${sets.join(", ")}, which can change what runs after it`;
+    return { requests: [{ kind: "unvouched", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason, ...(via.length > 0 ? { via } : {}) }] };
   }
   if (depth > MAX_DEPTH) {
     return { requests: [{ kind: "unparsed", span: { start: words[0]!.start, end: words[words.length - 1]!.end }, reason: "nested too deeply to follow" }], unparsed: "nested too deeply to follow" };

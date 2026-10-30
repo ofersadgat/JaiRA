@@ -164,10 +164,15 @@ class Parser {
     return via.length > 0 ? { ...request, via } : request;
   }
 
-  /** A piece nobody can vouch for. `whole`: PowerShell syntax this does not model, which leaves the line unparsed. */
-  private piece(from: number, to: number, reason: string, whole: boolean): void {
+  /** PowerShell syntax this does not model, which leaves the line unparsed. */
+  private unmodelled(from: number, to: number, reason: string): void {
     this.requests.push(this.withVia({ kind: "unparsed" as const, span: this.span(from, to), reason }));
-    if (whole) this.unparsed ??= reason;
+    this.unparsed ??= reason;
+  }
+
+  /** A piece that was read, and that nobody can vouch for. */
+  private unvouched(from: number, to: number, reason: string): void {
+    this.requests.push(this.withVia({ kind: "unvouched" as const, span: this.span(from, to), reason }));
   }
 
   /** Code the line runs that nobody can read off it — the subject `script`. */
@@ -947,10 +952,10 @@ class Parser {
     const drive = colon > 0 ? name.slice(0, colon).toLowerCase() : undefined;
     const own = colon > 0 ? name.slice(colon + 1) : name;
     if (drive === "env") {
-      if (!isHarmlessVariable(`$env:${own}`)) this.piece(from, to, `sets ${own} for what runs after it`, false);
-    } else if (drive === "function" || drive === "alias") this.piece(from, to, `defines what '${own}' runs`, false);
+      if (!isHarmlessVariable(`$env:${own}`)) this.unvouched(from, to, `it sets ${own}, which can change what runs after it`);
+    } else if (drive === "function" || drive === "alias") this.unvouched(from, to, `defines what '${own}' runs`);
     else if (own.toLowerCase() === "psdefaultparametervalues" && (drive === undefined || ["global", "script", "local", "private"].includes(drive))) {
-      this.piece(from, to, "changes the parameters every command after it is given", false);
+      this.unvouched(from, to, "changes the parameters every command after it is given");
     } else if (rest.startsWith(".")) this.code(from, to, `sets ${written.trim()}`);
   }
 
@@ -1080,7 +1085,7 @@ class Parser {
         this.blanks();
         if (this.text[this.i] === "(") this.region(1, ")", "(…)");
         this.body();
-        this.piece(from, this.i, `'${word}' is not modelled`, true);
+        this.unmodelled(from, this.i, `'${word}' is not modelled`);
         return;
       }
       case "class":
@@ -1089,7 +1094,7 @@ class Parser {
         this.lines();
         if (this.text[this.i] !== "{") throw new Syntax(`'${word}' is missing its '{'`);
         this.skipBraces();
-        this.piece(from, this.i, `'${word}' is not modelled`, true);
+        this.unmodelled(from, this.i, `'${word}' is not modelled`);
         return;
       }
       case "param":
@@ -1126,7 +1131,7 @@ class Parser {
           if (this.text[this.i] === ",") this.i++;
           else this.generic();
         }
-        if (kind === "module" || kind === "assembly") this.piece(from, this.i, `loads code from ${this.text.slice(start, this.i).trim()}`, false);
+        if (kind === "module" || kind === "assembly") this.unvouched(from, this.i, `loads code from ${this.text.slice(start, this.i).trim()}`);
         return;
       }
       case "data":
@@ -1143,7 +1148,7 @@ class Parser {
       case "sequence":
       case "inlinescript":
         this.body();
-        this.piece(from, this.i, `'${word}' belongs to a workflow, which is not modelled`, true);
+        this.unmodelled(from, this.i, `'${word}' belongs to a workflow, which is not modelled`);
         return;
       default:
         throw new Syntax(`unexpected '${word}'`);

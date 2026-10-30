@@ -204,7 +204,7 @@ function powershellUnmodelled(command: ParsedCommand, paths: readonly string[]):
     if (drive === null) continue;
     const kind = drive[1]!.toLowerCase();
     const name = drive[2]!;
-    if (kind === "env" && !isHarmlessVariable(`$env:${name}`)) return `sets ${name || "variables"} for what runs after it`;
+    if (kind === "env" && !isHarmlessVariable(`$env:${name}`)) return `it sets ${name || "variables"}, which can change what runs after it`;
     if (kind === "function" || kind === "alias") return `defines what '${name}' runs`;
   }
   return undefined;
@@ -414,6 +414,10 @@ function cmdSetsOf(command: ParsedCommand): string[] {
 export function classifyRequest(request: ShellRequest, dialect: CommandDialect): ClassifiedPart | undefined {
   if (request.kind === "unparsed") {
     return { kind: "unparsed", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
+  }
+  // Read, and not vouched for: the same as `export PATH=…`, which is a command that asks and says why.
+  if (request.kind === "unvouched") {
+    return { kind: "command", subject: SHELL_SUBJECT, span: request.span, matched: [{ ...request.span }], paths: [], widths: [], unmodelled: request.reason, ...(request.via !== undefined ? { via: request.via } : {}) };
   }
   // Code nobody can read off the line — a .NET call, a property set — is what `python -c` is.
   if (request.kind === "code") {

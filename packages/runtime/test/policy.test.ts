@@ -109,6 +109,17 @@ describe("unparsable input escalates", () => {
       expect(decision.reason).toMatch(/could not be parsed/);
     }
   });
+
+  it.each([
+    [`$env:NO_CORS="1"; git status`, "powershell", "it sets NO_CORS, which can change what runs after it"],
+    ["NO_CORS=1; git status", "posix", "it sets NO_CORS, which can change what runs after it"],
+    ["$alias:ls = 'Remove-Item'", "powershell", "defines what 'ls' runs"],
+    ["using module ./x.psm1", "powershell", "loads code from ./x.psm1"],
+  ] as const)("asks about a piece it read, and says why rather than that it could not read it: %j", (line, dialect, reason) => {
+    const decision = decideCommand(OPEN, line, dialect);
+    expect(decision.action).toBe("require_approval");
+    expect(decision.reason).toBe(reason);
+  });
 });
 
 describe("the project's policy is the built-ins, and a permission set's command lines are what a project says", () => {

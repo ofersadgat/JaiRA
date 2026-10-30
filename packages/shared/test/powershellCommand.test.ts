@@ -131,11 +131,13 @@ describe("PowerShell words", () => {
 
 describe("PowerShell that acts without a command", () => {
   it("treats a variable that reaches past the line as a piece nobody can vouch for", () => {
-    expect(pieces("$env:PATH = 'C:\\evil'; git status")).toEqual(["unparsed «$env:PATH»", "command «git status»"]);
-    expect(pieces("$env:Path += ';C:\\x'")).toEqual(["unparsed «$env:Path»"]);
-    expect(pieces("${function:git} = { Remove-Item x }; git status")).toEqual(["unparsed «${function:git}»", "command «Remove-Item x»", "command «git status»"]);
-    expect(pieces("$alias:ls = 'Remove-Item'")).toEqual(["unparsed «$alias:ls»"]);
-    expect(pieces("$PSDefaultParameterValues['*:Force'] = $true")).toEqual(["unparsed «$PSDefaultParameterValues['*:Force']»"]);
+    expect(pieces("$env:PATH = 'C:\\evil'; git status")).toEqual(["unvouched «$env:PATH»", "command «git status»"]);
+    expect(pieces("$env:Path += ';C:\\x'")).toEqual(["unvouched «$env:Path»"]);
+    expect(pieces("${function:git} = { Remove-Item x }; git status")).toEqual(["unvouched «${function:git}»", "command «Remove-Item x»", "command «git status»"]);
+    expect(pieces("$alias:ls = 'Remove-Item'")).toEqual(["unvouched «$alias:ls»"]);
+    expect(pieces("$PSDefaultParameterValues['*:Force'] = $true")).toEqual(["unvouched «$PSDefaultParameterValues['*:Force']»"]);
+    // Each of them was read: the line is not unparsed.
+    expect(takeApart("$env:PATH = 'C:\\evil'; git status", "powershell").unparsed).toBe(false);
     // The line's own variables, colour and CI are nothing to anybody else.
     expect(pieces("$x = Get-Content f.txt; [int]$n = 5; $a, $b = 1, 2; $env:CI = '1'; $ErrorActionPreference = 'Stop'")).toEqual(["command «Get-Content f.txt»"]);
     // A property set on an object can change a file: code.
@@ -160,7 +162,7 @@ describe("PowerShell that acts without a command", () => {
   it("treats what defines a name as not modelled, and still judges what its body runs", () => {
     expect(takeApart("function git { Remove-Item -Recurse * }; git status", "powershell")).toMatchObject({ unparsed: true, reason: "'function' is not modelled" });
     expect(pieces("function git { Remove-Item -Recurse * }; git status")).toEqual(["unparsed «function git { Remove-Item -Recurse * }»", "command «Remove-Item -Recurse *»", "command «git status»"]);
-    expect(pieces("using module ./Evil.psm1")).toEqual(["unparsed «using module ./Evil.psm1»"]);
+    expect(pieces("using module ./Evil.psm1")).toEqual(["unvouched «using module ./Evil.psm1»"]);
     expect(pieces("using namespace System.IO; git status")).toEqual(["command «git status»"]);
   });
 
