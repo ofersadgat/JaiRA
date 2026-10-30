@@ -312,6 +312,25 @@ describe("start_task", () => {
     expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual(["let's work on this", "right.", "something else", "sure."]);
   });
 
+  it("takes back a LATER message that started a run, and the same words can be said again", async () => {
+    const session = await conversation("chat/session");
+    const instanceId = rootInstanceOf(session);
+    const say = (message: string, output: string) => service.sendChatMessage({ taskId: session, instanceId, message, fake: [{ output }] as unknown as JsonValue });
+    await say("look at this first", "looked.");
+    await say("build it all", "starting it.");
+    await call(session, "start_task", { state: "lib/done" });
+    await parked();
+
+    const point = service.chatThread({ taskId: session })!.points.at(-1)!;
+    await service.rewindTask({ taskId: session, at: point.seq! });
+    const kept = ["let's work on this", "right.", "look at this first", "looked."];
+    expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual(kept);
+    expect(statusOf(session)).toBe("completed");
+
+    await say("build it all", "starting it again.");
+    expect(service.chatThread({ taskId: session })!.session.turns.map((turn) => turn.text)).toEqual([...kept, "build it all", "starting it again."]);
+  });
+
   it("dispatches no second model call of its own: what it starts is a CHILD, not another turn", async () => {
     const session = await conversation("chat/session");
     const opening = prompts(session);

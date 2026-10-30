@@ -139,6 +139,31 @@ describe("what a cut keeps", () => {
     const part = partitionAt(events, 5);
     expect(part.kept.map((e) => e.seq)).toEqual([1, 2, 3, 4]);
   });
+
+  it("names the first message a kept conversation loses — a chat turn's events name no record, and the last here never settled", () => {
+    const events = [
+      stored(1, "instance.entered", "host"),
+      stored(2, "operation.started", "host"),
+      stored(3, "operation.completed", "host", { operationId: "r-host" }),
+      stored(4, "instance.terminated", "host", { outcome: "success" }),
+      stored(5, "instance.entered", "chat:host"),
+      stored(6, "operation.started", "chat:host"),
+      stored(7, "operation.completed", "chat:host"),
+      stored(8, "instance.terminated", "chat:host", { outcome: "success" }),
+      stored(9, "transition.taken", "chat:host", { to: "chat/session", index: 1 }),
+      stored(10, "operation.started", "chat:host"),
+      stored(11, "operation.completed", "chat:host"),
+      stored(12, "instance.terminated", "chat:host", { outcome: "success" }),
+      stored(13, "transition.taken", "chat:host", { to: "chat/session", index: 2 }),
+      stored(14, "operation.started", "chat:host"),
+    ];
+    const atFirst = partitionAt(events, 9);
+    expect(atFirst.droppedRecords.size).toBe(0);
+    expect([...atFirst.droppedTurns]).toEqual([["chat:host", 1]]);
+    expect([...partitionAt(events, 13).droppedTurns]).toEqual([["chat:host", 2]]);
+    // Entered at the cut, the whole instance goes and its records with it.
+    expect(partitionAt(events, 5).droppedTurns.size).toBe(0);
+  });
 });
 
 // --- the store's cut -------------------------------------------------------------------------

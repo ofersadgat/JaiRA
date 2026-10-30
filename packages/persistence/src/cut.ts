@@ -77,6 +77,12 @@ export interface Partition {
   doomed: Set<string>;
   /** Record ids the dropped events dispatched or settled — what the deletion reaches by name. */
   droppedRecords: Set<string>;
+  /**
+   * Of a conversation kept past the cut, the first message it loses: chat instance → that message's
+   * index. A chat turn's events name no record, settled or not, but its `transition.taken` carries the
+   * index the turn dispatched at (`chatTurn.ts`: `scope.sequence`), which is what names the record.
+   */
+  droppedTurns: Map<string, number>;
 }
 
 /**
@@ -98,6 +104,7 @@ export function partitionAt(events: readonly StoredEvent[], seq: number): Partit
   const kept: StoredEvent[] = [];
   const dropped: StoredEvent[] = [];
   const droppedRecords = new Set<string>();
+  const droppedTurns = new Map<string, number>();
   /** The seq of each instance's newest `operation.started`, as the scan reaches it. */
   const lastStarted = new Map<string, number>();
   /** Instances that had ENDED since their newest call started, before the cut. */
@@ -138,8 +145,11 @@ export function partitionAt(events: readonly StoredEvent[], seq: number): Partit
     if (!keep && row.operationId !== undefined && row.type !== "call.waiting" && row.type !== "call.settled") {
       droppedRecords.add(row.operationId);
     }
+    if (!keep && row.event.type === "transition.taken" && inst !== undefined && inst.startsWith(CHAT_INSTANCE_PREFIX) && !doomed.has(inst)) {
+      droppedTurns.set(inst, Math.min(droppedTurns.get(inst) ?? row.event.index, row.event.index));
+    }
   }
-  return { kept, dropped, doomed, droppedRecords };
+  return { kept, dropped, doomed, droppedRecords, droppedTurns };
 }
 
 /** What a rewind removed, for the caller's log line. */
@@ -194,9 +204,22 @@ function pinAtCut(project: Project, taskId: string, events: readonly StoredEvent
   return pinAt(events, seq, standing);
 }
 
-/** Every record of a task at or after the cut — by the events that name them, and by doomed instance. */
+/**
+ * Every record of a task at or after the cut — by the events that name them, by doomed instance, and
+ * by the messages a kept conversation loses.
+ *
+ * A record left behind is worse than untidy. Its turn's seat and index are free again after the cut,
+ * so sending the same words again recomputes its id and is refused as already settled; other words
+ * collide with its seat; and with no seat cut, the provider's conversation keeps the deleted turn.
+ */
 function doomedRecordsOf(project: Project, taskId: string, part: Partition): Set<string> {
   const ids = new Set(part.droppedRecords);
+  for (const [instanceId, index] of part.droppedTurns) {
+    const rows = project.db
+      .prepare(`SELECT id FROM operation_records WHERE task_id = ? AND instance_id = ? AND sequence >= ?`)
+      .all(taskId, instanceId, index) as Array<{ id: string }>;
+    for (const row of rows) ids.add(row.id);
+  }
   if (part.doomed.size > 0) {
     const marks = [...part.doomed].map(() => "?").join(", ");
     const rows = project.db

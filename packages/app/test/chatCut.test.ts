@@ -97,6 +97,37 @@ describe("rewinding a conversation", () => {
     await service.rewindTask({ taskId, at: before.points[1]!.seq! });
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer"]);
   });
+
+  it("takes the message's record with it, so the same words can be sent again — and again", async () => {
+    const taskId = await threeLong();
+    for (const reply of ["third answer, again", "third answer, once more"]) {
+      const thread = service.chatThread({ taskId })!;
+      await service.rewindTask({ taskId, at: thread.points[1]!.seq! });
+      await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY(reply) });
+      expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer", "user: three", `assistant: ${reply}`]);
+      expect(service.chatThread({ taskId })!.forks).toBeUndefined();
+    }
+  });
+
+  it("frees the seat for different words too, with nothing left behind a seam", async () => {
+    const taskId = await threeLong();
+    const thread = service.chatThread({ taskId })!;
+    await service.rewindTask({ taskId, at: thread.points[1]!.seq! });
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three, differently", fake: REPLY("a different third answer") });
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer", "user: three, differently", "assistant: a different third answer"]);
+    expect(service.chatThread({ taskId })!.forks).toBeUndefined();
+  });
+
+  it("rewinds a message that was itself sent again", async () => {
+    const taskId = await threeLong();
+    const thread = service.chatThread({ taskId })!;
+    await service.rewindTask({ taskId, at: thread.points[1]!.seq! });
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", fake: REPLY("third answer, again") });
+    const cutAgain = service.chatThread({ taskId })!.points[1]!.seq!;
+    await service.rewindTask({ taskId, at: cutAgain });
+    expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer"]);
+    expect(service.chatThread({ taskId })!.points).toHaveLength(1);
+  });
 });
 
 describe("forking a conversation", () => {
@@ -118,6 +149,8 @@ describe("forking a conversation", () => {
     // It knows where it came from, in words the seam can draw.
     const thread = service.chatThread({ taskId: fork.taskId })!;
     expect(thread.origin).toMatchObject({ taskId, title: titleOf("one"), label: "before message 3" });
+    // A copy of what was kept: the cut turn is not carried along, seated past the cut.
+    expect(thread.forks).toBeUndefined();
     expect(thread.origin!.boundary).toBeGreaterThan(0);
     // Listed as its own conversation, filed under its parent.
     const listed = service.listTasks().find((t) => t.taskId === fork.taskId)!;
