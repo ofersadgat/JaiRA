@@ -18,7 +18,7 @@ service reported `0.2.90` as the newest).
 | `reference/format.md` | the `.dc.html` authoring format, as fenced in `created-result.md` |
 
 Only these changed, and only to placeholders a JaiRA canvas fills in: `{{canvas_url}}`,
-`{{version}}`, `{{version_id}}`, `{{file_path}}`, `{{brief}}`. Everything else is as served, including
+`{{version}}`, `{{version_id}}`, `{{file_path}}`, `{{own_files}}` (the canvas's files after the publish, each quoted, sorted, comma-separated), `{{brief}}`. Everything else is as served, including
 the type's own URLs.
 
 **Not here yet.** `SKILL.md` names reference pages the run never read — `craft.md`, `diagrams.md`,

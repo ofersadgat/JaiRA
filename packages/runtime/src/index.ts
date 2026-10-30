@@ -51,6 +51,8 @@ export * from "./genericAgent";
 export * from "./artifactPath";
 export * from "./artifacts";
 export * from "./fileTools";
+export * from "./showArtifact";
+export * from "./artifactCommands";
 export * from "./searchTools";
 export * from "./webTools";
 export * from "./workflowTools";

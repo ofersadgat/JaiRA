@@ -409,6 +409,7 @@ import {
   type EventsTaskNotice,
   type EventsTaskStart,
   type EventsTaskCaller,
+  expandArtifactCommand,
 } from "@jaira/runtime";
 import {
   ARTIFACT_SCHEME,
@@ -5264,6 +5265,9 @@ export class AppService {
     // bound — read now where that task has completed, and owed (the new task holds for it, and
     // `startRun` reads it) where it has not.
     const inputs: Record<string, JsonValue> = { ...(request.inputs ?? {}) };
+    // A conversation's opening message: `/design <brief>` becomes the prompt Claude Code sends for it
+    // (decision 0020 §2), as a message sent into it later does.
+    if (typeof inputs["message"] === "string") inputs["message"] = expandArtifactCommand(inputs["message"]);
     const provenance: Record<string, InputProvenance> = {};
     const waitsFor: string[] = [];
     for (const name of Object.keys(inputs)) provenance[name] = request.provenance?.[name] ?? { via: "asked" };
@@ -6632,6 +6636,8 @@ export class AppService {
     origin: ChatOrigin = {},
   ): Promise<ChatTurnResult & { instanceId: string; index: number; steered?: boolean; waiting?: WaitingItem }> {
     if (request.message.trim() === "") throw this.refusal("run", "a message cannot be empty");
+    // `/design <brief>` becomes the prompt Claude Code sends for it (decision 0020 §2).
+    request = { ...request, message: expandArtifactCommand(request.message) };
     const open = this.session(request.project);
     // The person writing again is what lets a task they stopped use the mouse and keyboard again.
     if (origin.by !== "host") this.drivingStopped.delete(`${this.refOfSession(open)}/${request.taskId}`);
