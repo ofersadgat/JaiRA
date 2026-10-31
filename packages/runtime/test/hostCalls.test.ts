@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { messagesOfRecord } from "@jaira/persistence";
-import { approvalCallEntries, approvalResultEntries, callingCallOf, checkCallEntries, checkResultEntries, endedCallsOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
+import { approvalCallEntries, approvalResultEntries, callIdsOf, callingCallOf, callingCallOfTurn, checkCallEntries, checkResultEntries, endedCallsOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
 import { ApprovalHub } from "../src/approval";
 
 const LINE = 'git fetch origin --quiet && echo "master=$(git rev-parse origin/master)"';
@@ -21,6 +21,27 @@ describe("the call that needs permission", () => {
     expect(callingCallOf(streamed, { command: LINE, cwd: "/r" })).toBe("t1");
     expect(callingCallOf(streamed, { command: LINE })).toBe("t0");
     expect(callingCallOf(streamed, { command: "ls" })).toBeUndefined();
+  });
+});
+
+describe("the call that needs permission, in a turn with a subagent", () => {
+  const use = (id: string, command: string, at: number): JsonValue => ({ kind: "message", role: "assistant", at, content: { role: "assistant", content: [{ type: "tool_use", id, name: "mcp__dai__shell", input: { command } }] } });
+
+  it("is found in the subagent's chain, where a background agent's calls ride", () => {
+    expect(callingCallOfTurn({ entries: [use("m1", "ls", 1)], sidechains: { spawn: [use("s1", LINE, 2)] } }, { command: LINE })).toEqual({ call: "s1", chain: "spawn" });
+  });
+
+  it("is the main thread's when the call is the main thread's", () => {
+    expect(callingCallOfTurn({ entries: [use("m1", LINE, 1)], sidechains: {} }, { command: LINE })).toEqual({ call: "m1" });
+  });
+
+  it("is the newest of the same input in both", () => {
+    expect(callingCallOfTurn({ entries: [use("m1", LINE, 5)], sidechains: { spawn: [use("s1", LINE, 2)] } }, { command: LINE })).toEqual({ call: "m1" });
+    expect(callingCallOfTurn({ entries: [use("m1", LINE, 1)], sidechains: { spawn: [use("s1", LINE, 2)] } }, { command: LINE })).toEqual({ call: "s1", chain: "spawn" });
+  });
+
+  it("is nobody's when no call has that input", () => {
+    expect(callingCallOfTurn({ entries: [], sidechains: {} }, { command: LINE })).toBeUndefined();
   });
 });
 
@@ -46,6 +67,32 @@ describe("in the record", () => {
   it("is never replayed to a model — the model made no such call", () => {
     const value = { value: { entries: mergeHostCalls([bashCall("t1", LINE), bashResult("t1")], [call, result]).entries } } as JsonValue;
     expect(messagesOfRecord(value)).toHaveLength(2);
+  });
+
+  it("stays in a subagent's chain when the call that made it is the subagent's", () => {
+    const sidechain = { id: "agent-1", parentToolUseId: "spawn" };
+    const inChain = { ...(bashCall("s1", LINE) as object), sidechain } as JsonValue;
+    const asked = approvalCallEntries("approve_1", "s1", { tool: "shell", command: LINE }, 1000).record;
+    const merged = mergeHostCalls([inChain], [asked]);
+    expect(merged.left).toEqual([]);
+    expect((merged.entries[1] as { sidechain?: unknown }).sidechain).toEqual(sidechain);
+    expect(callIdsOf(merged.entries).has("s1")).toBe(true);
+  });
+
+  it("hears what the record holds before taking what waits, so a call let go of lands in this record", async () => {
+    const order: string[] = [];
+    const inner = { append: (s: { id: string }) => ({ id: s.id }), finish: () => undefined } as unknown as RecordStore;
+    const store = withHostCalls(
+      inner,
+      () => {
+        order.push("take");
+        return [];
+      },
+      () => undefined,
+      (entries) => void order.push(`ending ${[...callIdsOf(entries)].join()}`),
+    );
+    await store.finish({ id: "r" }, { result: { value: { entries: [bashCall("t1", LINE)] } } } as never);
+    expect(order).toEqual(["ending t1", "take"]);
   });
 
   it("is folded in when the record settles, and what it could not place is kept for the next", async () => {

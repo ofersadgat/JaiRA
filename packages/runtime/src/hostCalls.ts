@@ -193,6 +193,34 @@ export function callingCallOf(entries: readonly JsonValue[], input: unknown): st
 }
 
 /**
+ * The call that needs permission in a turn still streaming, and the subagent chain it is in, if one: a
+ * background agent asks like any other, and its calls ride `sidechains`, not `entries`. The newest
+ * match, whichever it is in — the same input can be in both.
+ */
+export function callingCallOfTurn(turn: { entries: readonly JsonValue[]; sidechains: Readonly<Record<string, readonly JsonValue[]>> }, input: unknown): { call: string; chain?: string } | undefined {
+  let found: { call: string; chain?: string } | undefined;
+  let newest = -Infinity;
+  const look = (entries: readonly JsonValue[], chain?: string): void => {
+    const call = callingCallOf(entries, input);
+    if (call === undefined) return;
+    const entry = [...entries].reverse().find((e) => toolUsesOf(e).some((use) => use.id === call));
+    const at = (entry as { at?: unknown } | undefined)?.at;
+    const when = typeof at === "number" ? at : 0;
+    if (when < newest) return;
+    newest = when;
+    found = { call, ...(chain !== undefined ? { chain } : {}) };
+  };
+  look(turn.entries);
+  for (const [chain, entries] of Object.entries(turn.sidechains)) look(entries, chain);
+  return found;
+}
+
+/** Every call an entry list holds, whoever made it: the record's own, and its subagents'. */
+export function callIdsOf(entries: readonly JsonValue[]): Set<string> {
+  return new Set(entries.flatMap((entry) => toolUsesOf(entry).map((use) => use.id)));
+}
+
+/**
  * A question a record was left asking: a call put to the person that has no result. What a conversation
  * cut off by the app closing is found to be waiting on when it opens again — the record is the whole of
  * it (the person, 2026-10-21: "the agent record should be written, so we should be able to replay that
@@ -363,7 +391,10 @@ export function mergeHostCalls(entries: readonly JsonValue[], pending: readonly 
       continue;
     }
     const after = placed.get(caller) ?? 0;
-    out.splice(at + 1 + after, 0, entry);
+    // A subagent's call keeps its calls in its chain: without the mark they would read as the main
+    // thread's, after the subagents' entries at the end of the record.
+    const sidechain = (out[at] as { sidechain?: JsonValue }).sidechain;
+    out.splice(at + 1 + after, 0, sidechain === undefined ? entry : ({ ...(entry as object), sidechain } as JsonValue));
     placed.set(caller, after + 1);
   }
   return { entries: out, left };
@@ -373,16 +404,19 @@ export function mergeHostCalls(entries: readonly JsonValue[], pending: readonly 
  * A record store that folds the calls a tool made into the record of the call that made them, when it
  * settles. `take` hands over what is waiting (and forgets it); `keep` is given back what this record
  * could not place. A payload that is not a conversation has nowhere to put them, and is stored as it is.
+ * `ending` hears what the record holds first: a call in it is over, and what it was waiting for may yet
+ * add to what is taken.
  */
-export function withHostCalls(inner: RecordStore, take: () => JsonValue[], keep: (left: JsonValue[]) => void): RecordStore {
+export function withHostCalls(inner: RecordStore, take: () => JsonValue[], keep: (left: JsonValue[]) => void, ending?: (entries: readonly JsonValue[]) => void): RecordStore {
   return {
     append: (stub) => inner.append(stub),
     ...(inner.update !== undefined ? { update: (at, partial) => inner.update!.call(inner, at, partial) } : {}),
     ...(inner.bySession !== undefined ? { bySession: (session, upTo) => inner.bySession!.call(inner, session, upTo) } : {}),
     finish: (ref, settled) => {
-      const pending = take();
       const result = settled.result as { value?: unknown } | undefined;
       const value = result?.value as { entries?: unknown } | undefined;
+      if (value !== null && typeof value === "object" && Array.isArray(value.entries)) ending?.(value.entries as JsonValue[]);
+      const pending = take();
       if (pending.length === 0 || value === null || typeof value !== "object" || !Array.isArray(value.entries)) {
         if (pending.length > 0) keep(pending);
         return inner.finish(ref, settled);

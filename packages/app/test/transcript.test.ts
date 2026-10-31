@@ -471,6 +471,23 @@ describe("stored provider events", () => {
   });
 });
 
+describe("something the agent left running that did not finish", () => {
+  const ended = (status: string): ReturnType<typeof entriesOf> =>
+    entriesOf({
+      ...session([{ role: "assistant", text: "done" }] as never),
+      providerEvents: [{ index: 1, event: { type: "system", subtype: "task_notification", status, summary: "Build the runtime" } }],
+    } as never).filter((e) => e.kind === "event");
+
+  it("says so, by name: it is the one line that ever will", () => {
+    expect(ended("stopped")).toMatchObject([{ tone: "warn", text: "the background task “Build the runtime” was stopped before it finished" }]);
+    expect(ended("failed")).toMatchObject([{ tone: "bad", text: "the background task “Build the runtime” failed" }]);
+  });
+
+  it("is not a warning when it finished", () => {
+    expect(ended("completed")).toMatchObject([{ tone: "plain" }]);
+  });
+});
+
 describe("journalFor", () => {
   const turns: ConversationTurn[] = [
     { seq: 1, at: 1, kind: "policy", stateId: "plan/goals", text: "a" },

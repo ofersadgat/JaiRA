@@ -83,6 +83,45 @@ describe("a permission request whose call ended without an answer", () => {
     expect(answerOf(session, taskId)).toMatchObject({ decision: "deny", by: "abandoned" });
   });
 
+  it("is let go of when a subagent's call ends — its calls ride a chain of their own", async () => {
+    const { taskId } = service.createTask({ title: titleOf("sub"), workflow: CHAT_SESSION, inputs: { message: "sub" } });
+    const session = sessionOf();
+    streamed(session, taskId, { ...call, parentToolUseId: "spawn" });
+    const asked = askSmart(session, taskId);
+    expect(service.pendingApprovals()).toHaveLength(1);
+    streamed(session, taskId, { ...cut, parentToolUseId: "spawn" });
+    expect(await asked).toBe("deny");
+    expect(service.pendingApprovals()).toEqual([]);
+  });
+
+  it("is let go of when the record of the call settles, though the stream never said the call ended", async () => {
+    const { taskId } = service.createTask({ title: titleOf("gone"), workflow: CHAT_SESSION, inputs: { message: "gone" } });
+    const session = sessionOf();
+    streamed(session, taskId, { ...call, parentToolUseId: "spawn" });
+    const asked = askSmart(session, taskId);
+    const settled = [{ kind: "message", role: "assistant", content: [{ type: "tool_use", id: "t1", name: "mcp__dai__shell", input: { command: LINE } }], sidechain: { id: "spawn", parentToolUseId: "spawn" } }];
+    const finished: unknown[] = [];
+    const inner = { append: (s: { id: string }) => ({ id: s.id }), finish: (_ref: unknown, value: unknown) => void finished.push(value) };
+    const records = (service as never as { withHostCallsOf(o: Session, t: string, r: object): { finish(ref: object, settled: object): unknown } }).withHostCallsOf(session, taskId, inner);
+    await records.finish({ id: "r" }, { result: { value: { entries: settled } } });
+    expect(await asked).toBe("deny");
+    expect(service.pendingApprovals()).toEqual([]);
+    // In this record, under the call in its chain: the person can see what became of it.
+    const entries = (finished[0] as { result: { value: { entries: Array<{ sidechain?: unknown }> } } }).result.value.entries;
+    expect(entries).toHaveLength(3);
+    expect(entries.every((entry) => entry.sidechain !== undefined)).toBe(true);
+    expect(JSON.stringify(entries[2])).toContain('"by":"abandoned"');
+  });
+
+  it("is let go of when the conversation's last turn has ended and no run holds it", async () => {
+    const { taskId } = service.createTask({ title: titleOf("end"), workflow: CHAT_SESSION, inputs: { message: "end" } });
+    const session = sessionOf();
+    const asked = askSmart(session, taskId);
+    (service as never as { abandonAsksOfTask(s: Session, t: string): void }).abandonAsksOfTask(session, taskId);
+    expect(await asked).toBe("deny");
+    expect(service.pendingApprovals()).toEqual([]);
+  });
+
   it("is kept while the call is still going — another call's result is not its end", async () => {
     const { taskId } = service.createTask({ title: titleOf("two"), workflow: CHAT_SESSION, inputs: { message: "two" } });
     const session = sessionOf();

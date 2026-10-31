@@ -345,7 +345,8 @@ import {
   statusOfResult,
   withNativeCapture,
   withHostCalls,
-  callingCallOf,
+  callIdsOf,
+  callingCallOfTurn,
   approvalCallEntries,
   approvalResultEntries,
   unansweredAsksOf,
@@ -7235,6 +7236,7 @@ export class AppService {
       if (turns?.size === 0) open.chatTurns.delete(taskId);
       liveFlush.dispose();
       if (!open.chatTurns.has(taskId)) {
+        this.abandonAsksOfTask(open, taskId);
         open.liveTurns.clear(taskId);
         open.liveFlush.delete(taskId);
         open.approvals.unseed(taskId);
@@ -9789,11 +9791,13 @@ export class AppService {
     const taskId = request.taskId;
     if (taskId === undefined) return;
     const snap = session.liveTurns.snapshot(taskId);
-    const calledBy = snap !== null ? callingCallOf(snap.entries, request.input) : undefined;
+    const caller = snap !== null ? callingCallOfTurn(snap, request.input) : undefined;
+    const calledBy = caller?.call;
+    const chain = caller?.chain;
     // Unique across the conversation, not the process: a conversation outlives the process that asked,
     // and the request id is stamped with that process's start.
     const callId = `approve_${request.at.toString(36)}_${request.requestId}`;
-    session.approvalCalls.set(request.requestId, { callId, ...(calledBy !== undefined ? { calledBy } : {}), taskId, at: request.at });
+    session.approvalCalls.set(request.requestId, { callId, ...(calledBy !== undefined ? { calledBy } : {}), ...(chain !== undefined ? { chain } : {}), taskId, at: request.at });
     // The WHOLE request: a question the app closes under is found again in the record and put to the
     // person from it (`recoveredAsksOf`), so what the prompt draws and what a call made again is matched
     // by have to be here. The tool's input only when the call it belongs to is not beside it.
@@ -9811,7 +9815,7 @@ export class AppService {
       },
       request.at,
     );
-    this.hostCall(session, taskId, live, record, request.at);
+    this.hostCall(session, taskId, live, record, request.at, chain);
   }
 
   /**
@@ -9836,7 +9840,7 @@ export class AppService {
       waitedMs: Math.max(0, at - call.at),
     };
     const { live, record } = approvalResultEntries(call.callId, call.calledBy, answer, at);
-    this.hostCall(session, call.taskId, live, record, at);
+    this.hostCall(session, call.taskId, live, record, at, call.chain);
   }
 
   /** Which open check a request is: the task, the call's own input, the function, and the part it judges. */
@@ -9851,13 +9855,15 @@ export class AppService {
    */
   private recordCheckCall(session: ProjectSession, taskId: string, request: PermissionFunctionRequest): void {
     const snap = session.liveTurns.snapshot(taskId);
-    const calledBy = snap !== null ? callingCallOf(snap.entries, request.input) : undefined;
+    const caller = snap !== null ? callingCallOfTurn(snap, request.input) : undefined;
+    const calledBy = caller?.call;
+    const chain = caller?.chain;
     const at = Date.now();
     const callId = `check_${at.toString(36)}_${this.interactionStamp}-${++this.checkSeq}`;
     const key = this.checkKeyOf(taskId, request);
     // A queue: two identical calls checked at once are two checks, closed in the order they opened.
     const open = session.checkCalls.get(key) ?? [];
-    open.push({ callId, ...(calledBy !== undefined ? { calledBy } : {}), at });
+    open.push({ callId, ...(calledBy !== undefined ? { calledBy } : {}), ...(chain !== undefined ? { chain } : {}), at });
     session.checkCalls.set(key, open);
     const { live, record } = checkCallEntries(
       callId,
@@ -9871,7 +9877,7 @@ export class AppService {
       },
       at,
     );
-    this.hostCall(session, taskId, live, record, at);
+    this.hostCall(session, taskId, live, record, at, chain);
   }
 
   /** What the function came to, beside its call — once; a second word about the same check is no news. */
@@ -9883,7 +9889,7 @@ export class AppService {
     if (open!.length === 0) session.checkCalls.delete(key);
     const at = Date.now();
     const { live, record } = checkResultEntries(call.callId, call.calledBy, { verdict, ...(reason !== undefined ? { reason } : {}), tookMs: Math.max(0, at - call.at) }, at);
-    this.hostCall(session, taskId, live, record, at);
+    this.hostCall(session, taskId, live, record, at, call.chain);
   }
 
   /**
@@ -9894,7 +9900,9 @@ export class AppService {
    */
   private recordRuleRefusal(session: ProjectSession, taskId: string, refused: RuleRefusal): void {
     const snap = session.liveTurns.snapshot(taskId);
-    const calledBy = snap !== null ? callingCallOf(snap.entries, refused.input) : undefined;
+    const caller = snap !== null ? callingCallOfTurn(snap, refused.input) : undefined;
+    const calledBy = caller?.call;
+    const chain = caller?.chain;
     const at = Date.now();
     const callId = `check_${at.toString(36)}_${this.interactionStamp}-${++this.checkSeq}`;
     const command = (refused.input as { command?: unknown } | null)?.command;
@@ -9904,9 +9912,9 @@ export class AppService {
       { function: ruleLabel(refused.by.rule), rule: true, tool: refused.tool, subject: refused.tool, ...(typeof command === "string" ? { command } : {}) },
       at,
     );
-    this.hostCall(session, taskId, call.live, call.record, at);
+    this.hostCall(session, taskId, call.live, call.record, at, chain);
     const result = checkResultEntries(callId, calledBy, { verdict: "deny", ...(refused.by.reason !== undefined ? { reason: refused.by.reason } : {}), tookMs: 0 }, at);
-    this.hostCall(session, taskId, result.live, result.record, at);
+    this.hostCall(session, taskId, result.live, result.record, at, chain);
   }
 
   /**
@@ -9928,18 +9936,42 @@ export class AppService {
   }
 
   /**
+   * What a settling record leaves waiting, let go of: the process behind its calls is gone, so an
+   * approval one of them asked for can reach nothing, whether or not the stream said the call ended. An
+   * answer given afterwards would be answered to nobody, and the person would look for what it did
+   * (2026-10-30: a background agent's ask stood open 67 minutes past its turn). Here rather than at the
+   * turn's end so that it lands in this record. Not while the app closes, for the reason above.
+   */
+  private abandonAsksOfRecord(session: ProjectSession, taskId: string, entries: readonly JsonValue[]): void {
+    if (session.closing || session.approvalCalls.size === 0) return;
+    const calls = callIdsOf(entries);
+    for (const [requestId, call] of [...session.approvalCalls]) {
+      if (call.taskId === taskId && call.calledBy !== undefined && calls.has(call.calledBy)) session.approvals.abandon(requestId);
+    }
+  }
+
+  /** What is left waiting when a conversation's last turn has ended and no run holds it: nothing can use the answer. */
+  private abandonAsksOfTask(session: ProjectSession, taskId: string): void {
+    if (session.closing || session.live.has(taskId)) return;
+    for (const [requestId, call] of [...session.approvalCalls]) {
+      if (call.taskId === taskId) session.approvals.abandon(requestId);
+    }
+  }
+
+  /**
    * One entry of a call a tool made: onto the task's live turn — at the turn's own position, so it
    * joins the tail rather than replacing it, and flushed at once, so a turn cut off keeps it — and into
-   * what waits for the record to settle.
+   * what waits for the record to settle. A subagent's goes on that subagent's `chain`.
    */
-  private hostCall(session: ProjectSession, taskId: string, live: JsonValue, record: JsonValue, at: number): void {
+  private hostCall(session: ProjectSession, taskId: string, live: JsonValue, record: JsonValue, at: number, chain?: string): void {
     const waiting = session.hostCalls.get(taskId) ?? [];
     waiting.push(record);
     session.hostCalls.set(taskId, waiting);
     const snap = session.liveTurns.snapshot(taskId);
     if (snap === null || snap.sessionId === undefined || snap.seq === undefined) return;
     const where = { id: snap.sessionId, seq: snap.seq };
-    const applied = session.liveTurns.apply(taskId, { session: where, ...(snap.stateId !== undefined ? { stateId: snap.stateId } : {}), entry: live, at });
+    const entry = chain === undefined ? live : ({ ...(live as object), parentToolUseId: chain } as JsonValue);
+    const applied = session.liveTurns.apply(taskId, { session: where, ...(snap.stateId !== undefined ? { stateId: snap.stateId } : {}), entry, at });
     this.publish({
       type: "session:turn",
       taskId,
@@ -9978,6 +10010,7 @@ export class AppService {
         return waiting;
       },
       (left) => open.hostCalls.set(taskId, [...left, ...(open.hostCalls.get(taskId) ?? [])]),
+      (entries) => this.abandonAsksOfRecord(open, taskId, entries),
     ) as S;
   }
 
@@ -14237,11 +14270,11 @@ export function sidechainsOf(value: JsonValue | undefined): Record<string, Sessi
   if (!Array.isArray(entries)) return undefined;
   const out: Record<string, SessionTurn[]> = {};
   for (const raw of entries) {
-    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; sidechain?: { id?: unknown; parentToolUseId?: unknown } } | null;
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; calledBy?: unknown; sidechain?: { id?: unknown; parentToolUseId?: unknown } } | null;
     if (entry === null || typeof entry !== "object" || entry.kind !== "message") continue;
     const call = typeof entry.sidechain?.parentToolUseId === "string" ? entry.sidechain.parentToolUseId : entry.sidechain?.id;
     if (typeof call !== "string") continue;
-    (out[call] ??= []).push(turnOf({ role: entry.role, content: entry.content } as JsonValue));
+    (out[call] ??= []).push({ ...turnOf({ role: entry.role, content: entry.content } as JsonValue), ...(typeof entry.calledBy === "string" ? { calledBy: entry.calledBy } : {}) });
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

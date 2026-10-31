@@ -307,12 +307,12 @@ export class ProjectSession {
    * id, the call that made it, which task's conversation it is in, and when it was asked. What the
    * answer's result entry needs to name the right call and say how long it waited.
    */
-  readonly approvalCalls = new Map<string, { callId: string; calledBy?: string; taskId: string; at: number }>();
+  readonly approvalCalls = new Map<string, { callId: string; calledBy?: string; chain?: string; taskId: string; at: number }>();
   /**
    * `check_permission` calls still open — a permission function asked about a call, not yet come to
    * anything — by `Service.checkKeyOf` (task, the call's input, the function, the part), oldest first.
    */
-  readonly checkCalls = new Map<string, Array<{ callId: string; calledBy?: string; at: number }>>();
+  readonly checkCalls = new Map<string, Array<{ callId: string; calledBy?: string; chain?: string; at: number }>>();
   /**
    * record id → the words a cut call is continued with: what the person answered, since the app closed
    * under it, to what it was asking (`Service.answerRecoveredAsk`). Taken by the continuation layer.

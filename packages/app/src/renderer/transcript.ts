@@ -808,6 +808,12 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
   const type = typeof payload["type"] === "string" ? (payload["type"] as string) : "provider event";
   const subtype = typeof payload["subtype"] === "string" ? (payload["subtype"] as string) : "";
   if (subtype === "init") return [{ kind: "event", tone: "plain", text: "session started", detail }];
+  // Something the agent left running did not finish, which it is never told as anything but this line.
+  if (subtype === "task_notification" && (payload["status"] === "stopped" || payload["status"] === "failed")) {
+    const name = typeof payload["summary"] === "string" && payload["summary"].length > 0 ? ` “${payload["summary"]}”` : "";
+    const failed = payload["status"] === "failed";
+    return [{ kind: "event", tone: failed ? "bad" : "warn", text: `the background task${name} ${failed ? "failed" : "was stopped before it finished"}`, detail }];
+  }
   if (subtype === "compact_boundary") {
     const said = compactionOfEvent(payload);
     return [
