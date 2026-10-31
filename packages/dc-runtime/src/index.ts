@@ -5,7 +5,7 @@
  */
 
 export { parse, type DCDocument, type DCElement, type DCPropSpec, type SourceRange } from "./parse.js";
-export { editStyle, editText } from "./edit.js";
+export { editStyle, editText, formatStyle, insertElement, readStyle, removeElement } from "./edit.js";
 export { decodeEntities, parseHtml, type Attr, type ElementNode, type Node, type TextNode } from "./html.js";
 export { evaluate, interpolate, segments, type Scope, type Segment } from "./holes.js";
 export { parseStyle } from "./attrs.js";

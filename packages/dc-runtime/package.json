@@ -10,7 +10,8 @@
   },
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./source": "./src/source.ts"
   },
   "files": [
     "src",

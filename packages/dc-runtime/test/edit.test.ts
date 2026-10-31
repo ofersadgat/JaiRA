@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { editStyle, editText, parse, renderArtboard } from "../src/index.js";
+import { editStyle, editText, formatStyle, insertElement, parse, readStyle, removeElement, renderArtboard } from "../src/index.js";
 import { artboard, fixture } from "./fixtures.js";
 
 /** Asserts `after` is `before` with `[start, end)` replaced, and nothing else changed. */
@@ -72,5 +72,52 @@ describe("editText", () => {
     const sample = fixture("format-sample.dc.html");
     expect(() => editText(sample, 3, "x")).toThrow(/one literal text/);
     expect(() => editText(sample, 99, "x")).toThrow(/no element 99/);
+  });
+});
+
+describe("removeElement", () => {
+  it("takes an element and its line out, and leaves the rest byte for byte", () => {
+    const source = artboard(`<div style="padding: 8px">\n  <h1>Title</h1>\n  <p>Body</p>\n</div>`);
+    const h1 = parse(source).elements.find((el) => el.tag === "h1")!;
+    expect(removeElement(source, h1.n)).toBe(source.replace("  <h1>Title</h1>\n", ""));
+  });
+
+  it("takes only the element when it shares its line", () => {
+    const source = artboard(`<p>a <b>bold</b> c</p>`);
+    const b = parse(source).elements.find((el) => el.tag === "b")!;
+    expect(removeElement(source, b.n)).toBe(source.replace("<b>bold</b>", ""));
+  });
+});
+
+describe("insertElement", () => {
+  const source = artboard(`<div style="display: flex">\n  <span>one</span>\n  <span>two</span>\n</div>`);
+  const div = parse(source).elements.find((el) => el.tag === "div")!;
+
+  it("puts markup before a child, on its own line, indented as that child", () => {
+    const after = insertElement(source, div.n, `<em>new</em>`, 1);
+    expect(after).toBe(source.replace("  <span>two</span>", "  <em>new</em>\n  <span>two</span>"));
+  });
+
+  it("puts markup after the last child, a step in from the closing tag", () => {
+    expect(insertElement(source, div.n, `<em>new</em>`)).toBe(source.replace("  <span>two</span>\n</div>", "  <span>two</span>\n  <em>new</em>\n</div>"));
+  });
+
+  it("puts markup at the end of the template itself", () => {
+    const after = insertElement(source, null, `<footer>end</footer>`);
+    expect(parse(after).elements.at(-1)!.tag).toBe("footer");
+    expect(parse(after).elements.find((el) => el.tag === "footer")!.parent).toBeNull();
+  });
+});
+
+describe("readStyle and formatStyle", () => {
+  it("round-trip CSS names and values verbatim, holes and !important included", () => {
+    const text = "background: {{tab.bg}}; color: red !important; font-family: 'A; B', serif; background-image: url(data:x;base64,AA)";
+    const read = readStyle(text);
+    expect(read).toEqual({ background: "{{tab.bg}}", color: "red !important", "font-family": "'A; B', serif", "background-image": "url(data:x;base64,AA)" });
+    expect(readStyle(formatStyle(read))).toEqual(read);
+  });
+
+  it("drops an emptied declaration", () => {
+    expect(formatStyle({ width: "10px", height: "" })).toBe("width: 10px");
   });
 });

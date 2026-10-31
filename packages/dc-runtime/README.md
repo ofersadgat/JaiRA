@@ -42,6 +42,24 @@ To the page, from `window.parent` only:
 | Message | Effect |
 | --- | --- |
 | `{ type: "dc:props", props }` | the tweak values: `this.props` becomes the declared defaults overridden by `props`. Each message replaces the last one's set; it is not merged. |
+| `{ type: "dc:mode", mode }` | `view` (the default) and `play`: the page is itself. `edit`: the pointer is the editor's (below). |
+| `{ type: "dc:source", text }` | the editor's change: the artboard is drawn again from `text` in place, no reload; the same script keeps its class and its `state`. |
+| `{ type: "dc:select", id }` | the element the editor has selected (`null`: none): its box is reported after every render and resize. |
+
+### Edit mode
+
+In `edit` every press, click, key, input and focus is caught on the way down (the capture phase, at the
+window) and stopped, so the design's own handlers and links never run. What is under the pointer is
+reported by its nearest element carrying `data-dc-id`; boxes are in the frame's CSS pixels, page-relative.
+
+| Message | When |
+| --- | --- |
+| `{ type: "dc:hover", id, rect }` | the pointer moved (once an animation frame); `id` and `rect` `null` over no element |
+| `{ type: "dc:pick", id, rect, tag, style, text, shift }` | a click: the element's inline style and literal text as the SOURCE has them (holes kept, entities decoded; `text` `null` unless one literal text node) |
+| `{ type: "dc:dblclick", id, rect, tag, style, text }` | a double-click: the editor retypes the text |
+| `{ type: "dc:rects", rects: { [id]: rect } }` | after every render and resize, for the selected element |
+
+`dc:ready` is posted a frame after every render, not only the first.
 
 ### Links
 
@@ -98,6 +116,15 @@ interface DCElement {
 ```
 
 Every offset is into `source`. `parse` never throws.
+
+### The editor's other edits
+
+`removeElement(source, n)` takes element `n` out (its line too, when it stood alone on one);
+`insertElement(source, parent | null, html, index?)` puts markup in as a child of `parent` (or of the
+template) before its child at `index`, else after the last, on a line of its own indented as its
+neighbours; `readStyle(text)` / `formatStyle(record)` round-trip inline style text by CSS name, values
+verbatim. All pure, byte-preserving outside the edited range, and exported from
+`@jaira/dc-runtime/source` — the entry with no React, for the editor's chunk.
 
 ### `editStyle` and `editText`
 
@@ -199,9 +226,10 @@ The artboard as one React element, for `react-dom/server` and tests: `{ props?, 
 ## Host requirements
 
 - Serve `support.js` at `./support.js` beside every artboard, in every folder of the canvas.
-- The frame is sandboxed without `allow-same-origin`, so its origin is opaque: the page's fetch of
-  itself and of its imports are cross-origin. Answer `.dc.html` requests with
-  `Access-Control-Allow-Origin: *` (or the page falls back to the DOM, and imports fail).
+- The page fetches itself and its imports. JaiRA frames an artboard with `allow-same-origin` under a
+  grant that is an origin of its own (`jaira-artifact://<token>/`), so those fetches are same-origin; a
+  host framing it opaque must answer `.dc.html` requests with `Access-Control-Allow-Origin: *` (or the
+  page falls back to the DOM, and imports fail).
 - CSP: `script-src` must allow `support.js` (`'self'`) and **`'unsafe-eval'`** — the logic script is
   compiled with `new Function`. `connect-src 'self'` for those fetches. React needs nothing else.
 - `allow-popups` for external links.
