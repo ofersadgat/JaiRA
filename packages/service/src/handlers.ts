@@ -24,6 +24,7 @@ export type Handler = (request: never) => unknown;
 /** The channels a host answers itself — see the header. */
 export const HOST_CHANNELS = [
   "shell:saveFile",
+  "shell:exportArtboard",
   "shell:download",
   "shell:copyImageAt",
   "shell:edit",

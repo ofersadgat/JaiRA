@@ -112,6 +112,12 @@ export const CLAUDE_TOOLS: AgentToolDeclaration = {
     PowerShell: "shell",
     WebFetch: "web_fetch",
     WebSearch: "web_search",
+    // Decision 0020: Claude Code's own `Artifact` publishes to claude.ai. The Design type's instructions
+    // name it ("Call the `Artifact` tool"), so on a CLI signed in to claude.ai the model reaches for it
+    // over ours and the canvas leaves the machine; held as ours — always, since it is always granted —
+    // it is denied. Its companions (`ArtifactComments`, `ArtifactData`, `ArtifactCheck`) act only on an
+    // artifact it published, so they have nothing to reach once it is gone.
+    Artifact: "show_artifact",
     Task: null,
     Agent: null,
     SlashCommand: null,

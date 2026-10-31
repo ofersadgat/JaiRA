@@ -6,7 +6,7 @@ import { artifactOf, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuesti
 import type { JsonValue } from "@declarative-ai/json";
 import { answersOfAnsweredText } from "./choicesModel";
 import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall, refusalWordsOf } from "./workSummary";
-import { shellLineOf, type ToolEntry, type WorkEntry } from "./transcript";
+import { resultValueOf, shellLineOf, type ToolEntry, type WorkEntry } from "./transcript";
 
 /**
  * The type a tool call's OWN arguments say its payload is.
@@ -176,6 +176,22 @@ export type RowMark = "ok" | "bad" | "waiting" | "cut" | "denied";
 export type ToolShown = "sidechain" | "outcome" | "asked" | "published" | "publishedList" | "produced" | "picture" | "output" | undefined;
 
 /**
+ * A `show_artifact` call that may have published, though its result cannot be read yet: the answer that
+ * carries the Design type's instructions runs to 35 KB, and the window is handed a string that large as a
+ * placeholder (decision 0018 §6), fetched only where it is drawn. So the line is drawn as published from
+ * the call itself — succeeded, and not a list, quickstart or read — and the drawing fetches the result and
+ * reads the artifact out of it ({@link publishedOf}), drawing nothing when there is none.
+ */
+export function maybePublished(entry: ToolEntry): boolean {
+  if (entry.name !== "show_artifact" && !entry.name.endsWith("__show_artifact")) return false;
+  if (entry.ok !== true || entry.result === undefined) return false;
+  const args = entry.args;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return false;
+  const action = (args as Record<string, JsonValue>)["action"];
+  return action === undefined || action === "publish";
+}
+
+/**
  * Whether a call LISTED the task's published artifacts (`show_artifact`'s `action: "list"`): drawn as the
  * same list the side panel shows (decision 0020 §3). Under any of the tool's names, as an agent reaches it.
  */
@@ -204,8 +220,11 @@ export interface PublishedRef {
  * The artifact a call published, out of its result's `artifact` — read off the result, not the tool's
  * name, for the reason {@link producedArtifact} gives. `undefined` for anything else, a refusal included.
  */
-export function publishedOf(result: JsonValue | undefined): PublishedRef | undefined {
-  if (result === null || typeof result !== "object" || Array.isArray(result)) return undefined;
+export function publishedOf(raw: JsonValue | undefined): PublishedRef | undefined {
+  // What MCP delivered — the value serialized in a text block — unwrapped as the transcript unwraps it;
+  // here too, since a large answer reaches the window as a placeholder the transcript could not open.
+  const result = raw === undefined ? undefined : resultValueOf(raw);
+  if (result === null || result === undefined || typeof result !== "object" || Array.isArray(result)) return undefined;
   const artifact = (result as Record<string, JsonValue>)["artifact"];
   if (artifact === null || typeof artifact !== "object" || Array.isArray(artifact)) return undefined;
   const a = artifact as Record<string, JsonValue>;
@@ -345,7 +364,7 @@ export function toolLineOf(
           : "outcome"
         : askedOf(entry) !== undefined
           ? "asked"
-          : publishedOf(entry.result) !== undefined
+          : publishedOf(entry.result) !== undefined || maybePublished(entry)
             ? "published"
           : listedPublished(entry)
             ? "publishedList"

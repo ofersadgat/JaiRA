@@ -46,7 +46,8 @@ describe("planAgentTools", () => {
     // Not REMOVED for want of a grant — DISPLACED, because ours stands in for it. Either way the
     // agent does not get its own `Read`, which is what makes "ours" mean anything.
     expect(plan.denyNatives).not.toContain("Read");
-    expect(plan.displaced).toEqual(["Read"]);
+    // show_artifact is always held, so Claude Code's own Artifact is always displaced (decision 0020).
+    expect(plan.displaced).toEqual(["Read", "Artifact"]);
   });
 
   it("leaves the built-in for `native` but forces it to our gate", () => {
@@ -106,8 +107,10 @@ describe("alwaysGranted", () => {
     // Guarded rather than assumed: the whole argument for skipping the list is CONFINEMENT, so a
     // tool that can write wherever it likes must never be added to this set.
     expect([...ALWAYS_GRANTED_TOOLS]).toEqual(["show_artifact"]);
-    // No agent declares a native for it either: there is nothing to displace and nothing to remove.
-    for (const name of ALWAYS_GRANTED_TOOLS) expect(Object.values(CLAUDE_TOOLS.natives)).not.toContain(name);
+    // Claude Code's own Artifact is its native (it publishes to claude.ai, decision 0020): held always,
+    // it is displaced always.
+    expect(CLAUDE_TOOLS.natives["Artifact"]).toBe("show_artifact");
+    expect(planAgentTools(mapOf([])).displaced).toEqual(["Artifact"]);
     expect(TOOL_SPEC_BY_NAME.get("show_artifact")?.alwaysGranted).toBe(true);
   });
 
@@ -212,7 +215,7 @@ describe("the executors' declarations", () => {
     // Codex is served ours over its bridge, so keeping its own shell is a pick too.
     expect(nativeNamesByRoute("shell")).toEqual({ "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" });
     expect(nativeNamesByRoute("edit")).toEqual({ "claude-code": "Edit", "claude-cli": "Edit", "codex-cli": "apply_patch" });
-    expect(nativeNamesByRoute("show_artifact")).toEqual({});
+    expect(nativeNamesByRoute("show_artifact")).toEqual({ "claude-code": "Artifact", "claude-cli": "Artifact" });
   });
 });
 
@@ -249,7 +252,7 @@ describe("the implementation choice, per tool", () => {
   it("injects ours by default and keeps the built-in where the entry says `native`", () => {
     const plan = planAgentTools(permissionSet({ read_file: "allow", grep: { mode: "ask", implementation: "native" }, other: "deny" }));
     expect(plan.inject).toEqual(["read_file", "show_artifact"]);
-    expect(plan.displaced).toEqual(["Read"]);
+    expect(plan.displaced).toEqual(["Read", "Artifact"]);
     // Kept, and forced through the permission callback so the entry's `ask` still decides.
     expect(plan.askNatives).toEqual(["Grep"]);
     expect(plan.denyNatives).not.toContain("Grep");

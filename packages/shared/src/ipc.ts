@@ -2335,6 +2335,8 @@ export interface IpcContract {
    * outcome and not a failure: a cancelled save must not raise where a caller would report it.
    */
   "shell:saveFile": { request: SaveFileRequest; response: { file: string | null } };
+  /** An artboard saved as PNG or PDF (decision 0020 §5) — the desktop's: it needs a window to draw it in. */
+  "shell:exportArtboard": { request: ExportArtboardRequest; response: { file: string | null } };
   /**
    * Save whatever is at a URL, letting Chromium fetch it.
    *
@@ -2635,6 +2637,7 @@ export const IPC_CHANNELS = [
   "file:delete",
   "shell:reveal",
   "shell:saveFile",
+  "shell:exportArtboard",
   "shell:download",
   "shell:copyImageAt",
   "shell:edit",
@@ -3109,6 +3112,20 @@ export interface EventsNotice {
 }
 
 /** What {@link IpcContract}'s `shell:saveFile` is handed. */
+/**
+ * An artboard of a design canvas as a picture or a document (decision 0020 §5): the window loads
+ * `url` — a granted artboard — at its own size, out of sight, captures it (PNG) or prints it (PDF, one
+ * page the artboard's size), and saves it where the person chooses.
+ */
+export interface ExportArtboardRequest {
+  url: string;
+  width: number;
+  height: number;
+  format: "png" | "pdf";
+  /** The name to propose, without its extension. */
+  name: string;
+}
+
 export interface SaveFileRequest {
   /** The name to propose in the dialog. The extension is what picks the filter, so keep it. */
   name: string;

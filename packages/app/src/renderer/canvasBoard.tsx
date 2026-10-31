@@ -10,9 +10,61 @@
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
-import { type CanvasBoardEntry, type CanvasIndex, type CanvasNote } from "./canvasIndex";
+/** One artboard's entry in `canvas.json`'s `boards`. */
+export interface CanvasBoardEntry {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+  title?: string;
+  page?: string;
+  expand?: string;
+  is_interactive?: boolean;
+  radius?: number;
+  frameless?: boolean;
+}
 
-export type { CanvasBoardEntry, CanvasIndex, CanvasNote };
+/** A note on the board: a title over several artboards, a sticky, or one of a person's shapes. */
+export interface CanvasNote {
+  x: number;
+  y: number;
+  text?: string;
+  kind?: string;
+  w?: number;
+  h?: number;
+  maxW?: number;
+  size?: string | number;
+  bold?: boolean;
+  italic?: boolean;
+  color?: string;
+  fill?: string;
+  page?: string;
+  /** A line or arrow's other end, and a pen stroke's points — as the editor writes them. */
+  x2?: number;
+  y2?: number;
+  points?: Array<[number, number]>;
+}
+
+export interface CanvasIndex {
+  v?: number;
+  title?: string;
+  boards: Record<string, CanvasBoardEntry>;
+  order?: string[];
+  notes?: Record<string, CanvasNote>;
+  pages?: Array<{ id: string; name: string }>;
+  launch?: { view?: string; page?: string; file?: string };
+}
+
+/** `canvas.json` read leniently: a file the model got wrong draws what it can rather than nothing. */
+export function readCanvasIndex(text: string | undefined): CanvasIndex {
+  try {
+    const parsed = JSON.parse(text ?? "") as Partial<CanvasIndex>;
+    const boards = parsed.boards !== null && typeof parsed.boards === "object" ? parsed.boards : {};
+    return { ...parsed, boards: boards as Record<string, CanvasBoardEntry> };
+  } catch {
+    return { boards: {} };
+  }
+}
 
 /** The sticky colours `canvas.json` names, in this board's own light tones. */
 const STICKY: Record<string, string> = {
@@ -129,6 +181,11 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
           <span style={{ ...barText, fontWeight: 600 }}>{b.title ?? focused}</span>
           <span style={{ flex: 1 }} />
           {chrome}
+          {onOpen !== undefined ? (
+            <button type="button" style={button} onClick={onOpen}>
+              Edit
+            </button>
+          ) : null}
         </div>
         <div style={{ flex: 1, overflow: "auto", background: "#eceef3", display: "flex", justifyContent: "center", padding: 24 }}>
           <iframe
@@ -251,7 +308,7 @@ function Note({ note: n }: { note: CanvasNote }): JSX.Element | null {
   );
 }
 
-const frameBox: CSSProperties = { display: "flex", flexDirection: "column", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, overflow: "hidden", background: "var(--panel, #fff)", height: 420 };
+const frameBox: CSSProperties = { display: "flex", flexDirection: "column", width: "100%", boxSizing: "border-box", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, overflow: "hidden", background: "var(--panel, #fff)", height: 420 };
 const bar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderBottom: "1px solid var(--line, #e0e3ec)", minHeight: 30, boxSizing: "border-box" };
 const barText: CSSProperties = { fontSize: 12, color: "var(--text, #121526)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const button: CSSProperties = { font: "inherit", fontSize: 11.5, color: "var(--text, #121526)", background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "1px 8px", cursor: "pointer" };

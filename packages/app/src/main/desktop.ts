@@ -32,6 +32,7 @@ import {
   type IpcChannel,
   type PushMessage,
   type SaveFileRequest,
+  type ExportArtboardRequest,
 } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
 import { autoUpdater } from "electron-updater";
@@ -513,6 +514,34 @@ async function saveFile(request: SaveFileRequest): Promise<{ file: string | null
 }
 
 /**
+ * An artboard as a PNG or a PDF (decision 0020 §5).
+ *
+ * Drawn in a window of its own, never shown, at the artboard's size: its URL is a grant this window
+ * already holds (`jaira-artifact://<token>/project/<file>`), served by the same handler and under the
+ * same policy as the frame on the board, so what is saved is what the person sees. The runtime posts
+ * `dc:ready` once the artboard has rendered; with no message to listen for out here, the window waits
+ * for the page to load and a beat more for its fonts and the runtime's first render.
+ */
+async function exportArtboard(request: ExportArtboardRequest): Promise<{ file: string | null }> {
+  const url = new URL(request.url);
+  if (url.protocol !== `${ARTIFACT_SCHEME}:`) throw new Error("only an artboard of a canvas can be exported");
+  const width = Math.max(1, Math.min(8000, Math.round(request.width)));
+  const height = Math.max(1, Math.min(8000, Math.round(request.height)));
+  const drawing = new BrowserWindow({ show: false, width, height, useContentSize: true, webPreferences: { offscreen: true, sandbox: true, contextIsolation: true, javascript: true } });
+  try {
+    await drawing.loadURL(request.url);
+    await new Promise((settle) => setTimeout(settle, 800));
+    const data =
+      request.format === "png"
+        ? (await drawing.webContents.capturePage({ x: 0, y: 0, width, height })).toPNG()
+        : await drawing.webContents.printToPDF({ printBackground: true, margins: { top: 0, bottom: 0, left: 0, right: 0 }, pageSize: { width: width / 96, height: height / 96 } });
+    return await saveFile({ name: `${request.name.replace(/[\\/:*?"<>|]+/g, "-")}.${request.format}`, data: Buffer.from(data).toString("base64") });
+  } finally {
+    drawing.destroy();
+  }
+}
+
+/**
  * What may be downloaded by URL — everything a page in this app can legitimately be showing.
  *
  * An allow list rather than a deny list, and short on purpose. The URL reaches here from a
@@ -580,6 +609,7 @@ function copyImageAt(x: number, y: number): { copied: boolean } {
  */
 const hostHandlers: Record<HostChannel, Handler> = {
   "shell:saveFile": ((request: SaveFileRequest) => saveFile(request)) as Handler,
+  "shell:exportArtboard": ((request: ExportArtboardRequest) => exportArtboard(request)) as Handler,
   "shell:download": ((request: { url: string }) => download(request.url)) as Handler,
   "shell:copyImageAt": ((request: { x: number; y: number }) => copyImageAt(request.x, request.y)) as Handler,
   "shell:edit": ((request: { verb: "cut" | "copy" | "paste" | "selectAll" }) => edit(request.verb)) as Handler,

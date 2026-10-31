@@ -145,6 +145,7 @@
     "shell:copyImageAt",
     "shell:download",
     "shell:edit",
+    "shell:exportArtboard",
     "shell:reveal",
     "shell:saveFile",
     "state:effective",

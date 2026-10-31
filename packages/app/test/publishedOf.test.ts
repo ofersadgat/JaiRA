@@ -23,6 +23,19 @@ describe("publishedOf", () => {
     expect(publishedOf({ artifact: { ...result.artifact, kind: "svg" } })).toBeUndefined();
   });
 
+  it("reads the artifact out of what MCP delivered — the value serialized in a text block", () => {
+    expect(publishedOf([{ type: "text", text: JSON.stringify(result) }] as never)).toMatchObject({ id: "a-k3", version: 2 });
+  });
+
+  it("draws a successful publish as published while its answer is still a placeholder, so the drawing fetches it", () => {
+    const lazy = [{ type: "text", text: { $lazy: { size: 35_000, preview: '{"answer":"Created', hash: "h" } } }];
+    const entry = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { action: "publish", type_url: "https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd", title: "x" }, result: lazy } as unknown as ToolEntry;
+    expect(toolLineOf(entry, false, false).shown).toBe("published");
+    expect(publishedOf(lazy as never)).toBeUndefined();
+    expect(toolLineOf({ ...entry, args: { action: "quickstart", intent: "design" } } as ToolEntry, false, false).shown).not.toBe("published");
+    expect(toolLineOf({ ...entry, ok: false } as ToolEntry, false, false).shown).not.toBe("published");
+  });
+
   it("is what a show_artifact line shows unasked", () => {
     const entry = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { action: "publish" }, result } as unknown as ToolEntry;
     expect(toolLineOf(entry, false, false).shown).toBe("published");

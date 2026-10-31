@@ -24,5 +24,14 @@ export function expandArtifactCommand(message: string, builtInDir: string = defa
     // Without the type's files the command means nothing to the model; send what was typed.
     return message;
   }
-  return template.replace("{{brief}}", (match[1] ?? "").trim());
+  return `${template.replace("{{brief}}", (match[1] ?? "").trim()).trimEnd()}\n\n${ARTIFACT_TOOL_NOTE}\n`;
 }
+
+/**
+ * JaiRA's one line after the command's own words, which are kept as they are: the tool they name is
+ * served here as `show_artifact`. Without it a model told to call "the `Artifact` tool", and finding
+ * Claude Code's own disabled (it publishes to claude.ai, so JaiRA displaces it), stopped — measured in
+ * the canvas rig, 2026-10-31 — rather than reach for a tool whose description it had not loaded.
+ */
+export const ARTIFACT_TOOL_NOTE =
+  "(In JaiRA the `Artifact` tool these instructions name is `show_artifact` — `mcp__dai__show_artifact` where tools are prefixed. Call it with exactly the arguments they give for `Artifact`.)";

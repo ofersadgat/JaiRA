@@ -150,6 +150,11 @@ record(await build({
 const builtIn = fileURLToPath(new URL("../shared/builtin", import.meta.url));
 await rm(`${outdir}/builtin`, { recursive: true, force: true });
 if (existsSync(builtIn)) await cp(builtIn, `${outdir}/builtin`, { recursive: true });
+// The `.dc.html` runtime an artboard loads as `./support.js` (decision 0020 §5), built by its own package
+// and carried in the built-in layer beside the Design type's instructions, where the engine serves it from.
+const designRuntime = fileURLToPath(new URL("../dc-runtime/dist/support.js", import.meta.url));
+if (!existsSync(designRuntime)) throw new Error("packages/dc-runtime/dist/support.js is missing: run `npm run build -w packages/dc-runtime` first");
+await cp(designRuntime, `${outdir}/builtin/artifact-types/design/support.js`);
 
 await writeFile(`${outdir}/main-modules.json`, `${JSON.stringify([...bundled].sort())}\n`, "utf8");
 

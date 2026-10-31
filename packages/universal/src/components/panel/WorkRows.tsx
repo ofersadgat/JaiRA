@@ -250,7 +250,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
   // What is drawn unasked under the line — a page it produced, its output, a question, an outcome —
   // has its large values fetched; the rest wait for the row to be opened (`Payload`).
-  const unasked = line.shown === "produced" || line.shown === "output" || line.shown === "asked" || line.shown === "outcome";
+  const unasked = line.shown === "produced" || line.shown === "published" || line.shown === "output" || line.shown === "asked" || line.shown === "outcome";
   const args = useFilled(unasked ? held.args : undefined);
   const result = useFilled(unasked ? held.result : undefined);
   const entry: ToolEntry = unasked ? { ...held, ...(args !== undefined ? { args } : {}), ...(result !== undefined ? { result } : {}) } : held;
@@ -285,7 +285,11 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
         </>
       );
     }
-    if (line.shown === "published") return <PublishedView published={publishedOf(entry.result)!} artifacts={artifacts} />;
+    if (line.shown === "published") {
+      // Fetched above when the answer was a placeholder; a call that published nothing draws nothing.
+      const published = publishedOf(entry.result);
+      return published !== undefined ? <PublishedView published={published} artifacts={artifacts} /> : undefined;
+    }
     if (line.shown === "publishedList") return artifacts?.taskId !== undefined ? <PublishedList taskId={artifacts.taskId} project={artifacts.project} artifacts={artifacts} /> : undefined;
     if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;
     // A screenshot, a picture off the clipboard (decision 0019): what the agent saw, drawn as it saw it.

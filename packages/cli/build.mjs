@@ -71,6 +71,9 @@ await build({ ...common, format: "cjs", outExtension: { ".js": ".cjs" }, banner:
 // then publishes them with no further mention. `dist` was emptied above, so nothing stale survives.
 const builtIn = fileURLToPath(new URL("../shared/builtin", import.meta.url));
 if (existsSync(builtIn)) await cp(builtIn, "dist/builtin", { recursive: true });
+// The `.dc.html` runtime (decision 0020 §5), served by the engine to an artboard as `./support.js`.
+const designRuntime = fileURLToPath(new URL("../dc-runtime/dist/support.js", import.meta.url));
+if (existsSync(designRuntime)) await cp(designRuntime, "dist/builtin/artifact-types/design/support.js");
 
 // The plugin manifest (decision 0011 §6): every package `jaira plugin install` may fetch, at the versions
 // the workspace's lockfile resolved, with their hashes. Beside the bundle, where `startPlugins` looks.

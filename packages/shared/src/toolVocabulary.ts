@@ -202,8 +202,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     // Decision 0020: it READS the files it publishes (`file_path`, a canvas's `root`) and adds a version
     // to the task's own store — so the paths it names answer to the file rules, as a read's do.
     pathArgs: ["file_path", "root", "path"],
-    // No agent declares a native for it: there is no built-in doing this job in a delegated run, so
-    // there is nothing to displace and nothing to remove when the tool is not held.
+    // Claude Code declares one: its own `Artifact`, which publishes to claude.ai (`CLAUDE_TOOLS`), and
+    // which this displaces wherever it is held - always, since it is always granted.
   },
   {
     name: "shell",

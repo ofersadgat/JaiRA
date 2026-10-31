@@ -154,6 +154,22 @@ describe("reads that are not artifacts", () => {
   });
 });
 
+describe("an absolute path inside the workspace (decision 0020: the Design type's instructions ask for them)", () => {
+  it("is the workspace-relative path, written, read and edited as one", async () => {
+    const { write, read, edit } = tools("$DEFAULT");
+    const absolute = join(dir, "canvas", "project", "Main.dc.html");
+    expect(await call(write, { path: absolute, content: "<x-dc>a</x-dc>" })).toMatchObject({ path: "canvas/project/Main.dc.html" });
+    expect(readFileSync(absolute, "utf8")).toBe("<x-dc>a</x-dc>");
+    expect(await call(edit, { path: absolute, old: "a", new: "b" })).toMatchObject({ replaced: 1 });
+    expect(await call(read, { path: "canvas/project/Main.dc.html" })).toMatchObject({ content: "<x-dc>b</x-dc>" });
+  });
+
+  it("is still refused when it lies outside the workspace", async () => {
+    const { write } = tools("$DEFAULT");
+    expect(await call(write, { path: join(tmpdir(), "elsewhere.txt"), content: "x" })).toHaveProperty("error");
+  });
+});
+
 describe("refusals", () => {
   it("refuses .jaira/ on the LOGICAL path, before any destination is applied", async () => {
     // Checked on what the agent asked for, because that is what the author wrote

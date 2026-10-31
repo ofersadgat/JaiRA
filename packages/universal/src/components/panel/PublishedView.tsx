@@ -35,6 +35,10 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
   const [versions, setVersions] = useState<PublishedVersion[] | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  /** The canvas open in its editor, in place (a conversation draws inline). */
+  const [editing, setEditing] = useState(false);
+  /** Bumped to read the artifact again: after the editor saved, or a refused save asked to reload. */
+  const [reread, setReread] = useState(0);
   const project = artifacts?.project !== undefined ? { project: artifacts.project } : {};
   const taskId = artifacts?.taskId ?? published.taskId;
 
@@ -60,7 +64,7 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
     };
     // `project` is derived from `artifacts`, which the surface keeps stable per task.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, published.id, published.kind, published.entry, version]);
+  }, [taskId, published.id, published.kind, published.entry, version, reread]);
 
   const index = files?.["project/canvas.json"];
   /** What Rendered and Source show: the entry file, or a canvas's first artboard. */
@@ -135,7 +139,41 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
       if (!isWeb || frame === null) {
         return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>{isWeb ? "Opening the canvas…" : "This design canvas opens in JaiRA on a computer."}</Txt>;
       }
-      return <Island component="canvas" props={{ index: index ?? "{}", base: new URL(frame).origin + "/", style: { height: 440 } }} />;
+      const frames = new URL(frame).origin + "/";
+      if (editing) {
+        return (
+          <Island
+            component="canvasEditor"
+            props={{
+              files,
+              base: version,
+              frames,
+              style: { height: 640 },
+              // A save is a version marked the person's; the view then follows it.
+              onSave: async (changes: Record<string, string | null>, base: number) => {
+                const answer = await invoke("artifact:save", { taskId, artifact: published.id, base, changes, ...project });
+                if ("version" in answer) setVersions(null);
+                return answer;
+              },
+            }}
+            onEvent={(name, value) => {
+              if (name === "close") {
+                setEditing(false);
+                void invoke("artifact:versions", { taskId, artifact: published.id, ...project }).then((list) => setVersion(list.at(-1)?.version ?? version));
+              } else if (name === "reload") {
+                void invoke("artifact:versions", { taskId, artifact: published.id, ...project }).then((list) => {
+                  setVersion(list.at(-1)?.version ?? version);
+                  setReread((n) => n + 1);
+                });
+              } else if (name === "export") {
+                const { file, format, size } = value as { file: string; format: "png" | "pdf"; size: { width: number; height: number } };
+                void invoke("shell:exportArtboard", { url: `${frames}project/${file}`, width: size.width, height: size.height, format, name: file.replace(/\.dc\.html$/, "") }).catch(() => undefined);
+              }
+            }}
+          />
+        );
+      }
+      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: 440 } }} onEvent={(name) => name === "open" && setEditing(true)} />;
     }
     return (
       <Island

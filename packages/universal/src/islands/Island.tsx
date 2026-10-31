@@ -20,6 +20,7 @@ const MarkdownDocument = lazy(() => import("@jaira/ui/markdownDocument").then((m
 const Html = lazy(() => import("@jaira/ui/htmlFrame").then((m) => ({ default: m.Html })));
 const InteractiveArtifact = lazy(() => import("@jaira/ui/interactiveArtifact").then((m) => ({ default: m.InteractiveArtifact })));
 const CanvasBoard = lazy(() => import("@jaira/ui/canvasBoard").then((m) => ({ default: m.CanvasBoard })));
+const CanvasEditor = lazy(() => import("@jaira/ui/canvasEditor").then((m) => ({ default: m.CanvasEditor })));
 
 export function Island(props: IslandProps): JSX.Element {
   const look = useLook();
@@ -144,6 +145,22 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
             base={String(p["base"] ?? "")}
             {...(p["style"] !== undefined ? { style: p["style"] as CSSProperties } : {})}
             {...(onEvent !== undefined ? { onOpen: () => onEvent("open", null) } : {})}
+          />
+        </Suspense>
+      );
+    // The canvas editor: web only, so its props carry the host's functions as they are.
+    case "canvasEditor":
+      return (
+        <Suspense fallback={null}>
+          <CanvasEditor
+            files={(p["files"] ?? {}) as Record<string, string>}
+            base={Number(p["base"] ?? 0)}
+            frames={String(p["frames"] ?? "")}
+            onSave={p["onSave"] as Parameters<typeof CanvasEditor>[0]["onSave"]}
+            onReload={() => onEvent?.("reload", null)}
+            onExport={(file, format, size) => onEvent?.("export", { file, format, size })}
+            onClose={() => onEvent?.("close", null)}
+            {...(p["style"] !== undefined ? { style: p["style"] as CSSProperties } : {})}
           />
         </Suspense>
       );

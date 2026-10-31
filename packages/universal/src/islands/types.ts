@@ -2,7 +2,7 @@ import type { JairaAppearanceConfig } from "@jaira/shared/browser";
 
 /** An island (decision 0015): one of `@jaira/ui`'s DOM components, inline on web and in a WebView on a phone. */
 export interface IslandProps {
-  component: "markdown" | "diff" | "markdownEditor" | "code" | "schemaText" | "artifact" | "canvas";
+  component: "markdown" | "diff" | "markdownEditor" | "code" | "schemaText" | "artifact" | "canvas" | "canvasEditor";
   props: Record<string, unknown>;
   /** A fixed height, for an editor, which scrolls inside. Absent: sized to its content. */
   height?: number;

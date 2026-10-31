@@ -25,7 +25,7 @@
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname } from "node:path";
+import { dirname, isAbsolute, relative as relativePath } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { mimeOfPath } from "@jaira/shared";
 import type { ArtifactRecord, ArtifactStore } from "./artifacts";
@@ -64,10 +64,24 @@ const DEFAULT_INLINE_MAX = 65_536;
 
 const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
 
-/** Normalize an agent-supplied path to the map's key form. */
-function logicalKey(path: string): string {
+/**
+ * Normalize an agent-supplied path to the map's key form.
+ *
+ * An ABSOLUTE path inside the workspace is taken relative to it first: an agent following instructions
+ * that ask for absolute paths (the Design type's, decision 0020) names its files that way, and treated
+ * as relative it was joined onto the root — `<root>\C:\<root>\…` — and refused as outside it. One
+ * outside the workspace keeps its form, and the destination refuses it as before.
+ */
+function logicalKey(path: string, root?: string): string {
+  if (root !== undefined && isAbsolute(path)) {
+    const inside = relativePath(root, path);
+    if (inside.length > 0 && !inside.startsWith("..") && !isAbsolute(inside)) path = inside;
+  }
   return path.replace(/\\/g, "/").replace(/^\.\//, "").replace(/^\/+/, "");
 }
+
+/** The workspace a call works in: its own, else the tool's fallback, else the task's worktree. */
+const rootOf = (options: FileToolOptions, ctx?: ExecServices): string => ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree;
 
 /**
  * Reject a path before it is resolved.
@@ -135,9 +149,9 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
       required: ["path", "content"],
     },
     readOnly: false,
-    run: async (input): Promise<JsonValue> => {
+    run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown; content?: unknown };
-      const logical = logicalKey(typeof args.path === "string" ? args.path : "");
+      const logical = logicalKey(typeof args.path === "string" ? args.path : "", rootOf(options, ctx));
       const content = typeof args.content === "string" ? args.content : "";
       const refusal = refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
@@ -176,7 +190,7 @@ export function createReadFileTool(options: FileToolOptions): Tool {
     readOnly: true,
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown };
-      const logical = logicalKey(typeof args.path === "string" ? args.path : "");
+      const logical = logicalKey(typeof args.path === "string" ? args.path : "", rootOf(options, ctx));
       const refusal = refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
 
@@ -248,7 +262,7 @@ export function createEditFileTool(options: FileToolOptions): Tool {
     readOnly: false,
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown; old?: unknown; new?: unknown; all?: unknown };
-      const logical = logicalKey(typeof args.path === "string" ? args.path : "");
+      const logical = logicalKey(typeof args.path === "string" ? args.path : "", rootOf(options, ctx));
       const refusal = refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
       const oldText = typeof args.old === "string" ? args.old : "";
