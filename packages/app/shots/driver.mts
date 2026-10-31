@@ -69,6 +69,8 @@ export interface Options {
   readonly phone?: { readonly width: number; readonly height: number; readonly scale: number };
   /** Extra switches for a {@link browse}d browser. */
   readonly flags?: readonly string[];
+  /** The main process's Node inspector, on this port: what {@link App.evaluateMain} talks to. */
+  readonly mainInspect?: number;
 }
 
 export class App {
@@ -111,7 +113,8 @@ export class App {
      * lines, for as long as the window stayed covered — and a capture waits for a frame forever.
      * `Page.bringToFront` does not help; it raises the page, not the OS window over what covers it.
      */
-    const child = spawn(ELECTRON, [APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
+    const inspect = options.mainInspect !== undefined ? [`--inspect=${String(options.mainInspect)}`] : [];
+    const child = spawn(ELECTRON, [...inspect, APP_DIR, `--remote-debugging-port=${port}`, `--user-data-dir=${world.userData}`, "--disable-features=CalculateNativeWinOcclusion"], {
       cwd: world.project,
       env: { ...process.env, JAIRA_HOME: world.home, JAIRA_PROJECT: world.project },
       stdio: ["ignore", "pipe", "pipe"],
@@ -311,6 +314,32 @@ export class App {
   }
 
   /** Evaluate in the page. A throw there is a throw here — never a quiet `undefined`. */
+  /**
+   * Evaluate in the MAIN process, through its Node inspector (launched with `mainInspect`): for what
+   * the page cannot reach, a native dialog above all. `require` is the inspector's command-line one.
+   */
+  async evaluateMain<T>(port: number, expression: string): Promise<T> {
+    const list = (await (await fetch(`http://127.0.0.1:${String(port)}/json/list`)).json()) as { webSocketDebuggerUrl: string }[];
+    const target = list[0];
+    if (target === undefined) throw new Error(`no inspector target on ${String(port)}`);
+    const ws = new WebSocket(target.webSocketDebuggerUrl);
+    await new Promise<void>((resolve, reject) => {
+      ws.onopen = () => resolve();
+      ws.onerror = () => reject(new Error("could not attach to the main process's inspector"));
+    });
+    try {
+      const reply = await new Promise<{ result?: { result?: { value?: unknown }; exceptionDetails?: { exception?: { description?: string }; text?: string } } }>((resolve) => {
+        ws.onmessage = (e: MessageEvent) => resolve(JSON.parse(String(e.data)) as never);
+        ws.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, includeCommandLineAPI: true, awaitPromise: true, returnByValue: true } }));
+      });
+      const thrown = reply.result?.exceptionDetails;
+      if (thrown !== undefined) throw new Error(`main process threw: ${thrown.exception?.description ?? thrown.text ?? "?"}`);
+      return reply.result?.result?.value as T;
+    } finally {
+      ws.close();
+    }
+  }
+
   async evaluate<T>(expression: string): Promise<T> {
     const reply = await this.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: true });
     if (reply.result?.exceptionDetails !== undefined) {

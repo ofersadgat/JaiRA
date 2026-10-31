@@ -15,7 +15,7 @@
  *
  * `--reuse` opens the canvas the last run made instead of asking the agent for a new one.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { App } from "./driver.mjs";
 import { drawn, says, settle } from "./parityWorld.mjs";
@@ -44,7 +44,7 @@ async function main(): Promise<void> {
   writeFileSync(join(world.home, "settings.json"), JSON.stringify({ appearance: { conversation: { workPhases: true, workRows: 5 } } }, null, 2));
   if (pages !== undefined) process.env["JAIRA_CLIENT_DEV"] = pages;
 
-  const app = await App.launch(world, { out: OUT, port: 9271 });
+  const app = await App.launch(world, { out: OUT, port: 9271, mainInspect: 9272 });
   try {
     await app.until(drawn, "the window to draw");
     await app.resize(1400, 980);
@@ -263,7 +263,29 @@ async function main(): Promise<void> {
     await app.shot("playing");
     await app.clickText("Back to the canvas");
     await settle(1000);
-    console.log("canvas: passed");
+
+    // Export: the selected artboard drawn out of sight at its size and saved where the person says -
+    // here, where the Save dialog (stubbed in the main process) says.
+    const exports = join(OUT, "exports");
+    mkdirSync(exports, { recursive: true });
+    await app.evaluateMain(9272, `(() => { const { dialog } = require("electron"); const path = require("path"); dialog.showSaveDialog = async (...args) => ({ canceled: false, filePath: path.join(${JSON.stringify(exports)}, path.basename(args.at(-1).defaultPath)) }); return true; })()`);
+    const chosen = await artboardPoint();
+    await app.clickAt(chosen.x, chosen.y);
+    await settle(600);
+    for (const format of ["png", "pdf"] as const) {
+      const before = new Set(existsSync(exports) ? readdirSync(exports) : []);
+      await app.clickText(format.toUpperCase());
+      let file: string | undefined;
+      for (let i = 0; i < 60 && file === undefined; i++) {
+        await settle(250);
+        file = readdirSync(exports).find((f) => f.endsWith(`.${format}`) && !before.has(f));
+      }
+      if (file === undefined) throw new Error(`no ${format.toUpperCase()} was saved`);
+      const bytes = readFileSync(join(exports, file));
+      const signed = format === "png" ? bytes.subarray(1, 4).toString("latin1") === "PNG" : bytes.subarray(0, 4).toString("latin1") === "%PDF";
+      console.log(`editor: exported ${file}, ${String(bytes.length)} bytes${format === "png" ? `, ${String(bytes.readUInt32BE(16))}x${String(bytes.readUInt32BE(20))}` : ""}`);
+      if (!signed || bytes.length < 1000) throw new Error(`${file} is not a ${format.toUpperCase()} of the artboard`);
+    }    console.log("canvas: passed");
   } finally {
     await app.close();
   }
