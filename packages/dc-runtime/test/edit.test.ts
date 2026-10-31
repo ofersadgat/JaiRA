@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { editStyle, editText, formatStyle, insertElement, parse, readStyle, removeElement, renderArtboard } from "../src/index.js";
+import { applyMove, editStyle, editText, formatStyle, insertElement, parse, readStyle, removeElement, renderArtboard, setPropDefault, wrapElement } from "../src/index.js";
 import { artboard, fixture } from "./fixtures.js";
 
 /** Asserts `after` is `before` with `[start, end)` replaced, and nothing else changed. */
@@ -119,5 +119,58 @@ describe("readStyle and formatStyle", () => {
 
   it("drops an emptied declaration", () => {
     expect(formatStyle({ width: "10px", height: "" })).toBe("width: 10px");
+  });
+});
+
+describe("applyMove", () => {
+  const source = artboard(`<div style="display: flex; gap: 8px">\n  <span style="color: red">one</span>\n  <span>two</span>\n</div>`);
+  const [div, one, two] = parse(source).elements;
+  const parent = { id: div!.n, rect: { x: 10, y: 20, width: 300, height: 40 }, style: "display: flex; gap: 8px" };
+
+  it("drags an item out of a stack: the parent keeps its size, the sibling stays where it stood, the item goes where it was dropped", () => {
+    const after = applyMove(source, { id: one!.n, dx: 30, dy: 50, rect: { x: 10, y: 20, width: 40, height: 20 }, style: "color: red", parent, siblings: [{ id: two!.n, rect: { x: 58, y: 20, width: 40, height: 20 }, style: "" }] });
+    const [d, a, b] = parse(after).elements;
+    const styleOf = (el: typeof d) => readStyle(after.slice(el!.style!.start, el!.style!.end));
+    expect(styleOf(d)).toEqual({ display: "flex", gap: "8px", position: "relative", width: "300px", height: "40px" });
+    expect(styleOf(b)).toEqual({ position: "absolute", left: "48px", top: "0px", width: "40px", height: "20px", margin: "0" });
+    expect(styleOf(a)).toEqual({ color: "red", position: "absolute", left: "30px", top: "50px", width: "40px", height: "20px", margin: "0" });
+    // Nothing but the three styles changed.
+    expect(after.replace(/ style="[^"]*"/g, "")).toBe(source.replace(/ style="[^"]*"/g, ""));
+  });
+
+  it("only moves an element that is placed already", () => {
+    const placed = editStyle(source, one!.n, "position: absolute; left: 30px; top: 50px");
+    const after = applyMove(placed, { id: one!.n, dx: 5, dy: -10, rect: { x: 40, y: 70, width: 40, height: 20 }, style: "position: absolute; left: 30px; top: 50px", parent, siblings: [] });
+    const a = parse(after).elements[one!.n]!;
+    expect(readStyle(after.slice(a.style!.start, a.style!.end))).toEqual({ position: "absolute", left: "35px", top: "40px" });
+  });
+
+  it("offsets a top element, which has nothing to be placed in", () => {
+    const after = applyMove(source, { id: div!.n, dx: 12, dy: 4, rect: parent.rect, style: parent.style, parent: null, siblings: [] });
+    expect(readStyle(after.slice(parse(after).elements[0]!.style!.start, parse(after).elements[0]!.style!.end))).toMatchObject({ position: "relative", left: "12px", top: "4px" });
+  });
+});
+
+describe("wrapElement", () => {
+  it("puts an element in a new stack or grid and changes nothing else", () => {
+    const source = artboard(`<p>a <b>bold</b> c</p>`);
+    const b = parse(source).elements.find((el) => el.tag === "b")!;
+    expect(wrapElement(source, b.n, "stack")).toBe(source.replace("<b>bold</b>", `<div style="display: flex; flex-direction: column; gap: 8px"><b>bold</b></div>`));
+    const grid = wrapElement(source, b.n, "grid");
+    expect(parse(grid).elements.find((el) => el.tag === "b")!.parent).toBe(parse(grid).elements.find((el) => el.tag === "div")!.n);
+    expect(grid).toContain("repeat(2, minmax(0, 1fr))");
+  });
+});
+
+describe("setPropDefault", () => {
+  it("keeps a tweak as the prop's default, escaped as the attribute needs, and the rest of the file as it was", () => {
+    const poster = fixture("poster.dc.html");
+    const after = setPropDefault(poster, "accent", "#a9441f");
+    expect(parse(after).props["accent"]).toMatchObject({ editor: "color", default: "#a9441f" });
+    const quoted = setPropDefault(poster, "accent", "it's & done");
+    expect(parse(quoted).props["accent"]!.default).toBe("it's & done");
+    expect(quoted).toContain("it&#39;s &amp; done");
+    // Outside the attribute, nothing moved.
+    expect(after.slice(0, after.indexOf("data-props"))).toBe(poster.slice(0, poster.indexOf("data-props")));
   });
 });

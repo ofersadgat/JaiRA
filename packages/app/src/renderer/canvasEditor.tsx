@@ -17,7 +17,7 @@
  * file meanwhile, it says so and offers to reload.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
-import { editStyle, editText, formatStyle, parse, readStyle, removeElement } from "@jaira/dc-runtime/source";
+import { applyMove, editStyle, editText, formatStyle, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
 
 export type CanvasTool = "pointer" | "hand" | "text" | "artboard" | "note" | "pen" | "rect" | "oval" | "arrow" | "line";
@@ -144,7 +144,6 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const [status, setStatus] = useState<{ tone: "saved" | "saving" | "refused" | "error"; words: string } | null>(null);
   const [tab, setTab] = useState<"properties" | "tweaks" | "layers">("properties");
   const [playing, setPlaying] = useState<string | null>(null);
-  const [tweaks, setTweaks] = useState<Record<string, Record<string, unknown>>>({});
   const frameEls = useRef(new Map<string, HTMLIFrameElement>());
   const board = useRef<HTMLDivElement | null>(null);
 
@@ -212,7 +211,6 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         // before that — so every `dc:ready` is answered with what the frame should be.
         const w = frameEls.current.get(file)?.contentWindow;
         w?.postMessage({ type: "dc:mode", mode: playing === file ? "play" : "edit" }, "*");
-        if (tweaks[file] !== undefined) w?.postMessage({ type: "dc:props", props: tweaks[file] }, "*");
         if (selection?.kind === "element" && selection.file === file) w?.postMessage({ type: "dc:select", id: selection.id }, "*");
         return;
       }
@@ -225,6 +223,12 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       } else if (data.type === "dc:dblclick" && typeof data.id === "number" && data.rect !== undefined) {
         // Only an element holding one literal text can be retyped (`editText`).
         if (typeof data.text === "string") setEditingText({ file, id: data.id, rect: data.rect, text: data.text });
+      } else if (data.type === "dc:moved") {
+        // A drag the page drew as it happened, written into the source (`applyMove`): the parent's size
+        // kept, the siblings pinned, the element placed where it was dropped.
+        const moved = event.data as Moved;
+        changeSource(file, applyMove(sourceOf(file), moved));
+        setSelection((was) => (was?.kind === "element" && was.file === file && was.id === moved.id ? { ...was, rect: { ...moved.rect, x: moved.rect.x + moved.dx, y: moved.rect.y + moved.dy } } : was));
       } else if (data.type === "dc:rects") {
         // The selected element moved under a re-render or a resize: its box follows.
         const rects = (event.data as { rects?: Record<string, Rect> }).rects ?? {};
@@ -236,7 +240,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [tool, playing, index, sources, tweaks, selection]);
+  }, [tool, playing, index, sources, selection]);
 
   // Tell each frame which of its elements is selected, so it reports where that element went.
   const selectedId = selection?.kind === "element" ? `${selection.file}#${String(selection.id)}` : "";
@@ -586,7 +590,6 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                       w?.postMessage({ type: "dc:mode", mode: "edit" }, "*");
                       // A file changed here before the frame first loaded it: hand it the text it should show.
                       if (dirty.has(`project/${file}`)) w?.postMessage({ type: "dc:source", text: sourceOf(file) }, "*");
-                      if (tweaks[file] !== undefined) w?.postMessage({ type: "dc:props", props: tweaks[file] }, "*");
                     }}
                     style={{ width: b.w, height: b.h, border: 0, display: "block", background: "#fff", pointerEvents: layerOn ? "none" : "auto", outline: chosen ? "2px solid #4a4fd1" : "none", borderRadius: b.radius ?? 0 }}
                   />
@@ -640,7 +643,17 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
           <div style={{ overflow: "auto", flex: 1 }}>
             {tab === "properties" ? (
               element !== null ? (
-                <ElementProperties tag={element.tag} style={styleRecord} onStyle={setStyle} onDelete={remove} />
+                <ElementProperties
+                  tag={element.tag}
+                  style={styleRecord}
+                  onStyle={setStyle}
+                  onDelete={remove}
+                  onWrap={(as) => {
+                    changeSource(element.file, wrapElement(sourceOf(element.file), element.id, as));
+                    // A new element before it renumbers what follows: the selection is let go.
+                    setSelection(null);
+                  }}
+                />
               ) : selectedBoard !== undefined && selection?.kind === "board" ? (
                 <BoardProperties
                   file={selection.file}
@@ -657,11 +670,9 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               <TweaksTab
                 file={selection !== null && selection.kind !== "note" ? selection.file : order[0]}
                 source={(file) => sourceOf(file)}
-                values={tweaks}
-                onChange={(file, props) => {
-                  setTweaks((was) => ({ ...was, [file]: props }));
-                  frameEls.current.get(file)?.contentWindow?.postMessage({ type: "dc:props", props }, "*");
-                }}
+                // A tweak is kept as the prop's default in the artboard's `data-props`: saved with the
+                // canvas, and drawn again from the source like every other change.
+                onChange={(file, name, value) => changeSource(file, setPropDefault(sourceOf(file), name, value))}
               />
             ) : (
               <Layers order={order} index={index} selection={selection} onPick={(s) => setSelection(s)} />
@@ -765,7 +776,7 @@ function DrawingPreview({ gesture: g }: { gesture: Extract<Gesture, { kind: "dra
 }
 
 /** The selected element's inline style, as fields: what Claude Design's properties panel edits. */
-function ElementProperties({ tag, style: s, onStyle, onDelete }: { tag: string; style: Record<string, string>; onStyle: (name: string, value: string) => void; onDelete: () => void }): JSX.Element {
+function ElementProperties({ tag, style: s, onStyle, onDelete, onWrap }: { tag: string; style: Record<string, string>; onStyle: (name: string, value: string) => void; onDelete: () => void; onWrap: (as: "stack" | "grid") => void }): JSX.Element {
   const layout = s["display"] === "flex" ? "stack" : s["display"] === "grid" ? "grid" : "block";
   return (
     <>
@@ -815,10 +826,18 @@ function ElementProperties({ tag, style: s, onStyle, onDelete }: { tag: string; 
         <Field label="Size" value={s["font-size"] ?? ""} onCommit={(v) => onStyle("font-size", px(v))} />
         <Field label="Weight" value={s["font-weight"] ?? ""} onCommit={(v) => onStyle("font-weight", v)} />
       </Section>
-      <Section title="Remove">
-        <button type="button" style={button} onClick={onDelete}>
-          Delete element
-        </button>
+      <Section title="Arrange">
+        <span style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+          <button type="button" style={button} onClick={() => onWrap("stack")}>
+            Wrap in stack
+          </button>
+          <button type="button" style={button} onClick={() => onWrap("grid")}>
+            Wrap in grid
+          </button>
+          <button type="button" style={button} onClick={onDelete}>
+            Delete element
+          </button>
+        </span>
       </Section>
     </>
   );
@@ -885,17 +904,16 @@ function NoteProperties({ note: n, onChange, onDelete }: { note: CanvasNote; onC
 }
 
 /** The artboard's `data-props` levers, live in its frame (`dc:props`). */
-function TweaksTab({ file, source, values, onChange }: { file: string | undefined; source: (file: string) => string; values: Record<string, Record<string, unknown>>; onChange: (file: string, props: Record<string, unknown>) => void }): JSX.Element {
+function TweaksTab({ file, source, onChange }: { file: string | undefined; source: (file: string) => string; onChange: (file: string, name: string, value: unknown) => void }): JSX.Element {
   if (file === undefined) return <p style={hint}>No artboard yet.</p>;
   const declared = (parse(source(file)).props ?? {}) as Record<string, { editor?: string | null; default?: unknown; options?: unknown[]; min?: number; max?: number; step?: number }>;
   const levers = Object.entries(declared).filter(([name, p]) => name !== "$preview" && typeof p.editor === "string");
   if (levers.length === 0) return <p style={hint}>{file} declares no tweaks.</p>;
-  const now = values[file] ?? {};
-  const set = (name: string, value: unknown): void => onChange(file, { ...now, [name]: value });
+  const set = (name: string, value: unknown): void => onChange(file, name, value);
   return (
     <Section title={`Tweaks · ${file}`}>
       {levers.map(([name, p]) => {
-        const value = now[name] ?? p.default;
+        const value = p.default;
         if (p.editor === "boolean") {
           return (
             <Row key={name} label={name}>

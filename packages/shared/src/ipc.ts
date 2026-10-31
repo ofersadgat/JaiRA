@@ -2251,7 +2251,8 @@ export interface IpcContract {
   /** What a published artifact holds at a version (its latest when absent): every file, by path. */
   "artifact:files": {
     request: { taskId: string; artifact: string; version?: number; project?: ProjectRef };
-    response: { version: number; files: Record<string, string> };
+    /** `capabilities`: what that version declared (`{ downloads: {} }`), which the frame is granted. */
+    response: { version: number; files: Record<string, string>; capabilities?: Record<string, unknown> };
   };
   /** A person's save in the canvas editor — a new version marked theirs. */
   "artifact:save": { request: SaveArtifactRequest; response: { version: number } | { refused: string; files: string[] } };

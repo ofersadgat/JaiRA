@@ -3,5 +3,5 @@
  * and editing it in place. No React, no DOM — the editor's chunk carries only this.
  */
 export { parse, type DCDocument, type DCElement, type DCPropSpec, type SourceRange } from "./parse.js";
-export { editStyle, editText, formatStyle, insertElement, readStyle, removeElement } from "./edit.js";
+export { applyMove, editStyle, editText, formatStyle, insertElement, readStyle, removeElement, setPropDefault, wrapElement, type Box, type Moved } from "./edit.js";
 export { decodeEntities } from "./html.js";

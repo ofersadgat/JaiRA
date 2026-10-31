@@ -85,7 +85,7 @@ async function main(): Promise<void> {
     await app.clickText(TITLE);
     await settle(3000);
     // The finished turn's steps fold under its phase: open every one, so the publishing call is drawn.
-    for (let i = 0; i < 6; i++) {
+    for (let i = 0; i < 40; i++) {
       const toggle = await app.evaluate<{ x: number; y: number } | null>(
         `(() => { const el = [...document.querySelectorAll('[aria-label="Show steps"]')][0]; if (!el) return null; el.scrollIntoView({ block: "center" }); const r = el.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
       );
@@ -145,6 +145,78 @@ async function main(): Promise<void> {
     }
     await settle(1500);
     await app.shot("edited");
+
+    /** Wait for a version the person made after `count` versions, and say what it changed. */
+    const personSaved = async (count: number, what: string): Promise<Array<{ version: number; author: string; changed: Record<string, string> }>> => {
+      for (let i = 0; ; i++) {
+        const versions = await app.ipc<Array<{ version: number; author: string; changed: Record<string, string> }>>("artifact:versions", { taskId: made.taskId, artifact: canvas!.id });
+        if (versions.length > count && versions.at(-1)!.author === "person") {
+          console.log(`editor: ${what} saved as v${String(versions.at(-1)!.version)}, changing ${Object.keys(versions.at(-1)!.changed).join(", ")}`);
+          return versions;
+        }
+        if (i > 40) throw new Error(`${what} was not saved as the person's version: ${JSON.stringify(versions.map((v) => [v.version, v.author]))}`);
+        await settle(250);
+      }
+    };
+    const count = async (): Promise<number> => (await app.ipc<unknown[]>("artifact:versions", { taskId: made.taskId, artifact: canvas!.id })).length;
+    const clickLabel = async (label: string): Promise<void> => {
+      const at = await app.evaluate<{ x: number; y: number } | null>(`(() => { const el = document.querySelector('[aria-label="${label}"]'); if (!el) return null; el.scrollIntoView({ block: "nearest" }); const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); if (hit !== el && !el.contains(hit)) throw new Error("${label} is covered by " + (hit ? hit.tagName + " " + hit.textContent.slice(0, 40) : "nothing") + " at " + Math.round(r.left) + "," + Math.round(r.top)); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      if (at === null) throw new Error(`no control labelled ${label}`);
+      await app.clickAt(at.x, at.y);
+    };
+
+    /**
+     * A point on the artboard as it stands now, with room for a short drag on it: every save can change
+     * the editor's panels, and the board's layout with them, so a point measured earlier may be a panel.
+     */
+    const artboardPoint = async (): Promise<{ x: number; y: number }> => {
+      const at = await app.evaluate<{ x: number; y: number } | null>(
+        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); for (let y = r.top + 20; y < r.bottom - 50; y += 10) for (let x = r.left + 10; x < r.right - 40; x += 10) { if (document.elementFromPoint(x, y) === f && document.elementFromPoint(x + 30, y + 40) === f) return { x, y }; } return null; })()`,
+      );
+      if (at === null) throw new Error("no point of the artboard is under the pointer's reach");
+      return at;
+    };
+
+    // Moving an element: dragged inside its artboard, written as the person's version.
+    let n = await count();
+    // Measured again: the delete changed the editor's panels, and the board's layout with them.
+    const grip = await artboardPoint();
+    await app.drag(grip, { x: grip.x + 30, y: grip.y + 40 });
+    await settle(500);
+    const moved = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:moved").length`);
+    const tally = await app.evaluate<Record<string, number>>(`window.__dc.reduce((t, m) => (t[m.type] = (t[m.type] || 0) + 1, t), {})`);
+    console.log(`editor: ${String(moved)} dc:moved; messages ${JSON.stringify(tally)}`);
+    if (moved === 0) throw new Error("a drag on the artboard was not reported as a move");
+    await personSaved(n, "the move");
+    await settle(1500);
+    await app.shot("moved");
+
+    // A rectangle drawn on the board: a note of kind rect in canvas.json.
+    n = await count();
+    await clickLabel("Rectangle");
+    // On the layer a drawing tool lays over the board, found where it is now: the panels beside the board move it.
+    const bare = await app.evaluate<{ x: number; y: number } | null>(
+      `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) throw new Error("no artboard in the editor; islands " + [...document.querySelectorAll("[data-island]")].map((e) => e.getAttribute("data-island")).join(",")); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "hidden") c = c.parentElement; const layer = [...c.children].find((e) => e.style.cursor === "crosshair"); const r = c.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 50; y += 10) for (let x = r.left + 10; x < r.right - 50; x += 10) { if (document.elementFromPoint(x, y) === layer && document.elementFromPoint(x + 48, y + 38) === layer) return { x, y }; } return null; })()`,
+    );
+    if (bare === null) throw new Error("no bare stretch of the board to draw on");
+    await app.drag(bare, { x: bare.x + 48, y: bare.y + 38 });
+    await personSaved(n, "the rectangle");
+    const index = JSON.parse((await app.ipc<{ files: Record<string, string> }>("artifact:files", { taskId: made.taskId, artifact: canvas.id })).files["project/canvas.json"] ?? "{}") as { notes?: Record<string, { kind?: string }> };
+    if (!Object.values(index.notes ?? {}).some((note) => note.kind === "rect")) throw new Error(`no rect note in canvas.json: ${JSON.stringify(index.notes)}`);
+    await app.shot("rectangle");
+
+    // Play: the artboard alone, its own controls live; then back.
+    await clickLabel("Pointer");
+    const pick = await artboardPoint();
+    await app.clickAt(pick.x, pick.y);
+    await settle(600);
+    await app.clickText("▶ Play");
+    await settle(2000);
+    const playing = await app.evaluate<boolean>(`document.body.innerText.includes("Back to the canvas")`);
+    if (!playing) throw new Error("Play did not open the artboard alone");
+    await app.shot("playing");
+    await app.clickText("Back to the canvas");
+    await settle(1000);
     console.log("canvas: passed");
   } finally {
     await app.close();

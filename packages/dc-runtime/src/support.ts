@@ -129,6 +129,65 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     event.stopPropagation();
     event.stopImmediatePropagation();
   };
+
+  /**
+   * A drag of an element (README, "Moving an element"): drawn here as it happens — the element follows
+   * the pointer by a transform, nothing else changes — and reported when the pointer lets go, with what
+   * the editor needs to write it: the element's, its parent's and its siblings' boxes and source styles.
+   * Registered before the catch-all below, whose `stopImmediatePropagation` would otherwise swallow it.
+   */
+  let press: { el: HTMLElement; x: number; y: number; moved: boolean; transform: string } | null = null;
+  let swallowClick = false;
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (mode !== "edit" || event.button !== 0) return;
+      const el = named(event.target);
+      if (!el || el.parentElement === null) return;
+      press = { el, x: event.clientX, y: event.clientY, moved: false, transform: el.style.transform };
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      if (mode !== "edit" || press === null) return;
+      const dx = event.clientX - press.x;
+      const dy = event.clientY - press.y;
+      if (!press.moved && Math.hypot(dx, dy) < 4) return;
+      press.moved = true;
+      press.el.style.transform = `translate(${String(dx)}px, ${String(dy)}px) ${press.transform}`.trim();
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (mode !== "edit" || press === null) return;
+      const { el, x, y, moved, transform } = press;
+      press = null;
+      el.style.transform = transform;
+      if (!moved) return;
+      swallowClick = true;
+      const parent = el.parentElement?.closest("[data-dc-id]") ?? null;
+      const siblings = Array.from(el.parentElement?.children ?? []).filter((s): s is HTMLElement => s !== el && s.hasAttribute("data-dc-id"));
+      const n = idOf(el);
+      post({
+        type: "dc:moved",
+        id: n,
+        // How far it was dragged, in the frame's CSS pixels; `rect` is where it stood before.
+        dx: event.clientX - x,
+        dy: event.clientY - y,
+        rect: rectOf(el),
+        style: fromSource(n).style,
+        // The element's box parent: the nearest element the editor can name, or none (a top element).
+        parent: parent ? { id: idOf(parent), rect: rectOf(parent), style: fromSource(idOf(parent)).style } : null,
+        siblings: siblings.map((s) => ({ id: idOf(s), rect: rectOf(s), style: fromSource(idOf(s)).style })),
+      });
+    },
+    true,
+  );
+
   for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "contextmenu", "submit", "keydown", "keyup", "input", "change", "focusin"]) {
     window.addEventListener(type, stop, true);
   }
@@ -137,6 +196,11 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     (event) => {
       if (mode !== "edit") return;
       stop(event);
+      // The click a drag ends with is the drag's, not a pick.
+      if (swallowClick) {
+        swallowClick = false;
+        return;
+      }
       const el = named(event.target);
       if (!el) return;
       const n = idOf(el);

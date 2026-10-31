@@ -113,6 +113,103 @@ export function formatStyle(style: Record<string, string>): string {
     .join("; ");
 }
 
+/**
+ * Wraps element `n` in a new container (format.md: viewers create stacks and grids with "Wrap in flex" /
+ * "Wrap in grid"): `<div style="…">` before it, `</div>` after it, the element itself untouched. A grid
+ * is written in exactly the `repeat(N, minmax(0, 1fr))` shape the properties panel reads back.
+ */
+export function wrapElement(source: string, n: number, as: "stack" | "grid"): string {
+  const el = elementAt(source, n);
+  const style = as === "stack" ? "display: flex; flex-direction: column; gap: 8px" : "display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px";
+  return `${source.slice(0, el.outer.start)}<div style="${style}">${source.slice(el.outer.start, el.outer.end)}</div>${source.slice(el.outer.end)}`;
+}
+
+/**
+ * Keeps a tweak: sets prop `name`'s `default` in the logic script's `data-props` (the runtime draws a
+ * declared default as the prop's value), leaving the rest of the declaration, and of the file, as written.
+ * The attribute is single-quoted JSON read the way `getAttribute` reads it (format.md, "`data-props`
+ * escaping"), so it is decoded, changed and escaped back in those three escapes. A file with no
+ * `data-props`, or one whose JSON does not parse, is returned unchanged.
+ */
+export function setPropDefault(source: string, name: string, value: unknown): string {
+  const tag = /<script\b[^>]*\bdata-dc-script\b[^>]*>/i.exec(source);
+  if (!tag) return source;
+  const attr = /\bdata-props\s*=\s*'([^']*)'/i.exec(tag[0]);
+  if (!attr) return source;
+  let props: Record<string, Record<string, unknown>>;
+  try {
+    props = JSON.parse(attr[1]!.replace(/&#39;/g, "'").replace(/&quot;/g, '"').replace(/&amp;/g, "&")) as Record<string, Record<string, unknown>>;
+  } catch {
+    return source;
+  }
+  props[name] = { ...(props[name] ?? {}), default: value };
+  const written = JSON.stringify(props).replace(/&/g, "&amp;").replace(/'/g, "&#39;");
+  const start = tag.index + attr.index + attr[0].indexOf("'") + 1;
+  return splice(source, start, start + attr[1]!.length, written);
+}
+
+/** A box, in the frame's CSS pixels. */
+export interface Box {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+}
+
+/** What the page reports when a drag of an element ends (`dc:moved`): enough to write it. */
+export interface Moved {
+  id: number;
+  /** How far it was dragged. */
+  dx: number;
+  dy: number;
+  /** Where it stood before, and its inline style as the source has it. */
+  rect: Box;
+  style: string;
+  /** Its box parent (the nearest element the template names), or `null` for a top element. */
+  parent: { id: number; rect: Box; style: string } | null;
+  siblings: Array<{ id: number; rect: Box; style: string }>;
+}
+
+/**
+ * A drag written into the source, as the format describes it: an item dragged OUT of a stack or a grid
+ * makes "the editor … freeze the remaining siblings and the parent's size so nothing else on the page
+ * moves" (format.md). So, for an element in the flow: its parent keeps its size and becomes the
+ * positioning box, each sibling is pinned where it stands, and the element is placed where it was
+ * dropped — every one of them by its inline style, which is what the properties panel edits too. An
+ * element already placed absolutely only moves. A top element, with nothing to be placed in, is offset.
+ */
+export function applyMove(source: string, m: Moved): string {
+  const px = (v: number): string => `${String(Math.round(v))}px`;
+  const own = readStyle(m.style);
+  if (m.parent === null) {
+    const left = parseFloat(own["left"] ?? "0") || 0;
+    const top = parseFloat(own["top"] ?? "0") || 0;
+    return editStyle(source, m.id, formatStyle({ ...own, position: own["position"] ?? "relative", left: px(left + m.dx), top: px(top + m.dy) }));
+  }
+  const base = m.parent.rect;
+  const at = { left: px(m.rect.x - base.x + m.dx), top: px(m.rect.y - base.y + m.dy) };
+  if (own["position"] === "absolute") return editStyle(source, m.id, formatStyle({ ...own, ...at }));
+
+  let out = source;
+  const parent = readStyle(m.parent.style);
+  out = editStyle(
+    out,
+    m.parent.id,
+    formatStyle({
+      ...parent,
+      position: parent["position"] !== undefined && parent["position"] !== "static" ? parent["position"] : "relative",
+      width: parent["width"] ?? px(base.width),
+      height: parent["height"] ?? px(base.height),
+    }),
+  );
+  for (const s of m.siblings) {
+    const style = readStyle(s.style);
+    if (style["position"] === "absolute") continue;
+    out = editStyle(out, s.id, formatStyle({ ...style, position: "absolute", left: px(s.rect.x - base.x), top: px(s.rect.y - base.y), width: px(s.rect.width), height: px(s.rect.height), margin: "0" }));
+  }
+  return editStyle(out, m.id, formatStyle({ ...own, position: "absolute", ...at, width: px(m.rect.width), height: px(m.rect.height), margin: "0" }));
+}
+
 /** `text` split on `separator` outside parentheses, quotes and holes — `url(a;b)`, `content: "a;b"`, `{{a;b}}`. */
 function splitOutside(text: string, separator: string): string[] {
   const parts: string[] = [];

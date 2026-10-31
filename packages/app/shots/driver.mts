@@ -607,6 +607,23 @@ export class App {
     return false;
   }
 
+  /**
+   * Press at one point, move to another in `steps` real moves with the button held, and let go there —
+   * a drag as a person makes one, frame boundaries and pointer capture included.
+   */
+  async drag(from: { x: number; y: number }, to: { x: number; y: number }, steps = 8): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
+    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1, buttons: 1 });
+    for (let i = 1; i <= steps; i++) {
+      const x = from.x + ((to.x - from.x) * i) / steps;
+      const y = from.y + ((to.y - from.y) * i) / steps;
+      await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+      await sleep(16);
+    }
+    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", clickCount: 1, buttons: 0 });
+    await sleep(150);
+  }
+
   /** Put the pointer somewhere and do not wait: {@link hover} without the pause for a hover card. */
   async pointer(x: number, y: number): Promise<void> {
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });

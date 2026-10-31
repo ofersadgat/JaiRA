@@ -128,7 +128,13 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
       const frame = (
         <Suspense fallback={null}>
           {typeof p["url"] === "string" ? (
-            <InteractiveArtifact url={p["url"]} onPrompt={event("prompt")} style={style} published={p["published"] === true} />
+            <InteractiveArtifact
+              url={p["url"]}
+              onPrompt={event("prompt")}
+              {...(p["downloads"] === true ? { onDownload: event("download") } : {})}
+              style={style}
+              published={p["published"] === true}
+            />
           ) : (
             <Html text={String(p["text"] ?? "")} style={style} />
           )}

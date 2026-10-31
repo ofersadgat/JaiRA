@@ -29,16 +29,41 @@ import { useEffect, useRef, type CSSProperties, type JSX } from "react";
  * string `"null"`, which every other sandboxed frame also reports, so matching on it would accept a
  * message from any of them. Identity here is the window object itself.
  */
-export function InteractiveArtifact({ url, onPrompt, style, published = false }: { url: string; onPrompt?: ((text: string) => void) | undefined; style?: CSSProperties | undefined; published?: boolean }): JSX.Element {
+export function InteractiveArtifact({
+  url,
+  onPrompt,
+  onDownload,
+  style,
+  published = false,
+}: {
+  url: string;
+  onPrompt?: ((text: string) => void) | undefined;
+  /**
+   * A file the page offers to save (decision 0020 §6): only for a published artifact that declared the
+   * `downloads` capability. The page cannot start a download itself (no `allow-downloads`); it posts
+   * `{ type: "download", name, data, base64? }` and the host asks the person where to put it.
+   */
+  onDownload?: ((file: { name: string; data: string; base64: boolean }) => void) | undefined;
+  style?: CSSProperties | undefined;
+  published?: boolean;
+}): JSX.Element {
   const frame = useRef<HTMLIFrameElement | null>(null);
 
   useEffect(() => {
-    if (onPrompt === undefined) return;
+    if (onPrompt === undefined && onDownload === undefined) return;
     const onMessage = (event: MessageEvent): void => {
       // The window that sent it, not the origin it claims — see the component note.
       if (frame.current === null || event.source !== frame.current.contentWindow) return;
-      const data = event.data as { type?: unknown; text?: unknown } | null;
-      if (data === null || typeof data !== "object" || data.type !== "prompt") return;
+      const data = event.data as { type?: unknown; text?: unknown; name?: unknown; data?: unknown; base64?: unknown } | null;
+      if (data === null || typeof data !== "object") return;
+      if (data.type === "download" && onDownload !== undefined) {
+        if (typeof data.name !== "string" || typeof data.data !== "string") return;
+        // Bounded as the canvas's own call is: a page that posts more than 16 MB is not saved.
+        if (data.data.length > 16 * 1024 * 1024) return;
+        onDownload({ name: data.name.replace(/[\\/:*?"<>|]+/g, "-").slice(0, 200) || "download", data: data.data, base64: data.base64 === true });
+        return;
+      }
+      if (data.type !== "prompt" || onPrompt === undefined) return;
       if (typeof data.text !== "string" || data.text.trim() === "") return;
       // Bounded: this is a message from a page that may have been generated wrong, and a composer is
       // not the place to discover that something posted a megabyte into it.
@@ -46,7 +71,7 @@ export function InteractiveArtifact({ url, onPrompt, style, published = false }:
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [onPrompt]);
+  }, [onPrompt, onDownload]);
 
   // `style`: the frame's box, stated inline by the host (`Island.tsx`), as `Html`'s is.
   //

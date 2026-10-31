@@ -515,7 +515,11 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
         auto_open: { type: "string", description: "Accepted; JaiRA shows every artifact in the conversation as it is published." },
         asset: { type: "boolean", description: "Upload `file_path` (an image or font) to the canvas `url`; answered with its `/_blob/<id>` url." },
         path: { type: "string", description: "read: one file of the artifact." },
-        capabilities: { type: "object", description: "Runtime capabilities the page declares; `{ \"downloads\": {} }` lets it offer files to save." },
+        capabilities: {
+          type: "object",
+          description:
+            "Runtime capabilities the page declares. `{ \"downloads\": {} }` lets it offer files to save: a page cannot start a download itself, so its download control posts `window.parent.postMessage({ type: \"download\", name: \"table.csv\", data: <the file's text, or its bytes in base64 with base64: true> }, \"*\")` and the person chooses where it goes.",
+        },
         force: { type: "boolean", description: "Publish over a version someone else saved since you last read it. Only when the user asks." },
         scope: { type: "string", description: "list: accepted; JaiRA lists this task's artifacts." },
         limit: { type: "number", description: "list: at most this many (default 25)." },

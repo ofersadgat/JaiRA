@@ -35,6 +35,15 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
   const [versions, setVersions] = useState<PublishedVersion[] | null>(null);
   const [menu, setMenu] = useState<MenuAt | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
+  /** Whether the version declared the `downloads` capability: only then may the page offer a file. */
+  const [downloads, setDownloads] = useState(false);
+  /**
+   * The artifact's newest version, once read. A call whose version a later one replaced draws its title
+   * bar and no more until asked: a canvas published in six calls is six rows, and six running boards of
+   * the same canvas is a conversation nobody can scroll.
+   */
+  const [newest, setNewest] = useState<number | null>(null);
+  const [opened, setOpened] = useState(false);
   /** The canvas open in its editor, in place (a conversation draws inline). */
   const [editing, setEditing] = useState(false);
   /** Bumped to read the artifact again: after the editor saved, or a refused save asked to reload. */
@@ -44,12 +53,26 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
 
   useEffect(() => {
     let live = true;
+    void invoke("artifact:versions", { taskId, artifact: published.id, ...project })
+      .then((list) => live && setNewest(list.at(-1)?.version ?? published.version))
+      .catch(() => live && setNewest(published.version));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [taskId, published.id, published.version, reread]);
+  const superseded = newest !== null && newest > published.version && !opened;
+
+  useEffect(() => {
+    if (newest === null || superseded) return;
+    let live = true;
     setFiles(null);
     setFrame(null);
     void invoke("artifact:files", { taskId, artifact: published.id, version, ...project })
       .then(async (read) => {
         if (!live) return;
         setFiles(read.files);
+        setDownloads(read.capabilities !== undefined && "downloads" in read.capabilities);
         // The grant the Artifact view runs in: the whole artifact at this version (a phone's WebView
         // cannot load it yet, and draws what it can without one).
         if (published.kind === "markdown" || !isWeb) return;
@@ -64,7 +87,7 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
     };
     // `project` is derived from `artifacts`, which the surface keeps stable per task.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [taskId, published.id, published.kind, published.entry, version, reread]);
+  }, [taskId, published.id, published.kind, published.entry, version, reread, newest === null, superseded]);
 
   const index = files?.["project/canvas.json"];
   /** What Rendered and Source show: the entry file, or a canvas's first artboard. */
@@ -136,6 +159,8 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
     if (files === null) return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "tok-hint" }}>Opening…</Txt>;
     if (published.kind === "markdown") return <Markdown text={files[published.entry] ?? ""} scale={12.5 / 12.5} />;
     if (published.kind === "canvas") {
+      // The version the create call made: the canvas exists, and nothing is on it yet.
+      if (index === undefined) return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>The canvas is empty at v{version}: its artboards come in the calls after this one.</Txt>;
       if (!isWeb || frame === null) {
         return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>{isWeb ? "Opening the canvas…" : "This design canvas opens in JaiRA on a computer."}</Txt>;
       }
@@ -178,11 +203,36 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
     return (
       <Island
         component="artifact"
-        props={{ text: shownText ?? "", ...(frame !== null ? { url: frame, published: true } : {}), style: { width: "100%", height: 420, border: `1px solid ${String(t.v("line"))}`, borderRadius: 6, background: "#fff", boxSizing: "border-box" } }}
-        {...(artifacts?.onPrompt !== undefined ? { onEvent: (name: string, text: unknown) => void (name === "prompt" && typeof text === "string" && artifacts.onPrompt!(text)) } : {})}
+        props={{ text: shownText ?? "", ...(frame !== null ? { url: frame, published: true, downloads } : {}), style: { width: "100%", height: 420, border: `1px solid ${String(t.v("line"))}`, borderRadius: 6, background: "#fff", boxSizing: "border-box" } }}
+        onEvent={(name: string, value: unknown) => {
+          if (name === "prompt" && typeof value === "string") artifacts?.onPrompt?.(value);
+          // A file the page offers (its declared `downloads`): saved where the person chooses.
+          if (name === "download") {
+            const file = value as { name: string; data: string; base64: boolean };
+            const data = file.base64 ? file.data : base64OfText(file.data);
+            void invoke("shell:saveFile", { name: file.name, data }).catch(() => undefined);
+          }
+        }}
       />
     );
   })();
+
+  if (newest === null || superseded) {
+    return (
+      <View flexDirection="row" alignItems="center" gap={8} minWidth={0}>
+        <View flexShrink={1} minWidth={0}>
+          {titleBar}
+        </View>
+        {superseded ? (
+          <Press onPress={() => setOpened(true)} title={`Show v${String(published.version)}`} paddingVertical={1} paddingHorizontal={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : "transparent" })}>
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>
+              v{newest} is newer · Show v{published.version}
+            </Txt>
+          </Press>
+        ) : null}
+      </View>
+    );
+  }
 
   return (
     <View minWidth={0}>
@@ -196,6 +246,14 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </View>
   );
+}
+
+/** Text as UTF-8 in base64, in chunks: spreading a large file into one call overflows the stack. */
+function base64OfText(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) binary += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  return btoa(binary);
 }
 
 /** A version's time: today's as a time, an older one's as a date. */

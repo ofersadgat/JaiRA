@@ -12246,12 +12246,13 @@ export class AppService {
   }
 
   /** What a published artifact holds at a version. */
-  artifactFiles(request: { taskId: string; artifact: string; version?: number; project?: ProjectRef }): { version: number; files: Record<string, string> } {
+  artifactFiles(request: { taskId: string; artifact: string; version?: number; project?: ProjectRef }): { version: number; files: Record<string, string>; capabilities?: Record<string, unknown> } {
     const store = this.projectFor(request.project).artifacts;
     const versions = store.versions(request.taskId, request.artifact);
     const at = request.version ?? versions.at(-1)?.version;
     if (at === undefined) throw this.refusal("file", `no artifact ${request.artifact} for task ${request.taskId}`);
-    return { version: at, files: filesAt(store, request.taskId, request.artifact, at) };
+    const capabilities = versions.find((v) => v.version === at)?.capabilities;
+    return { version: at, files: filesAt(store, request.taskId, request.artifact, at), ...(capabilities !== undefined ? { capabilities } : {}) };
   }
 
   /**
