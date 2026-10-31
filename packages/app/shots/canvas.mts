@@ -191,19 +191,65 @@ async function main(): Promise<void> {
     await settle(1500);
     await app.shot("moved");
 
-    // A rectangle drawn on the board: a note of kind rect in canvas.json.
+    // The drawing tools, each on the board where it is bare now: a shape is a note of its kind in
+    // canvas.json, a note and a text are notes with what was typed, an artboard is a file of its own.
+    /** A bare stretch of the board's layer whose cursor is `cursor`, with room for a short drag. */
+    const bareBoard = async (cursor: "crosshair" | "default"): Promise<{ x: number; y: number }> => {
+      const at = await app.evaluate<{ x: number; y: number } | null>(
+        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) throw new Error("no artboard in the editor; islands " + [...document.querySelectorAll("[data-island]")].map((e) => e.getAttribute("data-island")).join(",")); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "hidden") c = c.parentElement; const layer = [...c.children].find((e) => e.style.cursor === ${JSON.stringify(cursor)}); const r = c.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 50; y += 10) for (let x = r.left + 10; x < r.right - 50; x += 10) { if (document.elementFromPoint(x, y) === layer && document.elementFromPoint(x + 48, y + 38) === layer && document.elementFromPoint(x + 24, y + 19) === layer) return { x, y }; } return null; })()`,
+      );
+      if (at === null) throw new Error(`no bare stretch of the board to draw on (${cursor})`);
+      return at;
+    };
+    const boardsBefore = Object.keys((JSON.parse((await app.ipc<{ files: Record<string, string> }>("artifact:files", { taskId: made.taskId, artifact: canvas.id })).files["project/canvas.json"] ?? "{}") as { boards?: Record<string, unknown> }).boards ?? {});
     n = await count();
-    await clickLabel("Rectangle");
-    // On the layer a drawing tool lays over the board, found where it is now: the panels beside the board move it.
-    const bare = await app.evaluate<{ x: number; y: number } | null>(
-      `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) throw new Error("no artboard in the editor; islands " + [...document.querySelectorAll("[data-island]")].map((e) => e.getAttribute("data-island")).join(",")); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "hidden") c = c.parentElement; const layer = [...c.children].find((e) => e.style.cursor === "crosshair"); const r = c.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 50; y += 10) for (let x = r.left + 10; x < r.right - 50; x += 10) { if (document.elementFromPoint(x, y) === layer && document.elementFromPoint(x + 48, y + 38) === layer) return { x, y }; } return null; })()`,
-    );
-    if (bare === null) throw new Error("no bare stretch of the board to draw on");
-    await app.drag(bare, { x: bare.x + 48, y: bare.y + 38 });
-    await personSaved(n, "the rectangle");
-    const index = JSON.parse((await app.ipc<{ files: Record<string, string> }>("artifact:files", { taskId: made.taskId, artifact: canvas.id })).files["project/canvas.json"] ?? "{}") as { notes?: Record<string, { kind?: string }> };
-    if (!Object.values(index.notes ?? {}).some((note) => note.kind === "rect")) throw new Error(`no rect note in canvas.json: ${JSON.stringify(index.notes)}`);
-    await app.shot("rectangle");
+    for (const label of ["Rectangle", "Oval", "Arrow", "Line", "Pen"]) {
+      await clickLabel(label);
+      const from = await bareBoard("crosshair");
+      await app.drag(from, { x: from.x + 48, y: from.y + 38 });
+      await settle(200);
+    }
+    await clickLabel("Note");
+    const noteAt = await bareBoard("crosshair");
+    await app.clickAt(noteAt.x, noteAt.y);
+    await settle(400);
+    await app.type("A note from the rig");
+    await app.press("Escape", 27);
+    await settle(200);
+    await clickLabel("Text");
+    const textFrom = await bareBoard("default");
+    await app.drag(textFrom, { x: textFrom.x + 48, y: textFrom.y + 38 });
+    await settle(400);
+    await app.type("A heading from the rig");
+    await app.press("Escape", 27);
+    await settle(200);
+    await clickLabel("Artboard");
+    const boardFrom = await bareBoard("crosshair");
+    await app.drag(boardFrom, { x: boardFrom.x + 48, y: boardFrom.y + 38 });
+    await settle(200);
+    await clickLabel("Pointer");
+    // Saved a second after the last change: wait for the person's version, then for the versions to rest.
+    await personSaved(n, "the drawings");
+    for (let last = -1, i = 0; ; i++) {
+      const now = await count();
+      if (now === last) break;
+      if (i > 20) throw new Error("the editor kept saving");
+      last = now;
+      await settle(2000);
+    }
+    const afterDrawing = (await app.ipc<{ files: Record<string, string> }>("artifact:files", { taskId: made.taskId, artifact: canvas.id })).files;
+    const index = JSON.parse(afterDrawing["project/canvas.json"] ?? "{}") as { boards?: Record<string, unknown>; notes?: Record<string, { kind?: string; text?: string }> };
+    const notes = Object.values(index.notes ?? {});
+    console.log(`editor: the drawings saved: notes ${JSON.stringify(notes.map((note) => note.kind ?? `text:${note.text ?? ""}`))}; boards ${JSON.stringify(Object.keys(index.boards ?? {}))}`);
+    for (const kind of ["rect", "oval", "arrow", "line", "pen"]) {
+      if (!notes.some((note) => note.kind === kind)) throw new Error(`no ${kind} note in canvas.json: ${JSON.stringify(index.notes)}`);
+    }
+    for (const text of ["A note from the rig", "A heading from the rig"]) {
+      if (!notes.some((note) => note.text === text)) throw new Error(`no note reading "${text}" in canvas.json: ${JSON.stringify(index.notes)}`);
+    }
+    const newBoard = Object.keys(index.boards ?? {}).find((file) => !boardsBefore.includes(file) && afterDrawing[`project/${file}`] !== undefined);
+    if (newBoard === undefined) throw new Error(`the drawn artboard is not a file of the canvas: ${JSON.stringify(Object.keys(afterDrawing))}`);
+    await app.shot("drawings");
 
     // Play: the artboard alone, its own controls live; then back.
     await clickLabel("Pointer");

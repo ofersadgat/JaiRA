@@ -337,6 +337,9 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       return;
     }
     if (tool === "note") {
+      // The note's text box takes the focus as it mounts; the press's own mousedown would take it back
+      // to the board, and the note would be committed empty before a word was typed.
+      e.preventDefault();
       const id = noteId();
       changeIndex((was) => ({ ...was, notes: { ...(was.notes ?? {}), [id]: { x: p.x, y: p.y, text: "", w: 220 } } }));
       setSelection({ kind: "note", id });
@@ -552,7 +555,15 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                 onUp={onLayerUp}
                 onEdit={() => (n.kind === undefined || n.kind === "title1") && setEditingText({ note: id, text: n.text ?? "" })}
                 onText={(text) => {
-                  changeIndex((was) => ({ ...was, notes: { ...was.notes, [id]: { ...was.notes![id]!, text } } }));
+                  // A note left with nothing in it is not kept: a press with the note tool and no words.
+                  changeIndex((was) => {
+                    const notes = was.notes ?? {};
+                    if (text.trim() === "" && notes[id]?.kind === undefined) {
+                      const { [id]: _dropped, ...rest } = notes;
+                      return { ...was, notes: rest };
+                    }
+                    return { ...was, notes: { ...notes, [id]: { ...notes[id]!, text } } };
+                  });
                   setEditingText(null);
                 }}
               />
