@@ -346,7 +346,7 @@ export function rememberedAnswersOf(entries: readonly JsonValue[]): Array<{ part
  */
 export function questionResultEntries(
   toolUseId: string,
-  answered: { answers: Record<string, string | readonly string[]> } | { leftToAgent: true } | { stopped: true },
+  answered: { answers: Record<string, string | readonly string[]> } | { leftToAgent: true } | { stopped: true } | { abandoned: true },
   at: number,
 ): { live: JsonValue; record: JsonValue } {
   let words: string;
@@ -358,6 +358,9 @@ export function questionResultEntries(
   } else if ("leftToAgent" in answered) {
     words = "The person left it to you: use your own judgment.";
     data = { by: "person" };
+  } else if ("abandoned" in answered) {
+    words = "not answered: the call that asked ended first";
+    data = { by: "abandoned" };
   } else {
     words = "not answered: the run stopped";
     data = { by: "stopped" };

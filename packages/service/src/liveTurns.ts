@@ -156,27 +156,35 @@ export function partialRecordValue(snapshot: LiveTurnSnapshot): JsonValue | null
  *
  * The flush callback is trusted to be a no-op when there is nothing to write — a timer that fires
  * after the record settled matches no open row and writes nothing (`update`'s status guard).
+ *
+ * The write is the whole turn so far, so a turn that runs for hours costs more each time: the wait
+ * grows with what the last write took (`FLUSH_PACE`), and durability never takes over the thread.
  */
 export class LiveTurnFlusher {
   private timer: ReturnType<typeof setTimeout> | undefined;
+  private wait: number;
 
   constructor(
     private readonly flushNow: () => void,
     private readonly intervalMs = 400,
-  ) {}
+  ) {
+    this.wait = intervalMs;
+  }
 
   /** Note that new data exists. Starts the interval timer unless one is already pending. */
   note(): void {
     if (this.timer !== undefined) return;
     this.timer = setTimeout(() => {
       this.timer = undefined;
+      const started = Date.now();
       try {
         this.flushNow();
       } catch {
         // Durability is best-effort beside a live stream that is already reaching the viewer — a
         // failed flush must not take the delta path down with it. The next note tries again.
       }
-    }, this.intervalMs);
+      this.wait = Math.max(this.intervalMs, (Date.now() - started) * FLUSH_PACE);
+    }, this.wait);
   }
 
   /**
@@ -209,8 +217,8 @@ export class LiveTurnFlusher {
   }
 }
 
-/** Live entries kept per position — the renderer's own bound, mirrored. */
-const LIVE_ENTRY_LIMIT = 500;
+/** At most this share of the main thread goes on writing a partial down: the wait is this many times the last write. */
+const FLUSH_PACE = 20;
 
 /** A usage reading riding the stream as an event entry (`{kind: "event", event: {type: "context"|"limits", reading}}`). */
 function usageEventOf(entry: JsonValue): { type: "context" | "limits"; reading: JsonValue } | undefined {
@@ -300,8 +308,7 @@ export class LiveTurnLog {
       if (sniffed !== undefined) entry.providerSessionId = sniffed;
       if (typeof incoming.parentToolUseId === "string") {
         enriched = { ...(delta.entry as object), at } as JsonValue;
-        const chain = [...(entry.sidechains[incoming.parentToolUseId] ?? []), enriched];
-        entry.sidechains[incoming.parentToolUseId] = chain.length > LIVE_ENTRY_LIMIT ? chain.slice(-LIVE_ENTRY_LIMIT) : chain;
+        entry.sidechains[incoming.parentToolUseId] = [...(entry.sidechains[incoming.parentToolUseId] ?? []), enriched];
       } else {
         const finished = incoming.kind === "message" && incoming.role === "assistant";
         const startedAt = entry.thinkingStartedAt ?? entry.textStartedAt;
@@ -316,16 +323,13 @@ export class LiveTurnLog {
           ...(thoughtMs !== undefined ? { thoughtMs } : {}),
         } as JsonValue;
         // The one thing bookkeeping SAYS is folded here; the event itself is then dropped rather
-        // than queued behind the cap — see `isStreamBookkeeping`. Folded before the drop, and before
+        // than kept — see `isStreamBookkeeping`. Folded before the drop, and before
         // the `finished` reset below, because a fold that runs after the entry is gone runs on
         // nothing.
         const writing = foldWriting(entry.writing, enriched);
         if (writing === undefined) delete entry.writing;
         else entry.writing = writing;
-        if (!isStreamBookkeeping(enriched)) {
-          entry.entries.push(enriched);
-          if (entry.entries.length > LIVE_ENTRY_LIMIT) entry.entries.splice(0, entry.entries.length - LIVE_ENTRY_LIMIT);
-        }
+        if (!isStreamBookkeeping(enriched)) entry.entries.push(enriched);
         // A finished assistant turn carries the same text and thinking its deltas streamed — the
         // tails restart, and with them the tail clocks. The half-written call goes with them: it is
         // ON that turn now, assembled, with a row of its own.

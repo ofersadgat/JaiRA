@@ -9927,9 +9927,13 @@ export class AppService {
    * waiting, which the next open asks again (`recoveredAsksOf`).
    */
   private abandonEndedAsks(session: ProjectSession, taskId: string, entry: JsonValue | undefined): void {
-    if (session.closing || session.approvalCalls.size === 0) return;
+    if (session.closing) return;
     const ended = new Set(endedCallsOf(entry));
     if (ended.size === 0) return;
+    // The call has its result, so the record needs no other: a question only leaves the screen.
+    for (const request of session.questions.listFor(taskId)) {
+      if (request.toolCallId !== undefined && ended.has(request.toolCallId)) session.questions.answer(request.requestId, undefined);
+    }
     for (const [requestId, call] of [...session.approvalCalls]) {
       if (call.taskId === taskId && call.calledBy !== undefined && ended.has(call.calledBy)) session.approvals.abandon(requestId);
     }
@@ -9943,8 +9947,9 @@ export class AppService {
    * turn's end so that it lands in this record. Not while the app closes, for the reason above.
    */
   private abandonAsksOfRecord(session: ProjectSession, taskId: string, entries: readonly JsonValue[]): void {
-    if (session.closing || session.approvalCalls.size === 0) return;
+    if (session.closing) return;
     const calls = callIdsOf(entries);
+    this.abandonQuestions(session, taskId, calls);
     for (const [requestId, call] of [...session.approvalCalls]) {
       if (call.taskId === taskId && call.calledBy !== undefined && calls.has(call.calledBy)) session.approvals.abandon(requestId);
     }
@@ -9953,8 +9958,26 @@ export class AppService {
   /** What is left waiting when a conversation's last turn has ended and no run holds it: nothing can use the answer. */
   private abandonAsksOfTask(session: ProjectSession, taskId: string): void {
     if (session.closing || session.live.has(taskId)) return;
+    this.abandonQuestions(session, taskId);
     for (const [requestId, call] of [...session.approvalCalls]) {
       if (call.taskId === taskId) session.approvals.abandon(requestId);
+    }
+  }
+
+  /**
+   * The questions a task's agent left, of `calls` if given, answered as abandoned in the record beside
+   * each, then let go of. Without the entry the question would read, after the next restart, as one the
+   * app closed under, and be asked again.
+   */
+  private abandonQuestions(session: ProjectSession, taskId: string, calls?: ReadonlySet<string>): void {
+    const at = Date.now();
+    for (const request of session.questions.listFor(taskId)) {
+      if (calls !== undefined && (request.toolCallId === undefined || !calls.has(request.toolCallId))) continue;
+      if (request.toolCallId !== undefined) {
+        const { live, record } = questionResultEntries(request.toolCallId, { abandoned: true }, at);
+        this.hostCall(session, taskId, live, record, at);
+      }
+      session.questions.answer(request.requestId, undefined);
     }
   }
 

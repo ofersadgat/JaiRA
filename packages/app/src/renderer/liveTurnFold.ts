@@ -27,8 +27,8 @@ export interface LiveTurn {
 
 export type SessionTurnPush = Extract<PushMessage, { type: "session:turn" }>;
 
-/** How many entries a tail keeps — the same cap main applies, so the two never disagree about a tail's length. */
-export const LIVE_ENTRY_LIMIT = 500;
+/** How often a tail reaches the screen. A 50 KB file is thousands of deltas, and each was a commit of the whole thread. */
+export const LIVE_DRAW_MS = 33;
 
 /** A `session:live` snapshot as a tail, or `null` when nothing is streaming. */
 export function liveTurnOfSnapshot(live: LiveTurnSnapshot | null): LiveTurn | null {
@@ -66,6 +66,48 @@ export function alreadyFolded(live: LiveTurn | null, message: SessionTurnPush): 
 }
 
 /**
+ * The tail between the pushes that fold it and the frames that draw it.
+ *
+ * Every delta folds at once, here, so nothing is lost and `n` stays exact; the screen takes the newest
+ * at most every {@link LIVE_DRAW_MS}. Drawing each delta made a large write one commit per delta of a
+ * whole thread and its tail, enough for React to give up (error #185, 2026-10-30, once, during a 53 KB
+ * file). A timer, not an animation frame: a window behind another draws no frames, and its tail would stand.
+ */
+export class LiveDraw {
+  private held: LiveTurn | null = null;
+  private timer: ReturnType<typeof setTimeout> | undefined;
+
+  constructor(
+    private readonly draw: (turn: LiveTurn) => void,
+    private readonly ms = LIVE_DRAW_MS,
+  ) {}
+
+  /** The newest tail: what waits to be drawn, or else what was. */
+  latest(drawn: LiveTurn | null): LiveTurn | null {
+    return this.held ?? drawn;
+  }
+
+  /** A tail to draw, with whatever else lands before the frame. */
+  hold(turn: LiveTurn): void {
+    this.held = turn;
+    if (this.timer !== undefined) return;
+    this.timer = setTimeout(() => {
+      this.timer = undefined;
+      const turn = this.held;
+      this.held = null;
+      if (turn !== null) this.draw(turn);
+    }, this.ms);
+  }
+
+  /** The tail is being replaced or ended: what waited must not land on top of that. */
+  drop(): void {
+    clearTimeout(this.timer);
+    this.timer = undefined;
+    this.held = null;
+  }
+}
+
+/**
  * One push folded into the tail.
  *
  * Accumulated per position: a delta is a fragment, and the fragments of one call belong to one
@@ -90,11 +132,10 @@ export function foldLiveTurn(live: LiveTurn | null, message: SessionTurnPush): L
     // prevent.
     const entry = message.entry as { kind?: string; role?: string; parentToolUseId?: string };
     if (typeof entry.parentToolUseId === "string") {
-      const chain = [...(sidechains[entry.parentToolUseId] ?? []), message.entry];
-      sidechains[entry.parentToolUseId] = chain.length > LIVE_ENTRY_LIMIT ? chain.slice(-LIVE_ENTRY_LIMIT) : chain;
+      sidechains[entry.parentToolUseId] = [...(sidechains[entry.parentToolUseId] ?? []), message.entry];
     } else {
       // The identical fold main runs (`LiveTurnLog`), on the identical entry: what the bookkeeping
-      // SAYS is kept, the event itself is dropped rather than queued behind the cap.
+      // SAYS is kept, the event itself is dropped.
       writing = foldWriting(writing, message.entry);
       if (!isStreamBookkeeping(message.entry)) entries.push(message.entry);
       // A finished assistant turn carries the same text and thinking its deltas streamed — the
@@ -134,7 +175,7 @@ export function foldLiveTurn(live: LiveTurn | null, message: SessionTurnPush): L
     thinking,
     ...(textStartedAt !== undefined ? { textStartedAt } : {}),
     ...(thinkingStartedAt !== undefined ? { thinkingStartedAt } : {}),
-    entries: entries.length > LIVE_ENTRY_LIMIT ? entries.slice(-LIVE_ENTRY_LIMIT) : entries,
+    entries,
     sidechains,
     ...(writing !== undefined ? { writing } : {}),
   };

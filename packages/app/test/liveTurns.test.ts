@@ -11,8 +11,80 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LiveTurnFlusher, LiveTurnLog, partialRecordValue } from "@jaira/service/liveTurns";
 import type { JsonValue } from "@declarative-ai/json";
+import { foldLiveTurn, LiveDraw, type LiveTurn } from "../src/renderer/liveTurnFold";
 
 const at = (id: string, seq: number) => ({ session: { id, seq } });
+
+describe("a long turn", () => {
+  const said = (i: number): JsonValue => ({ kind: "message", role: "user", content: { role: "user", content: `step ${i}` } });
+
+  it("keeps every entry in main, so nothing leaves the screen and the partial is the whole turn", () => {
+    const log = new LiveTurnLog();
+    for (let i = 0; i < 2400; i++) log.apply("t1", { ...at("s", 1), entry: said(i) });
+    log.apply("t1", { ...at("s", 1), entry: { ...(said(0) as object), parentToolUseId: "spawn" } as JsonValue });
+    const snap = log.snapshot("t1")!;
+    expect(snap.entries).toHaveLength(2400);
+    expect(snap.sidechains["spawn"]).toHaveLength(1);
+    expect(((partialRecordValue(snap) as { value: { entries: JsonValue[] } }).value.entries)).toHaveLength(2401);
+  });
+
+  it("keeps every entry in the window's tail, the same", () => {
+    let tail: LiveTurn | null = null;
+    for (let i = 0; i < 2400; i++) tail = foldLiveTurn(tail, { type: "session:turn", taskId: "t1", sessionId: "s", seq: 1, n: i, entry: said(i) } as never);
+    expect(tail!.entries).toHaveLength(2400);
+  });
+});
+
+describe("drawing a tail", () => {
+  beforeEach(() => void vi.useFakeTimers());
+  afterEach(() => void vi.useRealTimers());
+  const turn = (n: number): LiveTurn => ({ n, text: "", thinking: "", entries: [], sidechains: {} });
+
+  it("draws once a frame, the newest, however many deltas folded", () => {
+    const drawn: number[] = [];
+    const live = new LiveDraw((t) => void drawn.push(t.n!), 33);
+    for (let n = 1; n <= 100; n++) live.hold(turn(n));
+    expect(drawn).toEqual([]);
+    expect(live.latest(null)?.n).toBe(100);
+    vi.advanceTimersByTime(33);
+    expect(drawn).toEqual([100]);
+    expect(live.latest(turn(5))?.n).toBe(5);
+  });
+
+  it("draws nothing that waited once the tail is replaced or ended", () => {
+    const drawn: number[] = [];
+    const live = new LiveDraw((t) => void drawn.push(t.n!), 33);
+    live.hold(turn(1));
+    live.drop();
+    vi.advanceTimersByTime(100);
+    expect(drawn).toEqual([]);
+    live.hold(turn(2));
+    vi.advanceTimersByTime(33);
+    expect(drawn).toEqual([2]);
+  });
+});
+
+describe("the partial's pace", () => {
+  beforeEach(() => void vi.useFakeTimers());
+  afterEach(() => void vi.useRealTimers());
+
+  it("waits longer as a write takes longer, and no less than the interval", () => {
+    const writes: number[] = [];
+    const flusher = new LiveTurnFlusher(() => {
+      writes.push(Date.now());
+      vi.setSystemTime(Date.now() + 50); // a write of a long turn
+    }, 400);
+    flusher.note();
+    vi.advanceTimersByTime(400);
+    expect(writes).toHaveLength(1);
+    flusher.note();
+    vi.advanceTimersByTime(999);
+    expect(writes).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(writes).toHaveLength(2);
+    flusher.dispose();
+  });
+});
 
 describe("LiveTurnLog", () => {
   it("accumulates text, thinking and entries for one position", () => {

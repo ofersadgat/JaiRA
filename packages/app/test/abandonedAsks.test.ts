@@ -40,6 +40,8 @@ interface Session {
   closing: boolean;
   liveTurns: { apply(taskId: string, delta: object): unknown; snapshot(taskId: string): { entries: JsonValue[] } | null };
   approvals: { askFor(request: object, context: object): Promise<string> };
+  questions: { asker(context: object): (request: object) => Promise<unknown>; list(): unknown[] };
+  hostCalls: Map<string, JsonValue[]>;
 }
 const sessionOf = (): Session => [...(service as never as { sessions: Map<string, Session> }).sessions.values()][0]!;
 /** What the stream callback does with an entry once the live turn holds it. */
@@ -66,6 +68,52 @@ const answerOf = (session: Session, taskId: string): Record<string, unknown> | u
   }
   return undefined;
 };
+
+describe("a question whose call ended without an answer", () => {
+  const ask = (session: Session, taskId: string, toolCallId: string): Promise<unknown> =>
+    session.questions.asker({ taskId })({ questions: [{ question: "Which?", options: [] }], sessionId: "s", toolCallId });
+  const answered = (session: Session, taskId: string): string => JSON.stringify(session.hostCalls.get(taskId) ?? []);
+
+  it("leaves the screen when the call has its result, which is all the record needs", async () => {
+    const { taskId } = service.createTask({ title: titleOf("q1"), workflow: CHAT_SESSION, inputs: { message: "q1" } });
+    const session = sessionOf();
+    const asked = ask(session, taskId, "t1");
+    expect(session.questions.list()).toHaveLength(1);
+    streamed(session, taskId, cut);
+    expect(await asked).toBeUndefined();
+    expect(session.questions.list()).toEqual([]);
+    expect(pushes.some((m) => m.type === "question:resolved")).toBe(true);
+    expect(answered(session, taskId)).not.toContain("abandoned");
+  });
+
+  it("is answered in the record when the record of its call settles", async () => {
+    const { taskId } = service.createTask({ title: titleOf("q2"), workflow: CHAT_SESSION, inputs: { message: "q2" } });
+    const session = sessionOf();
+    const asked = ask(session, taskId, "t1");
+    const finished: unknown[] = [];
+    const inner = { append: (s: { id: string }) => ({ id: s.id }), finish: (_ref: unknown, value: unknown) => void finished.push(value) };
+    const records = (service as never as { withHostCallsOf(o: Session, t: string, r: object): { finish(ref: object, settled: object): unknown } }).withHostCallsOf(session, taskId, inner);
+    await records.finish({ id: "r" }, { result: { value: { entries: [{ kind: "message", role: "assistant", content: [{ type: "tool_use", id: "t1", name: "AskUserQuestion", input: {} }] }] } } });
+    expect(await asked).toBeUndefined();
+    expect(session.questions.list()).toEqual([]);
+    const entries = (finished[0] as { result: { value: { entries: unknown[] } } }).result.value.entries;
+    expect(entries).toHaveLength(2);
+    expect(JSON.stringify(entries[1])).toContain('"by":"abandoned"');
+  });
+
+  it("is kept when another record settles, and when the app is closing", async () => {
+    const { taskId } = service.createTask({ title: titleOf("q3"), workflow: CHAT_SESSION, inputs: { message: "q3" } });
+    const session = sessionOf();
+    void ask(session, taskId, "t1");
+    const abandon = (entries: unknown[]): void => (service as never as { abandonAsksOfRecord(s: Session, t: string, e: unknown[]): void }).abandonAsksOfRecord(session, taskId, entries);
+    abandon([{ kind: "message", role: "assistant", content: [{ type: "tool_use", id: "t2", name: "shell", input: {} }] }]);
+    expect(session.questions.list()).toHaveLength(1);
+    session.closing = true;
+    abandon([{ kind: "message", role: "assistant", content: [{ type: "tool_use", id: "t1", name: "AskUserQuestion", input: {} }] }]);
+    session.closing = false;
+    expect(session.questions.list()).toHaveLength(1);
+  });
+});
 
 describe("a permission request whose call ended without an answer", () => {
   it("is let go of as abandoned — off the hub, and answered so in the conversation", async () => {

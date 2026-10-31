@@ -18,7 +18,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { SessionRef, TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "./fileTypes";
-import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
+import { alreadyFolded, foldLiveTurn, LiveDraw, liveTurnOfSnapshot, tailIsAhead, type LiveTurn } from "./liveTurnFold";
 import { sessionKey } from "./sessionCache";
 import { invoke, subscribe } from "./store";
 import { useView, useViews } from "./useView";
@@ -74,20 +74,35 @@ export function useTaskRun(taskId: string, project: string | undefined, host: Fi
   // deltas). A settled call ends it, and the transcripts held still while it streamed are read.
   useEffect(() => {
     let mounted = true;
+    /** The tail as last drawn, which the folds below go on from when nothing waits to be drawn. */
+    let drawn: LiveTurn | null = null;
+    const liveDraw = new LiveDraw((turn) => {
+      drawn = turn;
+      setLiveTurn(turn);
+    });
+    const replace = (turn: LiveTurn | null): void => {
+      liveDraw.drop();
+      drawn = turn;
+      setLiveTurn(turn);
+    };
     void invoke("session:live", { taskId, ...(project !== undefined ? { project } : {}) })
       .catch(() => null)
-      .then((snap) => mounted && setLiveTurn((current) => (tailIsAhead(current, snap) ? current : liveTurnOfSnapshot(snap))));
+      .then((snap) => {
+        if (mounted && !tailIsAhead(liveDraw.latest(drawn), snap)) replace(liveTurnOfSnapshot(snap));
+      });
     const off = subscribe((message) => {
       if (!("taskId" in message) || message.taskId !== taskId) return;
       if (message.type === "session:turn") {
-        setLiveTurn((current) => (alreadyFolded(current, message) ? current : foldLiveTurn(current, message)));
+        const current = liveDraw.latest(drawn);
+        if (!alreadyFolded(current, message)) liveDraw.hold(foldLiveTurn(current, message));
         return;
       }
       const event = message.type === "engine:event" ? (message.event as { type?: string } | undefined) : undefined;
-      if (message.type === "run:finished" || event?.type === "operation.completed" || event?.type === "operation.failed") setLiveTurn(null);
+      if (message.type === "run:finished" || event?.type === "operation.completed" || event?.type === "operation.failed") replace(null);
     });
     return () => {
       mounted = false;
+      liveDraw.drop();
       off();
     };
   }, [taskId, project]);

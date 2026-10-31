@@ -157,7 +157,7 @@ import { publishRenderChoices } from "./renderChoice";
 import { unseenTasks } from "./pillModel";
 import { sessionKey } from "./sessionCache";
 import { SyncCache, type SyncOptions } from "./syncCache";
-import { alreadyFolded, foldLiveTurn, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
+import { alreadyFolded, foldLiveTurn, LiveDraw, liveTurnOfSnapshot, tailIsAhead } from "./liveTurnFold";
 import {
   emptyUiState,
   forgetSeen,
@@ -1166,6 +1166,7 @@ export function useApp() {
    * settle — so it is exactly the case where that assumption fails, and the visible symptom would
    * be the file list reverting to what it said before the install.
    */
+  const liveDraw = useMemo(() => new LiveDraw((liveTurn) => patch({ liveTurn })), [patch]);
   const patchDebug = useCallback((next: Partial<DebugState>) => {
     ref.current = { ...ref.current, debug: { ...ref.current.debug, ...next } };
     setState((s) => ({ ...s, debug: { ...s.debug, ...next } }));
@@ -1411,7 +1412,7 @@ export function useApp() {
       const [channel, request] = boardRequest(ref.current.at, ref.current.level);
       await store.refresh(channel, request as never);
     },
-    [patch, store],
+    [liveDraw, patch, store],
   );
 
   /**
@@ -1855,7 +1856,10 @@ export function useApp() {
       } catch {
         live = null;
       }
-      if (ref.current.selected === taskId && !tailIsAhead(ref.current.liveTurn, live)) patch({ liveTurn: liveTurnOfSnapshot(live) });
+      if (ref.current.selected === taskId && !tailIsAhead(liveDraw.latest(ref.current.liveTurn), live)) {
+        liveDraw.drop();
+        patch({ liveTurn: liveTurnOfSnapshot(live) });
+      }
       return wanted;
     },
     [patch, store],
@@ -2428,6 +2432,7 @@ export function useApp() {
           // it streamed are held live again by the hold effect, and read.
           const ev = message.event as { type?: string; instanceId?: string };
           if ((ev.type === "operation.completed" || ev.type === "operation.failed") && typeof ev.instanceId === "string") {
+            liveDraw.drop();
             patch({ liveTurn: null });
           }
           // The run's shape and narration — the instance tree, the session history, the conversation — are
@@ -2456,7 +2461,10 @@ export function useApp() {
           void refreshState(ref.current.stateId);
           // Every cached transcript of the finished run was fetched while it could still grow. The
           // panel refetches what it is showing; the live tail's record has landed with it.
-          if (message.taskId === ref.current.selected) patch({ liveTurn: null });
+          if (message.taskId === ref.current.selected) {
+            liveDraw.drop();
+            patch({ liveTurn: null });
+          }
           break;
         }
         case "session:turn": {
@@ -2468,11 +2476,11 @@ export function useApp() {
           if (message.taskId !== ref.current.selected) break;
           // Already folded in — the tail was seeded from a `session:live` snapshot that had seen
           // this delta. Applying it again would show the fragment twice.
-          const live = ref.current.liveTurn;
+          const live = liveDraw.latest(ref.current.liveTurn);
           if (alreadyFolded(live, message)) break;
           // The fold itself is shared with a made task's nested conversation (`liveTurnFold.ts`),
           // which holds a tail of its own for its task and must fold identically.
-          patch({ liveTurn: foldLiveTurn(live, message) });
+          liveDraw.hold(foldLiveTurn(live, message));
           break;
         }
         case "log:entry": {
