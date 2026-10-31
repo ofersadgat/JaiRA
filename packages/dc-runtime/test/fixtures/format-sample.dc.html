@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Hello</title>
+  <script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+  <style>
+    body { margin: 0; font-family: system-ui, sans-serif; }
+    a { color: #b45309; } a:hover { color: #92400e; }
+  </style>
+</helmet>
+<div style="padding: 32px">
+  <h1>{{title}}</h1>
+  <sc-for list="{{items}}" as="item">
+    <div>{{item.label}}</div>
+  </sc-for>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"title":{"editor":"text","default":"Hello"}}'>
+class Component extends DCLogic {
+  renderVals() {
+    return { title: this.props.title ?? 'Hello', items: [{ label: 'One' }] };
+  }
+}
+</script>
+</body>
+</html>

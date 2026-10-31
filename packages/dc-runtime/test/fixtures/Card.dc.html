@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Card</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<article style="width: 200px; height: 120px">
+<h2>{{ heading }}</h2>
+<p>{{ subtitle }}</p>
+</article>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"item":{"editor":null},"cardTone":{"editor":"text","default":"plain"},"$preview":{"width":200,"height":120}}'>
+class Component extends DCLogic {
+  renderVals() {
+    const item = this.props.item ?? { title: 'Untitled' };
+    return { heading: item.title, subtitle: this.props.cardTone };
+  }
+}
+</script>
+</body>
+</html>
