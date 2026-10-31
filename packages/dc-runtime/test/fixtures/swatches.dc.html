@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Swatches</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<div style="display: flex; gap: 8px">
+<sc-for list="{{ swatches }}" as="swatch" hint-placeholder-count="3">
+<button class="swatch {{ swatch.state }}" aria-pressed="{{ swatch.selected }}" onClick="{{ swatch.pick }}" style="background: {{ swatch.hex }}; width: 44px; height: 44px">{{ $index }}: {{ swatch.name }}</button>
+</sc-for>
+</div>
+<sc-if value="{{ hasPick }}" hint-placeholder-val="{{ true }}">
+<p>Picked {{ picked }}</p>
+</sc-if>
+<sc-if value="{{ noPick }}">
+<p>Nothing picked</p>
+</sc-if>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"initial":{"editor":"enum","options":["sand","moss","clay"],"default":"moss"}}'>
+class Component extends DCLogic {
+  state = { picked: this.props.initial };
+  renderVals() {
+    const xs = [
+      { id: 'sand', name: 'Sand', hex: '#e8d9b5' },
+      { id: 'moss', name: 'Moss', hex: '#6b7f4a' },
+      { id: 'clay', name: 'Clay', hex: '#c46a4a' },
+    ];
+    const picked = this.state.picked;
+    return {
+      swatches: xs.map((x) => ({
+        ...x,
+        selected: x.id === picked ? 'true' : 'false',
+        state: x.id === picked ? 'is-on' : 'is-off',
+        pick: () => this.setState({ picked: x.id }),
+      })),
+      picked,
+      hasPick: Boolean(picked),
+      noPick: !picked,
+    };
+  }
+}
+</script>
+</body>
+</html>

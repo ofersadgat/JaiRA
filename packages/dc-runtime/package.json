@@ -1,0 +1,31 @@
+{
+  "name": "@jaira/dc-runtime",
+  "version": "0.1.0",
+  "description": "JaiRA's runtime for Claude Design's .dc.html artboards (decision 0020): support.js, and the parser and source edits the canvas editor uses.",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ofersadgat/JaiRA.git",
+    "directory": "packages/dc-runtime"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "scripts": {
+    "build": "node build.mjs"
+  },
+  "dependencies": {
+    "react": "19.2.3",
+    "react-dom": "19.2.3"
+  },
+  "devDependencies": {
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "esbuild": "^0.28.1"
+  }
+}
