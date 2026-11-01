@@ -743,7 +743,7 @@ function EditableNote({
   }
   const title = n.kind === "title1";
   const box: CSSProperties = title
-    ? { position: "absolute", left: n.x, top: n.y, maxWidth: n.maxW, fontSize: 72, fontWeight: 700, lineHeight: 1.05, color: "#121526" }
+    ? { position: "absolute", left: n.x, top: n.y, width: "max-content", maxWidth: n.maxW, fontSize: 72, fontWeight: 700, lineHeight: 1.05, color: "#121526" }
     : { position: "absolute", left: n.x, top: n.y, width: n.w ?? 220, minHeight: 60, padding: "12px 14px", background: "#fdf3c4", boxShadow: "0 1px 2px rgba(0,0,0,.12)", borderRadius: 2, fontSize: 16, color: "#2b2a24", whiteSpace: "pre-wrap" };
   if (editing) {
     return (

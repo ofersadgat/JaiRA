@@ -25,6 +25,7 @@ import { ShellFloats } from "../components/floats/ShellFloats";
 import { edge, landmark } from "../primitives";
 import { TokenRoot, useLook, useTokens } from "../tokens";
 import { TouchRoot, shellTouch } from "../touchElsewhere";
+import { ArtifactInMain } from "./ArtifactInMain";
 import { BoardColumn } from "./BoardColumn";
 import { ChatView } from "./ChatView";
 import { DebugView } from "./DebugView";
@@ -185,8 +186,9 @@ function Frame(): JSX.Element {
         <View flex={1} minHeight={0} flexDirection="row">
           {state.view === "tasks" ? (
             <>
-              <View flex={1} minWidth={0} minHeight={0}>
+              <View flex={1} minWidth={0} minHeight={0} position="relative">
                 <BoardColumn />
+                <ArtifactInMain at={state.selected} />
               </View>
               <PanelColumn />
             </>

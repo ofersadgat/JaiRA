@@ -275,7 +275,8 @@ function Note({ note: n }: { note: CanvasNote }): JSX.Element | null {
   const ink = INK[n.color ?? ""] ?? n.color ?? "#d6453d";
   if (n.kind === "title1") {
     return (
-      <div style={{ position: "absolute", left: n.x, top: n.y, maxWidth: n.maxW, fontSize: 72, fontWeight: 700, lineHeight: 1.05, color: n.color !== undefined ? ink : "#121526", fontStyle: n.italic === true ? "italic" : "normal", whiteSpace: "pre-wrap" }}>
+      // `max-content`: placed absolutely in a layer of no size, it would shrink to its longest word.
+      <div style={{ position: "absolute", left: n.x, top: n.y, width: "max-content", maxWidth: n.maxW, fontSize: 72, fontWeight: 700, lineHeight: 1.05, color: n.color !== undefined ? ink : "#121526", fontStyle: n.italic === true ? "italic" : "normal", whiteSpace: "pre-wrap" }}>
         {n.text}
       </div>
     );

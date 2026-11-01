@@ -23,6 +23,7 @@
  */
 import { createContext, useContext, type ReactNode } from "react";
 import type { ServedArtifact, ViewHint } from "@jaira/shared/browser";
+import type { PublishedRef } from "./transcriptRows";
 
 /**
  * A value, pinned — everything the panel needs to draw it exactly as the place it came from did.
@@ -56,6 +57,12 @@ export interface PinnedValue {
    * stay current it has to hold itself: a state's panel loads its own document.
    */
   node?: ReactNode;
+  /**
+   * A published artifact, drawn as itself (`PublishedView`): running, every version a press away, and a
+   * canvas with its editor. Not a {@link node}, which would be a snapshot nobody can read: the panel has
+   * to know this is an artifact, which takes the whole of it (`PanelFace`'s `full`).
+   */
+  published?: { ref: PublishedRef; project?: string | undefined } | undefined;
   hint?: ViewHint | undefined;
   label?: string | undefined;
   serve?: ((path: string) => Promise<ServedArtifact>) | undefined;

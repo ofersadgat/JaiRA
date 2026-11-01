@@ -513,6 +513,8 @@ export function faceOf(host: FaceHost, entry: PanelEntry, headOnly = false): Pan
         titleText: entry.preview.title,
         verbs: [{ icon: "pin", label: held ? "Held — let go of it" : "Hold it — keep it in Held", onClick: () => (held ? host.unhold(entry.preview) : host.hold(entry.preview)) }],
         body: <PreviewCard item={entry.preview} />,
+        // A published artifact fills the panel, edge to edge, with nothing of the entry under it.
+        ...(entry.preview.published !== undefined ? { full: true, scroll: false } : {}),
       };
     }
 

@@ -5,6 +5,7 @@ import { ChatStart } from "../components/chat/ChatStart";
 import { ChatThread } from "../components/chat/ChatThread";
 import { useChatSurface } from "../components/chat/surface";
 import { ChatPanel } from "../components/chat/ChatPanel";
+import { ArtifactInMain } from "./ArtifactInMain";
 import { useSheetInset } from "./columnsFit";
 
 /**
@@ -20,8 +21,9 @@ export function ChatView(): JSX.Element {
   const inset = useSheetInset();
   return (
     <View flex={1} minWidth={0} minHeight={0} flexDirection="row">
-      <View flex={1} minWidth={0} minHeight={0} paddingBottom={inset}>
+      <View flex={1} minWidth={0} minHeight={0} paddingBottom={inset} position="relative">
         {surface.taskId === null ? <ChatStart surface={surface} /> : <ChatThread surface={surface} key={surface.taskId} />}
+        <ArtifactInMain at={surface.taskId} />
       </View>
       <ChatPanel surface={surface} />
     </View>

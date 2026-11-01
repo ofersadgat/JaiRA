@@ -5,6 +5,7 @@ import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
 import { FOLD, HALVES, PANE, modeOf, paneOf } from "@jaira/ui/uiState";
 import { FactsButton, FileAddressBar, FileInspector, FolderInspector } from "../components/files/FileAddressBar";
 import { FilePanel } from "../components/files/FilePanel";
+import { ArtifactInMain } from "./ArtifactInMain";
 import { PanelColumn } from "./PanelColumn";
 import { useShell } from "./shell";
 import { definitionReveal, issueReveal, runMode } from "./viewState";
@@ -98,17 +99,20 @@ export function FilesView(): JSX.Element {
   const context = useFileSurfaces();
   return (
     <View flex={1} minWidth={0} minHeight={0} flexDirection="row">
-      <FilePanel
-        doc={state.doc}
-        dir={state.dir}
-        busy={state.busy}
-        context={context}
-        viewerHeight={paneOf(ui, PANE.filesViewer)}
-        onViewerHeight={(size) => actions.setPane(PANE.filesViewer, size)}
-        half={modeOf(ui, FOLD.filesEditor, HALVES, "half")}
-        onHalf={(half) => actions.setMode(FOLD.filesEditor, half)}
-        onSave={actions.saveDoc}
-      />
+      <View flex={1} minWidth={0} minHeight={0} flexDirection="row" position="relative">
+        <FilePanel
+          doc={state.doc}
+          dir={state.dir}
+          busy={state.busy}
+          context={context}
+          viewerHeight={paneOf(ui, PANE.filesViewer)}
+          onViewerHeight={(size) => actions.setPane(PANE.filesViewer, size)}
+          half={modeOf(ui, FOLD.filesEditor, HALVES, "half")}
+          onHalf={(half) => actions.setMode(FOLD.filesEditor, half)}
+          onSave={actions.saveDoc}
+        />
+        <ArtifactInMain at={state.doc?.path ?? state.dir?.path} />
+      </View>
       <PanelColumn />
     </View>
   );

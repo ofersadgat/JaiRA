@@ -1,4 +1,6 @@
 import { useSyncExternalStore } from "react";
+import type { PublishedRef } from "@jaira/ui/transcriptRows";
+import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 
 /**
  * The few facts more than one of the shell's regions reads or sets — the reading of a drilled run (the
@@ -30,6 +32,12 @@ function shared<T>(initial: T): { get: () => T; set: (next: T) => void; use: () 
 
 /** Which reading of a drilled run is on screen — its board, or its conversation. */
 export const runMode = shared<"board" | "conversation">("board");
+
+/**
+ * The published artifact drawn over the main view (`ArtifactInMain.tsx`), set by the ⇤ on its title bar
+ * from wherever it was drawn, the side panel or the conversation.
+ */
+export const artifactInMain = shared<{ published: PublishedRef; artifacts: ArtifactSurface } | null>(null);
 
 /**
  * The side panel as the person left it, for the window to fit the columns by (`columnsFit.ts`): how wide

@@ -7,6 +7,7 @@ import { debugFileStatus, debugViewOf, readinessOf, verdictWord } from "@jaira/u
 import { SELF_TEST_ROOT } from "@jaira/ui/debugWorkflow";
 import type { DebugFile, DebugState } from "@jaira/ui/store";
 import { PLAIN_SCROLLER, Press, Txt, appCh, edge, lengthToken, scrollbarProps, useHover, type FontSpec } from "../../primitives";
+import { ArtifactInMain } from "../../app/ArtifactInMain";
 import { useTokens } from "../../tokens";
 import { Button } from "../settings/Button";
 import { Conversation } from "./Conversation";
@@ -83,134 +84,137 @@ export function DebugPane({
   const verdict = verdictWord(result.passed);
   return (
     <View flex={1} minWidth={0} minHeight={0} flexDirection="row">
-      <ScrollView
-        style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER } as never}
-        contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 14, gap: 16, ...PLAIN_SCROLLER } as never}
-        {...scrollbarProps(t)}
-      >
-        <View>
-          <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} marginBottom={4}>
-            Workflow self-test
-          </Txt>
-          <Txt spec={{ ...SUB, lineHeight: 1.5 }} maxWidth={appCh(t, 11 / 12.5, 70) as number}>
-            Two prompt states run in sequence. The first is asked to say hello world; the second takes what it said as a declared input and reports whether it did. A pass means the model answered{" "}
-            <Txt spec={{ ...SUB, lineHeight: 1.5, italic: true }}>and</Txt> that its output was validated, bound and carried into the next state.
-          </Txt>
-        </View>
-
-        <Section title="What it runs">
-          <View paddingLeft={20} flexDirection="column" gap={6}>
-            <Stage n={1}>
-              <Mono>{`${SELF_TEST_ROOT}/say`}</Mono>
-              <StageSub>asks for the greeting, publishes it as </StageSub>
-              <Mono>greeting: string</Mono>
-            </Stage>
-            <Stage n={2}>
-              <Mono>{`${SELF_TEST_ROOT}/check`}</Mono>
-              <StageSub>reads </StageSub>
-              <Mono>.children.say.output.greeting</Mono>
-              <StageSub>, publishes </StageSub>
-              <Mono>passed: boolean</Mono>
-              <StageSub> and </StageSub>
-              <Mono>verdict: string</Mono>
-            </Stage>
+      <View flex={1} minWidth={0} minHeight={0} flexDirection="row" position="relative">
+        <ScrollView
+          style={{ flex: 1, minWidth: 0, backgroundColor: t.v("bg") as string, ...PLAIN_SCROLLER } as never}
+          contentContainerStyle={{ paddingVertical: 12, paddingHorizontal: 14, gap: 16, ...PLAIN_SCROLLER } as never}
+          {...scrollbarProps(t)}
+        >
+          <View>
+            <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 700 }} marginBottom={4}>
+              Workflow self-test
+            </Txt>
+            <Txt spec={{ ...SUB, lineHeight: 1.5 }} maxWidth={appCh(t, 11 / 12.5, 70) as number}>
+              Two prompt states run in sequence. The first is asked to say hello world; the second takes what it said as a declared input and reports whether it did. A pass means the model answered{" "}
+              <Txt spec={{ ...SUB, lineHeight: 1.5, italic: true }}>and</Txt> that its output was validated, bound and carried into the next state.
+            </Txt>
           </View>
-          <Disclosure summary="The state files, as they load">
-            {debug.files.map((f) => (
-              <View key={f.stateId} marginTop={8}>
-                <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }} fontSize={t.scaled("size-app", 11 / 12.5)}>
-                  {f.file || `${f.stateId}.json`}
-                </Txt>
-                <Outputs>{f.text}</Outputs>
-              </View>
-            ))}
-          </Disclosure>
-        </Section>
 
-        <Section title="Where it comes from">
-          <Notice>
-            The self-test ships with JaiRA, so there is nothing to install and it runs with nothing in the shared root. A copy of one of its states in <Code>~/.jaira</Code> wins over the built-in one, as an override of any built-in does.
-          </Notice>
-          {debug.files.map((f) => (
-            <FileRow key={f.stateId} file={f} onOpen={() => (f.layer === null ? undefined : onOpenState(f.stateId, f.layer))} />
-          ))}
-          {missing > 0 ? (
-            <Notice tone="bad">
-              {missing === 1 ? "One state was" : `${missing} states were`} found in no layer, so the run cannot start. The built-in layer is missing from this build.
-            </Notice>
-          ) : null}
-          {overridden.length > 0 ? (
-            <Notice tone="warn">
-              {overridden.length === 1 ? "One state loads" : `${overridden.length} states load`} from the shared root instead of from what ships, and a run uses what loads.
-            </Notice>
-          ) : null}
-          <Actions>
-            <Button kind="ghost" disabled={debug.busy} onPress={onRecheck}>
-              Re-check
-            </Button>
-          </Actions>
-        </Section>
-
-        <Section title="Run it">
-          <Readiness availability={availability} />
-          {!hasProject ? <Notice tone="warn">No project is open. A task belongs to a checkout, so open one from Settings before running.</Notice> : null}
-          <Actions>
-            <Button disabled={debug.busy || running || !hasProject} onPress={() => onRun({})}>
-              Run (live LLM)
-            </Button>
-            <Button kind="ghost" disabled={debug.busy || running || !hasProject} onPress={() => onRun({ scripted: true })} title="Replaces the model with canned replies — exercises everything except the provider">
-              Run scripted
-            </Button>
-            <Button kind="ghost" disabled={debug.busy || running || !hasProject || debug.taskId === null} onPress={() => onRun({ fresh: true })} title="A new task, rather than another run on the last one">
-              New task
-            </Button>
-            <Button kind="ghost" disabled={!running} onPress={onCancel}>
-              Cancel
-            </Button>
-          </Actions>
-          {debug.error !== null ? (
-            <Press onPress={onDismissError} alignSelf="stretch" borderRadius={lengthToken(t, "control-radius", 7)} paddingVertical={7} paddingHorizontal={9} box={({ hovered }) => ({ backgroundColor: hovered ? t.tint("bad", 18) : t.v("tint-bad") })}>
-              <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>{debug.error}</Txt>
-            </Press>
-          ) : null}
-        </Section>
-
-        {mine !== null ? (
-          <Section title="Result">
-            {run === undefined ? (
-              <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8}>
-                Started — no run has settled yet.
-              </Txt>
-            ) : (
-              <>
-                <View flexDirection="row" gap={10} alignItems="baseline" paddingVertical={10} paddingHorizontal={12} borderRadius={lengthToken(t, "card-radius", 10)} backgroundColor={t.v(verdict.tone === "good" ? "tint-ok" : verdict.tone === "bad" ? "tint-bad" : "tint-warn") as never}>
-                  <Badge status={mine.status} />
-                  <Txt spec={{ voice: "app", scale: 18 / 12.5, weight: 700, ls: 0.06, color: verdict.tone === "good" ? "ok" : verdict.tone === "bad" ? "bad" : "warn" }}>{verdict.word}</Txt>
-                  <Txt spec={SUB}>{run.outcome}</Txt>
+          <Section title="What it runs">
+            <View paddingLeft={20} flexDirection="column" gap={6}>
+              <Stage n={1}>
+                <Mono>{`${SELF_TEST_ROOT}/say`}</Mono>
+                <StageSub>asks for the greeting, publishes it as </StageSub>
+                <Mono>greeting: string</Mono>
+              </Stage>
+              <Stage n={2}>
+                <Mono>{`${SELF_TEST_ROOT}/check`}</Mono>
+                <StageSub>reads </StageSub>
+                <Mono>.children.say.output.greeting</Mono>
+                <StageSub>, publishes </StageSub>
+                <Mono>passed: boolean</Mono>
+                <StageSub> and </StageSub>
+                <Mono>verdict: string</Mono>
+              </Stage>
+            </View>
+            <Disclosure summary="The state files, as they load">
+              {debug.files.map((f) => (
+                <View key={f.stateId} marginTop={8}>
+                  <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }} fontSize={t.scaled("size-app", 11 / 12.5)}>
+                    {f.file || `${f.stateId}.json`}
+                  </Txt>
+                  <Outputs>{f.text}</Outputs>
                 </View>
-                {result.greeting !== undefined ? <Field label="the greeting">{result.greeting}</Field> : null}
-                {result.verdict !== undefined ? <Field label="the judgement">{result.verdict}</Field> : null}
-                {result.passed === null && run.outcome !== "running" ? (
-                  <Notice tone="warn">The run settled without publishing a verdict — look at the instance tree and the events beside it for where it stopped.</Notice>
-                ) : null}
-                {run.failure !== undefined ? <Outputs>{JSON.stringify(run.failure, null, 2)}</Outputs> : null}
-              </>
-            )}
+              ))}
+            </Disclosure>
           </Section>
-        ) : null}
 
-        {mine !== null ? (
-          <Section title="What was actually said">
-            {/* The prompts and replies verbatim, per state (320 tall). */}
-            <SessionPanel history={sessionHistory} session={session} showing={sessionInstance} live={liveTurn} onShow={onShowSession} />
+          <Section title="Where it comes from">
+            <Notice>
+              The self-test ships with JaiRA, so there is nothing to install and it runs with nothing in the shared root. A copy of one of its states in <Code>~/.jaira</Code> wins over the built-in one, as an override of any built-in does.
+            </Notice>
+            {debug.files.map((f) => (
+              <FileRow key={f.stateId} file={f} onOpen={() => (f.layer === null ? undefined : onOpenState(f.stateId, f.layer))} />
+            ))}
+            {missing > 0 ? (
+              <Notice tone="bad">
+                {missing === 1 ? "One state was" : `${missing} states were`} found in no layer, so the run cannot start. The built-in layer is missing from this build.
+              </Notice>
+            ) : null}
+            {overridden.length > 0 ? (
+              <Notice tone="warn">
+                {overridden.length === 1 ? "One state loads" : `${overridden.length} states load`} from the shared root instead of from what ships, and a run uses what loads.
+              </Notice>
+            ) : null}
+            <Actions>
+              <Button kind="ghost" disabled={debug.busy} onPress={onRecheck}>
+                Re-check
+              </Button>
+            </Actions>
           </Section>
-        ) : null}
-        {mine !== null ? (
-          <Section title="Journal">
-            <Conversation conversation={conversation} />
+
+          <Section title="Run it">
+            <Readiness availability={availability} />
+            {!hasProject ? <Notice tone="warn">No project is open. A task belongs to a checkout, so open one from Settings before running.</Notice> : null}
+            <Actions>
+              <Button disabled={debug.busy || running || !hasProject} onPress={() => onRun({})}>
+                Run (live LLM)
+              </Button>
+              <Button kind="ghost" disabled={debug.busy || running || !hasProject} onPress={() => onRun({ scripted: true })} title="Replaces the model with canned replies — exercises everything except the provider">
+                Run scripted
+              </Button>
+              <Button kind="ghost" disabled={debug.busy || running || !hasProject || debug.taskId === null} onPress={() => onRun({ fresh: true })} title="A new task, rather than another run on the last one">
+                New task
+              </Button>
+              <Button kind="ghost" disabled={!running} onPress={onCancel}>
+                Cancel
+              </Button>
+            </Actions>
+            {debug.error !== null ? (
+              <Press onPress={onDismissError} alignSelf="stretch" borderRadius={lengthToken(t, "control-radius", 7)} paddingVertical={7} paddingHorizontal={9} box={({ hovered }) => ({ backgroundColor: hovered ? t.tint("bad", 18) : t.v("tint-bad") })}>
+                <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }}>{debug.error}</Txt>
+              </Press>
+            ) : null}
           </Section>
-        ) : null}
-      </ScrollView>
+
+          {mine !== null ? (
+            <Section title="Result">
+              {run === undefined ? (
+                <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8}>
+                  Started — no run has settled yet.
+                </Txt>
+              ) : (
+                <>
+                  <View flexDirection="row" gap={10} alignItems="baseline" paddingVertical={10} paddingHorizontal={12} borderRadius={lengthToken(t, "card-radius", 10)} backgroundColor={t.v(verdict.tone === "good" ? "tint-ok" : verdict.tone === "bad" ? "tint-bad" : "tint-warn") as never}>
+                    <Badge status={mine.status} />
+                    <Txt spec={{ voice: "app", scale: 18 / 12.5, weight: 700, ls: 0.06, color: verdict.tone === "good" ? "ok" : verdict.tone === "bad" ? "bad" : "warn" }}>{verdict.word}</Txt>
+                    <Txt spec={SUB}>{run.outcome}</Txt>
+                  </View>
+                  {result.greeting !== undefined ? <Field label="the greeting">{result.greeting}</Field> : null}
+                  {result.verdict !== undefined ? <Field label="the judgement">{result.verdict}</Field> : null}
+                  {result.passed === null && run.outcome !== "running" ? (
+                    <Notice tone="warn">The run settled without publishing a verdict — look at the instance tree and the events beside it for where it stopped.</Notice>
+                  ) : null}
+                  {run.failure !== undefined ? <Outputs>{JSON.stringify(run.failure, null, 2)}</Outputs> : null}
+                </>
+              )}
+            </Section>
+          ) : null}
+
+          {mine !== null ? (
+            <Section title="What was actually said">
+              {/* The prompts and replies verbatim, per state (320 tall). */}
+              <SessionPanel history={sessionHistory} session={session} showing={sessionInstance} live={liveTurn} onShow={onShowSession} />
+            </Section>
+          ) : null}
+          {mine !== null ? (
+            <Section title="Journal">
+              <Conversation conversation={conversation} />
+            </Section>
+          ) : null}
+        </ScrollView>
+        <ArtifactInMain />
+      </View>
       {panel}
     </View>
   );

@@ -92,6 +92,12 @@ instructions are passed verbatim and name them:
 JaiRA has one built-in artifact type, `design`, and answers as Claude Code's tool does:
 
 - `/design <brief>` in a JaiRA conversation sends `command.md` with the brief.
+- A design asked for in words starts the same way (ruled 2026-11-01, after a mock-up requested in plain
+  words came back as a plain page). Nothing expands it, so the model is told: the conversation's system
+  prompt and `show_artifact`'s description both say that for a design or a mock-up, in whatever words, the
+  first call is `quickstart`, before any file is written; a page or a document is for what is not a design.
+  Both, because the tool's description is deferred behind ToolSearch and a model that never loads it reads
+  only the system prompt, and a state outside `chat/session` reads only the description.
 - `quickstart` answers `quickstart-result.md`; the create call answers `created-result.md` (which carries
   `SKILL.md` and `reference/format.md`); a publish answers `updated-result.md`. The placeholders
   (`{{canvas_url}}`, `{{version}}`, `{{version_id}}`, `{{file_path}}`) are filled with JaiRA's values; the
@@ -112,6 +118,16 @@ As the mockup draws it:
   sits ABOVE that row and never replaces it.
 - The **artifact list** (one row per artifact, its latest version, its kind) is one render function: inline
   in the conversation and as the side panel's Artifacts tab.
+- A publish is a piece of the answer, not a step: it is kept under a work summary, never folded into its
+  chips (`keptUnderSummary`). A refused publish and a `read` stay in the summary.
+- **Where an artifact can be looked at** (the person, 2026-11-01). The title bar's right holds two verbs,
+  wherever the artifact is drawn:
+  - *Open it on its own, in the side panel*: pushed on the panel's stack, a place on its path. It has the
+    whole panel (`PanelFace`'s `full`): the tabs of the entry under it are not drawn, the body is edge to
+    edge, and the way back is the head's Back and crumbs.
+  - *⇤ Show this artifact in the main view*: drawn over the room's middle column, which stays mounted under
+    it, with a ‹ on its title bar. Going to another task or room takes it away. A phone has no ⇤: its
+    panel's sheet is already the whole screen.
 - Markdown stays as it is today (the person, 2026-10-24).
 
 ### 4. The page frame

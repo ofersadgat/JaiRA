@@ -6,7 +6,7 @@ import type { PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { Press, Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { PublishedView } from "./PublishedView";
+import { PublishedView, surfaceOf } from "./PublishedView";
 
 /**
  * A task's published artifacts (decision 0020 §3), one row per artifact at its latest version — the
@@ -73,7 +73,7 @@ export function PublishedList({
       ))}
       {open !== undefined ? (
         <View paddingTop={6} minWidth={0}>
-          <PublishedView key={`${open.id}@${open.version}`} published={refOf(open)} artifacts={artifacts ?? { serve: () => Promise.reject(new Error("no frame")), taskId, project }} />
+          <PublishedView key={`${open.id}@${open.version}`} published={refOf(open)} artifacts={artifacts ?? surfaceOf(taskId, project)} />
         </View>
       ) : null}
     </View>

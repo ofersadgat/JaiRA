@@ -3,7 +3,7 @@
  * one, and at which version, off what `show_artifact` returned, and `toolLineOf` shows it under the line.
  */
 import { describe, expect, it } from "vitest";
-import { publishedOf, toolLineOf } from "../src/renderer/transcriptRows";
+import { keptUnderSummary, publishedOf, toolLineOf } from "../src/renderer/transcriptRows";
 import type { ToolEntry } from "../src/renderer/transcript";
 
 const result = {
@@ -39,6 +39,25 @@ describe("publishedOf", () => {
   it("is what a show_artifact line shows unasked", () => {
     const entry = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { action: "publish" }, result } as unknown as ToolEntry;
     expect(toolLineOf(entry, false, false).shown).toBe("published");
+  });
+
+  it("never summarises a published artifact away: the row is a piece of the answer", () => {
+    // As the conversation of 2026-11-01 recorded it, ten minutes into a stretch of work: no `action`, and
+    // the answer in a text block. Folded into the summary's chips it was drawn nowhere.
+    const published = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { file_path: "C:\\x\\live-status-bar.html", icon: "image" }, result: [{ type: "text", text: JSON.stringify(result) }] } as unknown as ToolEntry;
+    expect(keptUnderSummary(published)).toBe(true);
+    // A canvas's create call, its long answer still a placeholder.
+    const lazy = [{ type: "text", text: { $lazy: { size: 35_000, preview: '{"answer":"Created', hash: "h" } } }];
+    expect(keptUnderSummary({ ...published, args: { action: "publish", type_url: "https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd", title: "x" }, result: lazy } as unknown as ToolEntry)).toBe(true);
+  });
+
+  it("leaves in the summary a publish that was refused, and a call that published nothing", () => {
+    const call = { kind: "tool", name: "mcp__dai__show_artifact", summary: "", ok: true, args: { file_path: "C:\\x\\page.html" } } as unknown as ToolEntry;
+    const refused = { ...call, result: [{ type: "text", text: JSON.stringify({ error: "Not published: page.html is not UTF-8 text." }) }] } as unknown as ToolEntry;
+    expect(keptUnderSummary(refused)).toBe(false);
+    expect(toolLineOf(refused, false, false).shown).not.toBe("published");
+    expect(keptUnderSummary({ ...call, args: { action: "quickstart", intent: "design" }, result: { answer: "Quickstart for a design." } } as unknown as ToolEntry)).toBe(false);
+    expect(keptUnderSummary({ ...call, args: { action: "read", url: result.artifact.url }, result } as unknown as ToolEntry)).toBe(false);
   });
 
   it("draws a call that listed the task's artifacts as the list, and a list of the Design System type as nothing", () => {

@@ -1,16 +1,26 @@
 import { useEffect, useState, type JSX } from "react";
-import type { GestureResponderEvent } from "react-native";
+import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { publishedMime, type PublishedVersion } from "@jaira/shared/browser";
 import { invoke } from "@jaira/ui/store";
 import type { PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
+import { useValuePanel } from "@jaira/ui/valuePanel";
+import { usePhone } from "../../app/phone";
+import { artifactInMain } from "../../app/viewState";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Markdown } from "../Markdown";
-import { Press, Txt } from "../../primitives";
+import { Press, Txt, viewScrollbarProps } from "../../primitives";
 import { Island } from "../../islands";
 import { useTokens } from "../../tokens";
+import { SpIcon } from "./SidePanel";
 import { ValueView } from "./ValueView";
+
+/**
+ * The surface of an artifact drawn away from its conversation: which task and project it reads from. Its
+ * frame comes from its own grant, never `serve`, and there is no composer for a page to write into.
+ */
+export const surfaceOf = (taskId: string, project: string | undefined): ArtifactSurface => ({ serve: () => Promise.reject(new Error("no frame")), taskId, project });
 
 /**
  * A published artifact in the conversation (decision 0020 §3–§4): the page Claude made, a Markdown
@@ -24,11 +34,20 @@ import { ValueView } from "./ValueView";
  *                    origin of its own); a document drawn as the conversation draws Markdown; a canvas
  *                    as a board of its artboards, each running (web: the `canvas` island)
  *   Rendered/Source  the entry file's (a canvas's: its first artboard's) as any value's
+ *   the verbs        the title bar's right: open it on its own in the side panel (where a panel can take
+ *                    it), and ⇤ into the main view (a phone's sheet is the whole screen, so none there);
+ *                    in the main view, ‹ back in their place
+ *
+ * Where it stands is its caller's. In the conversation and a list it is as tall as its frame; `fill`, it
+ * owns the column it is in (`ValueView`'s `pinned`), the frame as tall as the room measured for it and
+ * full bleed: the side panel, and the main view, which also gives it `onBack`.
  *
  * What the call returned names the artifact and its version, never its files: those are read here.
  */
-export function PublishedView({ published, artifacts }: { published: PublishedRef; artifacts?: ArtifactSurface | undefined }): JSX.Element {
+export function PublishedView({ published, artifacts, fill = false, onBack }: { published: PublishedRef; artifacts?: ArtifactSurface | undefined; fill?: boolean; onBack?: (() => void) | undefined }): JSX.Element {
   const t = useTokens();
+  const panel = useValuePanel();
+  const phone = usePhone();
   const [version, setVersion] = useState(published.version);
   const [files, setFiles] = useState<Record<string, string> | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
@@ -43,11 +62,15 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
    * the same canvas is a conversation nobody can scroll.
    */
   const [newest, setNewest] = useState<number | null>(null);
-  const [opened, setOpened] = useState(false);
+  // Brought here on purpose, at the version it was showing: drawn whatever came after it.
+  const [opened, setOpened] = useState(fill);
   /** The canvas open in its editor, in place (a conversation draws inline). */
   const [editing, setEditing] = useState(false);
   /** Bumped to read the artifact again: after the editor saved, or a refused save asked to reload. */
   const [reread, setReread] = useState(0);
+  /** The height `fill` measured for the frame. */
+  const [room, setRoom] = useState(0);
+  const tall = (height: number): number => (fill ? room : height);
   const project = artifacts?.project !== undefined ? { project: artifacts.project } : {};
   const taskId = artifacts?.taskId ?? published.taskId;
 
@@ -128,8 +151,19 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
   };
 
   const glyph = published.kind === "canvas" ? "◫" : published.kind === "markdown" ? "¶" : "▥";
+  // At the version on screen: where it is opened shows what was being looked at.
+  const here: PublishedRef = { ...published, version };
+  const verbs =
+    onBack !== undefined ? (
+      <SpIcon icon="back" label="Back out of this artifact" onPress={onBack} />
+    ) : newest === null || superseded ? null : (
+      <>
+        {panel !== null ? <SpIcon icon="read" label="Open it on its own, in the side panel" onPress={() => panel.open({ title: published.title ?? published.entry, published: { ref: here, ...project } })} /> : null}
+        {phone ? null : <SpIcon icon="adopt" label="Show this artifact in the main view" onPress={() => artifactInMain.set({ published: here, artifacts: artifacts ?? surfaceOf(taskId, undefined) })} />}
+      </>
+    );
   const titleBar = (
-    <View flexDirection="row" alignItems="center" gap={8} paddingTop={6} paddingHorizontal={2} paddingBottom={4} minWidth={0}>
+    <View flexDirection="row" alignItems="center" gap={8} paddingTop={6} paddingHorizontal={fill ? 10 : 2} paddingBottom={4} minWidth={0}>
       <View width={16} height={16} borderRadius={4} backgroundColor={t.v("panel-3") as never} alignItems="center" justifyContent="center" flexShrink={0}>
         <Text color={t.v("accent") as never} fontSize={10}>
           {glyph}
@@ -141,6 +175,15 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
       <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} numberOfLines={1} flexShrink={0}>
         {published.kind === "canvas" ? "canvas" : published.kind === "markdown" ? "document" : "page"} · v{version}
       </Txt>
+      {verbs !== null ? (
+        <>
+          <View flex={1} minWidth={0} />
+          {/* The icons' 26 stands out of the row, which keeps its height. */}
+          <View flexDirection="row" gap={1} flexShrink={0} marginVertical={-5}>
+            {verbs}
+          </View>
+        </>
+      ) : null}
     </View>
   );
 
@@ -172,7 +215,7 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
               files,
               base: version,
               frames,
-              style: { height: 640 },
+              style: { height: tall(640) },
               // A save is a version marked the person's; the view then follows it.
               onSave: async (changes: Record<string, string | null>, base: number) => {
                 const answer = await invoke("artifact:save", { taskId, artifact: published.id, base, changes, ...project });
@@ -198,12 +241,13 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
         );
       }
       // The editor is a computer's: a phone draws the board, every artboard running, and no Edit.
-      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: 440 } }} {...(isWeb ? { onEvent: (name: string) => name === "open" && setEditing(true) } : {})} />;
+      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: tall(440) } }} {...(isWeb ? { onEvent: (name: string) => name === "open" && setEditing(true) } : {})} />;
     }
+    const box = fill ? { height: room, border: 0, borderRadius: 0, display: "block" } : { height: 420, border: `1px solid ${String(t.v("line"))}`, borderRadius: 6 };
     return (
       <Island
         component="artifact"
-        props={{ text: shownText ?? "", ...(frame !== null ? { url: frame, published: true, downloads } : {}), style: { width: "100%", height: 420, border: `1px solid ${String(t.v("line"))}`, borderRadius: 6, background: "#fff", boxSizing: "border-box" } }}
+        props={{ text: shownText ?? "", ...(frame !== null ? { url: frame, published: true, downloads } : {}), style: { ...box, width: "100%", background: "#fff", boxSizing: "border-box" } }}
         onEvent={(name: string, value: unknown) => {
           if (name === "prompt" && typeof value === "string") artifacts?.onPrompt?.(value);
           // A file the page offers (its declared `downloads`): saved where the person chooses.
@@ -234,13 +278,26 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
     );
   }
 
+  // Filling a column, a document scrolls in it and anything else is as tall as what was measured here.
+  const scrolling = published.kind === "markdown" ? { overflow: "auto", paddingHorizontal: 10, paddingBottom: 10, ...viewScrollbarProps(t) } : {};
   return (
-    <View minWidth={0}>
+    <View minWidth={0} {...(fill ? { flex: 1, minHeight: 0 } : {})}>
       <ValueView
         value={{ path: shownPath, mediaType: publishedMime(shownPath), content: shownText ?? "" }}
         hint={{ mime: publishedMime(shownPath) }}
+        pinned={fill}
         titleBar={titleBar}
-        lead={{ label: "Artifact", hint: "The artifact as Claude published it", body: lead }}
+        lead={{
+          label: "Artifact",
+          hint: "The artifact as Claude published it",
+          body: fill ? (
+            <View flex={1} minHeight={0} {...(scrolling as object)} onLayout={(e: LayoutChangeEvent) => setRoom(e.nativeEvent.layout.height)}>
+              {lead}
+            </View>
+          ) : (
+            lead
+          ),
+        }}
         segment={segment}
       />
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}

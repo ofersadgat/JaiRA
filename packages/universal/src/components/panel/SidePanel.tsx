@@ -54,6 +54,12 @@ export interface PanelFace {
   body: ReactNode;
   scroll?: boolean;
   guard?: ReactNode;
+  /**
+   * The entry has the whole panel: the tabs of the entry under it are not drawn over it, and it goes back
+   * by the head's Back and crumbs alone. An artifact opened on its own, which is a place on the path and
+   * not one more view under those tabs.
+   */
+  full?: boolean;
 }
 
 type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
@@ -453,7 +459,7 @@ export function SidePanel({
         </View>
       ) : null}
 
-      {tabbed?.tabs !== undefined && tabbed.tabs.length > 0 ? (
+      {topFace.full !== true && tabbed?.tabs !== undefined && tabbed.tabs.length > 0 ? (
         <PanelTabs tabs={tabbed.tabs} open={tabbedAt === stack.entries.length - 1 ? tabbed.tab : undefined} onTab={(id) => onStack((was) => setTab(was, id))} />
       ) : null}
 

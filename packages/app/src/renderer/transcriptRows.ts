@@ -151,16 +151,16 @@ export interface CallSurface {
  * The rows no summary may hide — drawn under it, whatever it says.
  *
  * The same argument the old fold made for its exemptions, and for the same rows: a page the model
- * drew, the call that delivered the operation's output, a question the agent put to the person (half
- * of which the person wrote), what a workflow tool did and a subagent's conversation are not steps
- * towards the answer, they are pieces of it. A summary that counted them into "3 commands · 2 edited" would be saying, of work done
- * on request, that it was bookkeeping.
+ * drew, an artifact it published, the call that delivered the operation's output, a question the agent
+ * put to the person (half of which the person wrote), what a workflow tool did and a subagent's
+ * conversation are not steps towards the answer, they are pieces of it. A summary that counted them into
+ * "3 commands · 2 edited" would be saying, of work done on request, that it was bookkeeping.
  */
 export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean {
   if (entry.kind !== "tool") return false;
   // A subagent's call: its conversation is a child of this one, not a step of it.
   if (entry.sidechain !== undefined) return true;
-  if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || askedOf(entry) !== undefined) return true;
+  if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || maybePublished(entry) || askedOf(entry) !== undefined) return true;
   return workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false && calls?.outcomes !== "rail";
 }
 
@@ -180,7 +180,8 @@ export type ToolShown = "sidechain" | "outcome" | "asked" | "published" | "publi
  * carries the Design type's instructions runs to 35 KB, and the window is handed a string that large as a
  * placeholder (decision 0018 §6), fetched only where it is drawn. So the line is drawn as published from
  * the call itself — succeeded, and not a list, quickstart or read — and the drawing fetches the result and
- * reads the artifact out of it ({@link publishedOf}), drawing nothing when there is none.
+ * reads the artifact out of it ({@link publishedOf}), drawing nothing when there is none. A refusal is
+ * short enough to read here, and it answers without failing: that is a call that published nothing.
  */
 export function maybePublished(entry: ToolEntry): boolean {
   if (entry.name !== "show_artifact" && !entry.name.endsWith("__show_artifact")) return false;
@@ -188,7 +189,9 @@ export function maybePublished(entry: ToolEntry): boolean {
   const args = entry.args;
   if (args === null || typeof args !== "object" || Array.isArray(args)) return false;
   const action = (args as Record<string, JsonValue>)["action"];
-  return action === undefined || action === "publish";
+  if (action !== undefined && action !== "publish") return false;
+  const read = resultValueOf(entry.result);
+  return read === null || typeof read !== "object" || Array.isArray(read) || !("error" in read);
 }
 
 /**

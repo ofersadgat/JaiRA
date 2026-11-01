@@ -258,7 +258,7 @@ export function kindWordOf(entry: PanelEntry): string {
     case "config":
       return "as it ran";
     case "preview":
-      return "a value";
+      return entry.preview.published !== undefined ? "an artifact" : "a value";
     case "subagent":
       return "subagent";
     case "rerun":
