@@ -9232,22 +9232,30 @@ export class AppService {
    *
    * Refused while the task runs anywhere: a live run in this process holds an engine over the
    * journal being deleted, and one in another process is found the same way cancel finds it, by the
-   * job table's heartbeat. The worktree goes FIRST and with `force` — the renderer has already asked
-   * the human, and this is the one caller for whom "uncommitted work" is not a reason to stop — so a
-   * failure to remove it leaves the task intact and reportable rather than rows gone and a worktree
-   * orphaned.
+   * job table's heartbeat. A conversation's turn is no run, so that test passes it by: it is stopped
+   * and waited out here, as a rewind does, or the agent would go on working — and asking — in a task
+   * that is gone. The worktree goes FIRST and with `force` — the renderer has already asked the human,
+   * and this is the one caller for whom "uncommitted work" is not a reason to stop — so a failure to
+   * remove it leaves the task intact and reportable rather than rows gone and a worktree orphaned.
    */
   async deleteTask(taskId: string, project?: string): Promise<{ taskId: string }> {
     const session = this.session(project);
     if (session.live.has(taskId) || session.project.jobs.liveRunJob(taskId, Date.now()) !== undefined) {
       throw this.refusal("run", `task '${taskId}' is running — cancel it before deleting it`);
     }
+    const turns = [...(session.chatTurnEnds.get(taskId) ?? [])];
+    if (turns.length > 0) {
+      this.cancelChatTurn({ taskId, ...(project !== undefined ? { project } : {}) });
+      await Promise.all(turns);
+    }
     if (session.project.runtime.get(taskId)?.worktreePath !== undefined) {
       const result = await removeWorktree(session.project, taskId, { force: true });
       if (!result.removed) throw this.refusal("run", `could not remove the task's worktree: ${result.reason}`);
     }
     deleteTask(session.project, taskId);
-    // It waits for nothing now.
+    // It waits for nothing now — and nobody waits on it: what a cut conversation of it was left asking
+    // is held here, apart from the rows that just went, and the strip reads it from here.
+    this.dropRecoveredAsks(session, (r) => r.taskId === taskId);
     if (this.placement.dequeue(taskId) !== undefined) this.placementChanged();
     // What it had adopted is nobody's child now.
     releaseUnmirroredAdoptions(session.project, taskId);

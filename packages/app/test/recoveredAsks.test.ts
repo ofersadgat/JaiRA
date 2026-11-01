@@ -191,3 +191,64 @@ describe("an agent's question the app closed under", () => {
     expect(thread.at(-1)).toBe("assistant: pushed to the fork");
   }, 30_000);
 });
+
+describe("deleting a task that waits on you", () => {
+  it("takes the question the app closed under off the strip", async () => {
+    const { taskId } = await cutWhileAsking(question);
+    await restart();
+    await until(() => service.pendingQuestions().length === 1, "the question to be found in the record");
+    await service.deleteTask(taskId);
+    expect(service.pendingQuestions()).toEqual([]);
+    expect(pushes).toContainEqual({ type: "question:resolved", requestId: "ask_q1" });
+    expect(() => service.submitQuestion("ask_q1", { "Which remote?": "fork" })).toThrow(/no pending question/);
+  }, 30_000);
+
+  it("takes the permission request the app closed under off the strip", async () => {
+    const { taskId } = await cutWhileAsking(approval);
+    await restart();
+    await until(() => service.pendingApprovals().length === 1, "the request to be found in the record");
+    await service.deleteTask(taskId);
+    expect(service.pendingApprovals()).toEqual([]);
+    expect(pushes.some((m) => m.type === "approval:resolved" && m.requestId === CALL)).toBe(true);
+  }, 30_000);
+
+  it("stops the turn that is asking and waits it out, before the task goes", async () => {
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
+    await service.startTask({ taskId, fake: [{ output: "first answer" }] });
+    await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
+
+    // A scripted agent asks nothing, so the turn is held open the way a parked agent holds one.
+    const open = session() as never as {
+      chatTurns: Map<string, Set<AbortController>>;
+      questions: { asker(context: object): (request: object) => Promise<unknown> };
+    };
+    const abort = new AbortController();
+    open.chatTurns.set(taskId, new Set([abort]));
+    let taskAtTheEnd: unknown;
+    const turn = (service as never as { whileChatting(o: unknown, t: string, a: AbortController, f: object, l: object, run: () => Promise<void>): Promise<void> }).whileChatting(
+      open,
+      taskId,
+      abort,
+      { dispose: () => undefined },
+      {},
+      () =>
+        new Promise<void>((resolve) =>
+          abort.signal.addEventListener("abort", () => {
+            taskAtTheEnd = service.taskDetail(taskId).taskId;
+            resolve();
+          }),
+        ),
+    );
+    const asked = open.questions.asker({ taskId })({ questions: [{ question: "Which?", options: [] }], sessionId: "s", toolCallId: "t1" });
+    expect(service.pendingQuestions()).toHaveLength(1);
+
+    await service.deleteTask(taskId);
+    expect(abort.signal.aborted).toBe(true);
+    expect(taskAtTheEnd).toBe(taskId);
+    expect(await asked).toBeUndefined();
+    await turn;
+    expect(service.pendingQuestions()).toEqual([]);
+    expect(pushes.some((m) => m.type === "question:resolved")).toBe(true);
+    expect(() => service.taskDetail(taskId)).toThrow(/unknown task/);
+  }, 30_000);
+});
