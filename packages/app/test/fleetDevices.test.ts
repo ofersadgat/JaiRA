@@ -10,7 +10,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { initProject } from "@jaira/persistence";
+import { initProject, openProject } from "@jaira/persistence";
 import { AppService, hostEngine, loopbackTailnet, type HostedEngine } from "@jaira/service";
 import type { MachinesView, PairingDevice, ProjectSummary } from "@jaira/shared";
 import { engineBridge, pairDevice, type EngineBridge } from "../../client/bridges/engineBridge";
@@ -91,6 +91,28 @@ describe("a phone paired with two machines", () => {
     expect(await fleet.bridge.invoke("project:current", undefined as never)).toEqual({ dir: b });
     await fleet.bridge.invoke("project:open", { dir: a } as never);
     expect(await fleet.bridge.invoke("project:current", undefined as never)).toEqual({ dir: a });
+  }, 60_000);
+
+  it("loads a published canvas the machine granted, from the machine's own HTTP route (decision 0020 §4)", async () => {
+    const desk = await machine("desk");
+    const dir = project(desk);
+    const store = openProject(dir, { baseDir: desk.base });
+    try {
+      store.artifacts.publish({ taskId: "t-1", artifact: "a-1", author: "model", kind: "canvas", type: "design", entry: "project/canvas.json", changes: { "project/canvas.json": "{}", "project/Main.dc.html": "<x-dc>main</x-dc>", "_blob/abc123": "data:image/png;base64,iVBORw==" }, createdAt: 1 });
+    } finally {
+      store.close();
+    }
+    const member = await reach(desk);
+    await member.bridge.invoke("project:open", { dir, remember: true } as never);
+    const served = (await member.bridge.invoke("artifact:serve", { taskId: "t-1", artifact: "a-1", path: "project/Main.dc.html", project: dir } as never)) as { url: string };
+    // The grant, at the address this phone reaches the machine at.
+    expect(served.url).toMatch(new RegExp(`^http://127\\.0\\.0\\.1:${String(desk.hosted.networkPort())}/artifact/[0-9a-f]{32}/project/Main\\.dc\\.html$`));
+    const page = await fetch(served.url);
+    expect(await page.text()).toBe("<x-dc>main</x-dc>");
+    expect(page.headers.get("content-security-policy")).toMatch(/sandbox allow-scripts allow-popups$/);
+    // A sibling by relative URL, and an asset named path-absolute, as an artboard names them.
+    expect((await fetch(new URL("canvas.json", served.url))).status).toBe(200);
+    expect(Buffer.from(await (await fetch(new URL("/_blob/abc123", served.url))).arrayBuffer())).toEqual(Buffer.from([0x89, 0x50, 0x4e, 0x47]));
   }, 60_000);
 
   it("answers through one machine when both are one fleet's", async () => {

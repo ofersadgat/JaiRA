@@ -41,14 +41,22 @@ function classicPage(): Plugin {
   };
 }
 
-/** Which island this build is: `ISLAND=markdown|diff|markdownEditor|code|schemaText|artifact` (`build.mjs` runs them all). */
+/** Which island this build is: `ISLAND=markdown|diff|markdownEditor|code|schemaText|artifact|canvas` (`build.mjs` runs them all). */
 const ISLAND = process.env["ISLAND"] ?? "markdown";
 
-/** The page's one script names this build's island (`%ISLAND%` in `index.html`). */
+/**
+ * The islands that frame a grant at the engine's HTTP route (decision 0020 §4): a published page, and a
+ * canvas's artboards. The engine is wherever the phone reaches it - its tailnet name, or the loopback
+ * port of the phone's own proxy - so these two pages may frame any http(s) address; every other island
+ * frames nothing (`index.html`'s `default-src 'none'`).
+ */
+const FRAMING = new Set(["artifact", "canvas"]);
+
+/** The page's one script names this build's island (`%ISLAND%` in `index.html`), and what it may frame (`%FRAMES%`). */
 function whichIsland(): Plugin {
   return {
     name: "jaira-island-entry",
-    transformIndexHtml: { order: "pre", handler: (html) => html.replace("%ISLAND%", ISLAND) },
+    transformIndexHtml: { order: "pre", handler: (html) => html.replace("%ISLAND%", ISLAND).replace("%FRAMES%", FRAMING.has(ISLAND) ? "; frame-src http: https:" : "") },
   };
 }
 

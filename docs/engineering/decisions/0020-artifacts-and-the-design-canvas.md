@@ -125,7 +125,13 @@ written for. Nothing is uploaded and no Claude service is used.
   no frames, forms or base.
 - `sandbox="allow-scripts allow-popups"`, with `allow-same-origin` once a per-artifact origin is shown to
   give storage without reaching the app; `allow="clipboard-write"`; no downloads.
-- The phone draws the same page from the engine's HTTP route, by the same token.
+- The phone draws the same page from the engine's HTTP route, by the same token:
+  `/artifact/<token>/<path>`, and `/_blob/<id>` answered from a live grant that holds it. The phone
+  reaches the engine at one address, so there a grant is not an origin of its own; every response
+  carries a CSP `sandbox` (no `allow-same-origin`) and each page runs in an opaque origin instead -
+  ruled 2026-11-01 over a native scheme handler and an unsandboxed shared origin. Its cost: no
+  storage or cookies inside an artifact on a phone. The phone's engine bridge rewrites a grant's
+  `jaira-artifact:` address to that route on the address it reaches the engine at.
 
 ### 5. The canvas editor
 

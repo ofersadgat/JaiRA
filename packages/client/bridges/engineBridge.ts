@@ -138,6 +138,21 @@ const RESYNC: PushMessage[] = (["tasks", "board", "task", "workflows", "config",
  * Connect, and stay connected: a dropped connection is retried with growing waits and a fresh `hello`,
  * until the machine refuses the token or {@link EngineBridge.close}.
  */
+/**
+ * Where this side loads an artifact the engine granted (decision 0020 §4). The engine names a grant as
+ * the desktop window loads it, `jaira-artifact://<token>/<path>`; over this connection the same grant is
+ * the engine's HTTP route, `/artifact/<token>/<path>`, on the address the connection reaches it at - its
+ * tailnet name, or the loopback port of the phone's own tailnet proxy, which carries HTTP as it carries
+ * the WebSocket. Anything else is passed through.
+ */
+export function artifactAddress(served: string, engineUrl: string): string {
+  const grant = /^jaira-artifact:\/\/([0-9a-f]+)(\/.*)?$/.exec(served);
+  if (grant === null) return served;
+  // By pattern, as `hostOfUrl` reads one: React Native's `URL` has no `host` to ask.
+  const scheme = /^wss:/i.test(engineUrl) ? "https:" : "http:";
+  return `${scheme}//${hostOfUrl(engineUrl)}/artifact/${grant[1]!}${grant[2] ?? "/"}`;
+}
+
 export function engineBridge(options: EngineBridgeOptions): EngineBridge {
   const first = options.retryMs ?? 1000;
   const longest = options.maxRetryMs ?? 30_000;
@@ -324,9 +339,14 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
         return Promise.reject(new Error(current.state === "waiting" || current.state === "refused" || current.state === "mismatch" ? current.reason : `not connected to ${where}`));
       }
       const id = ++nextId;
-      return new Promise((resolve, reject) => {
+      const answered = new Promise<IpcResponse<C>>((resolve, reject) => {
         pending.set(id, { resolve: resolve as (value: unknown) => void, reject });
         send({ t: "req", id, channel, request: request === undefined ? null : request });
+      });
+      if (channel !== "artifact:serve") return answered;
+      return answered.then((served) => {
+        const it = served as { url?: unknown };
+        return (typeof it.url === "string" ? { ...it, url: artifactAddress(it.url, options.url) } : served) as IpcResponse<C>;
       });
     },
     subscribe(listener) {

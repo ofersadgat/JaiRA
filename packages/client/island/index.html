@@ -4,10 +4,11 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- The island page (decision 0015, S5): one DOM component, driven over the bridge in protocol.ts.
-         No remote code; 'wasm-unsafe-eval' for the TextMate grammars, blob: workers for Monaco. -->
+         No remote code; 'wasm-unsafe-eval' for the TextMate grammars, blob: workers for Monaco. Frames
+         only in the islands that frame a grant, which the build gives a frame-src (vite.config.ts). -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob:"
+      content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; worker-src 'self' blob:; font-src 'self' data:; connect-src 'self' data: blob:%FRAMES%"
     />
     <title>JaiRA island</title>
   </head>

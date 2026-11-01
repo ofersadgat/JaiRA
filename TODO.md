@@ -548,10 +548,11 @@ found is fixed or listed here.
 - [ ] **Symbol glyphs fall back to the system font.** A glyph DM Sans and JetBrains Mono lack (arrows,
       checks, box-drawing) is drawn by Android from its own fonts, at other metrics than Chromium's
       fallback. Needs a symbol face bundled with the 96 cuts, or the glyphs drawn as SVG.
-- [ ] **Interactive artifacts draw static.** A phone's WebView cannot load the desktop's
-      `jaira-artifact:` scheme, so the value view asks for no grant there and shows the page without
-      its script. Needs a transport that serves an artifact over the phone's connection. A pinned
-      page is also only as tall as its content, not the whole panel.
+- [x] **Interactive artifacts draw static.** Served now at the engine's HTTP route, each page
+      sandboxed into an opaque origin (decision 0020 §4, 2026-11-01): the phone's engine bridge rewrites
+      the grant's address, and the `artifact` and `canvas` islands run it. Seen in a phone-sized Chromium
+      (`shots/phoneCanvas.mts`), not yet on a device. Still open: a pinned page is only as tall as its
+      content, not the whole panel.
 - [ ] **A lift on the run board does not scroll it.** A card held at the task board's top or foot
       scrolls it (`useEdgeScroll`, checked on the emulator 2026-10-01); the run board's own scroller
       was not given the same, and neither scrolls sideways. A grip being dragged (Settings › Tools ›

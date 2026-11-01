@@ -48,6 +48,36 @@ describe("the engine's network listener", () => {
     expect((await fetch(`http://127.0.0.1:${net!.port}/other`)).status).toBe(404);
   });
 
+  it("serves a granted artifact's files and blobs, each page sandboxed into an opaque origin", async () => {
+    await net!.close();
+    const token = "0123456789abcdef0123456789abcdef";
+    net = await listenNetwork({
+      host: host!,
+      identity: () => machineIdentity(base),
+      version: "0.2.0",
+      port: 0,
+      artifacts: {
+        served: (t, path) => (t === token && path === "/project/Main.dc.html" ? { body: "<x-dc>main</x-dc>", mediaType: "text/html", policy: "canvas" } : undefined),
+        blob: (id) => (id === "abc123" ? { body: Buffer.from([1, 2, 3]), mediaType: "image/png", policy: "canvas" } : undefined),
+      },
+    });
+    const at = `http://127.0.0.1:${net.port}`;
+    const page = await fetch(`${at}/artifact/${token}/project/Main.dc.html`);
+    expect(page.status).toBe(200);
+    expect(await page.text()).toBe("<x-dc>main</x-dc>");
+    expect(page.headers.get("content-type")).toBe("text/html; charset=utf-8");
+    expect(page.headers.get("content-security-policy")).toMatch(/; sandbox allow-scripts allow-popups$/);
+    expect(page.headers.get("content-security-policy")).not.toMatch(/allow-same-origin/);
+    expect(page.headers.get("access-control-allow-origin")).toBe("*");
+    const blob = await fetch(`${at}/_blob/abc123`);
+    expect(Buffer.from(await blob.arrayBuffer())).toEqual(Buffer.from([1, 2, 3]));
+    // Another token, another path, a token of the wrong shape: nothing.
+    expect((await fetch(`${at}/artifact/${"f".repeat(32)}/project/Main.dc.html`)).status).toBe(404);
+    expect((await fetch(`${at}/artifact/${token}/project/Other.dc.html`)).status).toBe(404);
+    expect((await fetch(`${at}/artifact/nope/project/Main.dc.html`)).status).toBe(404);
+    expect((await fetch(`${at}/_blob/ffff`)).status).toBe(404);
+  });
+
   it("admits a paired machine by its token, and carries large messages both ways", async () => {
     const token = tokens.issue("m-laptop", "laptop");
     const client = await connectEngine({ baseDir: base, client: "desktop", version: "0.2.0", address: { url: url() }, token });

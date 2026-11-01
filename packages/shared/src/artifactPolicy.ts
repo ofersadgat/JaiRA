@@ -21,7 +21,14 @@ const CDNS = "https://cdnjs.cloudflare.com https://unpkg.com https://cdn.tailwin
 const FONTS_CSS = "https://fonts.googleapis.com";
 const FONTS = "https://fonts.gstatic.com";
 
-export function artifactPolicy(policy: ArtifactPolicy): string {
+export function artifactPolicy(policy: ArtifactPolicy, options: { sandbox?: boolean } = {}): string {
+  /*
+   * `sandbox`: the engine's HTTP route (the phone's). There every grant shares the one origin a phone
+   * reaches the engine at, so a grant is not an origin of its own as it is on the desktop; sandboxed
+   * without `allow-same-origin`, each page is an opaque origin instead, which keeps it from every other
+   * page and from the engine's own address. What it costs: no storage or cookies inside the page.
+   */
+  if (options.sandbox === true) return `${artifactPolicy(policy)}; sandbox${policy === "static" ? "" : " allow-scripts allow-popups"}`;
   const closed = "frame-src 'none'; form-action 'none'; base-uri 'none'";
   switch (policy) {
     case "static":

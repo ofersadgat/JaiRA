@@ -136,7 +136,9 @@ export class App {
       ["--headless=new", `--remote-debugging-port=${port}`, `--user-data-dir=${profile}`, "--no-first-run", "--hide-scrollbars", ...(options.flags ?? []), url],
       { stdio: ["ignore", "pipe", "pipe"] },
     );
-    return App.attach(child, port, options, true);
+    const app = await App.attach(child, port, options, true);
+    app.browsed = true;
+    return app;
   }
 
   /**
@@ -678,7 +680,11 @@ export class App {
     await this.until("document.readyState === 'complete'", `${url} to load`);
   }
 
+  /** A browser {@link browse} launched: closed by asking it, since on Windows the process it was started as is not the one that stays. */
+  private browsed = false;
+
   async close(): Promise<void> {
+    if (this.browsed) await Promise.race([this.send("Browser.close").catch(() => undefined), sleep(2000)]);
     this.ws.close();
     this.child?.kill();
     await sleep(300);

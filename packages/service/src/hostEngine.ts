@@ -203,6 +203,7 @@ export async function hostEngine(options: HostEngineOptions): Promise<HostedEngi
         host: claimed,
         identity: () => service.fleet.identity(),
         version: options.version,
+        artifacts: { served: (token, path) => service.servedArtifact(token, path), blob: (id) => service.servedBlob(id) },
         ...(options.network.port !== undefined ? { port: options.network.port } : {}),
         ...(options.log !== undefined ? { log: options.log } : {}),
       });

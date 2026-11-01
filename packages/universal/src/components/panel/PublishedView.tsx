@@ -73,9 +73,9 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
         if (!live) return;
         setFiles(read.files);
         setDownloads(read.capabilities !== undefined && "downloads" in read.capabilities);
-        // The grant the Artifact view runs in: the whole artifact at this version (a phone's WebView
-        // cannot load it yet, and draws what it can without one).
-        if (published.kind === "markdown" || !isWeb) return;
+        // The grant the Artifact view runs in: the whole artifact at this version - on a phone, at the
+        // engine's HTTP route (the phone's engine bridge says where).
+        if (published.kind === "markdown") return;
         const opens = published.kind === "canvas" ? "project/canvas.json" : published.entry;
         if (read.files[opens] === undefined) return;
         const granted = await invoke("artifact:serve", { taskId, artifact: published.id, version, path: opens, ...project });
@@ -161,10 +161,9 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
     if (published.kind === "canvas") {
       // The version the create call made: the canvas exists, and nothing is on it yet.
       if (index === undefined) return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>The canvas is empty at v{version}: its artboards come in the calls after this one.</Txt>;
-      if (!isWeb || frame === null) {
-        return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>{isWeb ? "Opening the canvas…" : "This design canvas opens in JaiRA on a computer."}</Txt>;
-      }
-      const frames = new URL(frame).origin + "/";
+      if (frame === null) return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }}>{"Opening the canvas…"}</Txt>;
+      // The grant's root: the address it opened on, less `project/canvas.json`.
+      const frames = frame.slice(0, frame.lastIndexOf("project/canvas.json"));
       if (editing) {
         return (
           <Island
@@ -198,7 +197,8 @@ export function PublishedView({ published, artifacts }: { published: PublishedRe
           />
         );
       }
-      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: 440 } }} onEvent={(name) => name === "open" && setEditing(true)} />;
+      // The editor is a computer's: a phone draws the board, every artboard running, and no Edit.
+      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: 440 } }} {...(isWeb ? { onEvent: (name: string) => name === "open" && setEditing(true) } : {})} />;
     }
     return (
       <Island

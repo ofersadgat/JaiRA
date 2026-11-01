@@ -137,6 +137,16 @@ describe("artifact:serve of a published artifact (decision 0020)", () => {
     expect(service.servedArtifact(token, "/project/Nope.dc.html")).toBeUndefined();
   });
 
+  it("answers a /_blob/ asset at the root only from a live grant that holds it (the phone's route)", async () => {
+    publish({ "project/Main.dc.html": "<x-dc>main</x-dc>", "_blob/abc123": "data:image/png;base64,iVBORw==" });
+    // Nothing granted yet: the blob is out of reach.
+    expect(service.servedBlob("abc123")).toBeUndefined();
+    await service.serveArtifact({ taskId: "t-1", artifact: "a-1", path: "project/Main.dc.html" });
+    expect(service.servedBlob("abc123")).toEqual({ body: Buffer.from([0x89, 0x50, 0x4e, 0x47]), mediaType: "image/png", policy: "canvas" });
+    expect(service.servedBlob("ffff")).toBeUndefined();
+    expect(service.servedBlob("../x")).toBeUndefined();
+  });
+
   it("keeps serving the version it granted after a later publish", async () => {
     publish({ "project/Main.dc.html": "one" });
     const token = tokenOf((await service.serveArtifact({ taskId: "t-1", artifact: "a-1", path: "project/Main.dc.html" })).url);

@@ -8,9 +8,16 @@
  *    it is a paired machine — or a paired phone — with the token in its `hello` (`machineTokens.ts`),
  *    never in the URL.
  *
+ *  - `GET /artifact/<token>/<path>` and `GET /_blob/<id>`: a published artifact granted to a phone
+ *    (decision 0020 §4), the same grant the desktop window loads as `jaira-artifact://<token>/`. The
+ *    token is the capability, as it is there. Every grant shares this one origin, so each response
+ *    sandboxes its page into an opaque origin of its own (`artifactPolicy`'s `sandbox`).
+ *
  * It serves no web client: a browser is not a device until the website exists (decision 0022 §6).
  */
-import { createServer, type Server } from "node:http";
+import { createServer, type Server, type ServerResponse } from "node:http";
+import { artifactPolicy } from "@jaira/shared";
+import type { ServedBody } from "./designRuntime";
 import type { Duplex } from "node:stream";
 import { ENGINE_PROTOCOL } from "./enginePipe";
 import { wsHostChannel } from "./engineChannel";
@@ -33,6 +40,20 @@ export interface NetworkListenerOptions {
   /** Default {@link NETWORK_PORT}; taken, any free port is used and said. */
   port?: number;
   log?: (level: "info" | "warn", message: string) => void;
+  /** Published artifacts' bytes, by grant (`AppService.servedArtifact`) and by blob id (`servedBlob`). */
+  artifacts?: { served(token: string, path: string): ServedBody | undefined; blob(id: string): ServedBody | undefined };
+}
+
+/** A granted file, its page sandboxed into an opaque origin; fetched from one, so open to any origin. */
+function sendServed(response: ServerResponse, served: ServedBody): void {
+  response.writeHead(200, {
+    "content-type": served.mediaType.startsWith("text/") || served.mediaType === "application/json" ? `${served.mediaType}; charset=utf-8` : served.mediaType,
+    "content-security-policy": artifactPolicy(served.policy, { sandbox: true }),
+    "x-content-type-options": "nosniff",
+    "access-control-allow-origin": "*",
+    "cache-control": "no-store",
+  });
+  response.end(served.body);
 }
 
 function listenOn(server: Server, port: number): Promise<number | "taken"> {
@@ -59,6 +80,13 @@ export async function listenNetwork(options: NetworkListenerOptions): Promise<Ne
       const identity = options.identity();
       response.writeHead(200, { "content-type": "application/json", "cache-control": "no-store" });
       response.end(JSON.stringify({ jaira: true, machineId: identity.id, label: identity.label, os: identity.os, version: options.version, protocol: ENGINE_PROTOCOL }));
+      return;
+    }
+    const artifact = request.method === "GET" ? /^\/artifact\/([0-9a-f]{32})(\/[^?#]*)?/.exec(request.url ?? "") : null;
+    const blob = request.method === "GET" ? /^\/_blob\/([0-9a-f]+)$/.exec(request.url ?? "") : null;
+    const served = artifact !== null ? options.artifacts?.served(artifact[1]!, artifact[2] ?? "/") : blob !== null ? options.artifacts?.blob(blob[1]!) : undefined;
+    if (served !== undefined) {
+      sendServed(response, served);
       return;
     }
     response.writeHead(404, { "content-type": "text/plain" });

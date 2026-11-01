@@ -129,7 +129,7 @@ export function ValueView({
   /**
    * How to have an artifact SERVED to a frame, for the interactive case: supplied by the surface, which
    * knows the task and project a grant takes. Absent ⇒ an interactive artifact is the static page, its
-   * scripts inert. Asked only on web — a phone's WebView cannot load the address.
+   * scripts inert.
    */
   serve?: ((path: string) => Promise<ServedArtifact>) | undefined;
   /** Where a message from an interactive artifact goes (the composer, filled, never sent). Absent ⇒ nowhere. */
@@ -169,10 +169,9 @@ export function ValueView({
   const plainly = renderer === "codeview" && renderersFor(view, mime, editable).length > 1;
   const writing = plainly ? undefined : edit;
 
-  // The address an interactive artifact runs from, once the record granted one (`artifactFrame.ts`). On
-  // web only: the frame is the window's `jaira-artifact:` protocol, which a phone's WebView cannot load,
-  // so a phone asks for nothing and draws the page inert.
-  const frameUrl = useArtifactFrame(artifact, isWeb ? serve : undefined);
+  // The address an interactive artifact runs from, once the record granted one (`artifactFrame.ts`): the
+  // window's `jaira-artifact:` protocol on a computer, the engine's HTTP route on a phone (decision 0020 §4).
+  const frameUrl = useArtifactFrame(artifact, serve);
   // The source's 340 ceiling, which a value that owns its column does without.
   const ceiling = pinned ? 1e9 : 340;
 

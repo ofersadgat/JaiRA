@@ -36,7 +36,7 @@
  */
 import type { JairaAppearanceConfig } from "@jaira/shared/browser";
 
-export type IslandComponent = "markdown" | "diff" | "markdownEditor" | "code" | "schemaText" | "artifact";
+export type IslandComponent = "markdown" | "diff" | "markdownEditor" | "code" | "schemaText" | "artifact" | "canvas";
 
 export interface IslandLook {
   palette: string;

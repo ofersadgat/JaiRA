@@ -12213,6 +12213,23 @@ export class AppService {
     return text === undefined ? undefined : { body: text, mediaType: publishedMime(file), policy };
   }
 
+  /**
+   * A `/_blob/<id>` asset asked for at the engine HTTP route's root, where no token is (the phone's):
+   * an artboard names its assets path-absolute, which on the desktop resolves under its grant's origin
+   * and here under the engine's one. Answered only from a live published grant that holds it - newest
+   * first - so the route reaches no blob nothing was granted.
+   */
+  servedBlob(id: string): ServedBody | undefined {
+    if (!/^[0-9a-f]+$/.test(id)) return undefined;
+    for (const grant of [...this.served.values()].reverse()) {
+      if (grant.kind !== "published") continue;
+      const files = filesAt(grant.session.project.artifacts, grant.taskId, grant.artifact, grant.version);
+      const data = /^data:([^;,]+);base64,(.*)$/s.exec(files[`_blob/${id}`] ?? "");
+      if (data !== null) return { body: Buffer.from(data[2]!, "base64"), mediaType: data[1]!, policy: grant.artifactKind === "canvas" ? "canvas" : "page" };
+    }
+    return undefined;
+  }
+
   /** A task's published artifacts, each at its latest version (decision 0020). */
   publishedArtifacts(request: { taskId: string; project?: ProjectRef }): PublishedArtifact[] {
     const store = this.projectFor(request.project).artifacts;
