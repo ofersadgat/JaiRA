@@ -4,6 +4,7 @@ import {
   accountOfRoute,
   chooseMostLeft,
   compactionOfEvent,
+  contextDropped,
   contextFill,
   formatAge,
   formatResetAt,
@@ -107,6 +108,16 @@ describe("how full a context is", () => {
   it("reads what a stored compaction boundary said", () => {
     expect(compactionOfEvent({ type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "manual", pre_tokens: 104000, post_tokens: 24000 } })).toEqual({ trigger: "manual", before: 104000, after: 24000 });
     expect(compactionOfEvent({ type: "rate_limit_event" })).toBeUndefined();
+  });
+
+  it("reads a boundary as the session file spells it, whose type capture lifted out", () => {
+    expect(compactionOfEvent({ subtype: "compact_boundary", uuid: "b1", compactMetadata: { trigger: "auto", preTokens: 967209, postTokens: 8788, durationMs: 51820 } })).toEqual({ id: "b1", trigger: "auto", before: 967209, after: 8788, durationMs: 51820 });
+  });
+
+  it("calls a reading far below the one before a drop", () => {
+    expect(contextDropped(100, 59)).toBe(true);
+    expect(contextDropped(100, 60)).toBe(false);
+    expect(contextDropped(0, 0)).toBe(false);
   });
 });
 

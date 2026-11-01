@@ -16,9 +16,10 @@
  * The clock is pinned at a local noon, so "resets 13:00" is the same in every time zone.
  */
 import { describe, expect, it } from "vitest";
-import { contextFill, formatAge, formatTokens, toneOfContext, type ContextReading, type LimitAccountView, type LimitReading, type LimitsView } from "@jaira/shared/browser";
+import { contextFill, formatAge, formatTokens, toneOfContext, type ContextReading, type LimitAccountView, type LimitReading, type LimitsView, type SessionView } from "@jaira/shared/browser";
 import { accountFor } from "../src/renderer/limitsStore";
-import { eventEntry } from "../src/renderer/transcript";
+import { contextTotalOf } from "../src/renderer/runConversationModel";
+import { entriesOf, eventEntry } from "../src/renderer/transcript";
 import { modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windowRowsOf } from "../src/renderer/usageCards";
 import { USAGE_PREVIEW_EXAMPLES, figureOf, keyFigureOf, weeklyFigureOf, weeklyTitleOf } from "../src/renderer/usageFigure";
 
@@ -148,6 +149,40 @@ describe("the conversation", () => {
     expect(eventEntry({ type: "provider_event", payload: { type: "system", subtype: "compact_boundary", compact_metadata: { trigger: "auto", pre_tokens: 1, post_tokens: 0 } } })).toEqual([
       { kind: "compaction", trigger: "auto", before: 1, after: 0 },
     ]);
+  });
+
+  // The shape a real record holds (2026-10-31): the stream's copy where it happened, and the session
+  // file's folded onto the end of the record, camelCase, its `type` lifted out at capture.
+  const STREAMED = { type: "system", subtype: "compact_boundary", uuid: "b1", compact_metadata: { trigger: "auto", pre_tokens: 967209, post_tokens: 8788, duration_ms: 51820 } };
+  const FILED = { subtype: "compact_boundary", uuid: "b1", compactMetadata: { trigger: "auto", preTokens: 967209, postTokens: 8788, durationMs: 51820 } };
+  const reply = (context?: Partial<ContextReading>) => ({ role: "assistant", text: "ok", ...(context !== undefined ? { context: { ...CONTEXT, ...context } } : {}) });
+  const conversation = (turns: unknown[], providerEvents: Array<{ index: number; event: unknown }>) => ({ taskId: "t", instanceId: "2", stateId: "s", sessionId: "#i2", seq: 0, turns, providerEvents }) as unknown as SessionView;
+
+  it("draws one compaction once, with its figures, where it happened", () => {
+    const lines = entriesOf(conversation([reply(), reply(), reply()], [{ index: 1, event: STREAMED }, { index: 3, event: FILED }])).filter((entry) => entry.kind === "compaction");
+    expect(lines).toEqual([{ kind: "compaction", id: "b1", trigger: "auto", before: 967209, after: 8788, durationMs: 51820 }]);
+  });
+
+  it("gives a compaction only the file holds its figures", () => {
+    expect(entriesOf(conversation([reply()], [{ index: 1, event: FILED }])).filter((entry) => entry.kind === "compaction")).toEqual([{ kind: "compaction", id: "b1", trigger: "auto", before: 967209, after: 8788, durationMs: 51820 }]);
+  });
+
+  it("totals what is held and what compaction took, each compaction once", () => {
+    expect(contextTotalOf(conversation([reply(), reply({ used: 168146 })], [{ index: 1, event: STREAMED }, { index: 2, event: FILED }]))).toEqual({ held: 168146, compacted: 958421, compactions: 1 });
+  });
+
+  it("holds what the compaction left when no reading has come since", () => {
+    expect(contextTotalOf(conversation([reply({ used: 900000 }), reply()], [{ index: 1, event: STREAMED }]))).toEqual({ held: 8788, compacted: 958421, compactions: 1 });
+  });
+
+  it("counts a drop nobody reported, and nothing when the context only grew", () => {
+    expect(contextTotalOf(conversation([reply({ used: 100000 }), reply({ used: 40000 })], []))).toEqual({ held: 40000, compacted: 60000, compactions: 1 });
+    expect(contextTotalOf(conversation([reply({ used: 40000 }), reply({ used: 100000 })], []))).toEqual({ held: 100000, compacted: 0, compactions: 0 });
+  });
+
+  it("has no total before a first reading", () => {
+    expect(contextTotalOf(conversation([reply()], []))).toBeUndefined();
+    expect(contextTotalOf(null)).toBeUndefined();
   });
 
   it("says what a state added in short tokens", () => {

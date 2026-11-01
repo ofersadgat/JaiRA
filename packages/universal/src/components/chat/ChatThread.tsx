@@ -350,7 +350,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               ? { disabled: "This conversation cannot be continued." }
               : {})}
           tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}
-          usage={{ context: m.lastContext, onCompact: m.onCompact, cost: m.thread?.costUsd }}
+          usage={{ context: m.lastContext, total: m.contextTotal, onCompact: m.onCompact, cost: m.thread?.costUsd }}
           onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(m.project !== undefined ? { project: m.project } : {}) })}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
           {...mentions}

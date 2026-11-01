@@ -2,11 +2,11 @@
  * What a run's CONVERSATION derives beside its bands — the call a settled gate is drawn from and the
  * request rebuilt from it, a `notify` call read as the line it told you, what one conversation cost, the
  * states an armed rewind deletes said as a list, a rewind armed from an entered row, and how full a
- * conversation was after its last answer. Nothing here draws: `RunTranscript.tsx` and `RunActivity.tsx`
- * (`packages/universal/src/components/panel`) and `run/RunConversation.tsx` do.
+ * conversation was after its last answer and has been in all. Nothing here draws: `RunTranscript.tsx`
+ * and `RunActivity.tsx` (`packages/universal/src/components/panel`) and `run/RunConversation.tsx` do.
  */
 import type { JsonValue } from "@declarative-ai/json";
-import { isComponentName, parseComponentConfig, readCall, type ContextReading, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionRef, type SessionView } from "@jaira/shared/browser";
+import { compactionOfEvent, contextDropped, isComponentName, parseComponentConfig, readCall, type ContextReading, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionRef, type SessionView } from "@jaira/shared/browser";
 import type { BandNote } from "./sessionBands";
 import { cutNameOf } from "./sessionRows";
 import { surfaceKindOf } from "./stateSurfaceModel";
@@ -121,4 +121,55 @@ export function armedRewindOf(note: BandNote, notes: readonly BandNote[], root: 
 /** How full a conversation was after its last answer: the reading on the newest turn that has one. */
 export function lastContextOf(view: SessionView | null | undefined): ContextReading | undefined {
   return [...(view?.turns ?? [])].reverse().find((turn) => turn.context !== undefined)?.context;
+}
+
+/** What a conversation has carried in all: what it holds now, and what its compactions took out of it. */
+export interface ContextTotal {
+  held: number;
+  compacted: number;
+  compactions: number;
+}
+
+/**
+ * The context as a whole conversation, walked the way the transcript draws it. A compaction counts what
+ * the agent said it dropped, and a reading far below the one before with no compaction said counts the
+ * drop (`contextDropped`), which is all an agent that reports none gives. What is held is the newest
+ * thing known: a compaction since the last reading says more than that reading does.
+ */
+export function contextTotalOf(view: SessionView | null | undefined): ContextTotal | undefined {
+  const events = view?.providerEvents ?? [];
+  const seen = new Set<string>();
+  let next = 0;
+  let held: number | undefined;
+  let compacted = 0;
+  let compactions = 0;
+  let said = false;
+  const reportedUpTo = (turn: number): void => {
+    for (; next < events.length && events[next]!.index <= turn; next++) {
+      const boundary = compactionOfEvent(events[next]!.event);
+      if (boundary === undefined) continue;
+      if (boundary.id !== undefined) {
+        if (seen.has(boundary.id)) continue;
+        seen.add(boundary.id);
+      }
+      compactions += 1;
+      said = true;
+      if (boundary.before !== undefined && boundary.after !== undefined) {
+        compacted += Math.max(0, boundary.before - boundary.after);
+        held = boundary.after;
+      }
+    }
+  };
+  for (const [i, turn] of (view?.turns ?? []).entries()) {
+    reportedUpTo(i);
+    if (turn.context === undefined) continue;
+    if (held !== undefined && !said && contextDropped(held, turn.context.used)) {
+      compacted += held - turn.context.used;
+      compactions += 1;
+    }
+    held = turn.context.used;
+    said = false;
+  }
+  reportedUpTo(Number.POSITIVE_INFINITY);
+  return held === undefined ? undefined : { held, compacted, compactions };
 }

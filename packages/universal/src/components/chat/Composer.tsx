@@ -28,6 +28,7 @@ import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
 import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
 import { modeMeta } from "@jaira/ui/permissionSetWords";
+import type { ContextTotal } from "@jaira/ui/runConversationModel";
 import { figureOf } from "@jaira/ui/usageFigure";
 import { NO_STACK, PLAIN_SCROLLER, Press, Txt, edge, font } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -120,7 +121,7 @@ export function Composer({
   value?: string;
   onValue?: (next: string) => void;
   draftKey?: string | undefined;
-  usage?: { context: ContextReading | null | undefined; onCompact?: ((focus?: string) => void) | undefined; cost?: number | undefined } | undefined;
+  usage?: { context: ContextReading | null | undefined; total?: ContextTotal | undefined; onCompact?: ((focus?: string) => void) | undefined; cost?: number | undefined } | undefined;
   /** Project paths matching a query — what `@` completes against. Absent ⇒ `@` is an ordinary character. */
   mentions?: ((query: string) => Promise<string[]>) | undefined;
   /** One mentioned file's text, for inlining. Absent ⇒ a mention stays a path. */
@@ -561,7 +562,7 @@ export function Composer({
         </ChipCard>
       ) : null}
       {card?.which === "account" && account !== undefined ? <AccountCard anchor={card.at} account={account} cost={usage?.cost} others={limits.accounts.filter((a) => a.key !== account.key)} onClose={close} /> : null}
-      {card?.which === "context" && usage !== undefined ? <ContextCard anchor={card.at} context={usage.context} route={route} busy={busy} onCompact={usage.onCompact} onClose={close} /> : null}
+      {card?.which === "context" && usage !== undefined ? <ContextCard anchor={card.at} context={usage.context} total={usage.total} route={route} busy={busy} onCompact={usage.onCompact} onClose={close} /> : null}
     </View>
   );
 }

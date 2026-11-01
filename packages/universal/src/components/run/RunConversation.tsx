@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
 import type { ChatPlanView, ChatSettings, InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
 import { actOnWaiting, useWaiting } from "@jaira/ui/limitsStore";
-import { costOfConversation, lastContextOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
+import { contextTotalOf, costOfConversation, lastContextOf, type ArmedRewind } from "@jaira/ui/runConversationModel";
 import { invoke } from "@jaira/ui/store";
 import { ChatError } from "../chat/ChatThread";
 import { Composer } from "../chat/Composer";
@@ -271,6 +271,7 @@ export function RunComposer({
 
   // How full the conversation being continued is, and what it has cost (the rows the panel holds).
   const contextReading = instanceId !== undefined ? lastContextOf(source.sessions[String(instanceId)]) : undefined;
+  const contextTotal = instanceId !== undefined ? contextTotalOf(source.sessions[String(instanceId)]) : undefined;
   const conversationCost = instanceId !== undefined ? costOfConversation(source.sessionHistory, String(instanceId)) : undefined;
   return (
     <>
@@ -283,7 +284,7 @@ export function RunComposer({
         plan={plan ?? null}
         // Kept per conversation: the task, and the state's conversation within it when one is picked.
         draftKey={`task:${taskId}${instanceId !== undefined ? `#${instanceId}` : ""}`}
-        usage={{ context: contextReading, onCompact, cost: conversationCost }}
+        usage={{ context: contextReading, total: contextTotal, onCompact, cost: conversationCost }}
         // A run in flight is busy whatever the box says: the button is the only handle on it…
         busy={busy || running}
         // …and a state that holds a conversation can be typed into while it runs.

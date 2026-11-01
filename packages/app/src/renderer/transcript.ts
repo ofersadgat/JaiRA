@@ -91,10 +91,12 @@ export interface MessageEntry {
  * A compaction: the agent folded the conversation to make room. Drawn as a line of its own rather
  * than a folded work row, because it changes what every turn after it is standing on. Claude reports
  * one (`compact_boundary`: automatic or asked for, the tokens before and after, how long it took).
+ * `id` is the boundary's own: the stream and the session file each carry it, and it is drawn once.
  */
 export interface CompactionEntry {
   kind: "compaction";
   at?: number;
+  id?: string;
   trigger?: string;
   before?: number;
   after?: number;
@@ -819,6 +821,7 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
     return [
       {
         kind: "compaction",
+        ...(said?.id !== undefined ? { id: said.id } : {}),
         ...(said?.trigger !== undefined ? { trigger: said.trigger } : {}),
         ...(said?.before !== undefined ? { before: said.before } : {}),
         ...(said?.after !== undefined ? { after: said.after } : {}),
@@ -1129,7 +1132,15 @@ export function entriesOf(
   for (; nextEvent < stored.length; nextEvent++) said.push(...eventEntry(stored[nextEvent]!.event));
   // Across the whole conversation, not per turn: `tool_use` and its `tool_result` are on different
   // turns in every Anthropic-shaped record, which is most of them.
-  const entries: TranscriptEntry[] = pairResults(said);
+  // One compaction, one line: a record holds the stream's copy where it happened and the session file's
+  // folded onto its end, so the first of an id is the one in the right place.
+  const compacted = new Set<string>();
+  const entries: TranscriptEntry[] = pairResults(said).filter((entry) => {
+    if (entry.kind !== "compaction" || entry.id === undefined) return true;
+    if (compacted.has(entry.id)) return false;
+    compacted.add(entry.id);
+    return true;
+  });
   for (const turn of journal) {
     const event = eventOf(turn);
     if (event !== undefined) entries.push(event);

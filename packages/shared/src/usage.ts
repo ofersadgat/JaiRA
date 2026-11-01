@@ -251,16 +251,29 @@ export function toneOfContext(percent: number | null): "accent" | "warn" | "none
   return percent >= 80 ? "warn" : "accent";
 }
 
-/** What a compaction boundary said, read off a stored event entry's data (claude's `compact_boundary`). */
-export function compactionOfEvent(data: unknown): { trigger: string; before?: number; after?: number; durationMs?: number } | undefined {
+/** A reading this far below the one before it means the context got smaller, whether or not the agent said so. */
+export function contextDropped(prior: number, used: number): boolean {
+  return prior > 0 && used < prior * 0.6;
+}
+
+/**
+ * What a compaction boundary said, read off a stored event entry's data (claude's `compact_boundary`).
+ *
+ * A boundary is spelled two ways, and both are current: the stream's `compact_metadata.pre_tokens`, and
+ * the session file's `compactMetadata.preTokens`, which is all a turn recovered from the file has. A
+ * file line's own `type` is lifted out of its data at capture, so the subtype is what names it. `id` is
+ * the boundary's uuid, the same on both.
+ */
+export function compactionOfEvent(data: unknown): { id?: string; trigger: string; before?: number; after?: number; durationMs?: number } | undefined {
   const e = data !== null && typeof data === "object" ? (data as Record<string, unknown>) : undefined;
-  if (e?.["type"] !== "system" || e["subtype"] !== "compact_boundary") return undefined;
-  const m = (e["compact_metadata"] ?? {}) as Record<string, unknown>;
+  if (e?.["subtype"] !== "compact_boundary") return undefined;
+  const m = (e["compact_metadata"] ?? e["compactMetadata"] ?? {}) as Record<string, unknown>;
   const num = (v: unknown): number | undefined => (typeof v === "number" && Number.isFinite(v) ? v : undefined);
-  const before = num(m["pre_tokens"]);
-  const after = num(m["post_tokens"]);
-  const durationMs = num(m["duration_ms"]);
+  const before = num(m["pre_tokens"] ?? m["preTokens"]);
+  const after = num(m["post_tokens"] ?? m["postTokens"]);
+  const durationMs = num(m["duration_ms"] ?? m["durationMs"]);
   return {
+    ...(typeof e["uuid"] === "string" ? { id: e["uuid"] } : {}),
     trigger: typeof m["trigger"] === "string" ? m["trigger"] : "auto",
     ...(before !== undefined ? { before } : {}),
     ...(after !== undefined ? { after } : {}),

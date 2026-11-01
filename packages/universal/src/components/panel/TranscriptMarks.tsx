@@ -65,7 +65,7 @@ export function CompactionLine({
       ? "the context got smaller — the agent didn't say why"
       : trigger === "manual"
         ? "compacted at your request"
-        : `compacted automatically${before !== undefined ? ` at ${formatTokens(before, true)}` : ""}${durationMs !== undefined ? ` · took ${round(durationMs / 1000)} s` : ""}`;
+        : `compacted automatically${before !== undefined ? ` at ${formatTokens(before, true)}` : ""}${durationMs !== undefined && durationMs >= 1000 ? ` · took ${round(durationMs / 1000)} s` : ""}`;
   const size = Number(t.scaled("size-app", 12 / 12.5)) || 12;
   const words = { voice: "app" as const, scale: 12 / 12.5, color: "dim" };
   // A fixed 11.5px, not a scale of the app's size.

@@ -13,6 +13,7 @@ import { useTokens } from "../../tokens";
  *   a segment            no ring, radius 7, padding 4 12, the body's text (app 13/12.5, line 1.5) at
  *                        500 in --dim; hovered --fill-ghost-hover and --text; chosen: --panel, --text,
  *                        ringed 1px --line with a 0 1 2 shadow at 6%. Disabled: half opacity.
+ *                        Dense, for a card: padding 2 8, app 11.5/12.5.
  */
 
 /** On or off, as a switch. */
@@ -52,12 +53,14 @@ export function Segmented<T extends string>({
   options,
   label,
   disabled = false,
+  dense = false,
   onChange,
 }: {
   value: T;
   options: ReadonlyArray<readonly [label: string, value: T]>;
   label: string;
   disabled?: boolean | undefined;
+  dense?: boolean | undefined;
   onChange: (value: T) => void;
 }): JSX.Element {
   const t = useTokens();
@@ -84,8 +87,8 @@ export function Segmented<T extends string>({
             flexDirection="row"
             alignItems="center"
             justifyContent="center"
-            paddingVertical={4}
-            paddingHorizontal={12}
+            paddingVertical={dense ? 2 : 4}
+            paddingHorizontal={dense ? 8 : 12}
             borderRadius={7}
             {...(disabled ? { opacity: 0.5 } : {})}
             box={({ hovered }) =>
@@ -95,7 +98,7 @@ export function Segmented<T extends string>({
             }
           >
             {({ hovered }) => (
-              <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 500, color: on || (hovered && !disabled) ? "text" : "dim" }} numberOfLines={1}>
+              <Txt spec={{ voice: "app", scale: (dense ? 11.5 : 13) / 12.5, weight: 500, color: on || (hovered && !disabled) ? "text" : "dim" }} numberOfLines={1}>
                 {text}
               </Txt>
             )}

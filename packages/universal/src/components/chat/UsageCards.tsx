@@ -5,6 +5,7 @@ import { contextFill, formatAge, formatTokens, formatUsd, toneOfContext, type Co
 import { colourOf } from "@jaira/ui/contextParts";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, refreshAccount, useLimits, useLimitsWatch, useNow } from "@jaira/ui/limitsStore";
+import type { ContextTotal } from "@jaira/ui/runConversationModel";
 import { capital, modelWindowOf, readingAgeOf, routeLeftOf, spentNoticeOf, windowRowsOf } from "@jaira/ui/usageCards";
 import { creditPercent, isSpent, toneOfPercent, usedPercentFor } from "@jaira/shared/browser";
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font } from "../../primitives";
@@ -17,6 +18,7 @@ import { Icon } from "../panel/Icon";
 import { HoverLayer } from "../panel/HoverLayer";
 import { BrandIcon } from "../settings/bits";
 import { Button } from "../settings/Button";
+import { Segmented } from "../settings/controls";
 import { ChipCard } from "./ComposerCards";
 import { Turn } from "../Turn";
 
@@ -33,7 +35,9 @@ import { Turn } from "../Turn";
  *   its head           row, centred, gap 7; the mark 13; the title app 600 12.5/12.5; the sub pushed
  *                      right, app 11.5/12.5 --dim
  *   the big figure     row, baseline, gap 8; the figure data 600 22/1, −0.02em, tabular; `of` app 12/12.5 --dim
- *   the windows        column, gap 7; a row: name (1fr) · bar (≥ 48, .8fr) · value 38 · reset, gap 9,
+ *   Current or Total   the context card's head, at its end: a dense `Segmented`. Total draws what is held
+ *                      (--accent) and what was compacted away (--dim 45%) in place of the parts
+ *   the windows       column, gap 7; a row: name (1fr) · bar (≥ 48, .8fr) · value 38 · reset, gap 9,
  *                      app 12/12.5; the value data 500 11.5/1 right, the reset 11px --dim
  *   a bar              6 tall, radius 3, --dim 16%; its fill the tone's colour
  *   the foot           row, centred, gap 8, 2 above, at least 24; the age 11px --dim
@@ -335,9 +339,39 @@ function OtherAccount({ account, now }: { account: LimitAccountView; now: number
   );
 }
 
-/** The context's card: the figure, the breakdown and its detail on hover, and Compact now. */
-export function ContextCard({ anchor, context, route, busy, onCompact, onClose }: { anchor: FloatRect; context: ContextReading | null | undefined; route?: string | undefined; busy?: boolean | undefined; onCompact?: ((focus?: string) => void) | undefined; onClose: () => void }): JSX.Element {
+/** Which context the card shows: what is held now, or everything the conversation has carried. */
+type ContextMeasure = "current" | "total";
+const CONTEXT_MEASURES: ReadonlyArray<readonly [string, ContextMeasure]> = [
+  ["Current", "current"],
+  ["Total", "total"],
+];
+
+/** The total's two rows' row: what it is, its tokens and its share of the whole. */
+function TotalRow({ name, note, tokens, whole, color }: { name: string; note?: string | undefined; tokens: number; whole: number; color: unknown }): JSX.Element {
+  return (
+    <View flexDirection="row" alignItems="center" gap={8} paddingVertical={4} paddingHorizontal={6}>
+      <View width={8} height={8} borderRadius={2} backgroundColor={color as never} />
+      <Txt spec={{ voice: "app", scale: 12 / 12.5, lineHeight: 1.3 }} ellip flexShrink={1} minWidth={0}>
+        {name}
+      </Txt>
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} fontSize={11} ellip flex={1} minWidth={0}>
+        {note ?? ""}
+      </Txt>
+      <Txt spec={{ voice: "data", scale: 11 / 12, weight: 500, tabular: true, lineHeight: 1 }} fontSize={11} width={46} textAlign="right">
+        {formatTokens(tokens, true)}
+      </Txt>
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim", tabular: true }} fontSize={11} width={40} textAlign="right">
+        {`${((tokens / Math.max(whole, 1)) * 100).toFixed(1)}%`}
+      </Txt>
+    </View>
+  );
+}
+
+/** The context's card: the figure, the breakdown and its detail on hover, and Compact now — or, switched to, the whole conversation's total. */
+export function ContextCard({ anchor, context, total, route, busy, onCompact, onClose }: { anchor: FloatRect; context: ContextReading | null | undefined; total?: ContextTotal | undefined; route?: string | undefined; busy?: boolean | undefined; onCompact?: ((focus?: string) => void) | undefined; onClose: () => void }): JSX.Element {
   const t = useTokens();
+  const [measure, setMeasure] = useState<ContextMeasure>("current");
+  const [currentHeight, setCurrentHeight] = useState<number | undefined>(undefined);
   const [shown, setShown] = useState<string | undefined>(undefined);
   const [focusing, setFocusing] = useState(false);
   const [focus, setFocus] = useState("");
@@ -362,10 +396,23 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
     const tone = toneOfContext(fill);
     const window = context.window;
     const parts = context.breakdown ?? [];
-    const total = window ?? Math.max(context.used, 1);
+    const whole = window ?? Math.max(context.used, 1);
     const open = parts.find((p) => p.name === shown);
+    // Set only while Total is what the card shows.
+    const all = measure === "total" ? total : undefined;
+    const carried = all !== undefined ? all.held + all.compacted : 0;
+    const compactedColour = t.mix(t.v("dim"), 45, "transparent");
     return (
-      <RNView ref={section} collapsable={false} style={PLAIN_SCROLLER as never}>
+      <RNView
+        ref={section}
+        collapsable={false}
+        // The card stands on its bottom edge, so a shorter Total would carry the switch out from under
+        // the pointer that pressed it: Total keeps the height Current had.
+        style={[PLAIN_SCROLLER, all !== undefined && currentHeight !== undefined ? { minHeight: currentHeight } : null] as never}
+        onLayout={(e) => {
+          if (all === undefined) setCurrentHeight(e.nativeEvent.layout.height);
+        }}
+      >
         <Section first>
           <View flexDirection="row" alignItems="center" gap={7} minWidth={0}>
             <Txt spec={{ voice: "app", scale: 1, weight: 600 }} flexShrink={0}>
@@ -374,19 +421,32 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
             <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} marginLeft="auto" ellip minWidth={0} flexShrink={1}>
               {context.model}
             </Txt>
+            {total !== undefined ? <Segmented dense label="Which context" value={measure} options={CONTEXT_MEASURES} onChange={setMeasure} /> : null}
           </View>
-          <Big n={fill === null ? formatTokens(context.used, true) : `${Math.round(fill)}%`} tone={tone} of={window === null ? `${formatTokens(context.used)} tokens · the window is not known` : `${formatTokens(context.used)} of ${formatTokens(window)} tokens`} />
-          <View flexDirection="row" height={7} borderRadius={4} gap={1} position="relative" backgroundColor={t.mix(t.v("dim"), 16, "transparent") as never} role="img" aria-label="what the context holds">
-            {parts.length > 0 ? (
-              parts.map((p, k) => <View key={p.name} height="100%" width={`${(p.tokens / total) * 100}%`} backgroundColor={colorOf(t, colourOf(p.name, k)) as never} {...({ title: `${p.name}: ${formatTokens(p.tokens)}` } as object)} />)
-            ) : (
-              <View height="100%" width={`${Math.min(100, (context.used / total) * 100)}%`} backgroundColor={t.v(TONE[tone] ?? "rule") as never} />
-            )}
-            {context.autoCompactAt !== undefined && window !== null ? <View position="absolute" top={-3} bottom={-3} width={2} marginLeft={-1} borderRadius={1} left={`${(context.autoCompactAt / window) * 100}%`} backgroundColor={t.v("dim") as never} /> : null}
-          </View>
-          {context.autoCompactAt !== undefined || onCompact !== undefined ? (
+          {all !== undefined ? (
+            <>
+              <Big n={formatTokens(carried, true)} of={all.compactions > 0 ? `${formatTokens(carried)} tokens in all` : `${formatTokens(carried)} tokens · nothing compacted yet`} />
+              <View flexDirection="row" height={7} borderRadius={4} gap={1} overflow="hidden" backgroundColor={t.mix(t.v("dim"), 16, "transparent") as never} role="img" aria-label="what is held and what was compacted away">
+                <View height="100%" width={`${(all.held / Math.max(carried, 1)) * 100}%`} backgroundColor={t.v("accent") as never} />
+                <View height="100%" flex={1} backgroundColor={compactedColour as never} />
+              </View>
+            </>
+          ) : (
+            <>
+              <Big n={fill === null ? formatTokens(context.used, true) : `${Math.round(fill)}%`} tone={tone} of={window === null ? `${formatTokens(context.used)} tokens · the window is not known` : `${formatTokens(context.used)} of ${formatTokens(window)} tokens`} />
+              <View flexDirection="row" height={7} borderRadius={4} gap={1} position="relative" backgroundColor={t.mix(t.v("dim"), 16, "transparent") as never} role="img" aria-label="what the context holds">
+                {parts.length > 0 ? (
+                  parts.map((p, k) => <View key={p.name} height="100%" width={`${(p.tokens / whole) * 100}%`} backgroundColor={colorOf(t, colourOf(p.name, k)) as never} {...({ title: `${p.name}: ${formatTokens(p.tokens)}` } as object)} />)
+                ) : (
+                  <View height="100%" width={`${Math.min(100, (context.used / whole) * 100)}%`} backgroundColor={t.v(TONE[tone] ?? "rule") as never} />
+                )}
+                {context.autoCompactAt !== undefined && window !== null ? <View position="absolute" top={-3} bottom={-3} width={2} marginLeft={-1} borderRadius={1} left={`${(context.autoCompactAt / window) * 100}%`} backgroundColor={t.v("dim") as never} /> : null}
+              </View>
+            </>
+          )}
+          {(all === undefined && context.autoCompactAt !== undefined) || onCompact !== undefined ? (
             <View flexDirection="row" alignItems="center" gap={8} minHeight={26}>
-              {context.autoCompactAt !== undefined ? (
+              {all === undefined && context.autoCompactAt !== undefined ? (
                 <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>
                   auto-compacts at {formatTokens(context.autoCompactAt, true)}
                   {window !== null ? ` (${Math.round((context.autoCompactAt / window) * 100)}%)` : ""}
@@ -433,7 +493,12 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
               </View>
             </View>
           ) : null}
-          {parts.length > 0 ? (
+          {all !== undefined ? (
+            <View flexDirection="column" gap={1} marginHorizontal={-6}>
+              <TotalRow name="Held now" tokens={all.held} whole={carried} color={t.v("accent")} />
+              <TotalRow name="Compacted away" note={all.compactions > 0 ? `${all.compactions} ${all.compactions === 1 ? "compaction" : "compactions"}` : undefined} tokens={all.compacted} whole={carried} color={compactedColour} />
+            </View>
+          ) : parts.length > 0 ? (
             <View flexDirection="column" gap={1} marginHorizontal={-6}>
               {parts.map((p, k) => {
                 const row = (
@@ -475,7 +540,7 @@ export function ContextCard({ anchor, context, route, busy, onCompact, onClose }
             </View>
           ) : null}
         </Section>
-        {open !== undefined && open.parts !== undefined && open.parts.length > 0 && beside !== null ? (
+        {all === undefined && open !== undefined && open.parts !== undefined && open.parts.length > 0 && beside !== null ? (
           hovers ? (
             <HoverLayer>
               <PartFlyout part={open} window={window} beside={beside} />

@@ -12,7 +12,7 @@ import { openBlockOf, writingOf } from "@jaira/ui/stillRunning";
 import { isIdle } from "@jaira/ui/workSummary";
 import { WorkLookContext } from "@jaira/ui/workSummaryContext";
 import { useValuePanel } from "@jaira/ui/valuePanel";
-import type { ContextReading } from "@jaira/shared/browser";
+import { contextDropped, type ContextReading } from "@jaira/shared/browser";
 import { Press, Txt, edge, useHover } from "../../primitives";
 import { useCanHover } from "../../canHover";
 import { onTouchElsewhere } from "../../touchElsewhere";
@@ -175,7 +175,7 @@ export const Transcript = memo(function Transcript({
           const context = block.context;
           // A reading far below the one before, with no compaction drawn between.
           const dropped =
-            context !== undefined && prior !== undefined && !compactedSince && prior.used > 0 && context.used < prior.used * 0.6 ? (
+            context !== undefined && prior !== undefined && !compactedSince && contextDropped(prior.used, context.used) ? (
               <CompactionLine derived before={prior.used} after={context.used} window={context.window ?? prior.window} />
             ) : null;
           if (context !== undefined) {
