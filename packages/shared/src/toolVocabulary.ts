@@ -97,6 +97,15 @@ export interface ToolSpec {
    */
   nativeOnly?: boolean;
   /**
+   * True when the agent's own tool doing this job must never run, so `native` is not a choice that can
+   * be made: `show_artifact`, whose counterpart in Claude Code publishes to claude.ai (decision 0020).
+   *
+   * The counterpart is still declared, which is what displaces it. This says only that nobody can keep
+   * it: the composer is offered no pick (`nativeNamesByRoute`), and an entry recording one is not honoured
+   * (`planAgentTools`).
+   */
+  appOnly?: boolean;
+  /**
    * Available whether or not anybody granted it — the tool list does not decide this one.
    *
    * Reserved for a tool that adds no CAPABILITY: `show_artifact` writes only under the task's own
@@ -198,6 +207,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
      * picture over. See {@link ToolSpec.alwaysGranted} for what this does not exempt it from.
      */
     alwaysGranted: true,
+    appOnly: true,
     hint: "produce something to look at — a page, a document, a design canvas",
     // Decision 0020: it READS the files it publishes (`file_path`, a canvas's `root`) and adds a version
     // to the task's own store — so the paths it names answer to the file rules, as a read's do.

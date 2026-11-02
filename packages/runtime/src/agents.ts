@@ -34,7 +34,7 @@ import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { resolveInvocation, type ExecObserver } from "./exec";
 import { detachedForTree, killTree } from "./killTree";
 import type { ExecEnv } from "./paths";
-import { primaryNativeOf, type AgentToolDeclaration } from "@jaira/shared";
+import { primaryNativeOf, TOOL_SPEC_BY_NAME, type AgentToolDeclaration } from "@jaira/shared";
 import { agentFunctionWrapper, CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, holdAgentFunction, permissionSetViewOf } from "./agentTools";
 import { mcpServersIn, mcpServersOfCall, type ResolvedMcpServer } from "./mcpServers";
 import { claudeReplacements } from "./tools";
@@ -71,10 +71,12 @@ export function agentToolsOf(name: string): AgentToolDeclaration {
  *
  * Only routes whose implementation is a CHOICE: claude can be served ours or keep its own, and so can
  * codex now that ours reach it over its bridge — keeping codex's own writer opens its writing sandbox.
- * A generic CLI has neither, so there is no pick to offer on its line.
+ * A generic CLI has neither, so there is no pick to offer on its line, and neither has a tool whose own
+ * must never run (`ToolSpec.appOnly`).
  */
 export function nativeNamesByRoute(standard: string): Record<string, string> {
   const out: Record<string, string> = {};
+  if (TOOL_SPEC_BY_NAME.get(standard)?.appOnly === true) return out;
   for (const [route, declaration] of Object.entries(AGENT_TOOLS)) {
     const native = declaration.channel !== "none" ? primaryNativeOf(declaration, standard) : undefined;
     if (native !== undefined) out[route] = native;

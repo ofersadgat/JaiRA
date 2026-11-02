@@ -86,6 +86,9 @@ instructions are passed verbatim and name them:
   canvas's `root` lives there.
 - Refused as Claude Code refuses: a file that does not decode or holds U+FFFD, a page over 16 MiB, a
   canvas over 512 files or 256 MB, a path outside `project/` or with `..`.
+- Claude Code's own `Artifact` never runs: it publishes to claude.ai. It is declared as `show_artifact`'s
+  native, which displaces it, and `show_artifact` is `appOnly`: the composer offers no pick, and a
+  permission set entry recording `implementation: "native"` is not honoured.
 
 ### 2. The Design type ships with JaiRA
 

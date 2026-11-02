@@ -114,6 +114,14 @@ describe("alwaysGranted", () => {
     expect(TOOL_SPEC_BY_NAME.get("show_artifact")?.alwaysGranted).toBe(true);
   });
 
+  it("never keeps Claude Code's own Artifact, whatever the entry recorded", () => {
+    // Keeping it would publish to claude.ai (decision 0020), and a kept native is `native`'s whole meaning.
+    const plan = planAgentTools(mapOf(["show_artifact"], { show_artifact: "native" }));
+    expect(plan.inject).toContain("show_artifact");
+    expect(plan.displaced).toContain("Artifact");
+    expect(plan.askNatives).not.toContain("Artifact");
+  });
+
   it("is injected by a permission set that never mentions it", () => {
     expect(planAgentTools(mapOf(["shell", "read_file", "write_file"])).inject).toContain("show_artifact");
   });
@@ -215,7 +223,9 @@ describe("the executors' declarations", () => {
     // Codex is served ours over its bridge, so keeping its own shell is a pick too.
     expect(nativeNamesByRoute("shell")).toEqual({ "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" });
     expect(nativeNamesByRoute("edit")).toEqual({ "claude-code": "Edit", "claude-cli": "Edit", "codex-cli": "apply_patch" });
-    expect(nativeNamesByRoute("show_artifact")).toEqual({ "claude-code": "Artifact", "claude-cli": "Artifact" });
+    // Declared, so it is displaced, and no choice: it is what `CLAUDE_TOOLS` says it publishes to.
+    expect(CLAUDE_TOOLS.natives["Artifact"]).toBe("show_artifact");
+    expect(nativeNamesByRoute("show_artifact")).toEqual({});
   });
 });
 

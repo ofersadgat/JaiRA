@@ -317,8 +317,9 @@ export function planAgentTools(grant: PermissionSet | PermissionSetView, declara
       plan.denyNatives.push(...natives);
       continue;
     }
-    // A tool we cannot serve has no `app` to choose, whatever the entry recorded.
-    const choice = spec.nativeOnly === true ? "native" : implementation;
+    // A tool we cannot serve has no `app` to choose, and one whose native must not run no `native`,
+    // whatever the entry recorded.
+    const choice = spec.nativeOnly === true ? "native" : spec.appOnly === true ? "app" : implementation;
     if (choice === "native" && natives.length > 0) {
       // Kept — and a `deny` beside it is still a deny, delivered as configuration.
       if (view.modeOf(spec.name) === "deny") plan.denyNatives.push(...natives);

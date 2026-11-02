@@ -109,7 +109,7 @@ describe("the settings a message would run under", () => {
         { name: "shell", natives: { "claude-code": "Bash", "claude-cli": "Bash", "codex-cli": "shell" } },
         { name: "read_file", natives: { "claude-code": "Read", "claude-cli": "Read" } },
         { name: "write_file", natives: { "claude-code": "Write", "claude-cli": "Write" } },
-        // No agent has a built-in doing this job, so there is nothing to pick.
+        // Claude Code's own publishes to claude.ai (decision 0020), so there is nothing to pick.
         { name: "show_artifact" },
       ]),
     );
