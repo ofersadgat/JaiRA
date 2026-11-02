@@ -16,7 +16,8 @@ function inlineWorkers(): Plugin {
     name: "jaira-island-inline-workers",
     enforce: "pre",
     transform(code, id) {
-      if (process.env["ISLAND_WORKERS"] === "file" || !id.replaceAll("\\", "/").endsWith("/renderer/monacoDiff.tsx")) return null;
+      // Monaco's workers are started from codeview's setup, which JaiRA shares with topodiff.
+      if (process.env["ISLAND_WORKERS"] === "file" || !id.replaceAll("\\", "/").endsWith("/codeview/src/monaco/setup.ts")) return null;
       return code.replace(/\?worker"/g, '?worker&inline"');
     },
   };
@@ -75,6 +76,9 @@ export default defineConfig({
       { find: "@jaira/shared/browser", replacement: local("../../shared/src/browser.ts") },
       { find: "@jaira/shared", replacement: local("../../shared/src/index.ts") },
     ],
+    // codeview, the editors shared with topodiff, is linked from beside this checkout with copies of its
+    // own for its tests; the page must hold one React and one Monaco.
+    dedupe: ["react", "react-dom", "monaco-editor"],
   },
   build: {
     outDir: local(`../dist-island/${ISLAND}`),

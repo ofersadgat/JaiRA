@@ -154,11 +154,15 @@ const NOTICE_TEXT_EXTENSIONS = new Set([
   ".txt",
   ".unlicense",
 ]);
-/** JaiRA's own packages, and declarative-ai's, which it is built on: walked through, never listed. */
+/**
+ * JaiRA's own packages, declarative-ai's, which it is built on, and codeview, the editors it shares with
+ * topodiff: walked through, never listed.
+ */
 const FIRST_PARTY_PACKAGE_PREFIXES = ["@jaira/", "@declarative-ai/"];
+const FIRST_PARTY_PACKAGES = new Set(["jaira", "codeview"]);
 
 function isFirstParty(name: string): boolean {
-  return name === "jaira" || FIRST_PARTY_PACKAGE_PREFIXES.some((prefix) => name.startsWith(prefix));
+  return FIRST_PARTY_PACKAGES.has(name) || FIRST_PARTY_PACKAGE_PREFIXES.some((prefix) => name.startsWith(prefix));
 }
 
 function isNoticeTextFile(fileName: string): boolean {
