@@ -97,6 +97,10 @@ export default {
     }),
     licenses(),
   ],
+  // codeview, the editors shared with topodiff, ships its source, and its Monaco workers are `?worker`
+  // imports, which only Vite's own pipeline understands: it is compiled with the page rather than
+  // pre-bundled. What it imports is then not scanned, so react-dom, which is CommonJS, is named here.
+  optimizeDeps: { exclude: ["codeview"], include: ["react-dom"] },
   resolve: {
     alias: [
       { find: "@jaira/ui", replacement: local("../app/src/renderer") },
@@ -104,9 +108,6 @@ export default {
       { find: "@jaira/shared/browser", replacement: local("../shared/src/browser.ts") },
       { find: "@jaira/shared", replacement: local("../shared/src/index.ts") },
     ],
-    // codeview, the editors shared with topodiff, is linked from beside this checkout with copies of its
-    // own for its tests; the page must hold one React and one Monaco.
-    dedupe: ["react", "react-dom", "monaco-editor"],
   },
   build: {
     target: "chrome122",

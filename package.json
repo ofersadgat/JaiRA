@@ -36,5 +36,8 @@
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-native-webview": "13.16.1"
+  },
+  "dependencies": {
+    "codeview": "git+https://gitlab.com/mistlabs/codeview.git#main"
   }
 }

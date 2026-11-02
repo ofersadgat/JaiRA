@@ -29,6 +29,9 @@ export default defineConfig({
     environment: "node",
     // Redirects the shared base root away from the developer's real `~/.jaira` — see test/setup.ts.
     setupFiles: ["./test/setup.ts"],
+    // codeview, the editors shared with topodiff, ships TypeScript source, so it is compiled here
+    // rather than handed to Node as it is.
+    server: { deps: { inline: ["codeview"] } },
     // Vitest's 5 s default is a unit-test budget, and most of this suite is not unit tests: a service
     // test opens a real project, runs whole tasks through the engine and closes it again — 1-2 s
     // alone, and 4 s or more for 139 passing tests when all 345 files share the machine. The default
