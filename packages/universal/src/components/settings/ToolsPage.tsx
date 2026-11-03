@@ -13,6 +13,7 @@ import { functionRulesOverlay } from "@jaira/ui/modelsPageModel";
 import { FunctionsSections } from "./FunctionsSections";
 import { goToPart } from "./parts";
 import { PermissionSetsSection } from "./permissions/PermissionSets";
+import { standingLayersOf } from "@jaira/ui/permissionSetsHost";
 
 /**
  * Settings → Tools: the permission sets, the functions a run can call, the events and the automations
@@ -25,13 +26,14 @@ export function ToolsPage(): JSX.Element {
   const automationsChannel = useMemo(() => automationsChannelOf(state.at), [state.at]);
   const mcp = useMcpData(true, state.config);
   const [data, setData] = useState<PermissionSetsData | null>(null);
+  const standing = useMemo(() => standingLayersOf(state.config), [state.config]);
   const [focus, setFocus] = useState<{ id: string; nonce: number } | undefined>(undefined);
   const editable = state.configLayer !== "project" || state.at !== null;
   const eventsProject = eventsProjectOf(state.configLayer, state.at);
   const eventStatus = useEventStatus(() => invoke("events:status", { project: eventsProject }), eventsProject);
   return (
     <>
-      <PermissionSetsSection key={state.at ?? "shared"} channel={channel} layer={state.configLayer} busy={state.busy} focus={focus} onData={setData} mcp={mcp.report?.servers} />
+      <PermissionSetsSection key={state.at ?? "shared"} channel={channel} layer={state.configLayer} busy={state.busy} focus={focus} onData={setData} mcp={mcp.report?.servers} standing={standing} />
       <FunctionsSections
         data={data}
         layer={state.configLayer}

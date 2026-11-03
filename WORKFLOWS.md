@@ -882,9 +882,10 @@ the same rule.
   ```
 
   - **Present means offered, with that mode. Absent means not offered.** The
-    modes are `allow`, `ask`, `deny` — and a **function**, `{ "function": "smart" }`,
-    which decides each call (below). `"smart"` as a word is refused: it is the
-    function JaiRA ships, and a line names it as one.
+    modes are `allow`, `ask`, `deny` — and a **function**: any other string,
+    `"smart"` or a name of yours, decides each call (below). `unavailable` is a
+    fourth word: the model is not handed the tool at all. A value may also be a
+    **map of places**, `{ "src": "allow", "**": "ask" }` (decision 0023).
   - A **subject** is a standard tool (`read_file`, `glob`, `grep`, `edit`,
     `write_file`, `show_artifact`, `shell`, `web_fetch`, `web_search`), a
     **command** (`git commit`, or `git` for every command of that program),
@@ -1007,10 +1008,10 @@ the same rule.
   ```jsonc
   "tools": {
     "read_file": "allow",
-    "shell": { "function": "smart" },                       // JaiRA's own
-    "write_file": { "function": "policy.judgeWrite" },     // a module of yours
-    "git push": { "function": "$BASE/functions/push_ok" }, // a rooted document
-    "edit": { "function": "smart", "implementation": "native" },
+    "shell": "smart",                                       // JaiRA's own
+    "write_file": "policy.judgeWrite",                      // a module of yours
+    "git push": "$BASE/functions/push_ok",                  // a rooted document
+    "edit": { "mode": "smart", "implementation": "native" },
     "other": "deny"
   }
   ```
@@ -1050,7 +1051,7 @@ the same rule.
     `allow`, `deny` or `unsure`, and `unsure` calls the approval prompt. Its model
     and what it is told are `functions.smart.model` and `functions.smart.prompt` in
     `settings.json` (Settings → Tools → Functions a workflow calls); a file named `smart` on the path replaces
-    it outright. The shipped `auto` permission sets give every line `{ "function": "smart" }`.
+    it outright. The shipped `auto` permission sets give every line `"smart"`.
 
   `"shell": "deny"` with no command and no `script` entry that allows, asks or
   names a function leaves nothing for the shell to run, so the shell is **withheld**: the

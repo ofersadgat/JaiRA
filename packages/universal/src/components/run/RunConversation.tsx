@@ -293,7 +293,7 @@ export function RunComposer({
         onOverrides={changeOverrides}
         onSend={send}
         onStop={stop}
-        onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
+        stack={{ project, taskId }}
         {...(disabled !== undefined ? { disabled } : {})}
       />
     </>

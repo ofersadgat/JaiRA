@@ -28,7 +28,8 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "fileAdd" | "fileDel" | "fileEdit"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
-  | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow" | "pause", string[]> = {
+  | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow" | "pause"
+  | "eyeOff" | "layers", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -68,6 +69,12 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   lock: ["M6 11h12v9H6z", "M9 11V7a3 3 0 0 1 6 0v4"],
   unlocked: ["M6 11h12v9H6z", "M9 11V7a3 3 0 0 1 5.9-.7"],
   star: ["m12 3 2.6 5.6 6.1.8-4.5 4.2 1.2 6-5.4-3-5.4 3 1.2-6L3.3 9.4l6.1-.8Z"],
+  // A line that is `unavailable` (decision 0023 §1): the eye that reads, struck through — the agent
+  // is never shown the tool at all.
+  eyeOff: ["M3 3l18 18", "M10.6 6.1A10 10 0 0 1 12 6c6.5 0 10 6 10 6a17 17 0 0 1-3.2 3.8", "M6.6 7.6C3.9 9.3 2 12 2 12s3.5 6 10 6a9.6 9.6 0 0 0 4-.9"],
+  // A permission set that names no icon of its own and is not one that ships: sheets laid one on
+  // another, as a set is a layer of a stack (decision 0023 §4.1).
+  layers: ["m12 3 9 5-9 5-9-5Z", "m3 13 9 5 9-5"],
   pencil: ["M4 20h4L19 9a2.1 2.1 0 0 0-3-3L5 17Z", "M14.5 6.5 17.5 9.5"],
   plan: ["M6 3h9l4 4v14H6z", "M9 9h6", "M9 13h6", "M9 17h4"],
   // The two ways concurrent sessions can be arranged, drawn as the arrangement itself: two panes

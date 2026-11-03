@@ -104,6 +104,8 @@ export function approvalOf(surface: GallerySurface, doc: Record<string, unknown>
     // policy behind it to take a line apart, and a sample is the place to see exactly what one carries.
     ...(isRecord(doc["parts"]) ? { parts: doc["parts"] as unknown as NonNullable<PendingApproval["parts"]> } : {}),
     ...(isRecord(doc["permissionSet"]) ? { permissionSet: doc["permissionSet"] as unknown as NonNullable<PendingApproval["permissionSet"]> } : {}),
+    ...(Array.isArray(doc["layers"]) ? { layers: doc["layers"] as unknown as NonNullable<PendingApproval["layers"]> } : {}),
+    ...(stringAt(doc, "defaultLayer") !== undefined ? { defaultLayer: stringAt(doc, "defaultLayer")! } : {}),
     input: (doc["input"] ?? {}) as Record<string, JsonValue>,
     project: GALLERY_PROJECT,
     at: 0,

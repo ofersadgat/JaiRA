@@ -17,7 +17,8 @@
  * part that is tested.
  */
 import {
-  MODE_WHEN_UNSET,
+  entryDeclOf,
+  modeWord,
   parsePermissionSet,
   PERMISSION_SET_LAYER_LABELS,
   PERMISSION_SET_REF_KEY,
@@ -110,17 +111,16 @@ export function permissionSetOfLines(lines: PermissionSetDecl): PermissionSet {
 /**
  * A {@link Permission set} of lines, back as the map a state writes.
  *
- * NOT `declOfPermissionSet`: that one always writes `other`, because a whole permission set should say what
- * happens to everything it does not name. Lines over a permission set say only what they change — writing
+ * Every line as written (`entryDeclOf`: a function by its name, a place map, `unavailable`), and
+ * `other` only when a line writes it: lines over a permission set say only what they change — writing
  * `other` here would override the permission set's own on every state that was opened in the form.
+ * Unlike `declOfPermissionSet`, a tool line is kept whether or not it is held, since these are lines
+ * over a set rather than a whole one.
  */
 export function linesOfPermissionSet(permissionSet: PermissionSet): PermissionSetDecl {
   const out: PermissionSetDecl = {};
-  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    const mode = entry.mode ?? MODE_WHEN_UNSET;
-    out[subject] = entry.kind === "tool" && entry.implementation === "native" ? { mode, implementation: "native" } : mode;
-  }
-  if (permissionSet.other !== undefined) out["other"] = permissionSet.other;
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) out[subject] = entryDeclOf(entry);
+  if (permissionSet.other !== undefined) out["other"] = modeWord(permissionSet.other);
   return out;
 }
 

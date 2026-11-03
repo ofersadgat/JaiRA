@@ -42,11 +42,12 @@ import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, U
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
 import type { SyncPage } from "./sync";
-import type { CommandApproval } from "./commandParts";
+import type { CommandApproval, PartAnswer } from "./commandParts";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
 import type { McpDetectedSource, McpToolsReport } from "./mcp";
 import type { PermissionSetsView, PermissionSetWriteKind } from "./permissionSetSettings";
+import type { OwnPermissionSet, PermissionSetScope, PermissionSetTree, PermissionSetTreeSet, PermissionStackView } from "./permissionSetTree";
 import type { EventsStatusView } from "./repoWatch";
 import type {
   BoardView,
@@ -204,6 +205,17 @@ export interface PendingApproval {
    * answer menu's "add to the permission set" offers. Absent when no permission set judged the call.
    */
   permissionSet?: ApprovalPermissionSet;
+  /**
+   * The STACK the call was judged under, NEWEST first (decision 0023 §2.6, §4.4) — what the dialog's
+   * "Add to [layer ⌄]" lists: each layer with where it lives and where a line for it can be written.
+   * Absent when the call was judged by no stack (a state lowered before stacks, the built-ins alone).
+   */
+  layers?: ApprovalLayer[];
+  /**
+   * The layer "Add to" starts on (§2.8): this project's newest standing layer for the bucket, else the
+   * set that asked, else the newest layer that can be written. Absent when none can.
+   */
+  defaultLayer?: string;
   input: Record<string, JsonValue>;
   taskId?: string;
   /** The workflow instance whose operation asked — what a run view draws the prompt under. */
@@ -255,6 +267,22 @@ export interface ApprovalPermissionSet {
   unwritable?: string;
 }
 
+/** One layer of the stack an approval lists for "Add to" (decision 0023 §4.4). */
+export interface ApprovalLayer {
+  /** As the parts' rows name it: `chat/ask-first`, `app/build`, `inline`, `runtime`, `tools`. */
+  id: string;
+  /** Where it lives — `built in`, `global`, `project`, `runtime`, `this conversation`, `this state`. */
+  scope: PermissionSetScope;
+  /** The files a line for this layer can be written into, nearest first. Empty ⇒ {@link unwritable} says why. */
+  targets: ApprovalPermissionSetTarget[];
+  unwritable?: string;
+  /**
+   * Writing it changes that set for EVERYONE who uses it (§2.8): a set that ships, which is written as
+   * a project or shared copy every conversation and state naming it then reads. The menu says so.
+   */
+  everyone?: true;
+}
+
 /** How long an approval answer applies (upstream's PermissionScope). */
 export type ApprovalScope = "once" | "session" | "workflow-run" | "always";
 
@@ -277,6 +305,49 @@ export interface SubmitApprovalRequest {
    * write that fails refuses the submit and leaves the request parked.
    */
   addTo?: WritableLayer;
+  /**
+   * WHERE the answer holds (decision 0023 §3.8, §4.4): one of the asking parts' `where.widths` places
+   * (`packages`, `$PROJECT`, `claude/**`, `**`). "For this run" keeps it at that place; "Add to" writes
+   * it as a place on the line (`"npm run build": { "packages": "deny" }`), merged into what the line
+   * says already. Absent: at the widths, everywhere — a plain line.
+   */
+  place?: string;
+  /**
+   * WHICH layer of the stack "Add to" writes into (§2.8), by its id from {@link PendingApproval.layers}
+   * (`app/build`). Absent: the set that asked (`CommandApproval.permissionSet`). `addTo` is still which
+   * scope's FILE of it is written — this project's or the shared root's.
+   */
+  layer?: string;
+  /**
+   * The ROWS answered one by one (decision 0023 ruling 7, §4.4): per asking part, allow or deny at its
+   * own width, place and reach — every part that asks, since Continue answers the ones left with its
+   * own choice. When present, `remember`, `addTo`, `place` and `layer` are not read, and `decision`
+   * must be what the rows come to (`partAnswersDecision`): `allow` only when every part that asks is
+   * allowed. A denied row refuses the call and the other rows' answers are still kept. Every write is
+   * made before the call is answered, so a write that fails leaves the question parked.
+   */
+  answers?: PartAnswer[];
+}
+
+/**
+ * Which stack a set-browser read is about (decision 0023 §4.1): the composer's settings as they stand
+ * (`ChatSettings.permissionSet`, `layers` and the tools layer's lines), else the conversation `taskId`
+ * keeps (`TaskMeta.chatSettings`). `taskId` also brings in that task's runtime layer.
+ */
+export interface PermissionSetTreeRequest {
+  project?: ProjectRef;
+  taskId?: string;
+  permissionSet?: Record<string, unknown>;
+}
+
+/** Save a stack as a set FILE (§7.4): `{ "layers": [ … ], …the tools layer's own lines }`, in a writable scope. */
+export interface SavePermissionStackRequest {
+  project?: ProjectRef;
+  layer: WritableLayer;
+  bucket: string;
+  name: string;
+  /** The stack, as `ChatSettings.permissionSet` holds it — `layers` oldest first, and the tools layer's own lines. */
+  permissionSet: Record<string, unknown>;
 }
 
 /** One choice a {@link PendingQuestion}'s question offers. */
@@ -2294,6 +2365,24 @@ export interface IpcContract {
   /** Whether each call is one the project's read-only set lets through, by id; `null` where no set holds it — see {@link JudgeReadOnlyRequest}. */
   "permissionSets:judgeReadOnly": { request: JudgeReadOnlyRequest; response: Record<string, boolean | null> };
   /**
+   * Every permission set FILE as the set browser draws it (decision 0023 §4.1): scopes → buckets → sets,
+   * each with its icon and whether it is in the stack named — `permissionSet` (a composer's settings), or
+   * the conversation `taskId` keeps — with the runtime scope when a task is named.
+   */
+  "permissionSets:tree": { request: PermissionSetTreeRequest; response: PermissionSetTree };
+  /** One set file's OWN lines — what a segment's popover draws under its crumbs (ruling 10). */
+  "permissionSets:own": { request: { project?: ProjectRef; reference: string }; response: OwnPermissionSet };
+  /** A stack COMPOSED, every line with the layer that decided it and each place with its own (§7.4 "Everything"). */
+  "permissionSets:stack": { request: PermissionSetTreeRequest; response: PermissionStackView };
+  /** Save a stack as a set file — its `layers` and its tools layer's own lines (§7.4 "save this stack as a set"). */
+  "permissionSets:saveStack": { request: SavePermissionStackRequest; response: PermissionSetTreeSet };
+  /**
+   * Let go of this task's answers "for this run" — the runtime layer (§4.1, the `runtime` segment):
+   * those `keys` name (`width`, or `width @ place`, as {@link PermissionStackView.runtime} lists them),
+   * or every one when `keys` is absent (`clear`). Answers what is kept after.
+   */
+  "permissionSets:forgetRuntime": { request: { project?: ProjectRef; taskId: string; keys?: string[] }; response: Record<string, "allow" | "deny"> };
+  /**
    * What Settings → Tools → Events shows (decision 0010 §2): the project's git remotes from its own
    * `.git/config` — or the shared root's, with no project named — each with its connection and how
    * the repository watcher stands with it, and what has arrived per event. Read-only; asks no forge.
@@ -2629,6 +2718,11 @@ export const IPC_CHANNELS = [
   "permissionSets:write",
   "permissionSets:reset",
   "permissionSets:judgeReadOnly",
+  "permissionSets:tree",
+  "permissionSets:own",
+  "permissionSets:stack",
+  "permissionSets:saveStack",
+  "permissionSets:forgetRuntime",
   "events:status",
   "notices:list",
   "desktop:driving",

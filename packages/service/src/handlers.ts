@@ -11,7 +11,7 @@
 import { resolve } from "node:path";
 import type { DetectSchemaRequest, InputSourcesRequest, IpcChannel, TaskAdoptRequest, TaskConnectRequest, TaskConnectUndoRequest, TaskMoveRequest, CopyChoice } from "@jaira/shared";
 import type { JsonValue } from "@declarative-ai/json";
-import type { HealthItem, LogLevel, MachineForm } from "@jaira/shared";
+import type { HealthItem, LogLevel, MachineForm, SubmitApprovalRequest } from "@jaira/shared";
 import type { EngineHostInfo } from "./enginePipe";
 import type { EngineClientInfo } from "./engineHost";
 import type { AppService, CrashKind } from "./service";
@@ -184,8 +184,8 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "interaction:submit": ((request: { requestId: string; value: never }) =>
       service.submitInteraction(request.requestId, request.value)) as Handler,
     "approval:pending": (() => service.pendingApprovals()) as Handler,
-    "approval:submit": ((request: { requestId: string; decision: "allow" | "deny"; scope?: never; remember?: string[]; addTo?: "project" | "base" }) =>
-      service.submitApproval(request.requestId, request.decision, request.scope, request.remember, request.addTo)) as Handler,
+    "approval:submit": ((request: SubmitApprovalRequest) =>
+      service.submitApproval(request.requestId, request.decision, request.scope, request.remember, request.addTo, request.place, request.layer, request.answers)) as Handler,
     "userEvent:pending": (() => service.pendingUserEvents()) as Handler,
     "userEvent:deliver": ((request: { requestId: string }) => service.deliverUserEvent(request.requestId)) as Handler,
     "task:move": ((request: TaskMoveRequest) => service.moveTask(request)) as Handler,
@@ -246,6 +246,11 @@ function localHandlers(service: AppService): Record<ServiceChannel, Handler> {
     "permissionSets:judgeReadOnly": ((request: Parameters<typeof service.judgeReadOnly>[0]) => service.judgeReadOnly(request)) as Handler,
     "permissionSets:write": ((request: Parameters<typeof service.writePermissionSetSettings>[0]) => service.writePermissionSetSettings(request)) as Handler,
     "permissionSets:reset": ((request: Parameters<typeof service.resetPermissionSetSettings>[0]) => service.resetPermissionSetSettings(request)) as Handler,
+    "permissionSets:tree": ((request: Parameters<typeof service.permissionSetTree>[0]) => service.permissionSetTree(request)) as Handler,
+    "permissionSets:own": ((request: Parameters<typeof service.ownPermissionSet>[0]) => service.ownPermissionSet(request)) as Handler,
+    "permissionSets:stack": ((request: Parameters<typeof service.permissionStack>[0]) => service.permissionStack(request)) as Handler,
+    "permissionSets:saveStack": ((request: Parameters<typeof service.savePermissionStack>[0]) => service.savePermissionStack(request)) as Handler,
+    "permissionSets:forgetRuntime": ((request: Parameters<typeof service.forgetRuntimeAnswers>[0]) => service.forgetRuntimeAnswers(request)) as Handler,
     "events:status": ((request: Parameters<typeof service.readEventStatus>[0]) => service.readEventStatus(request)) as Handler,
     "notices:list": (() => service.notices()) as Handler,
     "desktop:driving": (() => service.driving()) as Handler,

@@ -8,7 +8,7 @@
  * spans off the end of the line.
  */
 import { describe, expect, it } from "vitest";
-import { parsePermissionSet, type CommandApproval, type CommandPart, type PendingApproval } from "@jaira/shared";
+import { parsePermissionSet, partAnswersDecision, partAnswersProblem, partApproval, type CommandApproval, type CommandPart, type PendingApproval } from "@jaira/shared";
 import { decideCommand } from "@jaira/runtime";
 // Not part of the runtime's public surface: the policy is normally handed a lowered block, and this
 // is the one step that turns an authored map into what `decideCommand` takes.
@@ -16,11 +16,22 @@ import { shellPermissionSetOf } from "../../runtime/src/commandParts";
 import {
   additionOf,
   answerMenu,
+  answerWordsOf,
   approvalAnswerOf,
+  bottomOf,
+  choiceOfAnswer,
+  continueAnswerOf,
+  continueMenu,
   hueOf,
+  layerNameOf,
+  layerOptionsOf,
   lineSegments,
   partRows,
+  provenanceOf,
   reasonLines,
+  rowAnswerOf,
+  rowPanel,
+  middleOut,
   shortFile,
   whatChoices,
   widthsOf,
@@ -74,6 +85,32 @@ describe("the line in the colours of its parts", () => {
     const approval = judge(line);
     expect(approval.parts.map((p) => p.within)).toEqual([undefined, 0, undefined, undefined]);
     expect(sketch(lineSegments(line, approval.parts))).toBe("[0:_find_ . -name '*.tmp' -exec ][1:_rm_ {}][0: \\;] | [2:_tee_ cleaned.log] [3:_>_ out.txt]");
+  });
+
+  it("draws what a runner runs indented under it, and says so rather than repeating the line", () => {
+    const part = (subject: string, text: string, verdict: CommandPart["verdict"], extra: Partial<CommandPart> = {}): CommandPart => ({
+      span: { start: 0, end: 13 },
+      matched: [{ start: 0, end: 3 }],
+      text,
+      kind: "command",
+      subject,
+      verdict,
+      decidedBy: { source: "default", reason: "" },
+      widths: [],
+      ...extra,
+    });
+    const rows = partRows({
+      line: "npm run build",
+      dialect: "powershell",
+      verdict: "asks",
+      parts: [part("runner:npm", "npm run build", "allowed", { kind: "runner" }), part("script", "npm run build", "asks", { within: 0 }), part("git status", "git status", "allowed", { within: 1, via: ["npm run build"] })],
+    });
+    expect(rows.map((r) => [r.depth, r.pieces.map((p) => p.text).join("")])).toEqual([
+      [0, "npm run build"],
+      [1, "what it runs"],
+      [2, "git status"],
+    ]);
+    expect(rows[2]!.note).toBeUndefined();
   });
 
   it("dims an embedder that is no request itself, and tints what it embeds", () => {
@@ -232,5 +269,241 @@ describe("the answer menu", () => {
   it("shortens a nested bucket's path to its ends", () => {
     expect(shortFile(".jaira/permission-sets/chat/ask-first.json")).toBe(".jaira/permission-sets/…/ask-first.json");
     expect(shortFile("elsewhere.json")).toBe("elsewhere.json");
+  });
+});
+
+/**
+ * Design 4D (decision 0023 ruling 7, §4.4): the rows answered one by one, over a stack. The line is
+ * the mockup's — `npm --workspace @jaira/client run build`, its script's `one build` and the inline
+ * `node -e` it runs — hand-built, since what the policy reports about a stack is pinned where the stack
+ * is judged (`approvalPermissionSet.test.ts`); here it is what is DRAWN and what is SENT.
+ */
+describe("the rows, answered one by one", () => {
+  const where = (at: string): CommandPart["where"] => ({
+    kind: "path",
+    at,
+    widths: [
+      { width: "this", place: at },
+      { width: "folder", place: "packages" },
+      { width: "project", place: "$PROJECT" },
+      { width: "anywhere", place: "**" },
+    ],
+  });
+  const part = (text: string, subject: string, verdict: CommandPart["verdict"], decidedBy: CommandPart["decidedBy"], widths: string[], extra: Partial<CommandPart> = {}): CommandPart => ({
+    span: { start: 0, end: 0 },
+    matched: [],
+    text,
+    kind: "command",
+    subject,
+    verdict,
+    decidedBy,
+    widths,
+    ...extra,
+  });
+  const ASKS = (entry: string): CommandPart["decidedBy"] => ({ source: "permissionSet", entry, layer: "chat/ask-first", reason: `the permission set's '${entry}' is ask` });
+  const LINE = "npm --workspace @jaira/client run build";
+  const APPROVAL: CommandApproval = {
+    line: LINE,
+    dialect: "powershell",
+    verdict: "asks",
+    permissionSet: "$/permission-sets/chat/ask-first",
+    stack: ["runtime", "web/docs-sites", "project/build-safe", "chat/ask-first"],
+    parts: [
+      part(LINE, "runner:npm", "asks", ASKS("runner:npm"), ["runner:npm"], { kind: "runner" }),
+      part("npm run build:client", "npm run build", "allowed", { source: "permissionSet", entry: "npm run build", place: "packages/client", layer: "project/build-safe", reason: "" }, ["npm run build", "npm"], { within: 0, where: where("packages/client") }),
+      part("one build", "one build", "asks", ASKS("shell"), ["one build", "one"], { within: 1, where: where("packages/client") }),
+      part(`node -e "…rmSync(\`dist/client\`)…"`, "script", "asks", ASKS("script"), ["script"], { kind: "script", within: 1 }),
+    ],
+  };
+  const LAYERS: NonNullable<PendingApproval["layers"]> = [
+    { id: "runtime", scope: "runtime", targets: [], unwritable: "This task's own answers — answer For this run to add to it." },
+    { id: "web/docs-sites", scope: "global", targets: [{ layer: "project", file: ".jaira/permission-sets/web/docs-sites.json", follows: "$/permission-sets/web/docs-sites" }] },
+    { id: "project/build-safe", scope: "project", targets: [{ layer: "project", file: ".jaira/permission-sets/project/build-safe.json" }] },
+    {
+      id: "chat/ask-first",
+      scope: "built in",
+      everyone: true,
+      targets: [
+        { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
+        { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
+      ],
+    },
+  ];
+  const PENDING: PendingApproval = { ...pendingOf(APPROVAL), layers: LAYERS, defaultLayer: "project/build-safe" };
+
+  it("says on each row who decided, with its layer and place", () => {
+    const rows = partRows(APPROVAL);
+    expect(rows.map((r) => r.who)).toEqual([
+      "ask-first asks · no layer above names it",
+      "in packages/client · build-safe allows",
+      "in packages/client · ask-first asks · no layer names one build",
+      "ask-first asks · no layer above names it",
+    ]);
+    // The fallback's words give way to the layer's; what a runner runs stays indented under it.
+    expect(rows[2]!.note).toBe("in packages/client · ask-first asks · no layer names one build");
+    expect(rows.map((r) => r.depth)).toEqual([0, 1, 2, 2]);
+    // The runtime hands the place the part is about absolute; the row names it as a line would write it.
+    const absolute = { ...APPROVAL.parts[2]!, where: { ...where("packages/client")!, at: "C:/work/repo/packages/client" } };
+    expect(provenanceOf(APPROVAL, absolute)).toBe("in packages/client · ask-first asks · no layer names one build");
+    // A layer that is no file is named by what it is.
+    expect(provenanceOf(APPROVAL, { ...APPROVAL.parts[0]!, verdict: "allowed", decidedBy: { source: "remembered", layer: "runtime", reason: "" } })).toBe("this run allows");
+    expect(layerNameOf("inline")).toBe("this state");
+    expect(layerNameOf("tools")).toBe("the tools layer");
+    // No layer decided (a built-in): no layer words, and the row keeps its own reason.
+    expect(provenanceOf(APPROVAL, { ...APPROVAL.parts[0]!, decidedBy: { source: "builtin", reason: "pushes publish work" } })).toBeUndefined();
+  });
+
+  it("names the stack, oldest first, in place of the set and its entries", () => {
+    expect(reasonLines(PENDING)).toEqual([{ kind: "stack", layers: ["chat/ask-first", "project/build-safe", "web/docs-sites"], thisRun: true }]);
+  });
+
+  it("opens a row's panel on What, Where and How far — narrowest first, once, the default layer — answering nothing", () => {
+    const panel = rowPanel(PENDING, 2);
+    expect(panel.what).toMatchObject({ chosen: "one build", options: [{ width: "one build", program: false }, { width: "one", program: true }] });
+    expect(panel.where!.options.map((o) => [o.label, o.place])).toEqual([
+      ["packages/client", "packages/client"],
+      ["packages", "packages"],
+      ["this project", "$PROJECT"],
+      ["anywhere", undefined],
+    ]);
+    expect(panel.where!.chosen).toBe("packages/client");
+    expect(panel.reach.map((r) => [r.reach, r.name, r.disabled])).toEqual([
+      ["once", "Once", undefined],
+      ["run", "For this run", undefined],
+      ["add", "Add to", undefined],
+    ]);
+    expect(panel.reach[1]!.hint).toEqual(['joins "this run", the top layer; nothing is written']);
+    expect(panel.chosenReach).toBe("once");
+    // Newest layer first, each file of it; the runtime layer is "For this run", not a file.
+    expect(panel.layers.map((o) => [o.name, o.layer, o.addTo, o.everyone])).toEqual([
+      ["docs-sites", "web/docs-sites", "project", false],
+      ["build-safe", "project/build-safe", "project", false],
+      ["ask-first, in this project", "chat/ask-first", "project", true],
+      ["ask-first, for all projects", "chat/ask-first", "base", true],
+    ]);
+    expect(panel.chosenLayer!.id).toBe("project/build-safe");
+    // The line it would write, shown before Deny or Allow is pressed.
+    expect(panel.line).toBe('"one build": { "packages/client": … }');
+  });
+
+  it("shows the line at the place and in the layer chosen, and says when the layer is a shipped preset", () => {
+    const panel = rowPanel(PENDING, 2, { place: "packages", reach: "add" });
+    expect(panel.chosenReach).toBe("add");
+    expect(panel.reach[2]!.hint).toEqual(["writes ", { code: '"one build": { "packages": … }' }, " to .jaira/permission-sets/…/build-safe.json when you continue"]);
+    const preset = rowPanel(PENDING, 2, { width: "one", place: "**", reach: "add", layer: "chat/ask-first|base" });
+    expect(preset.line).toBe('"one": …');
+    expect(preset.reach[2]!.hint).toEqual([
+      "creates ~/.jaira/permission-sets/…/ask-first.json with ",
+      { code: '"one": …' },
+      ", following the built-in permission set, when you continue",
+      " — changes that set for everyone who uses it",
+    ]);
+  });
+
+  it("answers the row with the button pressed, at the reach chosen — a deny as well as an allow, written into a layer", () => {
+    expect(rowAnswerOf(PENDING, 2, { place: "packages", reach: "add" }, "deny")).toEqual({ decision: "deny", reach: "add", width: "one build", place: "packages", layer: "project/build-safe", addTo: "project" });
+    expect(rowAnswerOf(PENDING, 2, { width: "one", place: "**", reach: "run" }, "allow")).toEqual({ decision: "allow", reach: "run", width: "one" });
+    expect(rowAnswerOf(PENDING, 2, {}, "allow")).toEqual({ decision: "allow", reach: "once", width: "one build", place: "packages/client" });
+    // Reopened, the panel shows what was chosen.
+    const given = rowAnswerOf(PENDING, 2, { place: "packages", reach: "add", layer: "chat/ask-first|project" }, "deny");
+    expect(rowAnswerOf(PENDING, 2, choiceOfAnswer(PENDING, given), "deny")).toEqual(given);
+    expect(answerWordsOf(PENDING, 2, given)).toBe("you deny one build · added to ask-first, in this project · in packages");
+    expect(answerWordsOf(PENDING, 2, { decision: "allow", reach: "run", width: "one" })).toBe("you allow every one command · for this run");
+  });
+
+  it("offers a part with no place no Where, and a part nobody could read only Once", () => {
+    expect(rowPanel(PENDING, 3).where).toBeUndefined();
+    const unread: PendingApproval = { ...PENDING, parts: { ...APPROVAL, parts: [part("$CMD x", "shell", "asks", { source: "parser", reason: "what runs is decided at run time" }, [])] } };
+    const panel = rowPanel(unread, 0, { reach: "run" });
+    expect(panel.what).toBeUndefined();
+    expect(panel.chosenReach).toBe("once");
+    expect(panel.reach.filter((r) => r.disabled !== undefined).map((r) => r.reach)).toEqual(["run", "add"]);
+    expect(panel.notes[0]).toMatch(/could not be read/);
+  });
+
+  it("says why nothing can be added when no layer can be written, and falls back to the set that asked when there is no stack", () => {
+    const unwritable = "These lines are written on the state itself, so there is no permission set file to add a line to.";
+    const inline: PendingApproval = { ...PENDING, parts: { ...APPROVAL, permissionSet: "inline", stack: ["inline"] }, layers: [{ id: "inline", scope: "this state", targets: [], unwritable }] };
+    const panel = rowPanel(inline, 2, { reach: "add" });
+    expect(panel.chosenReach).toBe("once");
+    expect(panel.reach[2]!.disabled).toBe(unwritable);
+    const flat: PendingApproval = pendingOf(judge("git commit -m wip"), WRITABLE);
+    expect(layerOptionsOf(flat).map((o) => [o.key, o.layer, o.addTo])).toEqual([
+      ["feature/implementation/writes-asking|project", undefined, "project"],
+      ["feature/implementation/writes-asking|base", undefined, "base"],
+    ]);
+    // With no stack the set that asked is written: no layer is named.
+    expect(rowAnswerOf(flat, 0, { reach: "add", layer: "feature/implementation/writes-asking|base" }, "allow")).toEqual({ decision: "allow", reach: "add", width: "git commit", addTo: "base" });
+  });
+
+  it("keeps the aggregate Allow / Deny until a row is answered by hand, then Continue / Cancel", () => {
+    expect(bottomOf(PENDING, {})).toEqual({ mode: "aggregate" });
+    expect(bottomOf(PENDING, { 2: { decision: "allow", reach: "once" } })).toEqual({ mode: "continue", rest: [0, 3], refuses: false });
+    expect(bottomOf(PENDING, { 2: { decision: "deny", reach: "once" } })).toEqual({ mode: "continue", rest: [0, 3], refuses: true });
+    // A tool with no command line has no rows to answer.
+    expect(bottomOf({ requestId: "a", tool: "write_file", input: {}, project: "p", at: 0 }, {})).toEqual({ mode: "aggregate" });
+  });
+
+  it("gives Continue a menu for the rows still asking, and none when every row was answered", () => {
+    const menu = continueMenu(PENDING, { 2: { decision: "deny", reach: "once" } })!;
+    expect(menu.heading).toBe("Continue answers the 2 rows still asking");
+    expect(menu.what.map((c) => c.part)).toEqual([0, 3]);
+    expect(menu.reach.map((r) => r.name)).toEqual(["Allow once", "Allow for this run"]);
+    expect(continueMenu(PENDING, { 0: { decision: "allow", reach: "once" }, 2: { decision: "allow", reach: "once" }, 3: { decision: "allow", reach: "once" } })).toBeUndefined();
+  });
+
+  it("sends every row: those answered by hand as they were, the rest at Continue's reach — and a denied row refuses the call", () => {
+    const denied = { decision: "deny" as const, reach: "add" as const, width: "one build", place: "packages", layer: "project/build-safe", addTo: "project" as const };
+    expect(continueAnswerOf(PENDING, { 2: denied })).toEqual({
+      decision: "deny",
+      scope: "workflow-run",
+      answers: [
+        { part: 0, decision: "allow", reach: "once" },
+        { part: 2, ...denied },
+        { part: 3, decision: "allow", reach: "once" },
+      ],
+    });
+    // Allowed by hand once, the rest for this run at the width Continue's menu chose: the call runs.
+    expect(continueAnswerOf(PENDING, { 2: { decision: "allow", reach: "once", width: "one build" } }, "run")).toEqual({
+      decision: "allow",
+      scope: "workflow-run",
+      answers: [
+        { part: 0, decision: "allow", reach: "run", width: "runner:npm" },
+        { part: 2, decision: "allow", reach: "once", width: "one build" },
+        { part: 3, decision: "allow", reach: "run", width: "script" },
+      ],
+    });
+    // Every row once: the answer reaches no further than the call.
+    expect(continueAnswerOf(PENDING, { 0: { decision: "allow", reach: "once" } })).toMatchObject({ decision: "allow", scope: "once" });
+    // Added to the set that asked, as the aggregate menu's "Add to" does.
+    expect(continueAnswerOf(PENDING, { 0: { decision: "allow", reach: "once" } }, "add:project").answers.slice(1)).toEqual([
+      { part: 2, decision: "allow", reach: "add", width: "one build", addTo: "project" },
+      { part: 3, decision: "allow", reach: "add", width: "script", addTo: "project" },
+    ]);
+  });
+
+  it("is what the service takes: every answer about a part that asks, at a width and place it offers", () => {
+    const { answers } = continueAnswerOf(PENDING, { 2: rowAnswerOf(PENDING, 2, { place: "packages", reach: "add" }, "deny") });
+    expect(partAnswersProblem(APPROVAL, answers)).toBeUndefined();
+    expect(partAnswersDecision(APPROVAL, answers)).toBe("deny");
+    expect(partAnswersProblem(APPROVAL, [{ part: 1, decision: "allow", reach: "once" }])).toMatch(/not a part of this line that asks/);
+    expect(partAnswersProblem(APPROVAL, [{ part: 2, decision: "allow", reach: "run", place: "elsewhere" }])).toMatch(/not a place/);
+    expect(partAnswersProblem(APPROVAL, [{ part: 2, decision: "allow", reach: "once" }, { part: 2, decision: "deny", reach: "once" }])).toMatch(/twice/);
+    // Alone, a part is judged under nothing.
+    const { within: _within, ...alone } = APPROVAL.parts[2]!;
+    expect(partApproval(APPROVAL, 2).parts).toEqual([alone]);
+  });
+});
+
+describe("a Where choice too long for its chip", () => {
+  it("is cut in the middle, keeping both ends, and one that fits is left whole", () => {
+    expect(middleOut("packages/app/build.mjs")).toBe("packages/app/build.mjs");
+    const long = "packages/some-very-long-workspace-name/src/generated/deeply/nested/build.mjs";
+    const cut = middleOut(long);
+    expect([...cut].length).toBe(44);
+    expect(cut.startsWith("packages/some-ver")).toBe(true);
+    expect(cut.endsWith("nested/build.mjs")).toBe(true);
+    expect(cut).toContain("…");
+    expect(middleOut("abcdefghij", 7)).toBe("ab…ghij");
   });
 });

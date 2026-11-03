@@ -35,12 +35,6 @@ describe("handedToClaude", () => {
     expect(handed.natives).toEqual({ Task: "ask", Agent: "ask", SlashCommand: "ask" });
   });
 
-  it("ignores `scopes`: a table answers per place, and is its own test's business", async () => {
-    const lowered = map({ read_file: "allow", other: "deny" });
-    const scoped: PermissionsDecl = { ...lowered.permissions, scopes: [{ path: "docs/**", tools: { read_file: "allow" } }] };
-    expect(await handedToClaude({ tools: lowered.tools, permissions: scoped })).toEqual(await handedToClaude(lowered));
-  });
-
   it("refuses a block the engine would refuse", async () => {
     await expect(handedToClaude({ tools: ["reed_file"] })).rejects.toThrow(/never reached the agent/);
   });
@@ -58,7 +52,7 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   };
 
   it("hands claude the shell and the tool the function answers for, and each CALL is what the function said", async () => {
-    const decl = { read_file: "allow", write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" };
+    const decl = { read_file: "allow", write_file: "judge", shell: "judge", other: "deny" };
     const handed = await handedToClaude(map(decl), judge);
     // Served like any held line — the function decides calls, not whether the tool exists.
     expect(handed.served).toEqual(["read_file", "shell", "show_artifact", "write_file"]);
@@ -72,7 +66,7 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   });
 
   it("is refused where the function refuses, without anybody being asked", async () => {
-    const handed = await handedToClaude(map({ write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" }), {
+    const handed = await handedToClaude(map({ write_file: "judge", shell: "judge", other: "deny" }), {
       functions: async () => "deny",
     });
     // A way in that is refused is not a way in, and a shell every line of which is refused is not a shell.
@@ -81,26 +75,26 @@ describe("a line that names a FUNCTION, MEASURED (decision 0007, amended 2026-09
   });
 
   it("ASKS where nothing can run the function — a host with no runner lets nothing through", async () => {
-    const handed = await handedToClaude(map({ write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" }));
+    const handed = await handedToClaude(map({ write_file: "judge", shell: "judge", other: "deny" }));
     expect(handed.tools["write_file"]!.decision).toBe("ask");
     expect(handed.shell).toMatchObject({ command: "ask" });
   });
 
   it("forces claude's own natives to the callback for a written `other` that is a function", async () => {
-    const handed = await handedToClaude(map({ read_file: "allow", other: { function: "judge" } }), judge);
+    const handed = await handedToClaude(map({ read_file: "allow", other: "judge" }), judge);
     expect(handed.askRules).toEqual(expect.arrayContaining(["Task", "Agent", "SlashCommand"]));
     expect(handed.natives).toEqual({ Task: "deny", Agent: "deny", SlashCommand: "deny" });
   });
 
   it("serves codex a writer a function answers for over the bridge, each call what the function said — its own sandbox shut", async () => {
-    const handed = await handedToCodex(map({ read_file: "allow", write_file: { function: "judge" }, shell: { function: "judge" }, other: "deny" }), judge);
+    const handed = await handedToCodex(map({ read_file: "allow", write_file: "judge", shell: "judge", other: "deny" }), judge);
     expect(handed.served).toEqual(expect.arrayContaining(["shell", "read_file", "write_file"]));
     expect(handed.tools["write_file"]).toBe("allow");
     expect(handed.shell).toMatchObject({ command: "allow", write: "deny" });
     // Ours serves the line, so codex's own writers are displaced: the sandbox stays read-only.
     expect(handed.sandbox).toBe("read-only");
     // …and one whose line keeps codex's native opens it, the function still judging each call.
-    expect((await handedToCodex(map({ shell: { function: "judge", implementation: "native" }, other: "deny" }), judge)).sandbox).toBe("workspace-write");
+    expect((await handedToCodex(map({ shell: { mode: "judge", implementation: "native" }, other: "deny" }), judge)).sandbox).toBe("workspace-write");
   });
 });
 
@@ -115,11 +109,14 @@ describe("a shell the permission set denies, MEASURED in a run", () => {
 
   it("hands the SHIPPED `chat/read-only` a shell for the commands that only read, judged by the map", async () => {
     const decl = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as unknown;
-    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet));
+    // In a project: the shipped set reads freely in `$PROJECT` and asks elsewhere (decision 0023 §7.1).
+    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet), { workspaceRoot: process.cwd() });
     // Claude's own `Bash` is gone; ours is served, and `git status` and `cat` run where `rm` and a script do not.
     expect(handed.removed).toContain("Bash");
     expect(handed.tools["shell"]).toEqual({ reachable: true, via: ["app"] });
     expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "deny", script: "deny" });
+    // With no project to read in, the same `cat` asks: no place of the line names where it is.
+    expect((await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet))).shell).toMatchObject({ read: "ask" });
   });
 
   it("judges a \"no shell but these commands\" map's lines BY THE MAP, where the project's policy would have run them", async () => {
@@ -193,8 +190,9 @@ describe("handedToCodex — a held tool reaches codex through the MCP bridge, an
     // What decides a call is the permission set's entry, through the gate at the bridge — `ask` reaches a person.
     expect(handed.tools).toMatchObject({ read_file: "allow", write_file: "ask" });
     // A shell line is taken apart and each part judged by the map, as claude's is: the program is named,
-    // `cat` is `read_file`, `rm` is `write_file` (ask), and `./build.sh` is `script`, which falls to `other`.
-    expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "ask", script: "deny" });
+    // `cat` is `read_file`, `rm` is `write_file` (ask), and `./build.sh` is `script`, which — with no
+    // `script` line — is the shell's, then `other`'s (decision 0023 §3.4): the shell's `ask`.
+    expect(handed.shell).toEqual({ command: "allow", read: "allow", write: "ask", script: "ask" });
     // Ours do the writing, under the gate: codex's own writers stay shut in the read-only sandbox.
     expect(handed.sandbox).toBe("read-only");
   });

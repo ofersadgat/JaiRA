@@ -26,7 +26,7 @@ import { CommandGrants, commandDecisionOf, compilePolicy, decideMcpCall } from "
 
 vi.setConfig({ testTimeout: 60_000 });
 
-const map = (decl: Record<string, unknown>): HandedEnvironment => lowerPermissionSet(parsePermissionSet(decl).permissionSet, undefined, "$/permission-sets/chat/mcp");
+const map = (decl: Record<string, unknown>): HandedEnvironment => lowerPermissionSet(parsePermissionSet(decl).permissionSet, "$/permission-sets/chat/mcp");
 const setOf = (decl: Record<string, unknown>) => parsePermissionSet(decl).permissionSet;
 const viewOf = (decl: Record<string, unknown>): McpView => {
   const permissionSet = setOf(decl);
@@ -171,7 +171,7 @@ describe("what an agent is handed", () => {
     // A server whose own line refuses but which names a tool it allows is still handed over.
     expect(Object.keys(handedMcpServers(servers, viewOf({ mcp__pw: "deny", mcp__pw__browser_click: "allow", other: "deny" })))).toEqual(["pw"]);
     // `ask` and a function are answered at the call now, on codex as on claude: the server is handed over.
-    expect(Object.keys(handedMcpServers(servers, viewOf({ mcp__figma: "ask", mcp__pw: { function: "smart" }, other: "deny" })))).toEqual(["figma", "pw"]);
+    expect(Object.keys(handedMcpServers(servers, viewOf({ mcp__figma: "ask", mcp__pw: "smart", other: "deny" })))).toEqual(["figma", "pw"]);
   });
 
   it("is read off each call, and is nothing at all with no server configured", () => {
@@ -238,7 +238,7 @@ describe("an MCP call, MEASURED through the real chain", () => {
   });
 
   it("codex: a tool whose line is a FUNCTION is decided by it at the bridge", async () => {
-    const handed = await handedToCodex(map({ mcp__figma: { function: "judge" }, other: "deny" }), {
+    const handed = await handedToCodex(map({ mcp__figma: "judge", other: "deny" }), {
       mcpServers: servers,
       mcpProbes: ["mcp__figma__get_code"],
       functions: async () => "allow",
@@ -248,7 +248,7 @@ describe("an MCP call, MEASURED through the real chain", () => {
 });
 
 describe("judging an MCP call by name", () => {
-  const permissionSet = setOf({ mcp__figma: "ask", mcp__figma__get_code: "allow", mcp__figma__delete: { function: "smart" }, other: "deny" });
+  const permissionSet = setOf({ mcp__figma: "ask", mcp__figma__get_code: "allow", mcp__figma__delete: "smart", other: "deny" });
 
   it("is one part, its widths the tool and its server", () => {
     const decision = decideMcpCall("mcp__figma__whoami", permissionSet, "$/permission-sets/chat/x")!;
@@ -274,7 +274,7 @@ describe("judging an MCP call by name", () => {
     const policy = compilePolicy({});
     const input = {};
     noteMcpCall(input, "mcp__figma__whoami");
-    expect(policy.scopeOf?.({ name: "mcp__figma" }, input, lowered.permissions)).toBe("ask");
+    expect(policy.scopeOf?.({ name: "mcp__figma" }, input, lowered.permissions as never)).toBe("ask");
     expect(commandDecisionOf(input)!.parts.line).toBe("mcp__figma__whoami");
 
     // The approval names the tool, draws it as its one part, and "add to the permission set" is possible.

@@ -173,8 +173,13 @@ import {
   type WorkflowDigestOptions,
   type LayerSource,
   addToPermissionSet,
+  permissionSetReader,
+  permissionSetTree,
+  listPermissionSets,
   permissionSetWriteTargets,
+  readOwnPermissionSet,
   readPermissionSetLayers,
+  stackLayerInfo,
   resetPermissionSet,
   permissionSetLayers,
   permissionSetUsers,
@@ -441,7 +446,12 @@ import {
   isWritableLayer,
   chosenWidths,
   entriesToRemember,
+  partAnswersDecision,
+  partAnswersProblem,
+  partApproval,
+  type PartAnswer,
   type ApprovalPermissionSet,
+  type ApprovalLayer,
   type JairaPaths,
   type PermissionSetAddition,
   jairaBasePaths,
@@ -524,6 +534,23 @@ import {
   permissionSetLabel,
   permissionSetNameProblem,
   permissionSetOfSettings,
+  permissionSetIdOf,
+  permissionStackOf,
+  permissionStackViewOf,
+  resolveChatPermissionStack,
+  RUNTIME_LAYER,
+  TOOLS_LAYER,
+  PERMISSION_SET_LAYERS_KEY,
+  withoutPlaces,
+  type ChatPermissionStack,
+  type PermissionSetIssue,
+  DEFAULT_PERMISSION_SET_BUCKET,
+  type PermissionSetDecl,
+  type PermissionSetReader,
+  type OwnPermissionSet,
+  type PermissionSetTree,
+  type PermissionSetTreeSet,
+  type PermissionStackView,
   permissionsOfPermissionSet,
   type PermissionSetChoice,
   type PermissionsDecl,
@@ -724,6 +751,8 @@ import type {
   WriteConfigRequest,
   WriteFileRequest,
   SavePermissionSetRequest,
+  SavePermissionStackRequest,
+  PermissionSetTreeRequest,
   WritePermissionSetRequest,
   JudgeReadOnlyRequest,
   WritePermissionSetResult,
@@ -1286,7 +1315,43 @@ function approvalPermissionSetOf(paths: JairaPaths, reference: string): Approval
   };
 }
 
-function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: JairaPaths): PendingApproval {
+/**
+ * The stack an approval lists for "Add to", newest first (decision 0023 §4.4, §2.8): each of the
+ * parts' layers with where it lives and where a line for it could be written — and the layer the menu
+ * starts on: this project's newest standing layer for the bucket that can be written, else the set that
+ * asked, else the newest that can. Read off the disk each time, as {@link approvalPermissionSetOf} is.
+ */
+function approvalLayersOf(paths: JairaPaths, parts: CommandApproval, standing: Readonly<Record<string, readonly string[]>>): { layers: ApprovalLayer[]; defaultLayer?: string } {
+  const info = stackLayerInfo(paths);
+  const layers: ApprovalLayer[] = (parts.stack ?? []).map((id): ApprovalLayer => {
+    if (id === RUNTIME_LAYER) return { id, scope: "runtime", targets: [], unwritable: "This task's own answers — answer For this run to add to it." };
+    if (id === TOOLS_LAYER) return { id, scope: "this conversation", targets: [], unwritable: "This conversation's own lines — change them in the composer's Tools card." };
+    const setId = permissionSetIdOf(`$/permission-sets/${id}`);
+    if (setId === undefined || setId !== id) return { id, scope: "this state", targets: [], unwritable: "These lines are written on the state itself, so there is no permission set file to add a line to." };
+    const { scope } = info({ id, decl: {}, reference: `$/permission-sets/${id}`, role: "named" });
+    const found = approvalPermissionSetOf(paths, `$/permission-sets/${id}`);
+    const ships = permissionSetLayers(paths).some((layer) => layer.layer === "system" && listPermissionSetIds(layer.root).has(id));
+    return { id, scope, targets: found.targets, ...(found.unwritable !== undefined ? { unwritable: found.unwritable } : {}), ...(ships ? { everyone: true as const } : {}) };
+  });
+  const writable = (layer: ApprovalLayer | undefined): boolean => layer !== undefined && layer.targets.length > 0;
+  const bottom = [...(parts.stack ?? [])].reverse().find((id) => permissionSetIdOf(`$/permission-sets/${id}`) === id);
+  const bucket = bottom !== undefined && bottom.lastIndexOf("/") > 0 ? bottom.slice(0, bottom.lastIndexOf("/")) : undefined;
+  const standingIds = new Set((bucket !== undefined ? (standing[bucket] ?? []) : []).map((reference) => permissionSetIdOf(reference)).filter((id): id is string => id !== undefined));
+  const asked = parts.permissionSet !== undefined ? permissionSetIdOf(parts.permissionSet) : undefined;
+  const pick =
+    layers.find((layer) => standingIds.has(layer.id) && writable(layer) && layer.targets.some((target) => target.layer === "project")) ??
+    (asked !== undefined ? layers.find((layer) => layer.id === asked && writable(layer)) : undefined) ??
+    layers.find(writable);
+  return { layers, ...(pick !== undefined ? { defaultLayer: pick.id } : {}) };
+}
+
+/** The set ids a layer root holds. */
+function listPermissionSetIds(root: string): Set<string> {
+  return new Set(listPermissionSets([root]).map((file) => file.id));
+}
+
+function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: JairaPaths, standing: Readonly<Record<string, readonly string[]>> = {}): PendingApproval {
+  const stacked = request.parts?.stack !== undefined && paths !== undefined ? approvalLayersOf(paths, request.parts, standing) : undefined;
   return {
     requestId: request.requestId,
     tool: request.tool,
@@ -1294,6 +1359,7 @@ function pendingApprovalOf(request: ApprovalRequest, project: string, paths?: Ja
     ...(request.reason !== undefined ? { reason: request.reason } : {}),
     ...(request.parts !== undefined ? { parts: request.parts } : {}),
     ...(request.parts?.permissionSet !== undefined && paths !== undefined ? { permissionSet: approvalPermissionSetOf(paths, request.parts.permissionSet) } : {}),
+    ...(stacked !== undefined ? { layers: stacked.layers, ...(stacked.defaultLayer !== undefined ? { defaultLayer: stacked.defaultLayer } : {}) } : {}),
     input: request.input as Record<string, JsonValue>,
     ...(request.taskId !== undefined ? { taskId: request.taskId } : {}),
     ...(request.asker !== undefined ? { asker: request.asker } : {}),
@@ -1883,9 +1949,21 @@ export class AppService {
         this.requestOwner.set(request.requestId, key);
         const session = this.sessions.get(key);
         if (session !== undefined) this.recordApprovalCall(session, request);
-        this.publish({ type: "approval:requested", pending: pendingApprovalOf(request, this.refOf(key), this.sessions.get(key)?.project.paths) });
+        this.publish({
+          type: "approval:requested",
+          pending: pendingApprovalOf(request, this.refOf(key), this.sessions.get(key)?.project.paths, this.sessions.get(key)?.project.config.permissions.layers),
+        });
         // The task is a run parked on a person now, and the sidebar counts it so (`listProjects`).
         if (session !== undefined) this.publishFor(session, { type: "store:invalidate", scope: "tasks" });
+      },
+      // Decided again under new permissions, and still a question: its rows redrawn where it is drawn.
+      onUpdated: (request) => {
+        const session = this.sessions.get(key);
+        session?.approvalsSeen.set(request.requestId, request);
+        this.publish({
+          type: "approval:requested",
+          pending: pendingApprovalOf(request, this.refOf(key), session?.project.paths, session?.project.config.permissions.layers),
+        });
       },
       onResolved: (requestId, decision, by, reach) => {
         const answered = this.sessions.get(key);
@@ -1903,7 +1981,8 @@ export class AppService {
             tool: request?.tool ?? "unknown",
             ...(request?.command !== undefined ? { command: request.command } : {}),
             decision: decision.decision === "allow" ? "approved" : "denied",
-            decidedBy: "user",
+            // Answered by the stack changing under it: the policy's, not the person's.
+            decidedBy: by === "permissions" ? "policy" : "user",
             ...(request?.reason !== undefined ? { reason: request.reason } : {}),
             scope: decision.scope,
             ...(request?.sessionId !== undefined ? { sessionId: request.sessionId } : {}),
@@ -5407,7 +5486,11 @@ export class AppService {
     const bundle = bundleFor(open.project, meta.workflow);
     const root = bundle?.states[bundle.rootId];
     if (bundle === undefined || root === undefined) return undefined;
-    const state = stateWithChatSettings(root, overrides);
+    // A composer's STACK (decision 0023 §2.6) is followed here, before it is pinned: what the root is
+    // handed is the set it comes to, with who set each line.
+    const stack = this.chatStackOf(open, overrides);
+    const settings: ChatSettings = stack !== undefined ? { ...overrides, permissionSet: stack.decl as PermissionSetDecl } : overrides;
+    const state = stateWithChatSettings(root, settings, stack?.stack);
     return state === undefined ? undefined : { ...bundle, states: { ...bundle.states, [bundle.rootId]: state } };
   }
 
@@ -5955,10 +6038,18 @@ export class AppService {
      * Until a pick, every state's calls are decided under the block it was entered with.
      */
     const live: LivePermissions = { permissionSet: undefined };
+    // The root's parked calls, decided again under the set the person picked while they waited. A
+    // state's own block is the engine's, not held here: until a pick, nothing is decided again.
+    live.judge = (call) =>
+      live.permissionSet !== undefined && call.instanceId !== undefined && instanceStates.get(call.instanceId) === started.bundle.rootId
+        ? { policy, block: permissionsOfPermissionSet(live.permissionSet, undefined, live.stack) }
+        : undefined;
     const policy: ExecPolicy = {
       ...compileRunPolicy(config, {
         onDecision: auditPolicy,
         workspaceRoot: workspace.root,
+        // What `$WORKTREE` on a line names (decision 0023 §3.2).
+        ...(workspace.isWorktree ? { worktree: workspace.root } : {}),
         grants: open.approvals.grants(taskId),
         // A call a rule refused is a step under the call, as a function's verdict is.
         onRefused: (refused) => this.recordRuleRefusal(open, taskId, refused),
@@ -5966,7 +6057,7 @@ export class AppService {
       permissionsOf: (call, stated) =>
         live.permissionSet === undefined || instanceStates.get(call.instanceId) !== started.bundle.rootId
           ? stated
-          : (permissionsOfPermissionSet(live.permissionSet, (stated as PermissionsDecl | undefined)?.scopes) as AuthoredPermissions),
+          : (permissionsOfPermissionSet(live.permissionSet, undefined, live.stack) as AuthoredPermissions),
     };
     // OPEN THE GATE. A previous run of this task may have shut it on the way out (`stop`), and a
     // stop that outlived the run it stopped would refuse the first tool of the next one — a resumed
@@ -6310,7 +6401,9 @@ export class AppService {
     // wrong action, because `sendChatMessage` re-checks before it does anything.
     const live: ChatPlanView["live"] =
       open.liveCalls.get(sessionId) === undefined ? "idle" : open.liveCalls.canSend(sessionId) ? "steerable" : "busy";
-    const plan = chatPlanFor(context.path, request.overrides ?? {});
+    const asked = chatPlanFor(context.path, request.overrides ?? {});
+    // Worded by the set the composer's stack comes to; the settings handed back are the composer's own.
+    const plan = this.withChatStack(open, asked).plan;
     // Built ONCE and shared with `effectiveOf`: it lists the routes on offer here and supplies the
     // pinned/unnamed-route fallback there, and `defaultTree` compiles the whole prompt tree.
     const router = this.defaultTree(open.project.config, context.bundle, false, this.secretResolver(open), false).prompt as {
@@ -6321,6 +6414,7 @@ export class AppService {
     const permissionSets = readPermissionSets(open.project.paths);
     return {
       ...plan,
+      settings: asked.settings,
       live,
       effective: this.effectiveOf(
         open,
@@ -6405,7 +6499,8 @@ export class AppService {
     // Live files, never a snapshot: this conversation has not pinned one, and what it will run is
     // whatever `beginTaskRun` reads a moment from now — which is this.
     const bundle = bundleFor(open.project, stateId);
-    const plan = chatPlanFor([bundle?.states[stateId]], request.overrides ?? {});
+    const asked = chatPlanFor([bundle?.states[stateId]], request.overrides ?? {});
+    const plan = this.withChatStack(open, asked).plan;
     // The router, built over an EMPTY bundle. `defaultExecutorTree` refuses when a workflow's prompt
     // states name no model and nothing on this machine can answer one — a refusal that belongs to the
     // attempt and not to the preview. Raised here it would blank the composer on precisely the
@@ -6421,6 +6516,7 @@ export class AppService {
     const permissionSets = readPermissionSets(open.project.paths);
     return {
       ...plan,
+      settings: asked.settings,
       live: "idle",
       effective: this.effectiveOf(open, router, plan, undefined, tools, permissionSets),
       available: this.availableFor(open, router, tools, permissionSets, plan.settings),
@@ -6729,7 +6825,10 @@ export class AppService {
     // succeeded — so throwing here made a continuation refuse what the workflow does routinely, and
     // did it while the chip above showed a model. The op carries no model and the router answers it,
     // exactly as it answered the state.
-    const plan = chatPlanFor(context.path, request.overrides ?? {});
+    //
+    // The composer's STACK is followed first (decision 0023 §2.6): everything below reads the set it
+    // comes to, and the policy is told which layer set each line (§2.7).
+    const { plan, stack: chatStack } = this.withChatStack(open, chatPlanFor(context.path, request.overrides ?? {}));
 
     // The account this message spends, when its model says (a preset decides later and cannot be
     // held here). Known to be SPENT ⇒ the message waits for the reset instead of being refused —
@@ -6948,6 +7047,7 @@ export class AppService {
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
       askAboveBytes: config.artifacts.askAboveBytes,
       permissionSet,
+      ...(chatStack !== undefined ? { stack: chatStack.stack } : {}),
       grants: open.approvals.grants(request.taskId),
       // What the configured servers' tools count as (decision 0019, ruling 5).
       mcp: config.mcp,
@@ -6963,8 +7063,12 @@ export class AppService {
     // What this turn decides its calls under: the message's own set, until the person picks another
     // in the composer while it runs (`chat:settings`) — the gate and every wrapped tool read it at
     // each call. Held for the length of the turn (`whileChatting`).
-    const live: LivePermissions = { permissionSet: declaresTools(plan.settings) ? permissionSet : undefined };
-    const { tools, gate } = gateTools({
+    const live: LivePermissions = {
+      permissionSet: declaresTools(plan.settings) ? permissionSet : undefined,
+      ...(chatStack !== undefined ? { stack: chatStack.stack } : {}),
+    };
+    const turnSession = sessionOf(context.position);
+    const { tools, gate, authored } = gateTools({
       registry,
       // `tools === undefined` means the message said nothing and the STATE's declaration stands, so
       // the plan is not what runs and its injections must not be wrapped. The always-granted set is
@@ -6978,10 +7082,15 @@ export class AppService {
       // read back — as it stands at each call. `authored` goes either way, for its `scopes`: where a tool
       // may act is not part of a permission set.
       permissionSet: () => live.permissionSet,
+      // And the stack it was composed from, which moves with it (`chat:settings`).
+      stack: () => live.stack,
       ...(plan.settings.permissions !== undefined ? { authored: plan.settings.permissions } : {}),
       // What a relative scope glob and a relative call path resolve against — see `scopeNarrowingFor`.
       ...(workspaceRoot !== undefined ? { workspaceRoot } : {}),
     });
+    // This turn's parked calls — the gate's, and a function's question (asked with no session) — are
+    // decided again under the block as it stands when the permissions change while they wait.
+    live.judge = (call) => (call.sessionId === turnSession || call.sessionId === "" ? { policy, block: authored() } : undefined);
 
     // A CONTINUATION is the cut turn's own message, at its own place — the same call, so its record is
     // reopened and carried on (`withContinuation`); the note it continues with is the layer's to send.
@@ -7280,12 +7389,40 @@ export class AppService {
     return { canceled: true };
   }
 
+  /** How a permission set reference is followed in this project — the reader a state's `tools` is followed with. */
+  private permissionSetReaderOf(paths: JairaPaths): PermissionSetReader {
+    return permissionSetReader(workflowLoadOptions(paths, { tolerant: true }));
+  }
+
+  /**
+   * A composer's `permissionSet` read through its STACK (decision 0023 §2.6, `ChatSettings.permissionSet`):
+   * the bottom preset, this project's standing layers for its bucket, the conversation's own layers, and
+   * the tools layer. `undefined` when the composer names no set — the state's own block stands.
+   */
+  private chatStackOf(open: ProjectSession, settings: ChatSettings): ChatPermissionStack | undefined {
+    if (settings.permissionSet === undefined) return undefined;
+    return resolveChatPermissionStack(settings.permissionSet, this.permissionSetReaderOf(open.project.paths), { standing: open.project.config.permissions.layers });
+  }
+
+  /**
+   * A chat plan with its composer's stack followed: the same plan, its `permissionSet` the one map the
+   * stack comes to — which every reader downstream (`permissionSetOfSettings`, `chatOperationOf`, the
+   * gate) reads as it always has — and the stack beside it, for the policy to name layers by.
+   */
+  private withChatStack<P extends { settings: ChatSettings }>(open: ProjectSession, plan: P): { plan: P; stack?: ChatPermissionStack } {
+    const stack = this.chatStackOf(open, plan.settings);
+    if (stack === undefined) return { plan };
+    return { plan: { ...plan, settings: { ...plan.settings, permissionSet: stack.decl as PermissionSetDecl } }, stack };
+  }
+
   /** Hold a turn's or a run's permission set where `chat:settings` reaches it; the answer lets go. */
   private holdPermissions(open: ProjectSession, taskId: string, live: LivePermissions): () => void {
     const held = open.livePermissions.get(taskId) ?? new Set<LivePermissions>();
     held.add(live);
     open.livePermissions.set(taskId, held);
+    const unjudge = live.judge !== undefined ? open.approvals.judgeWith(taskId, live.judge) : undefined;
     return () => {
+      unjudge?.();
       held.delete(live);
       if (held.size === 0 && open.livePermissions.get(taskId) === held) open.livePermissions.delete(taskId);
     };
@@ -7316,9 +7453,15 @@ export class AppService {
         if (!(e instanceof NoConversationHere)) throw e;
       }
     }
-    const plan = chatPlanFor(path, request.overrides);
+    const { plan, stack } = this.withChatStack(open, chatPlanFor(path, request.overrides));
     const permissionSet = declaresTools(plan.settings) ? permissionSetOfSettings(plan.settings).permissionSet : undefined;
-    for (const live of held) live.permissionSet = permissionSet;
+    // The stack moves with the set: the rows of the next call name the layers of the stack picked.
+    for (const live of held) {
+      live.permissionSet = permissionSet;
+      live.stack = permissionSet !== undefined ? stack?.stack : undefined;
+    }
+    // What waits on the person was asked under the old stack: decided again under this one.
+    void open.approvals.rejudge(request.taskId);
     return { changed: held.size };
   }
 
@@ -9381,7 +9524,7 @@ export class AppService {
   pendingApprovals(): PendingApproval[] {
     // Every session's, not the focused one's: an approval names its own request id, and a run in
     // another project parked on a tool call is still waiting for the same person.
-    const local = [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir, s.project.paths)));
+    const local = [...this.sessions.values()].flatMap((s) => s.approvals.list().map((r) => pendingApprovalOf(r, s.dir, s.project.paths, s.project.config.permissions.layers)));
     // And what a conversation cut off by the app closing was left waiting on — found in its record.
     const recovered = [...this.sessions.values()].flatMap((s) =>
       [...s.recoveredAsks.values()].filter((r) => r.ask.kind === "approval").map((r) => this.pendingOfRecovered(s, r) as PendingApproval),
@@ -9405,26 +9548,68 @@ export class AppService {
     scope: ApprovalScope = "once",
     remember?: readonly string[],
     addTo?: WorkflowLayer,
+    /** Where the answer holds — one of the asking parts' place widths (decision 0023 §3.8). */
+    place?: string,
+    /** Which layer of the stack "Add to" writes into (§2.8), by id; absent, the set that asked. */
+    layer?: string,
+    /**
+     * The rows answered one by one (decision 0023 ruling 7) — see `SubmitApprovalRequest.answers`. When
+     * given, `remember`, `addTo`, `place` and `layer` are not read.
+     */
+    answers?: readonly PartAnswer[],
   ): { requestId: string } {
     // Routed by OWNER rather than to the focused project. A request id is all the renderer sends, and
     // answering it against the wrong session would deny a call nobody asked about while the one that
     // is actually parked waits forever.
     const owner = this.sessions.get(this.requestOwner.get(requestId) ?? "");
+    if (answers !== undefined) return this.submitPartAnswers(owner, requestId, decision, scope, answers);
     const recovered = owner?.recoveredAsks.get(requestId);
     if (owner !== undefined && recovered !== undefined && recovered.ask.kind === "approval") {
       const parts = recovered.ask.request.parts as unknown as CommandApproval | undefined;
-      if (addTo !== undefined) remember = this.addToPermissionSet(owner, parts, decision, remember, addTo);
-      this.answerRecoveredAsk(owner, recovered, { kind: "approval", decision, scope, ...(remember !== undefined ? { remember } : {}) });
+      if (addTo !== undefined) remember = this.addToPermissionSet(owner, parts, decision, remember, addTo, place, layer);
+      this.answerRecoveredAsk(owner, recovered, { kind: "approval", decision, scope, ...(remember !== undefined ? { remember, ...(place !== undefined ? { place } : {}) } : {}) });
       return { requestId };
     }
     if (owner !== undefined && addTo !== undefined) {
       const request = owner.approvals.list().find((r) => r.requestId === requestId);
       if (request === undefined) throw this.refusal("run", `no pending approval '${requestId}'`);
-      remember = this.addToPermissionSet(owner, request.parts, decision, remember, addTo);
+      remember = this.addToPermissionSet(owner, request.parts, decision, remember, addTo, place, layer);
     }
-    if (owner === undefined || !owner.approvals.decide(requestId, decision, scope, remember)) {
+    if (owner === undefined || !owner.approvals.decide(requestId, decision, scope, remember, undefined, "person", remember !== undefined ? place : undefined)) {
       throw this.refusal("run", `no pending approval '${requestId}'`);
     }
+    return { requestId };
+  }
+
+  /**
+   * An approval answered ROW BY ROW (decision 0023 ruling 7, §4.4): each asking part its own allow or
+   * deny, width, place and reach. Checked whole first — every answer about a part that asks, at a
+   * width and a place it offers, and `allow` only when every part that asks is allowed — then every
+   * `add` is written, each into its own layer as its own line, BEFORE the call is answered: a write
+   * that fails refuses the submit and leaves the question parked (a write made before it stays made).
+   * Then the call is answered: what reaches past it remembered part by part for the run.
+   */
+  private submitPartAnswers(owner: ProjectSession | undefined, requestId: string, decision: "allow" | "deny", scope: ApprovalScope, answers: readonly PartAnswer[]): { requestId: string } {
+    const recovered = owner?.recoveredAsks.get(requestId);
+    const asked = recovered !== undefined && recovered.ask.kind === "approval" ? recovered : undefined;
+    const live = owner?.approvals.list().find((r) => r.requestId === requestId);
+    if (owner === undefined || (live === undefined && asked === undefined)) throw this.refusal("run", `no pending approval '${requestId}'`);
+    const parts = asked !== undefined && asked.ask.kind === "approval" ? (asked.ask.request.parts as unknown as CommandApproval | undefined) : live?.parts;
+    if (parts === undefined) throw this.refusal("run", "this request names no part, so it cannot be answered part by part");
+    const problem = partAnswersProblem(parts, answers);
+    if (problem !== undefined) throw this.refusal("run", problem);
+    // Never wider than the rows say: a call runs only when every part that asks was allowed.
+    if (decision === "allow" && partAnswersDecision(parts, answers) === "deny") throw this.refusal("run", "not every part that asks was allowed, so the call cannot be allowed");
+    for (const answer of answers) {
+      if (answer.reach !== "add") continue;
+      this.addToPermissionSet(owner, partApproval(parts, answer.part), answer.decision, answer.width !== undefined ? [answer.width] : [], answer.addTo!, answer.place, answer.layer);
+    }
+    const kept = answers.map((a) => ({ ...a }));
+    if (asked !== undefined) {
+      this.answerRecoveredAsk(owner, asked, { kind: "approval", decision, scope, answers: kept });
+      return { requestId };
+    }
+    if (!owner.approvals.decide(requestId, decision, scope, undefined, undefined, "person", undefined, kept)) throw this.refusal("run", `no pending approval '${requestId}'`);
     return { requestId };
   }
 
@@ -9439,13 +9624,23 @@ export class AppService {
     decision: "allow" | "deny",
     remember: readonly string[] | undefined,
     addTo: WorkflowLayer,
+    place?: string,
+    layer?: string,
   ): string[] {
     this.writable(addTo);
-    if (parts === undefined) throw this.refusal("file", "this request is not a shell line, so there is no part of it to add to a permission set");
+    if (parts === undefined) throw this.refusal("file", "this request names no part a line could be written for, so there is nothing to add to a permission set");
+    // Any layer of the stack the call was judged under (decision 0023 §2.8) — never one it was not.
+    if (layer !== undefined && !(parts.stack ?? []).includes(layer)) throw this.refusal("file", `'${layer}' is not a layer of the stack this call was judged under`);
+    if (layer === RUNTIME_LAYER) throw this.refusal("file", "the runtime layer is this task's answers — answer For this run to add to it");
+    if (layer === TOOLS_LAYER) throw this.refusal("file", "the tools layer is this conversation's own lines — change them in the composer's Tools card");
+    const reference = layer !== undefined ? (permissionSetIdOf(`$/permission-sets/${layer}`) === layer ? `$/permission-sets/${layer}` : layer) : parts.permissionSet;
     const widths = chosenWidths(parts, remember ?? []);
-    const entries: PermissionSetAddition = entriesToRemember(parts, decision, (part) => part.widths.find((w) => widths.includes(w))) as PermissionSetAddition;
+    const plain = entriesToRemember(parts, decision, (part) => part.widths.find((w) => widths.includes(w)));
+    // At a PLACE the answer joins the line as that place (`"npm run build": { "packages": "deny" }`);
+    // without one it is the plain line it always was.
+    const entries: PermissionSetAddition = Object.fromEntries(Object.entries(plain).map(([subject, mode]) => [subject, place !== undefined ? { [place]: mode as "allow" | "deny" } : (mode as "allow" | "deny")]));
     try {
-      addToPermissionSet(owner.project.paths, parts.permissionSet, addTo, entries);
+      addToPermissionSet(owner.project.paths, reference, addTo, entries);
     } catch (e) {
       throw this.refusal("file", (e as Error).message);
     }
@@ -9844,6 +10039,8 @@ export class AppService {
       decision: decision.decision,
       scope: reach.scope,
       ...(reach.remember !== undefined ? { remember: [...reach.remember] } : {}),
+      ...(reach.place !== undefined ? { place: reach.place } : {}),
+      ...(reach.answers !== undefined ? { answers: reach.answers.map((a) => ({ ...a })) } : {}),
       by,
       waitedMs: Math.max(0, at - call.at),
     };
@@ -10224,7 +10421,7 @@ export class AppService {
     session: ProjectSession,
     recovered: RecoveredAsk,
     answer:
-      | { kind: "approval"; decision: "allow" | "deny"; scope: ApprovalScope; remember?: readonly string[] }
+      | { kind: "approval"; decision: "allow" | "deny"; scope: ApprovalScope; remember?: readonly string[]; place?: string; answers?: readonly PartAnswer[] }
       | { kind: "question"; answers?: Record<string, string | string[]> },
   ): void {
     const { taskId, recordId, ask } = recovered;
@@ -10232,11 +10429,22 @@ export class AppService {
     const at = Date.now();
     let note: string;
     if (ask.kind === "approval" && answer.kind === "approval") {
-      const reach: ApprovalReach = { scope: answer.scope, ...(answer.remember !== undefined ? { remember: [...answer.remember] } : {}) };
+      const reach: ApprovalReach =
+        answer.answers !== undefined
+          ? { scope: answer.scope, answers: answer.answers.map((a) => ({ ...a })) }
+          : { scope: answer.scope, ...(answer.remember !== undefined ? { remember: [...answer.remember], ...(answer.place !== undefined ? { place: answer.place } : {}) } : {}) };
       const { record } = approvalResultEntries(
         ask.callId,
         ask.calledBy,
-        { decision: answer.decision, scope: reach.scope, ...(reach.remember !== undefined ? { remember: [...reach.remember] } : {}), by: "person", waitedMs: Math.max(0, at - (ask.at ?? recovered.endedAt)) },
+        {
+          decision: answer.decision,
+          scope: reach.scope,
+          ...(reach.remember !== undefined ? { remember: [...reach.remember] } : {}),
+          ...(reach.place !== undefined ? { place: reach.place } : {}),
+          ...(reach.answers !== undefined ? { answers: reach.answers.map((a) => ({ ...a })) } : {}),
+          by: "person",
+          waitedMs: Math.max(0, at - (ask.at ?? recovered.endedAt)),
+        },
         at,
       );
       if (!store.answerInRecord(recordId, ask.callId, record)) throw this.refusal("run", `the conversation no longer holds the request '${recovered.id}'`);
@@ -10334,12 +10542,13 @@ export class AppService {
   private restoreGrants(session: ProjectSession, taskId: string): void {
     if (session.grantsRestored.has(taskId)) return;
     session.grantsRestored.add(taskId);
-    const answers = sessionStoreFor(session.project, { taskId })
-      .entriesMentioning("\"remember\"")
-      .flatMap((entries) => rememberedAnswersOf(entries));
+    const store = sessionStoreFor(session.project, { taskId });
+    // A whole-call answer keeps its widths as `remember`; rows answered one by one keep `answers`. A
+    // record holding both is read twice, which remembers the same thing twice: harmless.
+    const answers = [...store.entriesMentioning("\"remember\""), ...store.entriesMentioning("\"answers\"")].flatMap((entries) => rememberedAnswersOf(entries));
     session.approvals.rememberAgain(
       taskId,
-      answers.map((a) => ({ parts: a.parts as unknown as CommandApproval, decision: a.decision, remember: a.remember })),
+      answers.map((a) => ({ parts: a.parts as unknown as CommandApproval, decision: a.decision, remember: a.remember, ...(a.place !== undefined ? { place: a.place } : {}) })),
     );
   }
 
@@ -12530,6 +12739,134 @@ export class AppService {
    *
    * `usedBy: false` skips the scan of every state file, for a caller that wants the permission sets alone.
    */
+  /**
+   * The stack a set-browser read is about (decision 0023 §4.1): the composer's settings as sent, else
+   * what the conversation `taskId` keeps on its task — and that task's answers "for this run", the
+   * runtime layer. `undefined` settings: no stack — nothing is "in" it.
+   */
+  private browsedStackOf(request: PermissionSetTreeRequest): {
+    paths: JairaPaths;
+    standing: Readonly<Record<string, readonly string[]>>;
+    decl?: unknown;
+    runtime?: Record<string, "allow" | "deny">;
+  } {
+    const paths = this.permissionSetPaths(request.project);
+    const session = request.project !== SHARED_SESSION ? (request.project !== undefined ? this.sessionOf(request.project) : this.hasProject ? this.session() : undefined) : undefined;
+    const config = session?.project.config ?? this.effectiveConfig();
+    const kept = request.taskId !== undefined ? session?.project.tasks.tryRead(request.taskId)?.chatSettings?.permissionSet : undefined;
+    const decl = request.permissionSet ?? kept;
+    // What the record says is read back first, as the next turn would: answers from before this process are this run's too.
+    if (request.taskId !== undefined && session !== undefined && session.project.tasks.tryRead(request.taskId) !== undefined) this.restoreGrants(session, request.taskId);
+    const runtime = request.taskId !== undefined && session !== undefined ? session.approvals.grants(request.taskId).list() : undefined;
+    return { paths, standing: config.permissions.layers, ...(decl !== undefined ? { decl } : {}), ...(runtime !== undefined ? { runtime } : {}) };
+  }
+
+  /**
+   * Every permission set FILE, as the set browser draws it (decision 0023 §4.1, rulings 10–11): scopes
+   * (built in, global, project) → buckets → sets, each with its icon, its line count and whether the
+   * stack named is built of it — and, for a named task, the runtime scope with that task's answers.
+   */
+  permissionSetTree(request: PermissionSetTreeRequest = {}): PermissionSetTree {
+    const { paths, standing, decl, runtime } = this.browsedStackOf(request);
+    const ids = new Set<string>();
+    if (decl !== undefined) {
+      const layers = permissionStackOf(decl, this.permissionSetReaderOf(paths), "", [], { standing, bucket: DEFAULT_PERMISSION_SET_BUCKET, ownId: TOOLS_LAYER });
+      for (const layer of layers ?? []) if (layer.reference !== undefined) ids.add(layer.id);
+    }
+    const tree = permissionSetTree(paths, (id) => ids.has(id));
+    if (runtime === undefined) return tree;
+    const answers: PermissionSetTreeSet = {
+      id: RUNTIME_LAYER,
+      name: RUNTIME_LAYER,
+      bucket: "",
+      scope: "runtime",
+      file: "this task's answers, for this run",
+      lines: Object.keys(runtime).length,
+      icon: "history",
+      inStack: true,
+    };
+    return { scopes: [...tree.scopes, { scope: "runtime", label: RUNTIME_LAYER, buckets: [], sets: [answers] }] };
+  }
+
+  /** One set file's OWN lines — what a segment's compact popover draws under its crumbs (ruling 10). */
+  ownPermissionSet(request: { project?: string; reference: string }): OwnPermissionSet {
+    try {
+      return readOwnPermissionSet(this.permissionSetPaths(request.project), request.reference);
+    } catch (e) {
+      throw this.refusal("file", (e as Error).message);
+    }
+  }
+
+  /**
+   * A stack COMPOSED (§7.4, the Tools card's "Everything"): its layers oldest first — runtime in its
+   * place under the tools layer — and every line it comes to, each tagged with the layer that decided
+   * it and each place with its own. A stack nothing names is empty.
+   */
+  permissionStack(request: PermissionSetTreeRequest = {}): PermissionStackView {
+    const { paths, standing, decl, runtime } = this.browsedStackOf(request);
+    const issues: PermissionSetIssue[] = [];
+    const layers = decl !== undefined ? (permissionStackOf(decl, this.permissionSetReaderOf(paths), "", issues, { standing, bucket: DEFAULT_PERMISSION_SET_BUCKET, ownId: TOOLS_LAYER }) ?? []) : [];
+    return permissionStackViewOf(layers, stackLayerInfo(paths), runtime ?? {}, issues);
+  }
+
+  /**
+   * Save a stack as a set FILE (§7.4, "save this stack as a set"): `{ "layers": [ … ], …lines }` — the
+   * stack's own layers, oldest first, and the tools layer's own lines as the file's. The bucket's
+   * standing layers are not written: they are this project's settings, and stand over the new set by
+   * its bottom layer's bucket wherever it is named here. Checked before anything is written: the layer
+   * (what ships is read-only), the bucket and the name, the lines (they must parse), that every layer
+   * named can be followed, and that the scope does not hold that id already.
+   */
+  savePermissionStack(request: SavePermissionStackRequest): PermissionSetTreeSet {
+    this.writable(request.layer);
+    const problem = permissionSetBucketProblem(request.bucket) ?? permissionSetNameProblem(request.name);
+    if (problem !== undefined) throw this.refusal("file", problem);
+    const { [PERMISSION_SET_LAYERS_KEY]: named, ...lines } = request.permissionSet;
+    if (named !== undefined && (!Array.isArray(named) || !named.every((each) => typeof each === "string"))) {
+      throw this.refusal("file", "a stack's `layers` is a list of permission set references, oldest first");
+    }
+    const broken = parsePermissionSet(lines).issues.find((issue) => issue.severity === "error");
+    if (broken !== undefined) throw this.refusal("file", `that is not a permission set — ${broken.message}`);
+    const paths = this.permissionSetPaths(request.project);
+    const issues: PermissionSetIssue[] = [];
+    const doc = { ...(named !== undefined && named.length > 0 ? { [PERMISSION_SET_LAYERS_KEY]: named as string[] } : {}), ...lines };
+    if (permissionStackOf(doc, this.permissionSetReaderOf(paths), "", issues, {}) === undefined || issues.some((issue) => issue.severity === "error")) {
+      throw this.refusal("file", `that stack cannot be read — ${issues.find((issue) => issue.severity === "error")?.message ?? "a layer it names cannot be followed"}`);
+    }
+    const layered = `permission-sets/${request.bucket}/${request.name}.json`;
+    const projectPaths = request.layer === "project" ? this.requireProject(request.project).paths : undefined;
+    const prefix = projectPaths === undefined ? "" : relative(projectPaths.projectDir, projectPaths.jairaDir).split(sep).join("/");
+    const path = prefix.length === 0 ? layered : `${prefix}/${layered}`;
+    if (existsSync(this.treeFile(path, request.layer, request.project))) {
+      throw this.refusal("file", `'${request.bucket}/${request.name}' already exists there — pick another name`);
+    }
+    this.writeFile({
+      layer: request.layer,
+      path,
+      text: `${JSON.stringify(doc, null, 2)}\n`,
+      ...(request.project !== undefined ? { project: request.project } : {}),
+    });
+    const token = request.layer === "project" ? "$JAIRA" : "$BASE";
+    return readOwnPermissionSet(paths, `${token}/permission-sets/${request.bucket}/${request.name}`).set;
+  }
+
+  /**
+   * Let go of a task's answers "for this run" (§4.1, the composer's `runtime` segment): the ones `keys`
+   * names, or all of them. What the record says is read back first, as a turn would, so an answer from
+   * before this process is one that can be let go of — and is not restored after.
+   */
+  forgetRuntimeAnswers(request: { project?: string; taskId: string; keys?: string[] }): Record<string, "allow" | "deny"> {
+    const open = this.session(request.project);
+    if (open.project.tasks.tryRead(request.taskId) !== undefined) this.restoreGrants(open, request.taskId);
+    const grants = open.approvals.grants(request.taskId);
+    if (request.keys === undefined) grants.clear();
+    else grants.forget(request.keys);
+    // An answer let go of may have been what a parked call was waiting to be decided by.
+    void open.approvals.rejudge(request.taskId);
+    this.publishFor(open, { type: "store:invalidate", scope: "task", taskId: request.taskId });
+    return grants.list();
+  }
+
   readPermissionSetSettings(request: { project?: string; usedBy?: boolean } = {}): PermissionSetsView {
     const paths = this.permissionSetPaths(request.project);
     return {
@@ -12552,7 +12889,8 @@ export class AppService {
     const choice = readPermissionSets(paths).find((candidate) => candidate.id === READ_ONLY_PERMISSION_SET);
     const out: Record<string, boolean | null> = {};
     if (choice === undefined) return out;
-    const permissionSet = parsePermissionSet(choice.decl).permissionSet;
+    // WHAT a call does, not where: the set's places say where the person is asked (decision 0023 §7.1).
+    const permissionSet = withoutPlaces(parsePermissionSet(choice.decl).permissionSet);
     const config = (request.project !== undefined && request.project !== SHARED_SESSION ? this.sessionOf(request.project)?.project.config : undefined) ?? this.effectiveConfig();
     const policy = projectPolicy(config);
     const dialect = dialectFor(config.execEnvironment);
@@ -13103,7 +13441,8 @@ export class AppService {
     const project = session.project;
     const paths = this.permissionSetPaths(request.project);
     const choice = readPermissionSets(paths).find((candidate) => candidate.id === READ_ONLY_PERMISSION_SET);
-    const permissionSet = choice === undefined ? undefined : parsePermissionSet(choice.decl).permissionSet;
+    // WHAT a call does, not where: the set's places say where the person is asked (decision 0023 §7.1).
+    const permissionSet = choice === undefined ? undefined : withoutPlaces(parsePermissionSet(choice.decl).permissionSet);
     const config = project.config;
     const policy = projectPolicy(config);
     const judge: ReadOnlyJudge = (name, args, dialect) =>

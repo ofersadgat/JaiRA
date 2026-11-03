@@ -77,10 +77,13 @@ describe("what the shipped chat/read-only lets through", () => {
       "$files = Get-ChildItem *.md; $files.Count",
       "npx vitest run a.test.ts 2>&1 | Select-Object -Last 20",
       "[IO.Path]::Combine('a', 'b'); 'x'.ToUpper()",
-      String.raw`Test-Path C:\a; if (Test-Path C:\a) { git -C C:\a log --oneline -3; Select-String -Path C:\a\b.ts -Pattern "version: \d+" | Select-Object -Last 2 | ForEach-Object Line }; git worktree list`,
+      String.raw`Test-Path .\a; if (Test-Path .\a) { git -C .\a log --oneline -3; Select-String -Path .\a\b.ts -Pattern "version: \d+" | Select-Object -Last 2 | ForEach-Object Line }; git worktree list`,
     ]) {
       expect(powershell(line), line).toBe(true);
     }
+    // The same read OUTSIDE the project asks (decision 0023 §7.1): read-only reads freely in
+    // `$PROJECT` and `$WORKTREE` and asks elsewhere, so it is not let through with nobody asked.
+    expect(powershell(String.raw`Select-String -Path C:\a\b.ts -Pattern "version: \d+"`)).toBe(false);
     for (const line of [
       "Remove-Item a.ts",
       "rm -r build",

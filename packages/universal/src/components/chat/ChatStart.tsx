@@ -138,7 +138,7 @@ export function ChatStart({ surface }: { surface: ChatSurface }): JSX.Element {
           draftKey={`chat:new:${project ?? ""}`}
           onSend={(message) => void surface.onNew(message, overrides, runAs ?? undefined)}
           {...(start.disabled && runAs === null ? { disabled: "choose what this conversation runs, above" } : {})}
-          onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(project !== undefined ? { project } : {}) })}
+          stack={{ project }}
           // With no project open this runs in JaiRA's own root, which has no "this project" to keep in.
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
           tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}

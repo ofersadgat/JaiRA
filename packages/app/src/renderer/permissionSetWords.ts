@@ -3,8 +3,8 @@
  * standing sentences of the shell, `script` and the command runners. One table for every place a line is
  * drawn: Settings' permission sets, a state's Tools field, the composer's Tools card.
  */
-import { SMART_FUNCTION, SYSTEM_AREAS, isFunctionMode, type PermissionMode, type PermissionSetMode } from "@jaira/shared/browser";
-import type { PATHS } from "./iconPaths";
+import { PLACE_ANYWHERE, SMART_FUNCTION, SYSTEM_AREAS, isFunctionMode, type PermissionMode, type PermissionSetMode, type PlaceKind } from "@jaira/shared/browser";
+import { PATHS } from "./iconPaths";
 
 type IconName = keyof typeof PATHS;
 
@@ -45,4 +45,103 @@ export function modeMeta(mode: PermissionSetMode): { icon: IconName; label: stri
     label: mode.function,
     hint: mode.function === SMART_FUNCTION ? "a model judges each call, and asks you when it is unsure" : `the function ${mode.function} decides each call`,
   };
+}
+
+/**
+ * The fourth decision (decision 0023 §1, ruling 4): the model is not handed the tool. Offered in the
+ * mode menu of a tool, the shell and an MCP line, and nowhere else — a command, a runner, `script`,
+ * `other` and a place cannot be unavailable.
+ */
+export const UNAVAILABLE_META: { icon: IconName; label: string; hint: string } = { icon: "eyeOff", label: "unavailable", hint: "not offered — the agent never sees it" };
+
+// --- places on a line (decision 0023 §3, §4.2) ----------------------------------------------------
+
+/** The named places a path may start from, in the words the card writes beside them. */
+export const NAMED_PLACE_WORDS: Readonly<Record<string, string>> = {
+  $PROJECT: "this project",
+  $WORKTREE: "the task's worktree",
+  $TEMP: "temp",
+  "~": "your home folder",
+};
+
+/**
+ * The places a credential is kept in, as the add-a-place menu's `credential files` writes them —
+ * §7.1's list, the one what ships asks about in every set.
+ */
+export const CREDENTIAL_PLACES: readonly string[] = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws"];
+
+/** A place's words beside it, in the hint's face: a named place's name, `credentials`, `everywhere else`. */
+export function placeWordsOf(kind: PlaceKind, place: string): string | undefined {
+  const text = place.trim();
+  if (text === PLACE_ANYWHERE) return kind === "branch" ? "every other branch" : "everywhere else";
+  if (Object.hasOwn(NAMED_PLACE_WORDS, text)) return NAMED_PLACE_WORDS[text];
+  if (kind === "path" && CREDENTIAL_PLACES.includes(text)) return "credentials";
+  if (kind === "site" && text.startsWith("*.")) return "its subdomains";
+  return undefined;
+}
+
+/**
+ * A place's glyph, by what it names: a FILE (a pattern that pins files — a glob not ending in `/**`) is
+ * a sheet with its corner turned, any other path a folder; a site the globe; a branch or a repository
+ * the git glyph; a workflow the workflow's; a program the machine.
+ */
+export function placeGlyphOf(kind: PlaceKind, place: string): IconName {
+  const text = place.trim();
+  switch (kind) {
+    case "path":
+      return text !== PLACE_ANYWHERE && /[*?{]/.test(text) && !text.endsWith("/**") ? "script" : "folder";
+    case "site":
+    case "host":
+      return "web";
+    case "branch":
+    case "repository":
+      return "git";
+    case "workflow":
+      return "workflow";
+    case "program":
+      return "system";
+  }
+}
+
+/** What one of a line's places is called, counted: `1 place`, `5 sites`, `2 branches`. */
+export function placeNoun(kind: PlaceKind, n: number): string {
+  const [one, many] = kind === "site" ? ["site", "sites"] : kind === "branch" ? ["branch", "branches"] : ["place", "places"];
+  return `${n} ${n === 1 ? one : many}`;
+}
+
+/** What `+ add a place` is called on a line of this kind. */
+export function addPlaceLabel(kind: PlaceKind): string {
+  return kind === "site" ? "add a site" : kind === "branch" ? "add a branch" : "add a place";
+}
+
+/** What `another…` asks for, by kind — the example under its box. */
+export function placeExample(kind: PlaceKind): string {
+  switch (kind) {
+    case "path":
+      return "a folder like src, a file like *.lock, or a glob";
+    case "site":
+      return "a host like github.com, *.github.com, or github.com/owner/**";
+    case "branch":
+      return "a branch like main, claude/**, or origin:main";
+    case "repository":
+      return "owner/name";
+    case "workflow":
+      return "a workflow id";
+    case "program":
+      return "a process, service or app name";
+    case "host":
+      return "a host name";
+  }
+}
+
+/**
+ * The glyph a permission set wears (decision 0023 §4.1) — `permissionSetIconOf`'s word drawn: a mode
+ * word as that mode's glyph (`ask` a shut lock, `smart` the star), an icon the app has by its name, and
+ * anything else the generic layers.
+ */
+export function setIconGlyph(icon: string): IconName {
+  if (icon === "ask" || icon === "allow" || icon === "deny") return MODE_META[icon].icon;
+  if (Object.hasOwn(PATHS, icon)) return icon as IconName;
+  if (icon === SMART_FUNCTION) return FUNCTION_ICON;
+  return "layers";
 }

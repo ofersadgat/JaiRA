@@ -100,7 +100,8 @@ describe("inside the other nested blocks", () => {
   });
 
   it("offers the operation's nested blocks", () => {
-    expect(offered(state(), '{ "operation": { "permissions": { "|')).toEqual(["scopes"]);
+    // `permissions` is lowering's: an author writes nothing there, so nothing is offered (decision 0023 §3.7).
+    expect(offered(state(), '{ "operation": { "permissions": { "|')).toEqual([]);
     expect(offered(state(), '{ "operation": { "conversation": { "|')).toEqual(["mode", "artifacts"]);
   });
 

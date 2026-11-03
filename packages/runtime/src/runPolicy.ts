@@ -54,6 +54,8 @@ export function securityFloorOf(config: Pick<JairaConfig, "executors">, root: st
 export interface RunPolicyOptions {
   /** What a relative scope glob and a relative call path resolve against: the run's workspace. */
   workspaceRoot?: string | undefined;
+  /** The task's worktree, when it runs in one — what `$WORKTREE` on a line names. Absent: the workspace. */
+  worktree?: string | undefined;
   /** Every decision, for the audit trail — the host's `command_log` writer. Absent ⇒ unaudited. */
   onDecision?: ((entry: PolicyAuditEntry) => void) | undefined;
   /** The run's remembered part answers — `ApprovalHub.grants(taskId)`. */
@@ -77,6 +79,7 @@ export function compileRunPolicy(config: RunPolicyConfig, options: RunPolicyOpti
     // Absent ⇒ no narrowing, and nothing pays for the feature.
     ...(floor !== undefined ? { scopes: floor } : {}),
     ...(options.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
+    ...(options.worktree !== undefined ? { worktree: options.worktree } : {}),
     // The number is artifact configuration; turning it into an escalation is the policy's job.
     askAboveBytes: config.artifacts.askAboveBytes,
     ...(options.grants !== undefined ? { grants: options.grants } : {}),

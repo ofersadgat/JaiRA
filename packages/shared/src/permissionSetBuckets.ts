@@ -16,8 +16,8 @@
  * (`ChatPlanView.effective.permissions`), and the renderer asks again for whichever bucket the
  * person has picked.
  */
-import { modeWord, sameMode, SMART_MODE, type ToolImplementation, type PermissionSetMode } from "./operationVocabulary";
-import { holdsTool, MODE_WHEN_UNSET, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
+import { modeWord, sameMode, SMART_MODE, type PermissionModeDecl, type ToolImplementation, type PermissionSetMode } from "./operationVocabulary";
+import { holdsTool, MODE_WHEN_UNSET, modeDeclOf, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
 import type { WorkflowLayer } from "./view";
 
 /** The bucket a conversation opens on when nothing it inherits is any bucket's permission set. */
@@ -52,14 +52,16 @@ export interface PermissionSetChoice {
  */
 export function permissionSetSignature(permissionSet: PermissionSet, registered?: readonly string[]): string {
   const known = registered === undefined ? undefined : new Set(registered);
-  const lines: Array<[string, PermissionSetMode, ToolImplementation | ""]> = [];
+  // A line as written (`modeDeclOf`): its places and an `unavailable` are what it says too.
+  const lines: Array<[string, PermissionModeDecl, ToolImplementation | ""]> = [];
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
     if (entry.kind === "tool") {
-      if (!holdsTool(permissionSet, subject)) continue;
       if (known !== undefined && !known.has(subject)) continue;
-      lines.push([subject, entry.mode ?? MODE_WHEN_UNSET, entry.implementation ?? "app"]);
+      if (entry.unavailable === true) lines.push([subject, modeDeclOf(entry), ""]);
+      if (!holdsTool(permissionSet, subject)) continue;
+      lines.push([subject, modeDeclOf(entry), entry.implementation ?? "app"]);
     } else {
-      lines.push([subject, entry.mode ?? MODE_WHEN_UNSET, ""]);
+      lines.push([subject, modeDeclOf(entry), ""]);
     }
   }
   lines.sort((a, b) => (a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0));
@@ -154,6 +156,29 @@ export function permissionSetGlyph(choice: PermissionSetChoice): PermissionSetMo
   return SHIPPED_PERMISSION_SET_WORDS[choice.id]?.glyph ?? parsePermissionSet(choice.decl).permissionSet.other ?? MODE_WHEN_UNSET;
 }
 
+/** The icon a set wears in the browser when its file names none and it is not one that ships (decision 0023 §4.1). */
+export const GENERIC_PERMISSION_SET_ICON = "layers";
+
+/**
+ * The icon a set FILE wears in the set browser (decision 0023 §4.1, ruling 10: "each permission set is
+ * a file on a path, each one has an icon"). The decision does not say where it comes from; it is:
+ *
+ *  1. the file's own `"icon"` key (`PERMISSION_SET_ICON_KEY`) — a glyph name from the app's icon set,
+ *     or a mode word for that mode's glyph;
+ *  2. else, for a set that ships, the mode word of its glyph ({@link permissionSetGlyph}: `ask`,
+ *     `deny`, `smart`, `allow`) — the glyph its row already wears in the composer;
+ *  3. else {@link GENERIC_PERMISSION_SET_ICON}.
+ *
+ * A mode word (`ask`, `deny`, `allow`, or a function's name such as `smart`) is drawn as that mode's
+ * glyph, anything else as the icon of that name. `own` is the file's own text read, before references.
+ */
+export function permissionSetIconOf(id: string, own: unknown): string {
+  const named = own !== null && typeof own === "object" && !Array.isArray(own) ? (own as Record<string, unknown>)["icon"] : undefined;
+  if (typeof named === "string" && /^[a-z][a-z0-9-]{0,39}$/.test(named.trim())) return named.trim();
+  const shipped = SHIPPED_PERMISSION_SET_WORDS[id]?.glyph;
+  return shipped !== undefined ? modeWord(shipped) : GENERIC_PERMISSION_SET_ICON;
+}
+
 const SHIPPED_BUCKET_HINTS: Readonly<Record<string, string>> = {
   chat_control: "its own four — the task and workflow tools only",
 };
@@ -167,12 +192,14 @@ export function permissionSetLabel(choice: Pick<PermissionSetChoice, "id" | "nam
  * A permission set in a line, from what is in it: `9 lines · all ask`, `7 lines · other deny`.
  *
  * "All" only when every line AND `other` agree, because that is the one case where the count is the
- * less interesting half.
+ * less interesting half. A set that writes no `other` says so — `4 lines · no other` — since what it
+ * leaves out falls through to the sets under it (decision 0023 §2.3), and is not asked about.
  */
 export function permissionSetSummary(permissionSet: PermissionSet): string {
   const modes = Object.values(permissionSet.entries).map((entry) => entry.mode ?? MODE_WHEN_UNSET);
-  const other = permissionSet.other ?? MODE_WHEN_UNSET;
   const count = `${modes.length} ${modes.length === 1 ? "line" : "lines"}`;
+  if (permissionSet.other === undefined) return `${count} · no other`;
+  const other = permissionSet.other;
   return modes.length > 0 && modes.every((mode) => sameMode(mode, other)) ? `${count} · all ${modeWord(other)}` : `${count} · other ${modeWord(other)}`;
 }
 

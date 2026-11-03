@@ -61,6 +61,20 @@ import {
   type PermissionSetWriteKind,
   type WorkflowLayer,
   type WritableLayer,
+  GENERIC_PERMISSION_SET_ICON,
+  ownLineCount,
+  ownLinesOf,
+  permissionSetIconOf,
+  permissionSetIdOf,
+  SCOPE_OF_LAYER,
+  TOOLS_LAYER,
+  type OwnPermissionSet,
+  type PermissionSetScope,
+  type PermissionSetTree,
+  type PermissionSetTreeBucket,
+  type PermissionSetTreeScope,
+  type PermissionSetTreeSet,
+  type PermissionStackLayer,
 } from "@jaira/shared";
 import { hostCalleeSignatures, PERMISSION_FUNCTION_STATE, permissionFunctionState } from "@jaira/runtime";
 import { workflowLoadOptions } from "./workflowRefs";
@@ -110,12 +124,14 @@ export function lowerWorkflowPermissionSets(
   files: Record<string, unknown>,
   options: LoadBundleOptions = {},
   check: (reference: string) => string | undefined = permissionFunctionCheck(options),
+  /** Each bucket's standing layers (`config.permissions.layers`, decision 0023 §2.6 step 2). */
+  standing?: Readonly<Record<string, readonly string[]>>,
 ): { files: Record<string, unknown>; issues: StatePermissionSetIssue[] } {
   const read = permissionSetReader(options);
   const out: Record<string, unknown> = {};
   const issues: StatePermissionSetIssue[] = [];
   for (const [file, def] of Object.entries(files)) {
-    const lowered = lowerStatePermissionSets(stateIdFromPath(file), def, read, check);
+    const lowered = lowerStatePermissionSets(stateIdFromPath(file), def, read, check, standing);
     out[file] = lowered.def;
     issues.push(...lowered.issues);
   }
@@ -202,6 +218,12 @@ export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
    * because a run must not start under a permission set nobody could read.
    */
   onPermissionSetIssue?: (issue: StatePermissionSetIssue) => void;
+  /**
+   * Each bucket's STANDING layers — the project's `config.permissions.layers` (decision 0023 §2.6 step
+   * 2, §7.3) — laid over every set a state names from that bucket, and so pinned with the snapshot a
+   * task starts from. Absent: none, which is what a load with no project (`--workflows`) has.
+   */
+  standingLayers?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -212,7 +234,7 @@ export interface LoadWorkflowBundleOptions extends LoadBundleOptions {
  * every running task of it follows.
  */
 export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: string, options: LoadWorkflowBundleOptions = {}): WorkflowBundle {
-  const { onPermissionSetIssue, ...loadOptions } = options;
+  const { onPermissionSetIssue, standingLayers, ...loadOptions } = options;
   const read = permissionSetReader(loadOptions);
   // One check for the whole load, so a function every state names is loaded once.
   const check = permissionFunctionCheck(loadOptions);
@@ -226,6 +248,7 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
     Object.fromEntries(Object.entries(files).map(([file, def]) => [file, followedOf(stateIdFromPath(file), def, read)])),
     loadOptions,
     check,
+    standingLayers,
   );
   report(lowered.issues);
   const loadState = loadOptions.loadState;
@@ -238,7 +261,7 @@ export function loadWorkflowBundle(files: Record<string, unknown>, rootRef: stri
           loadState: (id: string) => {
             const def = loadState(id);
             if (def === undefined) return undefined;
-            const one = lowerStatePermissionSets(id, followedOf(id, def, read), read, check);
+            const one = lowerStatePermissionSets(id, followedOf(id, def, read), read, check, standingLayers);
             report(one.issues);
             return one.def;
           },
@@ -729,4 +752,137 @@ export function permissionSetUsers(paths: JairaPaths): Record<string, string[]> 
     walk(workflows, []);
   }
   return Object.fromEntries([...users].map(([id, set]) => [id, [...set].sort()]));
+}
+
+// --- the set browser (decision 0023 §4.1, rulings 10–11) ----------------------------------------
+
+/** One set file as the browser lists it, read from its layer root. */
+function treeSetOf(layer: PermissionSetLayer, found: PermissionSetFile, inStack: (id: string) => boolean, shadowedBy?: PermissionSetScope): PermissionSetTreeSet {
+  const ext = found.file.slice(found.file.lastIndexOf("."));
+  const set: PermissionSetTreeSet = {
+    id: found.id,
+    name: found.name,
+    bucket: found.bucket,
+    scope: SCOPE_OF_LAYER[layer.layer],
+    layer: layer.layer,
+    reference: found.reference,
+    explicit: `${layer.token}/${PERMISSION_SETS_DIR_NAME}/${found.id}`,
+    file: `${layer.label}/${PERMISSION_SETS_DIR_NAME}/${found.id}${ext}`,
+    path: found.file,
+    lines: 0,
+    icon: permissionSetIconOf(found.id, undefined),
+    inStack: inStack(found.id),
+    ...(shadowedBy !== undefined ? { shadowedBy } : {}),
+  };
+  try {
+    const own: unknown = parseReferencedFile(found.file, readFileSync(found.file, "utf8"));
+    set.lines = ownLineCount(own);
+    set.icon = permissionSetIconOf(found.id, own);
+    if (own !== null && typeof own === "object" && !Array.isArray(own)) {
+      const follows = (own as Record<string, unknown>)["$ref"];
+      const layers = (own as Record<string, unknown>)["layers"];
+      if (typeof follows === "string") set.follows = follows;
+      if (Array.isArray(layers) && layers.every((each) => typeof each === "string")) set.layers = layers as string[];
+    } else {
+      set.problem = "this file is not a permission set — a permission set is a map from a subject to a mode";
+    }
+  } catch (e) {
+    set.problem = (e as Error).message;
+  }
+  return set;
+}
+
+/** Sets into nested buckets, by their folder path. */
+function bucketsOf(sets: readonly PermissionSetTreeSet[]): PermissionSetTreeBucket[] {
+  const top: PermissionSetTreeBucket[] = [];
+  const byPath = new Map<string, PermissionSetTreeBucket>();
+  const bucketAt = (path: string): PermissionSetTreeBucket => {
+    const known = byPath.get(path);
+    if (known !== undefined) return known;
+    const at = path.lastIndexOf("/");
+    const bucket: PermissionSetTreeBucket = { name: at < 0 ? path : path.slice(at + 1), path, buckets: [], sets: [] };
+    byPath.set(path, bucket);
+    (at < 0 ? top : bucketAt(path.slice(0, at)).buckets).push(bucket);
+    return bucket;
+  };
+  for (const set of sets) bucketAt(set.bucket).sets.push(set);
+  return top;
+}
+
+/**
+ * Every permission set FILE this project's scopes hold, as the browser draws them (decision 0023 §4.1,
+ * ruling 10): one scope per layer root — built in, global (`~/.jaira`), project (`.jaira/`) — each
+ * holding its buckets (folders, nested) and their sets (files), every file listed in every scope that
+ * holds one, with which nearer scope hides it. `inStack(id)` says which sets the stack being looked at
+ * holds. A file that cannot be read is listed with its problem. The runtime scope is the service's to
+ * add: it is a task's memory, not a file.
+ */
+export function permissionSetTree(paths: JairaPaths, inStack: (id: string) => boolean = () => false): PermissionSetTree {
+  const layers = permissionSetLayers(paths);
+  const nearest = new Map<string, PermissionSetScope>();
+  const scopes: PermissionSetTreeScope[] = [];
+  // Nearest first, so each file knows which nearer scope's copy the bare reference finds.
+  for (const layer of layers) {
+    const sets = listPermissionSets([layer.root]).map((found) => treeSetOf(layer, found, inStack, nearest.get(found.id)));
+    for (const set of sets) if (!nearest.has(set.id)) nearest.set(set.id, set.scope);
+    scopes.push({ scope: SCOPE_OF_LAYER[layer.layer], layer: layer.layer, label: layer.label, buckets: bucketsOf(sets), sets: [] });
+  }
+  // Built in first, as the browser reads down to the project.
+  return { scopes: scopes.reverse() };
+}
+
+/**
+ * ONE set file and the lines it writes itself (ruling 10: "anything unset being filtered out") — what a
+ * segment's compact popover draws. `reference` is a layered `$/permission-sets/<id>` (the nearest
+ * scope's copy, as a stack finds it) or an explicit `$SYSTEM|$BASE|$JAIRA/permission-sets/<id>` (that
+ * scope's). Throws when no scope holds it.
+ */
+export function readOwnPermissionSet(paths: JairaPaths, reference: string): OwnPermissionSet {
+  const id = permissionSetIdOf(reference);
+  if (id === undefined) throw new Error(`'${reference}' names no permission set file — a set is named like $/permission-sets/chat/ask-first`);
+  const token = /^(\$[A-Z]*)\//.exec(reference.trim())?.[1];
+  const layers = permissionSetLayers(paths);
+  const candidates = token === "$" || token === undefined ? layers : layers.filter((layer) => layer.token === token);
+  for (const layer of candidates) {
+    const found = listPermissionSets([layer.root]).find((file) => file.id === id);
+    if (found === undefined) continue;
+    const nearer = layers.slice(0, layers.indexOf(layer)).find((other) => listPermissionSets([other.root]).some((file) => file.id === id));
+    const set = treeSetOf(layer, found, () => false, nearer !== undefined ? SCOPE_OF_LAYER[nearer.layer] : undefined);
+    let lines: Record<string, unknown> = {};
+    try {
+      lines = ownLinesOf(parseReferencedFile(found.file, readFileSync(found.file, "utf8")));
+    } catch {
+      // `set.problem` already says why.
+    }
+    return { set, lines };
+  }
+  throw new Error(`no scope holds the permission set ${id}`);
+}
+
+/**
+ * The scope and the icon of one layer of a stack, read off the disk — what the composer's segments and
+ * "Everything" draw beside its id. A set file is the scope its reference finds; lines written in place
+ * are the conversation's (`tools`) or the state's (`inline`).
+ */
+export function stackLayerInfo(paths: JairaPaths): (layer: PermissionStackLayer) => { scope: PermissionSetScope; icon: string } {
+  const layers = permissionSetLayers(paths);
+  return (layer) => {
+    if (layer.reference === undefined) return { scope: layer.id === TOOLS_LAYER ? "this conversation" : "this state", icon: layer.id === TOOLS_LAYER ? "tools" : GENERIC_PERMISSION_SET_ICON };
+    const id = permissionSetIdOf(layer.reference);
+    if (id === undefined) return { scope: "this state", icon: GENERIC_PERMISSION_SET_ICON };
+    const token = /^(\$[A-Z]*)\//.exec(layer.reference.trim())?.[1];
+    const candidates = token === "$" || token === undefined ? layers : layers.filter((one) => one.token === token);
+    for (const one of candidates) {
+      const found = listPermissionSets([one.root]).find((file) => file.id === id);
+      if (found === undefined) continue;
+      let own: unknown;
+      try {
+        own = parseReferencedFile(found.file, readFileSync(found.file, "utf8"));
+      } catch {
+        own = undefined;
+      }
+      return { scope: SCOPE_OF_LAYER[one.layer], icon: permissionSetIconOf(id, own) };
+    }
+    return { scope: "project", icon: GENERIC_PERMISSION_SET_ICON };
+  };
 }

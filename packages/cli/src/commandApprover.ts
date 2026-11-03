@@ -263,13 +263,17 @@ export function renderApproval(request: ApprovalRequest): string {
     return `${lines.join("\n")}\n`;
   }
   lines.push(...lineRows(parts));
-  const rows = parts.parts.map((part, index) => partColumns(part, index));
+  const rows = parts.parts.map((part, index) => partColumns(part, index, depthOf(parts, part)));
   const width = (column: number): number => Math.max(...rows.map((row) => row[column]!.length));
   for (const row of rows) {
     lines.push(`    ${row.map((cell, column) => (column === row.length - 1 ? cell : cell.padEnd(width(column)))).join("  ")}`.trimEnd());
   }
   if (parts.unparsed !== undefined) lines.push(`    could not be read: ${parts.unparsed}`);
-  if (parts.permissionSet !== undefined) lines.push(`    permission set: ${parts.permissionSet === INLINE_PERMISSION_SET ? "the one written on the state" : parts.permissionSet}`);
+  // Judged under a stack: its layers, oldest first — each row above says which of them decided it.
+  const stack = [...(parts.stack ?? [])].reverse();
+  const files = stack.filter((id) => id !== "runtime" && id !== "tools");
+  if (files.length > 0) lines.push(`    stack: ${files.join(" + ")}${stack.includes("runtime") ? ", then this run" : ""}`);
+  else if (parts.permissionSet !== undefined) lines.push(`    permission set: ${parts.permissionSet === INLINE_PERMISSION_SET ? "the one written on the state" : parts.permissionSet}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -304,18 +308,28 @@ function labelOf(index: number): string {
 
 const VERDICT: Record<CommandPart["verdict"], string> = { allowed: "allowed", function: "to a function", asks: "ASKS", denied: "DENIED" };
 
-function partColumns(part: CommandPart, index: number): string[] {
+/** How many parts this one is judged under: `rm {}` in its `find`, what a runner runs. */
+function depthOf(approval: CommandApproval, part: CommandPart): number {
+  let depth = 0;
+  for (let at = part.within; at !== undefined && depth < approval.parts.length; at = approval.parts[at]?.within) depth++;
+  return depth;
+}
+
+function partColumns(part: CommandPart, index: number, depth: number): string[] {
   const place = part.url ?? (part.paths !== undefined && part.paths.length > 0 ? part.paths.join(", ") : undefined);
   const via = part.via !== undefined && part.via.length > 0 && part.within === undefined ? `inside ${part.via.join(" › ")}` : undefined;
   const decided = deciderOf(part);
-  return [labelOf(index), part.text, part.subject, VERDICT[part.verdict], [decided, place, via].filter((s) => s !== undefined).join(" · ")];
+  return [labelOf(index), `${"  ".repeat(depth)}${part.text}`, part.subject, VERDICT[part.verdict], [decided, place, via].filter((s) => s !== undefined).join(" · ")];
 }
 
 function deciderOf(part: CommandPart): string {
-  const { source, entry, reason } = part.decidedBy;
+  const { source, entry, reason, layer, place } = part.decidedBy;
+  // Which layer of the stack set the deciding line, and at which of its places (decision 0023 §2.7).
+  const who = layer !== undefined ? `${layer} ` : "permission set ";
+  const at = place !== undefined ? ` in ${place}` : "";
   switch (source) {
     case "permissionSet":
-      return entry !== undefined ? `permission set "${entry}"${reason.includes(" — ") ? ` — ${reason.slice(reason.indexOf(" — ") + 3)}` : ""}` : `permission set: ${reason}`;
+      return entry !== undefined ? `${who}"${entry}"${at}${reason.includes(" — ") ? ` — ${reason.slice(reason.indexOf(" — ") + 3)}` : ""}` : `permission set: ${reason}`;
     case "remembered":
       return `answered earlier this run${entry !== undefined ? ` (${entry})` : ""}`;
     case "builtin":

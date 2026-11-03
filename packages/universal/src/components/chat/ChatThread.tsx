@@ -13,7 +13,6 @@ import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
 import { Composer } from "./Composer";
 import { useMentions } from "@jaira/ui/chatMentions";
-import { invoke } from "@jaira/ui/store";
 import { LiveStatusBar, Paper } from "./Paper";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
@@ -351,7 +350,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               : {})}
           tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}
           usage={{ context: m.lastContext, total: m.contextTotal, onCompact: m.onCompact, cost: m.thread?.costUsd }}
-          onSavePermissionSet={(request) => invoke("permissionSet:save", { ...request, ...(m.project !== undefined ? { project: m.project } : {}) })}
+          stack={{ project: m.project, ...(surface.taskId !== null ? { taskId: surface.taskId } : {}) }}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}
           {...mentions}
         />

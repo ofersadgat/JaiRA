@@ -100,6 +100,11 @@ describe("PowerShell words", () => {
     ["Remove-Item a.txt, b.txt,c.txt", ["Remove-Item", "a.txt", "b.txt{element}", "c.txt{element}"]],
     // Variables and what follows them, splats.
     ["Write-Output $env:PATH ${a b} $x.Name @params $using:y", ["Write-Output", "$env:PATH{dynamic}", "${a b}{dynamic}", "$x.Name{dynamic}", "@params{dynamic}", "$using:y{dynamic}"]],
+    // A splat is the whole word; a word that goes on past the name is a word (PowerShell's own tokenizer, `Generic`).
+    ["npm --workspace @jaira/app run build", ["npm", "--workspace", "@jaira/app", "run", "build"]],
+    ["Write-Output @a-b @a=1 @a\\b @a+b @a@b @a*", ["Write-Output", "@a-b", "@a=1", "@a\\b", "@a+b", "@a@b", "@a*"]],
+    ["Write-Output @global:a @a?b @1a @global:a/b", ["Write-Output", "@global:a{dynamic}", "@a?b{dynamic}", "@1a{dynamic}", "@global:a/b"]],
+    ["Write-Output @a{b}", ["Write-Output", "@a{dynamic}", "{b}{code}"]],
     // `--%`: the rest of the line goes to the program as it is written.
     ["icacls --% C:\\x /grant Users:(F) | Out-Null", ["icacls", "C:\\x", "/grant", "Users:(F)"]],
   ])("%j", (line, expected) => {

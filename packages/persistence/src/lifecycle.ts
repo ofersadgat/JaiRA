@@ -328,11 +328,15 @@ export async function pinWorkflow(
       bundle = loadWorkflowBundle(
         files,
         workflow,
-        workflowLoadOptions(project.paths, {
-          vfs,
-          path: project.config.workflows.path,
-          ...(watch !== undefined ? { watch } : {}),
-        }),
+        {
+          ...workflowLoadOptions(project.paths, {
+            vfs,
+            path: project.config.workflows.path,
+            ...(watch !== undefined ? { watch } : {}),
+          }),
+          // What stands over each bucket's sets in this project (decision 0023 §2.6), pinned with the run.
+          standingLayers: project.config.permissions.layers,
+        },
       );
     } catch (e) {
       // An unapproved module is raised FIRST, because it explains the load failure rather than

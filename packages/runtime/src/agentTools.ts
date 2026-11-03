@@ -80,6 +80,7 @@ import {
 import { noteCallDialect } from "./callDialect";
 import type { StackedExecutor } from "./executorStack";
 import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
+import { compileClaudePlaceRules, namedPlacesOf } from "./linePlaces";
 
 // --- what each executor declares ----------------------------------------------
 
@@ -190,6 +191,12 @@ export interface PermissionSetView {
   held(standard: string): ToolImplementation | undefined;
   /** The mode a standard tool resolves to, where anything says. */
   modeOf(standard: string): ViewMode | undefined;
+  /**
+   * The line's PLACES other than `**` (decision 0023 §3), when it has any — what decides that codex is
+   * served ours rather than kept to its own (a coarse switch cannot be told where), and what Claude's
+   * own rules are compiled from for a kept built-in (§3.9).
+   */
+  placesOf(standard: string): Readonly<Record<string, PermissionSetMode>> | undefined;
   /** The mode a name with no standard tool resolves to — `other`, unless something named it. */
   otherFor(name: string): ViewMode | undefined;
   /**
@@ -214,6 +221,30 @@ function mcpLinesOf(permissionSet: PermissionSet): Record<string, McpLine["mode"
   return out;
 }
 
+/** An entry's places other than `**`, when it has any. */
+function placesOfEntry(entry: { places?: Record<string, PermissionSetMode> } | undefined): Readonly<Record<string, PermissionSetMode>> | undefined {
+  return entry?.places !== undefined && Object.keys(entry.places).length > 0 ? entry.places : undefined;
+}
+
+/** Does every decision a line can give refuse — its own mode and every place? A line with places one of which lets something through does not. */
+function refusedEverywhere(view: PermissionSetView, standard: string): boolean {
+  const places = Object.values(view.placesOf(standard) ?? {});
+  const mode = view.modeOf(standard);
+  if (places.length === 0) return mode === "deny";
+  return (mode === undefined || mode === "deny") && places.every((place) => place === "deny");
+}
+
+/**
+ * Does the plan KEEP the agent's own implementation of a standard tool its line chose `native` for?
+ * Not where it has none, and not on a transport of coarse SWITCHES (codex) when the line has places: a
+ * switch cannot be told where, so a native kept there would act everywhere — ours is served instead,
+ * and judged per call at the line's places (decision 0023 §3.9).
+ */
+function keepsNative(view: PermissionSetView, declaration: AgentToolDeclaration, standard: string): boolean {
+  if (nativesOfStandard(declaration, standard).length === 0) return false;
+  return !(declaration.channel === "switches" && view.placesOf(standard) !== undefined);
+}
+
 /** A permission set in hand — a conversation turn's. */
 export function viewOfPermissionSet(permissionSet: PermissionSet): PermissionSetView {
   const offered = new Set(offeredTools(permissionSet));
@@ -221,6 +252,7 @@ export function viewOfPermissionSet(permissionSet: PermissionSet): PermissionSet
   return {
     held: (standard) => (offered.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
     modeOf: (standard) => entry(standard)?.mode,
+    placesOf: (standard) => placesOfEntry(entry(standard)),
     otherFor: () => permissionSet.other,
     otherIsAuthored: permissionSet.other !== undefined,
     lineOf: (subject) => mcpModeOf(permissionSet, subject),
@@ -259,7 +291,9 @@ export function viewOfServices(ctx: ExecServices): PermissionSetView | undefined
   const entry = (name: string) => (Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name] : undefined);
   return {
     held: (standard) => (held.has(standard) ? (entry(standard)?.implementation ?? "app") : undefined),
-    modeOf: (name) => entry(name)?.mode ?? gated(name),
+    // A line with places but no `**` has no mode of its own; the gate's would be its LOOSEST, never its own.
+    modeOf: (name) => entry(name)?.mode ?? (placesOfEntry(entry(name)) !== undefined ? undefined : gated(name)),
+    placesOf: (name) => placesOfEntry(entry(name)),
     otherFor: (name) => permissionSet.other ?? gated(name),
     otherIsAuthored: permissionSet.other !== undefined,
     lineOf: (subject) => mcpModeOf(permissionSet, subject),
@@ -320,9 +354,9 @@ export function planAgentTools(grant: PermissionSet | PermissionSetView, declara
     // A tool we cannot serve has no `app` to choose, and one whose native must not run no `native`,
     // whatever the entry recorded.
     const choice = spec.nativeOnly === true ? "native" : spec.appOnly === true ? "app" : implementation;
-    if (choice === "native" && natives.length > 0) {
-      // Kept — and a `deny` beside it is still a deny, delivered as configuration.
-      if (view.modeOf(spec.name) === "deny") plan.denyNatives.push(...natives);
+    if (choice === "native" && (spec.nativeOnly === true ? natives.length > 0 : keepsNative(view, declaration, spec.name))) {
+      // Kept — and a `deny` beside it, at every place, is still a deny, delivered as configuration.
+      if (refusedEverywhere(view, spec.name)) plan.denyNatives.push(...natives);
       else plan.askNatives.push(...natives);
       continue;
     }
@@ -352,7 +386,8 @@ export function planAgentTools(grant: PermissionSet | PermissionSetView, declara
 
 /** What a permission set REFUSES — the reason a transport that enforces nothing cannot run it. */
 export function refusalsOf(view: PermissionSetView): string[] {
-  const denied = TOOL_SPECS.filter((spec) => view.modeOf(spec.name) === "deny").map((spec) => spec.name);
+  // A line that refuses at any of its places refuses something, too.
+  const denied = TOOL_SPECS.filter((spec) => view.modeOf(spec.name) === "deny" || Object.values(view.placesOf(spec.name) ?? {}).includes("deny")).map((spec) => spec.name);
   return view.otherFor("other") === "deny" ? [...denied, "other"] : denied;
 }
 
@@ -450,8 +485,12 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
       // every tool of it): a `deny` needs no person.
       const servers = new Set(Object.keys(view.lines()).flatMap((subject) => parseMcpSubject(subject)?.server ?? []));
       const denied = [...new Set([...plan.displaced, ...plan.denyNatives, ...mcpDeniedSubjects(view, servers)])];
+      // A kept built-in whose line has places is bounded up front by the agent's own rules too
+      // (decision 0023 §3.9) — scoped only, under the bare ask that routes every other call to the gate.
+      const root = (ctx as { workspace?: { root?: string } }).workspace?.root;
+      const placed = compileClaudePlaceRules(keptPlaces(view, declaration, plan.askNatives), { ...(root !== undefined ? { root, named: namedPlacesOf(root) } : {}), declaration });
       return executor.start(
-        withAskRules(op, options.providerOptionsKey ?? "claudeCode", plan.askNatives),
+        withAgentRules(op, options.providerOptionsKey ?? "claudeCode", { ask: [...plan.askNatives, ...placed.ask], allow: placed.allow, deny: placed.deny }),
         servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx), view.lineOf),
       );
     },
@@ -518,7 +557,7 @@ const BRIDGE_ONLY: AgentToolDeclaration = { channel: "switches", natives: {} };
  * chosen. A conversation turn never registers it in the first place.
  */
 function nativelyServed(view: PermissionSetView, declaration: AgentToolDeclaration, ctx: ExecServices): string[] {
-  return Object.keys(ctx.tools ?? {}).filter((name) => view.held(name) === "native" && nativesOfStandard(declaration, name).length > 0);
+  return Object.keys(ctx.tools ?? {}).filter((name) => view.held(name) === "native" && keepsNative(view, declaration, name));
 }
 
 /** A registered agent function's `run`, in the shape `runtimeFunction` takes. */
@@ -670,21 +709,40 @@ function standardInput<T>(standard: string, input: T): T {
   return { ...bag, ...Object.fromEntries(wanted.map((arg) => [arg, place])) } as T;
 }
 
-/** Add ask rules to the agent's own settings — unioned with whatever the state already wrote. */
-function withAskRules(op: Operation<InlineFamily>, key: string, natives: readonly string[]): Operation<InlineFamily> {
-  if (op.kind !== "prompt" || natives.length === 0) return op;
+/**
+ * The lines of the natives the plan KEEPS that have places, by standard tool — what Claude's own rules
+ * are compiled from (`compileClaudePlaceRules`).
+ */
+function keptPlaces(view: PermissionSetView, declaration: AgentToolDeclaration, kept: readonly string[]): Record<string, Readonly<Record<string, PermissionSetMode>>> {
+  const out: Record<string, Readonly<Record<string, PermissionSetMode>>> = {};
+  for (const native of kept) {
+    const standard = standardOfNative(declaration, native);
+    if (typeof standard !== "string") continue;
+    const places = view.placesOf(standard);
+    if (places !== undefined) out[standard] = places;
+  }
+  return out;
+}
+
+/** Add rules to the agent's own settings — each list unioned with whatever the state already wrote. */
+function withAgentRules(op: Operation<InlineFamily>, key: string, rules: { ask: readonly string[]; allow: readonly string[]; deny: readonly string[] }): Operation<InlineFamily> {
+  if (op.kind !== "prompt" || (rules.ask.length === 0 && rules.allow.length === 0 && rules.deny.length === 0)) return op;
   const config = isObject(op.config) ? op.config : {};
   const providerOptions = isObject(config["providerOptions"]) ? config["providerOptions"] : {};
   const bag = isObject(providerOptions[key]) ? providerOptions[key] : {};
   const settings = isObject(bag["settings"]) ? bag["settings"] : {};
   const permissions = isObject(settings["permissions"]) ? settings["permissions"] : {};
-  const existing = Array.isArray(permissions["ask"]) ? (permissions["ask"] as JsonValue[]) : [];
-  const ask = [...new Set([...existing, ...natives])] as JsonValue;
+  const merged: Record<string, JsonValue> = { ...permissions };
+  for (const list of ["ask", "allow", "deny"] as const) {
+    if (rules[list].length === 0) continue;
+    const existing = Array.isArray(permissions[list]) ? (permissions[list] as JsonValue[]) : [];
+    merged[list] = [...new Set([...existing, ...rules[list]])] as JsonValue;
+  }
   return {
     ...op,
     config: {
       ...config,
-      providerOptions: { ...providerOptions, [key]: { ...bag, settings: { ...settings, permissions: { ...permissions, ask } } } },
+      providerOptions: { ...providerOptions, [key]: { ...bag, settings: { ...settings, permissions: merged } } },
     } as JsonValue,
   };
 }

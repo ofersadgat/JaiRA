@@ -223,7 +223,7 @@ export function bundleFor(project: Project, workflow: string, snapshotHash?: str
     return loadWorkflowBundle(
       readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }),
       workflow,
-      workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }),
+      { ...workflowLoadOptions(project.paths, { tolerant: true, path: project.config.workflows.path }), standingLayers: project.config.permissions.layers },
     );
   } catch {
     return undefined;

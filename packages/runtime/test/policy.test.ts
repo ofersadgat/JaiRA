@@ -358,6 +358,18 @@ describe("a line is judged part by part, against the permission set", () => {
     expect(decideCommand(OPEN, `git reset --hard; bash -c "echo 'oops"`, "posix", { permissionSet: open }).action).toBe("deny");
   });
 
+  it("lets a scoped package name through under full access: `@scope/name` is a word, and no splat", () => {
+    const full = shellPermissionSetOf(parsePermissionSet({ shell: "allow", script: "allow", "runner:*": "allow", other: "allow" }).permissionSet)!;
+    const repo = { dir: "/repo", name: "root", scripts: {}, workspaces: ["packages/*"] };
+    const app = { dir: "/repo/packages/app", name: "@jaira/app", scripts: { build: "node build.mjs" } };
+    const packages = { at: (dir: string) => [repo, app].find((pkg) => pkg.dir === dir), workspacesOf: () => [app] };
+    const decision = decideCommand(OPEN, "npm --workspace @jaira/app run build 2>&1 | Select-Object -Last 15", "powershell", { permissionSet: full, root: "/repo", packages });
+    expect(decision.action).toBe("allow");
+    expect(decision.parts.parts.map((p) => [p.text, p.subject, p.verdict])).toContainEqual(["node build.mjs", "script", "allowed"]);
+    // A real splat is still decided as the line runs.
+    expect(decideCommand(OPEN, "npm @params", "powershell", { permissionSet: full, root: "/repo", packages }).action).toBe("require_approval");
+  });
+
   it("keeps the destructive floor and `.jaira/` above EVERY permission set, however the command is dressed", () => {
     const open = shellPermissionSetOf(parsePermissionSet({ shell: "allow", write_file: "allow", read_file: "allow", script: "allow", git: "allow", "git reset": "allow", rm: "allow", other: "allow" }).permissionSet)!;
     for (const line of [
@@ -432,9 +444,10 @@ describe("a line is judged part by part, against the permission set", () => {
     // With the built-ins off, the permission set is the only authority.
     expect(decideCommand({ builtins: false }, "git push origin main", "posix", { permissionSet: blanket }).action).toBe("allow");
     expect(decideCommand({ builtins: false }, "git reset --hard", "posix", { permissionSet: shellPermissionSetOf(parsePermissionSet({ shell: "allow", "git reset": "ask" }).permissionSet)! }).action).toBe("require_approval");
-    // `smart` on an entry defers to the command policy.
+    // A shell line naming a FUNCTION (`"smart"`, decision 0023 §1) hands every part nothing else names
+    // to it: the gate is asked, and the approver puts the part to the function.
     const deferring = shellPermissionSetOf(parsePermissionSet({ shell: "smart" }).permissionSet)!;
-    expect(decideCommand(OPEN, "git status", "posix", { permissionSet: deferring }).action).toBe("allow");
+    expect(decideCommand(OPEN, "git status", "posix", { permissionSet: deferring }).action).toBe("require_approval");
     expect(decideCommand(OPEN, "git push", "posix", { permissionSet: deferring }).action).toBe("require_approval");
     // A subject the permission set does not hold is not offered: it asks.
     expect(judged("rm x", "posix", OPEN, blanket).parts).toEqual(["«rm x» write_file asks by permissionSet ~rm~"]);
@@ -470,6 +483,19 @@ describe("a line is judged part by part, against the permission set", () => {
     expect(decideCommand(OPEN, "git reset --hard", "posix", { permissionSet: PERMISSION_SET, grants }).action).toBe("deny");
     // A width no asking part offers is not stored — so the line itself never can be.
     expect(new CommandGrants().rememberParts(first.parts, "allow", [line, "git log"])).toEqual(["rm", "git commit"]);
+  });
+});
+
+describe("CommandGrants lets go of an answer by the key it lists it by (decision 0023 §4.1, the runtime segment)", () => {
+  it("forgets `width` and `width @ place` alone, and leaves the rest", () => {
+    const grants = new CommandGrants();
+    grants.remember("npm run build", "allow", "packages");
+    grants.remember("npm run build", "deny");
+    grants.remember("Git  Push", "deny");
+    expect(grants.list()).toEqual({ "npm run build @ packages": "allow", "npm run build": "deny", "git push": "deny" });
+    grants.forget(["npm run build @ packages", "git push", "nothing kept"]);
+    expect(grants.list()).toEqual({ "npm run build": "deny" });
+    expect(grants.answerFor(["npm run build"])).toEqual({ width: "npm run build", decision: "deny" });
   });
 });
 
@@ -668,6 +694,35 @@ describe("a command runner's gate", () => {
     expect(judged(`bash -c "git status"`)).toEqual({ action: "allow", parts: [`«bash -c "git status"» runner:bash allowed by runner:*`, "«git status» git status allowed by git status"] });
     // Nothing inside: the command itself, which no line names.
     expect(judged("npm install")).toEqual({ action: "deny", parts: ["«npm install» runner:npm allowed by runner:npm", "«npm install» npm install denied by shell"] });
+  });
+
+  it("puts what a runner runs under the runner, however deep its scripts go and whatever encloses it", () => {
+    const nested = { ...repo, scripts: { all: "npm run lint && npm run missing", lint: "git status" } };
+    const reader = { ...packages, at: (dir: string) => (dir === "/repo" ? nested : undefined) };
+    const under = (line: string) => decideCommand({}, line, "posix", { permissionSet: GATED, root: "/repo", packages: reader }).parts.parts.map((p) => [p.subject, p.within]);
+    expect(under("npm run lint")).toEqual([["runner:npm", undefined], ["git status", 0]]);
+    expect(under("npm run all")).toEqual([
+      ["runner:npm", undefined],
+      ["runner:npm", 0],
+      ["git status", 1],
+      ["runner:npm", 0],
+      ["script", 3],
+    ]);
+    // What it could not read is under it too, rather than a second listing of the line beside it.
+    expect(under("npm run missing")).toEqual([["runner:npm", undefined], ["script", 0]]);
+    expect(under("npm install")).toEqual([["runner:npm", undefined], ["npm install", 0]]);
+    expect(under(`bash -c "npm run lint"`)).toEqual([["runner:bash", undefined], ["runner:npm", 0], ["git status", 1]]);
+  });
+
+  it("knows a script past a flag's value, and does not let one it cannot read through as the program", () => {
+    for (const dialect of ["posix", "powershell"] as const) {
+      const decision = decideCommand({}, "npm --workspace @jaira/app run nothing", dialect, { permissionSet: set({ "runner:*": "allow", shell: "allow", script: "deny" }), root: "/repo", packages });
+      expect(decision.action, dialect).toBe("deny");
+      expect(decision.parts.parts.at(-1), dialect).toMatchObject({ kind: "script", subject: "script", within: 0 });
+    }
+    // A flag it does not read, and a word decided as the line runs, are read no further than they were.
+    expect(judged("npm --script-shell x run lint", set({ "runner:*": "allow", shell: "allow", script: "deny" })).action).toBe("deny");
+    expect(decideCommand({}, "npm $flags run lint", "posix", { permissionSet: set({ "runner:*": "allow", shell: "allow", script: "allow" }), root: "/repo", packages }).action).toBe("require_approval");
   });
 
   it("refuses a runner its gate denies without looking inside", () => {

@@ -6,7 +6,7 @@ updated: 2026-09-22
 visibility: public
 kind: api
 owned_by: [engineering/units/host-tools]
-consumers: ["workflow authors, through a state's environment.tools (a permission set, or the older list with permissions.tools) and permissions.scopes", "permission set files, permission-sets/<bucket>/<name>.json under each layer root, whose tool subjects are these names", "@jaira/shared permissionSets.ts, which tells a tool subject from a command subject by this table", "@declarative-ai/hw, which resolves environment.tools against registry.tools", "delegated agents, which receive the tools over the upstream MCP bridge", "@jaira/runtime tools.ts gateTools and planAgentTools, and policy.ts compilePolicy", "@jaira/shared toolVocabulary.ts TOOL_SPECS, whose pathArgs and urlArgs name these arguments", "@jaira/app renderer composer tools menu, through chat:plan available.tools", "@jaira/cli buildRunEnvironment"]
+consumers: ["workflow authors, through a state's environment.tools (a permission set, whose lines may carry places — decision 0023 §3)", "permission set files, permission-sets/<bucket>/<name>.json under each layer root, whose tool subjects are these names", "@jaira/shared permissionSets.ts, which tells a tool subject from a command subject by this table", "@declarative-ai/hw, which resolves environment.tools against registry.tools", "delegated agents, which receive the tools over the upstream MCP bridge", "@jaira/runtime tools.ts gateTools and planAgentTools, and policy.ts compilePolicy", "@jaira/shared toolVocabulary.ts TOOL_SPECS, whose pathArgs and urlArgs name these arguments", "@jaira/app renderer composer tools menu, through chat:plan available.tools", "@jaira/cli buildRunEnvironment"]
 siblings: [engineering/contracts/artifact-destination-template, engineering/contracts/exec-observer, engineering/contracts/settings-json]
 ---
 
@@ -16,7 +16,7 @@ The tools JaiRA registers on `registry.tools` for a model to call, and the `run_
 
 ## A state grants these tools to reach the workspace, a shell or the web under JaiRA's policy
 
-**Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a permission set (a map from a tool name to `allow`, `ask`, `deny` or a function such as `{ "function": "smart" }`, or a reference such as `$/permission-sets/chat/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
+**Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a permission set (a map from a tool name to `allow`, `ask`, `deny` or a function by name such as `"smart"`, or a reference such as `$/permission-sets/chat/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
 
 **Do not use when.** Expecting an agent to keep a built-in the permission set does not hold. Under a permission set map on a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the map does not hold is removed. The older list is the legacy reading and keeps the built-ins it does not mention: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
 
@@ -263,7 +263,7 @@ outside it.
 
 - `glob` and `grep` paths are relative to the `path` argument, not the workspace, and `grep`'s `count` stops at 200 while `glob`'s does not.
 - A walk skips `.git`, `.jaira`, `node_modules`, `dist`, `build`, `out`, `target`, `vendor`, `coverage`, `__pycache__` and `.venv` wherever they appear, and every symlink, file or directory.
-- A listing drops paths the executor floor denies without saying so. A state's own `permissions.scopes` refuses a call whose `path` it denies but does not filter what a walk from an allowed directory lists.
+- A listing drops paths the executor floor denies without saying so. A permission set line's places refuse a call whose `path` they deny but do not filter what a walk from an allowed directory lists.
 - A scope judges the logical path the model named, never where the destination put the bytes.
 - `read_file`, `edit` and a content-less `show_artifact` read the artifact map before the disk, so a small file changed outside the tools after a tool wrote it reads as the old text.
 - `show_artifact` places under `$CENTRAL` but records the logical path, so a later `edit` of that path writes the artifact's text through the configured destination, which under `$DEFAULT` overwrites the workspace file of that name.

@@ -38,7 +38,22 @@
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
-import { SHELL_SUBJECT, classifyRequest, lookUp, makeCallOf, matchCommandEntry, packageScriptOf, shellPermissionSetOf, shellPermissionSetOfBlock, subjectWordSpans, type ClassifiedPart, type ShellPermissionSet } from "./commandParts";
+import {
+  SHELL_SUBJECT,
+  answerOfLines,
+  classifyRequest,
+  lookUp,
+  makeCallOf,
+  matchCommandEntries,
+  matchCommandEntry,
+  packageScriptOf,
+  shellPermissionSetOf,
+  shellPermissionSetOfBlock,
+  subjectWordSpans,
+  type ClassifiedPart,
+  type PartPlaces,
+  type ShellPermissionSet,
+} from "./commandParts";
 import { dialectFor, type ExecEnv } from "./paths";
 import { filePackages, makeRunsOf, scriptRunsOf, shellWord, type PackageReader, type ScriptRun } from "./packageScripts";
 import {
@@ -64,13 +79,22 @@ import {
   modeFunction,
   modeWord,
   permissionSetFunctions,
+  permissionsOfPermissionSet,
   isCommandRunner,
   runnerSubject,
   RUNNER_GROUP_SUBJECT,
+  linePlaces,
+  normalizePath,
+  placeKindOf,
   shellSubjects,
   toolModes,
+  placeWidthsOf,
+  resolvePlaces,
+  SCRIPT_SUBJECT,
   RESERVED_MCP_SERVERS,
   TOOL_SPEC_BY_NAME,
+  type PlaceKind,
+  type PlaceOptions,
   type CommandApproval,
   type JairaMcpConfig,
   type McpToolMapping,
@@ -83,10 +107,17 @@ import {
   type ToolMode,
   type PermissionSet,
   type PermissionSetMode,
+  type PermissionStackDecl,
+  layerOfLine,
+  normalizeSubject,
+  RUNTIME_LAYER,
+  stackIdsNewestFirst,
+  TOOLS_LAYER,
 } from "@jaira/shared";
 // Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
 import { declaredNative, standardOfAnyNative } from "./agentTools";
-import { partScopeFor, scopeNarrowingFor } from "./tools";
+import { partScopeFor, placeNarrowingFor, scopeNarrowingFor, toolPlaceAnswer } from "./tools";
+import { namedPlacesOf } from "./linePlaces";
 import { mcpCallOf } from "./mcpServers";
 import { deniedEarlier, refusalWords, takeRefusal, type RefusedBy } from "./refusals";
 
@@ -296,14 +327,25 @@ export interface CommandDecision {
  * answer never reaches over the destructive floor, `.jaira/`, a rule's or a permission set's `deny`, or a
  * line the parser could not read. Writing the entry into a permission set FILE is the other reach ("add to
  * the permission set"), and is not done here.
+ *
+ * An answer may also be kept at a PLACE (decision 0023 §3.8): `npm run build` allowed "in packages"
+ * is (`npm run build`, `packages`), and covers the next `npm run build` only where every place it is
+ * about lies in `packages` — judged as a line's place map is (`resolvePlaces`), so `packages` is the
+ * folder and all under it and `claude/**` a branch glob. An answer kept at no place covers the width
+ * everywhere, as before places. Where both are kept for one width, the placed one that covers the part
+ * speaks, and a placeless one answers the rest.
  */
 export class CommandGrants {
-  private readonly answers = new Map<string, "allow" | "deny">();
+  /** By width (normalized as subjects are), then by place (`""` for none). */
+  private readonly answers = new Map<string, Map<string, "allow" | "deny">>();
 
-  /** Remember one answer at one width. Widths are normalized the way permission set subjects are. */
-  remember(width: string, decision: "allow" | "deny"): void {
+  /** Remember one answer at one width, and optionally at one place. Widths are normalized the way permission set subjects are. */
+  remember(width: string, decision: "allow" | "deny", place?: string): void {
     const key = width.trim().replace(/\s+/g, " ").toLowerCase();
-    if (key.length > 0) this.answers.set(key, decision);
+    if (key.length === 0) return;
+    const at = this.answers.get(key) ?? new Map<string, "allow" | "deny">();
+    at.set(place?.trim() ?? "", decision);
+    this.answers.set(key, at);
   }
 
   /**
@@ -312,29 +354,72 @@ export class CommandGrants {
    * `widths` names the chosen ones (`["git"]` to widen `git commit` to the program); a part none of
    * them fits is remembered at its narrowest. A width no ASKING part offers is dropped, which is what
    * keeps this from ever storing a line, a part that was already allowed, or one that was denied.
-   * Returns what was stored.
+   * `place`, when given, is where the answer holds (one of the asking parts' `where.widths`): each
+   * width is kept at it. Returns what was stored.
    */
-  rememberParts(approval: CommandApproval, decision: "allow" | "deny", widths?: readonly string[]): string[] {
+  rememberParts(approval: CommandApproval, decision: "allow" | "deny", widths?: readonly string[], place?: string): string[] {
     const chosen = Object.keys(entriesToRemember(approval, decision, (part) => part.widths.find((w) => widths?.includes(w) === true) ?? part.widths[0]));
-    for (const width of chosen) this.remember(width, decision);
+    for (const width of chosen) this.remember(width, decision, place);
     return chosen;
   }
 
-  /** The narrowest remembered answer among a part's widths. */
-  answerFor(widths: readonly string[]): { width: string; decision: "allow" | "deny" } | undefined {
+  /**
+   * The narrowest remembered answer among a part's widths — at a width kept at a place only where
+   * `placesOf` says the part is about places all of which lie there. `placesOf(kind, width)` is what
+   * the part is about for a line of that width (`PartPlaces.of`); absent, a placed answer covers nothing.
+   */
+  answerFor(
+    widths: readonly string[],
+    placesOf?: ((kind: PlaceKind, width: string) => readonly string[]) | undefined,
+    options: PlaceOptions = {},
+  ): { width: string; decision: "allow" | "deny"; place?: string } | undefined {
     for (const width of widths) {
-      const decision = this.answers.get(width.toLowerCase());
-      if (decision !== undefined) return { width, decision };
+      const kept = this.answers.get(width.trim().replace(/\s+/g, " ").toLowerCase());
+      if (kept === undefined) continue;
+      const placed = Object.fromEntries([...kept].filter(([place]) => place !== ""));
+      const kind = placeKindOf(width);
+      const about = kind !== undefined && placesOf !== undefined ? placesOf(kind, width) : [];
+      if (kind !== undefined && about.length > 0 && Object.keys(placed).length > 0) {
+        const resolved = resolvePlaces(placed, kind, about, options);
+        // A refusal kept at one of its places refuses the part, whatever its other places are; an
+        // allowance holds only where it covers all of them.
+        if (resolved.decision !== undefined && (resolved.unmatched.length === 0 || resolved.decision === "deny")) {
+          const deciding = resolved.matches.find((match) => match.decision === resolved.decision) ?? resolved.matches[0]!;
+          return { width, decision: resolved.decision, place: deciding.place };
+        }
+      }
+      const anywhere = kept.get("");
+      if (anywhere !== undefined) return { width, decision: anywhere };
     }
     return undefined;
   }
 
+  /** What is kept, by width — and `width @ place` for an answer kept at a place. */
   list(): Record<string, "allow" | "deny"> {
-    return Object.fromEntries(this.answers);
+    const out: Record<string, "allow" | "deny"> = {};
+    for (const [width, kept] of this.answers) for (const [place, decision] of kept) out[place === "" ? width : `${width} @ ${place}`] = decision;
+    return out;
   }
 
   clear(): void {
     this.answers.clear();
+  }
+
+  /**
+   * Let go of answers by the keys {@link list} names them by — `width`, or `width @ place` — what the
+   * Tools card's run marks let go of one at a time (decision 0023 §4.1). A key that names nothing
+   * kept is no error.
+   */
+  forget(keys: readonly string[]): void {
+    for (const key of keys) {
+      const at = key.indexOf(" @ ");
+      const width = (at < 0 ? key : key.slice(0, at)).trim().replace(/\s+/g, " ").toLowerCase();
+      const place = at < 0 ? "" : key.slice(at + 3).trim();
+      const kept = this.answers.get(width);
+      if (kept === undefined) continue;
+      kept.delete(place);
+      if (kept.size === 0) this.answers.delete(width);
+    }
   }
 }
 
@@ -349,16 +434,29 @@ export interface DecideCommandOptions {
    * the approval untouched; nothing here reads it.
    */
   permissionSetSource?: string | undefined;
-  /** Answers remembered for this run, by part width. */
+  /** Answers remembered for this run, by part width — and by place, where one was chosen. */
   grants?: CommandGrants | undefined;
   /**
-   * What a scope table says about one part's place, by the STANDARD TOOL the part is — so a path
-   * scope written for `write_file` binds `rm` and `>` exactly as it binds the tool.
+   * The stack {@link permissionSet} was composed from (decision 0023 §2.6) and who set each line —
+   * what a part's row names as its layer (`decidedBy.layer`, §2.7), and what the approval lists for
+   * "Add to", newest first. Absent: no part names a layer.
+   */
+  stack?: PermissionStackDecl | undefined;
+  /**
+   * What the executor's scope FLOOR says about one part's place, by the STANDARD TOOL the part is — so
+   * a path scope written for `write_file` binds `rm` and `>` exactly as it binds the tool.
    */
   scopeOf?: ((tool: string, place: { path?: string; url?: string }) => PermissionMode | undefined) | undefined;
   /** What a relative place resolves against for {@link scopeOf}: the workspace, then the call's own `cwd`, then each `cd` on the line. */
   root?: string | undefined;
   cwd?: string | undefined;
+  /**
+   * What a line's PLACES (decision 0023 §3) are resolved against: the project root a relative place is
+   * written from, and where `$PROJECT`, `$WORKTREE`, `$TEMP` and `~` are on this machine. Absent, the
+   * project root is {@link root}. Unlike {@link root} it is not moved for a package script's lines:
+   * `packages/app` means the project's `packages/app` however deep the line is.
+   */
+  places?: PlaceOptions | undefined;
   /**
    * How a line's packages are read — so `npm run lint`, `npm -w app test` are judged by the lines
    * their scripts run ({@link scriptRunsOf}; `filePackages` in the app). Absent, or with no directory
@@ -375,51 +473,194 @@ const MAX_SCRIPT_DEPTH = 4;
 function scriptRunsFor(part: ClassifiedPart, here: string | undefined, options: DecideCommandOptions): ScriptRun[] | undefined {
   if (options.packages === undefined || here === undefined || part.command === undefined || part.unmodelled !== undefined) return undefined;
   if ((options.scriptDepth ?? 0) >= MAX_SCRIPT_DEPTH) return undefined;
-  // A command line naming it (`npm run build`, `npm`) decides it outright; its script is not read.
-  if (options.permissionSet !== undefined && matchCommandEntry(options.permissionSet, part.command) !== undefined) return undefined;
   const make = makeCallOf(part.command);
   if (make !== undefined) return makeRunsOf(options.packages, part.command.program, make, here);
   const call = packageScriptOf(part.command);
   return call === undefined ? undefined : scriptRunsOf(options.packages, call, here);
 }
 
+/** Does a command line that names this part have places — so whether it decides depends on where the part runs? */
+function namedWithPlaces(set: ShellPermissionSet | undefined, command: ParsedCommand): boolean {
+  if (set === undefined) return false;
+  return matchCommandEntries(set, command).some((match) => set.places !== undefined && Object.hasOwn(set.places, match.entry.key));
+}
+
+/**
+ * A stack's layer ids NEWEST first, as an approval lists them (decision 0023 §4.4) — with `runtime`
+ * in its place under the tools layer (§2.6 step 4) when this task's answers are kept.
+ */
+export function approvalStackOf(stack: PermissionStackDecl, withRuntime: boolean): string[] {
+  const ids = stackIdsNewestFirst(stack);
+  if (!withRuntime) return ids;
+  const at = ids[0] === TOOLS_LAYER ? 1 : 0;
+  return [...ids.slice(0, at), RUNTIME_LAYER, ...ids.slice(at)];
+}
+
 /** Whether `span` lies within `outer`, and is not `outer` itself. */
 const inside = (span: TextSpan, outer: TextSpan): boolean => span.start >= outer.start && span.end <= outer.end && !(span.start === outer.start && span.end === outer.end);
 
+/** The ssh options that take a value — what is skipped to find the host a line reaches. */
+const SSH_VALUED = new Set(["-b", "-c", "-D", "-E", "-e", "-F", "-I", "-i", "-J", "-L", "-l", "-m", "-O", "-o", "-p", "-Q", "-R", "-S", "-W", "-w", "-B"]);
+
+/** The host an `ssh` line reaches (`user@host`, `host:22` → `host`), when it can be read. */
+function sshHostOf(command: ParsedCommand): string | undefined {
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]!;
+    if (word === "--") continue;
+    if (word.startsWith("-")) {
+      if (SSH_VALUED.has(word)) i++;
+      continue;
+    }
+    const host = word.includes("@") ? word.slice(word.lastIndexOf("@") + 1) : word;
+    return host.replace(/^ssh:\/\//i, "").replace(/:\d+$/, "");
+  }
+  return undefined;
+}
+
+/**
+ * The branches a `git push` line pushes to, as a branch place reads them (`origin:main`, or `main`
+ * where no remote is named): each refspec's destination, `refs/heads/` taken off. Empty when the line
+ * names no refspec — the current branch, which is git's to know — so its places say nothing and the
+ * line below answers (decision 0023 §3.4).
+ */
+export function pushedBranchesOf(command: ParsedCommand): string[] {
+  if (command.program !== "git" || command.subcommand !== "push") return [];
+  const words = (command.words ?? []).slice((command.programIndex ?? 0) + 1).map((w) => w.value);
+  const at = words.indexOf("push");
+  const operands: string[] = [];
+  for (let i = at + 1; i < words.length; i++) {
+    const word = words[i]!;
+    if (word === "--") continue;
+    if (word.startsWith("-")) {
+      // The options that take a value as the next word (`-o ci.skip`, `--repo x`, `--receive-pack x`).
+      if (["-o", "--push-option", "--repo", "--receive-pack", "--exec"].includes(word)) i++;
+      continue;
+    }
+    operands.push(word);
+  }
+  const [remote, ...refspecs] = operands;
+  const out: string[] = [];
+  for (const refspec of refspecs) {
+    const bare = refspec.replace(/^\+/, "");
+    const colon = bare.indexOf(":");
+    const destination = (colon === -1 ? bare : bare.slice(colon + 1) || bare.slice(0, colon)).replace(/^refs\/heads\//, "");
+    if (destination === "" || destination === "HEAD" || destination.startsWith("refs/")) continue;
+    out.push(remote !== undefined ? `${remote}:${destination}` : destination);
+  }
+  return out;
+}
+
+/**
+ * A word on a command line that names a place on the disk: one with a separator, or an absolute one — `commandSubjects`' reading.
+ * A scoped package name (`@jaira/app`, `@types/node`) is none: `npm -w @jaira/app run build` is about
+ * the workspace it picks, which is where it runs, not about a folder `@jaira` under the project.
+ */
+const looksLikePath = (word: string): boolean =>
+  !word.startsWith("-") && (word.includes("/") || word.includes("\\") || isAbsolutePath(word)) && !/^[a-z][a-z0-9+.-]*:\/\//i.test(word) && !SCOPED_PACKAGE.test(word);
+const SCOPED_PACKAGE = /^@[a-z0-9][\w.-]*\/[\w.-]+(@[^/\\\s]*)?$/i;
+
+/**
+ * What one part is about, for the places of each line it may answer to (decision 0023 §3.1): a FILE
+ * tool's line, and `script`'s, by the paths the part names (the file run, the file written) — else the
+ * directory it runs in; any other path line (a command line, `shell`, `runner:*`) by the directory it
+ * runs in — the package's, for a package script — and every path it names; `git push`'s by the
+ * branches it pushes; a network program's by its URL; `runner:ssh` by the host.
+ */
+function partPlacesOf(part: ClassifiedPart, here: string | undefined, runDirs: readonly string[] | undefined, placeOptions: PlaceOptions): PartPlaces & { primary(kind: PlaceKind, line: string): string | undefined } {
+  const resolve = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
+  const paths = part.paths.filter((path) => path !== "{}").map(resolve);
+  const named = part.command !== undefined && part.kind !== "tool" && part.kind !== "redirect" ? commandWords(part.command).filter(looksLikePath).map(resolve) : [];
+  const where = here ?? placeOptions.root;
+  const dirs = runDirs !== undefined && runDirs.length > 0 ? [...runDirs] : where !== undefined ? [where] : [];
+  const byFile = (line: string): boolean => line === SCRIPT_SUBJECT || (TOOL_SPEC_BY_NAME.has(line) && line !== SHELL_SUBJECT);
+  const of = (kind: PlaceKind, line: string): string[] => {
+    switch (kind) {
+      case "path":
+        if (byFile(line)) return paths.length > 0 ? paths : dirs;
+        return [...new Set([...dirs, ...paths, ...named])];
+      case "branch":
+        return part.command !== undefined ? pushedBranchesOf(part.command) : [];
+      case "site": {
+        const url = part.url ?? (part.command !== undefined ? commandWords(part.command).find((w) => /^[a-z][a-z0-9+.-]*:\/\//i.test(w)) : undefined);
+        return url !== undefined ? [url] : [];
+      }
+      case "host": {
+        const host = part.command !== undefined ? sshHostOf(part.command) : undefined;
+        return host !== undefined ? [host] : [];
+      }
+      default:
+        return [];
+    }
+  };
+  return {
+    of,
+    options: placeOptions,
+    // The place the dialog offers widths of: a path the part names before the directory it runs in.
+    primary: (kind, line) => (kind === "path" ? (paths[0] ?? named[0] ?? dirs[0]) : of(kind, line)[0]),
+  };
+}
+
+/** The folder of the nearest `package.json` at or above a path, read through a package reader — the dialog's "the package" width. */
+export function packageFolderOf(packages: PackageReader | undefined): ((path: string) => string | undefined) | undefined {
+  if (packages === undefined) return undefined;
+  return (path) => {
+    let dir = normalizePath(path);
+    for (let depth = 0; depth < 64; depth++) {
+      try {
+        if (packages.at(dir) !== undefined) return dir;
+      } catch {
+        return undefined;
+      }
+      const slash = dir.lastIndexOf("/");
+      if (slash <= 0 || /^[a-zA-Z]:$/.test(dir.slice(0, slash))) return undefined;
+      dir = dir.slice(0, slash);
+    }
+    return undefined;
+  };
+}
+
 /**
  * The gate a part's command runner answers to (`commandRunners.ts`): `"named"` when a command line
- * names the program (`npm`, `npm run build`), which decides it outright; its own `runner:` line or the
- * group's; `undefined` when it is no runner, or the set has no runner line at all — then nothing gates it.
+ * names the program (`npm`, `npm run build`) and decides it here, which decides it outright; its own
+ * `runner:` line or the group's — the most specific of their places that matches where it runs, else
+ * the line's own mode, else the group's (decision 0023 §3.4); `undefined` when it is no runner, or no
+ * runner line says anything here — then nothing gates it.
  */
-function runnerGateFor(part: ClassifiedPart, options: DecideCommandOptions): "named" | { mode: PermissionSetMode; line: string } | undefined {
+function runnerGateFor(part: ClassifiedPart, options: DecideCommandOptions, where: PartPlaces): "named" | { mode: PermissionSetMode; line: string; place?: string } | undefined {
   const set = options.permissionSet;
   const command = part.command;
   if (set === undefined || command === undefined || part.kind === "unparsed" || !isCommandRunner(command.program)) return undefined;
-  const own = (subject: string): PermissionSetMode | undefined => (Object.hasOwn(set.entries, subject) ? set.entries[subject] : undefined);
-  const line = own(runnerSubject(command.program)) !== undefined ? runnerSubject(command.program) : own(RUNNER_GROUP_SUBJECT) !== undefined ? RUNNER_GROUP_SUBJECT : undefined;
-  if (line === undefined) return undefined;
-  if (part.unmodelled === undefined && matchCommandEntry(set, command) !== undefined) return "named";
-  return { mode: own(line)!, line };
+  const lines = [runnerSubject(command.program), RUNNER_GROUP_SUBJECT];
+  const answer = answerOfLines(set, lines, where);
+  if (answer === undefined && !lines.some((line) => Object.hasOwn(set.entries, line) || (set.places !== undefined && Object.hasOwn(set.places, line)))) return undefined;
+  if (part.unmodelled === undefined && matchCommandEntry(set, command) !== undefined && lookUp(set, part, where).specific) return "named";
+  if (answer === undefined || answer.mode === undefined || answer.entry === undefined) return undefined;
+  return { mode: answer.mode, line: answer.entry, ...(answer.place !== undefined ? { place: answer.place } : {}) };
 }
 
 /** A runner's gate as a part of the line: its whole invocation, its program underlined, answered by its line — or by what was remembered for the run. */
-function runnerPart(part: ClassifiedPart, gate: { mode: PermissionSetMode; line: string }, options: DecideCommandOptions, line: string): CommandPart {
+function runnerPart(part: ClassifiedPart, gate: { mode: PermissionSetMode; line: string; place?: string }, options: DecideCommandOptions, line: string, where: PartPlaces): CommandPart {
   const command = part.command!;
   const subject = runnerSubject(command.program);
   const widths = [subject, RUNNER_GROUP_SUBJECT];
   const reference = modeFunction(gate.mode);
   let verdict = verdictOfMode(gate.mode);
+  const at = gate.place !== undefined ? ` in ${gate.place}` : "";
+  const layer = layerOfLine(options.stack, gate.line, gate.place);
   let decidedBy: CommandPart["decidedBy"] = {
     source: "permissionSet",
     entry: gate.line,
     ...(reference !== undefined ? { function: reference } : {}),
-    reason: reference !== undefined ? `the permission set's '${gate.line}' is decided by the function '${reference}'` : `the permission set's '${gate.line}' is ${modeWord(gate.mode)}`,
+    ...(gate.place !== undefined ? { place: gate.place } : {}),
+    ...(layer !== undefined ? { layer } : {}),
+    reason: reference !== undefined ? `the permission set's '${gate.line}'${at} is decided by the function '${reference}'` : `the permission set's '${gate.line}'${at} is ${modeWord(gate.mode)}`,
   };
   if (verdict === "asks") {
-    const remembered = options.grants?.answerFor(widths);
+    const remembered = options.grants?.answerFor(widths, where.of, where.options);
     if (remembered !== undefined) {
       verdict = remembered.decision === "allow" ? "allowed" : "denied";
-      decidedBy = { source: "remembered", entry: remembered.width, reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run` };
+      decidedBy = { source: "remembered", entry: remembered.width, layer: RUNTIME_LAYER, ...(remembered.place !== undefined ? { place: remembered.place } : {}), reason: rememberedReason(remembered) };
     }
   }
   const program = command.words?.[command.programIndex ?? 0];
@@ -439,6 +680,28 @@ function runnerPart(part: ClassifiedPart, gate: { mode: PermissionSetMode; line:
   };
 }
 
+/**
+ * Does a refusal kept "for this run" at `width` stand over what a part's set allowed (decision 0023
+ * §2.6: runtime is newer than every layer but the tools layer)? Over nothing decided — no built-in, no
+ * set — yes. Over a set's line: not one the TOOLS layer set, which is newer still; and, line against
+ * line, the more specific wins (§2.2) — a part's widths are its lines narrowest first, so the kept
+ * width stands where it is at least as narrow as the deciding line, and over any line that is no width
+ * of the part (`shell`, `other`, the standard tool a utility is), which is less specific than all.
+ */
+function runtimeOutranks(composed: Composed, width: string, widths: readonly string[]): boolean {
+  if (composed.source === "default") return true;
+  if (composed.source !== "permissionSet" || composed.layer === TOOLS_LAYER) return false;
+  const norm = (subject: string): string => normalizeSubject(subject).toLowerCase();
+  const all = widths.map(norm);
+  const line = composed.entry !== undefined ? all.indexOf(norm(composed.entry)) : -1;
+  return line < 0 || all.indexOf(norm(width)) <= line;
+}
+
+/** What a person reads for an answer remembered for this run — at its place, where it was kept at one. */
+function rememberedReason(remembered: { width: string; decision: "allow" | "deny"; place?: string }): string {
+  return `'${remembered.width}'${remembered.place !== undefined ? ` in ${remembered.place}` : ""} was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`;
+}
+
 /** A part's answer while it is being composed: the layer that gave it is kept beside it. */
 interface Composed {
   verdict: CommandPartVerdict;
@@ -449,6 +712,10 @@ interface Composed {
   function?: string;
   /** The words a permission set entry matched, when one decided. */
   matched?: TextSpan[];
+  /** The place of the entry's line that decided, when a place did. */
+  place?: string;
+  /** The layer of the stack that set the deciding line (decision 0023 §2.7) — `runtime` for an answer given in this task. */
+  layer?: string;
 }
 
 const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VERDICT_RANK[a] > VERDICT_RANK[b];
@@ -461,7 +728,9 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VE
  *  1. `.jaira/` anywhere in the part ⇒ denied. Nothing below is consulted.
  *  2. The BUILT-INS (unless `functions.shell.builtins` is off): the destructive floor (deny), else a
  *     built-in ask, else nothing — `default`, which allows.
- *  3. The PERMISSION_SET's answer for the part's subject. It composes with (2) as the STRICTER of the two,
+ *  3. The PERMISSION_SET's answer for the part's subject ({@link lookUp}: the most specific line, the
+ *     most specific of its places that matches where the part acts, a place that matches nothing
+ *     falling to a less specific line). It composes with (2) as the STRICTER of the two,
  *     with one exception: an entry that NAMES the program (`git push`, `git`) replaces a built-in ask
  *     or the `default` — naming it is the decision those two stand in for. It never replaces the
  *     floor: the floor stays above every permission set. An entry that names a FUNCTION answers `function`,
@@ -470,12 +739,13 @@ const isStricter = (a: CommandPartVerdict, b: CommandPartVerdict): boolean => VE
  *     that names the function names the program too.
  *  4. A part the parser cannot vouch for asks at least — never a function: what it cannot read is
  *     never allowed without a person, whatever the permission set hands it to.
- *  5. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied`. It never
- *     lifts `denied`, and never what the parser could not read, and never a part a function decides.
- *  6. A SCOPE table's answer for the part's place, by the standard tool the part is. Strictest again,
- *     and after (5): a remembered `rm` does not open a place the table shut.
+ *  5. An answer REMEMBERED for this run settles a part that asks: `allowed`, or `denied` — at its
+ *     place, where it was kept at one. It never lifts `denied`, and never what the parser could not
+ *     read, and never a part a function decides.
+ *  6. The executor's scope FLOOR's answer for the part's place, by the standard tool the part is.
+ *     Strictest again, and after (5): a remembered `rm` does not open a place the floor shut.
  */
-function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCommandOptions, here: string | undefined): Composed | undefined {
+function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCommandOptions, here: string | undefined, where: PartPlaces): Composed | undefined {
   // Every word, and the value written into a flag (`--output=.jaira/x`).
   const words = part.command !== undefined ? [...commandWords(part.command), ...part.command.flags.flatMap((f) => (f.includes("=") ? [f.slice(f.indexOf("=") + 1)] : []))] : [];
   if ([...words, ...part.paths].some(isDeniedPath)) {
@@ -502,20 +772,24 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
 
   // (3) the permission set
   if (options.permissionSet !== undefined && part.noRequest !== true) {
-    const answer = lookUp(options.permissionSet, part);
+    const answer = lookUp(options.permissionSet, part, where);
     if (answer.mode !== undefined) {
       const reference = modeFunction(answer.mode);
+      const at = answer.place !== undefined ? ` in ${answer.place}` : "";
+      const layer = answer.entry !== undefined ? layerOfLine(options.stack, answer.entry, answer.place) : undefined;
       const fromPermissionSet: Composed = {
         verdict: verdictOfMode(answer.mode),
         source: "permissionSet",
         ...(answer.entry !== undefined ? { entry: answer.entry } : {}),
+        ...(layer !== undefined ? { layer } : {}),
         ...(reference !== undefined ? { function: reference } : {}),
+        ...(answer.place !== undefined ? { place: answer.place } : {}),
         reason:
           answer.entry === undefined
             ? `the permission set does not hold '${part.subject}'`
             : reference !== undefined
-              ? `the permission set's '${answer.entry}' is decided by the function '${reference}'`
-              : `the permission set's '${answer.entry}' is ${modeWord(answer.mode)}`,
+              ? `the permission set's '${answer.entry}'${at} is decided by the function '${reference}'`
+              : `the permission set's '${answer.entry}'${at} is ${modeWord(answer.mode)}`,
         ...(answer.matched !== undefined ? { matched: answer.matched } : {}),
       };
       const builtinAsk = composed.source === "builtin" && composed.verdict === "asks";
@@ -532,20 +806,25 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
     composed = { verdict: "asks", source: "parser", reason: part.kind === "unparsed" ? `command could not be parsed (${part.unmodelled})` : part.unmodelled };
   }
 
-  // (5) remembered for this run
-  if (composed.verdict === "asks" && part.unmodelled === undefined) {
-    const remembered = options.grants?.answerFor(part.widths);
-    if (remembered !== undefined) {
+  // (5) remembered for this run — at the part's place, where the answer was kept at one. The runtime
+  // layer stands over every set below it (decision 0023 §2.6 step 4), so a refusal kept "for this
+  // run" also refuses what a layer below ALLOWS at a line no more specific than the width it was kept
+  // at; an allowance only settles what asks — it never lifts a refusal (invariant 28).
+  if (part.unmodelled === undefined && composed.verdict !== "denied") {
+    const remembered = options.grants?.answerFor(part.widths, where.of, where.options);
+    if (remembered !== undefined && (composed.verdict === "asks" || (remembered.decision === "deny" && runtimeOutranks(composed, remembered.width, part.widths)))) {
       composed = {
         verdict: remembered.decision === "allow" ? "allowed" : "denied",
         source: "remembered",
         entry: remembered.width,
-        reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`,
+        layer: RUNTIME_LAYER,
+        ...(remembered.place !== undefined ? { place: remembered.place } : {}),
+        reason: rememberedReason(remembered),
       };
     }
   }
 
-  // (6) where
+  // (6) where — the executor's floor
   if (options.scopeOf !== undefined && part.tool !== undefined && composed.verdict !== "denied") {
     const resolved = (path: string): string => (isAbsolutePath(path) || here === undefined ? path : absolutize(path, here));
     const places: Array<{ path?: string; url?: string }> = [...part.paths.map((path) => ({ path: resolved(path) })), ...(part.url !== undefined ? [{ url: part.url }] : [])];
@@ -566,7 +845,8 @@ function judgePart(policy: JairaPolicy, part: ClassifiedPart, options: DecideCom
  * strictest verdict — with the parts, which are what an approval shows.
  *
  * The line runs only if EVERY part may. Any part denied ⇒ the line is refused. Any part asking ⇒
- * one approval, carrying every part.
+ * one approval, carrying every part, each asking part with the place widths it may be remembered at
+ * (`CommandPart.where`).
  */
 export function decideCommand(policy: JairaPolicy, line: string, dialect: CommandDialect = "posix", options: DecideCommandOptions = {}): CommandDecision {
   const taken = takeApart(line, dialect);
@@ -574,6 +854,9 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
   const commands: Array<ParsedCommand | undefined> = [];
   let findRoots: string[] = ["."];
   let here =options.cwd !== undefined ? (isAbsolutePath(options.cwd) || options.root === undefined ? options.cwd : absolutize(options.cwd, options.root)) : options.root;
+  // A place is written from the PROJECT, not from the package a script's line runs in.
+  const placeOptions: PlaceOptions = options.places ?? (options.root !== undefined ? { root: options.root } : {});
+  const packageOf = packageFolderOf(options.packages);
   // Runners whose inside is not looked at: one the gate refused, or one its own command line decided.
   const unlooked: TextSpan[] = [];
   for (const request of taken.requests) {
@@ -581,12 +864,22 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     const classified = classifyRequest(request, dialect);
     if (classified === undefined) continue;
     const opened = request.kind === "command" ? request.opened : undefined;
-    const gate = runnerGateFor(classified, options);
+    // `npm run lint` is what its script runs: read where — and, unless a command line naming it
+    // decides it here, what — before it is judged.
+    const named = options.permissionSet !== undefined && classified.command !== undefined && matchCommandEntry(options.permissionSet, classified.command) !== undefined;
+    const runs = !named || namedWithPlaces(options.permissionSet, classified.command!) ? scriptRunsFor(classified, here, options) : undefined;
+    // `find docs -exec rm {} +` removes under `docs`: `{}` stands for the places the find walks.
+    if (classified.command?.program === "find" && classified.via?.at(-1) !== "find") findRoots = classified.paths.length > 0 ? classified.paths : ["."];
+    else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
+    const where = partPlacesOf(classified, here, runs?.map((run) => run.dir), placeOptions);
+    const gate = runnerGateFor(classified, options, where);
+    // The runner's row, when it has one: what it runs is judged under it.
+    let runner: number | undefined;
     if (gate === "named") {
       // A command line naming the runner (`npm`, `sudo`) decides it outright: nothing inside is looked at.
       if (opened !== undefined) unlooked.push(classified.span);
     } else if (gate !== undefined) {
-      const part = runnerPart(classified, gate, options, line);
+      const part = runnerPart(classified, gate, options, line, where);
       parts.push(part);
       commands.push(classified.command);
       if (part.verdict === "denied") {
@@ -595,32 +888,32 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
       }
       // What an opened runner runs follows, as requests of its own.
       if (opened !== undefined) continue;
+      runner = parts.length - 1;
     } else if (opened !== undefined && !opened.kept) continue;
-    // `npm run lint` is what its script runs: each part of those lines, judged in the runner's place.
-    const runs = scriptRunsFor(classified, here, options);
-    if (runs !== undefined) {
+    // A command line naming it decides it outright when it answers here — and then its script is not read.
+    const decidedByName = named && options.permissionSet !== undefined && lookUp(options.permissionSet, classified, where).specific;
+    if (runs !== undefined && !decidedByName) {
       const through = line.slice(classified.span.start, classified.span.end);
       for (const run of runs) for (const scriptLine of run.lines) {
-        const inner = decideCommand(policy, scriptLine, "posix", { ...options, cwd: run.dir, root: run.dir, scriptDepth: (options.scriptDepth ?? 0) + 1 });
+        const inner = decideCommand(policy, scriptLine, "posix", { ...options, cwd: run.dir, root: run.dir, places: placeOptions, scriptDepth: (options.scriptDepth ?? 0) + 1 });
+        const base = parts.length;
         for (const part of inner.parts.parts) {
-          const { within: _within, ...rest } = part;
-          parts.push({ ...rest, span: classified.span, matched: classified.matched, via: [...(classified.via ?? []), through, ...(part.via ?? [])] });
+          const { within, ...rest } = part;
+          const under = within !== undefined ? within + base : runner;
+          parts.push({ ...rest, span: classified.span, matched: classified.matched, via: [...(classified.via ?? []), through, ...(part.via ?? [])], ...(under !== undefined ? { within: under } : {}) });
           commands.push(classified.command);
         }
       }
       continue;
     }
-    // `find docs -exec rm {} +` removes under `docs`: `{}` stands for the places the find walks.
-    if (classified.command?.program === "find" && classified.via?.at(-1) !== "find") findRoots = classified.paths.length > 0 ? classified.paths : ["."];
-    else if (classified.via?.at(-1) === "find" && classified.paths.includes("{}")) classified.paths = classified.paths.flatMap((p) => (p === "{}" ? findRoots : [p]));
-    const judged = judgePart(policy, classified, options, here);
+    const judged = judgePart(policy, classified, options, here, where);
     // `cd infra && rm x` is about `infra/x`: the directory moves for what follows it on the line.
     if (classified.noRequest === true && DIRECTORY_CHANGERS.includes(classified.command?.program ?? "") && classified.paths[0] !== undefined && here !== undefined) {
       here = isAbsolutePath(classified.paths[0]) ? classified.paths[0] : absolutize(classified.paths[0], here);
     }
     if (judged === undefined) continue;
     // A command is named by the entry that decided it (`git commit`, or `git`), unless that entry is a fallback.
-    const named = judged.source === "permissionSet" && judged.matched !== undefined && judged.entry !== undefined;
+    const byEntry = judged.source === "permissionSet" && judged.matched !== undefined && judged.entry !== undefined;
     // What is underlined: the words of the entry that decided; for the floor, a built-in ask or a
     // remembered width, the words of the command's own subject; else the part's own default — the
     // program alone, the redirect's operator, a script's whole invocation.
@@ -632,12 +925,16 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
         : byName && judged.source === "builtin"
           ? subjectWordSpans(classified.command!, classified.subject)
           : classified.matched);
+    // Where an asking part acts, and the widths "for this run" may keep its answer at (§3.8).
+    const placeLine = classified.widths[0] ?? classified.subject;
+    const placeKind = placeKindOf(placeLine);
+    const at = judged.verdict === "asks" && placeKind !== undefined ? where.primary(placeKind, placeLine) : undefined;
     parts.push({
       span: classified.span,
       matched: underlined,
       text: line.slice(classified.span.start, classified.span.end),
       kind: classified.kind,
-      subject: named && classified.kind === "command" ? judged.entry! : classified.subject,
+      subject: byEntry && classified.kind === "command" ? judged.entry! : classified.subject,
       ...(classified.paths.length > 0 && classified.noRequest !== true ? { paths: classified.paths } : {}),
       ...(classified.url !== undefined ? { url: classified.url } : {}),
       // What the function a part is put to is handed about it — the command, parsed.
@@ -656,15 +953,21 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
         source: judged.source,
         ...(judged.entry !== undefined ? { entry: judged.entry } : {}),
         ...(judged.verdict === "function" && judged.function !== undefined ? { function: judged.function } : {}),
+        ...(judged.place !== undefined ? { place: judged.place } : {}),
+        ...(judged.layer !== undefined ? { layer: judged.layer } : {}),
         reason: judged.reason,
       },
       widths: classified.widths,
+      ...(at !== undefined && placeKind !== undefined ? { where: { kind: placeKind, at, widths: placeWidthsOf(placeKind, at, { ...placeOptions, ...(packageOf !== undefined ? { packageOf } : {}) }) } } : {}),
       ...(classified.via !== undefined ? { via: classified.via } : {}),
+      ...(runner !== undefined ? { within: runner } : {}),
     });
     commands.push(classified.command);
   }
   // A part written inside another: `rm {}` inside its `find`, `$( … )` inside the command it feeds.
   parts.forEach((part, index) => {
+    // What a runner runs is under the runner already, whatever else encloses them both.
+    if (part.within !== undefined) return;
     let within: number | undefined;
     parts.forEach((other, at) => {
       if (at === index || other.span.start > part.span.start || other.span.end < part.span.end) return;
@@ -682,6 +985,7 @@ export function decideCommand(policy: JairaPolicy, line: string, dialect: Comman
     verdict,
     ...(taken.reason !== undefined ? { unparsed: taken.reason } : {}),
     ...(options.permissionSet !== undefined && options.permissionSetSource !== undefined ? { permissionSet: options.permissionSetSource } : {}),
+    ...(options.permissionSet !== undefined && options.stack !== undefined ? { stack: approvalStackOf(options.stack, options.grants !== undefined) } : {}),
   });
 
   // The strictest PART names the line's reason — ranked by verdict, so an asking part explains an
@@ -801,8 +1105,13 @@ export interface CompilePolicyOptions {
    * narrowing at all, and a project that has authored no scopes pays nothing.
    */
   scopes?: readonly Scope[];
-  /** What a relative glob and a relative call path resolve against. */
+  /** What a relative glob and a relative call path resolve against — and a relative PLACE on a line, and `$PROJECT`. */
   workspaceRoot?: string;
+  /**
+   * The task's worktree, when it runs in one — what `$WORKTREE` on a line names (decision 0023 §3.2).
+   * Absent, `$WORKTREE` is {@link workspaceRoot}.
+   */
+  worktree?: string;
   /**
    * Above this many bytes, a tool that produces content asks instead of just keeping it.
    *
@@ -828,6 +1137,12 @@ export interface CompilePolicyOptions {
    * same way, on the lowered block's `subjects`, read by the narrowing.
    */
   permissionSet?: PermissionSet;
+  /**
+   * The stack {@link permissionSet} was composed from (decision 0023 §2.6) — a turn's, read through
+   * `resolveChatPermissionStack` — so a part's row names the layer that decided it (§2.7) and the
+   * approval lists the stack for "Add to". A state's own block carries its own (`PermissionsDecl.stack`).
+   */
+  stack?: PermissionStackDecl;
   /**
    * Answers remembered about the PARTS of shell lines, for as long as the caller keeps this object —
    * a run. A part that would ask and was allowed at one of its widths no longer asks.
@@ -863,6 +1178,12 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   // `interpreterFor`): WSL is POSIX, and native follows the host platform.
   const dialect: CommandDialect = dialectFor(options.execEnv ?? "windows");
   const audit = (entry: PolicyAuditEntry): void => options.onDecision?.(entry);
+  // What a line's PLACES are resolved against (decision 0023 §3.2): the workspace a relative place is
+  // written from, and where the named places are on this machine.
+  const placeOptions: PlaceOptions = {
+    ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
+    named: namedPlacesOf(options.workspaceRoot, options.worktree),
+  };
 
   const verdictFor = (tool: string, req: PermissionRequest): SmartVerdict => {
     const input = req.input as Record<string, unknown>;
@@ -929,10 +1250,10 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
    * `subjects` and `source`, in a conversation and in a run. A permission set this policy was compiled for is
    * a message's, which has no file behind it.
    */
-  const permissionSetFor = (authored: PermissionsDecl | undefined): { permissionSet: ShellPermissionSet; source: string } | undefined => {
+  const permissionSetFor = (authored: PermissionsDecl | undefined): { permissionSet: ShellPermissionSet; source: string; stack?: PermissionStackDecl } | undefined => {
     const own = shellPermissionSetOfBlock(authored);
-    if (own !== undefined) return { permissionSet: own.permissionSet, source: own.source ?? INLINE_PERMISSION_SET };
-    return compiledFor !== undefined ? { permissionSet: compiledFor, source: INLINE_PERMISSION_SET } : undefined;
+    if (own !== undefined) return { permissionSet: own.permissionSet, source: own.source ?? INLINE_PERMISSION_SET, ...(authored?.stack !== undefined ? { stack: authored.stack } : {}) };
+    return compiledFor !== undefined ? { permissionSet: compiledFor, source: INLINE_PERMISSION_SET, ...(options.stack !== undefined ? { stack: options.stack } : {}) } : undefined;
   };
 
   /** `tool` is the name the gate was asked about: an agent's `PowerShell` reads its line as PowerShell wherever the project runs. */
@@ -940,13 +1261,15 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     const known = LINE_DECISIONS.get(input);
     if (known !== undefined) return known;
     const cwd = typeof input["cwd"] === "string" && input["cwd"] !== "" ? input["cwd"] : undefined;
-    const decideUnder = (judging: { permissionSet: ShellPermissionSet; source: string } | undefined): CommandDecision =>
+    const decideUnder = (judging: { permissionSet: ShellPermissionSet; source: string; stack?: PermissionStackDecl } | undefined): CommandDecision =>
       decideCommand(policy, commandOf(input) ?? "", callDialectOf(input, tool) ?? dialect, {
         permissionSet: judging?.permissionSet,
         permissionSetSource: judging?.source,
+        stack: judging?.stack,
         grants: options.grants,
         packages: filePackages,
-        scopeOf: partScopeFor(authored?.scopes, options.workspaceRoot, options.scopes),
+        scopeOf: partScopeFor(options.scopes, options.workspaceRoot),
+        places: placeOptions,
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
@@ -972,6 +1295,17 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     block?.functions ?? (options.permissionSet !== undefined ? permissionSetFunctions(options.permissionSet) : undefined);
 
   /**
+   * A direct call to a tool whose line has PLACES, brought down to its own answer (`placeNarrowingFor`)
+   * — off the state's own block, else the permission set this policy was compiled for, lowered.
+   */
+  const placeNarrowing = placeNarrowingFor({
+    ...placeOptions,
+    ...(options.permissionSet !== undefined ? { fallback: permissionsOfPermissionSet(options.permissionSet, undefined, options.stack) } : {}),
+    ...(options.grants !== undefined ? { grants: options.grants } : {}),
+    ...(options.workspaceRoot !== undefined ? { packages: filePackages } : {}),
+  });
+
+  /**
    * A call to a tool of an MCP server, judged by NAME against the permission set the line would be: the
    * state's own block when it is a lowered map, else the one this policy was compiled for. The decision
    * is kept against the call's input like a shell line's, so the approver lets an allowed call through,
@@ -980,9 +1314,9 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
    */
   const mcpNarrowing = (tool: string, input: unknown, block: PermissionsDecl | undefined): PermissionMode | undefined => {
     const judging = isLoweredPermissionSet(block)
-      ? { permissionSet: permissionSetOfEnvironment([], block), source: block?.source ?? INLINE_PERMISSION_SET }
+      ? { permissionSet: permissionSetOfEnvironment([], block), source: block?.source ?? INLINE_PERMISSION_SET, stack: block?.stack }
       : options.permissionSet !== undefined
-        ? { permissionSet: options.permissionSet, source: INLINE_PERMISSION_SET }
+        ? { permissionSet: options.permissionSet, source: INLINE_PERMISSION_SET, stack: options.stack }
         : undefined;
     if (judging === undefined) return undefined;
     const mapping = mcpMappingOf(options.mcp, tool);
@@ -994,7 +1328,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
             builtins: policy.builtins !== false,
             ...(options.grants !== undefined ? { grants: options.grants } : {}),
           })
-        : decideMcpCall(tool, judging.permissionSet, judging.source, options.grants);
+        : decideMcpCall(tool, judging.permissionSet, judging.source, options.grants, judging.stack);
     if (decision === undefined) return undefined;
     if (input !== null && typeof input === "object") LINE_DECISIONS.set(input, decision);
     audit({ tool, action: decision.action, reason: decision.reason, parts: decision.parts, sessionId: "" });
@@ -1003,6 +1337,14 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   };
 
   const commandNarrowing: ScopeNarrowing = (tool, input, authored) => {
+    // A block pinned under the old place tables refuses every call that names a place (see
+    // {@link staleScopesDecision}) — before anything else reads it, since nothing else reads `scopes`.
+    const stale = staleScopesDecision(tool.name, input, authored as PermissionsDecl | undefined);
+    if (stale !== undefined) {
+      if (input !== null && typeof input === "object") LINE_DECISIONS.set(input, stale);
+      audit({ tool: tool.name, action: "deny", reason: stale.reason, parts: stale.parts, sessionId: "" });
+      return "deny";
+    }
     // The MCP tool the call really is, when the gate was asked about it by its server's name.
     const mcpTool = mcpCallOf(input) ?? tool.name;
     if (parseMcpSubject(mcpTool)?.tool !== undefined) return mcpNarrowing(mcpTool, input, authored as PermissionsDecl | undefined);
@@ -1011,7 +1353,12 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     const block = authored as PermissionsDecl | undefined;
     const line = COMMAND_TOOLS.has(name) ? commandOf(args) : undefined;
     if (line === undefined) {
-      // Not a shell line — but a tool whose line names a FUNCTION is decided by it, per call. The gate
+      // Not a shell line. A tool whose line has PLACES is brought down to this call's own answer — the
+      // gate was handed the line's loosest (decision 0023 §3.10) — and a place, or the line's `**`, that
+      // names a function is noted for the approver there (`placeNarrowingFor`).
+      const placed = placeNarrowing(tool, input, authored);
+      if (placed !== undefined) return placed;
+      // A tool whose line names a FUNCTION is decided by it, per call. The gate
       // was told `ask` for it; which function, and for which line, is kept against the call's input,
       // where the approver finds it before anybody is asked (`withPermissionFunctions`).
       const functions = functionsFor(block);
@@ -1052,15 +1399,14 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   for (const tool of COMMAND_TOOLS) smart[tool] = (req) => verdictFor(tool, req);
   for (const tool of CONTENT_TOOLS) smart[tool] = (req) => verdictFor(tool, req);
 
-  // The scope floor, as the callback every consumer of a policy already knows how to read.
-  // `perCall`: built even with no floor, because a STATE may author `permissions.scopes` and the
-  // engine hands that block to this callback at the moment of decision.
-  const places = scopeNarrowingFor(undefined, options.workspaceRoot, options.execEnv, options.scopes, true);
+  // The executor's scope floor, as the callback every consumer of a policy already knows how to read.
+  // A state's say about where is on its set's lines, and the narrowing below reads it.
+  const places = scopeNarrowingFor(options.scopes, options.workspaceRoot, options.execEnv);
   // What, by the call: the line's own judgement — and a tool that always asks (`power`,
   // `install_software`) asks at least, whatever its line says. Both gates read this one.
   const narrowing: ScopeNarrowing = (tool, input, authored) =>
     policy.builtins !== false && ALWAYS_ASKING_TOOLS.has(tool.name) ? strictestMode(commandNarrowing(tool, input, authored), "ask") : commandNarrowing(tool, input, authored);
-  // Where, then what: the scope table's answer and the call's own, the stricter kept.
+  // Where, then what: the floor's answer and the call's own, the stricter kept.
   const scopeOf: ScopeNarrowing = (tool, input, authored) => {
     const where = places?.(tool, input, authored);
     const what = narrowing(tool, input, authored);
@@ -1072,7 +1418,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
    * and what the deciders wrote down on the way (`refusals.ts`).
    */
   const refusal: RefusalWords = (refused) => {
-    const by = refusedByOf(refused);
+    const by = refusedByOfCall(refused);
     if (by.kind === "rule") options.onRefused?.({ tool: refused.tool, input: refused.input, by });
     return refusalWords(by, COMMAND_TOOLS.has(refused.tool) ? SHELL_SUBJECT : (standardOfAnyNative(refused.tool) ?? refused.tool));
   };
@@ -1082,6 +1428,43 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
 }
 
 const MODE_RANK: Record<PermissionMode, number> = { allow: 0, smart: 1, ask: 2, deny: 3 };
+
+/** What a call pinned under the old place tables is refused with — the agent reads it, and so does the row. */
+export const STALE_SCOPES_REASON =
+  "this task was pinned before 2026-11-02, under the old place tables (a state's `permissions.scopes`), which nothing reads any more — so where it may act cannot be known; start the task again to run it under its set's places";
+
+/**
+ * FAIL CLOSED for a block pinned under the old place tables (decision 0023 §3.7).
+ *
+ * A state's `permissions.scopes` moved onto its set's lines as place maps, and the key's reader was
+ * deleted. A task PINNED before that still holds a snapshot whose block says `scopes` — and, unread,
+ * its table would bound nothing: the state would act anywhere its lines allow, a silent widening of
+ * what its author wrote. So such a block is not read for where at all: every call to a tool that takes
+ * a place (`placeKindOf`), and every shell line, is refused, saying the task must be started again.
+ * Not a reader of the old meaning — the key is only ever a reason to refuse. A call to a tool that
+ * names no place (`web_search`, a task tool's list) is not about where, and is judged as before.
+ *
+ * `undefined` for every block without the key, which is every block lowered since.
+ */
+export function staleScopesDecision(tool: string, input: unknown, block: PermissionsDecl | undefined): CommandDecision | undefined {
+  if (block === undefined || !Object.hasOwn(block, "scopes")) return undefined;
+  const name = COMMAND_TOOLS.has(tool) ? SHELL_SUBJECT : (standardOfAnyNative(tool) ?? tool);
+  if (name !== SHELL_SUBJECT && placeKindOf(name) === undefined) return undefined;
+  const args = input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
+  const text = name === SHELL_SUBJECT ? (commandOf(args) ?? tool) : tool;
+  const span: TextSpan = { start: 0, end: text.length };
+  const part: CommandPart = {
+    span,
+    matched: [span],
+    text,
+    kind: name === SHELL_SUBJECT ? "unparsed" : "tool",
+    subject: name,
+    verdict: "denied",
+    decidedBy: { source: "builtin", reason: STALE_SCOPES_REASON },
+    widths: [],
+  };
+  return { action: "deny", reason: STALE_SCOPES_REASON, parts: { line: text, dialect: "posix", parts: [part], verdict: "denied" } };
+}
 
 /** The stricter of two modes, either of which may be unsaid. */
 const strictestMode = (a: PermissionMode | undefined, b: PermissionMode): PermissionMode => (a !== undefined && MODE_RANK[a] > MODE_RANK[b] ? a : b);
@@ -1108,7 +1491,7 @@ export interface RuleRefusal {
  * wrote down who answered it; a mode's `deny` is the permission set — or the person, who denied the
  * tool for longer than one call.
  */
-function refusedByOf(refused: RefusedCall): RefusedBy {
+export function refusedByOfCall(refused: RefusedCall): RefusedBy {
   const noted = takeRefusal(refused.input);
   const decided = commandDecisionOf(refused.input);
   switch (refused.cause) {
@@ -1116,9 +1499,16 @@ function refusedByOf(refused: RefusedCall): RefusedBy {
       return { kind: "rule", rule: "profile", ...(refused.profile !== undefined ? { profile: refused.profile } : {}) };
     case "mode":
       return { kind: "rule", rule: deniedEarlier(refused.sessionId, refused.tool) ? "earlier answer" : "permission set" };
-    case "narrowed":
-      // The line's own judgement refused it, or — when that let it through — the scope table did.
-      return decided?.action === "deny" ? refusedByOfDecision(decided) : { kind: "rule", rule: "scopes" };
+    case "narrowed": {
+      // The line's own judgement refused it; or a line's PLACE did, for a direct call; or — when
+      // neither did — the executor's scope floor.
+      if (decided?.action === "deny") return refusedByOfDecision(decided);
+      const placed = placeAnswerOf(refused.input);
+      if (placed !== undefined && placed.mode === "deny") {
+        return { kind: "rule", rule: "permission set", reason: placed.place !== undefined ? `'${placed.subject}' in ${placed.place}` : `'${placed.subject}' where this call acts` };
+      }
+      return { kind: "rule", rule: "scopes" };
+    }
     case "smart": {
       const path = pathOf((refused.input ?? {}) as Record<string, unknown>);
       if (path !== undefined && isDeniedPath(path)) return { kind: "rule", rule: "built-in rules", reason: ".jaira/ is engine-owned" };
@@ -1144,6 +1534,22 @@ export function refusedByOfDecision(decision: CommandDecision): RefusedBy {
   // says why in its own sentence.
   const reason = rule === "permission set" || rule === "earlier answer" ? part?.text : (decider?.reason ?? decision.reason);
   return { kind: "rule", rule, ...(reason !== undefined && reason.length > 0 ? { reason } : {}) };
+}
+
+/** What a line's places answered for a direct call, by the call's input — see {@link notePlaceAnswer}. */
+const PLACE_ANSWERS = new WeakMap<object, { subject: string; mode: PermissionSetMode; place?: string }>();
+
+/**
+ * Keep, against a direct call's input, what a line's PLACES answered for it (`placeNarrowingFor`) — so
+ * a refusal can say it was the permission set's line at that place, not the executor's floor.
+ */
+export function notePlaceAnswer(input: unknown, answer: { subject: string; mode: PermissionSetMode; place?: string }): void {
+  if (input !== null && typeof input === "object") PLACE_ANSWERS.set(input, answer);
+}
+
+/** What {@link notePlaceAnswer} kept for a call, if anything. */
+export function placeAnswerOf(input: unknown): { subject: string; mode: PermissionSetMode; place?: string } | undefined {
+  return input !== null && typeof input === "object" ? PLACE_ANSWERS.get(input) : undefined;
 }
 
 /** Line decisions by the input object of the call they are about — see `lineDecisionFor`. */
@@ -1178,9 +1584,20 @@ export interface FunctionCall {
   function: string;
   /** Which permission set judged it, when the block says. */
   permissionSet?: string;
+  /** The PLACE of the line whose decision names the function, when a place did (decision 0023 §3). */
+  place?: string;
 }
 
 const FUNCTION_CALLS = new WeakMap<object, FunctionCall>();
+
+/**
+ * Keep, against a call's input, the function a line — or one of its places — hands the call to: what
+ * the narrowing does for a direct call whose answer is a function, and what the approver reads back
+ * ({@link functionCallOf}) before anybody is asked.
+ */
+export function noteFunctionCall(input: unknown, call: FunctionCall): void {
+  if (input !== null && typeof input === "object") FUNCTION_CALLS.set(input, call);
+}
 
 /** Why an approval is being asked when a function could not decide — found by the call's input. */
 const APPROVAL_REASONS = new WeakMap<object, string>();
@@ -1193,6 +1610,19 @@ export function noteApprovalReason(input: unknown, reason: string): void {
 /** The reason {@link noteApprovalReason} left, if any. */
 export function approvalReasonOf(input: unknown): string | undefined {
   return input !== null && typeof input === "object" ? APPROVAL_REASONS.get(input) : undefined;
+}
+
+/**
+ * Let go of everything the narrowing kept against a call's input — its line's decision, its places'
+ * answer, the function it was handed to, the reason left for the person — so the call is decided
+ * afresh (`rejudgeCall`): what was kept is the old stack's word.
+ */
+export function forgetCallDecisions(input: unknown): void {
+  if (input === null || typeof input !== "object") return;
+  LINE_DECISIONS.delete(input);
+  PLACE_ANSWERS.delete(input);
+  FUNCTION_CALLS.delete(input);
+  APPROVAL_REASONS.delete(input);
 }
 
 /** The function a call is decided by, kept by the narrowing against the call's own input. */
@@ -1218,7 +1648,7 @@ export function commandNarrowingOf(policy: ExecPolicy | undefined): ScopeNarrowi
  * `undefined` for a name that is no MCP tool, and when the permission set writes nothing that answers
  * — no line, and no `other` — which leaves the call to the gate, as any name nobody declared is.
  */
-export function decideMcpCall(tool: string, permissionSet: PermissionSet, source: string, grants?: CommandGrants): CommandDecision | undefined {
+export function decideMcpCall(tool: string, permissionSet: PermissionSet, source: string, grants?: CommandGrants, stack?: PermissionStackDecl): CommandDecision | undefined {
   const parsed = parseMcpSubject(tool);
   if (parsed?.tool === undefined) return undefined;
   const answer = mcpModeOf(permissionSet, tool);
@@ -1226,11 +1656,13 @@ export function decideMcpCall(tool: string, permissionSet: PermissionSet, source
   const server = mcpServerSubject(parsed.server);
   const widths = [tool, server];
   const reference = modeFunction(answer.mode);
+  const layer = layerOfLine(stack, answer.line);
   let composed: Composed = {
     verdict: verdictOfMode(answer.mode),
     source: "permissionSet",
     entry: answer.line,
     ...(reference !== undefined ? { function: reference } : {}),
+    ...(layer !== undefined ? { layer } : {}),
     reason:
       answer.line === OTHER_SUBJECT
         ? `the permission set has no line for '${tool}' or its server, so 'other' answers: ${modeWord(answer.mode)}`
@@ -1247,6 +1679,7 @@ export function decideMcpCall(tool: string, permissionSet: PermissionSet, source
         verdict: remembered.decision === "allow" ? "allowed" : "denied",
         source: "remembered",
         entry: remembered.width,
+        layer: RUNTIME_LAYER,
         reason: `'${remembered.width}' was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`,
       };
     }
@@ -1265,6 +1698,7 @@ export function decideMcpCall(tool: string, permissionSet: PermissionSet, source
       source: composed.source,
       ...(composed.entry !== undefined ? { entry: composed.entry } : {}),
       ...(composed.function !== undefined ? { function: composed.function } : {}),
+      ...(composed.layer !== undefined ? { layer: composed.layer } : {}),
       reason: composed.reason,
     },
     widths,
@@ -1272,7 +1706,7 @@ export function decideMcpCall(tool: string, permissionSet: PermissionSet, source
   return {
     action: composed.verdict === "denied" ? "deny" : composed.verdict === "allowed" ? "allow" : "require_approval",
     reason: composed.reason,
-    parts: { line: tool, dialect: "posix", parts: [part], verdict: composed.verdict, permissionSet: source },
+    parts: { line: tool, dialect: "posix", parts: [part], verdict: composed.verdict, permissionSet: source, ...(stack !== undefined ? { stack: approvalStackOf(stack, grants !== undefined) } : {}) },
   };
 }
 
@@ -1434,12 +1868,13 @@ export function allowsCall(
   dialect: CommandDialect,
   where: { root?: string | undefined; packages?: PackageReader | undefined; mcp?: JairaMcpConfig | undefined } = {},
 ): boolean | undefined {
+  const places: PlaceOptions = { ...(where.root !== undefined ? { root: where.root } : {}), named: namedPlacesOf(where.root) };
   const mcp = parseMcpSubject(name);
   if (mcp !== undefined && !RESERVED_MCP_SERVERS.includes(mcp.server)) {
     const mapping = mcpMappingOf(where.mcp, name);
     if (mapping === undefined) return mcpModeOf(permissionSet, name)?.mode === "allow";
     return decideMappedMcpCall(name, args, mapping, permissionSet, INLINE_PERMISSION_SET, {
-      shell: (call) => decideCommand(policy, typeof call["command"] === "string" ? call["command"] : "", dialect, { permissionSet: { entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) }, root: where.root, packages: where.packages }).parts,
+      shell: (call) => decideCommand(policy, typeof call["command"] === "string" ? call["command"] : "", dialect, { permissionSet: judgingSetOf(permissionSet), root: where.root, places, packages: where.packages }).parts,
       builtins: policy.builtins !== false,
     }).action === "allow";
   }
@@ -1448,13 +1883,33 @@ export function allowsCall(
   if (standard === undefined) return undefined;
   const own = (subject: string): PermissionSetMode | undefined => (Object.hasOwn(permissionSet.entries, subject) ? permissionSet.entries[subject]!.mode : undefined);
   if (standard === null) return (permissionSet.other ?? "ask") === "allow";
-  if (standard !== SHELL_SUBJECT) return (own(standard) ?? permissionSet.other ?? "ask") === "allow";
+  if (standard !== SHELL_SUBJECT) {
+    // A line with places answers at the call's place (decision 0023 §3.4); a native's `file_path` is its place.
+    const entry = Object.hasOwn(permissionSet.entries, standard) ? permissionSet.entries[standard] : undefined;
+    const input = args !== null && typeof args === "object" && !Array.isArray(args) ? (args as Record<string, unknown>) : {};
+    const placed = entry !== undefined ? toolPlaceAnswer(standard, entry, permissionSet.other, typeof input["file_path"] === "string" && input["path"] === undefined ? { ...input, path: input["file_path"] } : input, places) : undefined;
+    return (placed?.mode ?? own(standard) ?? permissionSet.other ?? "ask") === "allow";
+  }
   const line = lineOfCall(args);
   if (line === undefined) return false;
-  const judging: ShellPermissionSet = { entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) };
+  const judging = judgingSetOf(permissionSet);
   const cwd = args !== null && typeof args === "object" && typeof (args as Record<string, unknown>)["cwd"] === "string" ? ((args as Record<string, unknown>)["cwd"] as string) : undefined;
   // An agent's own shell runs its line in its own language: Claude's `Bash` is POSIX, its `PowerShell` PowerShell.
-  return decideCommand(policy, line, nativeShellDialect(bare) ?? dialect, { permissionSet: judging, root: where.root, cwd, packages: where.packages }).action === "allow";
+  return decideCommand(policy, line, nativeShellDialect(bare) ?? dialect, { permissionSet: judging, root: where.root, cwd, places, packages: where.packages }).action === "allow";
+}
+
+/**
+ * A set as the shell reads it for a judge that is handed a set whatever it holds (`allowsCall`): every
+ * line's own mode and its places, and `other` — so a line the set has no shell line for still answers
+ * to the set's `other`, as against the built-ins alone.
+ */
+function judgingSetOf(permissionSet: PermissionSet): ShellPermissionSet {
+  const places = linePlaces(permissionSet);
+  return {
+    entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) },
+    ...(Object.keys(places).length > 0 ? { places } : {}),
+    ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}),
+  };
 }
 
 /** The line a shell call runs: its command string, or an argv (codex's `shell`) joined as a shell would read it. */

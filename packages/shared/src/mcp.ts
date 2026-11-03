@@ -352,10 +352,14 @@ export function mcpModeOf(permissionSet: PermissionSet, subject: string): McpLin
   const parsed = parseMcpSubject(subject);
   if (parsed === undefined) return permissionSet.other !== undefined ? { mode: permissionSet.other, line: "other" } : undefined;
   const own = (key: string) => (Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined);
+  // An `unavailable` line (decision 0023 §1) refuses: the tool is not to be handed over, and its
+  // server's line must not answer for it instead.
   const tool = parsed.tool !== undefined ? own(subject) : undefined;
+  if (tool?.unavailable === true) return { mode: "deny", line: subject };
   if (tool?.mode !== undefined) return { mode: tool.mode, line: subject };
   const server = mcpServerSubject(parsed.server);
   const group = own(server);
+  if (group?.unavailable === true) return { mode: "deny", line: server };
   if (group?.mode !== undefined) return { mode: group.mode, line: server };
   return permissionSet.other !== undefined ? { mode: permissionSet.other, line: "other" } : undefined;
 }

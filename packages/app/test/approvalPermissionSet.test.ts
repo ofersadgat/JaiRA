@@ -163,3 +163,94 @@ describe("a shell approval, answered through the service", () => {
     expect(hub().grants("t-1").list()).toEqual({ "git commit": "allow" });
   });
 });
+
+/**
+ * The approval over a STACK (decision 0023 §4.4, §2.8): it lists the stack's layers newest first, with
+ * where a line for each could be written, and "Add to" writes into the layer chosen — a deny as well as
+ * an allow, and at a place, merged into the line.
+ */
+describe("an approval over a stack of sets", () => {
+  const BUILD = "$/permission-sets/project/build-safe";
+  const buildFile = (): string => join(dir, ".jaira", "permission-sets", "project", "build-safe.json");
+
+  /** Judge a line under [chat/ask-first, project/build-safe], as a state naming that stack is lowered, and park it. */
+  function parkStacked(command: string): Promise<PermissionDecision> {
+    write(join(dir, ".jaira"), "permission-sets/project/build-safe.json", { git: "allow", terraform: "ask" });
+    const set = parsePermissionSet({ ...SHIPPED, git: "allow", terraform: "ask" }).permissionSet;
+    const stack = {
+      layers: [{ id: "chat/ask-first", reference: REF }, { id: "project/build-safe", reference: BUILD }],
+      lines: { terraform: { everywhere: "project/build-safe", places: {} }, git: { everywhere: "project/build-safe", places: {} }, shell: { everywhere: "chat/ask-first", places: {} } },
+    };
+    const block = lowerPermissionSet(set, REF, stack).permissions!;
+    const policy = compilePolicy({}, { execEnv: { wsl: "test" }, grants: hub().grants("t-1") });
+    const input = { command };
+    expect(policy.scopeOf!({ name: "shell" } as never, input as never, block as never)).toBe("ask");
+    return Promise.resolve(hub().approver({ taskId: "t-1" })({ tool: "shell", input: input as never, sessionId: "agent-1" }));
+  }
+
+  it("lists the stack newest first — runtime, this project's set, the shipped preset that changes for everyone — and names who asked", async () => {
+    void parkStacked("terraform plan");
+    const [pending] = service.pendingApprovals();
+    expect(pending!.parts!.parts[0]!.decidedBy).toMatchObject({ entry: "terraform", layer: "project/build-safe" });
+    expect(pending!.layers!.map((layer) => [layer.id, layer.scope, layer.targets.map((target) => target.layer), layer.everyone ?? false])).toEqual([
+      ["runtime", "runtime", [], false],
+      ["project/build-safe", "project", ["project"], false],
+      ["chat/ask-first", "built in", ["project", "base"], true],
+    ]);
+    // The set that asked is where "Add to" starts, there being no standing layer for `chat` here.
+    expect(pending!.defaultLayer).toBe("chat/ask-first");
+  });
+
+  it("'Add to' writes a DENY at a PLACE into the layer chosen, merged into its line, and keeps it for the run there", async () => {
+    const parked = parkStacked("terraform plan");
+    const [pending] = service.pendingApprovals();
+    service.submitApproval(pending!.requestId, "deny", "workflow-run", ["terraform"], "project", "infra", "project/build-safe");
+    // `terraform: "ask"` becomes its `**`, the place joins it; nothing else in the file moves.
+    expect(JSON.parse(readFileSync(buildFile(), "utf8"))).toEqual({ git: "allow", terraform: { "**": "ask", infra: "deny" } });
+    expect(existsSync(projectFile())).toBe(false);
+    await expect(parked).resolves.toEqual({ decision: "deny", scope: "once" });
+    expect(hub().grants("t-1").list()).toEqual({ "terraform @ infra": "deny" });
+  });
+
+  it("takes the ROWS one by one: a deny written into one layer, an allow for this run, a once — and refuses the call, keeping the rest", async () => {
+    const parked = parkStacked("terraform plan && git commit -m wip && git log");
+    const [pending] = service.pendingApprovals();
+    const asking = pending!.parts!.parts.map((p, i) => [i, p.widths, p.verdict] as const).filter(([, , v]) => v === "asks");
+    expect(asking.map(([, w]) => w)).toEqual([["terraform plan", "terraform"], ["git commit", "git"]]);
+    const [terraform, push] = asking.map(([i]) => i);
+    service.submitApproval(pending!.requestId, "deny", "workflow-run", undefined, undefined, undefined, undefined, [
+      { part: terraform!, decision: "deny", reach: "add", width: "terraform", layer: "project/build-safe", addTo: "project" },
+      { part: push!, decision: "allow", reach: "run" },
+    ]);
+    // Each row its own line, in its own layer; nothing in the preset's file.
+    expect(JSON.parse(readFileSync(buildFile(), "utf8"))).toEqual({ git: "allow", terraform: "deny" });
+    expect(existsSync(projectFile())).toBe(false);
+    await expect(parked).resolves.toEqual({ decision: "deny", scope: "once" });
+    expect(hub().grants("t-1").list()).toEqual({ terraform: "deny", "git commit": "allow" });
+  });
+
+  it("refuses rows that would allow a call one of whose parts is not allowed, or that name a part that does not ask — and leaves it parked", async () => {
+    void parkStacked("terraform plan && git commit -m wip");
+    const [pending] = service.pendingApprovals();
+    const [terraform, push] = pending!.parts!.parts.map((p, i) => (p.verdict === "asks" ? i : -1)).filter((i) => i >= 0);
+    const submit = (decision: "allow" | "deny", answers: never[]): unknown => service.submitApproval(pending!.requestId, decision, "once", undefined, undefined, undefined, undefined, answers);
+    expect(() => submit("allow", [{ part: terraform!, decision: "allow", reach: "once" }] as never[])).toThrow(/not every part that asks was allowed/);
+    expect(() => submit("allow", [{ part: terraform!, decision: "allow", reach: "once" }, { part: push!, decision: "deny", reach: "once" }] as never[])).toThrow(/not every part/);
+    expect(() => submit("deny", [{ part: 99, decision: "deny", reach: "once" }] as never[])).toThrow(/not a part of this line that asks/);
+    expect(() => submit("deny", [{ part: terraform!, decision: "deny", reach: "run", width: "rm" }] as never[])).toThrow(/not a width/);
+    expect(() => submit("deny", [{ part: terraform!, decision: "deny", reach: "add", width: "terraform" }] as never[])).toThrow(/which file/);
+    expect(service.pendingApprovals().map((p) => p.requestId)).toEqual([pending!.requestId]);
+    expect(hub().grants("t-1").list()).toEqual({});
+    // Every row allowed: the call runs.
+    submit("allow", [{ part: terraform!, decision: "allow", reach: "once" }, { part: push!, decision: "allow", reach: "once" }] as never[]);
+    expect(service.pendingApprovals()).toEqual([]);
+  });
+
+  it("refuses a layer the call was not judged under, the runtime layer and the tools layer — and leaves the question parked", async () => {
+    void parkStacked("terraform plan");
+    const [pending] = service.pendingApprovals();
+    expect(() => service.submitApproval(pending!.requestId, "allow", "workflow-run", ["terraform"], "project", undefined, "web/docs")).toThrow(/not a layer of the stack/);
+    expect(() => service.submitApproval(pending!.requestId, "allow", "workflow-run", ["terraform"], "project", undefined, "runtime")).toThrow(/For this run/);
+    expect(service.pendingApprovals().map((p) => p.requestId)).toEqual([pending!.requestId]);
+  });
+});

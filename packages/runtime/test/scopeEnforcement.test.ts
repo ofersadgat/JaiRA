@@ -1,10 +1,11 @@
 /**
- * A scope table, enforced — the first step where a place actually refuses a call.
+ * A place, enforced — the executor's scope FLOOR, and a permission set line's place map (decision 0023
+ * §3), each refusing a call.
  *
- * `scopes.test.ts` pins the table's arithmetic; this pins the wiring: that the vocabulary's own
- * declaration of what a tool takes is what gets resolved, that the narrowing reaches BOTH routes a
- * call can travel (a wrapped tool and a delegated agent's callback), and that it narrows rather than
- * widens.
+ * `scopes.test.ts` pins the table's arithmetic and `places.test.ts` the map's; this pins the wiring:
+ * that the vocabulary's own declaration of what a tool takes is what gets resolved, that the narrowing
+ * reaches BOTH routes a call can travel (a wrapped tool and a delegated agent's callback), and that it
+ * narrows rather than widens.
  */
 import { describe, expect, it } from "vitest";
 import { isPermissionDenied, PermissionLedger, type Approver } from "@declarative-ai/permissions";
@@ -12,6 +13,7 @@ import type { ExecServices, FunctionInputs, Tool } from "@declarative-ai/exec";
 import { newRegistry } from "../src/wiring";
 import { gateTools, scopeNarrowingFor } from "../src/tools";
 import { registerAllTools } from "../src/tools";
+import { parsePermissionSet } from "@jaira/shared";
 
 const ROOT = "/work";
 const CTX = {} as ExecServices;
@@ -24,15 +26,24 @@ const scopes = [
 
 const allowAll: Approver = () => ({ decision: "allow", scope: "once" });
 
-const gated = (names: string[]) => {
+/** The table as the executor's FLOOR, under a set that allows; or the same places as the set's own lines. */
+const gated = (names: string[], by: "floor" | "lines" = "floor") => {
   const registry = newRegistry();
   registerAllTools(registry, { cwd: ROOT, files: { vars: { taskId: "t", worktree: ROOT } } as never });
   return gateTools({
     registry,
     names,
-    sessionId: "s1",
+    sessionId: `s1-${by}`,
     approve: allowAll,
-    authored: { tools: { read_file: "allow", write_file: "allow", glob: "allow" }, scopes: [...scopes] as never },
+    ...(by === "floor"
+      ? { authored: { tools: { read_file: "allow", write_file: "allow", glob: "allow" } }, scopeFloor: [...scopes] as never }
+      : {
+          permissionSet: parsePermissionSet({
+            read_file: { "**": "deny", "/work": "allow", "/work/infra": "deny" },
+            write_file: { "**": "deny", "/work/app": "allow" },
+            glob: { "**": "deny", "/work": "allow", "/work/infra": "deny" },
+          }).permissionSet,
+        }),
     workspaceRoot: ROOT,
   });
 };
@@ -74,25 +85,27 @@ describe("the narrowing a scope table supplies", () => {
   });
 });
 
-describe("both routes a call can travel", () => {
+describe.each(["floor", "lines"] as const)("both routes a call can travel — places on the %s", (by) => {
   it("refuses through the GATE — what a delegated agent's callback asks", async () => {
-    const { gate } = gated(["read_file"]);
+    const { gate } = gated(["read_file"], by);
     expect(await gate.check({ name: "read_file" }, { path: "/work/a.ts" })).toMatchObject({ allow: true });
     expect(await gate.check({ name: "read_file" }, { path: "/work/infra/secret" })).toMatchObject({ allow: false });
+    // An agent's own `Read`, by the place it names.
+    expect(await gate.check({ name: "read_file" }, { path: "/elsewhere/x" })).toMatchObject({ allow: false });
   });
 
   it("refuses through the WRAPPED TOOL — what a composed runtime runs", async () => {
-    // The same decision by the other road. A scope binding only one of them would be a sandbox with
+    // The same decision by the other road. A place binding only one of them would be a sandbox with
     // a door in it.
-    const { tools } = gated(["read_file"]);
+    const { tools } = gated(["read_file"], by);
     const read = tools["read_file"] as Tool;
     const denied = await read.run({ path: "/work/infra/secret" } as FunctionInputs, CTX);
     expect(isPermissionDenied(denied as never)).toBe(true);
   });
 
-  it("narrows rather than widens — an allowed mode still loses to a denying scope", async () => {
-    // `read_file: "allow"` is authored, and the table still refuses it under infra/.
-    const { gate } = gated(["read_file"]);
+  it("narrows rather than widens — an allowed mode still loses to a denying place", async () => {
+    // The gate is handed `read_file` at its LOOSEST (`allow`), and the place still refuses under infra/.
+    const { gate } = gated(["read_file"], by);
     expect(await gate.check({ name: "read_file" }, { path: "/work/infra/x" })).toMatchObject({ allow: false });
   });
 
@@ -127,7 +140,8 @@ describe("the ledger cannot be talked past a scope", () => {
       names: ["read_file"],
       sessionId: "s3",
       approve,
-      authored: { tools: { read_file: "ask" }, scopes: [...scopes] as never },
+      authored: { tools: { read_file: "ask" } },
+      scopeFloor: [...scopes] as never,
       workspaceRoot: ROOT,
     });
     expect(await gate.check({ name: "read_file" }, { path: "/work/a.ts" })).toMatchObject({ allow: true });

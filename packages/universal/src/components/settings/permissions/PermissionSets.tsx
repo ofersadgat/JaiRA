@@ -8,6 +8,7 @@ import {
   isPermissionSetDirty,
   permissionSetBucketProblem,
   permissionSetFileLabel,
+  permissionSetIconOf,
   permissionSetOfAt,
   permissionSetsAt,
   permissionSetStanding,
@@ -26,11 +27,15 @@ import {
   detachingLines,
   newPermissionSetProblem,
   permissionSetRailRows,
+  standingBucketsOf,
   tabOfChoice,
   usePermissionSetsHost,
   type PermissionSetsChannel,
   type PermissionSetsViewProps,
+  type StandingLayers,
 } from "@jaira/ui/permissionSetsHost";
+import { defaultBaseOf } from "@jaira/ui/stackPreviewModel";
+import { setIconGlyph } from "@jaira/ui/permissionSetWords";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { Press, Txt, edge } from "../../../primitives";
 import { useTokens } from "../../../tokens";
@@ -41,6 +46,7 @@ import { Button } from "../Button";
 import { SettingsSection } from "../SettingsPage";
 import { ChipIcon } from "./rows";
 import { PermissionSetCard } from "./PermissionSetCard";
+import { StackPreview } from "./StackPreview";
 
 /**
  * Settings → Tools → Permission sets: a rail of buckets beside one permission set, drawn as the
@@ -55,6 +61,9 @@ import { PermissionSetCard } from "./PermissionSetCard";
  *                              `SourceTag` at the end
  *   the detail's title         row, centred, gap 8, wraps
  *   a question, a comparison   --panel-2 cards, 1px --line, app 11.5/12.5
+ *   a bucket's standing layers under its heading, 27 in: `layered on every set:` --tok-hint, each
+ *                              layer's id in the data face, --accent, joined by ` · `
+ *   a set's icon               13, --tok-hint, before its name in the rail and in the detail's title
  */
 export function PermissionSetsSection({
   channel,
@@ -63,6 +72,7 @@ export function PermissionSetsSection({
   focus,
   onData,
   mcp,
+  standing,
 }: {
   channel: PermissionSetsChannel;
   layer: ConfigLayer;
@@ -70,8 +80,10 @@ export function PermissionSetsSection({
   focus?: { id: string; nonce: number } | undefined;
   onData?: ((data: PermissionSetsData) => void) | undefined;
   mcp?: readonly McpServerStatus[] | undefined;
+  /** Each bucket's standing layers, from settings (`permissions.layers`). */
+  standing?: StandingLayers | undefined;
 }): JSX.Element {
-  const host = usePermissionSetsHost({ channel, layer, busy, focus, onData, mcp });
+  const host = usePermissionSetsHost({ channel, layer, busy, focus, onData, mcp, standing });
   if ("waiting" in host) {
     return (
       <Txt spec={{ voice: "app", scale: 13 / 12.5, color: "dim" }} paddingVertical={8}>
@@ -95,23 +107,24 @@ function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
   const ats = permissionSetsAt(props.data.records, props.layer);
   const open = props.choice !== undefined && props.choice !== "bucket" && "permissionSet" in props.choice ? ats.find((at) => at.id === (props.choice as { permissionSet: string }).permissionSet) : undefined;
   const adding = props.choice === "bucket" || (props.choice !== undefined && typeof props.choice === "object" && "newIn" in props.choice);
-  const rows = permissionSetRailRows(ats, props.writesTo, props.drafts, props.openBuckets !== undefined && props.onBucket !== undefined ? { open: props.openBuckets, onFold: props.onBucket } : undefined);
+  const rows = permissionSetRailRows(ats, props.writesTo, props.drafts, props.openBuckets !== undefined && props.onBucket !== undefined ? { open: props.openBuckets, onFold: props.onBucket } : undefined, props.standing);
   const items: RailItem[] = rows.map((row, i): RailItem => {
-    if (row.kind === "bucket") return { id: row.id, summary: null, heading: <BucketHeading name={row.name} layer={row.layerLabel} depth={row.depth} first={i === 0} {...(row.fold !== undefined ? { fold: row.fold } : {})} /> };
+    if (row.kind === "bucket")
+      return { id: row.id, summary: null, heading: <BucketHeading name={row.name} layer={row.layerLabel} depth={row.depth} first={i === 0} {...(row.fold !== undefined ? { fold: row.fold } : {})} {...(row.standing !== undefined ? { standing: row.standing } : {})} /> };
     if (row.kind === "add") return { id: row.id, add: true, summary: row.summary, title: row.title, ...(row.depth !== undefined ? { indent: row.depth } : {}) };
     return {
       id: row.id,
       indent: row.depth,
-      label:
-        row.dot || row.copy !== undefined ? (
-          <>
-            {row.name}
-            {row.dot ? <View display={"inline-flex" as "flex"} width={6} height={6} marginLeft={6} borderRadius={999} backgroundColor={t.v("accent") as never} /> : null}
-            {row.copy !== undefined ? <SourceTag>{row.copy}</SourceTag> : null}
-          </>
-        ) : (
-          row.name
-        ),
+      label: (
+        <>
+          <View display={"inline-flex" as "flex"} marginRight={6}>
+            <ChipIcon name={setIconGlyph(row.icon)} />
+          </View>
+          {row.name}
+          {row.dot ? <View display={"inline-flex" as "flex"} width={6} height={6} marginLeft={6} borderRadius={999} backgroundColor={t.v("accent") as never} /> : null}
+          {row.copy !== undefined ? <SourceTag>{row.copy}</SourceTag> : null}
+        </>
+      ),
       summary: row.summary,
     };
   });
@@ -134,8 +147,8 @@ function PermissionSetsView(props: PermissionSetsViewProps): JSX.Element {
   );
 }
 
-/** A bucket's name over its permission sets — a heading in the rail, a fold. */
-function BucketHeading({ name, layer, depth, first, fold }: { name: string; layer: string; depth: number; first: boolean; fold?: { open: boolean; onFold: () => void } }): JSX.Element {
+/** A bucket's name over its permission sets — a heading in the rail, a fold — and the layers laid on every set in it. */
+function BucketHeading({ name, layer, depth, first, fold, standing }: { name: string; layer: string; depth: number; first: boolean; fold?: { open: boolean; onFold: () => void }; standing?: readonly string[] }): JSX.Element {
   const t = useTokens();
   const words = (
     <>
@@ -153,12 +166,27 @@ function BucketHeading({ name, layer, depth, first, fold }: { name: string; laye
     </>
   );
   const box = { flexDirection: "row", alignItems: "center", gap: 6, paddingTop: first ? 3 : 9, paddingHorizontal: 8, paddingBottom: 3, marginLeft: depth * 12 } as const;
-  return fold !== undefined ? (
-    <Press onPress={fold.onFold} {...({ "aria-expanded": fold.open } as object)} {...box} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("text"), 6, "transparent") : "transparent" })}>
-      {words}
-    </Press>
-  ) : (
-    <View {...box}>{words}</View>
+  const head =
+    fold !== undefined ? (
+      <Press onPress={fold.onFold} {...({ "aria-expanded": fold.open } as object)} {...box} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("text"), 6, "transparent") : "transparent" })}>
+        {words}
+      </Press>
+    ) : (
+      <View {...box}>{words}</View>
+    );
+  if (standing === undefined || standing.length === 0) return head;
+  return (
+    <View>
+      {head}
+      <Txt spec={{ voice: "app", scale: 10.5 / 12.5, lineHeight: 1.35, color: "tok-hint" }} marginLeft={depth * 12 + 27} paddingRight={8} paddingBottom={4} {...({ title: "its standing layers (settings: permissions.layers) — laid over every set of it, oldest first" } as object)}>
+        {"layered on every set: "}
+        {standing.map((id, i) => (
+          <Txt key={id} spec={{ voice: "data", scale: 10.5 / 12, lineHeight: 1.35, color: "accent" }}>
+            {i > 0 ? ` · ${id}` : id}
+          </Txt>
+        ))}
+      </Txt>
+    </View>
   );
 }
 
@@ -180,14 +208,21 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
   const into = (["base", "project"] as WritableLayer[]).filter((layer) => props.data.layers.includes(layer));
   // A path is in the hint's own face here, not the data face.
   const mono = (text: string): string => text;
+  const standsIn = standingBucketsOf(props.standing, at.id);
   const title = (
     <View flexDirection="row" alignItems="center" gap={8} flexWrap="wrap">
+      <ChipIcon name={setIconGlyph(permissionSetIconOf(at.id, at.source.decl))} size={14} />
       <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} {...({ title: at.source.file } as object)}>
         {`${at.bucket.split("/").join(" / ")} / ${at.name}`}
       </Txt>
       <Status weight={600} kind={standing.here && props.writesTo !== undefined ? "here" : "unchecked"}>
         {standing.label}
       </Status>
+      {standsIn.map((bucket) => (
+        <Status key={bucket} weight={600} kind="unchecked" title={`settings: permissions.layers.${bucket} — laid over every ${bucket} set, oldest first`}>
+          {`standing layer of ${bucket}`}
+        </Status>
+      ))}
       {standing.shadowed !== undefined ? (
         <Status weight={600} kind="unchecked" title="a nearer layer holds a permission set of this name, and a bare $/permission-sets reference finds that one first">
           {standing.shadowed}
@@ -195,7 +230,11 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
       ) : null}
     </View>
   );
-  const line: ReactNode[] = [usedByLine(props.data.usedBy[at.id])];
+  const line: ReactNode[] = [...standsIn.map((bucket) => `layered on every ${bucket} set · `), usedByLine(props.data.usedBy[at.id])];
+  const bases = permissionSetsAt(props.data.records, props.layer)
+    .filter((one) => one.id !== at.id && one.source.decl !== undefined)
+    .map((one) => ({ id: one.id, name: one.name, icon: permissionSetIconOf(one.id, one.source.decl), decl: one.source.decl as Record<string, unknown> }));
+  const base = props.stack.base !== undefined && bases.some((one) => one.id === props.stack.base) ? props.stack.base : defaultBaseOf(at.id, bases.map((one) => one.id), props.standing);
   if (differ !== undefined && from !== undefined) {
     line.push(" · ");
     if (differ === 0) line.push(`nothing differs from ${LOWER_NAME[from]}`);
@@ -223,6 +262,16 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
           mcp={props.mcp}
         />
       )}
+      {at.source.decl !== undefined ? (
+        <StackPreview
+          layer={{ id: at.id, name: at.name, decl: declOfPermissionSet(shown) as Record<string, unknown> }}
+          sets={bases}
+          base={base}
+          shown={props.stack.shown}
+          onShown={(next) => props.onStack({ ...props.stack, shown: next })}
+          onBase={(id) => props.onStack({ shown: true, base: id })}
+        />
+      ) : null}
       {own && at.source.format !== "json" ? <Hint>This layer holds it as a YAML file, which JaiRA reads and does not edit. Change it in Files.</Hint> : null}
       {detaching.length > 0 ? (
         <Hint color="text" maxWidth={560} paddingVertical={6} paddingHorizontal={9} borderRadius={8} backgroundColor={t.mix(t.v("warn"), 10, "transparent") as never}>

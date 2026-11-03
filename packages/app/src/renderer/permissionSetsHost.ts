@@ -11,6 +11,8 @@ import {
   parsePermissionSet,
   permissionSetBucketProblem,
   permissionSetFileLabel,
+  permissionSetIconOf,
+  permissionSetIdOf,
   permissionSetNameProblem,
   permissionSetOfAt,
   permissionSetRailOf,
@@ -70,10 +72,36 @@ export interface RailFolds {
   onFold: (bucket: string) => void;
 }
 
+/** Each bucket's STANDING layers (decision 0023 §2.6 step 2), as references, oldest first — `permissions.layers` in settings. */
+export type StandingLayers = Readonly<Record<string, readonly string[]>>;
+
+/** `permissions.layers` of the settings in effect, or none — what the rail's bucket headings list. */
+export function standingLayersOf(config: { effective?: unknown } | null | undefined): StandingLayers {
+  const effective = config?.effective;
+  const block = effective !== null && typeof effective === "object" && !Array.isArray(effective) ? (effective as Record<string, unknown>)["permissions"] : undefined;
+  const layers = block !== null && typeof block === "object" && !Array.isArray(block) ? (block as Record<string, unknown>)["layers"] : undefined;
+  if (layers === null || typeof layers !== "object" || Array.isArray(layers)) return {};
+  const out: Record<string, string[]> = {};
+  for (const [bucket, list] of Object.entries(layers as Record<string, unknown>)) {
+    if (Array.isArray(list)) out[bucket] = list.filter((each): each is string => typeof each === "string" && each.trim().length > 0).map((each) => each.trim());
+  }
+  return out;
+}
+
+/** A bucket's standing layers as a person reads them: each by its set id (`project/build-safe`), else as written. */
+export function standingIdsOf(standing: StandingLayers, bucket: string): string[] {
+  return (standing[bucket] ?? []).map((reference) => permissionSetIdOf(reference) ?? reference);
+}
+
+/** The buckets a set is a standing layer of — every one whose `permissions.layers` names it. */
+export function standingBucketsOf(standing: StandingLayers, id: string): string[] {
+  return Object.keys(standing).filter((bucket) => standingIdsOf(standing, bucket).includes(id));
+}
+
 /** One row of the permission-set rail, before it is drawn. */
 export type PermissionSetRailRow =
-  | { kind: "bucket"; id: string; path: string; name: string; layerLabel: string; depth: number; fold?: { open: boolean; onFold: () => void } }
-  | { kind: "set"; id: string; name: string; depth: number; dot: boolean; copy: string | undefined; summary: string }
+  | { kind: "bucket"; id: string; path: string; name: string; layerLabel: string; depth: number; fold?: { open: boolean; onFold: () => void }; standing?: string[] }
+  | { kind: "set"; id: string; name: string; depth: number; dot: boolean; copy: string | undefined; summary: string; icon: string }
   | { kind: "add"; id: string; depth?: number; summary: string; title: string };
 
 /**
@@ -81,7 +109,7 @@ export type PermissionSetRailRow =
  * you are editing states it", and that layer states nothing. With `folds`, each bucket is a fold; a
  * closed one lists nothing under it, a bucket inside it included.
  */
-export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo: WritableLayer | undefined, drafts: PermissionSetDrafts, folds?: RailFolds): PermissionSetRailRow[] {
+export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo: WritableLayer | undefined, drafts: PermissionSetDrafts, folds?: RailFolds, standing: StandingLayers = {}): PermissionSetRailRow[] {
   const writable = writesTo !== undefined;
   const rows: PermissionSetRailRow[] = [];
   const isOpen = (path: string): boolean => folds === undefined || folds.open.has(path);
@@ -98,6 +126,7 @@ export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo:
       layerLabel: PERMISSION_SET_LAYER_LABELS[bucket.layer],
       depth: bucket.depth,
       ...(folds !== undefined ? { fold: { open, onFold: () => folds.onFold(bucket.path) } } : {}),
+      ...(standingIdsOf(standing, bucket.path).length > 0 ? { standing: standingIdsOf(standing, bucket.path) } : {}),
     });
     if (!open) continue;
     for (const at of permissionSets) {
@@ -112,6 +141,7 @@ export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo:
         dot: at.here && writable,
         copy: copiedFrom(at) !== undefined ? permissionSetStanding(at).label : undefined,
         summary: permissionSetRailSummary(at, drafts[at.id]),
+        icon: permissionSetIconOf(at.id, at.source.decl),
       });
     }
     if (writable) rows.push({ kind: "add", id: newTab(bucket.path), depth: bucket.depth, summary: "+ permission set", title: `add a permission set to ${bucket.path}` });
@@ -147,6 +177,8 @@ export const LOWER_NAME: Readonly<Record<WorkflowLayer, string>> = { system: "wh
 export const INTO_NAME: Readonly<Record<WritableLayer, string>> = { base: "Shared", project: "this project" };
 /** The personal layer, as the page's switch names it. */
 export const PERSONAL = "Just you";
+
+const NO_STANDING: StandingLayers = {};
 
 /** The three calls the pane makes — the host's, so the view has no channel of its own. */
 export interface PermissionSetsChannel {
@@ -185,6 +217,11 @@ export interface PermissionSetsViewProps {
   mcp?: readonly McpServerStatus[] | undefined;
   openBuckets?: ReadonlySet<string> | undefined;
   onBucket?: ((bucket: string) => void) | undefined;
+  /** Each bucket's standing layers, from settings (`permissions.layers`). */
+  standing: StandingLayers;
+  /** "Show it in a stack" (decision 0023 §4.3): whether the table is drawn, and the base picked for it. */
+  stack: { shown: boolean; base?: string | undefined };
+  onStack: (next: { shown: boolean; base?: string | undefined }) => void;
 }
 
 /** A change made on the personal layer, held while the person says which layer it goes to. */
@@ -210,6 +247,7 @@ export function usePermissionSetsHost({
   focus,
   onData,
   mcp,
+  standing = NO_STANDING,
 }: {
   channel: PermissionSetsChannel;
   layer: ConfigLayer;
@@ -217,6 +255,7 @@ export function usePermissionSetsHost({
   focus?: { id: string; nonce: number } | undefined;
   onData?: ((data: PermissionSetsData) => void) | undefined;
   mcp?: readonly McpServerStatus[] | undefined;
+  standing?: StandingLayers | undefined;
 }): { props: PermissionSetsViewProps } | { waiting: string } {
   const [data, setData] = useState<PermissionSetsData | null>(null);
   const [failed, setFailed] = useState<string | null>(null);
@@ -239,6 +278,8 @@ export function usePermissionSetsHost({
   const [openBuckets, setOpenBuckets] = useState<ReadonlySet<string>>(new Set());
   /** The bucket the chosen set was last opened in, so choosing one opens its bucket once, not always. */
   const [opened, setOpened] = useState<string | undefined>(undefined);
+  /** "Show it in a stack": kept across the sets, so a base once picked stays picked. */
+  const [stack, setStack] = useState<{ shown: boolean; base?: string | undefined }>({ shown: false });
 
   const load = useCallback(
     (): Promise<void> =>
@@ -342,6 +383,9 @@ export function usePermissionSetsHost({
       locked: busy || writing,
       problem,
       mcp,
+      standing,
+      stack,
+      onStack: setStack,
       openBuckets,
       onBucket: (bucket) =>
         setOpenBuckets((current) => {

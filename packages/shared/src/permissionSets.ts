@@ -9,6 +9,31 @@
  * names. A value may be an object when whose code runs the tool is chosen too:
  * `{ "mode": "ask", "implementation": "native" }`.
  *
+ * ## A line's value (decision 0023 §1)
+ *
+ *  - A STRING is a decision: `allow`, `ask`, `deny`, `unavailable` (the tool is not handed to the model
+ *    at all — `UNAVAILABLE`), or any other non-empty string, which names a FUNCTION (`"web_fetch": "smart"`).
+ *  - An OBJECT is either the entry wrapper `{ "mode": …, "implementation": "app" | "native" }` — an
+ *    object whose keys are all among those two and which has at least one — or a PLACE MAP, place →
+ *    decision: `"write_file": { "src": "allow", "infra": "deny", "**": "ask" }`. Any other object is a
+ *    place map, so a path literally named `mode` is written `./mode`, and a place map that names `mode`
+ *    or `implementation` beside other places is refused as the typo it almost always is. A map speaks
+ *    only at its places; `**` is how it gives itself a default, and a map with no `**` has no mode of
+ *    its own (`PermissionSetEntry.mode` absent — a call no place matches falls to a less specific line,
+ *    §3.4). `unavailable` is never a place's decision. What a place IS belongs to the tool
+ *    (`placeKindOf`, `ToolSpec.scope`), and a map on a line whose calls name no place is refused.
+ *
+ * ## Layers (decision 0023 §2)
+ *
+ * A set may be built from others: `{ "$ref": lower, …lines }` is the stack [lower, these lines], and a
+ * file may name a whole stack, `"layers": [ref, …]`, oldest first, its own lines the newest. A stack is
+ * merged LINE BY LINE, the newest saying ({@link mergePermissionMode}): a plain decision covers
+ * everywhere and clears the places below it; a map over a plain decision makes that decision its `**`;
+ * map over map combines, the same place taking the newer decision. A line a layer leaves out says
+ * nothing and falls through. {@link resolvePermissionSetDecl} does that merge as it follows references;
+ * `composePermissionSetLayers` (`permissionLayers.ts`) does it for a stack handed in, and keeps who set
+ * each line and each place.
+ *
  * This module is the one place a permission set is read and written:
  *
  *  - {@link parsePermissionSet} reads the MAP an author writes in `environment.tools`;
@@ -18,8 +43,9 @@
  *  - {@link permissionSetOfEnvironment} reads that lowered shape back — what a loaded state, a message's
  *    inherited declaration and a run's resolved block all arrive as.
  *
- * A map is the only form of `tools`, and an authored `permissions` says only `scopes`: a mode is an
- * entry of the permission set. The linter refuses anything else.
+ * A map is the only form of `tools`, and an authored `permissions` says nothing: a mode is an entry of
+ * the permission set, and where it applies is a place map on its line. The linter refuses the rest,
+ * the state table `permissions.scopes` included (decision 0023 §3.7).
  *
  * Pure: no filesystem and no upstream import, so the renderer can read a permission set too. Following a
  * `$ref` needs a file, and that is handed in as a {@link PermissionSetReader} — `@jaira/persistence` builds
@@ -48,7 +74,7 @@
  * ## A mode that is a function
  *
  * Any entry — a tool, a command, `script`, `shell`, `other` — may name a FUNCTION instead of a word:
- * `"shell": { "function": "smart" }` (see `FunctionMode`). It lowers as `ask` wherever the gate reads a
+ * `"shell": "smart"` (held in memory as a `FunctionMode`). It lowers as `ask` wherever the gate reads a
  * mode, and the reference rides in `permissions.functions`, by subject, which every lowered map
  * carries (empty when nothing is a function). The function is called per call — per PART of a shell
  * line — by the approver the host hands the engine, before any person is asked.
@@ -82,16 +108,23 @@ import { isMcpSubject } from "./mcp";
 import { commandRunnerOf, parseRunnerSubject } from "./commandRunners";
 import {
   PERMISSION_MODES,
+  RESERVED_DECISION_WORDS,
+  UNAVAILABLE,
   gateModeOf,
   isFunctionMode,
-  isPermissionSetMode,
+  loosestMode,
+  modeWord,
+  strictestMode,
   type ChatSettings,
   type PermissionMode,
+  type PermissionModeDecl,
   type PermissionsDecl,
+  type PermissionStackDecl,
   type ToolImplementation,
   type PermissionSetMode,
 } from "./operationVocabulary";
-import type { Scope } from "./scopes";
+import { resolvePermissionStack, stackDeclOf } from "./permissionLayers";
+import { PLACE_ANYWHERE, placeKindOf } from "./places";
 import { TOOL_SPEC_BY_NAME } from "./toolVocabulary";
 
 /** The subject that answers for everything no entry names. */
@@ -102,6 +135,26 @@ export const SCRIPT_SUBJECT = "script";
 export const SHELL_TOOL = "shell";
 /** The key that starts a permission set from another — the same `$ref` every other block uses. */
 export const PERMISSION_SET_REF_KEY = "$ref";
+/**
+ * The key a set FILE names the stack it is built from by (decision 0023 §2.5): `"layers": [ref, …]`,
+ * oldest first, the file's own lines the newest. Like `other` and `$ref`, it is never a subject — a
+ * program called `layers` cannot have a line of its own.
+ */
+export const PERMISSION_SET_LAYERS_KEY = "layers";
+/**
+ * The key a set FILE names its icon by (decision 0023 §4.1, ruling 10: "each one has an icon"): a short
+ * glyph name from the app's icon set (`"hammer"`, `"globe"`), or a mode word for that mode's glyph
+ * (`"ask"`, `"deny"`). Like `layers`, never a subject — a program called `icon` cannot have a line —
+ * and no layer's: it is the file's, so it is not merged, not inherited through `$ref`, and not a line
+ * of the set it names. Absent, a shipped preset wears its own glyph and anybody else's set the
+ * generic layers glyph (`permissionSetIconOf` in `permissionSetBuckets.ts`).
+ */
+export const PERMISSION_SET_ICON_KEY = "icon";
+
+/** Is this key of a set file one of its instructions — `$ref`, `layers`, `icon` — rather than a line? */
+export function isPermissionSetInstructionKey(key: string): boolean {
+  return key === PERMISSION_SET_REF_KEY || key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY;
+}
 
 /**
  * WRITTEN BY LOWERING, never authored: the two `permissions.tools` entries that say "this block was
@@ -128,29 +181,125 @@ export function isLoweredPermissionSet(permissions: Pick<PermissionsDecl, "tools
 const IMPLEMENTATIONS: readonly ToolImplementation[] = ["app", "native"];
 
 /**
- * One authored entry: a mode, or a mode with the implementation chosen too. A function mode may carry
- * the implementation beside its reference — `{ "function": "smart", "implementation": "native" }` —
- * as well as under `mode`.
+ * One authored entry (decision 0023 §1): a line's value — a decision string or a place map — or that
+ * value with the implementation chosen too, `{ "mode": …, "implementation": … }`.
  */
-export type PermissionSetEntryDecl =
-  | PermissionSetMode
-  | { mode: PermissionSetMode; implementation?: ToolImplementation }
-  | { function: string; implementation?: ToolImplementation };
-
-/**
- * One authored entry as its two parts, whichever of the spellings it was written in — `"ask"`,
- * `{ "function": "smart" }`, `{ "mode": …, "implementation": … }`, `{ "function": …, "implementation": … }`.
- * For an entry already known to parse; what `parsePermissionSet` refuses is not re-judged here.
- */
-export function entryOfDecl(entry: PermissionSetEntryDecl): { mode: PermissionSetMode; implementation?: ToolImplementation } {
-  if (typeof entry === "string") return { mode: entry };
-  const implementation = "implementation" in entry ? entry.implementation : undefined;
-  const mode: PermissionSetMode = "mode" in entry ? entry.mode : { function: entry.function };
-  return { mode, ...(implementation !== undefined ? { implementation } : {}) };
-}
+export type PermissionSetEntryDecl = PermissionModeDecl | { mode: PermissionModeDecl; implementation?: ToolImplementation };
 
 /** A permission set as AUTHORED, references already followed: subject → entry. */
 export type PermissionSetDecl = Record<string, PermissionSetEntryDecl>;
+
+/** One authored entry as its parts — what {@link entryOfDecl} and {@link parsePermissionSet} read. */
+export interface EntryParts {
+  /** The line's own decision: a plain decision, or a place map's `**`. Absent for `unavailable`, and for a map with no `**`. */
+  mode?: PermissionSetMode;
+  /** A place map's places other than `**`, each to its decision. Absent when the line names none. */
+  places?: Record<string, PermissionSetMode>;
+  /** The line says `unavailable`. */
+  unavailable?: true;
+  implementation?: ToolImplementation;
+}
+
+/** Is this object the entry WRAPPER — every key `mode` or `implementation`, and at least one — rather than a place map? */
+function isEntryWrapper(value: Record<string, unknown>): boolean {
+  const keys = Object.keys(value);
+  return keys.length > 0 && keys.every((key) => key === "mode" || key === "implementation");
+}
+
+/** What a mode may be, as a sentence the linter can say after "a mode is". */
+const MODE_SENTENCE = `one of ${[...PERMISSION_MODES, UNAVAILABLE].join(", ")}, the name of a function ("smart"), or a map of places ({ "src": "allow", "**": "ask" })`;
+
+/** One decision string read: a mode (a fixed word, or a function by name), `unavailable`, or what is wrong with it. */
+function readDecision(value: unknown): { mode: PermissionSetMode } | { unavailable: true } | { error: string } {
+  if (typeof value !== "string") return { error: `${JSON.stringify(value)} is not a decision — a decision is ${MODE_SENTENCE}` };
+  const text = value.trim();
+  if (text.length === 0) return { error: `an empty string names nothing — a decision is ${MODE_SENTENCE}` };
+  if ((PERMISSION_MODES as readonly string[]).includes(text)) return { mode: text as PermissionMode };
+  if (text === UNAVAILABLE) return { unavailable: true };
+  // No function may be named a mode word (§1), in any case: "Allow" is a slip, not a function.
+  const reserved = RESERVED_DECISION_WORDS.find((word) => word === text.toLowerCase());
+  if (reserved !== undefined) return { error: `"${text}" is the word '${reserved}' — write it in lower case; no function can be named ${reserved}` };
+  return { mode: { function: text } };
+}
+
+/**
+ * One authored entry read into its parts, or what is wrong with it — the one reader of every spelling
+ * of §1. A string is a decision; an object is the wrapper ({@link isEntryWrapper}) or a place map.
+ */
+function readEntry(value: unknown): EntryParts | { error: string } {
+  if (typeof value === "string") {
+    const decision = readDecision(value);
+    return "error" in decision ? decision : "unavailable" in decision ? { unavailable: true } : { mode: decision.mode };
+  }
+  if (!isPlainObject(value)) return { error: `${JSON.stringify(value)} is not a decision — a decision is ${MODE_SENTENCE}` };
+  if (!isEntryWrapper(value)) return readPlaceMap(value);
+  if (value["mode"] === undefined) return { error: `it has no mode — write ${MODE_SENTENCE}` };
+  const inner = value["mode"];
+  const parts = typeof inner === "string" ? readEntry(inner) : isPlainObject(inner) ? readPlaceMap(inner) : { error: `its mode ${JSON.stringify(inner)} is not one — a mode is ${MODE_SENTENCE}` };
+  if ("error" in parts) return parts;
+  const implementation = value["implementation"];
+  if (implementation !== undefined && !IMPLEMENTATIONS.includes(implementation as ToolImplementation)) {
+    return { error: `it has the implementation ${JSON.stringify(implementation)} — it is one of ${IMPLEMENTATIONS.join(", ")}` };
+  }
+  return { ...parts, ...(implementation !== undefined ? { implementation: implementation as ToolImplementation } : {}) };
+}
+
+/** A place map read: `**` as the line's own mode, every other place to its decision. */
+function readPlaceMap(map: Record<string, unknown>): EntryParts | { error: string } {
+  const entries = Object.entries(map);
+  if (entries.length === 0) return { error: "a map of places names no place — write one decision, or the places it decides for" };
+  // `{ "function": "smart" }` is how a function was written until 2026-11-02. Nothing reads that
+  // spelling; read as a place map it would quietly mean "at the path `function`", so the exact shape
+  // is refused, naming what to write. A path called `function` is written `./function`.
+  if (entries.length === 1 && entries[0]![0].trim() === "function" && typeof entries[0]![1] === "string") {
+    return { error: `{ "function": ${JSON.stringify(entries[0]![1])} } is no longer how a function is named — write the function's name as the line's value: ${JSON.stringify(entries[0]![1].trim())} (a path called function is './function')` };
+  }
+  let mode: PermissionSetMode | undefined;
+  const places: Record<string, PermissionSetMode> = {};
+  for (const [rawPlace, decision] of entries) {
+    const place = rawPlace.trim();
+    if (place.length === 0) return { error: "a place cannot be empty — `**` is everywhere" };
+    if (place === "mode" || place === "implementation") {
+      return { error: `it names '${place}' beside other places — an entry object is { "mode", "implementation" } alone, and a path named ${place} is written './${place}'` };
+    }
+    const read = readDecision(decision);
+    if ("error" in read) return { error: `at '${place}': ${read.error}` };
+    if ("unavailable" in read) return { error: `at '${place}': unavailable is never a place's decision — what the model is handed is per tool, not per place; refuse it there with deny` };
+    if (place === PLACE_ANYWHERE) mode = read.mode;
+    else places[place] = read.mode;
+  }
+  return { ...(mode !== undefined ? { mode } : {}), ...(Object.keys(places).length > 0 ? { places } : {}) };
+}
+
+/**
+ * One authored entry as its parts, whichever spelling it was written in — `"ask"`, `"smart"`,
+ * `"unavailable"`, a place map, `{ "mode": …, "implementation": … }`. For an entry already known to
+ * parse: what `parsePermissionSet` refuses comes back with no parts at all, and is not re-judged here.
+ */
+export function entryOfDecl(entry: PermissionSetEntryDecl | unknown): EntryParts {
+  const parts = readEntry(entry);
+  return "error" in parts ? {} : parts;
+}
+
+/**
+ * A line's value as AUTHORED — the inverse of reading one: `unavailable`, a plain decision (a function
+ * by its name), or a place map with the line's own mode as its `**`. A line with no decision at all
+ * (a block read back that gave the tool none) is written as {@link MODE_WHEN_UNSET}.
+ */
+export function modeDeclOf(entry: EntryParts): PermissionModeDecl {
+  if (entry.unavailable === true) return UNAVAILABLE;
+  const places = entry.places ?? {};
+  if (Object.keys(places).length === 0) return modeWord(entry.mode ?? MODE_WHEN_UNSET);
+  const out: Record<string, string> = entry.mode !== undefined ? { [PLACE_ANYWHERE]: modeWord(entry.mode) } : {};
+  for (const [place, mode] of Object.entries(places)) out[place] = modeWord(mode);
+  return out;
+}
+
+/** An entry as AUTHORED: {@link modeDeclOf}, in the wrapper when the implementation is the agent's own. */
+export function entryDeclOf(entry: EntryParts): PermissionSetEntryDecl {
+  const mode = modeDeclOf(entry);
+  return entry.implementation === "native" && entry.unavailable !== true ? { mode, implementation: "native" } : mode;
+}
 
 /**
  * What a subject names. `unknown-tool` is never stored — it is reported and dropped.
@@ -165,11 +314,27 @@ export type SubjectKind = "tool" | "command" | "script" | "mcp" | "runner" | "ot
 export interface PermissionSetEntry {
   kind: "tool" | "command" | "script" | "mcp" | "runner";
   /**
-   * The entry's mode. An authored map entry always has one. Absent only where a block read back
-   * ({@link permissionSetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a turn
-   * that declared no permission set — which resolves through the project baseline.
+   * The entry's own mode: its plain decision, or its place map's `**`. Absent where a block read back
+   * ({@link permissionSetOfEnvironment}) lists a tool it gives no mode — the always-granted tools of a
+   * turn that declared no permission set — which resolves through the project baseline; where the
+   * line is a place map with no `**`, so that a call no place matches falls to a less specific line
+   * (decision 0023 §3.4); and on an {@link unavailable} line.
    */
   mode?: PermissionSetMode;
+  /**
+   * The line's PLACES other than `**` (decision 0023 §3), each to its decision — what the most
+   * specific matching place answers for a call (`resolvePlaces` in `places.ts`). Absent when the line
+   * names none. Read by the narrowing per call; where one mode must stand for the whole line, see
+   * {@link loosestModeOf} (the gate) and {@link strictestModeOf} (a judge that cannot yet see places).
+   */
+  places?: Record<string, PermissionSetMode>;
+  /**
+   * The line says `unavailable` (decision 0023 §1): the model is not handed the tool. Only a single
+   * LAYER holds such an entry, as what it says over the layers below; it has no mode, is not held, and
+   * is written back as `"unavailable"`. An effective set — a stack composed — never holds one on a
+   * tool: the line is simply absent (`composePermissionSetLayers`).
+   */
+  unavailable?: true;
   implementation?: ToolImplementation;
   /**
    * `false` only from {@link permissionSetOfEnvironment}: the lowered `permissions.tools` gives a mode for
@@ -220,14 +385,22 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** What a mode may be, as a sentence the linter can say after "a mode is". */
-const MODE_SENTENCE = `one of ${PERMISSION_MODES.join(", ")}, or a function — { "function": "smart" }`;
+/** A subject as one spelling — two spellings of one command (`git  commit`) are one line. */
+export function normalizeSubject(subject: string): string {
+  return subject.trim().replace(/\s+/g, " ");
+}
 
 /**
- * Read a RESOLVED map (no `$ref` left in it) into a {@link Permission set}, saying what is wrong with it.
+ * Read a RESOLVED map (no `$ref` or `layers` left in it) into a {@link Permission set}, saying what is
+ * wrong with it.
  *
  * Never throws. An entry that cannot be read is reported and left out, so one bad line costs that
  * line and the linter can still speak about the rest.
+ *
+ * Refused (decision 0023): `unavailable` on a command, a runner line, `script` or `other`; a place map
+ * on `other` or on a line whose calls name no place (`placeKindOf`); a malformed decision or map. An
+ * MCP line may hold a map: the place it takes is the standard tool's the configuration maps it to,
+ * which a set alone cannot say.
  */
 export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSet; issues: PermissionSetIssue[] } {
   const permissionSet: PermissionSet = { entries: {} };
@@ -237,66 +410,53 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
     return { permissionSet, issues };
   }
   for (const [rawSubject, value] of Object.entries(decl)) {
-    const subject = rawSubject.trim().replace(/\s+/g, " ");
+    const subject = normalizeSubject(rawSubject);
     const error = (message: string): void => void issues.push({ path: rawSubject, message, severity: "error" });
     const warn = (message: string): void => void issues.push({ path: rawSubject, message, severity: "warning" });
     if (subject.length === 0) {
       error("a subject cannot be empty");
       continue;
     }
-    if (subject.startsWith("$")) {
-      error(`'${rawSubject}' is not a subject — '${PERMISSION_SET_REF_KEY}' is the only instruction a permission set takes`);
+    if (subject === PERMISSION_SET_ICON_KEY) {
+      if (typeof value !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(value.trim())) error(`'${PERMISSION_SET_ICON_KEY}' names the set's icon — a short glyph name like "hammer", in lower case`);
       continue;
     }
-    let mode: unknown;
-    let implementation: unknown;
-    if (isPlainObject(value)) {
-      // Two object spellings: `{ "mode": …, "implementation": … }`, and a FUNCTION mode, which may
-      // carry the implementation beside its reference — `{ "function": "smart", "implementation": … }`.
-      const named = value["function"] !== undefined;
-      if (named && value["mode"] !== undefined) {
-        error(`'${subject}' says both 'mode' and 'function' — a function IS the mode: write { "function": … }, or { "mode": { "function": … } }`);
-        continue;
-      }
-      mode = named ? { function: value["function"] } : value["mode"];
-      implementation = value["implementation"];
-      for (const key of Object.keys(value)) {
-        if (key !== "mode" && key !== "implementation" && key !== "function") {
-          warn(`'${key}' is not a field of an entry — it takes 'mode' (or 'function') and 'implementation'`);
-        }
-      }
-      if (mode === undefined) {
-        error(`'${subject}' has no mode — write ${MODE_SENTENCE}`);
-        continue;
-      }
-    } else {
-      mode = value;
-    }
-    if (isPlainObject(mode) && Object.hasOwn(mode, "function") && typeof mode["function"] === "string") {
-      // A function mode: the reference is what the call names, trimmed, and it must name something.
-      const reference = mode["function"].trim();
-      if (reference.length === 0 || Object.keys(mode).length !== 1) {
-        error(`'${subject}' names a function ${JSON.stringify(mode)} — a function mode is { "function": "<reference>" } and nothing else`);
-        continue;
-      }
-      mode = { function: reference };
-    }
-    if (!isPermissionSetMode(mode)) {
+    if (subject.startsWith("$") || subject === PERMISSION_SET_LAYERS_KEY) {
       error(
-        mode === "smart"
-          ? `'${subject}' has the mode "smart" — smart is a function now: write { "function": "smart" }`
-          : `'${subject}' has the mode ${JSON.stringify(mode)} — a mode is ${MODE_SENTENCE}`,
+        subject === PERMISSION_SET_LAYERS_KEY
+          ? `'${PERMISSION_SET_LAYERS_KEY}' names the layers a set is built from, not a subject — it is followed before the lines are read (resolvePermissionSetDecl)`
+          : `'${rawSubject}' is not a subject — '${PERMISSION_SET_REF_KEY}' and '${PERMISSION_SET_LAYERS_KEY}' are the only instructions a permission set takes`,
       );
       continue;
     }
-    if (implementation !== undefined && !IMPLEMENTATIONS.includes(implementation as ToolImplementation)) {
-      error(`'${subject}' has the implementation ${JSON.stringify(implementation)} — it is one of ${IMPLEMENTATIONS.join(", ")}`);
+    const parts = readEntry(value);
+    if ("error" in parts) {
+      error(`'${subject}': ${parts.error}`);
       continue;
     }
     const kind = subjectKindOf(subject);
+    if (kind === "unknown-tool") {
+      // Reported and dropped, which is what "falls to `other`" means: nothing is offered under a
+      // name no tool has, and a call that turns up by it is answered by `other`.
+      warn(`'${subject}' is not a tool JaiRA knows — nothing is offered under that name, and a call by it answers to 'other'`);
+      continue;
+    }
+    if (parts.unavailable === true && kind !== "tool" && kind !== "mcp") {
+      error(
+        kind === "other"
+          ? `'other' cannot be unavailable — it names no one tool to take away; it can deny`
+          : `'${subject}' cannot be unavailable — what the model is handed is per tool, and it cannot be shown part of a shell: refuse it with deny, or make 'shell' unavailable`,
+      );
+      continue;
+    }
+    if (parts.places !== undefined && kind !== "mcp" && (kind === "other" || placeKindOf(subject) === undefined)) {
+      error(`'${subject}' takes no place — ${kind === "other" ? "it names no one tool" : "its calls name none"}, so a map of places means nothing on it; write one decision`);
+      continue;
+    }
+    const implementation = parts.implementation;
     if (kind === "other") {
       if (implementation !== undefined) warn("'other' names no one tool, so an implementation means nothing on it");
-      permissionSet.other = mode;
+      permissionSet.other = parts.mode!;
       continue;
     }
     if (kind === "runner") {
@@ -306,20 +466,130 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
         continue;
       }
     }
-    if (kind === "unknown-tool") {
-      // Reported and dropped, which is what "falls to `other`" means: nothing is offered under a
-      // name no tool has, and a call that turns up by it is answered by `other`.
-      warn(`'${subject}' is not a tool JaiRA knows — nothing is offered under that name, and a call by it answers to 'other'`);
-      continue;
-    }
     if (kind !== "tool" && implementation !== undefined) warn(`'${subject}' is not a tool, so an implementation means nothing on it`);
+    else if (parts.unavailable === true && implementation !== undefined) warn(`'${subject}' is unavailable, so whose code would run it means nothing`);
     permissionSet.entries[subject] = {
       kind,
-      mode,
-      ...(kind === "tool" && implementation !== undefined ? { implementation: implementation as ToolImplementation } : {}),
+      ...(parts.mode !== undefined ? { mode: parts.mode } : {}),
+      ...(parts.places !== undefined ? { places: parts.places } : {}),
+      ...(parts.unavailable === true ? { unavailable: true as const } : {}),
+      ...(kind === "tool" && implementation !== undefined && parts.unavailable !== true ? { implementation } : {}),
     };
   }
   return { permissionSet, issues };
+}
+
+// --- layers: merging a stack, line by line (decision 0023 §2) -------------------
+
+/**
+ * One line's value under a newer layer's (decision 0023 §2.1), exactly as the decision writes it:
+ *
+ *  - a plain decision covers everywhere and clears the places below it;
+ *  - a place map over a plain decision makes that decision its `**` — a base `read_file: "deny"` under
+ *    a newer `{ "C:": "allow" }` comes to `{ "**": "deny", "C:": "allow" }`;
+ *  - a map over a map combines, the same place taking the newer decision.
+ *
+ * One case the decision's code does not meet, because it was written before `unavailable` was a word:
+ * a map over `unavailable`. `unavailable` is never a place's decision, so it does not become the `**`
+ * — the newer layer offers the tool at its places, and elsewhere says nothing.
+ */
+export function mergePermissionMode(lower: PermissionModeDecl | undefined, upper: PermissionModeDecl): PermissionModeDecl {
+  if (typeof upper === "string" || lower === undefined) return upper;
+  if (typeof lower === "string") return lower.trim() === UNAVAILABLE ? upper : { [PLACE_ANYWHERE]: lower, ...upper };
+  return { ...lower, ...upper };
+}
+
+/** An authored entry as its value and its implementation, unread — `undefined` when it is neither a string nor an object. */
+function splitEntryDecl(value: unknown): { mode?: unknown; implementation?: unknown } | undefined {
+  if (typeof value === "string") return { mode: value };
+  if (!isPlainObject(value)) return undefined;
+  if (!isEntryWrapper(value)) return { mode: value };
+  return { ...(value["mode"] !== undefined ? { mode: value["mode"] } : {}), ...(value["implementation"] !== undefined ? { implementation: value["implementation"] } : {}) };
+}
+
+const isModeDecl = (value: unknown): value is PermissionModeDecl => typeof value === "string" || isPlainObject(value);
+
+/**
+ * One authored ENTRY under a newer layer's: the values merged by {@link mergePermissionMode}, and the
+ * implementation the newest layer that SAYS one — a layer that writes `"write_file": "allow"` says
+ * nothing about whose code runs it, so the `native` below stands (§2.3: what a layer leaves out says
+ * nothing); a layer that means ours writes `"implementation": "app"`. An entry either side cannot read
+ * is not merged: the newer stands whole, and the parser reports what is wrong with it.
+ */
+export function mergeEntryDecl(lower: unknown, upper: unknown): unknown {
+  const up = splitEntryDecl(upper);
+  const low = lower === undefined ? undefined : splitEntryDecl(lower);
+  if (up === undefined || !isModeDecl(up.mode)) return upper;
+  const below = low !== undefined && isModeDecl(low.mode) ? low.mode : undefined;
+  const mode = mergePermissionMode(below, up.mode);
+  const implementation = up.implementation !== undefined ? up.implementation : low?.implementation;
+  // `unavailable` has nobody's code to run, and takes the choice below with it: a newer layer that
+  // offers the tool again starts from ours, unless it names the agent's.
+  return implementation === undefined || mode === UNAVAILABLE ? mode : { mode, implementation };
+}
+
+/** One layer of a stack: an id that names it to a person (`chat/ask-first`, a reference, `inline`), and its own lines. */
+export interface PermissionSetLayerDecl {
+  id: string;
+  decl: Record<string, unknown>;
+}
+
+/**
+ * Who set a line, per place (decision 0023 §2.7): the layer that decided it EVERYWHERE — a plain
+ * decision, or a map's `**` — and the layer behind each other place, and behind the implementation.
+ */
+export interface LineProvenance {
+  /** The layer whose plain decision, or `**`, the line's own mode is. Absent when no layer gave it one. */
+  everywhere?: string;
+  /** Place → the layer that last wrote it. */
+  places: Record<string, string>;
+  /** The layer whose `implementation` stands. */
+  implementation?: string;
+}
+
+/**
+ * A stack of layers' lines, oldest first, merged line by line ({@link mergeEntryDecl}) into one map,
+ * with who set what ({@link LineProvenance}, by normalized subject). Subjects compare in one spelling
+ * (`git  commit` is `git commit`), the first layer's spelling kept; `$ref` and `layers` are not lines
+ * and are skipped. Nothing is parsed or dropped here — `unavailable` stays a line, which is what a set
+ * FILE built of layers must say — so the result is a map an author could have written.
+ */
+export function mergeLayerDecls(layers: readonly PermissionSetLayerDecl[]): { decl: Record<string, unknown>; provenance: Record<string, LineProvenance> } {
+  const decl: Record<string, unknown> = {};
+  const keyOf = new Map<string, string>();
+  const provenance: Record<string, LineProvenance> = {};
+  for (const { id, decl: lines } of layers) {
+    for (const [rawSubject, value] of Object.entries(lines)) {
+      if (isPermissionSetInstructionKey(rawSubject)) continue;
+      const subject = normalizeSubject(rawSubject);
+      const key = keyOf.get(subject) ?? rawSubject;
+      keyOf.set(subject, key);
+      const lower = Object.hasOwn(decl, key) ? decl[key] : undefined;
+      decl[key] = mergeEntryDecl(lower, value);
+      provenance[subject] = provenanceOver(Object.hasOwn(provenance, subject) ? provenance[subject] : undefined, lower, value, id);
+    }
+  }
+  return { decl, provenance };
+}
+
+/** A line's provenance once layer `id` has written `upper` over `lower` — the same three cases as {@link mergePermissionMode}. */
+function provenanceOver(prior: LineProvenance | undefined, lower: unknown, upper: unknown, id: string): LineProvenance {
+  const up = splitEntryDecl(upper);
+  // `unavailable` takes the implementation with it, as `mergeEntryDecl` does.
+  const gone = typeof up?.mode === "string" && up.mode.trim() === UNAVAILABLE;
+  const implementation = gone ? undefined : up?.implementation !== undefined ? id : prior?.implementation;
+  const withImplementation = (line: LineProvenance): LineProvenance => (implementation !== undefined ? { ...line, implementation } : line);
+  if (up === undefined || !isModeDecl(up.mode) || typeof up.mode === "string") return withImplementation({ everywhere: id, places: {} });
+  const below = splitEntryDecl(lower)?.mode;
+  const fromBelow = typeof below === "string" && below.trim() === UNAVAILABLE ? undefined : prior?.everywhere;
+  const places: Record<string, string> = { ...prior?.places };
+  let everywhere = fromBelow;
+  for (const rawPlace of Object.keys(up.mode)) {
+    const place = rawPlace.trim();
+    if (place === PLACE_ANYWHERE) everywhere = id;
+    else places[place] = id;
+  }
+  return withImplementation({ ...(everywhere !== undefined ? { everywhere } : {}), places });
 }
 
 // --- references --------------------------------------------------------------
@@ -336,25 +606,27 @@ export interface PermissionSetSource {
 /** Follow one reference. Throws when it names nothing; the message is reported as written. */
 export type PermissionSetReader = (reference: string, from: string) => PermissionSetSource;
 
+/** The id the lines written on a node itself, rather than in a file it names, are a layer by. */
+export const INLINE_LAYER = "inline";
+
 /**
- * Follow a permission set node's references down to one plain map.
+ * A permission set node as the STACK of layers it is (decision 0023 §2.5), oldest first, every
+ * reference followed: a bare string is the stack of the file it names; `{ "$ref": lower, …lines }` is
+ * lower's stack and then these lines; a file that says `"layers": [ref, …]` is each named stack in
+ * turn and then its own lines (after `$ref`'s, when it says both). Each layer is named by the
+ * reference that reached it, and the lines written on `node` itself by `id`.
  *
- * Three spellings, all of which the format already has (WORKFLOWS.md §2.2): a bare string is a
- * reference, `{ "$ref": …, …siblings }` starts from one and says more, and a plain map is itself. A
- * permission set FILE may start from another the same way. Sibling keys override per SUBJECT and replace
- * the entry whole — `"write_file": "ask"` over `{ mode: "allow", implementation: "native" }` leaves
- * no implementation behind, because an entry is one statement.
- *
- * A cycle is an error NAMING it. `undefined` when nothing usable came back; the issues say why.
+ * A cycle is an error NAMING it. `undefined` when a reference could not be followed; the issues say why.
  */
-export function resolvePermissionSetDecl(
+export function permissionSetLayersOf(
   node: unknown,
   read: PermissionSetReader,
   from: string,
   issues: PermissionSetIssue[],
+  id: string = INLINE_LAYER,
   active: readonly string[] = [],
-): Record<string, unknown> | undefined {
-  const follow = (reference: string): Record<string, unknown> | undefined => {
+): PermissionSetLayerDecl[] | undefined {
+  const follow = (reference: string): PermissionSetLayerDecl[] | undefined => {
     let source: PermissionSetSource;
     try {
       source = read(reference, from);
@@ -374,7 +646,7 @@ export function resolvePermissionSetDecl(
       issues.push({ path: "", message: `'${reference}' is not a permission set — a permission set is a map from a subject to a mode`, severity: "error" });
       return undefined;
     }
-    return resolvePermissionSetDecl(source.value, read, source.from, issues, [...active, source.key]);
+    return permissionSetLayersOf(source.value, read, source.from, issues, reference, [...active, source.key]);
   };
   if (typeof node === "string") return follow(node);
   if (!isPlainObject(node)) {
@@ -382,15 +654,60 @@ export function resolvePermissionSetDecl(
     return undefined;
   }
   const reference = node[PERMISSION_SET_REF_KEY];
-  if (reference === undefined) return node;
-  if (typeof reference !== "string") {
-    issues.push({ path: PERMISSION_SET_REF_KEY, message: `'${PERMISSION_SET_REF_KEY}' takes a reference, as a string`, severity: "error" });
-    return undefined;
+  const named = node[PERMISSION_SET_LAYERS_KEY];
+  if (reference === undefined && named === undefined) {
+    // The file's icon is the file's, not a line of the layer it is.
+    const { [PERMISSION_SET_ICON_KEY]: _icon, ...lines } = node;
+    return [{ id, decl: lines }];
   }
-  const base = follow(reference);
-  if (base === undefined) return undefined;
-  const { [PERMISSION_SET_REF_KEY]: _ref, ...siblings } = node;
-  return { ...base, ...siblings };
+  const out: PermissionSetLayerDecl[] = [];
+  if (reference !== undefined) {
+    if (typeof reference !== "string") {
+      issues.push({ path: PERMISSION_SET_REF_KEY, message: `'${PERMISSION_SET_REF_KEY}' takes a reference, as a string`, severity: "error" });
+      return undefined;
+    }
+    const below = follow(reference);
+    if (below === undefined) return undefined;
+    out.push(...below);
+  }
+  if (named !== undefined) {
+    if (!Array.isArray(named) || !named.every((each) => typeof each === "string")) {
+      issues.push({ path: PERMISSION_SET_LAYERS_KEY, message: `'${PERMISSION_SET_LAYERS_KEY}' takes a list of references, oldest first`, severity: "error" });
+      return undefined;
+    }
+    for (const each of named as string[]) {
+      const layer = follow(each);
+      if (layer === undefined) return undefined;
+      out.push(...layer);
+    }
+  }
+  const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, ...lines } = node;
+  if (Object.keys(lines).length > 0) out.push({ id, decl: lines });
+  return out;
+}
+
+/**
+ * Follow a permission set node's references down to one plain map: the stack it is
+ * ({@link permissionSetLayersOf}), merged line by line ({@link mergeLayerDecls}, decision 0023 §2.5).
+ *
+ * So a copy that names one place no longer replaces the whole map below it, as upstream's sibling
+ * replacement would: `{ "$ref": …, "read_file": { "src": "allow" } }` over a `read_file: "deny"` comes
+ * to `{ "**": "deny", "src": "allow" }`. A plain decision over a map still replaces it, since it covers
+ * everywhere; an implementation below stands unless the newer line names one.
+ *
+ * A cycle is an error NAMING it. `undefined` when nothing usable came back; the issues say why.
+ */
+export function resolvePermissionSetDecl(
+  node: unknown,
+  read: PermissionSetReader,
+  from: string,
+  issues: PermissionSetIssue[],
+  active: readonly string[] = [],
+): Record<string, unknown> | undefined {
+  const layers = permissionSetLayersOf(node, read, from, issues, INLINE_LAYER, active);
+  if (layers === undefined) return undefined;
+  if (layers.length === 1) return layers[0]!.decl;
+  return mergeLayerDecls(layers).decl;
 }
 
 // --- what consumers read -----------------------------------------------------
@@ -407,6 +724,17 @@ export function offeredTools(permissionSet: PermissionSet): string[] {
   return heldTools(permissionSet).filter((name) => TOOL_SPEC_BY_NAME.get(name)?.unserved !== true && !(withheld && name === SHELL_TOOL));
 }
 
+/** Every decision a line can give: its own mode, and each place's. Empty for `unavailable` and for a line read back with no mode. */
+export function decisionsOf(entry: EntryParts): PermissionSetMode[] {
+  return [...(entry.mode !== undefined ? [entry.mode] : []), ...Object.values(entry.places ?? {})];
+}
+
+/** Does every decision the line can give refuse? A line with none at all does not. */
+function deniesOutright(entry: EntryParts): boolean {
+  const decisions = decisionsOf(entry);
+  return decisions.length > 0 && decisions.every((mode) => mode === "deny");
+}
+
 /**
  * Is this map's shell HELD and yet handed to nobody — a shell the permission set denies outright?
  *
@@ -419,13 +747,16 @@ export function offeredTools(permissionSet: PermissionSet): string[] {
  * shell turns the writing sandbox on. So it is withheld: {@link offeredTools} leaves it
  * out, {@link gateToolModes} answers `deny` for it, and an agent loses its own shell with it. The
  * entry is still HELD — it is what the author wrote, and it is what a person reads and matches.
+ *
+ * "Denies" means at every place: a shell, command or `script` line any place of which lets something
+ * through keeps the shell. An `unavailable` shell is not held at all, so it is not withheld either.
  */
 export function shellWithheld(permissionSet: PermissionSet): boolean {
   const shell = Object.hasOwn(permissionSet.entries, SHELL_TOOL) ? permissionSet.entries[SHELL_TOOL] : undefined;
-  if (shell === undefined || shell.kind !== "tool" || shell.mode !== "deny") return false;
+  if (shell === undefined || shell.kind !== "tool" || shell.unavailable === true || !deniesOutright(shell)) return false;
   // Only what a LINE can run keeps the shell: a command, or `script`. A tool, or an MCP server's
   // line, is judged by name and never reaches the shell.
-  return Object.values(permissionSet.entries).every((entry) => (entry.kind !== "command" && entry.kind !== "script" && entry.kind !== "runner") || entry.mode === "deny");
+  return Object.values(permissionSet.entries).every((entry) => (entry.kind !== "command" && entry.kind !== "script" && entry.kind !== "runner") || deniesOutright(entry));
 }
 
 /**
@@ -434,11 +765,12 @@ export function shellWithheld(permissionSet: PermissionSet): boolean {
  * An un-offered entry (see {@link PermissionSetEntry.offered}) is not held. The one exception is a tool
  * nothing serves yet: lowering leaves it out of the `tools` list (see {@link offeredTools}) and keeps
  * its mode, so a lowered block read back has it un-offered — and it was held. With no list it could
- * ever be on, its entry is the whole of the statement.
+ * ever be on, its entry is the whole of the statement. An `unavailable` line holds nothing: it is a
+ * layer saying the tool is not to be handed over.
  */
 export function holdsTool(permissionSet: PermissionSet, name: string): boolean {
   const entry = Object.hasOwn(permissionSet.entries, name) ? permissionSet.entries[name] : undefined;
-  if (entry === undefined || entry.kind !== "tool") return false;
+  if (entry === undefined || entry.kind !== "tool" || entry.unavailable === true) return false;
   return entry.offered !== false || TOOL_SPEC_BY_NAME.get(name)?.unserved === true;
 }
 
@@ -451,7 +783,7 @@ export function heldTools(permissionSet: PermissionSet): string[] {
  * The mode a line with none of its own reads as — the permission ledger's own last resort.
  *
  * What a new line starts at, what the composer draws for a tool listed with no mode (a turn that
- * declared no permission set), and what {@link declOfPermissionSet} writes for `other` when nothing said.
+ * declared no permission set), and what a call no line names comes to when there is no `other`.
  */
 export const MODE_WHEN_UNSET: PermissionMode = "ask";
 
@@ -460,28 +792,90 @@ export const MODE_WHEN_UNSET: PermissionMode = "ask";
  *
  * What the composer sends (`ChatSettings.permission set`) and what `+` keeps as a file. Only what is HELD is
  * written, because in a map present means offered: an un-offered mode has no spelling here and is
- * dropped. An implementation is written only where it is the agent's own, since ours is the
- * default. `other` is always written, so the map a person kept says what happens to everything it
- * does not name instead of leaving it to whoever reads it next.
+ * dropped. An `unavailable` line is written back as one — it is a statement about the layers below.
+ * A line with places is written as its place map, its own mode as `**`. An implementation is written
+ * only where it is the agent's own, since ours is the default.
+ *
+ * `other` is written only when the set has one (decision 0023 §2.3): a layer that writes `other`
+ * replaces the `other` under it, so a set that said nothing about it must not start saying `ask`
+ * when it is kept.
  */
 export function declOfPermissionSet(permissionSet: PermissionSet): PermissionSetDecl {
   const out: PermissionSetDecl = {};
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if (entry.kind === "tool" && !holdsTool(permissionSet, subject)) continue;
-    const mode = entry.mode ?? MODE_WHEN_UNSET;
-    if (entry.kind === "tool" && entry.implementation === "native") {
-      // A function carries the implementation beside its reference — the spelling `parsePermissionSet` reads.
-      out[subject] = isFunctionMode(mode) ? { function: mode.function, implementation: "native" } : { mode, implementation: "native" };
-    } else {
-      out[subject] = isFunctionMode(mode) ? { function: mode.function } : mode;
-    }
+    if (entry.kind === "tool" && entry.unavailable !== true && !holdsTool(permissionSet, subject)) continue;
+    out[subject] = entryDeclOf(entry);
   }
-  const other = permissionSet.other ?? MODE_WHEN_UNSET;
-  out[OTHER_SUBJECT] = isFunctionMode(other) ? { function: other.function } : other;
+  if (permissionSet.other !== undefined) out[OTHER_SUBJECT] = modeWord(permissionSet.other);
   return out;
 }
 
-/** Every tool entry's mode, offered or not — what shadows the project baseline, per tool. */
+/**
+ * ONE mode for a line that may have places, the LOOSEST any of them can give (decision 0023 §3.10:
+ * gate modes compile loose and narrow per call). What the upstream gate is handed for the line — its
+ * narrowing only tightens, so a mode stricter than some place's answer would refuse a call that place
+ * allows before the narrowing could see it. A line with no `**` falls elsewhere to a less specific
+ * line, so `elsewhere` (what that comes to: `other`, else {@link MODE_WHEN_UNSET}) is among the
+ * answers it can give. A line with no places is its own mode.
+ *
+ * The narrowing then works out each call's own answer and tightens to it (`placeNarrowingFor` in
+ * `@jaira/runtime`), so this is never what a call comes to — only never stricter than it.
+ */
+export function loosestModeOf(entry: EntryParts, elsewhere: PermissionSetMode): PermissionSetMode | undefined {
+  if (entry.places === undefined || Object.keys(entry.places).length === 0) return entry.mode;
+  return loosestMode(entry.mode ?? elsewhere, ...Object.values(entry.places));
+}
+
+/**
+ * A set read for WHAT a call does, not WHERE (decision 0023 §7.1): every line at the loosest answer any
+ * of its places gives ({@link loosestModeOf}), its places dropped. What the work summary and the Changes
+ * tab judge a call by when they ask "did this only read?" of `chat/read-only` — whose `read_file` asks
+ * outside the project and at a credential, which says where the person is asked, not that a read
+ * outside the project changed anything.
+ */
+export function withoutPlaces(permissionSet: PermissionSet): PermissionSet {
+  const elsewhere = permissionSet.other ?? MODE_WHEN_UNSET;
+  const entries: Record<string, PermissionSetEntry> = {};
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.places === undefined) {
+      entries[subject] = entry;
+      continue;
+    }
+    const { places: _places, ...rest } = entry;
+    const mode = loosestModeOf(entry, elsewhere);
+    entries[subject] = { ...rest, ...(mode !== undefined ? { mode } : {}) };
+  }
+  return { ...permissionSet, entries };
+}
+
+/**
+ * ONE mode for a line that may have places, the STRICTEST any of them can give — for a reader that
+ * must say one mode per line and cannot see a call (a summary), so it never reads a line as looser
+ * than some call's answer. `elsewhere` is what a call no place matches comes to; where the caller
+ * cannot know (a command line falls to a chain of less specific lines), it passes `deny`, which is
+ * never looser than anything. A line with no places is its own mode. No judge of a CALL reads it:
+ * those read the place map itself ({@link linePlaces}).
+ */
+export function strictestModeOf(entry: EntryParts, elsewhere: PermissionSetMode): PermissionSetMode | undefined {
+  if (entry.places === undefined || Object.keys(entry.places).length === 0) return entry.mode;
+  return strictestMode(entry.mode ?? elsewhere, ...Object.values(entry.places));
+}
+
+/** What a tool's call no place of its line matches falls to: `other`, else {@link MODE_WHEN_UNSET}. */
+function toolElsewhere(permissionSet: PermissionSet): PermissionSetMode {
+  return permissionSet.other ?? MODE_WHEN_UNSET;
+}
+
+/**
+ * Every tool entry's OWN mode, offered or not — what a part of a shell line is judged by when it is the
+ * standard tool it reads as (`cat x` as `read_file`), per tool.
+ *
+ * A line's own mode is its plain decision or its place map's `**`; a map with no `**` has none, and is
+ * not here. Its places are {@link linePlaces}, which the judge of a call reads beside this: the most
+ * specific place that matches the call answers, and a call no place matches falls to the own mode, or
+ * — where there is none — to the next less specific line (decision 0023 §3.4). The gate's mode is
+ * {@link gateToolModes}.
+ */
 export function toolModes(permissionSet: PermissionSet): Record<string, PermissionSetMode> {
   const out: Record<string, PermissionSetMode> = {};
   for (const [name, entry] of Object.entries(permissionSet.entries)) {
@@ -491,9 +885,42 @@ export function toolModes(permissionSet: PermissionSet): Record<string, Permissi
 }
 
 /**
- * {@link toolModes} as the GATE takes them: a function is `ask` (see `gateModeOf`), and the shell's
- * entry is `ask` whatever it says — or `deny` where the shell is withheld ({@link shellWithheld}),
- * since there is then no line to read.
+ * Every line's PLACES other than `**`, by subject (decision 0023 §3) — tools, commands, `script`,
+ * runner lines and the shell's own — for a judge of one call: `decideCommand` for a shell line's parts,
+ * the narrowing for a direct call. A line with no places is not here. MCP lines are not either: the
+ * place an MCP tool takes is the standard tool's the configuration maps it to, and until that is read
+ * a call to one answers to its line's own mode, or its server's, as it always has.
+ */
+export function linePlaces(permissionSet: PermissionSet): Record<string, Record<string, PermissionSetMode>> {
+  const out: Record<string, Record<string, PermissionSetMode>> = {};
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.kind === "mcp" || entry.places === undefined || Object.keys(entry.places).length === 0) continue;
+    out[subject] = { ...entry.places };
+  }
+  return out;
+}
+
+/** Is this one of the lines a shell line's PARTS answer to — a command, `script`, a runner line, or the shell's own? */
+function isShellLine(subject: string, entry: PermissionSetEntry): boolean {
+  return entry.kind === "command" || entry.kind === "script" || entry.kind === "runner" || subject === SHELL_TOOL;
+}
+
+/**
+ * Does the set say anything a shell line's parts answer to — a command, `script` or runner line, or
+ * the shell's own, with a mode or with places? What decides whether a line is judged by the set at
+ * all (`shellPermissionSetOf` in `@jaira/runtime`), and whether lowering writes `subjects`.
+ */
+export function holdsShellLines(permissionSet: PermissionSet): boolean {
+  return Object.entries(permissionSet.entries).some(
+    ([subject, entry]) => isShellLine(subject, entry) && entry.unavailable !== true && (entry.mode !== undefined || (entry.places !== undefined && Object.keys(entry.places).length > 0)),
+  );
+}
+
+/**
+ * The tools' modes as the GATE takes them: each line's LOOSEST answer ({@link loosestModeOf} —
+ * decision 0023 §3.10), a function as `ask` (see `gateModeOf`), and the shell's entry as `ask` whatever
+ * it says — or `deny` where the shell is withheld ({@link shellWithheld}), since there is then no line
+ * to read.
  *
  * Any other mode would answer for the shell before its line was read — `deny` would refuse the
  * `git status` the same permission set allows, `allow` would pre-approve a delegated agent's shell so that
@@ -504,24 +931,41 @@ export function toolModes(permissionSet: PermissionSet): Record<string, Permissi
  */
 export function gateToolModes(permissionSet: PermissionSet): Record<string, PermissionMode> {
   const modes: Record<string, PermissionMode> = {};
-  for (const [name, mode] of Object.entries(toolModes(permissionSet))) modes[name] = gateModeOf(mode);
+  for (const [name, entry] of Object.entries(permissionSet.entries)) {
+    if (entry.kind !== "tool") continue;
+    const mode = loosestModeOf(entry, toolElsewhere(permissionSet));
+    if (mode !== undefined) modes[name] = gateModeOf(mode);
+  }
   // A withheld shell has no line to read: nothing is offered, and the gate refuses it by name.
   if (Object.hasOwn(modes, SHELL_TOOL)) modes[SHELL_TOOL] = shellWithheld(permissionSet) ? "deny" : "ask";
   return modes;
 }
 
-/** Every MCP line's mode as the gate takes it — a function as `ask`. See {@link permissionsOfPermissionSet}. */
+/**
+ * Every MCP line's mode as the gate takes it — a function as `ask`, a line with places at its loosest
+ * ({@link loosestModeOf}). An `unavailable` MCP line is `deny`: until what an agent is handed reads it
+ * (decision 0023 §3.9), refusing every call is the nearest the gate can come to the tool not being
+ * there — and dropping the line would let the server's line, or `other`, answer for it. See
+ * {@link permissionsOfPermissionSet}.
+ */
 export function mcpGateModes(permissionSet: PermissionSet): Record<string, PermissionMode> {
   const out: Record<string, PermissionMode> = {};
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if (entry.kind === "mcp" && entry.mode !== undefined) out[subject] = gateModeOf(entry.mode);
+    if (entry.kind !== "mcp") continue;
+    if (entry.unavailable === true) {
+      out[subject] = "deny";
+      continue;
+    }
+    const mode = loosestModeOf(entry, toolElsewhere(permissionSet));
+    if (mode !== undefined) out[subject] = gateModeOf(mode);
   }
   return out;
 }
 
 /**
- * Every subject whose entry is a FUNCTION, to the function's reference — tools, commands, `script`,
- * the shell's own entry and `other` alike. What lowering writes as `permissions.functions`.
+ * Every subject whose OWN mode is a FUNCTION, to the function's reference — tools, commands, `script`,
+ * the shell's own entry and `other` alike. What lowering writes as `permissions.functions`. A function
+ * a line names only at a place is not here; {@link functionReferencesOf} has every one.
  */
 export function permissionSetFunctions(permissionSet: PermissionSet): Record<string, string> {
   const out: Record<string, string> = {};
@@ -532,9 +976,19 @@ export function permissionSetFunctions(permissionSet: PermissionSet): Record<str
   return out;
 }
 
-/** Every function a permission set names, each once, in the order first met. */
+/** Every line that names a function, at its own mode or at a place, as [subject, reference] — in authored order. */
+function functionLines(permissionSet: PermissionSet): Array<[string, string]> {
+  const out: Array<[string, string]> = [];
+  for (const [subject, entry] of Object.entries(permissionSet.entries)) {
+    for (const mode of decisionsOf(entry)) if (isFunctionMode(mode)) out.push([subject, mode.function]);
+  }
+  if (isFunctionMode(permissionSet.other)) out.push([OTHER_SUBJECT, permissionSet.other.function]);
+  return out;
+}
+
+/** Every function a permission set names, at a line or at a place, each once, in the order first met. */
 export function functionReferencesOf(permissionSet: PermissionSet): string[] {
-  return [...new Set(Object.values(permissionSetFunctions(permissionSet)))];
+  return [...new Set(functionLines(permissionSet).map(([, reference]) => reference))];
 }
 
 /** Whose code runs each tool, where an entry chose. */
@@ -549,11 +1003,15 @@ export function toolImplementations(permissionSet: PermissionSet): Record<string
 /**
  * What a shell line's parts answer to beyond the standard tools: the command subjects, `script`, and
  * the shell's own entry (`shell`) as the mode for any other command — see the module header.
+ *
+ * Each line's OWN mode — its plain decision or its `**` — as {@link toolModes} gives a tool's: a line
+ * with places and no `**` has none here, and its places ({@link linePlaces}) are read beside this by
+ * `decideCommand`, which takes a part no place matches to the next less specific line.
  */
 export function shellSubjects(permissionSet: PermissionSet): Record<string, PermissionSetMode> {
   const out: Record<string, PermissionSetMode> = {};
   for (const [subject, entry] of Object.entries(permissionSet.entries)) {
-    if ((entry.kind === "command" || entry.kind === "script" || entry.kind === "runner" || subject === SHELL_TOOL) && entry.mode !== undefined) out[subject] = entry.mode;
+    if (isShellLine(subject, entry) && entry.mode !== undefined) out[subject] = entry.mode;
   }
   return out;
 }
@@ -562,14 +1020,22 @@ export function shellSubjects(permissionSet: PermissionSet): Record<string, Perm
  * The permission set as the `permissions` block the upstream gate takes (`createToolGate`'s `authored`).
  *
  * `default` is never written: every offered tool carries its own mode by now, and what `default`
- * used to answer for a name nobody registered is what `other` says. `scopes` are not part of a
- * permission set and pass through beside it. A function is `ask` wherever the block says a mode, and named
- * in `functions` — see `PermissionsDecl.functions` for why that key is on every lowered map.
+ * used to answer for a name nobody registered is what `other` says. A function is `ask` wherever the
+ * block says a mode, and named in `functions` — see `PermissionsDecl.functions` for why that key is on
+ * every lowered map.
+ *
+ * A line's PLACES (decision 0023 §3) ride in `places`, on every lowered map (empty when no line has
+ * any), each line's whole map as authored with its own mode as `**` — see `PermissionsDecl.places`.
+ * The gate is handed each tool line at its LOOSEST answer ({@link gateToolModes}, §3.10), `subjects`
+ * a shell line's own mode where it has one, and the narrowing and `decideCommand` read the places to
+ * tighten each call to its own answer. `subjects` is written whenever the set has a line a shell
+ * line's parts answer to ({@link holdsShellLines}) — `{}` for a set whose only such line is a place map
+ * with no `**` — since its presence is what says the set judges a shell line at all.
  */
-export function permissionsOfPermissionSet(permissionSet: PermissionSet, scopes?: readonly Scope[] | undefined, source?: string | undefined): PermissionsDecl {
+export function permissionsOfPermissionSet(permissionSet: PermissionSet, source?: string | undefined, stack?: PermissionStackDecl | undefined): PermissionsDecl {
   const subjects: Record<string, PermissionMode> = {};
   for (const [subject, mode] of Object.entries(shellSubjects(permissionSet))) subjects[subject] = gateModeOf(mode);
-  const hasSubjects = Object.keys(subjects).length > 0;
+  const hasSubjects = holdsShellLines(permissionSet);
   // A MAP leaves its marks, so a run can tell it from a state that declared none. See the module
   // header and {@link PERMISSION_SET_MARKERS}.
   //
@@ -594,9 +1060,25 @@ export function permissionsOfPermissionSet(permissionSet: PermissionSet, scopes?
     ...(hasSubjects ? { subjects } : {}),
     ...(named && source !== undefined ? { source } : {}),
     functions: permissionSetFunctions(permissionSet),
+    // ALWAYS written, for the reason `implementations` and `functions` are.
+    places: loweredPlaces(permissionSet),
     implementations,
-    ...(scopes !== undefined && scopes.length > 0 ? { scopes: [...scopes] } : {}),
+    // Who said each line (decision 0023 §2.7), when the caller composed a stack — a state's lowering
+    // always does, so a child's map never names its parent's layers.
+    ...(stack !== undefined ? { stack } : {}),
   };
+}
+
+/** Every line with places, as `PermissionsDecl.places` carries it: the whole map in authored words, the own mode as `**`. */
+function loweredPlaces(permissionSet: PermissionSet): Record<string, Record<string, string>> {
+  const out: Record<string, Record<string, string>> = {};
+  for (const [subject, places] of Object.entries(linePlaces(permissionSet))) {
+    const entry = permissionSet.entries[subject]!;
+    const map: Record<string, string> = entry.mode !== undefined ? { [PLACE_ANYWHERE]: modeWord(entry.mode) } : {};
+    for (const [place, mode] of Object.entries(places)) map[place] = modeWord(mode);
+    out[subject] = map;
+  }
+  return out;
 }
 
 /**
@@ -612,7 +1094,9 @@ export function permissionsOfPermissionSet(permissionSet: PermissionSet, scopes?
  *  - `other`, and the carried `subjects` and `implementations`, come back as what they were — the
  *    shell's entry at its AUTHORED mode, which lowering carried in `subjects` beside the `ask` (or
  *    the withheld shell's `deny`) it wrote for the gate;
- *  - a subject `functions` names comes back as that function, over the `ask` the gate was told.
+ *  - a subject `functions` names comes back as that function, over the `ask` the gate was told;
+ *  - a line `places` carries comes back as its place map, its own mode the map's `**` (or none), over
+ *    the loosest mode the gate was told — a function at a place by its name.
  *
  * `implementations` is the composer's map, folded over the block's own.
  */
@@ -664,6 +1148,29 @@ export function permissionSetOfEnvironment(
     const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;
     if (held !== undefined) entries[subject] = { ...held, mode: { function: reference } };
   }
+  // A line with places IS its map (`PermissionsDecl.places`): the mode `tools` gave it is the gate's
+  // loosest, never the line's own, which is the map's `**` — or none.
+  for (const [subject, map] of Object.entries(permissions?.places ?? {})) {
+    if (map === null || typeof map !== "object") continue;
+    let mode: PermissionSetMode | undefined;
+    const places: Record<string, PermissionSetMode> = {};
+    for (const [place, word] of Object.entries(map)) {
+      const read = readDecision(word);
+      if ("error" in read || "unavailable" in read) continue;
+      if (place === PLACE_ANYWHERE) mode = read.mode;
+      else places[place] = read.mode;
+    }
+    const held = Object.hasOwn(entries, subject) ? entries[subject] : undefined;
+    const kind = subjectKindOf(subject);
+    const base: PermissionSetEntry =
+      held !== undefined
+        ? held
+        : kind === "command" || kind === "script" || kind === "runner"
+          ? { kind }
+          : { kind: "tool", offered: false };
+    const { mode: _lowered, places: _places, ...rest } = base;
+    entries[subject] = { ...rest, ...(mode !== undefined ? { mode } : {}), ...(Object.keys(places).length > 0 ? { places } : {}) };
+  }
   return { entries, ...(other !== undefined ? { other } : {}) };
 }
 
@@ -676,13 +1183,11 @@ export interface LoweredPermissionSet {
 }
 
 /**
- * One permission set, as `tools: string[]` and a `permissions` block.
- *
- * `rest` is the block's OWN `permissions`, of which only what a permission set does not say survives: its
- * `scopes`.
+ * One permission set, as `tools: string[]` and a `permissions` block. Nothing of a block's own authored
+ * `permissions` survives beside it: an author writes nothing there (`PermissionsDecl`).
  */
-export function lowerPermissionSet(permissionSet: PermissionSet, rest?: PermissionsDecl | undefined, source?: string | undefined): LoweredPermissionSet {
-  const permissions = permissionsOfPermissionSet(permissionSet, rest?.scopes, source);
+export function lowerPermissionSet(permissionSet: PermissionSet, source?: string | undefined, stack?: PermissionStackDecl | undefined): LoweredPermissionSet {
+  const permissions = permissionsOfPermissionSet(permissionSet, source, stack);
   return { tools: offeredTools(permissionSet), ...(Object.keys(permissions).length > 0 ? { permissions } : {}) };
 }
 
@@ -735,8 +1240,9 @@ function isPermissionSetNode(value: unknown): boolean {
  *
  * The old forms are ERRORS: `tools` as a LIST (written, or in a file a reference names), and a
  * `permissions` block that says `tools`, `default`, `other` or `profile` — each was a mode, and a mode
- * is an entry of the map now (`default` is its `other`; a profile is the `deny` entries it meant). A
- * list lowers to an empty map and the old keys are dropped, so a tolerant caller can go on.
+ * is an entry of the map now (`default` is its `other`; a profile is the `deny` entries it meant) — or
+ * `scopes`, the state table, whose places are a line's place map now (decision 0023 §3.7). A list
+ * lowers to an empty map and the old keys are dropped, so a tolerant caller can go on.
  *
  * On an error the node lowers to what could be read (nothing, for a broken reference), so a tolerant
  * caller — the lint surface — can go on to load the rest; a strict one throws on the issues.
@@ -751,6 +1257,12 @@ export function lowerStatePermissionSets(
   def: unknown,
   read: PermissionSetReader,
   checkFunction?: ((reference: string, stateId: string) => string | undefined) | undefined,
+  /**
+   * Each bucket's STANDING layers (`config.permissions.layers`, decision 0023 §2.6 step 2): laid over
+   * the set a state names, by that set's bucket, and under the state's own lines. A map written on the
+   * state names no bucket and takes none.
+   */
+  standing?: Readonly<Record<string, readonly string[]>> | undefined,
 ): { def: unknown; issues: StatePermissionSetIssue[] } {
   const issues: StatePermissionSetIssue[] = [];
   if (!isPlainObject(def)) return { def, issues };
@@ -764,6 +1276,7 @@ export function lowerStatePermissionSets(
     const modeKeys = isPlainObject(own) ? MODE_KEYS.filter((key) => own[key] !== undefined) : [];
     const found: PermissionSetIssue[] = [];
     let permissionSet: PermissionSet = { entries: {} };
+    let stack: PermissionStackDecl | undefined;
     if (Array.isArray(node)) {
       found.push({ path: "", message: MAP_FORM_MESSAGE, severity: "error" });
     } else {
@@ -780,23 +1293,25 @@ export function lowerStatePermissionSets(
       if (listed) {
         found.push({ path: "", message: `'${String(reference)}' names a list — ${MAP_FORM_MESSAGE}`, severity: "error" });
       } else {
-        const resolved = resolvePermissionSetDecl(node, read, from, found);
-        const parsed = parsePermissionSet(resolved ?? {});
+        // The stack the node is (decision 0023 §2.6): the set it names, the bucket's standing layers,
+        // the rest it names, its own lines — merged as `resolvePermissionSetDecl` merges, and who set
+        // each line kept for the rows that name it.
+        const resolved = resolvePermissionStack(node, read, from, found, { standing });
+        const parsed = parsePermissionSet(resolved?.decl ?? {});
         if (resolved !== undefined) found.push(...parsed.issues);
         permissionSet = parsed.permissionSet;
+        if (resolved !== undefined) stack = stackDeclOf(resolved);
       }
     }
 
-    let rest: PermissionsDecl | undefined;
     if (own !== undefined && !isPlainObject(own)) {
       found.push({ path: "", message: "a permission set cannot sit beside a bound or referenced `permissions` — write its modes as entries", severity: "error" });
-    } else if (own !== undefined) {
-      rest = own as PermissionsDecl;
-      if (modeKeys.length > 0) found.push({ path: "", message: modeKeysMessage(modeKeys), severity: "error" });
+    } else if (own !== undefined && modeKeys.length > 0) {
+      found.push({ path: "", message: modeKeysMessage(modeKeys), severity: "error" });
     }
     if (checkFunction !== undefined) {
       const answered = new Map<string, string | undefined>();
-      for (const [subject, reference] of Object.entries(permissionSetFunctions(permissionSet))) {
+      for (const [subject, reference] of functionLines(permissionSet)) {
         if (!answered.has(reference)) answered.set(reference, checkFunction(reference, stateId));
         const problem = answered.get(reference);
         if (problem !== undefined) found.push({ path: subject, message: `the function '${reference}' does not resolve: ${problem}`, severity: "error" });
@@ -812,7 +1327,7 @@ export function lowerStatePermissionSets(
     }
     // Where the shell's subjects came from, written beside them — see `PermissionsDecl.source`. A
     // bare reference names a FILE; a map, and a `$ref` that says more, are written where they stand.
-    return lowerPermissionSet(permissionSet, rest, typeof node === "string" ? node : INLINE_PERMISSION_SET);
+    return lowerPermissionSet(permissionSet, typeof node === "string" ? node : INLINE_PERMISSION_SET, stack);
   };
 
   const lowerBlock = (block: unknown, at: string): unknown => {
@@ -933,13 +1448,29 @@ function mergePermissionsBlock(base: unknown, over: unknown): unknown {
   return { ...prior, ...next, ...(priorTools !== undefined || nextTools !== undefined ? { tools: { ...priorTools, ...nextTools } } : {}) };
 }
 
-/** Keys of an authored `permissions` block that say a MODE — which only a permission set's entries say. `scopes` is not one. */
-const MODE_KEYS = ["tools", "default", "other", "profile"] as const;
+/**
+ * Keys of an authored `permissions` block that are refused: those that say a MODE — which only a
+ * permission set's entries say — and `scopes`, the state table whose places moved onto lines (decision
+ * 0023 §3.7). An author writes nothing in `permissions` now; every key in a lowered block is lowering's.
+ */
+const MODE_KEYS = ["tools", "default", "other", "profile", "scopes"] as const;
 
 const MAP_FORM_MESSAGE = "`tools` is a permission set: a map from a tool, a command, `script` or `other` to a mode, or a reference to one";
 
 function modeKeysMessage(keys: readonly string[]): string {
-  return `permissions.${keys.join(", permissions.")} ${keys.length === 1 ? "is" : "are"} not a setting of \`permissions\`, which says only \`scopes\` — a mode is an entry of the permission set in \`tools\` (decision 0007)`;
+  const modes = keys.filter((key) => key !== "scopes");
+  const sentences: string[] = [];
+  if (modes.length > 0) {
+    sentences.push(
+      `permissions.${modes.join(", permissions.")} ${modes.length === 1 ? "is" : "are"} not a setting of \`permissions\` — a mode is an entry of the permission set in \`tools\` (decision 0007)`,
+    );
+  }
+  if (keys.includes("scopes")) {
+    sentences.push(
+      'permissions.scopes is gone — where a tool may act is a map of places on its line in `tools`, e.g. "read_file": { "**": "deny", "docs/product": "allow" }, with `**` for everywhere else (decision 0023 §3.7)',
+    );
+  }
+  return sentences.join("; ");
 }
 
 function withoutModeKeys(permissions: Record<string, unknown>): Record<string, unknown> {

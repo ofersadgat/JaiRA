@@ -35,11 +35,13 @@ import {
   describeAddition,
   entriesToRemember,
   parseMcpSubject,
+  partAnswersDecision,
   type ApprovalScope,
   type ApprovalPermissionSetTarget,
   type CommandApproval,
   type CommandPart,
   type CommandPartVerdict,
+  type PartAnswer,
   type PendingApproval,
   type TextSpan,
   type PermissionSetAddition,
@@ -138,6 +140,8 @@ export interface PartRow {
    * parts a function already allowed and will not be asked about.
    */
   by?: string;
+  /** Who decided it, with its layer and place (decision 0023 §2.7) — also the start of {@link note}'s layer words. */
+  who?: string;
 }
 
 // `function` is a part not yet put to the function its line names — never on screen: the approver asks
@@ -168,23 +172,29 @@ export function partRows(approval: CommandApproval): PartRow[] {
     // Opened out of something that is not itself a row (`bash -c '…'`, `$( … )`): say so in words.
     if (part.within === undefined && part.via !== undefined && part.via.length > 0) notes.push(`inside ${part.via.join(" › ")}`);
     const { source, reason, entry } = part.decidedBy;
+    // Who decided, with its layer and place, where a layer of the stack did (decision 0023 §2.7).
+    const who = provenanceOf(approval, part);
+    if (who !== undefined) notes.push(who);
     // The SUBJECT, not the program: a permission set that holds `git commit` does have lines that name git.
-    if (fellThrough(part)) notes.push(`no line names ${part.subject} — ${FALLBACK_ENTRIES[entry!]}`);
+    else if (fellThrough(part)) notes.push(`no line names ${part.subject} — ${FALLBACK_ENTRIES[entry!]}`);
     // Beside a permission set's entry the policy keeps the built-in's reason after a dash; it is why the ask matters.
     if (source === "permissionSet" && reason.includes(" — ")) notes.push(reason.slice(reason.indexOf(" — ") + 3));
     // A function's answer is drawn as its name beside the verdict; one that could NOT answer says why
     // once, on the reason line under the rows (`reasonLines`).
     else if (source !== "permissionSet" && source !== "default" && source !== "function") notes.push(reason);
     const by = source === "function" ? part.decidedBy.function : undefined;
+    // Under a runner, the same words again would read as the line listed twice: it is what the runner runs.
+    const repeats = part.within !== undefined && approval.parts[part.within]?.text === part.text;
     return {
       index,
       hue: hueOf(index),
-      pieces: partPieces(approval.line, part),
+      pieces: repeats ? [{ text: "what it runs", matched: false }] : partPieces(approval.line, part),
       subject: fellThrough(part) ? entry! : part.subject,
       ...(notes.length > 0 ? { note: notes.join(" · ") } : {}),
       verdict: part.verdict,
       depth,
       ...(by !== undefined ? { by } : {}),
+      ...(who !== undefined ? { who } : {}),
     };
   });
 }
@@ -196,6 +206,12 @@ export type ReasonLine =
   | { kind: "permissionSet"; permissionSet?: string; entries: string[] }
   /** The permission set holds no line for these subjects, and that is why they ask. */
   | { kind: "unheld"; permissionSet?: string; subjects: string[] }
+  /**
+   * The STACK the line was judged under (decision 0023 §2.6), oldest first — `chat/ask-first +
+   * project/build-safe, then this run` — in place of naming the set and its entries: each row says which
+   * layer decided it.
+   */
+  | { kind: "stack"; layers: string[]; thisRun: boolean }
   /** A function a line names could not decide, so the person is asked — its own sentence. */
   | { kind: "function"; text: string }
   | { kind: "policy"; text: string };
@@ -223,9 +239,13 @@ export function reasonLines(pending: PendingApproval): ReasonLine[] {
     else if (part.decidedBy.entry !== undefined) add(entries, part.decidedBy.entry);
     else add(unheld, part.subject);
   }
+  const stack = [...(pending.parts?.stack ?? [])].reverse();
+  const files = stack.filter((id) => id !== "runtime" && id !== "tools");
+  const byStack = files.length > 0 && (entries.length > 0 || unheld.length > 0);
   return [
-    ...(entries.length > 0 ? [{ kind: "permissionSet" as const, ...named, entries }] : []),
-    ...(unheld.length > 0 ? [{ kind: "unheld" as const, ...named, subjects: unheld }] : []),
+    ...(byStack ? [{ kind: "stack" as const, layers: files, thisRun: stack.includes("runtime") }] : []),
+    ...(!byStack && entries.length > 0 ? [{ kind: "permissionSet" as const, ...named, entries }] : []),
+    ...(!byStack && unheld.length > 0 ? [{ kind: "unheld" as const, ...named, subjects: unheld }] : []),
     ...failed.map((text) => ({ kind: "function" as const, text })),
     ...policy.map((text) => ({ kind: "policy" as const, text })),
   ];
@@ -314,6 +334,8 @@ export interface ReachItem {
 }
 
 export interface AnswerMenu {
+  /** A line over the menu saying what it answers — Continue's: `Continue answers the 2 rows still asking`. */
+  heading?: string;
   what: WhatChoice[];
   /** `Allow what` / `Deny what`. */
   whatLabel: string;
@@ -365,6 +387,19 @@ export function additionOf(approval: CommandApproval, decision: "allow" | "deny"
 export function shortFile(file: string): string {
   const match = /^(.*?\/permission-sets)\/(?:.+)\/([^/]+)$/.exec(file);
   return match === null ? file : `${match[1]}/…/${match[2]}`;
+}
+
+/**
+ * A place too long for its choice, cut in the MIDDLE: both ends of a path are what identify it (the
+ * root it lies under, the file it names). At most `max` characters, the `…` among them; a place that
+ * fits is returned as it is. The cut keeps more of the end, where the file is.
+ */
+export function middleOut(text: string, max = 44): string {
+  const chars = [...text];
+  if (chars.length <= max || max < 5) return text;
+  const keep = max - 1;
+  const head = Math.floor(keep * 0.4);
+  return `${chars.slice(0, head).join("")}…${chars.slice(chars.length - (keep - head)).join("")}`;
 }
 
 const LAYER_WORDS: Record<WritableLayer, string> = { project: "in this project", base: "for all projects" };
@@ -419,4 +454,314 @@ export function approvalAnswerOf(pending: PendingApproval, reach: Reach, chosen:
   // task): it is what "for this run" meant before parts, and the hub drops it when it remembers.
   if (reach === "run" || widths.length === 0) return { scope: "workflow-run", ...(widths.length > 0 ? { remember: widths } : {}) };
   return { scope: "workflow-run", remember: widths, addTo: reach.slice("add:".length) as WritableLayer };
+}
+
+// --- who decided a row (decision 0023 §2.7) ------------------------------------------
+
+/** A layer's id as a row names it: a set by its own name (`build-safe`), the three that are no file by what they are. */
+export function layerNameOf(id: string): string {
+  if (id === INLINE_PERMISSION_SET) return "this state";
+  if (id === "tools") return "the tools layer";
+  if (id === "runtime") return "this run";
+  return id.split("/").at(-1) ?? id;
+}
+
+const DECIDES: Record<CommandPartVerdict, string> = { allowed: "allows", function: "asks", asks: "asks", denied: "denies" };
+
+/**
+ * Who decided a part, with its layer and place (decision 0023 §2.7, design 4D): `in packages/client ·
+ * build-safe allows`, `ask-first asks · no layer above names it`, `ask-first asks · no layer names one
+ * build`. The place is the one the deciding line answered at, else where the part runs when it names no
+ * path of its own. Absent when no layer decided — a built-in, `.jaira/`, the parser — whose own reason
+ * the row keeps.
+ */
+export function provenanceOf(approval: CommandApproval, part: CommandPart): string | undefined {
+  const layer = part.decidedBy.layer;
+  if (layer === undefined) return undefined;
+  const bits: string[] = [];
+  const named = part.url !== undefined || (part.paths !== undefined && part.paths.length > 0);
+  // Where it runs as a line would write it — its narrowest width (`packages/app`), not the absolute path it is `at`.
+  const place = part.decidedBy.place ?? (named ? undefined : (part.where?.widths[0]?.place ?? part.where?.at));
+  if (place !== undefined && place !== "") bits.push(`in ${place}`);
+  bits.push(`${layerNameOf(layer)} ${DECIDES[part.verdict]}`);
+  if (fellThrough(part)) bits.push(`no layer names ${part.subject}`);
+  else if (part.verdict === "asks" || part.verdict === "denied") {
+    // A newer layer that wrote nothing for it: the merge is newest-wins per line, so none named it.
+    const stack = approval.stack ?? [];
+    const at = stack.indexOf(layer);
+    if (at > 0 && stack.slice(0, at).some((id) => id !== "runtime")) bits.push("no layer above names it");
+  }
+  return bits.join(" · ");
+}
+
+// --- the rows, answered one by one (decision 0023 ruling 7, §4.4, design 4D) ----------
+
+/** How far one row's answer reaches: this call, this run, or a line written into a layer. */
+export type RowReach = PartAnswer["reach"];
+
+/** A row the person answered by hand — what Continue sends for it. */
+export type RowAnswer = Omit<PartAnswer, "part">;
+
+/** The rows answered by hand, by part index. */
+export type RowAnswers = Readonly<Record<number, RowAnswer>>;
+
+/** The panel's choices, which answer nothing until Deny or Allow is pressed. Absent: the default. */
+export interface RowChoice {
+  width?: string;
+  /** One of the part's place widths' places. */
+  place?: string;
+  reach?: RowReach;
+  /** A {@link LayerOption.key}. */
+  layer?: string;
+}
+
+/** One place an answer can hold at: `packages/client`, `this project`, `anywhere`. */
+export interface WhereOption {
+  /** What is sent and written — `undefined` for anywhere, which is the plain line. */
+  place: string | undefined;
+  label: string;
+  /** Its width in words, for a title: `its folder`, `the package`. */
+  title: string;
+  /** Stable for the life of the request. */
+  key: string;
+}
+
+/** One file of one layer of the stack "Add to" can write: `build-safe`, this project's copy. */
+export interface LayerOption {
+  key: string;
+  /** The layer's id, as `approval:submit` names it; absent for the set that asked when the call came with no stack. */
+  layer?: string;
+  addTo: WritableLayer;
+  /** `build-safe`, then `, for all projects` where the layer has two files and this is the farther. */
+  name: string;
+  /** The layer's full id: `project/build-safe`. */
+  id: string;
+  file: string;
+  /** A shipped preset: writing it changes that set for everyone who uses it (§2.8). */
+  everyone: boolean;
+  target: ApprovalPermissionSetTarget;
+}
+
+export interface RowReachItem {
+  reach: RowReach;
+  name: string;
+  hint: HintPiece[];
+  /** Why it cannot be chosen, when it cannot. */
+  disabled?: string;
+}
+
+export interface RowPanel {
+  part: number;
+  /** `Answer what`: the part's widths — one segment when it has one; absent when it has none. */
+  what?: WhatChoice;
+  /** `Where`: the part's place widths, narrowest first; absent when it names no place. */
+  where?: { options: WhereOption[]; chosen: string };
+  reach: RowReachItem[];
+  chosenReach: RowReach;
+  /** What "Add to" can write into, newest layer first. */
+  layers: LayerOption[];
+  chosenLayer?: LayerOption;
+  /** The line "Add to" would write, before an answer is chosen: `"one build": { "packages": … }`. */
+  line?: string;
+  notes: string[];
+}
+
+const ANYWHERE = "**";
+const PLACE_WORDS: Record<string, string> = { this: "this place", folder: "its folder", package: "the package", project: "this project", host: "the host", parent: "its domain", prefix: "the prefix", anywhere: "anywhere" };
+
+function whereOptionsOf(part: CommandPart): WhereOption[] {
+  return (part.where?.widths ?? []).map(({ width, place }) => {
+    const anywhere = width === "anywhere" || place === ANYWHERE;
+    const label = anywhere ? (part.where?.kind === "branch" ? "any branch" : "anywhere") : width === "project" ? "this project" : place;
+    return { place: anywhere ? undefined : place, label, title: PLACE_WORDS[width] ?? width, key: place };
+  });
+}
+
+/** What "Add to" can write: each writable layer's files, newest layer first — or, with no stack, the set that asked. */
+export function layerOptionsOf(pending: PendingApproval): LayerOption[] {
+  const out: LayerOption[] = [];
+  const push = (id: string, layer: string | undefined, targets: readonly ApprovalPermissionSetTarget[], everyone: boolean): void => {
+    targets.forEach((target) => {
+      out.push({
+        key: `${id}|${target.layer}`,
+        ...(layer !== undefined ? { layer } : {}),
+        addTo: target.layer,
+        name: `${layerNameOf(id)}${targets.length > 1 ? `, ${LAYER_WORDS[target.layer]}` : ""}`,
+        id,
+        file: target.file,
+        everyone,
+        target,
+      });
+    });
+  };
+  if (pending.layers !== undefined) {
+    for (const layer of pending.layers) push(layer.id, layer.id, layer.targets, layer.everyone === true);
+  } else if (pending.permissionSet !== undefined) {
+    push(pending.permissionSet.id ?? "the permission set", undefined, pending.permissionSet.targets, pending.permissionSet.targets.some((t) => t.follows?.startsWith("$SYSTEM/") === true));
+  }
+  return out;
+}
+
+/** Why nothing can be added to a layer, when nothing can. */
+function unwritableOf(pending: PendingApproval): string {
+  const asked = pending.parts?.permissionSet !== undefined ? permissionSetNameOf(pending) : undefined;
+  const layers = pending.layers ?? [];
+  // The set that asked says why first; else the oldest layer that is not this run's or the conversation's own.
+  const why =
+    layers.find((layer) => layer.id === asked)?.unwritable ??
+    [...layers].reverse().find((layer) => layer.id !== "runtime" && layer.id !== "tools" && layer.unwritable !== undefined)?.unwritable ??
+    pending.permissionSet?.unwritable;
+  return why ?? "No layer of this stack can be written.";
+}
+
+/** The width segments for one part: its widths, narrowest first, the chosen one on. */
+function whatOfPart(part: CommandPart, index: number, chosen: string | undefined): WhatChoice | undefined {
+  if (part.widths.length === 0) return undefined;
+  const [choice] = whatChoices({ line: "", dialect: "posix", verdict: "asks", parts: [{ ...part, verdict: "asks" }] }, chosen !== undefined ? { [keyOf(part)]: chosen } : {});
+  return choice === undefined ? undefined : { ...choice, part: index };
+}
+
+/** `"one build"`, `"one build": { "packages": … }` — the line a row's answer would write, its decision not yet chosen. */
+function lineOf(width: string, place: string | undefined, decision: string): string {
+  return place === undefined ? `${JSON.stringify(width)}: ${decision}` : `${JSON.stringify(width)}: { ${JSON.stringify(place)}: ${decision} }`;
+}
+
+/** The panel a row's `asks ⌄` opens: What, Where, How far — and nothing answered until a button is pressed. */
+export function rowPanel(pending: PendingApproval, index: number, choice: RowChoice = {}): RowPanel {
+  const part = pending.parts?.parts[index];
+  if (part === undefined) return { part: index, reach: [], chosenReach: "once", layers: [], notes: [] };
+  const what = whatOfPart(part, index, choice.width);
+  const options = whereOptionsOf(part);
+  const where = options.length > 0 ? { options, chosen: options.find((o) => o.key === choice.place)?.key ?? options[0]!.key } : undefined;
+  const width = what?.chosen;
+  const place = where !== undefined ? options.find((o) => o.key === where.chosen)!.place : undefined;
+  const layers = layerOptionsOf(pending);
+  const fallback = layers.find((o) => o.id === pending.defaultLayer) ?? layers[0];
+  const chosenLayer = layers.find((o) => o.key === choice.layer) ?? fallback;
+  const notes: string[] = [];
+  const unreadable = width === undefined;
+  if (unreadable) notes.push("This part could not be read well enough to remember an answer about it, so it is asked about every time.");
+  const line = width !== undefined ? lineOf(width, place, "…") : undefined;
+  const addHint: HintPiece[] = [];
+  if (chosenLayer !== undefined && line !== undefined) {
+    const { target } = chosenLayer;
+    if (target.follows !== undefined) addHint.push(`creates ${shortFile(target.file)} with `, { code: line }, `, following ${target.follows.startsWith("$SYSTEM/") ? "the built-in permission set" : "the shared permission set"}, when you continue`);
+    else addHint.push("writes ", { code: line }, ` to ${shortFile(target.file)} when you continue`);
+    if (target.shadowed === true) addHint.push(" — this project's own copy still wins here");
+    if (chosenLayer.everyone) addHint.push(" — changes that set for everyone who uses it");
+  }
+  const reach: RowReachItem[] = [
+    { reach: "once", name: "Once", hint: ["this call only"] },
+    { reach: "run", name: "For this run", hint: ['joins "this run", the top layer; nothing is written'], ...(unreadable ? { disabled: notes[0]! } : {}) },
+    {
+      reach: "add",
+      name: "Add to",
+      hint: addHint,
+      ...(unreadable ? { disabled: notes[0]! } : chosenLayer === undefined ? { disabled: unwritableOf(pending) } : {}),
+    },
+  ];
+  if (!unreadable && chosenLayer === undefined) notes.push(unwritableOf(pending));
+  const wanted = choice.reach ?? "once";
+  const chosenReach = reach.find((r) => r.reach === wanted && r.disabled === undefined)?.reach ?? "once";
+  return {
+    part: index,
+    ...(what !== undefined ? { what } : {}),
+    ...(where !== undefined ? { where } : {}),
+    reach,
+    chosenReach,
+    layers,
+    ...(chosenLayer !== undefined ? { chosenLayer } : {}),
+    ...(line !== undefined ? { line } : {}),
+    notes,
+  };
+}
+
+/** The answer pressing Deny or Allow in a row's panel gives that row, at the reach chosen. */
+export function rowAnswerOf(pending: PendingApproval, index: number, choice: RowChoice, decision: "allow" | "deny"): RowAnswer {
+  const panel = rowPanel(pending, index, choice);
+  const width = panel.what?.chosen;
+  const place = panel.where !== undefined ? panel.where.options.find((o) => o.key === panel.where!.chosen)?.place : undefined;
+  const base: RowAnswer = { decision, reach: panel.chosenReach, ...(width !== undefined ? { width } : {}), ...(place !== undefined ? { place } : {}) };
+  if (panel.chosenReach !== "add" || panel.chosenLayer === undefined) return base;
+  return { ...base, ...(panel.chosenLayer.layer !== undefined ? { layer: panel.chosenLayer.layer } : {}), addTo: panel.chosenLayer.addTo };
+}
+
+/** The panel's choices again, from an answer the row holds — so reopening it shows what was chosen. */
+export function choiceOfAnswer(pending: PendingApproval, answer: RowAnswer): RowChoice {
+  const layer = answer.reach === "add" ? layerOptionsOf(pending).find((o) => o.addTo === answer.addTo && (o.layer ?? undefined) === answer.layer) : undefined;
+  return {
+    ...(answer.width !== undefined ? { width: answer.width } : {}),
+    place: answer.place ?? ANYWHERE,
+    reach: answer.reach,
+    ...(layer !== undefined ? { layer: layer.key } : {}),
+  };
+}
+
+/** What a row answered by hand says in place of who decided it: `you allow every npm command · for this run · in packages`. */
+export function answerWordsOf(pending: PendingApproval, index: number, answer: RowAnswer): string {
+  const part = pending.parts?.parts[index];
+  const choice = part !== undefined && answer.width !== undefined ? whatOfPart(part, index, answer.width)?.options.find((o) => o.width === answer.width) : undefined;
+  const what = choice === undefined ? "" : choice.program ? ` every ${choice.width} command` : choice.server !== undefined ? ` every ${choice.server} tool` : ` ${choice.width}`;
+  const layer = answer.reach === "add" ? layerOptionsOf(pending).find((o) => o.addTo === answer.addTo && o.layer === answer.layer) : undefined;
+  const reach = answer.reach === "once" ? "once" : answer.reach === "run" ? "for this run" : `added to ${layer?.name ?? "the permission set"}`;
+  return [`you ${answer.decision}${what}`, reach, ...(answer.place !== undefined ? [`in ${answer.place}`] : [])].join(" · ");
+}
+
+/** The bottom pair: the aggregate Allow / Deny until a row is answered by hand, then Continue / Cancel. */
+export type BottomAnswers =
+  | { mode: "aggregate" }
+  | {
+      mode: "continue";
+      /** The asking parts no hand has answered — what Continue answers with its own choice. */
+      rest: number[];
+      /** A row was denied: Continue refuses the call, and keeps the other answers. */
+      refuses: boolean;
+    };
+
+export function bottomOf(pending: PendingApproval, answers: RowAnswers): BottomAnswers {
+  const approval = pending.parts;
+  if (approval === undefined || Object.keys(answers).length === 0) return { mode: "aggregate" };
+  const rest = approval.parts.flatMap((part, index) => (part.verdict === "asks" && answers[index] === undefined ? [index] : []));
+  return { mode: "continue", rest, refuses: Object.values(answers).some((a) => a.decision === "deny") };
+}
+
+/** The pending approval as Continue's menu sees it: only the rows still asking ask. */
+function restOf(pending: PendingApproval, answers: RowAnswers): PendingApproval {
+  const approval = pending.parts!;
+  return { ...pending, parts: { ...approval, parts: approval.parts.map((part, index) => (answers[index] !== undefined ? { ...part, verdict: answers[index]!.decision === "allow" ? "allowed" : "denied" } : part)) } };
+}
+
+/**
+ * Continue's own menu: how the rows still asking are allowed — once, for this run, or added to the set
+ * that asked — the aggregate menu over just those rows. Absent when every row was answered by hand.
+ */
+export function continueMenu(pending: PendingApproval, answers: RowAnswers, chosen: ChosenWidths = {}): AnswerMenu | undefined {
+  const bottom = bottomOf(pending, answers);
+  if (bottom.mode !== "continue" || bottom.rest.length === 0) return undefined;
+  const menu = answerMenu(restOf(pending, answers), "allow", chosen);
+  const n = bottom.rest.length;
+  return { ...menu, heading: `Continue answers the ${n === 1 ? "row" : `${n} rows`} still asking`, whatLabel: "Allow what" };
+}
+
+/** What Continue sends: every row answered by hand as it was, and the rest at Continue's own reach (once by default). */
+export function continueAnswerOf(pending: PendingApproval, answers: RowAnswers, reach: Reach = "once", chosen: ChosenWidths = {}): { decision: "allow" | "deny"; scope: ApprovalScope; answers: PartAnswer[] } {
+  const approval = pending.parts;
+  if (approval === undefined) return { decision: "deny", scope: "once", answers: [] };
+  const rest = restOf(pending, answers).parts!;
+  const widths = whatChoices(rest, chosen).map((c) => c.chosen);
+  const out: PartAnswer[] = [];
+  approval.parts.forEach((part, index) => {
+    if (part.verdict !== "asks") return;
+    const mine = answers[index];
+    if (mine !== undefined) {
+      out.push({ part: index, ...mine });
+      return;
+    }
+    // A part nobody could read is answered for this call alone, whatever Continue reaches.
+    const width = part.widths.find((w) => widths.includes(w)) ?? part.widths[0];
+    if (reach === "once" || width === undefined) out.push({ part: index, decision: "allow", reach: "once" });
+    else if (reach === "run") out.push({ part: index, decision: "allow", reach: "run", width });
+    else out.push({ part: index, decision: "allow", reach: "add", width, addTo: reach.slice("add:".length) as WritableLayer });
+  });
+  return { decision: partAnswersDecision(approval, out), scope: out.some((a) => a.reach !== "once") ? "workflow-run" : "once", answers: out };
 }

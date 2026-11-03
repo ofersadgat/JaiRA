@@ -43,7 +43,7 @@ const view = (sets: Record<string, Record<string, unknown>>): PermissionSetsView
 describe("Tools → Functions", () => {
   const data = view({
     "chat/ask-first": { read_file: "ask", shell: "ask", other: "ask" },
-    "chat/auto": { read_file: { function: "smart" }, shell: { function: "smart" }, other: { function: "smart" } },
+    "chat/auto": { read_file: "smart", shell: "smart", other: "smart" },
     "chat/read-only": { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" },
   });
   // The columns the Shared page's table has: the sets the layer its switch is on can see.

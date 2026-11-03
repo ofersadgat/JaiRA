@@ -26,7 +26,7 @@ const OUT = join(import.meta.dirname, "out", "refused-call", by);
 const WORLD = join(import.meta.dirname, `.world-refused-call-${by}`);
 
 /** The shipped `auto` set, as the composer sends it: every line `smart`. */
-const AUTO = Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "web_fetch", "web_search", "other"].map((line) => [line, { function: "smart" }]));
+const AUTO = Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "web_fetch", "web_search", "other"].map((line) => [line, "smart"]));
 const VERDICT = by === "auto" ? "deny" : "unsure";
 /** How the agent's refusal begins — the judge words its own reason, so only who is fixed. */
 const WORDS = by === "auto" ? "Not run: auto denied it" : "Not run: the person denied this call. Nothing was fetched.";

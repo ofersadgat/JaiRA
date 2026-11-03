@@ -223,4 +223,55 @@ describe("what the person answered for this run, read back from the record", () 
     const onceAnswer = approvalResultEntries("approve_2", "t2", { decision: "allow", scope: "once", by: "person", waitedMs: 1 }, 4).record;
     expect(rememberedAnswersOf([call, remembered, once, onceAnswer])).toEqual([{ parts, decision: "allow", remember: ["git"] }]);
   });
+
+  it("is each ROW answered past its call, as the one part it was about — a deny as well as an allow, at its place", () => {
+    const part = (subject: string, widths: string[], within?: number): object => ({ span: { start: 0, end: 1 }, matched: [], text: subject, kind: "command", subject, verdict: "asks", decidedBy: { source: "permissionSet", reason: "" }, widths, ...(within !== undefined ? { within } : {}) });
+    const parts = { line: "npm run build", dialect: "posix", verdict: "asks", parts: [part("runner:npm", ["runner:npm"]), part("npm run build", ["npm run build", "npm"], 0), part("script", ["script"], 1)] } as never;
+    const call = approvalCallEntries("approve_1", "t1", { tool: "shell", command: "npm run build", parts }, 1).record;
+    const rows = [
+      { part: 0, decision: "allow" as const, reach: "once" as const },
+      { part: 1, decision: "allow" as const, reach: "run" as const, width: "npm", place: "packages" },
+      { part: 2, decision: "deny" as const, reach: "add" as const, layer: "project/build-safe", addTo: "project" as const },
+    ];
+    const answered = approvalResultEntries("approve_1", "t1", { decision: "deny", scope: "workflow-run", answers: rows, by: "person", waitedMs: 1 }, 2).record;
+    const read = rememberedAnswersOf([call, answered]);
+    // The once row is not remembered; each other row alone, judged under nothing (`within` dropped).
+    expect(read.map((r) => [(r.parts as unknown as { parts: Array<{ subject: string; within?: number }> }).parts, r.decision, r.remember, r.place])).toEqual([
+      [[{ ...(part("npm run build", ["npm run build", "npm"]) as object) }], "allow", ["npm"], "packages"],
+      [[{ ...(part("script", ["script"]) as object) }], "deny", [], undefined],
+    ]);
+    // And the hub remembers them again as the person left them.
+    const hub = new ApprovalHub();
+    hub.rememberAgain("t1", read as never);
+    expect(hub.grants("t1").list()).toEqual({ "npm @ packages": "allow", script: "deny" });
+  });
+});
+
+describe("rows answered one by one, at the hub", () => {
+  it("remembers each row that reaches past its call as its own part, and answers upstream once", async () => {
+    const parts = {
+      line: "git commit -m x && terraform plan && ls",
+      dialect: "posix",
+      verdict: "asks",
+      parts: [
+        { span: { start: 0, end: 15 }, matched: [], text: "git commit -m x", kind: "command", subject: "git commit", verdict: "asks", decidedBy: { source: "permissionSet", reason: "" }, widths: ["git commit", "git"] },
+        { span: { start: 19, end: 33 }, matched: [], text: "terraform plan", kind: "command", subject: "terraform plan", verdict: "asks", decidedBy: { source: "permissionSet", reason: "" }, widths: ["terraform plan", "terraform"] },
+        { span: { start: 37, end: 39 }, matched: [], text: "ls", kind: "tool", subject: "glob", verdict: "asks", decidedBy: { source: "permissionSet", reason: "" }, widths: ["ls"] },
+      ],
+    };
+    const seen: unknown[] = [];
+    const hub = new ApprovalHub({ onRequest: () => undefined, onResolved: (_id, decision, _by, reach) => seen.push([decision, reach]) });
+    const input = { command: parts.line };
+    const asked = (hub as unknown as { hold: (r: object) => Promise<unknown> }).hold({ requestId: "r1", tool: "shell", command: parts.line, parts, input, sessionId: "s", taskId: "t1", at: 0 });
+    const rows = [
+      { part: 0, decision: "allow" as const, reach: "run" as const, width: "git" },
+      { part: 1, decision: "deny" as const, reach: "run" as const },
+      { part: 2, decision: "allow" as const, reach: "once" as const },
+    ];
+    expect(hub.decide("r1", "deny", "workflow-run", undefined, undefined, "person", undefined, rows)).toBe(true);
+    await expect(asked).resolves.toEqual({ decision: "deny", scope: "once" });
+    expect(hub.grants("t1").list()).toEqual({ git: "allow", "terraform plan": "deny" });
+    // The record keeps the rows as the person gave them.
+    expect(seen).toEqual([[{ decision: "deny", scope: "once" }, { scope: "workflow-run", answers: rows }]]);
+  });
 });

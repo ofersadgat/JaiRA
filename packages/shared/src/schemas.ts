@@ -38,6 +38,8 @@
 import {
   CONVERSATION_MODES,
   PERMISSION_MODES,
+  SMART_FUNCTION,
+  UNAVAILABLE,
   JSON_FIELDS,
   SIMPLE_FIELDS,
   fieldAppliesTo,
@@ -389,10 +391,9 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
     }),
     permissions: leaf({
       type: "object",
-      properties: {
-        scopes: { type: "array", items: { type: "object" }, description: "where each tool may act — a path or URL pattern and the modes under it" },
-      },
-      description: "where tools may act (`scopes`, §5.1); a tool's mode is an entry of the permission set in `tools`",
+      properties: {},
+      description:
+        "written by lowering, never by an author: a tool's mode is an entry of the permission set in `tools`, and where it may act a map of places on that line (decision 0023 §3)",
     }),
     reasoning: leaf({
       type: "object",
@@ -416,38 +417,39 @@ function commonOperationProperties(): Record<string, SchemaDoc> {
  * admits in an object position (§2.2); `$ref` beside the subjects starts from one and says more.
  */
 export function toolsSchema(): SchemaDoc {
-  const word: SchemaDoc = { type: "string", enum: [...PERMISSION_MODES] };
-  const reference: SchemaDoc = {
+  // Decision 0023 §1: a string is a decision — a mode word, `unavailable`, or any other string, which
+  // names a function; an object is the entry wrapper or a place map. The schema cannot tell a function
+  // from a typo, so a string is any non-empty string here; the linter asks whether a named function
+  // resolves (`lowerStatePermissionSets`' `checkFunction`).
+  const decision: SchemaDoc = {
     type: "string",
     minLength: 1,
-    description: "the function that decides each call — returns allow or deny; `smart` is the one JaiRA ships",
+    examples: [...PERMISSION_MODES, UNAVAILABLE, SMART_FUNCTION],
+    description: "allow, ask, deny, unavailable (the model is not handed the tool), or the name of a function that decides each call — `smart` is the one JaiRA ships",
   };
-  const fn: SchemaDoc = {
+  const placeDecision: SchemaDoc = { ...decision, not: { const: UNAVAILABLE }, description: "allow, ask, deny, or a function's name — never unavailable, which is per tool" };
+  const places: SchemaDoc = {
     type: "object",
-    properties: { function: reference },
-    required: ["function"],
-    additionalProperties: false,
-    description: "a function decides each call, and may ask you through approve_tool_call",
+    minProperties: 1,
+    // An object whose keys are only `mode` and `implementation` is the entry itself; a path named
+    // `mode` is written `./mode`.
+    propertyNames: { not: { enum: ["mode", "implementation"] } },
+    additionalProperties: placeDecision,
+    description: "place → decision: the most specific matching place answers; `**` is everywhere else, and without it a call no place matches falls to a less specific line",
   };
-  const mode: SchemaDoc = { anyOf: [word, fn] };
+  const mode: SchemaDoc = { anyOf: [decision, places] };
   const implementation: SchemaDoc = { type: "string", enum: ["app", "native"], description: "whose code runs the tool — JaiRA's, or the agent's own built-in" };
   const entry: SchemaDoc = {
     anyOf: [
-      word,
-      fn,
+      decision,
+      places,
       {
         type: "object",
         properties: {
-          mode: { ...mode, description: "allow, ask, deny, or { \"function\": … } — decided per call by that function" },
+          mode: { ...mode, description: "a decision, or a map of places to decisions" },
           implementation,
         },
         required: ["mode"],
-        additionalProperties: false,
-      },
-      {
-        type: "object",
-        properties: { function: reference, implementation },
-        required: ["function"],
         additionalProperties: false,
       },
     ],
@@ -461,12 +463,14 @@ export function toolsSchema(): SchemaDoc {
         type: "object",
         description: "subject → mode. Present means offered with that mode; absent means not offered; `other` is everything no entry names",
         properties: {
-          $ref: { type: "string", description: "start from this permission set; the entries beside it override, per subject" },
-          other: { ...mode, description: "everything no entry names" },
+          $ref: { type: "string", description: "start from this permission set; the lines beside it are a newer layer over it, merged line by line" },
+          layers: { type: "array", items: { type: "string" }, description: "the permission sets this one is built from, oldest first; its own lines are the newest layer" },
+          other: { ...decision, not: { const: UNAVAILABLE }, description: "everything no entry names" },
           script: { ...entry, description: "running a file — ./x.sh, npm run <name>, make <target>" },
         },
         // A binding form (`$expr`, `json`) is still a legal value here, so its keys are not entries.
-        patternProperties: { "^[^$]": entry },
+        // `layers` is no subject either (decision 0023 §2.5).
+        patternProperties: { "^(?![$])(?!layers$)": entry },
       },
       ...BINDING_FORMS,
     ],

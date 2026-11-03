@@ -30,6 +30,7 @@ export * from "./packageScripts";
 // A run's policy, one recipe for the app and the CLI alike.
 export * from "./runPolicy";
 export * from "./approval";
+export * from "./rejudge";
 export * from "./refusals";
 export * from "./permissionFunctions";
 export * from "./questions";
@@ -41,6 +42,7 @@ export { classifyRequest, type ClassifiedPart } from "./commandParts";
 // chain — how a permission set's effect on an agent is tested (decision 0007).
 export * from "./agentHanded";
 export * from "./tools";
+export * from "./linePlaces";
 export * from "./sessionServices";
 // The agent's own on-disk session file, captured into the record at operation close — the lines
 // (attachments, toolUseResult, threading) that never ride the stream and outlive nothing.

@@ -24,7 +24,6 @@ import {
   defaultsSchemaOf,
   defaultsSummary,
   isSubRow,
-  modeClass,
   rulesWords,
   runnerSubjectsOf,
   showsDefaultPrompt,
@@ -213,10 +212,9 @@ function HeadCell({ column, first }: { column: SetColumn; first: boolean }): JSX
 
 function Cell({ column, name, onOpenSet }: { column: SetColumn; name: string; onOpenSet: (id: string) => void }): JSX.Element {
   const t = useTokens();
-  const { mode, text, title } = cellOf(column, name);
-  const kind = modeClass(mode);
-  const ground = kind === "allow" ? t.v("tint-ok") : kind === "deny" ? t.v("tint-bad") : kind === "fn" ? t.v("tint-accent") : kind === "none" ? "transparent" : t.v("panel-3");
-  const ink = kind === "allow" ? "ok" : kind === "deny" ? "bad" : kind === "fn" ? "accent" : kind === "none" ? "rule" : "text";
+  const { text, title, kind } = cellOf(column, name);
+  const ground = kind === "allow" ? t.v("tint-ok") : kind === "deny" ? t.v("tint-bad") : kind === "fn" ? t.v("tint-accent") : kind === "none" || kind === "unavailable" ? "transparent" : t.v("panel-3");
+  const ink = kind === "allow" ? "ok" : kind === "deny" ? "bad" : kind === "fn" ? "accent" : kind === "none" ? "rule" : kind === "unavailable" ? "tok-hint" : "text";
   return (
     <Press
       onPress={() => onOpenSet(column.id)}
@@ -228,7 +226,8 @@ function Cell({ column, name, onOpenSet }: { column: SetColumn; name: string; on
       paddingHorizontal={7}
       borderRadius={999}
       backgroundColor={ground as never}
-      {...(column.here && mode !== undefined ? ({ boxShadow: `inset 0 0 0 1.5px ${String(t.v("warn"))}` } as object) : {})}
+      {...(kind === "unavailable" ? { borderWidth: 1, borderStyle: "dashed", borderColor: t.v("line") as never } : {})}
+      {...(column.here && kind !== "none" ? ({ boxShadow: `inset 0 0 0 1.5px ${String(t.v("warn"))}` } as object) : {})}
     >
       <Txt spec={{ voice: "app", scale: 10.5 / 12.5, lineHeight: 1.6, color: ink }} numberOfLines={1} textAlign="center">
         {text}

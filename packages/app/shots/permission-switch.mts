@@ -6,7 +6,7 @@
  * A real agent (claude-cli/haiku — this rig spends a little) on the shipped `auto` set, asked to fetch two
  * pages; `smart` is told to answer unsure whatever the call, so every call it judges is put to the person
  * and a second ask is how "still going through auto" shows. When the first call is asked about, the rig
- * picks "full access" on the composer's Permissions chip, as a person does, and allows the waiting call.
+ * swaps the stack's bottom layer for `full.json` by its crumb, as a person does, and allows the waiting call.
  * Passes when the second fetch runs without a second ask or auto check — in the opening message (the RUN)
  * and in a later one (a chat TURN), which are decided by two different gates. `--no-switch` is the
  * control: the same two messages with nothing switched must ask about the second fetch as well.
@@ -27,8 +27,8 @@ const switching = !process.argv.includes("--no-switch");
 const OUT = join(import.meta.dirname, "out", "permission-switch", switching ? "switch" : "control");
 const WORLD = join(import.meta.dirname, `.world-permission-switch${switching ? "" : "-control"}`);
 
-/** The shipped `auto` set, as the composer sends it: every line `smart`. */
-const AUTO = Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "web_fetch", "web_search", "other"].map((line) => [line, { function: "smart" }]));
+/** The shipped `auto` set, as the composer sends it: the stack's bottom layer (decision 0023 §2.6). */
+const AUTO = { layers: ["$/permission-sets/chat/auto"] };
 const TWO_FETCHES = (a: string, b: string): string =>
   `Use the web_fetch tool to fetch ${a}. After it answers, use the web_fetch tool again to fetch ${b}. Then reply with both page titles. Do not use any other tool.`;
 
@@ -49,12 +49,17 @@ async function main(): Promise<void> {
     await app.resize(1180, 860);
     const pending = (taskId: string): Promise<Pending[]> => app.ipc<Pending[]>("approval:pending", undefined).then((all) => all.filter((p) => p.taskId === taskId));
 
-    /** Pick a permission set on the open conversation's composer, the way a person does. */
-    const pick = async (label: string): Promise<void> => {
-      const opened = await app.evaluate<boolean>(`(() => { const chip = document.querySelector('[aria-label="Permissions"]'); if (!chip) return false; chip.click(); return true; })()`);
-      if (!opened) throw new Error("the composer has no Permissions chip");
+    /**
+     * Pick a permission set on the open conversation's composer, the way a person does: the stack's
+     * bottom segment, its set's crumb, and the sibling (decision 0023 §4.1 — two presses).
+     */
+    const pick = async (file: string): Promise<void> => {
+      const opened = await app.evaluate<boolean>(`(() => { const chip = document.querySelector('[aria-label="chat/auto"]'); if (!chip) return false; chip.click(); return true; })()`);
+      if (!opened) throw new Error("the composer's stack has no chat/auto segment");
       await settle(600);
-      await app.clickText(label);
+      await app.clickText("auto.json");
+      await settle(400);
+      await app.clickText(file);
       await settle(600);
     };
 
@@ -72,7 +77,7 @@ async function main(): Promise<void> {
       await settle(1500);
       await app.shot(`${what}-asked`);
       if (switching) {
-        await pick("full access");
+        await pick("full.json");
         await app.shot(`${what}-switched`);
       }
       await app.ipc("approval:submit", { requestId: first.requestId, decision: "allow", scope: "once" });

@@ -341,6 +341,48 @@ export interface JairaConfig {
   appearance: JairaAppearanceConfig;
   /** Which events fire, per event (decision 0010 §2, `./events`) — every one off until a layer says on. */
   events: JairaEventsConfig;
+  /** What stands over every permission set of a bucket — see {@link JairaPermissionsConfig}. */
+  permissions: JairaPermissionsConfig;
+}
+
+/**
+ * The `permissions` block: a bucket's STANDING layers (decision 0023 §2.6, step 2, and §7.3).
+ *
+ * `layers.<bucket>` is a list of permission set references, oldest first, laid over every set of that
+ * bucket wherever one is judged — a conversation's preset, a state's named set — and under whatever a
+ * state or a conversation lays on top of it. So `"chat": ["$/permission-sets/project/build-safe"]`
+ * makes "this build is safe in this project" hold under every `chat/…` preset, `read-only` included.
+ *
+ * Here rather than in each set's file (§7.3): a standing layer is a statement about a PROJECT, and a
+ * set file is shared by every project that names it. It layers as every setting does — objects by key,
+ * so a project's list for `chat` replaces the shared root's list for `chat` and leaves its other
+ * buckets standing; a list replaces whole, so a project can take a standing layer away.
+ */
+export interface JairaPermissionsConfig {
+  /** By bucket (`chat`, `feature/implementation`): the references laid over its sets, oldest first. */
+  layers: Record<string, string[]>;
+}
+
+/**
+ * Parse the `permissions` block. Strict about what is present, like every block here: a standing layer
+ * that silently reads as nothing is a rule the person believes is in force.
+ */
+function parsePermissions(raw: unknown): JairaPermissionsConfig {
+  if (raw === undefined) return { layers: {} };
+  const block = plainObject(raw, "config.permissions");
+  allowedFields(block, ["layers"], "config.permissions");
+  const layers: Record<string, string[]> = {};
+  if (block["layers"] !== undefined) {
+    for (const [bucket, list] of Object.entries(plainObject(block["layers"], "config.permissions.layers"))) {
+      const where = `config.permissions.layers.${bucket}`;
+      if (bucket.trim() === "" || bucket.startsWith("/") || bucket.endsWith("/")) throw new Error(`${where}: a bucket is a folder path like chat or feature/implementation`);
+      if (!Array.isArray(list) || !list.every((each) => typeof each === "string" && each.trim() !== "")) {
+        throw new Error(`${where} must be a list of permission set references, oldest first, like ["$/permission-sets/project/build-safe"]`);
+      }
+      layers[bucket] = (list as string[]).map((each) => each.trim());
+    }
+  }
+  return { layers };
 }
 
 /**
@@ -381,7 +423,7 @@ export interface JairaShellConfig {
 
 /**
  * The shipped `smart` permission function (decision 0007, amended 2026-09-22) — `functions.smart`. A
- * permission set line that says `{ "function": "smart" }` hands each call to it: one model call judges it
+ * permission set line that says `"smart"` hands each call to it: one model call judges it
  * `allow`, `deny` or `unsure`, and `unsure` puts it to the person through the approval prompt. Both
  * fields layer like every other setting (the project over `~/.jaira`).
  */
@@ -760,6 +802,7 @@ export function defaultConfig(): JairaConfig {
     mcp: defaultMcp(),
     appearance: defaultAppearanceConfig(),
     events: {},
+    permissions: { layers: {} },
   };
 }
 
@@ -1413,6 +1456,7 @@ export function parseConfig(raw: unknown): JairaConfig {
     mcp: parseMcp(cfg["mcp"]),
     appearance: parseAppearanceConfig(cfg["appearance"]),
     events: parseEvents(cfg["events"]),
+    permissions: parsePermissions(cfg["permissions"]),
   };
 }
 

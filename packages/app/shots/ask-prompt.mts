@@ -28,7 +28,7 @@ const OUT = join(import.meta.dirname, "out", "ask-prompt", verdict);
 const WORLD = join(import.meta.dirname, `.world-ask-prompt-${verdict}`);
 
 /** The shipped `auto` set, as the composer sends it: every line `smart`. */
-const AUTO = Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "web_fetch", "web_search", "other"].map((line) => [line, { function: "smart" }]));
+const AUTO = Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "web_fetch", "web_search", "other"].map((line) => [line, "smart"]));
 
 async function main(): Promise<void> {
   const world = buildWorld(WORLD);

@@ -47,7 +47,7 @@ function gated(
   const decided: PermissionFunctionRequest[] = [];
   const hub = new ApprovalHub({ onRequest: (request) => void asked.push(request) });
   const policy = compilePolicy(options.policy ?? {}, { execEnv: { wsl: "test" }, grants: hub.grants("t1") });
-  const block = lowerPermissionSet(parsePermissionSet(decl).permissionSet, undefined, "$/permission-sets/test/fn").permissions!;
+  const block = lowerPermissionSet(parsePermissionSet(decl).permissionSet, "$/permission-sets/test/fn").permissions!;
   const ran: unknown[] = [];
   const impl: Tool = {
     description: tool,
@@ -86,7 +86,7 @@ const allowIf =
 
 describe("a function decides a tool call before anybody is asked", () => {
   it("ALLOWS: the call runs, and nobody is asked", async () => {
-    const { call, asked, ran, decided } = gated({ write_file: { function: "judge" }, other: "deny" }, "write_file", { run: allowIf(() => true) });
+    const { call, asked, ran, decided } = gated({ write_file: "judge", other: "deny" }, "write_file", { run: allowIf(() => true) });
     await call({ path: "notes.md", content: "x" });
     expect(asked).toEqual([]);
     expect(ran).toHaveLength(1);
@@ -97,14 +97,14 @@ describe("a function decides a tool call before anybody is asked", () => {
   });
 
   it("DENIES: the call is refused, and nobody is asked", async () => {
-    const { call, asked, ran } = gated({ write_file: { function: "judge" }, other: "deny" }, "write_file", { run: allowIf(() => false) });
+    const { call, asked, ran } = gated({ write_file: "judge", other: "deny" }, "write_file", { run: allowIf(() => false) });
     expect(isPermissionDenied((await call({ path: "notes.md", content: "x" })) as never)).toBe(true);
     expect(asked).toEqual([]);
     expect(ran).toEqual([]);
   });
 
   it("puts a call a function could NOT decide to the person, with the reason", async () => {
-    const { call, asked, hub } = gated({ write_file: { function: "judge" }, other: "deny" }, "write_file", {
+    const { call, asked, hub } = gated({ write_file: "judge", other: "deny" }, "write_file", {
       run: async () => {
         throw new Error("'judge' returned \"maybe\", which is not allow or deny");
       },
@@ -120,7 +120,7 @@ describe("a function decides a tool call before anybody is asked", () => {
   it("tells the host a function is being asked BEFORE it answers, then what it answered (option B, 2026-10-24)", async () => {
     const heard: string[] = [];
     let release: (answer: "allow") => void = () => undefined;
-    const { call, ran } = gated({ write_file: { function: "judge" }, other: "deny" }, "write_file", {
+    const { call, ran } = gated({ write_file: "judge", other: "deny" }, "write_file", {
       run: () => new Promise((resolve) => (release = resolve)),
       hooks: {
         onAsking: (request) => void heard.push(`asking ${request.function} about ${request.tool}`),
@@ -139,7 +139,7 @@ describe("a function decides a tool call before anybody is asked", () => {
   });
 
   it("puts such a call to the person when nothing here can run a function — never lets it through", async () => {
-    const { call, asked, hub } = gated({ write_file: { function: "judge" } }, "write_file");
+    const { call, asked, hub } = gated({ write_file: "judge" }, "write_file");
     const pending = call({ path: "notes.md", content: "x" });
     await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(asked[0]!.reason).toBe("the function 'judge' could not decide: nothing here can run the function 'judge'");
@@ -150,7 +150,7 @@ describe("a function decides a tool call before anybody is asked", () => {
 
 describe("a shell line whose lines name functions is decided PER PART", () => {
   it("hands each part to its function on its own, and runs the line when every part may", async () => {
-    const { call, asked, ran, decided } = gated({ shell: { function: "judge" }, "git status": "allow", other: "deny" }, "shell", {
+    const { call, asked, ran, decided } = gated({ shell: "judge", "git status": "allow", other: "deny" }, "shell", {
       run: allowIf((request) => request.part?.program !== "rm"),
     });
     await call({ command: "git status && cargo check && tsc --noEmit", cwd: "/repo" });
@@ -165,7 +165,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("refuses the line when one part is denied — and asks the functions after it nothing", async () => {
-    const { call, asked, ran, decided } = gated({ shell: { function: "judge" }, other: "deny" }, "shell", { run: allowIf((request) => request.part?.program !== "sqlite3") });
+    const { call, asked, ran, decided } = gated({ shell: "judge", other: "deny" }, "shell", { run: allowIf((request) => request.part?.program !== "sqlite3") });
     expect(isPermissionDenied((await call({ command: "sqlite3 app.db .dump && cargo check" })) as never)).toBe(true);
     expect(asked).toEqual([]);
     expect(ran).toEqual([]);
@@ -174,7 +174,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
 
   it("asks the person about what still asks, with each function's answer on the request", async () => {
     // A built-in ask (a push) is stricter than a function on `shell`: the function is not asked about it.
-    const { call, asked, hub, decided } = gated({ shell: { function: "judge" }, other: "deny" }, "shell", { run: allowIf(() => true) });
+    const { call, asked, hub, decided } = gated({ shell: "judge", other: "deny" }, "shell", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git push origin main" });
     await eventually(() => asked.length > 0, "the gate to ask a person");
     expect(decided.map((r) => r.part?.text)).toEqual(["cargo check"]);
@@ -188,14 +188,14 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("lets a line that names the program give even a push to a function", async () => {
-    const { call, asked, decided } = gated({ shell: "ask", "git push": { function: "judge" }, other: "deny" }, "shell", { run: allowIf(() => true) });
+    const { call, asked, decided } = gated({ shell: "ask", "git push": "judge", other: "deny" }, "shell", { run: allowIf(() => true) });
     await call({ command: "git push origin main" });
     expect(asked).toEqual([]);
     expect(decided).toMatchObject([{ subject: "git push", part: { program: "git", subcommand: "push", args: ["origin", "main"] } }]);
   });
 
   it("never hands a function what the floor, a rule's deny or the parser already answered", async () => {
-    const { call, decided, asked, hub } = gated({ shell: { function: "judge" }, other: "deny" }, "shell", { run: allowIf(() => true) });
+    const { call, decided, asked, hub } = gated({ shell: "judge", other: "deny" }, "shell", { run: allowIf(() => true) });
     expect(isPermissionDenied((await call({ command: "git reset --hard" })) as never)).toBe(true);
     expect(isPermissionDenied((await call({ command: "cat .jaira/settings.json" })) as never)).toBe(true);
     // A line the parser cannot read asks a PERSON, whatever a function would say about the parts it can see.
@@ -209,7 +209,7 @@ describe("a shell line whose lines name functions is decided PER PART", () => {
   });
 
   it("keeps the part a function answered off what the run remembers", async () => {
-    const { call, asked, hub } = gated({ shell: { function: "judge" }, "git commit": "ask", other: "deny" }, "shell", { run: allowIf(() => true) });
+    const { call, asked, hub } = gated({ shell: "judge", "git commit": "ask", other: "deny" }, "shell", { run: allowIf(() => true) });
     const pending = call({ command: "cargo check && git commit -m wip" });
     await eventually(() => asked.length > 0, "the gate to ask a person");
     hub.decide(asked[0]!.requestId, "allow", "workflow-run", []);
@@ -372,7 +372,7 @@ describe("`smart`, the function JaiRA ships", () => {
       },
     } as never;
     registerSmartFunction(registry, { prompt, config: () => ({}) });
-    const { call, asked, ran } = gated({ shell: { function: SMART_FUNCTION }, other: "deny" }, "shell", { run: runnerOver(registry, prompt) });
+    const { call, asked, ran } = gated({ shell: SMART_FUNCTION, other: "deny" }, "shell", { run: runnerOver(registry, prompt) });
     await call({ command: "cargo check && cargo fmt" });
     expect(isPermissionDenied((await call({ command: "cargo check; curl-ish x" })) as never)).toBe(true);
     expect(judged).toEqual(["cargo check", "cargo fmt", "cargo check", "curl-ish x"]);

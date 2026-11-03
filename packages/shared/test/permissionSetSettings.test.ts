@@ -238,3 +238,23 @@ describe("what one layer's pane reads", () => {
     ]);
   });
 });
+
+describe("the text edits, with places, functions by name and a file's layers (decision 0023)", () => {
+  it("writes a function by its name, a place map inline, and leaves a file's `layers` as written", () => {
+    const text = `{\n  "layers": ["$/permission-sets/chat/ask-first"],\n  "read_file": "allow",\n  "other": "deny"\n}\n`;
+    const out = setPermissionSetText(text, { read_file: { "**": "deny", src: "allow" }, shell: "smart", other: "deny" });
+    expect(out).toBe(`{\n  "layers": ["$/permission-sets/chat/ask-first"],\n  "read_file": { "**": "deny", "src": "allow" },\n  "shell": "smart",\n  "other": "deny"\n}\n`);
+    // A map that says the same places in another order is the same line, and is not rewritten.
+    expect(setPermissionSetText(out, { read_file: { src: "allow", "**": "deny" }, shell: " smart", other: "deny" })).toBe(out);
+    expect(newPermissionSetText({ edit: { mode: { src: "allow" }, implementation: "native" }, web_search: "unavailable" })).toBe(
+      `{\n  "edit": { "mode": { "src": "allow" }, "implementation": "native" },\n  "web_search": "unavailable"\n}\n`,
+    );
+  });
+
+  it("words a line with places, or unavailable, when comparing with what ships", () => {
+    expect(comparePermissionSets({ read_file: "allow", web_fetch: "ask" }, { read_file: { "**": "deny", src: "allow" }, web_fetch: "unavailable" })).toEqual([
+      { subject: "read_file", theirs: "allow", ours: "** deny, src allow" },
+      { subject: "web_fetch", theirs: "ask", ours: "unavailable" },
+    ]);
+  });
+});

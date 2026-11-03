@@ -4,17 +4,26 @@ import { toolDisplayOf } from "@jaira/shared/browser";
 import type { ApprovalAnswerExtras, ApprovalSurfaceProps } from "@jaira/ui/approvalSurfaceTypes";
 import {
   answerMenu,
+  answerWordsOf,
   approvalAnswerOf,
+  bottomOf,
+  choiceOfAnswer,
+  continueAnswerOf,
+  continueMenu,
   hueOf,
   lineSegments,
   partRows,
   reasonLines,
+  rowAnswerOf,
+  rowPanel,
   verdictLabel,
   type ChosenWidths,
   type PartRow,
   type Piece,
   type Reach,
   type ReasonLine,
+  type RowAnswers,
+  type RowChoice,
 } from "@jaira/ui/approvalModel";
 import { Press, Txt, edge, lengthToken, padToken } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
@@ -24,6 +33,7 @@ import { Button } from "../settings/Button";
 import { anchorRectOf } from "./anchor";
 import { AnswerMenuCard } from "./AnswerMenu";
 import { GateTitle } from "./GateTitle";
+import { RowAnswerPanel } from "./RowAnswerPanel";
 
 /**
  * A command awaiting approval, as the requests its line is made of — the line in its parts' colours, a
@@ -52,18 +62,23 @@ import { GateTitle } from "./GateTitle";
  *   the answers              row, wrapping, gap 8, 14 above; `Split`s; the error under them (--bad, app
  *                            11/12.5)
  */
-export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading = true, reasons: saysWhy = true }: ApprovalSurfaceProps & {
+export function ApprovalSurface({ pending, error, onDecide, initialMenu, initialRow, heading = true, reasons: saysWhy = true }: ApprovalSurfaceProps & {
   /** Its heading; not under a work summary's row, which says it already. */
   heading?: boolean;
   /** Its reasons; not under a check's row that said why already ("Auto is unsure · …", option B). */
   reasons?: boolean;
 }): JSX.Element {
   const t = useTokens();
-  // One of the two menus open at a time, anchored to its own split button.
-  const [open, setOpen] = useState<{ which: "allow" | "deny"; at: ReturnType<typeof anchorRectOf> } | null>(initialMenu !== undefined ? { which: initialMenu, at: null } : null);
+  // One of the two menus open at a time, anchored to its own split button: Allow's or Deny's, or —
+  // once a row was answered by hand — Continue's (which answers the rows still asking with "allow").
+  const [open, setOpen] = useState<{ which: "allow" | "deny" | "continue"; at: ReturnType<typeof anchorRectOf> } | null>(initialMenu !== undefined ? { which: initialMenu, at: null } : null);
   const [chosen, setChosen] = useState<ChosenWidths>({});
   /** The part under the pointer, lit on the line and in its row. */
   const [hot, setHot] = useState<number | null>(null);
+  /** The rows answered by hand (decision 0023 ruling 7). Nothing is sent until Continue. */
+  const [answers, setAnswers] = useState<RowAnswers>({});
+  /** The row whose panel is open, where, and the choices made in it so far. */
+  const [panel, setPanel] = useState<{ index: number; at: ReturnType<typeof anchorRectOf>; choice: RowChoice } | null>(initialRow !== undefined ? { index: initialRow, at: null, choice: {} } : null);
 
   const decide = (decision: "allow" | "deny", reach: Reach): void => {
     const { scope, remember, addTo } = approvalAnswerOf(pending, reach, chosen);
@@ -72,6 +87,17 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
       remember !== undefined || addTo !== undefined ? { ...(remember !== undefined ? { remember } : {}), ...(addTo !== undefined ? { addTo } : {}) } : undefined;
     onDecide(decision, scope, extras);
   };
+  /** Continue: every row as answered by hand, the rest at this reach. */
+  const proceed = (reach: Reach): void => {
+    const { decision, scope, answers: sent } = continueAnswerOf(pending, answers, reach, chosen);
+    setOpen(null);
+    onDecide(decision, scope, { answers: sent });
+  };
+  /** Cancel: refuse the call, and keep nothing anybody chose. */
+  const cancel = (): void => {
+    setOpen(null);
+    onDecide("deny", "once");
+  };
 
   const approval = pending.parts;
   const drawn = approval !== undefined && approval.parts.length > 0 && pending.command !== undefined;
@@ -79,6 +105,11 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
   const hover = (index: number): Record<string, unknown> => (isWeb ? { onMouseEnter: () => setHot(index), onMouseLeave: () => setHot(null) } : {});
   const em = Number(t.scaled("size-data", 12 / 12)) || 12;
   const reasons = saysWhy ? reasonLines(pending) : [];
+  // A function's question is answered for this call alone: no row of it is answered on its own.
+  const byRow = pending.asker === undefined;
+  const bottom = byRow ? bottomOf(pending, answers) : ({ mode: "aggregate" } as const);
+  const restMenu = bottom.mode === "continue" ? continueMenu(pending, answers, chosen) : undefined;
+  const opened = panel !== null ? rowPanel(pending, panel.index, panel.choice) : null;
 
   return (
     <View testID="approval" flexDirection="column">
@@ -116,8 +147,26 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
           <View testID="approval-parts" flexDirection="column" gap={2} marginTop={Math.max(em, 8)}>
             {rows.map((row) => {
               const hue = colorOf(t, row.hue);
-              const asks = row.verdict === "asks";
-              return <PartRowView key={row.index} row={row} hue={hue} asks={asks} hot={hot === row.index} hover={hover(row.index)} />;
+              const mine = answers[row.index];
+              const asks = row.verdict === "asks" && mine === undefined;
+              const opens = byRow && row.verdict === "asks";
+              return (
+                <PartRowView
+                  key={row.index}
+                  row={mine !== undefined ? { ...row, verdict: mine.decision === "allow" ? "allowed" : "denied", note: answerWordsOf(pending, row.index, mine) } : row}
+                  hue={hue}
+                  asks={asks}
+                  hot={hot === row.index}
+                  hover={hover(row.index)}
+                  open={panel?.index === row.index}
+                  {...(opens
+                    ? {
+                        onPill: (from: unknown) =>
+                          setPanel(panel?.index === row.index ? null : { index: row.index, at: anchorRectOf(from), choice: mine !== undefined ? choiceOfAnswer(pending, mine) : {} }),
+                      }
+                    : {})}
+                />
+              );
             })}
           </View>
         </>
@@ -133,27 +182,76 @@ export function ApprovalSurface({ pending, error, onDecide, initialMenu, heading
       ))}
 
       <View flexDirection="row" flexWrap="wrap" gap={8} marginTop={reasons.length === 0 && !drawn ? Math.max(em, 14) : 14}>
-        {(["allow", "deny"] as const).map((decision) => (
-          <Split
-            key={decision}
-            decision={decision}
-            // A function's question is answered for this call alone, so there is no reach to choose.
-            caret={pending.asker === undefined}
-            open={open?.which === decision}
-            onMain={() => decide(decision, "once")}
-            // Placed against the whole split (the caret's parent on web).
-            onCaret={(from) => setOpen(open?.which === decision ? null : { which: decision, at: anchorRectOf((from as { parentElement?: unknown } | undefined)?.parentElement) })}
-          />
-        ))}
+        {bottom.mode === "aggregate" ? (
+          (["allow", "deny"] as const).map((decision) => (
+            <Split
+              key={decision}
+              decision={decision}
+              // A function's question is answered for this call alone, so there is no reach to choose.
+              caret={pending.asker === undefined}
+              open={open?.which === decision}
+              onMain={() => decide(decision, "once")}
+              // Placed against the whole split (the caret's parent on web).
+              onCaret={(from) => setOpen(open?.which === decision ? null : { which: decision, at: anchorRectOf((from as { parentElement?: unknown } | undefined)?.parentElement) })}
+            />
+          ))
+        ) : (
+          <>
+            {/* Once a row is answered by hand: Continue answers the rest with its own choice, Cancel keeps nothing. */}
+            <Split
+              decision="allow"
+              verb="Continue"
+              testID="approval-continue"
+              caret={restMenu !== undefined}
+              open={open?.which === "continue"}
+              onMain={() => proceed("once")}
+              onCaret={(from) => setOpen(open?.which === "continue" ? null : { which: "continue", at: anchorRectOf((from as { parentElement?: unknown } | undefined)?.parentElement) })}
+            />
+            <Split decision="deny" verb="Cancel" testID="approval-cancel" caret={false} open={false} onMain={cancel} onCaret={() => undefined} />
+          </>
+        )}
       </View>
-      {open !== null ? (
+      {bottom.mode === "continue" && bottom.refuses ? (
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} marginTop={6}>
+          A part is denied, so Continue refuses the command; the other answers are kept.
+        </Txt>
+      ) : null}
+      {open !== null && open.which !== "continue" ? (
         <AnswerMenuCard
           anchor={open.at}
           menu={answerMenu(pending, open.which, chosen)}
           onChoose={(key, width) => setChosen({ ...chosen, [key]: width })}
-          onReach={(reach) => decide(open.which, reach)}
+          onReach={(reach) => decide(open.which as "allow" | "deny", reach)}
           onClose={() => setOpen(null)}
           testIdOf={(reach) => `approval-${open.which}-${reach}`}
+        />
+      ) : null}
+      {open?.which === "continue" && restMenu !== undefined ? (
+        <AnswerMenuCard
+          anchor={open.at}
+          menu={restMenu}
+          onChoose={(key, width) => setChosen({ ...chosen, [key]: width })}
+          onReach={(reach) => proceed(reach)}
+          onClose={() => setOpen(null)}
+          testIdOf={(reach) => `approval-continue-${reach}`}
+        />
+      ) : null}
+      {panel !== null && opened !== null ? (
+        <RowAnswerPanel
+          anchor={panel.at}
+          panel={opened}
+          answered={answers[panel.index] !== undefined}
+          onChoose={(choice) => setPanel({ ...panel, choice: { ...panel.choice, ...choice } })}
+          onAnswer={(decision) => {
+            setAnswers({ ...answers, [panel.index]: rowAnswerOf(pending, panel.index, panel.choice, decision) });
+            setPanel(null);
+          }}
+          onReset={() => {
+            const { [panel.index]: _dropped, ...rest } = answers;
+            setAnswers(rest);
+            setPanel(null);
+          }}
+          onClose={() => setPanel(null)}
         />
       ) : null}
       {error ? (
@@ -172,7 +270,25 @@ const SUB = { voice: "app", scale: 11 / 12.5, color: "dim" } as const;
  * (1fr), the verdict — and the note in row 2 under the subject, in its column: where the subject was laid
  * out in row 1 is measured, and the note is placed there at its width.
  */
-function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string; asks: boolean; hot: boolean; hover: Record<string, unknown> }): JSX.Element {
+function PartRowView({
+  row,
+  hue,
+  asks,
+  hot,
+  hover,
+  open = false,
+  onPill,
+}: {
+  row: PartRow;
+  hue: string;
+  asks: boolean;
+  hot: boolean;
+  hover: Record<string, unknown>;
+  /** Its panel is open: the row and its pill are ringed in --accent. */
+  open?: boolean;
+  /** The pill is a button that opens the row's own panel (decision 0023 ruling 7) — handed the pill, to place it against. */
+  onPill?: (from: unknown) => void;
+}): JSX.Element {
   const t = useTokens();
   const [column, setColumn] = useState<{ x: number; width: number } | null>(null);
   const line = useRef<HTMLElement | null>(null);
@@ -212,6 +328,7 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
       marginLeft={row.depth * 17}
       borderRadius={lengthToken(t, "control-radius-sm", 6) as never}
       backgroundColor={(asks ? t.v("tint-warn") : hot ? t.mix(hue, 9, "transparent") : "transparent") as never}
+      {...((open && isWeb ? { boxShadow: `inset 0 0 0 1px ${t.mix(t.v("accent"), 55, "transparent")}` } : {}) as object)}
     >
       {/* Measured again when the row itself changes (web: its elements are read, so either event will do). */}
       <View ref={line as never} {...((isWeb ? { onLayout: measure } : {}) as object)} flexDirection="row" alignItems="baseline" gap={8}>
@@ -225,7 +342,7 @@ function PartRowView({ row, hue, asks, hot, hover }: { row: PartRow; hue: string
         <Txt ref={subject as never} onLayout={measure} spec={{ voice: "data", scale: 11.5 / 12, weight: 600 }} ellip flexGrow={1} flexShrink={1} flexBasis={0} minWidth={0}>
           {row.subject}
         </Txt>
-        <Verdict t={t} verdict={row.verdict} {...(row.by !== undefined ? { by: row.by } : {})} />
+        <Verdict t={t} verdict={row.verdict} open={open} {...(row.by !== undefined ? { by: row.by } : {})} {...(onPill !== undefined ? { onPress: onPill } : {})} />
       </View>
       {row.note !== undefined ? (
         <Txt
@@ -285,16 +402,49 @@ function Pieces({ t, pieces, hue }: { t: Tokens; pieces: readonly Piece[]; hue: 
   );
 }
 
-/** The verdict pill at a row's end, with the function that decided it where one did. */
-function Verdict({ t, verdict, by }: { t: Tokens; verdict: PartRow["verdict"]; by?: string }): JSX.Element {
+/**
+ * The verdict pill at a row's end, with the function that decided it where one did. A row that asks —
+ * or that was answered by hand — has a pill that is a BUTTON (decision 0023 ruling 7): its word, then a
+ * 10 chevron, gap 3, opening the row's own panel; open, it is ringed 2px in --accent at 45%.
+ */
+function Verdict({ t, verdict, by, open = false, onPress }: { t: Tokens; verdict: PartRow["verdict"]; by?: string; open?: boolean; onPress?: (from: unknown) => void }): JSX.Element {
   const ink = verdict === "asks" ? "warn" : verdict === "denied" ? "bad" : "dim";
   const ground = verdict === "asks" ? t.mix(t.v("warn"), 18, t.v("panel")) : verdict === "denied" ? t.v("tint-bad") : t.v("panel-2");
   const spec = { voice: "app", scale: 10.5 / 12.5, weight: 600, lineHeight: 1.6, color: ink } as const;
-  return (
-    <View flexDirection="row" alignItems="baseline" flexShrink={0} paddingHorizontal={7} borderRadius={999} backgroundColor={ground as never}>
+  const words = (
+    <>
       {by !== undefined ? <FunctionBy name={by} inVerdict spec={spec} /> : null}
       <Txt spec={spec}>{verdictLabel(verdict)}</Txt>
-    </View>
+    </>
+  );
+  if (onPress === undefined) {
+    return (
+      <View flexDirection="row" alignItems="baseline" flexShrink={0} paddingHorizontal={7} borderRadius={999} backgroundColor={ground as never}>
+        {words}
+      </View>
+    );
+  }
+  return (
+    <Press
+      onPress={(e) => onPress(isWeb ? (e as unknown as { currentTarget: unknown }).currentTarget : undefined)}
+      label={`${verdictLabel(verdict)}: answer this part on its own`}
+      testID="approval-row-pill"
+      {...((isWeb ? { "aria-expanded": open, "aria-haspopup": "dialog" } : {}) as object)}
+      fill={false}
+      flexDirection="row"
+      alignItems="center"
+      gap={3}
+      flexShrink={0}
+      paddingHorizontal={7}
+      borderRadius={999}
+      box={({ hovered }) => ({
+        backgroundColor: hovered ? t.mix(String(t.v(ink)), 26, t.v("panel")) : ground,
+        ...(open && isWeb ? { boxShadow: `0 0 0 2px ${t.mix(t.v("accent"), 45, "transparent")}` } : {}),
+      })}
+    >
+      {words}
+      <Icon name="chevron" size={10} color={String(t.v(ink))} />
+    </Press>
   );
 }
 
@@ -324,6 +474,20 @@ function Reason({ line, marginTop }: { line: ReasonLine; marginTop: number }): J
     return (
       <Txt spec={spec} marginTop={marginTop}>
         {line.kind === "policy" ? <>Policy: {line.text}</> : line.text}
+      </Txt>
+    );
+  }
+  // The stack, oldest first: `chat/ask-first + project/build-safe, then this run` — each row says which layer decided it.
+  if (line.kind === "stack") {
+    return (
+      <Txt spec={spec} marginTop={marginTop} testID="approval-stack">
+        {line.layers.map((id, at) => (
+          <Fragment key={id}>
+            {at > 0 ? " + " : null}
+            <Txt spec={mono}>{id}</Txt>
+          </Fragment>
+        ))}
+        {line.thisRun ? ", then this run" : null}
       </Txt>
     );
   }
@@ -363,21 +527,37 @@ function Reason({ line, marginTop }: { line: ReasonLine; marginTop: number }): J
  * square on the inside; the caret 7 either side, 1 over the main button, its chevron 12, and under
  * primary a 1px edge of white at 35% on its left.
  */
-function Split({ decision, caret, open, onMain, onCaret }: { decision: "allow" | "deny"; caret: boolean; open: boolean; onMain: () => void; onCaret: (from: unknown) => void }): JSX.Element {
+function Split({
+  decision,
+  verb: named,
+  testID,
+  caret,
+  open,
+  onMain,
+  onCaret,
+}: {
+  decision: "allow" | "deny";
+  /** Its word, when it is not `Allow` or `Deny`: `Continue`, `Cancel`. */
+  verb?: string;
+  testID?: string;
+  caret: boolean;
+  open: boolean;
+  onMain: () => void;
+  onCaret: (from: unknown) => void;
+}): JSX.Element {
   const t = useTokens();
   const primary = decision === "allow";
-  const verb = primary ? "Allow" : "Deny";
+  const verb = named ?? (primary ? "Allow" : "Deny");
   const kind = primary ? "primary" : "danger";
   const ink = String(primary ? t.v("on-accent") : t.v("bad"));
+  const id = testID ?? `approval-${decision}`;
   return (
     <View flexDirection="row" position="relative">
-      {/* The answer is square on the right with or without a caret beside it. */}
-      <Button kind={kind} onPress={onMain} testID={`approval-${decision}`} borderTopRightRadius={0} borderBottomRightRadius={0}>
+      {/* Allow and Deny are square on the right with or without a caret beside it; Continue only with one, Cancel never. */}
+      <Button kind={kind} onPress={onMain} testID={id} {...(caret || named === undefined ? { borderTopRightRadius: 0, borderBottomRightRadius: 0 } : {})}>
         {verb}
       </Button>
-      {caret ? (
-        <CaretButton kind={kind} verb={verb} ink={ink} open={open} testID={`approval-${decision}-more`} onPress={onCaret} />
-      ) : null}
+      {caret ? <CaretButton kind={kind} verb={verb} ink={ink} open={open} testID={`${id}-more`} onPress={onCaret} /> : null}
     </View>
   );
 }

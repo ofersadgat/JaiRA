@@ -297,11 +297,11 @@ describe("a coarse transport's switch is derived from the permission set", () =>
     // Held with OUR implementation: ours is served over the bridge and the native is displaced — shut.
     expect(on(permissionSet({ read_file: "allow", edit: "ask" }))).toBe(false);
     // A line a FUNCTION decides is held like any other: ours serves it, the function judging each call.
-    expect(on(permissionSet({ shell: { function: "smart" } }))).toBe(false);
+    expect(on(permissionSet({ shell: "smart" }))).toBe(false);
     expect(on(permissionSet({ write_file: "allow" }))).toBe(false);
     // Kept: codex's own `apply_patch` or `shell` does the job, and only the sandbox lets it.
     expect(on(permissionSet({ read_file: "allow", edit: { mode: "ask", implementation: "native" } }))).toBe(true);
-    expect(on(permissionSet({ shell: { function: "smart", implementation: "native" } }))).toBe(true);
+    expect(on(permissionSet({ shell: { mode: "smart", implementation: "native" } }))).toBe(true);
     // Held and refused is not held, whoever's code it names.
     expect(on(permissionSet({ read_file: "allow", shell: "deny", write_file: "deny" }))).toBe(false);
     expect(on(permissionSet({ shell: { mode: "deny", implementation: "native" } }))).toBe(false);

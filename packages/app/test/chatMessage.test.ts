@@ -184,7 +184,7 @@ describe("the settings a message would run under", () => {
     expect(() => service.savePermissionSet({ bucket: "chat", name: "ask-but-commit", layer: "project", permissionSet: mine })).toThrow(/already exists/);
     expect(() => service.savePermissionSet({ bucket: "chat", name: "../../escape", layer: "project", permissionSet: mine })).toThrow(/a name is/);
     expect(() => service.savePermissionSet({ bucket: "../up", name: "x", layer: "project", permissionSet: mine })).toThrow(/not a bucket/);
-    expect(() => service.savePermissionSet({ bucket: "chat", name: "bad", layer: "project", permissionSet: { shell: "sometimes" } as never })).toThrow(/not a permission set/);
+    expect(() => service.savePermissionSet({ bucket: "chat", name: "bad", layer: "project", permissionSet: { shell: 7 } as never })).toThrow(/not a permission set/);
   });
 
   it("ANSWERS null for a COMPOSITE rather than failing at being asked", async () => {

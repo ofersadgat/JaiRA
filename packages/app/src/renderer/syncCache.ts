@@ -166,6 +166,10 @@ const SHOWS: Partial<Record<string, readonly string[]>> = {
   "machines:copies": ["machine", "workspace"],
   "forge:signIns": ["forge", "config"],
   "permissionSets:read": ["config"],
+  // The composer's stack and its set browser (decision 0023 §4.1): the set files and the settings.
+  "permissionSets:tree": ["config"],
+  "permissionSets:own": ["config"],
+  "permissionSets:stack": ["config"],
   "catalog:status": ["config", "availability"],
   "mcp:tools": ["config"],
   "mcp:detect": ["config"],

@@ -1,7 +1,7 @@
 {
-  "read_file": "ask",
-  "glob": "ask",
-  "grep": "ask",
+  "read_file": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask" },
+  "glob": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask" },
+  "grep": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask" },
   "edit": "ask",
   "write_file": "ask",
   "show_artifact": "ask",

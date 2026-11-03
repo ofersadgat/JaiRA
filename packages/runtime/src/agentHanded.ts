@@ -97,6 +97,12 @@ export interface HandedOptions {
   /** The project's policy; the default policy when absent. Ignored when {@link run} is given. */
   policy?: JairaPolicy;
   /**
+   * The project the probe runs in — what `$PROJECT` on a line names and a relative path is read from
+   * (decision 0023 §3.2). Absent, no line's place names the project, so a set that reads freely only
+   * there (the shipped `chat/read-only`) asks. Ignored when {@link run} is given.
+   */
+  workspaceRoot?: string;
+  /**
    * The policy and approver a HOST builds for a run — the app's `startRun` or the `jaira` CLI — to be
    * measured as that host hands them to `executeWorkflow`, either field absent where the host passes
    * none. Absent ⇒ {@link policy} compiled bare and an approver that refuses. The approver is asked for
@@ -136,7 +142,7 @@ export interface HandedOptions {
 function governanceOf(options: HandedOptions, onAsk: () => void): { policy?: ExecPolicy; approve?: Approver } {
   if (options.run === undefined) {
     return {
-      policy: compilePolicy(options.policy ?? {}),
+      policy: compilePolicy(options.policy ?? {}, options.workspaceRoot !== undefined ? { workspaceRoot: options.workspaceRoot } : {}),
       // The approver a host hands the engine: the functions a permission set names asked first, then the
       // person — who, here, refuses, and is counted, since being asked at all is the measurement.
       approve: withPermissionFunctions(
@@ -172,7 +178,7 @@ function probeStates(
   outputs: Record<string, unknown>,
   options: HandedOptions,
 ): { states: Record<string, unknown>; root: string } {
-  const { scopes: _scopes, ...permissions } = environment.permissions ?? {};
+  const permissions = environment.permissions ?? {};
   const def = {
     label: "probe",
     outputs,
@@ -183,7 +189,7 @@ function probeStates(
     },
   };
   if (options.parent === undefined) return { states: { probe: def }, root: "probe" };
-  const { scopes: _parentScopes, ...parentPermissions } = options.parent.permissions ?? {};
+  const parentPermissions = options.parent.permissions ?? {};
   const parent = {
     label: "enclosing",
     outputs: {},

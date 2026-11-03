@@ -87,12 +87,12 @@ describe("which permission set a map is", () => {
   });
 
   it("matches a map whose lines name FUNCTIONS by the function's name, and still after it is lowered", () => {
-    const auto = choice("chat/auto", { read_file: { function: "smart" }, shell: { function: "smart" }, other: { function: "smart" } });
+    const auto = choice("chat/auto", { read_file: "smart", shell: "smart", other: "smart" });
     const lowered = lowerPermissionSet(of(auto.decl));
     expect(matchPermissionSet(permissionSetOfEnvironment(lowered.tools, lowered.permissions), [auto], "chat", REGISTERED)?.id).toBe("chat/auto");
     // The same lines under ANOTHER function are another permission set — and a word is not a function.
-    expect(matchPermissionSet(of({ read_file: { function: "judge" }, shell: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
-    expect(matchPermissionSet(of({ read_file: "ask", shell: { function: "smart" }, other: { function: "smart" } }), [auto], "chat", REGISTERED)).toBeUndefined();
+    expect(matchPermissionSet(of({ read_file: "judge", shell: "smart", other: "smart" }), [auto], "chat", REGISTERED)).toBeUndefined();
+    expect(matchPermissionSet(of({ read_file: "ask", shell: "smart", other: "smart" }), [auto], "chat", REGISTERED)).toBeUndefined();
   });
 
   it("still matches after a state LOWERED it — the shell's `ask`, a function, the marks, and a tool nothing serves", () => {
@@ -156,7 +156,7 @@ describe("what a permission set is called", () => {
   it("summarises a map by its lines and its `other`", () => {
     expect(permissionSetSummary(of(ASK_FIRST))).toBe("2 lines · all ask");
     expect(permissionSetSummary(of(READ_ONLY))).toBe("3 lines · other deny");
-    expect(permissionSetSummary(of({ shell: { function: "smart" }, other: { function: "smart" } }))).toBe("1 line · all smart");
+    expect(permissionSetSummary(of({ shell: "smart", other: "smart" }))).toBe("1 line · all smart");
   });
 });
 

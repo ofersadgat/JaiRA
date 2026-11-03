@@ -28,10 +28,17 @@ import { createToolGate, isPermissionDenied, PermissionLedger, withPermission } 
 import {
   absolutize,
   ALWAYS_GRANTED_TOOLS,
+  callPlacesOf,
   gateModeOf,
   isAbsolutePath,
+  isFunctionMode,
+  MODE_WHEN_UNSET,
+  modeStrictness,
   nativesOfStandard,
+  OTHER_SUBJECT,
+  placeKindOf,
   replacementsOf,
+  resolvePlaces,
   withAlwaysGranted,
   normalizePath,
   permissionsOfPermissionSet,
@@ -42,12 +49,21 @@ import {
   TOOL_SPEC_BY_NAME,
   TOOL_SPECS,
   permissionSetOfEnvironment,
+  isLoweredPermissionSet,
+  isPermissionSetMarkKey,
+  layerOfLine,
+  placeWidthsOf,
   type AgentToolDeclaration,
+  type CommandPart,
   type PermissionsDecl,
+  type PermissionSetMode,
+  type PlaceOptions,
   type Scope,
   type ScopeOptions,
   type PermissionSet,
+  type PermissionStackDecl,
 } from "@jaira/shared";
+import { namedPlacesOf } from "./linePlaces";
 import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { callDialectOf } from "./callDialect";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
@@ -56,10 +72,23 @@ import { registerWebTools, type WebToolOptions } from "./webTools";
 import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
 import { registerGitTools, type GitToolHost } from "./gitTools";
 import { registerSystemTools, type SystemToolOptions } from "./systemTools";
-import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate } from "@declarative-ai/permissions";
+import type { Approver, ExecPolicy, PermissionMode, ScopeNarrowing, ToolGate, WithPermissionOptions } from "@declarative-ai/permissions";
 import type { WorkflowMetrics } from "@declarative-ai/hw";
 import { NodeExec, type Exec } from "./exec";
-import { commandDecisionOf, commandNarrowingOf, commandWords, isDeniedPath } from "./policy";
+import {
+  approvalStackOf,
+  commandDecisionOf,
+  commandNarrowingOf,
+  commandWords,
+  isDeniedPath,
+  noteFunctionCall,
+  notePlaceAnswer,
+  packageFolderOf,
+  setCommandDecision,
+  type CommandDecision,
+  type CommandGrants,
+} from "./policy";
+import type { PackageReader } from "./packageScripts";
 import { refusalOf } from "./approval";
 import { dialectFor, interpreterFor, type ExecEnv } from "./paths";
 
@@ -311,8 +340,8 @@ export function gateTools(options: {
   approve?: Approver | undefined;
   /**
    * The operation's own `permissions` block, in the LOWERED shape a loaded state holds. Read back
-   * into a permission set with `names` as the list when no {@link permission set} is handed over — see there. Its
-   * `scopes` are read either way: where a tool may act is not part of a permission set.
+   * into a permission set with `names` as the list when no {@link permission set} is handed over — see
+   * there. Where a tool may act is on the set's lines (`places`), so nothing else of it is read.
    */
   authored?: PermissionsDecl | undefined;
   /**
@@ -332,16 +361,22 @@ export function gateTools(options: {
    * A function answering `undefined` is a turn that declares none, read back from `names` as above.
    */
   permissionSet?: PermissionSet | (() => PermissionSet | undefined) | undefined;
+  /**
+   * The stack {@link permissionSet} was composed from (decision 0023 §2.6) — written on the block the
+   * gate takes, so a part's row names the layer that decided it and an approval lists the stack. A
+   * function, like the set, because the two move together when the person picks mid-turn.
+   */
+  stack?: PermissionStackDecl | (() => PermissionStackDecl | undefined) | undefined;
   /** What a relative scope glob and a relative call path are resolved against. */
   workspaceRoot?: string | undefined;
   /**
-   * The executor's own scope table — the FLOOR, which the operation's `scopes` narrows within.
+   * The executor's own scope table — the FLOOR (decision 0023 §7.2), which no permission set widens.
    *
-   * Composed as two narrowings rather than merged: a state that allows what the floor denies is
-   * still denied, which is what "a state may narrow, never widen" has to mean.
+   * Composed with the line's own narrowing rather than merged: a set whose place allows what the floor
+   * denies is still denied.
    */
   scopeFloor?: readonly Scope[] | undefined;
-}): { tools: Record<string, Tool>; gate: ToolGate } {
+}): { tools: Record<string, Tool>; gate: ToolGate; authored: () => PermissionsDecl | undefined } {
   const ledger = new PermissionLedger({ baseline: options.policy?.baseline ?? {} });
   /**
    * The map as it stands at this decision — see `permissionSet` — and the block the upstream gate
@@ -350,16 +385,23 @@ export function gateTools(options: {
   const now = (): { permissionSet: PermissionSet; authored: PermissionsDecl | undefined } => {
     const given = typeof options.permissionSet === "function" ? options.permissionSet() : options.permissionSet;
     const permissionSet = given ?? permissionSetOfEnvironment(options.names, options.authored);
-    const authored = given === undefined && options.authored === undefined ? undefined : permissionsOfPermissionSet(permissionSet, options.authored?.scopes);
+    const stack = given === undefined ? undefined : typeof options.stack === "function" ? options.stack() : options.stack;
+    const authored = given === undefined && options.authored === undefined ? undefined : permissionsOfPermissionSet(permissionSet, undefined, stack);
     return { permissionSet, authored };
   };
   // With no approver wired, an `ask` denies — the same unattended default the approval hub takes.
   const approve: Approver = options.approve ?? (() => ({ decision: "deny", scope: "once" }));
-  const placeNarrowing = scopeNarrowingFor(options.authored?.scopes, options.workspaceRoot, undefined, options.scopeFloor);
+  // The executor's floor. A line's PLACES are the policy's narrowing's (`placeNarrowingFor`, folded
+  // into `commandNarrowingOf`), read off the block below at each call.
+  const placeNarrowing = scopeNarrowingFor(options.scopeFloor, options.workspaceRoot);
   // A shell line is taken apart and judged part by part against this turn's permission set (decision 0007
   // §4). That judgement is the policy's, and it has to NARROW rather than only advise: an "allow for
   // this turn" remembered against the whole tool must not wave through the next line's asking parts.
-  const lineNarrowing = commandNarrowingOf(options.policy);
+  //
+  // Without a compiled policy there is no line narrowing — but a line's places still narrow a direct
+  // call: the gate is handed each tool line at its LOOSEST answer (decision 0023 §3.10), and only the
+  // per-call narrowing brings a call down to its own.
+  const lineNarrowing = commandNarrowingOf(options.policy) ?? placeNarrowingFor(options.workspaceRoot !== undefined ? { root: options.workspaceRoot, named: namedPlacesOf(options.workspaceRoot) } : {});
   const scopeNarrowing: ScopeNarrowing | undefined =
     placeNarrowing === undefined || lineNarrowing === undefined
       ? (placeNarrowing ?? lineNarrowing)
@@ -386,7 +428,9 @@ export function gateTools(options: {
       ...(options.policy?.refusal !== undefined ? { refusal: options.policy.refusal } : {}),
     };
   });
-  if (options.names.length === 0) return { tools: {}, gate };
+  /** The block a call is decided under now — what a parked call is decided again under (`rejudgeCall`). */
+  const authored = (): PermissionsDecl | undefined => now().authored;
+  if (options.names.length === 0) return { tools: {}, gate, authored };
   const out: Record<string, Tool> = {};
   for (const name of options.names) {
     const tool = options.registry.tools.get(name);
@@ -406,8 +450,9 @@ export function gateTools(options: {
         toolName: name,
         approve,
         ...(authoredMode !== undefined ? { authoredMode } : {}),
-        // The block itself, so the narrowing sees the permission set's command subjects at the moment of decision.
-        ...(authored !== undefined ? { authored } : {}),
+        // The block itself, so the narrowing sees the permission set's command subjects and places at the
+        // moment of decision. Upstream types it by the one key it once read (`scopes`), and passes the rest through.
+        ...(authored !== undefined ? { authored: authored as unknown as NonNullable<WithPermissionOptions["authored"]> } : {}),
         ...(options.policy?.smart?.[name] !== undefined ? { smart: options.policy.smart[name] } : {}),
         ...(options.policy?.profiles !== undefined ? { profiles: options.policy.profiles } : {}),
         // The SAME narrowing the gate applies. A wrapped tool and a delegated one are two routes to one
@@ -417,7 +462,7 @@ export function gateTools(options: {
       };
     });
   }
-  return { tools: out, gate };
+  return { tools: out, gate, authored };
 }
 
 /**
@@ -551,35 +596,30 @@ export function claudeReplacements(): Record<string, string[]> {
 }
 
 /**
- * The `scopeOf` a permission gate takes, built from an authored scope table.
+ * The `scopeOf` a permission gate takes, built from the executor's scope table — the FLOOR (decision
+ * 0023 §7.2), an operator's sandbox no permission set widens.
  *
  * The seam upstream deliberately left open: it takes a callback rather than a table because which
  * argument of a tool names a place — and whether that place is inside somebody's sandbox — is a
  * question only this side can answer. Here the vocabulary answers the first half
- * ({@link ToolSpec.pathArgs}) and `scopeModeOf` the second.
+ * ({@link ToolSpec.pathArgs}) and `scopeModeOf` the second. A table alone is a sandbox: what it does
+ * not name is refused.
  *
  * `undefined` when there is no table, so a project that has authored no scopes pays nothing and
  * behaves exactly as it did. And `undefined` PER CALL for a tool that names no place, which is what
  * keeps the narrowing from refusing calls it has no opinion about.
+ *
+ * What a STATE says about where is no table any more: it is a place map on the lines of its permission
+ * set (§3.7), judged by {@link placeNarrowingFor} and `decideCommand`.
  */
 export function scopeNarrowingFor(
-  scopes: readonly Scope[] | undefined,
+  floor: readonly Scope[] | undefined,
   workspaceRoot: string | undefined,
   execEnv: ExecEnv = "windows",
-  floor?: readonly Scope[] | undefined,
-  /** Build the callback even with no static table, because a state may author one per call. */
-  perCall = false,
 ): ScopeNarrowing | undefined {
-  const both = [...(floor ?? []), ...(scopes ?? [])];
-  // Built even with nothing here, when a caller may still supply a per-state table at call time.
-  if (both.length === 0 && !perCall) return undefined;
+  if (floor === undefined || floor.length === 0) return undefined;
   const options = { ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}) };
-  return (tool, input, authored) => {
-    // A state's OWN table, handed over by the engine at the moment of decision. Layered under the
-    // floor exactly as a statically-supplied one is — a state narrows, never widens.
-    const stateScopes = authored?.scopes !== undefined && authored.scopes.length > 0
-      ? ([...(scopes ?? []), ...authored.scopes] as readonly Scope[])
-      : scopes;
+  return (tool, input) => {
     // By LOGICAL name, whichever implementation called: a gate asked about the agent's own `Glob`
     // resolves the table written for `glob`. Without this the two spellings would be two policies.
     const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
@@ -594,41 +634,12 @@ export function scopeNarrowingFor(
         const subjects = commandSubjects(args.command, cwd, execEnv, callDialectOf(input, tool.name));
         // A line nothing could parse is already `ask` under the policy's own rule; resolving its cwd
         // alone would be a quieter answer than the one the parser already gives.
-        const mode = strictest2(floor, stateScopes, name, subjects.paths, options);
+        const mode = resolveScopes(floor, name, subjects.paths, options) as PermissionMode;
         return subjects.unparsed ? strictestOf(mode, "ask") : mode;
       }
     }
-    // Each layer resolved on its own and the stricter kept — see `layeredScopeMode`. Merging the two
-    // tables into one list would let a state's specific entry outrank the floor's, which is exactly
-    // the widening the floor exists to forbid.
-    const spec = TOOL_SPEC_BY_NAME.get(name);
-    const hasFloor = floor !== undefined && floor.length > 0;
-    const fromFloor = hasFloor ? scopeModeOf(floor, spec, name, input, options) : undefined;
-    const fromState =
-      stateScopes === undefined || stateScopes.length === 0
-        ? undefined
-        : scopeModeOf(stateScopes, spec, name, input, { ...options, unmatched: hasFloor ? "silent" : "deny" });
-    if (fromFloor === undefined) return fromState;
-    if (fromState === undefined) return fromFloor;
-    return strictestOf(fromFloor, fromState);
+    return scopeModeOf(floor, TOOL_SPEC_BY_NAME.get(name), name, input, options);
   };
-}
-
-/** The strictest verdict across two layers for a set of paths — the `shell` case of the above. */
-function strictest2(
-  floor: readonly Scope[] | undefined,
-  scopes: readonly Scope[] | undefined,
-  tool: string,
-  paths: readonly string[],
-  options: ScopeOptions,
-): PermissionMode {
-  const modes: PermissionMode[] = [];
-  const hasFloor = floor !== undefined && floor.length > 0;
-  if (hasFloor) modes.push(resolveScopes(floor, tool, paths, options) as PermissionMode);
-  if (scopes !== undefined && scopes.length > 0) {
-    modes.push(resolveScopes(scopes, tool, paths, { ...options, unmatched: hasFloor ? "silent" : "deny" }) as PermissionMode);
-  }
-  return modes.reduce((a, b) => strictestOf(a, b), "allow" as PermissionMode);
 }
 
 /** `deny` ▸ `ask` ▸ `smart` ▸ `allow`, for the one place here that composes two modes. */
@@ -637,6 +648,219 @@ function strictestOf(a: PermissionMode, b: PermissionMode): PermissionMode {
   return rank[a] >= rank[b] ? a : b;
 }
 
+/** One line as a direct call reads it: its own mode (`**`) and its other places. */
+export interface PlacedLine {
+  mode?: PermissionSetMode | undefined;
+  places?: Readonly<Record<string, PermissionSetMode>> | undefined;
+}
+
+/** What a line with places answers for one direct call, and who said it. */
+export interface ToolPlaceAnswer {
+  mode: PermissionSetMode;
+  /** The line that answered: the tool's own, or `other` where a place matched nothing and the line has no `**`. */
+  subject: string;
+  /** The place of the tool's line that answered, when one did. */
+  place?: string;
+}
+
+/**
+ * What a tool's line with PLACES answers for one direct call (decision 0023 §3.2–§3.5): the places the
+ * call is about, read off its arguments (`callPlacesOf`), each answered by the most specific of the
+ * line's places that matches it, the strictest kept; a place none matches answered by the line's own
+ * mode — its `**` — or, where it has none, by the next less specific line, which for a tool is `other`,
+ * else {@link MODE_WHEN_UNSET}. `undefined` for a line with no places, whose own mode is the gate's and
+ * needs no narrowing.
+ */
+export function toolPlaceAnswer(tool: string, line: PlacedLine, other: PermissionSetMode | undefined, input: unknown, options: PlaceOptions = {}): ToolPlaceAnswer | undefined {
+  if (line.places === undefined || Object.keys(line.places).length === 0) return undefined;
+  const spec = TOOL_SPEC_BY_NAME.get(tool);
+  const kind = spec?.scope ?? placeKindOf(tool);
+  if (kind === undefined) return undefined;
+  const calls = callPlacesOf(spec, input, options.root);
+  const resolved = resolvePlaces(line.places, kind, calls, options);
+  const answers: ToolPlaceAnswer[] = [];
+  if (resolved.decision !== undefined) {
+    const deciding = resolved.matches.find((match) => modeStrictness(match.decision) === modeStrictness(resolved.decision!)) ?? resolved.matches[0]!;
+    answers.push({ mode: resolved.decision, subject: tool, place: deciding.place });
+  }
+  if (calls.length === 0 || resolved.unmatched.length > 0) {
+    answers.push(line.mode !== undefined ? { mode: line.mode, subject: tool } : other !== undefined ? { mode: other, subject: OTHER_SUBJECT } : { mode: MODE_WHEN_UNSET, subject: tool });
+  }
+  return answers.reduce((worst, next) => (modeStrictness(next.mode) > modeStrictness(worst.mode) ? next : worst));
+}
+
+/** What {@link placeNarrowingFor} resolves places against, and the set to read lines off when the block names none. */
+export interface PlaceNarrowingOptions extends PlaceOptions {
+  /**
+   * The block to read lines off when the call's own carries no `places` — the permission set a policy
+   * was compiled for (a turn's), lowered. A state's own block is the nearer statement and wins.
+   */
+  fallback?: PermissionsDecl | undefined;
+  /**
+   * This task's answers (decision 0023 §2.6, the runtime layer): a direct call that asks is settled by
+   * an answer kept for it — at its place, where the answer was kept at one (§3.8).
+   */
+  grants?: CommandGrants | undefined;
+  /** How a path's package is found — the "the package" width the dialog offers. */
+  packages?: PackageReader | undefined;
+}
+
+/**
+ * The per-call narrowing for a DIRECT call to a tool whose line has places (decision 0023 §3.10): the
+ * gate is handed the line's loosest answer, and this brings each call down to its own
+ * ({@link toolPlaceAnswer}) — so it only ever tightens, and a line with no places is left to its mode
+ * (`undefined`). A shell line is not judged here: its parts are `decideCommand`'s.
+ *
+ * A place whose decision is a FUNCTION answers `ask`, and which function — and for which line and
+ * place — is kept against the call's input (`noteFunctionCall`), where the approver puts the call to it
+ * before anybody is asked (`withPermissionFunctions`), as it does for a line that names one.
+ *
+ * A tool is read by its LOGICAL name, so a gate asked about an agent's own `Read` judges the call at
+ * `read_file`'s places — its `file_path` already copied to `path` by the translated gate.
+ */
+export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNarrowing {
+  const packageOf = packageFolderOf(options.packages);
+  return (tool, input, authored) => {
+    const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
+    if (name === "shell" || !TOOL_SPEC_BY_NAME.has(name)) return undefined;
+    const answered = toolPlaceAnswerOf(name, input, (authored as PermissionsDecl | undefined) ?? undefined, options) ?? ownAnswerOf(name, (authored as PermissionsDecl | undefined) ?? options.fallback);
+    if (answered === undefined) return undefined;
+    const { answer, block } = answered;
+    // A call that ASKS at a place is put to the person as one part, with WHERE it acts and the place
+    // widths an answer may be kept at (§3.8) — and is settled first by an answer this task already kept.
+    if (answer.mode === "ask") {
+      const decided = directCallDecision(name, input, answer, block, { ...options, ...(packageOf !== undefined ? { packageOf } : {}) });
+      if (decided !== undefined) {
+        setCommandDecision(input, decided);
+        // Settled "for this run": a refusal tightens; an allowance leaves the gate its own mode, and the
+        // approver, should the gate still ask, reads the allowed decision and lets the call through.
+        if (decided.action === "deny") return "deny";
+        if (decided.action === "allow") return undefined;
+        return "ask";
+      }
+    }
+    // A line with no places is the gate's to enforce as it stands.
+    if (answered.own === true) return undefined;
+    notePlaceAnswer(input, { subject: answer.subject, mode: answer.mode, ...(answer.place !== undefined ? { place: answer.place } : {}) });
+    if (isFunctionMode(answer.mode)) {
+      noteFunctionCall(input, {
+        tool: name,
+        subject: answer.subject,
+        function: answer.mode.function,
+        ...(answer.place !== undefined ? { place: answer.place } : {}),
+        ...(block.source !== undefined ? { permissionSet: block.source } : {}),
+      });
+      return "ask";
+    }
+    return answer.mode;
+  };
+}
+
+/**
+ * The line's OWN answer for a direct call to a tool whose line has no places — read off a lowered map
+ * (never off a state that declared no permission set): the tool's gate mode, a function by its
+ * reference, or `other` for a tool the map does not hold. Only what that line decides EVERYWHERE, which
+ * the gate already enforces — marked `own`, so the narrowing tightens nothing with it and reads it only
+ * to put an `ask` to the person with where the call acts.
+ */
+function ownAnswerOf(tool: string, block: PermissionsDecl | undefined): { answer: ToolPlaceAnswer; block: PermissionsDecl; own: true } | undefined {
+  if (block === undefined || !isLoweredPermissionSet(block) || placeKindOf(tool) === undefined) return undefined;
+  const reference = block.functions !== undefined && Object.hasOwn(block.functions, tool) ? block.functions[tool] : undefined;
+  if (reference !== undefined) return undefined;
+  const held = block.tools !== undefined && Object.hasOwn(block.tools, tool) && !isPermissionSetMarkKey(tool) ? block.tools[tool] : undefined;
+  // `other` naming a function is the function's to answer, as a line naming one is.
+  if (held === undefined && block.functions !== undefined && Object.hasOwn(block.functions, OTHER_SUBJECT)) return undefined;
+  const mode = held ?? block.other;
+  if (mode === undefined) return undefined;
+  return { answer: { mode, subject: held !== undefined ? tool : OTHER_SUBJECT }, block, own: true };
+}
+
+/**
+ * One direct call that asks, as the one-part decision a shell line's parts are (decision 0023 §3.8,
+ * §4.4): its subject is the tool and its only width the tool's line, `where` the place it acts and the
+ * place widths an answer may be kept at (`placeWidthsOf`), `decidedBy` the line — and the place and
+ * the LAYER (§2.7) — that asked. An answer this task kept for it (`CommandGrants`, at its place where it
+ * was kept at one) settles it first, as it settles a shell part. `undefined` for a call that names no
+ * place that can be read, which is asked about as before.
+ */
+function directCallDecision(
+  tool: string,
+  input: unknown,
+  answer: ToolPlaceAnswer,
+  block: PermissionsDecl,
+  options: PlaceNarrowingOptions & { packageOf?: (path: string) => string | undefined },
+): CommandDecision | undefined {
+  const spec = TOOL_SPEC_BY_NAME.get(tool);
+  const kind = spec?.scope ?? placeKindOf(tool);
+  if (kind === undefined) return undefined;
+  // A path as a shell part's is: resolved against the project, so the dialog and the record name one place.
+  const places = callPlacesOf(spec, input, options.root).map((place) => (kind === "path" && options.root !== undefined && !isAbsolutePath(place) ? absolutize(place, options.root) : place));
+  const at = places[0];
+  if (at === undefined) return undefined;
+  const layer = layerOfLine(block.stack, answer.subject, answer.place);
+  const widths = [tool];
+  const remembered = options.grants?.answerFor(widths, () => places, options);
+  const text = tool;
+  const span = { start: 0, end: text.length };
+  const verdict = remembered === undefined ? "asks" : remembered.decision === "allow" ? "allowed" : "denied";
+  const where = answer.place !== undefined ? ` in ${answer.place}` : "";
+  const part: CommandPart = {
+    span,
+    matched: [span],
+    text,
+    kind: "tool",
+    subject: tool,
+    ...(kind === "path" ? { paths: places } : kind === "site" ? { url: at } : {}),
+    verdict,
+    decidedBy:
+      remembered !== undefined
+        ? {
+            source: "remembered",
+            entry: remembered.width,
+            layer: "runtime",
+            ...(remembered.place !== undefined ? { place: remembered.place } : {}),
+            reason: `'${remembered.width}'${remembered.place !== undefined ? ` in ${remembered.place}` : ""} was ${remembered.decision === "allow" ? "allowed" : "denied"} for this run`,
+          }
+        : {
+            source: "permissionSet",
+            entry: answer.subject,
+            ...(answer.place !== undefined ? { place: answer.place } : {}),
+            ...(layer !== undefined ? { layer } : {}),
+            reason: `the permission set's '${answer.subject}'${where} asks`,
+          },
+    widths,
+    where: { kind, at, widths: placeWidthsOf(kind, at, { ...options, ...(options.packageOf !== undefined ? { packageOf: options.packageOf } : {}) }) },
+  };
+  return {
+    action: verdict === "denied" ? "deny" : verdict === "allowed" ? "allow" : "require_approval",
+    reason: part.decidedBy.reason,
+    parts: {
+      line: text,
+      dialect: "posix",
+      parts: [part],
+      verdict,
+      ...(block.source !== undefined ? { permissionSet: block.source } : {}),
+      ...(block.stack !== undefined ? { stack: approvalStackOf(block.stack, options.grants !== undefined) } : {}),
+    },
+  };
+}
+
+/** The place answer for one direct call off a lowered block — the call's own, else the fallback — and the block it came from. */
+export function toolPlaceAnswerOf(
+  tool: string,
+  input: unknown,
+  authored: PermissionsDecl | undefined,
+  options: PlaceNarrowingOptions = {},
+): { answer: ToolPlaceAnswer; block: PermissionsDecl; own?: undefined } | undefined {
+  const block = authored?.places !== undefined ? authored : options.fallback;
+  const map = block?.places !== undefined && Object.hasOwn(block.places, tool) ? block.places[tool] : undefined;
+  if (block === undefined || map === undefined) return undefined;
+  const read = permissionSetOfEnvironment(undefined, { places: { [tool]: map }, ...(block.functions !== undefined ? { functions: block.functions } : {}), ...(block.other !== undefined ? { other: block.other } : {}) });
+  const line = read.entries[tool];
+  if (line === undefined) return undefined;
+  const answer = toolPlaceAnswer(tool, { mode: line.mode, places: line.places }, read.other, input, options);
+  return answer === undefined ? undefined : { answer, block };
+}
 /**
  * The places a shell command is about — its working directory, and every path it names.
  *
@@ -689,33 +913,21 @@ export function commandSubjects(
 }
 
 /**
- * What the scope tables say about ONE PART of a shell line, by the standard tool the part is
- * (decision 0007 §4): `rm x` and `> x` are asked about as `write_file` at `x`, `curl <url>` as
+ * What the executor's scope FLOOR says about ONE PART of a shell line, by the standard tool the part
+ * is (decision 0007 §4): `rm x` and `> x` are asked about as `write_file` at `x`, `curl <url>` as
  * `web_fetch` at the url — so a table written for the tools binds the shell exactly as it binds them.
- *
- * Layered as every other narrowing here is: the floor and the state's table each resolved on their
- * own, the stricter kept, the state's silent where it says nothing under a floor. `undefined` with no
- * table at all.
+ * A table alone is a sandbox, so a place it names nothing about is refused. `undefined` with no table.
  */
 export function partScopeFor(
-  scopes: readonly Scope[] | undefined,
+  floor: readonly Scope[] | undefined,
   workspaceRoot: string | undefined,
-  floor?: readonly Scope[] | undefined,
 ): ((tool: string, place: { path?: string; url?: string }) => PermissionMode | undefined) | undefined {
-  const hasFloor = floor !== undefined && floor.length > 0;
-  const hasScopes = scopes !== undefined && scopes.length > 0;
-  if (!hasFloor && !hasScopes) return undefined;
+  if (floor === undefined || floor.length === 0) return undefined;
   const options: ScopeOptions = { ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}) };
-  return (tool, place) => {
-    const resolve = (table: readonly Scope[], layer: ScopeOptions): PermissionMode | undefined =>
-      (place.path !== undefined ? resolveScope(table, tool, place.path, layer) : place.url !== undefined ? resolveUrlScope(table, tool, place.url, layer) : undefined) as
-        | PermissionMode
-        | undefined;
-    const fromFloor = hasFloor ? resolve(floor, options) : undefined;
-    const fromState = hasScopes ? resolve(scopes, { ...options, unmatched: hasFloor ? "silent" : "deny" }) : undefined;
-    if (fromFloor === undefined || fromState === undefined) return fromFloor ?? fromState;
-    return strictestOf(fromFloor, fromState);
-  };
+  return (tool, place) =>
+    (place.path !== undefined ? resolveScope(floor, tool, place.path, options) : place.url !== undefined ? resolveUrlScope(floor, tool, place.url, options) : undefined) as
+      | PermissionMode
+      | undefined;
 }
 
 /** One argument, resolved against the directory the command runs in. */

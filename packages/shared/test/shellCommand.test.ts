@@ -88,6 +88,18 @@ describe("evasion shapes (SPEC §11.2)", () => {
     });
   });
 
+  it("sees through a package manager's own valued flags before the subcommand (`npm -w @app/x run build`)", () => {
+    // The workspace or directory such a flag takes is not the subcommand, so `npm run build` names the line.
+    for (const line of ["npm --workspace @jaira/app run build", "npm -w packages/app run build", "npm --prefix app run lint", "pnpm --filter @app/cli run test", "pnpm -C app run test", "yarn --cwd app run build"]) {
+      const parsed = one(line);
+      expect(parsed.subcommand, line).toBe("run");
+      expect(parsed.args.slice(-1), line).toEqual([line.split(" ").at(-1)]);
+    }
+    // A flag that takes no value leaves the next word alone.
+    expect(one("npm --workspaces run build")).toMatchObject({ program: "npm", subcommand: "run", args: ["build"] });
+    expect(one("npm --workspace=@jaira/app run build")).toMatchObject({ subcommand: "run", args: ["build"] });
+  });
+
   it("unwraps `sh -c \"…\"` to judge the real command", () => {
     const result = parseCommand(`sh -c "git push --force"`);
     expect(result.unparsed).toBe(false);

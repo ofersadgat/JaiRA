@@ -139,6 +139,8 @@ export interface BrowseOptions {
    * there never fires, and says so. Absent: not checked. A project's browse reads its own config.
    */
   events?: Pick<JairaConfig, "events">;
+  /** Each bucket's standing layers (`config.permissions.layers`), lowered into the states as a run lowers them. */
+  standingLayers?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -166,6 +168,8 @@ export interface LayerSource {
   tasks: TaskIndex;
   /** The effective `events` settings the lint checks `on_event` guards against — see {@link BrowseOptions.events}. */
   events?: Pick<JairaConfig, "events">;
+  /** The project's standing layers — see {@link BrowseOptions.standingLayers}. */
+  standingLayers?: Readonly<Record<string, readonly string[]>>;
 }
 
 /**
@@ -202,6 +206,7 @@ export function projectSource(project: Project): LayerSource {
     searchPath: project.config.workflows.path,
     tasks: tasksOf(project),
     events: project.config,
+    standingLayers: project.config.permissions.layers,
   };
 }
 
@@ -237,7 +242,12 @@ export function baseSource(baseDir: string, project?: Project): LayerSource {
  */
 export function browseSource(source: LayerSource, options: BrowseOptions = {}): WorkflowBrowser {
   const events = options.events ?? source.events;
-  return browseLayers(source.paths, source.layers, source.searchPath, source.tasks, { ...options, ...(events !== undefined ? { events } : {}) });
+  const standingLayers = options.standingLayers ?? source.standingLayers;
+  return browseLayers(source.paths, source.layers, source.searchPath, source.tasks, {
+    ...options,
+    ...(events !== undefined ? { events } : {}),
+    ...(standingLayers !== undefined ? { standingLayers } : {}),
+  });
 }
 
 /** Browse and lint the project's live `workflows/` directory. */
@@ -404,6 +414,7 @@ function browseLayers(
       bundle = loadWorkflowBundle(effective, rootId, {
         ...(watch !== undefined ? { ...refOptions, symbols: watch.symbols } : refOptions),
         onPermissionSetIssue: (issue) => permissionSetIssues.push(issue),
+        ...(options.standingLayers !== undefined ? { standingLayers: options.standingLayers } : {}),
       });
     } catch (e) {
       // An unresolvable child reference or a malformed state: the closure is

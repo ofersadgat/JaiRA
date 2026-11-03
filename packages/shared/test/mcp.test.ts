@@ -86,7 +86,7 @@ describe("MCP subjects", () => {
   });
 
   it("answers a tool by its own line, then its server's, then `other` — as git commit, git, the shell", () => {
-    const { permissionSet } = parsePermissionSet({ mcp__figma: "ask", mcp__figma__get_code: "allow", mcp__figma__delete: { function: "smart" }, other: "deny" });
+    const { permissionSet } = parsePermissionSet({ mcp__figma: "ask", mcp__figma__get_code: "allow", mcp__figma__delete: "smart", other: "deny" });
     expect(mcpModeOf(permissionSet, "mcp__figma__get_code")).toEqual({ mode: "allow", line: "mcp__figma__get_code" });
     expect(mcpModeOf(permissionSet, "mcp__figma__delete")).toEqual({ mode: { function: "smart" }, line: "mcp__figma__delete" });
     expect(mcpModeOf(permissionSet, "mcp__figma__whoami")).toEqual({ mode: "ask", line: "mcp__figma" });
@@ -102,11 +102,11 @@ describe("MCP subjects", () => {
   });
 
   it("lowers into the gate's tool modes and reads back as the same lines; never a shell subject, never a door for the shell", () => {
-    const { permissionSet } = parsePermissionSet({ shell: "deny", mcp__figma: "allow", mcp__figma__delete: { function: "smart" }, other: "deny" });
+    const { permissionSet } = parsePermissionSet({ shell: "deny", mcp__figma: "allow", mcp__figma__delete: "smart", other: "deny" });
     // An allowing MCP line does not keep a denied shell: only a command or `script` can.
     expect(shellWithheld(permissionSet)).toBe(true);
     expect(shellSubjects(permissionSet)).toEqual({ shell: "deny" });
-    const lowered = lowerPermissionSet(permissionSet, undefined, "$/permission-sets/chat/figma");
+    const lowered = lowerPermissionSet(permissionSet, "$/permission-sets/chat/figma");
     expect(lowered.tools).toEqual([]);
     expect(lowered.permissions?.tools).toMatchObject({ mcp__figma: "allow", mcp__figma__delete: "ask", shell: "deny" });
     expect(lowered.permissions?.functions).toEqual({ mcp__figma__delete: "smart" });

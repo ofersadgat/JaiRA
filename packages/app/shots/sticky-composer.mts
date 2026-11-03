@@ -4,8 +4,8 @@
  * conversation where the composer correctly switches to chat/ask and then I switch back to this current
  * conversation the composer should switch back to chat/smart").
  *
- * Two conversations answered by a script (this rig spends nothing). In the first the Permissions chip is
- * set to another permission set and nothing is sent; the second must open on its own; the first, opened
+ * Two conversations answered by a script (this rig spends nothing). In the first the permission stack's
+ * bottom layer is swapped for another set by its crumb (decision 0023 §4.1) and nothing is sent; the second must open on its own; the first, opened
  * again — and again after the app restarts — must read what it was left at.
  *
  *   npm --workspace @jaira/app run build
@@ -26,9 +26,9 @@ async function main(): Promise<void> {
   const world = buildWorld(WORLD);
   mkdirSync(world.home, { recursive: true });
 
-  /** What the open conversation's Permissions chip reads. */
-  const chip = (app: App): Promise<string> =>
-    app.evaluate<string>(`(document.querySelector('[aria-label="Permissions"]')?.innerText ?? "").trim()`);
+  /** What the open conversation's permission stack reads — the bar, not the ruler's copies of it. */
+  const STACK = '[role="group"][aria-label="Permissions"]';
+  const chip = (app: App): Promise<string> => app.evaluate<string>(`(document.querySelector(${JSON.stringify(STACK)})?.innerText ?? "").replace(/\\s+/g, " ").trim()`);
   const open = async (app: App, title: string): Promise<void> => {
     await app.clickText(title);
     await settle(1500);
@@ -53,10 +53,17 @@ async function main(): Promise<void> {
     await open(app, FIRST);
     const before = await chip(app);
     // Whatever it opened on, a different one: the rig is about the change, not about a default.
-    picked = before.includes("full access") ? "read-only" : "full access";
-    await app.evaluate(`document.querySelector('[aria-label="Permissions"]')?.click()`);
-    await settle(600);
-    await app.clickText(picked);
+    const current = /chat\/([a-z-]+)/.exec(before)?.[1];
+    if (current === undefined) throw new Error(`the stack names no chat set at its bottom: "${before}"`);
+    picked = current === "full" ? "chat/read-only" : "chat/full";
+    // The bottom segment, its set's crumb, the sibling: two presses after the segment.
+    await app.evaluate(`document.querySelector(${JSON.stringify(`${STACK} [aria-label="chat/${current}"]`)})?.click()`);
+    await settle(800);
+    await app.shot("first-segment");
+    await app.clickText(`${current}.json`);
+    await settle(400);
+    await app.shot("first-crumb");
+    await app.clickText(`${picked.slice("chat/".length)}.json`);
     await settle(1200);
     await app.press("Escape", 27);
     await app.shot("first-picked");

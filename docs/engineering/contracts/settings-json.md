@@ -59,7 +59,7 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 
 `inheritedDoc(view, layer)` is the merge of the layers weaker than `layer`; `statingLayer(view, path, below?)` is the strongest layer (below a given one) whose document states a dotted path, or `"built in"`; `inheritedValue` pairs the two, and is what a Settings row's "instead of … from …" line reads.
 
-### The top-level keys are nineteen blocks, and an unknown top-level key is ignored
+### The top-level keys are twenty blocks, and an unknown top-level key is ignored
 
 | Field | Type | Required | Meaning |
 | --- | --- | --- | --- |
@@ -81,6 +81,7 @@ No default model: `executors.default.prompt.defaults.model` stays unset.
 | `functions` | object | no, every default | each shipped function's defaults, by the function's name; below. Left out of the file `initProject` writes, for the reason `autopilot` is |
 | `mcp` | `{servers?: object}` | no, default `{servers: {}}` | the MCP servers every agent run is handed, by the name their tools are called under; below ([mcp-servers](../units/mcp-servers.md)) |
 | `appearance` | object | no, every default | how the app looks — mode, palette, board options, typography, the conversation's layout, the editors and the renderer choices; below. Usually stated in the personal layer, and left out of the file `initProject` writes |
+| `permissions` | `{layers?: {[bucket]: string[]}}` | no, default `{layers: {}}` | each bucket's STANDING layers ([decision 0023](../decisions/0023-overlays-and-scopes.md) §2.6 step 2, §7.3); below |
 | `events` | object of `{enabled?: boolean, branches?: string[], remotes?: {[remote]: boolean}}`, by event name | no; the built-in layer states every event, on | which events start tasks ([decision 0010](../decisions/0010-git-tools-and-events.md)): an event a layer does not state is off, and a stated one with no `enabled` is off. A name that is not an event is refused, naming the events there are; `branches` (non-empty branch globs, absent for every branch) and `remotes` are allowed only on a `git.*` event |
 
 ### A route block's allowed fields follow from its key
@@ -192,6 +193,14 @@ Resolving an overlay into a tree and what each level does belong to [executor-tr
 **A model field may name a preset.** In `functions.smart.model`, `executors.default.prompt.defaults.model` and a state's own `model`, a value exactly equal to the name of a preset in the merged `models.presets` means that preset's model: its model alone, not its other settings (`resolveModelField`). Naming a preset that has no model fails the call. The name rule above keeps the two apart: every model id holds a `-`, `/`, `.` or `:`, or is a word a model family claims, and no preset name can. A call outside a session, such as the judge's, chooses afresh each time.
 
 A command rule has no place here. What a command may run is a line under the `shell` tool of a permission set (`"git push --force": "deny"`), and a line no permission set judges answers to the built-ins alone ([tool-policy](../units/tool-policy.md)).
+
+### The permissions block holds each bucket's standing layers, strict about every field
+
+`parsePermissions` in `config.ts`. `permissions.layers.<bucket>` is a list of permission set references, oldest first, laid over every set of that bucket wherever one is judged — a conversation's preset (whose bucket is its bottom layer's, or `chat` for a map that names none) and the set a state names (by that set's bucket) — and under whatever a state or a conversation lays on top of it ([decision 0023](../decisions/0023-overlays-and-scopes.md) §2.6: bottom, standing, the state's or conversation's own, runtime, tools). A state's are lowered into its set at every load and pinned with its snapshot; a conversation's are read at each turn. It layers like every object: a layer's list for a bucket replaces the list below for that bucket whole (so a project can take a standing layer away with `[]`), and leaves the other buckets standing. A field other than `layers`, a bucket that starts or ends with `/` or is empty, and a value that is not a list of non-empty strings are refused, naming the field. A reference that names no file is not refused here: it is reported where the stack is read — an error on the state, an issue on the conversation — and left out of the stack.
+
+| Field | Type | Required | Meaning |
+| --- | --- | --- | --- |
+| `permissions.layers.<bucket>` | `string[]` | no | references, oldest first: `["$/permission-sets/project/build-safe"]` |
 
 ### The integrations block names forges, never holds a token, and refuses what it does not know
 

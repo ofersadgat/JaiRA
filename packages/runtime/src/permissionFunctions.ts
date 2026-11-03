@@ -1,5 +1,5 @@
 /**
- * A permission set line that is a FUNCTION (decision 0007, amended 2026-09-22): `"shell": { "function": "smart" }`.
+ * A permission set line that is a FUNCTION (decision 0007, amended 2026-09-22): `"shell": "smart"`.
  *
  * Four pieces, and they are one argument:
  *

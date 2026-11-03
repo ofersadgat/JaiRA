@@ -69,6 +69,7 @@ import type {
   TaskSummary,
   WorkflowEntry,
   WorkflowLayer,
+  PartAnswer,
   WritableLayer,
   WorkflowSource,
   RendererEdit,
@@ -3461,8 +3462,8 @@ export function useApp() {
         requestId: string,
         decision: "allow" | "deny",
         scope: ApprovalScope = "once",
-        /** The part widths to remember, and the layer to write them into (decision 0007 §4). */
-        extras: { remember?: string[]; addTo?: WritableLayer } = {},
+        /** The part widths to remember, and the layer to write them into (decision 0007 §4) — or each row's own answer (decision 0023 ruling 7). */
+        extras: { remember?: string[]; addTo?: WritableLayer; answers?: PartAnswer[] } = {},
       ) => {
         try {
           waited(
@@ -3472,6 +3473,7 @@ export function useApp() {
               scope,
               ...(extras.remember !== undefined ? { remember: extras.remember } : {}),
               ...(extras.addTo !== undefined ? { addTo: extras.addTo } : {}),
+              ...(extras.answers !== undefined ? { answers: extras.answers } : {}),
             }),
           );
         } catch (e) {

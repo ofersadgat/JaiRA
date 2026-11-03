@@ -107,7 +107,7 @@ describe("permissionSets:write", () => {
     const after = permissionSetsAt(service.readPermissionSetSettings({ project: dir }).records, "project");
     const readOnly = after.find((at) => at.id === "chat/read-only")!;
     expect(permissionSetStanding(readOnly)).toEqual({ here: true, label: "this project · copied from built in" });
-    expect(readOnly.source.decl).toMatchObject({ shell: "ask", read_file: "allow" });
+    expect(readOnly.source.decl).toMatchObject({ shell: "ask", read_file: { $PROJECT: "allow" } });
   });
 
   it("stops following when a line what ships holds is taken out, because an override cannot say that", () => {
@@ -125,7 +125,7 @@ describe("permissionSets:write", () => {
 
   it("refuses an id that climbs out of the layer, and a map that is not a permission set", () => {
     expect(() => service.writePermissionSetSettings({ id: "../../escape", layer: "project", project: dir, permissionSet: { other: "allow" } })).toThrow();
-    expect(() => service.writePermissionSetSettings({ id: "chat/x", layer: "project", project: dir, permissionSet: { read_file: "whenever" } as never })).toThrow(/not a permission set/);
+    expect(() => service.writePermissionSetSettings({ id: "chat/x", layer: "project", project: dir, permissionSet: { read_file: 7 } as never })).toThrow(/not a permission set/);
     expect(existsSync(join(dir, "..", "escape.json"))).toBe(false);
   });
 
@@ -219,5 +219,93 @@ describe("copy on first edit", () => {
     expect(JSON.parse(readFileSync(written.file, "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/chat/ask-first", shell: "allow" });
     // The project's copy still says what it said, and follows nothing new.
     expect(readAt("project", "chat/ask-first").source.decl).toMatchObject({ web_fetch: "deny" });
+  });
+});
+
+/**
+ * The set browser's channels (decision 0023 §4.1, §7.4): the tree of set files, one set's own lines,
+ * the whole stack composed, and a stack saved as a set — over the REAL shipped sets.
+ */
+describe("permissionSets:tree, :own, :stack and :saveStack", () => {
+  const STACK = { layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/web/docs"], web_search: "unavailable", write_file: "allow" };
+  beforeEach(() => {
+    write(join(dir, ".jaira"), "permission-sets/web/docs.json", { icon: "globe", web_fetch: { "docs.example.com": "allow" } });
+  });
+
+  it("lists every scope's set files, marking the ones the composer's stack is built of", () => {
+    const tree = service.permissionSetTree({ project: dir, permissionSet: STACK });
+    expect(tree.scopes.map((scope) => scope.scope)).toEqual(["built in", "global", "project"]);
+    const chat = tree.scopes[0]!.buckets.find((bucket) => bucket.name === "chat")!;
+    expect(chat.sets.map((set) => [set.name, set.icon, set.inStack])).toEqual([
+      ["ask-first", "ask", true],
+      ["auto", "smart", false],
+      ["full", "allow", false],
+      ["read-only", "deny", false],
+    ]);
+    expect(tree.scopes[2]!.buckets.find((bucket) => bucket.name === "web")!.sets[0]).toMatchObject({ id: "web/docs", icon: "globe", inStack: true, lines: 1 });
+  });
+
+  it("reads one set's OWN lines", () => {
+    expect(service.ownPermissionSet({ project: dir, reference: "$/permission-sets/web/docs" }).lines).toEqual({ web_fetch: { "docs.example.com": "allow" } });
+    expect(() => service.ownPermissionSet({ project: dir, reference: "$/permission-sets/web/nope" })).toThrow(/no scope holds/);
+  });
+
+  it("composes the whole stack, every line tagged with the layer that decided it", () => {
+    const view = service.permissionStack({ project: dir, permissionSet: STACK });
+    expect(view.layers.map((layer) => [layer.id, layer.scope, layer.role])).toEqual([
+      ["chat/ask-first", "built in", "bottom"],
+      ["web/docs", "project", "named"],
+      ["runtime", "runtime", "runtime"],
+      ["tools", "this conversation", "own"],
+    ]);
+    const line = (subject: string) => view.lines.find((each) => each.subject === subject)!;
+    expect(line("write_file")).toMatchObject({ layer: "tools", value: "allow" });
+    expect(line("web_fetch")).toMatchObject({ layer: "chat/ask-first", places: { "docs.example.com": { decision: "allow", layer: "web/docs" } } });
+    expect(line("web_search")).toMatchObject({ unavailable: "tools" });
+    expect(line("read_file").places["$PROJECT"]).toEqual({ decision: "ask", layer: "chat/ask-first" });
+  });
+
+  it("saves the stack as a set: its layers and the tools layer's own lines — and refuses what ships and a stack it cannot read", () => {
+    const saved = service.savePermissionStack({ project: dir, layer: "project", bucket: "mine", name: "docs-writer", permissionSet: STACK });
+    expect(saved).toMatchObject({ id: "mine/docs-writer", scope: "project", layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/web/docs"], lines: 2 });
+    expect(JSON.parse(readFileSync(join(dir, ".jaira", "permission-sets", "mine", "docs-writer.json"), "utf8"))).toEqual(STACK);
+    // It reads back as the stack it was: the preset, then the docs layer, then its own lines.
+    expect(service.permissionStack({ project: dir, permissionSet: { layers: ["$/permission-sets/mine/docs-writer"] } }).layers.map((layer) => layer.id)).toEqual([
+      "chat/ask-first",
+      "web/docs",
+      "mine/docs-writer",
+      "runtime",
+    ]);
+    expect(() => service.savePermissionStack({ project: dir, layer: "system" as never, bucket: "mine", name: "x", permissionSet: STACK })).toThrow(/read-only/);
+    expect(() => service.savePermissionStack({ project: dir, layer: "project", bucket: "mine", name: "x", permissionSet: { layers: ["$/permission-sets/web/nope"] } })).toThrow(/cannot be read/);
+    expect(() => service.savePermissionStack({ project: dir, layer: "project", bucket: "mine", name: "docs-writer", permissionSet: STACK })).toThrow(/already exists/);
+  });
+
+  it("names each layer by the reference the stack named it through, so a file built of layers is one segment", () => {
+    service.savePermissionStack({ project: dir, layer: "project", bucket: "mine", name: "built", permissionSet: STACK });
+    const view = service.permissionStack({ project: dir, permissionSet: { layers: ["$/permission-sets/chat/read-only", "$/permission-sets/mine/built"] } });
+    expect(view.layers.map((layer) => [layer.id, layer.role, layer.via])).toEqual([
+      ["chat/read-only", "bottom", "$/permission-sets/chat/read-only"],
+      ["chat/ask-first", "named", "$/permission-sets/mine/built"],
+      ["web/docs", "named", "$/permission-sets/mine/built"],
+      ["mine/built", "named", "$/permission-sets/mine/built"],
+      ["runtime", "runtime", undefined],
+    ]);
+  });
+
+  it("lets go of the run's answers one by one, or all of them — a run mark's × and `let go of all`", () => {
+    const open = (service as unknown as { session: (project?: string) => { approvals: { grants: (taskId: string) => { remember: (width: string, decision: "allow" | "deny", place?: string) => void; list: () => Record<string, string> } } } }).session(dir);
+    const grants = open.approvals.grants("t-stack");
+    grants.remember("npm run build", "allow", "packages");
+    grants.remember("git push", "deny");
+    expect(service.permissionStack({ project: dir, taskId: "t-stack", permissionSet: STACK }).runtime).toEqual({ "npm run build @ packages": "allow", "git push": "deny" });
+    expect(service.forgetRuntimeAnswers({ project: dir, taskId: "t-stack", keys: ["npm run build @ packages"] })).toEqual({ "git push": "deny" });
+    expect(service.forgetRuntimeAnswers({ project: dir, taskId: "t-stack" })).toEqual({});
+  });
+
+  it("words a composer's stack by the set it comes to, and hands its settings back as the composer wrote them", () => {
+    const plan = service.chatStartPlan({ project: dir, overrides: { permissionSet: { layers: ["$/permission-sets/chat/read-only"] } as never } });
+    expect(plan.effective.permissions).toBe("read-only");
+    expect(plan.settings.permissionSet).toEqual({ layers: ["$/permission-sets/chat/read-only"] });
   });
 });

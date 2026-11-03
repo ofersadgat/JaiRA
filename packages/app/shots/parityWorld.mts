@@ -737,13 +737,15 @@ export const SCENES: readonly Scene[] = [
     },
   },
   // The conversation's composer with one of its chips' cards open (a button titled "<Label>: <value>"),
-  // and the context ring's card.
+  // and the context ring's card. The permission stack (decision 0023 §4.1): its bottom layer's segment
+  // (titled by the set, `chat/ask-first · built in — adjust this layer`) open on its compact card, and
+  // its `tools` segment on today's Tools card.
   ...(
     [
       ["composer-model", '[title^="Model: "]', "Model"],
       ["composer-thinking", '[title^="Thinking: "]', "Thinking"],
-      ["composer-permissions", '[title^="Permissions: "]', "Permissions"],
-      ["composer-tools", '[title^="Tools: "]', "Tools"],
+      ["composer-permissions", '[title^="chat/ask-first"]', "edit a copy"],
+      ["composer-tools", '[title^="tools: "]', "Tools"],
       ["composer-context", '[title^="No reading yet"], [title^="This conversation"]', "Context"],
     ] as const
   ).map(

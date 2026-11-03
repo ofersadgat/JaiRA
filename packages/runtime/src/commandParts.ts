@@ -12,15 +12,21 @@
 import {
   OTHER_SUBJECT,
   SCRIPT_SUBJECT,
+  holdsShellLines,
   isAbsolutePath,
   isFunctionMode,
-  isPermissionSetMarkKey,
+  linePlaces,
+  placeKindOf,
+  resolvePlaces,
+  sameMode,
   shellSubjects,
   subjectKindOf,
   toolModes,
   permissionSetOfEnvironment,
   type CommandPartKind,
   type PermissionsDecl,
+  type PlaceKind,
+  type PlaceOptions,
   type TextSpan,
   type PermissionSet,
   type PermissionSetMode,
@@ -302,7 +308,7 @@ function classifyCommand(command: ParsedCommand, span: TextSpan, dialect: Comman
   }
 
   // Running a named script out of a project file: `npm run build`, `make all`.
-  if (SCRIPT_RUNNERS.some((r) => r.program === program && (r.subcommands === undefined || r.subcommands.includes(command.subcommand ?? "")))) {
+  if (runsPackageScript(command) || SCRIPT_RUNNERS.some((r) => r.program === program && (r.subcommands === undefined || r.subcommands.includes(command.subcommand ?? "")))) {
     return { ...base, kind: "script", subject: SCRIPT_SUBJECT, matched: [{ ...span }], widths: [SCRIPT_SUBJECT] };
   }
 
@@ -431,27 +437,37 @@ export function classifyRequest(request: ShellRequest, dialect: CommandDialect):
   return classifyWithSets(request.command, request.span, request.dialect ?? dialect);
 }
 
-// --- the permission set, as the shell reads it ---------------------------------------
+/// --- the permission set, as the shell reads it ---------------------------------------
 
 /**
  * Every subject a shell part can answer to, with its mode: tools, commands, `script`, and `other`. A
  * mode may be a FUNCTION — the part is then put to it (see `policy.ts`, the `function` verdict).
+ *
+ * `entries` holds each line's OWN mode — its plain decision, or its place map's `**`; `places` each
+ * line's other places (decision 0023 §3), by subject. A line with places and no `**` is in `places`
+ * alone: it speaks only where one of its places matches the part, and elsewhere the part falls to the
+ * next less specific line ({@link lookUp}).
  */
 export interface ShellPermissionSet {
   entries: Record<string, PermissionSetMode>;
+  places?: Record<string, Record<string, PermissionSetMode>>;
   other?: PermissionSetMode;
 }
 
 /**
  * The map a shell line is judged against, from a {@link Permission set}. `undefined` when the permission set says
- * nothing about the shell — no mode for `shell`, no command subject, no `script` — which is the same
- * test {@link shellPermissionSetOfBlock} applies to a lowered block, since lowering writes `subjects` from
- * exactly these.
+ * nothing about the shell — no line for `shell`, no command subject, no `script`, with a mode or with
+ * places — which is the same test {@link shellPermissionSetOfBlock} applies to a lowered block, since
+ * lowering writes `subjects` from exactly these (`holdsShellLines`).
  */
 export function shellPermissionSetOf(permissionSet: PermissionSet): ShellPermissionSet | undefined {
-  const subjects = shellSubjects(permissionSet);
-  if (Object.keys(subjects).length === 0) return undefined;
-  return { entries: { ...toolModes(permissionSet), ...subjects }, ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}) };
+  if (!holdsShellLines(permissionSet)) return undefined;
+  const places = linePlaces(permissionSet);
+  return {
+    entries: { ...toolModes(permissionSet), ...shellSubjects(permissionSet) },
+    ...(Object.keys(places).length > 0 ? { places } : {}),
+    ...(permissionSet.other !== undefined ? { other: permissionSet.other } : {}),
+  };
 }
 
 /** One map a line is judged against, and where it came from. */
@@ -467,17 +483,18 @@ export interface JudgingPermissionSet {
  *
  * The block is a conversation turn's, a state read straight off its file, or a RUN's (upstream
  * `literalPermissions` passes a host's keys through, declarative-ai 3f5e5cc and later). `subjects`
- * merges per key of `permissions`, so a child's own replaces its parent's.
+ * merges per key of `permissions`, so a child's own replaces its parent's — and `places` with it.
  */
 export function shellPermissionSetOfBlock(block: PermissionsDecl | undefined): JudgingPermissionSet | undefined {
   if (block?.subjects === undefined) return undefined;
-  // The block read back into the one map — the gate's modes, the subjects' authored ones, and every
-  // line a FUNCTION answers for, which lowering wrote as `ask` and named in `functions`.
+  // The block read back into the one map — the gate's modes, the subjects' authored ones, every line a
+  // FUNCTION answers for (which lowering wrote as `ask` and named in `functions`), and every line's places.
   const read = permissionSetOfEnvironment(undefined, block);
   const entries: Record<string, PermissionSetMode> = {};
   for (const [subject, entry] of Object.entries(read.entries)) if (entry.mode !== undefined) entries[subject] = entry.mode;
+  const places = linePlaces(read);
   return {
-    permissionSet: { entries, ...(read.other !== undefined ? { other: read.other } : {}) },
+    permissionSet: { entries, ...(Object.keys(places).length > 0 ? { places } : {}), ...(read.other !== undefined ? { other: read.other } : {}) },
     ...(block.source !== undefined ? { source: block.source } : {}),
   };
 }
@@ -491,11 +508,14 @@ export interface PermissionSetAnswer {
   specific: boolean;
   /** The words of the line that entry matched. */
   matched?: TextSpan[];
+  /** The PLACE of the entry's line that answered (`packages/app`), when a place did rather than the line's own mode. */
+  place?: string;
 }
 
 interface CommandEntry {
   key: string;
-  mode: PermissionSetMode;
+  /** The line's own mode; absent for a place map with no `**`. */
+  mode?: PermissionSetMode;
   program: string;
   subs: string[];
   flags: string[];
@@ -504,12 +524,31 @@ interface CommandEntry {
 /** How strict a mode is, for picking between two equally specific entries: allow ▸ function ▸ ask ▸ deny. */
 const MODE_RANK = (mode: PermissionSetMode): number => (isFunctionMode(mode) ? 1 : { allow: 0, ask: 2, deny: 3 }[mode]);
 
+/** A line's places other than `**`, when it has any. */
+function placesOfLine(permissionSet: ShellPermissionSet, key: string): Readonly<Record<string, PermissionSetMode>> | undefined {
+  const places = permissionSet.places !== undefined && Object.hasOwn(permissionSet.places, key) ? permissionSet.places[key] : undefined;
+  return places !== undefined && Object.keys(places).length > 0 ? places : undefined;
+}
+
+/** How strict a LINE is, for ordering equally specific entries: the strictest of its own mode and its places. */
+function lineRank(permissionSet: ShellPermissionSet, key: string, mode: PermissionSetMode | undefined): number {
+  const modes = [...(mode !== undefined ? [mode] : []), ...Object.values(placesOfLine(permissionSet, key) ?? {})];
+  return modes.reduce((worst, next) => Math.max(worst, MODE_RANK(next)), -1);
+}
+
+/** Is there a line for this subject at all — an own mode, or places? */
+function hasLine(permissionSet: ShellPermissionSet, key: string): boolean {
+  return Object.hasOwn(permissionSet.entries, key) || placesOfLine(permissionSet, key) !== undefined;
+}
+
 function commandEntriesOf(permissionSet: ShellPermissionSet): CommandEntry[] {
   const out: CommandEntry[] = [];
-  for (const [key, mode] of Object.entries(permissionSet.entries)) {
-    if (subjectKindOf(key) !== "command") continue;
+  const keys = [...new Set([...Object.keys(permissionSet.entries), ...Object.keys(permissionSet.places ?? {})])];
+  for (const key of keys) {
+    if (subjectKindOf(key) !== "command" || !hasLine(permissionSet, key)) continue;
     const [program, ...rest] = key.split(/\s+/);
-    out.push({ key, mode, program: program!.toLowerCase(), subs: rest.filter((w) => !isFlag(w)).map((w) => w.toLowerCase()), flags: rest.filter(isFlag) });
+    const mode = Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined;
+    out.push({ key, ...(mode !== undefined ? { mode } : {}), program: program!.toLowerCase(), subs: rest.filter((w) => !isFlag(w)).map((w) => w.toLowerCase()), flags: rest.filter(isFlag) });
   }
   return out;
 }
@@ -529,59 +568,168 @@ const flagMatches = (named: string, given: string): boolean => {
   return /^-[A-Za-z0-9]$/.test(named) && /^-[^-]{2,}/.test(given) && given.slice(1).includes(named[1]!);
 };
 
+/** One command entry that matches a command, with the words it matched and how specific it is. */
+export interface CommandMatch {
+  entry: CommandEntry;
+  words: CommandWord[];
+  score: number;
+}
+
 /**
- * The most specific command entry that matches: program, then its subcommand words as a prefix, then
- * every flag it names. A PowerShell command answers to its cmdlet's name and to the alias the line
- * called it by (`Remove-Item`'s entry, or `rm`'s, for `rm x`).
+ * EVERY command entry that matches, most specific first — program, then its subcommand words as a
+ * prefix, then every flag it names; among equally specific entries the stricter first, and among
+ * those the first written. A PowerShell command answers to its cmdlet's name and to the alias the line
+ * called it by (`Remove-Item`'s entry, or `rm`'s, for `rm x`). A line with places none of which
+ * matches a part passes it to the next of these (decision 0023 §3.4), which is why all of them are
+ * wanted and not the best alone.
  */
-export function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
+export function matchCommandEntries(permissionSet: ShellPermissionSet, command: ParsedCommand): CommandMatch[] {
   const operands = operandsOf(command).filter((w) => w.dynamic !== true);
   // `git -C dir commit`: the value `-C` takes is not the subcommand.
   const subs = command.subcommand !== undefined ? operands.slice(operands.findIndex((w) => w.value.toLowerCase() === command.subcommand)) : [];
-  let best: { entry: CommandEntry; words: CommandWord[]; score: number } | undefined;
+  const out: Array<CommandMatch & { rank: number }> = [];
   for (const entry of commandEntriesOf(permissionSet)) {
     if (entry.program !== command.program && entry.program !== command.alias) continue;
     if (!entry.subs.every((s, i) => subs[i]?.value.toLowerCase() === s)) continue;
     if (!entry.flags.every((f) => command.flags.some((g) => flagMatches(f, g)))) continue;
     const score = entry.subs.length * 2 + entry.flags.length;
-    if (best !== undefined && (score < best.score || (score === best.score && MODE_RANK(entry.mode) <= MODE_RANK(best.entry.mode)))) continue;
     const all = command.words ?? [];
     const program = all[command.programIndex ?? 0];
     const flagWords = entry.flags.flatMap((f) => all.find((w) => flagMatches(f, w.value)) ?? []);
-    best = { entry, score, words: [...(program !== undefined ? [program] : []), ...subs.slice(0, entry.subs.length), ...flagWords] };
+    out.push({ entry, score, rank: lineRank(permissionSet, entry.key, entry.mode), words: [...(program !== undefined ? [program] : []), ...subs.slice(0, entry.subs.length), ...flagWords] });
   }
-  return best;
+  // Array.prototype.sort is stable: among equals, the first written stays first.
+  return out.sort((a, b) => b.score - a.score || b.rank - a.rank).map(({ rank: _rank, ...match }) => match);
+}
+
+/** The most specific command entry that matches — the first of {@link matchCommandEntries}. */
+export function matchCommandEntry(permissionSet: ShellPermissionSet, command: ParsedCommand): { entry: CommandEntry; words: CommandWord[] } | undefined {
+  return matchCommandEntries(permissionSet, command)[0];
+}
+
+/**
+ * Where a part acts, for the places of the lines it answers to (decision 0023 §3.1): the places it is
+ * about, of each kind a line can be about, as `places.ts` compares them. Built by the policy, which
+ * knows the directory the part runs in and the packages a script runs in (`partPlacesOf` in `policy.ts`).
+ */
+export interface PartPlaces {
+  /** The places the part is about for the line `line`, of kind `kind` — empty when it names none that can be read. */
+  of(kind: PlaceKind, line: string): readonly string[];
+  /** What a path place is resolved against: the project root and the named places. */
+  options?: PlaceOptions | undefined;
+}
+
+/** One line a part may answer to, in the order it is asked. */
+interface LineStep {
+  key: string;
+  mode?: PermissionSetMode;
+  places?: Readonly<Record<string, PermissionSetMode>>;
+  specific: boolean;
+  matched?: TextSpan[];
 }
 
 /**
  * What the permission set says about one part.
  *
- * Lookup order: the most specific command entry naming the program (`git commit`, then `git`; for a
- * utility or a script runner that is `rm`, `npm run`), then the part's own subject — the standard
- * tool, or `script` — and for a plain command the shell's entry (`shell`, "any other command"), then
- * `other`. With nothing at all the answer is `ask`: absent means not offered.
+ * Lookup order — the lines from most specific to least: every command entry naming the program
+ * (`git commit`, then `git`; for a utility or a script runner that is `rm`, `npm run`), most specific
+ * first; then the part's own subject — the standard tool, or `script` — and for a plain command, or a
+ * script that `script` does not answer, the shell's entry (`shell`, "any other command"); then `other`.
+ * With nothing at all the answer is `ask`: absent means not offered.
+ *
+ * A line with PLACES (decision 0023 §3.4) answers only where one of its places matches what the part
+ * is about (`where`): the most specific place that matches decides, a part about several places takes
+ * the strictest (§3.5), and the places no place of the line matches go to the line's own mode — its
+ * `**` — or, where it has none, on down the lookup order, never to a guess. Without `where` a line's
+ * places match nothing, and only its own mode speaks.
  */
-export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart): PermissionSetAnswer {
-  const own = (key: string): PermissionSetMode | undefined => (Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined);
-  const answer = (mode: PermissionSetMode, entry: string, specific: boolean, matched?: TextSpan[]): PermissionSetAnswer => ({
-    mode,
-    entry,
-    specific,
-    ...(matched !== undefined ? { matched } : {}),
-  });
+export function lookUp(permissionSet: ShellPermissionSet, part: ClassifiedPart, where?: PartPlaces): PermissionSetAnswer {
+  const steps: LineStep[] = [];
+  const step = (key: string, specific: boolean, matched?: TextSpan[]): void => {
+    if (!hasLine(permissionSet, key) || steps.some((s) => s.key === key)) return;
+    const mode = Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined;
+    const places = placesOfLine(permissionSet, key);
+    steps.push({ key, specific, ...(mode !== undefined ? { mode } : {}), ...(places !== undefined ? { places } : {}), ...(matched !== undefined ? { matched } : {}) });
+  };
   if (part.command !== undefined && part.kind !== "unparsed" && part.unmodelled === undefined) {
-    const named = matchCommandEntry(permissionSet, part.command);
-    if (named !== undefined) return answer(named.entry.mode, named.entry.key, true, spanOfWords(named.words));
+    for (const named of matchCommandEntries(permissionSet, part.command)) step(named.entry.key, true, spanOfWords(named.words));
   }
   const subject = part.kind === "tool" || part.kind === "redirect" ? part.tool! : part.kind === "script" ? SCRIPT_SUBJECT : SHELL_SUBJECT;
-  const direct = own(subject);
-  if (direct !== undefined) return answer(direct, subject, false);
-  if (permissionSet.other !== undefined) return answer(permissionSet.other, OTHER_SUBJECT, false);
-  return { mode: "ask", specific: false };
+  step(subject, false);
+  // §3.4: elsewhere, `npm run build` is `script`'s, then `shell`'s, then `other`'s. A part that is a
+  // FILE TOOL is not "any other command": `cat x` is `read_file`'s, then `other`'s, as it always was.
+  if (part.kind === "script") step(SHELL_SUBJECT, false);
+  const fallback: PermissionSetAnswer =
+    permissionSet.other !== undefined ? { mode: permissionSet.other, entry: OTHER_SUBJECT, specific: false } : { mode: "ask", specific: false };
+  return walkLines(steps, 0, undefined, fallback, where);
 }
 
+/**
+ * What a chain of lines, most specific first, says about a part — each line's places, then its own
+ * mode, a place that matches nothing passing on to the next (decision 0023 §3.4) — or `undefined` when
+ * none of them says anything here. The runner gate's question (`runner:npm`, then `runner:*`), which
+ * answers nothing rather than `other` when no runner line speaks.
+ */
+export function answerOfLines(permissionSet: ShellPermissionSet, keys: readonly string[], where?: PartPlaces): PermissionSetAnswer | undefined {
+  const steps: LineStep[] = [];
+  for (const key of keys) {
+    if (!hasLine(permissionSet, key) || steps.some((s) => s.key === key)) continue;
+    const mode = Object.hasOwn(permissionSet.entries, key) ? permissionSet.entries[key] : undefined;
+    const places = placesOfLine(permissionSet, key);
+    steps.push({ key, specific: false, ...(mode !== undefined ? { mode } : {}), ...(places !== undefined ? { places } : {}) });
+  }
+  const answer = walkLines(steps, 0, undefined, { specific: false }, where);
+  return answer.mode === undefined ? undefined : answer;
+}
+
+/** The answer of `steps[at]` and the lines after it, for the places in `calls` (all of the part's, when undefined). */
+function walkLines(
+  steps: readonly LineStep[],
+  at: number,
+  calls: { kind: PlaceKind; calls: readonly string[] } | undefined,
+  fallback: PermissionSetAnswer,
+  where: PartPlaces | undefined,
+): PermissionSetAnswer {
+  const line = steps[at];
+  if (line === undefined) return fallback;
+  const answer = (mode: PermissionSetMode, place?: string): PermissionSetAnswer => ({
+    mode,
+    entry: line.key,
+    specific: line.specific,
+    ...(line.matched !== undefined ? { matched: line.matched } : {}),
+    ...(place !== undefined ? { place } : {}),
+  });
+  if (line.places === undefined) return line.mode !== undefined ? answer(line.mode) : walkLines(steps, at + 1, calls, fallback, where);
+  const kind = placeKindOf(line.key) ?? "path";
+  // What the part is about, as this line's kind reads it: carried down from a line of the same kind
+  // that matched none of them, else read afresh — a `git push` line's branches mean nothing to `git`'s folders.
+  const about = calls !== undefined && calls.kind === kind ? calls.calls : (where?.of(kind, line.key) ?? []);
+  const resolved = resolvePlaces(line.places, kind, about, where?.options ?? {});
+  const answers: PermissionSetAnswer[] = [];
+  if (resolved.decision !== undefined) {
+    const deciding = resolved.matches.find((match) => sameMode(match.decision, resolved.decision)) ?? resolved.matches[0]!;
+    answers.push(answer(resolved.decision, deciding.place));
+  }
+  // A part that names no place of this kind is about none of the line's places: all of it is "elsewhere".
+  if (about.length === 0 || resolved.unmatched.length > 0) {
+    answers.push(line.mode !== undefined ? answer(line.mode) : walkLines(steps, at + 1, about.length === 0 ? undefined : { kind, calls: resolved.unmatched }, fallback, where));
+  }
+  // Several places, the strictest answer (§3.5); among equals, the more specific line, met first.
+  return answers.reduce((worst, next) => (MODE_RANK(next.mode ?? "ask") > MODE_RANK(worst.mode ?? "ask") ? next : worst));
+}
 
 // --- a package's script, by name ---------------------------------------------------------------------
+
+/**
+ * Whether a package manager is told to run a script, whatever stands before the word: the value of a
+ * flag (`npm --workspace @a/b run x`) is no subcommand, and a flag this does not read does not make the
+ * line any less a script. Not when what runs is decided as the line runs: that stays nobody's to vouch for.
+ */
+function runsPackageScript(command: ParsedCommand): boolean {
+  const runner = Object.hasOwn(PACKAGE_SCRIPT_RUNNERS, command.program) ? PACKAGE_SCRIPT_RUNNERS[command.program]! : undefined;
+  if (runner === undefined || command.dynamic === true) return false;
+  return packageScriptOf(command) !== undefined || (command.words ?? []).slice((command.programIndex ?? 0) + 1).some((word) => runner.run.includes(word.value));
+}
 
 /** The workspaces a line picks: by name, name glob or path; every one; the root beside them; less those taken back. */
 export interface WorkspacePicks {

@@ -1,33 +1,44 @@
-import { useRef, useState, type JSX, type ReactNode } from "react";
+import { useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { Keyboard, Modal, Platform, TextInput, View as RNView, useWindowDimensions, type LayoutChangeEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import {
   REASONING_EFFORTS,
   contextFill,
-  declOfPermissionSet,
   formatTokens,
+  heldTools,
   isSpent,
-  parsePermissionSet,
-  permissionSetGlyph,
-  permissionSetHint,
-  permissionSetLabel,
   toneOfContext,
   type ChatPlanView,
   type ChatSettings,
   type ContextReading,
   type PermissionSet,
   type ReasoningEffort,
-  type SavePermissionSetRequest,
   type WritableLayer,
 } from "@jaira/shared/browser";
-import { fileFromText, mentionAt, permissionsHintOf, withFiles, withMention, type ComposerFile } from "@jaira/ui/composerCards";
+import { fileFromText, mentionAt, withFiles, withMention, type ComposerFile } from "@jaira/ui/composerCards";
 import { useKeptDraft } from "@jaira/ui/composerDrafts";
-import { CHIP_ORDER, canSendOf, chipStepOf, chipValuesOf, chipWordsAt, composerFactsOf, routeOf, sendTitleOf, shortChipWords, type ChipStep } from "@jaira/ui/composerModel";
-import type { Parked } from "@jaira/ui/composerPermissionSet";
+import { canSendOf, chipValuesOf, chipWordsAt, composerFactsOf, mapOfSettings, routeOf, sendTitleOf, shortChipWords, type ChipStep } from "@jaira/ui/composerModel";
+import { commandGroupsOf, type Parked } from "@jaira/ui/composerPermissionSet";
+import {
+  collapsedOf,
+  decidedTagOf,
+  footFitOf,
+  foldableOf,
+  runtimeAnswersOf,
+  runtimeRowsOf,
+  segmentsOf,
+  stackBucketOf,
+  withLayerAdded,
+  withLayerMoved,
+  withLayerRemoved,
+  withLayerSwapped,
+  type LayerSegment,
+  type StackSegment,
+} from "@jaira/ui/composerStack";
+import { useComposerStack, type StackHost } from "@jaira/ui/composerStackHost";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { accountFor, useLimits, useNow, useUsageFigures } from "@jaira/ui/limitsStore";
 import { levelsFooter, useModelParameters } from "@jaira/ui/modelParameters";
-import { modeMeta } from "@jaira/ui/permissionSetWords";
 import type { ContextTotal } from "@jaira/ui/runConversationModel";
 import { figureOf } from "@jaira/ui/usageFigure";
 import { NO_STACK, PLAIN_SCROLLER, Press, Txt, edge, font } from "../../primitives";
@@ -37,7 +48,8 @@ import { Float } from "../floats/Float";
 import { Icon, type IconName } from "../panel/Icon";
 import { Svg } from "../panel/Svg";
 import { INK, Ring } from "../usage/Ring";
-import { BucketPicker, CardHint, ChipCard, KeepPermissionSet, Opt, Opts, RouteCascade, ThinkingBody } from "./ComposerCards";
+import { ChipCard, RouteCascade, ThinkingBody } from "./ComposerCards";
+import { AddLayerCard, FoldCard, LayerCard, SaveStack, StackBar, StackBrowser, ToolsSwitch, useOpenSettingsTools, type StackCardHost } from "./ComposerStack";
 import { ToolsBody } from "./ComposerTools";
 import { Pulse } from "./Pulse";
 import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
@@ -68,11 +80,17 @@ import { useKeyboardShown } from "../floats/keyboard";
  *                     radius 10, --panel, 0 8 24 rgb(0 0 0 / 18%); a path padding 4 8, radius 6, app
  *                     12/12.5 (hovered --panel-2)
  *   the foot          row, centred, gap 5, padding 5 7 7 8, ONE line at every width: as the room narrows the
- *                     chips' words drop in steps (`chipStepOf`; the composer mockups, 2026-10-25, design
- *                     1) — every word; shorter (the model without its route, "default", a count); the
- *                     model's name and the other chips' icons; icons alone — and the live note's words go
- *                     at the third. The live note, the meter, ⤢, the clip and send stand together at the
- *                     right end. Each chip's width in each look is measured off screen (the ruler)
+ *                     permission stack folds its middle into `⋯ {n}` first, then the chips' words drop in
+ *                     steps (`footFitOf`; the composer mockups, 2026-10-25, design 1) — every word;
+ *                     shorter (the model without its route, "default"), and the stack collapses to the
+ *                     shield, the bottom layer's icon and `+n`; the model's name and the other chip's
+ *                     icon; icons alone — and the live note's words go at the third. The live note, the
+ *                     meter, ⤢, the clip and send stand together at the right end. Each chip's width in
+ *                     each look, and the stack's whole, folded and collapsed, is measured off screen (the
+ *                     ruler)
+ *   the stack         the Permissions chip as the stack (decision 0023 §4.1): `ComposerStack.tsx`'s bar,
+ *                     the shield (the whole stack, in the browser), a segment per layer, `tools` (today's
+ *                     Tools card, the run's answers marked on their lines) and `+`
  *   a chip            pill, padding 3 9, 1px transparent, gap 5, at most 210, app 11.5/12.5, --dim;
  *                     hovered --fill-ghost-hover and --text; open --fill-ghost-selected, a --line edge,
  *                     --text; overridden --accent; the icon 13, --tok-hint (overridden --accent)
@@ -105,7 +123,7 @@ export function Composer({
   usage,
   mentions,
   readMention,
-  onSavePermissionSet,
+  stack: stackHost,
   saveLayers,
   tray,
 }: {
@@ -126,9 +144,13 @@ export function Composer({
   mentions?: ((query: string) => Promise<string[]>) | undefined;
   /** One mentioned file's text, for inlining. Absent ⇒ a mention stays a path. */
   readMention?: ((path: string) => Promise<string>) | undefined;
-  /** Keep the map on the cards as a new permission set — the Permissions card's `+`. Absent ⇒ `+` stays dim. */
-  onSavePermissionSet?: ((request: Omit<SavePermissionSetRequest, "project">) => Promise<unknown>) | undefined;
-  /** Where `+` may write. */
+  /**
+   * Where the permission stack is read and written (decision 0023 §4.1): the project, and the
+   * conversation's task for its run's answers. Absent ⇒ the stack is drawn from the settings alone, and
+   * nothing is browsed, pinned or saved.
+   */
+  stack?: StackHost | undefined;
+  /** Where "save this stack as a set" may write; `project` also lets a layer be pinned to the project. */
   saveLayers?: readonly WritableLayer[] | undefined;
   /** What is tucked under the frame: the session's environment bar. */
   tray?: ReactNode;
@@ -145,12 +167,15 @@ export function Composer({
   /** The `@` completion: what is being typed after it, where it started, and what matched. */
   const [mention, setMention] = useState<{ at: number; query: string; paths: string[] } | null>(null);
   const [caret, setCaret] = useState(0);
-  /** Which bucket the Permissions rows are, once the person has picked one. Else the plan's. */
-  const [picked, setPicked] = useState<string | undefined>(undefined);
   /** What an unticked tool would run under if ticked again. Never sent. */
   const [parked, setParked] = useState<Parked>({});
-  const facts = composerFactsOf(plan, picked);
-  const { settings, origin, offered, map, tools, buckets, bucket, rows, matched, effective, route, current, cliRoute, permissionsOrigin, toolsOrigin } = facts;
+  // The permission STACK (decision 0023 §2.6, §4.1): the layers the settings name, composed by the
+  // engine; the map the Tools card draws is what they come to, and what it writes is the tools layer.
+  const planned = plan?.settings ?? EMPTY_SETTINGS;
+  const inherited = useMemo(() => mapOfSettings(planned), [planned]);
+  const stack = useComposerStack({ host: stackHost, settings: planned, inherited, overrides, onOverrides });
+  const facts = composerFactsOf(plan, undefined, stack.map);
+  const { settings, origin, offered, map, effective, route, current, cliRoute, toolsOrigin } = facts;
   const thinking = useModelParameters(effective.model);
   const chips = chipValuesOf(plan, facts, thinking);
   const limits = useLimits();
@@ -159,8 +184,10 @@ export function Composer({
   const spent = account !== undefined && isSpent(account.reading, now);
   const canSend = canSendOf(disabled, busy, joinable);
   const off = disabled !== undefined;
-  /** The card open, and the box it was opened from. */
-  const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Permissions" | "Tools" | "account" | "context"; at: FloatRect } | null>(null);
+  /** The card open, and the box it was opened from — for the stack, the segment's key and what it is. */
+  const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Tools" | "account" | "context" | "stack"; at: FloatRect; key?: string; segment?: StackSegment } | null>(null);
+  /** The Tools card on Everything (§7.4) rather than this conversation's lines. */
+  const [everything, setEverything] = useState(false);
   // The `@` list stands over the box it completes into, at the box's width.
   const box = useRef<TextInput | null>(null);
   const [boxAt, setBoxAt] = useState<FloatRect | null>(null);
@@ -239,21 +266,47 @@ export function Composer({
     delete next[key];
     onOverrides(next);
   };
-  /** Send the WHOLE map: a permission set is one statement. */
+  /**
+   * The Tools card's map, kept as the stack's TOOLS layer (§2.6 step 5, ruling 8): only what differs
+   * from the layers under it, and `unavailable` for a tool unticked over a layer that offers it.
+   */
   const write = (next: PermissionSet, nextParked: Parked = parked): void => {
     setParked(nextParked);
-    set({ permissionSet: declOfPermissionSet(next) });
+    stack.writeTools(next);
   };
-  /** Both cards reset together, because they are one setting. */
+  /** The whole stack resets together: it is one setting. */
   const resetPermissionSet = (): void => {
     const next = { ...overrides };
     delete next.permissionSet;
     setParked({});
-    setPicked(undefined);
     onOverrides(next);
   };
   const close = (): void => setCard(null);
   const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
+  /** A layer's segment as the stack stands NOW — its card stays on it while it moves. */
+  const liveLayer = (segment: LayerSegment): LayerSegment => stack.layers.find((layer) => layer.reference === segment.reference && layer.role === segment.role) ?? segment;
+  /** A segment's card, or closed when it was the one open. */
+  const openSegment = (segment: StackSegment, at: FloatRect): void => {
+    if (segment.kind === "tools") setEverything(false);
+    setCard((was) => (was?.which === "stack" && was.key === segment.key ? null : { which: "stack", at, key: segment.key, segment }));
+  };
+  const cardHost: StackCardHost = { treeRequest: stack.treeRequest, project: stackHost?.project, tools: offered };
+  const openSettings = useOpenSettingsTools(stackHost?.project);
+  const canPin = stackHost !== undefined && (saveLayers ?? ["project", "base"]).includes("project");
+  /** What a layer's card may do to its layer — a standing layer is settings', and moves only by its pin. */
+  const actionsOf = (segment: LayerSegment) => {
+    const index = segment.index;
+    const named = index !== undefined;
+    return {
+      ...(named && stackHost !== undefined ? { onSwap: (reference: string) => stack.write(withLayerSwapped(stack.form, index, reference)) } : {}),
+      ...(named ? { onMove: (by: -1 | 1) => stack.write(withLayerMoved(stack.form, index, by)), onRemove: () => (stack.write(withLayerRemoved(stack.form, index)), close()) } : {}),
+      canEarlier: index !== undefined && index > 0,
+      canLater: index !== undefined && index < stack.form.layers.length - 1,
+      ...(canPin && segment.reference !== undefined ? { onPin: () => void stack.pin(segment, segment.role !== "standing").then(close) } : {}),
+      pinned: segment.role === "standing",
+      ...(openSettings !== undefined ? { onEdit: () => (openSettings(), close()) } : {}),
+    };
+  };
   // A phone's: the chips folded while the keyboard is up, and the full-screen writer.
   const phone = usePhone();
   const keyboard = useKeyboardShown();
@@ -261,9 +314,10 @@ export function Composer({
   const tucked = has(tray) && !folded;
   const [full, setFull] = useState(false);
 
-  // The foot on one line, its chips' words dropping in steps as the room narrows (`chipStepOf`): the
-  // foot's width, the controls' (less the live note's words, which go with the chips), the account's
-  // figure's, and each chip's in each of its looks — measured off screen, in the ruler below.
+  // The foot on one line, the stack folding and the chips' words dropping in steps as the room narrows
+  // (`footFitOf`): the foot's width, the controls' (less the live note's words, which go with the
+  // chips), the account's figure's, each chip's in each of its looks and the stack's — whole, folded,
+  // and folded with its narrow words — measured off screen, in the ruler below.
   const [footWidth, setFootWidth] = useState(0);
   const [controls, setControls] = useState({ width: 0, words: 0 });
   const [figureWidth, setFigureWidth] = useState(0);
@@ -278,17 +332,55 @@ export function Composer({
   const chipLooks = {
     model: { lead: <BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />, own: origin.model === "override" },
     thinking: { icon: "think" as IconName, own: origin.reasoning === "override" },
-    permissions: { icon: "shield" as IconName, own: permissionsOrigin === "override" },
-    tools: { icon: "tool" as IconName, own: toolsOrigin === "override" },
   };
   const short = shortChipWords(chips);
   const noteWords = live !== undefined && ruler["note"] !== undefined ? ruler["note"] + 6 : 0;
-  const measured = footWidth > 0 && controls.width > 0 && ruler["icon"] !== undefined && CHIP_ORDER.every((name) => ruler[`${name}:full`] !== undefined && ruler[`${name}:short`] !== undefined);
+  // The stack's segments: whole, folded (the first layer, `⋯ {n}`, tools, +), and collapsed to the shield.
+  const answers = runtimeAnswersOf(stack.runtime);
+  const runtimeCount = answers.length;
+  const toolsCount = heldTools(map).length;
+  const whole = segmentsOf(stack.layers, toolsCount, runtimeCount, false);
+  const foldedBar = segmentsOf(stack.layers, toolsCount, runtimeCount, true);
+  const collapsed = collapsedOf(stack.layers, Object.keys(stack.form.tools ?? {}).length, runtimeCount);
+  // Where the Tools card marks each answer: the tools offered, the command lines, the programs grouping them.
+  const groups = commandGroupsOf(map);
+  const runRows = runtimeRowsOf(
+    answers,
+    offered.map((tool) => tool.name),
+    groups.flatMap((group) => group.subs.map((sub) => sub.subject)),
+    groups.map((group) => group.program),
+  );
+  const runtime = { rows: runRows, ...(stackHost?.taskId !== undefined ? { onForget: (keys: string[]) => void stack.forget(keys) } : {}) };
+  const stackMeasured = ruler["stack:full"] !== undefined && ruler["stack:folded"] !== undefined && ruler["stack:collapsed"] !== undefined;
+  const measured = footWidth > 0 && controls.width > 0 && ruler["icon"] !== undefined && stackMeasured && FOOT_CHIPS.every((name) => ruler[`${name}:full`] !== undefined && ruler[`${name}:short`] !== undefined);
   // The foot's padding (8 + 7), the gap before the controls, and the figure with its gap.
   const room = footWidth - 15 - (controls.width - controls.words) - 5 - (figure ? figureWidth + 5 : 0);
-  const step: ChipStep = !measured ? 0 : chipStepOf(room, CHIP_ORDER.map((name) => ({ full: ruler[`${name}:full`]!, short: ruler[`${name}:short`]!, icon: ruler["icon"]! })), 5, noteWords);
+  const fit = !measured
+    ? { step: 0 as ChipStep, look: "whole" as const }
+    : footFitOf(room, FOOT_CHIPS.map((name) => ({ full: ruler[`${name}:full`]!, short: ruler[`${name}:short`]!, icon: ruler["icon"]! })), { full: ruler["stack:full"]!, folded: ruler["stack:folded"]!, collapsed: ruler["stack:collapsed"]! }, 5, noteWords);
+  const step = fit.step;
   const shown = chipWordsAt(chips, step);
   const noteShown = live !== undefined && step <= 1;
+  const bar = fit.look === "folded" && foldableOf(stack.layers) ? foldedBar : whole;
+  /** The segment open, as the bar knows it — the fold's when a folded layer's card is open; any, collapsed. */
+  const openKey = card?.which !== "stack" ? undefined : fit.look === "collapsed" || card.key === "lead" || bar.some((segment) => segment.key === card.key) ? card.key : "fold";
+
+  /** The Tools card's rows — this conversation's lines, or Everything — drawn in its card and in the shield's browser. */
+  const toolsBody = (
+    <>
+      {everything ? (
+        // Under the head, its right end: the head's own row holds the title, the switch and the origin.
+        <View flexDirection="row" justifyContent="flex-end" marginTop={-3} marginBottom={4}>
+          <SaveStack bucket={stackBucketOf(stack.form)} layers={stackHost !== undefined ? (saveLayers ?? ["project", "base"]) : []} onSave={stackHost !== undefined ? stack.saveStack : undefined} />
+        </View>
+      ) : null}
+      {everything ? (
+        <ToolsBody key="everything" offered={offered} map={map} parked={parked} cliRoute={cliRoute} write={NO_WRITE} setParked={NO_PARK} readOnly tagOf={(subject) => decidedTagOf(stack.view, subject)} runtime={runtime} />
+      ) : (
+        <ToolsBody key="own" offered={offered} map={map} parked={parked} cliRoute={cliRoute} write={write} setParked={setParked} runtime={runtime} />
+      )}
+    </>
+  );
 
   return (
     <View paddingTop={10} paddingHorizontal={phone ? 8 : 16} paddingBottom={tucked ? 10 : phone ? 8 : 14} backgroundColor={t.v("bg") as never} {...(drop as object)}>
@@ -312,13 +404,22 @@ export function Composer({
               shows them — a box of no size that clips — for the foot to be fitted by. */}
           <View position="absolute" left={0} top={0} width={0} height={0} overflow="hidden" pointerEvents="none" {...({ "aria-hidden": true, importantForAccessibility: "no-hide-descendants" } as object)}>
             <View flexDirection="row" alignItems="flex-start" width={4000}>
-              {CHIP_ORDER.flatMap((name) =>
+              {FOOT_CHIPS.flatMap((name) =>
                 (["full", "short"] as const).map((look) => (
                   <View key={`${name}:${look}`} {...CHIP_BOX} borderColor="transparent" onLayout={measure(`${name}:${look}`)}>
                     <ChipFace t={t} {...chipLooks[name]} words={look === "full" ? chips[name] : short[name]} lit={false} />
                   </View>
                 )),
               )}
+              <View onLayout={measure("stack:full")}>
+                <StackBar segments={whole} open={undefined} onOpen={NO_OPEN} />
+              </View>
+              <View onLayout={measure("stack:folded")}>
+                <StackBar segments={foldedBar} open={undefined} onOpen={NO_OPEN} />
+              </View>
+              <View onLayout={measure("stack:collapsed")}>
+                <StackBar segments={foldedBar} collapsed={collapsed} open={undefined} onOpen={NO_OPEN} />
+              </View>
               <View {...CHIP_BOX} borderColor="transparent" onLayout={measure("icon")}>
                 <ChipFace t={t} icon="think" own={false} words={null} lit={false} />
               </View>
@@ -405,7 +506,7 @@ export function Composer({
           {/* One line at every width: the chips' words drop in steps as the room narrows (`chipStepOf`).
               Folded, the model's chip and ⋯, the model's chip giving way. */}
           <View flexDirection="row" alignItems="center" gap={5} paddingTop={5} paddingRight={7} paddingBottom={7} paddingLeft={8} minWidth={0} onLayout={(e) => setFootWidth(e.nativeEvent.layout.width)}>
-            <Chip t={t} {...chipLooks.model} label="Model" value={chips.model} words={folded ? chips.model : shown.model} open={card?.which === "Model"} onOpen={opener("Model")} />
+            <Chip t={t} {...chipLooks.model} label="Model" value={chips.model} words={folded ? chips.model : shown.model} open={card?.which === "Model"} onOpen={opener("Model")} floor={ruler["icon"]} />
             {folded ? (
               <Press onPress={() => Keyboard.dismiss()} label="Show every setting" title="show every setting" height={26} paddingHorizontal={8} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={999} backgroundColor={t.v("panel-2") as never}>
                 <Txt spec={{ voice: "app", scale: 1, color: "dim" }}>⋯</Txt>
@@ -413,9 +514,19 @@ export function Composer({
             ) : (
               <>
                 <Allowance t={t} route={route} model={effective.model} cost={usage?.cost} open={card?.which === "account"} onOpen={opener("account")} onWidth={setFigureWidth} />
-                <Chip t={t} {...chipLooks.thinking} label="Thinking" value={chips.thinking} words={shown.thinking} open={card?.which === "Thinking"} onOpen={opener("Thinking")} />
-                <Chip t={t} {...chipLooks.permissions} label="Permissions" value={chips.permissions} words={shown.permissions} open={card?.which === "Permissions"} onOpen={opener("Permissions")} />
-                <Chip t={t} {...chipLooks.tools} label="Tools" value={chips.tools} words={shown.tools} open={card?.which === "Tools"} onOpen={opener("Tools")} />
+                <Chip t={t} {...chipLooks.thinking} label="Thinking" value={chips.thinking} words={shown.thinking} open={card?.which === "Thinking"} onOpen={opener("Thinking")} floor={ruler["icon"]} />
+                {/* A foot narrower than the icons alone: the bar's end is cut, under the controls' edge,
+                    rather than anything being drawn over anything else. */}
+                <View flexShrink={1} minWidth={0} overflow="hidden" borderRadius={999}>
+                  <StackBar
+                    segments={bar}
+                    collapsed={fit.look === "collapsed" ? collapsed : undefined}
+                    open={openKey}
+                    onOpen={openSegment}
+                    // The shield, and the whole of a collapsed stack: everything, in the browser.
+                    onLead={(at) => setCard((was) => (was?.which === "stack" && was.key === "lead" ? null : { which: "stack", at, key: "lead" }))}
+                  />
+                </View>
               </>
             )}
             {plan !== null && plan.unresolved.length > 0 ? (
@@ -526,40 +637,56 @@ export function Composer({
           />
         </ChipCard>
       ) : null}
-      {card?.which === "Permissions" ? (
+      {card?.which === "stack" && card.key === "tools" ? (
+        // `tools`, the stack's last layer: today's Tools card over what the stack comes to, what this
+        // run answered marked on its lines — and its head's switch onto Everything, the same rows tagged
+        // with who decided each (§7.4).
         <ChipCard
           anchor={card.at}
-          label="Permissions"
-          origin={permissionsOrigin}
+          label="Tools"
+          origin={toolsOrigin}
           from={plan?.from}
           onReset={resetPermissionSet}
           onClose={close}
-          lead={<BucketPicker buckets={buckets} bucket={bucket} onPick={setPicked} />}
-          trail={
-            <KeepPermissionSet
-              bucket={bucket}
-              ready={onSavePermissionSet !== undefined && matched === undefined && Object.keys(map.entries).length > 0}
-              layers={saveLayers ?? ["project", "base"]}
-              onKeep={async (name, layer) => {
-                await onSavePermissionSet?.({ bucket, name, layer, permissionSet: declOfPermissionSet(map) });
-                onOverrides({ ...overrides });
-              }}
-            />
-          }
+          lead={<ToolsSwitch everything={everything} onEverything={setEverything} />}
         >
-          <Opts>
-            {rows.map((choice) => {
-              const permissionSet = parsePermissionSet(choice.decl).permissionSet;
-              return <Opt key={choice.id} on={matched?.id === choice.id} icon={modeMeta(permissionSetGlyph(choice)).icon as IconName} name={permissionSetLabel(choice)} hint={permissionSetHint(choice)} onPick={() => write(permissionSet, {})} />;
-            })}
-          </Opts>
-          <CardHint>{permissionsHintOf(rows.length, matched !== undefined, tools.length, bucket)}</CardHint>
+          {toolsBody}
         </ChipCard>
       ) : null}
-      {card?.which === "Tools" ? (
-        <ChipCard anchor={card.at} label="Tools" origin={toolsOrigin} from={plan?.from} onReset={resetPermissionSet} onClose={close}>
-          <ToolsBody offered={offered} map={map} parked={parked} cliRoute={cliRoute} write={write} setParked={setParked} />
-        </ChipCard>
+      {card?.which === "stack" && card.key === "lead" ? (
+        <StackBrowser
+          anchor={card.at}
+          host={cardHost}
+          layers={stack.layers}
+          tools={toolsCount}
+          runtime={runtimeCount}
+          actionsOf={actionsOf}
+          toolsBody={
+            <>
+              <View flexDirection="row" alignItems="center" marginBottom={6}>
+                <ToolsSwitch everything={everything} onEverything={setEverything} />
+              </View>
+              {toolsBody}
+            </>
+          }
+          onAdd={(reference) => stack.write(withLayerAdded(stack.form, reference))}
+          onClose={close}
+        />
+      ) : null}
+      {card?.which === "stack" && card.segment?.kind === "layer" ? (
+        <LayerCard key={card.segment.key} anchor={card.at} segment={liveLayer(card.segment)} host={cardHost} actions={actionsOf(liveLayer(card.segment))} onClose={close} />
+      ) : null}
+      {card?.which === "stack" && card.segment?.kind === "fold" ? (
+        <FoldCard anchor={card.at} layers={card.segment.layers} onOpenLayer={(layer) => setCard({ which: "stack", at: card.at, key: layer.key, segment: layer })} onClose={close} />
+      ) : null}
+      {card?.which === "stack" && card.segment?.kind === "add" ? (
+        <AddLayerCard
+          anchor={card.at}
+          host={cardHost}
+          start={stack.layers[0] !== undefined ? { reference: stack.layers[0].reference, id: stack.layers[0].id } : undefined}
+          onAdd={(reference) => stack.write(withLayerAdded(stack.form, reference))}
+          onClose={close}
+        />
       ) : null}
       {card?.which === "account" && account !== undefined ? <AccountCard anchor={card.at} account={account} cost={usage?.cost} others={limits.accounts.filter((a) => a.key !== account.key)} onClose={close} /> : null}
       {card?.which === "context" && usage !== undefined ? <ContextCard anchor={card.at} context={usage.context} total={usage.total} route={route} busy={busy} onCompact={usage.onCompact} onClose={close} /> : null}
@@ -601,7 +728,7 @@ function FullWriter({ t, value, onValue, placeholder, canSend, onSend, onClose }
   );
 }
 
-/** Whether there is a tray to tuck under the frame. */
+/** Whether there is a tray to tuck under the frame, or a first line over the text. */
 const has = (tray: ReactNode): boolean => tray !== undefined && tray !== null && tray !== false;
 
 /** Measure a chip's box in the window and hand it to what opens from it. */
@@ -612,6 +739,14 @@ function useOpener(onOpen: (at: FloatRect) => void): [React.MutableRefObject<RNV
 
 /** The live note's words: what a message sent now would do. */
 const LIVE_WORDS = { steerable: "joins this turn", busy: "waits for this turn" } as const;
+
+/** The chips before the stack, whose words drop in steps; the stack is the Permissions and Tools chips now (decision 0023 §4.1). */
+const FOOT_CHIPS = ["model", "thinking"] as const;
+const EMPTY_SETTINGS: ChatSettings = {};
+const NO_OPEN = (): void => undefined;
+/** Everything is read, never written. */
+const NO_WRITE = (): void => undefined;
+const NO_PARK = (): void => undefined;
 
 /** A chip's box: a pill, padding 3 9, a 1px edge, at most 210; its icon and its words 5 apart. */
 const CHIP_BOX = { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, borderWidth: 1, borderStyle: "solid", maxWidth: 210 } as const;
@@ -634,12 +769,14 @@ function ChipFace({ t, icon, lead, own, words, lit }: { t: Tokens; icon?: IconNa
  * A chip: one question, its icon and its answer; open, its card's ground and edge. `words`: the answer
  * as the foot's step has it — shorter, or none — while its title says it in full.
  */
-function Chip({ t, icon, lead, label, value, words, own, open, onOpen }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; words: string | null; own: boolean; open: boolean; onOpen: (at: FloatRect) => void }): JSX.Element {
+function Chip({ t, icon, lead, label, value, words, own, open, onOpen, floor = 0 }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; words: string | null; own: boolean; open: boolean; onOpen: (at: FloatRect) => void; floor?: number | undefined }): JSX.Element {
   const [ref, press] = useOpener(onOpen);
   return (
     // The chip stretches to its wrap rather than sizing to its words, so a wrap squeezed below them (the
-    // folded foot's model chip; a foot narrower than the icons) cuts them.
-    <RNView ref={ref} collapsable={false} style={{ minWidth: 0, flexShrink: 1, maxWidth: 210, ...NO_STACK } as never}>
+    // folded foot's model chip; a foot narrower than the icons) cuts them — but never below its icon
+    // (`floor`, the ruler's icon-only chip): squeezed past that, its glyph stood out of it over the
+    // account's figure after it. What is still too wide then is the stack bar's to give: its end is cut.
+    <RNView ref={ref} collapsable={false} style={{ minWidth: floor, flexShrink: 1, maxWidth: 210, ...NO_STACK } as never}>
     <Press
       onPress={press}
       title={`${label}: ${value}`}

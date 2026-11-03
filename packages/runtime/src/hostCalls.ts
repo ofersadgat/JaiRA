@@ -19,7 +19,7 @@
  */
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { ASK_USER_TOOL } from "@declarative-ai/agents-api";
-import { APPROVAL_PROMPT_FUNCTION, PERMISSION_CHECK } from "@jaira/shared";
+import { APPROVAL_PROMPT_FUNCTION, PERMISSION_CHECK, partApproval, type CommandApproval, type PartAnswer } from "@jaira/shared";
 
 /**
  * What `approve_tool_call` was called with, as the record keeps it — the WHOLE request, because the
@@ -51,8 +51,15 @@ export interface ApprovalCallAnswer {
   scope: string;
   /** "For this run", for a shell line: the widths of its asking parts the answer covers. */
   remember?: string[];
-  /** Who answered: the person, or nobody — a stop, the app closing, or the call that asked ending without it. */
-  by: "person" | "stopped" | "closed" | "abandoned";
+  /** Where that "for this run" answer holds, when a place was chosen (decision 0023 §3.8). */
+  place?: string;
+  /** The rows answered one by one, when they were (decision 0023 ruling 7) — each asking part's own answer and reach. */
+  answers?: PartAnswer[];
+  /**
+   * Who answered: the person, or nobody — a stop, the app closing, the call that asked ending without it,
+   * or the permissions changing under it so that it was no longer a question.
+   */
+  by: "person" | "stopped" | "closed" | "abandoned" | "permissions";
   /** How long the call waited on the answer. */
   waitedMs: number;
 }
@@ -121,7 +128,9 @@ export function approvalResultEntries(callId: string, calledBy: string | undefin
   const words =
     answer.decision === "allow"
       ? "allowed"
-      : answer.by === "person"
+      : answer.by === "permissions"
+        ? "denied: the permissions changed while it waited"
+        : answer.by === "person"
         ? "denied"
         : answer.by === "closed"
           ? "not answered: the app closed"
@@ -316,9 +325,9 @@ export function unansweredAsksOf(entries: readonly JsonValue[]): UnansweredAsk[]
  * `approve_tool_call` whose result the PERSON gave with widths to remember, paired with the parts its
  * call carried. What a run resumed in a new process remembers again (`ApprovalHub.rememberAgain`).
  */
-export function rememberedAnswersOf(entries: readonly JsonValue[]): Array<{ parts: JsonValue; decision: "allow" | "deny"; remember: string[] }> {
+export function rememberedAnswersOf(entries: readonly JsonValue[]): Array<{ parts: JsonValue; decision: "allow" | "deny"; remember: string[]; place?: string }> {
   const parts = new Map<string, JsonValue>();
-  const out: Array<{ parts: JsonValue; decision: "allow" | "deny"; remember: string[] }> = [];
+  const out: Array<{ parts: JsonValue; decision: "allow" | "deny"; remember: string[]; place?: string }> = [];
   for (const entry of entries) {
     for (const part of partsOf(entry)) {
       if (part["type"] === "tool_use" && part["name"] === APPROVAL_PROMPT_FUNCTION && typeof part["id"] === "string") {
@@ -328,9 +337,26 @@ export function rememberedAnswersOf(entries: readonly JsonValue[]): Array<{ part
       if (part["type"] === "tool_result" && typeof part["tool_use_id"] === "string") {
         const answer = part["data"] as Partial<ApprovalCallAnswer> | undefined;
         const asked = parts.get(part["tool_use_id"]);
-        if (asked === undefined || answer?.by !== "person" || !Array.isArray(answer.remember)) continue;
+        if (asked === undefined) continue;
+        if (answer?.by !== "person") continue;
+        // Rows answered one by one: each that reached past its call, as the one part it was about.
+        if (Array.isArray(answer.answers)) {
+          const approval = asked as unknown as CommandApproval;
+          if (!Array.isArray(approval.parts)) continue;
+          for (const row of answer.answers) {
+            if (typeof row.part !== "number" || row.reach === "once" || (row.decision !== "allow" && row.decision !== "deny")) continue;
+            out.push({
+              parts: partApproval(approval, row.part) as unknown as JsonValue,
+              decision: row.decision,
+              remember: typeof row.width === "string" ? [row.width] : [],
+              ...(typeof row.place === "string" && row.place !== "" ? { place: row.place } : {}),
+            });
+          }
+          continue;
+        }
+        if (!Array.isArray(answer.remember)) continue;
         if (answer.decision !== "allow" && answer.decision !== "deny") continue;
-        out.push({ parts: asked, decision: answer.decision, remember: answer.remember });
+        out.push({ parts: asked, decision: answer.decision, remember: answer.remember, ...(typeof answer.place === "string" && answer.place !== "" ? { place: answer.place } : {}) });
       }
     }
   }

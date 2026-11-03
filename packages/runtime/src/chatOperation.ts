@@ -46,11 +46,10 @@
 import { environmentOf, isOperationList, type ExecEnvironmentDecl, type LoadedState } from "@declarative-ai/hw";
 import type { InlineFamily, NamedParameter, PromptOp } from "@declarative-ai/exec";
 import type { JsonValue } from "@declarative-ai/json";
-import { ALWAYS_GRANTED_TOOLS, SHELL_TOOL, declaresTools, lowerPermissionSet, permissionsOfPermissionSet, permissionSetOfSettings } from "@jaira/shared";
+import { ALWAYS_GRANTED_TOOLS, SHELL_TOOL, declaresTools, lowerPermissionSet, permissionsOfPermissionSet, permissionSetOfSettings, type PermissionStackDecl } from "@jaira/shared";
 import type { ChatPlanView, ChatSettings, PermissionsDecl, SettingOrigin, ToolImplementation, UnresolvedSetting } from "@jaira/shared";
 import type { ReasoningSpec } from "@declarative-ai/llm";
 import { planAgentTools } from "./agentTools";
-import { claudePermissionSettings, compileClaudeScopeRules } from "./tools";
 
 
 /**
@@ -247,7 +246,12 @@ export function chatPlanFor(path: readonly (LoadedState | undefined)[], override
  * `undefined` for a state with no prompt operation. There is nowhere honest to put a model on a
  * composite, and writing one somewhere it might apply is worse than saying it did not apply.
  */
-export function stateWithChatSettings(state: LoadedState, settings: ChatSettings): LoadedState | undefined {
+export function stateWithChatSettings(
+  state: LoadedState,
+  settings: ChatSettings,
+  /** The stack the settings' set was composed from (decision 0023 §2.7), written beside it so a part names its layer. */
+  stack?: PermissionStackDecl,
+): LoadedState | undefined {
   const operation = promptCallOf(state);
   if (operation === undefined) return undefined;
   const config = { ...configOf(state) };
@@ -256,7 +260,7 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
   // A permission set is written as what it LOWERS to — the list and the block a loaded state holds —
   // so the state this returns is shaped like every other one the engine and the chat plan read.
   if (settings.permissionSet !== undefined) {
-    const lowered = lowerPermissionSet(permissionSetOfSettings(settings).permissionSet, settings.permissions);
+    const lowered = lowerPermissionSet(permissionSetOfSettings(settings).permissionSet, undefined, stack);
     return {
       ...state,
       operation: { ...operation, config: config as typeof operation.config },
@@ -278,7 +282,7 @@ export function stateWithChatSettings(state: LoadedState, settings: ChatSettings
       // A block that carries `subjects` holds a shell whose mode the plan showed as authored, so it
       // is lowered again (the shell back to `ask`); any other block goes in as it came.
       ...(settings.permissions?.subjects !== undefined
-        ? { permissions: permissionsOfPermissionSet(permissionSetOfSettings(settings).permissionSet, settings.permissions.scopes) }
+        ? { permissions: permissionsOfPermissionSet(permissionSetOfSettings(settings).permissionSet) }
         : settings.permissions !== undefined
           ? { permissions: settings.permissions }
           : {}),
@@ -346,7 +350,7 @@ export function chatOperationOf(plan: ChatPlan, args: { message: string; session
       // lowered again, which puts the shell's entry back to the `ask` the plan showed as its
       // authored mode (decision 0007 §4); any other block travels as it came.
       ...(settings.permissionSet !== undefined || settings.permissions?.subjects !== undefined
-        ? { permissions: permissionsOfPermissionSet(permissionSetOfSettings(settings).permissionSet, settings.permissions?.scopes) }
+        ? { permissions: permissionsOfPermissionSet(permissionSetOfSettings(settings).permissionSet) }
         : settings.permissions !== undefined
           ? { permissions: settings.permissions }
           : {}),
@@ -385,14 +389,7 @@ function agentToolWiring(settings: ChatSettings): {
   // ONE map, whichever way the settings spelled it — a permission set, or the list, the block and the
   // implementations map an inherited declaration arrives as (`permissionSetOfSettings`).
   const plan = planAgentTools(permissionSetOfSettings(settings).permissionSet);
-  // The scope table, compiled into the agent's own rules, so its built-ins are bounded UP FRONT
-  // rather than one callback at a time. Our gate stays underneath for what rules cannot express.
-  const scoped = settings.permissions?.scopes === undefined
-    ? { allow: [], ask: [], deny: [] }
-    : compileClaudeScopeRules(settings.permissions.scopes);
-  const rules = claudePermissionSettings({ allow: scoped.allow, ask: scoped.ask, deny: scoped.deny });
-  return {
-    environment: { tools: plan.inject },
-    config: Object.keys(rules).length > 0 ? { providerOptions: rules as unknown as JsonValue } : {},
-  };
+  // Where a kept built-in may act is a place map on its line, compiled into the agent's own rules at
+  // the executor (`withAgentPermissionSet`, decision 0023 §3.9) — which knows the route and the root.
+  return { environment: { tools: plan.inject }, config: {} };
 }

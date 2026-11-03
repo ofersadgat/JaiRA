@@ -252,3 +252,25 @@ describe("config.storage", () => {
     });
   });
 });
+
+describe("a bucket's standing layers (`permissions.layers`, decision 0023 §2.6 step 2, §7.3)", () => {
+  it("reads each bucket's list, oldest first, and defaults to none", () => {
+    expect(parseConfig({}).permissions).toEqual({ layers: {} });
+    expect(parseConfig({ permissions: { layers: { chat: ["$/permission-sets/project/build-safe"], "feature/implementation": [" $/permission-sets/web/docs "] } } }).permissions).toEqual({
+      layers: { chat: ["$/permission-sets/project/build-safe"], "feature/implementation": ["$/permission-sets/web/docs"] },
+    });
+  });
+
+  it("layers like every setting: a project's list for a bucket replaces the shared root's for that bucket, and leaves the others", () => {
+    const base = { permissions: { layers: { chat: ["$/permission-sets/shared/a"], app: ["$/permission-sets/shared/b"] } } };
+    const project = { permissions: { layers: { chat: [] } } };
+    expect(parseConfig(mergeConfigDocuments(base, project)).permissions.layers).toEqual({ chat: [], app: ["$/permission-sets/shared/b"] });
+  });
+
+  it("refuses what it cannot read, naming the field — a standing layer that silently reads as nothing is a rule nobody has", () => {
+    expect(() => parseConfig({ permissions: { layers: { chat: "$/permission-sets/x/y" } } })).toThrow("config.permissions.layers.chat must be a list of permission set references");
+    expect(() => parseConfig({ permissions: { layers: { chat: [""] } } })).toThrow(/config\.permissions\.layers\.chat/);
+    expect(() => parseConfig({ permissions: { layers: { "/chat": [] } } })).toThrow(/a bucket is a folder path/);
+    expect(() => parseConfig({ permissions: { stack: {} } })).toThrow(/config\.permissions/);
+  });
+});

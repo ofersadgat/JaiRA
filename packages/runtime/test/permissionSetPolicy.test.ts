@@ -111,7 +111,7 @@ describe("compilePolicy", () => {
 
   it("reads them in a RUN too: upstream hands the narrowing the block whole, `subjects` and `source` included", () => {
     const policy = compilePolicy({});
-    const lowered = lowerPermissionSet(parsePermissionSet({ shell: "deny", "git status": "allow", read_file: "allow", other: "deny" }).permissionSet, undefined, "$/permission-sets/x/y");
+    const lowered = lowerPermissionSet(parsePermissionSet({ shell: "deny", "git status": "allow", read_file: "allow", other: "deny" }).permissionSet, "$/permission-sets/x/y");
     const narrowed = (command: string, block: unknown) => {
       const input = { command };
       const mode = policy.scopeOf!({ name: "shell" }, input as never, block as never);
@@ -141,7 +141,7 @@ describe("compilePolicy", () => {
 
 describe("planAgentTools", () => {
   it("serves and keeps the same tools from a permission set as from its lowered block — and removes the rest", () => {
-    const permissionSet = parsePermissionSet({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, shell: { function: "smart" } }).permissionSet;
+    const permissionSet = parsePermissionSet({ read_file: "allow", glob: { mode: "ask", implementation: "native" }, shell: "smart" }).permissionSet;
     const lowered = lowerPermissionSet(permissionSet);
     const fromMap = planAgentTools(permissionSet);
     expect(planAgentTools(permissionSetOfEnvironment(lowered.tools, lowered.permissions))).toEqual(fromMap);
@@ -151,7 +151,7 @@ describe("planAgentTools", () => {
   });
 
   it("hands an agent TOOLS only — a command subject or `script` is not one", () => {
-    const plan = planAgentTools(parsePermissionSet({ shell: { function: "smart" }, "git commit": "ask", script: "deny", other: "deny" }).permissionSet);
+    const plan = planAgentTools(parsePermissionSet({ shell: "smart", "git commit": "ask", script: "deny", other: "deny" }).permissionSet);
     expect(plan.inject).toEqual(["show_artifact", "shell"]);
   });
 
@@ -275,7 +275,7 @@ describe("a conversation turn", () => {
     const written = stateWithChatSettings(host({}), { permissionSet: { read_file: "allow", "git status": "allow", other: "deny" } });
     expect(written?.environment).toEqual({
       tools: ["read_file"],
-      permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", subjects: { "git status": "allow" }, functions: {} },
+      permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", subjects: { "git status": "allow" }, functions: {}, places: {} },
     });
   });
 });

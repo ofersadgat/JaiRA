@@ -12,6 +12,9 @@
  * is `shellCommand.ts`; the verdicts are `@jaira/runtime`'s `policy.ts`.
  */
 import type { PermissionMode } from "./operationVocabulary";
+import type { PlaceWidth } from "./places";
+import type { PlaceKind } from "./toolVocabulary";
+import type { WritableLayer } from "./view";
 
 /** Offsets into the ORIGINAL line, `end` exclusive — `line.slice(start, end)` is the text. */
 export interface TextSpan {
@@ -48,7 +51,7 @@ export type CommandPartKind =
 /**
  * The answers a part can have. A line runs only if every part is `allowed`.
  *
- * `function` is a part whose permission set entry names a FUNCTION (`"shell": { "function": "smart" }`) and
+ * `function` is a part whose permission set entry names a FUNCTION (`"shell": "smart"`) and
  * which has not been put to it yet — `decidedBy.function` says which. It is never what a person is
  * shown: the approver the host hands the engine calls the function for each such part before anybody
  * is asked, and the part is then `allowed` or `denied` by it, or `asks` when the function failed. It
@@ -112,6 +115,20 @@ export interface CommandPart {
      * `function`), and on one it answered (source `function`).
      */
     function?: string;
+    /**
+     * The PLACE of the entry's line that answered (decision 0023 §3), as the line writes it —
+     * `packages/app`, `claude/**`, `github.com` — when a place did, as against the line's own mode.
+     * What lets a row say "in packages/app · build-safe allows".
+     */
+    place?: string;
+    /**
+     * The LAYER of the stack that set the deciding line — at {@link place} where a place answered
+     * (decision 0023 §2.7): a set's id (`chat/ask-first`, `app/build`), `inline` for lines written on
+     * a state, `tools` for the conversation's own, `runtime` for an answer given in this task. Absent
+     * where no layer decided — the built-ins, `.jaira/`, the parser, the floor — or where the judging
+     * set came with no stack.
+     */
+    layer?: string;
     /** A sentence a person can read. */
     reason: string;
   };
@@ -120,9 +137,20 @@ export interface CommandPart {
    * `["terraform plan", "terraform"]`, `["rm"]`, `["script"]`, `["write_file"]`. Never the line.
    */
   widths: string[];
+  /**
+   * Where the part acts, as the dialog offers it (decision 0023 §3.8): the kind of place, the place the
+   * part is about (the path, the URL, the branch), and the place WIDTHS an answer may be remembered
+   * at, narrowest first — a path's file, folder, package, project and anywhere; a URL's page, host,
+   * `*.parent` and anywhere; a branch, its `prefix/**` and any branch. Absent when the part names no
+   * place that can be read. What "for this run" stores beside a width (`CommandGrants`).
+   */
+  where?: { kind: PlaceKind; at: string; widths: PlaceWidth[] };
   /** The embedders it was opened out of, outermost first — `["bash"]`, `["find"]`, `["sudo"]`. */
   via?: string[];
-  /** Index of the part whose span encloses this one (`rm {}` inside its `find`), when there is one. */
+  /**
+   * Index of the part this one is judged under: the part whose span encloses it (`rm {}` inside its
+   * `find`), or the runner whose gate it passed (`script` under `runner:npm`), when there is one.
+   */
   within?: number;
 }
 
@@ -145,6 +173,13 @@ export interface CommandApproval {
    * approval's reason line names, and what "add to the permission set" writes into.
    */
   permissionSet?: string;
+  /**
+   * The stack the line was judged under (decision 0023 §2.6), as its layers' ids NEWEST first —
+   * `runtime` and `tools` among them where they are layers of it — what the dialog's "Add to" lists
+   * (§4.4). Which of them a line can be written into is the host's to say (`PendingApproval.layers`).
+   * Absent when the judging set came with no stack.
+   */
+  stack?: string[];
 }
 
 /** {@link CommandApproval.permission set} for a permission set with no file of its own. */
@@ -188,6 +223,73 @@ export function entriesToRemember(
     if (width !== undefined && part.widths.includes(width)) out[width] = mode;
   }
   return out;
+}
+
+/**
+ * One ROW's answer (decision 0023 ruling 7, §4.4): a person answering one asking part of a shell line
+ * on its own — allow or deny, at one of its widths, at one of its places, and how far. What
+ * `approval:submit` carries in `answers` when the rows were answered one by one, and what the record
+ * keeps of it.
+ *
+ *  - `once`: this call only.
+ *  - `run`: remembered for this task's run, at `width` and `place` (`CommandGrants`).
+ *  - `add`: written into a layer of the stack (`layer`, its `addTo` file) as `"{width}": "{decision}"`,
+ *    or at `place` as `"{width}": { "{place}": "{decision}" }` — and remembered for the run as well.
+ */
+export interface PartAnswer {
+  /** The part's index in {@link CommandApproval.parts} — one that asks. */
+  part: number;
+  decision: "allow" | "deny";
+  reach: "once" | "run" | "add";
+  /** One of the part's {@link CommandPart.widths}; absent, its narrowest. */
+  width?: string;
+  /** One of the part's {@link CommandPart.where} places; absent, everywhere. */
+  place?: string;
+  /** For `add`: the layer of the stack, by id (`project/build-safe`); absent, the set that asked. */
+  layer?: string;
+  /** For `add`: which file of that layer — this project's (`project`) or the shared root's (`base`). */
+  addTo?: WritableLayer;
+}
+
+/** The approval narrowed to one of its parts — what remembering or writing ONE row's answer works on. */
+export function partApproval(approval: CommandApproval, index: number): CommandApproval {
+  const part = approval.parts[index];
+  if (part === undefined) return { ...approval, parts: [] };
+  // Alone, it is judged under nothing: `within` indexed the whole line.
+  const alone: CommandPart = { ...part };
+  delete alone.within;
+  return { ...approval, parts: [alone] };
+}
+
+/**
+ * What answers given row by row come to for the CALL: it runs only when every part that asks was
+ * allowed — a shell call needs every part allowed — so one denied row, or one left unanswered, refuses
+ * it (the other rows' answers are still kept).
+ */
+export function partAnswersDecision(approval: CommandApproval, answers: readonly PartAnswer[]): "allow" | "deny" {
+  return approval.parts.every((part, index) => part.verdict !== "asks" || answers.some((a) => a.part === index && a.decision === "allow")) ? "allow" : "deny";
+}
+
+/**
+ * Why these row answers cannot be taken for this approval, or `undefined` when they can: each names a
+ * part that asks, once, with a width and a place that part offers, and a reach it can have (a part with
+ * no width — a line nobody could read — is answered for this call alone).
+ */
+export function partAnswersProblem(approval: CommandApproval, answers: readonly PartAnswer[]): string | undefined {
+  const seen = new Set<number>();
+  for (const answer of answers) {
+    const part = approval.parts[answer.part];
+    if (part === undefined || part.verdict !== "asks") return `part ${answer.part} is not a part of this line that asks`;
+    if (seen.has(answer.part)) return `part ${answer.part} is answered twice`;
+    seen.add(answer.part);
+    if (answer.decision !== "allow" && answer.decision !== "deny") return `part ${answer.part}'s answer is neither allow nor deny`;
+    if (answer.reach !== "once" && answer.reach !== "run" && answer.reach !== "add") return `part ${answer.part}'s reach '${String(answer.reach)}' is not once, run or add`;
+    if (answer.width !== undefined && !part.widths.includes(answer.width)) return `'${answer.width}' is not a width part ${answer.part} offers`;
+    if (answer.place !== undefined && !(part.where?.widths ?? []).some((w) => w.place === answer.place)) return `'${answer.place}' is not a place part ${answer.part} offers`;
+    if (answer.reach !== "once" && part.widths.length === 0) return `part ${answer.part} could not be read well enough to remember an answer about it`;
+    if (answer.reach === "add" && answer.addTo === undefined) return `part ${answer.part} is added to a layer without saying which file of it`;
+  }
+  return undefined;
 }
 
 /** How strict each verdict is: allowed ▸ function ▸ asks ▸ denied. */

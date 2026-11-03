@@ -48,7 +48,7 @@ const JUDGE = `export const judge = {
 /** A state whose permission set hands every shell command nothing else names to `reference`. */
 const guarded = (reference: string): Record<string, unknown> => ({
   label: "Guarded",
-  environment: { tools: { read_file: "allow", shell: { function: reference }, other: "deny" } },
+  environment: { tools: { read_file: "allow", shell: reference, other: "deny" } },
   operation: { prompt: "go", output: { report: { schema: { type: "string" } } } },
   outputs: { report: { binding: ".operation.output.report" } },
 });

@@ -12,6 +12,10 @@ import {
   SMART_FUNCTION,
   entryOfDecl,
   isFunctionMode,
+  loosestMode,
+  MODE_WHEN_UNSET,
+  sameMode,
+  strictestMode,
   permissionSetsAt,
   runnerSubject,
   subjectKindOf,
@@ -82,14 +86,14 @@ export function usersOf(name: string, columns: SetColumn[]): Array<{ id: string;
     if (name === SMART_FUNCTION || !(name in column.decl)) {
       if (name !== SMART_FUNCTION) continue;
       const lines = Object.entries(column.decl).filter(([, entry]) => {
-        const mode = entryOfDecl(entry as never).mode;
+        const mode = entryOfDecl(entry).mode;
         return isFunctionMode(mode) && mode.function === name;
       });
       if (lines.length > 0) out.push({ id: column.id, says: lines.length === Object.keys(column.decl).length ? `every line (${lines.length})` : `${lines.length} line${lines.length === 1 ? "" : "s"}` });
       continue;
     }
-    const mode = entryOfDecl(column.decl[name] as never).mode;
-    out.push({ id: column.id, says: modeMeta(mode).label });
+    const parts = entryOfDecl(column.decl[name]);
+    out.push({ id: column.id, says: parts.unavailable === true ? "unavailable" : modeMeta(parts.mode ?? MODE_WHEN_UNSET).label });
   }
   return out;
 }
@@ -136,21 +140,49 @@ export function defaultsSummary(name: string, writer: Writer | null): string {
   return parts.length === 0 ? "defaults" : parts.map(([k, v]) => `${k}: ${String(v)}`).join(" · ");
 }
 
-/** A cell's look: its mode's word, `fn` for a function, `none` for a set that does not offer it. */
+/** A cell's look: its mode's word, `fn` for a function, `none` for a set that does not offer it, `unavailable` for one that hides it. */
 export function modeClass(mode: PermissionSetMode | undefined): string {
   if (mode === undefined) return "none";
   if (isFunctionMode(mode)) return "fn";
   return mode;
 }
 
-/** A cell: the mode a set gives a function, its words and its tooltip. */
-export function cellOf(column: SetColumn, name: string): { mode: PermissionSetMode | undefined; text: string; title: string } {
+/** A mode as a cell writes it: its word, or `☆ {function}`. */
+const cellWord = (mode: PermissionSetMode): string => (isFunctionMode(mode) ? `☆ ${mode.function}` : mode);
+
+/**
+ * A cell: the mode a set gives a function, its words, its tooltip and its look (`kind`, as
+ * {@link modeClass} says it, or `unavailable`).
+ *
+ * A line with places (decision 0023 §3) is one cell still: its own mode — the map's `**` — and how many
+ * places it names, `ask · 3 places`; with no `**`, `3 places`, coloured as the LOOSEST of them (what the
+ * gate is handed for it, §3.10), and the tooltip says from what to what. A line that says `unavailable`
+ * reads so: the set hides the tool from the model.
+ */
+export function cellOf(column: SetColumn, name: string): { mode: PermissionSetMode | undefined; text: string; title: string; kind: string } {
   const entry = column.decl[name];
-  const mode = entry === undefined ? undefined : entryOfDecl(entry as never).mode;
+  if (entry === undefined) return { mode: undefined, text: "—", title: `${column.id} does not offer ${name}`, kind: "none" };
+  const parts = entryOfDecl(entry);
+  if (parts.unavailable === true) return { mode: undefined, text: "unavailable", title: `${column.id}: not offered — the agent never sees ${name} — open it`, kind: "unavailable" };
+  const places = Object.values(parts.places ?? {});
+  const mode = parts.mode;
+  if (places.length === 0) {
+    return {
+      mode,
+      text: mode === undefined ? "—" : cellWord(mode),
+      title: mode === undefined ? `${column.id} does not offer ${name}` : `${column.id}: ${modeMeta(mode).hint} — open it`,
+      kind: modeClass(mode),
+    };
+  }
+  const count = `${places.length} ${places.length === 1 ? "place" : "places"}`;
+  const loosest = loosestMode(...places) ?? places[0]!;
+  const strictest = strictestMode(...places) ?? places[0]!;
+  const range = sameMode(loosest, strictest) ? cellWord(loosest) : `from ${cellWord(loosest)} to ${cellWord(strictest)}`;
   return {
-    mode,
-    text: mode === undefined ? "—" : isFunctionMode(mode) ? `☆ ${mode.function}` : mode,
-    title: mode === undefined ? `${column.id} does not offer ${name}` : `${column.id}: ${modeMeta(mode).hint} — open it`,
+    mode: mode ?? loosest,
+    text: mode !== undefined ? `${cellWord(mode)} · ${count}` : count,
+    title: `${column.id}: ${mode !== undefined ? `${cellWord(mode)} elsewhere` : "elsewhere, as a less specific line says"}; at ${count} ${range} — open it`,
+    kind: modeClass(mode ?? loosest),
   };
 }
 

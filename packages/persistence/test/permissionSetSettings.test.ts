@@ -140,7 +140,7 @@ describe("writePermissionSet", () => {
     const before = readFileSync(join(builtIn, "permission-sets/chat/read-only.json"), "utf8");
     expect(() => writePermissionSet(paths, "chat/read-only", "system", SHIPPED)).toThrow(/read-only/);
     expect(() => writePermissionSet(paths, "../escape", "project", SHIPPED)).toThrow();
-    expect(() => writePermissionSet(paths, "chat/x", "project", { read_file: "sometimes" } as never)).toThrow(/not a permission set/);
+    expect(() => writePermissionSet(paths, "chat/x", "project", { read_file: 7 } as never)).toThrow(/not a permission set/);
     write(paths.jairaDir, "permission-sets/chat/yam.yaml", "read_file: allow\n");
     expect(() => writePermissionSet(paths, "chat/yam", "project", { read_file: "ask" })).toThrow(/YAML/);
     expect(readFileSync(join(builtIn, "permission-sets/chat/read-only.json"), "utf8")).toBe(before);

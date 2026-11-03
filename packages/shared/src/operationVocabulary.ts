@@ -15,7 +15,6 @@
  * but they are display strings ABOUT the vocabulary — `slotTypes.ts` already carries the same kind of
  * thing for the same reason, and the schema reference panel wants exactly these words.
  */
-import type { Scope } from "./scopes";
 import type { PermissionSetChoice } from "./permissionSetBuckets";
 import type { PermissionSetDecl } from "./permissionSets";
 
@@ -90,7 +89,7 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
   // diagnostics for the block.
   { name: "tools", key: "tools", type: "list", label: "Tools", group: "operation",
     placeholder: "a permission set map, in JSON",
-    hint: "a permission set: a map from a tool or a command to allow / ask / deny or { \"function\": … }, or a reference to one — `{}` drops the inherited ones" },
+    hint: "a permission set: a map from a tool or a command to allow / ask / deny / unavailable, a function's name, or a map of places, or a reference to one — `{}` drops the inherited ones" },
   { name: "model", key: "model", type: "string", label: "Model", group: "model",
     kinds: ["prompt"], prominent: true,
     placeholder: "claude-sonnet-5, or claude-cli/sonnet to pin the route",
@@ -155,11 +154,49 @@ export const CONVERSATION_MODES = ["full_history", "summary", "fresh", "selected
 
 /**
  * The three FIXED modes a permission set entry may say (DESIGN §5.1, decision 0007). The fourth kind of
- * answer is not a word: a {@link FunctionMode} names a function that decides each call — see
- * {@link PermissionSetMode}. (`smart` was a fourth word until 2026-09-22; it is the shipped function of that
- * name now, `{ "function": "smart" }`.)
+ * answer is not one of these words: any OTHER string names a function that decides each call
+ * (`"web_fetch": "smart"`, decision 0023 §1), held in memory as a {@link FunctionMode} — see
+ * {@link PermissionSetMode}. (`smart` was a fourth word until 2026-09-22; it is the shipped function of
+ * that name, and since 2026-11-02 the string `"smart"` is how a line names it.)
+ *
+ * {@link UNAVAILABLE} is a decision too, but not a mode: it says the model is not handed the tool, so
+ * nothing is left to decide about a call to it.
  */
 export const PERMISSION_MODES = ["allow", "deny", "ask"] as const;
+
+/**
+ * The fourth word a line may say (decision 0023 §1, ruling 4): the tool is NOT HANDED to the model at
+ * all, rather than handed and refused. Written on a tool, an MCP server's or tool's line, and `shell`;
+ * never on a command, a runner, `script`, `other`, or a place — the model cannot be shown part of a
+ * shell, and what it is shown is per tool, not per place. It is what the composer's Tools card writes
+ * when a tool is unticked over a layer that offers it, so it only means something in a stack: an
+ * EFFECTIVE set (`composePermissionSetLayers`) never holds it, the line is simply absent.
+ */
+export const UNAVAILABLE = "unavailable";
+
+/**
+ * The words a decision string may be that are NOT function names. No function may be named one of
+ * these, in any case: `"Allow"` is refused rather than read as a function called `Allow`.
+ */
+export const RESERVED_DECISION_WORDS: readonly string[] = [...PERMISSION_MODES, UNAVAILABLE];
+
+/**
+ * A decision as AUTHORED (decision 0023 §1): one of the {@link PERMISSION_MODES}, {@link UNAVAILABLE},
+ * or any other non-empty string, which names a function. Plain `string`, because the function's name
+ * is free text; `parsePermissionSet` says which a given string is.
+ */
+export type PermissionDecisionDecl = string;
+
+/**
+ * A PLACE MAP as authored: place → decision (`{ "src": "allow", "infra": "deny", "**": "ask" }`). A map
+ * speaks only at its places (§3.4); `**` is how it gives itself a default. `unavailable` is refused
+ * inside one. A path literally named `mode` or `implementation` is written `./mode`, because an object
+ * whose keys are only those two is the entry wrapper (`PermissionSetEntryDecl`).
+ */
+export type PlaceMapDecl = Record<string, PermissionDecisionDecl>;
+
+/** A line's value as authored: a decision everywhere, or a place map (decision 0023 §1). */
+export type PermissionModeDecl = PermissionDecisionDecl | PlaceMapDecl;
 
 /** True when a field is authorable on an operation of this kind. */
 export function fieldAppliesTo(field: { kinds?: readonly string[] }, kind: "prompt" | "function"): boolean {
@@ -193,7 +230,11 @@ export interface ReasoningDecl {
 export type PermissionMode = (typeof PERMISSION_MODES)[number];
 
 /**
- * A mode that is a FUNCTION: `{ "function": "smart" }` (decision 0007, amended 2026-09-22).
+ * A mode that is a FUNCTION, as held IN MEMORY: `{ function: "smart" }` (decision 0007, amended
+ * 2026-09-22). AUTHORED, a function is a bare string that is no mode word — `"shell": "smart"`
+ * (decision 0023 §1); `{ "function": … }` was the spelling until 2026-11-02, every file was migrated,
+ * and nothing reads it any more. In memory the object stays, so a function can never be mistaken for a
+ * fixed mode by a `===`.
  *
  * The function is handed what an approver would be shown — the tool, the subject the entry answers
  * for, and for a shell line the PART being judged with its arguments and working directory, plus the
@@ -226,7 +267,7 @@ export const SMART_FUNCTION = "smart";
  */
 export const APPROVAL_PROMPT_FUNCTION = "approve_tool_call";
 
-/** `{ "function": "smart" }` — the mode the shipped `auto` permission sets give every line. */
+/** `smart` as a mode in memory — what the shipped `auto` permission sets give every line, authored `"smart"`. */
 export const SMART_MODE: FunctionMode = Object.freeze({ function: SMART_FUNCTION }) as FunctionMode;
 
 /**
@@ -285,18 +326,49 @@ export function sameMode(a: PermissionSetMode | undefined, b: PermissionSetMode 
   return a === b;
 }
 
-/** A mode as one short word for a summary line: the fixed word, or the function's reference. */
+/**
+ * A mode as one short word — for a summary line, and as the AUTHORED spelling: the fixed word, or the
+ * function's reference, which is exactly how a line names a function (decision 0023 §1).
+ */
 export function modeWord(mode: PermissionSetMode): string {
   return isFunctionMode(mode) ? mode.function : mode;
 }
 
 /**
+ * How strict a mode is: deny ▸ ask ▸ function ▸ allow (decision 0023 §3.2). A function sits between
+ * `allow` and `ask` because it may let the call through without anybody asked, and may refuse it —
+ * the same place `decideCommand` ranks a `function` verdict.
+ */
+export function modeStrictness(mode: PermissionSetMode): number {
+  if (isFunctionMode(mode)) return 1;
+  return mode === "allow" ? 0 : mode === "ask" ? 2 : 3;
+}
+
+/**
+ * The strictest of several modes, the first met among equals (two different functions are equally
+ * strict, and the one met first stands). `undefined` for none.
+ */
+export function strictestMode(...modes: readonly PermissionSetMode[]): PermissionSetMode | undefined {
+  let out: PermissionSetMode | undefined;
+  for (const mode of modes) if (out === undefined || modeStrictness(mode) > modeStrictness(out)) out = mode;
+  return out;
+}
+
+/** The loosest of several modes, the first met among equals. `undefined` for none. */
+export function loosestMode(...modes: readonly PermissionSetMode[]): PermissionSetMode | undefined {
+  let out: PermissionSetMode | undefined;
+  for (const mode of modes) if (out === undefined || modeStrictness(mode) < modeStrictness(out)) out = mode;
+  return out;
+}
+
+/**
  * A `permissions` block in the shape the upstream engine takes — what a permission set LOWERS to.
  *
- * An author writes a permission set in `tools` (`permissionSets.ts`, decision 0007) and, here, only `scopes`;
- * everything else in this block is written by lowering (`permissionsOfPermissionSet`) and read back by
- * `permissionSetOfEnvironment`. The engine still knows a `profile` and a `default`; nothing JaiRA writes
- * carries either, and the linter refuses an authored one.
+ * An author writes a permission set in `tools` (`permissionSets.ts`, decision 0007) and nothing here:
+ * every key of this block is written by lowering (`permissionsOfPermissionSet`) and read back by
+ * `permissionSetOfEnvironment`. Where a tool may act is a place map on its line (decision 0023 §3); the
+ * state table `permissions.scopes` is gone and the linter refuses it. The engine still knows a `profile`
+ * and a `default`; nothing JaiRA writes carries either, and the linter refuses an authored one.
  */
 export interface PermissionsDecl {
   /**
@@ -315,13 +387,26 @@ export interface PermissionsDecl {
    */
   other?: PermissionMode;
   /**
-   * WHERE each tool may act — see `scopes.ts`.
+   * WRITTEN BY LOWERING, never authored, and on EVERY lowered map (empty when no line has places): each
+   * line's PLACE MAP (decision 0023 §3), by subject, as authored — `{ "read_file": { "**": "deny",
+   * "docs/product": "allow" } }`, the line's own mode as its `**` where it has one, and each place's
+   * decision in its authored spelling: `allow`, `ask`, `deny`, or a FUNCTION by name.
    *
-   * The axis a mode alone cannot express: `write_file: "allow"` is allow-everywhere, and what anybody
-   * actually means is "under `app/`". Unmatched denies, so a table naming only the sandbox IS the
-   * sandbox and widening is the thing you have to write.
+   * Authored words, not gate modes, because nothing upstream reads this key: `tools` and `subjects`
+   * hold gate modes only because the upstream gate reads them, and {@link functions} exists to carry
+   * what a gate mode cannot say. A place's function is therefore found HERE, by the narrowing and by
+   * `decideCommand`, and routed to its function the way a line's is.
+   *
+   * Where a line has places, this is the line: `tools` holds its LOOSEST answer for the gate (decision
+   * 0023 §3.10), and `subjects` its own mode where it has one; `permissionSetOfEnvironment` reads the
+   * line back from here. Always written, for the reason {@link functions} is: `permissions` merges per
+   * key down the `environment` chain, and a child whose map wrote no places would otherwise judge its
+   * own `read_file: "allow"` at its parent's places.
+   *
+   * Where the old state table `permissions.scopes` was: those tables were moved onto lines as place
+   * maps (decision 0023 §3.7) and the key is gone. An executor's `scopes` are a separate FLOOR, kept.
    */
-  scopes?: Scope[];
+  places?: Record<string, Record<string, string>>;
   /**
    * WRITTEN BY LOWERING, never authored: a permission set's command subjects and `script`, with their modes
    * (`"git commit": "allow"`). A map-form state reaches the engine as a list and this block, and
@@ -355,6 +440,26 @@ export interface PermissionsDecl {
   source?: string;
   /** WRITTEN BY LOWERING, never authored: a permission set entry's `implementation`, by tool. */
   implementations?: Record<string, ToolImplementation>;
+  /**
+   * WRITTEN BY LOWERING, never authored, on every map a STATE lowers: the stack of layers the set was
+   * composed from (decision 0023 §2.6) and who set each line (§2.7) — what a part's row names as its
+   * layer (`CommandPart.decidedBy.layer`) and what an approval lists for "Add to". Written on every
+   * such map for the reason {@link functions} is: a child's map must never name its parent's layers.
+   */
+  stack?: PermissionStackDecl;
+}
+
+/**
+ * A stack of permission sets as a lowered block, or a turn's policy, carries it (decision 0023 §2.7).
+ *
+ * `layers` oldest first, each by its id (`chat/ask-first`, `app/build`, `inline`, `tools`) and, for a
+ * layer in a file, the reference it was read through. `lines` is who set each line — by normalized
+ * subject, `other` included: the layer behind its own mode (`everywhere`), behind each other place, and
+ * behind its implementation. Absent for a stack of one layer, which set every line.
+ */
+export interface PermissionStackDecl {
+  layers: Array<{ id: string; reference?: string }>;
+  lines?: Record<string, { everywhere?: string; places: Record<string, string>; implementation?: string }>;
 }
 
 /** A tool a caller may be granted. */
@@ -369,7 +474,10 @@ export interface ToolChoice {
 }
 
 /**
- * FROZEN — the tools the `read-only` preset let through, and so the tools `chat/read-only` allows.
+ * FROZEN — the tools the `read-only` preset let through, and so the tools `chat/read-only` allows IN
+ * THE PROJECT: since decision 0023 §7.1 its `read_file`, `glob` and `grep` are place maps that allow in
+ * `$PROJECT` and `$WORKTREE` and ask elsewhere and at a credential, and the test that holds the file to
+ * this list reads each line at `$PROJECT`.
  *
  * The composer's four presets were functions of a tool (`modeFor`); they are permission set FILES now
  * (`$SYSTEM/permission-sets/chat/*.json`, decision 0007 §2), and "which preset is this" is `matchPermissionSet` in
@@ -409,13 +517,25 @@ export interface ChatSettings {
    */
   implementations?: Record<string, ToolImplementation>;
   /**
-   * The same three things as ONE map — a permission set, subject → mode (`permissionSets.ts`, decision 0007).
+   * The same three things as ONE permission set (`permissionSets.ts`, decision 0007) — and, since
+   * decision 0023, the conversation's STACK of them (§2.6, ruling 8):
    *
-   * When present it is the whole answer and `tools`, `permissions.tools` / `default` / `other` and
-   * `implementations` are not read; `permissions.scopes` still is, because where a tool may act is
-   * not part of a permission set. This is what the composer WRITES — picking a permission set row, ticking a tool
-   * or changing a mode sends the whole map — and the three fields above are what a state's lowered
-   * block still arrives as; `permissionSetOfSettings` reads either.
+   * ```json
+   * { "layers": ["$/permission-sets/chat/ask-first", "$/permission-sets/web/docs-sites"], "write_file": "allow", "glob": "unavailable" }
+   * ```
+   *
+   * `layers[0]` is the bottom layer (the preset), the rest are the conversation's own layers (§2.6
+   * step 3), and the lines written beside them are the TOOLS layer (step 5): what the composer's Tools
+   * card ticks and moves, `unavailable` for a tool unticked over a layer that offers it. The bucket's
+   * standing layers (`permissions.layers.<bucket>` in settings, step 2) go between the bottom and the
+   * rest, and the run's answers (step 4) between the rest and the tools — neither is written here.
+   * A map with no `layers` is a stack of one layer, the tools layer, over the `chat` bucket's standing
+   * layers. The service follows the references (`resolveChatPermissionStack`) before a turn runs;
+   * `permissionSetOfSettings` reads a map that has none.
+   *
+   * When present it is the whole answer and `tools`, `permissions` and `implementations` are not
+   * read — where a tool may act is a place map on its line; the three fields above are what a state's
+   * lowered block still arrives as.
    */
   permissionSet?: PermissionSetDecl;
 }

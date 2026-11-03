@@ -186,7 +186,7 @@ export interface GenerateVersionResult {
 /** Load a state and its closure from the LIVE layers — the project's files first, the rest found on the path. */
 function loadLive(project: Project, rootRef: string, extra: Record<string, unknown> = {}): WorkflowBundle {
   const files = { ...readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }), ...extra };
-  return loadWorkflowBundle(files, rootRef, workflowLoadOptions(project.paths, { path: project.config.workflows.path }));
+  return loadWorkflowBundle(files, rootRef, { ...workflowLoadOptions(project.paths, { path: project.config.workflows.path }), standingLayers: project.config.permissions.layers });
 }
 
 /** Only what the root reaches — so a version's identity never varies with a state it no longer mounts. */
@@ -445,7 +445,7 @@ function graft(project: Project, frozen: WorkflowBundle, generated: GenerateResu
   // The keys it already mounts are STUBS here: only their names matter to a wire, and the real
   // states come from the frozen copy below. `children: {}` keeps the directory from supplying any.
   for (const child of Object.values(root.children ?? {})) scaffold[`${sourceStateId(child.state)}.json`] ??= { children: {} };
-  const lowered = loadWorkflowBundle(scaffold, rootId, workflowLoadOptions(project.paths, { path: project.config.workflows.path }));
+  const lowered = loadWorkflowBundle(scaffold, rootId, { ...workflowLoadOptions(project.paths, { path: project.config.workflows.path }), standingLayers: project.config.permissions.layers });
   const loweredRoot = lowered.states[lowered.rootId]!;
 
   const added = Object.keys(generated.additions.children);

@@ -48,7 +48,7 @@ export function readEventsWorkflow(project: Project): EventsWorkflowReading {
   const bundle = loadWorkflowBundle(
     readWorkflowFiles(project.paths.workflowsDir, { onError: () => undefined }),
     EVENTS_WORKFLOW,
-    workflowLoadOptions(project.paths, { path: project.config.workflows.path }),
+    { ...workflowLoadOptions(project.paths, { path: project.config.workflows.path }), standingLayers: project.config.permissions.layers },
   );
   const root = bundle.states[bundle.rootId] as { transitions?: ReadonlyArray<{ name?: string; to?: string }> } | undefined;
   const lines = (root?.transitions ?? []).map((t, i) => t.name ?? t.to ?? `#${i + 1}`);

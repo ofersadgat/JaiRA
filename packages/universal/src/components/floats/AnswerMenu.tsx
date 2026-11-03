@@ -1,6 +1,6 @@
 import { Fragment, type JSX } from "react";
 import { Text, View, isWeb } from "@tamagui/core";
-import { hueOf, type AnswerMenu, type HintPiece, type Reach } from "@jaira/ui/approvalModel";
+import { hueOf, type AnswerMenu, type HintPiece, type Reach, type WhatChoice } from "@jaira/ui/approvalModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
 import { Press, Txt, edge, font, lengthToken } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -9,7 +9,8 @@ import { MenuLayer } from "../MenuLayer";
 import { Float } from "./Float";
 
 /**
- * The approval's answer menu: what the answer covers — a segmented choice per distinct set of widths
+ * The approval's answer menu — the aggregate Allow's and Deny's, and Continue's once a row was answered
+ * by hand (its heading says what it answers): what the answer covers — a segmented choice per distinct set of widths
  * among the asking parts, each by its part's colour — then how far it reaches, the default ticked, then
  * why something is not offered. Below its split button, start-aligned, over everything. How it looks:
  *
@@ -60,6 +61,11 @@ export function AnswerMenuCard({
   };
   const body = (
     <>
+      {menu.heading !== undefined ? (
+        <Txt spec={HINT} paddingTop={4} paddingHorizontal={7} paddingBottom={menu.what.length > 0 ? 0 : 4}>
+          {menu.heading}
+        </Txt>
+      ) : null}
       {menu.what.length > 0 ? (
         <>
           <View flexDirection="column" gap={4} paddingTop={4} paddingHorizontal={7} paddingBottom={6}>
@@ -67,52 +73,7 @@ export function AnswerMenuCard({
             {menu.what.map((choice) => (
               <View key={choice.key} flexDirection="row" alignItems="center" gap={7}>
                 {menu.what.length > 1 ? <View width={9} height={9} borderRadius={3} backgroundColor={colorOf(t, hueOf(choice.part)) as never} flexShrink={0} /> : null}
-                <View
-                  flexGrow={1}
-                  flexShrink={1}
-                  flexDirection="row"
-                  overflow="hidden"
-                  borderWidth={1}
-                  borderStyle="solid"
-                  borderColor={t.v("line") as never}
-                  borderRadius={lengthToken(t, "control-radius", 7) as never}
-                  backgroundColor={t.v("panel") as never}
-                  role="radiogroup"
-                  aria-label={menu.whatLabel}
-                >
-                  {choice.options.map((option, i) => {
-                    const on = choice.chosen === option.width;
-                    const spec = { voice: "app", scale: 11 / 12.5, weight: on ? 650 : 500, color: on ? "text" : "dim" } as const;
-                    return (
-                      <Press
-                        key={option.width}
-                        onPress={() => onChoose(choice.key, option.width)}
-                        flexGrow={1}
-                        flexShrink={1}
-                        // `flex: 1 1 0` on a button whose own edge counts: the one with the rule to its left
-                        // starts that rule wider (1px, as Chromium lays it out at this density).
-                        flexBasis={i > 0 ? hairline() : 0}
-                        flexDirection="row"
-                        alignItems="center"
-                        justifyContent="center"
-                        gap={4}
-                        paddingVertical={4}
-                        paddingHorizontal={9}
-                        {...(i > 0 ? edge(t, { left: 1 }) : {})}
-                        box={({ hovered }) => ({ backgroundColor: on ? t.mix(t.v("accent"), 13, "transparent") : hovered ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}
-                        {...((isWeb ? { role: "radio", "aria-checked": on } : {}) as object)}
-                      >
-                        {/* The button is a flex row (gap 4): each run of words is an item of its own, its
-                            edge spaces gone — "every", the width, "command". */}
-                        {(option.program ? ["every", option.width, "command"] : option.server !== undefined ? ["every", option.server, "tool"] : [option.width]).map((words, k) => (
-                          <Txt key={k} spec={spec} {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}>
-                            {words}
-                          </Txt>
-                        ))}
-                      </Press>
-                    );
-                  })}
-                </View>
+                <Segments label={menu.whatLabel} options={widthSegments(choice)} chosen={choice.chosen} onChoose={(width) => onChoose(choice.key, width)} />
               </View>
             ))}
           </View>
@@ -179,10 +140,84 @@ export function AnswerMenuCard({
   );
 }
 
-const HINT = { voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: "tok-hint" } as const;
+export const HINT = { voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: "tok-hint" } as const;
+
+/** One segment of a {@link Segments} choice: its key, and its words as runs (each a flex item, its edge spaces gone). */
+export interface Segment {
+  key: string;
+  words: string[];
+  title?: string;
+}
+
+/** A width choice's segments: `git commit` | `every git command`, an MCP server's `every figma tool`. */
+export function widthSegments(choice: WhatChoice): Segment[] {
+  return choice.options.map((option) => ({
+    key: option.width,
+    words: option.program ? ["every", option.width, "command"] : option.server !== undefined ? ["every", option.server, "tool"] : [option.width],
+  }));
+}
+
+/**
+ * A segmented choice inside a menu or a panel: the segments share the width, the chosen one tinted.
+ * 1px --line, radius --control-radius, --panel, clipped; each segment centred, padding 4 9, app
+ * 11/12.5 at 500 (650 on), --dim, a --line between; on: --accent at 13%, --text. The segments are radios.
+ */
+export function Segments({ label, options, chosen, onChoose, testID }: { label: string; options: readonly Segment[]; chosen: string; onChoose: (key: string) => void; testID?: string }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View
+      flexGrow={1}
+      flexShrink={1}
+      flexDirection="row"
+      overflow="hidden"
+      borderWidth={1}
+      borderStyle="solid"
+      borderColor={t.v("line") as never}
+      borderRadius={lengthToken(t, "control-radius", 7) as never}
+      backgroundColor={t.v("panel") as never}
+      role="radiogroup"
+      aria-label={label}
+      {...(testID !== undefined ? { testID } : {})}
+    >
+      {options.map((option, i) => {
+        const on = chosen === option.key;
+        const spec = { voice: "app", scale: 11 / 12.5, weight: on ? 650 : 500, color: on ? "text" : "dim" } as const;
+        return (
+          <Press
+            key={option.key}
+            onPress={() => onChoose(option.key)}
+            {...(option.title !== undefined ? { title: option.title } : {})}
+            flexGrow={1}
+            flexShrink={1}
+            // `flex: 1 1 0` on a button whose own edge counts: the one with the rule to its left
+            // starts that rule wider (1px, as Chromium lays it out at this density).
+            flexBasis={i > 0 ? hairline() : 0}
+            flexDirection="row"
+            alignItems="center"
+            justifyContent="center"
+            gap={4}
+            paddingVertical={4}
+            paddingHorizontal={9}
+            {...(i > 0 ? edge(t, { left: 1 }) : {})}
+            box={({ hovered }) => ({ backgroundColor: on ? t.mix(t.v("accent"), 13, "transparent") : hovered ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}
+            {...((isWeb ? { role: "radio", "aria-checked": on } : {}) as object)}
+          >
+            {/* The button is a flex row (gap 4): each run of words is an item of its own, its edge
+                spaces gone — "every", the width, "command". */}
+            {option.words.map((words, k) => (
+              <Txt key={k} spec={spec} {...((isWeb ? { whiteSpace: "nowrap" } : {}) as object)}>
+                {words}
+              </Txt>
+            ))}
+          </Press>
+        );
+      })}
+    </View>
+  );
+}
 
 /** The rule between the menu's parts: a --line, 1 tall, 3 above and below, 4 in. */
-function Rule(): JSX.Element {
+export function Rule(): JSX.Element {
   const t = useTokens();
   return <View height={1} marginVertical={3} marginHorizontal={4} backgroundColor={t.v("line") as never} />;
 }

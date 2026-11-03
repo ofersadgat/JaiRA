@@ -7,12 +7,18 @@ import {
   DEFAULT_PERMISSION_SET_BUCKET,
   heldTools,
   matchPermissionSet,
+  ownLinesOf,
+  parsePermissionSet,
+  PERMISSION_SET_LAYERS_KEY,
+  PERMISSION_SET_REF_KEY,
   permissionSetBuckets,
   permissionSetLabel,
   permissionSetOfSettings,
   permissionSetsOfBucket,
   type ChatPlanView,
+  type ChatSettings,
   type ModelParametersView,
+  type PermissionSet,
   type PermissionSetChoice,
 } from "@jaira/shared/browser";
 
@@ -41,7 +47,7 @@ export const ROUTE_BORROWS: Record<string, string> = {
  * tools and what it matches, the effective values, and the route. `picked` is the bucket the person
  * chose on the Permissions card, if any.
  */
-export function composerFactsOf(plan: ChatPlanView | null, picked: string | undefined) {
+export function composerFactsOf(plan: ChatPlanView | null, picked: string | undefined, stackMap?: PermissionSet) {
   const settings = plan?.settings ?? {};
   const origin = plan?.origin ?? {
     model: "unset" as const,
@@ -57,7 +63,8 @@ export function composerFactsOf(plan: ChatPlanView | null, picked: string | unde
   // permission set's name is only what to CALL it, and no match means the map is nobody's — `custom`.
   const offered = plan?.available.tools ?? [];
   const registered = offered.map((tool) => tool.name);
-  const map = permissionSetOfSettings(settings).permissionSet;
+  // A stack's map is what its layers come to (`composerStack.ts`), handed in; until then the settings' own lines.
+  const map = stackMap ?? mapOfSettings(settings);
   const tools = heldTools(map);
   const permissionSets: readonly PermissionSetChoice[] = plan?.available.permissionSets ?? [];
   const buckets = permissionSetBuckets(permissionSets);
@@ -83,6 +90,20 @@ export function composerFactsOf(plan: ChatPlanView | null, picked: string | unde
   return { settings, origin, offered, registered, map, tools, permissionSets, buckets, openedOn, bucket, rows, matched, effective, cliRoute, current, route, permissionsOrigin, toolsOrigin };
 }
 export type ComposerFacts = ReturnType<typeof composerFactsOf>;
+
+/**
+ * The map a composer's settings say ON THEIR OWN: a whole map as it is, the lines a STACK writes beside
+ * its `layers` (decision 0023 §2.6 — what the layers come to is the engine's to compose), nothing for a
+ * bare reference, and the state's declaration where nothing is chosen. Never a parse of `layers` as a line.
+ */
+export function mapOfSettings(settings: ChatSettings): PermissionSet {
+  const node = settings.permissionSet as unknown;
+  if (typeof node === "string") return { entries: {} };
+  if (node !== null && typeof node === "object" && !Array.isArray(node) && (Object.hasOwn(node, PERMISSION_SET_LAYERS_KEY) || Object.hasOwn(node, PERMISSION_SET_REF_KEY))) {
+    return parsePermissionSet(ownLinesOf(node)).permissionSet;
+  }
+  return permissionSetOfSettings(settings).permissionSet;
+}
 
 /** The four chips' words at rest: the model, the thinking level, the permission set, the tools. */
 export function chipValuesOf(plan: ChatPlanView | null, facts: ComposerFacts, thinking: ModelParametersView | undefined): { model: string; thinking: string; permissions: string; tools: string } {

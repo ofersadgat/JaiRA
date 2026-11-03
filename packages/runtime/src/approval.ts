@@ -14,12 +14,13 @@
  * Upstream's `PermissionLedger` applies it; this hub only collects it.
  */
 import type { Approver, PermissionDecision, PermissionRequest, PermissionScope } from "@declarative-ai/permissions";
-import type { CommandApproval, PermissionAnswer, PermissionFunctionRequest } from "@jaira/shared";
+import { partApproval, type CommandApproval, type PartAnswer, type PermissionAnswer, type PermissionFunctionRequest } from "@jaira/shared";
 import { CommandGrants, approvalReasonOf, commandDecisionOf, type PolicyAuditEntry } from "./policy";
 import { withPermissionFunctions, type PermissionFunctionsOptions } from "./permissionFunctions";
 import { mcpCallOf } from "./mcpServers";
 import { canonical } from "./hostCalls";
 import { forgetRefusal, noteRefusal, rememberDenial } from "./refusals";
+import { rejudgeCall, type JudgingUnder, type Rejudged } from "./rejudge";
 
 /** Why an approval was refused, by the call's own input object — see {@link refusalOf}. */
 const REFUSALS = new WeakMap<object, string>();
@@ -78,8 +79,10 @@ export interface ApprovalRequest {
  * down), the app closing, or the call that asked ENDING without it (`abandoned`: the agent gave up on
  * the call — the claude CLI ends an MCP call it has heard nothing from in five minutes — so nobody
  * waits on the answer any more). What the conversation's record says of an answer nobody gave.
+ * `permissions`: the person changed the permissions while the call waited, and under the new ones it is
+ * no longer a question (`ApprovalHub.rejudge`).
  */
-export type ApprovalAnsweredBy = "person" | "stopped" | "closed" | "abandoned";
+export type ApprovalAnsweredBy = "person" | "stopped" | "closed" | "abandoned" | "permissions";
 
 /**
  * How far the person's answer reached, as they chose it — before the hub narrows what it hands
@@ -90,6 +93,17 @@ export interface ApprovalReach {
   scope: PermissionScope;
   /** The widths of the asking parts the answer covers, when it was given "for this run". */
   remember?: readonly string[];
+  /**
+   * Where the "for this run" answer holds, when a place width was chosen (decision 0023 §3.8) — one of
+   * the asking parts' `where.widths` places (`packages`, `claude/**`). Absent: at the widths, anywhere.
+   */
+  place?: string;
+  /**
+   * The rows answered one by one (decision 0023 ruling 7): each asking part's own answer, width, place
+   * and reach. Those that reach past this call are remembered part by part; `remember` and `place` are
+   * then not used.
+   */
+  answers?: readonly PartAnswer[];
 }
 
 /**
@@ -107,6 +121,8 @@ export interface SeededApproval {
 export interface ApprovalHubOptions {
   onRequest?: (request: ApprovalRequest) => void;
   onResolved?: (requestId: string, decision: PermissionDecision, by: ApprovalAnsweredBy, reach: ApprovalReach) => void;
+  /** A parked request whose rows changed when it was decided again under new permissions — the same id, asked anew. */
+  onUpdated?: (request: ApprovalRequest) => void;
   nextId?: () => string;
   now?: () => number;
   /**
@@ -118,8 +134,17 @@ export interface ApprovalHubOptions {
 
 interface Pending {
   request: ApprovalRequest;
+  /** The call as the gate was asked about it — the tool by the name it was asked as — for {@link ApprovalHub.rejudge}. */
+  call: PermissionRequest;
   resolve: (decision: PermissionDecision) => void;
 }
+
+/**
+ * What a task's parked calls are decided again under — registered by the turn or run that made them
+ * ({@link ApprovalHub.judgeWith}). `undefined` for a call it cannot speak for: another turn's, or a
+ * state whose block it does not hold.
+ */
+export type ApprovalJudge = (call: PermissionRequest, request: ApprovalRequest) => JudgingUnder | undefined;
 
 export class ApprovalHub {
   private readonly pending = new Map<string, Pending>();
@@ -143,6 +168,8 @@ export class ApprovalHub {
   private readonly stopping = new Set<string>();
   /** Answers given ahead of their calls, by task — see {@link seed}. */
   private readonly seeded = new Map<string, SeededApproval[]>();
+  /** What each task's parked calls are decided again under — see {@link judgeWith}. */
+  private readonly judges = new Map<string, Set<ApprovalJudge>>();
 
   constructor(private readonly options: ApprovalHubOptions = {}) {}
 
@@ -184,8 +211,8 @@ export class ApprovalHub {
    * lines — read back from the record when the run resumes in a new process. The answers are the
    * record's own: each was given about these parts, at these widths.
    */
-  rememberAgain(taskId: string, answers: ReadonlyArray<{ parts: CommandApproval; decision: "allow" | "deny"; remember: readonly string[] }>): void {
-    for (const answer of answers) this.grants(taskId).rememberParts(answer.parts, answer.decision, answer.remember.length > 0 ? answer.remember : undefined);
+  rememberAgain(taskId: string, answers: ReadonlyArray<{ parts: CommandApproval; decision: "allow" | "deny"; remember: readonly string[]; place?: string | undefined }>): void {
+    for (const answer of answers) this.grants(taskId).rememberParts(answer.parts, answer.decision, answer.remember.length > 0 ? answer.remember : undefined, answer.place);
   }
 
   list(): ApprovalRequest[] {
@@ -298,14 +325,18 @@ export class ApprovalHub {
     };
     const seeded = this.takeSeed(taskId, request.tool, req.input);
     if (seeded !== undefined) return Promise.resolve(this.answerSeeded(request, seeded));
-    return this.hold(request);
+    return this.hold(request, req);
   }
 
   /** A seeded answer, given to the call it was given for — remembering its parts as the person said. */
   private answerSeeded(request: ApprovalRequest, seeded: SeededApproval): PermissionDecision {
     const { parts, taskId } = request;
+    if (seeded.reach.answers !== undefined && parts !== undefined && taskId !== undefined) {
+      this.rememberAnswers(taskId, parts, seeded.reach.answers);
+      return { decision: seeded.decision, scope: "once" };
+    }
     if (seeded.reach.remember !== undefined && parts !== undefined && taskId !== undefined) {
-      this.grants(taskId).rememberParts(parts, seeded.decision, seeded.reach.remember.length > 0 ? seeded.reach.remember : undefined);
+      this.grants(taskId).rememberParts(parts, seeded.decision, seeded.reach.remember.length > 0 ? seeded.reach.remember : undefined, seeded.reach.place);
       return { decision: seeded.decision, scope: "once" };
     }
     return { decision: seeded.decision, scope: seeded.reach.scope };
@@ -341,11 +372,11 @@ export class ApprovalHub {
     };
     const seeded = this.takeSeed(context.taskId, parked.tool, request.input);
     if (seeded !== undefined) return Promise.resolve(this.answerSeeded(parked, seeded).decision);
-    return this.hold(parked).then((decided) => decided.decision);
+    return this.hold(parked, { tool: request.tool, input: request.input as PermissionRequest["input"], sessionId: "" }).then((decided) => decided.decision);
   }
 
   /** Park one request until it is answered — or refuse it, when nothing is listening to ask. */
-  private hold(request: ApprovalRequest): Promise<PermissionDecision> {
+  private hold(request: ApprovalRequest, call: PermissionRequest): Promise<PermissionDecision> {
     if (this.options.onRequest === undefined) {
       // Nobody is listening: refuse rather than hang the agent's tool loop.
       const unattended = this.options.unattended ?? { decision: "deny", scope: "once" };
@@ -353,7 +384,7 @@ export class ApprovalHub {
       return Promise.resolve(unattended);
     }
     return new Promise<PermissionDecision>((resolve) => {
-      this.pending.set(request.requestId, { request, resolve });
+      this.pending.set(request.requestId, { request, call, resolve });
       this.options.onRequest?.(request);
     });
   }
@@ -365,7 +396,8 @@ export class ApprovalHub {
    * its asking PARTS (`["git commit"]`, or `["git"]` to cover the program). It is the parts that are
    * remembered, never the line — so the answer handed upstream is `once` whatever `scope` said: a
    * wider scope there would remember the whole shell tool. `[]` remembers each asking part at its
-   * narrowest width.
+   * narrowest width. `place`, beside `remember`, keeps the answer at that place only (decision 0023
+   * §3.8): "for this run, in `packages`" does not allow the same command elsewhere.
    */
   decide(
     requestId: string,
@@ -375,6 +407,14 @@ export class ApprovalHub {
     /** Why a `deny` was given, when it was not a person's plain no — found again by {@link refusalOf}. */
     why?: string,
     by: ApprovalAnsweredBy = "person",
+    /** Where a "for this run" answer holds — see {@link ApprovalReach.place}. Ignored without `remember`. */
+    place?: string,
+    /**
+     * The rows answered one by one — see {@link ApprovalReach.answers}. Each that reaches past this call
+     * is remembered as its own part, at its own width and place, allow or deny; `remember` and `place`
+     * are not read beside it. `decision` is what the call comes to.
+     */
+    answers?: readonly PartAnswer[],
   ): boolean {
     const entry = this.pending.get(requestId);
     if (!entry) return false;
@@ -384,20 +424,87 @@ export class ApprovalHub {
     if (decision === "deny") {
       // Who said no, for the words the agent reads (`refusals.ts`): a person's plain no, or nobody — a
       // stop, the app closing, the call ending first, or a host answering for nobody there (`why`).
-      noteRefusal(entry.request.input, by !== "person" ? { kind: "nobody", why: by } : why !== undefined ? { kind: "nobody", why: "unattended", reason: why } : { kind: "person" });
+      // A call the permissions now refuse was noted with the rule that refuses it (`rejudge`).
+      if (by !== "permissions") noteRefusal(entry.request.input, by !== "person" ? { kind: "nobody", why: by } : why !== undefined ? { kind: "nobody", why: "unattended", reason: why } : { kind: "person" });
       // A no for longer than this call is the ledger's to remember, and its next refusal is this answer's.
-      if (by === "person" && why === undefined && scope !== "once" && remember === undefined) rememberDenial(entry.request.sessionId, entry.request.tool);
+      if (by === "person" && why === undefined && scope !== "once" && remember === undefined && answers === undefined) rememberDenial(entry.request.sessionId, entry.request.tool);
     }
     // What the person chose, before it is narrowed for upstream — the record keeps THIS.
-    const reach: ApprovalReach = { scope, ...(remember !== undefined ? { remember: [...remember] } : {}) };
-    if (remember !== undefined && parts !== undefined && taskId !== undefined) {
-      this.grants(taskId).rememberParts(parts, decision, remember.length > 0 ? remember : undefined);
+    const reach: ApprovalReach =
+      answers !== undefined ? { scope, answers: answers.map((a) => ({ ...a })) } : { scope, ...(remember !== undefined ? { remember: [...remember], ...(place !== undefined ? { place } : {}) } : {}) };
+    if (answers !== undefined) {
+      if (parts !== undefined && taskId !== undefined) this.rememberAnswers(taskId, parts, answers);
+      scope = "once";
+    } else if (remember !== undefined && parts !== undefined && taskId !== undefined) {
+      this.grants(taskId).rememberParts(parts, decision, remember.length > 0 ? remember : undefined, place);
       scope = "once";
     }
     const resolved: PermissionDecision = { decision, scope };
     entry.resolve(resolved);
     this.options.onResolved?.(requestId, resolved, by, reach);
+    // What was just remembered for this run may answer the task's other parked calls.
+    const remembered = answers !== undefined ? answers.some((a) => a.reach !== "once") : remember !== undefined;
+    if (remembered && taskId !== undefined) void this.rejudge(taskId);
     return true;
+  }
+
+  /**
+   * Say what a task's parked calls are decided again under ({@link rejudge}) — the turn or run that
+   * parks them, for as long as it runs. The answer lets go.
+   */
+  judgeWith(taskId: string, judge: ApprovalJudge): () => void {
+    const held = this.judges.get(taskId) ?? new Set<ApprovalJudge>();
+    held.add(judge);
+    this.judges.set(taskId, held);
+    return () => {
+      held.delete(judge);
+      if (held.size === 0 && this.judges.get(taskId) === held) this.judges.delete(taskId);
+    };
+  }
+
+  /**
+   * Decide a task's parked calls again (decision 0023, 2026-11-03): the permissions they were asked
+   * under changed — a layer picked, an answer let go of, another call answered for this run. A call the
+   * permissions now allow or refuse is answered so, by nobody (`permissions`); one still asking stays,
+   * its rows redrawn as they are now ({@link ApprovalHubOptions.onUpdated}). A call no judge speaks for
+   * is left as it was. Resolves once every call has been decided again.
+   */
+  async rejudge(taskId: string): Promise<void> {
+    const judges = [...(this.judges.get(taskId) ?? [])];
+    if (judges.length === 0) return;
+    for (const [requestId, entry] of [...this.pending]) {
+      if (entry.request.taskId !== taskId) continue;
+      const under = judges.map((judge) => judge(entry.call, entry.request)).find((each) => each !== undefined);
+      if (under === undefined) continue;
+      let again: Rejudged;
+      try {
+        again = await rejudgeCall(entry.call, under);
+      } catch {
+        continue; // Deciding again is a courtesy: a call it cannot decide stays the person's question.
+      }
+      // Answered while it was being decided again: the person's answer stands.
+      if (this.pending.get(requestId) !== entry) continue;
+      if ("decision" in again) {
+        if (again.decision === "deny") noteRefusal(entry.request.input, again.by ?? { kind: "rule", rule: "permission set" });
+        this.decide(requestId, again.decision, "once", undefined, undefined, "permissions");
+        continue;
+      }
+      // A part a function now decides: the question as it stands — a function is asked first, never
+      // instead of a person already asking.
+      const parts = again.ask.parts;
+      if (parts === undefined || parts.parts.some((part) => part.verdict === "function")) continue;
+      if (JSON.stringify(parts) === JSON.stringify(entry.request.parts)) continue;
+      entry.request = { ...entry.request, parts, ...(again.ask.reason !== undefined ? { reason: again.ask.reason } : {}) };
+      this.options.onUpdated?.(entry.request);
+    }
+  }
+
+  /** Remember, for a task's run, each row answer that reaches past its call — as its own part. */
+  private rememberAnswers(taskId: string, parts: CommandApproval, answers: readonly PartAnswer[]): void {
+    for (const answer of answers) {
+      if (answer.reach === "once") continue;
+      this.grants(taskId).rememberParts(partApproval(parts, answer.part), answer.decision, answer.width !== undefined ? [answer.width] : undefined, answer.place);
+    }
   }
 
   /**

@@ -26,7 +26,7 @@
 import { isCommandRunner } from "./commandRunners";
 import type { TextSpan } from "./commandParts";
 import { walkPowerShell } from "./powershellCommand";
-import { EMBEDDERS, POWERSHELL_ALIASES, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
+import { EMBEDDERS, PACKAGE_SCRIPT_RUNNERS, POWERSHELL_ALIASES, isHarmlessVariable, isShellLocalName, type EmbedderSpec } from "./shellTables";
 import type { ShellToken as Token, ShellWalk as Walk } from "./shellWords";
 
 /**
@@ -563,6 +563,12 @@ const wordOf = (token: Token): CommandWord => ({
   ...(token.bound === true ? { bound: true } : {}),
 });
 
+/** A package manager's own flags that take the next word as their value: the workspace, the directory, a setting. */
+function managerValuedFlags(program: string): ReadonlySet<string> {
+  const runner = Object.hasOwn(PACKAGE_SCRIPT_RUNNERS, program) ? PACKAGE_SCRIPT_RUNNERS[program]! : undefined;
+  return new Set(runner === undefined ? [] : [...(runner.workspace ?? []), ...(runner.prefix ?? []), ...(runner.quietValued ?? [])]);
+}
+
 /** One `ParsedCommand` from a run of words, with no embedder opened. */
 function commandOf(words: Token[], start: number, via: string[], dialect: CommandDialect): ParsedCommand {
   const { program, alias } = commandNameOf(words[start]!.value, dialect);
@@ -570,6 +576,7 @@ function commandOf(words: Token[], start: number, via: string[], dialect: Comman
   const flags = rest.filter((t) => isFlag(t.value)).map((t) => t.value);
   const nonFlags: Token[] = [];
   const leading: string[] = [];
+  const valued = managerValuedFlags(program);
   for (let i = 0; i < rest.length; i++) {
     const token = rest[i]!;
     if (!isFlag(token.value)) {
@@ -578,8 +585,9 @@ function commandOf(words: Token[], start: number, via: string[], dialect: Comman
     }
     if (nonFlags.length === 0) leading.push(token.value);
     // `git -C <dir> reset` / `-c key=value`: a flag that consumes the next token,
-    // which must not be mistaken for the subcommand.
-    if (/^-(C|c|C=|c=)$/.test(token.value) || token.value === "--work-tree" || token.value === "--git-dir") {
+    // which must not be mistaken for the subcommand — nor a package manager's workspace or directory
+    // before it (`npm -w @jaira/app run build`).
+    if (/^-(C|c|C=|c=)$/.test(token.value) || token.value === "--work-tree" || token.value === "--git-dir" || (nonFlags.length === 0 && valued.has(token.value))) {
       if (i + 1 < rest.length && !isFlag(rest[i + 1]!.value)) i++;
     }
   }

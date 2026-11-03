@@ -217,6 +217,26 @@ describe("the request as a person reads it", () => {
     expect(drawn).toMatch(/1\s+git push origin main\s+git push\s+ASKS\s+built-in: pushes publish work/);
     expect(drawn).toContain("permission set: $/permission-sets/feature/build");
   });
+
+  it("says which layer of a stack decided each part, and where, and names the stack oldest first (decision 0023 §2.7)", () => {
+    const command = "npm run build && git commit -m x";
+    const judged = decideCommand({}, command).parts;
+    const [build, commit] = judged.parts;
+    const parts = {
+      ...judged,
+      permissionSet: "$/permission-sets/chat/ask-first",
+      stack: ["runtime", "project/build-safe", "chat/ask-first"],
+      parts: [
+        { ...build!, verdict: "allowed" as const, decidedBy: { source: "permissionSet" as const, entry: "npm run build", place: "packages/app", layer: "project/build-safe", reason: "" } },
+        { ...commit!, verdict: "asks" as const, decidedBy: { source: "permissionSet" as const, entry: "git commit", layer: "chat/ask-first", reason: "" } },
+      ],
+    };
+    const drawn = renderApproval({ requestId: "r", tool: "shell", command, input: { command }, sessionId: "s", at: 0, parts });
+    expect(drawn).toMatch(/1\s+npm run build\s+\S+\s+allowed\s+project\/build-safe "npm run build" in packages\/app/);
+    expect(drawn).toMatch(/2\s+git commit -m x\s+git commit\s+ASKS\s+chat\/ask-first "git commit"/);
+    expect(drawn).toContain("stack: chat/ask-first + project/build-safe, then this run");
+    expect(drawn).not.toContain("permission set: ");
+  });
 });
 
 /**
@@ -233,7 +253,7 @@ describe("permission sets under a CLI run", () => {
     "read-only": lowered({ read_file: "allow", glob: "allow", grep: "allow", other: "deny" }),
     "a shell with named commands": lowered({ shell: "deny", "git status": "allow", "node": "ask", read_file: "allow" }),
     "a native built-in, other ask": lowered({ edit: { mode: "ask", implementation: "native" }, shell: "ask", other: "ask" }),
-    "a shell a FUNCTION judges": lowered({ shell: { function: "judge" }, write_file: { function: "judge" }, read_file: "allow", other: "deny" }),
+    "a shell a FUNCTION judges": lowered({ shell: "judge", write_file: "judge", read_file: "allow", other: "deny" }),
     "no permission set": {},
   };
   /** What each host's runner would answer for `judge`: git and write_file may, nothing else. */
@@ -318,19 +338,20 @@ describe("the approval prompt a function calls, at a terminal", () => {
     const result = await approvals.prompt(APPROVAL_PROMPT_FUNCTION, { request: REQUEST as never });
     expect(result).toMatchObject({ error: { reason: expect.stringMatching(/^nobody can be asked — --non-interactive refuses every approval/) } });
     const run = governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } });
-    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet({ shell: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet), { run });
+    const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet({ shell: APPROVAL_PROMPT_FUNCTION, other: "deny" }).permissionSet), { run });
     expect(handed.shell).toMatchObject({ command: "ask" });
   });
 
   it("lets a line through that the person allows at the terminal, and refuses one they deny", async () => {
-    const environment = lowerPermissionSet(parsePermissionSet({ shell: { function: APPROVAL_PROMPT_FUNCTION }, other: "deny" }).permissionSet);
+    const environment = lowerPermissionSet(parsePermissionSet({ shell: APPROVAL_PROMPT_FUNCTION, other: "deny" }).permissionSet);
     const handedWith = (typed: string) => {
       const approvals = cliApprovals({ mode: "ask", ask: async () => typed, write: () => {} });
       return handedToClaude(environment, { run: governRun(config, approvals, { workspaceRoot: dir, functions: { run: runnerFor(approvals) } }) });
     };
     // The command the person allows runs — answered by the prompt, so the hub asked nobody; a file part
-    // or a script answers to its own line, which this map leaves to `other: deny`.
-    expect((await handedWith("y")).shell).toEqual({ command: "allow", read: "deny", write: "deny", script: "deny" });
+    // answers to its own line, which this map leaves to `other: deny`; a script with no `script` line is
+    // the shell's (decision 0023 §3.4), so the person answers it too.
+    expect((await handedWith("y")).shell).toEqual({ command: "allow", read: "deny", write: "deny", script: "allow" });
     // Every line they deny is refused, and a shell every line of which is refused is not a shell.
     const denied = await handedWith("n");
     expect(denied.shell).toEqual({});

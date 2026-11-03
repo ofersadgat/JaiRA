@@ -139,8 +139,8 @@ export interface OperationFieldsForm {
    *
    * Present only for a block this form may edit that way: `undefined` is a `tools` value that is no
    * permission set (a binding), which the `tools` box shows read-only. See `toolsFieldForm.ts`
-   * `showsToolsField`. The block's `permissions` (its `scopes`) is not a field here, and survives an
-   * edit untouched.
+   * `showsToolsField`. A block's `permissions` is lowering's and not a field here; whatever one holds
+   * survives an edit untouched.
    */
   toolsField?: ToolsFieldForm;
 }

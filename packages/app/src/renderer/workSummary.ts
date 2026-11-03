@@ -278,14 +278,14 @@ function heldWordsOf(kind: WorkKind, entry: WorkEntry, shell: Said): Said[] {
 }
 
 /** How it was answered — its result's `data` — or `undefined` while it waits. */
-export function approvalAnswerOf(entry: ToolEntry): { decision: "allow" | "deny"; scope: string; by: "person" | "stopped" | "closed" | "abandoned"; waitedMs: number } | undefined {
+export function approvalAnswerOf(entry: ToolEntry): { decision: "allow" | "deny"; scope: string; by: "person" | "stopped" | "closed" | "abandoned" | "permissions"; waitedMs: number } | undefined {
   const data = entry.detail as { decision?: unknown; scope?: unknown; by?: unknown; waitedMs?: unknown } | undefined;
   if (data === undefined || data === null || typeof data !== "object") return undefined;
   if (data.decision !== "allow" && data.decision !== "deny") return undefined;
   return {
     decision: data.decision,
     scope: typeof data.scope === "string" ? data.scope : "once",
-    by: data.by === "stopped" || data.by === "closed" || data.by === "abandoned" ? data.by : "person",
+    by: data.by === "stopped" || data.by === "closed" || data.by === "abandoned" || data.by === "permissions" ? data.by : "person",
     waitedMs: typeof data.waitedMs === "number" ? data.waitedMs : 0,
   };
 }
@@ -319,6 +319,11 @@ export function approvalWordsOf(entry: ToolEntry, waiting = true): { name: strin
     return waiting ? { name: "Approve", preview, tone: "plain", mark: "waiting" } : { name: "Not answered", preview, tone: "warn", mark: "cut" };
   }
   const after = answer.waitedMs >= 1000 ? ` · after ${secondsOf(answer.waitedMs)}` : "";
+  // Answered by the permissions changing under it (decision 0023): the stack it was asked under moved.
+  if (answer.by === "permissions") {
+    const preview = `the permissions changed while it waited${after}`;
+    return answer.decision === "allow" ? { name: "Approved", preview, tone: "plain", mark: "ok" } : { name: "Denied", preview, tone: "plain", mark: "denied" };
+  }
   if (answer.by !== "person") {
     const why = answer.by === "closed" ? "the app closed" : answer.by === "abandoned" ? "the agent gave up on the call" : "the run stopped";
     return { name: "Not answered", preview: `${why} while it waited${after}`, tone: "warn", mark: "cut" };

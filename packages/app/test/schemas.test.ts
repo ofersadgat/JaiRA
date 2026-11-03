@@ -144,7 +144,6 @@ describe("what must NOT be reported", () => {
           kind: "prompt",
           prompt: "…",
           conversation: { mode: "selected_artifacts", artifacts: ["plan"] },
-          permissions: { scopes: [{ path: "docs/**", default: "allow" }] },
           reasoning: { effort: "high", budgetTokens: 4096 },
           session: "planning",
         },
@@ -313,7 +312,8 @@ describe("what the schema offers the editor", () => {
 
   it("walks into the operation's own nested blocks", () => {
     const entry = schemaById("state-prompt")!;
-    expect(propertiesOf(entry, ["operation", "permissions"]).map((p) => p.key)).toEqual(["scopes"]);
+    // An author writes nothing in `permissions`: where a tool may act is a place map on its line (decision 0023 §3.7).
+    expect(propertiesOf(entry, ["operation", "permissions"]).map((p) => p.key)).toEqual([]);
     expect(propertiesOf(entry, ["operation", "conversation"]).map((p) => p.key)).toEqual(["mode", "artifacts"]);
     expect(propertiesOf(entry, ["operation", "reasoning"]).map((p) => p.key)).toEqual(["effort", "budgetTokens"]);
     expect(propertiesOf(entry, ["operation", "output"]).map((p) => p.key)).toContain("kind");

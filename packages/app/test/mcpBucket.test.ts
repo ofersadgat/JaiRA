@@ -48,7 +48,7 @@ describe("the model", () => {
   });
 
   it("a server with no line of its own shows `other`, and the first change writes its line", () => {
-    const permissionSet = setOf({ other: { function: "smart" } });
+    const permissionSet = setOf({ other: "smart" });
     expect(mcpGroupModeOf(permissionSet, "playwright")).toEqual({ function: "smart" });
     const next = withMcpServerMode(permissionSet, "playwright", "ask");
     expect(next.entries["mcp__playwright"]).toEqual({ kind: "mcp", mode: "ask" });
@@ -56,7 +56,7 @@ describe("the model", () => {
   });
 
   it("names a tool at what the server says of it — read-only allowed, destructive refused — else at the group's mode", () => {
-    let permissionSet = setOf({ mcp__playwright: { function: "smart" }, other: "deny" });
+    let permissionSet = setOf({ mcp__playwright: "smart", other: "deny" });
     const [snapshot, evaluate, click] = playwright.tools;
     permissionSet = withMcpTool(permissionSet, "playwright", snapshot!);
     permissionSet = withMcpTool(permissionSet, "playwright", evaluate!);
@@ -69,7 +69,7 @@ describe("the model", () => {
   });
 
   it("says what the group holds, open and folded", () => {
-    const permissionSet = setOf({ mcp__playwright: { function: "smart" }, mcp__playwright__browser_snapshot: { function: "smart" }, mcp__playwright__browser_evaluate: "deny", other: "deny" });
+    const permissionSet = setOf({ mcp__playwright: "smart", mcp__playwright__browser_snapshot: "smart", mcp__playwright__browser_evaluate: "deny", other: "deny" });
     const [group] = mcpGroupsOf(permissionSet, [playwright]);
     expect(mcpGroupHint(permissionSet, group!, true)).toBe("4 tools · 2 named here; any other playwright tool is decided by smart");
     expect(mcpGroupHint(permissionSet, group!, false)).toBe("4 tools · 2 named (browser_evaluate denied); the rest smart");

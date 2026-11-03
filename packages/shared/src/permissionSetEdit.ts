@@ -17,11 +17,44 @@
  * process calls it.
  */
 import { findNodeAtLocation, parse as parseJsonc, parseTree, type Node, type ParseError } from "jsonc-parser";
-import { isFunctionMode, type PermissionMode } from "./operationVocabulary";
-import { entryOfDecl, MODE_WHEN_UNSET, OTHER_SUBJECT, PERMISSION_SET_REF_KEY, type PermissionSetDecl, type PermissionSetEntryDecl } from "./permissionSets";
+import type { PermissionMode, PermissionModeDecl } from "./operationVocabulary";
+import {
+  entryDeclOf,
+  entryOfDecl,
+  mergePermissionMode,
+  MODE_WHEN_UNSET,
+  OTHER_SUBJECT,
+  isPermissionSetInstructionKey,
+  PERMISSION_SET_ICON_KEY,
+  PERMISSION_SET_LAYERS_KEY,
+  PERMISSION_SET_REF_KEY,
+  type PermissionSetDecl,
+  type PermissionSetEntryDecl,
+} from "./permissionSets";
 
-/** What a remembered answer writes: a subject and one of the two modes a person can answer with. */
-export type PermissionSetAddition = Record<string, Extract<PermissionMode, "allow" | "deny">>;
+/** One of the two answers a person can give, as a line writes it. */
+export type AdditionDecision = Extract<PermissionMode, "allow" | "deny">;
+
+/**
+ * What a remembered answer writes: a subject and one of the two modes a person can answer with — or,
+ * for an answer kept at a PLACE (decision 0023 §3.8, §4.4), that place and its decision
+ * (`"npm run build": { "packages": "deny" }`), merged into the line rather than replacing it.
+ */
+export type PermissionSetAddition = Record<string, AdditionDecision | Record<string, AdditionDecision>>;
+
+/**
+ * The value a line holds once an addition is written into it (decision 0023 §2.8): a plain decision
+ * replaces the line, since it covers everywhere; a place joins it — a line that is already a place map
+ * gains the place (the same place takes the newer decision), and a plain line `x` becomes
+ * `{ "**": x, "<place>": decision }`. The same rule a newer layer's line follows over an older one's
+ * (`mergePermissionMode`), because writing into a layer is saying something newer in it.
+ */
+export function addedValueOf(held: unknown, added: PermissionSetAddition[string]): unknown {
+  if (typeof added === "string") return added;
+  const mode = held !== null && typeof held === "object" && !Array.isArray(held) && Object.keys(held).every((key) => key === "mode" || key === "implementation") ? (held as Record<string, unknown>)["mode"] : held;
+  const readable = typeof mode === "string" || (mode !== null && typeof mode === "object" && !Array.isArray(mode));
+  return mergePermissionMode(readable ? (mode as PermissionModeDecl) : undefined, added);
+}
 
 const normalize = (subject: string): string => subject.trim().replace(/\s+/g, " ");
 
@@ -50,7 +83,7 @@ function appendProperty(text: string, root: Node, key: string, valueText: string
 /** The line(s) an addition writes, as a person reads them in the menu: `"git commit": "allow"`. */
 export function describeAddition(entries: PermissionSetAddition): string {
   return Object.entries(entries)
-    .map(([subject, mode]) => `${JSON.stringify(subject)}: ${JSON.stringify(mode)}`)
+    .map(([subject, mode]) => `${JSON.stringify(subject)}: ${inlineJson(mode)}`)
     .join(", ");
 }
 
@@ -59,7 +92,9 @@ export function overridePermissionSetText(follows: string, entries: PermissionSe
   if (!/^\$[A-Z]+\//.test(follows)) {
     throw new Error(`an override follows an explicit root ('$SYSTEM/…', '$BASE/…') — '${follows}' would find the override itself`);
   }
-  const lines = [`  ${JSON.stringify(PERMISSION_SET_REF_KEY)}: ${JSON.stringify(follows)}`, ...Object.entries(entries).map(([s, m]) => `  ${JSON.stringify(normalize(s))}: ${JSON.stringify(m)}`)];
+  // A place is written alone on the override's line: what the line says elsewhere is the lower
+  // layer's, which the override follows (decision 0023 §2.1 makes it the `**` when the two are merged).
+  const lines = [`  ${JSON.stringify(PERMISSION_SET_REF_KEY)}: ${JSON.stringify(follows)}`, ...Object.entries(entries).map(([s, m]) => `  ${JSON.stringify(normalize(s))}: ${inlineJson(m)}`)];
   return `{\n${lines.join(",\n")}\n}\n`;
 }
 
@@ -86,7 +121,7 @@ export function addToPermissionSetText(text: string, entries: PermissionSetAddit
   let out = text;
   for (const [rawSubject, mode] of Object.entries(entries)) {
     const subject = normalize(rawSubject);
-    if (subject.length === 0 || subject.startsWith("$") || subject === OTHER_SUBJECT) {
+    if (subject.length === 0 || subject.startsWith("$") || subject === OTHER_SUBJECT || isPermissionSetInstructionKey(subject)) {
       throw new Error(`'${rawSubject}' is not a subject an answer can be remembered at`);
     }
     const current = parseJsonc(out, [], { allowTrailingComma: true }) as Record<string, unknown>;
@@ -95,17 +130,14 @@ export function addToPermissionSetText(text: string, entries: PermissionSetAddit
     const held = current[key];
     const isEntryObject = held !== null && typeof held === "object" && !Array.isArray(held);
     const tree = parseTree(out, [], { allowTrailingComma: true })!;
-    // A value already there is replaced where it stands — the `mode` alone of an entry written as an
-    // object, so its implementation stays — and a new subject goes on a line of its own.
-    const node = (isEntryObject ? findNodeAtLocation(tree, [key, "mode"]) : undefined) ?? findNodeAtLocation(tree, [key]);
-    // A FUNCTION entry that chose an implementation (`{ "function": …, "implementation": … }`) has no
-    // `mode` to replace: the answer takes the function's place, and the implementation stays.
-    const implementation = isEntryObject && Object.hasOwn(held as object, "function") ? (held as { implementation?: unknown }).implementation : undefined;
-    const valueText =
-      typeof implementation === "string" && implementation !== "app"
-        ? `{ "mode": ${JSON.stringify(mode)}, "implementation": ${JSON.stringify(implementation)} }`
-        : JSON.stringify(mode);
-    out = node !== undefined ? out.slice(0, node.offset) + valueText + out.slice(node.offset + node.length) : appendProperty(out, tree, key, JSON.stringify(mode));
+    // A value already there is replaced where it stands — the `mode` alone of an entry written as the
+    // wrapper, so its implementation stays — and a new subject goes on a line of its own. A plain
+    // answer replaces a PLACE MAP whole, since it covers everywhere (decision 0023 §2.1); an answer at
+    // a place joins the line instead ({@link addedValueOf}).
+    const wrapper = isEntryObject && findNodeAtLocation(tree, [key, "mode"]) !== undefined && Object.keys(held as object).every((k) => k === "mode" || k === "implementation");
+    const node = (wrapper ? findNodeAtLocation(tree, [key, "mode"]) : undefined) ?? findNodeAtLocation(tree, [key]);
+    const valueText = inlineJson(addedValueOf(held, mode));
+    out = node !== undefined ? out.slice(0, node.offset) + valueText + out.slice(node.offset + node.length) : appendProperty(out, tree, key, valueText);
   }
   return out;
 }
@@ -116,23 +148,31 @@ export function addToPermissionSetText(text: string, entries: PermissionSetAddit
 // re-moded, lines taken out. Same rule — text in, text out, and nothing a person laid out is moved
 // that did not have to be.
 
-/** An entry as one comparable thing: a bare mode and `{ mode }` say the same, and ours is the default. */
+/**
+ * An entry as one comparable thing: a bare mode and `{ mode }` say the same, a function is its name
+ * however it is spaced, a place map is its places (`**` first), and ours is the default. One that does
+ * not read compares as what was written.
+ */
 function entryKey(entry: PermissionSetEntryDecl | undefined): string | undefined {
   if (entry === undefined) return undefined;
-  const { mode, implementation } = entryOfDecl(entry);
-  return `${JSON.stringify(mode)}/${implementation ?? "app"}`;
+  const parts = entryOfDecl(entry);
+  if (Object.keys(parts).length === 0) return `unread:${JSON.stringify(entry)}`;
+  return `${JSON.stringify(entryDeclOf({ ...parts, implementation: "app" }))}/${parts.implementation ?? "app"}`;
 }
 
-/** An entry as it is written on one line — a function as `{ "function": … }`, beside its implementation. */
-function entryText(entry: PermissionSetEntryDecl): string {
-  const { mode, implementation } = entryOfDecl(entry);
-  const own = implementation !== undefined && implementation !== "app";
-  if (isFunctionMode(mode)) {
-    return own
-      ? `{ "function": ${JSON.stringify(mode.function)}, "implementation": ${JSON.stringify(implementation)} }`
-      : `{ "function": ${JSON.stringify(mode.function)} }`;
+/** A value as one line of JSON, spaced as a person writes it: `{ "src": "allow", "**": "ask" }`. */
+function inlineJson(value: unknown): string {
+  if (value !== null && typeof value === "object" && !Array.isArray(value)) {
+    const fields = Object.entries(value as Record<string, unknown>).map(([k, v]) => `${JSON.stringify(k)}: ${inlineJson(v)}`);
+    return fields.length === 0 ? "{}" : `{ ${fields.join(", ")} }`;
   }
-  return own ? `{ "mode": ${JSON.stringify(mode)}, "implementation": ${JSON.stringify(implementation)} }` : JSON.stringify(mode);
+  return JSON.stringify(value);
+}
+
+/** An entry as it is written on one line — a function by its name, a place map inline, beside its implementation. */
+function entryText(entry: PermissionSetEntryDecl): string {
+  const parts = entryOfDecl(entry);
+  return Object.keys(parts).length === 0 ? inlineJson(entry) : inlineJson(entryDeclOf(parts));
 }
 
 /** Do two entries say the same thing? `other` left out reads as the mode an unset line reads as. */
@@ -154,7 +194,7 @@ export function overridesOf(base: PermissionSetDecl, next: PermissionSetDecl): {
   for (const [subject, entry] of Object.entries(next)) {
     if (!samePermissionSetEntry(subject, Object.hasOwn(base, subject) ? base[subject] : undefined, entry)) siblings[subject] = entry;
   }
-  const dropped = Object.keys(base).filter((subject) => subject !== OTHER_SUBJECT && !Object.hasOwn(next, subject));
+  const dropped = Object.keys(base).filter((subject) => subject !== OTHER_SUBJECT && !isPermissionSetInstructionKey(subject) && !Object.hasOwn(next, subject));
   return { siblings, dropped };
 }
 
@@ -233,6 +273,8 @@ export function setPermissionSetText(text: string, next: PermissionSetDecl, foll
     const key = keyOf(prop);
     const valueNode = prop.children![1]!;
     const replace = (value: string): string => out.slice(0, valueNode.offset) + value + out.slice(valueNode.offset + valueNode.length);
+    // The stack a file is built from, and its icon, are no lines: they stay as they are written.
+    if (key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY) continue;
     if (key === PERMISSION_SET_REF_KEY) {
       if (follows === undefined) out = removeProperty(out, root, index);
       else if (valueNode.value !== follows) out = replace(JSON.stringify(follows));

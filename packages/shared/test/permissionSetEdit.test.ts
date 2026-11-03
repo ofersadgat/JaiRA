@@ -123,3 +123,35 @@ describe("the widths an answer remembers", () => {
     expect(chosenWidths(approval, ["rm", "npm"])).toEqual(["git commit", "script"]);
   });
 });
+
+describe("adding a line over places and layers (decision 0023)", () => {
+  it("replaces a place map whole — a remembered answer is a plain decision, which covers everywhere — and keeps a wrapper's implementation", () => {
+    expect(JSON.parse(addToPermissionSetText('{ "read_file": { "**": "deny", "src": "allow" } }', { read_file: "allow" }))).toEqual({ read_file: "allow" });
+    expect(addToPermissionSetText('{ "edit": { "mode": { "src": "allow" }, "implementation": "native" } }', { edit: "deny" })).toBe('{ "edit": { "mode": "deny", "implementation": "native" } }');
+  });
+
+  it("refuses `layers`, which is no subject", () => {
+    expect(() => addToPermissionSetText("{}", { layers: "allow" })).toThrow(/not a subject/);
+  });
+});
+
+describe("adding an answer AT A PLACE, allow or deny (decision 0023 §2.8, §4.4)", () => {
+  it("joins the line: a new line is the place alone, a plain line becomes its `**`, a place map gains the place", () => {
+    expect(JSON.parse(addToPermissionSetText("{}", { "npm run build": { packages: "deny" } }))).toEqual({ "npm run build": { packages: "deny" } });
+    expect(JSON.parse(addToPermissionSetText('{ "npm run build": "ask" }', { "npm run build": { packages: "deny" } }))).toEqual({ "npm run build": { "**": "ask", packages: "deny" } });
+    expect(JSON.parse(addToPermissionSetText('{ "read_file": { "**": "deny", "src": "allow" } }', { read_file: { src: "deny", docs: "allow" } }))).toEqual({ read_file: { "**": "deny", src: "deny", docs: "allow" } });
+    // The wrapper keeps its implementation; the place joins its mode.
+    expect(JSON.parse(addToPermissionSetText('{ "edit": { "mode": "ask", "implementation": "native" } }', { edit: { src: "allow" } }))).toEqual({ edit: { mode: { "**": "ask", src: "allow" }, implementation: "native" } });
+  });
+
+  it("writes a place into a new override alone — elsewhere the line is the lower layer's", () => {
+    expect(overridePermissionSetText("$SYSTEM/permission-sets/chat/ask-first", { "npm run build": { packages: "deny" } })).toBe(
+      '{\n  "$ref": "$SYSTEM/permission-sets/chat/ask-first",\n  "npm run build": { "packages": "deny" }\n}\n',
+    );
+    expect(describeAddition({ "npm run build": { packages: "deny" }, git: "allow" })).toBe('"npm run build": { "packages": "deny" }, "git": "allow"');
+  });
+
+  it("refuses `icon`, which names the file's icon and is no subject", () => {
+    expect(() => addToPermissionSetText("{}", { icon: "allow" })).toThrow(/not a subject/);
+  });
+});

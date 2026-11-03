@@ -20,9 +20,9 @@ import type { FSWatcher } from "node:fs";
 import type { DirectedTransitions } from "@declarative-ai/hw";
 import type { Project } from "@jaira/persistence";
 import { LiveCalls } from "@jaira/runtime";
-import type { ApprovalHub, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UnansweredAsk, UserEventHub } from "@jaira/runtime";
+import type { ApprovalHub, ApprovalJudge, ApprovalRequest, EventHub, InteractionHub, QuestionHub, RemoteEventHub, UnansweredAsk, UserEventHub } from "@jaira/runtime";
 import type { InlineFamily, PromptOp } from "@declarative-ai/exec";
-import type { ChatSettings, PermissionSet, SyncDirection, WorkflowLayer } from "@jaira/shared";
+import type { ChatSettings, PermissionSet, PermissionStackDecl, SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
 import type { FastForwardRun } from "./fastForward";
 
@@ -35,6 +35,17 @@ import type { FastForwardRun } from "./fastForward";
  */
 export interface LivePermissions {
   permissionSet: PermissionSet | undefined;
+  /**
+   * The stack {@link permissionSet} was composed from, when a composer's stack named it — what a row
+   * names the deciding layer by and an approval lists for "Add to" (decision 0023 §2.7). It moves with
+   * the set when a pick arrives mid-turn.
+   */
+  stack?: PermissionStackDecl | undefined;
+  /**
+   * What this turn's or run's parked calls are decided again under when the permissions change while
+   * they wait (`ApprovalHub.rejudge`) — held with the set, for as long.
+   */
+  judge?: ApprovalJudge | undefined;
 }
 
 /** A run this session started and has not yet settled. */

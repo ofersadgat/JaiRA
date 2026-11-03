@@ -64,6 +64,13 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
  */
 export type ToolIconName = "read" | "search" | "write" | "terminal" | "system" | "web" | "git" | "workflow" | "artifact" | "agent" | "tool";
 
+/**
+ * The kinds of PLACE a line's decision can be narrowed to (decision 0023 §3.1): a path on the disk, a
+ * site on the network, a branch, a repository on the forge (`owner/name`), a workflow id, a program
+ * (a process, a service or an app, by name), and a host a runner reaches (`runner:ssh`).
+ */
+export type PlaceKind = "path" | "site" | "branch" | "repository" | "workflow" | "program" | "host";
+
 export interface ToolSpec {
   /** The LOGICAL name — what a workflow authors, what a policy is written against. */
   name: string;
@@ -88,6 +95,26 @@ export interface ToolSpec {
   pathArgs?: readonly string[];
   /** The same, for arguments naming a URL — the web tools scope by those instead. */
   urlArgs?: readonly string[];
+  /**
+   * The KIND of place a call to this tool is about (decision 0023 §3.1): what a place map on its line
+   * names, and how `places.ts` matches and ranks one. Beside {@link pathArgs} and {@link urlArgs},
+   * which say where in the call the place is read; this says what kind of thing it is, which is what
+   * the matcher, the card and the dialog need to know to read and offer one.
+   *
+   * Absent for a tool whose calls name no place (`web_search`: a query is no place; `screenshot`), and
+   * a place map on such a line is refused by the linter. Command lines, `script` and `runner:*` are not
+   * tools and have no spec — `placeKindOf` in `places.ts` answers for every subject.
+   */
+  scope?: PlaceKind;
+  /**
+   * For a tool whose {@link scope} is no path or site: the arguments that name its place — the branch
+   * `git_push` pushes, the state `start_task` starts, the service `control_service` acts on — read by
+   * `callPlacesOf` (`places.ts`), as {@link pathArgs} and {@link urlArgs} are for the others. Absent, or
+   * not given on a call, and the call names no place: the line's own mode answers, or the line below it
+   * (decision 0023 §3.4) — `git_push` with no `branch` pushes the current one, which only the forge
+   * knows, and a merge request's tools name a number, not a repository.
+   */
+  placeArgs?: readonly string[];
   /**
    * True when JaiRA has no implementation of its own, so `app` is not a choice that can be made.
    *
@@ -153,6 +180,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     hint: "read a file in the workspace",
     pathArgs: ["path"],
+    scope: "path",
   },
   {
     name: "glob",
@@ -162,6 +190,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     hint: "list files matching a pattern",
     pathArgs: ["path"],
+    scope: "path",
   },
   {
     name: "grep",
@@ -171,6 +200,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     hint: "search file contents for a pattern",
     pathArgs: ["path"],
+    scope: "path",
   },
   {
     name: "edit",
@@ -180,6 +210,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     hint: "replace exact text in an existing file",
     pathArgs: ["path"],
+    scope: "path",
   },
   {
     name: "write_file",
@@ -189,6 +220,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "files",
     hint: "create a file, or replace one whole",
     pathArgs: ["path"],
+    scope: "path",
   },
   {
     name: "show_artifact",
@@ -212,6 +244,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     // Decision 0020: it READS the files it publishes (`file_path`, a canvas's `root`) and adds a version
     // to the task's own store — so the paths it names answer to the file rules, as a read's do.
     pathArgs: ["file_path", "root", "path"],
+    scope: "path",
     // Claude Code declares one: its own `Artifact`, which publishes to claude.ai (`CLAUDE_TOOLS`), and
     // which this displaces wherever it is held - always, since it is always granted.
   },
@@ -223,15 +256,17 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "execution",
     hint: "run shell commands, under the policy",
     pathArgs: ["cwd"],
+    // Where a line runs, and every path a part of it names as a file tool (decision 0023 §3.1).
+    scope: "path",
   },
   // The System tools (decision 0019, `runtime/systemTools.ts`): the machine the engine runs on and its
   // desktop, in the areas of {@link SYSTEM_AREAS} — each area's look, then its change.
   { name: "read_system", label: "read_system", title: "Read the system", icon: "system", category: "system", hint: "what the machine is: its OS, hardware, disks, network, users and logs" },
   { name: "power", label: "power", title: "Power", icon: "system", category: "system", hint: "restart, shut down, sleep, sign out or lock the machine" },
   { name: "list_processes", label: "list_processes", title: "List processes", icon: "system", category: "system", hint: "the programs running on this machine, and what each is using" },
-  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program" },
+  { name: "stop_process", label: "stop_process", title: "Stop process", icon: "system", category: "system", hint: "stop a running program", scope: "program" },
   { name: "list_services", label: "list_services", title: "List services", icon: "system", category: "system", hint: "the machine's services, and whether each is running" },
-  { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service" },
+  { name: "control_service", label: "control_service", title: "Control service", icon: "system", category: "system", hint: "start, stop, restart, enable or disable a service", scope: "program", placeArgs: ["name"] },
   { name: "list_software", label: "list_software", title: "List software", icon: "system", category: "system", hint: "what is installed: programs, packages and modules" },
   { name: "install_software", label: "install_software", title: "Install software", icon: "system", category: "system", hint: "install, update or remove a program, a package or a module" },
   { name: "read_settings", label: "read_settings", title: "Read settings", icon: "system", category: "system", hint: "the machine's settings: the registry, preferences, environment, time and time zone" },
@@ -239,7 +274,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   { name: "read_clipboard", label: "read_clipboard", title: "Read clipboard", icon: "system", category: "system", hint: "what is on the clipboard" },
   { name: "write_clipboard", label: "write_clipboard", title: "Write clipboard", icon: "system", category: "system", hint: "put text or an image on the clipboard" },
   { name: "list_windows", label: "list_windows", title: "List windows", icon: "system", category: "system", hint: "the apps and windows open on the desktop" },
-  { name: "open_app", label: "open_app", title: "Open app", icon: "system", category: "system", hint: "launch an app, open a file or a link in its app, focus or close a window" },
+  { name: "open_app", label: "open_app", title: "Open app", icon: "system", category: "system", hint: "launch an app, open a file or a link in its app, focus or close a window", scope: "program", placeArgs: ["app"] },
   { name: "screenshot", label: "screenshot", title: "Take screenshot", icon: "system", category: "system", hint: "a picture of the screen, or of one window" },
   { name: "control_input", label: "control_input", title: "Control mouse & keyboard", icon: "system", category: "system", hint: "move and click the mouse, scroll, type and press keys" },
   {
@@ -250,6 +285,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     category: "web",
     hint: "fetch a URL and read what comes back",
     urlArgs: ["url"],
+    scope: "site",
   },
   {
     name: "web_search",
@@ -263,19 +299,19 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   // forge of the workspace's own git remote, through the connection signed in for its host
   // (`runtime/gitTools.ts`). Named for what each acts on; `git_merge` and `git_push` are git's own verbs
   // done on the forge. The readers first, then what leaves the machine.
-  { name: "list_merge_requests", label: "list_merge_requests", title: "List merge requests", icon: "git", category: "git", hint: "this repository's merge requests, by state, author, branch" },
-  { name: "read_merge_request", label: "read_merge_request", title: "Read merge request", icon: "git", category: "git", hint: "one merge request: description, state, threads, comments, approvals, its latest pipeline" },
-  { name: "open_merge_request", label: "open_merge_request", title: "Open merge request", icon: "git", category: "git", hint: "push the branch and open (or update) its merge request" },
-  { name: "comment_merge_request", label: "comment_merge_request", title: "Comment on merge request", icon: "git", category: "git", hint: "comment on a merge request, reply in a thread, resolve it" },
-  { name: "git_merge", label: "git_merge", title: "Merge", icon: "git", category: "git", hint: "merge a merge request" },
-  { name: "close_merge_request", label: "close_merge_request", title: "Close merge request", icon: "git", category: "git", hint: "close a merge request without merging" },
-  { name: "git_push", label: "git_push", title: "Push branch", icon: "git", category: "git", hint: "push the current branch with the connection's credentials" },
+  { name: "list_merge_requests", label: "list_merge_requests", title: "List merge requests", icon: "git", category: "git", hint: "this repository's merge requests, by state, author, branch", scope: "repository" },
+  { name: "read_merge_request", label: "read_merge_request", title: "Read merge request", icon: "git", category: "git", hint: "one merge request: description, state, threads, comments, approvals, its latest pipeline", scope: "repository" },
+  { name: "open_merge_request", label: "open_merge_request", title: "Open merge request", icon: "git", category: "git", hint: "push the branch and open (or update) its merge request", scope: "repository" },
+  { name: "comment_merge_request", label: "comment_merge_request", title: "Comment on merge request", icon: "git", category: "git", hint: "comment on a merge request, reply in a thread, resolve it", scope: "repository" },
+  { name: "git_merge", label: "git_merge", title: "Merge", icon: "git", category: "git", hint: "merge a merge request", scope: "branch" },
+  { name: "close_merge_request", label: "close_merge_request", title: "Close merge request", icon: "git", category: "git", hint: "close a merge request without merging", scope: "repository" },
+  { name: "git_push", label: "git_push", title: "Push branch", icon: "git", category: "git", hint: "push the current branch with the connection's credentials", scope: "branch", placeArgs: ["branch"] },
   // The CI tools (decision 0016, `runtime/ciTools.ts`): pipelines, their jobs, and what the jobs left.
   // Reads only — a download is kept with the task, never in the workspace.
-  { name: "list_pipelines", label: "list_pipelines", title: "List pipelines", icon: "git", category: "ci", hint: "the pipelines of a merge request, a branch or a commit" },
-  { name: "read_pipeline", label: "read_pipeline", title: "Read pipeline", icon: "git", category: "ci", hint: "one pipeline: its jobs and why each failed, its artifacts, its test counts" },
-  { name: "read_pipeline_job", label: "read_pipeline_job", title: "Read pipeline job", icon: "git", category: "ci", hint: "one job: the machine it ran on, its steps, why it failed, its artifacts" },
-  { name: "download_pipeline_artifact", label: "download_pipeline_artifact", title: "Download pipeline artifact", icon: "git", category: "ci", hint: "keep a job's log, a report or its files with the task, to read" },
+  { name: "list_pipelines", label: "list_pipelines", title: "List pipelines", icon: "git", category: "ci", hint: "the pipelines of a merge request, a branch or a commit", scope: "repository" },
+  { name: "read_pipeline", label: "read_pipeline", title: "Read pipeline", icon: "git", category: "ci", hint: "one pipeline: its jobs and why each failed, its artifacts, its test counts", scope: "repository" },
+  { name: "read_pipeline_job", label: "read_pipeline_job", title: "Read pipeline job", icon: "git", category: "ci", hint: "one job: the machine it ran on, its steps, why it failed, its artifacts", scope: "repository" },
+  { name: "download_pipeline_artifact", label: "download_pipeline_artifact", title: "Download pipeline artifact", icon: "git", category: "ci", hint: "keep a job's log, a report or its files with the task, to read", scope: "repository" },
   // Served by the event hub (decision 0010 §2–3, `runtime/eventHub.ts`): any event — the remote's or JaiRA's own —
   // so it sits with the tasks and workflows rather than with git (decision 0016 §5).
   { name: "wait_for_event", label: "wait_for_event", title: "Wait for an event", icon: "workflow", category: "tasks", hint: "wait for an event — a push, a merge request, a pipeline, a task's end — or its timeout" },
@@ -284,8 +320,8 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they
   // carried until then is gone, and deleting it was the whole change here.
   { name: "list_workflows", label: "list_workflows", title: "List workflows", icon: "workflow", category: "tasks", hint: "list workflows, and what a state takes and produces" },
-  { name: "start_task", label: "start_task", title: "Start task", icon: "workflow", category: "tasks", hint: "start a task in a workflow, from this conversation" },
-  { name: "move_task", label: "move_task", title: "Move task", icon: "workflow", category: "tasks", hint: "move a task to another state — forward, backward or across workflows" },
+  { name: "start_task", label: "start_task", title: "Start task", icon: "workflow", category: "tasks", hint: "start a task in a workflow, from this conversation", scope: "workflow", placeArgs: ["state"] },
+  { name: "move_task", label: "move_task", title: "Move task", icon: "workflow", category: "tasks", hint: "move a task to another state — forward, backward or across workflows", scope: "workflow", placeArgs: ["to"] },
   { name: "list_tasks", label: "list_tasks", title: "List tasks", icon: "workflow", category: "tasks", hint: "what was started here, where each stands and what it produced" },
   { name: "answer_question", label: "answer_question", title: "Answer question", icon: "workflow", category: "tasks", hint: "settle a question a task is asking" },
   { name: "hold_task", label: "hold_task", title: "Hold task", icon: "workflow", category: "tasks", hint: "hold a task where it stands" },

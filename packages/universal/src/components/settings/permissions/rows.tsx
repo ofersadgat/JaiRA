@@ -10,14 +10,15 @@ import {
   modeFunction,
   type PermissionSet,
   type PermissionSetMode,
+  type PlaceKind,
   type SystemArea,
   type ToolCategory,
   type ToolChoice,
   type ToolImplementation,
   type ToolSpec,
 } from "@jaira/shared/browser";
-import { groupModeOf, groupSentence, groupSummary, runnerFallbackOf, runnerRowsOf, type CommandGroup } from "@jaira/ui/composerPermissionSet";
-import { FUNCTION_ICON, MODE_META, RUNNERS_HINT, SCRIPT_HINT, SHELL_HINT, TOOL_ICONS, modeMeta } from "@jaira/ui/permissionSetWords";
+import { groupModeOf, groupSentence, groupSummary, runnerFallbackOf, runnerRowsOf, type CommandGroup, type GroupHead, type PlaceRow } from "@jaira/ui/composerPermissionSet";
+import { FUNCTION_ICON, MODE_META, RUNNERS_HINT, SCRIPT_HINT, SHELL_HINT, TOOL_ICONS, UNAVAILABLE_META, modeMeta, placeGlyphOf, placeWordsOf } from "@jaira/ui/permissionSetWords";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { NO_STACK, Press, Txt, edge, lengthToken, padToken, useHover } from "../../../primitives";
 import { useTokens } from "../../../tokens";
@@ -82,7 +83,7 @@ export function OptText({ name, hint, mono: _mono = false, nameColor = "text", g
 }
 
 /** A floating menu, below the box it was opened from and against one of its edges. */
-function SubMenu({ at, align, width, children, onClose }: { at: { x: number; y: number; w: number }; align: "start" | "end"; width: number; children: ReactNode; onClose: () => void }): JSX.Element {
+export function SubMenu({ at, align, width, children, onClose }: { at: { x: number; y: number; w: number }; align: "start" | "end"; width: number; children: ReactNode; onClose: () => void }): JSX.Element {
   const t = useTokens();
   const win = useWindowDimensions();
   const left = align === "end" ? at.x + at.w - width : at.x;
@@ -109,7 +110,7 @@ function SubMenu({ at, align, width, children, onClose }: { at: { x: number; y: 
 }
 
 /** One row of a menu: ✓, an icon, a name over a hint. */
-function MenuRow({ on = false, icon, name, hint, mono = false, title, onPress }: { on?: boolean; icon?: IconName; name: ReactNode; hint?: string; mono?: boolean; title?: string; onPress: () => void }): JSX.Element {
+export function MenuRow({ on = false, icon, name, hint, mono = false, title, onPress }: { on?: boolean; icon?: IconName; name: ReactNode; hint?: string; mono?: boolean; title?: string; onPress: () => void }): JSX.Element {
   const t = useTokens();
   return (
     <Press
@@ -138,7 +139,7 @@ function MenuRow({ on = false, icon, name, hint, mono = false, title, onPress }:
 }
 
 /** Where a box is in the window, for a menu to open under it. */
-function useAnchor(): [React.RefObject<RNView | null>, (then: (at: { x: number; y: number; w: number }) => void) => void] {
+export function useAnchor(): [React.RefObject<RNView | null>, (then: (at: { x: number; y: number; w: number }) => void) => void] {
   const ref = useRef<RNView | null>(null);
   return [ref, (then) => ref.current?.measureInWindow((x, y, w, h) => then({ x, y: y + h, w }))];
 }
@@ -186,6 +187,10 @@ export function ModePicker({
   faded = false,
   head = false,
   onRemove,
+  removeHint,
+  unavailable = false,
+  onUnavailable,
+  label,
 }: {
   mode: PermissionSetMode | undefined;
   title: string;
@@ -194,6 +199,14 @@ export function ModePicker({
   faded?: boolean;
   /** A last row taking the line out of the permission set — for a line with no minus of its own. */
   onRemove?: (() => void) | undefined;
+  /** What that row says under `remove`; by default `out of the permission set — not offered`. */
+  removeHint?: string | undefined;
+  /** The line says `unavailable` (decision 0023 §1): drawn dashed, its eye struck through. */
+  unavailable?: boolean;
+  /** Offer `unavailable` in the menu — for a tool, the shell and an MCP line only. */
+  onUnavailable?: (() => void) | undefined;
+  /** What the button reads when there is no `mode` — `elsewhere: as script` — instead of `custom`. */
+  label?: string | undefined;
   /**
    * In a fold's head or `Other`'s, not a line: the plain button — padding --control-pad, app 13/12.5 in
    * --text, hovered --panel-3 and --rule — its glyph --tok-hint whatever the mode, its › whole.
@@ -205,8 +218,8 @@ export function ModePicker({
   const [ref, measure] = useAnchor();
   const [at, setAt] = useState<{ x: number; y: number; w: number } | null>(null);
   const [naming, setNaming] = useState(false);
-  const meta = mode === undefined ? undefined : modeMeta(mode);
-  const ink = head ? "text" : mode === "deny" ? "bad" : mode === "allow" ? "ok" : "tok-hint";
+  const meta = unavailable ? UNAVAILABLE_META : mode === undefined ? undefined : modeMeta(mode);
+  const ink = unavailable ? "tok-hint" : head ? "text" : mode === "deny" ? "bad" : mode === "allow" ? "ok" : "tok-hint";
   const close = (): void => {
     setAt(null);
     setNaming(false);
@@ -228,7 +241,7 @@ export function ModePicker({
         paddingVertical={head ? padV : 4}
         paddingHorizontal={head ? padH : 6}
         borderWidth={1}
-        borderStyle={mode === undefined ? "dashed" : "solid"}
+        borderStyle={unavailable || (mode === undefined && label === undefined) ? "dashed" : "solid"}
         borderRadius={lengthToken(t, "control-radius", 7)}
         {...(faded ? { opacity: 0.62 } : {})}
         {...(readOnly === true ? { cursor: "default" } : {})}
@@ -240,8 +253,8 @@ export function ModePicker({
         }}
       >
         {meta !== undefined ? <ChipIcon name={meta.icon} color={head ? "tok-hint" : ink} /> : null}
-        <Txt spec={{ voice: "app", scale: head ? 13 / 12.5 : 11 / 12.5, color: mode === undefined ? "tok-hint" : ink }} ellip>
-          {meta?.label ?? "custom"}
+        <Txt spec={{ voice: "app", scale: head ? 13 / 12.5 : 11 / 12.5, color: mode === undefined || unavailable ? "tok-hint" : ink }} ellip>
+          {meta?.label ?? label ?? "custom"}
         </Txt>
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} {...(head ? {} : { opacity: 0.5 })}>
           ›
@@ -263,7 +276,7 @@ export function ModePicker({
               {PERMISSION_MODES.map((value) => (
                 <MenuRow
                   key={value}
-                  on={value === mode}
+                  on={!unavailable && value === mode}
                   icon={MODE_META[value].icon}
                   name={MODE_META[value].label}
                   hint={MODE_META[value].hint}
@@ -273,8 +286,20 @@ export function ModePicker({
                   }}
                 />
               ))}
+              {onUnavailable !== undefined ? (
+                <MenuRow
+                  on={unavailable}
+                  icon={UNAVAILABLE_META.icon}
+                  name={UNAVAILABLE_META.label}
+                  hint={UNAVAILABLE_META.hint}
+                  onPress={() => {
+                    onUnavailable();
+                    close();
+                  }}
+                />
+              ) : null}
               <MenuRow
-                on={isFunctionMode(mode)}
+                on={!unavailable && isFunctionMode(mode)}
                 icon={FUNCTION_ICON}
                 name={isFunctionMode(mode) ? mode.function : "function…"}
                 mono={isFunctionMode(mode)}
@@ -285,7 +310,7 @@ export function ModePicker({
                 <MenuRow
                   icon="cross"
                   name="remove"
-                  hint="out of the permission set — not offered"
+                  hint={removeHint ?? "out of the permission set — not offered"}
                   onPress={() => {
                     onRemove();
                     close();
@@ -297,6 +322,37 @@ export function ModePicker({
         </SubMenu>
       ) : null}
     </RNView>
+  );
+}
+
+/**
+ * A mode as a still chip — the mode button's look with nothing to press: its glyph and word, `deny` in
+ * --bad, `allow` in --ok, `unavailable` dashed in --tok-hint. Where a mode is read, not set (a table).
+ */
+export function ModeChip({ mode, unavailable = false }: { mode: PermissionSetMode | undefined; unavailable?: boolean }): JSX.Element {
+  const t = useTokens();
+  const meta = unavailable ? UNAVAILABLE_META : mode === undefined ? undefined : modeMeta(mode);
+  const ink = unavailable || mode === undefined ? "tok-hint" : mode === "deny" ? "bad" : mode === "allow" ? "ok" : isFunctionMode(mode) ? "accent" : "text";
+  return (
+    <View
+      flexDirection="row"
+      alignItems="center"
+      gap={5}
+      flexShrink={0}
+      paddingVertical={2}
+      paddingHorizontal={6}
+      borderWidth={1}
+      borderStyle={unavailable ? "dashed" : "solid"}
+      borderColor={t.v("line") as never}
+      borderRadius={lengthToken(t, "control-radius", 7)}
+      backgroundColor={t.v("panel-2") as never}
+      {...({ title: meta?.hint ?? "" } as object)}
+    >
+      {meta !== undefined ? <ChipIcon name={meta.icon} color={ink} /> : null}
+      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: ink }} ellip>
+        {meta?.label ?? "—"}
+      </Txt>
+    </View>
   );
 }
 
@@ -406,7 +462,83 @@ function Grant({ icon, name, hint, mono = false, title }: { icon: IconName; name
   );
 }
 
-/** One tool, as a line of a permission set on the page: its minus, its words, its implementation and mode. */
+/**
+ * A line's PLACES (decision 0023 §4.2), as the card hands them to a row: the line folds like a command
+ * group, and open there is a row per place, most specific first, then `+ add a place`. Every edit is a
+ * callback; without them the rows are drawn and nothing can be changed.
+ */
+export interface LinePlaces {
+  kind: PlaceKind;
+  /** Most specific first, the line's own `**` last where it has one (`placeRowsOf`). */
+  rows: readonly PlaceRow[];
+  open: boolean;
+  onOpen: () => void;
+  /** The words under the line's name: `read a file — 6 places; the most specific decides`. */
+  hint: string;
+  /** What the head's mode reads where the line has no `**`: `elsewhere: as script`. */
+  elsewhere?: string | undefined;
+  onPlaceMode?: ((place: string, next: PermissionSetMode) => void) | undefined;
+  onRemovePlace?: ((place: string) => void) | undefined;
+  /** The last row: a menu of places of the line's kind, and `another…`. Absent where nothing can be added. */
+  add?: { label: string; options: readonly AddOption[]; onPick: (id: string) => void; typed: { label: string; example: string; hint: string; onAdd: (typed: string) => string | undefined } } | undefined;
+}
+
+/**
+ * One place of a line: its minus, the glyph of what it names (a file, a folder, a site, a branch), the
+ * place in the data face with a named place's words beside it, and its mode.
+ *
+ *   the words     row, centred, gap 8, padding 4 7, grows
+ *   the place     data 11/12 --text, one line; its words app 10.5/12.5 --tok-hint after it
+ */
+export function PlaceLine({ kind, row, onMode, onRemove, readOnly }: { kind: PlaceKind; row: PlaceRow; onMode: (next: PermissionSetMode) => void; onRemove?: (() => void) | undefined; readOnly?: boolean | undefined }): JSX.Element {
+  const words = placeWordsOf(kind, row.place);
+  return (
+    <Line>
+      {onRemove !== undefined ? <RemoveLine subject={row.place} onRemove={onRemove} /> : null}
+      <View flexDirection="row" alignItems="center" gap={8} paddingVertical={4} paddingHorizontal={7} flexGrow={1} flexShrink={1} minWidth={0} {...({ title: words !== undefined ? `${row.place} — ${words}` : row.place } as object)}>
+        <ChipIcon name={placeGlyphOf(kind, row.place)} />
+        <Txt spec={{ voice: "data", scale: 11 / 12, lineHeight: 1.3 }} ellip flexShrink={1}>
+          {row.place}
+        </Txt>
+        {words !== undefined ? (
+          <Txt spec={HINT} ellip flexShrink={2}>
+            {words}
+          </Txt>
+        ) : null}
+      </View>
+      <ModePicker mode={row.mode} title={`${row.place}: ${modeMeta(row.mode).hint}`} onMode={onMode} readOnly={readOnly} />
+    </Line>
+  );
+}
+
+/** What is under an open line with places: a row per place, then the add row. */
+function PlacesBody({ places, readOnly }: { places: LinePlaces; readOnly?: boolean | undefined }): JSX.Element {
+  const locked = readOnly === true;
+  return (
+    <FoldBody sub>
+      {places.rows.map((row) => (
+        <PlaceLine
+          key={row.place}
+          kind={places.kind}
+          row={row}
+          readOnly={locked || places.onPlaceMode === undefined}
+          onMode={(next) => places.onPlaceMode?.(row.place, next)}
+          onRemove={locked || places.onRemovePlace === undefined ? undefined : () => places.onRemovePlace!(row.place)}
+        />
+      ))}
+      {!locked && places.add !== undefined ? <AddMenu label={places.add.label} options={places.add.options} onPick={places.add.onPick} typed={{ ...places.add.typed, icon: "folder" }} /> : null}
+    </FoldBody>
+  );
+}
+
+/** A line's words: plain, or — with places — the fold that opens onto them. */
+function LineWords({ icon, name, hint, mono, places }: { icon: IconName; name: string; hint: string; mono: boolean; places?: LinePlaces | undefined }): JSX.Element {
+  if (places === undefined) return <Grant icon={icon} name={name} hint={hint} mono={mono} title={hint} />;
+  const n = places.rows.filter((row) => !row.anywhere).length;
+  return <Fold open={places.open} onOpen={places.onOpen} icon={icon} name={name} hint={places.hint} mono={mono} {...(n > 0 ? { count: n } : {})} />;
+}
+
+/** One tool, as a line of a permission set on the page: its minus, its words, its implementation and mode — and, with places, the rows under it. */
 export function ToolRow({
   tool,
   spec,
@@ -417,32 +549,57 @@ export function ToolRow({
   note,
   onRemove,
   readOnly,
+  unavailable = false,
+  onUnavailable,
+  places,
 }: {
   tool: ToolChoice;
   spec?: ToolSpec | undefined;
-  mode: PermissionSetMode;
+  /** The line's own mode; absent on a line with places and no `**` — the head then reads {@link LinePlaces.elsewhere}. */
+  mode: PermissionSetMode | undefined;
   impl: ToolImplementation;
   onMode: (next: PermissionSetMode) => void;
   onImpl: (next: ToolImplementation) => void;
   note?: string | undefined;
   onRemove?: (() => void) | undefined;
   readOnly?: boolean | undefined;
+  /** The line says `unavailable`: its mode reads so, and it has no implementation to pick. */
+  unavailable?: boolean;
+  /** Offer `unavailable` in its mode menu. */
+  onUnavailable?: (() => void) | undefined;
+  places?: LinePlaces | undefined;
 }): JSX.Element {
   const names = Object.entries(tool.natives ?? {});
-  const native = names.length > 0 ? "native" : undefined;
+  const native = names.length > 0 && !unavailable ? "native" : undefined;
   const nativeHint = names.length > 0 ? `the agent's own — ${names.map(([route, name]) => `${name} on ${route}`).join(", ")}` : undefined;
   const hint = note ?? (tool.name === SHELL_TOOL ? SHELL_HINT : spec?.unserved === true ? `${spec.hint} · not served yet` : (spec?.hint ?? tool.name));
-  return (
+  const line = (
     <Line>
       {onRemove !== undefined ? <RemoveLine subject={spec?.label ?? tool.name} onRemove={onRemove} /> : null}
-      <Grant icon={(TOOL_ICONS[tool.name] ?? "tool") as IconName} name={spec?.label ?? tool.name} hint={hint} title={hint} />
+      <LineWords icon={(TOOL_ICONS[tool.name] ?? "tool") as IconName} name={spec?.label ?? tool.name} hint={hint} mono={false} places={places} />
       {native !== undefined ? <ImplPicker value={impl} native={native} nativeHint={nativeHint} onPick={onImpl} readOnly={readOnly} /> : null}
-      <ModePicker mode={mode} title={`${tool.name}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} />
+      <ModePicker
+        mode={mode}
+        title={`${tool.name}: ${unavailable ? UNAVAILABLE_META.hint : mode !== undefined ? modeMeta(mode).hint : (places?.elsewhere ?? "")}`}
+        onMode={onMode}
+        readOnly={readOnly}
+        unavailable={unavailable}
+        onUnavailable={onUnavailable}
+        label={places?.elsewhere}
+        faded={mode === undefined && places?.elsewhere !== undefined}
+      />
     </Line>
+  );
+  if (places === undefined || !places.open) return line;
+  return (
+    <View>
+      {line}
+      <PlacesBody places={places} readOnly={readOnly} />
+    </View>
   );
 }
 
-/** A line of Execution that is not a tool: a command the permission set names, or `script`. */
+/** A line of Execution that is not a tool: a command the permission set names, or `script` — and, with places, the rows under it. */
 export function SubjectRow({
   subject,
   hint,
@@ -453,10 +610,14 @@ export function SubjectRow({
   follows = false,
   mono,
   icon,
+  unavailable = false,
+  onUnavailable,
+  places,
 }: {
   subject: string;
   hint?: string;
-  mode: PermissionSetMode;
+  /** The line's own mode; absent on a line with places and no `**`. */
+  mode: PermissionSetMode | undefined;
   onMode: (next: PermissionSetMode) => void;
   onRemove?: (() => void) | undefined;
   readOnly?: boolean | undefined;
@@ -464,14 +625,35 @@ export function SubjectRow({
   follows?: boolean;
   mono?: boolean;
   icon?: IconName;
+  /** An MCP line that says `unavailable`. */
+  unavailable?: boolean;
+  /** Offer `unavailable` in its mode menu — an MCP line's; a command, `script` and a runner cannot say it. */
+  onUnavailable?: (() => void) | undefined;
+  places?: LinePlaces | undefined;
 }): JSX.Element {
   const script = subject === SCRIPT_SUBJECT;
-  return (
+  const line = (
     <Line {...(follows && readOnly !== true ? { pad: 23 } : {})}>
       {onRemove !== undefined ? <RemoveLine subject={subject} onRemove={onRemove} /> : null}
-      <Grant icon={icon ?? (script ? "script" : "terminal")} name={subject} hint={hint ?? ""} mono={mono ?? !script} title={hint ?? subject} />
-      <ModePicker mode={mode} title={`${subject}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} faded={follows} />
+      <LineWords icon={icon ?? (script ? "script" : "terminal")} name={subject} hint={hint ?? ""} mono={mono ?? !script} places={places} />
+      <ModePicker
+        mode={mode}
+        title={`${subject}: ${unavailable ? UNAVAILABLE_META.hint : mode !== undefined ? modeMeta(mode).hint : (places?.elsewhere ?? "")}`}
+        onMode={onMode}
+        readOnly={readOnly}
+        faded={follows || (mode === undefined && places?.elsewhere !== undefined)}
+        unavailable={unavailable}
+        onUnavailable={onUnavailable}
+        label={places?.elsewhere}
+      />
     </Line>
+  );
+  if (places === undefined || !places.open) return line;
+  return (
+    <View>
+      {line}
+      <PlacesBody places={places} readOnly={readOnly} />
+    </View>
   );
 }
 
@@ -485,7 +667,29 @@ export function SubjectRow({
  *   its mode      in an 84 box, from its start
  *   add           the mode's box dashed, --tok-hint: + add
  */
-function AreaSide({ tool, width, held, mode, onMode, onAdd, onRemove, readOnly }: { tool: string; width: number; held: boolean; mode: PermissionSetMode; onMode: (next: PermissionSetMode) => void; onAdd?: (() => void) | undefined; onRemove?: (() => void) | undefined; readOnly?: boolean | undefined }): JSX.Element {
+function AreaSide({
+  tool,
+  width,
+  held,
+  mode,
+  onMode,
+  onAdd,
+  onRemove,
+  readOnly,
+  unavailable = false,
+  onUnavailable,
+}: {
+  tool: string;
+  width: number;
+  held: boolean;
+  mode: PermissionSetMode;
+  onMode: (next: PermissionSetMode) => void;
+  onAdd?: (() => void) | undefined;
+  onRemove?: (() => void) | undefined;
+  readOnly?: boolean | undefined;
+  unavailable?: boolean | undefined;
+  onUnavailable?: (() => void) | undefined;
+}): JSX.Element {
   const t = useTokens();
   return (
     <View flexDirection="row" alignItems="center" gap={6} flexShrink={0}>
@@ -493,8 +697,16 @@ function AreaSide({ tool, width, held, mode, onMode, onAdd, onRemove, readOnly }
         {tool}
       </Txt>
       <View width={84} alignItems="flex-start">
-        {held ? (
-          <ModePicker mode={mode} title={`${tool}: ${modeMeta(mode).hint}`} onMode={onMode} readOnly={readOnly} onRemove={readOnly === true ? undefined : onRemove} />
+        {held || unavailable ? (
+          <ModePicker
+            mode={mode}
+            title={`${tool}: ${unavailable ? UNAVAILABLE_META.hint : modeMeta(mode).hint}`}
+            onMode={onMode}
+            readOnly={readOnly}
+            onRemove={readOnly === true ? undefined : onRemove}
+            unavailable={unavailable}
+            onUnavailable={readOnly === true ? undefined : onUnavailable}
+          />
         ) : onAdd !== undefined && readOnly !== true ? (
           <Press
             onPress={onAdd}
@@ -526,6 +738,9 @@ function AreaSide({ tool, width, held, mode, onMode, onAdd, onRemove, readOnly }
 export interface AreaSideLine {
   tool: string;
   held: boolean;
+  /** The side's line says `unavailable`. */
+  unavailable?: boolean | undefined;
+  onUnavailable?: (() => void) | undefined;
   mode: PermissionSetMode;
   onMode: (next: PermissionSetMode) => void;
   onAdd?: (() => void) | undefined;
@@ -674,7 +889,18 @@ export function AddButton({ label, open = false, disabled = false, onPress }: { 
 }
 
 /** The last line of a section or a group: add one of what it does not hold, or type one. */
-export function AddMenu({ label, options, onPick, typed }: { label: string; options: readonly AddOption[]; onPick: (subject: string) => void; typed?: { label: string; example: string; onAdd: (typed: string) => string | undefined } | undefined }): JSX.Element | null {
+export function AddMenu({
+  label,
+  options,
+  onPick,
+  typed,
+}: {
+  label: string;
+  options: readonly AddOption[];
+  onPick: (subject: string) => void;
+  /** `another…`: a one-box form. `hint` is what its menu row says (by default `type one, like {example}`), `icon` its glyph. */
+  typed?: { label: string; example: string; onAdd: (typed: string) => string | undefined; hint?: string | undefined; icon?: IconName | undefined } | undefined;
+}): JSX.Element | null {
   const [ref, measure] = useAnchor();
   const [at, setAt] = useState<{ x: number; y: number; w: number } | null>(null);
   const [typing, setTyping] = useState(false);
@@ -703,9 +929,9 @@ export function AddMenu({ label, options, onPick, typed }: { label: string; opti
           ))}
           {typed !== undefined ? (
             <MenuRow
-              icon="terminal"
+              icon={typed.icon ?? "terminal"}
               name="another…"
-              hint={`type one, like ${typed.example}`}
+              hint={typed.hint ?? `type one, like ${typed.example}`}
               onPress={() => {
                 setAt(null);
                 setTyping(true);
@@ -775,6 +1001,7 @@ export function RunnerGroupRow({
   onRemoveRunner,
   onRemove,
   readOnly,
+  placesOf,
 }: {
   permissionSet: PermissionSet;
   open: boolean;
@@ -784,6 +1011,8 @@ export function RunnerGroupRow({
   onRemoveRunner: (program: string) => void;
   onRemove?: (() => void) | undefined;
   readOnly?: boolean | undefined;
+  /** A runner's own line's places (decision 0023 §4.2), where it has a line. */
+  placesOf?: ((program: string) => LinePlaces | undefined) | undefined;
 }): JSX.Element {
   const rows = runnerRowsOf(permissionSet);
   const fallback = runnerFallbackOf(permissionSet);
@@ -802,10 +1031,11 @@ export function RunnerGroupRow({
               key={row.program}
               subject={row.program}
               hint={row.hint}
-              mode={row.own ?? fallback}
+              mode={row.own !== undefined || row.placed !== true ? (row.own ?? fallback) : undefined}
               readOnly={readOnly}
-              follows={row.own === undefined}
-              onRemove={row.own !== undefined && readOnly !== true ? () => onRemoveRunner(row.program) : undefined}
+              follows={row.own === undefined && row.placed !== true}
+              places={row.own !== undefined || row.placed === true ? placesOf?.(row.program) : undefined}
+              onRemove={(row.own !== undefined || row.placed === true) && readOnly !== true ? () => onRemoveRunner(row.program) : undefined}
               onMode={(next) => onRunnerMode(row.program, next)}
             />
           ))}
@@ -815,7 +1045,13 @@ export function RunnerGroupRow({
   );
 }
 
-/** One PROGRAM under Execution: a fold over the subcommands the permission set names. */
+/**
+ * One PROGRAM under Execution: a fold over the subcommands the permission set names. Its head is the
+ * bare program's line, so it takes places like any line (decision 0023 §4.2): given `places`, open it
+ * draws a row per place of the bare line, then its `+ add a place`, above the subcommands. Given `head`
+ * (`groupHeadOf`), its mode button claims only what the set writes; without it, it reads the mode any
+ * other command of it comes to (`groupModeOf`), as the Tools card's merged view wants.
+ */
 export function CommandGroupRow({
   group,
   permissionSet,
@@ -825,6 +1061,8 @@ export function CommandGroupRow({
   children,
   onRemove,
   readOnly,
+  head,
+  places,
 }: {
   group: CommandGroup;
   permissionSet: PermissionSet;
@@ -834,7 +1072,13 @@ export function CommandGroupRow({
   children: ReactNode;
   onRemove?: (() => void) | undefined;
   readOnly?: boolean | undefined;
+  head?: GroupHead | undefined;
+  /** The bare program's places, where it has a line of its own. */
+  places?: LinePlaces | undefined;
 }): JSX.Element {
+  const locked = readOnly === true;
+  const placeRows = places?.rows ?? [];
+  const count = group.subs.length + placeRows.filter((row) => !row.anywhere).length;
   return (
     <View>
       <View flexDirection="row" alignItems="center" gap={4} minWidth={0} paddingVertical={1}>
@@ -847,11 +1091,38 @@ export function CommandGroupRow({
           name={group.program}
           mono
           hint={open ? groupSentence(permissionSet, group) : groupSummary(permissionSet, group)}
-          {...(group.subs.length > 0 ? { count: group.subs.length } : {})}
+          {...(count > 0 ? { count } : {})}
         />
-        <ModePicker head mode={groupModeOf(permissionSet, group)} title={`${group.program}: any ${group.program} command not named under it`} onMode={onMode} readOnly={readOnly} />
+        <ModePicker
+          head
+          mode={head !== undefined ? head.mode : groupModeOf(permissionSet, group)}
+          label={head?.label}
+          faded={head?.follows === true}
+          title={head?.title ?? `${group.program}: any ${group.program} command not named under it`}
+          onMode={onMode}
+          readOnly={readOnly}
+        />
       </View>
-      {open ? <FoldBody sub>{children}</FoldBody> : null}
+      {open ? (
+        <FoldBody sub>
+          {places !== undefined
+            ? placeRows.map((row) => (
+                <PlaceLine
+                  key={`place:${row.place}`}
+                  kind={places.kind}
+                  row={row}
+                  readOnly={locked || places.onPlaceMode === undefined}
+                  onMode={(next) => places.onPlaceMode?.(row.place, next)}
+                  onRemove={locked || places.onRemovePlace === undefined ? undefined : () => places.onRemovePlace!(row.place)}
+                />
+              ))
+            : null}
+          {places !== undefined && !locked && places.add !== undefined ? (
+            <AddMenu label={`${places.add.label} to ${group.program}`} options={places.add.options} onPick={places.add.onPick} typed={{ ...places.add.typed, icon: "folder" }} />
+          ) : null}
+          {children}
+        </FoldBody>
+      ) : null}
     </View>
   );
 }

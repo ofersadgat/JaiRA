@@ -54,6 +54,8 @@ const isDoubleQuote = (c: string | undefined): boolean => c !== undefined && c.l
 const isQuote = (c: string | undefined): boolean => isSingleQuote(c) || isDoubleQuote(c);
 const isDash = (c: string | undefined): boolean => c !== undefined && c.length === 1 && DASHES.includes(c);
 const isWordChar = (c: string | undefined): boolean => c !== undefined && /^[A-Za-z0-9_]$/.test(c);
+/** What a splatted variable's name is made of: a word, a scope (`@global:a`), and PowerShell's own `?`. */
+const isSplatChar = (c: string | undefined): boolean => c !== undefined && /^[A-Za-z0-9_:?]$/.test(c);
 const isLetter = (c: string | undefined): boolean => c !== undefined && /^[A-Za-z]$/.test(c);
 const isBlank = (c: string | undefined): boolean =>
   c !== undefined &&
@@ -529,13 +531,18 @@ class Parser {
       keep(from, this.i);
       return token();
     }
-    if (c === "@" && isWordChar(n)) {
-      // `@params`: splatted — the arguments are decided as the line runs.
-      this.i++;
-      while (isWordChar(this.text[this.i])) this.i++;
-      dynamic = true;
-      keep(from, this.i);
-      return token();
+    if (c === "@" && isSplatChar(n)) {
+      // `@params`: splatted — the arguments are decided as the line runs. A word that goes on past the
+      // name is no splat, and a word like any other: `@jaira/app`, `@a-b`, `@a=1`.
+      let end = this.i + 1;
+      while (isSplatChar(this.text[end])) end++;
+      const after = this.text[end];
+      if (after === undefined || isBlank(after) || "\n;|&(){},.[".includes(after)) {
+        this.i = end;
+        dynamic = true;
+        keep(from, this.i);
+        return token();
+      }
     }
     if (c === "@" && isQuote(n)) {
       const here = this.hereString();

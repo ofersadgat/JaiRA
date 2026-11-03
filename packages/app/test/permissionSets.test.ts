@@ -279,12 +279,12 @@ describe("the state editor's one Tools field", () => {
   });
 
   it("carries a sibling it could not read straight through, rather than deleting the evidence", () => {
-    const odd = { $ref: "$/permission-sets/chat/read-only", read_file: "sometimes" };
+    const odd = { $ref: "$/permission-sets/chat/read-only", read_file: 7 };
     const form = toolsFieldOf(odd)!;
-    expect(form).toMatchObject({ lines: {}, unread: { read_file: "sometimes" } });
+    expect(form).toMatchObject({ lines: {}, unread: { read_file: 7 } });
     expect(applyToolsField(odd, form)).toBe(odd);
     // It survives an edit to a different line.
-    expect(applyToolsField(odd, { ...form, lines: { edit: "ask" } })).toEqual({ $ref: "$/permission-sets/chat/read-only", read_file: "sometimes", edit: "ask" });
+    expect(applyToolsField(odd, { ...form, lines: { edit: "ask" } })).toEqual({ $ref: "$/permission-sets/chat/read-only", read_file: 7, edit: "ask" });
   });
 
   it("is not the form's field for a binding, or for a list (which the linter refuses)", () => {

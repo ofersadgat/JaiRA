@@ -1,30 +1,22 @@
 import { useRef, useState, type JSX, type ReactNode } from "react";
 import { View as RNView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import {
-  PERMISSION_SET_LAYER_LABELS,
-  permissionSetNameProblem,
-  type PermissionSetBucket,
-  type SettingOrigin,
-  type WritableLayer,
-} from "@jaira/shared/browser";
-import { EFFORT_HINTS, KEEP_WHERE, VENDOR_NAMES, cascadeOf, modalitiesOf, modalityIcon, originWordsOf, repoint, tierOf, type PickModel } from "@jaira/ui/composerCards";
+import type { SettingOrigin } from "@jaira/shared/browser";
+import { EFFORT_HINTS, VENDOR_NAMES, cascadeOf, modalitiesOf, modalityIcon, originWordsOf, repoint, tierOf, type PickModel } from "@jaira/ui/composerCards";
 import { ROUTE_BORROWS } from "@jaira/ui/composerModel";
 import type { FloatRect } from "@jaira/ui/floatPlace";
-import type { Schema } from "@jaira/ui/schemaForm/types";
 import { NO_STACK, Press, Txt, edge, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Svg } from "../panel/Svg";
 import { MenuLayer } from "../MenuLayer";
 import { Float } from "../floats/Float";
-import { SchemaForm } from "../form/SchemaForm";
 import { Icon, type IconName } from "../panel/Icon";
 import { BrandIcon } from "../settings/bits";
 import { ModelWindow, RouteLeft } from "./UsageCards";
 
 /**
  * The composer's cards: what each chip opens — the route → model cascade, the thinking levels, the
- * permission sets of a bucket (with the bucket picker and `+`), and (in `ComposerTools.tsx`) the tools.
+ * the permission stack (in `ComposerStack.tsx`), and (in `ComposerTools.tsx`) the tools.
  * What they compute is `composerCards.ts`' and `composerModel.ts`'s. How they look:
  *
  *   a card             above the chip, its start edges lined up, 7 apart; at least 250, at most 560 (78% of
@@ -481,75 +473,6 @@ export function RouteCascade({ routes, models, current, onPick }: { routes: read
   );
 }
 
-/**
- * `BucketPicker`: the Permissions head's bucket — its folder and name, opening the hierarchy of
- * buckets, each with what it holds and the layer that defines it.
- *
- *   the bucket's button         row, centred, gap 4, margin −1 −5, padding 1 5, radius 6, --text 600
- *                               (hovered or open --text 7%); the folder 12
- *   its menu                    under it, from its start, at least 320
- *   a row's layer               6 in, padding 0 5, round, --panel-2, app 500 9.5/12.5 on 1.5
- */
-export function BucketPicker({ buckets, bucket, onPick }: { buckets: readonly PermissionSetBucket[]; bucket: string; onPick: (path: string) => void }): JSX.Element {
-  const t = useTokens();
-  const [ref, measure] = useAnchorRect();
-  const [at, setAt] = useState<FloatRect | null>(null);
-  return (
-    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
-      <Press
-        onPress={() => (at !== null ? setAt(null) : measure(setAt))}
-        title="Which bucket of permission sets these rows are"
-        flexDirection="row"
-        alignItems="center"
-        gap={4}
-        marginVertical={-1}
-        marginHorizontal={-5}
-        paddingVertical={1}
-        paddingHorizontal={5}
-        borderRadius={6}
-        box={({ hovered }) => ({ backgroundColor: hovered || at !== null ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}
-      >
-        <Icon name="folder" size={12} color={String(t.v("tok-hint"))} />
-        <Txt spec={{ voice: "app", scale: 10.5 / 12.5, weight: 600, color: "text" }}>{bucket}</Txt>
-        <More weight={600} />
-      </Press>
-      {at !== null ? (
-        <SubMenu anchor={at} align="start" minWidth={320} onClose={() => setAt(null)}>
-          {buckets.map((row) => (
-            <SubRow
-              key={row.path}
-              on={row.path === bucket}
-              paddingLeft={7 + 16 * row.depth}
-              onPress={() => {
-                onPick(row.path);
-                setAt(null);
-              }}
-            >
-              {(lit) => (
-                <>
-                  <Tick on={row.path === bucket} />
-                  <Icon name="folder" size={14} color={String(t.v("tok-hint"))} />
-                  <View flexDirection="column" gap={1} minWidth={0} flexShrink={1}>
-                    <Txt spec={{ ...NAME, color: lit ? "text" : "dim" }} ellip>
-                      {row.name}{" "}
-                      <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 500, lineHeight: 1.5, color: "tok-hint" }} marginLeft={6} paddingHorizontal={5} borderRadius={999} backgroundColor={t.v("panel-2") as never}>
-                        {PERMISSION_SET_LAYER_LABELS[row.layer]}
-                      </Txt>
-                    </Txt>
-                    <Txt spec={HINT} ellip>
-                      {row.hint}
-                    </Txt>
-                  </View>
-                </>
-              )}
-            </SubRow>
-          ))}
-        </SubMenu>
-      ) : null}
-    </RNView>
-  );
-}
-
 /** A menu under a card's head: column, gap 1, padding 4, 1px --line, radius 9, --panel, a 0 10 28 shadow at 28%. */
 export function SubMenu({ anchor, align, minWidth, padding = 4, gap = 1, onClose, children }: { anchor: FloatRect; align: "start" | "end"; minWidth: number; padding?: number; gap?: number; onClose: () => void; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -561,101 +484,3 @@ export function SubMenu({ anchor, align, minWidth, padding = 4, gap = 1, onClose
     </MenuLayer>
   );
 }
-
-/** A `SubMenu` row: gap 8, padding 5 7, radius 7; hovered --text 7%, in force --accent 13%. */
-function SubRow({ on, paddingLeft = 7, onPress, children }: { on: boolean; paddingLeft?: number; onPress: () => void; children: (lit: boolean) => ReactNode }): JSX.Element {
-  const t = useTokens();
-  return (
-    <Press
-      onPress={onPress}
-      flexDirection="row"
-      alignItems="center"
-      gap={8}
-      width="100%"
-      minWidth={0}
-      paddingVertical={5}
-      paddingRight={7}
-      paddingLeft={paddingLeft}
-      borderRadius={7}
-      box={({ hovered }) => ({ backgroundColor: on ? t.mix(t.v("accent"), 13, "transparent") : hovered ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}
-    >
-      {({ hovered }) => children(on || hovered)}
-    </Press>
-  );
-}
-
-/**
- * `KeepPermissionSet`: `+` — keep the map on the cards as a NEW permission set in this bucket, asked
- * through the schema form (a name, and where it goes).
- *
- *   the `+`             padding 0 7, round, --panel-2, app 11.5/12.5 on 1.5, --dim; ready --accent 13%
- *                       and --accent; not ready at .45
- *   its menu            gap 7, at least 270, padding 9; the foot's buttons padding 4 13, Add --accent
- */
-export function KeepPermissionSet({ bucket, ready, layers, onKeep }: { bucket: string; ready: boolean; layers: readonly WritableLayer[]; onKeep: (name: string, layer: WritableLayer) => Promise<void> }): JSX.Element {
-  const t = useTokens();
-  const [ref, measure] = useAnchorRect();
-  const [at, setAt] = useState<FloatRect | null>(null);
-  const [draft, setDraft] = useState<{ name?: string; where?: string }>({});
-  const [problem, setProblem] = useState<string | null>(null);
-  const [saving, setSaving] = useState(false);
-  const where = layers.map((layer) => KEEP_WHERE[layer]);
-  const schema: Schema = {
-    type: "object",
-    properties: { name: { type: "string", title: "name", minLength: 1 }, where: { type: "string", title: "where", enum: where, default: where[0] } },
-    required: ["name", "where"],
-  };
-  const add = (): void => {
-    const name = (draft.name ?? "").trim();
-    const layer = layers.find((candidate) => KEEP_WHERE[candidate] === (draft.where ?? where[0]));
-    const wrong = permissionSetNameProblem(name) ?? (layer === undefined ? "pick where it goes" : undefined);
-    if (wrong !== undefined || layer === undefined) {
-      setProblem(wrong ?? null);
-      return;
-    }
-    setSaving(true);
-    setProblem(null);
-    void onKeep(name, layer).then(
-      () => {
-        setSaving(false);
-        setDraft({});
-        setAt(null);
-      },
-      (e: unknown) => {
-        setSaving(false);
-        setProblem(e instanceof Error ? e.message : String(e));
-      },
-    );
-  };
-  return (
-    <RNView ref={ref} collapsable={false} style={{ flexShrink: 0, ...NO_STACK } as never}>
-      <Press
-        onPress={() => (at !== null ? setAt(null) : measure(setAt))}
-        disabled={!ready}
-        title={ready ? `Keep these tools and modes as a new permission set in ${bucket}` : "These tools and modes are already a permission set here"}
-        paddingHorizontal={7}
-        borderRadius={999}
-        opacity={ready ? 1 : 0.45}
-        backgroundColor={(ready ? t.mix(t.v("accent"), 13, "transparent") : t.v("panel-2")) as never}
-      >
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: ready ? "accent" : "dim" }}>+</Txt>
-      </Press>
-      {at !== null && ready ? (
-        <SubMenu anchor={at} align="end" minWidth={270} padding={9} gap={7} onClose={() => setAt(null)}>
-          <Txt spec={HINT}>
-            Keep these tools and modes as a permission set in <Txt spec={{ ...HINT, weight: 700 }}>{bucket}</Txt>
-          </Txt>
-          <SchemaForm schema={schema} value={{ where: where[0], ...draft }} onChange={(next) => setDraft((next ?? {}) as { name?: string; where?: string })} ctx={{ path: "", hidePaths: true, disabled: saving }} />
-          {problem !== null ? <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "warn" }} maxWidth={300}>{problem}</Txt> : null}
-          <View flexDirection="row" alignItems="center" justifyContent="flex-end" gap={8}>
-            <Press onPress={add} disabled={saving} paddingVertical={4} paddingHorizontal={13} borderRadius={7} backgroundColor={t.v("accent") as never} {...(saving ? { opacity: 0.5 } : {})}>
-              <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600, color: "#fff" }}>Add</Txt>
-            </Press>
-          </View>
-        </SubMenu>
-      ) : null}
-    </RNView>
-  );
-}
-
-

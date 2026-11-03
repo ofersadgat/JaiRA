@@ -9,7 +9,7 @@
  * `@jaira/persistence` `readPermissionSetLayers`, and everything below is a pure function of it — main
  * sends the records, the renderer draws them, and both agree because there is one reading.
  */
-import { isFunctionMode, type ToolChoice } from "./operationVocabulary";
+import { isFunctionMode, type PermissionSetMode, type ToolChoice } from "./operationVocabulary";
 import { entryOfDecl, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
 import { samePermissionSet, permissionSetBuckets, permissionSetSummary, type PermissionSetBucket, type PermissionSetChoice } from "./permissionSetBuckets";
 import { samePermissionSetEntry } from "./permissionSetEdit";
@@ -231,8 +231,16 @@ export interface PermissionSetDifference {
 }
 
 function entryWords(entry: PermissionSetDecl[string]): string {
-  const { mode, implementation } = entryOfDecl(entry);
-  const word = isFunctionMode(mode) ? `function ${mode.function}` : mode;
+  const { mode, places, unavailable, implementation } = entryOfDecl(entry);
+  const said = (m: PermissionSetMode): string => (isFunctionMode(m) ? `function ${m.function}` : m);
+  const at = Object.entries(places ?? {});
+  // A line with places in words: its own mode first, as the place everywhere, then each place.
+  const word =
+    unavailable === true
+      ? "unavailable"
+      : at.length === 0
+        ? mode !== undefined ? said(mode) : JSON.stringify(entry)
+        : [...(mode !== undefined ? [`** ${said(mode)}`] : []), ...at.map(([place, m]) => `${place} ${said(m)}`)].join(", ");
   return implementation === "native" ? `${word} · native` : word;
 }
 

@@ -904,7 +904,7 @@ async function runAdhocInProcess(projectDir: string, root: string, inputs: Recor
     // module pair. On `standaloneLoadOptions` this validated against a bundle in which no `.ts`
     // callee could resolve, so `jaira run --root` refused every workflow that calls one, saying
     // "'confidence.score' is not a known operation" about a function that is approved and registered.
-    const bundle = loadWorkflowBundle(files, values.root, workflowLoadOptions(project.paths));
+    const bundle = loadWorkflowBundle(files, values.root, { ...workflowLoadOptions(project.paths), standingLayers: project.config.permissions.layers });
     const report = validateBundle(bundle);
     if (report.errors.length > 0) {
       const detail = report.errors.map((e) => `${e.stateId} ${e.path}: ${e.message}`).join("\n  ");

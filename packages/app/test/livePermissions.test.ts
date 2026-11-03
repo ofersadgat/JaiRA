@@ -104,6 +104,22 @@ describe("a permission set picked while the conversation answers", () => {
     expect(held(taskId)).toBeUndefined();
   });
 
+  it("moves the STACK the rows name their layers by with the set, when a stack is picked mid-turn (decision 0023 §2.7)", async () => {
+    const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
+    await service.startTask({ taskId, fake: [{ output: "first answer" }] });
+    await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
+    const thread = service.chatThread({ taskId })!;
+    const stacks: unknown[] = [];
+    onPush = (m) => {
+      if (stacks.length > 0 || m.type !== "engine:event" || m.taskId !== taskId || (m.event as { type?: string }).type !== "operation.started") return;
+      service.changeChatSettings({ taskId, overrides: { permissionSet: { layers: ["$/permission-sets/chat/full"], web_search: "unavailable" } as never } });
+      const sessions = (service as never as { sessions: Map<string, { livePermissions: Map<string, Set<{ stack?: { layers: Array<{ id: string }> } }>> }> }).sessions;
+      stacks.push(...[...([...sessions.values()][0]!.livePermissions.get(taskId) ?? [])].map((cell) => cell.stack?.layers.map((layer) => layer.id)));
+    };
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", overrides: { permissionSet: { layers: ["$/permission-sets/chat/auto"] } as never }, fake: [{ output: "second answer" }] });
+    expect(stacks).toEqual([["chat/full", "tools"]]);
+  });
+
   it("changes nothing in flight when nothing is answering — the next message carries the composer's settings", async () => {
     const { taskId } = service.createTask({ title: titleOf("one"), workflow: CHAT_SESSION, inputs: { message: "one" } });
     await service.startTask({ taskId, fake: [{ output: "first answer" }] });

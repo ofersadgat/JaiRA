@@ -15,7 +15,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { PERMISSION_SET_MARKERS, jairaPaths, setBuiltInDir, type JairaPaths } from "@jaira/shared";
 import { initProject } from "../src/project";
 import { readWorkflowFiles } from "../src/snapshots";
-import { addToPermissionSet, loadWorkflowBundle, permissionSetIdOfReference, permissionSetWriteTargets } from "../src/permissionSets";
+import { addToPermissionSet, loadWorkflowBundle, permissionSetIdOfReference, permissionSetTree, permissionSetWriteTargets, readOwnPermissionSet } from "../src/permissionSets";
 import { workflowLoadOptions } from "../src/workflowRefs";
 
 let scratch: string;
@@ -143,7 +143,13 @@ describe("writing the line", () => {
       other: "deny",
       subjects: { shell: "ask", "git status": "allow", "terraform plan": "allow" },
       source: REF,
-      functions: {},
+      functions: {}, places: {},
+      // The stack it was read through (decision 0023 §2.7): the built-in file, then this project's copy
+      // of it — one set, `chat/ask-first`, in two files.
+      stack: {
+        layers: [{ id: "chat/ask-first", reference: "$SYSTEM/permission-sets/chat/ask-first" }, { id: "chat/ask-first", reference: REF }],
+        lines: expect.objectContaining({ "terraform plan": { everywhere: "chat/ask-first", places: {} } }),
+      },
     });
 
     // It FOLLOWS: a line the built-in layer gains later is inherited, which a copy would have frozen out.
@@ -213,5 +219,83 @@ describe("writing the line", () => {
     const listBefore = readFileSync(list, "utf8");
     expect(() => addToPermissionSet(paths, REF, "project", { git: "allow" })).toThrow(/not a map/);
     expect(readFileSync(list, "utf8")).toBe(listBefore);
+  });
+});
+
+describe("sets as files, for the browser (decision 0023 §4.1, rulings 10–11)", () => {
+  beforeEach(() => {
+    write(builtIn, "permission-sets/chat/ask-first.json", SHIPPED);
+    write(builtIn, "permission-sets/chat/read-only.json", { read_file: "allow", other: "deny" });
+    write(paths.base.baseDir, "permission-sets/web/docs-sites.json", { icon: "globe", web_fetch: { "docs.example.com": "allow" } });
+    write(paths.jairaDir, "permission-sets/chat/ask-first.json", { $ref: "$SYSTEM/permission-sets/chat/ask-first", git: "allow" });
+    write(paths.jairaDir, "permission-sets/feature/implementation/writes.json", { layers: ["$/permission-sets/chat/read-only"], write_file: "ask" });
+    write(paths.jairaDir, "permission-sets/feature/broken.json", "{ nope");
+  });
+
+  it("lists every scope's files as scopes → buckets (nested) → sets, each with its id, file, lines, icon and whether the stack holds it", () => {
+    const tree = permissionSetTree(paths, (id) => id === "chat/ask-first");
+    expect(tree.scopes.map((scope) => [scope.scope, scope.label])).toEqual([
+      ["built in", "built in"],
+      ["global", "~/.jaira"],
+      ["project", ".jaira"],
+    ]);
+    const builtInChat = tree.scopes[0]!.buckets.find((bucket) => bucket.name === "chat")!;
+    const askFirst = builtInChat.sets.find((set) => set.name === "ask-first")!;
+    expect(askFirst).toMatchObject({
+      id: "chat/ask-first",
+      scope: "built in",
+      reference: "$/permission-sets/chat/ask-first",
+      explicit: "$SYSTEM/permission-sets/chat/ask-first",
+      file: "built in/permission-sets/chat/ask-first.json",
+      lines: 4,
+      // A shipped preset wears its own glyph: ask-first's is `ask`.
+      icon: "ask",
+      inStack: true,
+      // This project's copy is what the bare reference finds.
+      shadowedBy: "project",
+    });
+    // A file's own `icon`, else the generic layers glyph.
+    const docs = tree.scopes[1]!.buckets[0]!.sets[0]!;
+    expect(docs).toMatchObject({ id: "web/docs-sites", icon: "globe", lines: 1, inStack: false });
+    const project = tree.scopes[2]!;
+    const feature = project.buckets.find((bucket) => bucket.name === "feature")!;
+    expect(feature.buckets.map((bucket) => bucket.path)).toEqual(["feature/implementation"]);
+    expect(feature.buckets[0]!.sets[0]).toMatchObject({ id: "feature/implementation/writes", icon: "layers", lines: 1, layers: ["$/permission-sets/chat/read-only"] });
+    // A file nobody can read is listed, with why.
+    expect(feature.sets.find((set) => set.name === "broken")!.problem).toBeDefined();
+    expect(project.buckets.find((bucket) => bucket.name === "chat")!.sets[0]).toMatchObject({ follows: "$SYSTEM/permission-sets/chat/ask-first", lines: 1, inStack: true });
+  });
+
+  it("reads ONE set's own lines — anything it does not write is filtered out — the nearest copy, or the one an explicit root names", () => {
+    expect(readOwnPermissionSet(paths, "$/permission-sets/chat/ask-first").lines).toEqual({ git: "allow" });
+    expect(readOwnPermissionSet(paths, "$SYSTEM/permission-sets/chat/ask-first").lines).toEqual(SHIPPED);
+    expect(readOwnPermissionSet(paths, "$/permission-sets/web/docs-sites")).toMatchObject({ set: { scope: "global", icon: "globe" }, lines: { web_fetch: { "docs.example.com": "allow" } } });
+    expect(() => readOwnPermissionSet(paths, "$/permission-sets/chat/nope")).toThrow(/no scope holds/);
+  });
+
+  it("never reads a file's icon as a line of the set", () => {
+    write(paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/web/docs-sites" }));
+    const loaded = loadPlan();
+    expect(loaded.issues).toEqual([]);
+    expect(JSON.stringify(loaded.permissions)).not.toContain("globe");
+  });
+});
+
+describe("a bucket's standing layers, pinned with a state (decision 0023 §2.6 step 2)", () => {
+  it("lays them over the set a state names, under the state's own lines, and keeps who set each line", () => {
+    write(builtIn, "permission-sets/chat/ask-first.json", SHIPPED);
+    write(paths.jairaDir, "permission-sets/project/build-safe.json", { "npm run build": { packages: "allow" }, git: "allow" });
+    write(paths.workflowsDir, "plan.json", state({ tools: { $ref: REF, shell: "deny" } }));
+    const bundle = loadWorkflowBundle(readWorkflowFiles(paths.workflowsDir), "plan", { ...workflowLoadOptions(paths), standingLayers: { chat: ["$/permission-sets/project/build-safe"] } });
+    const permissions = environmentOf(bundle.states["plan"]!)?.permissions as { subjects: Record<string, string>; places: Record<string, unknown>; stack: { layers: unknown[]; lines: Record<string, unknown> } };
+    expect(permissions.subjects).toMatchObject({ git: "allow", shell: "deny", "git status": "allow" });
+    expect(permissions.places["npm run build"]).toEqual({ packages: "allow" });
+    expect(permissions.stack.layers).toEqual([{ id: "chat/ask-first", reference: REF }, { id: "project/build-safe", reference: "$/permission-sets/project/build-safe" }, { id: "inline" }]);
+    expect(permissions.stack.lines["git"]).toEqual({ everywhere: "project/build-safe", places: {} });
+    expect(permissions.stack.lines["shell"]).toEqual({ everywhere: "inline", places: {} });
+    // A map written on the state names no bucket, and takes none.
+    write(paths.workflowsDir, "plan.json", state({ tools: { read_file: "allow" } }));
+    const plain = loadWorkflowBundle(readWorkflowFiles(paths.workflowsDir), "plan", { ...workflowLoadOptions(paths), standingLayers: { chat: ["$/permission-sets/project/build-safe"] } });
+    expect((environmentOf(plain.states["plan"]!)?.permissions as { stack: unknown }).stack).toEqual({ layers: [{ id: "inline" }] });
   });
 });
