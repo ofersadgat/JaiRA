@@ -688,6 +688,32 @@ describe("a person's move in the tree (decision 0005)", () => {
     const ruled = events.map((e) => (e.type === "transition.taken" ? { ...e, by: undefined } : e)) as EngineEvent[];
     expect(projectRun(ruled, SHAPE, ruled.map((_, i) => 1000 + i)).instances[0]!.status).toBe("completed");
   });
+
+  it("reopens a chat child for its next message, and it alone", () => {
+    // A finished run, then two messages typed into it: the first enters the chat child, the second
+    // takes a transition in it (`chatTurn.ts`), each turn ending the child.
+    const chat = "chat:1";
+    const events: EngineEvent[] = [
+      entered("1", "feature/plan"),
+      terminated("1", "feature/plan", "success"),
+      entered(chat, "feature/plan", "1", "ask"),
+      opStarted(chat, "feature/plan", "prompt"),
+      terminated(chat, "feature/plan", "success"),
+      { type: "transition.taken", instanceId: chat, stateId: "feature/plan", to: "feature/plan", index: 1, iteration: 0 },
+      opStarted(chat, "feature/plan", "prompt"),
+    ];
+    const run = projectRun(events, SHAPE, events.map((_, i) => 1000 + i));
+    const child = run.instances[0]!.children[0]!;
+    // The second message's turn runs like the first's — what a run page finds its approval under.
+    expect(child.status).toBe("running");
+    expect(child.endedAt).toBeUndefined();
+    expect(child.operation?.status).toBe("running");
+    // The run it hangs from is not reopened: a turn is not the run.
+    expect(run.instances[0]!.status).toBe("completed");
+    // And it ends again with its turn.
+    const ended = [...events, terminated(chat, "feature/plan", "success")];
+    expect(projectRun(ended, SHAPE, ended.map((_, i) => 1000 + i)).instances[0]!.children[0]!.status).toBe("completed");
+  });
 });
 
 /**

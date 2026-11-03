@@ -17,6 +17,7 @@
  */
 import type { EngineEvent } from "@declarative-ai/hw";
 import type { JsonValue } from "@declarative-ai/json";
+import { isChatInstance } from "@jaira/runtime";
 import { occurrenceOf } from "./load";
 import { resolveLabel } from "./runLabel";
 import type {
@@ -338,6 +339,14 @@ export function projectRun(events: readonly EngineEvent[], shape?: WorkflowShape
             up.status = "running";
             delete up.endedAt;
           }
+        }
+        // A chat child's next message REOPENS it, and it alone (`chatTurn.ts`: each turn ends the
+        // instance, the next one reopens it). Its first message enters it running; without this every
+        // message after read as ended while it ran, and a run page found no running call to draw that
+        // turn's approval under. The run it hangs from stays as it ended: a turn is not the run.
+        else if (node && isChatInstance(node.instanceId) && !isLive(node)) {
+          node.status = "running";
+          delete node.endedAt;
         }
         break;
       }
