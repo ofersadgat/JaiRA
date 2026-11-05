@@ -8,7 +8,7 @@
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, resolve, sep } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { MemoryArtifactStore } from "../src/artifacts";
@@ -167,6 +167,17 @@ describe("an absolute path inside the workspace (decision 0020: the Design type'
   it("is still refused for a WRITE when it lies outside the workspace", async () => {
     const { write } = tools("$DEFAULT");
     expect(await call(write, { path: join(tmpdir(), "elsewhere.txt"), content: "x" })).toHaveProperty("error");
+  });
+
+  it("is refused for a write or an edit from the filesystem's root, not written as the project's own", async () => {
+    // The logical key drops a leading `/`, so `/elsewhere.txt` (and on Linux every absolute path,
+    // `/tmp/…` included) was written into the workspace as `elsewhere.txt`.
+    const { write, edit } = tools("$DEFAULT");
+    const rooted = resolve(sep, "elsewhere.txt");
+    expect(await call(write, { path: rooted, content: "x" })).toMatchObject({ error: expect.stringContaining("outside the workspace") });
+    writeFileSync(join(dir, "elsewhere.txt"), "a", "utf8");
+    expect(await call(edit, { path: rooted, old: "a", new: "b" })).toMatchObject({ error: expect.stringContaining("outside the workspace") });
+    expect(readFileSync(join(dir, "elsewhere.txt"), "utf8")).toBe("a");
   });
 });
 

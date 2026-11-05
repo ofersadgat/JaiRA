@@ -151,9 +151,10 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
     readOnly: false,
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown; content?: unknown };
-      const logical = logicalKey(typeof args.path === "string" ? args.path : "", rootOf(options, ctx));
+      const raw = typeof args.path === "string" ? args.path : "";
+      const logical = logicalKey(raw, rootOf(options, ctx));
       const content = typeof args.content === "string" ? args.content : "";
-      const refusal = refusePath(logical);
+      const refusal = refuseOutside(rootOf(options, ctx), raw) ?? refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
 
       try {
@@ -186,6 +187,16 @@ function outsidePath(root: string, path: string): string | undefined {
   if (path.trim() === "") return undefined;
   const absolute = isAbsolute(path) ? normalize(path) : resolvePath(root, path);
   return withinWorkspace(root, absolute) === undefined ? absolute : undefined;
+}
+
+/**
+ * A write's refusal of an ABSOLUTE path outside the workspace, judged on the path as the call wrote it.
+ * Writes keep the workspace (decision 0023 ruling 18). Judged before the logical key, which drops a
+ * leading `/`: on Linux `/tmp/x` would otherwise be written as the project's `tmp/x`. A relative path
+ * that climbs out (`../x`) is the destination's to refuse, against its own root.
+ */
+function refuseOutside(root: string, path: string): string | undefined {
+  return isAbsolute(path) && outsidePath(root, path) !== undefined ? `'${path}' is outside the workspace` : undefined;
 }
 
 /**
@@ -288,8 +299,9 @@ export function createEditFileTool(options: FileToolOptions): Tool {
     readOnly: false,
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown; old?: unknown; new?: unknown; all?: unknown };
-      const logical = logicalKey(typeof args.path === "string" ? args.path : "", rootOf(options, ctx));
-      const refusal = refusePath(logical);
+      const raw = typeof args.path === "string" ? args.path : "";
+      const logical = logicalKey(raw, rootOf(options, ctx));
+      const refusal = refuseOutside(rootOf(options, ctx), raw) ?? refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
       const oldText = typeof args.old === "string" ? args.old : "";
       const newText = typeof args.new === "string" ? args.new : "";

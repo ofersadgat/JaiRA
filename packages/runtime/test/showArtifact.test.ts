@@ -8,7 +8,7 @@
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import type { ExecServices, Tool } from "@declarative-ai/exec";
@@ -76,7 +76,8 @@ describe("a page", () => {
     writeFileSync(bad, Buffer.from([0x3c, 0x70, 0x3e, 0xff, 0xfe, 0x0a]));
     expect(await call({ file_path: bad })).toMatchObject({ error: expect.stringMatching(/not UTF-8.*line 1, column 4/) as unknown as string });
     expect(await call({ file_path: write("r.html", "a\n\uFFFDb") })).toMatchObject({ error: expect.stringMatching(/U\+FFFD \(line 2, column 1\)/) as unknown as string });
-    expect(await call({ file_path: "C:/jaira-not-there/x.html" })).toMatchObject({ error: expect.stringMatching(/outside the workspace/) as unknown as string });
+    // Absolute on every platform: `C:/…` is a relative path on Linux.
+    expect(await call({ file_path: resolve(sep, "jaira-not-there", "x.html") })).toMatchObject({ error: expect.stringMatching(/outside the workspace/) as unknown as string });
   });
 
   it("reads a UTF-16 file by its byte-order mark", async () => {
