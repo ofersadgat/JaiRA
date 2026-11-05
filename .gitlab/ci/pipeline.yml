@@ -75,6 +75,16 @@ variables:
   RELEASES_REPO: ofersadgat/releases
   # Cloned beside the checkout, and removed after a Linux job on the group's machine (scripts/ci/in-node.sh).
   CI_CLONES_BESIDE: declarative-ai
+  # codeview (gitlab.com/mistlabs/codeview) is private, and the lockfile names it by SSH, which a runner
+  # has no key for: git reads it over HTTPS with the job's token, which requires this project on
+  # codeview's Settings > CI/CD > Job token allowlist. Set in the environment, not with
+  # `git config --global`: the group's machines keep their files between jobs, and a job's token ends
+  # with the job. GitHub's workflows do the same with a deploy token (.github/workflows/ci.yml).
+  GIT_CONFIG_COUNT: "2"
+  GIT_CONFIG_KEY_0: "url.https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/codeview.git.insteadOf"
+  GIT_CONFIG_VALUE_0: "ssh://git@gitlab.com/mistlabs/codeview.git"
+  GIT_CONFIG_KEY_1: "url.https://gitlab-ci-token:${CI_JOB_TOKEN}@gitlab.com/mistlabs/codeview.git.insteadOf"
+  GIT_CONFIG_VALUE_1: "https://gitlab.com/mistlabs/codeview.git"
 
 build:
   stage: test
