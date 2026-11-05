@@ -273,6 +273,16 @@ export const WORK_ROWS: readonly WorkRows[] = [0, 1, 3, 5];
 export type WorkNotes = "show" | "hide-groups" | "hide-blocks" | "hide";
 export const WORK_NOTES: readonly WorkNotes[] = ["show", "hide-groups", "hide-blocks", "hide"];
 
+/**
+ * Where a conversation says what its agent is doing right now (`LiveStatus`, chosen 2026-11-01 from
+ * the live-status mockups):
+ *
+ *  - `"pill"`: a pill over the thread's end, in the row the waits' pills stand in.
+ *  - `"composer"`: the composer's first line, over what is being typed.
+ */
+export type LiveStatusPlace = "pill" | "composer";
+export const LIVE_STATUS_PLACES: readonly LiveStatusPlace[] = ["pill", "composer"];
+
 /** The conversation's reading preferences — `appearance.conversation` (`./appearanceConfig`). */
 export interface ConversationLook {
   sequentialBatches: SequentialBatchLayout;
@@ -291,11 +301,13 @@ export interface ConversationLook {
   workThinking: boolean;
   /** See {@link WorkNotes}. */
   workNotes: WorkNotes;
+  /** See {@link LiveStatusPlace}. */
+  liveStatus: LiveStatusPlace;
 }
 
 /** Stacked: a batch reads as the sequence it was, until somebody asks otherwise. The number alone. */
 export function defaultConversationLook(): ConversationLook {
-  return { sequentialBatches: "stacked", usageFigures: "number", workPhases: true, workRows: 3, workThinking: true, workNotes: "hide-groups" };
+  return { sequentialBatches: "stacked", usageFigures: "number", workPhases: true, workRows: 3, workThinking: true, workNotes: "hide-groups", liveStatus: "pill" };
 }
 
 /**

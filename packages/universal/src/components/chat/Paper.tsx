@@ -45,53 +45,124 @@ export function Sheet({ children, dark }: { children: ReactNode; dark: boolean }
 }
 
 /**
- * `LiveStatusBar`: what the model is doing right now, in one fixed place between the record and the
- * box. The words, and who it waits on, are `liveStatusModel.ts`'s.
+ * What the model is doing right now, in one of two places (`appearance.conversation.liveStatus`): a
+ * pill over the thread's end (`LiveStatusPill`), or the composer's first line (`LiveStatusLine`). The
+ * words, and who it waits on, are `liveStatusModel.ts`'s; both draw the same ones. Neither stands
+ * between the thread and the box, so the thread's fade into the ground is its own.
  *
- *   the bar             row, centred, gap 8, padding 5 14, a --line above, --accent 5% over transparent,
- *                       app 11.5/12.5, --dim, tabular
- *   the verb            600, --accent
- *   what it is on       the data voice, flex 1, one line
+ *   the words           row, centred, gap 8, app 11.5/12.5, --dim, tabular
+ *   the mark            the pulse; waiting for you: the pause mark (13, --warn); checking with auto: the
+ *                       star (13, --accent)
+ *   the verb            600, --accent (waiting for you: --warn)
+ *   what it is on       the data voice, one line
  *   the jump            --accent, pressed to go back to the live edge
- *   waiting for you     the pulse is the pause mark (13); the bar --warn 12%, its line --warn 30% into
- *                       --line; the verb --warn
- *   checking with auto  the pulse is the star (13, --accent)
  */
-export function LiveStatusBar({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
+function LiveStatusWords({ status, grow }: { status: LiveStatus; grow: boolean }): JSX.Element {
   const t = useTokens();
   const since = status.kind === "writing" || status.kind === "working" ? undefined : status.since;
   const elapsed = useElapsed(since, true);
   const figure = statusFigureOf(status, elapsed);
   const tone = statusToneOf(status);
-  const ink = tone === "you" ? "warn" : "accent";
-  const face = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim", tabular: true };
+  const what = statusWhatOf(status);
+  return (
+    <>
+      {tone === "you" ? <Icon name="pause" size={13} color={String(t.v("warn"))} /> : tone === "check" ? <Icon name="star" size={13} color={String(t.v("accent"))} /> : <Pulse />}
+      <Txt spec={{ ...LIVE_FACE, weight: 600, color: tone === "you" ? "warn" : "accent" }} flexShrink={0}>
+        {statusVerbOf(status)}
+      </Txt>
+      {what !== "" || grow ? (
+        <Txt spec={{ ...LIVE_FACE, voice: "data" }} fontSize={t.scaled("size-app", 11.5 / 12.5)} ellip minWidth={0} {...(grow ? { flex: 1 } : { flexShrink: 1 })}>
+          {what}
+        </Txt>
+      ) : null}
+      {figure !== undefined ? (
+        <Txt spec={LIVE_FACE} flexShrink={0}>
+          {figure}
+        </Txt>
+      ) : null}
+    </>
+  );
+}
+
+const LIVE_FACE = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim", tabular: true };
+
+/** How tall the status pill stands over the thread, with the 8 under it: what the thread leaves free. */
+export const LIVE_PILL_HEIGHT = 40;
+
+/**
+ * `LiveStatusPill`: the words on a pill, in the row the waits' pills stand in over the box
+ * (`WaitPills`, design W3), first of them.
+ *
+ *   the pill            row, at most 560, radius 999, --panel, a 1px --line ring, 0 4 14
+ *                       rgba(15,20,30,.12); waiting for you: --warn 10% into --panel, a --warn 30% into
+ *                       --line ring, as a wait's pill
+ *   its words           padding 5 14 5 12
+ *   the jump            away from the live edge: a second compartment, a 1px --line before it, padding
+ *                       0 12 0 10, app 11.5/12.5 --accent; hovered --fill-ghost-hover
+ */
+export function LiveStatusPill({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
+  const t = useTokens();
+  const you = statusToneOf(status) === "you";
   return (
     <View
-      flexShrink={0}
+      flexDirection="row"
+      alignItems="stretch"
+      minWidth={0}
+      flexShrink={1}
+      maxWidth={560}
+      borderRadius={999}
+      overflow="hidden"
+      backgroundColor={(you ? t.mix(t.v("warn"), 10, t.v("panel")) : t.v("panel")) as never}
+      {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, you ? t.mix(t.v("warn"), 30, t.v("line")) : undefined) as object)}
+      {...({ boxShadow: "0px 4px 14px rgba(15, 20, 30, 0.12)" } as object)}
+    >
+      <View role="status" flexDirection="row" alignItems="center" gap={8} minWidth={0} flexShrink={1} paddingVertical={5} paddingLeft={12} paddingRight={14}>
+        <LiveStatusWords status={status} grow={false} />
+      </View>
+      {onJump !== undefined ? (
+        <Press
+          onPress={onJump}
+          flexShrink={0}
+          flexDirection="row"
+          alignItems="center"
+          paddingLeft={10}
+          paddingRight={12}
+          {...(edge(t, { left: 1 }) as object)}
+          box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" }) as never}
+        >
+          <Txt spec={{ ...LIVE_FACE, color: "accent" }} numberOfLines={1}>
+            Jump to live ↓
+          </Txt>
+        </Press>
+      ) : null}
+    </View>
+  );
+}
+
+/**
+ * `LiveStatusLine`: the words as the composer's first line, over what is being typed.
+ *
+ *   the line            row, padding 7 15 0; what it is on takes the room, the jump hard right
+ *   waiting for you     padding 7 15, --warn 10% into --panel, the shell's top corners (21)
+ */
+export function LiveStatusLine({ status, onJump }: { status: LiveStatus; onJump?: (() => void) | undefined }): JSX.Element {
+  const t = useTokens();
+  const you = statusToneOf(status) === "you";
+  return (
+    <View
+      role="status"
       flexDirection="row"
       alignItems="center"
       gap={8}
       minWidth={0}
-      paddingVertical={5}
-      paddingHorizontal={14}
-      backgroundColor={t.mix(t.v(ink), tone === "you" ? 12 : 5, "transparent") as never}
-      {...(edge(t, { top: 1 }, tone === "you" ? t.mix(t.v("warn"), 30, t.v("line")) : undefined) as object)}
+      paddingTop={7}
+      paddingHorizontal={15}
+      {...(you ? { paddingBottom: 7, borderTopLeftRadius: 21, borderTopRightRadius: 21, backgroundColor: t.mix(t.v("warn"), 10, t.v("panel")) as never } : {})}
     >
-      {tone === "you" ? <Icon name="pause" size={13} color={String(t.v("warn"))} /> : tone === "check" ? <Icon name="star" size={13} color={String(t.v("accent"))} /> : <Pulse />}
-      <Txt spec={{ ...face, weight: 600, color: ink }} flexShrink={0}>
-        {statusVerbOf(status)}
-      </Txt>
-      <Txt spec={{ ...face, voice: "data" }} fontSize={t.scaled("size-app", 11.5 / 12.5)} ellip flex={1} minWidth={0}>
-        {statusWhatOf(status)}
-      </Txt>
-      {figure !== undefined ? (
-        <Txt spec={face} flexShrink={0}>
-          {figure}
-        </Txt>
-      ) : null}
+      <LiveStatusWords status={status} grow />
       {onJump !== undefined ? (
-        <Press onPress={onJump} marginLeft="auto" flexShrink={0} paddingHorizontal={2}>
-          <Txt spec={{ ...face, color: "accent" }} numberOfLines={1}>
+        <Press onPress={onJump} flexShrink={0} paddingHorizontal={2}>
+          <Txt spec={{ ...LIVE_FACE, color: "accent" }} numberOfLines={1}>
             Jump to live ↓
           </Txt>
         </Press>

@@ -2,6 +2,8 @@ import { useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
 import type { WorkflowOutcome } from "@jaira/shared/browser";
 import { CUT, fitPills, secondLine, type PillLevel, type RunWait } from "@jaira/ui/childRunModel";
+import { thoughtTime } from "@jaira/ui/liveStatusModel";
+import { useElapsed } from "@jaira/ui/runActivityModel";
 import { Press, Txt, edge, lengthToken, padToken } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { Icon } from "../panel/Icon";
@@ -40,7 +42,8 @@ import { Pulse } from "./Pulse";
  *                     its step on screen: an --accent 70% ring and a 3px --accent 16% halo
  *   its mark          the pause, or an approval's shield, 12 --warn; working: the pulse
  *   its first line    "Waiting for" app 12.5/12.5 --warn, the step data 600 --warn
- *   its second line   app 10/12.5 --dim, one line
+ *   its second line   app 10/12.5 --dim, one line; the conversation's own wait ends on how long it has
+ *                     waited, ticking, where a run's ends on its clock
  */
 export function ChildRunLine({
   outcome,
@@ -188,7 +191,9 @@ function pillFrame(t: ReturnType<typeof useTokens>, here: boolean, hovered: bool
 function WaitPill({ wait, level, here, clock, onGo }: { wait: RunWait; level: PillLevel; here: boolean; clock: (at: number) => string; onGo: (wait: RunWait) => void }): JSX.Element {
   const t = useTokens();
   const face = { voice: "app" as const, scale: 12.5 / 12.5, color: "warn" };
-  const second = secondLine(wait, level, clock);
+  // The conversation's own wait stands for its status, and keeps the status's ticking time.
+  const elapsed = useElapsed(wait.own === true ? wait.since : undefined, true);
+  const second = secondLine(wait, level, clock, elapsed !== undefined ? thoughtTime(elapsed) : undefined);
   const name = level === 0 && wait.step.length > CUT ? `${wait.step.slice(0, CUT - 1)}…` : wait.step;
   return (
     <Press
@@ -264,12 +269,15 @@ function RunningPill({ step, path, took, onGo }: { step: string; path: string[];
 export const WAIT_PILLS_HEIGHT = 56;
 
 export function WaitPills({
+  lead,
   waits,
   running,
   onScreen,
   clock,
   onGo,
 }: {
+  /** First in the row, at most half of it: what the conversation's agent is doing (`LiveStatusPill`). */
+  lead?: ReactNode;
   /** The waits from where you stand (`scopedWaits`). */
   waits: readonly RunWait[];
   /** The step a run works on, while nothing waits. */
@@ -281,8 +289,10 @@ export function WaitPills({
 }): JSX.Element | null {
   const t = useTokens();
   const [width, setWidth] = useState(0);
-  if (waits.length === 0 && running === undefined) return null;
-  const { level, shown } = width > 0 ? fitPills(waits, width - 40, clock) : { level: 4 as PillLevel, shown: waits.length };
+  if (waits.length === 0 && running === undefined && lead === undefined) return null;
+  // The lead takes at most half the row; the waits are fitted into what is left.
+  const room = width - 40 - (lead !== undefined && waits.length > 0 ? Math.min(560, (width - 40) / 2) + 8 : 0);
+  const { level, shown } = width > 0 ? fitPills(waits, room, clock) : { level: 4 as PillLevel, shown: waits.length };
   const rest = waits.length - shown;
   return (
     <View
@@ -297,7 +307,12 @@ export function WaitPills({
       pointerEvents="box-none"
       onLayout={(e) => setWidth(e.nativeEvent.layout.width)}
     >
-      <View flexDirection="row" alignItems="center" gap={8} pointerEvents="box-none">
+      <View flexDirection="row" alignItems="center" gap={8} maxWidth="100%" pointerEvents="box-none">
+        {lead !== undefined ? (
+          <View flexShrink={1} minWidth={0} {...(waits.length > 0 || running !== undefined ? { maxWidth: "50%" } : {})} pointerEvents="box-none">
+            {lead}
+          </View>
+        ) : null}
         {waits.length === 0 && running !== undefined ? <RunningPill {...running} /> : null}
         {waits.slice(0, shown).map((wait) => (
           <WaitPill key={`${wait.instanceId}:${wait.step}`} wait={wait} level={level} here={onScreen?.has(wait.instanceId) === true} clock={clock} onGo={onGo} />

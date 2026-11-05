@@ -74,7 +74,8 @@ import { useKeyboardShown } from "../floats/keyboard";
  *   its shell         column, radius 21, --panel (off: --panel-2)
  *   the files         row, wrapping, gap 6, padding 9 12 0; a file a pill: padding 2 4 2 7, 1px --line,
  *                     --panel-2, at most 260, app 11.5/12.5; the clip 12 --dim; × --dim (hovered --text)
- *   the text          app 13.5/12.5, line 1.55, padding 13 15 6, --text, at least 54 tall, at most
+ *   its first line    what the agent is doing, when `liveStatus` puts it here (`LiveStatusLine`)
+ *   the text          app 13.5/12.5, line 1.55, padding 13 15 6 (under a first line, 6 15 6), --text, at least 54 tall, at most
  *                     40% of the window, growing with what is typed; the placeholder --tok-hint
  *   the `@` list      over the box, its width, 4 apart: column, at most 240, padding 4, 1px --line,
  *                     radius 10, --panel, 0 8 24 rgb(0 0 0 / 18%); a path padding 4 8, radius 6, app
@@ -126,6 +127,7 @@ export function Composer({
   stack: stackHost,
   saveLayers,
   tray,
+  head,
 }: {
   plan: ChatPlanView | null;
   busy?: boolean;
@@ -154,6 +156,8 @@ export function Composer({
   saveLayers?: readonly WritableLayer[] | undefined;
   /** What is tucked under the frame: the session's environment bar. */
   tray?: ReactNode;
+  /** The shell's first line, over what is typed: what the agent is doing (`LiveStatusLine`). */
+  head?: ReactNode;
 }): JSX.Element {
   const t = useTokens();
   const win = useWindowDimensions();
@@ -400,6 +404,7 @@ export function Composer({
         {/* Positioned: painted after the conversation above it, with what else is. */}
         <View position="relative" flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
           {!off ? <SpentLine route={route} /> : null}
+          {head}
           {/* The ruler: each chip in each of its looks, and the live note's words, laid out where nothing
               shows them — a box of no size that clips — for the foot to be fitted by. */}
           <View position="absolute" left={0} top={0} width={0} height={0} overflow="hidden" pointerEvents="none" {...({ "aria-hidden": true, importantForAccessibility: "no-hide-descendants" } as object)}>
@@ -490,7 +495,8 @@ export function Composer({
             {...(Platform.OS === "web" ? {} : { textAlignVertical: "top" as const })}
             style={{
               ...(font(t, { voice: "app", scale: 13.5 / 12.5, color: "text", lineHeight: 1.55 }) as object),
-              paddingTop: 13,
+              // Under a first line, closer to it.
+              paddingTop: has(head) ? 6 : 13,
               paddingHorizontal: 15,
               paddingBottom: 6,
               minHeight: 54,

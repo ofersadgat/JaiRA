@@ -2,7 +2,7 @@
  * Settings → Appearance's model: its choices, what its rows are called and say, how a value of the
  * look is spelt, and a row's place in the layers — everything `AppearancePage.tsx` draws FROM.
  */
-import { statesPath, type Appearance, type BucketStyle, type ConfigLayer, type ConfigView, type SequentialBatchLayout, type ThemeMode, type UsageFigures, type WorkNotes, type WorkRows } from "@jaira/shared/browser";
+import { statesPath, type Appearance, type BucketStyle, type ConfigLayer, type ConfigView, type LiveStatusPlace, type SequentialBatchLayout, type ThemeMode, type UsageFigures, type WorkNotes, type WorkRows } from "@jaira/shared/browser";
 import { EDITOR_THEMES, EDITOR_THEME_APP } from "./editorThemes";
 import { PALETTE_CARDS } from "./paletteCardsModel";
 import { shortValue, type RowLayer } from "./settingsRows";
@@ -54,6 +54,11 @@ export const WORK_NOTE_CHOICES: Array<[string, WorkNotes]> = [
   ["Hide everywhere", "hide"],
 ];
 
+export const LIVE_STATUS_CHOICES: ReadonlyArray<readonly [string, LiveStatusPlace]> = [
+  ["A pill over the thread", "pill"],
+  ["In the composer", "composer"],
+];
+
 export const BATCH_CHOICES: ReadonlyArray<readonly [string, SequentialBatchLayout]> = [
   ["One after another", "stacked"],
   ["Side by side", "band"],
@@ -95,6 +100,8 @@ export function lookWords(value: unknown, path: string): string {
       return value === true ? "on" : value === false ? "off" : shortValue(value, path);
     case "conversation.workNotes":
       return WORK_NOTE_CHOICES.find(([, notes]) => notes === value)?.[0].toLowerCase() ?? shortValue(value, path);
+    case "conversation.liveStatus":
+      return LIVE_STATUS_CHOICES.find(([, place]) => place === value)?.[0].toLowerCase() ?? shortValue(value, path);
     case "conversation.workRows":
       return value === 0 ? "none" : typeof value === "number" ? `${value} rows` : shortValue(value, path);
     case "appFamily":
@@ -148,6 +155,11 @@ export const APPEARANCE_ROWS = {
     name: "Usage figures",
     description: "How much of an account is used, after the model chip and in Connections: as a number, a ring, both, or not at all.",
     info: "A subscription shows the percent of its tightest window; an API key whose provider reports its credit, what is spent; any other key, what the conversation cost. The ring draws the same share, so either one alone says it. The conversation's own ring, at the composer's right, is not this setting.",
+  },
+  liveStatus: {
+    name: "What the agent is doing",
+    description: "Where a conversation says what its agent is doing right now: a pill over the end of the thread, or the composer's first line.",
+    info: "Both say the same words, and turn amber while the agent waits for you. Scrolled away from the end, the pill and the line offer Jump to live.",
   },
   usagePreview: { name: "Preview", description: "The composer on a subscription, on a key whose provider reports its credit, and on a key whose provider does not." },
   workPhases: {

@@ -99,6 +99,9 @@ export interface RunWait {
   note?: string;
   /** When it started waiting. */
   since?: number;
+  /** The conversation's own agent asking, in no run: what the conversation's status would say, so it says
+   *  it instead, with the status's ticking time in place of the clock. */
+  own?: true;
 }
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -152,12 +155,15 @@ export function waitsOf(input: {
     }
   }
   const placed = (instanceId: string | undefined): string[] => (instanceId === undefined ? [] : (runs.map((run) => keysTo([run], instanceId)).find((keys) => keys !== undefined) ?? []));
+  const own = (path: string[]): { own?: true } => (path.length === 0 ? { own: true } : {});
   if (input.approval !== undefined) {
     const { step, note } = approvalStep(input.approval);
-    waits.push({ instanceId: input.approval.instanceId ?? "", path: placed(input.approval.instanceId), step, verb: "approve", kind: "approve", ...(note !== undefined ? { note } : {}), since: input.approval.at });
+    const path = placed(input.approval.instanceId);
+    waits.push({ instanceId: input.approval.instanceId ?? "", path, step, verb: "approve", kind: "approve", ...(note !== undefined ? { note } : {}), since: input.approval.at, ...own(path) });
   }
   if (input.question !== undefined) {
-    waits.push({ instanceId: input.question.instanceId ?? "", path: placed(input.question.instanceId), step: "answer", kind: "ask", note: plural(input.question.questions.length, "question"), since: input.question.at });
+    const path = placed(input.question.instanceId);
+    waits.push({ instanceId: input.question.instanceId ?? "", path, step: "answer", kind: "ask", note: plural(input.question.questions.length, "question"), since: input.question.at, ...own(path) });
   }
   return waits;
 }
@@ -218,11 +224,15 @@ export const PILL_GAP = 8;
 /** The "+N waiting" pill. */
 const MORE = 110;
 
-/** The words of a wait's second line at a level. */
-export function secondLine(wait: RunWait, level: PillLevel, clock: (at: number) => string): string {
+/**
+ * The words of a wait's second line at a level. The conversation's own wait (`own`) ends on `waited`,
+ * how long it has waited, wherever it has a second line: it stands for the status, whose time it is.
+ */
+export function secondLine(wait: RunWait, level: PillLevel, clock: (at: number) => string, waited?: string): string {
   if (level < 2) return "";
   const where = wait.path.length === 0 ? "in this conversation" : level >= 4 ? `in ${wait.path.join(" › ")}` : level === 3 ? `in ${wait.path[wait.path.length - 1]}` : "";
-  return [where, wait.note ?? "", level >= 4 && wait.since !== undefined ? clock(wait.since) : ""].filter((part) => part !== "").join(" · ");
+  const when = wait.own === true && waited !== undefined ? waited : level >= 4 && wait.since !== undefined ? clock(wait.since) : "";
+  return [where, wait.note ?? "", when].filter((part) => part !== "").join(" · ");
 }
 
 /** "8 steps", the step's name cut at level 0. */
@@ -231,7 +241,8 @@ export const CUT = 10;
 export function pillWidth(wait: RunWait, level: PillLevel, clock: (at: number) => string = () => "00:00 PM"): number {
   const name = level === 0 ? Math.min(wait.step.length, CUT) : wait.step.length;
   const first = "Waiting for ".length * BIG + (wait.verb !== undefined ? (wait.verb.length + 1) * BIG : 0) + name * STEP;
-  const second = secondLine(wait, level, clock).length * SMALL;
+  // A ticking time is measured at a width it keeps for its first minute, so the row does not refit each tick.
+  const second = secondLine(wait, level, clock, "00.0 seconds").length * SMALL;
   return FRAME + Math.max(first, second);
 }
 

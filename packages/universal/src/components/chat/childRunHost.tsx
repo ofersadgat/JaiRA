@@ -8,6 +8,7 @@ import { useRunContext } from "../run/runContext";
 import { OutcomeHostContext } from "../panel/outcomeHost";
 import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
 import { ChildRunLine, WaitPills, WAIT_PILLS_HEIGHT } from "./ChildRun";
+import { LIVE_PILL_HEIGHT } from "./Paper";
 
 /** "9:37 PM": when a wait began, on a pill. */
 const shortClock = (at: number): string => new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
@@ -29,7 +30,12 @@ function idsIn(node: InstanceNode): string[] {
  * turns as pieces of its own. The agent's approval or question is the run's when its instance is in the
  * run — drawn in the run's page — and the conversation's otherwise, drawn where the thread asks it.
  */
-export function useChildRunHost(surface: ChatSurface, jump: () => void): {
+export function useChildRunHost(
+  surface: ChatSurface,
+  jump: () => void,
+  /** The conversation's own status pill, first in the pills' row (`appearance.conversation.liveStatus`). */
+  lead?: ReactNode,
+): {
   outcomeHost: ((outcome: WorkflowOutcome) => ReactNode | undefined) | undefined;
   walkedIn: ReactNode | null;
   pills: ReactNode | null;
@@ -140,7 +146,11 @@ export function useChildRunHost(surface: ChatSurface, jump: () => void): {
         }
       : undefined;
   const showPills = here.length > 0 || running !== undefined;
-  const pills = showPills ? <WaitPills waits={here} running={running} {...(walked !== undefined ? { onScreen } : {})} clock={shortClock} onGo={go} /> : null;
+  // Walked into a run, the run is the page: the conversation's own status is not drawn over it. Nor
+  // beside the conversation's own wait, which says the same with its time (`RunWait.own`).
+  const leading = walked === undefined && lead !== undefined && lead !== null && !here.some((wait) => wait.own === true) ? lead : undefined;
+  const pills =
+    showPills || leading !== undefined ? <WaitPills lead={leading} waits={here} running={running} {...(walked !== undefined ? { onScreen } : {})} clock={shortClock} onGo={go} /> : null;
 
   const walkedIn =
     walked === undefined || detail === null ? null : (
@@ -157,5 +167,5 @@ export function useChildRunHost(surface: ChatSurface, jump: () => void): {
       </OutcomeHostContext.Provider>
     );
 
-  return { outcomeHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : 0, ownApproval: approvalRun === undefined, ownQuestion: questionRun === undefined };
+  return { outcomeHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined, ownQuestion: questionRun === undefined };
 }

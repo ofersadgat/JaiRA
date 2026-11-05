@@ -31,7 +31,7 @@ A one-line bar pinned under a conversation that says what is happening there now
 - **Sentence.** What is happening, then the path of child keys joined by ` → ` at 600 in `--text`. It ellipsises on one line, except the rewind confirmation, which wraps.
 - **Clock.** A half-faded `·` and the time since the run started, in the data face at tabular figures, ticking once a second while running or waiting.
 - **Button.** At the far right: a red-outlined `Stop` while the run goes; one filled accent verb once it has stopped; a ghost `Cancel` beside a filled `--bad` `Rewind` while a cut is armed.
-- **Live line.** The full width of the chat column, a 1px `--line` rule above and a 5% `--accent` wash, 5px by 14px. The dots in `--dim`, the verb at 600 in `--accent`, what it acts on in the data face taking the rest of the width, the counter, and `Jump to live ↓` in `--accent` hard against the right edge.
+- **Live line.** One of two looks, by `appearance.conversation.liveStatus`. A pill (the default): at most 560 wide, radius 999, `--panel` with a 1px `--line` ring and the waits' pills' drop shadow, 5px by 12–14px, centred over the thread's end and first in their row; scrolled away, `Jump to live ↓` is a second compartment after a 1px `--line`. Or the composer's first line, 7px above and 15px either side, over the text; what it acts on takes the rest of the width and `Jump to live ↓` sits hard right. In both: the pulse, the verb at 600 in `--accent`, what it acts on in the data face, the counter. Waiting for you turns the pill, or the line's ground, `--warn` 10% into `--panel`.
 
 ## Every form is one line that names the run's condition and offers the act that changes it
 

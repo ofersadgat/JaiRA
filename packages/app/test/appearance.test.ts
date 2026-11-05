@@ -106,6 +106,10 @@ describe("parsing the appearance block of a settings layer", () => {
     expect(parseAppearanceConfig({ conversation: { workNotes: "hide" } }).conversation.workNotes).toBe("hide");
     expect(parseAppearanceConfig({ conversation: { workNotes: "hide-blocks" } }).conversation.workNotes).toBe("hide-blocks");
     expect(() => parseAppearanceConfig({ conversation: { workNotes: "quiet" } })).toThrow(/workNotes/);
+    // Where the live status is drawn: a pill over the thread unless a layer says the composer.
+    expect(parsed.conversation.liveStatus).toBe("pill");
+    expect(parseAppearanceConfig({ conversation: { liveStatus: "composer" } }).conversation.liveStatus).toBe("composer");
+    expect(() => parseAppearanceConfig({ conversation: { liveStatus: "bar" } })).toThrow(/liveStatus/);
     expect(parseAppearanceConfig({ conversation: { workPhases: false, workRows: 0, workThinking: false } }).conversation).toMatchObject({ workPhases: false, workRows: 0, workThinking: false });
     expect(() => parseAppearanceConfig({ conversation: { workRows: 2 } })).toThrow(/workRows must be one of 0, 1, 3, 5/);
     expect(() => parseAppearanceConfig({ conversation: { workPhases: "yes" } })).toThrow(/workPhases must be true or false/);

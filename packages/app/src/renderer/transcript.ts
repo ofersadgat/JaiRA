@@ -1022,12 +1022,23 @@ export function liveStatusOf(
   // still being waited on when the others have come back — and only in the stretch since the last
   // message: a call further up that never answered is not what this turn is doing (a chat whose old
   // turn ended on an unanswered `git fetch` would otherwise say "Running git fetch" for every turn
-  // after it).
+  // after it). A call held at a gate (the approval prompt, a permission check) wins over a newer one,
+  // though: the calls after it are queued behind it, not running, and the turn waits on the gate (the
+  // person, 2026-11-04: "Running Read file" beside the approval it was queued behind).
+  let found: number | undefined;
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i]!;
     if (entry.kind === "message") break;
     if (entry.kind !== "tool" || entry.ok !== undefined || entry.result !== undefined) continue;
-    const about = entry.calledBy !== undefined ? callerOf(entries, i, entry.calledBy) : undefined;
+    found ??= i;
+    if (entry.name === APPROVAL_PROMPT_FUNCTION || entry.name === PERMISSION_CHECK) {
+      found = i;
+      break;
+    }
+  }
+  if (found !== undefined) {
+    const entry = entries[found] as ToolEntry;
+    const about = entry.calledBy !== undefined ? callerOf(entries, found, entry.calledBy) : undefined;
     // A permission check says which function is checking: "Checking with auto".
     const checker = entry.name === PERMISSION_CHECK ? (entry.args as { function?: unknown } | undefined)?.function : undefined;
     return {

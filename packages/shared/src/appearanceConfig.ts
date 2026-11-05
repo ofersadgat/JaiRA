@@ -27,6 +27,7 @@ import {
   EDITOR_KINDS,
   EDITOR_KNOBS,
   LINE_HEIGHT,
+  LIVE_STATUS_PLACES,
   PALETTES,
   RENDER_VIEWS,
   SEQUENTIAL_BATCH_LAYOUTS,
@@ -45,6 +46,7 @@ import {
   type ConversationLook,
   type EditorKind,
   type EditorLook,
+  type LiveStatusPlace,
   type Palette,
   type RendererChoice,
   type RendererChoices,
@@ -162,7 +164,7 @@ function parseConversation(raw: unknown, where: string): ConversationLook {
   const out = defaultConversationLook();
   if (raw === undefined) return out;
   const spec = plain(raw, where);
-  onlyFields(spec, ["sequentialBatches", "usageFigures", "workPhases", "workRows", "workThinking", "workNotes"], where);
+  onlyFields(spec, ["sequentialBatches", "usageFigures", "workPhases", "workRows", "workThinking", "workNotes", "liveStatus"], where);
   if (spec["sequentialBatches"] !== undefined) {
     out.sequentialBatches = oneOf<SequentialBatchLayout>(spec["sequentialBatches"], SEQUENTIAL_BATCH_LAYOUTS, `${where}.sequentialBatches`);
   }
@@ -177,6 +179,7 @@ function parseConversation(raw: unknown, where: string): ConversationLook {
   }
   if (spec["workThinking"] !== undefined) out.workThinking = bool(spec["workThinking"], `${where}.workThinking`);
   if (spec["workNotes"] !== undefined) out.workNotes = oneOf<WorkNotes>(spec["workNotes"], WORK_NOTES, `${where}.workNotes`);
+  if (spec["liveStatus"] !== undefined) out.liveStatus = oneOf<LiveStatusPlace>(spec["liveStatus"], LIVE_STATUS_PLACES, `${where}.liveStatus`);
   return out;
 }
 

@@ -95,11 +95,11 @@ describe("what it waits on", () => {
     const inRun = { requestId: "a", tool: "shell", command: "git push origin x", instanceId: "draft", at: T + 9 } as unknown as PendingApproval;
     const own = { requestId: "b", tool: "web_fetch", instanceId: "chat:root", at: T + 7 } as unknown as PendingApproval;
     expect(waitsOf({ instances, approval: inRun }).find((w) => w.instanceId === "draft")).toEqual({ instanceId: "draft", path: ["feature", "product", "draft"], step: "git push", verb: "approve", kind: "approve", note: "a shell command", since: T + 9 });
-    expect(waitsOf({ instances, approval: own }).find((w) => w.instanceId === "chat:root")).toMatchObject({ path: [], step: "web_fetch", verb: "approve" });
+    expect(waitsOf({ instances, approval: own }).find((w) => w.instanceId === "chat:root")).toMatchObject({ path: [], step: "web_fetch", verb: "approve", own: true });
   });
   it("counts an agent's questions", () => {
     const q = { requestId: "q", questions: [{}], instanceId: "chat:root", at: T } as unknown as PendingQuestion;
-    expect(waitsOf({ instances, question: q }).find((w) => w.instanceId === "chat:root")).toMatchObject({ path: [], step: "answer", note: "1 question" });
+    expect(waitsOf({ instances, question: q }).find((w) => w.instanceId === "chat:root")).toMatchObject({ path: [], step: "answer", note: "1 question", own: true });
   });
 });
 
@@ -135,6 +135,13 @@ describe("a pill's second line", () => {
   });
   it("names the conversation for its own wait", () => {
     expect(secondLine(waits[2]!, 3, clock)).toBe("in this conversation");
+  });
+  it("ends the conversation's own wait on how long it has waited, at every level with a second line", () => {
+    const own: RunWait = { ...waits[2]!, own: true };
+    expect(secondLine(own, 4, clock, "4.2 seconds")).toBe("in this conversation · 4.2 seconds");
+    expect(secondLine(own, 2, clock, "4.2 seconds")).toBe("in this conversation · 4.2 seconds");
+    // A run's wait keeps its clock.
+    expect(secondLine(waits[0]!, 4, clock, "4.2 seconds")).toBe("in feature › product · 5 questions · 9:37 PM");
   });
 });
 

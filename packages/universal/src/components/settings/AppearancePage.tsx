@@ -9,6 +9,7 @@ import {
   BATCH_CHOICES,
   BATCH_PREVIEW,
   BUCKET_CHOICES,
+  LIVE_STATUS_CHOICES,
   MODES,
   SUGGESTED_APP,
   SUGGESTED_DATA,
@@ -139,6 +140,11 @@ export function AppearancePage(): JSX.Element {
         <SettingsRow {...ROWS.usagePreview} full>
           <UsageFiguresPreview mode={look.conversation.usageFigures} />
         </SettingsRow>
+        <SettingsRow
+          {...ROWS.liveStatus}
+          layer={rowLayer("conversation.liveStatus")}
+          control={<Segmented label={ROWS.liveStatus.name} value={look.conversation.liveStatus} options={LIVE_STATUS_CHOICES} disabled={busy} onChange={(liveStatus) => onConversation({ liveStatus })} />}
+        />
         <SettingsRow
           {...ROWS.workPhases}
           layer={rowLayer("conversation.workPhases")}

@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState, type JSX, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
+import { lookOf } from "@jaira/ui/appearanceLayer";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { routeOf } from "@jaira/ui/composerModel";
 import { facesOf } from "@jaira/ui/environmentModel";
@@ -13,7 +14,8 @@ import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
 import { Composer } from "./Composer";
 import { useMentions } from "@jaira/ui/chatMentions";
-import { LiveStatusBar, Paper } from "./Paper";
+import { LiveStatusLine, LiveStatusPill, Paper } from "./Paper";
+import { useShell } from "../../app/shell";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
 import { InlineHost } from "../panel/RunTranscript";
@@ -36,7 +38,10 @@ import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
  *
  *   the thread       column, flex 1
  *   its scroller     flex 1, scrolls, follows the live edge while the reader is on it
- *   the foot         --bg, and an 18px fade into --bg over the thread's last pixels (`FootFade`)
+ *   the foot         --bg, and an 18px fade into --bg over the thread's last pixels (`FootFade`), hung
+ *                    from the top of all that stands under the thread, so it fades the thread alone
+ *   what it is doing a pill first in the pills' row over the box, or the composer's first line
+ *                    (`appearance.conversation.liveStatus`; `LiveStatusPill`, `LiveStatusLine`)
  *   what is armed    row, centred, gap 8, 900 at most, 8 above, padding 5 12, radius 8, --accent 10%
  *                    over transparent, app 12/12.5, --dim (a rewind: --bad's)
  *   an error         900 at most, 6 below, padding 6 12, radius 8, --bad 12% over transparent, --bad,
@@ -73,7 +78,11 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
   /** The runs this conversation started: their lines, the one walked into, and the waits over the box. */
-  const runs = useChildRunHost(surface, () => jumpRef.current());
+  // Where it says what the agent is doing: a pill over the thread's end, or the composer's first line.
+  const { state: shell } = useShell();
+  const place = useMemo(() => lookOf(shell.config).conversation.liveStatus, [shell.config]);
+  const jumpIf = away ? { onJump: jump } : {};
+  const runs = useChildRunHost(surface, () => jumpRef.current(), m.status !== null && place === "pill" ? <LiveStatusPill status={m.status} {...jumpIf} /> : undefined);
   const mentions = useMentions(surface.hasProject, m.project);
   const env = useChatEnvironment(surface);
   const placement = placementSummaryOf({
@@ -265,14 +274,13 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
 
       {/* The box and what stands over it: the pills hang from the top of all of it, painted last. */}
       <View flexShrink={0} position="relative">
-      {m.status !== null && runs.walkedIn === null ? <LiveStatusBar status={m.status} {...(away ? { onJump: jump } : {})} /> : null}
+      {/* The thread fading into the ground the box sits on, over its last 18. */}
+      <FootFade color={String(t.v("bg"))} />
 
       {m.waitingHere.length > 0 ? <WaitingHost items={m.waitingHere} /> : null}
 
       {/* Positioned: painted after the thread above it, with what else is. */}
       <View flexShrink={0} position="relative" backgroundColor={t.v("bg") as never}>
-        {/* The thread fading into the ground the box sits on, over its last 18. */}
-        <FootFade color={String(t.v("bg"))} />
         {m.arming !== null ? (
           <View
             flexDirection="row"
@@ -349,6 +357,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               ? { disabled: "This conversation cannot be continued." }
               : {})}
           tray={<EnvironmentBar view={env.view} stage={env.stage} onChoose={env.onChoose} />}
+          head={m.status !== null && place === "composer" && runs.walkedIn === null ? <LiveStatusLine status={m.status} {...jumpIf} /> : undefined}
           usage={{ context: m.lastContext, total: m.contextTotal, onCompact: m.onCompact, cost: m.thread?.costUsd }}
           stack={{ project: m.project, ...(surface.taskId !== null ? { taskId: surface.taskId } : {}) }}
           saveLayers={surface.hasProject ? ["project", "base"] : ["base"]}

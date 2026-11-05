@@ -822,6 +822,18 @@ describe("what the model is doing right now, as one line", () => {
     expect(liveStatusOf(entries, null, true)).toMatchObject({ kind: "running", name: "shell", since: 900 });
   });
 
+  it("waits on the approval, not on a newer call queued behind it (2026-11-04)", () => {
+    // "Running Read file" beside the approval of the shell call the Read was queued behind.
+    const shell: TranscriptEntry = { kind: "tool", name: "shell", summary: "powershell -NoProfile", callId: "s1", at: 100 };
+    const asked: TranscriptEntry = { kind: "tool", name: "approve_tool_call", summary: "shell", callId: "a1", calledBy: "s1", at: 200 };
+    const read: TranscriptEntry = { kind: "tool", name: "read_file", summary: "a.ts", callId: "r1", at: 150 };
+    const status = liveStatusOf([shell, asked, read], null, true)!;
+    expect(status).toMatchObject({ kind: "running", name: "approve_tool_call", since: 200 });
+    expect(statusToneOf(status)).toBe("you");
+    // Answered, the newest unanswered call is what runs again.
+    expect(liveStatusOf([shell, { ...asked, ok: true, result: "allow" } as TranscriptEntry, read], null, true)).toMatchObject({ name: "read_file" });
+  });
+
   it("falls back to the honest floor: a turn has started and has said nothing", () => {
     expect(liveStatusOf([], null, true)).toEqual({ kind: "working" });
   });
