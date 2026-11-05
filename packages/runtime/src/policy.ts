@@ -35,6 +35,7 @@
  *     `.jaira/` (§1g item 5) — the deny rule is the real enforcement, not the
  *     directory layout.
  */
+import type { FunctionInputs } from "@declarative-ai/exec";
 import type { ExecPolicy, PermissionBaseline, PermissionMode, PermissionRequest, RefusalWords, RefusedCall, ScopeNarrowing, SmartVerdict } from "@declarative-ai/permissions";
 import { DIRECTORY_CHANGERS, describeCommand, nativeShellDialect, powershellParameter, takeApart, type CommandDialect, type ParsedCommand } from "@jaira/shared";
 import { callDialectOf } from "./callDialect";
@@ -116,8 +117,8 @@ import {
 } from "@jaira/shared";
 // Which standard tool an agent's built-in IS comes from the executors' own declarations (0007 §3).
 import { declaredNative, standardOfAnyNative } from "./agentTools";
-import { partScopeFor, placeNarrowingFor, scopeNarrowingFor, toolPlaceAnswer } from "./tools";
-import { namedPlacesOf } from "./linePlaces";
+import { mayNarrow, partScopeFor, placeNarrowingFor, scopeNarrowingFor, toolPlaceAnswer } from "./tools";
+import { namedPlacesOf, placesForCall } from "./linePlaces";
 import { mcpCallOf } from "./mcpServers";
 import { deniedEarlier, refusalWords, takeRefusal, type RefusedBy } from "./refusals";
 
@@ -1269,7 +1270,8 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
         grants: options.grants,
         packages: filePackages,
         scopeOf: partScopeFor(options.scopes, options.workspaceRoot),
-        places: placeOptions,
+        // `$AGENT_WORKSPACE` is the calling agent's folder.
+        places: placesForCall(placeOptions, input),
         ...(options.workspaceRoot !== undefined ? { root: options.workspaceRoot } : {}),
         ...(cwd !== undefined ? { cwd } : {}),
       });
@@ -1336,7 +1338,7 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     return decision.parts.verdict === "allowed" ? undefined : "ask";
   };
 
-  const commandNarrowing: ScopeNarrowing = (tool, input, authored) => {
+  const judgeCall: ScopeNarrowing = (tool, input, authored) => {
     // A block pinned under the old place tables refuses every call that names a place (see
     // {@link staleScopesDecision}) — before anything else reads it, since nothing else reads `scopes`.
     const stale = staleScopesDecision(tool.name, input, authored as PermissionsDecl | undefined);
@@ -1379,6 +1381,16 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
     if (decision.action === "allow" || (decision.action === "require_approval" && !judged)) return undefined;
     return decision.action === "deny" ? "deny" : "ask";
   };
+  // What may be tightened, read with no call in hand: a shell line, an MCP tool, any tool under a block
+  // pinned to the old place tables — and a tool whose line has places. A tool whose line names a
+  // function is `ask` at the gate already.
+  const commandNarrowing: ScopeNarrowing = Object.assign(judgeCall, {
+    narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) =>
+      COMMAND_TOOLS.has(tool.name) ||
+      parseMcpSubject(tool.name)?.tool !== undefined ||
+      (authored !== undefined && Object.hasOwn(authored, "scopes")) ||
+      mayNarrow(placeNarrowing, tool, authored),
+  });
 
   const baseline: PermissionBaseline = {
     tools: {
@@ -1404,15 +1416,22 @@ export function compilePolicy(policy: JairaPolicy, options: CompilePolicyOptions
   const places = scopeNarrowingFor(options.scopes, options.workspaceRoot, options.execEnv);
   // What, by the call: the line's own judgement — and a tool that always asks (`power`,
   // `install_software`) asks at least, whatever its line says. Both gates read this one.
-  const narrowing: ScopeNarrowing = (tool, input, authored) =>
-    policy.builtins !== false && ALWAYS_ASKING_TOOLS.has(tool.name) ? strictestMode(commandNarrowing(tool, input, authored), "ask") : commandNarrowing(tool, input, authored);
+  const alwaysAsks = (tool: { name: string }): boolean => policy.builtins !== false && ALWAYS_ASKING_TOOLS.has(tool.name);
+  const narrowing: ScopeNarrowing = Object.assign(
+    (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]) =>
+      alwaysAsks(tool) ? strictestMode(commandNarrowing(tool, input, authored), "ask") : commandNarrowing(tool, input, authored),
+    { narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => alwaysAsks(tool) || mayNarrow(commandNarrowing, tool, authored) },
+  );
   // Where, then what: the floor's answer and the call's own, the stricter kept.
-  const scopeOf: ScopeNarrowing = (tool, input, authored) => {
-    const where = places?.(tool, input, authored);
-    const what = narrowing(tool, input, authored);
-    if (where === undefined || what === undefined) return where ?? what;
-    return MODE_RANK[where] >= MODE_RANK[what] ? where : what;
-  };
+  const scopeOf: ScopeNarrowing = Object.assign(
+    (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, authored: Parameters<ScopeNarrowing>[2]) => {
+      const where = places?.(tool, input, authored);
+      const what = narrowing(tool, input, authored);
+      if (where === undefined || what === undefined) return where ?? what;
+      return MODE_RANK[where] >= MODE_RANK[what] ? where : what;
+    },
+    { narrows: (tool: { name: string; readOnly?: boolean }, authored?: Parameters<ScopeNarrowing>[2]) => mayNarrow(places, tool, authored) || mayNarrow(narrowing, tool, authored) },
+  );
   /**
    * What the agent reads for a refused call: who refused it, from what upstream says of WHICH step did
    * and what the deciders wrote down on the way (`refusals.ts`).

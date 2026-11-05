@@ -60,6 +60,7 @@ export const UNAVAILABLE_META: { icon: IconName; label: string; hint: string } =
 export const NAMED_PLACE_WORDS: Readonly<Record<string, string>> = {
   $PROJECT: "this project",
   $WORKTREE: "the task's worktree",
+  $AGENT_WORKSPACE: "the agent's own folder",
   $TEMP: "temp",
   "~": "your home folder",
 };
@@ -68,7 +69,7 @@ export const NAMED_PLACE_WORDS: Readonly<Record<string, string>> = {
  * The places a credential is kept in, as the add-a-place menu's `credential files` writes them —
  * §7.1's list, the one what ships asks about in every set.
  */
-export const CREDENTIAL_PLACES: readonly string[] = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws"];
+export const CREDENTIAL_PLACES: readonly string[] = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws", "~/.claude/.credentials.json", "~/.codex/auth.json"];
 
 /** A place's words beside it, in the hint's face: a named place's name, `credentials`, `everywhere else`. */
 export function placeWordsOf(kind: PlaceKind, place: string): string | undefined {

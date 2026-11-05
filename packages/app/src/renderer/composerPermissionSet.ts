@@ -661,8 +661,8 @@ export interface PlaceOption {
 
 /**
  * What a line's `+ add a place` offers (§4.2), places of the line's kind it does not name yet: for a
- * path, `this project`, `the task's worktree`, `temp`, `your home folder` and `credential files` (the
- * six §7.1 asks about, added at once); for any kind, `everywhere else` — the line's own `**` — while it
+ * path, `this project`, `the task's worktree`, `the agent's own folder`, `temp`, `your home folder` and `credential files` (the
+ * eight §7.1 asks about, added at once); for any kind, `everywhere else` — the line's own `**` — while it
  * has none. `another…` is the menu's own last row. Empty for a line whose calls name no place.
  */
 export function placeOptionsOf(permissionSet: PermissionSet, subject: string): PlaceOption[] {

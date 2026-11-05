@@ -45,6 +45,9 @@
  * (`PERMISSION_SET_MARKERS` in `@jaira/shared`), read off `ctx.authored`; a conversation turn that declares
  * nothing publishes no permission set and reads the same way.
  */
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { claudeProjectsDir, encodeSessionCwd } from "@declarative-ai/agents-api";
 import {
   finishedHandle,
   permanentFailure,
@@ -53,9 +56,10 @@ import {
   type InlineFamily,
   type JsonValue,
   type Operation,
+  type Tool,
 } from "@declarative-ai/exec";
 import { emptyWorkflowMetrics, type WorkflowMetrics } from "@declarative-ai/hw";
-import type { ExecPolicy, PermissionMode as GateMode, ToolGate } from "@declarative-ai/permissions";
+import { beforeEachCall, type ExecPolicy, type PermissionMode as GateMode, type ToolGate } from "@declarative-ai/permissions";
 import {
   isFunctionMode,
   isLoweredPermissionSet,
@@ -78,6 +82,7 @@ import {
   type McpLine,
 } from "@jaira/shared";
 import { noteCallDialect } from "./callDialect";
+import { noteCallAgent } from "./callAgent";
 import type { StackedExecutor } from "./executorStack";
 import { mcpDeniedSubjects, noteMcpCall, type McpView } from "./mcpServers";
 import { compileClaudePlaceRules, namedPlacesOf } from "./linePlaces";
@@ -123,6 +128,9 @@ export const CLAUDE_TOOLS: AgentToolDeclaration = {
     Agent: null,
     SlashCommand: null,
   },
+  // Its project folder, spelled as the agent spells it: memory, transcripts, the tool results it saved.
+  // Not `~/.claude`, which holds the sign-in.
+  workspace: (cwd) => join(claudeProjectsDir(), encodeSessionCwd(cwd)),
 };
 
 /**
@@ -140,6 +148,9 @@ export const CODEX_TOOLS: AgentToolDeclaration = {
   channel: "switches",
   natives: { shell: "shell", apply_patch: "edit" },
   switches: { "workspace-write": ["write_file", "edit", "shell"] },
+  // Its transcripts, kept by date rather than by project (its memories are a database, not files). Not
+  // `CODEX_HOME` itself, which holds `auth.json`.
+  workspace: () => join(process.env["CODEX_HOME"] ?? join(homedir(), ".codex"), "sessions"),
 };
 
 /** The switch {@link CODEX_TOOLS} declares — the sandbox that lets codex change the workspace. */
@@ -477,7 +488,7 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
       }
 
       if (declaration.channel === "switches") {
-        return (options.switched?.(plan.switches, view) ?? executor).start(op, switchedServices(ctx, nativelyServed(view, declaration, ctx), view));
+        return (options.switched?.(plan.switches, view) ?? executor).start(op, switchedServices(ctx, declaration, nativelyServed(view, declaration, ctx), view));
       }
 
       // An MCP tool the permission set refuses is on the deny list too, by the name the agent calls it —
@@ -488,7 +499,7 @@ export function withAgentPermissionSet<E extends Executor<ExecServices, any>>(
       // A kept built-in whose line has places is bounded up front by the agent's own rules too
       // (decision 0023 §3.9) — scoped only, under the bare ask that routes every other call to the gate.
       const root = (ctx as { workspace?: { root?: string } }).workspace?.root;
-      const placed = compileClaudePlaceRules(keptPlaces(view, declaration, plan.askNatives), { ...(root !== undefined ? { root, named: namedPlacesOf(root) } : {}), declaration });
+      const placed = compileClaudePlaceRules(keptPlaces(view, declaration, plan.askNatives), { ...(root !== undefined ? { root, named: namedPlacesOf(root, undefined, declaration) } : {}), declaration });
       return executor.start(
         withAgentRules(op, options.providerOptionsKey ?? "claudeCode", { ask: [...plan.askNatives, ...placed.ask], allow: placed.allow, deny: placed.deny }),
         servicesUnder(ctx, declaration, denied, nativelyServed(view, declaration, ctx), view.lineOf),
@@ -528,8 +539,8 @@ export function agentFunctionWrapper(declaration: AgentToolDeclaration, label: s
  * Nothing else is translated: the bridge is crossed only by tools of ours, already under their standard
  * names, and by MCP tools — never by a native of codex's, which is why the declaration holds none.
  */
-function switchedServices(ctx: ExecServices, withheldNames: readonly string[], view: PermissionSetView): ExecServices {
-  const tools = ctx.tools === undefined ? undefined : Object.fromEntries(Object.entries(ctx.tools).filter(([name]) => !withheldNames.includes(name)));
+function switchedServices(ctx: ExecServices, agent: AgentToolDeclaration, withheldNames: readonly string[], view: PermissionSetView): ExecServices {
+  const tools = ctx.tools === undefined ? undefined : madeBy(Object.fromEntries(Object.entries(ctx.tools).filter(([name]) => !withheldNames.includes(name))), agent);
   const baseline = ctx.policy?.baseline?.tools;
   const policy: ExecPolicy | undefined =
     ctx.policy === undefined || baseline === undefined
@@ -541,7 +552,7 @@ function switchedServices(ctx: ExecServices, withheldNames: readonly string[], v
             tools: Object.fromEntries(Object.entries(baseline).filter(([name]) => tools !== undefined && Object.hasOwn(tools, name))),
           },
         };
-  const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, BRIDGE_ONLY, new Set(), view.lineOf);
+  const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, BRIDGE_ONLY, new Set(), view.lineOf, agent);
   return { ...ctx, ...(tools !== undefined ? { tools } : {}), ...(policy !== undefined ? { policy } : {}), ...(gate !== undefined ? { gate } : {}) };
 }
 
@@ -603,7 +614,7 @@ export function holdAgentFunction<R extends AgentFunctionRun>(declaration: Agent
     }
     const plan = planAgentTools(view, declaration);
     const shut = Object.values(plan.switches).some((on) => !on);
-    return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, switchedServices(ctx, nativelyServed(view, declaration, ctx), view));
+    return run(shut ? { ...inputs, permissionMode: "plan" } : inputs, switchedServices(ctx, declaration, nativelyServed(view, declaration, ctx), view));
   }) as R;
 }
 
@@ -623,10 +634,7 @@ export function servicesUnder(
   mcpLineOf?: McpView["lineOf"],
 ): ExecServices {
   const refused = new Set(denied);
-  const tools =
-    withheld.length === 0 || ctx.tools === undefined
-      ? undefined
-      : Object.fromEntries(Object.entries(ctx.tools).filter(([name]) => !withheld.includes(name)));
+  const tools = ctx.tools === undefined ? undefined : madeBy(Object.fromEntries(Object.entries(ctx.tools).filter(([name]) => !withheld.includes(name))), declaration);
   // Untouched when there is nothing to remove: a call with no policy keeps having none.
   const policy: ExecPolicy | undefined =
     denied.length === 0
@@ -640,6 +648,16 @@ export function servicesUnder(
         };
   const gate = ctx.gate === undefined ? undefined : translatedGate(ctx.gate, declaration, refused, mcpLineOf);
   return { ...ctx, ...(policy !== undefined ? { policy } : {}), ...(gate !== undefined ? { gate } : {}), ...(tools !== undefined ? { tools } : {}) };
+}
+
+/**
+ * Tools of ours handed to `agent`, each noting the agent against every call's input before it is
+ * decided (`noteCallAgent`) — what `$AGENT_WORKSPACE` on a line resolves by. A tool already wrapped
+ * with its permission stays wrapped (`beforeEachCall`), so a bridge that gates unwrapped tools does
+ * not gate it twice.
+ */
+function madeBy(tools: Record<string, Tool>, agent: AgentToolDeclaration): Record<string, Tool> {
+  return Object.fromEntries(Object.entries(tools).map(([name, tool]) => [name, beforeEachCall(tool, (input) => noteCallAgent(input, agent))]));
 }
 
 /**
@@ -657,7 +675,13 @@ export function servicesUnder(
  * input ({@link noteMcpCall}), where the narrowing and the approval find it: the person is asked about
  * `mcp__figma__get_code`, and "add to the permission set" writes that tool's line.
  */
-function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refused: ReadonlySet<string>, mcpLineOf?: McpView["lineOf"]): ToolGate {
+function translatedGate(
+  gate: ToolGate,
+  declaration: AgentToolDeclaration,
+  refused: ReadonlySet<string>,
+  mcpLineOf?: McpView["lineOf"],
+  agent: AgentToolDeclaration = declaration,
+): ToolGate {
   const mcpName = (name: string): string | undefined => {
     const parsed = mcpLineOf !== undefined ? parseMcpSubject(name) : undefined;
     if (parsed?.tool === undefined) return undefined;
@@ -681,6 +705,8 @@ function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refus
         return Promise.resolve({ allow: false as const, reason: `tool '${tool.name}' is not in this state's permission set` });
       }
       const asked = subject(tool);
+      // Whose call it is goes with it: `$AGENT_WORKSPACE` is that agent's folder.
+      noteCallAgent(input, agent);
       if (mcpName(tool.name) !== undefined) {
         noteMcpCall(input, tool.name);
         return gate.check(asked, input);
@@ -688,7 +714,9 @@ function translatedGate(gate: ToolGate, declaration: AgentToolDeclaration, refus
       // `Bash` and `PowerShell` are both asked about as `shell`: which shell reads the line goes with it.
       const dialect = nativeShellDialect(tool.name);
       if (dialect !== undefined) noteCallDialect(input, dialect);
-      return gate.check(asked, asked === tool ? input : standardInput(asked.name, input));
+      const handed = asked === tool ? input : standardInput(asked.name, input);
+      noteCallAgent(handed, agent);
+      return gate.check(asked, handed);
     },
   };
 }

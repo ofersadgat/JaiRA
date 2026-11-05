@@ -172,6 +172,7 @@ describe("adding, re-moding and taking out a place", () => {
     const path = placeOptionsOf(set({ read_file: { "**": "ask", $PROJECT: "allow" } }), "read_file").map((option) => [option.id, option.label]);
     expect(path).toEqual([
       ["$WORKTREE", "the task's worktree"],
+      ["$AGENT_WORKSPACE", "the agent's own folder"],
       ["$TEMP", "temp"],
       ["~", "your home folder"],
       [CREDENTIALS_PICK, "credential files"],

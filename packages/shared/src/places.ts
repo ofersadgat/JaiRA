@@ -46,7 +46,7 @@
  * kept the newer one (`mergePermissionMode`). A call about several places takes the strictest of their
  * answers (§3.5).
  *
- * Pure: no filesystem. The named places (`$PROJECT`, `$WORKTREE`, `$TEMP`, `~`) are handed in.
+ * Pure: no filesystem. The named places (`$PROJECT`, `$WORKTREE`, `$AGENT_WORKSPACE`, `$TEMP`, `~`) are handed in.
  */
 import { parseRunnerSubject } from "./commandRunners";
 import { isMcpSubject } from "./mcp";
@@ -57,8 +57,12 @@ import { TOOL_SPEC_BY_NAME, type PlaceKind, type ToolSpec } from "./toolVocabula
 /** The place that is everywhere — how a place map gives itself a default (§3.4). */
 export const PLACE_ANYWHERE = "**";
 
-/** The named places a path place may start from (§3.2). `~` is the person's home folder. */
-export const NAMED_PLACES = ["$PROJECT", "$WORKTREE", "$TEMP", "~"] as const;
+/**
+ * The named places a path place may start from (§3.2). `~` is the person's home folder;
+ * `$AGENT_WORKSPACE` the folder the agent keeps for the folder it works in — its memory, its
+ * transcripts — which is neither the project nor the worktree.
+ */
+export const NAMED_PLACES = ["$PROJECT", "$WORKTREE", "$AGENT_WORKSPACE", "$TEMP", "~"] as const;
 export type NamedPlace = (typeof NAMED_PLACES)[number];
 
 /**

@@ -164,9 +164,32 @@ describe("an absolute path inside the workspace (decision 0020: the Design type'
     expect(await call(read, { path: "canvas/project/Main.dc.html" })).toMatchObject({ content: "<x-dc>b</x-dc>" });
   });
 
-  it("is still refused when it lies outside the workspace", async () => {
+  it("is still refused for a WRITE when it lies outside the workspace", async () => {
     const { write } = tools("$DEFAULT");
     expect(await call(write, { path: join(tmpdir(), "elsewhere.txt"), content: "x" })).toHaveProperty("error");
+  });
+});
+
+describe("a read outside the workspace (decision 0023 §3.2: where is the permission set's to say)", () => {
+  it("is read where it is, by the path the call named", async () => {
+    // The gate judged the call at its places before the tool ran — as it judges a shell's
+    // `Get-Content` of the same file, which ran. Refusing it here as well asked a person and then
+    // refused what they allowed.
+    const { read } = tools("$DEFAULT");
+    const outside = mkdtempSync(join(tmpdir(), "jaira-read-outside-"));
+    try {
+      const file = join(outside, "memory.md");
+      writeFileSync(file, "remember", "utf8");
+      expect(await call(read, { path: file })).toMatchObject({ path: file, content: "remember" });
+      expect(await call(read, { path: join(outside, "missing.md") })).toMatchObject({ error: expect.stringContaining("could not read") });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it("never reads a .jaira folder, the project's or another's", async () => {
+    const { read } = tools("$DEFAULT");
+    expect(await call(read, { path: join(tmpdir(), "home", ".jaira", "system", "machine.key") })).toMatchObject({ error: expect.stringContaining(".jaira") });
   });
 });
 

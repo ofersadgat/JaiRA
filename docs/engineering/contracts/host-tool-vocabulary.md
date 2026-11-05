@@ -241,10 +241,10 @@ outside it.
 | `shell` gets an empty command, or a `cwd` containing `..` or `.jaira` | `{error: "no command given"}`, `{error: "cwd '<cwd>' is not allowed"}` | send a command, or a relative directory |
 | `shell` cannot start its interpreter | the call rejects with `failed to run '<command>': <message>` | fix the environment |
 | A file tool gets an empty path or one under `.jaira/` | `{error: "no path given"}`, `{error: "'<path>' is inside .jaira/, which agents may not write"}`, for reads too | name another path |
-| A read resolves outside the workspace or cannot open | `{error: "'<path>' is outside the workspace"}`, `{error: "could not read '<path>': <message>"}` | name a workspace path |
+| A read cannot open (a path outside the workspace is read where it is: whether it may be is the permission set's, decision 0023 ruling 18) | `{error: "could not read '<path>': <message>"}` | name a path that exists |
 | A write's destination refuses the path or the disk refuses the write | `{error}` with the `DestinationError` message, `{error: "could not write '<path>': <message>"}`, or `could not show` for `show_artifact` | name a path the destination admits |
 | `edit` has empty `old`, identical `old` and `new`, absent text, or several matches without `all` | `{error}` naming which, the last with the count | include more context, or set `all` |
-| A search has no pattern, no workspace, or a `path` under `.jaira/` or outside the workspace | `{error: "no pattern given"}`, `{error: "this operation has no workspace to search"}`, or a path error | fix the argument |
+| A search has no pattern, no workspace, or a `path` under `.jaira/` (one outside the workspace is searched where it is) | `{error: "no pattern given"}`, `{error: "this operation has no workspace to search"}`, or a path error | fix the argument |
 | A `glob` pattern or `grep` expression does not compile | `{error: "'<pattern>' is not a usable pattern: <message>"}` or `is not a usable regular expression` | fix the pattern |
 | `grep` gets a `glob` argument that does not compile | the call rejects with the `SyntaxError` | fix the glob |
 | `web_fetch` gets a non-URL, another scheme, or the fetch fails or times out | `{error: "'<url>' is not a URL"}`, a scheme error, or `{error: "could not fetch '<url>': <reason>"}` | fix the URL |

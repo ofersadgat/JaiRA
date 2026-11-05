@@ -234,8 +234,8 @@ describe("every shipped permission set", () => {
 
 describe("what ships gains places (decision 0023 §7.1)", () => {
   const ROOT = "C:/work/app";
-  const options = { root: ROOT, named: { $PROJECT: ROOT, $WORKTREE: "C:/work/app-wt", $TEMP: "C:/tmp", "~": "C:/Users/me" } };
-  const CREDENTIALS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws"];
+  const options = { root: ROOT, named: { $PROJECT: ROOT, $WORKTREE: "C:/work/app-wt", $AGENT_WORKSPACE: "C:/Users/me/.claude/projects/C--work-app-wt", $TEMP: "C:/tmp", "~": "C:/Users/me" } };
+  const CREDENTIALS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws", "~/.claude/.credentials.json", "~/.codex/auth.json"];
   /** A line's answer at one path, as a call's place is judged: the most specific place, else the line's own mode. */
   const at = (file: string, tool: string, path: string): PermissionSetMode | undefined => {
     const { permissionSet } = parsePermissionSet(shipped(`chat/${file}`));
@@ -248,10 +248,14 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     ["read-only", "allow"],
     ["ask-first", "ask"],
     ["auto", SMART_MODE],
-  ] as const)("chat/%s reads, globs and greps at its own mode in the project and the worktree, and ASKS elsewhere", (file, mode) => {
+  ] as const)("chat/%s reads, globs and greps at its own mode in the project, the worktree and the agent's own folder, and ASKS elsewhere", (file, mode) => {
     for (const tool of ["read_file", "glob", "grep"]) {
       expect(at(file, tool, `${ROOT}/src/index.ts`), `${file} ${tool}`).toEqual(mode);
       expect(at(file, tool, "C:/work/app-wt/src/index.ts"), `${file} ${tool}`).toEqual(mode);
+      // The agent's memory and transcripts: neither the project nor the worktree, and its own.
+      expect(at(file, tool, "C:/Users/me/.claude/projects/C--work-app-wt/memory/notes.md"), `${file} ${tool}`).toEqual(mode);
+      // Not the rest of the agent's folder, where its sign-in is.
+      expect(at(file, tool, "C:/Users/me/.claude/.credentials.json"), `${file} ${tool}`).toBe("ask");
       // A read outside the project asks — under ask-first, as everywhere.
       expect(at(file, tool, "C:/Users/me/Documents/notes.txt"), `${file} ${tool}`).toBe("ask");
     }

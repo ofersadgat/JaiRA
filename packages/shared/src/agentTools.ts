@@ -42,6 +42,13 @@ export interface AgentToolDeclaration {
    * — codex's `workspace-write` sandbox is on for `write_file`, `edit` or `shell`, and off otherwise.
    */
   switches?: Readonly<Record<string, readonly string[]>>;
+  /**
+   * The folder the agent keeps for itself while it works in `cwd` — its memory, its transcripts —
+   * which is neither the project nor the worktree: what `$AGENT_WORKSPACE` names on a line (decision
+   * 0023 ruling 19), for a call this agent makes. Absent ⇒ the agent keeps none, and the place names
+   * nothing. Never the folder holding the agent's sign-in.
+   */
+  workspace?: (cwd: string) => string;
 }
 
 /** The standard tool a native IS: a name, `null` for "none — it answers to `other`", `undefined` for undeclared. */

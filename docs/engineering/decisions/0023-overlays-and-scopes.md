@@ -2,7 +2,7 @@
 id: engineering/decisions/0023-overlays-and-scopes
 type: decision
 status: built
-updated: 2026-11-03
+updated: 2026-11-04
 decides_for: [engineering/units/tool-policy, ui/components/permissionSet-card, ui/components/composer-setting-chip, ui/components/command-approval, ui/surfaces/settings-tools]
 ---
 
@@ -91,6 +91,44 @@ a count of the layers over the bottom plus one for what the conversation changed
 16. **Collapsed**, a narrow composer's stack is one segment: the shield, the bottom's icon and `+n`,
     where `n` is the layers over the bottom, plus one when the conversation has lines of its own or
     this run has answers. Pressed, it opens the shield's browser.
+
+## Amended 2026-11-04: the agent's own folder, and reads the gate allows
+
+The person, 2026-11-04: "many of the permissions are limiting read scope a little too narrowly … claude
+codes own files are unable to be read when they should be able to", and on a conversation where a
+`read_file` of the agent's memory was refused and the agent's PowerShell `Get-Content` of the same file
+then went through: "powershell Get-Content should be the same as read_file, right?". They named the
+place `$AGENT_WORKSPACE`, as `$AGENT` "would seem to mean the agent name".
+
+The shell part WAS judged as `read_file`. What differed was everything around the judgement:
+
+17. **A tool a place can narrow is never pre-approved.** A delegated agent pre-approves every tool whose
+    mode, read with no input, is `allow`. §3.10 hands the gate a line at its loosest, so under
+    `chat/read-only` (`$PROJECT: allow`) `read_file`, `glob` and `grep` were pre-approved, and the
+    narrowing never ran on any read: not outside the project, and not at `**/.env`. The engine hands a
+    delegated agent its raw tools and its own gate, so nothing else stood in front of them. Upstream's
+    `ScopeNarrowing` gains `narrows(tool, block)`, and `ToolGate.modeOf` reports an `allow` that a
+    narrowing may tighten as `smart`, which is not pre-approved. JaiRA's narrowings say a tool narrows
+    when its line has places, the executor floor holds a tool that acts somewhere, or the tool is a
+    shell, an MCP tool or one that always asks. A narrowing that does not say narrows.
+18. **A read goes where the gate let it.** `read_file`, `glob` and `grep` refused every path outside the
+    workspace on their own, a rule older than places. So a read the set asks about outside the project
+    (§7.1) was asked and then refused, and only the shell could reach there. Where a read may go is the
+    set's to say, at its places, and the executor floor is the sandbox: these tools now read and search
+    an outside path where it is, by the path the call named. `.jaira/` is refused anywhere, `~/.jaira`
+    included. Writes keep the workspace: `write_file` and `edit` place files through the artifact
+    destination, which is the workspace's.
+19. **`$AGENT_WORKSPACE` is a named place, and each agent declares it.** The person: "the agents
+    themselves should declare what their workspaces are. This way, chatgpt can have a different workspace
+    than claude." An agent's declaration says the folder it keeps for itself while it works in a folder
+    (`AgentToolDeclaration.workspace`). Claude Code: `~/.claude/projects/<the worktree, else the project,
+    as the agent spells it>` (memory, transcripts, saved tool results). Codex: its transcripts,
+    `~/.codex/sessions` (its memories are a database, not files). Neither is the folder that holds the
+    sign-in. The place is resolved per call, for the agent that made it: the agent's wrapper notes its
+    declaration against each call's input, so Claude's folder opens to Claude's calls only, and a call no
+    agent made (JaiRA's own) has none. The `chat` sets read there at their project
+    mode, and `~/.claude/.credentials.json` and `~/.codex/auth.json` join the credential places that ask
+    in every set.
 
 Conversations kept before 0023 held the whole map as their composer setting, some with
 `{ function: … }` values, and so showed no `chat/…` layer. They were migrated by hand, 2026-11-03: each
@@ -219,7 +257,8 @@ to a standard tool takes that tool's place.
 **3.2 Paths.**
 - A bare path is that folder and everything under it: `"C:"`, `"src"`, `"~/.ssh"`. A path containing
   `*`, `?` or `{` is a glob. A path that names a file names that file. Relative paths are relative to
-  the project, and `$PROJECT`, `$WORKTREE` (the task's), `$TEMP` and `~` are named places.
+  the project, and `$PROJECT`, `$WORKTREE` (the task's), `$AGENT_WORKSPACE` (the agent's own folder for
+  the folder it works in, ruling 19), `$TEMP` and `~` are named places.
 - **The most specific place wins, whatever layer it came from (ruling 1).** In order:
   1. A place that pins the file beats a folder that holds it. `**/.env` and `*.pem` beat `C:` and
      `$PROJECT`, which is how credentials stay asked about under a broad allow, with no rule of their
@@ -275,6 +314,7 @@ own tool to codex and displaces its native.
 **3.10 Gate modes compile loose and narrow per call.** Upstream's narrowing only tightens. So the mode
 lowered into `baseline.tools` for a tool is the loosest answer any of its places can give, and the
 narrowing works out each call's answer. Shell parts already work this way through `decideCommand`.
+A tool whose answer a narrowing may tighten is therefore never pre-approved (ruling 17).
 
 ## 4. On screen
 
@@ -365,9 +405,11 @@ answered by hand) stays as the 2026-11-02 rounds set it.
 ## 7. Settled last (ruling 12)
 
 1. **What ships gains places.** The four `chat` sets get:
-   - `read_file`, `glob` and `grep` at the set's mode in `$PROJECT` and `$WORKTREE`, and `ask`
+   - `read_file`, `glob` and `grep` at the set's mode in `$PROJECT`, `$WORKTREE` and `$AGENT_WORKSPACE`
+     (ruling 19), and `ask`
      elsewhere in `read-only`, `ask-first` and `auto`. `full` keeps `allow`.
-   - `**/.env`, `**/.env.*`, `**/*.pem`, `**/id_rsa*`, `~/.ssh` and `~/.aws` at `ask` in every set,
+   - `**/.env`, `**/.env.*`, `**/*.pem`, `**/id_rsa*`, `~/.ssh`, `~/.aws`, `~/.claude/.credentials.json`
+     and `~/.codex/auth.json` at `ask` in every set,
      `full` included.
    - In `auto`, `git_push` at `smart`, with `main`, `master` and `release/**` asking.
 2. **Executor `scopes` stay a separate floor,** an operator's sandbox no layer widens. An executor

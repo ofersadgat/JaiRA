@@ -25,7 +25,7 @@
  */
 import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
-import { dirname, isAbsolute, relative as relativePath } from "node:path";
+import { dirname, isAbsolute, normalize, relative as relativePath, resolve as resolvePath } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { mimeOfPath } from "@jaira/shared";
 import type { ArtifactRecord, ArtifactStore } from "./artifacts";
@@ -175,22 +175,48 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
 }
 
 /**
+ * A path a call names OUTSIDE the workspace, made absolute, or `undefined` for one inside it.
+ *
+ * Read where it is: whether it may be read is the permission set's to say, at its places (decision 0023
+ * §3.2), and the gate said so before the tool ran — the same answer a shell's `Get-Content` of it gets.
+ * Taken from the path as the call wrote it, which is what the gate judged; the logical key drops a
+ * leading `/`, which would read `/etc/x` as the project's `etc/x`.
+ */
+function outsidePath(root: string, path: string): string | undefined {
+  if (path.trim() === "") return undefined;
+  const absolute = isAbsolute(path) ? normalize(path) : resolvePath(root, path);
+  return withinWorkspace(root, absolute) === undefined ? absolute : undefined;
+}
+
+/**
  * The matching read. Map first, workspace second — so an artifact resolves wherever
- * it was placed, and an ordinary source file is read normally.
+ * it was placed, and an ordinary source file is read normally. A path outside the workspace is read
+ * where it is ({@link outsidePath}).
  */
 export function createReadFileTool(options: FileToolOptions): Tool {
   const store = options.store ?? new MemoryArtifactStore();
   return {
-    description: "Read a file from the task's workspace.",
+    description: "Read a file: a path relative to the workspace root, or an absolute path.",
     inputSchema: {
       type: "object",
-      properties: { path: { type: "string", description: "Path relative to the workspace root." } },
+      properties: { path: { type: "string", description: "Path relative to the workspace root, or absolute." } },
       required: ["path"],
     },
     readOnly: true,
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown };
-      const logical = logicalKey(typeof args.path === "string" ? args.path : "", rootOf(options, ctx));
+      const raw = typeof args.path === "string" ? args.path : "";
+      const outside = outsidePath(rootOf(options, ctx), raw);
+      if (outside !== undefined) {
+        const refused = refusePath(outside);
+        if (refused !== undefined) return { error: refused };
+        try {
+          return { path: raw, content: readFileSync(outside, "utf8") };
+        } catch (e) {
+          return { error: `could not read '${raw}': ${(e as Error).message}` };
+        }
+      }
+      const logical = logicalKey(raw, rootOf(options, ctx));
       const refusal = refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
 

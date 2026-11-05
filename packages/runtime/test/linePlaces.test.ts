@@ -10,6 +10,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { FunctionInputs } from "@declarative-ai/exec";
+import { claudeProjectsDir } from "@declarative-ai/agents-api";
 import {
   lowerPermissionSet,
   lowerStatePermissionSets,
@@ -26,7 +27,10 @@ import { ApprovalHub } from "../src/approval";
 import { shellPermissionSetOf } from "../src/commandParts";
 import { compileClaudePlaceRules, namedPlacesOf } from "../src/linePlaces";
 import { placeNarrowingFor, scopeNarrowingFor } from "../src/tools";
-import { CLAUDE_TOOLS, CODEX_TOOLS, planAgentTools } from "../src/agentTools";
+import { CLAUDE_TOOLS, CODEX_TOOLS, GENERIC_CLI_TOOLS, planAgentTools, servicesUnder } from "../src/agentTools";
+import { callAgentOf, noteCallAgent } from "../src/callAgent";
+import { isPermissionWrapped, PermissionLedger, withPermission } from "@declarative-ai/permissions";
+import { homedir } from "node:os";
 import type { PackageInfo, PackageReader } from "../src/packageScripts";
 
 const ROOT = "/work";
@@ -427,5 +431,70 @@ describe("place widths (§3.8)", () => {
       { width: "anywhere", place: "**" },
     ]);
     expect(placeWidthsOf("branch", "main")).toEqual([{ width: "this", place: "main" }, { width: "anywhere", place: "**" }]);
+  });
+});
+
+describe("$AGENT_WORKSPACE is what the calling agent declares (decision 0023 ruling 19)", () => {
+  const claudeFolder = `${claudeProjectsDir().replace(/\\/g, "/")}/C--work-app`;
+  const codexFolder = CODEX_TOOLS.workspace!("C:/work/app").replace(/\\/g, "/");
+
+  it("is Claude Code's project folder for the worktree, Codex's transcripts, and nothing for an agent that declares none", () => {
+    expect(namedPlacesOf("C:\\work\\app", undefined, CLAUDE_TOOLS).$AGENT_WORKSPACE).toBe(claudeFolder);
+    expect(namedPlacesOf("C:\\work\\app", "C:\\work\\app-wt", CLAUDE_TOOLS).$AGENT_WORKSPACE).toBe(`${claudeProjectsDir().replace(/\\/g, "/")}/C--work-app-wt`);
+    expect(codexFolder).toMatch(/\/sessions$/);
+    expect(namedPlacesOf("C:/work/app", undefined, CODEX_TOOLS).$AGENT_WORKSPACE).toBe(codexFolder);
+    expect(namedPlacesOf("C:/work/app", undefined, GENERIC_CLI_TOOLS).$AGENT_WORKSPACE).toBeUndefined();
+    expect(namedPlacesOf("C:/work/app").$AGENT_WORKSPACE).toBeUndefined();
+  });
+
+  it("opens each agent's own folder to its own calls only, and never the sign-in beside it", () => {
+    const block = lowerPermissionSet(parsePermissionSet({ read_file: { "**": "ask", $AGENT_WORKSPACE: "allow" } }).permissionSet, "$/permission-sets/x/y").permissions!;
+    const narrow = placeNarrowingFor({ root: "C:/work/app", named: namedPlacesOf("C:/work/app") });
+    const read = (path: string, agent?: typeof CLAUDE_TOOLS) => {
+      const input = { path } as FunctionInputs;
+      if (agent !== undefined) noteCallAgent(input, agent);
+      return narrow({ name: "read_file" }, input, block as never);
+    };
+    expect(read(`${claudeFolder}/memory/notes.md`, CLAUDE_TOOLS)).toBe("allow");
+    expect(read(`${codexFolder}/2026/11/04/rollout.jsonl`, CODEX_TOOLS)).toBe("allow");
+    // The other agent's folder is not this one's.
+    expect(read(`${claudeFolder}/memory/notes.md`, CODEX_TOOLS)).toBe("ask");
+    expect(read(`${codexFolder}/2026/11/04/rollout.jsonl`, CLAUDE_TOOLS)).toBe("ask");
+    // A call no agent's wrapper handed on is JaiRA's own, and has no agent folder.
+    expect(read(`${claudeFolder}/memory/notes.md`)).toBe("ask");
+    expect(read(`${homedir().replace(/\\/g, "/")}/.claude/.credentials.json`, CLAUDE_TOOLS)).toBe("ask");
+  });
+
+  it("is the calling agent's in a shell line's parts too", () => {
+    const set = parsePermissionSet({ shell: "ask", read_file: { "**": "ask", $AGENT_WORKSPACE: "allow" } }).permissionSet;
+    const policy = compilePolicy({}, { permissionSet: set, workspaceRoot: "C:/work/app" });
+    const line = (agent: typeof CLAUDE_TOOLS) => {
+      const input = { command: `cat ${claudeFolder}/memory/notes.md` } as FunctionInputs;
+      noteCallAgent(input, agent);
+      return policy.scopeOf!({ name: "shell" }, input, lowerPermissionSet(set).permissions as never);
+    };
+    expect(line(CLAUDE_TOOLS)).toBeUndefined();
+    expect(line(CODEX_TOOLS)).toBe("ask");
+  });
+});
+
+describe("an agent's calls carry who made them (decision 0023 ruling 19)", () => {
+  it("are noted as the agent's by the gate it is handed and by every tool of ours, a wrapped tool staying wrapped", async () => {
+    const seen: Array<ReturnType<typeof callAgentOf>> = [];
+    const gate = {
+      profile: "full" as const,
+      modeOf: () => "ask" as const,
+      check: async (_tool: { name: string }, input: FunctionInputs) => {
+        seen.push(callAgentOf(input));
+        return { allow: true as const };
+      },
+    };
+    const raw = { description: "r", inputSchema: {}, readOnly: true, run: async (input: FunctionInputs) => ({ agent: callAgentOf(input) === CODEX_TOOLS }) };
+    const wrapped = withPermission(raw as never, { toolName: "read_file", ledger: new PermissionLedger({}), sessionId: "s", approve: () => ({ decision: "allow", scope: "once" }), authoredMode: "allow" });
+    const ctx = servicesUnder({ gate, tools: { read_file: wrapped } } as never, CODEX_TOOLS, []);
+    await ctx.gate!.check({ name: "read_file" }, { path: "a" } as FunctionInputs);
+    expect(seen).toEqual([CODEX_TOOLS]);
+    expect(await ctx.tools!["read_file"]!.run({ path: "a" } as FunctionInputs, ctx)).toEqual({ agent: true });
+    expect(isPermissionWrapped(ctx.tools!["read_file"]!)).toBe(true);
   });
 });

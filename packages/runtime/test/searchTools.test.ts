@@ -54,12 +54,22 @@ describe("glob", () => {
     expect((result.paths as string[]).some((p) => p.startsWith(".jaira/"))).toBe(false);
   });
 
-  it("scopes to a subdirectory when asked, and refuses one outside the workspace", async () => {
+  it("scopes to a subdirectory when asked, searches one outside the workspace where it is, and never .jaira", async () => {
     expect(await call(tool(), { pattern: "*.ts", path: "src" })).toMatchObject({ paths: ["a.ts"] });
-    expect(await call(tool(), { pattern: "*", path: "../.." })).toMatchObject({
-      error: expect.stringMatching(/outside the workspace/) as unknown as string,
-    });
+    // Whether a place outside may be searched is the permission set's to say, at its places (decision
+    // 0023 §3.2) — the gate answered before the tool ran. The tool searches it, relative to it.
+    const outside = mkdtempSync(join(tmpdir(), "jaira-search-outside-"));
+    try {
+      writeFileSync(join(outside, "memory.md"), "remember\n", "utf8");
+      expect(await call(tool(), { pattern: "*.md", path: outside })).toMatchObject({ paths: ["memory.md"] });
+      expect(await call(createGrepTool(), { pattern: "remember", path: outside })).toMatchObject({ count: 1 });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
     expect(await call(tool(), { pattern: "*", path: ".jaira" })).toMatchObject({
+      error: expect.stringMatching(/\.jaira/) as unknown as string,
+    });
+    expect(await call(tool(), { pattern: "*", path: join(tmpdir(), "x", ".jaira") })).toMatchObject({
       error: expect.stringMatching(/\.jaira/) as unknown as string,
     });
   });

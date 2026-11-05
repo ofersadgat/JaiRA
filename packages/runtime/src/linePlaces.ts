@@ -5,10 +5,12 @@
  * Two small pieces the policy, the gate and the agent wrapper all need, kept apart from `tools.ts` and
  * `agentTools.ts` so that neither has to import the other to reach them:
  *
- *  - {@link namedPlacesOf}: `$PROJECT`, `$WORKTREE`, `$TEMP` and `~`, as `places.ts` is handed them;
+ *  - {@link namedPlacesOf}: `$PROJECT`, `$WORKTREE`, `$AGENT_WORKSPACE`, `$TEMP` and `~`, as `places.ts` is handed them,
+ *    and {@link placesForCall}, the same for one call — `$AGENT_WORKSPACE` is the calling agent's;
  *  - {@link compileClaudePlaceRules}: a kept built-in's place map, as Claude Code permission rules.
  */
 import { homedir, tmpdir } from "node:os";
+import { callAgentOf } from "./callAgent";
 import {
   absolutize,
   isFunctionMode,
@@ -23,19 +25,39 @@ import {
 } from "@jaira/shared";
 
 /**
- * Where `$PROJECT`, `$WORKTREE`, `$TEMP` and `~` are on this machine (decision 0023 §3.2): the
- * workspace a call runs in, the task's worktree (the workspace, where the task has none), the
- * system's temporary folder and the person's home — slashes forward, as places compare.
+ * Where `$PROJECT`, `$WORKTREE`, `$AGENT_WORKSPACE`, `$TEMP` and `~` are on this machine (decision
+ * 0023 §3.2): the workspace a call runs in, the task's worktree (the workspace, where the task has
+ * none), the folder the agent keeps for the folder it works in, the system's temporary folder and the
+ * person's home — slashes forward, as places compare.
+ *
+ * `$AGENT_WORKSPACE` is what `agent` DECLARES it keeps while it works in the worktree
+ * (`AgentToolDeclaration.workspace`): Claude Code's project folder, Codex's transcripts. Without an
+ * agent, or for one that keeps none, it names nothing — a call no agent made is JaiRA's own.
  */
-export function namedPlacesOf(workspaceRoot: string | undefined, worktree?: string | undefined): NonNullable<PlaceOptions["named"]> {
+export function namedPlacesOf(workspaceRoot: string | undefined, worktree?: string | undefined, agent?: AgentToolDeclaration): NonNullable<PlaceOptions["named"]> {
   const slashed = (path: string): string => normalizePath(path);
   const tree = worktree ?? workspaceRoot;
+  const kept = tree !== undefined ? agent?.workspace?.(tree) : undefined;
   return {
     ...(workspaceRoot !== undefined ? { $PROJECT: slashed(workspaceRoot) } : {}),
     ...(tree !== undefined ? { $WORKTREE: slashed(tree) } : {}),
+    ...(kept !== undefined ? { $AGENT_WORKSPACE: slashed(kept) } : {}),
     $TEMP: slashed(tmpdir()),
     "~": slashed(homedir()),
   };
+}
+
+/**
+ * The place options one call is judged under: `options`, with `$AGENT_WORKSPACE` the folder of the
+ * agent that made the call (`noteCallAgent`) — or naming nothing, for a call no agent's wrapper handed
+ * on. The narrowing and the policy are built before a call's route is known, and one run may route its
+ * states to different agents, so this is read per call.
+ */
+export function placesForCall<O extends PlaceOptions>(options: O, input: unknown): O {
+  const { $AGENT_WORKSPACE: _built, ...named } = options.named ?? {};
+  const tree = named.$WORKTREE ?? named.$PROJECT ?? options.root;
+  const kept = tree !== undefined ? callAgentOf(input)?.workspace?.(tree) : undefined;
+  return { ...options, named: { ...named, ...(kept !== undefined ? { $AGENT_WORKSPACE: normalizePath(kept) } : {}) } };
 }
 
 /** A path place as a rule's glob: named places expanded, relative ones against the root, a bare folder as all under it. `undefined` where it cannot be written. */

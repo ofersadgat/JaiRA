@@ -218,7 +218,8 @@ describe("gateTools", () => {
     expect(asked).toEqual(["edit", "read_file"]);
 
     current = preset("full");
-    expect(gate.modeOf({ name: "edit" })).toBe("allow");
+    // Allowed everywhere but at the credential files, which ask: not pre-approvable, so the call decides.
+    expect(gate.modeOf({ name: "edit" })).toBe("smart");
     expect((await gate.check({ name: "edit" }, { path: "a.ts" })).allow).toBe(true);
     expect(isPermissionDenied((await tools["read_file"]!.run({ path: "a.ts" }, {})) as never)).toBe(false);
     // An agent's own built-in answers to the map's `other`, which Full allows too.

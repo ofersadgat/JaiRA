@@ -1,7 +1,7 @@
 {
-  "read_file": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask" },
-  "glob": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask" },
-  "grep": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask" },
+  "read_file": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "$AGENT_WORKSPACE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask" },
+  "glob": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "$AGENT_WORKSPACE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask" },
+  "grep": { "**": "ask", "$PROJECT": "ask", "$WORKTREE": "ask", "$AGENT_WORKSPACE": "ask", "**/.env": "ask", "**/.env.*": "ask", "**/*.pem": "ask", "**/id_rsa*": "ask", "~/.ssh": "ask", "~/.aws": "ask", "~/.claude/.credentials.json": "ask", "~/.codex/auth.json": "ask" },
   "edit": "ask",
   "write_file": "ask",
   "show_artifact": "ask",

@@ -12,12 +12,13 @@
  * person can approve. `bash("find . -name '*.ts' -delete")` says "run this", and the only thing that
  * can reason about it is a command parser trying to reconstruct the intent we started with.
  *
- * Both are `readOnly`, both are confined to the workspace, and both are bounded — a walk that could
+ * Both are `readOnly`, both search the workspace unless a call names somewhere else (which the permission
+ * set answers for, at its places), and both are bounded — a walk that could
  * enumerate a `node_modules` is a walk that hangs a run, so the limits are part of the contract
  * rather than a defensive afterthought.
  */
 import { readdirSync, readFileSync, statSync } from "node:fs";
-import { join, relative, sep } from "node:path";
+import { join, relative, resolve, sep } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { globToRegExp } from "@jaira/shared";
 import { withinWorkspace } from "./artifactPath";
@@ -96,19 +97,18 @@ function rootOf(options: SearchToolOptions, ctx?: ExecServices): string | undefi
 }
 
 /**
- * The subtree a call is scoped to, checked for containment.
+ * The subtree a call is scoped to.
  *
- * `path` is a convenience and a trap: it is the natural way to say "only under `src`", and it is also
- * the natural way to say `../../..`. Resolved through the same `withinWorkspace` every other tool
- * uses, so the answer is the one the rest of the policy already gives.
+ * `path` is the natural way to say "only under `src`", and also to say `../..` or `~/.claude/…`.
+ * Somewhere outside the workspace is searched where it is: whether it may be is the permission set's to
+ * say, at its places (decision 0023 §3.2), and the gate said so before the tool ran — as `read_file`
+ * reads there. `.jaira/` is never searched, here or anywhere.
  */
 function scopeOf(root: string, path: unknown): { dir: string } | { error: string } {
   if (typeof path !== "string" || path.trim() === "") return { dir: root };
   const rel = path.replace(/\\/g, "/").replace(/^\.\//, "");
   if (isDeniedPath(rel)) return { error: `'${rel}' is inside .jaira/, which is not searchable` };
-  const within = withinWorkspace(root, rel);
-  if (within === undefined) return { error: `'${rel}' is outside the workspace` };
-  return { dir: within };
+  return { dir: withinWorkspace(root, rel) ?? resolve(root, path) };
 }
 
 /**

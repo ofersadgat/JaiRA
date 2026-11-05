@@ -63,7 +63,7 @@ import {
   type PermissionSet,
   type PermissionStackDecl,
 } from "@jaira/shared";
-import { namedPlacesOf } from "./linePlaces";
+import { namedPlacesOf, placesForCall } from "./linePlaces";
 import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { callDialectOf } from "./callDialect";
 import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
@@ -405,11 +405,14 @@ export function gateTools(options: {
   const scopeNarrowing: ScopeNarrowing | undefined =
     placeNarrowing === undefined || lineNarrowing === undefined
       ? (placeNarrowing ?? lineNarrowing)
-      : (tool, input, block) => {
-          const where = placeNarrowing(tool, input, block);
-          const what = lineNarrowing(tool, input, block);
-          return where === undefined || what === undefined ? (where ?? what) : strictestOf(where, what);
-        };
+      : Object.assign(
+          (tool: { name: string; readOnly?: boolean }, input: FunctionInputs, block: Parameters<ScopeNarrowing>[2]) => {
+            const where = placeNarrowing(tool, input, block);
+            const what = lineNarrowing(tool, input, block);
+            return where === undefined || what === undefined ? (where ?? what) : strictestOf(where, what);
+          },
+          { narrows: (tool: { name: string; readOnly?: boolean }, block: Parameters<ScopeNarrowing>[2]) => mayNarrow(placeNarrowing, tool, block) || mayNarrow(lineNarrowing, tool, block) },
+        );
   /** One gate over the SAME ledger, so a decision made at either end is remembered at both. */
   const gate = createToolGate(() => {
     const { authored } = now();
@@ -619,10 +622,10 @@ export function scopeNarrowingFor(
 ): ScopeNarrowing | undefined {
   if (floor === undefined || floor.length === 0) return undefined;
   const options = { ...(workspaceRoot !== undefined ? { root: workspaceRoot } : {}) };
-  return (tool, input) => {
+  const narrowing = (tool: { name: string; readOnly?: boolean }, input: FunctionInputs): PermissionMode | undefined => {
     // By LOGICAL name, whichever implementation called: a gate asked about the agent's own `Glob`
     // resolves the table written for `glob`. Without this the two spellings would be two policies.
-    const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
+    const name = logicalToolName(tool.name);
 
     // A SHELL COMMAND is about more than one place, and the ordinary extractor cannot see them: its
     // paths are inside a string. See `commandSubjects` — the cwd it runs in plus every path it
@@ -640,6 +643,25 @@ export function scopeNarrowingFor(
     }
     return scopeModeOf(floor, TOOL_SPEC_BY_NAME.get(name), name, input, options);
   };
+  // A table is a sandbox — what it does not name is refused — so it may narrow every tool that acts
+  // somewhere, and none that does not.
+  return Object.assign(narrowing, {
+    narrows: (tool: { name: string }) => {
+      const name = logicalToolName(tool.name);
+      return name === "shell" || TOOL_SPEC_BY_NAME.get(name)?.scope !== undefined;
+    },
+  });
+}
+
+/** A tool by its LOGICAL name, whichever implementation is asked about: an agent's `Glob` is `glob`. */
+const logicalToolName = (name: string): string => (TOOL_SPEC_BY_NAME.has(name) ? name : (standardOfAnyNative(name) ?? name));
+
+/**
+ * Whether a narrowing may tighten some call of `tool` — `ScopeNarrowing.narrows`, which keeps a tool it
+ * may tighten from being pre-approved past it. A narrowing that does not say may.
+ */
+export function mayNarrow(narrowing: ScopeNarrowing | undefined, tool: { name: string; readOnly?: boolean }, authored: Parameters<ScopeNarrowing>[2]): boolean {
+  return narrowing !== undefined && (narrowing.narrows?.(tool, authored) ?? true);
 }
 
 /** `deny` ▸ `ask` ▸ `smart` ▸ `allow`, for the one place here that composes two modes. */
@@ -720,16 +742,18 @@ export interface PlaceNarrowingOptions extends PlaceOptions {
  */
 export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNarrowing {
   const packageOf = packageFolderOf(options.packages);
-  return (tool, input, authored) => {
-    const name = TOOL_SPEC_BY_NAME.has(tool.name) ? tool.name : (standardOfAnyNative(tool.name) ?? tool.name);
+  const narrowing: ScopeNarrowing = (tool, input, authored) => {
+    const name = logicalToolName(tool.name);
     if (name === "shell" || !TOOL_SPEC_BY_NAME.has(name)) return undefined;
-    const answered = toolPlaceAnswerOf(name, input, (authored as PermissionsDecl | undefined) ?? undefined, options) ?? ownAnswerOf(name, (authored as PermissionsDecl | undefined) ?? options.fallback);
+    // `$AGENT_WORKSPACE` is the calling agent's folder.
+    const here = placesForCall(options, input);
+    const answered = toolPlaceAnswerOf(name, input, (authored as PermissionsDecl | undefined) ?? undefined, here) ?? ownAnswerOf(name, (authored as PermissionsDecl | undefined) ?? options.fallback);
     if (answered === undefined) return undefined;
     const { answer, block } = answered;
     // A call that ASKS at a place is put to the person as one part, with WHERE it acts and the place
     // widths an answer may be kept at (§3.8) — and is settled first by an answer this task already kept.
     if (answer.mode === "ask") {
-      const decided = directCallDecision(name, input, answer, block, { ...options, ...(packageOf !== undefined ? { packageOf } : {}) });
+      const decided = directCallDecision(name, input, answer, block, { ...here, ...(packageOf !== undefined ? { packageOf } : {}) });
       if (decided !== undefined) {
         setCommandDecision(input, decided);
         // Settled "for this run": a refusal tightens; an allowance leaves the gate its own mode, and the
@@ -754,6 +778,15 @@ export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNar
     }
     return answer.mode;
   };
+  // Only a line with places is tightened here; a line without is the gate's mode, as it stands.
+  return Object.assign(narrowing, {
+    narrows: (tool: { name: string }, authored?: Parameters<ScopeNarrowing>[2]) => {
+      const name = logicalToolName(tool.name);
+      if (name === "shell" || !TOOL_SPEC_BY_NAME.has(name)) return false;
+      const block = (authored as PermissionsDecl | undefined)?.places !== undefined ? (authored as PermissionsDecl) : options.fallback;
+      return block?.places !== undefined && Object.hasOwn(block.places, name);
+    },
+  });
 }
 
 /**
