@@ -44,8 +44,17 @@ jobs:
         run: npm run build
         working-directory: declarative-ai
 
+      # codeview (gitlab.com/mistlabs/codeview) is private, and the lockfile names it
+      # by SSH, which the runner has no key for: git reads it over HTTPS with a
+      # read-only deploy token (the CODEVIEW_TOKEN secret, deploy token `jaira-ci`).
       - name: Install JaiRA deps
-        run: npm install
+        env:
+          CODEVIEW_TOKEN: ${{ secrets.CODEVIEW_TOKEN }}
+        run: |
+          codeview="https://jaira-ci:${CODEVIEW_TOKEN}@gitlab.com/mistlabs/codeview.git"
+          git config --global url."$codeview".insteadOf ssh://git@gitlab.com/mistlabs/codeview.git
+          git config --global --add url."$codeview".insteadOf https://gitlab.com/mistlabs/codeview.git
+          npm install
         working-directory: JaiRA
 
       - name: Typecheck

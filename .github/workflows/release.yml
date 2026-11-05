@@ -193,10 +193,18 @@ jobs:
           npm install
           npm run build
 
+      # codeview is private and named by SSH in the lockfile; see ci.yml.
       - name: Install JaiRA
         if: steps.done.outputs.built != 'true'
         working-directory: JaiRA
-        run: npm install
+        shell: bash
+        env:
+          CODEVIEW_TOKEN: ${{ secrets.CODEVIEW_TOKEN }}
+        run: |
+          codeview="https://jaira-ci:${CODEVIEW_TOKEN}@gitlab.com/mistlabs/codeview.git"
+          git config --global url."$codeview".insteadOf ssh://git@gitlab.com/mistlabs/codeview.git
+          git config --global --add url."$codeview".insteadOf https://gitlab.com/mistlabs/codeview.git
+          npm install
 
       # The smoke test at the end of package.mjs launches the packaged app, which needs a display.
       - name: Build the installer
@@ -301,10 +309,18 @@ jobs:
           npm install
           npm run build
 
+      # codeview is private and named by SSH in the lockfile; see ci.yml.
       - name: Install JaiRA
         if: steps.done.outputs.built != 'true'
         working-directory: JaiRA
-        run: npm install
+        shell: bash
+        env:
+          CODEVIEW_TOKEN: ${{ secrets.CODEVIEW_TOKEN }}
+        run: |
+          codeview="https://jaira-ci:${CODEVIEW_TOKEN}@gitlab.com/mistlabs/codeview.git"
+          git config --global url."$codeview".insteadOf ssh://git@gitlab.com/mistlabs/codeview.git
+          git config --global --add url."$codeview".insteadOf https://gitlab.com/mistlabs/codeview.git
+          npm install
 
       # Tailscale built into the app is Go, bound with gomobile (packages/client/modules/jaira-net/build.mjs).
       - uses: actions/setup-go@v5

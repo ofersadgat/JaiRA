@@ -54,9 +54,16 @@ jobs:
           npm install
           npm run build
 
+      # codeview is private and named by SSH in the lockfile; see ci.yml.
       - name: Install JaiRA
         working-directory: JaiRA
-        run: npm install
+        env:
+          CODEVIEW_TOKEN: ${{ secrets.CODEVIEW_TOKEN }}
+        run: |
+          codeview="https://jaira-ci:${CODEVIEW_TOKEN}@gitlab.com/mistlabs/codeview.git"
+          git config --global url."$codeview".insteadOf ssh://git@gitlab.com/mistlabs/codeview.git
+          git config --global --add url."$codeview".insteadOf https://gitlab.com/mistlabs/codeview.git
+          npm install
 
       - name: Build, launch and photograph
         working-directory: JaiRA
