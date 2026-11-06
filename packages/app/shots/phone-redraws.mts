@@ -326,19 +326,44 @@ async function main(): Promise<void> {
         seen: number;
         kids: Node[];
       }
-      const all = await phone.evaluate<Node>("window.__census()");
-      console.log(`census, the task open: ${all.comps} components over ${all.hosts} elements; ${all.inView} elements in the screen, ${all.seen} of them uncovered`);
-      // The tree, each line a component with its share; a chain of one child keeping most of it folded into one line.
-      const print = (node: Node, depth: number, chain: string[]): void => {
-        const big = node.kids.filter((k) => k.comps >= Math.max(40, all.comps * 0.015));
-        const only = big.length === 1 && big[0]!.comps >= node.comps * 0.85 ? big[0]! : undefined;
-        if (only !== undefined && depth < 60) return print(only, depth, [...chain, node.name]);
-        const names = [...chain, node.name];
-        const shown = names.length > 3 ? `${names[0]} › … › ${names.slice(-2).join(" › ")}` : names.join(" › ");
-        console.log(`${"  ".repeat(Math.min(depth, 20))}${node.comps} comps, ${node.hosts} els (${node.inView} in screen, ${node.seen} uncovered)  ${shown}`);
-        for (const kid of big.sort((a, b) => b.comps - a.comps)) print(kid, depth + 1, []);
+      const census = async (where: string): Promise<void> => {
+        const all = await phone!.evaluate<Node>("window.__census()");
+        console.log(`census, ${where}: ${all.comps} components over ${all.hosts} elements; ${all.inView} elements in the screen, ${all.seen} of them uncovered`);
+        // The tree, each line a component with its share; a chain of one child keeping most of it folded into one line.
+        const print = (node: Node, depth: number, chain: string[]): void => {
+          const big = node.kids.filter((k) => k.comps >= Math.max(40, all.comps * 0.015));
+          const only = big.length === 1 && big[0]!.comps >= node.comps * 0.85 ? big[0]! : undefined;
+          if (only !== undefined && depth < 60) return print(only, depth, [...chain, node.name]);
+          const names = [...chain, node.name];
+          const shown = names.length > 3 ? `${names[0]} › … › ${names.slice(-2).join(" › ")}` : names.join(" › ");
+          console.log(`${"  ".repeat(Math.min(depth, 20))}${node.comps} comps, ${node.hosts} els (${node.inView} in screen, ${node.seen} uncovered)  ${shown}`);
+          for (const kid of big.sort((a, b) => b.comps - a.comps)) print(kid, depth + 1, []);
+        };
+        for (const top of all.kids) print(top, 0, []);
       };
-      for (const top of all.kids) print(top, 0, []);
+      const sheetTop = (): Promise<number | null> => phone!.evaluate<number | null>(`(() => { const el = document.querySelector('[aria-label="Drag the panel"]'); return el ? Math.round(el.getBoundingClientRect().top) : null; })()`);
+      const drag = async (y0: number, y1: number): Promise<void> => {
+        await phone!.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 195, y: y0 }] });
+        for (let i = 1; i <= 14; i++) {
+          await phone!.cdp("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 195, y: y0 + ((y1 - y0) * i) / 14 }] });
+          await sleep(20);
+        }
+        await phone!.cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        await sleep(1200);
+      };
+      await census(`the task open, its sheet at half (top ${await sheetTop()})`);
+      const half = await sheetTop();
+      if (half !== null) {
+        await drag(half + 8, 120);
+        await census(`the sheet full (top ${await sheetTop()})`);
+        const full = await sheetTop();
+        if (full !== null) await drag(full + 8, full + 220);
+      }
+      await tapLabel("Open the sidebar");
+      await sleep(1200);
+      await census("the drawer open");
+      await tapLabel("Close the sidebar").catch(() => undefined);
+      await sleep(800);
     }
 
     // Another task changing on the machine three times a second: what the phone pays per change.
@@ -362,6 +387,35 @@ async function main(): Promise<void> {
       },
       1500,
     );
+    // The same, the task's sheet raised to full over the board.
+    // The drawer the last tap opened, swiped shut as a finger would.
+    if (await phone.evaluate<boolean>(`!!document.querySelector('[aria-label="Close the sidebar"]')`)) {
+      await phone.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 300, y: 420 }] });
+      for (let i = 1; i <= 14; i++) {
+        await phone.cdp("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 300 - (260 * i) / 14, y: 422 }] });
+        await sleep(20);
+      }
+      await phone.cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    }
+    await sleep(1000);
+    const sheetTopNow = (): Promise<number | null> => phone!.evaluate<number | null>(`(() => { const el = document.querySelector('[aria-label="Drag the panel"]'); return el ? Math.round(el.getBoundingClientRect().top) : null; })()`);
+    for (let attempt = 0; attempt < 3; attempt++) {
+      const top = await sheetTopNow();
+      if (top === null || top < 120) break;
+      await phone.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x: 195, y: top + 8 }] });
+      for (let i = 1; i <= 14; i++) {
+        await phone.cdp("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: [{ x: 195, y: top + 8 + ((100 - top - 8) * i) / 14 }] });
+        await sleep(20);
+      }
+      await phone.cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await sleep(1500);
+    }
+    const raised = await sheetTopNow();
+    if (raised !== null && raised < 120) {
+      const board = await phone.evaluate<string>(`(() => { const el = document.querySelector('[data-testid="board-column"]'); if (!el) return "no board"; let at = el; while (at && getComputedStyle(at).display !== "none") at = at.parentElement; return at ? "the board hidden" : "the board shown"; })()`);
+      console.log(`(the sheet at top ${raised}: ${board})`);
+      await measure("busy full", async () => undefined, 5000);
+    } else console.log(`(the sheet did not rise to full: top ${raised})`);
     renaming = false;
     console.log(`(${await renames} renames on the desktop)`);
     await phone.shot("busy");

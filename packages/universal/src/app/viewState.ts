@@ -95,6 +95,13 @@ export const phoneInbox = shared(false);
  * question showing, so at least half. A request, with a stamp so the same one twice means "again";
  * `atLeast`, it only raises — a sheet already higher stays where it is.
  */
+/**
+ * The phone's sheet stands at full, settled and not held: the room under it is out of sight, and is kept
+ * hidden (`PhoneFrame`'s `Room`, an `Activity`) rather than drawn for nobody — the board under it was 700
+ * components drawn again with every change on the machine.
+ */
+export const sheetCovers = shared(false);
+
 export const sheetAsk = shared<{ detent: "peek" | "half" | "full"; at: number; atLeast?: boolean } | null>(null);
 
 /**

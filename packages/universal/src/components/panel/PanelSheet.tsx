@@ -5,6 +5,7 @@ import { dragHeight, settleSheet, sheetHeights, type SheetDetent, type SheetHeig
 import { Press, Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
 import { focusedInputTop, useKeyboardShown } from "../floats/keyboard";
+import { sheetCovers } from "../../app/viewState";
 
 /**
  * A phone's context panel (decision 0015, amended 2026-10-04): the panel (`SidePanel`) in a sheet over
@@ -51,6 +52,13 @@ export function PanelSheet({
   const live = useRef({ heights, detent, onMain, onClose });
   live.current = { heights, detent, onMain, onClose };
 
+  // Whether it rests where it was sent (its spring finished) and is not held: only then is a full sheet
+  // said to cover the room, so the room is never hidden behind a sheet still rising or being dragged.
+  const [settled, setSettled] = useState(true);
+  const [held, setHeld] = useState(false);
+  useEffect(() => sheetCovers.set(detent === "full" && settled && !held), [detent, settled, held]);
+  useEffect(() => () => sheetCovers.set(false), []);
+
   const animateTo = (to: number, done?: () => void): void => {
     Animated.spring(height, { toValue: to, useNativeDriver: false, bounciness: 0, speed: 16 }).start(({ finished }) => {
       if (finished) done?.();
@@ -58,7 +66,8 @@ export function PanelSheet({
   };
   const goTo = (next: SheetDetent): void => {
     setDetent(next);
-    animateTo(live.current.heights[next]);
+    setSettled(false);
+    animateTo(live.current.heights[next], () => setSettled(true));
   };
   // The room was measured or turned: the sheet keeps its height by name.
   useEffect(() => {
@@ -106,12 +115,14 @@ export function PanelSheet({
       // A press is the head's own (its buttons, its crumbs); a vertical drag is the sheet's.
       onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dy) > 6 && Math.abs(g.dy) > Math.abs(g.dx) * 1.2,
       onPanResponderGrant: () => {
+        setHeld(true);
         height.stopAnimation((v) => {
           start = v;
         });
       },
       onPanResponderMove: (_e, g) => height.setValue(at(g.dy)),
       onPanResponderRelease: (_e, g) => {
+        setHeld(false);
         const { heights: h, onMain: main, onClose: close } = live.current;
         const settled = settleSheet(at(g.dy), g.vy, h, main !== undefined);
         if (settled === "main") {
@@ -121,7 +132,10 @@ export function PanelSheet({
         if (settled === "close") return animateTo(0, close);
         goTo(settled);
       },
-      onPanResponderTerminate: () => goTo(live.current.detent),
+      onPanResponderTerminate: () => {
+        setHeld(false);
+        goTo(live.current.detent);
+      },
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { Activity, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { atRightEdge, drawerSettles, edgeWidth, panelSwipeOpens } from "@jaira/ui/phoneModel";
 import { Animated, PanResponder, Platform, View as RNView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
@@ -25,7 +25,7 @@ import { useShell } from "./shell";
 import { useSheetInset } from "./columnsFit";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
-import { phoneDrawer, phoneInbox, phonePanelOpener, rightEdgeTouch, sheetAsk } from "./viewState";
+import { phoneDrawer, phoneInbox, phonePanelOpener, rightEdgeTouch, sheetAsk, sheetCovers } from "./viewState";
 import { remoteStatus } from "./remoteStatus";
 import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
 
@@ -137,13 +137,18 @@ export function RemoteLine(): JSX.Element | null {
 function Room(): JSX.Element | null {
   const { state } = useShell();
   const inset = useSheetInset();
+  // Under a full sheet the board is out of sight: hidden, its state kept and its draws put off until it
+  // shows again, rather than drawn for nobody on every change (`sheetCovers`).
+  const covered = sheetCovers.use();
   if (state.view === "tasks") {
     return (
       <>
         {/* The board stops above the sheet's head. */}
-        <View flex={1} minWidth={0} minHeight={0} paddingBottom={inset}>
-          <BoardColumn />
-        </View>
+        <Activity mode={covered ? "hidden" : "visible"}>
+          <View flex={1} minWidth={0} minHeight={0} paddingBottom={inset}>
+            <BoardColumn />
+          </View>
+        </Activity>
         <PanelColumn />
       </>
     );

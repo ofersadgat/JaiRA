@@ -156,10 +156,11 @@ const TAB_BOX = { flexDirection: "row", alignItems: "center", gap: 6, paddingTop
  * The tab strip, labelled as far as the width allows ({@link labelPlan}). Measured: a hidden ruler
  * draws each tab bare and labelled, and the strip's own width decides. Widths are rounded to whole
  * pixels, as `offsetWidth` and `clientWidth` are — what the plan in the reference pictures was made from.
- */
-/**
- * The tab strip, drawn again only when its tabs move in content or another is open: a face makes its tabs
- * and the handler again on every draw of the panel (`steady.ts`).
+ * The ruler stands only while a tab as it now reads has no width yet: a tab's width is kept by what it
+ * says (its label and count) and the text's size, so a measured strip mounts no ruler.
+ *
+ * Drawn again only when its tabs move in content or another is open: a face makes its tabs and the
+ * handler again on every draw of the panel (`steady.ts`).
  */
 function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open: string | undefined; onTab: (id: string) => void }): JSX.Element {
   const steady = useSteadyHandlers({ onTab });
@@ -171,15 +172,19 @@ const PanelTabsDrawn = steadyMemo(function PanelTabsDrawn({ tabs, open, onTab }:
   const [strip, setStrip] = useState(0);
   const [widths, setWidths] = useState<Record<string, number>>({});
   const openAt = tabs.findIndex((tab) => tab.id === open);
+  const size = String(t.v("size-app"));
+  const keyOf = (tab: PanelTabSpec): string => JSON.stringify([tab.id, tab.label, tab.icon, tab.count ?? null, size]);
+  const unmeasured = tabs.filter((tab) => widths[`${keyOf(tab)}:bare`] === undefined || widths[`${keyOf(tab)}:full`] === undefined);
   const plan = useMemo(() => {
-    const all = tabs.map((tab) => ({ bare: widths[`${tab.id}:bare`], full: widths[`${tab.id}:full`] }));
+    const all = tabs.map((tab) => ({ bare: widths[`${keyOf(tab)}:bare`], full: widths[`${keyOf(tab)}:full`] }));
     if (strip === 0 || all.some((w) => w.bare === undefined || w.full === undefined)) return tabs.map(() => true);
     return labelPlan(
       all.map((w) => ({ bare: w.bare!, label: Math.max(0, w.full! - w.bare!) })),
       openAt,
       strip - 2,
     );
-  }, [tabs, widths, strip, openAt]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tabs, widths, strip, openAt, size]);
   const measure = (key: string) => (e: LayoutChangeEvent) => {
     const w = Math.round(e.nativeEvent.layout.width);
     setWidths((was) => (was[key] === w ? was : { ...was, [key]: w }));
@@ -217,19 +222,21 @@ const PanelTabsDrawn = steadyMemo(function PanelTabsDrawn({ tabs, open, onTab }:
           </Press>
         );
       })}
-      {/* The ruler: every tab twice, bare and labelled, out of sight. */}
-      <View position="absolute" left={0} top={0} flexDirection="row" opacity={0} pointerEvents="none" aria-hidden>
-        {tabs.map((tab) => (
-          <View key={tab.id} flexDirection="row">
-            <View {...TAB_BOX} onLayout={measure(`${tab.id}:bare`)}>
-              <TabInside tab={tab} labelled={false} color={String(t.v("dim"))} />
+      {/* The ruler: each tab not yet measured as it reads, twice, bare and labelled, out of sight. */}
+      {unmeasured.length > 0 ? (
+        <View position="absolute" left={0} top={0} flexDirection="row" opacity={0} pointerEvents="none" aria-hidden>
+          {unmeasured.map((tab) => (
+            <View key={keyOf(tab)} flexDirection="row">
+              <View {...TAB_BOX} onLayout={measure(`${keyOf(tab)}:bare`)}>
+                <TabInside tab={tab} labelled={false} color={String(t.v("dim"))} />
+              </View>
+              <View {...TAB_BOX} onLayout={measure(`${keyOf(tab)}:full`)}>
+                <TabInside tab={tab} labelled color={String(t.v("dim"))} />
+              </View>
             </View>
-            <View {...TAB_BOX} onLayout={measure(`${tab.id}:full`)}>
-              <TabInside tab={tab} labelled color={String(t.v("dim"))} />
-            </View>
-          </View>
-        ))}
-      </View>
+          ))}
+        </View>
+      ) : null}
     </View>
   );
 }, ["tabs"]);
