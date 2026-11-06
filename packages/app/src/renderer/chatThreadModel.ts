@@ -17,6 +17,7 @@ import { agentTitleOf, entriesOf, journalFor, liveStatusOf, type LiveTail } from
 import { contextTotalOf } from "./runConversationModel";
 import { conversationAnswering, openingRunAnswering, stillRunningIn } from "./childRunModel";
 import { askDrawnAtItsCall } from "./approvalCall";
+import type { CutSide } from "./transcriptViewTypes";
 
 /**
  * What the box is ARMED for beyond a reply — see `EditMessage`.
@@ -31,8 +32,8 @@ import { askDrawnAtItsCall } from "./approvalCall";
  */
 export type Arming =
   | { kind: "edit"; at: string; was: string }
-  | { kind: "rewind"; seq: number; from: number; was: string; side: "before" | "after"; waiting?: true; busy?: true }
-  | { kind: "fork"; seq: number; from: number; was: string; side: "before" | "after" };
+  | { kind: "rewind"; seq: number; from: number; was: string; side: CutSide; waiting?: true; busy?: true }
+  | { kind: "fork"; seq: number; from: number; was: string; side: CutSide };
 
 /**
  * The key of the side the thread is ON — the branch the record chain actually walks.
@@ -90,16 +91,21 @@ export function runningText(running: { agent: boolean; workflow: boolean }): str
  * What the banner over the box says while something is armed — see {@link Arming}. `running` is what
  * still runs, said by {@link runningText}: a rewind armed over it asks whether to wait or to stop.
  */
-export function armingText(arming: Arming, running: string | null = null): string {
+export function armingText(arming: Arming, running: string | null = null, worktree = false): string {
   if (arming.kind === "edit") return `Replacing ${namedMessage(arming.was)} — everything after it is left behind.`;
   if (arming.kind === "fork")
-    return `Forking ${arming.side === "before" ? "before" : "after"} ${namedMessage(arming.was)} — your next message starts a new conversation from there. This one is not changed.`;
-  const where = arming.side === "before" ? `to before ${namedMessage(arming.was)}` : `to ${namedMessage(arming.was)}`;
+    return arming.side === "start"
+      ? `Forking before ${namedMessage(arming.was)} — your next message starts a new conversation that shares nothing with this one. This one is not changed.`
+      : `Forking ${arming.side === "before" ? "before" : "after"} ${namedMessage(arming.was)} — your next message starts a new conversation from there. This one is not changed.`;
+  const where = arming.side === "after" ? `to ${namedMessage(arming.was)}` : `to before ${namedMessage(arming.was)}`;
   if (arming.waiting === true) return `Rewinding ${where} once nothing is running here${running !== null ? ` — ${running.charAt(0).toLowerCase()}${running.slice(1)}` : ""}.`;
   const what =
-    arming.side === "before"
-      ? `Rewind ${where} — it and everything after it are deleted, and it goes back in the box. This cannot be undone.`
-      : `Rewind ${where} — everything after it is deleted. This cannot be undone.`;
+    arming.side === "start"
+      ? // The message it opened with: nothing is left, so the conversation goes and a new one takes the words.
+        `Rewind ${where} — the whole conversation is deleted${worktree ? ", with its worktree" : ""}, and the message goes back in the box of a new one. This cannot be undone.`
+      : arming.side === "before"
+        ? `Rewind ${where} — it and everything after it are deleted, and it goes back in the box. This cannot be undone.`
+        : `Rewind ${where} — everything after it is deleted. This cannot be undone.`;
   return running !== null ? `${what} ${running}: wait for it to finish, or stop it now.` : what;
 }
 
@@ -275,9 +281,11 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     setError(null);
     if (armed?.kind === "fork") {
       // The message starts the NEW conversation — see "task:fork" — and the shell opens it, so this
-      // thread has nothing to show for it and nothing pending to keep.
+      // thread has nothing to show for it and nothing pending to keep. Before the message it opened
+      // with there is nothing to share: that is simply a new conversation, under these settings.
       setSending((n) => n + 1);
-      void surface.onFork(taskId, armed.seq, message, overrides, project).finally(() => setSending((n) => Math.max(0, n - 1)));
+      const started = armed.side === "start" ? surface.onNew(message, overrides) : surface.onFork(taskId, armed.seq, message, overrides, project);
+      void started.finally(() => setSending((n) => Math.max(0, n - 1)));
       return;
     }
     setSending((n) => n + 1);
@@ -474,14 +482,17 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
         .sort((a, b) => a.turn - b.turn),
     [thread],
   );
+  const opened = thread?.opening;
   const cutAt = useCallback(
-    (turn: number): { seq: number; from: number; side: "before" | "after" } | undefined => {
+    (turn: number): { seq: number; from: number; side: CutSide } | undefined => {
+      // The message it opened with is cut before itself too — which leaves nothing (`ChatThreadView.opening`).
+      if (opened !== undefined && opened.turn === turn) return { seq: opened.seq, from: opened.turn, side: "start" };
       const own = cuts.find((c) => c.turn === turn);
       if (own !== undefined) return { seq: own.seq, from: own.turn, side: "before" };
       const next = cuts.find((c) => c.turn > turn);
       return next === undefined ? undefined : { seq: next.seq, from: next.turn, side: "after" };
     },
-    [cuts],
+    [cuts, opened],
   );
   /**
    * Where this conversation was FORKED FROM, drawn as a seam between the shared part and its own.
@@ -592,6 +603,12 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       setArming((now) => (now === null || now === armed ? { ...armed, busy: true } : now));
       return;
     }
+    if (outcome === "deleted") {
+      // Cut before the message it opened with: the conversation is gone and the window is on the start
+      // page, whose box takes the words — as a conversation taken back does (`takeBack`).
+      keepDraft(`chat:new:${project ?? ""}`, armed.was);
+      return;
+    }
     if (outcome !== "done") setError(outcome.failure);
     else if (armed.side === "before") setDraft(armed.was);
     setArming((now) => (now === armed ? null : now));
@@ -680,6 +697,8 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     arming,
     /** What still runs, said — null when nothing does (and nothing was answered busy). */
     runningSaid: runningText(stillRunning) ?? (arming?.kind === "rewind" && arming.busy === true ? "Something is still running here" : null),
+    /** Whether it runs in a worktree of its own — which a rewind to before its opening message deletes with it. */
+    hasWorktree: surface.detail?.worktreePath !== undefined,
     disarm,
     confirmRewind,
     send,

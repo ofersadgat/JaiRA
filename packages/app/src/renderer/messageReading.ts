@@ -17,6 +17,7 @@ import type { JsonValue } from "@declarative-ai/json";
 import { familyIcon } from "./iconPaths";
 import type { MenuItem } from "./menuTypes";
 import type { MessageEntry } from "./transcript";
+import type { CutSide } from "./transcriptViewTypes";
 
 /**
  * What the app would say this is if nobody had corrected it.
@@ -174,7 +175,12 @@ export function copyTextOf(entry: MessageEntry, value: JsonValue): string {
 }
 
 /** The rewind and fork buttons' tooltips and names, by which side of the message the cut falls. */
-export function cutTitleOf(verb: "rewind" | "fork", cut: "before" | "after"): { title: string; label: string } {
+export function cutTitleOf(verb: "rewind" | "fork", cut: CutSide): { title: string; label: string } {
+  // The opening message: before it there is nothing, so the conversation itself is what goes or is not shared.
+  if (cut === "start")
+    return verb === "rewind"
+      ? { title: "Rewind to before this message — the whole conversation is deleted, and this message goes back in the box", label: "Rewind to before this message" }
+      : { title: "Fork before this message — a new conversation that shares nothing with this one", label: "Fork before this message" };
   if (verb === "rewind")
     return cut === "before"
       ? { title: "Rewind to before this message — it and everything after it are deleted", label: "Rewind to before this message" }

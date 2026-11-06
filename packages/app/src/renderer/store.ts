@@ -1351,6 +1351,35 @@ export function useApp() {
   );
 
   /**
+   * Stop showing tasks that were just deleted — by a delete, or by a rewind that left nothing of a
+   * conversation. Without it the panel would describe a record the next fetch cannot find.
+   */
+  const forgetDeleted = useCallback(
+    (taskIds: readonly string[]) => {
+      // A deleted conversation stops being the open one, or the Chat view would keep asking for
+      // a transcript nothing can answer with.
+      if (ref.current.chat.taskId !== null && taskIds.includes(ref.current.chat.taskId)) {
+        patch({ chat: { ...ref.current.chat, taskId: null, error: null } });
+      }
+      // …and stops being remembered as read. This is the only moment the map can be pruned
+      // safely — see `forgetSeen` on why the other direction is not available.
+      setUi(forgetSeen(ref.current.settings.ui, taskIds));
+      if (ref.current.selected !== null && taskIds.includes(ref.current.selected)) {
+        patch({
+          selected: null,
+          stream: [],
+          sessionsOpen: [],
+          sessionInstance: null,
+          trail: [],
+          trailState: null,
+          inspect: "path",
+        });
+      }
+    },
+    [patch, setUi],
+  );
+
+  /**
    * Do not lose the last gesture to the window closing.
    *
    * A layout change made inside {@link UI_WRITE_DELAY} of a quit is exactly the one someone would
@@ -3103,11 +3132,22 @@ export function useApp() {
        * anything still runs, and nothing cut.
        */
       rewindConversation: async (taskId: string, seq: number, project?: string, stop?: boolean): Promise<RewindOutcome> => {
+        // What its composer was set to, read before a cut that may delete it — see `deleted` below.
+        const settings = ref.current.detail?.taskId === taskId ? ref.current.detail.chatSettings : undefined;
         patch({ chat: { ...ref.current.chat, busy: true, error: null } });
         try {
           const answer = await invoke("task:rewind", { taskId, at: seq, ...(stop === false ? { stop } : {}), ...(project !== undefined ? { project } : {}) });
           patch({ chat: { ...ref.current.chat, busy: false } });
           if (answer.busy === true) return "busy";
+          if (answer.deleted === true) {
+            // Cut to before its opening message: it is gone, and the start page opens under what it ran
+            // with, as a conversation taken back does (`takeBackQueued`). Its words are the caller's.
+            const { settings: _had, ...chat } = ref.current.chat;
+            patch({ chat: { ...chat, ...(settings !== undefined && Object.keys(settings).length > 0 ? { settings } : {}) } });
+            forgetDeleted([taskId]);
+            await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard()]);
+            return "deleted";
+          }
           await Promise.all([project === SHARED_SESSION ? refreshSharedTasks() : refreshTasks(), refreshBoard(), refreshDetail(taskId, project)]);
           return "done";
         } catch (e) {
@@ -3142,25 +3182,7 @@ export function useApp() {
           for (const taskId of taskIds) {
             await invoke("task:delete", { taskId, ...(project !== undefined ? { project } : {}) });
           }
-          // A deleted conversation stops being the open one, or the Chat view would keep asking for
-          // a transcript nothing can answer with.
-          if (ref.current.chat.taskId !== null && taskIds.includes(ref.current.chat.taskId)) {
-            patch({ chat: { ...ref.current.chat, taskId: null, error: null } });
-          }
-          // …and stops being remembered as read. This is the only moment the map can be pruned
-          // safely — see `forgetSeen` on why the other direction is not available.
-          setUi(forgetSeen(ref.current.settings.ui, taskIds));
-          if (ref.current.selected !== null && taskIds.includes(ref.current.selected)) {
-            patch({
-              selected: null,
-              stream: [],
-              sessionsOpen: [],
-              sessionInstance: null,
-              trail: [],
-              trailState: null,
-              inspect: "path",
-            });
-          }
+          forgetDeleted(taskIds);
           patch({ busy: false });
           await Promise.all([refreshTasks(), refreshBoard()]);
         } catch (e) {
@@ -4904,6 +4926,7 @@ export function useApp() {
       setUi,
       keepingUi,
       fail,
+      forgetDeleted,
       refreshAll,
       refreshTasks,
       refreshBoard,

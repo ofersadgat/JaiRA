@@ -306,7 +306,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
               flexBasis={240}
               minWidth={0}
             >
-              {armingText(m.arming, m.arming.kind === "rewind" ? m.runningSaid : null)}
+              {armingText(m.arming, m.arming.kind === "rewind" ? m.runningSaid : null, m.hasWorktree)}
             </Txt>
             <View flexDirection="row" alignItems="center" gap={8} marginLeft="auto">
               <Press onPress={m.disarm} paddingVertical={3} paddingHorizontal={10} borderRadius={7} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>

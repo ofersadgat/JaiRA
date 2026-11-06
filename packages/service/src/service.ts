@@ -568,6 +568,7 @@ import {
   presetModelOf,
   type CatalogStatusView,
   type ModelParametersView,
+  isConversation,
 } from "@jaira/shared";
 import { gitIgnoredPaths } from "./gitIgnored";
 import { Diagnostics, stackDetail } from "./diagnostics";
@@ -7707,8 +7708,11 @@ export class AppService {
     const seqOfRecord = new Map<string, number>();
     /** By SEAT, for a chat turn: its settle names no record, only the position the call ended at. */
     const seqOfSeat = new Map<string, number>();
+    /** The run's own entry — the first instance the task entered. A cut there leaves nothing. */
+    let runEntered: number | undefined;
     for (const row of project.events.list(request.taskId)) {
       if (row.instanceId === undefined) continue;
+      if (row.type === "instance.entered" && runEntered === undefined) runEntered = row.seq;
       if (row.type === "instance.entered" || row.type === "transition.taken") turnStarts.set(row.instanceId, row.seq);
       if (row.type !== "operation.dispatched" && row.type !== "operation.completed" && row.type !== "operation.failed") continue;
       const start = turnStarts.get(row.instanceId);
@@ -7725,6 +7729,7 @@ export class AppService {
 
     const turns: SessionTurn[] = [];
     const points: ChatEditPoint[] = [];
+    let opening: { turn: number; seq: number } | undefined;
     const sidechains: Record<string, SessionTurn[]> = {};
     const providerEvents: Array<{ index: number; event: JsonValue }> = [];
     const native: Array<{ index: number; line: JsonValue }> = [];
@@ -7742,9 +7747,12 @@ export class AppService {
       turns.push(...said);
       // The run's own call is not a message somebody typed — editing it means running the task
       // again with different inputs, which is a different verb in a different place.
+      const seq = seqOfRecord.get(row.recordId) ?? seqOfSeat.get(`${row.sessionId}@${row.seq}`);
       if (i > 0) {
-        const seq = seqOfRecord.get(row.recordId) ?? seqOfSeat.get(`${row.sessionId}@${row.seq}`);
         points.push({ turn: at, at: `${sessionOf(context.position)}@${row.seq}`, ...(seq !== undefined ? { seq } : {}) });
+      } else if (seq !== undefined && seq === runEntered && said[0]?.role === "user") {
+        // It can still be CUT before: that is the conversation taken back to its start (see `opening`).
+        opening = { turn: at, seq };
       }
       // A TURN index is record-relative, so it shifts onto the thread by where that record started —
       // the same arithmetic the two index families below do. A call id needs no shifting: it is the
@@ -7809,6 +7817,7 @@ export class AppService {
       instanceId: host,
       session,
       points,
+      ...(opening !== undefined ? { opening } : {}),
       ...(forks.length > 0 ? { forks } : {}),
       ...(origin !== undefined ? { origin } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
@@ -7837,7 +7846,7 @@ export class AppService {
     stop?: boolean;
     interactions?: Record<string, JsonValue[]>;
     fake?: JsonValue;
-  }): Promise<{ taskId: string; busy?: true }> {
+  }): Promise<{ taskId: string; busy?: true; deleted?: true }> {
     const session = this.session(request.project);
     const { taskId } = request;
     const live = session.live.get(taskId);
@@ -7861,6 +7870,18 @@ export class AppService {
       if (owner === taskId) session.hub.reject(requestId, "the task was rewound to before this question");
     }
     session.questions.dismissFor(taskId);
+    // A CONVERSATION cut to before its own run — before the message it opened with — keeps nothing,
+    // and running it again in place is not a rewind: the next message to say is the person's, not
+    // the input it was made with, and a fresh run is a new task (`rerunTask`). So it is deleted, and
+    // the window opens a new conversation with what it opened with in the box. A workflow run cut
+    // there still resumes as it always has.
+    const meta = session.project.tasks.read(taskId);
+    const kept = session.project.events.list(taskId).some((row) => row.type === "instance.entered" && row.seq < request.at);
+    if (isConversation(meta) && !kept) {
+      await this.deleteTask(taskId, request.project);
+      this.log({ level: "info", source: "run", message: `rewound ${taskId} to before its opening message: the conversation was deleted`, project: session.key, taskId });
+      return { taskId, deleted: true };
+    }
     // A reopening of the FINISHED task that the cut takes away: what it cleared is what the task goes
     // back to (`hostRows.ts`). Read before the cut, which deletes the row that says so.
     const reopened = reopenedAfter(session.project, taskId, request.at);

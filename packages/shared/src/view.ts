@@ -1609,6 +1609,16 @@ export interface ChatThreadView {
   /** Where a message may be sent INSTEAD of an existing one — see `chat:send`'s `branchAt`. */
   points: ChatEditPoint[];
   /**
+   * The message the conversation OPENED with, where a cut can be made before it: its turn, and the
+   * journal position of the run's own entry — before which nothing of the task is left.
+   *
+   * Not a {@link points} entry, because it cannot be replaced in place: it is the task's input, and
+   * the run it began is the task. A rewind there deletes the conversation (`task:rewind` answers
+   * `deleted`), and a fork there is a new conversation that shares nothing. Absent where the first
+   * record is not the run's own call (a conversation that started idle) or its turn is not named.
+   */
+  opening?: { turn: number; seq: number };
+  /**
    * Where this conversation SPLIT, and what it said down the other side.
    *
    * Absent for the ordinary conversation, which is most of them: nothing here is paid for until

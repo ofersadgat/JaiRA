@@ -50,7 +50,8 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 const REPLY = (text: string): Array<{ output: string }> => [{ output: text }];
 
 async function started(message: string): Promise<string> {
-  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message } });
+  // A conversation, as the Chat view makes one (`newConversation`).
+  const { taskId } = service.createTask({ title: titleOf(message), workflow: CHAT_SESSION, inputs: { message }, conversation: true });
   await service.startTask({ taskId, fake: REPLY("first answer") });
   await until(() => pushes.some((m) => m.type === "run:finished" && m.taskId === taskId), "the opening run to finish");
   return taskId;
@@ -127,6 +128,30 @@ describe("rewinding a conversation", () => {
     await service.rewindTask({ taskId, at: cutAgain });
     expect(said(taskId)).toEqual(["user: one", "assistant: first answer", "user: two", "assistant: second answer"]);
     expect(service.chatThread({ taskId })!.points).toHaveLength(1);
+  });
+});
+
+describe("rewinding to before the message a conversation opened with", () => {
+  it("is offered for the opening message alone, at the run's own entry", async () => {
+    const taskId = await started("one");
+    const thread = service.chatThread({ taskId })!;
+    // Nothing typed after it, so no point to replace or cut at — and still the opening can be cut before.
+    expect(thread.points).toEqual([]);
+    expect(thread.opening).toMatchObject({ turn: 0 });
+    const entered = service.taskDetail(taskId).timeline.find((t) => t.type === "instance.entered")!.seq;
+    expect(thread.opening!.seq).toBe(entered);
+    // Later messages leave it where it was, and still not among the points.
+    const longer = await threeLong();
+    const three = service.chatThread({ taskId: longer })!;
+    expect(three.opening).toMatchObject({ turn: 0 });
+    expect(three.points.map((p) => p.turn)).not.toContain(0);
+  });
+
+  it("deletes the conversation, however long it is", async () => {
+    const taskId = await threeLong();
+    const opening = service.chatThread({ taskId })!.opening!;
+    expect(await service.rewindTask({ taskId, at: opening.seq })).toEqual({ taskId, deleted: true });
+    expect(service.listTasks().some((t) => t.taskId === taskId)).toBe(false);
   });
 });
 

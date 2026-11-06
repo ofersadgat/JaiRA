@@ -5,6 +5,9 @@
  */
 import type { ProjectRef, ServedArtifact } from "@jaira/shared/browser";
 
+/** Which side of a message a cut falls on — see {@link EditMessage.cut}. */
+export type CutSide = "before" | "after" | "start";
+
 /**
  * Replacing a message that was already sent — what the Chat view lends its transcript.
  *
@@ -22,10 +25,12 @@ export interface EditMessage {
    * A message that begins a turn is cut BEFORE: it and everything after it go. A reply ends one and
    * is cut AFTER: it stays, and everything after it goes. Both land on the same kind of point — the
    * start of the next turn in the journal — so the sentence in the tooltip is the only thing that
-   * differs. `undefined` means neither verb is offered here: nothing comes after this message, or
-   * the journal does not name its turn.
+   * differs. `start` is the message a conversation OPENED with (`ChatThreadView.opening`): cut before
+   * it, nothing is left — a rewind deletes the conversation and a fork shares nothing. `undefined`
+   * means neither verb is offered here: nothing comes after this message, or the journal does not
+   * name its turn.
    */
-  cut?: ((turn: number) => "before" | "after" | undefined) | undefined;
+  cut?: ((turn: number) => CutSide | undefined) | undefined;
   /**
    * Delete from the cut on, then carry on from there.
    *

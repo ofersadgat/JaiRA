@@ -157,6 +157,30 @@ describe("rewinding a run to before a state", () => {
   });
 });
 
+describe("rewinding to before the run's own entry", () => {
+  /** The journal position the run's root was entered at — before it, nothing of the task is left. */
+  const rootEntered = (taskId: string): number => service.taskDetail(taskId).timeline.find((t) => t.type === "instance.entered")!.seq;
+
+  it("deletes a CONVERSATION — waiting for what runs with stop: false, stopping it otherwise", async () => {
+    const { taskId } = service.createTask({ title: "Cut", workflow: ROOT, conversation: true });
+    void service.startTask({ taskId });
+    await until(() => service.pendingInteractions().some((p) => p.component === "confirm_action"), "the first question");
+    const at = rootEntered(taskId);
+
+    expect(await service.rewindTask({ taskId, at, stop: false })).toEqual({ taskId, busy: true });
+    expect(service.listTasks().some((t) => t.taskId === taskId)).toBe(true);
+    expect(await service.rewindTask({ taskId, at })).toEqual({ taskId, deleted: true });
+    expect(service.listTasks().some((t) => t.taskId === taskId)).toBe(false);
+    expect(service.pendingInteractions().some((p) => p.taskId === taskId)).toBe(false);
+  });
+
+  it("leaves a workflow task in place — only a conversation is deleted", async () => {
+    const taskId = await ranThree();
+    expect(await service.rewindTask({ taskId, at: rootEntered(taskId) })).toEqual({ taskId });
+    expect(service.listTasks().some((t) => t.taskId === taskId)).toBe(true);
+  });
+});
+
 describe("forking a run before a state", () => {
   it("is a second task that asks the question again, while the original keeps its answers", async () => {
     const taskId = await ranThree();

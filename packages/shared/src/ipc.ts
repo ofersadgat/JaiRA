@@ -1800,7 +1800,12 @@ export interface IpcContract {
    */
   "task:rewind": {
     request: { taskId: string; at: number; project?: ProjectRef; stop?: boolean; interactions?: Record<string, JsonValue[]>; fake?: JsonValue };
-    response: { taskId: string; busy?: true };
+    /**
+     * `deleted`: the cut left nothing of a CONVERSATION — it was before the run's own entry, so before
+     * the message it opened with (`ChatThreadView.opening`) — and the conversation was deleted rather
+     * than run again in place; what it opened with is the caller's to say again.
+     */
+    response: { taskId: string; busy?: true; deleted?: true };
   };
   /**
    * A second task that shares everything up to a point — a COPY of what a rewind at `at` would

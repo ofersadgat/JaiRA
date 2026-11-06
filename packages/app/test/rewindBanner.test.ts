@@ -27,6 +27,16 @@ describe("an armed rewind's banner", () => {
       "Rewind to “start the gate” — everything after it is deleted. This cannot be undone. A workflow it started is still running: wait for it to finish, or stop it now.",
     );
   });
+  it("says the whole conversation goes before the message it opened with — and its worktree, where it has one", () => {
+    const start: Arming = { ...before, side: "start" };
+    expect(armingText(start)).toBe("Rewind to before “start the gate” — the whole conversation is deleted, and the message goes back in the box of a new one. This cannot be undone.");
+    expect(armingText(start, null, true)).toBe(
+      "Rewind to before “start the gate” — the whole conversation is deleted, with its worktree, and the message goes back in the box of a new one. This cannot be undone.",
+    );
+    expect(armingText({ kind: "fork", seq: 9, from: 0, was: "start the gate", side: "start" })).toBe(
+      "Forking before “start the gate” — your next message starts a new conversation that shares nothing with this one. This one is not changed.",
+    );
+  });
   it("says it is waiting, and on what", () => {
     expect(armingText({ ...before, waiting: true }, "The agent is still answering")).toBe("Rewinding to before “start the gate” once nothing is running here — the agent is still answering.");
     expect(armingText({ ...before, waiting: true })).toBe("Rewinding to before “start the gate” once nothing is running here.");

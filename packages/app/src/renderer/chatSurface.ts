@@ -22,8 +22,11 @@ import type { ApprovalAnswerExtras } from "./approvalSurfaceTypes";
 import type { LiveTail } from "./transcript";
 
 /** What the Chat view needs from the shell. Assembled by {@link chatSurfaceOf}. */
-/** How a conversation's rewind ended: cut, put off because something still runs, or refused (why). */
-export type RewindOutcome = "done" | "busy" | { failure: string };
+/**
+ * How a conversation's rewind ended: cut, put off because something still runs, refused (why), or —
+ * cut to before its opening message — the conversation deleted, and the window on a new one.
+ */
+export type RewindOutcome = "done" | "busy" | "deleted" | { failure: string };
 
 export interface ChatSurface {
   /**
