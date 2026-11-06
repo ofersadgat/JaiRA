@@ -8,6 +8,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type JairaDb } from "../src/db";
 import { changesSince, pruneTombstones, syncHorizon, syncNow, touch } from "../src/sync";
 import { stageTable } from "../src/fileStorage";
+import { migrate } from "../src/migrations";
 
 let dir: string;
 let db: JairaDb;
@@ -64,6 +65,40 @@ describe("the change log", () => {
     db.prepare(`INSERT INTO sync_changes (collection, id, task_id, at, deleted) VALUES ('task', 't-old', 't-old', ?, 0)`).run(future);
     runtime("t-a");
     expect(changesSince(db, future).map((c) => c.id).sort()).toEqual(["t-a", "t-old"]);
+  });
+
+  it("gives every change a stamp of its own, and a row written again a new one, however soon", () => {
+    db.transaction(() => {
+      for (let i = 0; i < 20; i++) runtime(`t-${i}`);
+      for (let i = 0; i < 5; i++) db.prepare(`UPDATE task_runtime SET status = ? WHERE task_id = 't-0'`).run(`s${i}`);
+    })();
+    const stamps = changesSince(db, 0).map((c) => c.at);
+    expect(new Set(stamps).size).toBe(stamps.length);
+    expect([...stamps].sort((a, b) => a - b)).toEqual(stamps);
+    // t-0 was written last of all: its stamp is the newest.
+    expect(changesSince(db, 0).at(-1)!.id).toBe("t-0");
+  });
+
+  it("is given its own-stamp clock by migration 33, where the triggers were made with the old one", () => {
+    // A database from before: the task trigger stamps with the old clock, which two writes in one
+    // millisecond share.
+    const old = `MAX(CAST(unixepoch('subsec') * 1000 AS INTEGER), COALESCE((SELECT MAX(at) FROM sync_changes), 0))`;
+    db.exec(`DROP TRIGGER sync_task_runtime_insert;
+      CREATE TRIGGER sync_task_runtime_insert AFTER INSERT ON task_runtime BEGIN
+        INSERT INTO sync_changes (collection, id, task_id, at, deleted) VALUES ('task', NEW.task_id, NEW.task_id, ${old}, 0)
+        ON CONFLICT (collection, id) DO UPDATE SET task_id = excluded.task_id, at = excluded.at, deleted = excluded.deleted;
+      END;`);
+    db.transaction(() => {
+      for (let i = 0; i < 20; i++) runtime(`a-${i}`);
+    })();
+    expect(new Set(changesSince(db, 0).map((c) => c.at)).size).toBeLessThan(20);
+    db.pragma("user_version = 32");
+    migrate(db);
+    db.prepare(`DELETE FROM sync_changes`).run();
+    db.transaction(() => {
+      for (let i = 0; i < 20; i++) runtime(`b-${i}`);
+    })();
+    expect(new Set(changesSince(db, 0).map((c) => c.at)).size).toBe(20);
   });
 
   it("ignores a job's heartbeat, and records its end", () => {

@@ -231,7 +231,8 @@ describe("a busy task", () => {
     await settle();
     const reads = (): number => e.asked.filter((a) => a.channel === "task:detail").length;
     const before = reads();
-    for (let i = 0; i < 20; i++) cache.push(changed(10 + i, page(11 + i, [task("t-a")])));
+    // Each page a new change to one of its records, as a streaming turn makes them.
+    for (let i = 0; i < 20; i++) cache.push(changed(10 + i, page(11 + i, [task("t-a")], { changes: [{ collection: "record", id: "r-1", taskId: "t-a", at: 11 + i, deleted: false }] })));
     await settle();
     expect(reads() - before).toBe(1);
     await new Promise((r) => setTimeout(r, 600));
@@ -415,5 +416,113 @@ describe("telling the readers", () => {
     expect(told).toBe(0);
     await new Promise((r) => setTimeout(r, 30));
     expect(told).toBe(1);
+  });
+});
+
+describe("the rows at the cursor, brought again", () => {
+  it("read nothing again — a new change does", async () => {
+    const e = engine(() => ({ n: 1 }));
+    const rec = (at: number) => ({ collection: "record", id: "r-1", taskId: "t-a", at, deleted: false });
+    let next = page(10, [task("t-a")], { whole: true });
+    e.answerSince(() => next);
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    cache.hold("store", [["task:detail", { taskId: "t-a" }]]);
+    await settle();
+    const reads = (): number => e.asked.filter((a) => a.channel === "task:detail").length;
+    const before = reads();
+    // A change at 12: read. Asked again from 12, the same change comes again: nothing is read.
+    next = page(12, [task("t-a")], { changes: [rec(12)] });
+    await cache.reconcile();
+    await new Promise((r) => setTimeout(r, 600));
+    expect(reads() - before).toBe(1);
+    await cache.reconcile();
+    await cache.reconcile();
+    await new Promise((r) => setTimeout(r, 600));
+    expect(reads() - before).toBe(1);
+    // The same row changed again, at a new stamp: read.
+    next = page(15, [task("t-a")], { changes: [rec(15)] });
+    await cache.reconcile();
+    await new Promise((r) => setTimeout(r, 600));
+    expect(reads() - before).toBe(2);
+  });
+
+  it("keep a task's summary its object when it is the same", async () => {
+    const e = engine();
+    let next = page(10, [task("t-a", "one")], { whole: true });
+    e.answerSince(() => next);
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    const was = cache.task("t-a");
+    next = page(11, [task("t-a", "one")], { changes: [{ collection: "event", id: "1", taskId: "t-a", at: 11, deleted: false }] });
+    await cache.reconcile();
+    expect(cache.task("t-a")).toBe(was);
+    next = page(12, [task("t-a", "two")], { changes: [{ collection: "event", id: "2", taskId: "t-a", at: 12, deleted: false }] });
+    await cache.reconcile();
+    expect(cache.task("t-a")?.title).toBe("two");
+  });
+});
+
+describe("views held together for the first time", () => {
+  it("are shown together, when the slowest has answered", async () => {
+    const e = engine((channel, request) => ({ board: (request as { project: string }).project }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    e.hold();
+    cache.hold("place", [
+      ["board:roots", { project: "/a" }],
+      ["board:roots", { project: "/b" }],
+    ]);
+    await settle();
+    expect(cache.peek("board:roots", { project: "/a" }).value).toBeUndefined();
+    e.release();
+    await settle();
+    expect(cache.peek("board:roots", { project: "/a" }).value).toEqual({ board: "/a" });
+    expect(cache.peek("board:roots", { project: "/b" }).value).toEqual({ board: "/b" });
+  });
+
+  it("show what they have after a while, and a refresh of one answers once its group is shown", async () => {
+    let slow: (() => void) | undefined;
+    const io: SyncIo = {
+      invoke: (async (channel: string, request: unknown) => {
+        if (channel === "sync:since") return page(1, [], { whole: true });
+        if ((request as { project: string }).project === "/slow") await new Promise<void>((r) => (slow = r));
+        return { board: (request as { project: string }).project };
+      }) as SyncIo["invoke"],
+    };
+    const cache = new SyncCache(io);
+    await cache.start();
+    cache.hold("place", [
+      ["board:roots", { project: "/a" }],
+      ["board:roots", { project: "/slow" }],
+    ]);
+    let refreshed = false;
+    void cache.refresh("board:roots", { project: "/a" }).then(() => (refreshed = true));
+    await settle();
+    expect(cache.peek("board:roots", { project: "/a" }).value).toBeUndefined();
+    expect(refreshed).toBe(false);
+    await new Promise((r) => setTimeout(r, 450));
+    expect(cache.peek("board:roots", { project: "/a" }).value).toEqual({ board: "/a" });
+    expect(refreshed).toBe(true);
+    slow?.();
+    await settle();
+    expect(cache.peek("board:roots", { project: "/slow" }).value).toEqual({ board: "/slow" });
+  });
+});
+
+describe("a page asked before a view was", () => {
+  it("reads nothing again of that view: its answer is as of the page or later", async () => {
+    const e = engine(() => ({ n: 1 }));
+    e.answerSince(() => page(10, [task("t-a")], { whole: true }));
+    const cache = new SyncCache(e.io);
+    e.hold();
+    const started = cache.start();
+    await settle();
+    // The views the window holds are asked while the first whole page is still out.
+    cache.hold("place", [["project:list", undefined]]);
+    e.release();
+    await started;
+    await new Promise((r) => setTimeout(r, 50));
+    expect(e.asked.filter((a) => a.channel === "project:list")).toHaveLength(1);
   });
 });

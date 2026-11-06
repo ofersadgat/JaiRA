@@ -2273,35 +2273,15 @@ export function useApp() {
     // empty window — which is where someone goes to set the shared layer up in the first place.
     // Before the early return: JaiRA's own runs belong to no checkout, so they are exactly what a
     // window with nothing open should still be able to see.
-    await Promise.all([
-      refreshSettings(),
-      refreshTree(),
-      refreshConfig(),
-      refreshAvailability(),
-      refreshProjects(),
-      refreshSharedTasks(),
-      refreshWorkflows(),
-    ]);
+    //
+    // What the cache holds — the projects, the boards, what waits on the person, the history's size — is
+    // not asked for here: the window holds those views (`place`, `selected`), and a view held is read. A
+    // read asked for here as well read each again behind the first, and the boards a third time (2026-11-06:
+    // `board:roots` 17 times for 6 boards as a window opened, each drawn as it came). The index is brought
+    // up to date once, from the cursor. `at` is set above, so this one pass reads the project's layer too.
+    await Promise.all([refreshSettings(), refreshTree(), refreshConfig(), refreshAvailability(), refreshTasks(), refreshWorkflows()]);
     if (!current) return;
-    await Promise.all([
-      refreshTasks(),
-      refreshBoard(),
-      refreshPending(),
-      refreshApprovals(),
-      refreshQuestions(),
-      refreshUserEvents(),
-      refreshHistory(),
-      // Again, now that a project layer exists to lay over the base one.
-      refreshConfig(),
-      // Again, now that a project supplies a second root to walk.
-      refreshTree(),
-      // And again for the same reason: the picker lists the focused project's roots beside the shared
-      // ones, and the pass above ran before there was a focused project to ask about.
-      refreshWorkflows(),
-      refreshDetail(ref.current.selected),
-      refreshState(ref.current.stateId),
-      refreshAllConversations(),
-    ]);
+    await Promise.all([refreshDetail(ref.current.selected), refreshState(ref.current.stateId)]);
   }, [
     patch,
     refreshTasks,
@@ -3767,10 +3747,8 @@ export function useApp() {
         patch({ view, error: null });
         if (view === "settings") void refreshConfig();
         if (view === "files") void refreshTree();
-        // The per-project boards go stale while this view is not on screen — a running task's
-        // transitions are not followed there, deliberately, because following them costs a fetch per
-        // project per journal entry. Arriving is when that debt is paid. See the `board` invalidate.
-        if (view === "tasks") void refreshProjects();
+        // The per-project boards are held while this view is on screen; one a change touched while it was
+        // not is marked stale by the cache and read as it is held again (`SyncCache.apply`).
         // Backfilled once on open; everything after arrives on the push.
         // Same for arriving at Chat by any other door: the list it draws is fetched by nothing else.
         if (view === "chat") void refreshAllConversations();

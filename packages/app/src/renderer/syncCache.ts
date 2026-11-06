@@ -27,7 +27,7 @@
  * the device (`syncMirror.ts`): the index and the views read before, shown from the moment it starts
  * and while no engine answers — a cache of the engines, which an engine's answer replaces.
  */
-import type { IpcChannel, IpcRequest, IpcResponse, ProjectTask, PushMessage, SyncPage } from "@jaira/shared/browser";
+import type { IpcChannel, IpcRequest, IpcResponse, ProjectTask, PushMessage, SyncChange, SyncPage } from "@jaira/shared/browser";
 import type { SyncMirror } from "./syncMirror";
 
 export interface SyncIo {
@@ -106,6 +106,8 @@ interface Entry {
   project: string | null;
   value: unknown;
   error: string | undefined;
+  /** The newest read asked of it (counted as `at` is), landed or not; -1 before the first. */
+  issued: number;
   /** Which read the current value or error came from; -1 before the first answer. */
   at: number;
   /** The value is the mirror's, kept from before: no engine has answered for it yet. */
@@ -128,11 +130,38 @@ interface Entry {
   usedAt: number;
   /** What `peek` answers: the same object until something in it changes, so a hook can compare it. */
   shown: Held<unknown>;
+  /** Held with others for the first time, and shown with them: until they all have an answer, `shown` waits. */
+  group: Together | undefined;
 }
+
+/**
+ * Views first asked for together (in one turn of the event loop), shown together: each one's first
+ * answer — the engine's or the mirror's — is kept back until every one of them has one, or
+ * {@link TOGETHER_MAX_MS} has passed. A window asked a board per project, answered one after another, and drew each as it came
+ * (2026-11-06: "i see tasks render one by one on the task view instead of all at once").
+ */
+interface Together {
+  waiting: Set<Entry>;
+  members: Entry[];
+  done: boolean;
+  /** No more join it: the turn it was formed in is over. */
+  closed: boolean;
+  cap: ReturnType<typeof setTimeout> | undefined;
+  promise: Promise<void>;
+  resolve: () => void;
+}
+
+/** The longest a group of views waits for its slowest before what it has is shown. */
+const TOGETHER_MAX_MS = 400;
 
 const NOTHING: Held<never> = Object.freeze({ value: undefined, error: undefined, loading: false });
 
+/** A change in the log, as a row of it: what changed, without when. */
+const changeKey = (change: SyncChange): string => `${change.collection}\u0000${change.id}`;
+
 function show(entry: Entry): void {
+  // Shown with its group, when the group is.
+  if (entry.group !== undefined) return;
   const was = entry.shown;
   if (was.value === entry.value && was.error === entry.error && was.loading === entry.loading) return;
   entry.shown = { value: entry.value, error: entry.error, loading: entry.loading };
@@ -241,6 +270,12 @@ export class SyncCache {
   private readonly listeners = new Set<() => void>();
   /** Per engine, the newest stamp of its clock this cache has everything up to. */
   private readonly cursors = new Map<string, number>();
+  /**
+   * Per engine, the changes applied at its cursor's stamp. The read is inclusive, so they come again on
+   * the next page; no two changes share a stamp (migration 33), so one seen at the cursor is the same
+   * change and reads nothing again — every ask once read the boards again for the last change made.
+   */
+  private readonly atCursor = new Map<string, Set<string>>();
   private started = false;
   private loading: Promise<void> | undefined;
   private readonly reconciling = new Map<string, { run: Promise<void>; again: boolean }>();
@@ -320,14 +355,17 @@ export class SyncCache {
         do {
           state.again = false;
           const cursor = this.cursorOf(source);
+          // A view asked after this page was is answered as of it or later: the engine answers in order.
+          let asked = this.reads;
           let page = await this.since(source, cursor);
           // A clock behind the cursor is another database under the engine's name (a machine set up
           // again): nothing taken from the old one stands, its stamps least of all.
           if (!page.whole && page.at < cursor) {
+            asked = this.reads;
             page = await this.since(source, 0);
             this.drop(source);
           }
-          this.apply(page, source);
+          this.apply(page, source, asked);
         } while (state.again);
       } catch {
         // The engine is away or refused: the cache stays as it was, and the next trigger asks again.
@@ -373,26 +411,36 @@ export class SyncCache {
       this.indexAt.delete(id);
     }
     this.cursors.delete(source);
+    this.atCursor.delete(source);
   }
 
   /**
    * Apply one page of an engine: summaries upserted, the gone dropped, its cursor moved forward, held
    * views of what changed read again.
    */
-  apply(page: SyncPage, source: string = LOCAL): void {
+  apply(page: SyncPage, source: string = LOCAL, askedAt = Number.POSITIVE_INFINITY): void {
     /** This page is older than what the index has of a task — which only the same engine's clock can say. */
     const older = (id: string): boolean => {
       const had = this.indexAt.get(id);
       return had !== undefined && had.source === source && had.at > page.at;
     };
+    // The changes this page brings that were not applied before: the rows at the cursor come again.
+    const was = this.cursorOf(source);
+    const seen = page.whole ? undefined : this.atCursor.get(source);
+    const changes = seen === undefined ? page.changes : page.changes.filter((c) => !(c.at === was && seen.has(changeKey(c))));
     if (page.whole) {
       // Whole is everything the engine has as of its cursor: what it put here and lacks now is gone,
       // unless a newer page put it here.
       for (const [id, had] of [...this.indexAt]) if (had.source === source && had.at <= page.at) this.index.delete(id);
     }
+    // The summaries that moved: one the same as the index has keeps its object, and reads nothing again.
+    const moved = new Set<string>();
     for (const task of page.tasks) {
       if (older(task.taskId)) continue;
-      this.index.set(task.taskId, task);
+      const before = this.index.get(task.taskId);
+      const kept = sharedWith(before, task) as ProjectTask;
+      if (kept !== before) moved.add(task.taskId);
+      this.index.set(task.taskId, kept);
       this.indexAt.set(task.taskId, { source, at: page.at });
     }
     for (const id of page.gone) {
@@ -402,17 +450,28 @@ export class SyncCache {
     }
     // A whole page is the engine's state as of its stamp, whatever came before — one from a database set
     // up again sets the cursor back.
-    if (page.whole || page.at > this.cursorOf(source)) this.cursors.set(source, page.at);
-    this.sortIndex();
-    this.keepIndex(source);
+    if (page.whole || page.at > was) this.cursors.set(source, page.at);
+    const now = this.cursorOf(source);
+    const atNow = new Set(page.changes.filter((c) => c.at === now).map(changeKey));
+    if (now === was && seen !== undefined) for (const key of seen) atNow.add(key);
+    this.atCursor.set(source, atNow);
+    // A page that only brought again what was applied moves nothing of the index; what an engine has not
+    // answered for yet (the mirror's views, the unreadable) is still read below, as on any page.
+    if (page.whole || moved.size > 0 || page.gone.length > 0) {
+      this.sortIndex();
+      this.keepIndex(source);
+    }
     // A draft's change moves its draft and nothing else of its task (decision 0018 §9).
-    const changed = new Set<string>([...page.tasks.map((t) => t.taskId), ...page.gone, ...page.changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" ? [c.taskId] : []))]);
-    const drafted = new Set(page.changes.flatMap((c) => (c.collection === "draft" ? [c.id] : [])));
-    const collections = new Set(page.changes.map((c) => c.collection));
+    const changed = new Set<string>([...moved, ...page.gone, ...changes.flatMap((c) => (c.taskId !== null && c.collection !== "draft" ? [c.taskId] : []))]);
+    const drafted = new Set(changes.flatMap((c) => (c.collection === "draft" ? [c.id] : [])));
+    const collections = new Set(changes.map((c) => c.collection));
     // Where the changed tasks are — a project-scoped view is read only for its own project's.
-    const projects = new Set(page.tasks.map((t) => t.project));
+    const projects = new Set(page.tasks.filter((t) => moved.has(t.taskId)).map((t) => t.project));
     for (const [key, entry] of this.entries) {
-      if (!this.isHeld(entry)) continue;
+      // Asked after this page was (`askedAt`, the reads counted when it was asked): its answer is as of
+      // this page or later. The window's first whole page once read every view it held again, each
+      // asked a moment before it (2026-11-06).
+      if (entry.issued > askedAt) continue;
       // Shown from the mirror, or unreadable: an engine answering is the time to ask it again.
       if (entry.mirrored || entry.error !== undefined) {
         if (this.isLive(entry)) this.readForChange(key, entry);
@@ -423,6 +482,8 @@ export class SyncCache {
       if (entry.channel === "draft:get") {
         if (!page.whole && !drafted.has((entry.request as { key: string }).key)) continue;
       } else if (!page.whole && !this.touches(entry, changed, collections, projects, page.gone.length > 0)) continue;
+      // Held live, read now; held still or not held at all (a board while another room is on screen),
+      // read when next held — so arriving back needs no read of its own.
       if (this.isLive(entry)) this.readForChange(key, entry);
       else entry.stale = true;
     }
@@ -474,6 +535,10 @@ export class SyncCache {
     const key = this.ensure(channel, request);
     const entry = this.entries.get(key)!;
     entry.count += 1;
+    if (entry.stale) {
+      entry.stale = false;
+      void this.read(key);
+    }
     let released = false;
     return () => {
       if (released) return;
@@ -492,15 +557,68 @@ export class SyncCache {
   refresh<C extends IpcChannel>(channel: C, request: IpcRequest<C>): Promise<void> {
     const unread = this.entries.get(viewKey(channel, request))?.asked !== true;
     const key = this.ensure(channel, request);
-    return unread ? (this.entries.get(key)?.idle ?? Promise.resolve()) : this.read(key);
+    const entry = this.entries.get(key);
+    const read = unread ? (entry?.idle ?? Promise.resolve()) : this.read(key);
+    // A view still waiting for its group answers with it: what is read after this sees it.
+    const group = entry?.group;
+    return group === undefined ? read : Promise.all([read, group.promise]).then(() => undefined);
+  }
+
+  /**
+   * A view asked for the first time joins the group of every other view first asked in the same turn of
+   * the event loop — a hold's, a refresh's, a component's — and is shown with them (see {@link Together}).
+   */
+  private join(entry: Entry): void {
+    let group = this.forming;
+    if (group === undefined) {
+      let resolve: () => void = () => undefined;
+      const promise = new Promise<void>((r) => (resolve = r));
+      const made: Together = { waiting: new Set(), members: [], done: false, closed: false, cap: undefined, promise, resolve };
+      made.cap = setTimeout(() => this.showTogether(made), TOGETHER_MAX_MS);
+      // Closed once this turn is over: what is asked after it is another group.
+      setTimeout(() => {
+        made.closed = true;
+        if (this.forming === made) this.forming = undefined;
+        if (made.waiting.size === 0) this.showTogether(made);
+      }, 0);
+      this.forming = made;
+      group = made;
+    }
+    entry.group = group;
+    group.members.push(entry);
+    group.waiting.add(entry);
+  }
+  private forming: Together | undefined;
+
+  /** A view has its first answer; its group is shown once all of them have, and no more can join. */
+  private landed(entry: Entry): void {
+    const group = entry.group;
+    if (group === undefined) return;
+    group.waiting.delete(entry);
+    if (group.waiting.size === 0 && group.closed) this.showTogether(group);
+  }
+
+  private showTogether(group: Together): void {
+    if (group.done) return;
+    group.done = true;
+    group.closed = true;
+    if (this.forming === group) this.forming = undefined;
+    if (group.cap !== undefined) clearTimeout(group.cap);
+    for (const entry of group.members) {
+      entry.group = undefined;
+      show(entry);
+    }
+    group.resolve();
+    this.bump();
   }
 
   private ensure(channel: IpcChannel, request: unknown): string {
     const key = viewKey(channel, request);
     let entry = this.entries.get(key);
     if (entry === undefined) {
-      entry = { channel, request, taskId: taskOf(request), project: projectOf(request), value: undefined, error: undefined, at: -1, mirrored: false, asked: false, loading: false, again: false, stale: false, idle: undefined, changeReadAt: 0, soon: undefined, owners: new Map(), count: 0, usedAt: Date.now(), shown: NOTHING };
+      entry = { channel, request, taskId: taskOf(request), project: projectOf(request), value: undefined, error: undefined, at: -1, mirrored: false, asked: false, loading: false, again: false, stale: false, idle: undefined, changeReadAt: 0, soon: undefined, owners: new Map(), count: 0, usedAt: Date.now(), shown: NOTHING, group: undefined, issued: -1 };
       this.entries.set(key, entry);
+      this.join(entry);
       this.fromMirror(key, entry);
     }
     entry.usedAt = Date.now();
@@ -541,6 +659,7 @@ export class SyncCache {
         // A placeholder's string is what it was wherever it is read; anything else, as it was then.
         entry.mirrored = !IMMUTABLE.has(entry.channel);
         show(entry);
+        this.landed(entry);
         this.bump();
       },
       () => undefined,
@@ -618,6 +737,7 @@ export class SyncCache {
         do {
           entry.again = false;
           const asked = ++this.reads;
+          entry.issued = asked;
           try {
             const answered = await this.io.invoke(entry.channel, entry.request as never);
             if (asked >= entry.at) {
@@ -646,6 +766,8 @@ export class SyncCache {
       } finally {
         entry.loading = false;
         entry.idle = undefined;
+        // Answered, or refused: either is its first word, which its group waits on.
+        this.landed(entry);
         show(entry);
         this.bump();
       }

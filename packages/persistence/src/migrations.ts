@@ -23,7 +23,7 @@
  *  - **Change `SCHEMA` too**, so a fresh database is born in the shape the step leaves an old one in.
  */
 import type { JairaDb } from "./db";
-import { SYNC_SQL } from "./sync";
+import { SYNC_SQL, SYNC_TRIGGERS_AGAIN_SQL } from "./sync";
 import { DEVICE_LAYOUTS_SQL, WINDOW_STATES_SQL } from "./windowStates";
 import { moveRecordedPermissionSets } from "./permissionSetsMove";
 
@@ -118,6 +118,11 @@ UPDATE event_waits SET name = CASE name
     version: 32,
     note: "the permission sets left chat/ (2026-11-05): a turn's filed composer settings name $/permission-sets/read-only, not $/permission-sets/chat/read-only, and control/ for chat_control/ (permissionSetsMove.ts)",
     run: moveRecordedPermissionSets,
+  },
+  {
+    version: 33,
+    note: "the change log's clock is always past its newest stamp (max(now, newest + 1)), so no two changes share one and a reader knows the rows its inclusive read brings again (2026-11-06)",
+    sql: SYNC_TRIGGERS_AGAIN_SQL,
   },
 ];
 

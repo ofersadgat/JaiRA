@@ -106,6 +106,13 @@ export function fleetBridge(): { bridge: JairaBridge; sources: SyncSources; setM
   const sourceListeners = new Set<() => void>();
   /** Requests made while no machine answers: sent once one does. */
   let waiting: Array<() => void> = [];
+  /**
+   * Whether any machine has answered before. The first to answer is no reconnection: everything asked
+   * until then waited for it and is answered now, so telling the store every scope moved only asked for
+   * it all again (2026-11-06: a phone's launch read most things twice). The change log is still followed
+   * from the start (`sources`), which reads again whatever the phone showed from its mirror.
+   */
+  let answeredBefore = false;
 
   const byId = (id: string | undefined): FleetMember | undefined => (id === undefined ? undefined : answering.find((m) => m.id === id));
   const routeOf = (request: unknown): FleetMember | undefined => {
@@ -179,8 +186,9 @@ export function fleetBridge(): { bridge: JairaBridge; sources: SyncSources; setM
     }
     if (changed) {
       sourceListeners.forEach((on) => on());
-      for (const message of RESYNC) listeners.forEach((on) => on(message));
+      if (answeredBefore) for (const message of RESYNC) listeners.forEach((on) => on(message));
     }
+    if (answering.length > 0) answeredBefore = true;
   };
 
   const sources: SyncSources = {

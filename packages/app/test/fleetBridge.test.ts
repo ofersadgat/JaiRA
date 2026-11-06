@@ -88,20 +88,35 @@ describe("the fleet bridge", () => {
     f.setMembers([member("a", a, true)]);
     expect(await asked).toEqual([{ project: "/a" }]);
   });
-  it("passes every answering machine's pushes on, and says to read again when the fleets change", () => {
+  it("passes every answering machine's pushes on, and says to read again when the fleets change — not when the first answers", () => {
     const a = engine({});
     const c = engine({});
     const f = fleetBridge();
     const heard: PushMessage[] = [];
     f.bridge.subscribe((m) => heard.push(m));
+    // The first machine to answer is no reconnection: what waited for it is asked now, and nothing again.
     f.setMembers([member("a", a, true, ["a"])]);
     const resyncs = heard.length;
-    expect(resyncs).toBeGreaterThan(0);
+    expect(resyncs).toBe(0);
     a.push({ type: "store:invalidate", scope: "tasks" } as PushMessage);
     c.push({ type: "store:invalidate", scope: "board" } as PushMessage);
     expect(heard.length).toBe(resyncs + 1);
     f.setMembers([member("a", a, true, ["a"]), member("c", c, true, ["c"])]);
     c.push({ type: "store:invalidate", scope: "board" } as PushMessage);
     expect(heard.length).toBeGreaterThan(resyncs + 2);
+  });
+
+  it("says to read everything again when a machine answers after none did — a reconnection", () => {
+    const a = engine({});
+    const f = fleetBridge();
+    const heard: PushMessage[] = [];
+    f.bridge.subscribe((m) => heard.push(m));
+    f.setMembers([member("a", a, true, ["a"])]);
+    expect(heard).toHaveLength(0);
+    // Lost: the fleets changed. Back: a reconnection, which says every scope may have moved.
+    f.setMembers([member("a", a, false, ["a"])]);
+    const lost = heard.length;
+    f.setMembers([member("a", a, true, ["a"])]);
+    expect(heard.slice(lost).filter((m) => m.type === "store:invalidate").length).toBeGreaterThan(0);
   });
 });

@@ -45,6 +45,10 @@ const COMMITS = (arg("--commits") ?? "").split(",");
 /** With `--names`: why each component drew (`--why`), and what is mounted once the task is open (`--census`). */
 const WHY = process.argv.includes("--why");
 const CENSUS = process.argv.includes("--census");
+/** The launch's timeline: what the socket carried, and the task titles on screen, frame by frame (`--launch`). */
+const LAUNCH = process.argv.includes("--launch");
+/** With `--launch`: each frame from the machine handed on this many ms late, a tailnet's round trip standing in. */
+const RTT = Number(arg("--rtt") ?? "0");
 
 /**
  * React's devtools hook, before React loads: each commit counted, and each component the commit drew —
@@ -144,6 +148,7 @@ const HOOK = `(() => {
     onCommitFiberRoot(_id, root) {
       window.__lastRoot = root;
       s.commits++;
+      if (window.__launch && performance.now() < 15000) window.__launch.commits.push(Math.round(performance.now()));
       const r0 = s.rendered, m0 = s.mounted;
       s.from = [];
       try { walk(root.current); } catch (e) { s.error = String(e); }
@@ -153,6 +158,41 @@ const HOOK = `(() => {
   try {
     new PerformanceObserver((list) => { for (const e of list.getEntries()) { s.longTasks++; s.longTotal += e.duration; s.longest = Math.max(s.longest, e.duration); } }).observe({ type: "longtask" });
   } catch {}
+  // The launch, as it happened: every frame the socket carried (a request's channel, its answer's size, a
+  // push's kind), and how many of the world's task titles were on screen at each frame drawn.
+  const t0 = performance.now();
+  const at = () => Math.round(performance.now() - t0);
+  const launch = { frames: [], cards: [], commits: [] };
+  window.__launch = launch;
+  const Native = window.WebSocket;
+  const asked = new Map();
+  window.WebSocket = class extends Native {
+    constructor(...args) {
+      super(...args);
+      launch.frames.push({ at: at(), what: "open " + String(args[0]).split("?")[0] });
+      // A tailnet's round trip, standing in: every frame from the machine handed on this much later.
+      const late = Number(new URLSearchParams(location.search).get("rtt") ?? window.__rtt ?? 0);
+      if (late > 0) {
+        const add = this.addEventListener.bind(this);
+        let onmessage = null;
+        Object.defineProperty(this, "onmessage", { get: () => onmessage, set: (fn) => { onmessage = fn; } });
+        add("message", (e) => setTimeout(() => onmessage?.call(this, e), late));
+      }
+      const send = this.send.bind(this);
+      this.send = (data) => {
+        try { const f = JSON.parse(String(data)); if (f.t === "req") { asked.set(f.id, f.channel); launch.frames.push({ at: at(), what: "ask " + f.channel + " " + JSON.stringify(f.request ?? null).slice(0, 60) }); } else launch.frames.push({ at: at(), what: "send " + f.t }); } catch {}
+        return send(data);
+      };
+      this.addEventListener("message", (e) => {
+        const text = String(e.data);
+        try { const f = JSON.parse(text); launch.frames.push({ at: at(), what: f.t === "res" ? "answer " + (asked.get(f.id) ?? "?") + " " + text.length + "B" : f.t === "push" ? "push " + (f.message?.type ?? "?") + (f.message?.scope ? " " + f.message.scope : "") : "got " + f.t }); } catch {}
+      });
+    }
+  };
+  window.__titles = [];
+  const count = () => { const want = new Set(window.__titles); if (want.size === 0) return 0; let n = 0; for (const el of document.querySelectorAll("*")) if (el.childElementCount === 0 && want.has(el.textContent)) n++; return n; };
+  const sample = () => { const n = count(); const last = launch.cards[launch.cards.length - 1]; if (last === undefined || last.n !== n) launch.cards.push({ at: at(), n }); if (performance.now() - t0 < 15000) requestAnimationFrame(sample); };
+  requestAnimationFrame(sample);
   // From a touch to the first frame a condition holds in.
   window.__tapAt = 0;
   addEventListener("touchend", () => { window.__tapAt = performance.now(); }, true);
@@ -219,9 +259,20 @@ async function main(): Promise<void> {
     await phone.until(`!!document.querySelector('[aria-label="Open the sidebar"]') && !${says("Connect to a JaiRA machine")} && !${says("No machine connected")}`, "the phone to pair");
 
     // Paired (kept in the profile): load again with the hook in, slowed to a phone's pace.
-    await phone.cdp("Page.addScriptToEvaluateOnNewDocument", { source: HOOK });
+    const titles = [...Array.from({ length: 6 }, (_, i) => `finished task ${i + 1}`), "tighten the changeset lint"];
+    await phone.cdp("Page.addScriptToEvaluateOnNewDocument", { source: `window.__rtt = ${RTT};` + HOOK + `;window.__titles = ${JSON.stringify(titles)};` });
+    // The launch is measured as a phone has it: its CPU slowed from the start.
+    if (LAUNCH && THROTTLE > 1) await phone.cdp("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
     await phone.cdp("Page.reload", {});
     await phone.until(`!!window.__redraws && !!document.querySelector('[aria-label="Open the sidebar"]') && !${says("No machine connected")}`, "the phone to come back paired");
+    if (LAUNCH) {
+      // Throttled from the reload, as a phone is from its launch.
+      await sleep(6000);
+      const l = await phone.evaluate<{ frames: Array<{ at: number; what: string }>; cards: Array<{ at: number; n: number }>; commits: number[] }>("JSON.parse(JSON.stringify(window.__launch))");
+      const lines = [...l.frames.map((f) => ({ at: f.at, line: f.what })), ...l.cards.map((c) => ({ at: c.at, line: `== ${c.n} of ${titles.length} task titles on screen` }))].sort((a, b) => a.at - b.at);
+      console.log(`launch (CPU slowed ${THROTTLE}x, ${RTT} ms added to each frame from the machine): ${l.commits.length} commits in the first 15 s`);
+      for (const one of lines) console.log(`  +${String(one.at).padStart(5)} ms  ${one.line}`);
+    }
     await sleep(3000);
     if (THROTTLE > 1) await phone.cdp("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
     await phone.cdp("Performance.enable", {});

@@ -13,9 +13,12 @@
  * to remember. What the database does not hold (a task's file, a gate the engine keeps in memory) is
  * entered by {@link touch}, with the same clock.
  *
- * **The clock** is this machine's milliseconds, never behind the newest stamp in the log
- * (`max(now, newest)`): a wall clock stepped backwards cannot put a change behind a cursor. Two changes
- * in one millisecond share a stamp, which the inclusive read is for.
+ * **The clock** is this machine's milliseconds, and always past the newest stamp in the log
+ * (`max(now, newest + 1)`): a wall clock stepped backwards cannot put a change behind a cursor, and no two
+ * changes share a stamp — a row written again has a new one, however soon. So a reader that has applied
+ * the rows at its cursor knows them when the inclusive read brings them again (`SyncCache`), and reads
+ * nothing again for them; it once did, every time it asked (2026-11-06: a window's board read three
+ * times over as it opened). Before migration 33 two changes in one millisecond shared a stamp.
  */
 import type { SyncChange } from "@jaira/shared";
 import type { JairaDb } from "./db";
@@ -50,8 +53,8 @@ const TRACKED: readonly Tracked[] = [
   { table: "drafts", collection: "draft", id: "R.key", task: "R.task_id" },
 ];
 
-/** The stamp: this machine's milliseconds, never behind the newest in the log. */
-const CLOCK = `MAX(CAST(unixepoch('subsec') * 1000 AS INTEGER), COALESCE((SELECT MAX(at) FROM sync_changes), 0))`;
+/** The stamp: this machine's milliseconds, always past the newest in the log — no two changes share one. */
+const CLOCK = `MAX(CAST(unixepoch('subsec') * 1000 AS INTEGER), COALESCE((SELECT MAX(at) FROM sync_changes), 0) + 1)`;
 
 function entry(t: Tracked, row: "NEW" | "OLD", deleted: 0 | 1): string {
   const id = t.id.replaceAll("R.", `${row}.`);
@@ -115,6 +118,13 @@ CREATE TABLE IF NOT EXISTS sync_meta (
 );
 ${TRACKED.map(triggers).join("\n")}
 `;
+
+/**
+ * The triggers made again with the clock as it is now (migration 33): they are created `IF NOT EXISTS`,
+ * so a database made before keeps the clock it was made with until they are dropped.
+ */
+export const SYNC_TRIGGERS_AGAIN_SQL = `${TRACKED.flatMap((t) => ["insert", "update", "delete"].map((event) => `DROP TRIGGER IF EXISTS sync_${t.table}_${event};`)).join("\n")}
+${SYNC_SQL}`;
 
 /**
  * Enter a change the database does not see: a task's file, a gate held in memory, the placement queue.
