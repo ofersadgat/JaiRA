@@ -1,4 +1,5 @@
 import type { JSX } from "react";
+import { steadyMemo } from "../../steady";
 import NativeSvg, { Circle, Path } from "react-native-svg";
 import { View } from "@tamagui/core";
 
@@ -32,7 +33,8 @@ export interface SvgProps {
  * `<svg>` itself (`Svg.web.tsx`); on a phone the same shapes through `react-native-svg`, with the same
  * defaults: stroked in the current colour, round caps and joins, no fill unless a shape asks.
  */
-export function Svg({ width, height, viewBox = "0 0 24 24", color = "#000", fill = "none", strokeWidth = 1.7, linecap = "round", linejoin = "round", shapes, box }: SvgProps): JSX.Element {
+/** Drawn again only when its shapes or box move in content (`steady.ts`). */
+export const Svg = steadyMemo(function Svg({ width, height, viewBox = "0 0 24 24", color = "#000", fill = "none", strokeWidth = 1.7, linecap = "round", linejoin = "round", shapes, box }: SvgProps): JSX.Element {
   const paint = (value: string | undefined): string | undefined => (value === "currentColor" ? color : value);
   return (
     <View width={width} height={height} flexShrink={0} {...(box as object)}>
@@ -66,4 +68,4 @@ export function Svg({ width, height, viewBox = "0 0 24 24", color = "#000", fill
       </NativeSvg>
     </View>
   );
-}
+}, ["shapes", "box"]);

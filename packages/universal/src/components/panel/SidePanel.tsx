@@ -1,4 +1,5 @@
 import { createContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { steadyMemo, useSteadyHandlers } from "../../steady";
 import { View, isWeb } from "@tamagui/core";
 import { ScrollView, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
@@ -156,7 +157,16 @@ const TAB_BOX = { flexDirection: "row", alignItems: "center", gap: 6, paddingTop
  * draws each tab bare and labelled, and the strip's own width decides. Widths are rounded to whole
  * pixels, as `offsetWidth` and `clientWidth` are — what the plan in the reference pictures was made from.
  */
+/**
+ * The tab strip, drawn again only when its tabs move in content or another is open: a face makes its tabs
+ * and the handler again on every draw of the panel (`steady.ts`).
+ */
 function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open: string | undefined; onTab: (id: string) => void }): JSX.Element {
+  const steady = useSteadyHandlers({ onTab });
+  return <PanelTabsDrawn tabs={tabs} open={open} onTab={steady.onTab} />;
+}
+
+const PanelTabsDrawn = steadyMemo(function PanelTabsDrawn({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open: string | undefined; onTab: (id: string) => void }): JSX.Element {
   const t = useTokens();
   const [strip, setStrip] = useState(0);
   const [widths, setWidths] = useState<Record<string, number>>({});
@@ -222,7 +232,7 @@ function PanelTabs({ tabs, open, onTab }: { tabs: readonly PanelTabSpec[]; open:
       </View>
     </View>
   );
-}
+}, ["tabs"]);
 
 /** pin, fold, close — or pin and ✕-that-folds beside a conversation. */
 function FrameControls({ stack, onStack, onFold, closeFolds }: { stack: PanelStack; onStack: OnStack; onFold: () => void; closeFolds: boolean }): JSX.Element {

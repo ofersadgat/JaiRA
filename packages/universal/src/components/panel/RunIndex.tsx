@@ -1,4 +1,4 @@
-import { useEffect, useState, type JSX, type ReactNode } from "react";
+import { memo, useEffect, useState, type JSX, type ReactNode } from "react";
 import type { GestureResponderEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import type { InstanceNode } from "@jaira/shared/browser";
@@ -8,6 +8,7 @@ import { metaOf } from "@jaira/ui/sessionRows";
 import type { DisplayItem } from "@jaira/ui/stepCompaction";
 import { Press, Txt, type FontSpec } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
+import { useSteadyHandlers } from "../../steady";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Icon } from "./Icon";
 import { RailedRows, cssColour } from "./Rail";
@@ -90,6 +91,10 @@ export function RunIndex({
     });
   };
 
+  // Each row is drawn again only when what it shows moves — the clock moves the running row's time and no
+  // other's — so its handlers are kept as one function each (`steady.ts`).
+  const act = useSteadyHandlers({ goTo: onGoTo, toggleFold, menu: menuOf, toggleLoop });
+
   const row = (index: number, folded: boolean): JSX.Element | null => {
     const what = rows[index];
     if (what === undefined) return null;
@@ -114,102 +119,22 @@ export function RunIndex({
       );
     }
     const node = what.node;
-    const tone = toneOf(node, asking);
-    const held = stepsIn(node);
-    const name = nameOf(node);
-    const meta = metaOf(node, now);
-    const on = here === keyOfNode(node);
-    const toneInk = tone === "accent" ? "accent" : tone === "amber" ? "warn" : tone === "red" ? "bad" : undefined;
-    const fill = tone === "accent" ? t.mix(t.v("accent"), 12, t.v("panel")) : tone === "amber" ? t.mix(t.v("warn"), 14, t.v("panel")) : tone === "red" ? t.mix(t.v("bad"), 11, t.v("panel")) : undefined;
-    // A folded state is a TILE: --panel, a --line ring and a soft shadow, radius 6. It beats the tone and
-    // the here-chip; only a toned row the reader is on keeps its fill and ring over it.
-    const heavy = on && fill !== undefined;
-    const ground = folded && !heavy ? t.v("panel") : (fill ?? (on ? t.mix(t.v("accent"), 15, t.v("panel")) : undefined));
-    const ring = folded && !heavy ? `0px 0px 0px 1px ${String(t.v("line"))}, 0px 1px 2px rgba(0, 0, 0, 0.06)` : on ? `inset 0px 0px 0px 1.5px ${t.mix(t.v("accent"), fill !== undefined ? 62 : 42, "transparent")}` : tone === "amber" ? `inset 0px 0px 0px 1px ${t.mix(t.v("warn"), 30, t.v("line"))}` : undefined;
-    const inside = (hovered: boolean): ReactNode => {
-      const ink = hovered && onGoTo !== undefined ? "text" : "dim";
-      return (
-        <>
-          <View width={6} height={6} borderRadius={3} flexShrink={0} backgroundColor={t.v("dim") as never} />
-          <Txt spec={{ voice: "data", scale: 1, weight: 600, color: toneInk ?? (on ? "accent" : "text") }} flexShrink={0} {...(node.superseded ? { textDecorationLine: "line-through", opacity: 0.5 } : {})}>
-            {name}
-          </Txt>
-          {node.operation?.status === "failed" && node.operation.reason !== undefined ? (
-            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} ellip flex={1} minWidth={0}>
-              {node.operation.reason}
-            </Txt>
-          ) : null}
-          {folded ? (
-            <View flexShrink={0} marginLeft={8} paddingVertical={1} paddingHorizontal={6} borderRadius={3} backgroundColor={t.v("panel-2") as never}>
-              <Txt spec={{ voice: "data", scale: 1, upper: true, color: "dim" }} fontSize={9.5} letterSpacing={9.5 * 0.05} lineHeight={t.replayed ? 14.25 : undefined} numberOfLines={1}>
-                {held} step{held === 1 ? "" : "s"}
-              </Txt>
-            </View>
-          ) : null}
-          {meta !== "" ? (
-            <Txt spec={{ voice: "data", scale: 10 / 12, tabular: true, color: ink }} ellip flexShrink={1} minWidth={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
-              {meta}
-            </Txt>
-          ) : null}
-        </>
-      );
-    };
-    const go = { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 3, paddingHorizontal: 6, borderRadius: folded ? 6 : 4, overflow: "hidden" } as const;
-    const paint = (hovered: boolean): Record<string, unknown> => ({
-      backgroundColor: ground ?? (hovered && onGoTo !== undefined ? t.v("fill-ghost-hover") : "transparent"),
-      ...(ring !== undefined ? { boxShadow: ring } : {}),
-    });
-    const cuttable = onCut !== undefined && node.parentInstanceId !== undefined;
     return (
-      <View
-        {...((cuttable && isWeb
-          ? {
-              onContextMenu: (e: { preventDefault: () => void; clientX: number; clientY: number }) => {
-                e.preventDefault();
-                menuOf(node, name, e.clientX, e.clientY);
-              },
-            }
-          : {}) as object)}
-        flexDirection="row"
-        alignItems="center"
-        gap={2}
-        width="100%"
-        minWidth={0}
-        borderRadius={5}
-        {...(what.loop !== undefined ? { borderLeftWidth: 2, borderStyle: "solid", borderColor: t.mix(t.v("accent"), 30, "transparent") } : { borderLeftWidth: 2, borderStyle: "solid", borderColor: "transparent" })}
-        {...({ borderTopWidth: 0, borderRightWidth: 0, borderBottomWidth: 0 } as object)}
-        {...(node.superseded ? { opacity: 0.72 } : {})}
-      >
-        {what.lane !== undefined ? (
-          <Press onPress={() => toggleFold(what.lane!, false)} label={`${folded ? "Expand" : "Collapse"} ${name}`} width={15} height={15} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={3}>
-            {({ hovered }) => (
-              <View transform={folded ? [] : [{ rotate: "90deg" }]}>
-                <Icon name="chevron" size={Number(t.scaled("size-data", 11 / 12)) || 11} color={String(t.v(hovered ? "text" : "dim"))} />
-              </View>
-            )}
-          </Press>
-        ) : (
-          // The slot is kept so every name in the column starts at the same x. A leaf has no fold.
-          <View width={15} height={15} flexShrink={0} />
-        )}
-        {onGoTo === undefined ? (
-          <View {...go} {...(paint(false) as object)}>
-            {inside(false)}
-          </View>
-        ) : (
-          <Press
-            onPress={() => onGoTo(node)}
-            // A phone has no right button: a long press opens the row's menu where the finger is.
-            {...(cuttable && !isWeb ? { onLongPress: (e: GestureResponderEvent) => menuOf(node, name, e.nativeEvent.pageX, e.nativeEvent.pageY) } : {})}
-            title={`go to ${name} in the conversation`}
-            {...go}
-            box={({ hovered }) => paint(hovered)}
-          >
-            {({ hovered }) => inside(hovered)}
-          </Press>
-        )}
-        {what.loop?.head === true ? <LoopTag times={what.loop.times} onToggle={() => toggleLoop(what.loop!.key)} t={t} /> : null}
-      </View>
+      <StepRow
+        node={node}
+        meta={metaOf(node, now)}
+        on={here === keyOfNode(node)}
+        tone={toneOf(node, asking)}
+        folded={folded}
+        lane={what.lane}
+        loopAccent={what.loop !== undefined}
+        loopHead={what.loop?.head === true ? { key: what.loop.key, times: what.loop.times } : undefined}
+        cuttable={onCut !== undefined && node.parentInstanceId !== undefined}
+        onGoTo={onGoTo !== undefined ? act.goTo : undefined}
+        onToggleFold={act.toggleFold!}
+        onMenu={act.menu!}
+        onToggleLoop={act.toggleLoop!}
+      />
     );
   };
 
@@ -298,6 +223,135 @@ export function RunIndex({
     </>
   );
 }
+
+/**
+ * One step's row in the index: its fold, its name and tone, its time, and what pressing it does. Drawn
+ * again only when one of those moves (`memo`): the index draws every second for the running step's clock.
+ */
+const StepRow = memo(function StepRow({
+  node,
+  meta,
+  on,
+  tone,
+  folded,
+  lane,
+  loopAccent,
+  loopHead,
+  cuttable,
+  onGoTo,
+  onToggleFold,
+  onMenu,
+  onToggleLoop,
+}: {
+  node: InstanceNode;
+  meta: string;
+  on: boolean;
+  tone: ReturnType<typeof toneOf>;
+  folded: boolean;
+  lane: string | undefined;
+  loopAccent: boolean;
+  loopHead: { key: string; times: number } | undefined;
+  cuttable: boolean;
+  onGoTo: ((node: InstanceNode) => void) | undefined;
+  onToggleFold: (lane: string, open: boolean) => void;
+  onMenu: (node: InstanceNode, name: string, x: number, y: number) => void;
+  onToggleLoop: (key: string) => void;
+}): JSX.Element {
+  const t = useTokens();
+  const held = stepsIn(node);
+  const name = nameOf(node);
+  const toneInk = tone === "accent" ? "accent" : tone === "amber" ? "warn" : tone === "red" ? "bad" : undefined;
+  const fill = tone === "accent" ? t.mix(t.v("accent"), 12, t.v("panel")) : tone === "amber" ? t.mix(t.v("warn"), 14, t.v("panel")) : tone === "red" ? t.mix(t.v("bad"), 11, t.v("panel")) : undefined;
+  // A folded state is a TILE: --panel, a --line ring and a soft shadow, radius 6. It beats the tone and
+  // the here-chip; only a toned row the reader is on keeps its fill and ring over it.
+  const heavy = on && fill !== undefined;
+  const ground = folded && !heavy ? t.v("panel") : (fill ?? (on ? t.mix(t.v("accent"), 15, t.v("panel")) : undefined));
+  const ring = folded && !heavy ? `0px 0px 0px 1px ${String(t.v("line"))}, 0px 1px 2px rgba(0, 0, 0, 0.06)` : on ? `inset 0px 0px 0px 1.5px ${t.mix(t.v("accent"), fill !== undefined ? 62 : 42, "transparent")}` : tone === "amber" ? `inset 0px 0px 0px 1px ${t.mix(t.v("warn"), 30, t.v("line"))}` : undefined;
+  const inside = (hovered: boolean): ReactNode => {
+    const ink = hovered && onGoTo !== undefined ? "text" : "dim";
+    return (
+      <>
+        <View width={6} height={6} borderRadius={3} flexShrink={0} backgroundColor={t.v("dim") as never} />
+        <Txt spec={{ voice: "data", scale: 1, weight: 600, color: toneInk ?? (on ? "accent" : "text") }} flexShrink={0} {...(node.superseded ? { textDecorationLine: "line-through", opacity: 0.5 } : {})}>
+          {name}
+        </Txt>
+        {node.operation?.status === "failed" && node.operation.reason !== undefined ? (
+          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "bad" }} ellip flex={1} minWidth={0}>
+            {node.operation.reason}
+          </Txt>
+        ) : null}
+        {folded ? (
+          <View flexShrink={0} marginLeft={8} paddingVertical={1} paddingHorizontal={6} borderRadius={3} backgroundColor={t.v("panel-2") as never}>
+            <Txt spec={{ voice: "data", scale: 1, upper: true, color: "dim" }} fontSize={9.5} letterSpacing={9.5 * 0.05} lineHeight={t.replayed ? 14.25 : undefined} numberOfLines={1}>
+              {held} step{held === 1 ? "" : "s"}
+            </Txt>
+          </View>
+        ) : null}
+        {meta !== "" ? (
+          <Txt spec={{ voice: "data", scale: 10 / 12, tabular: true, color: ink }} ellip flexShrink={1} minWidth={0} marginLeft="auto" paddingLeft={10} opacity={0.85}>
+            {meta}
+          </Txt>
+        ) : null}
+      </>
+    );
+  };
+  const go = { flex: 1, minWidth: 0, flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 3, paddingHorizontal: 6, borderRadius: folded ? 6 : 4, overflow: "hidden" } as const;
+  const paint = (hovered: boolean): Record<string, unknown> => ({
+    backgroundColor: ground ?? (hovered && onGoTo !== undefined ? t.v("fill-ghost-hover") : "transparent"),
+    ...(ring !== undefined ? { boxShadow: ring } : {}),
+  });
+  return (
+    <View
+      {...((cuttable && isWeb
+        ? {
+            onContextMenu: (e: { preventDefault: () => void; clientX: number; clientY: number }) => {
+              e.preventDefault();
+              onMenu(node, name, e.clientX, e.clientY);
+            },
+          }
+        : {}) as object)}
+      flexDirection="row"
+      alignItems="center"
+      gap={2}
+      width="100%"
+      minWidth={0}
+      borderRadius={5}
+      {...(loopAccent ? { borderLeftWidth: 2, borderStyle: "solid", borderColor: t.mix(t.v("accent"), 30, "transparent") } : { borderLeftWidth: 2, borderStyle: "solid", borderColor: "transparent" })}
+      {...({ borderTopWidth: 0, borderRightWidth: 0, borderBottomWidth: 0 } as object)}
+      {...(node.superseded ? { opacity: 0.72 } : {})}
+    >
+      {lane !== undefined ? (
+        <Press onPress={() => onToggleFold(lane, false)} label={`${folded ? "Expand" : "Collapse"} ${name}`} width={15} height={15} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={3}>
+          {({ hovered }) => (
+            <View transform={folded ? [] : [{ rotate: "90deg" }]}>
+              <Icon name="chevron" size={Number(t.scaled("size-data", 11 / 12)) || 11} color={String(t.v(hovered ? "text" : "dim"))} />
+            </View>
+          )}
+        </Press>
+      ) : (
+        // The slot is kept so every name in the column starts at the same x. A leaf has no fold.
+        <View width={15} height={15} flexShrink={0} />
+      )}
+      {onGoTo === undefined ? (
+        <View {...go} {...(paint(false) as object)}>
+          {inside(false)}
+        </View>
+      ) : (
+        <Press
+          onPress={() => onGoTo(node)}
+          // A phone has no right button: a long press opens the row's menu where the finger is.
+          {...(cuttable && !isWeb ? { onLongPress: (e: GestureResponderEvent) => onMenu(node, name, e.nativeEvent.pageX, e.nativeEvent.pageY) } : {})}
+          title={`go to ${name} in the conversation`}
+          {...go}
+          box={({ hovered }) => paint(hovered)}
+        >
+          {({ hovered }) => inside(hovered)}
+        </Press>
+      )}
+      {loopHead !== undefined ? <LoopTag times={loopHead.times} onToggle={() => onToggleLoop(loopHead.key)} t={t} /> : null}
+    </View>
+  );
+});
 
 /** A loop's tag: a cycle's passes, and the control that folds them into one row. */
 function LoopTag({ times, onToggle, t }: { times: number; onToggle: () => void; t: Tokens }): JSX.Element {

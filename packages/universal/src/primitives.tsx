@@ -2,6 +2,7 @@ import { createContext, useContext, useLayoutEffect, useRef, useState, type JSX,
 import { Platform, Pressable, type GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { useTokens, type Tokens } from "./tokens";
+import { steadyMemo } from "./steady";
 
 /**
  * What every component of this tree stands on (decision 0015). The tree is drawn by react-native-web in a
@@ -102,9 +103,11 @@ export const REGISTERS = {
 export type Register = keyof typeof REGISTERS;
 
 /**
- * A run of text in a register (or a spec), with overrides. `ellip`: one line, cut with an ellipsis.
+ * A run of text in a register (or a spec), with overrides. `ellip`: one line, cut with an ellipsis. Drawn
+ * again only when what it is given moves — its `spec` and `style` compared by content, since most callers
+ * write them in place (`steady.ts`).
  */
-export function Txt({
+export const Txt = steadyMemo(function Txt({
   register,
   spec,
   ellip = false,
@@ -132,7 +135,7 @@ export function Txt({
       {children}
     </Text>
   );
-}
+}, ["spec", "style"]);
 
 /**
  * The colour a `Txt` that names none takes: the body's --text, unless a box round it sets another — CSS
@@ -142,13 +145,13 @@ export function Txt({
 export const InkContext = createContext<string | undefined>(undefined);
 
 /** A glyph set in the app voice at a size, centred in a fixed width (a sidebar row's glyph). */
-export function Glyph({ children, width, scale = 1, color = "dim", ...rest }: { children: ReactNode; width?: number; scale?: number; color?: string } & Record<string, unknown>): JSX.Element {
+export const Glyph = steadyMemo(function Glyph({ children, width, scale = 1, color = "dim", ...rest }: { children: ReactNode; width?: number; scale?: number; color?: string } & Record<string, unknown>): JSX.Element {
   return (
     <Txt spec={{ voice: "app", scale, color }} textAlign="center" {...(width !== undefined ? { width, flexShrink: 0 } : {})} {...rest}>
       {children}
     </Txt>
   );
-}
+}, ["style"]);
 
 export interface PressState {
   hovered: boolean;

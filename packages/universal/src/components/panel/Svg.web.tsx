@@ -1,11 +1,13 @@
 import { createElement, type JSX } from "react";
+import { steadyMemo } from "../../steady";
 import { View } from "@tamagui/core";
 import type { SvgProps } from "./Svg";
 
 export type { Shape, SvgProps } from "./Svg";
 
 /** On web, the `<svg>` itself — see `Svg.tsx`; a shape's `filter` is its style. */
-export function Svg({ width, height, viewBox = "0 0 24 24", color, fill = "none", strokeWidth = 1.7, linecap = "round", linejoin = "round", shapes, box }: SvgProps): JSX.Element {
+/** Drawn again only when its shapes or box move in content (`steady.ts`). */
+export const Svg = steadyMemo(function Svg({ width, height, viewBox = "0 0 24 24", color, fill = "none", strokeWidth = 1.7, linecap = "round", linejoin = "round", shapes, box }: SvgProps): JSX.Element {
   const drawn = createElement(
     "svg",
     {
@@ -53,4 +55,4 @@ export function Svg({ width, height, viewBox = "0 0 24 24", color, fill = "none"
       {drawn}
     </View>
   );
-}
+}, ["shapes", "box"]);

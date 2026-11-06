@@ -42,6 +42,9 @@ const THROTTLE = Number(arg("--throttle") ?? "4");
 const NAMES = process.argv.includes("--names");
 /** The scenes whose every commit `--names` lists: `--commits open,busy`. */
 const COMMITS = (arg("--commits") ?? "").split(",");
+/** With `--names`: why each component drew (`--why`), and what is mounted once the task is open (`--census`). */
+const WHY = process.argv.includes("--why");
+const CENSUS = process.argv.includes("--census");
 
 /**
  * React's devtools hook, before React loads: each commit counted, and each component the commit drew —
@@ -51,14 +54,72 @@ const COMMITS = (arg("--commits") ?? "").split(",");
 const HOOK = `(() => {
   const PERFORMED = 1;
   const COMPONENT = new Set([0, 1, 11, 14, 15]);
-  const s = { commits: 0, rendered: 0, mounted: 0, names: {}, roots: {}, log: [], longest: 0, longTasks: 0, longTotal: 0 };
+  const s = { commits: 0, rendered: 0, mounted: 0, names: {}, roots: {}, log: [], why: {}, remade: {}, moved: {}, longest: 0, longTasks: 0, longTotal: 0 };
   window.__redraws = s;
-  window.__redrawsReset = () => { s.commits = 0; s.rendered = 0; s.mounted = 0; s.names = {}; s.roots = {}; s.log = []; s.longest = 0; s.longTasks = 0; s.longTotal = 0; };
+  window.__redrawsReset = () => { s.commits = 0; s.rendered = 0; s.mounted = 0; s.names = {}; s.roots = {}; s.log = []; s.why = {}; s.remade = {}; s.moved = {}; s.longest = 0; s.longTasks = 0; s.longTotal = 0; };
   const nameOf = (f) => { const t = f.type; if (!t) return "?"; if (typeof t === "string") return t; return t.displayName || t.name || (t.render && (t.render.displayName || t.render.name)) || (t.type && (t.type.displayName || t.type.name)) || "anon"; };
   const note = (f) => { const n = nameOf(f); s.names[n] = (s.names[n] || 0) + 1; };
   const mountedUnder = (top) => {
     const stack = [top];
     while (stack.length) { const f = stack.pop(); if (COMPONENT.has(f.tag)) { s.mounted++; note(f); } for (let c = f.child; c; c = c.sibling) stack.push(c); }
+  };
+  // Why a component drew: its props the same object, the same field by field, different only in things
+  // made again with equal content (a new callback, a new element, an equal object), or with a value moved.
+  const same = (a, b, depth) => {
+    if (a === b) return true;
+    if (typeof a === "function" && typeof b === "function") return true;
+    if (a === null || b === null || typeof a !== "object" || typeof b !== "object" || depth > 5) return false;
+    if (a.$$typeof !== undefined || b.$$typeof !== undefined) return a.$$typeof === b.$$typeof && a.type === b.type && a.key === b.key && same(a.props, b.props, depth + 1);
+    if (Array.isArray(a) !== Array.isArray(b)) return false;
+    const ka = Object.keys(a), kb = Object.keys(b);
+    if (ka.length !== kb.length) return false;
+    return ka.every((k) => same(a[k], b[k], depth + 1));
+  };
+  const kindOf = (v) => typeof v === "function" ? "callback" : v !== null && typeof v === "object" && v.$$typeof !== undefined ? "element" : Array.isArray(v) && v.some((x) => x !== null && typeof x === "object" && x.$$typeof !== undefined) ? "element" : "object";
+  const bump = (bag, key) => { bag[key] = (bag[key] || 0) + 1; };
+  const why = (f, prev) => {
+    const a = prev.memoizedProps, b = f.memoizedProps;
+    if (a === b) return bump(s.why, "same props object (own state, context or a store)");
+    const keys = new Set([...Object.keys(a || {}), ...Object.keys(b || {})]);
+    const moved = [...keys].filter((k) => a?.[k] !== b?.[k]);
+    if (moved.length === 0) return bump(s.why, "props equal field by field (drawn with its parent)");
+    const real = moved.filter((k) => !same(a?.[k], b?.[k], 0));
+    const n = nameOf(f);
+    if (real.length === 0) {
+      bump(s.why, "props new but equal in content (callbacks, elements, objects made again)");
+      for (const k of moved) bump(s.remade, n + "." + k + " (" + kindOf(b?.[k]) + ")");
+      return;
+    }
+    bump(s.why, "a prop's value moved");
+    for (const k of real) bump(s.moved, n + "." + k);
+  };
+  // What is mounted, by component: how many components and DOM elements under each, how many of those
+  // elements lie in the viewport, and how many are the top element at their centre (not covered).
+  window.__census = () => {
+    const W = innerWidth, H = innerHeight;
+    const look = (el) => {
+      if (!(el instanceof Element)) return [0, 0];
+      const r = el.getBoundingClientRect();
+      if (r.width <= 0 || r.height <= 0 || r.right <= 0 || r.bottom <= 0 || r.left >= W || r.top >= H) return [0, 0];
+      const x = Math.min(W - 1, Math.max(0, r.left + r.width / 2)), y = Math.min(H - 1, Math.max(0, r.top + r.height / 2));
+      const top = document.elementFromPoint(x, y);
+      return [1, top !== null && (top === el || el.contains(top)) ? 1 : 0];
+    };
+    const visit = (f) => {
+      let comps = 0, hosts = 0, inView = 0, seen = 0, kids = [];
+      for (let c = f.child; c; c = c.sibling) {
+        const r = visit(c);
+        comps += r.comps; hosts += r.hosts; inView += r.inView; seen += r.seen; kids.push(...r.kids);
+      }
+      if (f.tag === 5) { const [v, t] = look(f.stateNode); hosts += 1; inView += v; seen += t; }
+      if (COMPONENT.has(f.tag)) {
+        const node = { name: nameOf(f), comps: comps + 1, hosts, inView, seen, kids: kids.filter((k) => k.comps >= 25) };
+        return { comps: comps + 1, hosts, inView, seen, kids: [node] };
+      }
+      return { comps, hosts, inView, seen, kids };
+    };
+    const all = visit(window.__lastRoot.current);
+    return { comps: all.comps, hosts: all.hosts, inView: all.inView, seen: all.seen, kids: all.kids };
   };
   // A component drawn with none drawn above it is where the draw started: whose own state moved.
   const walk = (top) => {
@@ -68,7 +129,7 @@ const HOOK = `(() => {
       const prev = f.alternate;
       if (prev === null) { mountedUnder(f); continue; }
       const drew = COMPONENT.has(f.tag) && (f.flags & PERFORMED) !== 0;
-      if (drew) { s.rendered++; note(f); if (!under) { const n = nameOf(f); s.roots[n] = (s.roots[n] || 0) + 1; s.from.push(n); } }
+      if (drew) { s.rendered++; note(f); why(f, prev); if (!under) { const n = nameOf(f); s.roots[n] = (s.roots[n] || 0) + 1; s.from.push(n); } }
       if (f.child === prev.child) continue;
       // Under a component that skipped its draw (a memo), a draw started on its own.
       const below = COMPONENT.has(f.tag) ? drew : under;
@@ -81,6 +142,7 @@ const HOOK = `(() => {
     inject(r) { id += 1; this.renderers.set(id, r); return id; },
     checkDCE() {}, onScheduleFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {},
     onCommitFiberRoot(_id, root) {
+      window.__lastRoot = root;
       s.commits++;
       const r0 = s.rendered, m0 = s.mounted;
       s.from = [];
@@ -108,6 +170,9 @@ interface Stats {
   names: Record<string, number>;
   roots: Record<string, number>;
   log: Array<{ t: number; rendered: number; mounted: number; from: string[] }>;
+  why: Record<string, number>;
+  remade: Record<string, number>;
+  moved: Record<string, number>;
   longest: number;
   longTasks: number;
   longTotal: number;
@@ -191,6 +256,17 @@ async function main(): Promise<void> {
           .join(", ");
         console.log(`           most drawn: ${top}`);
         console.log(`           drawn from: ${roots}`);
+        if (WHY) {
+          const list = (bag: Record<string, number>, n: number): string =>
+            Object.entries(bag)
+              .sort(([, a], [, b]) => b - a)
+              .slice(0, n)
+              .map(([k, c]) => `${k}×${c}`)
+              .join(", ");
+          for (const [k, c] of Object.entries(s.why).sort(([, a], [, b]) => b - a)) console.log(`           ${String(c).padStart(6)}  ${k}`);
+          console.log(`           made again most: ${list(s.remade, 14)}`);
+          console.log(`           moved most: ${list(s.moved, 14)}`);
+        }
         if (COMMITS.includes(scene)) for (const c of s.log) if (c.rendered + c.mounted > 20) console.log(`             +${c.t} ms: ${c.rendered} drawn, ${c.mounted} mounted, from ${c.from.join(", ")}`);
       }
     };
@@ -241,6 +317,29 @@ async function main(): Promise<void> {
       4000,
     );
     await phone.shot("open");
+    if (CENSUS) {
+      interface Node {
+        name: string;
+        comps: number;
+        hosts: number;
+        inView: number;
+        seen: number;
+        kids: Node[];
+      }
+      const all = await phone.evaluate<Node>("window.__census()");
+      console.log(`census, the task open: ${all.comps} components over ${all.hosts} elements; ${all.inView} elements in the screen, ${all.seen} of them uncovered`);
+      // The tree, each line a component with its share; a chain of one child keeping most of it folded into one line.
+      const print = (node: Node, depth: number, chain: string[]): void => {
+        const big = node.kids.filter((k) => k.comps >= Math.max(40, all.comps * 0.015));
+        const only = big.length === 1 && big[0]!.comps >= node.comps * 0.85 ? big[0]! : undefined;
+        if (only !== undefined && depth < 60) return print(only, depth, [...chain, node.name]);
+        const names = [...chain, node.name];
+        const shown = names.length > 3 ? `${names[0]} › … › ${names.slice(-2).join(" › ")}` : names.join(" › ");
+        console.log(`${"  ".repeat(Math.min(depth, 20))}${node.comps} comps, ${node.hosts} els (${node.inView} in screen, ${node.seen} uncovered)  ${shown}`);
+        for (const kid of big.sort((a, b) => b.comps - a.comps)) print(kid, depth + 1, []);
+      };
+      for (const top of all.kids) print(top, 0, []);
+    }
 
     // Another task changing on the machine three times a second: what the phone pays per change.
     let renaming = true;

@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type JSX, type ReactNode, type RefObject } from "react";
 import { Platform, ScrollView, type NativeScrollEvent, type NativeSyntheticEvent } from "react-native";
 import { View } from "@tamagui/core";
-import { type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type TaskDetail } from "@jaira/shared/browser";
+import { type ConversationView, type InstanceNode, type OperationRecordView, type PendingInteraction, type ReadCall, type SessionView, type TaskDetail } from "@jaira/shared/browser";
 import type { FileSurfaceContext } from "@jaira/ui/fileTypes";
 import { useTaskRun } from "@jaira/ui/taskRun";
 import { RowSpyContext, type RowSpy, type SpiedRow } from "./rowSpy";
@@ -12,7 +12,7 @@ import { invoke } from "@jaira/ui/store";
 import { AnsweredForYou } from "./WorkRows";
 import { PendingSend } from "./PendingSend";
 import { paletteOfRun } from "@jaira/ui/rail";
-import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type SessionPiece } from "@jaira/ui/sessionBands";
+import { bandsOf, instancesOf, mountPathOf, notesOf, piecesOf, recordAt, type BandNote, type SessionPiece } from "@jaira/ui/sessionBands";
 import { sessionKey } from "@jaira/ui/sessionCache";
 import { partHoldsEnd, writingOf } from "@jaira/ui/stillRunning";
 import { askingInstanceOf, isAsking, runningLeafOf, surfaceKindOf } from "@jaira/ui/stateSurfaceModel";
@@ -22,7 +22,8 @@ import type { CallSurface } from "@jaira/ui/transcriptRows";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
-import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf } from "@jaira/ui/transcript";
+import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, type LiveTail, type TranscriptEntry } from "@jaira/ui/transcript";
+import { useSteadyHandlers } from "../../steady";
 import { PLAIN_SCROLLER, Txt, edge, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { GateSurface } from "./Gate";
@@ -143,20 +144,24 @@ export function RunTranscript({
     }),
     [detail.taskId, source.project],
   );
-  const openSidechain = onOpenSidechain ?? source.onWalkIntoSidechain;
+  // The handlers a piece's transcript is handed, kept as one function each while calling the newest: a
+  // host makes them again on every draw, and each would have drawn every piece again (`steady.ts`).
+  const steady = useSteadyHandlers({ openSidechain: onOpenSidechain ?? source.onWalkIntoSidechain, onRewind: source.onRewind, onFork: source.onFork, onArm });
+  const openSidechain = steady.openSidechain;
   /** How full each state's conversation was after its last turn — what its letterhead's `+30k` is worked out from. */
   const readingOf = (piece: SessionPiece) => lastContextOf(sessions[sessionKey(recordAt(piece))]);
   // The two verbs of a cut on every entered row: a rewind is armed (the host asks in its strip), a fork
   // starts at once.
-  const { onRewind, onFork } = source;
+  const { onRewind, onFork } = steady;
   const onCut = useMemo<CutOffer | undefined>(() => {
-    if (onRewind === undefined || onFork === undefined || onArm === undefined) return undefined;
+    const arm = steady.onArm;
+    if (onRewind === undefined || onFork === undefined || arm === undefined) return undefined;
     const taskId = detail.taskId;
     return {
-      rewind: (note) => onArm(armedRewindOf(note, notes, rootPath)),
+      rewind: (note) => arm(armedRewindOf(note, notes, rootPath)),
       fork: (note) => onFork(taskId, note.seq),
     };
-  }, [detail.taskId, onRewind, onFork, onArm, notes, rootPath]);
+  }, [detail.taskId, onRewind, onFork, steady.onArm, notes, rootPath]);
 
   // Every panel is open, so every transcript in them is needed — fetched in one round.
   useEffect(() => {
@@ -310,34 +315,10 @@ export function RunTranscript({
       liveTurn !== null &&
       (piece.sessionId !== undefined ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq : liveTurn.stateId === piece.node.stateId && piece.node.status === "running");
     const live = matches ? liveTurn : null;
-    const whole = markAnsweredQuestions(entriesOf(view, journalFor(conversation?.turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions);
-    const entries = entriesOfPart(whole, piece.part);
-    // The message that opened this state's conversation is where its entry into the run is: a rewind or
-    // a fork from it cuts at the same journal point as the rail's entered row — for a message typed into
-    // the run, before that message.
-    const entered = onCut !== undefined ? notes.find((note) => note.kind === "entered" && note.instanceId === piece.node.instanceId) : undefined;
-    const opening = entries.find((entry): entry is Extract<typeof entry, { kind: "message" }> => entry.kind === "message" && entry.role === "user")?.turn;
-    const onEdit: EditMessage | undefined =
-      entered !== undefined && onCut !== undefined && opening !== undefined
-        ? { can: () => false, edit: () => undefined, cut: (turn) => (turn === opening ? "before" : undefined), rewind: () => onCut.rewind(entered), fork: () => onCut.fork(entered) }
-        : undefined;
-    // A record drawn in parts is in progress only in the part that reaches its end.
-    const working = writingOf(undefined, view) && partHoldsEnd(whole, piece.part);
-    const transcript = (
-      <Transcript
-        session={view}
-        entries={entries}
-        live={live}
-        working={working}
-        calls={calls}
-        rails
-        onEdit={onEdit}
-        {...(piece.sessionId !== undefined ? { scope: piece.sessionId } : {})}
-        {...(openSidechain !== undefined ? { onOpenSidechain: (call: string, name: string) => openSidechain(piece.node, call, name) } : {})}
-      />
-    );
+    const transcript = <PieceTranscript piece={piece} view={view} turns={conversation?.turns} live={live} calls={calls} onCut={onCut} notes={notes} onOpenSidechain={openSidechain} />;
     // The agent's question or the command it is waiting to run, under what it said before asking.
     if (piece.node.instanceId !== agentHere) return transcript;
+    const { entries, working } = pieceEntriesOf(view, conversation?.turns, live, piece);
     const { approval, onApproval, question, onQuestion } = source;
     // The approval as the step it is: where a work summary draws the prompt in that step's row
     // (`ApprovalAskContext`), it is not drawn again here — and only there (`askDrawnAtItsCall`).
@@ -459,6 +440,64 @@ export function RunTranscript({
     </ScrollView>
   );
 }
+
+/** A piece's entries, as its transcript draws them, and whether its record is still being written there. */
+function pieceEntriesOf(view: SessionView, turns: ConversationView["turns"] | undefined, live: LiveTail | null, piece: SessionPiece): { entries: TranscriptEntry[]; working: boolean } {
+  const whole = markAnsweredQuestions(entriesOf(view, journalFor(turns ?? [], piece.node.stateId), live), piece.node.answeredQuestions);
+  // A record drawn in parts is in progress only in the part that reaches its end.
+  return { entries: entriesOfPart(whole, piece.part), working: writingOf(undefined, view) && partHoldsEnd(whole, piece.part) };
+}
+
+/**
+ * One piece's transcript: drawn again only when its session, its turns, its live tail or the cut on offer
+ * moves — not whenever the conversation around it draws (a task's other views arriving, another piece's
+ * live tail).
+ */
+const PieceTranscript = memo(function PieceTranscript({
+  piece,
+  view,
+  turns,
+  live,
+  calls,
+  onCut,
+  notes,
+  onOpenSidechain,
+}: {
+  piece: SessionPiece;
+  view: SessionView;
+  turns: ConversationView["turns"] | undefined;
+  live: LiveTail | null;
+  calls: CallSurface;
+  onCut: CutOffer | undefined;
+  notes: readonly BandNote[];
+  onOpenSidechain: ((node: InstanceNode, call: string, name: string) => void) | undefined;
+}): JSX.Element {
+  const { entries, working } = useMemo(() => pieceEntriesOf(view, turns, live, piece), [view, turns, live, piece]);
+  // The message that opened this state's conversation is where its entry into the run is: a rewind or
+  // a fork from it cuts at the same journal point as the rail's entered row — for a message typed into
+  // the run, before that message.
+  const onEdit = useMemo<EditMessage | undefined>(() => {
+    const entered = onCut !== undefined ? notes.find((note) => note.kind === "entered" && note.instanceId === piece.node.instanceId) : undefined;
+    const opening = entries.find((entry): entry is Extract<typeof entry, { kind: "message" }> => entry.kind === "message" && entry.role === "user")?.turn;
+    return entered !== undefined && onCut !== undefined && opening !== undefined
+      ? { can: () => false, edit: () => undefined, cut: (turn) => (turn === opening ? "before" : undefined), rewind: () => onCut.rewind(entered), fork: () => onCut.fork(entered) }
+      : undefined;
+  }, [onCut, notes, piece, entries]);
+  const openHere = useCallback((call: string, name: string) => onOpenSidechain?.(piece.node, call, name), [onOpenSidechain, piece]);
+  return (
+    <Transcript
+      session={view}
+      entries={entries}
+      live={live}
+      working={working}
+      calls={calls}
+      rails
+      onEdit={onEdit}
+      {...(piece.sessionId !== undefined ? { scope: piece.sessionId } : {})}
+      {...(onOpenSidechain !== undefined ? { onOpenSidechain: openHere } : {})}
+    />
+  );
+});
 
 /**
  * An adopted task's own history, drawn inside the conversation of the task that adopted it (decision

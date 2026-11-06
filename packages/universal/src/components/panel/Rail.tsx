@@ -1,4 +1,5 @@
 import { forwardRef, useCallback, useImperativeHandle, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { steadyMemo } from "../../steady";
 import { Pressable, type GestureResponderEvent } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { CAP, MID, bumpPath, centresFor, forkPath, gutterWidth, insideOf, joinPath, lanesOf, lobePath, needsFan, paletteOf, railOf, stackPaint, stacksOf, type RailLane, type RailRow, type RailStep } from "@jaira/ui/rail";
@@ -484,11 +485,12 @@ interface GutterProps {
   box?: Record<string, unknown>;
 }
 
-function GutterOf({ geo, here, cut, ...rest }: GutterProps & { geo: Geo; here: boolean; cut: boolean }): JSX.Element {
+/** A row's gutter, drawn again only when its shape moves: the rows draw every second for the running step's clock. */
+const GutterOf = steadyMemo(function GutterOf({ geo, here, cut, ...rest }: GutterProps & { geo: Geo; here: boolean; cut: boolean }): JSX.Element {
   if (geo.kind === "gap") return <GapGutter lanes={geo.lanes} {...rest} />;
   if (geo.kind === "crumb") return <CrumbGutter lanes={geo.lanes} {...rest} />;
   return <Gutter row={geo.row} folded={geo.folded} {...(geo.mark !== undefined ? { mark: geo.mark } : {})} hideExit={geo.hideExit} here={here} cut={cut} {...rest} />;
-}
+}, ["geo", "box", "centres"]);
 
 /** One row's gutter: the lanes crossing it, and the fork, join or lobe inside it. */
 function Gutter({
