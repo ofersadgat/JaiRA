@@ -27,13 +27,13 @@
  */
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
 import { defaultBuiltInDir } from "@jaira/shared";
 import { filesAt, MemoryArtifactStore, type ArtifactKind, type ArtifactStore, type ArtifactVersion } from "./artifacts";
 import { parseDestination, resolveDestination, withinWorkspace } from "./artifactPath";
 import type { FileToolOptions } from "./fileTools";
+import { isDeniedPath } from "./policy";
 
 /** The Design type's address, as its instructions name it — accepted as `type_url` and answered as JaiRA's own type. */
 export const DESIGN_TYPE_URL = "https://claude.ai/artifact/QKN21svewxgyPb6SYRqWnd";
@@ -102,6 +102,13 @@ function decodeText(bytes: Buffer, name: string): string {
   return text;
 }
 
+/** Text already decoded — kept by `write_file`, or sent in the call itself — held to the rule a file's text is. */
+function inlineText(text: string, name: string): { text: string; bytes: number } {
+  const bad = text.indexOf("�");
+  if (bad >= 0) throw new Refusal(`Not published: ${name} holds the replacement character U+FFFD (${where(text, bad)}). Write the real character there and publish again.`);
+  return { text, bytes: Buffer.byteLength(text, "utf8") };
+}
+
 function where(text: string, at: number): string {
   const before = text.slice(0, Math.max(0, at));
   const line = before.split("\n").length;
@@ -125,6 +132,50 @@ function canvasPathOk(path: string): boolean {
 
 const quoted = (paths: readonly string[]): string => [...paths].sort().map((p) => `"${p}"`).join(", ");
 
+/**
+ * JaiRA's one paragraph after the Design type's own answer, which is kept word for word: the type's
+ * instructions have the model write every file before it publishes it, and a conversation that may not
+ * write anywhere (read-only) could then never draw. JaiRA's publish takes a file's text in the call.
+ */
+export const inlineCanvasNote = (url: string): string =>
+  `(In JaiRA a publish can carry each file's text itself, so nothing need be written first — the way to go when you cannot write files, and fine whenever: \`{ "url": "${url}", "files": { "project/canvas.json": { "content": "<its whole text>" }, "project/Main.dc.html": { "content": "<its whole text>" } } }\`, with no \`root\` or \`file_path\`. The order and the rules above stand: the index first, then one artboard per call. Each publish keeps the files earlier ones sent; to change a file, read it (\`action: "read"\`, \`url\`, \`path\`) unless you sent it in this conversation, and send its new whole text.)`;
+
+/** A `files` value that carries a file's text itself — `{ content }` — rather than naming a file to read. */
+function inlineContentOf(value: unknown): string | undefined {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const content = (value as { content?: unknown }).content;
+  return typeof content === "string" ? content : undefined;
+}
+
+/**
+ * The files one `show_artifact` call READS from disk, as the call names them: what the gate judges at
+ * `read_file`'s line, file by file (decision 0020, amended 2026-11-05) — a publish shows a person the
+ * bytes of a file, so it may publish exactly the files the conversation may read, and no fixed list of
+ * folders decides that. `file_path` unless the call carries `content`; each `files` entry that names a
+ * file — absolute, or under `root` — and none that carries its text. Nothing for a read, a list, a
+ * quickstart or a new canvas, which read no file.
+ */
+export function publishedReadsOf(input: unknown): string[] {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return [];
+  const args = input as Record<string, unknown>;
+  const action = typeof args["action"] === "string" && args["action"].length > 0 ? args["action"] : "publish";
+  if (action !== "publish") return [];
+  if (typeof args["type_url"] === "string" && args["type_url"].length > 0) return [];
+  const reads: string[] = [];
+  if (typeof args["file_path"] === "string" && args["file_path"].length > 0 && typeof args["content"] !== "string") reads.push(args["file_path"]);
+  const root = typeof args["root"] === "string" && args["root"].length > 0 ? args["root"].replace(/[\\/]+$/, "") : undefined;
+  const files = args["files"];
+  if (Array.isArray(files)) {
+    for (const f of files) if (typeof f === "string" && f.length > 0) reads.push(f);
+  } else if (files !== null && typeof files === "object") {
+    for (const at of Object.values(files as Record<string, unknown>)) {
+      if (typeof at !== "string" || at.length === 0) continue;
+      reads.push(isAbsolute(at) || root === undefined ? at : `${root}/${at.replace(/\\/g, "/")}`);
+    }
+  }
+  return [...new Set(reads)];
+}
+
 export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
   const store: ArtifactStore = options.store ?? new MemoryArtifactStore();
   const now = options.now ?? Date.now;
@@ -142,16 +193,12 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
   };
 
   /**
-   * Where a published file may be read from: the workspace, the task's own artifact folder, and the
-   * system's temporary folder — the scratchpad Claude Code's prompt tells the model to use for these
-   * files lives there. Anything else is refused rather than read: a publish puts the bytes in front of
-   * a person, and a path the model invents must not become a way to show them a file it could not read.
+   * The task's own artifact folder (`$CENTRAL`), the one place under `.jaira/` a publish may read: what
+   * this task's tools wrote there (a screenshot) is the task's own to show.
    */
-  const allowedRoots = (ctx?: ExecServices): string[] => {
-    const roots = [ctx?.workspace?.root, options.cwd, options.vars.worktree, tmpdir()].filter((r): r is string => typeof r === "string" && r.length > 0);
+  const ownArtifactFolder = (): string | undefined => {
     const central = resolveDestination(parseDestination("$CENTRAL"), { ...options.vars, relPath: "x" }, "x");
-    if (central.path !== undefined) roots.push(dirname(central.path));
-    return roots.map((r) => resolvePath(r));
+    return central.path !== undefined ? resolvePath(dirname(central.path)) : undefined;
   };
 
   const workspaceRoot = (ctx?: ExecServices): string => resolvePath(ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree);
@@ -167,14 +214,21 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel) ? rel.replace(/\\/g, "/") : full.replace(/\\/g, "/");
   };
 
-  /** Bytes from outside the workspace, from an allowed root only. */
-  const readOutside = (absolute: string, name: string, ctx?: ExecServices): Buffer => {
+  /**
+   * Bytes from outside the workspace, read where they are. Whether this conversation may read them is
+   * the permission set's to say, and the gate said so before the tool ran: it judges every file a
+   * publish reads at `read_file`'s line ({@link publishedReadsOf}), so a publish shows exactly what a
+   * read could. `.jaira/` is refused as `read_file` refuses it, but for this task's own artifact folder.
+   */
+  const refuseJaira = (full: string, name: string): void => {
+    const own = ownArtifactFolder();
+    const inOwn = own !== undefined && ((rel) => rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel))(relative(own, full));
+    if (isDeniedPath(full) && !inOwn) throw new Refusal(`Not published: ${name} is inside .jaira/, which agents may not read.`);
+  };
+
+  const readOutside = (absolute: string, name: string): Buffer => {
     const full = resolvePath(absolute);
-    const inside = allowedRoots(ctx).some((root) => {
-      const rel = relative(root, full);
-      return rel.length > 0 && !rel.startsWith("..") && !isAbsolute(rel);
-    });
-    if (!inside) throw new Refusal(`Not published: ${name} is outside the workspace, the task's artifact folder and the temporary folder. Write it in one of those and publish again.`);
+    refuseJaira(full, name);
     try {
       if (!statSync(full).isFile()) throw new Refusal(`Not published: ${name} is not a file.`);
       return readFileSync(full);
@@ -193,17 +247,14 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
   const readPublished = (path: string, name: string, ctx?: ExecServices): { text: string; bytes: number } => {
     const key = keyOf(path, ctx);
     if (isAbsolute(key)) {
-      const bytes = readOutside(key, name, ctx);
+      const bytes = readOutside(key, name);
       return { text: decodeText(bytes, name), bytes: bytes.length };
     }
     const record = store.get(options.vars.taskId, key);
-    if (record?.content !== undefined) {
-      const bad = record.content.indexOf("�");
-      if (bad >= 0) throw new Refusal(`Not published: ${name} holds the replacement character U+FFFD (${where(record.content, bad)}). Write the real character there and publish again.`);
-      return { text: record.content, bytes: Buffer.byteLength(record.content, "utf8") };
-    }
+    if (record?.content !== undefined) return inlineText(record.content, name);
     const target = record?.physicalPath ?? withinWorkspace(workspaceRoot(ctx), key);
     if (target === undefined) throw new Refusal(`Not published: ${name} is outside the workspace.`);
+    if (record === undefined) refuseJaira(resolvePath(target), name);
     let bytes: Buffer;
     try {
       bytes = readFileSync(target);
@@ -213,11 +264,13 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     return { text: decodeText(bytes, name), bytes: bytes.length };
   };
 
-  /** An asset's raw bytes: the map's physical copy of a workspace path (else the path itself), or a file from an allowed root. */
+  /** An asset's raw bytes: the map's physical copy of a workspace path (else the path itself), or a file outside it. */
   const readAssetBytes = (path: string, name: string, ctx?: ExecServices): Buffer => {
     const key = keyOf(path, ctx);
-    if (isAbsolute(key)) return readOutside(key, name, ctx);
-    const target = store.get(options.vars.taskId, key)?.physicalPath ?? join(workspaceRoot(ctx), key);
+    if (isAbsolute(key)) return readOutside(key, name);
+    const kept = store.get(options.vars.taskId, key)?.physicalPath;
+    const target = kept ?? join(workspaceRoot(ctx), key);
+    if (kept === undefined) refuseJaira(resolvePath(target), name);
     try {
       return readFileSync(target);
     } catch (e) {
@@ -275,7 +328,7 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     seen.set(version.artifact, version.version);
     const url = artifactUrl(taskId, version.artifact);
     return {
-      answer: text.replaceAll("{{canvas_url}}", url).replaceAll("{{version_id}}", String(version.version)),
+      answer: `${text.replaceAll("{{canvas_url}}", url).replaceAll("{{version_id}}", String(version.version)).trimEnd()}\n\n${inlineCanvasNote(url)}`,
       artifact: shown(version) as unknown as JsonValue,
     };
   };
@@ -283,14 +336,14 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
   const publishCanvas = (
     taskId: string,
     id: string,
-    args: { file_path?: unknown; root?: unknown; files?: unknown; force?: unknown },
+    args: { file_path?: unknown; root?: unknown; files?: unknown; force?: unknown; content?: unknown },
     ctx?: ExecServices,
   ): JsonValue => {
     const latest = store.versions(taskId, id).at(-1);
     if (latest === undefined || latest.kind !== "canvas") throw new Refusal(`Not published: there is no canvas at that url in this task.`);
     const root = typeof args.root === "string" && args.root.length > 0 ? keyOf(args.root, ctx).replace(/\/+$/, "") : undefined;
-    // canvas path → the file as the publish names it (or null: remove it).
-    const wanted = new Map<string, string | null>();
+    // canvas path → the file as the publish names it, its text sent in the call (`{ content }`), or null: remove it.
+    const wanted = new Map<string, string | null | { content: string }>();
     const canvasPathFor = (path: string): string => {
       const key = keyOf(path, ctx);
       if (root !== undefined && key.startsWith(`${root}/`)) return key.slice(root.length + 1);
@@ -301,23 +354,21 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     };
     /** A `files` value is a path under `root`, unless it is absolute. */
     const underRoot = (at: string): string => (isAbsolute(at) || root === undefined ? at : `${root}/${at.replace(/\\/g, "/")}`);
-    if (typeof args.file_path === "string" && args.file_path.length > 0) wanted.set(canvasPathFor(args.file_path), args.file_path);
+    if (typeof args.file_path === "string" && args.file_path.length > 0) {
+      wanted.set(canvasPathFor(args.file_path), typeof args.content === "string" ? { content: args.content } : args.file_path);
+    }
     if (Array.isArray(args.files)) {
       for (const f of args.files) if (typeof f === "string") wanted.set(canvasPathFor(f), f);
     } else if (args.files !== null && typeof args.files === "object") {
       for (const [path, at] of Object.entries(args.files as Record<string, unknown>)) {
+        const content = inlineContentOf(at);
         if (at === null) wanted.set(path, null);
         else if (typeof at === "string") wanted.set(path, underRoot(at));
+        else if (content !== undefined) wanted.set(path, { content });
       }
     }
-    if (wanted.size === 0) throw new Refusal(`Not published: no files were given (\`file_path\`, \`files\`).`);
-    // Every file read must be under `root` (or be `file_path` itself): the file rules judge `file_path`
-    // and `root`, so a `files` entry pointing elsewhere would be a read nothing judged.
-    for (const [path, at] of wanted) {
-      if (at === null || at === args.file_path) continue;
-      const key = keyOf(at, ctx);
-      if (root === undefined || !key.startsWith(`${root}/`)) throw new Refusal(`Not published: \`${path}\` is not under \`root\`. Give \`root\`, the folder holding \`project/\`, and keep every file in it.`);
-    }
+    if (wanted.size === 0) throw new Refusal(`Not published: no files were given (\`files\`, or \`file_path\`).`);
+    // A file named anywhere is read where it is: the gate judged each at `read_file`'s line (`publishedReadsOf`).
     for (const path of wanted.keys()) {
       if (!canvasPathOk(path)) throw new Refusal(`Not published: \`${path}\` is not a path under \`project/\` (letters, digits, \`_\`, \`.\` and \`-\`, no \`..\`).`);
       if (path === "project/index.html" || path.startsWith("project/artifact-type/")) throw new Refusal(`Not published: \`${path}\` is one of the type's own files.`);
@@ -335,7 +386,7 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
         changes[path] = null;
         continue;
       }
-      const read = readPublished(at, `\`${path}\``, ctx);
+      const read = typeof at === "string" ? readPublished(at, `\`${path}\``, ctx) : inlineText(at.content, `\`${path}\``);
       callBytes += read.bytes;
       changes[path] = read.text;
     }
@@ -372,7 +423,8 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     });
     seen.set(id, version.version);
     const text = typeFile("updated-result.md") ?? "Updated the Artifact at {{canvas_url}} (Version {{version}}).";
-    const filePath = typeof args.file_path === "string" ? args.file_path : [...wanted.values()].find((v) => v !== null) ?? "";
+    const first = [...wanted.entries()].find(([, v]) => v !== null);
+    const filePath = typeof args.file_path === "string" ? args.file_path : first === undefined ? "" : typeof first[1] === "string" ? first[1] : first[0];
     return {
       answer: text
         .replaceAll("{{canvas_url}}", artifactUrl(taskId, id))
@@ -409,19 +461,22 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     return { answer: `Uploaded ${basename(filePath)}. Its url: /_blob/${blob} — use it verbatim where the file is named.`, url: `/_blob/${blob}` };
   };
 
-  const publishPage = (taskId: string, args: { file_path?: unknown; url?: unknown; title?: unknown; icon?: unknown; capabilities?: unknown; force?: unknown }, ctx?: ExecServices): JsonValue => {
-    const filePath = typeof args.file_path === "string" ? args.file_path : "";
-    if (filePath.length === 0) throw new Refusal(`Not published: give \`file_path\`, the page you wrote.`);
+  const publishPage = (taskId: string, args: { file_path?: unknown; content?: unknown; url?: unknown; title?: unknown; icon?: unknown; capabilities?: unknown; force?: unknown }, ctx?: ExecServices): JsonValue => {
+    // Sent in the call: `content` is the page, and `file_path`, when given, only names it.
+    const inline = typeof args.content === "string" ? args.content : undefined;
+    const filePath = typeof args.file_path === "string" && args.file_path.length > 0 ? args.file_path : inline !== undefined ? "page.html" : "";
+    if (filePath.length === 0) throw new Refusal(`Not published: give \`content\`, the page itself, or \`file_path\`, the page you wrote.`);
     const ext = extname(filePath).toLowerCase();
     if (![".html", ".htm", ".md"].includes(ext)) throw new Refusal(`Not published: a page is a .html, .htm or .md file, and ${basename(filePath)} is not.`);
-    const name = basename(filePath);
-    const { text, bytes } = readPublished(filePath, name, ctx);
+    const name = basename(filePath.replace(/\\/g, "/"));
+    const { text, bytes } = inline !== undefined ? inlineText(inline, name) : readPublished(filePath, name, ctx);
     if (bytes > PAGE_MAX_BYTES) throw new Refusal(`Not published: a page is at most 16 MiB, and ${name} is ${(bytes / 1048576).toFixed(1)} MiB. Images embedded as data URIs are the usual cause.`);
     const kind: ArtifactKind = ext === ".md" ? "markdown" : "page";
-    // The same artifact: the one `url` names, else the page this conversation published from the same file.
+    // The same artifact: the one `url` names, else the page this conversation published from the same
+    // file. A page sent in the call has no file to be the same as: without a `url` it is a new one.
     let id = typeof args.url === "string" && args.url.length > 0 ? artifactIdOf(args.url, taskId) : undefined;
     if (typeof args.url === "string" && args.url.length > 0 && id === undefined) throw new Refusal(`Not published: there is no artifact at ${args.url} in this task.`);
-    if (id === undefined) id = store.latest(taskId).find((v) => v.kind !== "canvas" && v.entry === name)?.artifact;
+    if (id === undefined && inline === undefined) id = store.latest(taskId).find((v) => v.kind !== "canvas" && v.entry === name)?.artifact;
     if (id !== undefined && args.force !== true && overwritesPerson(taskId, id, [name]).length > 0) {
       throw new Refusal(`Not published: someone changed this page since you last published it. Read it (\`action: "read"\`, \`url\`), redo your edit on what it holds now, and publish again.`);
     }
@@ -441,11 +496,12 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     });
     seen.set(version.artifact, version.version);
     const url = artifactUrl(taskId, version.artifact);
+    const again = inline !== undefined ? "give this url with its new `content`" : "publish the same file_path again in this conversation, or give this url";
     return {
       answer:
         version.version === 1
-          ? `Published ${name} as a new artifact at ${url} (version 1). It is shown in this conversation. To update it, publish the same file_path again in this conversation, or give this url.`
-          : `Updated the artifact at ${url} (version ${version.version}) with ${name}. To update it again, publish the same file_path or url.`,
+          ? `Published ${name} as a new artifact at ${url} (version 1). It is shown in this conversation. To update it, ${again}.`
+          : `Updated the artifact at ${url} (version ${version.version}) with ${name}. To update it again, ${again}.`,
       artifact: shown(version) as unknown as JsonValue,
     };
   };
@@ -496,16 +552,24 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
 
   return {
     description:
-      "The Artifact tool (wherever instructions name `Artifact` or 'your Artifact tool', they mean this one). Publish what you made for the user to look at: a page (`.html`, `.htm`), a Markdown document (`.md`), or a design canvas. Write the file first, then publish it with `file_path` (its absolute path); there is no inline content parameter. The page is shown in the conversation and every publish is a new version of the same artifact: to update one, publish the same `file_path` again in this conversation, or give its `url`. A page is one self-contained file: it may load fonts from Google Fonts and scripts from cdnjs, unpkg, cdn.tailwindcss.com, code.jquery.com and cdn.jsdelivr.net/npm/, and nothing else — inline other CSS and JavaScript, embed images as data URIs, use in-page anchors (relative links do not resolve); at most 16 MiB. The page's `<title>` names it. When the person wants a design or a mock-up, in whatever words and whether or not they typed `/design`, your first call is `action: \"quickstart\"` with `intent: \"design\"`, before you write any file, and then you do what it answers: the result is a design canvas, which the person can edit. A page or a Markdown document is for what is not a design. `action: \"read\"` reads an artifact (`url`, and `path` for one of a canvas's files); `action: \"list\"` lists this task's artifacts.",
+      "The Artifact tool (wherever instructions name `Artifact` or 'your Artifact tool', they mean this one). Publish what you made for the user to look at: a page (`.html`, `.htm`), a Markdown document (`.md`), or a design canvas. Give the text in the call — `content` for a page (with `file_path` only to name it, `notes.md` for Markdown), or `files: { \"project/<path>\": { \"content\": \"…\" } }` for a canvas's files — or write the file first and publish it with `file_path` (its absolute path). Sending the text needs no file and no write permission. A file you publish must be one you may read. The page is shown in the conversation and every publish is a new version of the same artifact: to update one, give its `url` (or, for a page from a file, publish the same `file_path` again in this conversation); `action: \"read\"` gives back what it holds now. A page is one self-contained file: it may load fonts from Google Fonts and scripts from cdnjs, unpkg, cdn.tailwindcss.com, code.jquery.com and cdn.jsdelivr.net/npm/, and nothing else — inline other CSS and JavaScript, embed images as data URIs, use in-page anchors (relative links do not resolve); at most 16 MiB. The page's `<title>` names it. When the person wants a design or a mock-up, in whatever words and whether or not they typed `/design`, your first call is `action: \"quickstart\"` with `intent: \"design\"`, before you write any file, and then you do what it answers: the result is a design canvas, which the person can edit. A page or a Markdown document is for what is not a design. `action: \"read\"` reads an artifact (`url`, and `path` for one of a canvas's files); `action: \"list\"` lists this task's artifacts.",
     inputSchema: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["publish", "read", "list", "quickstart"], description: "Omit (or 'publish') to publish `file_path`. 'read' reads an artifact; 'list' lists them; 'quickstart' starts a design." },
-        file_path: { type: "string", description: "The absolute path of the file to publish (a page, or one of a canvas's files)." },
+        file_path: { type: "string", description: "The absolute path of the file to publish (a page, or one of a canvas's files). With `content`, it only names the page (or the canvas path)." },
+        content: { type: "string", description: "The page's whole text, sent in the call instead of written to a file." },
         root: { type: "string", description: "A canvas: the folder holding `project/`." },
         files: {
-          description: "A canvas: the other files of this publish, by their `project/…` paths → their path under `root` (or null to remove one); or a list of absolute paths.",
-          anyOf: [{ type: "object", additionalProperties: { type: ["string", "null"] } }, { type: "array", items: { type: "string" } }],
+          description:
+            "A canvas: the files of this publish, by their `project/…` paths → `{ \"content\": \"<the file's whole text>\" }`, or their path under `root`, or null to remove one; or a list of absolute paths.",
+          anyOf: [
+            {
+              type: "object",
+              additionalProperties: { anyOf: [{ type: "string" }, { type: "null" }, { type: "object", properties: { content: { type: "string" } }, required: ["content"] }] },
+            },
+            { type: "array", items: { type: "string" } },
+          ],
         },
         url: { type: "string", description: "The artifact to update or read." },
         type_url: { type: "string", description: "Make a new artifact of this type (the design canvas)." },
@@ -556,7 +620,7 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
         if (url.length > 0 && target === undefined) return { error: `Not published: there is no artifact at ${url} in this task.` };
         // A canvas file published without its url: the canvas this conversation is filling.
         const filePath = typeof args["file_path"] === "string" ? args["file_path"].replace(/\\/g, "/") : "";
-        if (filePath.includes("/project/") && (filePath.endsWith(".dc.html") || filePath.endsWith("/canvas.json"))) {
+        if ((filePath.includes("/project/") || filePath.startsWith("project/")) && (filePath.endsWith(".dc.html") || filePath.endsWith("/canvas.json"))) {
           const canvas = store.latest(taskId).filter((v) => v.kind === "canvas").at(-1);
           if (canvas !== undefined) return publishCanvas(taskId, canvas.artifact, args, ctx);
         }

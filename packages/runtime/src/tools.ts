@@ -66,7 +66,8 @@ import {
 import { namedPlacesOf, placesForCall } from "./linePlaces";
 import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { callDialectOf } from "./callDialect";
-import { registerFileTools, READ_FILE, WRITE_FILE, type FileToolOptions } from "./fileTools";
+import { registerFileTools, READ_FILE, SHOW_ARTIFACT, WRITE_FILE, type FileToolOptions } from "./fileTools";
+import { publishedReadsOf } from "./showArtifact";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
 import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
@@ -747,13 +748,26 @@ export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNar
     if (name === "shell" || !TOOL_SPEC_BY_NAME.has(name)) return undefined;
     // `$AGENT_WORKSPACE` is the calling agent's folder.
     const here = placesForCall(options, input);
-    const answered = toolPlaceAnswerOf(name, input, (authored as PermissionsDecl | undefined) ?? undefined, here) ?? ownAnswerOf(name, (authored as PermissionsDecl | undefined) ?? options.fallback);
+    const block = (authored as PermissionsDecl | undefined) ?? undefined;
+    let answered: { answer: ToolPlaceAnswer; block: PermissionsDecl; own?: true | undefined } | undefined = toolPlaceAnswerOf(name, input, block, here) ?? ownAnswerOf(name, block ?? options.fallback);
+    // What the call is judged as when it asks: itself, or — for a publish held back by a file it reads —
+    // a read of that file.
+    let judged = { tool: name, input: input as unknown };
+    if (name === SHOW_ARTIFACT) {
+      const reading = publishReadAnswerOf(input, block, options.fallback, here);
+      const stricter = reading !== undefined && (answered === undefined ? reading.answer.mode !== "allow" : modeStrictness(reading.answer.mode) > modeStrictness(answered.answer.mode));
+      if (stricter) {
+        // Not `own`: nothing but this narrowing holds a publish to its reads, so it is enforced here.
+        answered = { answer: reading.answer, block: reading.block };
+        judged = { tool: READ_FILE, input: { path: reading.path } };
+      }
+    }
     if (answered === undefined) return undefined;
-    const { answer, block } = answered;
+    const { answer, block: from } = answered;
     // A call that ASKS at a place is put to the person as one part, with WHERE it acts and the place
     // widths an answer may be kept at (§3.8) — and is settled first by an answer this task already kept.
     if (answer.mode === "ask") {
-      const decided = directCallDecision(name, input, answer, block, { ...here, ...(packageOf !== undefined ? { packageOf } : {}) });
+      const decided = directCallDecision(judged.tool, judged.input, answer, from, { ...here, ...(packageOf !== undefined ? { packageOf } : {}) });
       if (decided !== undefined) {
         setCommandDecision(input, decided);
         // Settled "for this run": a refusal tightens; an allowance leaves the gate its own mode, and the
@@ -768,25 +782,48 @@ export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNar
     notePlaceAnswer(input, { subject: answer.subject, mode: answer.mode, ...(answer.place !== undefined ? { place: answer.place } : {}) });
     if (isFunctionMode(answer.mode)) {
       noteFunctionCall(input, {
-        tool: name,
+        tool: judged.tool,
         subject: answer.subject,
         function: answer.mode.function,
         ...(answer.place !== undefined ? { place: answer.place } : {}),
-        ...(block.source !== undefined ? { permissionSet: block.source } : {}),
+        ...(from.source !== undefined ? { permissionSet: from.source } : {}),
       });
       return "ask";
     }
     return answer.mode;
   };
-  // Only a line with places is tightened here; a line without is the gate's mode, as it stands.
+  // Only a line with places is tightened here; a line without is the gate's mode, as it stands — but a
+  // publish, which answers to `read_file`'s line for every file it reads, wherever a permission set judges.
   return Object.assign(narrowing, {
     narrows: (tool: { name: string }, authored?: Parameters<ScopeNarrowing>[2]) => {
       const name = logicalToolName(tool.name);
       if (name === "shell" || !TOOL_SPEC_BY_NAME.has(name)) return false;
+      if (name === SHOW_ARTIFACT) return (authored as PermissionsDecl | undefined) !== undefined || options.fallback !== undefined;
       const block = (authored as PermissionsDecl | undefined)?.places !== undefined ? (authored as PermissionsDecl) : options.fallback;
       return block?.places !== undefined && Object.hasOwn(block.places, name);
     },
   });
+}
+
+/**
+ * The strictest answer `read_file`'s line gives for the files one publish reads (`publishedReadsOf`), and
+ * the file it gave it for — a publish shows a person a file's bytes, so it may publish what a read could
+ * read (decision 0020, amended 2026-11-05). `undefined` when it reads no file (its text is in the call)
+ * or no permission set judges it.
+ */
+function publishReadAnswerOf(
+  input: unknown,
+  authored: PermissionsDecl | undefined,
+  fallback: PermissionsDecl | undefined,
+  here: PlaceNarrowingOptions,
+): { answer: ToolPlaceAnswer; block: PermissionsDecl; path: string } | undefined {
+  let worst: { answer: ToolPlaceAnswer; block: PermissionsDecl; path: string } | undefined;
+  for (const path of publishedReadsOf(input)) {
+    const answered = toolPlaceAnswerOf(READ_FILE, { path }, authored, { ...here, fallback }) ?? ownAnswerOf(READ_FILE, authored ?? fallback);
+    if (answered === undefined) continue;
+    if (worst === undefined || modeStrictness(answered.answer.mode) > modeStrictness(worst.answer.mode)) worst = { answer: answered.answer, block: answered.block, path };
+  }
+  return worst;
 }
 
 /**

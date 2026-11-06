@@ -69,8 +69,9 @@ instructions are passed verbatim and name them:
 | Input | Meaning |
 | --- | --- |
 | `action` | `publish` (absent), `read`, `list`, `quickstart` |
-| `file_path` | the file published (a page: `.html`, `.htm`, `.md`; a canvas: one of its files, absolute) |
-| `root`, `files` | a canvas: the folder holding `project/`, and the other files by their `project/…` paths (`null` removes one) |
+| `file_path` | the file published (a page: `.html`, `.htm`, `.md`; a canvas: one of its files, absolute); beside `content`, only its name |
+| `content` | JaiRA's own: a page's text, or with `file_path` one canvas file's, sent in the call instead of written (amended 2026-11-05) |
+| `root`, `files` | a canvas: the folder holding `project/`, and the other files by their `project/…` paths (`null` removes one; `{ "content": … }` sends its text) |
 | `url` | the artifact to update — JaiRA's own address for it, `artifact://<task>/<id>` |
 | `type_url`, `title`, `auto_open` | create an artifact of a type (§2); `title` also names a page with no `<title>` |
 | `intent` | `quickstart`: `"design"` |
@@ -86,6 +87,25 @@ instructions are passed verbatim and name them:
   canvas's `root` lives there.
 - Refused as Claude Code refuses: a file that does not decode or holds U+FFFD, a page over 16 MiB, a
   canvas over 512 files or 256 MB, a path outside `project/` or with `..`.
+- **Amended 2026-11-05** (task `t-elvj5dhzoy`, under read-only-scratch). The agent wrote a design into its
+  own folder, where the permission set let it write and read. Every publish was refused as "outside the
+  workspace, the task's artifact folder and the temporary folder", a fixed list in the tool that the
+  permission set never saw. Under plain read-only it could write nowhere, so nothing could be drawn. The
+  bullet above, that every permission set lets an agent write under the task's artifact folder, did not
+  hold: read-only refuses `write_file` everywhere. The person ruled:
+  - "if the llm wants to publish an artifact from a file, it should follow the read_file permission." The
+    gate judges every file a publish reads (`publishedReadsOf`: `file_path`, and each `files` entry naming
+    a file, under `root` where relative) at `read_file`'s line, the strictest kept. It asks or refuses as a
+    read of that file (`placeNarrowingFor`). Because of that, `show_artifact` is never pre-approved under a
+    permission set. The tool reads such a file where it is, refusing only `.jaira/`, except this task's own
+    artifact folder.
+  - "an llm should be able to publish an artifact without sourcing it from a file by giving the contents
+    directly." This uses `content`, and `{ "content": … }` in `files`. Text sent in the call reads nothing
+    and needs no write permission, so a read-only conversation can draw. It reads an artifact back with
+    `action: "read"` and sends the changed text as the next version. A page sent this way is a new
+    artifact unless the call gives `url`. The Design type's answer to a create is kept word for word, and
+    JaiRA adds one paragraph after it saying so (`inlineCanvasNote`), because the instructions have the
+    model write every file first.
 - Claude Code's own `Artifact` never runs: it publishes to claude.ai. It is declared as `show_artifact`'s
   native, which displaces it, and `show_artifact` is `appOnly`: the composer offers no pick, and a
   permission set entry recording `implementation: "native"` is not honoured.

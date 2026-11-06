@@ -242,7 +242,9 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
     appOnly: true,
     hint: "produce something to look at — a page, a document, a design canvas",
     // Decision 0020: it READS the files it publishes (`file_path`, a canvas's `root`) and adds a version
-    // to the task's own store — so the paths it names answer to the file rules, as a read's do.
+    // to the task's own store — so the paths it names answer to the file rules, as a read's do. Each file
+    // it reads is also judged at `read_file`'s line (amended 2026-11-05: `publishedReadsOf`, judged in
+    // `placeNarrowingFor`); text sent in the call reads nothing.
     pathArgs: ["file_path", "root", "path"],
     scope: "path",
     // Claude Code declares one: its own `Artifact`, which publishes to claude.ai (`CLAUDE_TOOLS`), and
