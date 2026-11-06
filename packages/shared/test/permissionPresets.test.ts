@@ -144,13 +144,14 @@ describe("the chat bucket is the four presets, written down", () => {
     // Plan mode is an ESCALATION — read-only until the agent presents a plan and a human approves the
     // exit — and the exit gate is registered by the engine for the states it runs, not by the chat
     // path. Shipped here it would be `read-only` under a name promising a door nobody has hung.
-    expect(readdirSync(join(PERMISSION_SETS, "chat")).sort()).toEqual(["ask-first.json", "auto.json", "full.json", "read-only.json"]);
+    expect(readdirSync(join(PERMISSION_SETS, "chat")).sort()).toEqual(["ask-first.json", "auto.json", "full.json", "read-only-scratch.json", "read-only.json"]);
   });
 });
 
 describe("chat_control has its OWN versions of the same names", () => {
-  it("ships the same four names", () => {
-    expect(readdirSync(join(PERMISSION_SETS, "chat_control")).sort()).toEqual(readdirSync(join(PERMISSION_SETS, "chat")).sort());
+  it("ships the same four names — not read-only-scratch, which differs only in file tools a control conversation never holds", () => {
+    const chat = readdirSync(join(PERMISSION_SETS, "chat")).filter((file) => file !== "read-only-scratch.json");
+    expect(readdirSync(join(PERMISSION_SETS, "chat_control")).sort()).toEqual(chat.sort());
   });
 
   it.each(["ask-first", "read-only", "auto", "full"])("chat_control/%s holds ONLY the task and workflow tools, and refuses everything else", (name) => {
@@ -206,7 +207,7 @@ describe("the Git tools (decision 0010 §1)", () => {
 
   it("sit after the web tools in every chat file, the CI tools after them, as the menu draws them", () => {
     const forge = Object.keys(FORGE_TOOLS);
-    for (const name of ["ask-first", "read-only", "auto", "full"]) {
+    for (const name of ["ask-first", "read-only", "read-only-scratch", "auto", "full"]) {
       const keys = Object.keys(shipped(`chat/${name}`) as Record<string, unknown>);
       expect(keys.slice(keys.indexOf("web_search") + 1, keys.indexOf("web_search") + 1 + forge.length), name).toEqual(forge);
     }
@@ -270,7 +271,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     expect(at("full", "edit", "C:/Users/me/.ssh/config")).toBe("ask");
   });
 
-  it.each(["read-only", "ask-first", "auto", "full"])("chat/%s asks at every credential place, inside the project too", (file) => {
+  it.each(["read-only", "read-only-scratch", "ask-first", "auto", "full"])("chat/%s asks at every credential place, inside the project too", (file) => {
     const { permissionSet } = parsePermissionSet(shipped(`chat/${file}`));
     for (const tool of ["read_file", "glob", "grep"]) for (const place of CREDENTIALS) expect(linePlaces(permissionSet)[tool]?.[place], `${file} ${tool} ${place}`).toBe("ask");
     expect(at(file, "read_file", `${ROOT}/config/server.pem`)).toBe("ask");
@@ -278,9 +279,29 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     expect(at(file, "grep", `${ROOT}/packages/app/.env.production`)).toBe("ask");
   });
 
-  it("never loosens a refusal into a question: read-only's writers still refuse a credential", () => {
-    expect(at("read-only", "write_file", `${ROOT}/.env`)).toBe("deny");
-    expect(at("read-only", "edit", "C:/Users/me/.ssh/config")).toBe("deny");
+  it.each(["read-only", "read-only-scratch"])("never loosens a refusal into a question: %s's writers still refuse a credential", (file) => {
+    expect(at(file, "write_file", `${ROOT}/.env`)).toBe("deny");
+    expect(at(file, "edit", "C:/Users/me/.ssh/config")).toBe("deny");
+    expect(at(file, "write_file", "C:/Users/me/.claude/.credentials.json")).toBe("deny");
+  });
+
+  it("chat/read-only-scratch is chat/read-only, except that it writes and edits in the agent's own folder", () => {
+    const scratch = shipped("chat/read-only-scratch") as Record<string, unknown>;
+    const readOnly = shipped("chat/read-only") as Record<string, unknown>;
+    expect(parsePermissionSet(scratch).issues).toEqual([]);
+    // Every other line, in the same order, is read-only's.
+    expect(Object.keys(scratch)).toEqual(Object.keys(readOnly));
+    for (const key of Object.keys(readOnly)) if (key !== "edit" && key !== "write_file") expect(scratch[key], key).toEqual(readOnly[key]);
+    const memory = "C:/Users/me/.claude/projects/C--work-app-wt/memory/notes.md";
+    for (const tool of ["write_file", "edit"]) {
+      expect(at("read-only-scratch", tool, memory), tool).toBe("allow");
+      expect(at("read-only-scratch", tool, `${ROOT}/src/index.ts`), tool).toBe("deny");
+      expect(at("read-only-scratch", tool, "C:/work/app-wt/src/index.ts"), tool).toBe("deny");
+      expect(at("read-only-scratch", tool, "C:/tmp/x.txt"), tool).toBe("deny");
+      // A credential pinned by name is refused even inside the agent's folder (ruling 3).
+      expect(at("read-only-scratch", tool, "C:/Users/me/.claude/projects/C--work-app-wt/.env"), tool).toBe("deny");
+      expect(at("read-only", tool, memory), tool).toBe("deny");
+    }
   });
 
   it("chat/auto judges a push with smart, and asks before pushing main, master or a release branch", () => {

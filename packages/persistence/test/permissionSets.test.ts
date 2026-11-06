@@ -385,13 +385,14 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     project = openProject(dir, { baseDir: testHome() });
   });
 
-  it("are listed from the built-in layer: two buckets, the same four names in each", () => {
+  it("are listed from the built-in layer: two buckets, the same four names in each, and chat's read-only-scratch", () => {
     const listed = listPermissionSets(project.paths.roots);
     expect(listed.map((t) => t.id)).toEqual([
       "chat/ask-first",
       "chat/auto",
       "chat/full",
       "chat/read-only",
+      "chat/read-only-scratch",
       "chat_control/ask-first",
       "chat_control/auto",
       "chat_control/full",
@@ -502,6 +503,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
       ["chat/auto", "system"],
       ["chat/full", "system"],
       ["chat/read-only", "project"],
+      ["chat/read-only-scratch", "system"],
       ["chat_control/ask-first", "system"],
       ["chat_control/auto", "system"],
       ["chat_control/full", "system"],

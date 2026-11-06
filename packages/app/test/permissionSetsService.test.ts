@@ -57,13 +57,14 @@ afterEach(async () => {
 });
 
 describe("permissionSets:read", () => {
-  it("answers the eight shipped permission sets, the layers this window has, and the tools a line can name", () => {
+  it("answers the nine shipped permission sets, the layers this window has, and the tools a line can name", () => {
     const view = service.readPermissionSetSettings({ project: dir });
     expect(view.records.map((r) => r.id)).toEqual([
       "chat/ask-first",
       "chat/auto",
       "chat/full",
       "chat/read-only",
+      "chat/read-only-scratch",
       "chat_control/ask-first",
       "chat_control/auto",
       "chat_control/full",
@@ -241,6 +242,7 @@ describe("permissionSets:tree, :own, :stack and :saveStack", () => {
       ["auto", "smart", false],
       ["full", "allow", false],
       ["read-only", "deny", false],
+      ["read-only-scratch", "deny", false],
     ]);
     expect(tree.scopes[2]!.buckets.find((bucket) => bucket.name === "web")!.sets[0]).toMatchObject({ id: "web/docs", icon: "globe", inStack: true, lines: 1 });
   });

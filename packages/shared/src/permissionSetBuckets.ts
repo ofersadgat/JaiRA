@@ -120,6 +120,7 @@ export function bucketOf(current: PermissionSet, choices: readonly PermissionSet
 const SHIPPED_PERMISSION_SET_WORDS: Readonly<Record<string, { label: string; hint: string; glyph: PermissionSetMode }>> = {
   "chat/ask-first": { label: "ask first", hint: "stop and ask before every call", glyph: "ask" },
   "chat/read-only": { label: "read-only", hint: "reading goes ahead, anything that writes is refused", glyph: "deny" },
+  "chat/read-only-scratch": { label: "read-only, with scratch", hint: "as read-only, but the agent may write in its own folder", glyph: "deny" },
   "chat/auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
   "chat/full": { label: "full access", hint: "anything, without asking", glyph: "allow" },
   "chat_control/ask-first": { label: "ask first", hint: "ask before starting, moving or answering anything", glyph: "ask" },
@@ -129,11 +130,11 @@ const SHIPPED_PERMISSION_SET_WORDS: Readonly<Record<string, { label: string; hin
 };
 
 /** The order the shipped NAMES are listed in, strictest-sounding first — the order the presets had. */
-const SHIPPED_NAME_ORDER: readonly string[] = ["ask-first", "read-only", "auto", "full"];
+const SHIPPED_NAME_ORDER: readonly string[] = ["ask-first", "read-only", "read-only-scratch", "auto", "full"];
 
 /**
- * The permission sets of one bucket, in the order its rows are drawn: the four names that ship in the
- * order the presets always had, then anybody else's by name.
+ * The permission sets of one bucket, in the order its rows are drawn: the names that ship in the order
+ * the presets always had (scratch beside the read-only it widens), then anybody else's by name.
  */
 export function permissionSetsOfBucket(choices: readonly PermissionSetChoice[], bucket: string): PermissionSetChoice[] {
   const rank = (choice: PermissionSetChoice): number => {
