@@ -16,7 +16,8 @@ import Tailnet
  *    defunct (-65569) when the app goes inactive, as it does behind that very prompt — is started again
  *    by itself, waiting a little longer each time, until it is stopped.
  *  - Tailscale built in (`Tailnet.xcframework`, gomobile, packages/tailnet/mobile): start the node, hear
- *    its state (`onTailnetState`), and a loopback port proxying to an engine on the tailnet.
+ *    its state (`onTailnetState`), and a loopback port proxying to an engine on the tailnet — let go of
+ *    as the app enters the background, and asked for again before every attempt to connect.
  */
 public class JairaNetModule: Module {
   private var browser: NWBrowser?
@@ -92,6 +93,18 @@ public class JairaNetModule: Module {
       var error: NSError?
       _ = TailnetLogout(&error)
       if let error { throw error }
+      #endif
+    }
+
+    /**
+     * Into the background: let go of the tailnet proxies' ports, as Apple's TN2277 asks of a listening
+     * socket. A suspended app's are taken back by the system, and one taken back refuses every
+     * connection while the app runs on, so a kept port left the phone unable to reach its machine until
+     * the app was restarted (2026-11-06). The node stays; the next `tailnetProxy` makes a new port.
+     */
+    OnAppEntersBackground {
+      #if canImport(Tailnet)
+      TailnetCloseProxies()
       #endif
     }
 

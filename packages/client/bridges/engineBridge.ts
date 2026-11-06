@@ -111,7 +111,15 @@ export interface EngineBridge extends JairaBridge {
 }
 
 export interface EngineBridgeOptions {
+  /** The engine's address: where the bridge connects, or, with `resolveUrl`, how the machine is named. */
   url: string;
+  /**
+   * Where to connect, asked again before every attempt; one that rejects is a failed attempt, its message
+   * the reason. For an engine reached through the phone's own Tailscale: its proxy's loopback port, which
+   * does not outlive a suspension of the app for certain (packages/tailnet/mobile), so a port got once and
+   * kept left the phone saying "nothing answers" until it was restarted (2026-11-06).
+   */
+  resolveUrl?: () => Promise<string>;
   token: string;
   /** Who is connecting, for the machine's log: the device's name. */
   client: string;
@@ -157,6 +165,11 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
   const first = options.retryMs ?? 1000;
   const longest = options.maxRetryMs ?? 30_000;
   const where = options.where ?? describe(options.url);
+  /** Where the last attempt connected: `options.url`, or what `resolveUrl` last said. */
+  let url = options.url;
+  /** Which `resolveUrl` answer is awaited, while one is: a later attempt, or a close, makes it stale. */
+  let resolution = 0;
+  let resolving = false;
   const pending = new Map<number, { resolve: (value: unknown) => void; reject: (error: Error) => void }>();
   const listeners = new Set<(message: PushMessage) => void>();
   const stateListeners = new Set<(state: BridgeState) => void>();
@@ -262,9 +275,28 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
     timer = undefined;
     // A reconnection stays "waiting" until it is welcomed: the shell's line says why it is not there.
     if (!everConnected) say({ state: "connecting" });
+    if (options.resolveUrl === undefined) return connect(url);
+    const asked = ++resolution;
+    resolving = true;
+    options.resolveUrl().then(
+      (resolved) => {
+        if (stopped || asked !== resolution) return;
+        resolving = false;
+        url = resolved;
+        connect(resolved);
+      },
+      (e: unknown) => {
+        if (stopped || asked !== resolution) return;
+        resolving = false;
+        later(e instanceof Error ? e.message : String(e));
+      },
+    );
+  }
+
+  function connect(address: string): void {
     let mine: WebSocket;
     try {
-      mine = new WebSocket(options.url);
+      mine = new WebSocket(address);
     } catch (e) {
       return later(`could not reach ${where}: ${(e as Error).message}`);
     }
@@ -312,8 +344,8 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
       return () => void stateListeners.delete(listener);
     },
     retryNow() {
-      // `socket` is absent exactly while waiting between attempts.
-      if (stopped || socket !== undefined) return;
+      // `socket` is absent while waiting between attempts, and while an attempt asks where to connect.
+      if (stopped || socket !== undefined || resolving) return;
       if (timer !== undefined) clearTimeout(timer);
       open();
     },
@@ -346,7 +378,7 @@ export function engineBridge(options: EngineBridgeOptions): EngineBridge {
       if (channel !== "artifact:serve") return answered;
       return answered.then((served) => {
         const it = served as { url?: unknown };
-        return (typeof it.url === "string" ? { ...it, url: artifactAddress(it.url, options.url) } : served) as IpcResponse<C>;
+        return (typeof it.url === "string" ? { ...it, url: artifactAddress(it.url, url) } : served) as IpcResponse<C>;
       });
     },
     subscribe(listener) {

@@ -138,6 +138,14 @@ The helper therefore also opens local doors: asked for a device's address, it se
 that forwards HTTP (WebSockets included) to that address over the tailnet, TLS and all. The engine
 connects to the loopback port. The phone's built-in Tailscale does the same for the phone's client.
 
+Amended 2026-11-06: the phone's port does not outlive a suspension of the app for certain. iOS takes
+back a suspended app's listening sockets (Apple's TN2277), and the port, asked for once at launch and
+handed out again by the node, left the phone saying "nothing answers at <machine>" until the app was
+restarted. Now the node hands a port out again only while it still answers, and replaces it otherwise
+(`Proxy`); the iOS module lets go of every port as the app enters the background (`CloseProxies`); and
+the phone's bridge asks for the port before every attempt to connect (`engineBridge`'s `resolveUrl`),
+waiting for its own Tailscale to run and saying so, in words about the phone, when it does not.
+
 ## Consequences
 
 - `MachineReach`, the `machines:reach` channel and `machines:add` are replaced by the Tailscale row's

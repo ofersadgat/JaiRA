@@ -58,10 +58,41 @@ export function engineOrigin(address: string): string {
 }
 
 /** The URL the bridge connects to for an engine on the tailnet: the node's loopback proxy to it. */
-export async function tailnetEngineUrl(tailnet: Tailnet, hostname: string, address: string): Promise<string> {
+/**
+ * Asked before every attempt to connect (`engineBridge`'s `resolveUrl`), not once: the proxy's port may
+ * not have outlived a suspension of the app, and the node hands out a new one when it did not. Waits for
+ * the node to run, and rejects in words about THIS phone's Tailscale when it does not, so the line does
+ * not blame the machine for what is the phone's.
+ */
+export async function tailnetEngineUrl(tailnet: Tailnet, hostname: string, address: string, waitMs = 10_000): Promise<string> {
   await tailnet.start(hostname);
+  await tailnetRunning(tailnet, waitMs);
   const port = await tailnet.proxy(engineOrigin(address));
   return `ws://127.0.0.1:${port}/engine`;
+}
+
+/** Settles once the node runs; rejects with what it is doing instead when it fails, asks for a sign-in, or is still not running after `waitMs`. */
+function tailnetRunning(tailnet: Tailnet, waitMs: number): Promise<void> {
+  return new Promise<void>((resolve, reject) => {
+    let off: () => void = () => undefined;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    let settled = false;
+    const finish = (error?: Error): void => {
+      if (settled) return;
+      settled = true;
+      if (timer !== undefined) clearTimeout(timer);
+      off();
+      if (error === undefined) resolve();
+      else reject(error);
+    };
+    const hear = (state: TailnetState): void => {
+      if (state.state === "running") finish();
+      else if (state.state === "error" || state.state === "needs-login" || state.state === "unavailable") finish(new Error(tailnetWords(state)));
+    };
+    off = tailnet.onState(hear);
+    timer = setTimeout(() => finish(new Error(tailnetWords(tailnet.state()))), waitMs);
+    hear(tailnet.state());
+  });
 }
 
 /** What the phone's Tailscale is doing, in a line for the screen. */

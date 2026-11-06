@@ -79,8 +79,31 @@ describe("joining while pairing", () => {
 describe("the engine through the node", () => {
   it("is the proxy's loopback port, to the engine's origin", async () => {
     const node = fakeTailnet();
+    node.say({ state: "running" });
     await expect(tailnetEngineUrl(node, "jaira-pixel", "https://desk.tail4c2e.ts.net")).resolves.toBe("ws://127.0.0.1:52123/engine");
     expect(node.proxied).toEqual(["https://desk.tail4c2e.ts.net"]);
+  });
+
+  it("waits for the node to run before asking for the port", async () => {
+    const node = fakeTailnet();
+    node.say({ state: "starting" });
+    const url = tailnetEngineUrl(node, "jaira-pixel", "https://desk.tail4c2e.ts.net");
+    await Promise.resolve();
+    expect(node.proxied).toEqual([]);
+    node.say({ state: "running" });
+    await expect(url).resolves.toBe("ws://127.0.0.1:52123/engine");
+  });
+
+  // So the line blames the phone's own Tailscale, not the machine, when that is what is not there.
+  it("fails in words about this phone's Tailscale when it is not running", async () => {
+    const node = fakeTailnet();
+    node.say({ state: "needs-login", url: "https://login.tailscale.com/a/1" });
+    await expect(tailnetEngineUrl(node, "jaira-pixel", "https://desk.tail4c2e.ts.net")).rejects.toThrow("Tailscale on this phone: waiting for its sign-in to be approved");
+    node.say({ state: "error", message: "no network" });
+    await expect(tailnetEngineUrl(node, "jaira-pixel", "https://desk.tail4c2e.ts.net")).rejects.toThrow("Tailscale on this phone failed: no network");
+    node.say({ state: "starting" });
+    await expect(tailnetEngineUrl(node, "jaira-pixel", "https://desk.tail4c2e.ts.net", 30)).rejects.toThrow("Tailscale on this phone: starting");
+    expect(node.proxied).toEqual([]);
   });
 
   it("keeps the scheme and a port the address says", () => {

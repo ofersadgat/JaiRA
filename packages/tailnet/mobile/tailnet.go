@@ -6,13 +6,20 @@
 //	gomobile bind -target=android -javapkg=com.mistlabs.jaira -o tailnet.aar ./mobile
 //
 // The node runs in the app's process, in userspace: no VPN profile, nothing for the rest of the phone.
-// It is up while the app is; the system suspends both together, and it picks up where it was when the
-// app comes back (its state is kept in the directory given to Start).
+// It is up while the app is; the system suspends both together, and the node picks up where it was when
+// the app comes back (its state is kept in the directory given to Start).
 //
 // The app's JavaScript cannot dial through it, so Proxy gives it a loopback port instead: an HTTP and
 // WebSocket proxy to one engine on the tailnet, dialled through the node. The app connects to
 // ws://127.0.0.1:<port>/engine exactly as it would to the engine, and TLS is done here, against the
 // engine's own name and certificate.
+//
+// A proxy's port does NOT survive a suspension for certain: iOS takes back a suspended app's listening
+// sockets (Apple's TN2277), and one taken back refuses every connection while the app goes on running.
+// Kept and handed out again, such a port left the phone saying "nothing answers" until the app was
+// restarted (found 2026-11-06). So Proxy hands a port out again only while it still answers, the app
+// asks for it before every attempt to connect, and CloseProxies lets go of every port as the app goes
+// into the background, as TN2277 asks.
 package tailnet
 
 import (
@@ -57,6 +64,23 @@ var (
 type proxy struct {
 	port     int
 	listener net.Listener
+	// Closed when the proxy stops serving: its listener failed or was closed.
+	done chan struct{}
+}
+
+// alive: still serving, and a connection to its port is taken.
+func (p *proxy) alive() bool {
+	select {
+	case <-p.done:
+		return false
+	default:
+	}
+	conn, err := net.DialTimeout("tcp", fmt.Sprintf("127.0.0.1:%d", p.port), time.Second)
+	if err != nil {
+		return false
+	}
+	conn.Close()
+	return true
 }
 
 func say(fields map[string]any) {
@@ -176,7 +200,8 @@ func run(ctx context.Context, s *tsnet.Server) {
 
 // Proxy gives a loopback port that forwards HTTP and WebSocket requests to target — an engine's
 // address on the tailnet, "https://desk.tail4c2e.ts.net" or "http://jaira-desk.tail4c2e.ts.net" — dialled
-// through the node. The same target gets the same port while the app runs.
+// through the node. The same target gets the same port while that port still answers; one that does not
+// (its socket was taken back while the app was suspended, or CloseProxies let it go) is replaced.
 func Proxy(target string) (int, error) {
 	u, err := url.Parse(target)
 	if err != nil || (u.Scheme != "https" && u.Scheme != "http") || u.Host == "" {
@@ -189,7 +214,11 @@ func Proxy(target string) (int, error) {
 	}
 	key := u.Scheme + "://" + u.Host
 	if p, ok := proxies[key]; ok {
-		return p.port, nil
+		if p.alive() {
+			return p.port, nil
+		}
+		p.listener.Close()
+		delete(proxies, key)
 	}
 	s := server
 	transport := &http.Transport{
@@ -214,9 +243,25 @@ func Proxy(target string) (int, error) {
 		return 0, err
 	}
 	port := l.Addr().(*net.TCPAddr).Port
-	proxies[key] = &proxy{port: port, listener: l}
-	go func() { _ = http.Serve(l, handler) }()
+	p := &proxy{port: port, listener: l, done: make(chan struct{})}
+	proxies[key] = p
+	go func() {
+		_ = http.Serve(l, handler)
+		close(p.done)
+	}()
 	return port, nil
+}
+
+// CloseProxies lets go of every proxy's port, keeping the node: the app is going into the background,
+// where the system may take the sockets back anyway (TN2277). Connections already made are kept; the
+// next Proxy makes a new port.
+func CloseProxies() {
+	mu.Lock()
+	defer mu.Unlock()
+	for key, p := range proxies {
+		p.listener.Close()
+		delete(proxies, key)
+	}
 }
 
 // Logout signs the node out of the tailnet; the next Start asks for a sign-in again.

@@ -18,6 +18,7 @@
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
+import { connect, createServer, type Server, type Socket } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -79,6 +80,34 @@ function bridgeOf(pairing: Pairing, options: { protocol?: number } = {}): Engine
   const bridge = engineBridge({ url: pairing.url, token: pairing.token, client: "Pixel 8", version: "0.2.0", retryMs: 20, maxRetryMs: 80, ...options });
   bridges.push(bridge);
   return bridge;
+}
+
+/** A stand-in for the phone's Tailscale proxy: a loopback port forwarding to `target`, closed with its connections. */
+async function forwarder(target: number): Promise<{ port: number; close(): Promise<void> }> {
+  const open = new Set<Socket>();
+  const server: Server = createServer((inbound) => {
+    const outbound = connect(target, "127.0.0.1");
+    open.add(inbound).add(outbound);
+    inbound.pipe(outbound).pipe(inbound);
+    const end = (): void => {
+      inbound.destroy();
+      outbound.destroy();
+    };
+    inbound.on("error", end).on("close", end);
+    outbound.on("error", end).on("close", end);
+  });
+  await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
+  const at = (server.address() as { port: number }).port;
+  let closed = false;
+  return {
+    port: at,
+    close: async () => {
+      if (closed) return;
+      closed = true;
+      for (const socket of open) socket.destroy();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 /** Every state a bridge goes through from now on. */
@@ -243,6 +272,62 @@ describe("the device's bridge", { timeout: 60_000 }, () => {
     const away = bridgeOf({ ...pairing, url: "ws://127.0.0.1:9/engine" });
     await expect.poll(() => away.state().state, { timeout: 5000 }).toBe("waiting");
     await expect(away.invoke("machines:view", undefined)).rejects.toThrow(/nothing answers|did not answer|could not reach/);
+  });
+
+  // The phone after a night in the background (2026-11-06): its Tailscale proxy's port was taken back by
+  // the system, and the bridge, given that port once, said "nothing answers" until the app was restarted.
+  it("asks where to connect at every attempt, so a proxy's new port is reached", async () => {
+    const pairing = await paired();
+    const first = await forwarder(port());
+    let current = first;
+    const asked: number[] = [];
+    const phone = engineBridge({
+      url: "wss://desk.tail4c2e.ts.net/engine",
+      resolveUrl: async () => {
+        asked.push(current.port);
+        return `ws://127.0.0.1:${current.port}/engine`;
+      },
+      token: pairing.token,
+      client: "iPhone",
+      version: "0.2.0",
+      retryMs: 20,
+      maxRetryMs: 80,
+    });
+    bridges.push(phone);
+    await phone.ready;
+    const states = statesOf(phone);
+    // The system takes the port back, and the node makes a new one when asked.
+    current = await forwarder(port());
+    await first.close();
+    await expect.poll(() => states.filter((s) => s === "connected").length, { timeout: 5000 }).toBe(1);
+    expect(states[0]).toBe("waiting");
+    expect(asked).toEqual([first.port, current.port]);
+    // Named by the machine's own address, not the loopback port.
+    await current.close();
+    await expect.poll(() => phone.state(), { timeout: 5000 }).toMatchObject({ state: "waiting", reason: expect.stringContaining("desk.tail4c2e.ts.net") });
+  });
+
+  it("takes an address it could not get as a failed attempt, in its words, and tries again", async () => {
+    const pairing = await paired();
+    let running = false;
+    const phone = engineBridge({
+      url: "wss://desk.tail4c2e.ts.net/engine",
+      resolveUrl: async () => {
+        if (!running) throw new Error("Tailscale on this phone: starting…");
+        return `ws://${address()}/engine`;
+      },
+      token: pairing.token,
+      client: "iPhone",
+      version: "0.2.0",
+      retryMs: 20,
+      maxRetryMs: 80,
+    });
+    bridges.push(phone);
+    await expect.poll(() => phone.state(), { timeout: 5000 }).toEqual({ state: "waiting", reason: "Tailscale on this phone: starting…" });
+    await expect(phone.invoke("machines:view", undefined)).rejects.toThrow("Tailscale on this phone: starting…");
+    running = true;
+    await phone.ready;
+    expect(phone.state().state).toBe("connected");
   });
 
   it("says so when the machine speaks another protocol, which side to update, and stops", async () => {

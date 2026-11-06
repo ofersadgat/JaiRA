@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppState } from "react-native";
-import { hostOfUrl, type JairaBridge, type MachinesView } from "@jaira/shared/browser";
+import type { JairaBridge, MachinesView } from "@jaira/shared/browser";
 import { connectionLost, connectionRestored } from "@jaira/universal";
 import { syncCache } from "@jaira/ui/store";
 import type { SyncSources } from "@jaira/ui/syncCache";
@@ -46,8 +46,6 @@ interface Connection {
   state: LinkState;
   reason?: string | undefined;
   fleet?: ReadonlySet<string>;
-  /** Which attempt is the current one, while its address is worked out (the tailnet's proxy). */
-  attempt: number;
 }
 
 export function useFleetLinks(enabled: boolean): {
@@ -94,11 +92,11 @@ export function useFleetLinks(enabled: boolean): {
   const reach = useCallback(
     (pairing: SavedPairing): void => {
       drop(pairing.machine.id);
-      const conn: Connection = { pairing, state: "connecting", attempt: 0 };
+      const conn: Connection = { pairing, state: "connecting" };
       conns.current.set(pairing.machine.id, conn);
       update();
-      const open = (url: string): void => {
-        const mine = engineBridge({ url, token: pairing.token, client: deviceLabel(), version: CLIENT_VERSION, ...(url !== pairing.url ? { where: hostOfUrl(pairing.url) } : {}) });
+      const open = (resolveUrl?: () => Promise<string>): void => {
+        const mine = engineBridge({ url: pairing.url, token: pairing.token, client: deviceLabel(), version: CLIENT_VERSION, ...(resolveUrl !== undefined ? { resolveUrl } : {}) });
         conn.bridge = mine;
         mine.onState((state) => {
           if (conns.current.get(pairing.machine.id) !== conn || conn.bridge !== mine) return;
@@ -140,24 +138,15 @@ export function useFleetLinks(enabled: boolean): {
           }
         });
       };
-      if (pairing.tailnet !== true) return open(pairing.url);
+      if (pairing.tailnet !== true) return open();
       if (tailnet === undefined) {
         conn.state = "waiting";
         conn.reason = "this build of JaiRA has no Tailscale built in, which this pairing needs: forget this machine and pair by address";
         return update();
       }
-      const attempt = ++conn.attempt;
-      tailnetEngineUrl(tailnet, tailnetHostname(deviceLabel()), pairing.address).then(
-        (url) => {
-          if (conns.current.get(pairing.machine.id) === conn && conn.attempt === attempt) open(url);
-        },
-        (e: Error) => {
-          if (conns.current.get(pairing.machine.id) !== conn) return;
-          conn.state = "waiting";
-          conn.reason = `Tailscale on this phone did not start: ${e.message}`;
-          update();
-        },
-      );
+      // The proxy's port, asked for at every attempt: it may not have outlived the app's last suspension.
+      const node = tailnet;
+      open(() => tailnetEngineUrl(node, tailnetHostname(deviceLabel()), pairing.address));
     },
     [drop, update],
   );
