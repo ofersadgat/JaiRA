@@ -133,9 +133,6 @@ export function BoardColumn(): JSX.Element {
     [sticky],
   );
   const moved = (): void => sticky?.moved.forEach((measure) => measure());
-  // What a drilled run reads from, for `RunView`: the Files room's context, and the run's own over it.
-  const runContext = { ...useFileSurfaces(), ...useRunContext() };
-
   // A RUN is on the path, so the column shows that run — its executions as cards, or what it said.
   if (state.trail.length > 0 && state.taskFocus !== null) {
     return (
@@ -143,7 +140,7 @@ export function BoardColumn(): JSX.Element {
       // clips, and Chromium layers what is inside a clip apart from what is not — without it the run's
       // composer shared a layer with the side panel, and the conversation above it was greyscale.
       <View flex={1} minWidth={0} minHeight={0} flexDirection="column" backgroundColor={t.v("bg") as never} {...((isWeb ? { overflow: "auto" } : {}) as object)}>
-        <RunView context={runContext} />
+        <DrilledRun />
         {floats}
       </View>
     );
@@ -271,4 +268,14 @@ export function BoardColumn(): JSX.Element {
       </Scroller>
     </StickyScroll.Provider>
   );
+}
+
+/**
+ * A drilled run, for `RunView`: the Files room's context, and the run's own over it — read here, where
+ * the run is drawn, so the board does not draw again for each of the selected task's views (its
+ * conversation, sessions, records) while it shows cards.
+ */
+function DrilledRun(): JSX.Element {
+  const context = { ...useFileSurfaces(), ...useRunContext() };
+  return <RunView context={context} />;
 }

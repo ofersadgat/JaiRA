@@ -399,3 +399,21 @@ describe("sharedWith", () => {
     expect(sharedWith(null, { a: 1 })).toEqual({ a: 1 });
   });
 });
+
+describe("telling the readers", () => {
+  it("tells them once for the changes that land together, a moment after, with peek current at once", async () => {
+    const e = engine();
+    e.answerSince(() => page(10, [task("t-a")], { whole: true }));
+    const cache = new SyncCache(e.io);
+    await cache.start();
+    await new Promise((r) => setTimeout(r, 30));
+    let told = 0;
+    cache.subscribe(() => (told += 1));
+    cache.push(changed(10, page(11, [task("t-a", "one", 11)])));
+    cache.push(changed(11, page(12, [task("t-a", "two", 12)])));
+    expect(cache.task("t-a")?.title).toBe("two");
+    expect(told).toBe(0);
+    await new Promise((r) => setTimeout(r, 30));
+    expect(told).toBe(1);
+  });
+});

@@ -40,6 +40,8 @@ const arg = (name: string): string | undefined => {
 };
 const THROTTLE = Number(arg("--throttle") ?? "4");
 const NAMES = process.argv.includes("--names");
+/** The scenes whose every commit `--names` lists: `--commits open,busy`. */
+const COMMITS = (arg("--commits") ?? "").split(",");
 
 /**
  * React's devtools hook, before React loads: each commit counted, and each component the commit drew —
@@ -49,9 +51,9 @@ const NAMES = process.argv.includes("--names");
 const HOOK = `(() => {
   const PERFORMED = 1;
   const COMPONENT = new Set([0, 1, 11, 14, 15]);
-  const s = { commits: 0, rendered: 0, mounted: 0, names: {}, roots: {}, longest: 0, longTasks: 0, longTotal: 0 };
+  const s = { commits: 0, rendered: 0, mounted: 0, names: {}, roots: {}, log: [], longest: 0, longTasks: 0, longTotal: 0 };
   window.__redraws = s;
-  window.__redrawsReset = () => { s.commits = 0; s.rendered = 0; s.mounted = 0; s.names = {}; s.roots = {}; s.longest = 0; s.longTasks = 0; s.longTotal = 0; };
+  window.__redrawsReset = () => { s.commits = 0; s.rendered = 0; s.mounted = 0; s.names = {}; s.roots = {}; s.log = []; s.longest = 0; s.longTasks = 0; s.longTotal = 0; };
   const nameOf = (f) => { const t = f.type; if (!t) return "?"; if (typeof t === "string") return t; return t.displayName || t.name || (t.render && (t.render.displayName || t.render.name)) || (t.type && (t.type.displayName || t.type.name)) || "anon"; };
   const note = (f) => { const n = nameOf(f); s.names[n] = (s.names[n] || 0) + 1; };
   const mountedUnder = (top) => {
@@ -66,9 +68,11 @@ const HOOK = `(() => {
       const prev = f.alternate;
       if (prev === null) { mountedUnder(f); continue; }
       const drew = COMPONENT.has(f.tag) && (f.flags & PERFORMED) !== 0;
-      if (drew) { s.rendered++; note(f); if (!under) { const n = nameOf(f); s.roots[n] = (s.roots[n] || 0) + 1; } }
+      if (drew) { s.rendered++; note(f); if (!under) { const n = nameOf(f); s.roots[n] = (s.roots[n] || 0) + 1; s.from.push(n); } }
       if (f.child === prev.child) continue;
-      for (let c = f.child; c; c = c.sibling) stack.push([c, under || drew]);
+      // Under a component that skipped its draw (a memo), a draw started on its own.
+      const below = COMPONENT.has(f.tag) ? drew : under;
+      for (let c = f.child; c; c = c.sibling) stack.push([c, below]);
     }
   };
   let id = 0;
@@ -76,7 +80,13 @@ const HOOK = `(() => {
     supportsFiber: true, isDisabled: false, renderers: new Map(),
     inject(r) { id += 1; this.renderers.set(id, r); return id; },
     checkDCE() {}, onScheduleFiberRoot() {}, onCommitFiberUnmount() {}, onPostCommitFiberRoot() {},
-    onCommitFiberRoot(_id, root) { s.commits++; try { walk(root.current); } catch (e) { s.error = String(e); } },
+    onCommitFiberRoot(_id, root) {
+      s.commits++;
+      const r0 = s.rendered, m0 = s.mounted;
+      s.from = [];
+      try { walk(root.current); } catch (e) { s.error = String(e); }
+      if (s.log.length < 200) s.log.push({ t: Math.round(performance.now() - window.__tapAt), rendered: s.rendered - r0, mounted: s.mounted - m0, from: s.from.slice(0, 10) });
+    },
   };
   try {
     new PerformanceObserver((list) => { for (const e of list.getEntries()) { s.longTasks++; s.longTotal += e.duration; s.longest = Math.max(s.longest, e.duration); } }).observe({ type: "longtask" });
@@ -97,6 +107,7 @@ interface Stats {
   mounted: number;
   names: Record<string, number>;
   roots: Record<string, number>;
+  log: Array<{ t: number; rendered: number; mounted: number; from: string[] }>;
   longest: number;
   longTasks: number;
   longTotal: number;
@@ -180,6 +191,7 @@ async function main(): Promise<void> {
           .join(", ");
         console.log(`           most drawn: ${top}`);
         console.log(`           drawn from: ${roots}`);
+        if (COMMITS.includes(scene)) for (const c of s.log) if (c.rendered + c.mounted > 20) console.log(`             +${c.t} ms: ${c.rendered} drawn, ${c.mounted} mounted, from ${c.from.join(", ")}`);
       }
     };
     const tapLabel = async (label: string): Promise<void> => {

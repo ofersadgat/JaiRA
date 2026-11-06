@@ -661,8 +661,22 @@ export class SyncCache {
     for (const [key] of unheld.slice(KEEP_UNHELD)) this.entries.delete(key);
   }
 
+  /**
+   * A change, told to the readers a moment later, with whatever else lands in that moment: the answers
+   * that queue up while the window is busy drawing are drawn once, not once each (2026-11-06: a task
+   * opened on the phone drew its panel again for each of its views, ~150 ms apart). What `peek` answers
+   * is current at once; only the redraw waits.
+   */
   private bump(): void {
     this.version += 1;
-    for (const listener of [...this.listeners]) listener();
+    if (this.telling !== undefined) return;
+    this.telling = setTimeout(() => {
+      this.telling = undefined;
+      for (const listener of [...this.listeners]) listener();
+    }, TELL_AFTER_MS);
   }
+  private telling: ReturnType<typeof setTimeout> | undefined;
 }
+
+/** How long a change waits for the ones after it before the readers are told: about a frame. */
+const TELL_AFTER_MS = 16;

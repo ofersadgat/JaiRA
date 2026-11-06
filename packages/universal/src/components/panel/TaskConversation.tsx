@@ -1,4 +1,4 @@
-import { useState, type JSX } from "react";
+import { useMemo, useSyncExternalStore, type JSX } from "react";
 import type { InstanceNode, PendingInteraction, TaskDetail } from "@jaira/shared/browser";
 import { hasAsking } from "@jaira/ui/stateSurfaceModel";
 import { RunConversation } from "../run/RunConversation";
@@ -35,8 +35,11 @@ export function TaskConversation({
 }): JSX.Element {
   const hosted = gate !== undefined && detail.instances.some((node) => hasAsking(node));
   // The gate at the foot is at most 55% of the conversation's height. It stands in the box under the
-  // scroller, where a percentage has nothing to resolve against, so the height is measured and handed down.
-  const [height, setHeight] = useState<number | undefined>(undefined);
+  // scroller, where a percentage has nothing to resolve against, so the height is measured and handed
+  // down — to the gate alone: kept as this component's state, every new height (a sheet being dragged)
+  // drew the whole conversation again.
+  const height = useMemo(() => measured(), []);
+  const footed = gate !== undefined && !hosted;
   return (
     <RunConversation
       detail={detail}
@@ -50,8 +53,38 @@ export function TaskConversation({
       onRerun={onRerun}
       onResume={onResume}
       onOpenSidechain={onOpenSidechain}
-      onLayout={setHeight}
-      foot={gate !== undefined && !hosted ? <InlineGate pending={gate} onGate={onGate} services={source.gateServices} {...(height !== undefined ? { maxHeight: height * 0.55 } : {})} /> : null}
+      {...(footed ? { onLayout: height.set } : {})}
+      foot={footed ? <FootGate height={height} pending={gate} onGate={onGate} services={source.gateServices} /> : null}
     />
   );
+}
+
+/** A measured height, and who to tell when it moves. */
+interface Measured {
+  get: () => number | undefined;
+  set: (height: number) => void;
+  subscribe: (listener: () => void) => () => void;
+}
+
+function measured(): Measured {
+  let height: number | undefined;
+  const listeners = new Set<() => void>();
+  return {
+    get: () => height,
+    set: (next) => {
+      if (next === height) return;
+      height = next;
+      for (const listener of [...listeners]) listener();
+    },
+    subscribe: (listener) => {
+      listeners.add(listener);
+      return () => void listeners.delete(listener);
+    },
+  };
+}
+
+/** The gate at the foot, at most 55% of the conversation's measured height. */
+function FootGate({ height, pending, onGate, services }: { height: Measured; pending: PendingInteraction; onGate: (value: unknown) => void; services: TranscriptSource["gateServices"] }): JSX.Element {
+  const tall = useSyncExternalStore(height.subscribe, height.get, height.get);
+  return <InlineGate pending={pending} onGate={onGate} services={services} {...(tall !== undefined ? { maxHeight: tall * 0.55 } : {})} />;
 }
