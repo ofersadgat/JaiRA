@@ -4,7 +4,7 @@
  */
 import { describe, expect, it } from "vitest";
 import type { ProjectTask, PushMessage, SyncPage } from "@jaira/shared";
-import { SyncCache, type SyncIo } from "../src/renderer/syncCache";
+import { SyncCache, sharedWith, type SyncIo } from "../src/renderer/syncCache";
 
 const task = (taskId: string, title = taskId, updatedAt = 1): ProjectTask =>
   ({ taskId, title, status: "completed", workflow: "chat/session", createdAt: "", updatedAt, project: "/p" }) as ProjectTask;
@@ -358,5 +358,44 @@ describe("keys", () => {
     await settle();
     expect(cache.peek("board:roots", { project: "/a" }).value).toEqual({ channel: "board:roots", project: "/a" });
     expect(cache.peek("board:roots", { project: "/b" }).value).toEqual({ channel: "board:roots", project: "/b" });
+  });
+});
+
+describe("a view read again", () => {
+  it("keeps its object when the engine answers the same, and each part that did not move when it answers otherwise", async () => {
+    let answer: unknown = { title: "a", turns: [{ id: 1, text: "hello" }, { id: 2, text: "there" }], meta: { n: 1 } };
+    const e = engine(() => structuredClone(answer));
+    const cache = new SyncCache(e.io);
+    cache.acquire("task:detail", { taskId: "t-a" });
+    await settle();
+    const first = cache.peek("task:detail", { taskId: "t-a" }).value as unknown as { turns: unknown[]; meta: unknown };
+    expect(first).toEqual(answer);
+
+    await cache.refresh("task:detail", { taskId: "t-a" });
+    expect(cache.peek("task:detail", { taskId: "t-a" }).value).toBe(first);
+
+    answer = { title: "a", turns: [{ id: 1, text: "hello" }, { id: 2, text: "there!" }], meta: { n: 1 } };
+    await cache.refresh("task:detail", { taskId: "t-a" });
+    const second = cache.peek("task:detail", { taskId: "t-a" }).value as unknown as { turns: unknown[]; meta: unknown };
+    expect(second).not.toBe(first);
+    expect(second).toEqual(answer);
+    expect(second.turns[0]).toBe(first.turns[0]);
+    expect(second.turns[1]).not.toBe(first.turns[1]);
+    expect(second.meta).toBe(first.meta);
+  });
+});
+
+describe("sharedWith", () => {
+  it("answers the old value when equal, the new one where it differs, and old parts where they match", () => {
+    const was = { a: [1, { b: 2 }], c: "x" };
+    expect(sharedWith(was, { a: [1, { b: 2 }], c: "x" })).toBe(was);
+    const grown = sharedWith(was, { a: [1, { b: 2 }, 3], c: "x" }) as typeof was;
+    expect(grown).toEqual({ a: [1, { b: 2 }, 3], c: "x" });
+    expect(grown.a[1]).toBe(was.a[1]);
+    const fewer = sharedWith(was, { a: [1, { b: 2 }] }) as Record<string, unknown>;
+    expect(fewer).toEqual({ a: [1, { b: 2 }] });
+    expect(fewer["a"]).toBe(was.a);
+    expect(sharedWith([1], { 0: 1 })).toEqual({ 0: 1 });
+    expect(sharedWith(null, { a: 1 })).toEqual({ a: 1 });
   });
 });

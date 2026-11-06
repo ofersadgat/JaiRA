@@ -58,6 +58,37 @@ export interface SyncOptions {
 /** The one engine of a cache without {@link SyncSources}. */
 const LOCAL = "";
 
+/**
+ * `next`, with each part deep-equal to the same part of `was` taken from `was` — `was` itself when the two
+ * are equal. JSON values: plain objects, arrays and primitives.
+ */
+export function sharedWith(was: unknown, next: unknown): unknown {
+  if (was === next) return was;
+  if (was === null || next === null || typeof was !== "object" || typeof next !== "object") return next;
+  if (Array.isArray(was) !== Array.isArray(next)) return next;
+  if (Array.isArray(next)) {
+    const before = was as unknown[];
+    let same = before.length === next.length;
+    const out = next.map((item, i) => {
+      const kept = i < before.length ? sharedWith(before[i], item) : item;
+      if (kept !== before[i]) same = false;
+      return kept;
+    });
+    return same ? was : out;
+  }
+  const before = was as Record<string, unknown>;
+  const after = next as Record<string, unknown>;
+  const keys = Object.keys(after);
+  let same = keys.length === Object.keys(before).length;
+  const out: Record<string, unknown> = {};
+  for (const key of keys) {
+    const kept = key in before ? sharedWith(before[key], after[key]) : after[key];
+    if (kept !== before[key] || !(key in before)) same = false;
+    out[key] = kept;
+  }
+  return same ? was : out;
+}
+
 /** One view, as a reader sees it. */
 export interface Held<T> {
   value: T | undefined;
@@ -588,13 +619,17 @@ export class SyncCache {
           entry.again = false;
           const asked = ++this.reads;
           try {
-            const value = await this.io.invoke(entry.channel, entry.request as never);
+            const answered = await this.io.invoke(entry.channel, entry.request as never);
             if (asked >= entry.at) {
+              // What did not move keeps its object, the whole answer included when nothing did: a reader
+              // compares by identity, and redraws only what moved.
+              const value = sharedWith(entry.value, answered);
+              const moved = value !== entry.value || entry.mirrored;
               entry.value = value;
               entry.error = undefined;
               entry.at = asked;
               entry.mirrored = false;
-              this.mirror?.keepView(key, value);
+              if (moved) this.mirror?.keepView(key, value);
             }
           } catch (e) {
             // A view shown from the mirror stays shown while no engine can answer for it.

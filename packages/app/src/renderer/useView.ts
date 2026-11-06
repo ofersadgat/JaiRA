@@ -5,7 +5,7 @@
  * `still` holds it without re-reading on changes — a transcript while its turn streams, which the live
  * tail is drawing — and it is read as soon as it is held live again.
  */
-import { useEffect, useId, useMemo, useSyncExternalStore } from "react";
+import { useEffect, useId, useMemo, useRef, useSyncExternalStore } from "react";
 import { lazyHashes, withLazyFilled, type IpcChannel, type IpcRequest, type IpcResponse } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { syncCache } from "./store";
@@ -43,13 +43,16 @@ export function useViews<C extends IpcChannel>(channel: C, requests: ReadonlyArr
     return () => store.hold(owner, []);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [store, owner, keys, still]);
-  const version = useSyncExternalStore(
-    (listener) => store.subscribe(listener),
-    () => store.version,
-    () => store.version,
-  );
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  return useMemo(() => requests.map((request) => store.peek(channel, request)), [store, keys, version]);
+  // The same array until one of them moves — not whenever anything in the cache does.
+  const last = useRef<Array<Held<IpcResponse<C>>>>([]);
+  const snapshot = (): Array<Held<IpcResponse<C>>> => {
+    const next = requests.map((request) => store.peek(channel, request));
+    const was = last.current;
+    if (was.length === next.length && next.every((held, i) => held === was[i])) return was;
+    last.current = next;
+    return next;
+  };
+  return useSyncExternalStore((listener) => store.subscribe(listener), snapshot, snapshot);
 }
 
 /**

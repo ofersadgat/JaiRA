@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, type JSX } from "react";
+import { memo, useEffect, useMemo, useRef, type JSX } from "react";
 import { useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { SHARED_SESSION } from "@jaira/shared/browser";
@@ -34,7 +34,7 @@ import { GalleryView } from "./GalleryView";
 import { LogsView } from "./LogsView";
 import { PanelColumn } from "./PanelColumn";
 import { SettingsView } from "./SettingsView";
-import { AppContext, useShell } from "./shell";
+import { AppContext, useShell, useShellHub } from "./shell";
 import { useColumnsFit } from "./columnsFit";
 import { PhoneContext } from "./phone";
 import { PhoneFrame, RemoteLine } from "./PhoneFrame";
@@ -104,9 +104,12 @@ export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.E
     };
   }, [actions]);
   const appearance = useMemo(() => (phone ? { ...model.appearance, overrides: phoneTypography(model.appearance.overrides) } : model.appearance), [phone, model.appearance]);
+  // The regions read the store from the hub, each drawn again only when what it read moves (`shell.ts`):
+  // this component draws on every change, so what it holds is kept from drawing with it (`Body`, `Floats`).
+  const hub = useShellHub(model);
   return (
     <PhoneContext.Provider value={layout}>
-    <AppContext.Provider value={model}>
+    <AppContext.Provider value={hub}>
       <ValuePanelContext.Provider value={valuePanel}>
         <MessageTypeContext.Provider value={messageTypes}>
           <WorkLookContext.Provider value={workLook}>
@@ -114,13 +117,12 @@ export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.E
               <TokenRoot {...appearance}>
                 <CrashBoundary>
                   <TouchRoot>
-                    {layout ? <PhoneFrame /> : <Frame />}
+                    <Body layout={layout} />
                   </TouchRoot>
                 </CrashBoundary>
                 {/* Outside the boundary: a report about a failure must not go down with what it
                     reports. After the frame, so a phone draws them over it. */}
-                <Disconnected />
-                <LooseErrorBanner />
+                <Floats />
               </TokenRoot>
             </ReadOnlyJudgeContext.Provider>
           </WorkLookContext.Provider>
@@ -130,6 +132,20 @@ export function UniversalApp({ phone = false }: { phone?: boolean } = {}): JSX.E
     </PhoneContext.Provider>
   );
 }
+
+/** The frame for this layout — drawn when its regions' own readings move, not with `UniversalApp`. */
+const Body = memo(function Body({ layout }: { layout: boolean }): JSX.Element {
+  return layout ? <PhoneFrame /> : <Frame />;
+});
+
+const Floats = memo(function Floats(): JSX.Element {
+  return (
+    <>
+      <Disconnected />
+      <LooseErrorBanner />
+    </>
+  );
+});
 
 /**
  * The frame: the sidebar, its splitter, and the body — a row the height of the window. The body is the

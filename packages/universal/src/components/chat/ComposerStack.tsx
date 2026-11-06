@@ -1,4 +1,4 @@
-import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
+import { useMemo, useState, type JSX, type ReactNode } from "react";
 import { View as RNView, useWindowDimensions } from "react-native";
 import { View } from "@tamagui/core";
 import type { PermissionSetTree, PermissionSetTreeRequest, PermissionSetTreeSet, ToolChoice, WritableLayer } from "@jaira/shared/browser";
@@ -37,7 +37,7 @@ import type { Schema } from "@jaira/ui/schemaForm/types";
 import { useView } from "@jaira/ui/useView";
 import { NO_STACK, Press, Txt, edge } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { AppContext } from "../../app/shell";
+import { useShellOrNull, type AppModel } from "../../app/shell";
 import { usePhone } from "../../app/phone";
 import { MenuLayer } from "../MenuLayer";
 import { Float } from "../floats/Float";
@@ -641,7 +641,7 @@ function TreeRowView({ row, onPress }: { row: TreeRow; onPress: () => void }): J
 /** The browser's foot: `open in Settings` pushed left, then the close button and whatever verbs it is handed. */
 function BrowserFoot({ host, onClose, close, children }: { host: StackCardHost; onClose: () => void; close: string; children?: ReactNode }): JSX.Element {
   const t = useTokens();
-  const app = useContext(AppContext);
+  const app = useShellOrNull();
   return (
     <View flexDirection="row" flexWrap="wrap" alignItems="center" justifyContent="flex-end" gap={8} paddingTop={7} paddingHorizontal={9} paddingBottom={9} {...(edge(t, { top: 1 }, "panel-2") as object)}>
       {app !== null ? (
@@ -687,7 +687,7 @@ function StackTag(): JSX.Element {
 }
 
 /** Settings → Tools, on the layer this window stands on. */
-function openSettingsTools(app: NonNullable<React.ContextType<typeof AppContext>>, project: string | undefined): void {
+function openSettingsTools(app: AppModel, project: string | undefined): void {
   app.actions.setConfigLayer(project !== undefined ? "project" : "base");
   app.actions.setSection("tools");
   app.actions.setView("settings");
@@ -695,13 +695,13 @@ function openSettingsTools(app: NonNullable<React.ContextType<typeof AppContext>
 
 /** Settings → Tools, for a caller outside the card (`edit a copy`). */
 export function useOpenSettingsTools(project: string | undefined): (() => void) | undefined {
-  const app = useContext(AppContext);
+  const app = useShellOrNull();
   return app === null ? undefined : () => openSettingsTools(app, project);
 }
 
 /** The remembered look of a layer's card (ruling 11): the window's UI state, else this composer's own. */
 export function useBrowserMode(): [BrowserMode, (next: BrowserMode) => void] {
-  const app = useContext(AppContext);
+  const app = useShellOrNull();
   const [own, setOwn] = useState<BrowserMode>("compact");
   if (app === null) return [own, setOwn];
   return [browserModeOf(app.state.settings.ui), (next) => app.actions.setMode(STACK_BROWSER_MODE, BROWSER_MODES.includes(next) ? next : "compact")];

@@ -1109,10 +1109,13 @@ function placeViewsOf(store: SyncCache, raw: AppState, previous: PlaceViews | un
   let boards: Record<string, BoardView | null> = Object.fromEntries(projects.map((p) => [p.project, peekBoard(p.project, raw.levels[p.project] ?? null)]));
   const was = previous?.boards;
   if (was !== undefined && Object.keys(was).length === Object.keys(boards).length && Object.entries(boards).every(([k, v]) => was[k] === v)) boards = was;
+  // A list the index's move left as it was keeps its array, so what lists it is not drawn again.
+  const kept = <T,>(was: readonly T[] | undefined, next: T[]): T[] => (was !== undefined && was.length === next.length && next.every((item, i) => item === was[i]) ? (was as T[]) : next);
+  const producing = answeringIn(all);
   return {
-    tasks: raw.at === null ? NO_TASKS : filterIndex(all, `at ${raw.at}`, (t) => t.project === raw.at),
-    sharedTasks: shared === undefined ? NO_TASKS : filterIndex(all, `shared ${shared}`, (t) => t.project === shared),
-    allConversations: filterIndex(all, "conversations", listedConversation),
+    tasks: kept(previous?.tasks, raw.at === null ? NO_TASKS : filterIndex(all, `at ${raw.at}`, (t) => t.project === raw.at)),
+    sharedTasks: kept(previous?.sharedTasks, shared === undefined ? NO_TASKS : filterIndex(all, `shared ${shared}`, (t) => t.project === shared)),
+    allConversations: kept(previous?.allConversations, filterIndex(all, "conversations", listedConversation)),
     projects,
     boards,
     board: peekBoard(raw.at, raw.level),
@@ -1122,10 +1125,17 @@ function placeViewsOf(store: SyncCache, raw: AppState, previous: PlaceViews | un
     approvals: store.peek("approval:pending", undefined).value ?? NO_APPROVALS,
     questions: store.peek("question:pending", undefined).value ?? NO_QUESTIONS,
     userEvents: store.peek("userEvent:pending", undefined).value ?? NO_USER_EVENTS,
-    producing: answeringIn(all),
+    producing: previous !== undefined && sameFields(previous.producing, producing) ? previous.producing : producing,
   };
 }
 const NO_QUEUE: QueuedPlacement[] = [];
+
+/** Whether two objects hold the same values, field by field. */
+function sameFields<T extends object>(a: T, b: T): boolean {
+  const ka = Object.keys(a);
+  if (ka.length !== Object.keys(b).length) return false;
+  return ka.every((k) => (a as Record<string, unknown>)[k] === (b as Record<string, unknown>)[k]);
+}
 const NO_PENDING: PendingInteraction[] = [];
 const NO_APPROVALS: PendingApproval[] = [];
 const NO_QUESTIONS: PendingQuestion[] = [];
@@ -1181,21 +1191,28 @@ export function useApp() {
    * one task's data under another. Every reader in this file reads them through {@link cur}.
    */
   const store = syncCache();
-  const storeVersion = useSyncExternalStore(
-    useCallback((listener: () => void) => store.subscribe(listener), [store]),
-    () => store.version,
-    () => store.version,
-  );
   const viewsMemo = useRef<{ raw: AppState; version: number; views: SelectedViews & PlaceViews } | null>(null);
+  /**
+   * The views, the same object until one of them moves: a read starting or ending, or answering what it
+   * answered before, is no change to draw — the cache's `version` moves for each, and the window drew
+   * everything again for each (2026-11-06: ~1,600 components per change on the phone).
+   */
   const selectedViews = useCallback(
     (raw: AppState): SelectedViews & PlaceViews => {
       const memo = viewsMemo.current;
       if (memo !== null && memo.raw === raw && memo.version === store.version) return memo.views;
-      const views = { ...selectedViewsOf(store, raw, memo?.views), ...placeViewsOf(store, raw, memo?.views) };
+      let views: SelectedViews & PlaceViews = { ...selectedViewsOf(store, raw, memo?.views), ...placeViewsOf(store, raw, memo?.views) };
+      if (memo !== null && sameFields(memo.views, views)) views = memo.views;
       viewsMemo.current = { raw, version: store.version, views };
       return views;
     },
     [store],
+  );
+  // Drawn again when the views move; what is drawn is read for `state` below.
+  useSyncExternalStore(
+    useCallback((listener: () => void) => store.subscribe(listener), [store]),
+    () => selectedViews(ref.current),
+    () => selectedViews(ref.current),
   );
   /** What is true now, the cache's views of the selected task included. */
   const cur = useCallback((): AppState => ({ ...ref.current, ...selectedViews(ref.current) }), [selectedViews]);
@@ -4961,6 +4978,7 @@ export function useApp() {
   const actionsRef = useRef(actions);
   actionsRef.current = actions;
 
-  const shown = useMemo(() => ({ ...state, ...selectedViews(state) }), [state, storeVersion, selectedViews]);
+  const views = selectedViews(state);
+  const shown = useMemo(() => ({ ...state, ...views }), [state, views]);
   return { state: shown, actions, appearance };
 }
