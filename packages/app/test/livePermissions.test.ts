@@ -20,7 +20,7 @@ import { shippedLayer, testHome } from "@jaira/testing";
 import { AppService } from "@jaira/service";
 import { CHAT_SESSION, titleOf } from "../src/renderer/chatWorkflow";
 
-const SHIPPED = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "shared", "builtin", "permission-sets", "chat");
+const SHIPPED = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "shared", "builtin", "permission-sets");
 const preset = (name: string): PermissionSetDecl => JSON.parse(readFileSync(join(SHIPPED, `${name}.json`), "utf8")) as PermissionSetDecl;
 
 let dir: string;
@@ -112,12 +112,12 @@ describe("a permission set picked while the conversation answers", () => {
     const stacks: unknown[] = [];
     onPush = (m) => {
       if (stacks.length > 0 || m.type !== "engine:event" || m.taskId !== taskId || (m.event as { type?: string }).type !== "operation.started") return;
-      service.changeChatSettings({ taskId, overrides: { permissionSet: { layers: ["$/permission-sets/chat/full"], web_search: "unavailable" } as never } });
+      service.changeChatSettings({ taskId, overrides: { permissionSet: { layers: ["$/permission-sets/full"], web_search: "unavailable" } as never } });
       const sessions = (service as never as { sessions: Map<string, { livePermissions: Map<string, Set<{ stack?: { layers: Array<{ id: string }> } }>> }> }).sessions;
       stacks.push(...[...([...sessions.values()][0]!.livePermissions.get(taskId) ?? [])].map((cell) => cell.stack?.layers.map((layer) => layer.id)));
     };
-    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", overrides: { permissionSet: { layers: ["$/permission-sets/chat/auto"] } as never }, fake: [{ output: "second answer" }] });
-    expect(stacks).toEqual([["chat/full", "tools"]]);
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", overrides: { permissionSet: { layers: ["$/permission-sets/auto"] } as never }, fake: [{ output: "second answer" }] });
+    expect(stacks).toEqual([["full", "tools"]]);
   });
 
   it("changes nothing in flight when nothing is answering — the next message carries the composer's settings", async () => {

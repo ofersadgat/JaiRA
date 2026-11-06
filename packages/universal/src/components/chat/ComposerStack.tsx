@@ -2,6 +2,7 @@ import { useContext, useMemo, useState, type JSX, type ReactNode } from "react";
 import { View as RNView, useWindowDimensions } from "react-native";
 import { View } from "@tamagui/core";
 import type { PermissionSetTree, PermissionSetTreeRequest, PermissionSetTreeSet, ToolChoice, WritableLayer } from "@jaira/shared/browser";
+import { permissionSetIdAt } from "@jaira/shared/browser";
 import {
   BROWSER_MODES,
   STACK_BROWSER_MODE,
@@ -1036,7 +1037,7 @@ export function SaveStack({ bucket, layers, onSave }: { bucket: string; layers: 
     void onSave(name, layer).then(
       () => {
         setSaving(false);
-        setSaved(`${bucket}/${name}`);
+        setSaved(permissionSetIdAt(bucket, name));
         setDraft({});
         setAt(null);
       },
@@ -1051,7 +1052,7 @@ export function SaveStack({ bucket, layers, onSave }: { bucket: string; layers: 
       <Press
         onPress={() => (at !== null ? setAt(null) : measure(setAt))}
         disabled={!ready}
-        title={ready ? `Save this stack as a permission set in ${bucket}: its layers, and this conversation's lines` : "There is nowhere to save a set here"}
+        title={ready ? `Save this stack as a permission set ${bucket === "" ? "at the top level" : `in ${bucket}`}: its layers, and this conversation's lines` : "There is nowhere to save a set here"}
         paddingHorizontal={7}
         borderRadius={999}
         opacity={ready ? 1 : 0.45}

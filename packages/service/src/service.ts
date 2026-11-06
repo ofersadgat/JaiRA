@@ -530,7 +530,10 @@ import {
   matchPermissionSet,
   parsePermissionSet,
   TOOL_SPECS,
-  permissionSetBucketProblem,
+  permissionSetPlaceProblem,
+  permissionSetIdAt,
+  isPermissionSetId,
+  bucketOfSetId,
   permissionSetLabel,
   permissionSetNameProblem,
   permissionSetOfSettings,
@@ -1327,7 +1330,7 @@ function approvalLayersOf(paths: JairaPaths, parts: CommandApproval, standing: R
   const layers: ApprovalLayer[] = (parts.stack ?? []).map((id): ApprovalLayer => {
     if (id === RUNTIME_LAYER) return { id, scope: "runtime", targets: [], unwritable: "This task's own answers — answer For this run to add to it." };
     if (id === TOOLS_LAYER) return { id, scope: "this conversation", targets: [], unwritable: "This conversation's own lines — change them in the composer's Tools card." };
-    const setId = permissionSetIdOf(`$/permission-sets/${id}`);
+    const setId = isPermissionSetId(id) ? id : undefined;
     if (setId === undefined || setId !== id) return { id, scope: "this state", targets: [], unwritable: "These lines are written on the state itself, so there is no permission set file to add a line to." };
     const { scope } = info({ id, decl: {}, reference: `$/permission-sets/${id}`, role: "named" });
     const found = approvalPermissionSetOf(paths, `$/permission-sets/${id}`);
@@ -1335,8 +1338,8 @@ function approvalLayersOf(paths: JairaPaths, parts: CommandApproval, standing: R
     return { id, scope, targets: found.targets, ...(found.unwritable !== undefined ? { unwritable: found.unwritable } : {}), ...(ships ? { everyone: true as const } : {}) };
   });
   const writable = (layer: ApprovalLayer | undefined): boolean => layer !== undefined && layer.targets.length > 0;
-  const bottom = [...(parts.stack ?? [])].reverse().find((id) => permissionSetIdOf(`$/permission-sets/${id}`) === id);
-  const bucket = bottom !== undefined && bottom.lastIndexOf("/") > 0 ? bottom.slice(0, bottom.lastIndexOf("/")) : undefined;
+  const bottom = [...(parts.stack ?? [])].reverse().find((id) => isPermissionSetId(id));
+  const bucket = bottom !== undefined ? bucketOfSetId(bottom) : undefined;
   const standingIds = new Set((bucket !== undefined ? (standing[bucket] ?? []) : []).map((reference) => permissionSetIdOf(reference)).filter((id): id is string => id !== undefined));
   const asked = parts.permissionSet !== undefined ? permissionSetIdOf(parts.permissionSet) : undefined;
   const pick =
@@ -9654,7 +9657,7 @@ export class AppService {
     if (layer !== undefined && !(parts.stack ?? []).includes(layer)) throw this.refusal("file", `'${layer}' is not a layer of the stack this call was judged under`);
     if (layer === RUNTIME_LAYER) throw this.refusal("file", "the runtime layer is this task's answers — answer For this run to add to it");
     if (layer === TOOLS_LAYER) throw this.refusal("file", "the tools layer is this conversation's own lines — change them in the composer's Tools card");
-    const reference = layer !== undefined ? (permissionSetIdOf(`$/permission-sets/${layer}`) === layer ? `$/permission-sets/${layer}` : layer) : parts.permissionSet;
+    const reference = layer !== undefined ? (isPermissionSetId(layer) ? `$/permission-sets/${layer}` : layer) : parts.permissionSet;
     const widths = chosenWidths(parts, remember ?? []);
     const plain = entriesToRemember(parts, decision, (part) => part.widths.find((w) => widths.includes(w)));
     // At a PLACE the answer joins the line as that place (`"npm run build": { "packages": "deny" }`);
@@ -12719,19 +12722,19 @@ export class AppService {
    */
   savePermissionSet(request: SavePermissionSetRequest): PermissionSetChoice {
     this.writable(request.layer);
-    const problem = permissionSetBucketProblem(request.bucket) ?? permissionSetNameProblem(request.name);
+    const problem = permissionSetPlaceProblem(request.bucket, request.name);
     if (problem !== undefined) throw this.refusal("file", problem);
     const parsed = parsePermissionSet(request.permissionSet);
     const broken = parsed.issues.find((issue) => issue.severity === "error");
     if (broken !== undefined) throw this.refusal("file", `that is not a permission set — ${broken.message}`);
     // `writeFile` takes the FILES VIEW's address — relative to the checkout for a project, so the
     // layer's own prefix (`.jaira`, measured rather than assumed) goes in front; see `treeFile`.
-    const layered = `permission-sets/${request.bucket}/${request.name}.json`;
+    const layered = `permission-sets/${permissionSetIdAt(request.bucket, request.name)}.json`;
     const paths = request.layer === "project" ? this.requireProject(request.project).paths : undefined;
     const prefix = paths === undefined ? "" : relative(paths.projectDir, paths.jairaDir).split(sep).join("/");
     const path = prefix.length === 0 ? layered : `${prefix}/${layered}`;
     if (existsSync(this.treeFile(path, request.layer, request.project))) {
-      throw this.refusal("file", `'${request.bucket}/${request.name}' already exists there — pick another name`);
+      throw this.refusal("file", `'${permissionSetIdAt(request.bucket, request.name)}' already exists there — pick another name`);
     }
     this.writeFile({
       layer: request.layer,
@@ -12739,7 +12742,7 @@ export class AppService {
       text: `${JSON.stringify(request.permissionSet, null, 2)}\n`,
       ...(request.project !== undefined ? { project: request.project } : {}),
     });
-    return { id: `${request.bucket}/${request.name}`, bucket: request.bucket, name: request.name, layer: request.layer, decl: request.permissionSet };
+    return { id: permissionSetIdAt(request.bucket, request.name), bucket: request.bucket, name: request.name, layer: request.layer, decl: request.permissionSet };
   }
 
   /**
@@ -12840,7 +12843,7 @@ export class AppService {
    */
   savePermissionStack(request: SavePermissionStackRequest): PermissionSetTreeSet {
     this.writable(request.layer);
-    const problem = permissionSetBucketProblem(request.bucket) ?? permissionSetNameProblem(request.name);
+    const problem = permissionSetPlaceProblem(request.bucket, request.name);
     if (problem !== undefined) throw this.refusal("file", problem);
     const { [PERMISSION_SET_LAYERS_KEY]: named, ...lines } = request.permissionSet;
     if (named !== undefined && (!Array.isArray(named) || !named.every((each) => typeof each === "string"))) {
@@ -12854,12 +12857,12 @@ export class AppService {
     if (permissionStackOf(doc, this.permissionSetReaderOf(paths), "", issues, {}) === undefined || issues.some((issue) => issue.severity === "error")) {
       throw this.refusal("file", `that stack cannot be read — ${issues.find((issue) => issue.severity === "error")?.message ?? "a layer it names cannot be followed"}`);
     }
-    const layered = `permission-sets/${request.bucket}/${request.name}.json`;
+    const layered = `permission-sets/${permissionSetIdAt(request.bucket, request.name)}.json`;
     const projectPaths = request.layer === "project" ? this.requireProject(request.project).paths : undefined;
     const prefix = projectPaths === undefined ? "" : relative(projectPaths.projectDir, projectPaths.jairaDir).split(sep).join("/");
     const path = prefix.length === 0 ? layered : `${prefix}/${layered}`;
     if (existsSync(this.treeFile(path, request.layer, request.project))) {
-      throw this.refusal("file", `'${request.bucket}/${request.name}' already exists there — pick another name`);
+      throw this.refusal("file", `'${permissionSetIdAt(request.bucket, request.name)}' already exists there — pick another name`);
     }
     this.writeFile({
       layer: request.layer,
@@ -12868,7 +12871,7 @@ export class AppService {
       ...(request.project !== undefined ? { project: request.project } : {}),
     });
     const token = request.layer === "project" ? "$JAIRA" : "$BASE";
-    return readOwnPermissionSet(paths, `${token}/permission-sets/${request.bucket}/${request.name}`).set;
+    return readOwnPermissionSet(paths, `${token}/permission-sets/${permissionSetIdAt(request.bucket, request.name)}`).set;
   }
 
   /**
@@ -12899,10 +12902,10 @@ export class AppService {
   }
 
   /**
-   * Which of these calls the project's `chat/read-only` lets through with nobody asked, by call id —
+   * Which of these calls the project's `read-only` lets through with nobody asked, by call id —
    * `null` for a call no permission set holds (`allowsCall`). What the work summary calls a CHANGE is a
    * call it does not let through (`workSummary.ts`), so this is read through every layer, the way a
-   * state naming `$/permission-sets/chat/read-only` would read it: a project that adds `make check` to
+   * state naming `$/permission-sets/read-only` would read it: a project that adds `make check` to
    * its read-only set sees `make check` counted as checking, not changing.
    */
   judgeReadOnly(request: JudgeReadOnlyRequest): Record<string, boolean | null> {
@@ -13453,7 +13456,7 @@ export class AppService {
    */
   /**
    * What a task changed, from its own record of calls and its subtasks' — the Changes tab. Each call
-   * is judged by the project's `chat/read-only` permission set, as `judgeReadOnly` judges it for the
+   * is judged by the project's `read-only` permission set, as `judgeReadOnly` judges it for the
    * work summary, and a shell line part by part too; `changeLogOf` groups what did not pass.
    */
   taskChanges(request: TaskChangesRequest): TaskChangeLog {

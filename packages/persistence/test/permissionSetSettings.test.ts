@@ -41,7 +41,7 @@ beforeEach(() => {
   setBuiltInDir(builtIn);
   initProject(projectDir, home);
   paths = jairaPaths(projectDir, home, builtIn);
-  write(builtIn, "permission-sets/chat/read-only.json", SHIPPED);
+  write(builtIn, "permission-sets/read-only.json", SHIPPED);
 });
 
 afterEach(() => {
@@ -51,27 +51,27 @@ afterEach(() => {
 
 describe("readPermissionSetLayers", () => {
   it("keeps every layer's file apart, nearest first, with what each follows and resolves to", () => {
-    write(paths.base.baseDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", shell: "ask" });
+    write(paths.base.baseDir, "permission-sets/read-only.json", { $ref: "$SYSTEM/permission-sets/read-only", shell: "ask" });
     write(paths.jairaDir, "permission-sets/feature/writes.json", { edit: "ask", other: "ask" });
     const records = readPermissionSetLayers(paths);
     expect(records.map((r) => [r.id, r.files.map((f) => [f.layer, f.file, f.follows])])).toEqual([
+      ["feature/writes", [["project", ".jaira/permission-sets/feature/writes.json", undefined]]],
       [
-        "chat/read-only",
+        "read-only",
         [
-          ["base", "~/.jaira/permission-sets/chat/read-only.json", "$SYSTEM/permission-sets/chat/read-only"],
-          ["system", "built in/permission-sets/chat/read-only.json", undefined],
+          ["base", "~/.jaira/permission-sets/read-only.json", "$SYSTEM/permission-sets/read-only"],
+          ["system", "built in/permission-sets/read-only.json", undefined],
         ],
       ],
-      ["feature/writes", [["project", ".jaira/permission-sets/feature/writes.json", undefined]]],
     ]);
-    expect(records[0]!.files[0]!.decl).toEqual({ ...SHIPPED, shell: "ask" });
-    expect(records[0]!.files[1]!.decl).toEqual(SHIPPED);
+    expect(records[1]!.files[0]!.decl).toEqual({ ...SHIPPED, shell: "ask" });
+    expect(records[1]!.files[1]!.decl).toEqual(SHIPPED);
   });
 
   it("lists a file it cannot read, with why, instead of leaving it out", () => {
-    write(paths.jairaDir, "permission-sets/chat/broken.json", { $ref: "$/permission-sets/chat/nowhere" });
-    write(paths.jairaDir, "permission-sets/chat/list.json", '["read_file"]');
-    const files = readPermissionSetLayers(paths).filter((r) => r.id !== "chat/read-only").map((r) => r.files[0]!);
+    write(paths.jairaDir, "permission-sets/broken.json", { $ref: "$/permission-sets/nowhere" });
+    write(paths.jairaDir, "permission-sets/list.json", '["read_file"]');
+    const files = readPermissionSetLayers(paths).filter((r) => r.id !== "read-only").map((r) => r.files[0]!);
     expect(files.map((f) => [f.decl, typeof f.problem])).toEqual([
       [undefined, "string"],
       [undefined, "string"],
@@ -82,7 +82,7 @@ describe("readPermissionSetLayers", () => {
     write(home, "permission-sets/team/review.json", { read_file: "allow" });
     const shared = baseAsProjectPaths(home, builtIn);
     expect(readPermissionSetLayers(shared).map((r) => [r.id, r.files.map((f) => f.layer)])).toEqual([
-      ["chat/read-only", ["system"]],
+      ["read-only", ["system"]],
       ["team/review", ["base"]],
     ]);
   });
@@ -90,40 +90,40 @@ describe("readPermissionSetLayers", () => {
 
 describe("writePermissionSet", () => {
   it("creates an override that follows what ships and holds only what differs — and a run reads the merge", () => {
-    const result = writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, shell: "ask", "git log": "allow" });
+    const result = writePermissionSet(paths, "read-only", "project", { ...SHIPPED, shell: "ask", "git log": "allow" });
     expect(result.kind).toBe("override");
-    expect(readFileSync(result.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n  "shell": "ask",\n  "git log": "allow"\n}\n`);
-    expect(winner("chat/read-only")).toEqual({ ...SHIPPED, shell: "ask", "git log": "allow" });
+    expect(readFileSync(result.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/read-only",\n  "shell": "ask",\n  "git log": "allow"\n}\n`);
+    expect(winner("read-only")).toEqual({ ...SHIPPED, shell: "ask", "git log": "allow" });
     // What ships moved on: the override inherits it, which is the point of following.
-    write(builtIn, "permission-sets/chat/read-only.json", { ...SHIPPED, grep: "allow" });
-    expect(winner("chat/read-only")).toMatchObject({ grep: "allow", shell: "ask" });
+    write(builtIn, "permission-sets/read-only.json", { ...SHIPPED, grep: "allow" });
+    expect(winner("read-only")).toMatchObject({ grep: "allow", shell: "ask" });
   });
 
   it("an override with nothing to say is still an override — what 'Override here' writes", () => {
-    const result = writePermissionSet(paths, "chat/read-only", "base", { ...SHIPPED });
+    const result = writePermissionSet(paths, "read-only", "base", { ...SHIPPED });
     expect(result.kind).toBe("override");
-    expect(readFileSync(result.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only"\n}\n`);
+    expect(readFileSync(result.file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/read-only"\n}\n`);
     expect(result.file.startsWith(home)).toBe(true);
   });
 
   it("edits an override in place, still following, and keeps the person's layout", () => {
-    const file = write(paths.jairaDir, "permission-sets/chat/read-only.json", `{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "shell":   "ask"\n}\n`);
-    expect(writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, shell: "allow", edit: "ask" }).kind).toBe("edit");
-    expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "shell":   "allow",\n  "edit": "ask"\n}\n`);
+    const file = write(paths.jairaDir, "permission-sets/read-only.json", `{\n  "$ref": "$SYSTEM/permission-sets/read-only",\n\n  "shell":   "ask"\n}\n`);
+    expect(writePermissionSet(paths, "read-only", "project", { ...SHIPPED, shell: "allow", edit: "ask" }).kind).toBe("edit");
+    expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/read-only",\n\n  "shell":   "allow",\n  "edit": "ask"\n}\n`);
     // A line put back to what ships says goes out of the override again.
-    writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, edit: "ask" });
-    expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/chat/read-only",\n\n  "edit": "ask"\n}\n`);
+    writePermissionSet(paths, "read-only", "project", { ...SHIPPED, edit: "ask" });
+    expect(readFileSync(file, "utf8")).toBe(`{\n  "$ref": "$SYSTEM/permission-sets/read-only",\n\n  "edit": "ask"\n}\n`);
   });
 
   it("stops following when a line the lower layer holds is taken out, because an override cannot say that", () => {
     const { glob: _gone, ...rest } = SHIPPED;
-    const created = writePermissionSet(paths, "chat/read-only", "project", rest);
+    const created = writePermissionSet(paths, "read-only", "project", rest);
     expect(created.kind).toBe("detach");
     expect(JSON.parse(readFileSync(created.file, "utf8"))).toEqual(rest);
-    expect(winner("chat/read-only")).toEqual(rest);
+    expect(winner("read-only")).toEqual(rest);
 
-    const file = write(paths.base.baseDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", shell: "ask" });
-    expect(writePermissionSet(paths, "chat/read-only", "base", { ...rest, shell: "ask" }).kind).toBe("detach");
+    const file = write(paths.base.baseDir, "permission-sets/read-only.json", { $ref: "$SYSTEM/permission-sets/read-only", shell: "ask" });
+    expect(writePermissionSet(paths, "read-only", "base", { ...rest, shell: "ask" }).kind).toBe("detach");
     expect(JSON.parse(readFileSync(file, "utf8"))).toEqual({ ...rest, shell: "ask" });
   });
 
@@ -137,47 +137,47 @@ describe("writePermissionSet", () => {
   });
 
   it("writes nothing into what ships, for an id that climbs, a YAML file, or a map that is not a permission set", () => {
-    const before = readFileSync(join(builtIn, "permission-sets/chat/read-only.json"), "utf8");
-    expect(() => writePermissionSet(paths, "chat/read-only", "system", SHIPPED)).toThrow(/read-only/);
+    const before = readFileSync(join(builtIn, "permission-sets/read-only.json"), "utf8");
+    expect(() => writePermissionSet(paths, "read-only", "system", SHIPPED)).toThrow(/read-only/);
     expect(() => writePermissionSet(paths, "../escape", "project", SHIPPED)).toThrow();
-    expect(() => writePermissionSet(paths, "chat/x", "project", { read_file: 7 } as never)).toThrow(/not a permission set/);
-    write(paths.jairaDir, "permission-sets/chat/yam.yaml", "read_file: allow\n");
-    expect(() => writePermissionSet(paths, "chat/yam", "project", { read_file: "ask" })).toThrow(/YAML/);
-    expect(readFileSync(join(builtIn, "permission-sets/chat/read-only.json"), "utf8")).toBe(before);
+    expect(() => writePermissionSet(paths, "x", "project", { read_file: 7 } as never)).toThrow(/not a permission set/);
+    write(paths.jairaDir, "permission-sets/yam.yaml", "read_file: allow\n");
+    expect(() => writePermissionSet(paths, "yam", "project", { read_file: "ask" })).toThrow(/YAML/);
+    expect(readFileSync(join(builtIn, "permission-sets/read-only.json"), "utf8")).toBe(before);
     expect(existsSync(join(scratch, "escape.json"))).toBe(false);
   });
 });
 
 describe("resetPermissionSet", () => {
   it("deletes the override, so the layer below answers again", () => {
-    const made = writePermissionSet(paths, "chat/read-only", "project", { ...SHIPPED, shell: "ask" });
-    expect(resetPermissionSet(paths, "chat/read-only", "project").file).toBe(made.file);
+    const made = writePermissionSet(paths, "read-only", "project", { ...SHIPPED, shell: "ask" });
+    expect(resetPermissionSet(paths, "read-only", "project").file).toBe(made.file);
     expect(existsSync(made.file)).toBe(false);
-    expect(winner("chat/read-only")).toEqual(SHIPPED);
+    expect(winner("read-only")).toEqual(SHIPPED);
   });
 
   it("refuses what is not an override: nothing below it, not held here, or what ships", () => {
     const file = write(paths.jairaDir, "permission-sets/feature/writes.json", { edit: "ask" });
     expect(() => resetPermissionSet(paths, "feature/writes", "project")).toThrow(/overrides nothing/);
     expect(existsSync(file)).toBe(true);
-    expect(() => resetPermissionSet(paths, "chat/read-only", "base")).toThrow(/not overridden/);
-    expect(() => resetPermissionSet(paths, "chat/read-only", "system")).toThrow(/read-only/);
+    expect(() => resetPermissionSet(paths, "read-only", "base")).toThrow(/not overridden/);
+    expect(() => resetPermissionSet(paths, "read-only", "system")).toThrow(/read-only/);
   });
 });
 
 describe("permissionSetUsers", () => {
   it("finds a bare reference, a $ref with overrides, an explicit root and a per-mount environment — first layer's copy of a state only", () => {
-    write(paths.workflowsDir, "sync/review.json", { environment: { tools: "$/permission-sets/chat/read-only" } });
-    write(paths.workflowsDir, "feature/plan.json", { operation: { kind: "prompt", tools: { $ref: "$/permission-sets/chat/read-only", edit: "ask" } } });
-    write(paths.workflowsDir, "feature.json", { children: { build: { state: "feature/build", environment: { tools: "$SYSTEM/permission-sets/chat/full.json" } } } });
+    write(paths.workflowsDir, "sync/review.json", { environment: { tools: "$/permission-sets/read-only" } });
+    write(paths.workflowsDir, "feature/plan.json", { operation: { kind: "prompt", tools: { $ref: "$/permission-sets/read-only", edit: "ask" } } });
+    write(paths.workflowsDir, "feature.json", { children: { build: { state: "feature/build", environment: { tools: "$SYSTEM/permission-sets/full.json" } } } });
     write(paths.workflowsDir, "listed.json", { environment: { tools: ["read_file"] } });
     write(paths.workflowsDir, "broken.json", "{ nope");
     // Shadowed by the project's own copy of the same state, so it is not what runs.
-    write(join(home, "workflows"), "sync/review.json", { environment: { tools: "$/permission-sets/chat/full" } });
-    write(join(home, "workflows"), "shared/only.json", { environment: { tools: "$/permission-sets/chat/full" } });
+    write(join(home, "workflows"), "sync/review.json", { environment: { tools: "$/permission-sets/full" } });
+    write(join(home, "workflows"), "shared/only.json", { environment: { tools: "$/permission-sets/full" } });
     expect(permissionSetUsers(paths)).toEqual({
-      "chat/read-only": ["feature/plan", "sync/review"],
-      "chat/full": ["feature", "shared/only"],
+      "read-only": ["feature/plan", "sync/review"],
+      "full": ["feature", "shared/only"],
     });
   });
 });

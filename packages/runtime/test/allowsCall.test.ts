@@ -1,6 +1,6 @@
 /**
  * `allowsCall` — would a permission set let a call run with nobody asked — held against the SHIPPED
- * `chat/read-only`, which is what the work summary judges a change by (`workSummary.ts`).
+ * `read-only`, which is what the work summary judges a change by (`workSummary.ts`).
  */
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -9,7 +9,7 @@ import { parsePermissionSet } from "@jaira/shared";
 import { allowsCall } from "../src/policy";
 import type { PackageInfo, PackageReader } from "../src/packageScripts";
 
-const READ_ONLY = parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as unknown).permissionSet;
+const READ_ONLY = parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/read-only.json", import.meta.url)), "utf8")) as unknown).permissionSet;
 /**
  * A workspace project at `/repo`: the root's own scripts, and two workspaces — `@app/cli`, whose
  * scripts only read (and whose build writes), and `@app/web`, whose lint fixes.
@@ -41,7 +41,7 @@ const TABLE: PackageReader = {
 const allows = (name: string, args: unknown): boolean | undefined => allowsCall({}, READ_ONLY, name, args, "posix", { root: "/repo", packages: TABLE });
 const bash = (command: string): boolean | undefined => allows("Bash", { command });
 
-describe("what the shipped chat/read-only lets through", () => {
+describe("what the shipped read-only lets through", () => {
   it("judges an agent's built-ins as the standard tools they are, and JaiRA's own over the bridge", () => {
     expect(allows("Read", { file_path: "a.ts" })).toBe(true);
     expect(allows("Grep", { pattern: "x" })).toBe(true);

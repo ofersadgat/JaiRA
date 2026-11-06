@@ -58,7 +58,7 @@ export function StackPreview({
   );
 }
 
-/** A set's id as the base chip reads it: `chat / read-only`. */
+/** A set's id as the base chip reads it: `read-only`, `control / read-only`. */
 const spaced = (id: string): string => id.split("/").join(" / ");
 
 function BasePicker({ sets, picked, onBase }: { sets: ReadonlyArray<PreviewSet & { name: string; icon: string }>; picked: (PreviewSet & { icon: string }) | undefined; onBase: (id: string) => void }): JSX.Element {

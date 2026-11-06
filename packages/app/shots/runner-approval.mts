@@ -2,9 +2,9 @@
  * Layers and places deciding a real agent's calls (decision 0023), in a real conversation.
  *
  * A real agent (claude-cli/haiku — this rig spends a little) on Windows, whose shell is PowerShell:
- *  a. under the shipped `chat/full`, `npm --workspace @jaira/app run build` runs and nobody is asked
+ *  a. under the shipped `full`, `npm --workspace @jaira/app run build` runs and nobody is asked
  *     (2026-11-01: it asked under full access);
- *  b. under the stack `chat/ask-first` + `app/build` (a project layer holding
+ *  b. under the stack `ask-first` + `app/build` (a project layer holding
  *     `"npm run build": { "packages": "allow" }`) the same line runs outright — the line names it, in its
  *     workspace's package (§3.6) — while `npm --workspace @jaira/app run check`, which no layer names,
  *     asks: what the script runs drawn under `runner:npm`, each row saying who decided it and where;
@@ -13,8 +13,8 @@
  *     and the line asked for again does not ask about that row;
  *  d. a fresh line, its row denied `For this run`: refused, the agent told why, and refused again without
  *     an ask;
- *  e. places on a direct tool call: a read outside the project asks under `chat/ask-first` (and under
- *     `chat/read-only`, where a read inside does not); a `.env` in the project asks under `chat/full`
+ *  e. places on a direct tool call: a read outside the project asks under `ask-first` (and under
+ *     `read-only`, where a read inside does not); a `.env` in the project asks under `full`
  *     (where another file does not);
  *  f. the composer's stack, a segment's card, the approval and its panel, light and dark.
  *
@@ -31,12 +31,12 @@ const MODEL = "claude-cli/haiku";
 const OUT = join(import.meta.dirname, "out", "runner-approval");
 const WORLD = join(import.meta.dirname, ".world-runner-approval");
 /** A shipped set as the composer sends it: the stack's bottom layer (decision 0023 §2.6). */
-const preset = (name: string): { layers: string[] } => ({ layers: [`$/permission-sets/chat/${name}`] });
+const preset = (name: string): { layers: string[] } => ({ layers: [`$/permission-sets/${name}`] });
 const FULL = preset("full");
 const ASK_FIRST = preset("ask-first");
 const READ_ONLY = preset("read-only");
 /** The project layer the rig writes, laid over `ask-first`. */
-const STACK = { layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/app/build"] };
+const STACK = { layers: ["$/permission-sets/ask-first", "$/permission-sets/app/build"] };
 const BUILD = "npm --workspace @jaira/app run build";
 /** A script of the same package that no layer names: it asks, and what it runs is drawn under the runner. */
 const CHECK = "npm --workspace @jaira/app run check";
@@ -216,8 +216,8 @@ async function main(): Promise<void> {
       await send(full, message, FULL);
       const asked = await untilTurnEnds(full.taskId, "under full access", "allow");
       await app.shot("a-full-access");
-      check(asked.length === 0, `a. under chat/full the build ran without an ask (asked ${asked.length})`);
-      check((await after(message)).includes("BUILT-OK"), "a. under chat/full the reply says BUILT-OK");
+      check(asked.length === 0, `a. under full the build ran without an ask (asked ${asked.length})`);
+      check((await after(message)).includes("BUILT-OK"), "a. under full the reply says BUILT-OK");
     }
 
     // b. The stack: the line app/build names runs outright, in its package; a script it does not name
@@ -340,7 +340,7 @@ async function main(): Promise<void> {
       const asked = await untilTurnEnds(askFirst.taskId, "reading outside under ask-first", "deny");
       console.log(`runner-approval: under ask-first, a read outside asked ${JSON.stringify(asked.map((p) => ({ tool: p.tool, input: p.input })))}`);
       await app.shot(`e-ask-first-outside-${await theme()}`);
-      check(asked.length > 0, "e. under chat/ask-first a read outside the project asks");
+      check(asked.length > 0, "e. under ask-first a read outside the project asks");
     }
     {
       const readOnly = await open("Reads under read-only", READ_ONLY);
@@ -350,8 +350,8 @@ async function main(): Promise<void> {
       const reply = await after(message);
       console.log(`runner-approval: under read-only, asked ${JSON.stringify(asked.map((p) => ({ tool: p.tool, input: p.input })))}\n${reply.slice(0, 600)}`);
       await app.shot(`e-read-only-${await theme()}`);
-      check(reply.includes("NOTES-OK"), "e. under chat/read-only a read in the project ran");
-      check(asked.length === 1 && JSON.stringify(asked[0]?.input ?? "").includes("far.txt"), "e. under chat/read-only only the read outside the project asked");
+      check(reply.includes("NOTES-OK"), "e. under read-only a read in the project ran");
+      check(asked.length === 1 && JSON.stringify(asked[0]?.input ?? "").includes("far.txt"), "e. under read-only only the read outside the project asked");
     }
     {
       const full = await open("Reads under full access", FULL);
@@ -361,8 +361,8 @@ async function main(): Promise<void> {
       const reply = await after(message);
       console.log(`runner-approval: under full, asked ${JSON.stringify(asked.map((p) => ({ tool: p.tool, input: p.input })))}\n${reply.slice(0, 600)}`);
       await app.shot(`e-full-env-${await theme()}`);
-      check(reply.includes("NOTES-OK"), "e. under chat/full a plain project file was read without an ask");
-      check(asked.length === 1 && JSON.stringify(asked[0]?.input ?? "").includes(".env"), "e. under chat/full only the .env read asked");
+      check(reply.includes("NOTES-OK"), "e. under full a plain project file was read without an ask");
+      check(asked.length === 1 && JSON.stringify(asked[0]?.input ?? "").includes(".env"), "e. under full only the .env read asked");
       check(!reply.includes("rig-secret"), "e. the denied .env was not read");
     }
 

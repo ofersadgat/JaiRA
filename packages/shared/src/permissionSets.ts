@@ -528,7 +528,7 @@ export function mergeEntryDecl(lower: unknown, upper: unknown): unknown {
   return implementation === undefined || mode === UNAVAILABLE ? mode : { mode, implementation };
 }
 
-/** One layer of a stack: an id that names it to a person (`chat/ask-first`, a reference, `inline`), and its own lines. */
+/** One layer of a stack: an id that names it to a person (`ask-first`, a reference, `inline`), and its own lines. */
 export interface PermissionSetLayerDecl {
   id: string;
   decl: Record<string, unknown>;
@@ -829,7 +829,7 @@ export function loosestModeOf(entry: EntryParts, elsewhere: PermissionSetMode): 
 /**
  * A set read for WHAT a call does, not WHERE (decision 0023 §7.1): every line at the loosest answer any
  * of its places gives ({@link loosestModeOf}), its places dropped. What the work summary and the Changes
- * tab judge a call by when they ask "did this only read?" of `chat/read-only` — whose `read_file` asks
+ * tab judge a call by when they ask "did this only read?" of `read-only` — whose `read_file` asks
  * outside the project and at a credential, which says where the person is asked, not that a read
  * outside the project changed anything.
  */

@@ -10,7 +10,7 @@ import { COMMAND_RUNNERS, parsePermissionSet, type PermissionSetDecl } from "@ja
 import { holdsRunners, runnerFallbackOf, runnerRowsOf, sectionCountOf, withoutRunners, withRunners, withSubject } from "../src/renderer/composerPermissionSet";
 
 const shipped = (name: string): PermissionSetDecl =>
-  JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/chat/${name}.json`, import.meta.url)), "utf8")) as PermissionSetDecl;
+  JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url)), "utf8")) as PermissionSetDecl;
 const READ_ONLY = parsePermissionSet(shipped("read-only")).permissionSet;
 
 describe("the command runners' lines", () => {

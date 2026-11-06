@@ -87,7 +87,7 @@ export function describeAddition(entries: PermissionSetAddition): string {
     .join(", ");
 }
 
-/** A new override file that keeps following `follows` (`$SYSTEM/permission-sets/chat/ask-first`). */
+/** A new override file that keeps following `follows` (`$SYSTEM/permission-sets/ask-first`). */
 export function overridePermissionSetText(follows: string, entries: PermissionSetAddition): string {
   if (!/^\$[A-Z]+\//.test(follows)) {
     throw new Error(`an override follows an explicit root ('$SYSTEM/…', '$BASE/…') — '${follows}' would find the override itself`);

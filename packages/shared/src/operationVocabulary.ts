@@ -83,7 +83,7 @@ export const SIMPLE_FIELDS: readonly SimpleField[] = [
   { name: "functionRef", key: "function", alias: "functionRef", type: "string", label: "Function", group: "operation",
     kinds: ["function"],
     placeholder: "claude-code, codex-cli, choose_option, …" },
-  // A permission set — a map from a subject to a mode, or a reference to one (`"$/permission-sets/chat/read-only"`,
+  // A permission set — a map from a subject to a mode, or a reference to one (`"$/permission-sets/read-only"`,
   // `permissionSets.ts`, decision 0007). The state editor draws it as its own Tools field; this entry is
   // what shows a value that field cannot draw (a binding), read-only, and what claims `tools`
   // diagnostics for the block.
@@ -430,7 +430,7 @@ export interface PermissionsDecl {
   functions?: Record<string, string>;
   /**
    * WRITTEN BY LOWERING, never authored, and only beside {@link subjects}: where those subjects came
-   * from — the reference the state named its permission set by (`$/permission-sets/chat/ask-first`), or `inline`
+   * from — the reference the state named its permission set by (`$/permission-sets/ask-first`), or `inline`
    * for a map written on the state (a `$ref` with siblings counts as written on the state: a sibling
    * is an entry no file holds). Written WITH `subjects` every time, so a child block that replaces
    * the one replaces the other, and an approval never names a parent's file for a child's map.
@@ -452,7 +452,7 @@ export interface PermissionsDecl {
 /**
  * A stack of permission sets as a lowered block, or a turn's policy, carries it (decision 0023 §2.7).
  *
- * `layers` oldest first, each by its id (`chat/ask-first`, `app/build`, `inline`, `tools`) and, for a
+ * `layers` oldest first, each by its id (`ask-first`, `app/build`, `inline`, `tools`) and, for a
  * layer in a file, the reference it was read through. `lines` is who set each line — by normalized
  * subject, `other` included: the layer behind its own mode (`everywhere`), behind each other place, and
  * behind its implementation. Absent for a stack of one layer, which set every line.
@@ -474,13 +474,13 @@ export interface ToolChoice {
 }
 
 /**
- * FROZEN — the tools the `read-only` preset let through, and so the tools `chat/read-only` allows IN
+ * FROZEN — the tools the `read-only` preset let through, and so the tools `read-only` allows IN
  * THE PROJECT: since decision 0023 §7.1 its `read_file`, `glob` and `grep` are place maps that allow in
  * `$PROJECT` and `$WORKTREE` and ask elsewhere and at a credential, and the test that holds the file to
  * this list reads each line at `$PROJECT`.
  *
  * The composer's four presets were functions of a tool (`modeFor`); they are permission set FILES now
- * (`$SYSTEM/permission-sets/chat/*.json`, decision 0007 §2), and "which preset is this" is `matchPermissionSet` in
+ * (`$SYSTEM/permission-sets/*.json`, decision 0007 §2), and "which preset is this" is `matchPermissionSet` in
  * `permissionSetBuckets.ts`. This list is what is left of them: exactly the tools `ToolSpec.readOnly` was
  * true for on the day that flag was removed, kept so a test can hold the shipped file to the map the
  * preset always wrote, and the runtime's tools to the facts it was derived from. Nothing reads it to
@@ -521,7 +521,7 @@ export interface ChatSettings {
    * decision 0023, the conversation's STACK of them (§2.6, ruling 8):
    *
    * ```json
-   * { "layers": ["$/permission-sets/chat/ask-first", "$/permission-sets/web/docs-sites"], "write_file": "allow", "glob": "unavailable" }
+   * { "layers": ["$/permission-sets/ask-first", "$/permission-sets/web/docs-sites"], "write_file": "allow", "glob": "unavailable" }
    * ```
    *
    * `layers[0]` is the bottom layer (the preset), the rest are the conversation's own layers (§2.6
@@ -529,7 +529,7 @@ export interface ChatSettings {
    * card ticks and moves, `unavailable` for a tool unticked over a layer that offers it. The bucket's
    * standing layers (`permissions.layers.<bucket>` in settings, step 2) go between the bottom and the
    * rest, and the run's answers (step 4) between the rest and the tools — neither is written here.
-   * A map with no `layers` is a stack of one layer, the tools layer, over the `chat` bucket's standing
+   * A map with no `layers` is a stack of one layer, the tools layer, over the top level's (`""`) standing
    * layers. The service follows the references (`resolveChatPermissionStack`) before a turn runs;
    * `permissionSetOfSettings` reads a map that has none.
    *

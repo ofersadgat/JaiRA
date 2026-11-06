@@ -3,8 +3,8 @@
  * (decision 0007 §1 and §6).
  *
  * ```jsonc
- * "tools": "$/permission-sets/chat/read-only"                                   // names one
- * "tools": { "$ref": "$/permission-sets/chat/read-only", "write_file": "ask" }  // starts from one, says more
+ * "tools": "$/permission-sets/read-only"                                   // names one
+ * "tools": { "$ref": "$/permission-sets/read-only", "write_file": "ask" }  // starts from one, says more
  * "tools": { "read_file": "allow", "other": "deny" }                     // lines of its own only
  * ```
  *
@@ -29,7 +29,7 @@ import {
 } from "@jaira/shared/browser";
 
 export interface ToolsFieldForm {
-  /** The permission set the state starts from, as written — `$/permission-sets/chat/read-only`. Empty ⇒ none. */
+  /** The permission set the state starts from, as written — `$/permission-sets/read-only`. Empty ⇒ none. */
   reference: string;
   /** The lines the state writes itself: over the permission set, or on their own. */
   lines: PermissionSetDecl;
@@ -132,9 +132,9 @@ export const permissionSetReference = (id: string): string => `$/permission-sets
 export const NO_PERMISSION_SET_LABEL = "none — lines of its own only";
 
 export interface PermissionSetPick {
-  /** `chat / read-only — this project`. What the picker lists, and what it hands back. */
+  /** `read-only — this project`, `control / read-only — built in`. What the picker lists, and what it hands back. */
   label: string;
-  /** What is written: `$/permission-sets/chat/read-only`, or empty for none. */
+  /** What is written: `$/permission-sets/read-only`, or empty for none. */
   reference: string;
 }
 
@@ -148,7 +148,7 @@ export function permissionSetPicks(permissionSets: readonly PermissionSetChoice[
   const buckets = [...new Set(permissionSets.map((choice) => choice.bucket))].sort();
   const picks = buckets.flatMap((bucket) =>
     permissionSetsOfBucket(permissionSets, bucket).map((choice) => ({
-      label: `${choice.bucket.split("/").join(" / ")} / ${choice.name} — ${PERMISSION_SET_LAYER_LABELS[choice.layer]}`,
+      label: `${[...(choice.bucket === "" ? [] : choice.bucket.split("/")), choice.name].join(" / ")} — ${PERMISSION_SET_LAYER_LABELS[choice.layer]}`,
       reference: permissionSetReference(choice.id),
     })),
   );

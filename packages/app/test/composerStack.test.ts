@@ -44,7 +44,7 @@ import {
 import { mapOfSettings } from "../src/renderer/composerModel";
 import { withMode } from "../src/renderer/uiState";
 
-const ASK_FIRST = "$/permission-sets/chat/ask-first";
+const ASK_FIRST = "$/permission-sets/ask-first";
 const BUILD = "$/permission-sets/app/build";
 const DOCS = "$/permission-sets/web/docs-sites";
 
@@ -60,8 +60,8 @@ describe("the form a conversation keeps (§2.6)", () => {
   it("takes the state's set as the bottom while nothing is chosen here, with no lines of its own", () => {
     expect(stackFormOf({ tools: ["read_file"], permissions: { source: ASK_FIRST } as never })).toEqual({ layers: [ASK_FIRST], tools: undefined });
     // A state whose map is written in place: the bottom of the stack it was lowered from.
-    expect(stackFormOf({ tools: [], permissions: { source: "inline", stack: { layers: [{ id: "chat/ask-first", reference: "$SYSTEM/permission-sets/chat/ask-first" }, { id: "inline" }] } } as never })).toEqual({
-      layers: ["$SYSTEM/permission-sets/chat/ask-first"],
+    expect(stackFormOf({ tools: [], permissions: { source: "inline", stack: { layers: [{ id: "ask-first", reference: "$SYSTEM/permission-sets/ask-first" }, { id: "inline" }] } } as never })).toEqual({
+      layers: ["$SYSTEM/permission-sets/ask-first"],
       tools: undefined,
     });
     expect(stackFormOf({})).toEqual({ layers: [], tools: undefined });
@@ -81,7 +81,7 @@ describe("the form a conversation keeps (§2.6)", () => {
     // Moving the bottom later makes the next layer the bottom: two presets stack like any two layers.
     expect(withLayerMoved(form, 0, 1).layers).toEqual([BUILD, ASK_FIRST, DOCS]);
     expect(withLayerMoved(form, 0, -1)).toBe(form);
-    expect(withLayerSwapped(form, 0, "$/permission-sets/chat/read-only").layers[0]).toBe("$/permission-sets/chat/read-only");
+    expect(withLayerSwapped(form, 0, "$/permission-sets/read-only").layers[0]).toBe("$/permission-sets/read-only");
     expect(withLayerAdded(form, "$/permission-sets/review/strict").layers.at(-1)).toBe("$/permission-sets/review/strict");
     expect(withLayerRemoved(form, 1).layers).toEqual([ASK_FIRST, DOCS]);
   });
@@ -123,10 +123,10 @@ const viewOf = (layers: PermissionStackView["layers"]): Pick<PermissionStackView
 
 describe("the segments (§4.1, §7.4)", () => {
   const view = viewOf([
-    { id: "chat/ask-first", reference: "$SYSTEM/permission-sets/chat/ask-first", via: ASK_FIRST, scope: "built in", role: "bottom", icon: "ask", lines: 17 },
+    { id: "ask-first", reference: "$SYSTEM/permission-sets/ask-first", via: ASK_FIRST, scope: "built in", role: "bottom", icon: "ask", lines: 17 },
     { id: "project/build-safe", reference: "$JAIRA/permission-sets/project/build-safe", via: "$/permission-sets/project/build-safe", scope: "project", role: "standing", icon: "layers", lines: 2 },
     // A file built of layers is several layers, one `via`: one segment, the file itself.
-    { id: "chat/ask-first", reference: "$SYSTEM/permission-sets/chat/ask-first", via: BUILD, scope: "built in", role: "named", icon: "ask", lines: 17 },
+    { id: "ask-first", reference: "$SYSTEM/permission-sets/ask-first", via: BUILD, scope: "built in", role: "named", icon: "ask", lines: 17 },
     { id: "app/build", reference: "$JAIRA/permission-sets/app/build", via: BUILD, scope: "project", role: "named", icon: "layers", lines: 4 },
     { id: "web/docs-sites", reference: "$BASE/permission-sets/web/docs-sites", via: DOCS, scope: "global", role: "named", icon: "web", lines: 1 },
     { id: "runtime", scope: "runtime", role: "runtime", icon: "history", lines: 3 },
@@ -137,7 +137,7 @@ describe("the segments (§4.1, §7.4)", () => {
   it("is one per layer, oldest first, a standing layer among them with no place in the form", () => {
     const layers = layerSegmentsOf(view, form);
     expect(layers.map((layer) => [layer.id, layer.role, layer.reference, layer.index])).toEqual([
-      ["chat/ask-first", "bottom", ASK_FIRST, 0],
+      ["ask-first", "bottom", ASK_FIRST, 0],
       ["project/build-safe", "standing", "$/permission-sets/project/build-safe", undefined],
       ["app/build", "named", BUILD, 1],
       ["web/docs-sites", "named", DOCS, 2],
@@ -146,7 +146,7 @@ describe("the segments (§4.1, §7.4)", () => {
 
   it("is drawn from the form alone until the engine has composed it", () => {
     expect(layerSegmentsOf(null, form).map((layer) => [layer.id, layer.role, layer.index])).toEqual([
-      ["chat/ask-first", "bottom", 0],
+      ["ask-first", "bottom", 0],
       ["app/build", "named", 1],
       ["web/docs-sites", "named", 2],
     ]);
@@ -155,12 +155,12 @@ describe("the segments (§4.1, §7.4)", () => {
   it("ends in tools and +, the run's answers riding on tools, and folds the middle into ⋯ n, keeping the first", () => {
     const layers = layerSegmentsOf(view, form);
     const whole = segmentsOf(layers, 9, 3, false);
-    expect(whole.map((segment) => segmentWordsOf(segment))).toEqual(["chat/ask-first", "project/build-safe", "app/build", "web/docs-sites", "tools · 9", "+"]);
+    expect(whole.map((segment) => segmentWordsOf(segment))).toEqual(["ask-first", "project/build-safe", "app/build", "web/docs-sites", "tools · 9", "+"]);
     // No runtime segment: the answers are the tools segment's mark, in --accent.
     expect(whole.map((segment) => runtimeMarkOf(segment))).toEqual([null, null, null, null, "· 3", null]);
     expect(runtimeMarkOf(segmentsOf(layers, 9, 0, false).at(-2)!)).toBeNull();
     const folded = segmentsOf(layers, 9, 3, true);
-    expect(folded.map((segment) => segmentWordsOf(segment))).toEqual(["chat/ask-first", "⋯ 3", "tools · 9", "+"]);
+    expect(folded.map((segment) => segmentWordsOf(segment))).toEqual(["ask-first", "⋯ 3", "tools · 9", "+"]);
     const fold = folded[1]!;
     expect(fold.kind === "fold" ? fold.layers.map((layer) => layer.id) : []).toEqual(["project/build-safe", "app/build", "web/docs-sites"]);
   });
@@ -179,7 +179,7 @@ describe("the segments (§4.1, §7.4)", () => {
     // The bottom alone, nothing changed: no count.
     expect(collapsedWordsOf(collapsedOf(layers.slice(0, 1), 0, 0))).toBeNull();
     expect(collapsedWordsOf(collapsedOf(layers.slice(0, 1), 0, 1))).toBe("+1");
-    expect(collapsedOf(layers.slice(0, 2), 1, 2).title).toBe("Permissions: chat/ask-first; 1 more layer: project/build-safe; 1 line of this conversation's own; 2 answers from this run");
+    expect(collapsedOf(layers.slice(0, 2), 1, 2).title).toBe("Permissions: ask-first; 1 more layer: project/build-safe; 1 line of this conversation's own; 2 answers from this run");
   });
 
   it("fits the foot: the stack folds before any word drops, then collapses to the shield as the words drop", () => {
@@ -203,7 +203,7 @@ describe("the segments (§4.1, §7.4)", () => {
     const layers = layerSegmentsOf(view, form);
     expect(stackRowsOf(layers, 9, 3).map((row) => [row.kind, row.label, row.hint])).toEqual([
       ["root", "This conversation", "oldest first"],
-      ["layer", "chat/ask-first", "built in · 17 lines"],
+      ["layer", "ask-first", "built in · 17 lines"],
       ["layer", "project/build-safe", "project · pinned · 2 lines"],
       ["layer", "app/build", "project · 4 lines"],
       ["layer", "web/docs-sites", "global · 1 line"],
@@ -232,7 +232,9 @@ describe("the run's answers, on the Tools card's lines (2026-11-03)", () => {
 
 const set = (scope: PermissionSetTreeSet["scope"], bucket: string, name: string, extra: Partial<PermissionSetTreeSet> = {}): PermissionSetTreeSet => {
   const token = scope === "built in" ? "$SYSTEM" : scope === "global" ? "$BASE" : "$JAIRA";
-  return { id: `${bucket}/${name}`, name, bucket, scope, reference: `$/permission-sets/${bucket}/${name}`, explicit: `${token}/permission-sets/${bucket}/${name}`, file: `${scope}/permission-sets/${bucket}/${name}.json`, lines: 17, icon: "ask", inStack: false, ...extra };
+  // A set at the top level (bucket "") is named by its bare name.
+  const id = bucket === "" ? name : `${bucket}/${name}`;
+  return { id, name, bucket, scope, reference: `$/permission-sets/${id}`, explicit: `${token}/permission-sets/${id}`, file: `${scope}/permission-sets/${id}.json`, lines: 17, icon: "ask", inStack: false, ...extra };
 };
 const TREE: PermissionSetTree = {
   scopes: [
@@ -240,11 +242,8 @@ const TREE: PermissionSetTree = {
       scope: "built in",
       layer: "system",
       label: "built in",
-      sets: [],
-      buckets: [
-        { name: "chat", path: "chat", buckets: [], sets: [set("built in", "chat", "ask-first", { inStack: true, shadowedBy: "project" }), set("built in", "chat", "read-only"), set("built in", "chat", "auto")] },
-        { name: "chat_control", path: "chat_control", buckets: [], sets: [set("built in", "chat_control", "ask-first")] },
-      ],
+      sets: [set("built in", "", "ask-first", { inStack: true, shadowedBy: "project" }), set("built in", "", "read-only"), set("built in", "", "auto")],
+      buckets: [{ name: "control", path: "control", buckets: [], sets: [set("built in", "control", "ask-first")] }],
     },
     {
       scope: "global",
@@ -253,22 +252,28 @@ const TREE: PermissionSetTree = {
       sets: [],
       buckets: [{ name: "feature", path: "feature", sets: [], buckets: [{ name: "implementation", path: "feature/implementation", buckets: [], sets: [set("global", "feature/implementation", "writes-asking")] }] }],
     },
-    { scope: "project", layer: "project", label: ".jaira", sets: [], buckets: [{ name: "chat", path: "chat", buckets: [], sets: [set("project", "chat", "ask-first", { lines: 18 })] }] },
+    { scope: "project", layer: "project", label: ".jaira", sets: [set("project", "", "ask-first", { lines: 18 })], buckets: [] },
     { scope: "runtime", label: "runtime", buckets: [], sets: [{ id: "runtime", name: "runtime", bucket: "", scope: "runtime", file: "this task's answers, for this run", lines: 2, icon: "history", inStack: true }] },
   ],
 };
 
 describe("the crumbs that are pickers (§4.1)", () => {
   it("are the set's path, each dropping what sits beside it — the scopes, a scope's buckets, a bucket's sets", () => {
-    const crumbs = crumbsOf(TREE, { scope: "built in", bucket: "chat", set: "chat/ask-first" });
-    expect(crumbs.map((crumb) => crumb.label)).toEqual(["Built in", "chat", "ask-first.json"]);
+    // A set at the top level has no bucket crumb: the scope's, then the set's.
+    const crumbs = crumbsOf(TREE, { scope: "built in", bucket: "", set: "ask-first" });
+    expect(crumbs.map((crumb) => crumb.label)).toEqual(["Built in", "ask-first.json"]);
     // The runtime scope is this task's answers, no file: not a place to pick a layer from.
     expect(crumbs[0]!.siblings.map((choice) => choice.label)).toEqual(["Built in", "Global", "Project"]);
-    expect(crumbs[1]!.siblings.map((choice) => choice.label)).toEqual(["chat", "chat_control"]);
-    expect(crumbs[2]!.siblings.map((choice) => choice.label)).toEqual(["ask-first.json", "read-only.json", "auto.json"]);
-    expect(crumbs[2]!.on).toBe("set:built in:chat/ask-first");
+    expect(crumbs[1]!.siblings.map((choice) => choice.label)).toEqual(["ask-first.json", "read-only.json", "auto.json"]);
+    expect(crumbs[1]!.on).toBe("set:built in:ask-first");
     // So swapping ask-first for read-only is two presses: the set's crumb, then its sibling.
-    expect(crumbs[2]!.siblings[1]!.set?.id).toBe("chat/read-only");
+    expect(crumbs[1]!.siblings[1]!.set?.id).toBe("read-only");
+    // A set in a bucket: the bucket's crumb lists the buckets beside it.
+    const inBucket = crumbsOf(TREE, { scope: "built in", bucket: "control", set: "control/ask-first" });
+    expect(inBucket.map((crumb) => crumb.label)).toEqual(["Built in", "control", "ask-first.json"]);
+    expect(inBucket[1]!.siblings.map((choice) => choice.label)).toEqual(["control"]);
+    expect(inBucket[2]!.siblings.map((choice) => choice.label)).toEqual(["ask-first.json"]);
+    expect(inBucket[2]!.on).toBe("set:built in:control/ask-first");
   });
 
   it("walk a nested bucket a folder at a time, and drill into a folder picked", () => {
@@ -277,41 +282,40 @@ describe("the crumbs that are pickers (§4.1)", () => {
     expect(childrenOf(TREE, { scope: "global", bucket: "" }).map((choice) => [choice.kind, choice.label])).toEqual([["bucket", "feature"]]);
     expect(childrenOf(TREE, { scope: "global", bucket: "feature" }).map((choice) => [choice.kind, choice.label, choice.hint])).toEqual([["bucket", "implementation", "1 set"]]);
     // With no set chosen yet the last crumb asks for one.
-    expect(crumbsOf(TREE, { scope: "built in", bucket: "chat" }).at(-1)!.label).toBe("choose a set");
+    expect(crumbsOf(TREE, { scope: "built in", bucket: "" }).at(-1)!.label).toBe("choose a set");
   });
 
   it("find a layer where its reference names it: the copy named exactly, else the nearest", () => {
-    expect(treeAtOf(TREE, "$SYSTEM/permission-sets/chat/ask-first", "chat/ask-first")).toEqual({ scope: "built in", bucket: "chat", set: "chat/ask-first" });
+    expect(treeAtOf(TREE, "$SYSTEM/permission-sets/ask-first", "ask-first")).toEqual({ scope: "built in", bucket: "", set: "ask-first" });
     // `$/…` finds the nearest copy: the project's, which shadows what ships.
-    expect(treeAtOf(TREE, ASK_FIRST, "chat/ask-first")).toEqual({ scope: "project", bucket: "chat", set: "chat/ask-first" });
+    expect(treeAtOf(TREE, ASK_FIRST, "ask-first")).toEqual({ scope: "project", bucket: "", set: "ask-first" });
   });
 
   it("lay what was looked at: a shadowed copy by its exact reference, any other by the nearest", () => {
-    expect(referenceOfPick(set("built in", "chat", "ask-first", { shadowedBy: "project" }))).toBe("$SYSTEM/permission-sets/chat/ask-first");
-    expect(referenceOfPick(set("built in", "chat", "read-only"))).toBe("$/permission-sets/chat/read-only");
+    expect(referenceOfPick(set("built in", "", "ask-first", { shadowedBy: "project" }))).toBe("$SYSTEM/permission-sets/ask-first");
+    expect(referenceOfPick(set("built in", "", "read-only"))).toBe("$/permission-sets/read-only");
   });
 });
 
 describe("the expanded browser's tree (§4.1)", () => {
   it("opens every scope and the bucket that holds the selection, with each set's icon and whether it is in the stack", () => {
-    const rows = treeRowsOf(TREE, {}, { scope: "built in", bucket: "chat", set: "chat/read-only" });
+    const rows = treeRowsOf(TREE, {}, { scope: "built in", bucket: "", set: "read-only" });
     expect(rows.map((row) => `${"  ".repeat(row.depth)}${row.label}${row.on ? " ←" : ""}${row.inStack ? " (in the stack)" : ""}`)).toEqual([
       "Built in",
-      "  chat",
-      "    ask-first.json (in the stack)",
-      "    read-only.json ←",
-      "    auto.json",
-      "  chat_control",
+      "  control",
+      "  ask-first.json (in the stack)",
+      "  read-only.json ←",
+      "  auto.json",
       "Global",
       "  feature",
       "Project",
-      "  chat",
+      "  ask-first.json",
     ]);
   });
 
   it("opens and shuts what the person toggled, over that", () => {
     const rows = treeRowsOf(TREE, { "scope:built in": false, "bucket:global:feature": true }, undefined);
-    expect(rows.map((row) => row.label)).toEqual(["Built in", "Global", "feature", "implementation", "Project", "chat"]);
+    expect(rows.map((row) => row.label)).toEqual(["Built in", "Global", "feature", "implementation", "Project", "ask-first.json"]);
   });
 });
 
@@ -329,27 +333,27 @@ describe("the remembered look (ruling 11)", () => {
 describe("a pin, and the stack saved as a set (§7.3, §7.4)", () => {
   it("pins a layer to the bucket's standing layers in the project's settings, starting from what stands", () => {
     const doc = { model: "x", permissions: { layers: { app: ["$/permission-sets/app/a"] } } };
-    expect(pinnedConfigOf(doc, ["$/permission-sets/chat/base-one"], "chat", BUILD, true)).toEqual({
+    expect(pinnedConfigOf(doc, ["$/permission-sets/base-one"], "", BUILD, true)).toEqual({
       model: "x",
-      permissions: { layers: { app: ["$/permission-sets/app/a"], chat: ["$/permission-sets/chat/base-one", BUILD] } },
+      permissions: { layers: { app: ["$/permission-sets/app/a"], "": ["$/permission-sets/base-one", BUILD] } },
     });
     // Pinned already: no second copy. Unpinned: taken out by its set id, whatever root wrote it.
-    expect(pinnedConfigOf({ permissions: { layers: { chat: [BUILD] } } }, [], "chat", BUILD, true)).toEqual({ permissions: { layers: { chat: [BUILD] } } });
-    expect(pinnedConfigOf({ permissions: { layers: { chat: ["$JAIRA/permission-sets/app/build"] } } }, [], "chat", BUILD, false)).toEqual({ permissions: { layers: { chat: [] } } });
-    expect(pinnedConfigOf(null, undefined, "chat", BUILD, true)).toEqual({ permissions: { layers: { chat: [BUILD] } } });
+    expect(pinnedConfigOf({ permissions: { layers: { "": [BUILD] } } }, [], "", BUILD, true)).toEqual({ permissions: { layers: { "": [BUILD] } } });
+    expect(pinnedConfigOf({ permissions: { layers: { "": ["$JAIRA/permission-sets/app/build"] } } }, [], "", BUILD, false)).toEqual({ permissions: { layers: { "": [] } } });
+    expect(pinnedConfigOf(null, undefined, "", BUILD, true)).toEqual({ permissions: { layers: { "": [BUILD] } } });
   });
 
   it("reads the standing layers and the bucket they are by — the bottom's", () => {
-    expect(standingOf({ permissions: { layers: { chat: [BUILD] } } }, "chat")).toEqual([BUILD]);
-    expect(standingOf({}, "chat")).toEqual([]);
+    expect(standingOf({ permissions: { layers: { "": [BUILD] } } }, "")).toEqual([BUILD]);
+    expect(standingOf({}, "")).toEqual([]);
     expect(stackBucketOf({ layers: ["$/permission-sets/feature/implementation/writes-asking"], tools: {} })).toBe("feature/implementation");
-    expect(stackBucketOf({ layers: [], tools: {} })).toBe("chat");
+    expect(stackBucketOf({ layers: [], tools: {} })).toBe("");
   });
 
   it("saves the stack's own layers and its tools layer's lines, in the bottom's bucket", () => {
     expect(saveStackRequestOf({ layers: [ASK_FIRST, DOCS], tools: { web_search: "unavailable" } }, "  docs-first ", "project")).toEqual({
       layer: "project",
-      bucket: "chat",
+      bucket: "",
       name: "docs-first",
       permissionSet: { layers: [ASK_FIRST, DOCS], web_search: "unavailable" },
     });
@@ -367,12 +371,12 @@ describe("runtime and Everything (§4.1, §7.4)", () => {
   it("tags a line with the layer that decided it — the one that took a tool away first", () => {
     const view: Pick<PermissionStackView, "lines"> = {
       lines: [
-        { subject: "read_file", value: "ask", layer: "chat/ask-first", places: {} },
+        { subject: "read_file", value: "ask", layer: "ask-first", places: {} },
         { subject: "web_search", value: "unavailable", layer: "tools", places: {}, unavailable: "tools" },
         { subject: "npm run build", value: { packages: "allow" }, places: { packages: { decision: "allow", layer: "app/build" } } },
       ],
     };
-    expect(decidedTagOf(view, "read_file")).toBe("chat/ask-first");
+    expect(decidedTagOf(view, "read_file")).toBe("ask-first");
     expect(decidedTagOf(view, "web_search")).toBe("tools");
     expect(decidedTagOf(view, "npm run build")).toBe("app/build");
     expect(decidedTagOf(view, "glob")).toBeUndefined();

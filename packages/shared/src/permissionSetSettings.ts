@@ -18,7 +18,7 @@ import type { WorkflowLayer } from "./view";
 /** One layer's file for a permission set id. */
 export interface PermissionSetLayerFile {
   layer: WorkflowLayer;
-  /** The file as a person reads it: `.jaira/permission-sets/chat/read-only.json`. */
+  /** The file as a person reads it: `.jaira/permission-sets/read-only.json`. */
   file: string;
   /** Only a JSON file is edited in place; a YAML one is read, and overridden or replaced by hand. */
   format: "json" | "yaml";
@@ -55,7 +55,7 @@ export const PERMISSION_SET_LAYER_ORDER: readonly WorkflowLayer[] = ["project", 
 /** A layer's root as a person reads it, the start of {@link PermissionSetLayerFile.file}. */
 export const PERMISSION_SET_ROOT_LABELS: Readonly<Record<WorkflowLayer, string>> = { project: ".jaira", base: "~/.jaira", system: "built in" };
 
-/** The file a layer holds `id` in, or would once written — `~/.jaira/permission-sets/chat/ask-first.json`. */
+/** The file a layer holds `id` in, or would once written — `~/.jaira/permission-sets/ask-first.json`. */
 export function permissionSetFileLabel(layer: WorkflowLayer, id: string): string {
   return `${PERMISSION_SET_ROOT_LABELS[layer]}/permission-sets/${id}.json`;
 }

@@ -4,7 +4,7 @@
  * The gate is handed a placed line at its LOOSEST answer, and a call is brought down to its own by the
  * per-call narrowing. A delegated agent pre-approves every tool whose mode, read with no input, is
  * `allow` (`--allowedTools`), and a pre-approved tool is never put to the gate — so the narrowing never
- * ran. Under `chat/read-only`, whose `read_file` is `allow` in the project and `ask` elsewhere and at
+ * ran. Under `read-only`, whose `read_file` is `allow` in the project and `ask` elsewhere and at
  * `**​/.env`, every read was pre-approved and none was asked about: the engine hands a delegated agent
  * its raw tools and its own gate, built from the policy's `scopeOf`. Seen in a real conversation, where
  * a read of `~/.claude/…` came back refused by the tool in 9 ms with nobody asked.
@@ -19,7 +19,7 @@ import { gateTools } from "../src/tools";
 import { newRegistry } from "../src/wiring";
 
 const shipped = (name: string): PermissionSet =>
-  parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/chat/${name}.json`, import.meta.url)), "utf8"))).permissionSet;
+  parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url)), "utf8"))).permissionSet;
 
 /** The gate the engine builds for a delegated agent: its own, over the policy's narrowing and the state's lowered block. */
 const engineGate = (permissionSet: PermissionSet, scopes?: Parameters<typeof compilePolicy>[1] extends infer O ? (O extends { scopes?: infer S } ? S : never) : never) => {

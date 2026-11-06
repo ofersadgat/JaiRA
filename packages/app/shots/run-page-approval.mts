@@ -1,7 +1,7 @@
 /**
  * A later chat turn's approval on the task's own run page.
  *
- * A real agent (claude-cli/haiku — this rig spends a little), under `chat/ask-first`: a task — not a
+ * A real agent (claude-cli/haiku — this rig spends a little), under `ask-first`: a task — not a
  * conversation, so it is read on its run page — answers its opening message and its run ends; a later
  * message asks to run a line, and the approval is drawn on the run page under that turn, where it can be
  * answered. Before the fix the page drew it nowhere: it looked for a state whose call was running, and
@@ -18,7 +18,7 @@ import { buildWorld } from "./world.mjs";
 const MODEL = "claude-cli/haiku";
 const OUT = join(import.meta.dirname, "out", "run-page-approval");
 const WORLD = join(import.meta.dirname, ".world-run-page-approval");
-const ASK_FIRST = { layers: ["$/permission-sets/chat/ask-first"] };
+const ASK_FIRST = { layers: ["$/permission-sets/ask-first"] };
 const run = (line: string): string => `Use your shell tool to run exactly this line, once, and nothing else: ${line}\nDo not pass a cwd. Then reply with its output, or, if it was not run, with the reason you were given, word for word. Do not use any other tool, and do not try again.`;
 
 type Pending = { requestId: string; taskId?: string; command?: string };

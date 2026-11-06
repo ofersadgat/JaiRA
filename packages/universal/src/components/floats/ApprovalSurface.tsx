@@ -477,7 +477,7 @@ function Reason({ line, marginTop }: { line: ReasonLine; marginTop: number }): J
       </Txt>
     );
   }
-  // The stack, oldest first: `chat/ask-first + project/build-safe, then this run` — each row says which layer decided it.
+  // The stack, oldest first: `ask-first + project/build-safe, then this run` — each row says which layer decided it.
   if (line.kind === "stack") {
     return (
       <Txt spec={spec} marginTop={marginTop} testID="approval-stack">

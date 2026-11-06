@@ -117,7 +117,7 @@ describe("a System command is the System tool", () => {
 });
 
 describe("a System command, judged by the shipped sets", () => {
-  const shipped = (name: string) => parsePermissionSet(JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/chat/${name}.json`, import.meta.url), "utf8"))).permissionSet;
+  const shipped = (name: string) => parsePermissionSet(JSON.parse(readFileSync(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url), "utf8"))).permissionSet;
   const judge = (name: string) => {
     const smart = compilePolicy({}, { permissionSet: shipped(name) }).smart!["shell"]!;
     return (command: string, dialect: CommandDialect = "posix") => {

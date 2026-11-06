@@ -26,7 +26,7 @@ import { CommandGrants, commandDecisionOf, compilePolicy, decideMcpCall } from "
 
 vi.setConfig({ testTimeout: 60_000 });
 
-const map = (decl: Record<string, unknown>): HandedEnvironment => lowerPermissionSet(parsePermissionSet(decl).permissionSet, "$/permission-sets/chat/mcp");
+const map = (decl: Record<string, unknown>): HandedEnvironment => lowerPermissionSet(parsePermissionSet(decl).permissionSet, "$/permission-sets/mcp");
 const setOf = (decl: Record<string, unknown>) => parsePermissionSet(decl).permissionSet;
 const viewOf = (decl: Record<string, unknown>): McpView => {
   const permissionSet = setOf(decl);
@@ -251,9 +251,9 @@ describe("judging an MCP call by name", () => {
   const permissionSet = setOf({ mcp__figma: "ask", mcp__figma__get_code: "allow", mcp__figma__delete: "smart", other: "deny" });
 
   it("is one part, its widths the tool and its server", () => {
-    const decision = decideMcpCall("mcp__figma__whoami", permissionSet, "$/permission-sets/chat/x")!;
+    const decision = decideMcpCall("mcp__figma__whoami", permissionSet, "$/permission-sets/x")!;
     expect(decision.action).toBe("require_approval");
-    expect(decision.parts).toMatchObject({ line: "mcp__figma__whoami", verdict: "asks", permissionSet: "$/permission-sets/chat/x" });
+    expect(decision.parts).toMatchObject({ line: "mcp__figma__whoami", verdict: "asks", permissionSet: "$/permission-sets/x" });
     expect(decision.parts.parts[0]).toMatchObject({ kind: "mcp", subject: "mcp__figma__whoami", widths: ["mcp__figma__whoami", "mcp__figma"], decidedBy: { source: "permissionSet", entry: "mcp__figma" } });
     expect(decideMcpCall("mcp__figma__get_code", permissionSet, "inline")!.action).toBe("allow");
     expect(decideMcpCall("mcp__figma__delete", permissionSet, "inline")!.parts.parts[0]).toMatchObject({ verdict: "function", decidedBy: { function: "smart" } });
@@ -283,7 +283,7 @@ describe("judging an MCP call by name", () => {
     await Promise.resolve();
     await Promise.resolve();
     const [request] = hub.list();
-    expect(request).toMatchObject({ tool: "mcp__figma__whoami", command: "mcp__figma__whoami", parts: { line: "mcp__figma__whoami", permissionSet: "$/permission-sets/chat/mcp" } });
+    expect(request).toMatchObject({ tool: "mcp__figma__whoami", command: "mcp__figma__whoami", parts: { line: "mcp__figma__whoami", permissionSet: "$/permission-sets/mcp" } });
     hub.denyAll();
   });
 });

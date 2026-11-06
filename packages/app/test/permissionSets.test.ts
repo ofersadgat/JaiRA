@@ -65,15 +65,15 @@ const SHIPPED: PermissionSetDecl = { read_file: "allow", glob: "allow", shell: "
 
 const records: PermissionSetRecord[] = [
   {
-    id: "chat/read-only",
-    bucket: "chat",
+    id: "read-only",
+    bucket: "",
     name: "read-only",
     files: [
-      { layer: "project", file: ".jaira/permission-sets/chat/read-only.json", format: "json", follows: "$SYSTEM/permission-sets/chat/read-only", decl: { ...SHIPPED, shell: "ask" } },
-      { layer: "system", file: "built in/permission-sets/chat/read-only.json", format: "json", decl: SHIPPED },
+      { layer: "project", file: ".jaira/permission-sets/read-only.json", format: "json", follows: "$SYSTEM/permission-sets/read-only", decl: { ...SHIPPED, shell: "ask" } },
+      { layer: "system", file: "built in/permission-sets/read-only.json", format: "json", decl: SHIPPED },
     ],
   },
-  { id: "chat/full", bucket: "chat", name: "full", files: [{ layer: "system", file: "built in/permission-sets/chat/full.json", format: "json", decl: { shell: "allow", other: "allow" } }] },
+  { id: "full", bucket: "", name: "full", files: [{ layer: "system", file: "built in/permission-sets/full.json", format: "json", decl: { shell: "allow", other: "allow" } }] },
   {
     id: "feature/writes",
     bucket: "feature",
@@ -102,10 +102,10 @@ describe("the rail", () => {
   it("is the bucket hierarchy: a heading per bucket, its permission sets, + permission set, and + bucket last", () => {
     const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", {});
     expect(rows.map((row) => [row.id, row.kind, row.depth])).toEqual([
-      ["bucket:chat", "bucket", 0],
-      ["permissionSet:chat/read-only", "set", 0],
-      ["permissionSet:chat/full", "set", 0],
-      ["new:chat", "add", 0],
+      ["bucket:", "bucket", 0],
+      ["permissionSet:read-only", "set", 0],
+      ["permissionSet:full", "set", 0],
+      ["new:", "add", 0],
       ["bucket:feature", "bucket", 0],
       ["permissionSet:feature/writes", "set", 0],
       ["new:feature", "add", 0],
@@ -117,7 +117,7 @@ describe("the rail", () => {
     const nested: PermissionSetRecord = { id: "feature/impl/reads", bucket: "feature/impl", name: "reads", files: [{ layer: "project", file: "x", format: "json", decl: SHIPPED }] };
     const rows = permissionSetRailRows(permissionSetsAt([...records, nested], "project"), "project", {});
     expect(bucketsOf(rows).map((row) => [row.id, row.depth])).toEqual([
-      ["bucket:chat", 0],
+      ["bucket:", 0],
       ["bucket:feature", 0],
       ["bucket:feature/impl", 1],
     ]);
@@ -126,17 +126,17 @@ describe("the rail", () => {
   it("folds a closed bucket to its heading, a bucket inside it included, and flips one on its heading", () => {
     const nested: PermissionSetRecord = { id: "feature/impl/reads", bucket: "feature/impl", name: "reads", files: [{ layer: "project", file: "x", format: "json", decl: SHIPPED }] };
     const flipped: string[] = [];
-    const rows = permissionSetRailRows(permissionSetsAt([...records, nested], "project"), "project", {}, { open: new Set(["chat"]), onFold: (bucket) => flipped.push(bucket) });
+    const rows = permissionSetRailRows(permissionSetsAt([...records, nested], "project"), "project", {}, { open: new Set([""]), onFold: (bucket) => flipped.push(bucket) });
     expect(rows.map((row) => row.id)).toEqual([
-      "bucket:chat",
-      "permissionSet:chat/read-only",
-      "permissionSet:chat/full",
-      "new:chat",
+      "bucket:",
+      "permissionSet:read-only",
+      "permissionSet:full",
+      "new:",
       "bucket:feature",
       "+bucket",
     ]);
     expect(bucketsOf(rows).map((row) => [row.id, row.fold?.open])).toEqual([
-      ["bucket:chat", true],
+      ["bucket:", true],
       ["bucket:feature", false],
     ]);
     bucketsOf(rows)
@@ -148,7 +148,7 @@ describe("the rail", () => {
   it("offers no + rows where nothing can be written — the personal layer holds no permission sets", () => {
     const rows = permissionSetRailRows(permissionSetsAt(records, "project"), undefined, {});
     expect(rows.some((row) => row.kind === "add")).toBe(false);
-    expect(rows.map((row) => row.id)).toEqual(["bucket:chat", "permissionSet:chat/read-only", "permissionSet:chat/full", "bucket:feature", "permissionSet:feature/writes"]);
+    expect(rows.map((row) => row.id)).toEqual(["bucket:", "permissionSet:read-only", "permissionSet:full", "bucket:feature", "permissionSet:feature/writes"]);
   });
 
   it("marks what THIS layer states, and marks nothing on a layer that states nothing", () => {
@@ -156,25 +156,25 @@ describe("the rail", () => {
       setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), writesTo, {}))
         .filter((row) => row.dot)
         .map((row) => row.id);
-    expect(here("project")).toEqual(["permissionSet:chat/read-only", "permissionSet:feature/writes"]);
+    expect(here("project")).toEqual(["permissionSet:read-only", "permissionSet:feature/writes"]);
     expect(here(undefined)).toEqual([]);
   });
 
   it("tags a copy of what ships beside its name, and nothing else", () => {
     const tags = setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), "project", {})).map((row) => [row.id, row.copy]);
     expect(tags).toEqual([
-      ["permissionSet:chat/read-only", "this project · copied from built in"],
-      ["permissionSet:chat/full", undefined],
+      ["permissionSet:read-only", "this project · copied from built in"],
+      ["permissionSet:full", undefined],
       ["permissionSet:feature/writes", undefined],
     ]);
   });
 
   it("says a row is unsaved from its draft", () => {
     const draft = parsePermissionSet({ read_file: "allow", other: "deny" }).permissionSet;
-    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", { "chat/read-only": draft });
-    expect(setsOf(rows).find((row) => row.id === "permissionSet:chat/read-only")?.summary).toBe("unsaved · 1 line · other deny");
+    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", { "read-only": draft });
+    expect(setsOf(rows).find((row) => row.id === "permissionSet:read-only")?.summary).toBe("unsaved · 1 line · other deny");
     // With no draft the row says what the file holds.
-    expect(setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), "project", {})).find((row) => row.id === "permissionSet:chat/read-only")?.summary).toBe("4 lines · other deny");
+    expect(setsOf(permissionSetRailRows(permissionSetsAt(records, "project"), "project", {})).find((row) => row.id === "permissionSet:read-only")?.summary).toBe("4 lines · other deny");
   });
 });
 
@@ -200,11 +200,14 @@ describe("what a save will do", () => {
 
   it("refuses a new name the layer already holds, and one a reference could not carry", () => {
     const ats = permissionSetsAt(records, "project");
-    expect(newPermissionSetProblem(ats, "chat", "read-only")).toMatch(/already a permission set/);
-    expect(newPermissionSetProblem(ats, "chat", "full")).toMatch(/inherited/);
-    expect(newPermissionSetProblem(ats, "chat", "a b")).toMatch(/letters, digits/);
-    expect(newPermissionSetProblem(ats, "", "ok")).toMatch(/bucket/);
-    expect(newPermissionSetProblem(ats, "chat", "quiet")).toBeUndefined();
+    expect(newPermissionSetProblem(ats, "", "read-only")).toMatch(/already a permission set/);
+    expect(newPermissionSetProblem(ats, "", "full")).toMatch(/inherited/);
+    expect(newPermissionSetProblem(ats, "", "a b")).toMatch(/letters, digits/);
+    expect(newPermissionSetProblem(ats, "../up", "ok")).toMatch(/not a bucket/);
+    // The top level is a place, but not for a name every stack already uses for a layer.
+    expect(newPermissionSetProblem(ats, "", "tools")).toMatch(/names a layer of every stack/);
+    expect(newPermissionSetProblem(ats, "feature", "tools")).toBeUndefined();
+    expect(newPermissionSetProblem(ats, "", "quiet")).toBeUndefined();
   });
 });
 
@@ -245,7 +248,7 @@ describe("a section's add line and its minus", () => {
 
 describe("the state editor's one Tools field", () => {
   it("reads all three spellings, and writes each back as the plain one", () => {
-    const bare = "$/permission-sets/chat/read-only";
+    const bare = "$/permission-sets/read-only";
     expect(toolsFieldOf(bare)).toEqual({ reference: bare, lines: {}, unread: {} });
     expect(applyToolsField(bare, toolsFieldOf(bare)!)).toBe(bare);
 
@@ -263,12 +266,12 @@ describe("the state editor's one Tools field", () => {
 
   it("hands the document back UNCHANGED when nothing was edited — spelling and order and all", () => {
     // A `$ref` object with one sibling could be written as either spelling; the one on disk wins.
-    const written = { $ref: "$/permission-sets/chat/read-only", "git commit": "ask", write_file: { mode: "ask", implementation: "native" } };
+    const written = { $ref: "$/permission-sets/read-only", "git commit": "ask", write_file: { mode: "ask", implementation: "native" } };
     expect(applyToolsField(written, toolsFieldOf(written)!)).toBe(written);
   });
 
   it("changes spelling only when what it says changes", () => {
-    const bare = "$/permission-sets/chat/read-only";
+    const bare = "$/permission-sets/read-only";
     const form = toolsFieldOf(bare)!;
     expect(applyToolsField(bare, { ...form, lines: { edit: "ask" } })).toEqual({ $ref: bare, edit: "ask" });
     // Dropping the last line goes back to a bare reference; dropping the reference leaves the map.
@@ -279,12 +282,12 @@ describe("the state editor's one Tools field", () => {
   });
 
   it("carries a sibling it could not read straight through, rather than deleting the evidence", () => {
-    const odd = { $ref: "$/permission-sets/chat/read-only", read_file: 7 };
+    const odd = { $ref: "$/permission-sets/read-only", read_file: 7 };
     const form = toolsFieldOf(odd)!;
     expect(form).toMatchObject({ lines: {}, unread: { read_file: 7 } });
     expect(applyToolsField(odd, form)).toBe(odd);
     // It survives an edit to a different line.
-    expect(applyToolsField(odd, { ...form, lines: { edit: "ask" } })).toEqual({ $ref: "$/permission-sets/chat/read-only", read_file: 7, edit: "ask" });
+    expect(applyToolsField(odd, { ...form, lines: { edit: "ask" } })).toEqual({ $ref: "$/permission-sets/read-only", read_file: 7, edit: "ask" });
   });
 
   it("is not the form's field for a binding, or for a list (which the linter refuses)", () => {
@@ -293,14 +296,14 @@ describe("the state editor's one Tools field", () => {
     expect(showsToolsField({ tools: ["read_file"] })).toBe(false);
     // Whatever sits in `permissions` has no say in it.
     expect(showsToolsField({ permissions: { scopes: [] } })).toBe(true);
-    expect(showsToolsField({ tools: "$/permission-sets/chat/read-only" })).toBe(true);
+    expect(showsToolsField({ tools: "$/permission-sets/read-only" })).toBe(true);
     expect(showsToolsField({})).toBe(true);
   });
 
   it("round-trips through the whole operation form, and keeps a value it cannot draw as it was", () => {
-    const migrated = { kind: "prompt", prompt: "go", tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask" } };
+    const migrated = { kind: "prompt", prompt: "go", tools: { $ref: "$/permission-sets/read-only", write_file: "ask" } };
     const form = operationFieldsOf(migrated);
-    expect(form.toolsField).toEqual({ reference: "$/permission-sets/chat/read-only", lines: { write_file: "ask" }, unread: {} });
+    expect(form.toolsField).toEqual({ reference: "$/permission-sets/read-only", lines: { write_file: "ask" }, unread: {} });
     expect(applyOperationFields(migrated, form)).toEqual(migrated);
 
     const bound = { kind: "prompt", prompt: "go", tools: { $expr: ".inputs.tools" } };
@@ -311,10 +314,10 @@ describe("the state editor's one Tools field", () => {
   });
 
   it("writes the permission set the picker chose, and the lines the rows changed", () => {
-    const block = { kind: "prompt", tools: "$/permission-sets/chat/read-only" };
+    const block = { kind: "prompt", tools: "$/permission-sets/read-only" };
     const form = operationFieldsOf(block);
-    const next = applyOperationFields(block, { ...form, toolsField: { ...form.toolsField!, reference: "$/permission-sets/chat/full", lines: { shell: "deny" } } });
-    expect(next["tools"]).toEqual({ $ref: "$/permission-sets/chat/full", shell: "deny" });
+    const next = applyOperationFields(block, { ...form, toolsField: { ...form.toolsField!, reference: "$/permission-sets/full", lines: { shell: "deny" } } });
+    expect(next["tools"]).toEqual({ $ref: "$/permission-sets/full", shell: "deny" });
     // "none" is a real answer, and it leaves the lines behind as the whole statement.
     const none = applyOperationFields(block, { ...form, toolsField: { reference: "", lines: { shell: "deny" }, unread: {} } });
     expect(none["tools"]).toEqual({ shell: "deny" });
@@ -331,15 +334,15 @@ describe("the state editor's one Tools field", () => {
 
 describe("the permission set picker", () => {
   const choices: PermissionSetChoice[] = [
-    { id: "chat/read-only", bucket: "chat", name: "read-only", layer: "project", decl: SHIPPED },
-    { id: "chat/full", bucket: "chat", name: "full", layer: "system", decl: SHIPPED },
+    { id: "read-only", bucket: "", name: "read-only", layer: "project", decl: SHIPPED },
+    { id: "full", bucket: "", name: "full", layer: "system", decl: SHIPPED },
     { id: "feature/impl/reads", bucket: "feature/impl", name: "reads", layer: "base", decl: SHIPPED },
   ];
 
   it("lists every permission set as `bucket / name — layer`, then none", () => {
     expect(permissionSetPicks(choices, "").map((pick) => pick.label)).toEqual([
-      "chat / read-only — this project",
-      "chat / full — built in",
+      "read-only — this project",
+      "full — built in",
       "feature / impl / reads — all projects",
       NO_PERMISSION_SET_LABEL,
     ]);
@@ -354,25 +357,25 @@ describe("the permission set picker", () => {
   it("falls to none for a reference that is empty, and reads a label back as its reference", () => {
     const picks = permissionSetPicks(choices, "");
     expect(pickOfReference(picks, "").label).toBe(NO_PERMISSION_SET_LABEL);
-    expect(referenceOfLabel(picks, "chat / full — built in")).toBe("$/permission-sets/chat/full");
+    expect(referenceOfLabel(picks, "full — built in")).toBe("$/permission-sets/full");
     expect(referenceOfLabel(picks, NO_PERMISSION_SET_LABEL)).toBe("");
     expect(referenceOfLabel(picks, "half a wor")).toBeUndefined();
   });
 });
 
 describe("what the pane says of the open permission set, and the field of the one a state names", () => {
-  const usedBy: Record<string, string[]> = { "chat/read-only": ["sync/review", "a", "b"] };
+  const usedBy: Record<string, string[]> = { "read-only": ["sync/review", "a", "b"] };
   const at = (id: string, all: readonly PermissionSetRecord[] = records) => permissionSetsAt(all, "project").find((one) => one.id === id)!;
 
   it("says who uses it", () => {
-    expect(usedByLine(usedBy["chat/read-only"])).toBe("used by sync/review and 2 more states");
-    expect(usedByLine(usedBy["chat/full"])).toBe("no state names it");
+    expect(usedByLine(usedBy["read-only"])).toBe("used by sync/review and 2 more states");
+    expect(usedByLine(usedBy["full"])).toBe("no state names it");
   });
 
   it("a built-in on a layer is not the layer's own: its standing, and where its first change will copy it", () => {
-    const full = at("chat/full");
+    const full = at("full");
     expect(permissionSetStanding(full)).toEqual({ here: false, label: "built in" });
-    expect(permissionSetFileLabel("project", full.id)).toBe(".jaira/permission-sets/chat/full.json");
+    expect(permissionSetFileLabel("project", full.id)).toBe(".jaira/permission-sets/full.json");
     // Nothing of this layer's to save, revert or put back until the first change writes the copy.
     expect(full.here).toBe(false);
     expect(copiedFrom(full)).toBeUndefined();
@@ -380,10 +383,10 @@ describe("what the pane says of the open permission set, and the field of the on
   });
 
   it("a copy: its tag, how many lines differ from what ships and where it lives", () => {
-    const readOnly = at("chat/read-only");
+    const readOnly = at("read-only");
     expect(permissionSetStanding(readOnly)).toEqual({ here: true, label: "this project · copied from built in" });
     expect(copyDifferences(readOnly)).toBe(1);
-    expect(readOnly.source.file).toBe(".jaira/permission-sets/chat/read-only.json");
+    expect(readOnly.source.file).toBe(".jaira/permission-sets/read-only.json");
     // A copy of what SHIPS is put back; a copy of the shared one is reset to it. The layer it was
     // copied from decides which, and is named as the page names it.
     expect(copiedFrom(readOnly)).toBe("system");
@@ -396,18 +399,18 @@ describe("what the pane says of the open permission set, and the field of the on
   });
 
   it("keeps why a file it cannot read is not a permission set", () => {
-    const broken: PermissionSetRecord = { id: "chat/bad", bucket: "chat", name: "bad", files: [{ layer: "project", file: ".jaira/permission-sets/chat/bad.json", format: "json", problem: "it is a list" }] };
-    const bad = at("chat/bad", [...records, broken]);
+    const broken: PermissionSetRecord = { id: "bad", bucket: "", name: "bad", files: [{ layer: "project", file: ".jaira/permission-sets/bad.json", format: "json", problem: "it is a list" }] };
+    const bad = at("bad", [...records, broken]);
     // No map to draw a card from, and the reason the page gives instead.
     expect(bad.source.decl).toBeUndefined();
     expect(bad.source.problem).toBe("it is a list");
-    expect(bad.source.file).toBe(".jaira/permission-sets/chat/bad.json");
+    expect(bad.source.file).toBe(".jaira/permission-sets/bad.json");
   });
 
   it("the state field shows the permission set a state names by its row's label", () => {
-    const choices: PermissionSetChoice[] = [{ id: "chat/read-only", bucket: "chat", name: "read-only", layer: "system", decl: SHIPPED }];
-    const reference = toolsFieldOf({ $ref: "$/permission-sets/chat/read-only", write_file: "ask" })!.reference;
-    expect(pickOfReference(permissionSetPicks(choices, reference), reference).label).toBe("chat / read-only — built in");
+    const choices: PermissionSetChoice[] = [{ id: "read-only", bucket: "", name: "read-only", layer: "system", decl: SHIPPED }];
+    const reference = toolsFieldOf({ $ref: "$/permission-sets/read-only", write_file: "ask" })!.reference;
+    expect(pickOfReference(permissionSetPicks(choices, reference), reference).label).toBe("read-only — built in");
   });
 });
 

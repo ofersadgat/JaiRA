@@ -20,6 +20,7 @@
 import {
   composePermissionSetLayers,
   decidedBy,
+  permissionSetIdAt,
   OTHER_SUBJECT,
   parsePermissionSet,
   PLACE_ANYWHERE,
@@ -36,7 +37,7 @@ import {
 import { linePlaceKindOf, runsAFile } from "./composerPermissionSet";
 import { NAMED_PLACE_WORDS } from "./permissionSetWords";
 
-/** One set of a preview, by the id a person reads (`chat/read-only`, `project/build-safe`) and its map. */
+/** One set of a preview, by the id a person reads (`read-only`, `project/build-safe`) and its map. */
 export interface PreviewSet {
   id: string;
   decl: Record<string, unknown>;
@@ -166,12 +167,12 @@ export function stackPreviewOf(base: PreviewSet, layer: PreviewSet): PreviewRow[
 
 /**
  * The base a set is first shown over: a set whose bucket's standing layers name it is shown over that
- * bucket's `ask-first` (it is laid on every set there); any other over `chat/ask-first`; failing those,
+ * bucket's `ask-first` (it is laid on every set there); any other over `ask-first`; failing those,
  * the first set offered. Never the set itself.
  */
 export function defaultBaseOf(id: string, offered: readonly string[], standing: Readonly<Record<string, readonly string[]>>): string | undefined {
   const others = offered.filter((one) => one !== id);
   const bucket = Object.entries(standing).find(([, list]) => list.some((reference) => reference.replace(/\.(json|ya?ml)$/, "").endsWith(`/permission-sets/${id}`)))?.[0];
-  for (const want of [bucket !== undefined ? `${bucket}/ask-first` : undefined, "chat/ask-first"]) if (want !== undefined && others.includes(want)) return want;
+  for (const want of [bucket !== undefined ? permissionSetIdAt(bucket, "ask-first") : undefined, "ask-first"]) if (want !== undefined && others.includes(want)) return want;
   return others[0];
 }

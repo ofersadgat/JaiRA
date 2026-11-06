@@ -350,16 +350,17 @@ export interface JairaConfig {
  *
  * `layers.<bucket>` is a list of permission set references, oldest first, laid over every set of that
  * bucket wherever one is judged — a conversation's preset, a state's named set — and under whatever a
- * state or a conversation lays on top of it. So `"chat": ["$/permission-sets/project/build-safe"]`
- * makes "this build is safe in this project" hold under every `chat/…` preset, `read-only` included.
+ * state or a conversation lays on top of it. The sets at the TOP LEVEL (`$/permission-sets/read-only`)
+ * are the bucket `""`, so `"": ["$/permission-sets/project/build-safe"]` makes "this build is safe in
+ * this project" hold under every conversation preset, `read-only` included.
  *
  * Here rather than in each set's file (§7.3): a standing layer is a statement about a PROJECT, and a
  * set file is shared by every project that names it. It layers as every setting does — objects by key,
- * so a project's list for `chat` replaces the shared root's list for `chat` and leaves its other
+ * so a project's list for a bucket replaces the shared root's list for it and leaves its other
  * buckets standing; a list replaces whole, so a project can take a standing layer away.
  */
 export interface JairaPermissionsConfig {
-  /** By bucket (`chat`, `feature/implementation`): the references laid over its sets, oldest first. */
+  /** By bucket (`""` for the top level, `control`, `feature/implementation`): the references laid over its sets, oldest first. */
   layers: Record<string, string[]>;
 }
 
@@ -374,8 +375,9 @@ function parsePermissions(raw: unknown): JairaPermissionsConfig {
   const layers: Record<string, string[]> = {};
   if (block["layers"] !== undefined) {
     for (const [bucket, list] of Object.entries(plainObject(block["layers"], "config.permissions.layers"))) {
-      const where = `config.permissions.layers.${bucket}`;
-      if (bucket.trim() === "" || bucket.startsWith("/") || bucket.endsWith("/")) throw new Error(`${where}: a bucket is a folder path like chat or feature/implementation`);
+      const where = bucket === "" ? 'config.permissions.layers[""]' : `config.permissions.layers.${bucket}`;
+      // `""` is the top level, where the conversation presets are; anything else is a folder path.
+      if ((bucket !== "" && bucket.trim() === "") || bucket.startsWith("/") || bucket.endsWith("/")) throw new Error(`${where}: a bucket is "" (the top level) or a folder path like control or feature/implementation`);
       if (!Array.isArray(list) || !list.every((each) => typeof each === "string" && each.trim() !== "")) {
         throw new Error(`${where} must be a list of permission set references, oldest first, like ["$/permission-sets/project/build-safe"]`);
       }

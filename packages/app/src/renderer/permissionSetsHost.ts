@@ -9,7 +9,9 @@ import {
   declOfPermissionSet,
   overridesOf,
   parsePermissionSet,
-  permissionSetBucketProblem,
+  permissionSetPlaceProblem,
+  permissionSetIdAt,
+  TOP_LEVEL_BUCKET_NAME,
   permissionSetFileLabel,
   permissionSetIconOf,
   permissionSetIdOf,
@@ -144,7 +146,7 @@ export function permissionSetRailRows(ats: readonly PermissionSetAt[], writesTo:
         icon: permissionSetIconOf(at.id, at.source.decl),
       });
     }
-    if (writable) rows.push({ kind: "add", id: newTab(bucket.path), depth: bucket.depth, summary: "+ permission set", title: `add a permission set to ${bucket.path}` });
+    if (writable) rows.push({ kind: "add", id: newTab(bucket.path), depth: bucket.depth, summary: "+ permission set", title: `add a permission set to ${bucket.path === "" ? TOP_LEVEL_BUCKET_NAME : bucket.path}` });
   }
   if (writable) rows.push({ kind: "add", id: BUCKET_TAB, summary: "+ bucket", title: "add a bucket — a place with its own versions of the same names" });
   return rows;
@@ -162,9 +164,9 @@ export function detachingLines(at: PermissionSetAt, draft: PermissionSet | undef
 
 /** Why a name cannot be used for a new permission set in a bucket, or `undefined` when it can. */
 export function newPermissionSetProblem(ats: readonly PermissionSetAt[], bucket: string, name: string): string | undefined {
-  const problem = permissionSetBucketProblem(bucket.trim()) ?? permissionSetNameProblem(name.trim());
+  const problem = permissionSetPlaceProblem(bucket.trim(), name.trim());
   if (problem !== undefined) return problem;
-  const taken = ats.find((at) => at.id === `${bucket.trim()}/${name.trim()}`);
+  const taken = ats.find((at) => at.id === permissionSetIdAt(bucket.trim(), name.trim()));
   if (taken === undefined) return undefined;
   return taken.here ? `there is already a permission set called '${taken.id}'` : `'${taken.id}' is inherited here — open it, and your first change copies it here`;
 }
@@ -444,7 +446,7 @@ export function usePermissionSetsHost({
       told,
       onAdd: (bucket, name) => {
         if (writesTo === undefined) return;
-        const id = `${bucket}/${name}`;
+        const id = permissionSetIdAt(bucket, name);
         run(
           () => channel.write({ id, layer: writesTo, permissionSet: NEW_PERMISSION_SET }),
           () => {

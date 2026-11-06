@@ -65,14 +65,14 @@ const plan = (): ChatPlanView =>
  */
 const choice = (id: string, decl: PermissionSetDecl, layer: PermissionSetChoice["layer"] = "system"): PermissionSetChoice => {
   const cut = id.lastIndexOf("/");
-  return { id, bucket: id.slice(0, cut), name: id.slice(cut + 1), layer, decl };
+  return { id, bucket: cut < 0 ? "" : id.slice(0, cut), name: id.slice(cut + 1), layer, decl };
 };
 const ASK_FIRST: PermissionSetDecl = { read_file: "ask", write_file: "ask", shell: "ask", other: "ask" };
 const READ_ONLY: PermissionSetDecl = { read_file: "allow", write_file: "deny", shell: "deny", other: "deny" };
 const PERMISSION_SETS: PermissionSetChoice[] = [
-  choice("chat/ask-first", ASK_FIRST),
-  choice("chat/read-only", READ_ONLY),
-  choice("chat_control/ask-first", { start_task: "ask", move_task: "ask", other: "deny" }),
+  choice("ask-first", ASK_FIRST),
+  choice("read-only", READ_ONLY),
+  choice("control/ask-first", { start_task: "ask", move_task: "ask", other: "deny" }),
   choice("feature/implementation/writes-asking", { write_file: "ask", other: "deny" }, "project"),
 ];
 const TOOLS = ["read_file", "write_file", "shell", "start_task", "move_task"].map((name) => ({ name }));
@@ -104,10 +104,10 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
     expect(rowsOf(facts)).toEqual(["ask first", "read-only"]);
     // One match, which is the row that is ticked — and, the map being somebody's already, why `+`
     // has nothing to keep.
-    expect(facts.matched?.id).toBe("chat/read-only");
+    expect(facts.matched?.id).toBe("read-only");
     expect(permissionSetHint(facts.matched!)).toBe("reading goes ahead, anything that writes is refused");
-    // The head: the bucket, then where the value came from.
-    expect(facts.bucket).toBe("chat");
+    // The head: the bucket (the top level's is ""), then where the value came from.
+    expect(facts.bucket).toBe("");
     expect(originWordsOf(facts.permissionsOrigin, view.from)).toEqual({ text: "your choice for this conversation", tone: "own" });
   });
 
@@ -125,7 +125,7 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
     expect(chipsOf(view).permissions).toBe("custom");
     expect(facts.matched).toBeUndefined();
     expect(permissionsHintOf(facts.rows.length, facts.matched !== undefined, facts.tools.length, facts.bucket)).toBe(
-      "These tools and modes match no permission set in chat — + keeps them as a new one.",
+      "These tools and modes match no permission set at the top level — + keeps them as a new one.",
     );
   });
 
@@ -137,25 +137,25 @@ describe("the Permissions card holds the permission sets of one bucket", () => {
 
   it("opens on the plan's bucket, whose rows are ITS versions of the same names", () => {
     const control = { start_task: "ask", move_task: "ask", other: "deny" } as PermissionSetDecl;
-    const view = permissionSetPlan({ permissionSet: control }, "chat_control");
+    const view = permissionSetPlan({ permissionSet: control }, "control");
     const facts = factsOf(view);
-    expect(facts.bucket).toBe("chat_control");
+    expect(facts.bucket).toBe("control");
     expect(chipsOf(view).permissions).toBe("ask first");
     expect(rowsOf(facts)).toEqual(["ask first"]);
     expect(facts.rows.map(permissionSetHint)).toEqual(["ask before starting, moving or answering anything"]);
-    // The same map read in the chat bucket is nobody's: a label belongs to a bucket.
-    expect(chipsOf(permissionSetPlan({ permissionSet: control }, "chat")).permissions).toBe("custom");
+    // The same map read at the top level is nobody's: a label belongs to a bucket.
+    expect(chipsOf(permissionSetPlan({ permissionSet: control }, "")).permissions).toBe("custom");
   });
 
   it("lists the hierarchy for the picker: each bucket, what it holds, the layer that defines it, nested ones a level in", () => {
     const { buckets } = factsOf(permissionSetPlan({ permissionSet: ASK_FIRST }));
     expect(buckets.map((row) => [row.name, row.depth, PERMISSION_SET_LAYER_LABELS[row.layer]])).toEqual([
-      ["chat", 0, "built in"],
-      ["chat_control", 0, "built in"],
+      ["top level", 0, "built in"],
+      ["control", 0, "built in"],
       ["feature", 0, "this project"],
       ["implementation", 1, "this project"],
     ]);
-    expect(buckets.find((row) => row.path === "chat")?.hint).toBe("ask first · read-only");
+    expect(buckets.find((row) => row.path === "")?.hint).toBe("ask first · read-only");
     expect(buckets.find((row) => row.path === "feature")?.hint).toBe("0 permission sets, and 1 bucket inside");
   });
 

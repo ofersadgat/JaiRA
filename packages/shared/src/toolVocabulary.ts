@@ -53,7 +53,7 @@ export const TOOL_CATEGORIES: readonly ToolCategory[] = [
   { id: "git", label: "Git", hint: "the repository and its merge requests, through the connection signed in on Connections" },
   // Decision 0016: the pipelines that ran on the repository's commits — CI, not git.
   { id: "ci", label: "CI", hint: "the pipelines that ran on the repository's commits, through the same connection" },
-  // The workflow tools of decision 0005 §3 — all of what `chat_control/*` holds, and part of `chat/*`.
+  // The workflow tools of decision 0005 §3 — all of what `control/*` holds, and part of every top-level set.
   { id: "tasks", label: "Tasks & workflows", hint: "starting, moving and answering tasks" },
   { id: "mcp", label: "MCP", hint: "tools served by connected MCP servers" },
 ];
@@ -316,7 +316,7 @@ export const TOOL_SPECS: readonly ToolSpec[] = [
   // so it sits with the tasks and workflows rather than with git (decision 0016 §5).
   { name: "wait_for_event", label: "wait_for_event", title: "Wait for an event", icon: "workflow", category: "tasks", hint: "wait for an event — a push, a merge request, a pipeline, a task's end — or its timeout" },
   // The workflow tools (decision 0005 §3): the host's own operations, offered to a conversation.
-  // `chat_control/*` holds nothing else; `chat/*` holds them beside the project's tools. Served since
+  // `control/*` holds nothing else; the top-level sets hold them beside the project's tools. Served since
   // step 6 (`runtime/workflowTools.ts`, over the host the app lends) — the `unserved` mark they
   // carried until then is gone, and deleting it was the whole change here.
   { name: "list_workflows", label: "list_workflows", title: "List workflows", icon: "workflow", category: "tasks", hint: "list workflows, and what a state takes and produces" },

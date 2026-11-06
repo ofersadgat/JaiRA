@@ -106,12 +106,12 @@ describe("MCP subjects", () => {
     // An allowing MCP line does not keep a denied shell: only a command or `script` can.
     expect(shellWithheld(permissionSet)).toBe(true);
     expect(shellSubjects(permissionSet)).toEqual({ shell: "deny" });
-    const lowered = lowerPermissionSet(permissionSet, "$/permission-sets/chat/figma");
+    const lowered = lowerPermissionSet(permissionSet, "$/permission-sets/figma");
     expect(lowered.tools).toEqual([]);
     expect(lowered.permissions?.tools).toMatchObject({ mcp__figma: "allow", mcp__figma__delete: "ask", shell: "deny" });
     expect(lowered.permissions?.functions).toEqual({ mcp__figma__delete: "smart" });
     // Where the lines came from rides along, for "add to the permission set".
-    expect(lowered.permissions?.source).toBe("$/permission-sets/chat/figma");
+    expect(lowered.permissions?.source).toBe("$/permission-sets/figma");
     const back = permissionSetOfEnvironment(lowered.tools, lowered.permissions);
     expect(back.entries["mcp__figma"]).toEqual({ kind: "mcp", mode: "allow" });
     expect(back.entries["mcp__figma__delete"]).toEqual({ kind: "mcp", mode: { function: "smart" } });

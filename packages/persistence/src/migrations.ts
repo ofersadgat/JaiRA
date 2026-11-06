@@ -25,6 +25,7 @@
 import type { JairaDb } from "./db";
 import { SYNC_SQL } from "./sync";
 import { DEVICE_LAYOUTS_SQL, WINDOW_STATES_SQL } from "./windowStates";
+import { moveRecordedPermissionSets } from "./permissionSetsMove";
 
 /** The version `SCHEMA` creates a database at. */
 export const SCHEMA_BASELINE = 24;
@@ -112,6 +113,11 @@ UPDATE event_waits SET name = CASE name
     version: 31,
     note: "decision 0020: every publish of an artifact is a version (artifact_versions), and a canvas is one artifact of many files",
     sql: SYNC_SQL,
+  },
+  {
+    version: 32,
+    note: "the permission sets left chat/ (2026-11-05): a turn's filed composer settings name $/permission-sets/read-only, not $/permission-sets/chat/read-only, and control/ for chat_control/ (permissionSetsMove.ts)",
+    run: moveRecordedPermissionSets,
   },
 ];
 

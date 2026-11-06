@@ -270,7 +270,7 @@ describe("a bucket's standing layers (`permissions.layers`, decision 0023 §2.6 
   it("refuses what it cannot read, naming the field — a standing layer that silently reads as nothing is a rule nobody has", () => {
     expect(() => parseConfig({ permissions: { layers: { chat: "$/permission-sets/x/y" } } })).toThrow("config.permissions.layers.chat must be a list of permission set references");
     expect(() => parseConfig({ permissions: { layers: { chat: [""] } } })).toThrow(/config\.permissions\.layers\.chat/);
-    expect(() => parseConfig({ permissions: { layers: { "/chat": [] } } })).toThrow(/a bucket is a folder path/);
+    expect(() => parseConfig({ permissions: { layers: { "/control": [] } } })).toThrow('a bucket is "" (the top level) or a folder path');
     expect(() => parseConfig({ permissions: { stack: {} } })).toThrow(/config\.permissions/);
   });
 });

@@ -150,12 +150,17 @@ export function originWordsOf(origin: "override" | "unset" | "inherited" | strin
 /** Where a kept permission set goes, as the form words it. */
 export const KEEP_WHERE: Readonly<Record<"project" | "base", string>> = { project: "in this project", base: "for all projects" };
 
+/** Where a bucket is, in a sentence: `at the top level`, `in control`. */
+export function bucketPhraseOf(bucket: string): string {
+  return bucket === "" ? "at the top level" : `in ${bucket}`;
+}
+
 /** The Permissions card's sentence under its rows. */
 export function permissionsHintOf(rows: number, matched: boolean, tools: number, bucket: string): string {
   return rows === 0
-    ? `No permission sets in ${bucket} yet. + keeps the tools and modes under Tools as the first.`
+    ? `No permission sets ${bucketPhraseOf(bucket)} yet. + keeps the tools and modes under Tools as the first.`
     : !matched && tools > 0
-      ? `These tools and modes match no permission set in ${bucket} — + keeps them as a new one.`
+      ? `These tools and modes match no permission set ${bucketPhraseOf(bucket)} — + keeps them as a new one.`
       : "A permission set: which tools are offered, and what happens when each is called. Change any of it under Tools and this becomes custom.";
 }
 

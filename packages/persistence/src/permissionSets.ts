@@ -16,7 +16,7 @@
  *    first layer winning, a bucket free to nest.
  *
  * A permission set reference is resolved by the SAME resolver as every other reference in a workflow
- * (`resolveReference`), with the same options — so `$/permission-sets/chat/read-only` searches the layer
+ * (`resolveReference`), with the same options — so `$/permission-sets/read-only` searches the layer
  * roots in order (`rootPath`, which is `paths.roots`: a third layer is picked up by being in that
  * list), `./` means what it means elsewhere, and the file lands in the snapshot closure through the
  * same `onReferencedFile`.
@@ -45,7 +45,8 @@ import {
   parsePermissionSet,
   resolvePermissionSetDecl,
   setPermissionSetText,
-  permissionSetBucketProblem,
+  permissionSetPlaceProblem,
+  RESERVED_LAYER_IDS,
   permissionSetNameProblem,
   permissionSetTextFollows,
   PERMISSION_SET_ROOT_LABELS,
@@ -102,7 +103,7 @@ export function permissionSetReader(options: LoadBundleOptions): PermissionSetRe
       vfs,
     });
     if (resolved.local || resolved.file === undefined) {
-      throw new Error(`reference '${reference}' names no file — a permission set reference is a path, like $/permission-sets/chat/read-only`);
+      throw new Error(`reference '${reference}' names no file — a permission set reference is a path, like $/permission-sets/read-only`);
     }
     const text = vfs.read(resolved.file);
     if (text === undefined) throw new Error(`reference '${reference}' names '${resolved.file}', which does not exist`);
@@ -278,7 +279,7 @@ const SWITCH_ONLY: ReadonlySet<string> = new Set(["$ref", "disabled"]);
  * "disabled": … }`, what Disable writes (decision 0021) — read AS the file it follows, a chain of them
  * to its end. The switch is no part of a load ({@link withoutSwitches}), so the two load the same. Done
  * here, BEFORE lowering, because the engine's own `$ref` expansion runs after it and would meet the
- * followed file's permission set (`"tools": "$/permission-sets/chat/ask-first"`) unlowered. A file that
+ * followed file's permission set (`"tools": "$/permission-sets/ask-first"`) unlowered. A file that
  * cannot be followed is left as it is: the load reports the reference the way it reports any other.
  */
 function followedOf(stateId: string, def: unknown, read: PermissionSetReader): unknown {
@@ -314,7 +315,7 @@ function withoutSwitches(bundle: WorkflowBundle): WorkflowBundle {
  * followed — what the composer's Permissions card is drawn from (decision 0007 §5).
  *
  * Read through the same reader a state's `tools` reference goes through, so a permission set file that
- * starts from another (`{ "$ref": "$/permission-sets/chat/read-only", "shell": "ask" }`) is offered as the
+ * starts from another (`{ "$ref": "$/permission-sets/read-only", "shell": "ask" }`) is offered as the
  * map it resolves to — the map picking it would write. A file that cannot be read, or whose
  * references do not resolve, is LEFT OUT rather than offered as half of itself: a row that writes
  * something other than what its file says is worse than a missing row, and the linter is where a
@@ -375,7 +376,10 @@ export function listPermissionSets(roots: readonly string[]): PermissionSetFile[
           continue;
         }
         const match = /^(.+)\.(json|ya?ml)$/.exec(entry.name);
-        if (!entry.isFile() || match === null || bucket.length === 0) continue;
+        if (!entry.isFile() || match === null) continue;
+        // A file directly in `permission-sets/` is a set at the top level, named by its bare name — but
+        // never one of the names a stack gives a layer that is no file (`tools`, `runtime`, `inline`).
+        if (bucket.length === 0 && RESERVED_LAYER_IDS.includes(match[1]!)) continue;
         const id = [...bucket, match[1]!].join("/");
         const prior = byId.get(id);
         if (prior !== undefined) {
@@ -395,7 +399,7 @@ export function listPermissionSets(roots: readonly string[]): PermissionSetFile[
     };
     walk(join(root, PERMISSION_SETS_DIR_NAME), []);
   }
-  // By code point, so a bucket sorts ahead of a longer name that starts with it (`chat/` before `chat_control/`).
+  // By code point, so a bucket sorts ahead of a longer name that starts with it (`control/` before `control_x/`); a set at the top level is its bare name.
   return [...byId.values()].sort((a, b) => (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
 }
 
@@ -426,11 +430,12 @@ export function permissionSetLayers(paths: JairaPaths): PermissionSetLayer[] {
   return layers.filter((layer) => !(layer.layer === "project" && resolve(layer.root) === resolve(paths.base.baseDir)));
 }
 
-/** `<bucket>/<name>` from a LAYERED permission set reference (`$/permission-sets/<bucket>/<name>`), or nothing. */
+/** `[<bucket>/]<name>` from a LAYERED permission set reference (`$/permission-sets/read-only`, `$/permission-sets/<bucket>/<name>`), or nothing. */
 export function permissionSetIdOfReference(reference: string): string | undefined {
-  const match = /^\$\/permission-sets\/((?:[^/\\#]+\/)+[^/\\#]+)$/.exec(reference.trim());
+  const match = /^\$\/permission-sets\/((?:[^/\\#]+\/)*[^/\\#]+)$/.exec(reference.trim());
   if (match === null) return undefined;
   const id = match[1]!.replace(/\.(json|ya?ml)$/, "");
+  if (RESERVED_LAYER_IDS.includes(id)) return undefined;
   return id.split("/").some((segment) => segment === "." || segment === "..") ? undefined : id;
 }
 
@@ -484,7 +489,7 @@ export function permissionSetWriteTargets(
   if (id === undefined) {
     return {
       targets: [],
-      unwritable: `The state names its permission set as ${reference}. Only a layered $/permission-sets/<bucket>/<name> reference says which file a line belongs in.`,
+      unwritable: `The state names its permission set as ${reference}. Only a layered $/permission-sets/[<bucket>/]<name> reference says which file a line belongs in.`,
     };
   }
   const layers = permissionSetLayers(paths);
@@ -552,7 +557,7 @@ export function addToPermissionSet(
  *
  * {@link readPermissionSets} answers with the winner of each id, which is what a conversation can name.
  * A settings pane edits one layer, so it needs the files kept apart. Each is read through the layer's
- * explicit root (`$BASE/permission-sets/chat/read-only`) — the same resolver, so an override's `$ref` is
+ * explicit root (`$BASE/permission-sets/read-only`) — the same resolver, so an override's `$ref` is
  * followed exactly as a run would follow it — and a file that cannot be read is LISTED, with why,
  * rather than left out: a pane that hid a broken file would offer to create the one that is there.
  */
@@ -587,7 +592,7 @@ export function readPermissionSetLayers(paths: JairaPaths): PermissionSetRecord[
 
 function checkedPermissionSetId(id: string): void {
   const at = id.lastIndexOf("/");
-  const problem = at <= 0 ? "a permission set lives in a bucket" : (permissionSetBucketProblem(id.slice(0, at)) ?? permissionSetNameProblem(id.slice(at + 1)));
+  const problem = at === 0 ? `'${id}' is not a permission set's id` : permissionSetPlaceProblem(at < 0 ? "" : id.slice(0, at), id.slice(at + 1));
   if (problem !== undefined) throw new Error(problem);
 }
 
@@ -825,7 +830,7 @@ export function permissionSetTree(paths: JairaPaths, inStack: (id: string) => bo
   for (const layer of layers) {
     const sets = listPermissionSets([layer.root]).map((found) => treeSetOf(layer, found, inStack, nearest.get(found.id)));
     for (const set of sets) if (!nearest.has(set.id)) nearest.set(set.id, set.scope);
-    scopes.push({ scope: SCOPE_OF_LAYER[layer.layer], layer: layer.layer, label: layer.label, buckets: bucketsOf(sets), sets: [] });
+    scopes.push({ scope: SCOPE_OF_LAYER[layer.layer], layer: layer.layer, label: layer.label, buckets: bucketsOf(sets.filter((set) => set.bucket !== "")), sets: sets.filter((set) => set.bucket === "") });
   }
   // Built in first, as the browser reads down to the project.
   return { scopes: scopes.reverse() };
@@ -839,7 +844,7 @@ export function permissionSetTree(paths: JairaPaths, inStack: (id: string) => bo
  */
 export function readOwnPermissionSet(paths: JairaPaths, reference: string): OwnPermissionSet {
   const id = permissionSetIdOf(reference);
-  if (id === undefined) throw new Error(`'${reference}' names no permission set file — a set is named like $/permission-sets/chat/ask-first`);
+  if (id === undefined) throw new Error(`'${reference}' names no permission set file — a set is named like $/permission-sets/ask-first`);
   const token = /^(\$[A-Z]*)\//.exec(reference.trim())?.[1];
   const layers = permissionSetLayers(paths);
   const candidates = token === "$" || token === undefined ? layers : layers.filter((layer) => layer.token === token);

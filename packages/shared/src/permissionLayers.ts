@@ -2,7 +2,7 @@
  * A STACK of permission sets, composed into the one set a conversation or a state is judged under
  * (decision 0023 §2), and who said each line.
  *
- * Every layer is a permission set (ruling 6): the bottom one usually a preset (`chat/ask-first`), then
+ * Every layer is a permission set (ruling 6): the bottom one usually a preset (`ask-first`), then
  * the bucket's standing layers, a state's or a conversation's own, this run's answers, and the
  * conversation's tools (§2.6). They are merged line by line, newest saying — {@link mergeLayerDecls} in
  * `permissionSets.ts`, the same merge a `$ref` copy and a file's `layers` go through — and the result
@@ -127,24 +127,43 @@ export const TOOLS_LAYER = "tools";
 /** The id of the answers given in this task, kept in memory (§2.6, step 4): `CommandGrants`. */
 export const RUNTIME_LAYER = "runtime";
 
-const SET_REFERENCE = /^\$[A-Z]*\/permission-sets\/((?:[^/\\#]+\/)+[^/\\#]+?)(?:\.(?:json|ya?ml))?$/;
+const SET_REFERENCE = /^\$[A-Z]*\/permission-sets\/((?:[^/\\#]+\/)*[^/\\#]+?)(?:\.(?:json|ya?ml))?$/;
 
 /**
- * The set id a reference names — `$/permission-sets/chat/ask-first`, `$SYSTEM/permission-sets/chat/ask-first.json`
- * → `chat/ask-first` — whatever root it is searched from. `undefined` for anything else (`./mine`, `inline`).
- * The id is how a person reads a layer (`chat/ask-first`, `app/build`): its bucket, then its name.
+ * The layer ids that are not set files: this task's answers, the conversation's own lines and lines
+ * written on a state. A set at the TOP LEVEL is named by its bare name (`read-only`), so these names
+ * cannot be a top-level set's: a stack names a layer by id, and `tools` would mean two things.
+ */
+// `"inline"` is `INLINE_LAYER`, spelled out: `permissionSets.ts` imports this module, so its constant is
+// not yet defined while this one is evaluated (`permissionSetBuckets.test.ts` holds the two equal).
+export const RESERVED_LAYER_IDS: readonly string[] = [RUNTIME_LAYER, TOOLS_LAYER, "inline"];
+
+/**
+ * The set id a reference names — `$/permission-sets/read-only`, `$SYSTEM/permission-sets/control/ask-first.json`
+ * → `read-only`, `control/ask-first` — whatever root it is searched from. `undefined` for anything else
+ * (`./mine`, `inline`), and for a reserved top-level name ({@link RESERVED_LAYER_IDS}).
+ * The id is how a person reads a layer (`read-only`, `app/build`): its bucket, if it is in one, then its name.
  */
 export function permissionSetIdOf(reference: string): string | undefined {
   const match = SET_REFERENCE.exec(reference.trim());
   if (match === null) return undefined;
   const id = match[1]!;
+  if (RESERVED_LAYER_IDS.includes(id)) return undefined;
   return id.split("/").some((segment) => segment === "." || segment === "..") ? undefined : id;
 }
 
-/** The bucket of a set id — everything before its name (`feature/implementation/writes-asking` → `feature/implementation`). */
-export function bucketOfSetId(id: string): string | undefined {
+/** Is this layer id a set file's (`read-only`, `control/ask-first`), rather than `runtime`, `tools`, `inline` or a path? */
+export function isPermissionSetId(id: string): boolean {
+  return permissionSetIdOf(`$/permission-sets/${id}`) === id;
+}
+
+/**
+ * The bucket of a set id — everything before its name (`feature/implementation/writes-asking` →
+ * `feature/implementation`), and `""` for a set at the top level (`read-only`).
+ */
+export function bucketOfSetId(id: string): string {
   const at = id.lastIndexOf("/");
-  return at > 0 ? id.slice(0, at) : undefined;
+  return at > 0 ? id.slice(0, at) : "";
 }
 
 /** How a layer is named to a person: a set file by its id, anything else as it was written (`inline`, `tools`, `./mine`). */
@@ -259,7 +278,7 @@ export function permissionStackOf(
     if (bottomId !== undefined && permissionSetIdOf(reference) === bottomId) continue;
     const found: PermissionSetIssue[] = [];
     const followed = follow(reference, "standing", found);
-    for (const issue of found) issues.push({ ...issue, message: `the standing layer '${reference}' of '${bucket}' (settings: permissions.layers.${bucket}): ${issue.message}` });
+    for (const issue of found) issues.push({ ...issue, message: `the standing layer '${reference}' of '${bucket}' (settings: ${standingKeyOf(bucket ?? "")}): ${issue.message}` });
     if (followed !== undefined) standing.push(...followed);
   }
   const middle: PermissionStackLayer[] = [];
@@ -351,7 +370,7 @@ export interface ChatPermissionStack {
 /**
  * A conversation's `ChatSettings.permissionSet` read through its stack (decision 0023 §2.6): the bottom
  * layer (`layers[0]`, the preset), the bucket's standing layers (`options.standing`, by the bottom's
- * bucket, or `chat` for a map that names no set), the conversation's own layers (the rest of `layers`),
+ * bucket, or the top level for a map that names no set), the conversation's own layers (the rest of `layers`),
  * and the lines written beside them as the TOOLS layer ({@link TOOLS_LAYER}). The runtime layer is the
  * task's `CommandGrants`, read by the policy beside this.
  *
@@ -376,8 +395,13 @@ export function resolveChatPermissionStack(
   return { permissionSet: parsed.permissionSet, decl: resolved.decl, stack: stackDeclOf(resolved), issues };
 }
 
-/** The bucket a conversation's map is in when its bottom layer names none — the composer's. */
-const CHAT_BUCKET = "chat";
+/** The bucket a conversation's map is in when its bottom layer names none — the composer's: the top level. */
+const CHAT_BUCKET = "";
+
+/** How a person writes a bucket's standing layers in settings: `permissions.layers.feature`, and `permissions.layers[""]` for the top level. */
+export function standingKeyOf(bucket: string): string {
+  return bucket === "" ? 'permissions.layers[""]' : `permissions.layers.${bucket}`;
+}
 
 /**
  * The TOOLS layer that makes `below` come to `wanted` (§2.6 step 5, ruling 8) — what the composer's

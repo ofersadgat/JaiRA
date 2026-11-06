@@ -20,8 +20,8 @@ import { listPermissionSets, loadWorkflowBundle, readPermissionSets } from "../s
 import { browseWorkflows } from "../src/workflows";
 import { workflowLoadOptions } from "../src/workflowRefs";
 
-/** The shipped `chat/read-only`, as its file says. */
-const SHIPPED_READ_ONLY = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as Record<string, string>;
+/** The shipped `read-only`, as its file says. */
+const SHIPPED_READ_ONLY = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/read-only.json", import.meta.url)), "utf8")) as Record<string, string>;
 /** A map's shell lines besides the shell's own: commands (`git status`, `vitest -u`), runners (`runner:*`) and `script`. */
 const commandLinesOf = (map: Record<string, string>): Record<string, string> => Object.fromEntries(Object.entries(map).filter(([subject]) => ["command", "runner", "script"].includes(subjectKindOf(subject))));
 
@@ -79,8 +79,8 @@ const environmentOf = (rootId: string): unknown => withoutStack(load(rootId).sta
 
 describe("a permission set, referenced from a state", () => {
   it("resolves `$/permission-sets/<bucket>/<name>` and reaches the engine as a list and a block", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/read-only" }));
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", glob: "allow", shell: "deny", "git status": "allow", other: "deny" });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/read-only" }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "glob", "shell"],
       // The shell is offered and its LINES are judged: the gate is handed `ask` for it, and the
@@ -94,15 +94,15 @@ describe("a permission set, referenced from a state", () => {
         implementations: {},
         other: "deny",
         subjects: { shell: "deny", "git status": "allow" },
-        source: "$/permission-sets/chat/read-only",
+        source: "$/permission-sets/read-only",
         functions: {}, places: {},
       },
     });
   });
 
   it("starts from one and says more — sibling keys override", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", shell: "deny", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask", shell: "smart" } }));
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", shell: "deny", other: "deny" });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/read-only", write_file: "ask", shell: "smart" } }));
     expect(environmentOf("plan")).toEqual({
       tools: ["read_file", "shell", "write_file"],
       // A `$ref` that says more is written on the STATE: a sibling is an entry no file holds, so a
@@ -119,9 +119,9 @@ describe("a permission set, referenced from a state", () => {
   });
 
   it("follows a permission set file that itself starts from another, into a NESTED bucket", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", other: "deny" });
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.jairaDir, "permission-sets/feature/implementation/build.json", {
-      $ref: "$/permission-sets/chat/read-only",
+      $ref: "$/permission-sets/read-only",
       edit: { mode: "ask", implementation: "native" },
     });
     write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/feature/implementation/build" }));
@@ -132,19 +132,19 @@ describe("a permission set, referenced from a state", () => {
   });
 
   it("layers like everything else: the project's file wins, and the shared root supplies what it lacks", () => {
-    write(testHome(), "permission-sets/chat/read-only.json", { read_file: "ask", other: "ask" });
-    write(testHome(), "permission-sets/chat/shared-only.json", { glob: "allow" });
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/read-only" }));
-    write(project.paths.workflowsDir, "other.json", state({ tools: "$/permission-sets/chat/shared-only" }));
+    write(testHome(), "permission-sets/read-only.json", { read_file: "ask", other: "ask" });
+    write(testHome(), "permission-sets/shared-only.json", { glob: "allow" });
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", other: "deny" });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/read-only" }));
+    write(project.paths.workflowsDir, "other.json", state({ tools: "$/permission-sets/shared-only" }));
     expect(environmentOf("plan")).toEqual({ tools: ["read_file"], permissions: { tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", functions: {}, places: {} } });
     expect(environmentOf("other")).toEqual({ tools: ["glob"], permissions: { tools: { glob: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, functions: {}, places: {} } });
   });
 
   it("is inherited by a child, and a child's own permission set replaces it", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", other: "deny" });
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", other: "deny" });
     write(project.paths.workflowsDir, "wf.json", {
-      environment: { tools: "$/permission-sets/chat/read-only" },
+      environment: { tools: "$/permission-sets/read-only" },
       children: { a: {}, b: { environment: { tools: { shell: "smart" } } } },
       sequence: ["a", "b"],
     });
@@ -164,14 +164,14 @@ describe("a permission set inside a REFERENCED block", () => {
   it("reaches the engine exactly as the same map written on the state — environment, operation and a child's mount", () => {
     write(project.paths.jairaDir, "envs/reader.json", { tools: map });
     write(project.paths.jairaDir, "envs/named.json", { $ref: "$/envs/base" });
-    write(project.paths.jairaDir, "envs/base.json", { tools: "$/permission-sets/chat/read-only" });
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", map);
+    write(project.paths.jairaDir, "envs/base.json", { tools: "$/permission-sets/read-only" });
+    write(project.paths.jairaDir, "permission-sets/read-only.json", map);
     const op = (state({}) as { operation: Record<string, unknown> }).operation;
     write(project.paths.jairaDir, "ops/plan.json", { ...op, tools: map });
     write(project.paths.workflowsDir, "written.json", state({ tools: map }));
     write(project.paths.workflowsDir, "byref.json", state("$/envs/reader"));
     write(project.paths.workflowsDir, "bydollarref.json", state({ $ref: "$/envs/reader", model: "claude-sonnet-5" }));
-    write(project.paths.workflowsDir, "writtenname.json", state({ tools: "$/permission-sets/chat/read-only" }));
+    write(project.paths.workflowsDir, "writtenname.json", state({ tools: "$/permission-sets/read-only" }));
     write(project.paths.workflowsDir, "chained.json", state("$/envs/named"));
     const writtenOp: Record<string, unknown> = { ...(state({}) as Record<string, unknown>), operation: { ...op, tools: map } };
     delete writtenOp["environment"];
@@ -258,14 +258,14 @@ describe("a state that declares no permission set", () => {
 
 describe("the snapshot", () => {
   it("records the permission set file in the closure, and a pinned task does not see a later edit", async () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/read-only" }));
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", other: "deny" });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/read-only" }));
     const read: string[] = [];
     const bundle = load("plan", (file) => read.push(file.replace(/\\/g, "/")));
-    expect(read.some((file) => file.endsWith("permission-sets/chat/read-only.json"))).toBe(true);
+    expect(read.some((file) => file.endsWith("permission-sets/read-only.json"))).toBe(true);
 
     const snap = await ensureSnapshot(project.paths.snapshotsDir, bundle);
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "deny", other: "deny" });
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "deny", other: "deny" });
     const pinned = loadSnapshot(project.paths.snapshotsDir, snap.hash);
     expect((withoutStack(callEnvironmentOf(pinned.states["plan"]!)) as { permissions?: unknown } | undefined)?.permissions).toEqual({ tools: { read_file: "allow", ...PERMISSION_SET_MARKERS }, implementations: {}, other: "deny", functions: {}, places: {} });
     // …and the edit is a different workflow to the next task.
@@ -277,8 +277,8 @@ describe("the linter", () => {
   const issuesOf = (rootId: string) => browseWorkflows(project).workflows.find((w) => w.rootId === rootId)!;
 
   it("is quiet about a good permission set", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { read_file: "allow", "git log": "allow", script: "ask", other: "deny" });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/read-only" }));
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { read_file: "allow", "git log": "allow", script: "ask", other: "deny" });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/read-only" }));
     expect(issuesOf("plan").loadError).toBeUndefined();
     expect(issuesOf("plan").issues).toEqual([]);
   });
@@ -316,8 +316,8 @@ describe("the linter", () => {
   });
 
   it("reports a mode that is not one as an ERROR at the entry, through a reference too", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/broken.json", { read_file: 7 });
-    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/chat/broken", shell: "ask" } }));
+    write(project.paths.jairaDir, "permission-sets/broken.json", { read_file: 7 });
+    write(project.paths.workflowsDir, "plan.json", state({ tools: { $ref: "$/permission-sets/broken", shell: "ask" } }));
     const entry = issuesOf("plan");
     expect(entry.loadError).toBeUndefined();
     expect(entry.issues).toEqual([
@@ -338,37 +338,40 @@ describe("the linter", () => {
   });
 
   it("reports a reference that names nothing", () => {
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/nope" }));
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/nope" }));
     expect(issuesOf("plan").issues).toEqual([expect.objectContaining({ path: "environment.tools", severity: "error" })]);
   });
 });
 
 describe("buckets", () => {
   it("lists every permission set across the layer roots, first root winning, buckets free to nest", () => {
-    write(testHome(), "permission-sets/chat/read-only.json", {});
-    write(testHome(), "permission-sets/chat/full.json", {});
-    write(testHome(), "permission-sets/chat_control/read-only.json", {});
+    write(testHome(), "permission-sets/read-only.json", {});
+    write(testHome(), "permission-sets/full.json", {});
+    write(testHome(), "permission-sets/control/read-only.json", {});
     write(testHome(), "permission-sets/loose.json", {});
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", {});
+    write(project.paths.jairaDir, "permission-sets/read-only.json", {});
     write(project.paths.jairaDir, "permission-sets/feature/implementation/build.json", {});
 
     const listed = listPermissionSets(project.paths.roots);
     expect(listed.map((t) => [t.id, t.bucket, t.name, t.root === project.paths.jairaDir ? "project" : "base", t.overrides])).toEqual([
-      ["chat/full", "chat", "full", "base", false],
-      ["chat/read-only", "chat", "read-only", "project", true],
-      ["chat_control/read-only", "chat_control", "read-only", "base", false],
+      ["control/read-only", "control", "read-only", "base", false],
       ["feature/implementation/build", "feature/implementation", "build", "project", false],
+      // A file directly in `permission-sets/` is a set at the top level, named by its bare name.
+      ["full", "", "full", "base", false],
+      ["loose", "", "loose", "base", false],
+      ["read-only", "", "read-only", "project", true],
     ]);
-    expect(listed[3]!.reference).toBe("$/permission-sets/feature/implementation/build");
+    expect(listed[1]!.reference).toBe("$/permission-sets/feature/implementation/build");
+    expect(listed[3]!.reference).toBe("$/permission-sets/loose");
   });
 
   it("picks up a THIRD layer root with no change — it reads whatever `roots` holds", () => {
     const third = mkdtempSync(join(tmpdir(), "jaira-permission-sets-system-"));
     try {
-      write(third, "permission-sets/chat/ask-first.json", {});
-      write(project.paths.jairaDir, "permission-sets/chat/read-only.json", {});
+      write(third, "permission-sets/ask-first.json", {});
+      write(project.paths.jairaDir, "permission-sets/read-only.json", {});
       const listed = listPermissionSets([...project.paths.roots, third]);
-      expect(listed.map((t) => t.id)).toEqual(["chat/ask-first", "chat/read-only"]);
+      expect(listed.map((t) => t.id)).toEqual(["ask-first", "read-only"]);
       expect(listed[0]!.root).toBe(third);
     } finally {
       rmSync(third, { recursive: true, force: true });
@@ -385,18 +388,18 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
     project = openProject(dir, { baseDir: testHome() });
   });
 
-  it("are listed from the built-in layer: two buckets, the same four names in each, and chat's read-only-scratch", () => {
+  it("are listed from the built-in layer: the presets at the top level, control's own four in control/", () => {
     const listed = listPermissionSets(project.paths.roots);
     expect(listed.map((t) => t.id)).toEqual([
-      "chat/ask-first",
-      "chat/auto",
-      "chat/full",
-      "chat/read-only",
-      "chat/read-only-scratch",
-      "chat_control/ask-first",
-      "chat_control/auto",
-      "chat_control/full",
-      "chat_control/read-only",
+      "ask-first",
+      "auto",
+      "control/ask-first",
+      "control/auto",
+      "control/full",
+      "control/read-only",
+      "full",
+      "read-only",
+      "read-only-scratch",
     ]);
     expect(listed.every((t) => t.root === project.paths.builtIn.dir && !t.overrides)).toBe(true);
   });
@@ -412,7 +415,7 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
   });
 
   it("reaches the engine as the list and block the map lowers to — the workflow tools among them", () => {
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat/read-only" }));
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/read-only" }));
     expect(environmentOf("plan")).toEqual({
       // The nine a conversation has always held, then the eight of decision 0005, served since its
       // step 6 — before that they carried `unserved` and lowering left them out of this list.
@@ -476,16 +479,16 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
         other: "deny",
         subjects: { shell: "deny", ...commandLinesOf(SHIPPED_READ_ONLY) },
         // Beside `subjects`: the file they came from, which is what an approval names.
-        source: "$/permission-sets/chat/read-only",
+        source: "$/permission-sets/read-only",
         functions: {},
         // Where it reads freely — `$PROJECT` and `$WORKTREE` — and the credentials that ask (decision
         // 0023 §7.1): the gate was handed each line's loosest, `allow`, and the narrowing reads these.
         places: { read_file: SHIPPED_READ_ONLY["read_file"], glob: SHIPPED_READ_ONLY["glob"], grep: SHIPPED_READ_ONLY["grep"] },
       },
     });
-    // `chat_control` holds the workflow tools and NOTHING of the project: the engine resolves those
+    // `control` holds the workflow tools and NOTHING of the project: the engine resolves those
     // eight against its registry, and a project tool is not on the list to be handed over at all.
-    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/chat_control/ask-first" }));
+    write(project.paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/control/ask-first" }));
     const control = environmentOf("plan") as { tools: string[]; permissions: { tools: Record<string, string>; other: string } };
     expect(control.tools).toEqual(["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"]);
     expect(control.tools).not.toContain("shell");
@@ -494,24 +497,24 @@ describe("the permission sets that SHIP (decision 0007 step 4)", () => {
   });
 
   it("are READ for the composer with the layer that supplied each, a project's file winning and a `$ref` followed", () => {
-    write(project.paths.jairaDir, "permission-sets/chat/read-only.json", { $ref: "$SYSTEM/permission-sets/chat/read-only", shell: "ask" });
+    write(project.paths.jairaDir, "permission-sets/read-only.json", { $ref: "$SYSTEM/permission-sets/read-only", shell: "ask" });
     write(testHome(), "permission-sets/feature/implementation/writes-asking.json", { write_file: "ask", other: "deny" });
-    write(project.paths.jairaDir, "permission-sets/chat/broken.json", { read_file: 7 });
+    write(project.paths.jairaDir, "permission-sets/broken.json", { read_file: 7 });
     const read = readPermissionSets(project.paths);
     expect(read.map((t) => [t.id, t.layer])).toEqual([
-      ["chat/ask-first", "system"],
-      ["chat/auto", "system"],
-      ["chat/full", "system"],
-      ["chat/read-only", "project"],
-      ["chat/read-only-scratch", "system"],
-      ["chat_control/ask-first", "system"],
-      ["chat_control/auto", "system"],
-      ["chat_control/full", "system"],
-      ["chat_control/read-only", "system"],
+      ["ask-first", "system"],
+      ["auto", "system"],
+      ["control/ask-first", "system"],
+      ["control/auto", "system"],
+      ["control/full", "system"],
+      ["control/read-only", "system"],
       ["feature/implementation/writes-asking", "base"],
+      ["full", "system"],
+      ["read-only", "project"],
+      ["read-only-scratch", "system"],
     ]);
     // The override is offered as the map it RESOLVES to — what picking its row would write.
-    const overridden = read.find((t) => t.id === "chat/read-only")!.decl;
+    const overridden = read.find((t) => t.id === "read-only")!.decl;
     expect(overridden).toMatchObject({ read_file: { "**": "ask", $PROJECT: "allow" }, edit: "deny", shell: "ask", other: "deny" });
     expect(overridden).not.toHaveProperty("$ref");
     // A permission set nobody could read is left out rather than offered as half of itself.

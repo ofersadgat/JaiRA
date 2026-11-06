@@ -1,10 +1,10 @@
 /**
  * The composer's stack after using it (decision 0023, amended 2026-11-03), in a real conversation.
  *
- * A real agent (claude-cli/haiku — this rig spends a little), under `chat/ask-first`:
+ * A real agent (claude-cli/haiku — this rig spends a little), under `ask-first`:
  *  a. a line asks; the shield opens the browser with this stack at the top of its tree — the bottom
  *     layer, then `tools` — above the scopes (ruling 13);
- *  b. `chat/full` laid on top from that browser decides the waiting call again: it is answered by the
+ *  b. `full` laid on top from that browser decides the waiting call again: it is answered by the
  *     permissions, and the turn goes on without anybody pressing Allow (ruling 15);
  *  c. the layer taken out again, the same line asks; answered for this run, the bar has no `runtime`
  *     segment and counts the answer on `tools`, and the Tools card marks it (ruling 14);
@@ -22,7 +22,7 @@ import { buildWorld } from "./world.mjs";
 const MODEL = "claude-cli/haiku";
 const OUT = join(import.meta.dirname, "out", "stack-rejudge");
 const WORLD = join(import.meta.dirname, ".world-stack-rejudge");
-const ASK_FIRST = { layers: ["$/permission-sets/chat/ask-first"] };
+const ASK_FIRST = { layers: ["$/permission-sets/ask-first"] };
 const LINE = "hostname";
 const run = (line: string): string => `Use your shell tool to run exactly this line, once, and nothing else: ${line}\nDo not pass a cwd. Then reply with its output, or, if it was not run, with the reason you were given, word for word. Do not use any other tool, and do not try again.`;
 const BAR = '[role="group"][aria-label="Permissions"]';
@@ -116,7 +116,7 @@ async function main(): Promise<void> {
     await app.shot("a-asked", undefined, false);
     const barText = await app.evaluate<string>(`document.querySelector(${JSON.stringify(BAR)})?.innerText ?? ""`);
     console.log(`stack-rejudge: the bar reads ${JSON.stringify(barText)}`);
-    check(/chat\/ask-first/.test(barText) && /tools · \d+/.test(barText) && !/runtime/.test(barText), "a. the bar reads chat/ask-first, tools and +, and no runtime segment");
+    check(/chat\/ask-first/.test(barText) && /tools · \d+/.test(barText) && !/runtime/.test(barText), "a. the bar reads ask-first, tools and +, and no runtime segment");
     await press(`${BAR} [aria-label="Permissions"]`);
     await settle(800);
     await app.shot("a-shield-browser", undefined, false);
@@ -124,7 +124,7 @@ async function main(): Promise<void> {
     check(/This conversation/.test(browser) && /what the whole stack comes to/.test(browser), "a. the shield opens the browser on tools, This conversation at the top of its tree");
     check(/Built in/.test(browser) && /Done/.test(browser), "a. the scopes are under the stack, and the foot says Done");
 
-    // b. chat/full laid on top, from the browser: the waiting call is decided again.
+    // b. full laid on top, from the browser: the waiting call is decided again.
     await pressText("full.json");
     await app.shot("b-full-picked", undefined, false);
     await pressText("Lay it on top");
@@ -132,7 +132,7 @@ async function main(): Promise<void> {
       if (i > 40) break;
       await settle(250);
     }
-    check((await pending(made.taskId)).length === 0, "b. laying chat/full on top answered the waiting call without anybody pressing Allow");
+    check((await pending(made.taskId)).length === 0, "b. laying full on top answered the waiting call without anybody pressing Allow");
     await untilTurnEnds("after laying full on top");
     await app.press("Escape", 27);
     await settle(600);
@@ -144,10 +144,10 @@ async function main(): Promise<void> {
     check(/Approved/.test(ran) && /the permissions changed while it waited/.test(ran), "b. the approval reads Approved — the permissions changed while it waited");
     const bar2 = await app.evaluate<string>(`document.querySelector(${JSON.stringify(BAR)})?.innerText ?? ""`);
     console.log(`stack-rejudge: the bar now reads ${JSON.stringify(bar2)}`);
-    check(/chat\/full/.test(bar2), "b. the bar shows chat/full over ask-first");
+    check(/chat\/full/.test(bar2), "b. the bar shows full over ask-first");
 
     // c. The layer taken out again; the line asks again, answered for this run; the Tools card marks it.
-    await press('[aria-label="chat/full"]');
+    await press('[aria-label="full"]');
     await pressText("remove");
     await settle(800);
     // Another line: asked to run one it has run, an agent answers from memory.
@@ -174,7 +174,7 @@ async function main(): Promise<void> {
     await app.shot("d-narrow", undefined, false);
     const bar4 = await app.evaluate<{ text: string; segments: number } | null>(`(() => { const all = [...document.querySelectorAll('[aria-label="Permissions"]')]; const el = all.find((e) => e.getAttribute("role") !== "group"); return el ? { text: el.innerText, segments: all.length } : null; })()`);
     console.log(`stack-rejudge: narrow, the stack reads ${JSON.stringify(bar4)}`);
-    check(bar4 !== null && /\+1/.test(bar4.text) && (await app.evaluate<number>(`document.querySelectorAll('[aria-label="chat/ask-first"]').length`)) === 0, "d. narrow, the stack is the shield with +1, no segments");
+    check(bar4 !== null && /\+1/.test(bar4.text) && (await app.evaluate<number>(`document.querySelectorAll('[aria-label="ask-first"]').length`)) === 0, "d. narrow, the stack is the shield with +1, no segments");
     await press('[aria-label="Permissions"]');
     await settle(800);
     await app.shot("d-collapsed-pressed", undefined, false);

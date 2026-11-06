@@ -119,7 +119,7 @@ describe("the settings a message would run under", () => {
     // The suite runs over an empty built-in layer, so the permission sets that ship are put where a project
     // would override them: the match is the same whichever layer supplies the file.
     for (const name of ["ask-first", "read-only", "auto", "full"]) {
-      for (const bucket of ["chat", "chat_control"]) {
+      for (const bucket of ["", "control"]) {
         const file = join(dir, ".jaira", "permission-sets", bucket, `${name}.json`);
         mkdirSync(dirname(file), { recursive: true });
         writeFileSync(file, readFileSync(join(SHIPPED_PERMISSION_SETS, bucket, `${name}.json`), "utf8"));
@@ -131,18 +131,18 @@ describe("the settings a message would run under", () => {
     const posture = (overrides?: ChatSettings): string => planned(overrides).effective.permissions;
 
     // A permission set's map is reported by the permission set's name…
-    expect(posture({ permissionSet: shipped("chat/read-only") })).toBe("read-only");
-    expect(posture({ permissionSet: shipped("chat/full") })).toBe("full access");
+    expect(posture({ permissionSet: shipped("read-only") })).toBe("read-only");
+    expect(posture({ permissionSet: shipped("full") })).toBe("full access");
     // …and one line changed makes it nobody's, which is what `custom` says.
-    expect(posture({ permissionSet: { ...shipped("chat/read-only"), shell: "ask" } })).toBe("custom");
-    const { edit: _edit, ...unticked } = shipped("chat/read-only") as Record<string, PermissionSetDecl[string]>;
+    expect(posture({ permissionSet: { ...shipped("read-only"), shell: "ask" } })).toBe("custom");
+    const { edit: _edit, ...unticked } = shipped("read-only") as Record<string, PermissionSetDecl[string]>;
     expect(posture({ permissionSet: unticked })).toBe("custom");
 
     // The same map as the lowered fields a state's declaration arrives as is the same permission set: read FROM the shipped file rather
     // than derived, because the file is what the match is against and the modes it gives the workflow
     // tools (decision 0005 step 6) are its own — `READ_ONLY_PRESET_TOOLS` predates them.
     // Its command, runner and script lines arrive where lowering writes them, in `subjects`.
-    const readOnly = shipped("chat/read-only") as Record<string, PermissionMode>;
+    const readOnly = shipped("read-only") as Record<string, PermissionMode>;
     const shellLine = (subject: string): boolean => subject === "shell" || ["command", "script", "runner"].includes(subjectKindOf(subject));
     const subjects = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => shellLine(subject)));
     const toolLines = Object.fromEntries(Object.entries(readOnly).filter(([subject]) => subject === "shell" || !shellLine(subject)));
@@ -150,12 +150,12 @@ describe("the settings a message would run under", () => {
     // A map naming three of the seventeen is not that permission set — it is a map with the rest unticked.
     expect(posture({ tools: ["read_file", "shell", "write_file"], permissions: { tools: toolLines, other: "deny", subjects } })).toBe("custom");
 
-    // The card opens on the bucket whose permission set the map is, and the label is that bucket's.
-    expect(planned({ permissionSet: shipped("chat/read-only") }).available.bucket).toBe("chat");
-    const control = planned({ permissionSet: shipped("chat_control/ask-first") });
-    expect(control.available.bucket).toBe("chat_control");
+    // The card opens on the bucket whose permission set the map is, and the label is that bucket's: the top level's is "".
+    expect(planned({ permissionSet: shipped("read-only") }).available.bucket).toBe("");
+    const control = planned({ permissionSet: shipped("control/ask-first") });
+    expect(control.available.bucket).toBe("control");
     expect(control.effective.permissions).toBe("ask first");
-    expect(control.available.permissionSets?.filter((t) => t.bucket === "chat_control").map((t) => [t.name, t.layer])).toEqual([
+    expect(control.available.permissionSets?.filter((t) => t.bucket === "control").map((t) => [t.name, t.layer])).toEqual([
       ["ask-first", "project"],
       ["auto", "project"],
       ["full", "project"],

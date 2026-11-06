@@ -20,29 +20,29 @@ import {
 
 describe("an override that keeps following what it overrides", () => {
   it("starts from the lower layer's file by an EXPLICIT root, and says the one line more", () => {
-    const text = overridePermissionSetText("$SYSTEM/permission-sets/chat/ask-first", { "git  commit": "allow", terraform: "deny" });
-    expect(text).toBe('{\n  "$ref": "$SYSTEM/permission-sets/chat/ask-first",\n  "git commit": "allow",\n  "terraform": "deny"\n}\n');
-    expect(permissionSetTextFollows(text, "$SYSTEM/permission-sets/chat/ask-first")).toBe(true);
-    expect(permissionSetTextFollows(text, "$BASE/permission-sets/chat/ask-first")).toBe(false);
+    const text = overridePermissionSetText("$SYSTEM/permission-sets/ask-first", { "git  commit": "allow", terraform: "deny" });
+    expect(text).toBe('{\n  "$ref": "$SYSTEM/permission-sets/ask-first",\n  "git commit": "allow",\n  "terraform": "deny"\n}\n');
+    expect(permissionSetTextFollows(text, "$SYSTEM/permission-sets/ask-first")).toBe(true);
+    expect(permissionSetTextFollows(text, "$BASE/permission-sets/ask-first")).toBe(false);
     expect(permissionSetTextFollows("[]", "$BASE/x")).toBe(false);
   });
 
   it("refuses a bare `$`, which is searched from the top layer down and would find the override itself", () => {
-    expect(() => overridePermissionSetText("$/permission-sets/chat/ask-first", { git: "allow" })).toThrow(/explicit root/);
+    expect(() => overridePermissionSetText("$/permission-sets/ask-first", { git: "allow" })).toThrow(/explicit root/);
     expect(() => overridePermissionSetText("./ask-first", { git: "allow" })).toThrow(/explicit root/);
   });
 
   it("resolves to the lower file's entries with the new line over them, and parses clean", () => {
     const files: Record<string, unknown> = {
-      "$/permission-sets/chat/ask-first": JSON.parse(overridePermissionSetText("$SYSTEM/permission-sets/chat/ask-first", { "git commit": "allow" })),
-      "$SYSTEM/permission-sets/chat/ask-first": { read_file: "allow", shell: "ask", "git commit": "ask", other: "deny" },
+      "$/permission-sets/ask-first": JSON.parse(overridePermissionSetText("$SYSTEM/permission-sets/ask-first", { "git commit": "allow" })),
+      "$SYSTEM/permission-sets/ask-first": { read_file: "allow", shell: "ask", "git commit": "ask", other: "deny" },
     };
     const read: PermissionSetReader = (reference) => {
       if (!Object.hasOwn(files, reference)) throw new Error(`no ${reference}`);
       return { value: files[reference], key: reference, from: reference };
     };
     const issues: never[] = [];
-    const resolved = resolvePermissionSetDecl("$/permission-sets/chat/ask-first", read, "plan", issues);
+    const resolved = resolvePermissionSetDecl("$/permission-sets/ask-first", read, "plan", issues);
     expect(issues).toEqual([]);
     expect(resolved).toEqual({ read_file: "allow", shell: "ask", "git commit": "allow", other: "deny" });
     expect(parsePermissionSet(resolved).issues).toEqual([]);
@@ -68,7 +68,7 @@ describe("a line added to a file somebody wrote", () => {
 
   it("refuses what is not a permission set map, and what is not a subject", () => {
     expect(() => addToPermissionSetText('["shell"]', { git: "allow" })).toThrow(/not a map/);
-    expect(() => addToPermissionSetText('"$/permission-sets/chat/x"', { git: "allow" })).toThrow(/not a map/);
+    expect(() => addToPermissionSetText('"$/permission-sets/x"', { git: "allow" })).toThrow(/not a map/);
     expect(() => addToPermissionSetText("{ nope", { git: "allow" })).toThrow(/does not parse/);
     expect(() => addToPermissionSetText("{}", { other: "allow" })).toThrow(/not a subject/);
     expect(() => addToPermissionSetText("{}", { $ref: "allow" } as never)).toThrow(/not a subject/);
@@ -88,9 +88,9 @@ describe("where a lowered block's subjects came from", () => {
   };
 
   it("is the reference for a permission set named by one, and `inline` for a map — or a `$ref` that says more — on the state", () => {
-    expect(sourceOf("$/permission-sets/chat/ask-first")).toBe("$/permission-sets/chat/ask-first");
+    expect(sourceOf("$/permission-sets/ask-first")).toBe("$/permission-sets/ask-first");
     expect(sourceOf({ shell: "ask" })).toBe(INLINE_PERMISSION_SET);
-    expect(sourceOf({ $ref: "$/permission-sets/chat/ask-first", "git commit": "allow" })).toBe(INLINE_PERMISSION_SET);
+    expect(sourceOf({ $ref: "$/permission-sets/ask-first", "git commit": "allow" })).toBe(INLINE_PERMISSION_SET);
   });
 
   it("is written only beside `subjects`, so a block that judges no shell line is exactly what it was", () => {
@@ -145,8 +145,8 @@ describe("adding an answer AT A PLACE, allow or deny (decision 0023 §2.8, §4.4
   });
 
   it("writes a place into a new override alone — elsewhere the line is the lower layer's", () => {
-    expect(overridePermissionSetText("$SYSTEM/permission-sets/chat/ask-first", { "npm run build": { packages: "deny" } })).toBe(
-      '{\n  "$ref": "$SYSTEM/permission-sets/chat/ask-first",\n  "npm run build": { "packages": "deny" }\n}\n',
+    expect(overridePermissionSetText("$SYSTEM/permission-sets/ask-first", { "npm run build": { packages: "deny" } })).toBe(
+      '{\n  "$ref": "$SYSTEM/permission-sets/ask-first",\n  "npm run build": { "packages": "deny" }\n}\n',
     );
     expect(describeAddition({ "npm run build": { packages: "deny" }, git: "allow" })).toBe('"npm run build": { "packages": "deny" }, "git": "allow"');
   });

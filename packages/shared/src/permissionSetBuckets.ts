@@ -3,7 +3,7 @@
  * (decision 0007 §2 and §5.)
  *
  * The composer's four permission presets used to be FUNCTIONS — `tool.readOnly ? "allow" : "deny"` —
- * spent the moment they were clicked. They are files now (`$SYSTEM/permission-sets/chat/*.json`), a bucket
+ * spent the moment they were clicked. They are files now (`$SYSTEM/permission-sets/*.json`, at the top level), a bucket
  * is a folder of them, and "which preset is this" became "which permission set IN THE CURRENT BUCKET does
  * this map exactly match". That is {@link matchPermissionSet}, and it is the whole of what a label is:
  *
@@ -18,16 +18,17 @@
  */
 import { modeWord, sameMode, SMART_MODE, type PermissionModeDecl, type ToolImplementation, type PermissionSetMode } from "./operationVocabulary";
 import { holdsTool, MODE_WHEN_UNSET, modeDeclOf, parsePermissionSet, type PermissionSet, type PermissionSetDecl } from "./permissionSets";
+import { RESERVED_LAYER_IDS } from "./permissionLayers";
 import type { WorkflowLayer } from "./view";
 
-/** The bucket a conversation opens on when nothing it inherits is any bucket's permission set. */
-export const DEFAULT_PERMISSION_SET_BUCKET = "chat";
+/** The bucket a conversation opens on when nothing it inherits is any bucket's permission set: the top level. */
+export const DEFAULT_PERMISSION_SET_BUCKET = "";
 
 /** One permission set a card can offer: where it lives, which layer supplied it, and the map itself. */
 export interface PermissionSetChoice {
-  /** `<bucket>/<name>` — what follows `$/permission-sets/` in a reference. */
+  /** `<bucket>/<name>`, or `<name>` at the top level — what follows `$/permission-sets/` in a reference. */
   id: string;
-  /** The folder path, `/`-separated. A bucket may nest (`feature/implementation`). */
+  /** The folder path, `/`-separated; `""` at the top level. A bucket may nest (`feature/implementation`). */
   bucket: string;
   name: string;
   /** The layer whose file this is — the first on the search path to hold the id. */
@@ -96,7 +97,7 @@ export function matchPermissionSet(
  * A loaded state holds the list and block its permission set LOWERED to — the reference it was written as
  * is gone by the time anybody plans a message — so "the permission set its state names" is found the way
  * every label here is, by match: the first bucket holding a permission set this map exactly is, the default
- * bucket tried first. A state that names none, or starts from one and says more, opens on `chat`.
+ * bucket tried first. A state that names none, or starts from one and says more, opens on the top level.
  */
 export function bucketOf(current: PermissionSet, choices: readonly PermissionSetChoice[], registered?: readonly string[]): string {
   const buckets = [DEFAULT_PERMISSION_SET_BUCKET, ...choices.map((choice) => choice.bucket)];
@@ -118,15 +119,15 @@ export function bucketOf(current: PermissionSet, choices: readonly PermissionSet
  * what is in it ({@link permissionSetSummary}).
  */
 const SHIPPED_PERMISSION_SET_WORDS: Readonly<Record<string, { label: string; hint: string; glyph: PermissionSetMode }>> = {
-  "chat/ask-first": { label: "ask first", hint: "stop and ask before every call", glyph: "ask" },
-  "chat/read-only": { label: "read-only", hint: "reading goes ahead, anything that writes is refused", glyph: "deny" },
-  "chat/read-only-scratch": { label: "read-only, with scratch", hint: "as read-only, but the agent may write in its own folder", glyph: "deny" },
-  "chat/auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
-  "chat/full": { label: "full access", hint: "anything, without asking", glyph: "allow" },
-  "chat_control/ask-first": { label: "ask first", hint: "ask before starting, moving or answering anything", glyph: "ask" },
-  "chat_control/read-only": { label: "read-only", hint: "may look at tasks and workflows; starts and moves nothing", glyph: "deny" },
-  "chat_control/auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
-  "chat_control/full": { label: "full access", hint: "steer without asking", glyph: "allow" },
+  "ask-first": { label: "ask first", hint: "stop and ask before every call", glyph: "ask" },
+  "read-only": { label: "read-only", hint: "reading goes ahead, anything that writes is refused", glyph: "deny" },
+  "read-only-scratch": { label: "read-only, with scratch", hint: "as read-only, but the agent may write in its own folder", glyph: "deny" },
+  "auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
+  "full": { label: "full access", hint: "anything, without asking", glyph: "allow" },
+  "control/ask-first": { label: "ask first", hint: "ask before starting, moving or answering anything", glyph: "ask" },
+  "control/read-only": { label: "read-only", hint: "may look at tasks and workflows; starts and moves nothing", glyph: "deny" },
+  "control/auto": { label: "auto", hint: "each call judged by the smart function, which asks you when unsure", glyph: SMART_MODE },
+  "control/full": { label: "full access", hint: "steer without asking", glyph: "allow" },
 };
 
 /** The order the shipped NAMES are listed in, strictest-sounding first — the order the presets had. */
@@ -149,7 +150,7 @@ export function permissionSetsOfBucket(choices: readonly PermissionSetChoice[], 
 /**
  * The MODE whose glyph stands beside a permission set's name — a shut lock, a shield, a star, an open lock.
  *
- * The shipped ones are told, because `chat_control`'s four all refuse everything else and would
+ * The shipped ones are told, because `control`'s four all refuse everything else and would
  * otherwise all wear the shield. Anybody else's wears the glyph of its `other`, which is the one line
  * every permission set has.
  */
@@ -181,7 +182,7 @@ export function permissionSetIconOf(id: string, own: unknown): string {
 }
 
 const SHIPPED_BUCKET_HINTS: Readonly<Record<string, string>> = {
-  chat_control: "its own four — the task and workflow tools only",
+  control: "its own four — the task and workflow tools only",
 };
 
 /** What a permission set is called on a row and on the chip. */
@@ -247,7 +248,7 @@ export function permissionSetBuckets(choices: readonly PermissionSetChoice[]): P
     const parts = choice.bucket.split("/");
     for (let i = 1; i <= parts.length; i++) paths.add(parts.slice(0, i).join("/"));
   }
-  // Segment-wise, so `chat` sorts ahead of `chat_control` and a child directly under its parent.
+  // Segment-wise, so the top level (`""`) sorts first, `control` ahead of `control_x`, and a child directly under its parent.
   const ordered = [...paths].sort((a, b) => {
     const left = a.split("/");
     const right = b.split("/");
@@ -265,9 +266,22 @@ export function permissionSetBuckets(choices: readonly PermissionSetChoice[]): P
     const hint =
       (layer === "system" ? SHIPPED_BUCKET_HINTS[path] : undefined) ??
       (inside > 0 ? `${counted}, and ${inside} ${inside === 1 ? "bucket" : "buckets"} inside` : own.map(permissionSetLabel).join(" · "));
-    return { path, name: path.slice(path.lastIndexOf("/") + 1), depth: path.split("/").length - 1, layer, permissionSets: own, hint };
+    return { path, name: bucketNameOf(path), depth: path.split("/").length - 1, layer, permissionSets: own, hint };
   });
 }
+
+/**
+ * What a bucket is called on a row: its own folder's name, and {@link TOP_LEVEL_BUCKET_NAME} for the
+ * sets directly in `permission-sets/` — the conversation presets. The top level sits beside the
+ * buckets rather than over them: a set is in exactly one place, and `control/` is not inside
+ * `read-only`'s.
+ */
+export function bucketNameOf(path: string): string {
+  return path === "" ? TOP_LEVEL_BUCKET_NAME : path.slice(path.lastIndexOf("/") + 1);
+}
+
+/** The top level's name on a row. */
+export const TOP_LEVEL_BUCKET_NAME = "top level";
 
 /** A layer, as the picker names it beside a bucket. */
 export const PERMISSION_SET_LAYER_LABELS: Readonly<Record<WorkflowLayer, string>> = {
@@ -290,11 +304,28 @@ export function permissionSetNameProblem(name: string): string | undefined {
   return undefined;
 }
 
-/** The same for a bucket path: one or more such segments. */
+/** The same for a bucket path: `""` for the top level, or one or more such segments. */
 export function permissionSetBucketProblem(bucket: string): string | undefined {
-  if (bucket.length === 0) return "a permission set lives in a bucket";
+  if (bucket.length === 0) return undefined;
   for (const segment of bucket.split("/")) {
     if (permissionSetNameProblem(segment) !== undefined) return `'${bucket}' is not a bucket — each folder is letters, digits, '-', '_' and '.'`;
   }
   return undefined;
+}
+
+/**
+ * What is wrong with a set at `bucket` called `name`, or `undefined`: the bucket's and the name's
+ * problems, and at the top level a name a stack already uses for a layer that is no file (`tools`,
+ * `runtime`, `inline` — `RESERVED_LAYER_IDS`).
+ */
+export function permissionSetPlaceProblem(bucket: string, name: string): string | undefined {
+  const problem = permissionSetBucketProblem(bucket) ?? permissionSetNameProblem(name);
+  if (problem !== undefined) return problem;
+  if (bucket === "" && RESERVED_LAYER_IDS.includes(name)) return `'${name}' names a layer of every stack — put it in a bucket, or call it something else`;
+  return undefined;
+}
+
+/** A set's id from where it is: `<bucket>/<name>`, or the bare name at the top level. */
+export function permissionSetIdAt(bucket: string, name: string): string {
+  return bucket === "" ? name : `${bucket}/${name}`;
 }

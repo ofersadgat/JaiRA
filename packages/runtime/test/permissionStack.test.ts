@@ -29,18 +29,18 @@ const readerOver = (files: Record<string, unknown>): PermissionSetReader => (ref
 };
 
 const FILES = {
-  "chat/ask-first": { read_file: "ask", shell: "ask", git: "ask", "git status": "allow", write_file: "ask", other: "ask" },
-  "chat/build-safe": { "npm run build": { packages: "allow" }, git: "allow" },
+  "ask-first": { read_file: "ask", shell: "ask", git: "ask", "git status": "allow", write_file: "ask", other: "ask" },
+  "build-safe": { "npm run build": { packages: "allow" }, git: "allow" },
   "web/docs-sites": { web_fetch: { "docs.example.com": "allow" }, "git push": "deny" },
 };
 const read = readerOver(FILES);
-const STANDING = { chat: ["$/permission-sets/chat/build-safe"] };
+const STANDING = { "": ["$/permission-sets/build-safe"] };
 
 /** A conversation's settings read through its stack, as the service reads them before a turn. */
 const conversation = (settings: Record<string, unknown>) => resolveChatPermissionStack(settings, read, { standing: STANDING });
 
 describe("who decided each part (§2.7)", () => {
-  const stacked = conversation({ layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/web/docs-sites"], write_file: "allow" });
+  const stacked = conversation({ layers: ["$/permission-sets/ask-first", "$/permission-sets/web/docs-sites"], write_file: "allow" });
   const decide = (line: string, grants?: CommandGrants) =>
     decideCommand({}, line, "posix", {
       permissionSet: shellPermissionSetOf(stacked.permissionSet)!,
@@ -55,16 +55,16 @@ describe("who decided each part (§2.7)", () => {
     const parts = decide("git status && git log && git push && cd packages/app && npm run build").parts.parts;
     const by = (text: string) => parts.find((part) => part.text === text)!.decidedBy;
     // `git status` is the preset's own line; `git` the standing layer's, newer than the preset's `git`.
-    expect(by("git status")).toMatchObject({ entry: "git status", layer: "chat/ask-first" });
-    expect(by("git log")).toMatchObject({ entry: "git", layer: "chat/build-safe" });
+    expect(by("git status")).toMatchObject({ entry: "git status", layer: "ask-first" });
+    expect(by("git log")).toMatchObject({ entry: "git", layer: "build-safe" });
     // The conversation's own layer refuses a push, under every layer below it.
     expect(by("git push")).toMatchObject({ entry: "git push", layer: "web/docs-sites", source: "permissionSet" });
-    expect(by("npm run build")).toMatchObject({ entry: "npm run build", place: "packages", layer: "chat/build-safe" });
+    expect(by("npm run build")).toMatchObject({ entry: "npm run build", place: "packages", layer: "build-safe" });
   });
 
   it("lists the stack newest first for the dialog — tools, runtime, the conversation's layers, the standing one, the preset", () => {
     const approval = decide("git commit -m x", new CommandGrants()).parts;
-    expect(approval.stack).toEqual(["tools", "runtime", "web/docs-sites", "chat/build-safe", "chat/ask-first"]);
+    expect(approval.stack).toEqual(["tools", "runtime", "web/docs-sites", "build-safe", "ask-first"]);
   });
 
   it("names `runtime` for an answer given in this task", () => {
@@ -79,7 +79,7 @@ describe("who decided each part (§2.7)", () => {
     const policy = compilePolicy({}, { execEnv: { wsl: "test" }, workspaceRoot: ROOT });
     const input = { command: "git log" };
     policy.scopeOf!({ name: "shell" }, input as FunctionInputs, block as never);
-    expect(commandDecisionOf(input)!.parts.parts[0]!.decidedBy.layer).toBe("chat/build-safe");
+    expect(commandDecisionOf(input)!.parts.parts[0]!.decidedBy.layer).toBe("build-safe");
   });
 
   it("names the layer in a TURN, from the stack the policy was compiled for", () => {
@@ -128,7 +128,7 @@ describe("the runtime layer: answers given in this task (§2.6 step 4)", () => {
   });
 
   it("does not stand over the TOOLS layer, which is newer still", () => {
-    const stacked = conversation({ layers: ["$/permission-sets/chat/ask-first"], "git log": "allow" });
+    const stacked = conversation({ layers: ["$/permission-sets/ask-first"], "git log": "allow" });
     const grants = new CommandGrants();
     grants.remember("git", "deny");
     const line = (text: string) =>

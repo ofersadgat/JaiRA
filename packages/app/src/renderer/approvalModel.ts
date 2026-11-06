@@ -207,7 +207,7 @@ export type ReasonLine =
   /** The permission set holds no line for these subjects, and that is why they ask. */
   | { kind: "unheld"; permissionSet?: string; subjects: string[] }
   /**
-   * The STACK the line was judged under (decision 0023 §2.6), oldest first — `chat/ask-first +
+   * The STACK the line was judged under (decision 0023 §2.6), oldest first — `ask-first +
    * project/build-safe, then this run` — in place of naming the set and its entries: each row says which
    * layer decided it.
    */

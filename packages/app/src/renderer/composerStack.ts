@@ -1,6 +1,6 @@
 /**
  * The composer's permission STACK (decision 0023 §4.1, rulings 8–11; §7.4): the Permissions chip as
- * one joined segment per layer, oldest to newest — `chat/ask-first ⌄` · `app/build` · `tools · 9 · 3` ·
+ * one joined segment per layer, oldest to newest — `ask-first ⌄` · `app/build` · `tools · 9 · 3` ·
  * `+` — and everything a segment opens onto, worked out here, pure. The run's answers are no segment of
  * their own: the tools segment counts them, and the Tools card marks each on the line it is about
  * (2026-11-03). `ComposerStack.tsx` draws it; `composerStackHost.ts` reads what it needs from the engine.
@@ -14,6 +14,7 @@
 import {
   bucketOfSetId,
   chatStackSettingsOf,
+  DEFAULT_PERMISSION_SET_BUCKET,
   composePermissionSetLayers,
   layerIdOf,
   ownLinesOf,
@@ -157,7 +158,7 @@ export function withLayerRemoved(form: StackForm, index: number): StackForm {
 export interface LayerSegment {
   kind: "layer";
   key: string;
-  /** `chat/ask-first`, `app/build` — the set file the segment is. */
+  /** `ask-first`, `app/build` — the set file the segment is. */
   id: string;
   /** What the stack names it by: the conversation's reference, or the standing layer's in settings. */
   reference: string | undefined;
@@ -440,7 +441,7 @@ export interface Crumb {
 }
 
 /**
- * A set's path as crumbs that are pickers (§4.1): `Built in › chat › ask-first.json`. The scope's crumb
+ * A set's path as crumbs that are pickers (§4.1): `Built in › ask-first.json`. The scope's crumb
  * lists the scopes, a bucket's lists the buckets beside it, and the set's the sets of its bucket — so
  * swapping `ask-first` for `read-only` is two presses. With no set chosen yet the last crumb is
  * `choose a set` over the bucket's sets.
@@ -623,10 +624,10 @@ export function browserModeOf(ui: JairaUiState | undefined): BrowserMode {
 
 // --- pinning, and saving the stack ---------------------------------------------------------------
 
-/** The bucket a stack's standing layers are by (§2.6): its bottom's — `chat` for a stack with no set at the bottom. */
+/** The bucket a stack's standing layers are by (§2.6): its bottom's — the top level (`""`) for a stack with no set at the bottom. */
 export function stackBucketOf(form: StackForm): string {
   const id = form.layers[0] !== undefined ? permissionSetIdOf(form.layers[0]) : undefined;
-  return (id !== undefined ? bucketOfSetId(id) : undefined) ?? "chat";
+  return id !== undefined ? bucketOfSetId(id) : DEFAULT_PERMISSION_SET_BUCKET;
 }
 
 /**

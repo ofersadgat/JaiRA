@@ -20,7 +20,7 @@ import { compilePolicy, type ApprovalHub } from "@jaira/runtime";
 import { lowerPermissionSet, parsePermissionSet, setBuiltInDir, type PermissionsDecl, type PushMessage } from "@jaira/shared";
 import { AppService } from "@jaira/service";
 
-const REF = "$/permission-sets/chat/ask-first";
+const REF = "$/permission-sets/ask-first";
 const SHIPPED = { shell: "ask", read_file: "allow", write_file: "allow", "git commit": "ask", "git log": "allow", other: "deny" } as const;
 
 let scratch: string;
@@ -43,7 +43,7 @@ beforeEach(async () => {
   home = join(scratch, "home");
   builtIn = join(scratch, "builtin");
   mkdirSync(dir, { recursive: true });
-  write(builtIn, "permission-sets/chat/ask-first.json", SHIPPED);
+  write(builtIn, "permission-sets/ask-first.json", SHIPPED);
   setBuiltInDir(builtIn);
   initProject(dir, home);
   pushes = [];
@@ -79,8 +79,8 @@ function narrowingFor(input: { command: string }, source: string | undefined = R
   return policy.scopeOf!({ name: "shell" } as never, input as never, block as never);
 }
 
-const projectFile = (): string => join(dir, ".jaira", "permission-sets", "chat", "ask-first.json");
-const sharedFile = (): string => join(home, "permission-sets", "chat", "ask-first.json");
+const projectFile = (): string => join(dir, ".jaira", "permission-sets", "ask-first.json");
+const sharedFile = (): string => join(home, "permission-sets", "ask-first.json");
 
 describe("a shell approval, answered through the service", () => {
   it("tells the renderer which permission set asked, and where a line could be written", async () => {
@@ -88,15 +88,15 @@ describe("a shell approval, answered through the service", () => {
     const [pending] = service.pendingApprovals();
     expect(pending!.parts!.permissionSet).toBe(REF);
     expect(pending!.permissionSet).toEqual({
-      id: "chat/ask-first",
+      id: "ask-first",
       targets: [
-        { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
-        { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
+        { layer: "project", file: ".jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+        { layer: "base", file: "~/.jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
       ],
     });
     // The push carries the same thing, so a renderer that was already open draws the same menu.
     const pushed = pushes.find((m) => m.type === "approval:requested");
-    expect(pushed).toMatchObject({ pending: { requestId: pending!.requestId, permissionSet: { id: "chat/ask-first" } } });
+    expect(pushed).toMatchObject({ pending: { requestId: pending!.requestId, permissionSet: { id: "ask-first" } } });
   });
 
   it("'for this run' reaches the hub's ledger at the width chosen, and writes nothing", async () => {
@@ -114,12 +114,12 @@ describe("a shell approval, answered through the service", () => {
   it("'add to the permission set, in this project' creates an override that follows the built-in one, then answers and remembers", async () => {
     const parked = park("git commit -m wip && terraform plan");
     const [pending] = service.pendingApprovals();
-    const shipped = readFileSync(join(builtIn, "permission-sets", "chat", "ask-first.json"), "utf8");
+    const shipped = readFileSync(join(builtIn, "permission-sets", "ask-first.json"), "utf8");
 
     service.submitApproval(pending!.requestId, "allow", "workflow-run", ["git commit", "terraform"], "project");
 
-    expect(readFileSync(projectFile(), "utf8")).toBe('{\n  "$ref": "$SYSTEM/permission-sets/chat/ask-first",\n  "git commit": "allow",\n  "terraform": "allow"\n}\n');
-    expect(readFileSync(join(builtIn, "permission-sets", "chat", "ask-first.json"), "utf8")).toBe(shipped);
+    expect(readFileSync(projectFile(), "utf8")).toBe('{\n  "$ref": "$SYSTEM/permission-sets/ask-first",\n  "git commit": "allow",\n  "terraform": "allow"\n}\n');
+    expect(readFileSync(join(builtIn, "permission-sets", "ask-first.json"), "utf8")).toBe(shipped);
     expect(existsSync(sharedFile())).toBe(false);
     await expect(parked).resolves.toEqual({ decision: "allow", scope: "once" });
     // A started task reads its pinned snapshot, so the same widths are remembered for the run too.
@@ -129,14 +129,14 @@ describe("a shell approval, answered through the service", () => {
     expect(narrowingFor({ command: "git commit -m again && terraform apply" })).toBeUndefined();
     // And the menu now describes a file that is THERE: the next line is added in place.
     void park("git log && npm publish");
-    expect(service.pendingApprovals()[0]!.permissionSet!.targets[0]).toEqual({ layer: "project", file: ".jaira/permission-sets/chat/ask-first.json" });
+    expect(service.pendingApprovals()[0]!.permissionSet!.targets[0]).toEqual({ layer: "project", file: ".jaira/permission-sets/ask-first.json" });
   });
 
   it("'for all projects' writes the shared root, and a deny is written as deny", async () => {
     const parked = park("git commit -m wip");
     const [pending] = service.pendingApprovals();
     service.submitApproval(pending!.requestId, "deny", "workflow-run", ["git commit"], "base");
-    expect(JSON.parse(readFileSync(sharedFile(), "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/chat/ask-first", "git commit": "deny" });
+    expect(JSON.parse(readFileSync(sharedFile(), "utf8"))).toEqual({ $ref: "$SYSTEM/permission-sets/ask-first", "git commit": "deny" });
     expect(existsSync(projectFile())).toBe(false);
     await expect(parked).resolves.toEqual({ decision: "deny", scope: "once" });
   });
@@ -173,13 +173,13 @@ describe("an approval over a stack of sets", () => {
   const BUILD = "$/permission-sets/project/build-safe";
   const buildFile = (): string => join(dir, ".jaira", "permission-sets", "project", "build-safe.json");
 
-  /** Judge a line under [chat/ask-first, project/build-safe], as a state naming that stack is lowered, and park it. */
+  /** Judge a line under [ask-first, project/build-safe], as a state naming that stack is lowered, and park it. */
   function parkStacked(command: string): Promise<PermissionDecision> {
     write(join(dir, ".jaira"), "permission-sets/project/build-safe.json", { git: "allow", terraform: "ask" });
     const set = parsePermissionSet({ ...SHIPPED, git: "allow", terraform: "ask" }).permissionSet;
     const stack = {
-      layers: [{ id: "chat/ask-first", reference: REF }, { id: "project/build-safe", reference: BUILD }],
-      lines: { terraform: { everywhere: "project/build-safe", places: {} }, git: { everywhere: "project/build-safe", places: {} }, shell: { everywhere: "chat/ask-first", places: {} } },
+      layers: [{ id: "ask-first", reference: REF }, { id: "project/build-safe", reference: BUILD }],
+      lines: { terraform: { everywhere: "project/build-safe", places: {} }, git: { everywhere: "project/build-safe", places: {} }, shell: { everywhere: "ask-first", places: {} } },
     };
     const block = lowerPermissionSet(set, REF, stack).permissions!;
     const policy = compilePolicy({}, { execEnv: { wsl: "test" }, grants: hub().grants("t-1") });
@@ -195,10 +195,10 @@ describe("an approval over a stack of sets", () => {
     expect(pending!.layers!.map((layer) => [layer.id, layer.scope, layer.targets.map((target) => target.layer), layer.everyone ?? false])).toEqual([
       ["runtime", "runtime", [], false],
       ["project/build-safe", "project", ["project"], false],
-      ["chat/ask-first", "built in", ["project", "base"], true],
+      ["ask-first", "built in", ["project", "base"], true],
     ]);
-    // The set that asked is where "Add to" starts, there being no standing layer for `chat` here.
-    expect(pending!.defaultLayer).toBe("chat/ask-first");
+    // The set that asked is where "Add to" starts, there being no standing layer for the top level here.
+    expect(pending!.defaultLayer).toBe("ask-first");
   });
 
   it("'Add to' writes a DENY at a PLACE into the layer chosen, merged into its line, and keeps it for the run there", async () => {

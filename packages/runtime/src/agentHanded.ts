@@ -99,7 +99,7 @@ export interface HandedOptions {
   /**
    * The project the probe runs in — what `$PROJECT` on a line names and a relative path is read from
    * (decision 0023 §3.2). Absent, no line's place names the project, so a set that reads freely only
-   * there (the shipped `chat/read-only`) asks. Ignored when {@link run} is given.
+   * there (the shipped `read-only`) asks. Ignored when {@link run} is given.
    */
   workspaceRoot?: string;
   /**

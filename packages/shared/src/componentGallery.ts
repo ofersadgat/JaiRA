@@ -1041,7 +1041,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             cwd: "/repo",
             state: "feature/implementation/build",
             task: "t-qfr49rm80m",
-            permissionSet: "$/permission-sets/chat/auto",
+            permissionSet: "$/permission-sets/auto",
           },
         },
       },
@@ -1058,7 +1058,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             input: { path: "deploy/production.env", content: "API_URL=https://api.internal" },
             state: "feature/implementation/build",
             task: "t-qfr49rm80m",
-            permissionSet: "$/permission-sets/chat/auto",
+            permissionSet: "$/permission-sets/auto",
           },
         },
       },
@@ -1146,7 +1146,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             line: "npm test && git push origin feature/probe",
             dialect: "posix",
             verdict: "asks",
-            permissionSet: "$/permission-sets/chat/auto",
+            permissionSet: "$/permission-sets/auto",
             parts: [
               {
                 span: { start: 0, end: 8 },
@@ -1184,8 +1184,8 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             line: "npm --workspace @jaira/client run build",
             dialect: "powershell",
             verdict: "asks",
-            permissionSet: "$/permission-sets/chat/ask-first",
-            stack: ["runtime", "web/docs-sites", "project/build-safe", "chat/ask-first"],
+            permissionSet: "$/permission-sets/ask-first",
+            stack: ["runtime", "web/docs-sites", "project/build-safe", "ask-first"],
             parts: [
               {
                 span: { start: 0, end: 39 },
@@ -1194,7 +1194,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
                 kind: "runner",
                 subject: "runner:npm",
                 verdict: "asks",
-                decidedBy: { source: "permissionSet", entry: "runner:npm", layer: "chat/ask-first", reason: "the permission set's 'runner:npm' is ask" },
+                decidedBy: { source: "permissionSet", entry: "runner:npm", layer: "ask-first", reason: "the permission set's 'runner:npm' is ask" },
                 widths: ["runner:npm"],
               },
               {
@@ -1216,7 +1216,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
                 kind: "command",
                 subject: "one build",
                 verdict: "asks",
-                decidedBy: { source: "permissionSet", entry: "shell", layer: "chat/ask-first", reason: "the permission set's 'shell' is ask" },
+                decidedBy: { source: "permissionSet", entry: "shell", layer: "ask-first", reason: "the permission set's 'shell' is ask" },
                 widths: ["one build", "one"],
                 where: {
                   kind: "path",
@@ -1238,7 +1238,7 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
                 kind: "script",
                 subject: "script",
                 verdict: "asks",
-                decidedBy: { source: "permissionSet", entry: "script", layer: "chat/ask-first", reason: "the permission set's 'script' is ask" },
+                decidedBy: { source: "permissionSet", entry: "script", layer: "ask-first", reason: "the permission set's 'script' is ask" },
                 widths: ["script"],
                 within: 1,
                 via: ["npm run build:client"],
@@ -1250,12 +1250,12 @@ export const GALLERY_GROUPS: readonly GalleryGroup[] = [
             { id: "web/docs-sites", scope: "global", targets: [{ layer: "project", file: ".jaira/permission-sets/web/docs-sites.json", follows: "$/permission-sets/web/docs-sites" }] },
             { id: "project/build-safe", scope: "project", targets: [{ layer: "project", file: ".jaira/permission-sets/project/build-safe.json" }] },
             {
-              id: "chat/ask-first",
+              id: "ask-first",
               scope: "built in",
               everyone: true,
               targets: [
-                { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
-                { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
+                { layer: "project", file: ".jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+                { layer: "base", file: "~/.jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
               ],
             },
           ],

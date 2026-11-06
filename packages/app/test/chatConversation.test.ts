@@ -180,7 +180,7 @@ describe("the settings of a conversation that has not started yet", () => {
       operation: { tools: string };
     };
     expect(service.readWorkflow({ stateId: CHAT_SESSION, layer: "project" }).exists).toBe(false);
-    expect(state.operation.tools).toBe("$/permission-sets/chat/ask-first");
+    expect(state.operation.tools).toBe("$/permission-sets/ask-first");
   });
 });
 

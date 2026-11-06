@@ -206,7 +206,7 @@ describe("gateTools", () => {
    */
   it("decides each call under the permission set as it stands — Auto, then Full, then Ask, in one turn", async () => {
     const preset = (name: string) =>
-      parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/chat/${name}.json`, import.meta.url)), "utf8")) as unknown).permissionSet;
+      parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url)), "utf8")) as unknown).permissionSet;
     let current = preset("auto");
     const { gate, tools } = gated({ permissionSet: () => current });
     asked.length = 0;

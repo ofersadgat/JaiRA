@@ -1,7 +1,7 @@
 /**
- * `chat/read-only-scratch`: read-only, with scratch space in the agent's own folder.
+ * `read-only-scratch`: read-only, with scratch space in the agent's own folder.
  *
- * The set is `chat/read-only` but for its two writers, which refuse everywhere except `$AGENT_WORKSPACE`
+ * The set is `read-only` but for its two writers, which refuse everywhere except `$AGENT_WORKSPACE`
  * (decision 0023 ruling 19) and refuse a credential even there. This pins what that line does at
  * the runtime: Claude keeps its own Write and Edit (asked per call, never pre-approved), each call is
  * judged at its place — allowed in the agent's folder, refused in the project — and Codex, which cannot be
@@ -21,14 +21,14 @@ import { CLAUDE_TOOLS, CODEX_TOOLS, planAgentTools } from "../src/agentTools";
 import { noteCallAgent } from "../src/callAgent";
 
 const shipped = (name: string): PermissionSet =>
-  parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/chat/${name}.json`, import.meta.url)), "utf8"))).permissionSet;
+  parsePermissionSet(JSON.parse(readFileSync(fileURLToPath(new URL(`../../shared/builtin/permission-sets/${name}.json`, import.meta.url)), "utf8"))).permissionSet;
 
 const SCRATCH = shipped("read-only-scratch");
 const READ_ONLY = shipped("read-only");
 const ROOT = "C:/work/app";
 const claudeFolder = `${claudeProjectsDir().replace(/\\/g, "/")}/C--work-app`;
 
-describe("chat/read-only-scratch", () => {
+describe("read-only-scratch", () => {
   it("keeps Claude's own Write and Edit, put to the gate per call, where read-only does not keep them", () => {
     // Native, because JaiRA's own `write_file` keeps the workspace (ruling 18) and would refuse the folder.
     const scratch = planAgentTools(SCRATCH, CLAUDE_TOOLS);
@@ -70,7 +70,7 @@ describe("chat/read-only-scratch", () => {
   });
 
   it("allows a write in the calling agent's folder and refuses one in the project, elsewhere, or from no agent", () => {
-    const block = lowerPermissionSet(SCRATCH, "$/permission-sets/chat/read-only-scratch").permissions!;
+    const block = lowerPermissionSet(SCRATCH, "$/permission-sets/read-only-scratch").permissions!;
     const narrow = placeNarrowingFor({ root: ROOT, named: namedPlacesOf(ROOT) });
     const write = (tool: string, path: string, agent?: typeof CLAUDE_TOOLS) => {
       const input = { path, content: "x" } as FunctionInputs;

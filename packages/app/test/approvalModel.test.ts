@@ -267,7 +267,9 @@ describe("the answer menu", () => {
   });
 
   it("shortens a nested bucket's path to its ends", () => {
-    expect(shortFile(".jaira/permission-sets/chat/ask-first.json")).toBe(".jaira/permission-sets/…/ask-first.json");
+    expect(shortFile(".jaira/permission-sets/project/build-safe.json")).toBe(".jaira/permission-sets/…/build-safe.json");
+    // A set at the top level has no bucket to cut.
+    expect(shortFile(".jaira/permission-sets/ask-first.json")).toBe(".jaira/permission-sets/ask-first.json");
     expect(shortFile("elsewhere.json")).toBe("elsewhere.json");
   });
 });
@@ -300,14 +302,14 @@ describe("the rows, answered one by one", () => {
     widths,
     ...extra,
   });
-  const ASKS = (entry: string): CommandPart["decidedBy"] => ({ source: "permissionSet", entry, layer: "chat/ask-first", reason: `the permission set's '${entry}' is ask` });
+  const ASKS = (entry: string): CommandPart["decidedBy"] => ({ source: "permissionSet", entry, layer: "ask-first", reason: `the permission set's '${entry}' is ask` });
   const LINE = "npm --workspace @jaira/client run build";
   const APPROVAL: CommandApproval = {
     line: LINE,
     dialect: "powershell",
     verdict: "asks",
-    permissionSet: "$/permission-sets/chat/ask-first",
-    stack: ["runtime", "web/docs-sites", "project/build-safe", "chat/ask-first"],
+    permissionSet: "$/permission-sets/ask-first",
+    stack: ["runtime", "web/docs-sites", "project/build-safe", "ask-first"],
     parts: [
       part(LINE, "runner:npm", "asks", ASKS("runner:npm"), ["runner:npm"], { kind: "runner" }),
       part("npm run build:client", "npm run build", "allowed", { source: "permissionSet", entry: "npm run build", place: "packages/client", layer: "project/build-safe", reason: "" }, ["npm run build", "npm"], { within: 0, where: where("packages/client") }),
@@ -320,12 +322,12 @@ describe("the rows, answered one by one", () => {
     { id: "web/docs-sites", scope: "global", targets: [{ layer: "project", file: ".jaira/permission-sets/web/docs-sites.json", follows: "$/permission-sets/web/docs-sites" }] },
     { id: "project/build-safe", scope: "project", targets: [{ layer: "project", file: ".jaira/permission-sets/project/build-safe.json" }] },
     {
-      id: "chat/ask-first",
+      id: "ask-first",
       scope: "built in",
       everyone: true,
       targets: [
-        { layer: "project", file: ".jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
-        { layer: "base", file: "~/.jaira/permission-sets/chat/ask-first.json", follows: "$SYSTEM/permission-sets/chat/ask-first" },
+        { layer: "project", file: ".jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
+        { layer: "base", file: "~/.jaira/permission-sets/ask-first.json", follows: "$SYSTEM/permission-sets/ask-first" },
       ],
     },
   ];
@@ -354,7 +356,7 @@ describe("the rows, answered one by one", () => {
   });
 
   it("names the stack, oldest first, in place of the set and its entries", () => {
-    expect(reasonLines(PENDING)).toEqual([{ kind: "stack", layers: ["chat/ask-first", "project/build-safe", "web/docs-sites"], thisRun: true }]);
+    expect(reasonLines(PENDING)).toEqual([{ kind: "stack", layers: ["ask-first", "project/build-safe", "web/docs-sites"], thisRun: true }]);
   });
 
   it("opens a row's panel on What, Where and How far — narrowest first, once, the default layer — answering nothing", () => {
@@ -378,8 +380,8 @@ describe("the rows, answered one by one", () => {
     expect(panel.layers.map((o) => [o.name, o.layer, o.addTo, o.everyone])).toEqual([
       ["docs-sites", "web/docs-sites", "project", false],
       ["build-safe", "project/build-safe", "project", false],
-      ["ask-first, in this project", "chat/ask-first", "project", true],
-      ["ask-first, for all projects", "chat/ask-first", "base", true],
+      ["ask-first, in this project", "ask-first", "project", true],
+      ["ask-first, for all projects", "ask-first", "base", true],
     ]);
     expect(panel.chosenLayer!.id).toBe("project/build-safe");
     // The line it would write, shown before Deny or Allow is pressed.
@@ -390,10 +392,10 @@ describe("the rows, answered one by one", () => {
     const panel = rowPanel(PENDING, 2, { place: "packages", reach: "add" });
     expect(panel.chosenReach).toBe("add");
     expect(panel.reach[2]!.hint).toEqual(["writes ", { code: '"one build": { "packages": … }' }, " to .jaira/permission-sets/…/build-safe.json when you continue"]);
-    const preset = rowPanel(PENDING, 2, { width: "one", place: "**", reach: "add", layer: "chat/ask-first|base" });
+    const preset = rowPanel(PENDING, 2, { width: "one", place: "**", reach: "add", layer: "ask-first|base" });
     expect(preset.line).toBe('"one": …');
     expect(preset.reach[2]!.hint).toEqual([
-      "creates ~/.jaira/permission-sets/…/ask-first.json with ",
+      "creates ~/.jaira/permission-sets/ask-first.json with ",
       { code: '"one": …' },
       ", following the built-in permission set, when you continue",
       " — changes that set for everyone who uses it",
@@ -405,7 +407,7 @@ describe("the rows, answered one by one", () => {
     expect(rowAnswerOf(PENDING, 2, { width: "one", place: "**", reach: "run" }, "allow")).toEqual({ decision: "allow", reach: "run", width: "one" });
     expect(rowAnswerOf(PENDING, 2, {}, "allow")).toEqual({ decision: "allow", reach: "once", width: "one build", place: "packages/client" });
     // Reopened, the panel shows what was chosen.
-    const given = rowAnswerOf(PENDING, 2, { place: "packages", reach: "add", layer: "chat/ask-first|project" }, "deny");
+    const given = rowAnswerOf(PENDING, 2, { place: "packages", reach: "add", layer: "ask-first|project" }, "deny");
     expect(rowAnswerOf(PENDING, 2, choiceOfAnswer(PENDING, given), "deny")).toEqual(given);
     expect(answerWordsOf(PENDING, 2, given)).toBe("you deny one build · added to ask-first, in this project · in packages");
     expect(answerWordsOf(PENDING, 2, { decision: "allow", reach: "run", width: "one" })).toBe("you allow every one command · for this run");

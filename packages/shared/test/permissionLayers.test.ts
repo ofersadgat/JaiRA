@@ -49,7 +49,7 @@ describe("a stack composed", () => {
 
   it("merges line by line: the person's example, and §2.2's git and git push", () => {
     const { permissionSet, issues } = composePermissionSetLayers([
-      { id: "chat/ask-first", decl: ASK_FIRST },
+      { id: "ask-first", decl: ASK_FIRST },
       { id: "app/build", decl: BUILD },
     ]);
     expect(issues).toEqual([]);
@@ -61,25 +61,25 @@ describe("a stack composed", () => {
 
   it("keeps who said each line and each place", () => {
     const composed = composePermissionSetLayers([
-      { id: "chat/ask-first", decl: ASK_FIRST },
+      { id: "ask-first", decl: ASK_FIRST },
       { id: "app/build", decl: BUILD },
       { id: "runtime", decl: { web_fetch: { "docs.example.com": "allow" } } },
     ]);
-    expect(decidedBy(composed, "read_file")).toBe("chat/ask-first");
+    expect(decidedBy(composed, "read_file")).toBe("ask-first");
     expect(decidedBy(composed, "read_file", "C:")).toBe("app/build");
     expect(decidedBy(composed, "read_file", "src")).toBeUndefined();
-    expect(decidedBy(composed, "git  push")).toBe("chat/ask-first");
+    expect(decidedBy(composed, "git  push")).toBe("ask-first");
     expect(decidedBy(composed, "git")).toBe("app/build");
     expect(decidedBy(composed, "npm run build")).toBeUndefined();
     expect(decidedBy(composed, "npm run build", "packages/app")).toBe("app/build");
-    expect(decidedBy(composed, "web_fetch", "**")).toBe("chat/ask-first");
+    expect(decidedBy(composed, "web_fetch", "**")).toBe("ask-first");
     expect(decidedBy(composed, "web_fetch", "docs.example.com")).toBe("runtime");
-    expect(decidedBy(composed, "other")).toBe("chat/ask-first");
+    expect(decidedBy(composed, "other")).toBe("ask-first");
   });
 
   it("lets a newer plain decision take the whole line, its places and their provenance with it", () => {
     const composed = composePermissionSetLayers([
-      { id: "chat/ask-first", decl: ASK_FIRST },
+      { id: "ask-first", decl: ASK_FIRST },
       { id: "app/build", decl: BUILD },
       { id: "tools", decl: { read_file: "allow" } },
     ]);
@@ -88,7 +88,7 @@ describe("a stack composed", () => {
   });
 
   it("drops a tool the stack comes to `unavailable` on, says who took it, and lets a newer layer offer it again", () => {
-    const base = { id: "chat/full", decl: { read_file: "allow", web_fetch: { mode: "allow", implementation: "native" }, mcp__figma: "allow", mcp__figma__delete: "allow", other: "allow" } };
+    const base = { id: "full", decl: { read_file: "allow", web_fetch: { mode: "allow", implementation: "native" }, mcp__figma: "allow", mcp__figma__delete: "allow", other: "allow" } };
     const tools = { id: "tools", decl: { web_fetch: "unavailable", mcp__figma__delete: "unavailable" } };
     const composed = composePermissionSetLayers([base, tools]);
     expect(composed.permissionSet.entries["web_fetch"]).toBeUndefined();
@@ -109,7 +109,7 @@ describe("a stack composed", () => {
 
   it("reports what is wrong with a layer against that layer, and keeps the older line it could not replace", () => {
     const { permissionSet, issues } = composePermissionSetLayers([
-      { id: "chat/ask-first", decl: ASK_FIRST },
+      { id: "ask-first", decl: ASK_FIRST },
       { id: "app/broken", decl: { read_file: 7, "git commit": "unavailable" } },
     ]);
     expect(issues.map((issue) => [issue.layer, issue.path])).toEqual([
@@ -122,7 +122,7 @@ describe("a stack composed", () => {
 
   it("writes no `other` for a layer that says none, so an added layer never replaces the one below", () => {
     const { permissionSet } = composePermissionSetLayers([
-      { id: "chat/read-only", decl: { read_file: "allow", other: "deny" } },
+      { id: "read-only", decl: { read_file: "allow", other: "deny" } },
       { id: "web/docs", decl: { web_fetch: "allow" } },
     ]);
     expect(permissionSet.other).toBe("deny");
@@ -142,28 +142,28 @@ describe("the stack a node is, in §2.6's order", () => {
     return { value, key: id!, from: reference };
   };
   const FILES = {
-    "chat/ask-first": { read_file: "ask", write_file: "ask", web_fetch: "ask", shell: "ask", git: "ask", other: "ask" },
-    "chat/build-safe": { write_file: { packages: "allow" }, git: "allow", shell: "deny" },
-    "chat/web": { web_fetch: "allow", shell: "allow" },
-    "app/build": { layers: ["$/permission-sets/chat/ask-first"], write_file: "allow" },
+    "ask-first": { read_file: "ask", write_file: "ask", web_fetch: "ask", shell: "ask", git: "ask", other: "ask" },
+    "build-safe": { write_file: { packages: "allow" }, git: "allow", shell: "deny" },
+    "web": { web_fetch: "allow", shell: "allow" },
+    "app/build": { layers: ["$/permission-sets/ask-first"], write_file: "allow" },
   };
   const read = readerOver(FILES);
-  const STANDING = { chat: ["$/permission-sets/chat/build-safe"] };
+  const STANDING = { "": ["$/permission-sets/build-safe"] };
 
   it("is the bottom, the bucket's standing layers, the conversation's own, then the tools layer — each newer than the last", () => {
     const issues: Parameters<typeof permissionStackOf>[3] = [];
-    const layers = permissionStackOf({ layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/chat/web"], shell: "ask" }, read, "", issues, { standing: STANDING, ownId: "tools" });
+    const layers = permissionStackOf({ layers: ["$/permission-sets/ask-first", "$/permission-sets/web"], shell: "ask" }, read, "", issues, { standing: STANDING, ownId: "tools" });
     expect(issues).toEqual([]);
     expect(layers!.map((layer) => [layer.id, layer.role])).toEqual([
-      ["chat/ask-first", "bottom"],
-      ["chat/build-safe", "standing"],
-      ["chat/web", "named"],
+      ["ask-first", "bottom"],
+      ["build-safe", "standing"],
+      ["web", "named"],
       ["tools", "own"],
     ]);
   });
 
   it("merges newest first per line: standing under the conversation's layers, under the tools layer", () => {
-    const { permissionSet, stack } = resolveChatPermissionStack({ layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/chat/web"], shell: "ask" }, read, { standing: STANDING });
+    const { permissionSet, stack } = resolveChatPermissionStack({ layers: ["$/permission-sets/ask-first", "$/permission-sets/web"], shell: "ask" }, read, { standing: STANDING });
     // The standing layer loosens the preset's `git`; the conversation's layer loosens `web_fetch` and
     // `shell` over the standing layer's `deny`; the tools layer takes `shell` back to `ask`.
     expect(permissionSet.entries["git"]).toMatchObject({ mode: "allow" });
@@ -171,50 +171,50 @@ describe("the stack a node is, in §2.6's order", () => {
     expect(permissionSet.entries["shell"]).toMatchObject({ mode: "ask" });
     // A place map over the preset's plain line makes the preset's word its `**`.
     expect(permissionSet.entries["write_file"]).toMatchObject({ mode: "ask", places: { packages: "allow" } });
-    expect(layerOfLine(stack, "git")).toBe("chat/build-safe");
-    expect(layerOfLine(stack, "web_fetch")).toBe("chat/web");
+    expect(layerOfLine(stack, "git")).toBe("build-safe");
+    expect(layerOfLine(stack, "web_fetch")).toBe("web");
     expect(layerOfLine(stack, "shell")).toBe("tools");
-    expect(layerOfLine(stack, "write_file", "packages")).toBe("chat/build-safe");
-    expect(layerOfLine(stack, "write_file")).toBe("chat/ask-first");
-    expect(layerOfLine(stack, "other")).toBe("chat/ask-first");
+    expect(layerOfLine(stack, "write_file", "packages")).toBe("build-safe");
+    expect(layerOfLine(stack, "write_file")).toBe("ask-first");
+    expect(layerOfLine(stack, "other")).toBe("ask-first");
   });
 
   it("takes a tool away with `unavailable` in the tools layer, which a lower layer offers", () => {
-    const { permissionSet } = resolveChatPermissionStack({ layers: ["$/permission-sets/chat/ask-first"], web_fetch: "unavailable" }, read, {});
+    const { permissionSet } = resolveChatPermissionStack({ layers: ["$/permission-sets/ask-first"], web_fetch: "unavailable" }, read, {});
     // Not held, so not offered — and not handed to an agent (decision 0023 §1).
     expect(holdsTool(permissionSet, "web_fetch")).toBe(false);
     expect(offeredTools(permissionSet)).not.toContain("web_fetch");
     expect(offeredTools(permissionSet)).toContain("read_file");
   });
 
-  it("lays the standing layers under a whole map with no layers — the tools layer, in the `chat` bucket", () => {
+  it("lays the standing layers under a whole map with no layers — the tools layer, at the top level", () => {
     const { permissionSet, stack } = resolveChatPermissionStack({ read_file: "allow", other: "deny" }, read, { standing: STANDING });
-    expect(stack.layers.map((layer) => layer.id)).toEqual(["chat/build-safe", "tools"]);
+    expect(stack.layers.map((layer) => layer.id)).toEqual(["build-safe", "tools"]);
     expect(permissionSet.entries["git"]).toMatchObject({ mode: "allow" });
     expect(permissionSet.other).toBe("deny");
   });
 
   it("follows a set FILE built of layers whole, and lays the standing layers of the NAMED set's bucket over it", () => {
     // A state names `app/build`: the file is the stack it is itself, and the bucket is `app`'s.
-    const layers = permissionStackOf("$/permission-sets/app/build", read, "", [], { standing: { ...STANDING, app: ["$/permission-sets/chat/web"] } });
+    const layers = permissionStackOf("$/permission-sets/app/build", read, "", [], { standing: { ...STANDING, app: ["$/permission-sets/web"] } });
     expect(layers!.map((layer) => [layer.id, layer.role])).toEqual([
-      ["chat/ask-first", "bottom"],
+      ["ask-first", "bottom"],
       ["app/build", "bottom"],
-      ["chat/web", "standing"],
+      ["web", "standing"],
     ]);
   });
 
   it("offers NOTHING when its own preset cannot be read, and says why — and leaves out a standing layer it cannot read, saying so", () => {
-    const broken = resolveChatPermissionStack({ layers: ["$/permission-sets/chat/nope"], read_file: "allow" }, read, {});
+    const broken = resolveChatPermissionStack({ layers: ["$/permission-sets/nope"], read_file: "allow" }, read, {});
     expect(broken.permissionSet).toEqual({ entries: {} });
     expect(broken.issues[0]!.message).toMatch(/matches no file/);
-    const typo = resolveChatPermissionStack({ layers: ["$/permission-sets/chat/ask-first"] }, read, { standing: { chat: ["$/permission-sets/chat/missing"] } });
+    const typo = resolveChatPermissionStack({ layers: ["$/permission-sets/ask-first"] }, read, { standing: { "": ["$/permission-sets/missing"] } });
     expect(typo.permissionSet.entries["read_file"]).toMatchObject({ mode: "ask" });
-    expect(typo.issues.map((issue) => issue.message).join()).toMatch(/standing layer '\$\/permission-sets\/chat\/missing' of 'chat'/);
+    expect(typo.issues.map((issue) => issue.message).join()).toContain(`standing layer '$/permission-sets/missing' of '' (settings: permissions.layers[""])`);
   });
 
   it("names a layer by its set id, whatever root it is searched from", () => {
-    expect(permissionSetIdOf("$/permission-sets/chat/ask-first")).toBe("chat/ask-first");
+    expect(permissionSetIdOf("$/permission-sets/ask-first")).toBe("ask-first");
     expect(permissionSetIdOf("$SYSTEM/permission-sets/feature/implementation/writes-asking.json")).toBe("feature/implementation/writes-asking");
     expect(permissionSetIdOf("./mine")).toBeUndefined();
   });
@@ -226,7 +226,7 @@ describe("the tools layer the composer writes (ruling 8)", () => {
     const wanted = parsePermissionSet({ read_file: "allow", other: "ask" }).permissionSet;
     // `git push` is no tool: absent says nothing of it, so it stays as below.
     expect(toolsLayerOf(below, wanted)).toEqual({ read_file: "allow", web_fetch: "unavailable" });
-    expect(chatStackSettingsOf(["$/permission-sets/chat/ask-first"], { read_file: "allow" })).toEqual({ layers: ["$/permission-sets/chat/ask-first"], read_file: "allow" });
+    expect(chatStackSettingsOf(["$/permission-sets/ask-first"], { read_file: "allow" })).toEqual({ layers: ["$/permission-sets/ask-first"], read_file: "allow" });
   });
 });
 
@@ -234,7 +234,7 @@ describe("the whole stack, composed for \"Everything\" (§7.4)", () => {
   it("tags every line, and every place, with the layer that decided it — runtime among the layers, under the tools", () => {
     const view = permissionStackViewOf(
       [
-        { id: "chat/ask-first", decl: { read_file: "ask", web_fetch: "ask", other: "ask" }, reference: "$/permission-sets/chat/ask-first", role: "bottom" },
+        { id: "ask-first", decl: { read_file: "ask", web_fetch: "ask", other: "ask" }, reference: "$/permission-sets/ask-first", role: "bottom" },
         { id: "app/build", decl: { read_file: { src: "allow" } }, reference: "$/permission-sets/app/build", role: "standing" },
         { id: "tools", decl: { web_fetch: "unavailable" }, role: "own" },
       ],
@@ -242,13 +242,13 @@ describe("the whole stack, composed for \"Everything\" (§7.4)", () => {
       { "git push @ main": "deny" },
     );
     expect(view.layers.map((layer) => [layer.id, layer.role, layer.lines])).toEqual([
-      ["chat/ask-first", "bottom", 3],
+      ["ask-first", "bottom", 3],
       ["app/build", "standing", 1],
       ["runtime", "runtime", 1],
       ["tools", "own", 1],
     ]);
     const line = (subject: string) => view.lines.find((each) => each.subject === subject)!;
-    expect(line("read_file")).toMatchObject({ layer: "chat/ask-first", places: { src: { decision: "allow", layer: "app/build" } } });
+    expect(line("read_file")).toMatchObject({ layer: "ask-first", places: { src: { decision: "allow", layer: "app/build" } } });
     expect(line("web_fetch")).toMatchObject({ layer: "tools", unavailable: "tools" });
     expect(view.runtime).toEqual({ "git push @ main": "deny" });
   });

@@ -16,7 +16,7 @@ The tools JaiRA registers on `registry.tools` for a model to call, and the `run_
 
 ## A state grants these tools to reach the workspace, a shell or the web under JaiRA's policy
 
-**Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a permission set (a map from a tool name to `allow`, `ask`, `deny` or a function by name such as `"smart"`, or a reference such as `$/permission-sets/chat/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
+**Use when.** Giving a prompt or agent state governed access to files, search, a shell or the network by offering tools in `environment.tools`, as a permission set (a map from a tool name to `allow`, `ask`, `deny` or a function by name such as `"smart"`, or a reference such as `$/permission-sets/read-only`) or as the older list with modes in `permissions.tools`; narrowing where they act with scope tables; running one command as a state with `function: "run_command"`; reading a tool result in a prompt or a transcript.
 
 **Do not use when.** Expecting an agent to keep a built-in the permission set does not hold. Under a permission set map on a claude transport a held tool is served by JaiRA's implementation and displaces the built-in, a `native` choice leaves the built-in running under an ask rule, and the built-in of every standard tool the map does not hold is removed. The older list is the legacy reading and keeps the built-ins it does not mention: see [tool-policy](../units/tool-policy.md). Deciding where an artifact's bytes go: [artifact-destination-template](artifact-destination-template.md).
 
@@ -68,7 +68,7 @@ connection signed in for its host. A call with no connection answers `{error: "n
 sign in on Connections"}`. `git_push` and `open_merge_request` also pass `functions.review_artifacts.publish`,
 asked once per task and shared with `remote_push`/`remote_open`; the push carries the connection's token
 as an `Authorization` header in `GIT_CONFIG_*` environment variables, to the project's https url, never
-forced. `chat_control` sets do not hold them.
+forced. `control` sets do not hold them.
 
 The **CI tools** ([0016](../decisions/0016-git-and-ci-tools.md) §2), category `ci`, reach the same forge the same
 way and only read: a pipeline list (of a merge request, a ref or a sha), one pipeline and its jobs, one job

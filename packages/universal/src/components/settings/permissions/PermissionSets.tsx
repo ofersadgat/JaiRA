@@ -213,14 +213,14 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
     <View flexDirection="row" alignItems="center" gap={8} flexWrap="wrap">
       <ChipIcon name={setIconGlyph(permissionSetIconOf(at.id, at.source.decl))} size={14} />
       <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600 }} {...({ title: at.source.file } as object)}>
-        {`${at.bucket.split("/").join(" / ")} / ${at.name}`}
+        {[...(at.bucket === "" ? [] : at.bucket.split("/")), at.name].join(" / ")}
       </Txt>
       <Status weight={600} kind={standing.here && props.writesTo !== undefined ? "here" : "unchecked"}>
         {standing.label}
       </Status>
       {standsIn.map((bucket) => (
         <Status key={bucket} weight={600} kind="unchecked" title={`settings: permissions.layers.${bucket} — laid over every ${bucket} set, oldest first`}>
-          {`standing layer of ${bucket}`}
+          {bucket === "" ? "standing layer at the top level" : `standing layer of ${bucket}`}
         </Status>
       ))}
       {standing.shadowed !== undefined ? (
@@ -230,7 +230,7 @@ function OpenPermissionSet({ at, ...props }: PermissionSetsViewProps & { at: Per
       ) : null}
     </View>
   );
-  const line: ReactNode[] = [...standsIn.map((bucket) => `layered on every ${bucket} set · `), usedByLine(props.data.usedBy[at.id])];
+  const line: ReactNode[] = [...standsIn.map((bucket) => (bucket === "" ? "layered on every top-level set · " : `layered on every ${bucket} set · `)), usedByLine(props.data.usedBy[at.id])];
   const bases = permissionSetsAt(props.data.records, props.layer)
     .filter((one) => one.id !== at.id && one.source.decl !== undefined)
     .map((one) => ({ id: one.id, name: one.name, icon: permissionSetIconOf(one.id, one.source.decl), decl: one.source.decl as Record<string, unknown> }));
@@ -405,7 +405,7 @@ function NewPermissionSet({ ats, ...props }: PermissionSetsViewProps & { ats: re
   const name = props.naming.name ?? "";
   const typed = name.trim().length > 0 || (inBucket === undefined && bucket.trim().length > 0);
   const problem = newPermissionSetProblem(ats, bucket, name);
-  const path = `permission sets${inBucket !== undefined ? `/${inBucket}` : ""}`;
+  const path = `permission sets${inBucket !== undefined && inBucket !== "" ? `/${inBucket}` : ""}`;
   return (
     <RailDetail
       minHeight={330}
@@ -422,7 +422,7 @@ function NewPermissionSet({ ats, ...props }: PermissionSetsViewProps & { ats: re
       hints={[
         inBucket !== undefined
           ? "It starts holding nothing, with everything else asked about. Its lines are added once it has a name."
-          : "A place with its own versions of the same names — chat/ask-first and chat_control/ask-first are two permission sets.",
+          : "A place with its own versions of the same names — ask-first and control/ask-first are two permission sets.",
       ]}
     >
       <SchemaForm

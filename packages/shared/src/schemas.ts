@@ -456,7 +456,7 @@ export function toolsSchema(): SchemaDoc {
   };
   return {
     description:
-      "what the agent may do (§5.1) — a permission set: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/permission-sets/chat/read-only\"). `{}` drops the inherited ones",
+      "what the agent may do (§5.1) — a permission set: a map from a tool, a command, `script` or `other` to a mode, or a reference to one (\"$/permission-sets/read-only\"). `{}` drops the inherited ones",
     anyOf: [
       { type: "string", description: "a reference to a permission set file — $/permission-sets/<bucket>/<name>" },
       {

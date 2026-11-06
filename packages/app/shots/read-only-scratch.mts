@@ -1,5 +1,5 @@
 /**
- * `chat/read-only-scratch` with a real agent (2026-11-05: "read only, but it provides the llm scratch
+ * `read-only-scratch` with a real agent (2026-11-05: "read only, but it provides the llm scratch
  * space in its agent workspace").
  *
  * A real agent (claude-cli/haiku — this rig spends a little) under the shipped set, told to write a note
@@ -21,7 +21,7 @@ const TITLE = "Scratch";
 const MODEL = "claude-cli/haiku";
 const OUT = join(import.meta.dirname, "out", "read-only-scratch");
 const WORLD = join(import.meta.dirname, ".world-read-only-scratch");
-const SET = { layers: ["$/permission-sets/chat/read-only-scratch"] };
+const SET = { layers: ["$/permission-sets/read-only-scratch"] };
 
 /** Claude Code's folder for a working directory — as `@declarative-ai/agents-api` spells it. */
 const agentFolder = (cwd: string): string =>

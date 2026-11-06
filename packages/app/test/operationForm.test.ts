@@ -40,7 +40,7 @@ const FULL = {
   maxOutputTokens: 16000,
   stopSequences: ["</done>"],
   reasoning: { effort: "high", budgetTokens: 4000 },
-  tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask" },
+  tools: { $ref: "$/permission-sets/read-only", write_file: "ask" },
   session: "review",
   fork: true,
   conversation: { mode: "selected_artifacts", artifacts: ["plan_doc"] },

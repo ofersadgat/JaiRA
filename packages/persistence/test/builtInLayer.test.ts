@@ -172,11 +172,11 @@ describe("three-layer resolution", () => {
 
   it("resolves a permission-set-shaped fragment from the layer by the reference form that already exists", () => {
     // `permission-sets/` is a directory of ordinary fragments (decision 0006); what a permission set MEANS is 0007's.
-    write(builtIn, "permission-sets/chat/ask-first.json", { model: "from-permission set" });
+    write(builtIn, "permission-sets/ask-first.json", { model: "from-permission set" });
     const p = open();
     write(p.paths.workflowsDir, "greet.json", {
       ...promptState("x"),
-      operation: { $ref: "$/permission-sets/chat/ask-first", kind: "prompt", prompt: "x" },
+      operation: { $ref: "$/permission-sets/ask-first", kind: "prompt", prompt: "x" },
     });
     expect((load(p, "greet").states.greet!.operation as { config?: { model?: string } }).config?.model).toBe("from-permission set");
   });

@@ -246,11 +246,11 @@ export interface PendingApproval {
 /** One layer an answer can be written into — see {@link ApprovalPermissionSet}. */
 export interface ApprovalPermissionSetTarget {
   layer: WritableLayer;
-  /** The file, as a person reads it: `.jaira/permission-sets/chat/ask-first.json`, `~/.jaira/permission-sets/…`. */
+  /** The file, as a person reads it: `.jaira/permission-sets/ask-first.json`, `~/.jaira/permission-sets/…`. */
   file: string;
   /**
    * Set when this layer does not hold the permission set yet: the write CREATES an override here that keeps
-   * following the named lower layer's file (`$SYSTEM/permission-sets/chat/ask-first`).
+   * following the named lower layer's file (`$SYSTEM/permission-sets/ask-first`).
    */
   follows?: string;
   /** A nearer layer holds its own copy that does not follow this one, so a line written here is not read in this project. */
@@ -269,7 +269,7 @@ export interface ApprovalPermissionSet {
 
 /** One layer of the stack an approval lists for "Add to" (decision 0023 §4.4). */
 export interface ApprovalLayer {
-  /** As the parts' rows name it: `chat/ask-first`, `app/build`, `inline`, `runtime`, `tools`. */
+  /** As the parts' rows name it: `ask-first`, `app/build`, `inline`, `runtime`, `tools`. */
   id: string;
   /** Where it lives — `built in`, `global`, `project`, `runtime`, `this conversation`, `this state`. */
   scope: PermissionSetScope;
@@ -1208,7 +1208,7 @@ export interface WritePermissionSetRequest {
 }
 
 /** The permission set the work summary judges a change by: a call it does not let through is one (`workSummary.ts`). */
-export const READ_ONLY_PERMISSION_SET = "chat/read-only";
+export const READ_ONLY_PERMISSION_SET = "read-only";
 
 /** Judge tool calls against the project's {@link READ_ONLY_PERMISSION_SET}, read through every layer. */
 export interface JudgeReadOnlyRequest {

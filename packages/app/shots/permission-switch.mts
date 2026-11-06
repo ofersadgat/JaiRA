@@ -28,7 +28,7 @@ const OUT = join(import.meta.dirname, "out", "permission-switch", switching ? "s
 const WORLD = join(import.meta.dirname, `.world-permission-switch${switching ? "" : "-control"}`);
 
 /** The shipped `auto` set, as the composer sends it: the stack's bottom layer (decision 0023 §2.6). */
-const AUTO = { layers: ["$/permission-sets/chat/auto"] };
+const AUTO = { layers: ["$/permission-sets/auto"] };
 const TWO_FETCHES = (a: string, b: string): string =>
   `Use the web_fetch tool to fetch ${a}. After it answers, use the web_fetch tool again to fetch ${b}. Then reply with both page titles. Do not use any other tool.`;
 
@@ -54,8 +54,8 @@ async function main(): Promise<void> {
      * bottom segment, its set's crumb, and the sibling (decision 0023 §4.1 — two presses).
      */
     const pick = async (file: string): Promise<void> => {
-      const opened = await app.evaluate<boolean>(`(() => { const chip = document.querySelector('[aria-label="chat/auto"]'); if (!chip) return false; chip.click(); return true; })()`);
-      if (!opened) throw new Error("the composer's stack has no chat/auto segment");
+      const opened = await app.evaluate<boolean>(`(() => { const chip = document.querySelector('[aria-label="auto"]'); if (!chip) return false; chip.click(); return true; })()`);
+      if (!opened) throw new Error("the composer's stack has no auto segment");
       await settle(600);
       await app.clickText("auto.json");
       await settle(400);

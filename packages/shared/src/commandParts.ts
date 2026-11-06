@@ -123,7 +123,7 @@ export interface CommandPart {
     place?: string;
     /**
      * The LAYER of the stack that set the deciding line — at {@link place} where a place answered
-     * (decision 0023 §2.7): a set's id (`chat/ask-first`, `app/build`), `inline` for lines written on
+     * (decision 0023 §2.7): a set's id (`ask-first`, `app/build`), `inline` for lines written on
      * a state, `tools` for the conversation's own, `runtime` for an answer given in this task. Absent
      * where no layer decided — the built-ins, `.jaira/`, the parser, the floor — or where the judging
      * set came with no stack.

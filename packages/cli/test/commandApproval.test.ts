@@ -224,17 +224,17 @@ describe("the request as a person reads it", () => {
     const [build, commit] = judged.parts;
     const parts = {
       ...judged,
-      permissionSet: "$/permission-sets/chat/ask-first",
-      stack: ["runtime", "project/build-safe", "chat/ask-first"],
+      permissionSet: "$/permission-sets/ask-first",
+      stack: ["runtime", "project/build-safe", "ask-first"],
       parts: [
         { ...build!, verdict: "allowed" as const, decidedBy: { source: "permissionSet" as const, entry: "npm run build", place: "packages/app", layer: "project/build-safe", reason: "" } },
-        { ...commit!, verdict: "asks" as const, decidedBy: { source: "permissionSet" as const, entry: "git commit", layer: "chat/ask-first", reason: "" } },
+        { ...commit!, verdict: "asks" as const, decidedBy: { source: "permissionSet" as const, entry: "git commit", layer: "ask-first", reason: "" } },
       ],
     };
     const drawn = renderApproval({ requestId: "r", tool: "shell", command, input: { command }, sessionId: "s", at: 0, parts });
     expect(drawn).toMatch(/1\s+npm run build\s+\S+\s+allowed\s+project\/build-safe "npm run build" in packages\/app/);
-    expect(drawn).toMatch(/2\s+git commit -m x\s+git commit\s+ASKS\s+chat\/ask-first "git commit"/);
-    expect(drawn).toContain("stack: chat/ask-first + project/build-safe, then this run");
+    expect(drawn).toMatch(/2\s+git commit -m x\s+git commit\s+ASKS\s+ask-first "git commit"/);
+    expect(drawn).toContain("stack: ask-first + project/build-safe, then this run");
     expect(drawn).not.toContain("permission set: ");
   });
 });

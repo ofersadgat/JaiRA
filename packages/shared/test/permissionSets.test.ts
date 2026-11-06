@@ -183,9 +183,9 @@ describe("parsing the map", () => {
 
 describe("references", () => {
   const files = {
-    "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", shell: "deny", other: "deny" },
-    "$/permission-sets/chat/writer": { $ref: "$/permission-sets/chat/read-only", write_file: { mode: "ask", implementation: "native" } },
-    "$/permission-sets/feature/implementation/build": { $ref: "$/permission-sets/chat/writer", shell: "smart" },
+    "$/permission-sets/read-only": { read_file: "allow", glob: "allow", shell: "deny", other: "deny" },
+    "$/permission-sets/writer": { $ref: "$/permission-sets/read-only", write_file: { mode: "ask", implementation: "native" } },
+    "$/permission-sets/feature/implementation/build": { $ref: "$/permission-sets/writer", shell: "smart" },
     "$/permission-sets/loop/a": { $ref: "$/permission-sets/loop/b", read_file: "allow" },
     "$/permission-sets/loop/b": { $ref: "$/permission-sets/loop/a" },
     "$/permission-sets/loop/self": "$/permission-sets/loop/self",
@@ -198,11 +198,11 @@ describe("references", () => {
   };
 
   it("a bare string is the permission set it names", () => {
-    expect(resolve("$/permission-sets/chat/read-only")).toEqual({ decl: files["$/permission-sets/chat/read-only"], issues: [] });
+    expect(resolve("$/permission-sets/read-only")).toEqual({ decl: files["$/permission-sets/read-only"], issues: [] });
   });
 
   it("`$ref` with sibling keys starts from one and overrides per subject", () => {
-    const { decl, issues } = resolve({ $ref: "$/permission-sets/chat/read-only", write_file: "ask", shell: "ask" });
+    const { decl, issues } = resolve({ $ref: "$/permission-sets/read-only", write_file: "ask", shell: "ask" });
     expect(issues).toEqual([]);
     expect(decl).toEqual({ read_file: "allow", glob: "allow", shell: "ask", other: "deny", write_file: "ask" });
   });
@@ -222,9 +222,9 @@ describe("references", () => {
   it("an override merges the line: a newer mode leaves the implementation below standing, unless it names one", () => {
     // Decision 0023 §2.3: what a layer leaves out says nothing — and a line that says only a mode says
     // nothing about whose code runs the tool.
-    const { decl } = resolve({ $ref: "$/permission-sets/chat/writer", write_file: "allow" });
+    const { decl } = resolve({ $ref: "$/permission-sets/writer", write_file: "allow" });
     expect(parsePermissionSet(decl).permissionSet.entries["write_file"]).toEqual({ kind: "tool", mode: "allow", implementation: "native" });
-    const ours = resolve({ $ref: "$/permission-sets/chat/writer", write_file: { mode: "allow", implementation: "app" } }).decl;
+    const ours = resolve({ $ref: "$/permission-sets/writer", write_file: { mode: "allow", implementation: "app" } }).decl;
     expect(parsePermissionSet(ours).permissionSet.entries["write_file"]).toEqual({ kind: "tool", mode: "allow", implementation: "app" });
   });
 
@@ -238,7 +238,7 @@ describe("references", () => {
   });
 
   it("a reference that names nothing, or names something that is not a map, is an error", () => {
-    expect(resolve("$/permission-sets/chat/nope").issues[0]!.message).toMatch(/matches no file/);
+    expect(resolve("$/permission-sets/nope").issues[0]!.message).toMatch(/matches no file/);
     expect(resolve({ $ref: "$/lib/list", shell: "ask" }).issues[0]!.message).toMatch(/is not a permission set/);
   });
 });
@@ -384,7 +384,7 @@ describe("a line that names a FUNCTION (decision 0007, amended 2026-09-22)", () 
 
 describe("lowering a state file", () => {
   const read = readerOver({
-    "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", other: "deny" },
+    "$/permission-sets/read-only": { read_file: "allow", glob: "allow", other: "deny" },
     "$/lib/list": ["shell"],
   });
 
@@ -437,9 +437,9 @@ describe("lowering a state file", () => {
     const { def, issues } = lowerStatePermissionSets(
       "wf",
       {
-        environment: { model: "m", tools: "$/permission-sets/chat/read-only" },
+        environment: { model: "m", tools: "$/permission-sets/read-only" },
         operation: { kind: "prompt", prompt: "go", tools: { shell: "smart", "git status": "allow" } },
-        children: { review: { state: "./review", environment: { tools: { $ref: "$/permission-sets/chat/read-only", write_file: "ask" } } } },
+        children: { review: { state: "./review", environment: { tools: { $ref: "$/permission-sets/read-only", write_file: "ask" } } } },
       },
       read,
     );
@@ -455,7 +455,7 @@ describe("lowering a state file", () => {
           functions: {},
           places: {},
           // The stack the set was read through (decision 0023 §2.7): one layer, which set every line.
-          stack: { layers: [{ id: "chat/read-only", reference: "$/permission-sets/chat/read-only" }] },
+          stack: { layers: [{ id: "read-only", reference: "$/permission-sets/read-only" }] },
         },
       },
       // `source` is written beside `subjects`, and only there: where a shell line's subjects came from.
@@ -486,11 +486,11 @@ describe("lowering a state file", () => {
               places: {},
               // A copy is the stack [the set it names, its own lines], and who set each line is kept.
               stack: {
-                layers: [{ id: "chat/read-only", reference: "$/permission-sets/chat/read-only" }, { id: "inline" }],
+                layers: [{ id: "read-only", reference: "$/permission-sets/read-only" }, { id: "inline" }],
                 lines: {
-                  read_file: { everywhere: "chat/read-only", places: {} },
-                  glob: { everywhere: "chat/read-only", places: {} },
-                  other: { everywhere: "chat/read-only", places: {} },
+                  read_file: { everywhere: "read-only", places: {} },
+                  glob: { everywhere: "read-only", places: {} },
+                  other: { everywhere: "read-only", places: {} },
                   write_file: { everywhere: "inline", places: {} },
                 },
               },
@@ -521,7 +521,7 @@ describe("lowering a state file", () => {
   });
 
   it("offers nothing under a reference it could not follow", () => {
-    const { def, issues } = lowerStatePermissionSets("wf", { environment: { tools: "$/permission-sets/chat/nope" } }, read);
+    const { def, issues } = lowerStatePermissionSets("wf", { environment: { tools: "$/permission-sets/nope" } }, read);
     expect(issues).toEqual([expect.objectContaining({ path: "environment.tools", severity: "error" })]);
     expect((def as { environment: unknown }).environment).toEqual({ tools: [], permissions: { tools: { ...PERMISSION_SET_MARKERS }, implementations: {}, functions: {}, places: {} } });
   });
@@ -530,9 +530,9 @@ describe("lowering a state file", () => {
 describe("lowering a permission set inside a REFERENCED block", () => {
   const map = { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" };
   const read = readerOver({
-    "$/permission-sets/chat/read-only": { read_file: "allow", glob: "allow", other: "deny" },
+    "$/permission-sets/read-only": { read_file: "allow", glob: "allow", other: "deny" },
     "$/envs/inline": { model: "m", tools: map },
-    "$/envs/named": { tools: "$/permission-sets/chat/read-only" },
+    "$/envs/named": { tools: "$/permission-sets/read-only" },
     "$/envs/over": { $ref: "$/envs/inline", model: "o" },
     "$/envs/plain": { model: "m" },
     "$/envs/list": { tools: ["shell"] },
@@ -560,7 +560,7 @@ describe("lowering a permission set inside a REFERENCED block", () => {
     const { tools, permissions } = written({ tools: map });
     expect((def as { operation: unknown }).operation).toEqual({ $ref: "$/ops/plan", tools, permissions });
     // A permission set REFERENCE inside the block keeps its name as the source, as it would on the state.
-    expect((def as { children: { a: unknown } }).children.a).toEqual({ state: "./a", environment: { $ref: "$/envs/named", ...written({ tools: "$/permission-sets/chat/read-only" }) } });
+    expect((def as { children: { a: unknown } }).children.a).toEqual({ state: "./a", environment: { $ref: "$/envs/named", ...written({ tools: "$/permission-sets/read-only" }) } });
   });
 
   it("follows a block that starts from another, merging `permissions` per key the way the engine does", () => {
@@ -617,13 +617,13 @@ describe("the operation schema", () => {
   const validate = new Ajv({ strict: false, allErrors: true }).compile(toolsSchema());
 
   it.each([
-    ["$/permission-sets/chat/read-only"],
+    ["$/permission-sets/read-only"],
     [{ read_file: "allow", "git status": "allow", script: "ask", other: "deny" }],
-    [{ $ref: "$/permission-sets/chat/read-only", write_file: { mode: "ask", implementation: "native" } }],
+    [{ $ref: "$/permission-sets/read-only", write_file: { mode: "ask", implementation: "native" } }],
     [{ $expr: ".inputs.tools" }],
     [{}],
     [{ read_file: "smart", web_fetch: "unavailable", write_file: { src: "allow", "**": "ask" }, edit: { mode: { src: "allow" }, implementation: "native" } }],
-    [{ layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/app/build"], shell: "allow" }],
+    [{ layers: ["$/permission-sets/ask-first", "$/permission-sets/app/build"], shell: "allow" }],
   ])("admits %j", (tools) => {
     expect(validate(tools)).toBe(true);
   });
@@ -718,7 +718,7 @@ describe("a line's value (decision 0023 §1)", () => {
     [{ read_file: {} }, /names no place/],
     [{ read_file: { "": "allow" } }, /a place cannot be empty/],
     [{ read_file: { src: { deeper: "allow" } } }, /at 'src': .* is not a decision/],
-    [{ layers: ["$/permission-sets/chat/ask-first"] }, /'layers' names the layers a set is built from/],
+    [{ layers: ["$/permission-sets/ask-first"] }, /'layers' names the layers a set is built from/],
   ])("refuses %j", (decl, message) => {
     const { permissionSet, issues } = parsePermissionSet(decl);
     expect(issues.filter((i) => i.severity === "error")).toHaveLength(1);
@@ -823,10 +823,10 @@ describe("a line's value (decision 0023 §1)", () => {
 
 describe("layers in a set's references (decision 0023 §2.5)", () => {
   const read = readerOver({
-    "$/permission-sets/chat/ask-first": { read_file: "deny", "git push": "ask", shell: "ask", write_file: { mode: "ask", implementation: "native" }, other: "ask" },
+    "$/permission-sets/ask-first": { read_file: "deny", "git push": "ask", shell: "ask", write_file: { mode: "ask", implementation: "native" }, other: "ask" },
     "$/permission-sets/app/build": { "npm run build": { "packages/app": "allow" }, read_file: { "C:": "allow" } },
     "$/permission-sets/web/docs": { web_fetch: { "docs.example.com": "allow" } },
-    "$/permission-sets/stack/saved": { layers: ["$/permission-sets/chat/ask-first", "$/permission-sets/app/build"], git: "allow" },
+    "$/permission-sets/stack/saved": { layers: ["$/permission-sets/ask-first", "$/permission-sets/app/build"], git: "allow" },
     "$/permission-sets/loop/a": { layers: ["$/permission-sets/loop/b"] },
     "$/permission-sets/loop/b": { $ref: "$/permission-sets/loop/a" },
   });
@@ -836,7 +836,7 @@ describe("layers in a set's references (decision 0023 §2.5)", () => {
   };
 
   it("merges a `$ref` copy's lines into the one below: a place over a plain decision makes it the `**`", () => {
-    const { decl, issues } = resolve({ $ref: "$/permission-sets/chat/ask-first", read_file: { "C:": "allow" } });
+    const { decl, issues } = resolve({ $ref: "$/permission-sets/ask-first", read_file: { "C:": "allow" } });
     expect(issues).toEqual([]);
     expect(decl!["read_file"]).toEqual({ "**": "deny", "C:": "allow" });
     // The lines it does not name fall through untouched.
@@ -863,13 +863,13 @@ describe("layers in a set's references (decision 0023 §2.5)", () => {
     const issues: PermissionSetIssue[] = [];
     const layers = permissionSetLayersOf({ $ref: "$/permission-sets/stack/saved", layers: ["$/permission-sets/web/docs"], shell: "allow" }, read, "wf", issues, "chat/session");
     expect(issues).toEqual([]);
-    expect(layers!.map((layer) => layer.id)).toEqual(["$/permission-sets/chat/ask-first", "$/permission-sets/app/build", "$/permission-sets/stack/saved", "$/permission-sets/web/docs", "chat/session"]);
+    expect(layers!.map((layer) => layer.id)).toEqual(["$/permission-sets/ask-first", "$/permission-sets/app/build", "$/permission-sets/stack/saved", "$/permission-sets/web/docs", "chat/session"]);
   });
 
   it("names a cycle through `layers`, and refuses a `layers` that is no list of references", () => {
     expect(resolve("$/permission-sets/loop/a").issues[0]!.message).toBe(
       "permission set reference cycle: $/permission-sets/loop/a → $/permission-sets/loop/b → $/permission-sets/loop/a",
     );
-    expect(resolve({ layers: "$/permission-sets/chat/ask-first" }).issues[0]!.message).toMatch(/takes a list of references/);
+    expect(resolve({ layers: "$/permission-sets/ask-first" }).issues[0]!.message).toMatch(/takes a list of references/);
   });
 });

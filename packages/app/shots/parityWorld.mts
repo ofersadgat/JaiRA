@@ -568,7 +568,7 @@ export const SCENES: readonly Scene[] = [
     [
       ["files-markdown", ["plan_doc.md"], "The Plan"],
       ["files-readme", ["README.md"], "an edit copies it to Shared"],
-      ["files-json", ["permission-sets", "chat", "ask-first.json"], "read_file"],
+      ["files-json", ["permission-sets", "ask-first.json"], "read_file"],
       // The code editor (Monaco, an island).
       ["files-ts", ["lint.ts"], "Revert"],
       // A type with no grammar: the plain box (`textarea.code-editor`), the configuration editor's too.
@@ -738,13 +738,13 @@ export const SCENES: readonly Scene[] = [
   },
   // The conversation's composer with one of its chips' cards open (a button titled "<Label>: <value>"),
   // and the context ring's card. The permission stack (decision 0023 §4.1): its bottom layer's segment
-  // (titled by the set, `chat/ask-first · built in — adjust this layer`) open on its compact card, and
+  // (titled by the set, `ask-first · built in — adjust this layer`) open on its compact card, and
   // its `tools` segment on today's Tools card.
   ...(
     [
       ["composer-model", '[title^="Model: "]', "Model"],
       ["composer-thinking", '[title^="Thinking: "]', "Thinking"],
-      ["composer-permissions", '[title^="chat/ask-first"]', "edit a copy"],
+      ["composer-permissions", '[title^="ask-first"]', "edit a copy"],
       ["composer-tools", '[title^="tools: "]', "Tools"],
       ["composer-context", '[title^="No reading yet"], [title^="This conversation"]', "Context"],
     ] as const

@@ -268,7 +268,7 @@ export function parseTaskMeta(raw: unknown, expectedId?: string): TaskMeta {
 /**
  * What the Chat view STARTS (decisions 0005 §3, 0006): a person began a conversation, and it may work
  * in the project, start a workflow, or only talk — the project's tools and the workflow tools, under
- * `chat/ask-first`.
+ * `ask-first`.
  */
 export const CHAT_SESSION = "chat/session";
 /**

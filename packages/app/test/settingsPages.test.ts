@@ -42,16 +42,16 @@ const view = (sets: Record<string, Record<string, unknown>>): PermissionSetsView
 
 describe("Tools → Functions", () => {
   const data = view({
-    "chat/ask-first": { read_file: "ask", shell: "ask", other: "ask" },
-    "chat/auto": { read_file: "smart", shell: "smart", other: "smart" },
-    "chat/read-only": { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" },
+    "ask-first": { read_file: "ask", shell: "ask", other: "ask" },
+    "auto": { read_file: "smart", shell: "smart", other: "smart" },
+    "read-only": { read_file: "allow", shell: "deny", "git status": "allow", other: "deny" },
   });
   // The columns the Shared page's table has: the sets the layer its switch is on can see.
   const columns = columnsOf(data, permissionSetLayersOf("base", data.layers).reads);
   const rowOf = (name: string) => columns.map((column) => cellOf(column, name));
 
   it("has one column per set, and in a function's row each set's mode", () => {
-    expect(columns.map((column) => column.id)).toEqual(["chat/ask-first", "chat/auto", "chat/read-only"]);
+    expect(columns.map((column) => column.id)).toEqual(["ask-first", "auto", "read-only"]);
     expect(rowOf("read_file").map((cell) => cell.text)).toEqual(["ask", "☆ smart", "allow"]);
     // a set that does not offer a tool has a dash, not a mode
     expect(rowOf("web_fetch").map((cell) => [cell.text, modeClass(cell.mode)])).toEqual([

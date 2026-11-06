@@ -36,7 +36,7 @@ export const SCOPE_OF_LAYER: Readonly<Record<WorkflowLayer, PermissionSetScope>>
 
 /** One set file as the browser lists it. */
 export interface PermissionSetTreeSet {
-  /** `<bucket>/<name>` — `chat/ask-first`, `feature/implementation/writes-asking`. For the runtime layer, `runtime`. */
+  /** `<bucket>/<name>` — `ask-first`, `feature/implementation/writes-asking`. For the runtime layer, `runtime`. */
   id: string;
   name: string;
   /** The folder path, `/`-separated; empty for the runtime layer. */
@@ -46,9 +46,9 @@ export interface PermissionSetTreeSet {
   layer?: WorkflowLayer;
   /** What a stack names it by: `$/permission-sets/<id>`, which finds the NEAREST scope's copy. Absent for runtime. */
   reference?: string;
-  /** This scope's copy exactly — `$SYSTEM/permission-sets/chat/ask-first` — what an override follows. */
+  /** This scope's copy exactly — `$SYSTEM/permission-sets/ask-first` — what an override follows. */
   explicit?: string;
-  /** The file as a person reads it: `built in/permission-sets/chat/ask-first.json`. */
+  /** The file as a person reads it: `built in/permission-sets/ask-first.json`. */
   file: string;
   /** The absolute file. Absent for runtime. */
   path?: string;
@@ -103,7 +103,7 @@ export interface OwnPermissionSet {
 
 /** One layer of a stack, as the composer's segments draw it (§4.1), oldest first. */
 export interface PermissionStackViewLayer {
-  /** `chat/ask-first`, `app/build`, `inline`, `runtime`, `tools`. */
+  /** `ask-first`, `app/build`, `inline`, `runtime`, `tools`. */
   id: string;
   /** The reference it was read through, for a layer in a file. */
   reference?: string;

@@ -107,8 +107,8 @@ describe("a shell the permission set denies, MEASURED in a run", () => {
     expect(handed.shell).toEqual({});
   });
 
-  it("hands the SHIPPED `chat/read-only` a shell for the commands that only read, judged by the map", async () => {
-    const decl = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/chat/read-only.json", import.meta.url)), "utf8")) as unknown;
+  it("hands the SHIPPED `read-only` a shell for the commands that only read, judged by the map", async () => {
+    const decl = JSON.parse(readFileSync(fileURLToPath(new URL("../../shared/builtin/permission-sets/read-only.json", import.meta.url)), "utf8")) as unknown;
     // In a project: the shipped set reads freely in `$PROJECT` and asks elsewhere (decision 0023 §7.1).
     const handed = await handedToClaude(lowerPermissionSet(parsePermissionSet(decl).permissionSet), { workspaceRoot: process.cwd() });
     // Claude's own `Bash` is gone; ours is served, and `git status` and `cat` run where `rm` and a script do not.

@@ -3,7 +3,7 @@
  *
  * A preset used to be a FUNCTION of a tool, spent on the click: it wrote a mode per tool and then had
  * no further say, so what ran was the map. That half survives untouched — what runs is still the map.
- * What changed is where the four maps live: `$SYSTEM/permission-sets/chat/{ask-first, read-only, auto,
+ * What changed is where the four maps live: `$SYSTEM/permission-sets/{ask-first, read-only, auto,
  * full}.json`, data a person can read, override in a layer, and add to.
  *
  * So the functions are FROZEN HERE, exactly as they were the day they left the source, and the one
@@ -11,12 +11,12 @@
  * conversation can be handed, and for the name no preset had ever heard of, which is what `other` is.
  * Which permission set a map IS — the old `presetOf` — is `matchPermissionSet`, in `permissionSetBuckets.test.ts`.
  *
- * ## The workflow tools joined the `chat` bucket (decision 0005 step 6)
+ * ## The workflow tools joined the conversation presets (decision 0005 step 6)
  *
- * A session holds the project's tools AND the workflow tools, so the four `chat` files grew eight
+ * A session holds the project's tools AND the workflow tools, so the four top-level files grew eight
  * entries the four functions had never seen. The frozen functions are therefore held to the tools
  * they were written about — the nine a conversation had then — and the eight new ones are held to a
- * rule instead: **a `chat/<name>` gives a workflow tool whatever `chat_control/<name>` gives it**.
+ * rule instead: **a top-level `<name>` gives a workflow tool whatever `control/<name>` gives it**.
  * One bucket, said twice, is one bucket that can drift; this is the assertion that it has not.
  */
 import { readdirSync, readFileSync } from "node:fs";
@@ -41,6 +41,9 @@ const projectModes = (permissionSet: PermissionSet): Record<string, PermissionSe
 
 const PERMISSION_SETS = join(dirname(fileURLToPath(import.meta.url)), "..", "builtin", "permission-sets");
 
+/** The top level's set files — the conversation presets. */
+const topLevel = (): string[] => readdirSync(PERMISSION_SETS, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => entry.name);
+
 const shipped = (id: string): unknown => JSON.parse(readFileSync(join(PERMISSION_SETS, `${id}.json`), "utf8"));
 
 /** FROZEN — `PERMISSION_PRESETS` as it stood at a1a0581, the last commit that had it. */
@@ -53,7 +56,7 @@ const FROZEN_PRESETS: ReadonlyArray<{ id: string; file: string; modeFor: (name: 
   { id: "full", file: "full", modeFor: () => "allow" },
 ];
 
-/** The workflow tools (decision 0005 §3) — all of what `chat_control` holds, and part of `chat`. */
+/** The workflow tools (decision 0005 §3) — all of what `control` holds, and part of every top-level set. */
 const WORKFLOW_TOOLS = ["list_workflows", "start_task", "move_task", "list_tasks", "answer_question", "hold_task", "release_task", "stop_task"];
 
 /**
@@ -79,7 +82,7 @@ const CI_TOOLS: Record<string, Record<string, PermissionSetMode>> = {
   download_pipeline_artifact: { "ask-first": "ask", auto: "allow", full: "allow", "read-only": "allow" },
 };
 
-/** Every tool that reaches the forge, in the order the chat files write them. */
+/** Every tool that reaches the forge, in the order the top-level files write them. */
 const FORGE_TOOLS = { ...GIT_TOOLS, ...CI_TOOLS };
 
 /** `wait_for_event` (decision 0016 §5): any event, so a task tool — the readers' modes, before the workflow tools. */
@@ -108,12 +111,12 @@ const CONVERSATION_TOOLS = TOOL_SPECS.filter((spec) => spec.nativeOnly !== true 
 /** The tools the frozen FUNCTIONS were written about: everything a conversation held before step 6. */
 const PRESET_TOOLS = CONVERSATION_TOOLS.filter((name) => !WORKFLOW_TOOLS.includes(name) && TABLED[name] === undefined);
 
-describe("the chat bucket is the four presets, written down", () => {
-  it.each(FROZEN_PRESETS)("chat/$file writes EXACTLY the map the `$id` preset wrote", ({ file, modeFor }) => {
-    const { permissionSet, issues } = parsePermissionSet(shipped(`chat/${file}`));
-    const control = parsePermissionSet(shipped(`chat_control/${file}`)).permissionSet;
+describe("the top level is the four presets, written down, and read-only-scratch", () => {
+  it.each(FROZEN_PRESETS)("$file writes EXACTLY the map the `$id` preset wrote", ({ file, modeFor }) => {
+    const { permissionSet, issues } = parsePermissionSet(shipped(file));
+    const control = parsePermissionSet(shipped(`control/${file}`)).permissionSet;
     expect(issues).toEqual([]);
-    // The map the preset wrote for the tools it knew, `chat_control`'s own answer for the workflow
+    // The map the preset wrote for the tools it knew, `control`'s own answer for the workflow
     // tools, and decision 0010's table for the Git tools.
     expect(projectModes(permissionSet)).toEqual({
       ...Object.fromEntries(PRESET_TOOLS.map((name) => [name, modeFor(name)])),
@@ -132,7 +135,7 @@ describe("the chat bucket is the four presets, written down", () => {
   });
 
   it("read-only allows exactly the frozen list, and that list is still in the vocabulary", () => {
-    const { permissionSet } = parsePermissionSet(shipped("chat/read-only"));
+    const { permissionSet } = parsePermissionSet(shipped("read-only"));
     const allowed = Object.entries(projectModes(permissionSet))
       .filter(([name, mode]) => mode === "allow" && !WORKFLOW_TOOLS.includes(name) && TABLED[name] === undefined)
       .map(([name]) => name);
@@ -144,18 +147,18 @@ describe("the chat bucket is the four presets, written down", () => {
     // Plan mode is an ESCALATION — read-only until the agent presents a plan and a human approves the
     // exit — and the exit gate is registered by the engine for the states it runs, not by the chat
     // path. Shipped here it would be `read-only` under a name promising a door nobody has hung.
-    expect(readdirSync(join(PERMISSION_SETS, "chat")).sort()).toEqual(["ask-first.json", "auto.json", "full.json", "read-only-scratch.json", "read-only.json"]);
+    expect(topLevel().sort()).toEqual(["ask-first.json", "auto.json", "full.json", "read-only-scratch.json", "read-only.json"]);
   });
 });
 
-describe("chat_control has its OWN versions of the same names", () => {
+describe("control has its OWN versions of the same names", () => {
   it("ships the same four names — not read-only-scratch, which differs only in file tools a control conversation never holds", () => {
-    const chat = readdirSync(join(PERMISSION_SETS, "chat")).filter((file) => file !== "read-only-scratch.json");
-    expect(readdirSync(join(PERMISSION_SETS, "chat_control")).sort()).toEqual(chat.sort());
+    const chat = topLevel().filter((file) => file !== "read-only-scratch.json");
+    expect(readdirSync(join(PERMISSION_SETS, "control")).sort()).toEqual(chat.sort());
   });
 
-  it.each(["ask-first", "read-only", "auto", "full"])("chat_control/%s holds ONLY the task and workflow tools, and refuses everything else", (name) => {
-    const { permissionSet, issues } = parsePermissionSet(shipped(`chat_control/${name}`));
+  it.each(["ask-first", "read-only", "auto", "full"])("control/%s holds ONLY the task and workflow tools, and refuses everything else", (name) => {
+    const { permissionSet, issues } = parsePermissionSet(shipped(`control/${name}`));
     // No warning either: the eight names are in the standard list, or each would be dropped as unknown.
     expect(issues).toEqual([]);
     expect(Object.keys(permissionSet.entries).sort()).toEqual([...WORKFLOW_TOOLS].sort());
@@ -163,7 +166,7 @@ describe("chat_control has its OWN versions of the same names", () => {
   });
 
   it("holds them and HANDS THEM OVER: they are named, and served since step 6", () => {
-    const { permissionSet } = parsePermissionSet(shipped("chat_control/full"));
+    const { permissionSet } = parsePermissionSet(shipped("control/full"));
     expect(heldTools(permissionSet).sort()).toEqual([...WORKFLOW_TOOLS].sort());
     // What lowering writes into the engine's `tools` list, and what an agent plan calls held. It was
     // empty while the eight carried `unserved`; deleting that mark was the whole of serving them.
@@ -175,7 +178,7 @@ describe("chat_control has its OWN versions of the same names", () => {
   });
 
   it("read-only may look and may not steer", () => {
-    expect(toolModes(parsePermissionSet(shipped("chat_control/read-only")).permissionSet)).toEqual({
+    expect(toolModes(parsePermissionSet(shipped("control/read-only")).permissionSet)).toEqual({
       list_workflows: "allow",
       list_tasks: "allow",
       start_task: "deny",
@@ -197,18 +200,18 @@ describe("the Git tools (decision 0010 §1)", () => {
     expect(TOOL_SPECS.filter((spec) => spec.category === "ci").map((spec) => spec.name)).toEqual(Object.keys(CI_TOOLS));
   });
 
-  it("are not offered by chat_control, whose `other` refuses them", () => {
+  it("are not offered by control, whose `other` refuses them", () => {
     for (const name of ["ask-first", "read-only", "auto", "full"]) {
-      const { permissionSet } = parsePermissionSet(shipped(`chat_control/${name}`));
-      for (const tool of Object.keys(FORGE_TOOLS)) expect(permissionSet.entries[tool], `chat_control/${name}: ${tool}`).toBeUndefined();
+      const { permissionSet } = parsePermissionSet(shipped(`control/${name}`));
+      for (const tool of Object.keys(FORGE_TOOLS)) expect(permissionSet.entries[tool], `control/${name}: ${tool}`).toBeUndefined();
       expect(permissionSet.other).toBe("deny");
     }
   });
 
-  it("sit after the web tools in every chat file, the CI tools after them, as the menu draws them", () => {
+  it("sit after the web tools in every top-level file, the CI tools after them, as the menu draws them", () => {
     const forge = Object.keys(FORGE_TOOLS);
     for (const name of ["ask-first", "read-only", "read-only-scratch", "auto", "full"]) {
-      const keys = Object.keys(shipped(`chat/${name}`) as Record<string, unknown>);
+      const keys = Object.keys(shipped(name) as Record<string, unknown>);
       expect(keys.slice(keys.indexOf("web_search") + 1, keys.indexOf("web_search") + 1 + forge.length), name).toEqual(forge);
     }
   });
@@ -216,9 +219,11 @@ describe("the Git tools (decision 0010 §1)", () => {
 
 describe("every shipped permission set", () => {
   it("only ever writes a decision a permission set takes — one of the three words, or a function by its name", () => {
-    for (const bucket of readdirSync(PERMISSION_SETS)) {
-      for (const file of readdirSync(join(PERMISSION_SETS, bucket))) {
-        const map = shipped(`${bucket}/${file.replace(/\.json$/, "")}`) as Record<string, unknown>;
+    // The top level, then each bucket.
+    const files = [...topLevel().map((file) => ({ bucket: ".", file })), ...readdirSync(PERMISSION_SETS, { withFileTypes: true }).filter((entry) => entry.isDirectory()).flatMap((entry) => readdirSync(join(PERMISSION_SETS, entry.name)).map((file) => ({ bucket: entry.name, file })))];
+    for (const { bucket, file } of files) {
+      {
+        const map = shipped(bucket === "." ? file.replace(/.json$/, "") : `${bucket}/${file.replace(/.json$/, "")}`) as Record<string, unknown>;
         for (const [subject, mode] of Object.entries(map)) {
           // A plain string, or a map of places (decision 0023 §7.1) — and none says `unavailable`, which
           // is a statement about a layer below.
@@ -239,7 +244,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
   const CREDENTIALS = ["**/.env", "**/.env.*", "**/*.pem", "**/id_rsa*", "~/.ssh", "~/.aws", "~/.claude/.credentials.json", "~/.codex/auth.json"];
   /** A line's answer at one path, as a call's place is judged: the most specific place, else the line's own mode. */
   const at = (file: string, tool: string, path: string): PermissionSetMode | undefined => {
-    const { permissionSet } = parsePermissionSet(shipped(`chat/${file}`));
+    const { permissionSet } = parsePermissionSet(shipped(file));
     const entry = permissionSet.entries[tool]!;
     const place = resolvePlace({ ...(entry.mode !== undefined ? { "**": entry.mode } : {}), ...entry.places }, "path", path, options);
     return place?.decision ?? entry.mode;
@@ -249,7 +254,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     ["read-only", "allow"],
     ["ask-first", "ask"],
     ["auto", SMART_MODE],
-  ] as const)("chat/%s reads, globs and greps at its own mode in the project, the worktree and the agent's own folder, and ASKS elsewhere", (file, mode) => {
+  ] as const)("%s reads, globs and greps at its own mode in the project, the worktree and the agent's own folder, and ASKS elsewhere", (file, mode) => {
     for (const tool of ["read_file", "glob", "grep"]) {
       expect(at(file, tool, `${ROOT}/src/index.ts`), `${file} ${tool}`).toEqual(mode);
       expect(at(file, tool, "C:/work/app-wt/src/index.ts"), `${file} ${tool}`).toEqual(mode);
@@ -262,7 +267,7 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     }
   });
 
-  it("chat/full keeps allow — and still asks at a credential", () => {
+  it("full keeps allow — and still asks at a credential", () => {
     expect(at("full", "read_file", "C:/Users/me/Documents/notes.txt")).toBe("allow");
     expect(at("full", "read_file", `${ROOT}/src/index.ts`)).toBe("allow");
     // `.env` asks under full: a place that pins the file beats any folder that holds it (ruling 3).
@@ -271,8 +276,8 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     expect(at("full", "edit", "C:/Users/me/.ssh/config")).toBe("ask");
   });
 
-  it.each(["read-only", "read-only-scratch", "ask-first", "auto", "full"])("chat/%s asks at every credential place, inside the project too", (file) => {
-    const { permissionSet } = parsePermissionSet(shipped(`chat/${file}`));
+  it.each(["read-only", "read-only-scratch", "ask-first", "auto", "full"])("%s asks at every credential place, inside the project too", (file) => {
+    const { permissionSet } = parsePermissionSet(shipped(file));
     for (const tool of ["read_file", "glob", "grep"]) for (const place of CREDENTIALS) expect(linePlaces(permissionSet)[tool]?.[place], `${file} ${tool} ${place}`).toBe("ask");
     expect(at(file, "read_file", `${ROOT}/config/server.pem`)).toBe("ask");
     expect(at(file, "read_file", "C:/Users/me/.aws/credentials")).toBe("ask");
@@ -285,9 +290,9 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     expect(at(file, "write_file", "C:/Users/me/.claude/.credentials.json")).toBe("deny");
   });
 
-  it("chat/read-only-scratch is chat/read-only, except that it writes and edits in the agent's own folder", () => {
-    const scratch = shipped("chat/read-only-scratch") as Record<string, unknown>;
-    const readOnly = shipped("chat/read-only") as Record<string, unknown>;
+  it("read-only-scratch is read-only, except that it writes and edits in the agent's own folder", () => {
+    const scratch = shipped("read-only-scratch") as Record<string, unknown>;
+    const readOnly = shipped("read-only") as Record<string, unknown>;
     expect(parsePermissionSet(scratch).issues).toEqual([]);
     // Every other line, in the same order, is read-only's.
     expect(Object.keys(scratch)).toEqual(Object.keys(readOnly));
@@ -304,8 +309,8 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
     }
   });
 
-  it("chat/auto judges a push with smart, and asks before pushing main, master or a release branch", () => {
-    const { permissionSet } = parsePermissionSet(shipped("chat/auto"));
+  it("auto judges a push with smart, and asks before pushing main, master or a release branch", () => {
+    const { permissionSet } = parsePermissionSet(shipped("auto"));
     const push = permissionSet.entries["git_push"]!;
     expect(push.mode).toEqual(SMART_MODE);
     const map = { "**": push.mode!, ...push.places };

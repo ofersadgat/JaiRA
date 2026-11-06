@@ -1877,7 +1877,7 @@ export function describeDecision(decision: CommandDecision): string {
  * tool of an MCP server by its server's lines, and a shell line taken apart and every part judged
  * with the project's built-ins (`decideCommand`) — a package script by the line it runs, where `where`
  * says which directory the call ran in and how to read a `package.json`. What the work summary calls a CHANGE is a call
- * `chat/read-only` does not allow (`workSummary.ts`).
+ * `read-only` does not allow (`workSummary.ts`).
  */
 export function allowsCall(
   policy: JairaPolicy,

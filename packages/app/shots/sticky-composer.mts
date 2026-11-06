@@ -53,17 +53,17 @@ async function main(): Promise<void> {
     await open(app, FIRST);
     const before = await chip(app);
     // Whatever it opened on, a different one: the rig is about the change, not about a default.
-    const current = /chat\/([a-z-]+)/.exec(before)?.[1];
-    if (current === undefined) throw new Error(`the stack names no chat set at its bottom: "${before}"`);
-    picked = current === "full" ? "chat/read-only" : "chat/full";
+    const current = /\b(ask-first|read-only-scratch|read-only|auto|full)\b/.exec(before)?.[1];
+    if (current === undefined) throw new Error(`the stack names no preset at its bottom: "${before}"`);
+    picked = current === "full" ? "read-only" : "full";
     // The bottom segment, its set's crumb, the sibling: two presses after the segment.
-    await app.evaluate(`document.querySelector(${JSON.stringify(`${STACK} [aria-label="chat/${current}"]`)})?.click()`);
+    await app.evaluate(`document.querySelector(${JSON.stringify(`${STACK} [aria-label="${current}"]`)})?.click()`);
     await settle(800);
     await app.shot("first-segment");
     await app.clickText(`${current}.json`);
     await settle(400);
     await app.shot("first-crumb");
-    await app.clickText(`${picked.slice("chat/".length)}.json`);
+    await app.clickText(`${picked}.json`);
     await settle(1200);
     await app.press("Escape", 27);
     await app.shot("first-picked");

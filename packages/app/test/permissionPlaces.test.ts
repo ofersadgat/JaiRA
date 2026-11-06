@@ -221,7 +221,7 @@ describe("unavailable", () => {
 });
 
 describe("the functions table, over places and unavailable", () => {
-  const column = (decl: Record<string, unknown>): SetColumn => ({ id: "chat/auto", bucket: "chat", name: "auto", here: false, decl });
+  const column = (decl: Record<string, unknown>): SetColumn => ({ id: "auto", bucket: "chat", name: "auto", here: false, decl });
 
   it("reads a line with places as its own mode and how many places it names", () => {
     expect(cellOf(column({ read_file: { "**": "ask", $PROJECT: "allow", "**/.env": "ask", "~/.ssh": "deny" } }), "read_file")).toMatchObject({ text: "ask · 3 places", kind: "ask" });
@@ -230,7 +230,7 @@ describe("the functions table, over places and unavailable", () => {
   it("colours a map with no `**` as the loosest of its places, and says the range", () => {
     const cell = cellOf(column({ "npm run build": { "packages/app": "allow", infra: "deny" } }), "npm run build");
     expect(cell).toMatchObject({ text: "2 places", kind: "allow" });
-    expect(cell.title).toBe("chat/auto: elsewhere, as a less specific line says; at 2 places from allow to deny — open it");
+    expect(cell.title).toBe("auto: elsewhere, as a less specific line says; at 2 places from allow to deny — open it");
   });
 
   it("reads `unavailable` as such", () => {
@@ -240,14 +240,14 @@ describe("the functions table, over places and unavailable", () => {
 });
 
 describe("Show it in a stack", () => {
-  const readOnly = { id: "chat/read-only", decl: { read_file: "allow", write_file: "deny", script: "deny", shell: "deny", "git status": "allow", other: "deny" } };
+  const readOnly = { id: "read-only", decl: { read_file: "allow", write_file: "deny", script: "deny", shell: "deny", "git status": "allow", other: "deny" } };
   const buildSafe = { id: "project/build-safe", decl: { "npm run build": { packages: "allow" }, "runner:npm": "allow" } };
 
   it("draws each place the layer writes, then elsewhere, with the base's answer, the layer's, the result and who said it", () => {
     const rows = stackPreviewOf(readOnly, buildSafe);
     expect(rows.map((row) => [row.subject, row.where, row.base?.mode, row.layer?.mode, row.result.mode, row.decidedBy])).toEqual([
       ["npm run build", "in packages", "deny", "allow", "allow", "project/build-safe"],
-      ["npm run build", "elsewhere", "deny", undefined, "deny", "chat/read-only · script"],
+      ["npm run build", "elsewhere", "deny", undefined, "deny", "read-only · script"],
       ["runner:npm", "", undefined, "allow", "allow", "project/build-safe"],
     ]);
   });
@@ -260,7 +260,7 @@ describe("Show it in a stack", () => {
   });
 
   it("says a tool a layer takes away is unavailable, and who took it", () => {
-    const [row] = stackPreviewOf({ id: "chat/full", decl: { web_search: "allow", other: "allow" } }, { id: "web/quiet", decl: { web_search: "unavailable" } });
+    const [row] = stackPreviewOf({ id: "full", decl: { web_search: "allow", other: "allow" } }, { id: "web/quiet", decl: { web_search: "unavailable" } });
     expect(row).toMatchObject({ base: { mode: "allow" }, layer: { mode: "unavailable" }, result: { mode: "unavailable" }, decidedBy: "web/quiet" });
   });
 
@@ -279,35 +279,40 @@ describe("Show it in a stack", () => {
     expect(answerAt(ps, "git push", undefined, true)).toBeUndefined();
   });
 
-  it("lays a standing layer on its bucket's ask-first first, any other set on chat/ask-first, never on itself", () => {
-    const offered = ["chat/ask-first", "chat/read-only", "app/ask-first", "project/build-safe"];
+  it("lays a standing layer on its bucket's ask-first first, any other set on ask-first, never on itself", () => {
+    const offered = ["ask-first", "read-only", "app/ask-first", "project/build-safe"];
     expect(defaultBaseOf("project/build-safe", offered, { app: ["$/permission-sets/project/build-safe"] })).toBe("app/ask-first");
-    expect(defaultBaseOf("project/build-safe", offered, {})).toBe("chat/ask-first");
-    expect(defaultBaseOf("chat/ask-first", offered, {})).toBe("chat/read-only");
+    expect(defaultBaseOf("project/build-safe", offered, {})).toBe("ask-first");
+    expect(defaultBaseOf("ask-first", offered, {})).toBe("read-only");
   });
 });
 
 describe("standing layers in the rail, and a set's icon", () => {
-  const record = (id: string, decl: Record<string, unknown>): PermissionSetRecord => ({ id, bucket: id.split("/")[0]!, name: id.split("/")[1]!, files: [{ layer: "project", file: `${id}.json`, format: "json", decl: decl as never }] });
+  // A bare id is a set at the top level, whose bucket is "".
+  const record = (id: string, decl: Record<string, unknown>): PermissionSetRecord => {
+    const cut = id.lastIndexOf("/");
+    return { id, bucket: cut < 0 ? "" : id.slice(0, cut), name: id.slice(cut + 1), files: [{ layer: "project", file: `${id}.json`, format: "json", decl: decl as never }] };
+  };
 
   it("reads each bucket's standing layers from the settings in effect, by set id", () => {
-    const standing = standingLayersOf({ effective: { permissions: { layers: { chat: ["$/permission-sets/project/build-safe", "  ", 3] } } } });
-    expect(standing).toEqual({ chat: ["$/permission-sets/project/build-safe"] });
-    expect(standingIdsOf(standing, "chat")).toEqual(["project/build-safe"]);
-    expect(standingBucketsOf(standing, "project/build-safe")).toEqual(["chat"]);
+    // The top level's standing layers are keyed "".
+    const standing = standingLayersOf({ effective: { permissions: { layers: { "": ["$/permission-sets/project/build-safe", "  ", 3] } } } });
+    expect(standing).toEqual({ "": ["$/permission-sets/project/build-safe"] });
+    expect(standingIdsOf(standing, "")).toEqual(["project/build-safe"]);
+    expect(standingBucketsOf(standing, "project/build-safe")).toEqual([""]);
     expect(standingLayersOf(null)).toEqual({});
     expect(standingLayersOf({ effective: { permissions: {} } })).toEqual({});
   });
 
   it("lists a bucket's standing layers under its heading, and gives every set its icon", () => {
-    const records = [record("chat/ask-first", { other: "ask" }), record("project/build-safe", { icon: "terminal", "npm run build": "allow" }), record("project/docs", { web_fetch: "allow" })];
-    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", {}, undefined, { chat: ["$/permission-sets/project/build-safe"] });
+    const records = [record("ask-first", { other: "ask" }), record("project/build-safe", { icon: "terminal", "npm run build": "allow" }), record("project/docs", { web_fetch: "allow" })];
+    const rows = permissionSetRailRows(permissionSetsAt(records, "project"), "project", {}, undefined, { "": ["$/permission-sets/project/build-safe"] });
     expect(rows.flatMap((row) => (row.kind === "bucket" ? [[row.path, row.standing]] : []))).toEqual([
-      ["chat", ["project/build-safe"]],
+      ["", ["project/build-safe"]],
       ["project", undefined],
     ]);
     expect(rows.flatMap((row) => (row.kind === "set" ? [[row.id, row.icon, row.summary]] : []))).toEqual([
-      ["permissionSet:chat/ask-first", "ask", "0 lines · other ask"],
+      ["permissionSet:ask-first", "ask", "0 lines · other ask"],
       ["permissionSet:project/build-safe", "terminal", "1 line · no other"],
       ["permissionSet:project/docs", "layers", "1 line · no other"],
     ]);

@@ -205,10 +205,10 @@ describe("the two conversations", () => {
     const control = service.readWorkflow({ stateId: "chat/control", layer: "system" });
     const authored = JSON.parse(control.text) as Record<string, unknown>;
     expect(authored["environment"]).toBeUndefined();
-    expect((authored["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/chat_control/ask-first");
+    expect((authored["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/control/ask-first");
     const session = JSON.parse(service.readWorkflow({ stateId: "chat/session", layer: "system" }).text) as Record<string, unknown>;
     expect(session["environment"]).toBeUndefined();
-    expect((session["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/chat/ask-first");
+    expect((session["operation"] as Record<string, unknown>)["tools"]).toBe("$/permission-sets/ask-first");
   });
 
   it("denies a project tool in a control conversation rather than offering it, per tool and by `other`", async () => {

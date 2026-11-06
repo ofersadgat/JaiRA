@@ -43,6 +43,7 @@ import { RuntimeStore } from "./runtime";
 import { TaskFileStore } from "./taskStore";
 import { registerWorkspace, workspaceIdFor, workspaceIdOf } from "./workspace";
 import { touch } from "./sync";
+import { movePermissionSetsOutOfChat, moveTaskPermissionSets } from "./permissionSetsMove";
 
 /** Where this module's lines land in the log — see `refusal` for why a library declines out loud. */
 const log = createLogger("jaira.persistence.project");
@@ -280,6 +281,13 @@ export function initBase(baseDir?: string): JairaBasePaths {
   const ignoreFile = join(base.baseDir, ".gitignore");
   if (existsSync(ignoreFile)) ensureKeyIgnored(ignoreFile);
   else writeFileSync(ignoreFile, JAIRA_GITIGNORE, "utf8");
+  // The permission sets left `chat/` (2026-11-05): this root's own files are moved and renamed before
+  // its settings or workflows are read (`permissionSetsMove.ts`).
+  movePermissionSetsOutOfChat({
+    permissionSetsDir: join(base.baseDir, "permission-sets"),
+    workflowsDir: base.workflowsDir,
+    settingsFiles: [base.settingsFile, base.personalSettingsFile],
+  });
   return base;
 }
 
@@ -370,6 +378,10 @@ export function openProject(
     throw refusal(log, `${paths.projectDir} is not a JaiRA project (no .jaira/ — run 'jaira init')`);
   }
   initBase(paths.base.baseDir);
+  // A replica is another machine's to move; its owner does, and the copy follows.
+  if (opts?.replica !== true) {
+    movePermissionSetsOutOfChat({ permissionSetsDir: join(paths.jairaDir, "permission-sets"), workflowsDir: paths.workflowsDir, settingsFiles: [paths.settingsFile] });
+  }
   return openAt(paths, loadLayeredConfig(paths), "project", opts);
 }
 
@@ -403,6 +415,9 @@ function openAt(
   // the first workspace this machine opens.
   mkdirSync(dirname(paths.dbFile), { recursive: true });
   const db = openDb(paths.dbFile);
+  // The permission sets left `chat/` (2026-11-05): a conversation that names its stack by the old
+  // reference is given the new one before anything reads it (`permissionSetsMove.ts`).
+  if (!replica) moveTaskPermissionSets(paths.tasksDir, paths.snapshotsDir, db);
   // A copy of another machine's workspace is its owner's id, as written; this machine's own is held to
   // what the database knows (`workspaceIdFor`: a committed id file is not a second clone's to take).
   const workspace = replica ? workspaceIdOf(paths) : workspaceIdFor(db, paths);
