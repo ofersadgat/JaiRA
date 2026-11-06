@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
-import { drawerSettles } from "@jaira/ui/phoneModel";
+import { atRightEdge, drawerSettles, edgeWidth, panelSwipeOpens } from "@jaira/ui/phoneModel";
 import { Animated, PanResponder, Platform, View as RNView, useWindowDimensions } from "react-native";
 import { View, isWeb } from "@tamagui/core";
 import { inboxItemsOf } from "@jaira/ui/inboxModel";
@@ -25,7 +25,7 @@ import { useShell } from "./shell";
 import { useSheetInset } from "./columnsFit";
 import { ShellSidebar } from "./SidebarRegion";
 import { ShellTitleBar } from "./TitleBar";
-import { phoneDrawer, phoneInbox, sheetAsk } from "./viewState";
+import { phoneDrawer, phoneInbox, phonePanelOpener, rightEdgeTouch, sheetAsk } from "./viewState";
 import { remoteStatus } from "./remoteStatus";
 import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
 
@@ -52,6 +52,10 @@ import { pageGround, usePageRules, useWindowTitle } from "./windowPage";
  *   the drawer      the sidebar at 86% of the width (330 at most), sliding in over 180ms; --scrim over the
  *                   rest, as dark as the drawer is out. A swipe right from the screen's left edge (its first
  *                   20) pulls it out under the finger, a swipe left on it pushes it back (`drawerSettles`)
+ *   the panel       a swipe left from the screen's right edge (its last 20) opens the room's context panel:
+ *                   unfolded where it folds, its sheet raised to half at least (`panelSwipeOpens`: 48 in, or
+ *                   a flick). Not while the drawer is out, nor where the room has no panel or nothing on it,
+ *                   nor from a run's Steps rail, which owns that edge (`rightEdgeTouch`)
  */
 export function PhoneFrame(): JSX.Element {
   const t = useTokens();
@@ -184,16 +188,14 @@ function ShellInboxRoom(): JSX.Element {
   );
 }
 
-/**
- * How much of the screen's left edge a swipe that pulls the drawer out starts in. Wider on Android, whose
- * gesture navigation keeps the first 24 or so for its own Back: a swipe from just past that is the
- * drawer's.
- */
-const EDGE = Platform.OS === "android" ? 36 : 20;
+/** How much of either screen edge a swipe in from it starts in (`edgeWidth`: wider on Android, for its Back). */
+const ANDROID = Platform.OS === "android";
+const EDGE = edgeWidth(ANDROID);
 
 /**
  * The sidebar, slid over the room from the left — by ▸|, or by a finger from the screen's left edge,
- * following it; a press on the rest closes it, and so does a swipe back to the left.
+ * following it; a press on the rest closes it, and so does a swipe back to the left. A finger in from the
+ * screen's right edge opens the room's context panel instead (`phonePanelOpener`).
  */
 function DrawerHost({ open, children }: { open: boolean; children: ReactNode }): JSX.Element {
   const t = useTokens();
@@ -204,8 +206,8 @@ function DrawerHost({ open, children }: { open: boolean; children: ReactNode }):
   const [shown, setShown] = useState(open);
   /** A finger is moving it. */
   const [dragging, setDragging] = useState(false);
-  const live = useRef({ width, open });
-  live.current = { width, open };
+  const live = useRef({ width, open, screen: win.width });
+  live.current = { width, open, screen: win.width };
   const animate = (to: number, done?: () => void): void => {
     Animated.timing(out, { toValue: to, duration: 180, useNativeDriver: !isWeb }).start(({ finished }) => {
       if (finished) done?.();
@@ -252,18 +254,37 @@ function DrawerHost({ open, children }: { open: boolean; children: ReactNode }):
       onPanResponderTerminationRequest: () => false,
     };
   };
+  // Which edge the drag being taken came in from.
+  const side = useRef<"left" | "right" | null>(null);
   const edge = useMemo(
-    () =>
-      PanResponder.create({
+    () => {
+      const pull = dragger(() => 0);
+      return PanResponder.create({
         // Asked of every drag before what is under it, and taken only from the screen's left edge going
-        // right: a tap, and every other drag, are left to what is under the finger.
+        // right (the drawer) or its right edge going left (the panel): a tap, and every other drag, are
+        // left to what is under the finger.
         onStartShouldSetPanResponderCapture: (e) => {
           began.current = e.nativeEvent.pageX;
+          side.current = null;
+          rightEdgeTouch.owned = false;
           return false;
         },
-        onMoveShouldSetPanResponderCapture: (_e, g) => !live.current.open && began.current < EDGE && g.dx > 8 && Math.abs(g.dx) > Math.abs(g.dy) * 1.5,
-        ...dragger(() => 0),
-      }),
+        onMoveShouldSetPanResponderCapture: (_e, g) => {
+          if (live.current.open || Math.abs(g.dx) <= Math.abs(g.dy) * 1.5) return false;
+          if (began.current < EDGE && g.dx > 8) side.current = "left";
+          else if (atRightEdge(began.current, live.current.screen, ANDROID) && g.dx < -8 && !rightEdgeTouch.owned && phonePanelOpener.get() !== null) side.current = "right";
+          return side.current !== null;
+        },
+        onPanResponderGrant: () => (side.current === "left" ? pull.onPanResponderGrant() : undefined),
+        onPanResponderMove: (e, g) => (side.current === "left" ? pull.onPanResponderMove(e, g) : undefined),
+        onPanResponderRelease: (e, g) => {
+          if (side.current === "left") return pull.onPanResponderRelease(e, g);
+          if (side.current === "right" && panelSwipeOpens(g.dx, g.vx)) phonePanelOpener.get()?.();
+          return undefined;
+        },
+        onPanResponderTerminationRequest: pull.onPanResponderTerminationRequest,
+      });
+    },
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [],
   );

@@ -34,8 +34,8 @@ export function PanelSheet({
   onClose,
 }: {
   children: ReactNode;
-  /** A height asked for, stamped so the same one twice means "again". */
-  ask?: { detent: SheetDetent; at: number } | null | undefined;
+  /** A height asked for, stamped so the same one twice means "again"; `atLeast`, only ever raising it. */
+  ask?: { detent: SheetDetent; at: number; atLeast?: boolean } | null | undefined;
   /** Into the main view, where the entry has one. */
   onMain?: (() => void) | undefined;
   onClose: () => void;
@@ -67,7 +67,9 @@ export function PanelSheet({
   }, [heights.peek, heights.half, heights.full]);
   // A height asked for.
   useEffect(() => {
-    if (ask != null && fresh && room > 0) goTo(ask.detent);
+    if (ask == null || !fresh || room <= 0) return;
+    if (ask.atLeast === true && DETENTS.indexOf(live.current.detent) >= DETENTS.indexOf(ask.detent)) return;
+    goTo(ask.detent);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [ask?.at]);
 
@@ -171,6 +173,8 @@ export function PanelSheet({
   );
 }
 
+/** The heights, lowest first. */
+const DETENTS: readonly SheetDetent[] = ["peek", "half", "full"];
 /** The handle's height. */
 const HANDLE = 22;
 /** The sheet at its head: the handle and the panel's head (44 at least, two lines of title at a phone's size). */

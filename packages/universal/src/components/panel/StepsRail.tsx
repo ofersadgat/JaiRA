@@ -8,6 +8,7 @@ import type { IndexRow } from "@jaira/ui/runIndexModel";
 import { metaOf } from "@jaira/ui/sessionRows";
 import { Press, Txt, edge } from "../../primitives";
 import { useTokens } from "../../tokens";
+import { rightEdgeTouch } from "../../app/viewState";
 import { RunIndex } from "./RunIndex";
 
 /**
@@ -81,6 +82,12 @@ export function StepsRail({
       }
     };
     return PanResponder.create({
+      // A touch begun here is the rail's, though it is at the screen's right edge: the swipe that opens
+      // the context panel leaves it alone (`rightEdgeTouch`).
+      onStartShouldSetPanResponderCapture: () => {
+        rightEdgeTouch.owned = true;
+        return false;
+      },
       // Taps are the index's own (a knot, a row); a drag is the rail's — taken from under them.
       onMoveShouldSetPanResponderCapture: (_e, g) => Math.abs(g.dx) > 6 || Math.abs(g.dy) > 6,
       onPanResponderGrant: (e) => {

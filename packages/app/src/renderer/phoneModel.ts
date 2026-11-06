@@ -181,3 +181,30 @@ export function drawerSettles(at: number, velocity: number, width: number): bool
   if (velocity < -0.5) return false;
   return at > width / 3;
 }
+
+/**
+ * How much of the screen's edge a swipe in from it starts in: 20, or 36 on Android, whose gesture
+ * navigation keeps the first 24 or so of either edge for its own Back — a swipe from just past that is ours.
+ */
+export function edgeWidth(android: boolean): number {
+  return android ? 36 : 20;
+}
+
+/** Whether a touch at `x` begins in the right edge of a screen `width` wide. */
+export function atRightEdge(x: number, width: number, android: boolean): boolean {
+  return width > 0 && x > width - edgeWidth(android);
+}
+
+/** How far in (px) a swipe from the right edge must come, let go slowly, to open the context panel. */
+export const PANEL_SWIPE = 48;
+
+/**
+ * Whether a swipe in from the right edge, let go `dx` along (negative is in, leftward) at `velocity` (px/ms,
+ * positive to the right), opens the context panel: a flick in does, a flick back out does not; else far
+ * enough in.
+ */
+export function panelSwipeOpens(dx: number, velocity: number): boolean {
+  if (velocity < -0.5) return true;
+  if (velocity > 0.5) return false;
+  return dx <= -PANEL_SWIPE;
+}

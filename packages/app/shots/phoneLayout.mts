@@ -3,13 +3,15 @@
  * Chrome standing in for the phone, as `phone.mts` does.
  *
  *   npm --workspace @jaira/app run build
- *   npx tsx packages/app/shots/phoneLayout.mts [--only drawer,inbox,sheet,board,chat]
+ *   npx tsx packages/app/shots/phoneLayout.mts [--only drawer,inbox,panel,sheet,board,chat]
  *
  * A desktop with two finished tasks and one parked at its gate, and the phone paired with it by the code.
  * Then each part of the layout, photographed into `parity/phone-layout/`:
  *
  * - **drawer**: ▸| opens the sidebar over the room, with the INBOX row at its root;
  * - **inbox**: the Inbox room lists the gate; pressed, it opens the task with the panel as a sheet at half;
+ * - **panel**: lowered to its head, a swipe in from the screen's right edge raises the sheet to half; at
+ *   full, the same swipe leaves it there;
  * - **sheet**: dragged up it is full; dragged past the top the conversation is in the main view, the sheet
  *   back at its head; dragged down past its head it closes;
  * - **board**: All tasks — the strip, every column stacked, one column alone after a swipe;
@@ -110,6 +112,10 @@ async function main(): Promise<void> {
     await phone.clickText("Pair");
     await phone.until(`!!document.querySelector('[aria-label="Open the sidebar"]') && !${says("Connect to a JaiRA machine")} && !${says("No machine connected")}`, "the phone to pair, close the Connect screen and draw the machine's shell");
     await sleep(1500);
+    // Chrome pans the page under a drag nothing cancels, and from then on sends its touchmoves late: a
+    // swipe's last one arrives inside the NEXT touch, with its old time, and that drag jumps by it. A phone's
+    // own touches have no page to pan, so neither has this one.
+    await phone.evaluate(`document.documentElement.style.touchAction = "none"`);
     await phone.shot("0-first");
     console.log("  dims", await phone.evaluate<string>(`JSON.stringify({ inner: innerWidth, client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth, h: innerHeight, meta: document.querySelector('meta[name=viewport]')?.content ?? null })`));
     console.log("  boxes", await phone.evaluate<string>(`JSON.stringify((() => { const out = []; let el = document.querySelector('[data-testid="board-column"]'); while (el && out.length < 14) { const r = el.getBoundingClientRect(); out.push([el.tagName, Math.round(r.top), Math.round(r.height), getComputedStyle(el).display, getComputedStyle(el).flexGrow, getComputedStyle(el).height]); el = el.parentElement; } return out; })())`));
@@ -125,14 +131,14 @@ async function main(): Promise<void> {
       await sleep(400);
       check(await phone.evaluate<boolean>(`!document.querySelector('[aria-label="Close the sidebar"]')`), "a swipe back to the left closes it");
     }
-    if (doing("drawer") || doing("inbox") || doing("sheet")) {
+    if (doing("drawer") || doing("inbox") || doing("panel") || doing("sheet")) {
       await tapLabel(phone, "Open the sidebar");
       await phone.until(says("Inbox"), "the drawer to open with its Inbox row");
       await phone.shot("1-drawer");
       check(await phone.evaluate<boolean>(`!![...document.querySelectorAll('[aria-label]')].find((e) => (e.getAttribute('aria-label') ?? "").startsWith("This phone's machines:"))`) && (await phone.evaluate<boolean>(says("1 of 1"))), "the drawer lists this phone's machines, one answering");
       check(await phone.evaluate<boolean>(says("All tasks")), "the drawer is the sidebar, with All tasks under Inbox");
     }
-    if (doing("inbox") || doing("sheet")) {
+    if (doing("inbox") || doing("panel") || doing("sheet")) {
       await phone.clickText("Inbox");
       await phone.until(says("Review the critique result."), "the Inbox room to list the gate");
       await phone.shot("2-inbox");
@@ -143,6 +149,32 @@ async function main(): Promise<void> {
       await phone.shot("3-sheet-half");
       const half = await sheetTop(phone);
       check(half !== null && half > 300 && half < 560, `the sheet stands at half (top ${half})`);
+    }
+    if (doing("panel")) {
+      // Down to its head, then a swipe in from the screen's right edge: up to half.
+      const at = (await sheetTop(phone))!;
+      await drag(phone, 195, at + 8, at + 300);
+      const peeked = (await sheetTop(phone)) ?? -1;
+      check(peeked > 640, `lowered, the sheet rests at its head (top ${peeked})`);
+      await drag(phone, 385, 300, 304, -200);
+      await sleep(400);
+      const raised = (await sheetTop(phone)) ?? -1;
+      await phone.shot("3b-panel-swiped");
+      check(raised > 300 && raised < 560, `a swipe in from the right edge raises it to half (top ${raised})`);
+      // A swipe in from the middle of the screen is not the edge's.
+      await drag(phone, 195, raised + 8, raised + 300);
+      await drag(phone, 300, 300, 304, -200);
+      await sleep(400);
+      check(((await sheetTop(phone)) ?? -1) > 640, "a swipe left from the middle of the screen leaves it at its head");
+      // At full, the swipe only raises: it stays full.
+      await drag(phone, 385, 300, 304, -200);
+      await sleep(400);
+      const half = (await sheetTop(phone))!;
+      await drag(phone, 195, half + 8, 120);
+      await drag(phone, 385, 300, 304, -200);
+      await sleep(400);
+      const still = (await sheetTop(phone)) ?? -1;
+      check(still > 0 && still < 140, `at full, the swipe leaves it full (top ${still})`);
     }
     if (doing("sheet")) {
       let top = (await sheetTop(phone))!;

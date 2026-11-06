@@ -26,7 +26,7 @@ import { Splitter } from "../components/files/Splitter";
 import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
-import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, runMode, sheetAsk } from "./viewState";
+import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, sheetAsk } from "./viewState";
 import { usePhone } from "./phone";
 import { useColumnsFit } from "./columnsFit";
 
@@ -307,6 +307,18 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
   void roomRef;
   const ask = sheetAsk.use();
+  // A phone's swipe in from the right edge (`PhoneFrame`): unfold the panel where it folds, and raise its
+  // sheet to half at least. Nothing on the stack, nothing to open.
+  const { foldKey, open: unfolded } = geometry;
+  const canOpen = phone && top !== undefined;
+  useEffect(() => {
+    if (!canOpen) return undefined;
+    phonePanelOpener.set(() => {
+      if (foldKey !== null && !unfolded) actions.setFold(foldKey, true);
+      sheetAsk.set({ detent: "half", at: Date.now(), atLeast: true });
+    });
+    return () => phonePanelOpener.set(null);
+  }, [canOpen, foldKey, unfolded, actions]);
 
   if (top === undefined) return null;
   // A phone's panel is a sheet over the room (`PanelSheet`). Tasks always has it, at its head at least; a
@@ -316,7 +328,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     const minimise = (): void => (room === "tasks" ? sheetAsk.set({ detent: "peek", at: Date.now() }) : geometry.foldKey !== null ? actions.setFold(geometry.foldKey, false) : undefined);
     const adopt = face(top).verbs?.find((verb) => verb.icon === "adopt" && verb.disabled !== true);
     return (
-      <PanelSheet ask={room === "tasks" ? ask : null} {...(adopt !== undefined ? { onMain: adopt.onClick } : {})} onClose={() => (room === "tasks" ? onStack(closeStack) : minimise())}>
+      <PanelSheet ask={ask} {...(adopt !== undefined ? { onMain: adopt.onClick } : {})} onClose={() => (room === "tasks" ? onStack(closeStack) : minimise())}>
         <ToolsFieldProvider value={toolsFieldData}>
           <SidePanel stack={panelStack} onStack={onStack} face={face} folded={false} onFold={(folded) => folded && minimise()} closeFolds={closeFoldsOf(panelStack)} />
         </ToolsFieldProvider>

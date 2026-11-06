@@ -92,6 +92,22 @@ export const phoneInbox = shared(false);
 
 /**
  * The height a phone's context panel is asked to stand at (`PanelSheet`): the Inbox opens a task with its
- * question showing, so at least half. A request, with a stamp so the same one twice means "again".
+ * question showing, so at least half. A request, with a stamp so the same one twice means "again";
+ * `atLeast`, it only raises — a sheet already higher stays where it is.
  */
-export const sheetAsk = shared<{ detent: "peek" | "half" | "full"; at: number } | null>(null);
+export const sheetAsk = shared<{ detent: "peek" | "half" | "full"; at: number; atLeast?: boolean } | null>(null);
+
+/**
+ * How a phone's swipe in from the screen's right edge opens the room's context panel (`PhoneFrame`): the
+ * panel column sets it while its room has a panel with something on it (unfold it, raise its sheet to
+ * half), null while there is nothing to open — and then the swipe is not taken.
+ */
+export const phonePanelOpener = shared<(() => void) | null>(null);
+
+/**
+ * Whether the touch going on began on something that owns the screen's right edge itself — a run's Steps
+ * rail (`StepsRail`), pulled left from it. The frame clears it as a touch begins (its capture is asked
+ * first, from the root down), the rail sets it as the same touch reaches it, and a swipe that began there
+ * is left to the rail rather than opening the panel. Read and written within one touch: no one redraws on it.
+ */
+export const rightEdgeTouch = { owned: false };

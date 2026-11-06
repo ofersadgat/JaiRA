@@ -6,7 +6,7 @@
 import { describe, expect, it } from "vitest";
 import type { PendingApproval, PendingInteraction, PendingQuestion } from "@jaira/shared/browser";
 import { inboxItemsOf } from "../src/renderer/inboxModel";
-import { ancestorsOf, dragHeight, drawerSettles, isPhoneWidth, phoneTypography, railAt, railPull, scrubRow, settleSheet, sheetHeights, shownOf, stackedParts, swipeColumn, type StripColumn } from "../src/renderer/phoneModel";
+import { ancestorsOf, atRightEdge, dragHeight, drawerSettles, edgeWidth, isPhoneWidth, panelSwipeOpens, phoneTypography, railAt, railPull, scrubRow, settleSheet, sheetHeights, shownOf, stackedParts, swipeColumn, type StripColumn } from "../src/renderer/phoneModel";
 
 describe("a phone's window", () => {
   it("is one narrower than 700", () => {
@@ -129,5 +129,22 @@ describe("the drawer", () => {
     expect(drawerSettles(100, 0, 330)).toBe(false);
     expect(drawerSettles(40, 0.8, 330)).toBe(true);
     expect(drawerSettles(300, -0.8, 330)).toBe(false);
+  });
+});
+
+describe("the swipe in from the right edge", () => {
+  it("starts in the screen's last 20, or 36 on Android", () => {
+    expect(edgeWidth(false)).toBe(20);
+    expect(edgeWidth(true)).toBe(36);
+    expect(atRightEdge(375, 390, false)).toBe(true);
+    expect(atRightEdge(365, 390, false)).toBe(false);
+    expect(atRightEdge(360, 390, true)).toBe(true);
+    expect(atRightEdge(10, 0, false)).toBe(false);
+  });
+  it("opens the panel 48 in, or flicked in, and not flicked back out", () => {
+    expect(panelSwipeOpens(-48, 0)).toBe(true);
+    expect(panelSwipeOpens(-30, 0)).toBe(false);
+    expect(panelSwipeOpens(-20, -0.8)).toBe(true);
+    expect(panelSwipeOpens(-80, 0.8)).toBe(false);
   });
 });
