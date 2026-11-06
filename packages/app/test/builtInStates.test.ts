@@ -252,8 +252,8 @@ describe("the tree's third root", () => {
     return undefined;
   };
 
-  it("closes a project's tree with a read-only Built in root", () => {
-    const tree = service.filesTree({ project: dir });
+  it("closes a project's tree with a read-only Built in root", async () => {
+    const tree = (await service.filesTree({ project: dir }));
     expect(tree.roots.map((root) => root.layer)).toEqual(["project", "system"]);
     const shipped = tree.roots[1]!;
     expect(shipped.label).toBe("Built in");
@@ -264,16 +264,16 @@ describe("the tree's third root", () => {
     expect(node?.shadowed).toBeUndefined();
   });
 
-  it("marks a shipped FILE a person has a copy of as overridden, as it marks a state", () => {
+  it("marks a shipped FILE a person has a copy of as overridden, as it marks a state", async () => {
     const readme = (roots: FileRoot[]): FileNode | undefined => roots.find((root) => root.layer === "system")?.nodes.find((node) => node.path === "README.md");
-    expect(readme(service.filesTree({ project: dir }).roots)?.shadowed).toBeUndefined();
+    expect(readme((await service.filesTree({ project: dir })).roots)?.shadowed).toBeUndefined();
     service.writeFile({ layer: "base", path: "README.md", text: "mine" });
-    expect(readme(service.filesTree({ project: dir }).roots)?.shadowed).toBe(true);
-    expect(readme(service.filesTree({ project: SHARED_SESSION }).roots)?.shadowed).toBe(true);
+    expect(readme((await service.filesTree({ project: dir })).roots)?.shadowed).toBe(true);
+    expect(readme((await service.filesTree({ project: SHARED_SESSION })).roots)?.shadowed).toBe(true);
   });
 
-  it("closes the shared root's tree, and an empty window's, with it too", () => {
-    expect(service.filesTree({ project: SHARED_SESSION }).roots.map((root) => root.layer)).toEqual(["base", "system"]);
+  it("closes the shared root's tree, and an empty window's, with it too", async () => {
+    expect((await service.filesTree({ project: SHARED_SESSION })).roots.map((root) => root.layer)).toEqual(["base", "system"]);
   });
 
   it("lists it ONCE beside several projects", async () => {
@@ -282,15 +282,15 @@ describe("the tree's third root", () => {
     extraDirs.push(other);
     initProject(other, testHome());
     await service.open(other);
-    expect(service.filesTree().roots.map((root) => root.layer)).toEqual(["project", "project", "system"]);
+    expect((await service.filesTree()).roots.map((root) => root.layer)).toEqual(["project", "project", "system"]);
   });
 
-  it("marks which layer supplied a state: the shipped row overridden, the person's row overriding", () => {
+  it("marks which layer supplied a state: the shipped row overridden, the person's row overriding", async () => {
     const file = join(dir, ".jaira", "workflows", `${CHAT_SESSION}.json`);
     mkdirSync(dirname(file), { recursive: true });
     writeFileSync(file, JSON.stringify({ label: "Here" }), "utf8");
 
-    const tree = service.filesTree({ project: dir });
+    const tree = (await service.filesTree({ project: dir }));
     expect(find(tree.roots[0]!.nodes, CHAT_SESSION)).toMatchObject({ layer: "project", overridesBuiltIn: true });
     expect(find(tree.roots[1]!.nodes, CHAT_SESSION)).toMatchObject({ layer: "system", shadowed: true });
     // A shipped state nobody overrode is marked as neither.
@@ -300,7 +300,7 @@ describe("the tree's third root", () => {
 
     // The same from the shared root's side.
     installInShared(CHAT_CONTROL, JSON.stringify({ label: "Shared" }));
-    const shared = service.filesTree({ project: SHARED_SESSION });
+    const shared = (await service.filesTree({ project: SHARED_SESSION }));
     expect(find(shared.roots[0]!.nodes, CHAT_CONTROL)).toMatchObject({ layer: "base", overridesBuiltIn: true });
     expect(find(shared.roots[1]!.nodes, CHAT_CONTROL)).toMatchObject({ shadowed: true });
   });

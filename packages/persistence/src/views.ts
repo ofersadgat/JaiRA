@@ -205,6 +205,29 @@ function cutLabelOf(type: string, payloadJson: string): string {
 }
 
 /**
+ * Pinned snapshots read for drawing, by folder and hash — the newest {@link KEEP_PINNED}. A snapshot is
+ * named by its content's hash, so what is kept under a name is what is there for good: each board answer
+ * read every card's snapshot again, every file of it, and hashed it whole to check it (2026-11-06: a
+ * third of a window's launch in the main process). For reading only: what is handed out is shared.
+ */
+const pinned = new Map<string, WorkflowBundle>();
+const KEEP_PINNED = 256;
+function pinnedBundle(snapshotsDir: string, hash: string): WorkflowBundle {
+  const key = `${snapshotsDir}\u0000${hash}`;
+  const kept = pinned.get(key);
+  if (kept !== undefined) {
+    // Most recently used last, so the oldest is first to go.
+    pinned.delete(key);
+    pinned.set(key, kept);
+    return kept;
+  }
+  const bundle = loadSnapshot(snapshotsDir, hash);
+  pinned.set(key, bundle);
+  if (pinned.size > KEEP_PINNED) pinned.delete(pinned.keys().next().value!);
+  return bundle;
+}
+
+/**
  * The bundle a board level is drawn from. A pinned snapshot wins — execution
  * reads the snapshot (DESIGN §5.3), so that is what the run being displayed
  * actually followed; live `workflows/` is the fallback before anything is pinned.
@@ -212,7 +235,7 @@ function cutLabelOf(type: string, payloadJson: string): string {
 export function bundleFor(project: Project, workflow: string, snapshotHash?: string): WorkflowBundle | undefined {
   if (snapshotHash !== undefined) {
     try {
-      return loadSnapshot(project.paths.snapshotsDir, snapshotHash);
+      return pinnedBundle(project.paths.snapshotsDir, snapshotHash);
     } catch {
       // A missing/corrupt snapshot shouldn't blank the board — fall back below.
     }

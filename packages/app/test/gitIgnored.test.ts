@@ -20,7 +20,7 @@ afterEach(() => {
 });
 
 describe("gitIgnoredPaths", () => {
-  it("names a wholly ignored folder once, and an ignored file alone", () => {
+  it("names a wholly ignored folder once, and an ignored file alone", async () => {
     execFileSync("git", ["init", "-q", dir], { windowsHide: true });
     writeFileSync(join(dir, ".gitignore"), "build/\n*.log\n", "utf8");
     mkdirSync(join(dir, "build", "obj", "deep"), { recursive: true });
@@ -29,13 +29,13 @@ describe("gitIgnoredPaths", () => {
     writeFileSync(join(dir, "src", "main.ts"), "", "utf8");
     writeFileSync(join(dir, "src", "main.log"), "", "utf8");
 
-    const ignored = gitIgnoredPaths(dir);
+    const ignored = (await gitIgnoredPaths(dir));
     expect(ignored).toBeDefined();
     expect([...ignored!.dirs]).toEqual(["build"]);
     expect([...ignored!.files]).toEqual(["src/main.log"]);
   });
 
-  it("has no answer outside a repository", () => {
-    expect(gitIgnoredPaths(dir)).toBeUndefined();
+  it("has no answer outside a repository", async () => {
+    expect((await gitIgnoredPaths(dir))).toBeUndefined();
   });
 });

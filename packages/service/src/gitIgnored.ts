@@ -10,23 +10,23 @@
  *
  * `undefined` when there is no answer — not a repository, no git, a git that hung — and the tree is then
  * walked as it always was.
+ *
+ * Asked without waiting on it: the engine answers a window's requests one at a time, and git took ~50 ms
+ * of a project's tree on every launch, every board answer waiting behind it (2026-11-06).
  */
-import { execFileSync } from "node:child_process";
+import { execFile } from "node:child_process";
 import type { IgnoredPaths } from "@jaira/persistence";
 
-export function gitIgnoredPaths(dir: string): IgnoredPaths | undefined {
-  let out: string;
-  try {
-    out = execFileSync("git", ["-C", dir, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"], {
-      encoding: "utf8",
-      windowsHide: true,
-      stdio: ["ignore", "pipe", "ignore"],
-      timeout: 5000,
-      maxBuffer: 64 * 1024 * 1024,
-    });
-  } catch {
-    return undefined;
-  }
+export async function gitIgnoredPaths(dir: string): Promise<IgnoredPaths | undefined> {
+  const out = await new Promise<string | undefined>((resolve) => {
+    execFile(
+      "git",
+      ["-C", dir, "ls-files", "-z", "--others", "--ignored", "--exclude-standard", "--directory"],
+      { encoding: "utf8", windowsHide: true, timeout: 5000, maxBuffer: 64 * 1024 * 1024 },
+      (error, stdout) => resolve(error === null ? stdout : undefined),
+    );
+  });
+  if (out === undefined) return undefined;
   const dirs = new Set<string>();
   const files = new Set<string>();
   for (const entry of out.split("\0")) {

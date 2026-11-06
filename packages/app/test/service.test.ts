@@ -359,7 +359,7 @@ describe("sessions — one process, several projects", () => {
     try {
       await service.open(other);
       // No `project`: the ROOT, "all projects", which is a real place and not "nothing chosen".
-      const tree = service.filesTree();
+      const tree = (await service.filesTree());
       // The projects ARE the top level there (SHELL.md §2.2) — one root each, stamped with the
       // project every call about a file in it will have to name.
       const projects = tree.roots.filter((r) => r.layer === "project");
@@ -379,7 +379,7 @@ describe("sessions — one process, several projects", () => {
     initProject(other, testHome());
     try {
       await service.open(other);
-      const tree = service.filesTree({ project: other });
+      const tree = (await service.filesTree({ project: other }));
       // That project, and what ships behind it (decision 0006) — which belongs to no project.
       expect(tree.roots.map((r) => r.project)).toEqual([other, undefined]);
       expect(tree.roots.map((r) => r.layer)).toEqual(["project", "system"]);
@@ -391,11 +391,11 @@ describe("sessions — one process, several projects", () => {
 
   it("falls back to every project when the address names one that is not open", async () => {
     // A stale address is an address, not a fault: the panel shows the root rather than nothing.
-    const tree = service.filesTree({ project: join(tmpdir(), "never-opened") });
+    const tree = await service.filesTree({ project: join(tmpdir(), "never-opened") });
     expect(tree.roots.filter((r) => r.layer === "project").map((r) => r.project)).toEqual([dir]);
   });
 
-  it("names what git ignores in the tree, and lists it a level at a time when it is opened", () => {
+  it("names what git ignores in the tree, and lists it a level at a time when it is opened", async () => {
     // 2026-10-27: the root's tree was 80 MB, 97% of it git-ignored, and a phone was killed holding it.
     execFileSync("git", ["init", "-q", dir], { windowsHide: true });
     writeFileSync(join(dir, ".gitignore"), "build/\n", "utf8");
@@ -403,14 +403,14 @@ describe("sessions — one process, several projects", () => {
     writeFileSync(join(dir, "build", "cache", "blob"), "", "utf8");
     writeFileSync(join(dir, "build", "out.bin"), "", "utf8");
 
-    const build = service.filesTree({ project: dir }).roots[0]!.nodes.find((n) => n.name === "build");
+    const build = (await service.filesTree({ project: dir })).roots[0]!.nodes.find((n) => n.name === "build");
     expect(build).toMatchObject({ ignored: true, unlisted: true, children: [] });
-    const listed = service.filesList({ project: dir, path: "build" });
+    const listed = (await service.filesList({ project: dir, path: "build" }));
     expect(listed.map((n) => [n.path, n.ignored, n.unlisted])).toEqual([
       ["build/cache", true, true],
       ["build/out.bin", true, undefined],
     ]);
-    expect(() => service.filesList({ project: join(tmpdir(), "never-opened"), path: "build" })).toThrow(/not an open project/);
+    await expect(service.filesList({ project: join(tmpdir(), "never-opened"), path: "build" })).rejects.toThrow(/not an open project/);
   });
 
   it("lists every project's tasks as one recency-ordered list, each stamped with its project", async () => {

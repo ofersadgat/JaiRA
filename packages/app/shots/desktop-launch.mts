@@ -12,6 +12,8 @@
  * `--clone <repo>` (again for more): a clone of a real repository as one more project — the size of
  * what a project's reads walk (its files, what git ignores) is a real one's; cloned with `--shared` into
  * the world, so the repository itself is only read.
+ * `--profile`: a CPU profile of the window from the load, and of the main process (through its
+ * inspector), each summed by function and by file — names need an unminified client.
  * `--cold`: the app quit and started again over the world, the timeline from its window's first load
  * (the projects reopened by the main process as it starts) — rather than the window loaded again.
  */
@@ -32,6 +34,8 @@ const TASKS = Number(arg("--tasks") ?? "12");
 const THROTTLE = Number(arg("--throttle") ?? "1");
 const PROJECTS = Number(arg("--projects") ?? "0");
 const COLD = process.argv.includes("--cold");
+/** CPU profiles of the window and the main process across the load, summed by function (`--profile`). */
+const PROFILE = process.argv.includes("--profile");
 const CLONES = process.argv.flatMap((a, i) => (a === "--clone" && process.argv[i + 1] !== undefined ? [process.argv[i + 1]!] : []));
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -43,7 +47,8 @@ const SAMPLER = (titles: readonly string[]): string => `(() => {
   const log = { cards: [], commits: [], epoch: Date.now() };
   window.__launch = log;
   const count = () => { let n = 0; for (const el of document.querySelectorAll("*")) if (el.childElementCount === 0 && want.has(el.textContent)) n++; return n; };
-  const sample = () => { const n = count(); const last = log.cards[log.cards.length - 1]; if (last === undefined || last.n !== n) log.cards.push({ at: at(), n }); if (performance.now() - t0 < 15000) requestAnimationFrame(sample); };
+  let frame = 0;
+  const sample = () => { if (frame++ % 4 !== 0) { if (performance.now() - t0 < 15000) requestAnimationFrame(sample); return; } const n = count(); const last = log.cards[log.cards.length - 1]; if (last === undefined || last.n !== n) log.cards.push({ at: at(), n }); if (performance.now() - t0 < 15000) requestAnimationFrame(sample); };
   requestAnimationFrame(sample);
   let id = 0;
   window.__REACT_DEVTOOLS_GLOBAL_HOOK__ = {
@@ -105,6 +110,15 @@ async function main(): Promise<void> {
     );
     await desktop.cdp("Page.addScriptToEvaluateOnNewDocument", { source: SAMPLER(titles) });
     if (THROTTLE > 1) await desktop.cdp("Emulation.setCPUThrottlingRate", { rate: THROTTLE });
+    if (PROFILE) {
+      await desktop.cdp("Profiler.enable", {});
+      await desktop.cdp("Profiler.setSamplingInterval", { interval: 200 });
+      await desktop.cdp("Profiler.start", {});
+      await desktop.evaluateMain(
+        9287,
+        `(() => { const inspector = require("inspector"); const s = new inspector.Session(); s.connect(); globalThis.__prof = s; s.post("Profiler.enable", () => s.post("Profiler.setSamplingInterval", { interval: 200 }, () => s.post("Profiler.start"))); return true; })()`,
+      );
+    }
     await desktop.cdp("Page.reload", {});
     await sleep(8000);
     const log = await desktop.evaluate<{ cards: Array<{ at: number; n: number }>; commits: number[]; epoch: number }>("JSON.parse(JSON.stringify(window.__launch ?? { cards: [], commits: [], epoch: 0 }))");
@@ -117,6 +131,10 @@ async function main(): Promise<void> {
     ].sort((a, b) => a.at - b.at);
     const busy = ipc.reduce((sum, [, start, end]) => sum + (end - start), 0);
     console.log(`  ${ipc.length} requests, ${busy} ms held in the main process in all`);
+    const nav = await desktop.evaluate<{ response: number; dom: number; loaded: number }>(
+      `(() => { const n = performance.getEntriesByType("navigation")[0]; return { response: Math.round(n.responseEnd), dom: Math.round(n.domContentLoadedEventEnd), loaded: Math.round(n.loadEventEnd) }; })()`,
+    );
+    console.log(`  the page: its HTML by ${nav.response} ms, its scripts run by ${nav.dom} ms, loaded by ${nav.loaded} ms; React's first commit at ${log.commits[0] ?? "?"} ms`);
     for (const one of lines) console.log(`  +${String(one.at).padStart(5)} ms  ${one.line}`);
     const by = new Map<string, { n: number; ms: number }>();
     for (const [ch, start, end] of ipc) {
@@ -124,6 +142,76 @@ async function main(): Promise<void> {
       by.set(ch, { n: was.n + 1, ms: was.ms + end - start });
     }
     console.log("  by channel:", [...by].sort(([, a], [, b]) => b.ms - a.ms).map(([ch, v]) => `${ch} ${v.n}x ${v.ms}ms`).join(", "));
+    if (PROFILE) {
+      interface Node {
+        id: number;
+        callFrame: { functionName: string; url: string; lineNumber: number };
+        children?: number[];
+      }
+      interface Profile {
+        nodes: Node[];
+        samples: number[];
+        timeDeltas: number[];
+        startTime: number;
+      }
+      const sum = (profile: Profile, where: string, untilMs: number): void => {
+        const byId = new Map(profile.nodes.map((n) => [n.id, n]));
+        const self = new Map<number, number>();
+        let t = 0;
+        for (let i = 0; i < profile.samples.length; i++) {
+          t += profile.timeDeltas[i]! / 1000;
+          if (t > untilMs) break;
+          const id = profile.samples[i]!;
+          self.set(id, (self.get(id) ?? 0) + (profile.timeDeltas[i + 1] ?? 0) / 1000);
+        }
+        const fn = new Map<string, number>();
+        const file = new Map<string, number>();
+        let total = 0;
+        for (const [id, ms] of self) {
+          const n = byId.get(id)!;
+          const name = n.callFrame.functionName || "(anonymous)";
+          const url = n.callFrame.url.replace(/^.*\/(node_modules\/)?/, "");
+          if (name === "(idle)") continue;
+          total += ms;
+          fn.set(`${name}  ${url}:${n.callFrame.lineNumber}`, (fn.get(`${name}  ${url}:${n.callFrame.lineNumber}`) ?? 0) + ms);
+          const f = name.startsWith("(") ? name : url || "(native)";
+          file.set(f, (file.get(f) ?? 0) + ms);
+        }
+        const top = (m: Map<string, number>, n: number): string[] =>
+          [...m]
+            .sort(([, a], [, b]) => b - a)
+            .slice(0, n)
+            .map(([k, v]) => `${String(Math.round(v)).padStart(5)} ms  ${k}`);
+        console.log(`${where}: ${Math.round(total)} ms busy in the first ${untilMs} ms`);
+        console.log("  by file:");
+        for (const line of top(file, 14)) console.log(`    ${line}`);
+        console.log("  by function (self):");
+        for (const line of top(fn, 30)) console.log(`    ${line}`);
+        // Inclusive: a function's own time and everything it called, each function counted once per sample.
+        const parent = new Map<number, number>();
+        for (const n of profile.nodes) for (const c of n.children ?? []) parent.set(c, n.id);
+        const inclusive = new Map<string, number>();
+        for (const [id, ms] of self) {
+          const seen = new Set<string>();
+          for (let at: number | undefined = id; at !== undefined; at = parent.get(at)) {
+            const n = byId.get(at)!;
+            const name = n.callFrame.functionName;
+            if (name === "" || name.startsWith("(") || seen.has(name)) continue;
+            seen.add(name);
+            inclusive.set(name, (inclusive.get(name) ?? 0) + ms);
+          }
+        }
+        console.log("  by function (with what it called):");
+        for (const line of top(inclusive, 40)) console.log(`    ${line}`);
+      };
+      const windowProfile = (await desktop.cdp<{ profile: Profile }>("Profiler.stop", {})).profile;
+      sum(windowProfile, "the window", 1000);
+      const mainProfile = await desktop.evaluateMain<Profile>(
+        9287,
+        `new Promise((resolve) => globalThis.__prof.post("Profiler.stop", (err, r) => resolve(err ? null : r.profile)))`,
+      );
+      if (mainProfile !== null) sum(mainProfile, "the main process", 9000);
+    }
     await desktop.shot("after");
   } finally {
     await desktop.close();

@@ -4686,7 +4686,7 @@ export class AppService {
    * no project to stand in, the shared root is the only place there is, and its workflows are the
    * ones that outlive any checkout.
    */
-  filesTree(request?: { project?: ProjectRef }): FileTree {
+  async filesTree(request?: { project?: ProjectRef }): Promise<FileTree> {
     const open = this.userSessions();
     const at = request?.project;
     const baseDir = jairaBasePaths(this.baseDir).baseDir;
@@ -4717,9 +4717,9 @@ export class AppService {
     const sessions = shown.length > 0 ? shown : open;
     // What git ignores is named and not walked (`IgnoredPaths`): the folders a checkout piles up —
     // builds, caches, worktrees — are listed when they are opened (`filesList`).
-    const trees = sessions.map((session) =>
-      fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config), gitIgnoredPaths(session.project.paths.projectDir)),
-    );
+    // Every project's ignored folders asked of git at once, and nothing else held up while it answers.
+    const ignored = await Promise.all(sessions.map((session) => gitIgnoredPaths(session.project.paths.projectDir)));
+    const trees = sessions.map((session, i) => fileTree(session.project, this.browseWorkflowsIn(session), this.hiddenRulesFor(session.project.config), ignored[i]));
     // What ships closes every tree (decision 0006): it is behind all of them, it has no sidebar row
     // to be reached by, and it is where an override starts. Listed ONCE, with its `shadowed` marks
     // reduced across the projects shown, as the shared root's were when it was listed here.
@@ -4737,10 +4737,10 @@ export class AppService {
    * unlisted folder, read when it is opened. Read afresh each time and kept nowhere — not in the
    * tree's answer, not in the change log, not in a phone's copy.
    */
-  filesList(request: { project?: ProjectRef; path: string }): FileNode[] {
+  async filesList(request: { project?: ProjectRef; path: string }): Promise<FileNode[]> {
     const session = this.sessionOf(request.project);
     if (session === undefined || session.kind !== "user") throw this.refusal("files", request.project === undefined ? "say which project's folder to list" : `'${request.project}' is not an open project`);
-    return listDirectory(session.project, request.path, this.hiddenRulesFor(session.project.config), gitIgnoredPaths(session.project.paths.projectDir));
+    return listDirectory(session.project, request.path, this.hiddenRulesFor(session.project.config), await gitIgnoredPaths(session.project.paths.projectDir));
   }
 
   /**

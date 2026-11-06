@@ -41,8 +41,8 @@ async function until(predicate: () => boolean, label: string, budgetMs = 8000): 
 }
 
 describe("the Files view's surfaces", () => {
-  it("lists the project's own root, with the workflow files carrying their state ids", () => {
-    const tree = service.filesTree();
+  it("lists the project's own root, with the workflow files carrying their state ids", async () => {
+    const tree = (await service.filesTree());
 
     // ONE root a person owns: the project's own folder. `~/.jaira` is a layer this project resolves
     // against and is browsed by standing in it, not by appearing inside every checkout. What SHIPS
@@ -139,7 +139,7 @@ describe("with no project open", () => {
     const home = mkdtempSync(join(tmpdir(), "jaira-home-"));
     const bare = new AppService({ publish: () => undefined, baseDir: join(home, "shared") });
     try {
-      const tree = bare.filesTree();
+      const tree = (await bare.filesTree());
       // Not `{roots: []}`: `~/.jaira` exists independently of any checkout, and it is where you put
       // a workflow that should outlive this one. Hiding it with no project open would hide it
       // exactly when someone is looking for a place to start.
@@ -215,9 +215,9 @@ describe("authoring into the shared root", () => {
       // And it is immediately browsable — by STANDING in the shared root, which is a sidebar row of
       // its own. Asking from a checkout gives that checkout, which is the whole point of the change:
       // a shared workflow is reached by going to where it lives.
-      const tree = svc.filesTree({ project: SHARED_SESSION });
+      const tree = (await svc.filesTree({ project: SHARED_SESSION }));
       expect(tree.roots.find((r) => r.layer === "base")?.exists).toBe(true);
-      expect(svc.filesTree({ project: other }).roots.map((r) => r.layer)).toEqual(["project", "system"]);
+      expect((await svc.filesTree({ project: other })).roots.map((r) => r.layer)).toEqual(["project", "system"]);
     } finally {
       await svc.close();
       rmSync(home, { recursive: true, force: true });
@@ -496,7 +496,7 @@ describe("file operations", () => {
 });
 
 describe("creating a state", () => {
-  it("writes the file immediately, so it is in the tree before anything is saved", () => {
+  it("writes the file immediately, so it is in the tree before anything is saved", async () => {
     // The old flow opened an editor over a file that did not exist until Save — a state you have
     // named and cannot see in the tree is a state you will name again.
     const written = service.writeWorkflow({ stateId: "triage/bug", layer: "project", text: "{}" });
@@ -504,13 +504,13 @@ describe("creating a state", () => {
     expect(existsSync(written.file)).toBe(true);
     expect(service.readWorkflow({ stateId: "triage/bug", layer: "project" }).exists).toBe(true);
     const ids: string[] = [];
-    const walk = (nodes: ReturnType<typeof service.filesTree>["roots"][number]["nodes"]): void => {
+    const walk = (nodes: Awaited<ReturnType<typeof service.filesTree>>["roots"][number]["nodes"]): void => {
       for (const node of nodes) {
         if (node.stateId !== undefined) ids.push(node.stateId);
         if (node.children) walk(node.children);
       }
     };
-    service.filesTree().roots.forEach((r) => walk(r.nodes));
+    (await service.filesTree()).roots.forEach((r) => walk(r.nodes));
     expect(ids).toContain("triage/bug");
   });
 });
