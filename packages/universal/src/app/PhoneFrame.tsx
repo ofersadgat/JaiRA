@@ -13,6 +13,7 @@ import { useKeyboardTop } from "../components/floats/keyboard";
 import { Press, Txt, WINDOW_GUTTER, edge, landmark } from "../primitives";
 import { useLook, useTokens } from "../tokens";
 import { shellTouch } from "../touchElsewhere";
+import { ArtifactInMain } from "./ArtifactInMain";
 import { BoardColumn } from "./BoardColumn";
 import { ChatView } from "./ChatView";
 import { DebugView } from "./DebugView";
@@ -149,6 +150,8 @@ function Room(): JSX.Element | null {
             <BoardColumn />
           </View>
         </Activity>
+        {/* Outside the Activity: hiding the board under a full sheet must not put the artifact away. */}
+        <ArtifactInMain at={state.selected} />
         <PanelColumn />
       </>
     );

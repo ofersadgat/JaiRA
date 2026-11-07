@@ -49,8 +49,9 @@ window.open_ = (props, component = "canvas") => {
     if (e.source !== frame.contentWindow) return;
     const m = JSON.parse(e.data);
     window.__events.push(m);
-    if (m.kind === "ready") frame.contentWindow.postMessage(JSON.stringify({ kind: "render", component, props, look: { palette: "ink", theme: "light" } }), "*");
+    if (m.kind === "ready") window.render_(props);
   });
+  window.render_ = (next) => frame.contentWindow.postMessage(JSON.stringify({ kind: "render", component, props: next, look: { palette: "ink", theme: "light" } }), "*");
 };
 </script></body></html>`;
 
@@ -144,6 +145,19 @@ async function main(): Promise<void> {
     if (!(pct(spread.z) >= pct(before.z) * 3.5)) throw new Error(`spreading two fingers 4x apart did not zoom in 4x (${before.z} -> ${spread.z})`);
     if (Math.abs(pct(pinched.z) - pct(before.z)) > 1) throw new Error(`pinching back did not return the zoom (${before.z} -> ${pinched.z})`);
     if (pinched.transform !== before.transform && Math.abs(pct(pinched.z) - pct(before.z)) === 0) console.log(`phone: the view moved by the pinch round trip: ${before.transform} -> ${pinched.transform}`);
+    // A column that fills (the side panel, the main view) draws the board 0 tall before it is measured,
+    // then at its height: the board must fit then, right side up - a fit from the 0-tall box was a
+    // negative zoom, the board drawn turned over.
+    await app.evaluate(`document.body.innerHTML = ""; window.__events = []; window.open_(${JSON.stringify({ index, base, style: { height: 0 } })})`);
+    for (let i = 0; i < 40 && !(await app.evaluate<boolean>(`window.__events.some((e) => e.kind === "ready")`)); i++) await new Promise((r) => setTimeout(r, 250));
+    await new Promise((r) => setTimeout(r, 500));
+    await app.evaluate(`frame.style.height = "600px"; window.render_(${JSON.stringify({ index, base, style: { height: 600 } })})`);
+    await new Promise((r) => setTimeout(r, 800));
+    const measured = await app.evaluate<{ z: string; transform: string }>(`(() => { const d = frame.contentDocument; const z = [...d.querySelectorAll("span")].find((s) => /^-?\\d+%$/.test(s.textContent)); const layer = [...d.querySelectorAll("div")].find((x) => x.style.transform.startsWith("translate")); return { z: z ? z.textContent : "", transform: layer ? layer.style.transform : "" }; })()`);
+    console.log(`phone: drawn 0 tall, then 600: zoom ${measured.z}, ${measured.transform}`);
+    await app.shot("measured-late");
+    const scale = Number(/scale\(([-\d.e]+)\)/.exec(measured.transform)?.[1] ?? Number.NaN);
+    if (!(scale > 0.05)) throw new Error(`a board measured after it was drawn is not fitted right side up (${measured.z}, ${measured.transform})`);
     // A published page, in the artifact island: its script runs from the same route.
     asked.splice(0);
     await app.evaluate(`document.body.innerHTML = ""; window.__events = []; window.open_(${JSON.stringify({ url: `${base}chart.html`, published: true, style: { width: "100%", height: 300 } })}, "artifact")`);

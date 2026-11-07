@@ -126,14 +126,38 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
     return [...listed, ...Object.keys(index.boards).filter((f) => !listed.includes(f))];
   }, [index]);
 
-  /** Fit every artboard of the page in the box, 32 px clear, never above 100%. */
+  /**
+   * The person has panned or zoomed since the last fit: the board then stays where they put it when its
+   * box changes size. Until then it fits again as the box grows.
+   */
+  const moved = useRef(false);
+  /**
+   * Fit every artboard of the page in the box, 32 px clear, between 5% and 100%. A box not yet measured
+   * (a column that fills, first drawn 0 tall) is not fitted: a zoom worked out from it is negative, and
+   * a negative scale draws the board turned over.
+   */
   const fit = (): void => {
     const el = box.current;
-    if (el === null) return;
-    const z = Math.min(1, (el.clientWidth - 64) / Math.max(extent.w, 1), (el.clientHeight - 64) / Math.max(extent.h, 1));
+    if (el === null || el.clientWidth <= 0 || el.clientHeight <= 0) return;
+    moved.current = false;
+    const room = (side: number): number => Math.max(side - 64, side / 2);
+    const z = Math.max(0.05, Math.min(1, room(el.clientWidth) / Math.max(extent.w, 1), room(el.clientHeight) / Math.max(extent.h, 1)));
     setView({ z, x: (el.clientWidth - extent.w * z) / 2 - extent.x * z, y: (el.clientHeight - extent.h * z) / 2 - extent.y * z });
   };
+  const fitNow = useRef(fit);
+  fitNow.current = fit;
   useLayoutEffect(fit, [extent.x, extent.y, extent.w, extent.h]);
+  // The box measured, grown or turned: fitted again, unless the person has moved the board.
+  useEffect(() => {
+    const el = box.current;
+    if (el === null || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      if (!moved.current) fitNow.current();
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+    // The box is drawn again when an artboard is focused and back: watched from each.
+  }, [focused]);
 
   // The wheel: Ctrl (or a pinch, which Chromium reports as Ctrl) zooms about the pointer; else it pans.
   useEffect(() => {
@@ -141,6 +165,7 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
     if (el === null) return;
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
+      moved.current = true;
       setView((v) => {
         if (v === null) return v;
         if (!e.ctrlKey) return { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY };
@@ -199,6 +224,7 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
   const onMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     if (!pointers.current.has(e.pointerId)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pinch.current !== null || drag.current !== null) moved.current = true;
     const p = pinch.current;
     if (p !== null) {
       const span = spanOf();

@@ -2,6 +2,7 @@ import { useEffect, type JSX } from "react";
 import { View } from "@tamagui/core";
 import { PublishedView } from "../components/panel/PublishedView";
 import { useTokens } from "../tokens";
+import { useSheetInset } from "./columnsFit";
 import { artifactInMain } from "./viewState";
 
 /**
@@ -16,10 +17,12 @@ import { artifactInMain } from "./viewState";
 export function ArtifactInMain({ at = null }: { /** What the column is showing: when that changes, this has nothing to stand over. */ at?: string | null | undefined }): JSX.Element | null {
   const t = useTokens();
   const held = artifactInMain.use();
+  // On a phone the panel's sheet stands over the room's foot: the artifact stops above its head.
+  const inset = useSheetInset();
   useEffect(() => () => artifactInMain.set(null), [at]);
   if (held === null) return null;
   return (
-    <View position="absolute" top={0} right={0} bottom={0} left={0} zIndex={10} backgroundColor={t.v("bg") as never} flexDirection="column" minHeight={0}>
+    <View position="absolute" top={0} right={0} bottom={inset} left={0} zIndex={10} backgroundColor={t.v("bg") as never} flexDirection="column" minHeight={0}>
       <PublishedView key={`${held.published.id}@${String(held.published.version)}`} published={held.published} artifacts={held.artifacts} fill onBack={() => artifactInMain.set(null)} />
     </View>
   );

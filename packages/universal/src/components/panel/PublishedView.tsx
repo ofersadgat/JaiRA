@@ -7,7 +7,7 @@ import type { PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 import { usePhone } from "../../app/phone";
-import { artifactInMain } from "../../app/viewState";
+import { artifactInMain, sheetAsk } from "../../app/viewState";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Markdown } from "../Markdown";
 import { Press, Txt, viewScrollbarProps } from "../../primitives";
@@ -35,7 +35,7 @@ export const surfaceOf = (taskId: string, project: string | undefined): Artifact
  *                    as a board of its artboards, each running (web: the `canvas` island)
  *   Rendered/Source  the entry file's (a canvas's: its first artboard's) as any value's
  *   the verbs        the title bar's right: open it on its own in the side panel (where a panel can take
- *                    it), and ⇤ into the main view (a phone's sheet is the whole screen, so none there);
+ *                    it), and ⇤ into the main view (on a phone, the panel's sheet lowered to its head);
  *                    in the main view, ‹ back in their place
  *
  * Where it stands is its caller's. In the conversation and a list it is as tall as its frame; `fill`, it
@@ -159,7 +159,15 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
     ) : newest === null || superseded ? null : (
       <>
         {panel !== null ? <SpIcon icon="read" label="Open it on its own, in the side panel" onPress={() => panel.open({ title: published.title ?? published.entry, published: { ref: here, ...project } })} /> : null}
-        {phone ? null : <SpIcon icon="adopt" label="Show this artifact in the main view" onPress={() => artifactInMain.set({ published: here, artifacts: artifacts ?? surfaceOf(taskId, undefined) })} />}
+        <SpIcon
+          icon="adopt"
+          label="Show this artifact in the main view"
+          onPress={() => {
+            artifactInMain.set({ published: here, artifacts: artifacts ?? surfaceOf(taskId, undefined) });
+            // A phone's panel is a sheet over the main view: lowered to its head, so the artifact is seen.
+            if (phone) sheetAsk.set({ detent: "peek", at: Date.now() });
+          }}
+        />
       </>
     );
   const titleBar = (
