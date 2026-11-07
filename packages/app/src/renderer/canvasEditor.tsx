@@ -16,11 +16,36 @@
  * the person's (`onSave`), a second after the last change; refused, because the model published the same
  * file meanwhile, it says so and offers to reload.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { applyMove, editStyle, editText, formatStyle, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
+import { Popover } from "./popover";
 
-export type CanvasTool = "pointer" | "hand" | "text" | "artboard" | "note" | "pen" | "rect" | "oval" | "arrow" | "line";
+export type CanvasTool = "pointer" | "hand" | "text" | "artboard" | "note" | "pen" | "rect" | "oval" | "arrow" | "line" | "comment";
+
+/** A comment as the editor draws it (decision 0024): `@jaira/shared`'s `ArtifactComment`, the fields it reads. */
+export interface CanvasComment {
+  id: string;
+  file: string;
+  x: number;
+  y: number;
+  element?: { id: number; tag: string; text?: string };
+  text: string;
+  toClaude: boolean;
+  sentAt?: number;
+  resolvedAt?: number;
+  createdAt: number;
+}
+
+/** A comment being written: where its pin is, and what the person wrote. */
+export interface CommentDraft {
+  file: string;
+  x: number;
+  y: number;
+  element?: { id: number; tag: string; text?: string };
+  text: string;
+  toClaude: boolean;
+}
 
 export interface CanvasEditorProps {
   /** Every file of the canvas at `base`, by path (`project/canvas.json`, `project/Main.dc.html`, …). */
@@ -35,7 +60,20 @@ export interface CanvasEditorProps {
   onReload: () => void;
   /** An artboard as a picture or a document, saved where the person chooses. */
   onExport?: ((file: string, format: "png" | "pdf", size: { width: number; height: number }) => void) | undefined;
-  onClose?: (() => void) | undefined;
+  /** The comments on this artifact; with `onComment`, the comment tool is offered. */
+  comments?: CanvasComment[] | undefined;
+  /**
+   * Keep a new comment, and send it to Claude when it says so; `failure` when it could not be sent.
+   * `version`: the one the editor holds — the element's id is of that source, past the person's saves.
+   */
+  onComment?: ((draft: CommentDraft, version: number) => Promise<{ failure?: string }>) | undefined;
+  /**
+   * The grant root of a version (`jaira-artifact://<token>/`): where a file the opened version does not
+   * hold — an artboard drawn here — is framed from, once a save has made it a version's.
+   */
+  serveVersion?: ((version: number) => Promise<string>) | undefined;
+  /** Resolve a comment, open it again, or take it away. */
+  onSettleComment?: ((id: string, change: { resolved?: boolean; removed?: boolean }) => void) | undefined;
   style?: CSSProperties;
 }
 
@@ -76,9 +114,13 @@ const TOOLS: Array<{ tool: CanvasTool; label: string; key: string; path: string 
   { tool: "oval", label: "Oval", key: "O", path: "M4 12a8 6 0 1 0 16 0a8 6 0 1 0-16 0" },
   { tool: "arrow", label: "Arrow", key: "Shift+L", path: "M5 19L19 5M10 5h9v9" },
   { tool: "line", label: "Line", key: "L", path: "M5 19L19 5" },
+  { tool: "comment", label: "Comment", key: "C", path: "M4 5h16v11H9l-5 4z" },
 ];
 
-const SHORTCUT: Record<string, CanvasTool> = { v: "pointer", h: "hand", t: "text", a: "artboard", n: "note", p: "pen", r: "rect", o: "oval", l: "line" };
+const SHORTCUT: Record<string, CanvasTool> = { v: "pointer", h: "hand", t: "text", a: "artboard", n: "note", p: "pen", r: "rect", o: "oval", l: "line", c: "comment" };
+
+/** The colour of a running artboard's ring and its controls. */
+const RUN = "#0f7a45";
 
 /** `canvas.json` as the editor holds it; its other keys ride along untouched. */
 function readIndex(text: string | undefined): CanvasIndex & Record<string, unknown> {
@@ -131,7 +173,7 @@ return {};
 `;
 }
 
-export function CanvasEditor({ files: initial, base: initialBase, frames, onSave, onReload, onExport, onClose, style }: CanvasEditorProps): JSX.Element {
+export function CanvasEditor({ files: initial, base: initialBase, frames, onSave, onReload, onExport, comments = [], onComment, serveVersion, onSettleComment, style }: CanvasEditorProps): JSX.Element {
   const [index, setIndex] = useState(() => readIndex(initial["project/canvas.json"]));
   const [sources, setSources] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(initial).filter(([p]) => p.endsWith(".dc.html"))));
   const [base, setBase] = useState(initialBase);
@@ -142,26 +184,100 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [editingText, setEditingText] = useState<{ file: string; id: number; rect: Rect; text: string } | { note: string; text: string } | null>(null);
   const [status, setStatus] = useState<{ tone: "saved" | "saving" | "refused" | "error"; words: string } | null>(null);
-  const [tab, setTab] = useState<"properties" | "tweaks" | "layers">("properties");
-  const [playing, setPlaying] = useState<string | null>(null);
+  const [tab, setTab] = useState<"properties" | "tweaks" | "layers" | "comments">("properties");
+  /**
+   * The artboards RUNNING where they sit (`play`): the design's own handlers, inputs and links are live,
+   * as in the app it shows; every other artboard is edited around them. Only an interactive one runs.
+   */
+  const [running, setRunning] = useState<ReadonlySet<string>>(new Set());
+  /** The artboard running on its own, filling the editor's box (⤢). */
+  const [full, setFull] = useState<string | null>(null);
+  const fullBox = useRef<HTMLDivElement | null>(null);
+  /** The comment being written, at its pin. */
+  const [draft, setDraft] = useState<CommentDraft | null>(null);
+  /** The comment whose pin was opened. */
+  const [openPin, setOpenPin] = useState<string | null>(null);
+  const [showResolved, setShowResolved] = useState(false);
+  /** The pin a comment's box opens against: the one being written, or the one opened. */
+  const pinRef = useRef<HTMLButtonElement | null>(null);
+  const modeOf = (file: string): "play" | "edit" => (running.has(file) || full === file ? "play" : "edit");
+  /**
+   * A run is a trial: an artboard that stops is drawn again from its source, its frame loaded afresh.
+   * Left as the run left it, it kept the run's state and scroll — an input focused near the edge scrolls
+   * the page — and the editor picked nothing where the person pressed. Counted per artboard, as its key.
+   */
+  const [fresh, setFresh] = useState<Record<string, number>>({});
+  const wasRunning = useRef<ReadonlySet<string>>(running);
+  useEffect(() => {
+    const stopped = [...wasRunning.current].filter((file) => !running.has(file));
+    wasRunning.current = running;
+    if (stopped.length > 0) setFresh((was) => ({ ...was, ...Object.fromEntries(stopped.map((file) => [file, (was[file] ?? 0) + 1])) }));
+  }, [running]);
   const frameEls = useRef(new Map<string, HTMLIFrameElement>());
+  /**
+   * Where each artboard's frame loads from: the opened version's grant (`frames`), or — for one drawn
+   * here, which that grant does not hold — the grant of the version that first saved it.
+   */
+  const [roots, setRoots] = useState<Record<string, string>>({});
+  /**
+   * The text each frame's grant serves, by path. A frame that loads again (back from the full view, a
+   * remount) gets the grant's text, which is behind the person's saves; it is handed the editor's.
+   */
+  const granted = useRef<Record<string, string>>(Object.fromEntries(Object.entries(initial).filter(([path]) => path.endsWith(".dc.html"))));
+  const servable = (file: string): boolean => roots[file] !== undefined || initial[`project/${file}`] !== undefined;
   const board = useRef<HTMLDivElement | null>(null);
-
-  // Opened, the canvas is fitted into what the board shows of it: in a conversation's column the board
-  // is narrow, and a fixed place put the artboards behind the properties panel.
+  /**
+   * The editor's own width. Narrow — a conversation's column, the side panel — the properties panel is
+   * closed and opened over the board on demand (Claude Design's own toggle, Ctrl+\): drawn beside a
+   * board in 500 px it pushed the board and the top bar's controls out of the column.
+   */
+  const shellBox = useRef<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  const [panelOpen, setPanelOpen] = useState(false);
+  useEffect(() => {
+    const el = shellBox.current;
+    if (el === null || typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => setWidth(el.clientWidth));
+    watch.observe(el);
+    setWidth(el.clientWidth);
+    return () => watch.disconnect();
+  }, []);
+  const narrow = width > 0 && width < 760;
   useEffect(() => {
     const el = board.current;
+    if (el === null) return;
+    if (!moved.current) fitNow.current();
+    if (typeof ResizeObserver === "undefined") return;
+    const watch = new ResizeObserver(() => {
+      if (!moved.current) fitNow.current();
+    });
+    watch.observe(el);
+    return () => watch.disconnect();
+  }, [full]);
+
+  /**
+   * The person has panned or zoomed since the last fit: the view is theirs, and stays where they put it
+   * when the board's box changes size. Until then the canvas is fitted again as the box changes — it
+   * opens in a column that is still being laid out (narrow, the panel closes after the first measure),
+   * and a fit made once, from the first width, left the artboards wider than the board.
+   */
+  const moved = useRef(false);
+  /** Every artboard in what the board shows, 24 px clear, between 5% and 100%; never from a box not yet measured. */
+  const fit = (): void => {
+    const el = board.current;
     const boxes = Object.values(index.boards);
-    if (el === null || boxes.length === 0) return;
+    if (el === null || boxes.length === 0 || el.clientWidth <= 0 || el.clientHeight <= 0) return;
+    moved.current = false;
     const x = Math.min(...boxes.map((b) => b.x));
     const y = Math.min(...boxes.map((b) => b.y)) - 24;
     const w = Math.max(...boxes.map((b) => b.x + b.w)) - x;
     const h = Math.max(...boxes.map((b) => b.y + b.h)) - y;
-    const z = Math.min(1, (el.clientWidth - 48) / Math.max(w, 1), (el.clientHeight - 48) / Math.max(h, 1));
+    const room = (side: number): number => Math.max(side - 48, side / 2);
+    const z = Math.max(0.05, Math.min(1, room(el.clientWidth) / Math.max(w, 1), room(el.clientHeight) / Math.max(h, 1)));
     setView({ z, x: (el.clientWidth - w * z) / 2 - x * z, y: (el.clientHeight - h * z) / 2 - y * z });
-    // Once, as it opens: after that the view is the person's.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  };
+  const fitNow = useRef(fit);
+  fitNow.current = fit;
 
   // --- edits ------------------------------------------------------------------------------------
 
@@ -189,6 +305,17 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
           if ("version" in answer) {
             setBase(answer.version);
             setDirty(new Set());
+            // An artboard drawn here is a file of this version now: framed from its grant.
+            for (const [path, text] of Object.entries(changes)) {
+              const file = path.replace(/^project\//, "");
+              if (text === null || !path.endsWith(".dc.html") || servable(file) || serveVersion === undefined) continue;
+              void serveVersion(answer.version)
+                .then((root) => {
+                  granted.current[path] = text;
+                  setRoots((was) => ({ ...was, [file]: root }));
+                })
+                .catch(() => undefined);
+            }
             setStatus({ tone: "saved", words: `Saved · your edit is v${answer.version}` });
           } else {
             setStatus({ tone: "refused", words: `Claude changed ${answer.files.map((f) => f.replace(/^project\//, "")).join(", ")} meanwhile — reload to edit the newer version` });
@@ -205,16 +332,24 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     const onMessage = (event: MessageEvent): void => {
       const file = [...frameEls.current.entries()].find(([, el]) => el.contentWindow === event.source)?.[0];
       if (file === undefined) return;
-      const data = event.data as { type?: string; id?: number; rect?: Rect; tag?: string; style?: string; text?: string | null; href?: string };
+      const data = event.data as { type?: string; id?: number; rect?: Rect; at?: { x: number; y: number }; tag?: string; style?: string; text?: string | null; href?: string };
       if (data.type === "dc:ready") {
         // The frame's runtime is listening only once it has drawn — a mode sent at `load` can arrive
         // before that — so every `dc:ready` is answered with what the frame should be.
         const w = frameEls.current.get(file)?.contentWindow;
-        w?.postMessage({ type: "dc:mode", mode: playing === file ? "play" : "edit" }, "*");
+        w?.postMessage({ type: "dc:mode", mode: modeOf(file) }, "*");
         if (selection?.kind === "element" && selection.file === file) w?.postMessage({ type: "dc:select", id: selection.id }, "*");
         return;
       }
       if (data.type === "dc:pick" && typeof data.id === "number" && data.rect !== undefined) {
+        if (tool === "comment" && onComment !== undefined) {
+          // A pin where the press landed, over the element there.
+          const at = data.at ?? { x: data.rect.x, y: data.rect.y };
+          const own = typeof data.text === "string" && data.text.trim() !== "" ? { text: data.text.trim().slice(0, 120) } : {};
+          setOpenPin(null);
+          setDraft({ file, x: Math.round(at.x), y: Math.round(at.y), element: { id: data.id, tag: data.tag ?? "div", ...own }, text: "", toClaude: true });
+          return;
+        }
         if (tool === "text" && typeof data.text === "string") {
           setEditingText({ file, id: data.id, rect: data.rect, text: data.text });
           return;
@@ -223,7 +358,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       } else if (data.type === "dc:dblclick" && typeof data.id === "number" && data.rect !== undefined) {
         // Only an element holding one literal text can be retyped (`editText`).
         if (typeof data.text === "string") setEditingText({ file, id: data.id, rect: data.rect, text: data.text });
-      } else if (data.type === "dc:moved") {
+      } else if (data.type === "dc:moved" && tool !== "comment") {
         // A drag the page drew as it happened, written into the source (`applyMove`): the parent's size
         // kept, the siblings pinned, the element placed where it was dropped.
         const moved = event.data as Moved;
@@ -233,14 +368,28 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         // The selected element moved under a re-render or a resize: its box follows.
         const rects = (event.data as { rects?: Record<string, Rect> }).rects ?? {};
         setSelection((was) => (was?.kind === "element" && was.file === file && rects[String(was.id)] !== undefined ? { ...was, rect: rects[String(was.id)]! } : was));
-      } else if (data.type === "dc:navigate" && typeof data.href === "string" && playing !== null) {
+      } else if (data.type === "dc:navigate" && typeof data.href === "string") {
+        // A link to another artboard moves the run there (format.md, "Links between artboards"): in the
+        // full view the view follows it; on the canvas the target runs in place, brought into view.
         const target = data.href.replace(/^\/?project\//, "");
-        if (index.boards[target] !== undefined) setPlaying(target);
+        if (index.boards[target] === undefined) return;
+        if (full === file) {
+          setFull(target);
+        } else if (running.has(file)) {
+          setRunning((was) => {
+            const next = new Set(was);
+            next.delete(file);
+            next.add(target);
+            return next;
+          });
+          bringIntoView(target);
+        }
       }
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [tool, playing, index, sources, selection]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, running, full, index, sources, selection, onComment]);
 
   // Tell each frame which of its elements is selected, so it reports where that element went.
   const selectedId = selection?.kind === "element" ? `${selection.file}#${String(selection.id)}` : "";
@@ -249,10 +398,12 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
 
-  // Tell every frame what mode it is in: the pointer and text tools edit; nothing else reaches a frame.
+  // Tell every frame what mode it is in: a running one plays; the rest edit (only the pointer, text and
+  // comment tools reach a frame).
   useEffect(() => {
-    for (const [file, el] of frameEls.current) el.contentWindow?.postMessage({ type: "dc:mode", mode: playing === file ? "play" : "edit" }, "*");
-  }, [tool, playing, index]);
+    for (const [file, el] of frameEls.current) el.contentWindow?.postMessage({ type: "dc:mode", mode: modeOf(file) }, "*");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tool, running, full, index]);
 
   // --- keys ----------------------------------------------------------------------------------------
 
@@ -288,9 +439,21 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         return;
       }
       if (e.key === "Escape") {
+        // What runs stops first; then the comment, the selection and the tool are let go.
+        if (running.size > 0 || full !== null) {
+          setRunning(new Set());
+          setFull(null);
+          return;
+        }
+        setDraft(null);
+        setOpenPin(null);
         setSelection(null);
-        setPlaying(null);
         setTool("pointer");
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
+        e.preventDefault();
+        setPanelOpen((was) => !was);
         return;
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
@@ -299,9 +462,29 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [remove, editingText]);
+  }, [remove, editingText, running, full]);
 
   // --- the board's gestures --------------------------------------------------------------------------
+
+  /** Pan so an artboard stands in the middle of the board, at the zoom it is at. */
+  const bringIntoView = (file: string): void => {
+    const el = board.current;
+    const b = index.boards[file];
+    if (el === null || b === undefined) return;
+    moved.current = true;
+    setView((v) => ({ ...v, x: (el.clientWidth - b.w * v.z) / 2 - b.x * v.z, y: (el.clientHeight - b.h * v.z) / 2 - b.y * v.z }));
+  };
+
+  const run = (file: string): void => {
+    setRunning((was) => new Set(was).add(file));
+    if (selection !== null && selection.kind !== "note" && selection.file === file) setSelection(null);
+  };
+  const stop = (file: string): void =>
+    setRunning((was) => {
+      const next = new Set(was);
+      next.delete(file);
+      return next;
+    });
 
   /** A pointer's place in board space. */
   const at = (e: { clientX: number; clientY: number }): { x: number; y: number } => {
@@ -313,6 +496,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     const el = board.current;
     if (el === null) return;
     const onWheel = (e: WheelEvent): void => {
+      moved.current = true;
       e.preventDefault();
       setView((v) => {
         if (!e.ctrlKey) return { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY };
@@ -347,9 +531,11 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       setTool("pointer");
       return;
     }
-    if (tool === "pointer") {
-      // On the board itself, not on a frame or note: nothing selected, and a drag pans.
+    if (tool === "pointer" || tool === "comment") {
+      // On the board itself, not on a frame or note: nothing selected, no comment open, and a drag pans.
       setSelection(null);
+      setDraft(null);
+      setOpenPin(null);
       setGesture({ kind: "pan", from: { x: e.clientX, y: e.clientY }, view });
       return;
     }
@@ -360,6 +546,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     if (gesture === null) return;
     const p = at(e);
     if (gesture.kind === "pan") {
+      moved.current = true;
       setView({ ...gesture.view, x: gesture.view.x + e.clientX - gesture.from.x, y: gesture.view.y + e.clientY - gesture.from.y });
     } else if (gesture.kind === "moveBoard") {
       const dx = p.x - gesture.from.x;
@@ -449,32 +636,60 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
 
   // --- drawing ---------------------------------------------------------------------------------------
 
-  const frameSrc = (file: string): string => `${frames.replace(/\/+$/, "")}/project/${file.split("/").map(encodeURIComponent).join("/")}`;
+  const frameSrc = (file: string): string => `${(roots[file] ?? frames).replace(/\/+$/, "")}/project/${file.split("/").map(encodeURIComponent).join("/")}`;
+  /** Hand a frame that has just loaded the editor's text, when its grant serves an older one. */
+  const handSource = (file: string, w: Window | null | undefined): void => {
+    if (w !== null && w !== undefined && sourceOf(file) !== granted.current[`project/${file}`]) w.postMessage({ type: "dc:source", text: sourceOf(file) }, "*");
+  };
   const order = (index.order ?? []).filter((f) => index.boards[f] !== undefined);
-  const layerOn = tool !== "pointer" && tool !== "text";
+  const layerOn = tool !== "pointer" && tool !== "text" && tool !== "comment";
+  const interactive = order.filter((f) => index.boards[f]!.is_interactive === true);
+  /** Numbered as they were written: a pin keeps its number when others are resolved. */
+  const numbered = comments.map((c, i) => ({ ...c, n: i + 1 })).filter((c) => index.boards[c.file] !== undefined);
+  const shownPins = numbered.filter((c) => showResolved || c.resolvedAt === undefined);
+  const openComment = openPin !== null ? numbered.find((c) => c.id === openPin) : undefined;
 
-  if (playing !== null && index.boards[playing] !== undefined) {
-    const b = index.boards[playing]!;
+  const submitDraft = (): void => {
+    if (draft === null || onComment === undefined || draft.text.trim() === "") return;
+    const sent = draft;
+    setDraft(null);
+    void onComment(sent, base)
+      .then((answer) => {
+        if (answer.failure !== undefined) setStatus({ tone: "error", words: `Comment kept, not sent to Claude: ${answer.failure}` });
+      })
+      .catch((e: unknown) => setStatus({ tone: "error", words: `Comment not kept: ${e instanceof Error ? e.message : String(e)}` }));
+  };
+
+  if (full !== null && index.boards[full] !== undefined) {
+    const b = index.boards[full]!;
     return (
-      <div style={{ ...shell, ...style }}>
+      <div ref={fullBox} style={{ ...shell, ...style }}>
         <div style={bar}>
-          <button type="button" style={button} onClick={() => setPlaying(null)}>
+          <button type="button" style={button} onClick={() => setFull(null)}>
             ← Back to the canvas
           </button>
-          <span style={{ ...barText, fontWeight: 600 }}>▶ {b.title ?? playing}</span>
+          <span style={{ ...barText, fontWeight: 600, color: RUN }}>Running · {b.title ?? full}</span>
+          <span style={{ flex: 1 }} />
+          <button type="button" style={button} title="The whole screen" onClick={() => void fullBox.current?.requestFullscreen().catch(() => undefined)}>
+            Full screen
+          </button>
         </div>
-        <div style={{ flex: 1, overflow: "auto", background: "#eceef3", display: "flex", justifyContent: "center", padding: 24 }}>
+        <div style={{ flex: 1, overflow: "auto", background: "#eceef3", display: "flex", justifyContent: "center", padding: b.expand === "fill" ? 0 : 24 }}>
           <iframe
-            key={playing}
+            key={full}
             ref={(el) => {
-              if (el !== null) frameEls.current.set(playing, el);
+              if (el !== null) frameEls.current.set(full, el);
             }}
-            title={b.title ?? playing}
-            src={frameSrc(playing)}
+            title={b.title ?? full}
+            src={frameSrc(full)}
             sandbox="allow-scripts allow-same-origin allow-popups"
             allow="clipboard-write"
-            onLoad={(e) => e.currentTarget.contentWindow?.postMessage({ type: "dc:mode", mode: "play" }, "*")}
-            style={{ width: b.expand === "fill" ? "100%" : b.w, height: b.h, border: 0, background: "#fff", flexShrink: 0 }}
+            onLoad={(e) => {
+              const w = e.currentTarget.contentWindow;
+              w?.postMessage({ type: "dc:mode", mode: "play" }, "*");
+              handSource(full, w);
+            }}
+            style={{ width: b.expand === "fill" ? "100%" : b.w, height: b.expand === "fill" ? "100%" : b.h, border: 0, background: "#fff", flexShrink: 0 }}
           />
         </div>
       </div>
@@ -482,21 +697,38 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   }
 
   return (
-    <div style={{ ...shell, ...style }}>
-      <div style={bar}>
-        <span style={{ ...barText, fontWeight: 600 }}>{index.title ?? "Canvas"}</span>
-        <span style={{ ...barText, color: status?.tone === "refused" || status?.tone === "error" ? "#d6453d" : "#5a5f7a" }}>{status?.words ?? (dirty.size > 0 ? "Unsaved" : `v${base}`)}</span>
+    <div ref={shellBox} style={{ ...shell, ...style }}>
+      {/*
+        One line, always the same height: a bar that wrapped grew and shrank as the status changed and
+        controls came and went, and every change of the board's height fitted the canvas again under the
+        pointer. The words give way first (an ellipsis, the whole in the tooltip); past that it scrolls.
+      */}
+      <div style={{ ...bar, overflowX: "auto", scrollbarWidth: "thin" }}>
+        <span style={{ ...barText, ...shrinks, flexShrink: 2, fontWeight: 600 }} title={index.title ?? "Canvas"}>
+          {index.title ?? "Canvas"}
+        </span>
+        <span style={{ ...barText, ...shrinks, color: status?.tone === "refused" || status?.tone === "error" ? "#d6453d" : "#5a5f7a" }} title={status?.words}>
+          {status?.words ?? (dirty.size > 0 ? "Unsaved" : `v${base}`)}
+        </span>
         {status?.tone === "refused" ? (
           <button type="button" style={button} onClick={onReload}>
             Reload
           </button>
         ) : null}
         <span style={{ flex: 1 }} />
+        {interactive.length > 0 ? (
+          running.size > 0 ? (
+            <button type="button" style={{ ...button, background: RUN, borderColor: RUN, color: "#fff" }} title="Stop every running artboard (Esc)" onClick={() => setRunning(new Set())}>
+              ■ Stop
+            </button>
+          ) : (
+            <button type="button" style={{ ...button, color: RUN }} title="Run every interactive artboard where it sits" onClick={() => setRunning(new Set(interactive))}>
+              ▶ Run canvas
+            </button>
+          )
+        ) : null}
         {selection?.kind === "board" || selection?.kind === "element" ? (
           <>
-            <button type="button" style={button} onClick={() => setPlaying(selection.file)}>
-              ▶ Play
-            </button>
             {onExport !== undefined ? (
               <>
                 <button type="button" style={button} onClick={() => onExport(selection.file, "png", { width: index.boards[selection.file]!.w, height: index.boards[selection.file]!.h })}>
@@ -509,16 +741,19 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
             ) : null}
           </>
         ) : null}
+        <button type="button" style={button} onClick={fit} title="See every artboard">
+          Fit
+        </button>
         <span style={{ ...barText, minWidth: 40, textAlign: "right" }}>{Math.round(view.z * 100)}%</span>
-        {onClose !== undefined ? (
-          <button type="button" style={button} onClick={onClose}>
-            Done
+        {narrow ? (
+          <button type="button" style={{ ...button, background: panelOpen ? "var(--panel-3, #e5e8f1)" : button.background }} aria-label="Properties panel" aria-pressed={panelOpen} title="Properties, tweaks, layers and comments (Ctrl+\)" onClick={() => setPanelOpen((was) => !was)}>
+            Panel
           </button>
         ) : null}
       </div>
-      <div style={{ display: "flex", flex: 1, minHeight: 0 }}>
+      <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
         <div role="toolbar" aria-label="Tools" aria-orientation="vertical" style={tools}>
-          {TOOLS.map((t) => (
+          {TOOLS.filter((t) => t.tool !== "comment" || onComment !== undefined).map((t) => (
             <button
               key={t.tool}
               type="button"
@@ -534,7 +769,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
             </button>
           ))}
         </div>
-        <div ref={board} style={{ position: "relative", flex: 1, minWidth: 280, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
+        <div ref={board} style={{ position: "relative", flex: 1, minWidth: narrow ? 0 : 280, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
           {/* Under the frames and notes: a press here pans, and empties the selection. */}
           <div onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "default" }} />
           <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
@@ -585,9 +820,27 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                     style={{ position: "absolute", left: 0, bottom: "100%", paddingBottom: 6, fontSize: 13 / Math.max(view.z, 0.25), lineHeight: 1.2, color: chosen ? "#4a4fd1" : "#5a5f7a", whiteSpace: "nowrap", cursor: "move", userSelect: "none", display: "flex", gap: 6, alignItems: "center" }}
                   >
                     {b.is_interactive === true ? <span style={{ width: 8, height: 8, borderRadius: 4, background: "#4a4fd1", display: "inline-block" }} /> : null}
-                    {b.title ?? file.replace(/\.dc\.html$/, "")}
+                    <span style={running.has(file) ? { color: RUN, fontWeight: 600 } : undefined}>
+                      {b.title ?? file.replace(/\.dc\.html$/, "")}
+                      {running.has(file) ? " · running" : ""}
+                    </span>
+                    {b.is_interactive === true ? (
+                      <RunControls
+                        running={running.has(file)}
+                        onRun={() => run(file)}
+                        onStop={() => stop(file)}
+                        onFull={() => {
+                          stop(file);
+                          setFull(file);
+                        }}
+                      />
+                    ) : null}
                   </div>
+                  {!servable(file) ? (
+                    <div style={{ width: b.w, height: b.h, background: "#fff", display: "grid", placeItems: "center", color: "#5a5f7a", fontSize: 13 / Math.max(view.z, 0.25), outline: chosen ? "2px solid #4a4fd1" : "none" }}>{dirty.size > 0 ? "Saving the new artboard…" : "Opening…"}</div>
+                  ) : (
                   <iframe
+                    key={`${file}#${String(fresh[file] ?? 0)}`}
                     ref={(el) => {
                       if (el !== null) frameEls.current.set(file, el);
                       else frameEls.current.delete(file);
@@ -598,12 +851,23 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                     allow="clipboard-write"
                     onLoad={(e) => {
                       const w = e.currentTarget.contentWindow;
-                      w?.postMessage({ type: "dc:mode", mode: "edit" }, "*");
-                      // A file changed here before the frame first loaded it: hand it the text it should show.
-                      if (dirty.has(`project/${file}`)) w?.postMessage({ type: "dc:source", text: sourceOf(file) }, "*");
+                      w?.postMessage({ type: "dc:mode", mode: modeOf(file) }, "*");
+                      // Changed here since its grant's version: hand it the text it should show.
+                      handSource(file, w);
                     }}
-                    style={{ width: b.w, height: b.h, border: 0, display: "block", background: "#fff", pointerEvents: layerOn ? "none" : "auto", outline: chosen ? "2px solid #4a4fd1" : "none", borderRadius: b.radius ?? 0 }}
+                    style={{
+                      width: b.w,
+                      height: b.h,
+                      border: 0,
+                      display: "block",
+                      background: "#fff",
+                      pointerEvents: layerOn && !running.has(file) ? "none" : "auto",
+                      outline: running.has(file) ? `${2 / view.z}px solid ${RUN}` : chosen ? "2px solid #4a4fd1" : "none",
+                      boxShadow: running.has(file) ? `0 0 0 ${6 / view.z}px rgba(15,122,69,.14)` : "none",
+                      borderRadius: b.radius ?? 0,
+                    }}
                   />
+                  )}
                   {selection?.kind === "element" && selection.file === file ? (
                     <div style={{ position: "absolute", left: selection.rect.x, top: selection.rect.y, width: selection.rect.width, height: selection.rect.height, outline: `${1.5 / view.z}px solid #4a4fd1`, pointerEvents: "none" }} />
                   ) : null}
@@ -639,15 +903,57 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               );
             })}
             {gesture?.kind === "draw" ? <DrawingPreview gesture={gesture} /> : null}
+            {shownPins.map((c) => {
+              const b = index.boards[c.file]!;
+              return (
+                <Pin
+                  key={c.id}
+                  {...(openPin === c.id && draft === null ? { ref: pinRef } : {})}
+                  n={c.n}
+                  at={{ x: b.x + c.x, y: b.y + c.y }}
+                  zoom={view.z}
+                  open={openPin === c.id}
+                  resolved={c.resolvedAt !== undefined}
+                  onOpen={() => {
+                    setDraft(null);
+                    setOpenPin(openPin === c.id ? null : c.id);
+                  }}
+                />
+              );
+            })}
+            {draft !== null && index.boards[draft.file] !== undefined ? (
+              <>
+                <Pin ref={pinRef} n={numbered.length + 1} at={{ x: index.boards[draft.file]!.x + draft.x, y: index.boards[draft.file]!.y + draft.y }} zoom={view.z} open resolved={false} onOpen={() => undefined} />
+              </>
+            ) : null}
           </div>
+          {/* A comment's box: a float against its pin, so a narrow board never clips it. */}
+          {draft !== null && index.boards[draft.file] !== undefined ? (
+            <Popover anchor={pinRef} side="right" align="start" gap={8} style={{ width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
+              <CommentBox draft={draft} onChange={setDraft} onSubmit={submitDraft} onCancel={() => setDraft(null)} />
+            </Popover>
+          ) : null}
+          {openComment !== undefined && draft === null ? (
+            <Popover anchor={pinRef} side="right" align="start" gap={8} style={{ width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
+              <CommentCard
+                comment={openComment}
+                boardTitle={index.boards[openComment.file]!.title ?? openComment.file}
+                onClose={() => setOpenPin(null)}
+                onSettle={(change) => {
+                  onSettleComment?.(openComment.id, change);
+                  if (change.removed === true || change.resolved === true) setOpenPin(null);
+                }}
+              />
+            </Popover>
+          ) : null}
           {/* Over the frames while a drawing tool is held, so a frame never takes the gesture. */}
           {layerOn ? <div onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "crosshair" }} /> : null}
         </div>
-        <aside style={panel}>
+        <aside style={narrow ? { ...panel, display: panelOpen ? "flex" : "none", position: "absolute", top: 0, right: 0, bottom: 0, boxShadow: "-8px 0 24px rgba(18,21,38,.14)" } : panel}>
           <div role="tablist" style={{ display: "flex", borderBottom: "1px solid var(--line, #e0e3ec)", padding: "0 10px" }}>
-            {(["properties", "tweaks", "layers"] as const).map((id) => (
+            {(onComment !== undefined ? (["properties", "tweaks", "layers", "comments"] as const) : (["properties", "tweaks", "layers"] as const)).map((id) => (
               <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => setTab(id)} style={{ ...tabButton, color: tab === id ? "var(--text, #121526)" : "var(--dim, #5a5f7a)", fontWeight: tab === id ? 600 : 400, boxShadow: tab === id ? "inset 0 -2px 0 var(--accent, #4a4fd1)" : "none" }}>
-                {id === "properties" ? "Properties" : id === "tweaks" ? "Tweaks" : "Layers"}
+                {id === "properties" ? "Properties" : id === "tweaks" ? "Tweaks" : id === "layers" ? "Layers" : `Comments${numbered.some((c) => c.resolvedAt === undefined) ? ` ${String(numbered.filter((c) => c.resolvedAt === undefined).length)}` : ""}`}
               </button>
             ))}
           </div>
@@ -686,11 +992,190 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                 onChange={(file, name, value) => changeSource(file, setPropDefault(sourceOf(file), name, value))}
               />
             ) : (
-              <Layers order={order} index={index} selection={selection} onPick={(s) => setSelection(s)} />
+              tab === "layers" ? (
+                <Layers order={order} index={index} selection={selection} onPick={(s) => setSelection(s)} />
+              ) : (
+                <CommentList
+                  comments={numbered}
+                  index={index}
+                  showResolved={showResolved}
+                  onShowResolved={setShowResolved}
+                  onPick={(c) => {
+                    setDraft(null);
+                    setOpenPin(c.id);
+                    if (c.resolvedAt !== undefined) setShowResolved(true);
+                    bringIntoView(c.file);
+                  }}
+                />
+              )
             )}
           </div>
         </aside>
       </div>
+    </div>
+  );
+}
+
+/** An interactive artboard's controls on its label: ▶ runs it where it sits; running, ■ stops it and ⤢ fills the editor with it. */
+function RunControls({ running, onRun, onStop, onFull }: { running: boolean; onRun: () => void; onStop: () => void; onFull: () => void }): JSX.Element {
+  // The label drags its artboard: a press on a control is the control's.
+  const own = { onPointerDown: (e: ReactPointerEvent) => e.stopPropagation() };
+  const chip: CSSProperties = { font: "inherit", fontSize: "0.85em", lineHeight: 1.25, padding: "0 0.4em", borderRadius: "0.3em", border: `1px solid ${RUN}`, cursor: "pointer" };
+  return running ? (
+    <>
+      <button type="button" {...own} onClick={onStop} title="Stop running it" aria-label="Stop" style={{ ...chip, background: RUN, color: "#fff" }}>
+        ■
+      </button>
+      <button type="button" {...own} onClick={onFull} title="Run it on its own, filling the editor" aria-label="Run it on its own" style={{ ...chip, background: "#fff", color: RUN }}>
+        ⤢
+      </button>
+    </>
+  ) : (
+    <button type="button" {...own} onClick={onRun} title="Run it where it sits" aria-label="Run" style={{ ...chip, background: "#fff", color: RUN }}>
+      ▶
+    </button>
+  );
+}
+
+/** A comment's pin: its point at the place it was put, its number in it. */
+function Pin({ n, at, zoom, open, resolved, onOpen, ref }: { n: number; at: { x: number; y: number }; zoom: number; open: boolean; resolved: boolean; onOpen: () => void; ref?: Ref<HTMLButtonElement> }): JSX.Element {
+  // Drawn after the frames, so over them: no z-index (floats are popover.tsx's).
+  return (
+    <button
+      ref={ref}
+      type="button"
+      aria-label={`Comment ${String(n)}`}
+      onPointerDown={(e) => e.stopPropagation()}
+      onClick={onOpen}
+      style={{
+        position: "absolute",
+        left: at.x,
+        top: at.y,
+        width: 24,
+        height: 24,
+        // The pin's point is its bottom-left corner, at the place.
+        transform: `scale(${1 / zoom}) translateY(-100%)`,
+        transformOrigin: "0 0",
+        borderRadius: "12px 12px 12px 2px",
+        border: "2px solid #fff",
+        background: resolved ? "#949cad" : "#2563c7",
+        color: "#fff",
+        font: "600 11px/20px system-ui, sans-serif",
+        textAlign: "center",
+        padding: 0,
+        cursor: "pointer",
+        boxShadow: open ? "0 0 0 3px rgba(37,99,199,.35), 0 2px 6px rgba(18,21,38,.3)" : "0 2px 6px rgba(18,21,38,.3)",
+      }}
+    >
+      {n}
+    </button>
+  );
+}
+
+const card: CSSProperties = { width: "100%", boxSizing: "border-box", gridTemplateColumns: "minmax(0, 1fr)", background: "var(--panel, #fff)", color: "var(--text, #121526)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 8, boxShadow: "0 10px 28px rgba(18,21,38,.2)", padding: 10, display: "grid", gap: 8, fontSize: 12.5 };
+
+/** What the element under a comment is called: its tag and its own words. */
+const elementLabel = (element: CanvasComment["element"]): string => (element === undefined ? "" : `<${element.tag}>${element.text !== undefined ? ` “${element.text.slice(0, 40)}”` : ""}`);
+
+/** A comment being written: its words, whether Claude takes it as a request, and Comment. */
+function CommentBox({ draft, onChange, onSubmit, onCancel }: { draft: CommentDraft; onChange: (next: CommentDraft) => void; onSubmit: () => void; onCancel: () => void }): JSX.Element {
+  return (
+    <div style={card} role="dialog" aria-label="New comment">
+      {draft.element !== undefined ? <div style={{ fontSize: 11, color: "var(--dim, #5a5f7a)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>On {elementLabel(draft.element)}</div> : null}
+      <textarea
+        autoFocus
+        aria-label="Comment"
+        placeholder="Write a comment"
+        value={draft.text}
+        onChange={(e) => onChange({ ...draft, text: e.currentTarget.value })}
+        onKeyDown={(e) => {
+          if (e.key === "Escape") onCancel();
+          if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) onSubmit();
+        }}
+        rows={3}
+        style={{ font: "inherit", fontSize: 12.5, resize: "vertical", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "6px 7px", background: "var(--panel, #fff)", color: "inherit" }}
+      />
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 5, color: "var(--dim, #5a5f7a)", cursor: "pointer" }} title="Claude takes it as a request, in this conversation; unticked, it is a note for people">
+          <input type="checkbox" checked={draft.toClaude} onChange={(e) => onChange({ ...draft, toClaude: e.currentTarget.checked })} />
+          Send to Claude
+        </label>
+        <span style={{ flex: 1 }} />
+        <button type="button" style={button} onClick={onCancel}>
+          Cancel
+        </button>
+        <button type="button" style={{ ...button, background: "#2563c7", borderColor: "#2563c7", color: "#fff", opacity: draft.text.trim() === "" ? 0.5 : 1 }} disabled={draft.text.trim() === ""} onClick={onSubmit}>
+          Comment
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** An opened pin: what was written, where it went, and Resolve / Delete. */
+function CommentCard({ comment: c, boardTitle, onClose, onSettle }: { comment: CanvasComment & { n: number }; boardTitle: string; onClose: () => void; onSettle: (change: { resolved?: boolean; removed?: boolean }) => void }): JSX.Element {
+  return (
+    <div style={card} role="dialog" aria-label={`Comment ${String(c.n)}`}>
+      <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 11, color: "var(--dim, #5a5f7a)" }}>
+        <span style={{ fontWeight: 600, color: "var(--text, #121526)" }}>#{c.n}</span>
+        <span style={{ flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+          {boardTitle}
+          {c.element !== undefined ? ` · ${elementLabel(c.element)}` : ""}
+        </span>
+        <button type="button" aria-label="Close" onClick={onClose} style={{ ...button, border: 0, padding: "0 4px" }}>
+          ×
+        </button>
+      </div>
+      <div style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>{c.text}</div>
+      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, fontSize: 11, color: "var(--dim, #5a5f7a)" }}>
+        <span>{c.toClaude ? (c.sentAt !== undefined ? `Sent to Claude · ${new Date(c.sentAt).toLocaleString()}` : "For Claude · not sent") : `Note · ${new Date(c.createdAt).toLocaleString()}`}</span>
+        <span style={{ flex: 1 }} />
+        <button type="button" style={button} onClick={() => onSettle({ resolved: c.resolvedAt === undefined })}>
+          {c.resolvedAt === undefined ? "Resolve" : "Reopen"}
+        </button>
+        <button type="button" style={button} onClick={() => onSettle({ removed: true })}>
+          Delete
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/** Every comment, in the order written: a press opens its pin and brings its artboard into view. */
+function CommentList({
+  comments,
+  index,
+  showResolved,
+  onShowResolved,
+  onPick,
+}: {
+  comments: Array<CanvasComment & { n: number }>;
+  index: CanvasIndex;
+  showResolved: boolean;
+  onShowResolved: (show: boolean) => void;
+  onPick: (comment: CanvasComment) => void;
+}): JSX.Element {
+  const shown = comments.filter((c) => showResolved || c.resolvedAt === undefined);
+  const resolved = comments.filter((c) => c.resolvedAt !== undefined).length;
+  return (
+    <div style={{ padding: "8px 10px", display: "grid", gap: 6 }}>
+      {comments.length === 0 ? <p style={{ ...hint, margin: 0 }}>No comments yet. Pick the comment tool (C) and press on an artboard.</p> : null}
+      {shown.map((c) => (
+        <button key={c.id} type="button" onClick={() => onPick(c)} style={{ ...layer, display: "grid", gap: 2, padding: "6px 4px", whiteSpace: "normal", borderBottom: "1px solid var(--line, #e0e3ec)", opacity: c.resolvedAt !== undefined ? 0.6 : 1 }}>
+          <span style={{ fontSize: 11, color: "var(--dim, #5a5f7a)" }}>
+            #{c.n} · {index.boards[c.file]?.title ?? c.file}
+            {c.toClaude ? " · to Claude" : ""}
+            {c.resolvedAt !== undefined ? " · resolved" : ""}
+          </span>
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical" }}>{c.text}</span>
+        </button>
+      ))}
+      {resolved > 0 ? (
+        <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--dim, #5a5f7a)", marginTop: 4 }}>
+          <input type="checkbox" checked={showResolved} onChange={(e) => onShowResolved(e.currentTarget.checked)} />
+          Show {resolved} resolved
+        </label>
+      ) : null}
     </div>
   );
 }
@@ -865,7 +1350,7 @@ function BoardProperties({ file, board: b, onChange, onDelete }: { file: string;
         <Field label="Height" value={String(b.h)} onCommit={(v) => onChange({ h: clamp(Number(v)) })} />
         <Field label="Radius" value={b.radius !== undefined ? String(b.radius) : ""} onCommit={(v) => onChange(v === "" ? { radius: undefined as never } : { radius: Number(v) || 0 })} />
         <Row label="Works">
-          <input type="checkbox" checked={b.is_interactive === true} onChange={(e) => onChange({ is_interactive: e.currentTarget.checked })} aria-label="Its controls respond (Play)" />
+          <input type="checkbox" checked={b.is_interactive === true} onChange={(e) => onChange({ is_interactive: e.currentTarget.checked })} aria-label="Its controls respond: it runs (▶)" />
         </Row>
       </Section>
       <Section title="Remove">
@@ -1039,7 +1524,9 @@ function Segmented({ value, options, onChange }: { value: string; options: Array
 const shell: CSSProperties = { display: "flex", flexDirection: "column", width: "100%", boxSizing: "border-box", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, overflow: "hidden", background: "var(--panel, #fff)", height: 640 };
 const bar: CSSProperties = { display: "flex", alignItems: "center", gap: 8, padding: "5px 8px", borderBottom: "1px solid var(--line, #e0e3ec)", minHeight: 30, boxSizing: "border-box" };
 const barText: CSSProperties = { fontSize: 12, color: "var(--text, #121526)", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const button: CSSProperties = { font: "inherit", fontSize: 11.5, color: "var(--text, #121526)", background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "1px 8px", cursor: "pointer" };
+/** A bar's words that give way to its controls: shortened to an ellipsis rather than wrapped. */
+const shrinks: CSSProperties = { minWidth: 24, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1 };
+const button: CSSProperties = { font: "inherit", fontSize: 11.5, color: "var(--text, #121526)", background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "1px 8px", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" };
 const tools: CSSProperties = { width: 44, flexShrink: 0, borderRight: "1px solid var(--line, #e0e3ec)", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 0", background: "var(--panel, #fff)" };
 const toolButton: CSSProperties = { width: 30, height: 30, borderRadius: 7, display: "grid", placeItems: "center", border: 0, cursor: "pointer" };
 const panel: CSSProperties = { width: 250, flexShrink: 0, borderLeft: "1px solid var(--line, #e0e3ec)", background: "var(--panel, #fff)", display: "flex", flexDirection: "column", minHeight: 0 };

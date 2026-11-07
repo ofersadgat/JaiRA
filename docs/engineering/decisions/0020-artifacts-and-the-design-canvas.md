@@ -174,6 +174,10 @@ written for. Nothing is uploaded and no Claude service is used.
 
 ### 5. The canvas editor
 
+Superseded in part by [0024](0024-canvas-opens-to-edit.md) (2026-11-07). A canvas now opens in this
+editor, not a board you can only look at. Play is ▶ on an interactive artboard, run in place. Comments
+were added.
+
 JaiRA's own editor over `canvas.json` and the `.dc.html` files — "a person should be able to do all the same
 things they can in the claude design canvas":
 

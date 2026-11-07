@@ -51,6 +51,7 @@ const TRACKED: readonly Tracked[] = [
   { table: "module_approvals", collection: "moduleApproval", id: "R.path", task: "NULL" },
   { table: "workspaces", collection: "workspace", id: "R.id", task: "NULL" },
   { table: "drafts", collection: "draft", id: "R.key", task: "R.task_id" },
+  { table: "artifact_comments", collection: "artifactComment", id: "R.id", task: "R.task_id" },
 ];
 
 /** The stamp: this machine's milliseconds, always past the newest in the log — no two changes share one. */
@@ -102,6 +103,24 @@ CREATE TABLE IF NOT EXISTS artifact_versions (
   created_at        INTEGER NOT NULL,
   PRIMARY KEY (task_id, artifact, version)
 );
+-- A comment on a published artifact (a pin on a canvas's artboard): beside the versions, never in them.
+-- element_json: the element the pin was put on, at \`version\` ({id, tag, text?}).
+CREATE TABLE IF NOT EXISTS artifact_comments (
+  id           TEXT PRIMARY KEY,
+  task_id      TEXT NOT NULL,
+  artifact     TEXT NOT NULL,
+  file         TEXT NOT NULL,
+  x            REAL NOT NULL,
+  y            REAL NOT NULL,
+  element_json TEXT,
+  version      INTEGER NOT NULL,
+  text         TEXT NOT NULL,
+  to_claude    INTEGER NOT NULL DEFAULT 0,
+  sent_at      INTEGER,
+  resolved_at  INTEGER,
+  created_at   INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS artifact_comments_of ON artifact_comments(task_id, artifact);
 CREATE TABLE IF NOT EXISTS sync_changes (
   collection TEXT NOT NULL,
   id         TEXT NOT NULL,

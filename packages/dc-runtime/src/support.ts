@@ -204,7 +204,8 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
       const el = named(event.target);
       if (!el) return;
       const n = idOf(el);
-      post({ type: "dc:pick", id: n, rect: rectOf(el), shift: event.shiftKey, ...fromSource(n) });
+      // `at`: where the press landed, in the artboard's own pixels — where a comment's pin is put.
+      post({ type: "dc:pick", id: n, rect: rectOf(el), at: { x: event.clientX + window.scrollX, y: event.clientY + window.scrollY }, shift: event.shiftKey, ...fromSource(n) });
     },
     true,
   );

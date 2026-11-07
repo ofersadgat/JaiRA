@@ -1,7 +1,7 @@
 import { useEffect, useState, type JSX } from "react";
 import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
-import { publishedMime, type PublishedVersion } from "@jaira/shared/browser";
+import { publishedMime, type ArtifactComment, type PublishedVersion } from "@jaira/shared/browser";
 import { invoke } from "@jaira/ui/store";
 import type { PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
@@ -32,7 +32,10 @@ export const surfaceOf = (taskId: string, project: string | undefined): Artifact
  *                    version picker as a segment of the same toggle, in its type
  *   Artifact         a page RUNNING in its frame (the grant is the whole artifact at this version, an
  *                    origin of its own); a document drawn as the conversation draws Markdown; a canvas
- *                    as a board of its artboards, each running (web: the `canvas` island)
+ *                    in its EDITOR at its newest version on a computer (decision 0024, as Claude Design
+ *                    opens one for whoever can save: tools, panels, ▶ on its interactive artboards,
+ *                    comments), and as a board of its artboards where nobody saves — a version a newer
+ *                    one replaced, and the phone
  *   Rendered/Source  the entry file's (a canvas's: its first artboard's) as any value's
  *   the verbs        the title bar's right: open it on its own in the side panel (where a panel can take
  *                    it), and ⇤ into the main view (on a phone, the panel's sheet lowered to its head);
@@ -64,8 +67,8 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
   const [newest, setNewest] = useState<number | null>(null);
   // Brought here on purpose, at the version it was showing: drawn whatever came after it.
   const [opened, setOpened] = useState(fill);
-  /** The canvas open in its editor, in place (a conversation draws inline). */
-  const [editing, setEditing] = useState(false);
+  /** The comments on a canvas (decision 0024), read with it and again after each change. */
+  const [comments, setComments] = useState<ArtifactComment[]>([]);
   /** Bumped to read the artifact again: after the editor saved, or a refused save asked to reload. */
   const [reread, setReread] = useState(0);
   /** The height `fill` measured for the frame. */
@@ -111,6 +114,21 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
     // `project` is derived from `artifacts`, which the surface keeps stable per task.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, published.id, published.kind, published.entry, version, reread, newest === null, superseded]);
+
+  /**
+   * The canvas opens in its editor where a person can save it: a computer, at the newest version (a
+   * save over an older one would only be refused). Newer than `newest` counts too — the person's own saves
+   * move the version past what was read when this opened.
+   */
+  const editing = published.kind === "canvas" && isWeb && !phone && newest !== null && version >= newest;
+  const readComments = (): void =>
+    void invoke("artifact:comments", { taskId, artifact: published.id, ...project })
+      .then(setComments)
+      .catch(() => undefined);
+  useEffect(() => {
+    if (editing) readComments();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editing, taskId, published.id]);
 
   const index = files?.["project/canvas.json"];
   /** What Rendered and Source show: the entry file, or a canvas's first artboard. */
@@ -230,12 +248,26 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
                 if ("version" in answer) setVersions(null);
                 return answer;
               },
+              comments,
+              // A version's grant root: where an artboard drawn in the editor is framed from once saved.
+              serveVersion: async (at: number) => {
+                const granted = await invoke("artifact:serve", { taskId, artifact: published.id, version: at, path: "project/canvas.json", ...project });
+                return granted.url.slice(0, granted.url.lastIndexOf("project/canvas.json"));
+              },
+              // A comment kept, and sent into this conversation when it says so (decision 0024).
+              onComment: async (draft: { file: string; x: number; y: number; element?: { id: number; tag: string; text?: string }; text: string; toClaude: boolean }, at: number) => {
+                const answer = await invoke("artifact:comment", { taskId, artifact: published.id, version: at, ...draft, ...project });
+                readComments();
+                return answer.failure !== undefined ? { failure: answer.failure } : {};
+              },
+              onSettleComment: (id: string, change: { resolved?: boolean; removed?: boolean }) => {
+                void invoke("artifact:settleComment", { taskId, id, ...change, ...project })
+                  .then(readComments)
+                  .catch(() => undefined);
+              },
             }}
             onEvent={(name, value) => {
-              if (name === "close") {
-                setEditing(false);
-                void invoke("artifact:versions", { taskId, artifact: published.id, ...project }).then((list) => setVersion(list.at(-1)?.version ?? version));
-              } else if (name === "reload") {
+              if (name === "reload") {
                 void invoke("artifact:versions", { taskId, artifact: published.id, ...project }).then((list) => {
                   setVersion(list.at(-1)?.version ?? version);
                   setReread((n) => n + 1);
@@ -248,8 +280,8 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
           />
         );
       }
-      // The editor is a computer's: a phone draws the board, every artboard running, and no Edit.
-      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: tall(440) } }} {...(isWeb ? { onEvent: (name: string) => name === "open" && setEditing(true) } : {})} />;
+      // Where nobody saves — an older version, the phone — the board: every artboard drawn, the interactive ones run with ▶.
+      return <Island component="canvas" props={{ index: index ?? "{}", base: frames, style: { height: tall(440) } }} />;
     }
     const box = fill ? { height: room, border: 0, borderRadius: 0, display: "block" } : { height: 420, border: `1px solid ${String(t.v("line"))}`, borderRadius: 6 };
     return (

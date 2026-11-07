@@ -6,8 +6,12 @@
  * The board is JaiRA's; what is inside each frame is the model's artboard, drawn by JaiRA's `.dc.html`
  * runtime (`support.js`). Read here, nothing is changed: pan by dragging the board, zoom with the wheel
  * held with Ctrl (or a trackpad's pinch) or two fingers' pinch on a touch screen, Fit to see every
- * artboard, and double-click an artboard to see it alone
- * at its own size. `onOpen` asks the host for the editor.
+ * artboard, and double-click an artboard to see it alone at its own size.
+ *
+ * Where nobody can save — a version a newer one replaced, the phone — this is what a canvas is drawn as
+ * (decision 0024; on a computer the newest version opens in the editor). An interactive artboard still
+ * RUNS here: ▶ on its label hands it the pointer where it sits, and a link in it moves the run to the
+ * artboard it names.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 
@@ -108,18 +112,27 @@ export interface CanvasBoardProps {
   base: string;
   /** The box the board fills. */
   style?: CSSProperties;
-  /** The host's editor, when there is one to open. */
-  onOpen?: (() => void) | undefined;
   /** Drawn over the board's top edge, right: what the host adds (the editor's toolbar, later). */
   chrome?: ReactNode;
 }
 
-export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardProps): JSX.Element {
+export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): JSX.Element {
   const box = useRef<HTMLDivElement | null>(null);
   const [page, setPage] = useState<string | undefined>(index.launch?.page ?? first(index));
   const [view, setView] = useState<{ x: number; y: number; z: number } | null>(null);
   const [focused, setFocused] = useState<string | null>(index.launch?.view === "focused" ? (index.launch.file ?? null) : null);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
+  /** The interactive artboards running where they sit: the pointer is theirs, not the board's. */
+  const [running, setRunning] = useState<ReadonlySet<string>>(new Set());
+  const frames = useRef(new Map<string, HTMLIFrameElement>());
+  /** An artboard that stops is drawn again from its source (its key): a run is a trial, its state and scroll not kept. */
+  const [fresh, setFresh] = useState<Record<string, number>>({});
+  const wasRunning = useRef<ReadonlySet<string>>(running);
+  useEffect(() => {
+    const stopped = [...wasRunning.current].filter((file) => !running.has(file));
+    wasRunning.current = running;
+    if (stopped.length > 0) setFresh((was) => ({ ...was, ...Object.fromEntries(stopped.map((file) => [file, (was[file] ?? 0) + 1])) }));
+  }, [running]);
   const extent = useMemo(() => extentOf(index, page), [index, page]);
   const order = useMemo(() => {
     const listed = (index.order ?? []).filter((f) => index.boards[f] !== undefined);
@@ -158,6 +171,38 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
     return () => watch.disconnect();
     // The box is drawn again when an artboard is focused and back: watched from each.
   }, [focused]);
+
+  // A link to another artboard (format.md, "Links between artboards"): opened alone, the view follows it;
+  // running on the board, the run moves to it and it is brought into view.
+  useEffect(() => {
+    const onMessage = (event: MessageEvent): void => {
+      const data = event.data as { type?: string; href?: string } | null;
+      if (data?.type !== "dc:navigate" || typeof data.href !== "string") return;
+      const from = [...frames.current.entries()].find(([, el]) => el.contentWindow === event.source)?.[0];
+      const target = data.href.replace(/^\/?project\//, "");
+      const b = index.boards[target];
+      if (from === undefined || b === undefined) return;
+      if (focused === from) {
+        setFocused(target);
+        return;
+      }
+      if (!running.has(from)) return;
+      setRunning((was) => {
+        const next = new Set(was);
+        next.delete(from);
+        next.add(target);
+        return next;
+      });
+      if (b.page !== undefined && b.page !== page) setPage(b.page);
+      const el = box.current;
+      if (el !== null) {
+        moved.current = true;
+        setView((v) => (v === null ? v : { ...v, x: (el.clientWidth - b.w * v.z) / 2 - b.x * v.z, y: (el.clientHeight - b.h * v.z) / 2 - b.y * v.z }));
+      }
+    };
+    window.addEventListener("message", onMessage);
+    return () => window.removeEventListener("message", onMessage);
+  }, [index, focused, running, page]);
 
   // The wheel: Ctrl (or a pinch, which Chromium reports as Ctrl) zooms about the pointer; else it pans.
   useEffect(() => {
@@ -257,14 +302,14 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
           <span style={{ ...barText, fontWeight: 600 }}>{b.title ?? focused}</span>
           <span style={{ flex: 1 }} />
           {chrome}
-          {onOpen !== undefined ? (
-            <button type="button" style={button} onClick={onOpen}>
-              Edit
-            </button>
-          ) : null}
         </div>
         <div style={{ flex: 1, overflow: "auto", background: "#eceef3", display: "flex", justifyContent: "center", padding: 24 }}>
           <iframe
+            key={focused}
+            ref={(el) => {
+              if (el !== null) frames.current.set(focused, el);
+              else frames.current.delete(focused);
+            }}
             title={b.title ?? focused}
             src={frameSrc(focused)}
             sandbox="allow-scripts allow-same-origin allow-popups"
@@ -295,11 +340,6 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
           Fit
         </button>
         <span style={{ ...barText, minWidth: 40, textAlign: "right" }}>{view === null ? "" : `${Math.round(view.z * 100)}%`}</span>
-        {onOpen !== undefined ? (
-          <button type="button" style={button} onClick={onOpen}>
-            Edit
-          </button>
-        ) : null}
       </div>
       <div
         ref={box}
@@ -324,16 +364,54 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
                   <div key={file} style={{ position: "absolute", left: b.x, top: b.y, width: b.w, height: b.h }} onDoubleClick={() => setFocused(file)}>
                     <div style={{ position: "absolute", left: 0, bottom: "100%", paddingBottom: 6, fontSize: 13 / Math.max(view.z, 0.25), lineHeight: 1.2, color: "#5a5f7a", whiteSpace: "nowrap", display: "flex", gap: 6, alignItems: "center" }}>
                       {b.is_interactive === true ? <span title="Works: its controls respond" style={{ width: 8, height: 8, borderRadius: 4, background: "#4a4fd1", display: "inline-block" }} /> : null}
-                      {b.title ?? file.replace(/\.dc\.html$/, "")}
+                      <span style={running.has(file) ? { color: RUN, fontWeight: 600 } : undefined}>
+                        {b.title ?? file.replace(/\.dc\.html$/, "")}
+                        {running.has(file) ? " · running" : ""}
+                      </span>
+                      {b.is_interactive === true ? (
+                        <button
+                          type="button"
+                          // The board drags under a press; a press here is the button's.
+                          onPointerDown={(e) => e.stopPropagation()}
+                          onClick={() =>
+                            setRunning((was) => {
+                              const next = new Set(was);
+                              if (next.has(file)) next.delete(file);
+                              else next.add(file);
+                              return next;
+                            })
+                          }
+                          title={running.has(file) ? "Stop running it" : "Run it where it sits"}
+                          aria-label={running.has(file) ? "Stop" : "Run"}
+                          style={{ font: "inherit", fontSize: "0.85em", lineHeight: 1.25, padding: "0 0.4em", borderRadius: "0.3em", border: `1px solid ${RUN}`, background: running.has(file) ? RUN : "#fff", color: running.has(file) ? "#fff" : RUN, cursor: "pointer" }}
+                        >
+                          {running.has(file) ? "■" : "▶"}
+                        </button>
+                      ) : null}
                     </div>
                     <iframe
+                      key={`${file}#${String(fresh[file] ?? 0)}`}
+                      ref={(el) => {
+                        if (el !== null) frames.current.set(file, el);
+                        else frames.current.delete(file);
+                      }}
                       title={b.title ?? file}
                       src={frameSrc(file)}
                       sandbox="allow-scripts allow-same-origin allow-popups"
                       allow="clipboard-write"
                       loading="lazy"
-                      // The board pans and zooms under the pointer; an artboard is used opened alone.
-                      style={{ width: b.w, height: b.h, border: 0, display: "block", background: "#fff", pointerEvents: "none", borderRadius: b.radius ?? 0, boxShadow: b.frameless === true ? "none" : "0 1px 3px rgba(18,21,38,.12)" }}
+                      // The board pans and zooms under the pointer; an artboard is used running, or opened alone.
+                      style={{
+                        width: b.w,
+                        height: b.h,
+                        border: 0,
+                        display: "block",
+                        background: "#fff",
+                        pointerEvents: running.has(file) ? "auto" : "none",
+                        borderRadius: b.radius ?? 0,
+                        outline: running.has(file) ? `${2 / view.z}px solid ${RUN}` : "none",
+                        boxShadow: running.has(file) ? `0 0 0 ${6 / view.z}px rgba(15,122,69,.14)` : b.frameless === true ? "none" : "0 1px 3px rgba(18,21,38,.12)",
+                      }}
                     />
                   </div>
                 );
@@ -344,6 +422,9 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
     </div>
   );
 }
+
+/** The colour of a running artboard's ring and its control. */
+const RUN = "#0f7a45";
 
 /** A note as `canvas.json` keeps it: a title over several artboards, a sticky, or a person's shape. */
 function Note({ note: n }: { note: CanvasNote }): JSX.Element | null {

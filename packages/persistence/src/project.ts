@@ -33,6 +33,7 @@ import { ARTIFACT_ROWS, exportRows, fingerprintOf, replayRows, RowLog, rowFiles,
 import { SqliteSessionStore, type OpeningAuthor, type SessionScope } from "./sessionStore";
 import type { JsonValue } from "@declarative-ai/json";
 import { SqliteArtifactStore } from "./artifactStore";
+import { ArtifactCommentStore } from "./artifactComments";
 import { CommandLog } from "./commandLog";
 import { JobStore, type JobRow } from "./jobs";
 import { InteractionStore } from "./interactions";
@@ -73,6 +74,8 @@ export interface Project {
   commands: CommandLog;
   /** The artifact map: logical path → where the bytes went (DESIGN §7.6). */
   artifacts: SqliteArtifactStore;
+  /** Comments on its published artifacts (a canvas's pins). */
+  comments: ArtifactCommentStore;
   /** Process claims and child processes (DESIGN §4.2a). */
   jobs: JobStore;
   /**
@@ -493,6 +496,7 @@ function openAt(
     events: new SqliteEventLog(db, journalDir),
     commands: new CommandLog(db),
     artifacts: new SqliteArtifactStore(db, artifactLog),
+    comments: new ArtifactCommentStore(db),
     jobs,
     interactions: new InteractionStore(db, workspace),
     remotes: new RemoteHandleStore(db, workspace),

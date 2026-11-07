@@ -209,6 +209,7 @@ import {
   syncNow,
   touch,
   TOMBSTONE_KEEP_MS,
+  commentId,
 } from "@jaira/persistence";
 import {
   ApprovalHub,
@@ -781,7 +782,7 @@ import { fanOutHostFor } from "./fanOut";
 import { Fleet, TAILNET_HEALTH } from "./fleet";
 import { designRuntimeSource, type ServedBody } from "./designRuntime";
 import { artifactUrl, filesAt } from "@jaira/runtime";
-import { publishedMime, type PublishedArtifact, type PublishedVersion, type SaveArtifactRequest } from "@jaira/shared";
+import { publishedMime, type AddCommentRequest, type ArtifactComment, type PublishedArtifact, type PublishedVersion, type SaveArtifactRequest } from "@jaira/shared";
 import type { AnnouncePort } from "./lanPairing";
 import type { TailnetPort } from "./tailnet";
 import { Federation } from "./federation";
@@ -12545,6 +12546,63 @@ export class AppService {
     return { version: version.version };
   }
 
+  /** The comments on one published artifact, oldest first (decision 0024). */
+  artifactComments(request: { taskId: string; artifact: string; project?: ProjectRef }): ArtifactComment[] {
+    return this.projectFor(request.project).comments.list(request.taskId, request.artifact);
+  }
+
+  /**
+   * A new comment on a published artifact (decision 0024). Written as a request (`toClaude`), it goes
+   * into the task's conversation as the person's own message — under the composer's kept settings, as if
+   * typed there — naming the artboard, the place and the element, so Claude can find what it is about.
+   * The send is started, not awaited: a turn can take minutes, and the comment is kept either way.
+   */
+  commentOnArtifact(request: AddCommentRequest): { comment: ArtifactComment; failure?: string } {
+    const text = request.text.trim();
+    if (text === "") throw this.refusal("file", "a comment cannot be empty");
+    if (!/^[^/\\].*\.dc\.html$/.test(request.file) || request.file.split("/").some((s) => s === ".." || s === "")) throw this.refusal("file", `'${request.file}' is not an artboard of the canvas`);
+    const open = this.session(request.project);
+    const latest = open.project.artifacts.versions(request.taskId, request.artifact).at(-1);
+    if (latest === undefined) throw this.refusal("file", `no artifact ${request.artifact} for task ${request.taskId}`);
+    const comment = open.project.comments.add({
+      id: commentId(),
+      taskId: request.taskId,
+      artifact: request.artifact,
+      file: request.file,
+      x: Math.round(request.x),
+      y: Math.round(request.y),
+      ...(request.element !== undefined ? { element: request.element } : {}),
+      version: request.version,
+      text,
+      toClaude: request.toClaude,
+      createdAt: Date.now(),
+    });
+    if (!request.toClaude) return { comment };
+    const host = this.chatHostOf(request.taskId, open.dir);
+    if (host === null) return { comment, failure: "this task holds no conversation to send it to" };
+    const settings = open.project.tasks.tryRead(request.taskId)?.chatSettings;
+    const sentAt = Date.now();
+    open.project.comments.markSent(request.taskId, comment.id, sentAt);
+    void this.sendChatMessage({
+      taskId: request.taskId,
+      instanceId: host,
+      message: commentMessage(comment, latest.title, artifactUrl(request.taskId, request.artifact)),
+      project: open.dir,
+      ...(settings !== undefined ? { overrides: settings } : {}),
+    }).catch((e: unknown) => {
+      this.log({ level: "error", source: "run", message: `a comment on ${request.artifact} was not sent: ${e instanceof Error ? e.message : String(e)}`, project: open.key, taskId: request.taskId });
+    });
+    return { comment: { ...comment, sentAt } };
+  }
+
+  /** Resolve a comment, open it again, or take it away. */
+  settleComment(request: { taskId: string; id: string; resolved?: boolean; removed?: boolean; project?: ProjectRef }): void {
+    const comments = this.projectFor(request.project).comments;
+    if (comments.get(request.taskId, request.id) === undefined) throw this.refusal("file", `no comment ${request.id} on task ${request.taskId}`);
+    if (request.removed === true) comments.remove(request.taskId, request.id);
+    else if (request.resolved !== undefined) comments.resolve(request.taskId, request.id, request.resolved ? Date.now() : null);
+  }
+
   /** The open project a request names, else the current one; refused when none is open. */
   private projectFor(ref: ProjectRef | undefined): Project {
     const session = ref !== undefined ? this.sessionOf(ref) : this.sessionOf();
@@ -14844,6 +14902,20 @@ function postureOf(config: JairaConfigOf, tools: readonly ToolChoice[], permissi
 
 
 /** The `reason` inside a run row's stored failure, or undefined where there is none or it will not parse. */
+/**
+ * What Claude reads for a comment sent to it (decision 0024): the person's words, under a line saying
+ * where on the canvas they were written — the artboard, the place on it, and the element there — so the
+ * model can find the file and the element to change.
+ */
+export function commentMessage(comment: ArtifactComment, title: string | undefined, url: string): string {
+  const element = comment.element;
+  const over = element === undefined ? "" : `, on the <${element.tag}>${element.text !== undefined && element.text.trim() !== "" ? ` "${element.text.trim().slice(0, 80)}"` : ""} there (element ${String(element.id)} at v${String(comment.version)})`;
+  const canvas = title !== undefined ? `"${title}" (${url})` : url;
+  return `A comment on the canvas ${canvas}, on the artboard project/${comment.file} at (${String(comment.x)}, ${String(comment.y)})${over}:
+
+${comment.text}`;
+}
+
 function reasonOf(failureJson: string | undefined): string | undefined {
   if (failureJson === undefined) return undefined;
   try {

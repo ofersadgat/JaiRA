@@ -39,6 +39,7 @@ export * from "./workflowSync";
 export * from "./descriptions";
 export * from "./blobStore";
 export * from "./artifactStore";
+export * from "./artifactComments";
 export * from "./memoCache";
 export * from "./jobs";
 export * from "./jobOwner";

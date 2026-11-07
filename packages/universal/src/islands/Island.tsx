@@ -150,7 +150,6 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
             index={readCanvasIndex(typeof p["index"] === "string" ? p["index"] : undefined)}
             base={String(p["base"] ?? "")}
             {...(p["style"] !== undefined ? { style: p["style"] as CSSProperties } : {})}
-            {...(onEvent !== undefined ? { onOpen: () => onEvent("open", null) } : {})}
           />
         </Suspense>
       );
@@ -165,7 +164,10 @@ function inline({ component, props: p, height, onEvent, handle }: IslandProps): 
             onSave={p["onSave"] as Parameters<typeof CanvasEditor>[0]["onSave"]}
             onReload={() => onEvent?.("reload", null)}
             onExport={(file, format, size) => onEvent?.("export", { file, format, size })}
-            onClose={() => onEvent?.("close", null)}
+            comments={p["comments"] as Parameters<typeof CanvasEditor>[0]["comments"]}
+            onComment={p["onComment"] as Parameters<typeof CanvasEditor>[0]["onComment"]}
+            onSettleComment={p["onSettleComment"] as Parameters<typeof CanvasEditor>[0]["onSettleComment"]}
+            serveVersion={p["serveVersion"] as Parameters<typeof CanvasEditor>[0]["serveVersion"]}
             {...(p["style"] !== undefined ? { style: p["style"] as CSSProperties } : {})}
           />
         </Suspense>

@@ -1573,6 +1573,45 @@ export interface PublishedVersion {
 }
 
 /**
+ * A comment on a published artifact (decision 0024): a pin on one of a canvas's artboards, at a place on
+ * it (`x`, `y`: the artboard's own pixels) and over the element there as it was at `version`.
+ *
+ * `toClaude`: written as a request — sent into the task's conversation (`sentAt` once it went), where
+ * Claude takes it as the person's own message. Otherwise a note for people, which Claude never reads.
+ */
+export interface ArtifactComment {
+  id: string;
+  taskId: string;
+  artifact: string;
+  /** The artboard: its file under `project/` (`Checkout.dc.html`). */
+  file: string;
+  x: number;
+  y: number;
+  /** The element under the pin, by its template id at `version`, its tag and its own text. */
+  element?: { id: number; tag: string; text?: string };
+  version: number;
+  text: string;
+  toClaude: boolean;
+  sentAt?: number;
+  resolvedAt?: number;
+  createdAt: number;
+}
+
+/** A new comment — see {@link ArtifactComment}. */
+export interface AddCommentRequest {
+  taskId: string;
+  artifact: string;
+  file: string;
+  x: number;
+  y: number;
+  element?: { id: number; tag: string; text?: string };
+  version: number;
+  text: string;
+  toClaude: boolean;
+  project?: ProjectRef;
+}
+
+/**
  * A person's save in the canvas editor (decision 0020 §5): the files it changed, as of the version the
  * editor opened. Refused when the artifact moved past `base` in one of those files, so a save never
  * silently undoes what the model published meanwhile.
@@ -2332,6 +2371,15 @@ export interface IpcContract {
   };
   /** A person's save in the canvas editor — a new version marked theirs. */
   "artifact:save": { request: SaveArtifactRequest; response: { version: number } | { refused: string; files: string[] } };
+  /** The comments on one published artifact, oldest first (decision 0024). */
+  "artifact:comments": { request: { taskId: string; artifact: string; project?: ProjectRef }; response: ArtifactComment[] };
+  /**
+   * A new comment. Sent to Claude (`toClaude`), it goes into the task's conversation as the person's
+   * message, naming the artboard and the element; `failure` says why it could not, the comment kept.
+   */
+  "artifact:comment": { request: AddCommentRequest; response: { comment: ArtifactComment; failure?: string } };
+  /** Resolve a comment, or open it again (`resolved: false`); or take it away (`removed`). */
+  "artifact:settleComment": { request: { taskId: string; id: string; resolved?: boolean; removed?: boolean; project?: ProjectRef }; response: void };
   /**
    * Project files whose path matches a query — what an `@` in the composer completes against.
    *
@@ -2712,6 +2760,9 @@ export const IPC_CHANNELS = [
   "artifact:versions",
   "artifact:files",
   "artifact:save",
+  "artifact:comments",
+  "artifact:comment",
+  "artifact:settleComment",
   "git:identity",
   "file:find",
   "changeset:review",

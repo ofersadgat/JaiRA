@@ -124,6 +124,11 @@ UPDATE event_waits SET name = CASE name
     note: "the change log's clock is always past its newest stamp (max(now, newest + 1)), so no two changes share one and a reader knows the rows its inclusive read brings again (2026-11-06)",
     sql: SYNC_TRIGGERS_AGAIN_SQL,
   },
+  {
+    version: 34,
+    note: "comments on a published artifact (artifact_comments): a pin on a canvas's artboard, sent to Claude or kept for people, in the change log (2026-11-07)",
+    sql: SYNC_SQL,
+  },
 ];
 
 /**
