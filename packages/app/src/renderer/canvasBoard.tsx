@@ -5,7 +5,8 @@
  *
  * The board is JaiRA's; what is inside each frame is the model's artboard, drawn by JaiRA's `.dc.html`
  * runtime (`support.js`). Read here, nothing is changed: pan by dragging the board, zoom with the wheel
- * held with Ctrl (or a pinch), Fit to see every artboard, and double-click an artboard to see it alone
+ * held with Ctrl (or a trackpad's pinch) or two fingers' pinch on a touch screen, Fit to see every
+ * artboard, and double-click an artboard to see it alone
  * at its own size. `onOpen` asks the host for the editor.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
@@ -154,18 +155,67 @@ export function CanvasBoard({ index, base, style, onOpen, chrome }: CanvasBoardP
     return () => el.removeEventListener("wheel", onWheel);
   }, []);
 
+  // Safari's own pinch (`gesture*`, WebKit only) would zoom the page around the board; the board zooms itself.
+  useEffect(() => {
+    const el = box.current;
+    if (el === null) return;
+    const stop = (e: Event): void => e.preventDefault();
+    for (const name of ["gesturestart", "gesturechange"]) el.addEventListener(name, stop, { passive: false });
+    return () => {
+      for (const name of ["gesturestart", "gesturechange"]) el.removeEventListener(name, stop);
+    };
+  }, []);
+
+  // Fingers and the mouse: one pointer down drags the board; two pinch it, zooming about the point
+  // between them and following it as it moves.
+  const pointers = useRef(new Map<number, { x: number; y: number }>());
+  const pinch = useRef<{ d: number; bx: number; by: number; z: number } | null>(null);
+  const viewNow = useRef(view);
+  viewNow.current = view;
+  const spanOf = (): { d: number; mx: number; my: number } | null => {
+    const [a, b] = [...pointers.current.values()];
+    const rect = box.current?.getBoundingClientRect();
+    if (a === undefined || b === undefined || rect === undefined) return null;
+    return { d: Math.max(Math.hypot(b.x - a.x, b.y - a.y), 1), mx: (a.x + b.x) / 2 - rect.left, my: (a.y + b.y) / 2 - rect.top };
+  };
+  /** Begin what the pointers now down ask for, from the view as it stands. */
+  const begin = (): void => {
+    const v = viewNow.current;
+    drag.current = null;
+    pinch.current = null;
+    if (v === null) return;
+    const [only] = [...pointers.current.values()];
+    if (pointers.current.size === 1 && only !== undefined) drag.current = { x: only.x, y: only.y, vx: v.x, vy: v.y };
+    const span = pointers.current.size >= 2 ? spanOf() : null;
+    // The board's point under the fingers' middle stays under it.
+    if (span !== null) pinch.current = { d: span.d, bx: (span.mx - v.x) / v.z, by: (span.my - v.y) / v.z, z: v.z };
+  };
   const onDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    if (view === null || e.button !== 0) return;
-    drag.current = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y };
+    if (view === null || (e.pointerType === "mouse" && e.button !== 0)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture(e.pointerId);
+    begin();
   };
   const onMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!pointers.current.has(e.pointerId)) return;
+    pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    const p = pinch.current;
+    if (p !== null) {
+      const span = spanOf();
+      if (span === null) return;
+      const z = Math.min(4, Math.max(0.05, (p.z * span.d) / p.d));
+      viewNow.current = { z, x: span.mx - p.bx * z, y: span.my - p.by * z };
+      setView(viewNow.current);
+      return;
+    }
     const d = drag.current;
     if (d === null) return;
     setView((v) => (v === null ? v : { ...v, x: d.vx + e.clientX - d.x, y: d.vy + e.clientY - d.y }));
   };
-  const onUp = (): void => {
-    drag.current = null;
+  const onUp = (e: ReactPointerEvent<HTMLDivElement>): void => {
+    if (!pointers.current.delete(e.pointerId)) return;
+    // A finger lifted from a pinch: the one left drags on from where the board now is.
+    begin();
   };
 
   const frameSrc = (file: string): string => `${base.replace(/\/+$/, "")}/project/${file.split("/").map(encodeURIComponent).join("/")}`;

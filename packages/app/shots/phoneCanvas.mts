@@ -116,6 +116,34 @@ async function main(): Promise<void> {
     if (count("/project/Host.dc.html") < 2) throw new Error("the host artboard loaded but its runtime never read its own source");
     if (count("/project/Card.dc.html") < 1) throw new Error("the host artboard's dc-import never fetched its sibling");
     if (count("/project/support.js") < 2) throw new Error("the artboards never loaded the runtime");
+    // Two fingers: spread apart zooms in about the point between them, pinched together zooms out.
+    const zoom = async (): Promise<{ z: string; transform: string }> =>
+      app!.evaluate(`(() => { const d = frame.contentDocument; const z = [...d.querySelectorAll("span")].find((s) => /^\\d+%$/.test(s.textContent)); const layer = [...d.querySelectorAll("div")].find((x) => x.style.transform.startsWith("translate")); return { z: z ? z.textContent : "", transform: layer ? layer.style.transform : "" }; })()`);
+    const area = await app.evaluate<{ x: number; y: number }>(`(() => { const r = frame.getBoundingClientRect(); return { x: r.x + r.width / 2, y: r.y + 300 }; })()`);
+    const pinchBy = async (from: number, to: number): Promise<void> => {
+      const at = (gap: number): Array<{ x: number; y: number; id: number }> => [
+        { x: area.x - gap / 2, y: area.y, id: 1 },
+        { x: area.x + gap / 2, y: area.y, id: 2 },
+      ];
+      await app!.cdp("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: at(from) });
+      for (let i = 1; i <= 12; i++) {
+        await app!.cdp("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: at(from + ((to - from) * i) / 12) });
+        await new Promise((r) => setTimeout(r, 20));
+      }
+      await app!.cdp("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      await new Promise((r) => setTimeout(r, 400));
+    };
+    const before = await zoom();
+    await pinchBy(60, 240);
+    const spread = await zoom();
+    await app.shot("pinched-out");
+    await pinchBy(240, 60);
+    const pinched = await zoom();
+    console.log(`phone: zoom ${before.z} -> spread ${spread.z} -> pinched ${pinched.z}`);
+    const pct = (s: string): number => Number.parseInt(s, 10);
+    if (!(pct(spread.z) >= pct(before.z) * 3.5)) throw new Error(`spreading two fingers 4x apart did not zoom in 4x (${before.z} -> ${spread.z})`);
+    if (Math.abs(pct(pinched.z) - pct(before.z)) > 1) throw new Error(`pinching back did not return the zoom (${before.z} -> ${pinched.z})`);
+    if (pinched.transform !== before.transform && Math.abs(pct(pinched.z) - pct(before.z)) === 0) console.log(`phone: the view moved by the pinch round trip: ${before.transform} -> ${pinched.transform}`);
     // A published page, in the artifact island: its script runs from the same route.
     asked.splice(0);
     await app.evaluate(`document.body.innerHTML = ""; window.__events = []; window.open_(${JSON.stringify({ url: `${base}chart.html`, published: true, style: { width: "100%", height: 300 } })}, "artifact")`);
