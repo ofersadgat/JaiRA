@@ -642,16 +642,18 @@ export class App {
    * Press at one point, move to another in `steps` real moves with the button held, and let go there —
    * a drag as a person makes one, frame boundaries and pointer capture included.
    */
-  async drag(from: { x: number; y: number }, to: { x: number; y: number }, steps = 8): Promise<void> {
+  /** A press, moves and a release; `button` "middle" for a canvas's pan (Chromium's `buttons` 4). */
+  async drag(from: { x: number; y: number }, to: { x: number; y: number }, steps = 8, button: "left" | "middle" = "left"): Promise<void> {
+    const buttons = button === "left" ? 1 : 4;
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: from.x, y: from.y });
-    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button: "left", clickCount: 1, buttons: 1 });
+    await this.send("Input.dispatchMouseEvent", { type: "mousePressed", x: from.x, y: from.y, button, clickCount: 1, buttons });
     for (let i = 1; i <= steps; i++) {
       const x = from.x + ((to.x - from.x) * i) / steps;
       const y = from.y + ((to.y - from.y) * i) / steps;
-      await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button: "left", buttons: 1 });
+      await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y, button, buttons });
       await sleep(16);
     }
-    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button: "left", clickCount: 1, buttons: 0 });
+    await this.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: to.x, y: to.y, button, clickCount: 1, buttons: 0 });
     await sleep(150);
   }
 

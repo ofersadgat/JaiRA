@@ -10,8 +10,9 @@
  *   - the conversation draws the canvas in its editor, and every artboard frame posts `dc:ready`;
  *   - in the editor, a click on an artboard selects one of its elements, Delete removes it, and the
  *     canvas gains a version whose author is the person; a drag moves one; every drawing tool saves;
- *   - an artboard marked interactive runs in place under ▶ (a click in it picks nothing), ⤢ fills the
- *     editor with it, ■ stops it; PNG and PDF export;
+ *   - the chrome is Claude Code's: tools on a floating bar (shapes and lines behind ⌄), the panel opened
+ *     from the top-right bar; an artboard marked interactive runs in place under ▶ on its label (a click
+ *     in it picks nothing), ⤢ fills the editor with it, ■ stops it; ⬇ saves PNG and PDF;
  *   - the comment tool pins a note and a comment for Claude on the artboard: both kept, the note never
  *     sent, the other in the conversation as the person's message; a pin opened and resolved.
  *
@@ -140,8 +141,9 @@ async function main(): Promise<void> {
     await app.shot("selected");
     // Narrow (a conversation's column), the properties panel is closed: opened for its Delete, then closed.
     const panel = async (open: boolean): Promise<void> => {
-      const at = await app.evaluate<{ x: number; y: number } | null>(`(() => { const b = document.querySelector('[aria-label="Properties panel"]'); if (!b || (b.getAttribute("aria-pressed") === "true") === ${String(open)}) return null; b.scrollIntoView({ block: "nearest" }); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      const at = await app.evaluate<{ x: number; y: number } | null>(`(() => { const b = document.querySelector('[aria-label="Properties panel"]'); if (!b || (b.getAttribute("aria-pressed") === "true") === ${String(open)}) return null; b.scrollIntoView({ block: "center" }); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
       if (at === null) return;
+      await settle(300);
       await app.clickAt(at.x, at.y);
       await settle(400);
     };
@@ -177,6 +179,25 @@ async function main(): Promise<void> {
       const at = await app.evaluate<{ x: number; y: number } | null>(`(() => { const el = document.querySelector('[aria-label="${label}"]'); if (!el) return null; el.scrollIntoView({ block: "nearest" }); const r = el.getBoundingClientRect(); const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); if (hit !== el && !el.contains(hit)) throw new Error("${label} is covered by " + (hit ? hit.tagName + " " + hit.textContent.slice(0, 40) : "nothing") + " at " + Math.round(r.left) + "," + Math.round(r.top)); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
       if (at === null) throw new Error(`no control labelled ${label}`);
       await app.clickAt(at.x, at.y);
+    };
+
+    /**
+     * A tool by its name: its button on the top-left bar, or — one of a group (pen, line, arrow; rectangle,
+     * oval) that is not the group's button now — from behind the group's ⌄.
+     */
+    const pickTool = async (label: string): Promise<void> => {
+      const onBar = await app.evaluate<boolean>(`!!document.querySelector('[role="toolbar"][aria-label="Tools"] [aria-label="${label}"]')`);
+      if (onBar) {
+        await clickLabel(label);
+        return;
+      }
+      const group = ["Pen", "Line", "Arrow"].includes(label) ? "More pen and line tools" : "More shape tools";
+      await clickLabel(group);
+      await settle(300);
+      const item = await app.evaluate<{ x: number; y: number } | null>(`(() => { const b = document.querySelector('[role="menuitem"][aria-label="${label}"]'); if (!b) return null; const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`);
+      if (item === null) throw new Error(`no ${label} behind ${group}`);
+      await app.clickAt(item.x, item.y);
+      await settle(200);
     };
 
     /**
@@ -228,7 +249,7 @@ async function main(): Promise<void> {
     const boardsBefore = Object.keys((JSON.parse((await app.ipc<{ files: Record<string, string> }>("artifact:files", { taskId: made.taskId, artifact: canvas.id })).files["project/canvas.json"] ?? "{}") as { boards?: Record<string, unknown> }).boards ?? {});
     n = await count();
     for (const label of ["Rectangle", "Oval", "Arrow", "Line", "Pen"]) {
-      await clickLabel(label);
+      await pickTool(label);
       const from = await bareBoard("crosshair");
       await app.drag(from, { x: from.x + 48, y: from.y + 38 });
       await settle(200);
@@ -292,8 +313,12 @@ async function main(): Promise<void> {
       `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const label = f.parentElement.firstElementChild; const r = label.getBoundingClientRect(); return { x: r.left + Math.min(r.width / 2, 30), y: r.top + r.height / 2 }; })()`,
     );
     if (labelAt === null) throw new Error("the artboard has no label");
+    const beforeLabel = await count();
     await app.clickAt(labelAt.x, labelAt.y);
-    await settle(600);
+    await settle(1800);
+    // A press on an artboard's name that moved nothing is no edit (2026-11-07: it saved canvas.json as it was).
+    if ((await count()) !== beforeLabel) throw new Error("a press on an artboard's label, with no move, saved a version");
+    console.log("label: a press with no move saved nothing");
     await panel(true);
     const works = await app.evaluate<boolean>(`(() => { const box = document.querySelector('[aria-label="Its controls respond: it runs (▶)"]'); if (!box) return null; return box.checked; })()`);
     if (works === null) throw new Error("selecting the artboard did not show its Properties");
@@ -316,7 +341,7 @@ async function main(): Promise<void> {
     console.log(`run: in place; picks before a click in it ${String(picksBefore)}, after ${String(picksAfter)}`);
     if (picksAfter !== picksBefore) throw new Error("a click in a running artboard was taken by the editor");
     await app.shot("running");
-    await clickLabel("Run it on its own");
+    await clickLabel("Open it on its own");
     await settle(1500);
     if (!(await app.evaluate<boolean>(`document.body.innerText.includes("Back to the canvas")`))) throw new Error("⤢ did not fill the editor with the artboard");
     await app.shot("running-full");
@@ -383,9 +408,11 @@ async function main(): Promise<void> {
     console.log("stop: the artboard is edited again (a click in it picked an element)");
     for (const format of ["png", "pdf"] as const) {
       const before = new Set(existsSync(exports) ? readdirSync(exports) : []);
-      // The editor's own button, not the first thing on the page that says PNG (the agent's reply may).
+      // The artboard's ⬇ on its label, then the format from its menu (a float in <body>).
+      await clickLabel("Download");
+      await settle(300);
       const button = await app.evaluate<{ x: number; y: number } | string>(
-        `(() => { const b = [...document.querySelectorAll('[data-island="canvasEditor"] button')].find((e) => e.textContent.trim() === ${JSON.stringify(format.toUpperCase())}); if (!b) return "no ${format.toUpperCase()} button; the bar has " + [...document.querySelectorAll('[data-island="canvasEditor"] button')].slice(0, 12).map((e) => e.textContent.trim()).join("|"); b.scrollIntoView({ block: "nearest" }); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
+        `(() => { const b = [...document.querySelectorAll('[role="menuitem"]')].find((e) => e.textContent.trim().startsWith(${JSON.stringify(format.toUpperCase())})); if (!b) return "no ${format.toUpperCase()} in the download menu; menu items " + [...document.querySelectorAll('[role="menuitem"]')].map((e) => e.textContent.trim()).join("|"); const r = b.getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + r.height / 2 }; })()`,
       );
       if (typeof button === "string") throw new Error(button);
       await app.clickAt(button.x, button.y);
@@ -405,6 +432,22 @@ async function main(): Promise<void> {
       console.log(`editor: exported ${file}, ${String(bytes.length)} bytes${format === "png" ? `, ${String(bytes.readUInt32BE(16))}x${String(bytes.readUInt32BE(20))}` : ""}`);
       if (!signed || bytes.length < 1000) throw new Error(`${file} is not a ${format.toUpperCase()} of the artboard`);
     }
+
+    // The middle button pans the board, from a press over an artboard too (its frame tells the editor).
+    await clickLabel("Pointer");
+    const grab = await elementPoint();
+    const frameAt = async (): Promise<{ x: number; y: number }> =>
+      app.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('[data-island="canvasEditor"] iframe').getBoundingClientRect(); return { x: r.left, y: r.top }; })()`);
+    const versionsBeforePan = await count();
+    const framedBefore = await frameAt();
+    await app.drag(grab, { x: grab.x + 40, y: grab.y + 30 }, 8, "middle");
+    await settle(500);
+    const framedAfter = await frameAt();
+    const pannedBy = { x: Math.round(framedAfter.x - framedBefore.x), y: Math.round(framedAfter.y - framedBefore.y) };
+    console.log(`pan: a middle-button drag from over the artboard moved it by ${JSON.stringify(pannedBy)}`);
+    if (Math.abs(pannedBy.x - 40) > 6 || Math.abs(pannedBy.y - 30) > 6) throw new Error(`a middle-button drag over the artboard did not pan the board by (40, 30): ${JSON.stringify(pannedBy)}`);
+    await settle(1500);
+    if ((await count()) !== versionsBeforePan) throw new Error("a middle-button pan saved a version (it moved an element)");
 
     // Comments (decision 0024): the comment tool pins one on the artboard where it is pressed.
     const comment = async (text: string, toClaude: boolean): Promise<void> => {
@@ -462,6 +505,12 @@ async function main(): Promise<void> {
     }
     const sentNote = (await app.ipc<{ session: { turns: Array<{ role: string; text?: string }> } } | null>("chat:thread", { taskId: made.taskId }))?.session.turns.some((t) => (t.text ?? "").includes(NOTE));
     if (sentNote === true) throw new Error("the note for people reached the conversation");
+    // The eye shows the canvas whole, in the main view: the editor at full width, as Claude Code's canvas.
+    await clickLabel("Show this artifact in the main view");
+    await settle(2500);
+    const inMain = await app.evaluate<number>(`document.querySelectorAll('[data-island="canvasEditor"]').length`);
+    console.log(`main view: ${String(inMain)} editors drawn`);
+    await app.shot("main-view");
     console.log("canvas: passed");
   } finally {
     await app.close();

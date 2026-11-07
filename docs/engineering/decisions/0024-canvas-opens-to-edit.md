@@ -107,6 +107,43 @@ columns: a conversation's column in the side panel gives the board about 170 px.
 - *A comment's box ran off a narrow board.* It is now a float against its pin (`popover.tsx`, the
   standing rule), so the board's edges no longer clip it.
 
+## Round 2: the person's notes on the real conversation (2026-11-07)
+
+In "I dont like how the chat panel looks…" (t-elvj5dhzoy): "1. i dont see any of the ui buttons. 2. why
+does it say that there is a v16, but I dont see it in the conversation? 3. I should be able to pan with
+pressed middle click 4. the attached is how the claude code version looks 5. sometimes panning will
+select the elements 6. I think the eye icon to see the artifact full screen in the main panel makes more
+sense than having it open in the side panel. I think an arrow to the right pointing at a vertical line
+… would be better for open in side panel".
+
+- **1 and 2 had one cause.** v16 was the person's save, and it was `canvas.json` reformatted: a press on
+  an artboard's name saved even when nothing moved. A version the person saves belongs to no call, yet
+  it counted as replacing v15's card. So every card read "v16 is newer · Show vN", no card drew v16, and
+  "Show v15" opened the look-only board, which has no buttons. Now only Claude's publishes replace a
+  card (`callCardOf`, `publishedCard.ts`), and the newest call's card shows the person's newest version
+  in the editor. A press that moves nothing saves nothing.
+- **3 and 5.** The middle button pans from anywhere: the bare board, a label, a note, a handle. Over an
+  artboard, the frame takes the press, so its runtime tells the host where the pointer is (`dc:pan`,
+  start / move / end, in the frame's pixels). The host places that in the window from where the frame
+  stands as it reads it, pans by how far it moved, and commits at once (`flushSync`). Distances measured
+  inside the frame do not work, because the frame moves under the pointer as the pan goes: 40 px panned
+  119, then 26. Space held pans too, the capture layer laid over the frames. The look-only board pans
+  with the middle button as well.
+- **4.** The editor's chrome is now Claude Code's. The board is the whole box. A floating bar at the top
+  left holds the tools, with pen / line / arrow and rectangle / oval each behind a ⌄ (and pages, when
+  there are several). A floating bar at the top right holds the version or save status, ▷ (run the
+  canvas) or ■, the properties panel toggle (Ctrl+\), and the zoom % ⌄ (fit, 50, 100, 200). Each
+  artboard's label has its title on the left and, at the artboard's right edge, ▶ (interactive ones),
+  ⤢ (on its own) and ⬇ (a PNG or PDF menu). The properties panel is a floating card. Menus are
+  Popovers. The narrow top bar, the side rail and the selection-bound PNG / PDF buttons are gone. On a
+  board narrower than 600 px the tools wrap and the canvas bar moves to the bottom right, because the
+  two ran into each other at the top.
+- **6.** The eye shows the artifact in the main view. →| (⇤ turned round) opens it in the side panel.
+
+Seen: `shots/canvas.mts` passed end to end twice in a row on this round's code (full suite: 449 files
+pass). The label press and the middle pan (exactly 40, 30, both runs) are now its own checks. Its last step opens the main view through the eye, for
+comparison with Claude Code's picture.
+
 ## Not done
 
 - **Comments on the phone and on the board.** The phone has no comment tool and no pins. The board

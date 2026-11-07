@@ -131,6 +131,47 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
   };
 
   /**
+   * The middle button pans the canvas, whatever the mode: a press inside a frame is the frame's, so the
+   * drag is told to the host rather than started here — WHERE the pointer is, in this frame's own pixels
+   * (`dc:pan`, `phase` start | move | end), which the host places in its window by where the frame stands
+   * as it reads it. Not how far it moved: the host pans the frame under the pointer as it goes, and a
+   * distance measured here is measured against a frame that has since moved (40 px panned 26, or 119).
+   * Registered first, so no edit-mode listener sees it, and the browser's own autoscroll never starts.
+   */
+  let panning = false;
+  window.addEventListener(
+    "pointerdown",
+    (event) => {
+      if (event.button !== 1) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      panning = true;
+      post({ type: "dc:pan", phase: "start", x: event.clientX, y: event.clientY });
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      if (!panning) return;
+      event.stopImmediatePropagation();
+      post({ type: "dc:pan", phase: "move", x: event.clientX, y: event.clientY });
+    },
+    true,
+  );
+  const panEnds = (event: PointerEvent): void => {
+    if (!panning || event.button !== 1) return;
+    event.stopImmediatePropagation();
+    panning = false;
+    post({ type: "dc:pan", phase: "end", x: event.clientX, y: event.clientY });
+  };
+  window.addEventListener("pointerup", panEnds, true);
+  window.addEventListener("pointercancel", () => (panning = false), true);
+  for (const type of ["mousedown", "auxclick"]) {
+    window.addEventListener(type, (event) => (event as MouseEvent).button === 1 && event.preventDefault(), true);
+  }
+
+  /**
    * A drag of an element (README, "Moving an element"): drawn here as it happens — the element follows
    * the pointer by a transform, nothing else changes — and reported when the pointer lets go, with what
    * the editor needs to write it: the element's, its parent's and its siblings' boxes and source styles.

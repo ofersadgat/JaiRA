@@ -15,6 +15,7 @@ import { Island } from "../../islands";
 import { useTokens } from "../../tokens";
 import { SpIcon } from "./SidePanel";
 import { ValueView } from "./ValueView";
+import { callCardOf } from "./publishedCard";
 
 /**
  * The surface of an artifact drawn away from its conversation: which task and project it reads from. Its
@@ -65,6 +66,12 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
    * the same canvas is a conversation nobody can scroll.
    */
   const [newest, setNewest] = useState<number | null>(null);
+  /**
+   * The newest version CLAUDE published. Only that replaces a call: a version the person saved in the
+   * editor is no call's, and counted it left the canvas drawn nowhere — every card "v16 is newer", and
+   * v16 on none (2026-11-07). The newest call's card follows the person's saves to the newest version.
+   */
+  const [newestByModel, setNewestByModel] = useState<number | null>(null);
   // Brought here on purpose, at the version it was showing: drawn whatever came after it.
   const [opened, setOpened] = useState(fill);
   /** The comments on a canvas (decision 0024), read with it and again after each change. */
@@ -80,14 +87,25 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
   useEffect(() => {
     let live = true;
     void invoke("artifact:versions", { taskId, artifact: published.id, ...project })
-      .then((list) => live && setNewest(list.at(-1)?.version ?? published.version))
-      .catch(() => live && setNewest(published.version));
+      .then((list) => {
+        if (!live) return;
+        const card = callCardOf(list, published.version);
+        setNewest(card.newest);
+        setNewestByModel(card.replacedBy ?? published.version);
+        // The newest call's card shows the person's edits after it, as they left them.
+        if (card.replacedBy === null) setVersion((was) => (was === published.version ? card.shows : was));
+      })
+      .catch(() => {
+        if (!live) return;
+        setNewest(published.version);
+        setNewestByModel(published.version);
+      });
     return () => {
       live = false;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [taskId, published.id, published.version, reread]);
-  const superseded = newest !== null && newest > published.version && !opened;
+  const superseded = newestByModel !== null && newestByModel > published.version && !opened;
 
   useEffect(() => {
     if (newest === null || superseded) return;
@@ -176,9 +194,10 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
       <SpIcon icon="back" label="Back out of this artifact" onPress={onBack} />
     ) : newest === null || superseded ? null : (
       <>
-        {panel !== null ? <SpIcon icon="read" label="Open it on its own, in the side panel" onPress={() => panel.open({ title: published.title ?? published.entry, published: { ref: here, ...project } })} /> : null}
+        {/* The person, 2026-11-07: the eye shows it whole, in the main view; →| (⇤ turned round) puts it in the side panel. */}
+        {panel !== null ? <SpIcon icon="adopt" flip label="Open it on its own, in the side panel" onPress={() => panel.open({ title: published.title ?? published.entry, published: { ref: here, ...project } })} /> : null}
         <SpIcon
-          icon="adopt"
+          icon="read"
           label="Show this artifact in the main view"
           onPress={() => {
             artifactInMain.set({ published: here, artifacts: artifacts ?? surfaceOf(taskId, undefined) });
@@ -310,7 +329,7 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
         {superseded ? (
           <Press onPress={() => setOpened(true)} title={`Show v${String(published.version)}`} paddingVertical={1} paddingHorizontal={8} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : "transparent" })}>
             <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }}>
-              v{newest} is newer · Show v{published.version}
+              v{newestByModel} is newer · Show v{published.version}
             </Txt>
           </Press>
         ) : null}

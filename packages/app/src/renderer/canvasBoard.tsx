@@ -14,6 +14,7 @@
  * artboard it names.
  */
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 
 /** One artboard's entry in `canvas.json`'s `boards`. */
 export interface CanvasBoardEntry {
@@ -125,6 +126,8 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
   /** The interactive artboards running where they sit: the pointer is theirs, not the board's. */
   const [running, setRunning] = useState<ReadonlySet<string>>(new Set());
   const frames = useRef(new Map<string, HTMLIFrameElement>());
+  /** A middle-button pan begun inside a running frame: where the pointer last was, in the window. */
+  const framePan = useRef<{ x: number; y: number } | null>(null);
   /** An artboard that stops is drawn again from its source (its key): a run is a trial, its state and scroll not kept. */
   const [fresh, setFresh] = useState<Record<string, number>>({});
   const wasRunning = useRef<ReadonlySet<string>>(running);
@@ -176,7 +179,22 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
   // running on the board, the run moves to it and it is brought into view.
   useEffect(() => {
     const onMessage = (event: MessageEvent): void => {
-      const data = event.data as { type?: string; href?: string } | null;
+      const data = event.data as { type?: string; href?: string; phase?: string; x?: number; y?: number } | null;
+      // The middle button dragged inside a running frame: where the pointer is, placed in the window by
+      // where the frame stands now; the board pans by how far that moved, committed at once.
+      if (data?.type === "dc:pan" && typeof data.x === "number" && typeof data.y === "number") {
+        const el = [...frames.current.values()].find((f) => f.contentWindow === event.source);
+        if (el === undefined) return;
+        const box = el.getBoundingClientRect();
+        const scale = el.offsetWidth > 0 ? box.width / el.offsetWidth : 1;
+        const p = { x: box.left + data.x * scale, y: box.top + data.y * scale };
+        const was = framePan.current;
+        framePan.current = data.phase === "end" ? null : p;
+        if (data.phase === "start" || was === null) return;
+        moved.current = true;
+        flushSync(() => setView((v) => (v === null ? v : { ...v, x: v.x + p.x - was.x, y: v.y + p.y - was.y })));
+        return;
+      }
       if (data?.type !== "dc:navigate" || typeof data.href !== "string") return;
       const from = [...frames.current.entries()].find(([, el]) => el.contentWindow === event.source)?.[0];
       const target = data.href.replace(/^\/?project\//, "");
@@ -261,7 +279,8 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
     if (span !== null) pinch.current = { d: span.d, bx: (span.mx - v.x) / v.z, by: (span.my - v.y) / v.z, z: v.z };
   };
   const onDown = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    if (view === null || (e.pointerType === "mouse" && e.button !== 0)) return;
+    // The left button drags the board, and the middle one too (as on every canvas).
+    if (view === null || (e.pointerType === "mouse" && e.button !== 0 && e.button !== 1)) return;
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     e.currentTarget.setPointerCapture(e.pointerId);
     begin();
@@ -344,6 +363,7 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
       <div
         ref={box}
         onPointerDown={onDown}
+        onMouseDown={(e) => e.button === 1 && e.preventDefault()}
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}

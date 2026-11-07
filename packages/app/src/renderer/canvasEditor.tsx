@@ -17,6 +17,7 @@
  * file meanwhile, it says so and offers to reload.
  */
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { flushSync } from "react-dom";
 import { applyMove, editStyle, editText, formatStyle, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
 import { Popover } from "./popover";
@@ -116,6 +117,18 @@ const TOOLS: Array<{ tool: CanvasTool; label: string; key: string; path: string 
   { tool: "line", label: "Line", key: "L", path: "M5 19L19 5" },
   { tool: "comment", label: "Comment", key: "C", path: "M4 5h16v11H9l-5 4z" },
 ];
+
+/** Tools that share one button in the top-left bar, behind its ⌄ — as Claude Code's canvas groups them. */
+type ToolGroup = "pen" | "shape";
+const GROUPS: Record<ToolGroup, CanvasTool[]> = { pen: ["pen", "line", "arrow"], shape: ["rect", "oval"] };
+const groupOf = (tool: CanvasTool): ToolGroup | undefined => (Object.keys(GROUPS) as ToolGroup[]).find((g) => GROUPS[g].includes(tool));
+
+const CARET = "M6 9l6 6 6-6";
+const PLAY = "M8 5.5v13l10-6.5z";
+const STOP = "M7 7h10v10H7z";
+const SLIDERS = "M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4";
+const EXPAND = "M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7";
+const DOWNLOAD = "M12 4v11M7 10l5 5 5-5M5 20h14";
 
 const SHORTCUT: Record<string, CanvasTool> = { v: "pointer", h: "hand", t: "text", a: "artboard", n: "note", p: "pen", r: "rect", o: "oval", l: "line", c: "comment" };
 
@@ -227,33 +240,65 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const servable = (file: string): boolean => roots[file] !== undefined || initial[`project/${file}`] !== undefined;
   const board = useRef<HTMLDivElement | null>(null);
   /**
-   * The editor's own width. Narrow — a conversation's column, the side panel — the properties panel is
-   * closed and opened over the board on demand (Claude Design's own toggle, Ctrl+\): drawn beside a
-   * board in 500 px it pushed the board and the top bar's controls out of the column.
+   * The properties panel (properties, tweaks, layers, comments): a card over the board's right edge,
+   * opened by the top-right bar's toggle or Ctrl+\ (Claude Design's own), closed until asked — the board
+   * is the whole box, as Claude Code's canvas draws it (the person, 2026-11-07, with its picture).
    */
-  const shellBox = useRef<HTMLDivElement | null>(null);
-  const [width, setWidth] = useState(0);
   const [panelOpen, setPanelOpen] = useState(false);
+  /**
+   * The board's width. Narrow (a conversation's column: about 210 px in the side panel), the two bars
+   * cannot share the top edge — the tools ran under the canvas bar: the tools wrap at the top, the canvas
+   * bar goes to the bottom right, and the panel opens between them.
+   */
+  const [boardWidth, setBoardWidth] = useState(0);
+  const stacked = boardWidth > 0 && boardWidth < 600;
+  /** Space held: the pointer pans, over the frames too (the capture layer is laid over them). */
+  const [spaceHeld, setSpaceHeld] = useState(false);
+  /** Which tool each group's button stands for: the last one picked from it. */
+  const [groupPick, setGroupPick] = useState<Record<ToolGroup, CanvasTool>>({ pen: "pen", shape: "rect" });
+  /** The one menu open: a tool group's, the zoom's, the pages', or an artboard's downloads. */
+  const [menu, setMenu] = useState<{ kind: "group"; group: ToolGroup } | { kind: "zoom" } | { kind: "pages" } | { kind: "download"; file: string } | null>(null);
+  const menuAnchor = useRef<Element | null>(null);
+  const menuBox = useRef<HTMLDivElement | null>(null);
+  const openMenu = (next: NonNullable<typeof menu>, anchor: Element): void => {
+    menuAnchor.current = anchor;
+    setMenu((was) => (was !== null && JSON.stringify(was) === JSON.stringify(next) ? null : next));
+  };
+  // A press anywhere else, or Esc, puts the menu away (a float's dismissal is its host's).
   useEffect(() => {
-    const el = shellBox.current;
-    if (el === null || typeof ResizeObserver === "undefined") return;
-    const watch = new ResizeObserver(() => setWidth(el.clientWidth));
-    watch.observe(el);
-    setWidth(el.clientWidth);
-    return () => watch.disconnect();
-  }, []);
-  const narrow = width > 0 && width < 760;
+    if (menu === null) return;
+    const away = (e: Event): void => {
+      const target = e.target as Node | null;
+      if (target !== null && (menuBox.current?.contains(target) === true || menuAnchor.current?.contains(target) === true)) return;
+      setMenu(null);
+    };
+    const key = (e: KeyboardEvent): void => {
+      if (e.key === "Escape") setMenu(null);
+    };
+    window.addEventListener("pointerdown", away, true);
+    window.addEventListener("keydown", key, true);
+    return () => {
+      window.removeEventListener("pointerdown", away, true);
+      window.removeEventListener("keydown", key, true);
+    };
+  }, [menu]);
+  /** The page on the board, when the canvas has pages; every artboard and note otherwise. */
+  const firstPage = index.pages?.[0]?.id;
+  const [page, setPage] = useState<string | undefined>(index.launch?.page ?? firstPage);
+  const onPage = (entry: { page?: string | undefined }): boolean => firstPage === undefined || (entry.page ?? firstPage) === page;
   useEffect(() => {
     const el = board.current;
     if (el === null) return;
     if (!moved.current) fitNow.current();
+    setBoardWidth(el.clientWidth);
     if (typeof ResizeObserver === "undefined") return;
     const watch = new ResizeObserver(() => {
+      setBoardWidth(el.clientWidth);
       if (!moved.current) fitNow.current();
     });
     watch.observe(el);
     return () => watch.disconnect();
-  }, [full]);
+  }, [full, page]);
 
   /**
    * The person has panned or zoomed since the last fit: the view is theirs, and stays where they put it
@@ -262,10 +307,14 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
    * and a fit made once, from the first width, left the artboards wider than the board.
    */
   const moved = useRef(false);
+  /** The board, an artboard or a note was dragged since the press: a press that moved nothing saves nothing. */
+  const gestureMoved = useRef(false);
+  /** A middle-button pan begun inside a frame: where the pointer last was, in the window. */
+  const framePan = useRef<{ x: number; y: number } | null>(null);
   /** Every artboard in what the board shows, 24 px clear, between 5% and 100%; never from a box not yet measured. */
   const fit = (): void => {
     const el = board.current;
-    const boxes = Object.values(index.boards);
+    const boxes = Object.values(index.boards).filter(onPage);
     if (el === null || boxes.length === 0 || el.clientWidth <= 0 || el.clientHeight <= 0) return;
     moved.current = false;
     const x = Math.min(...boxes.map((b) => b.x));
@@ -332,7 +381,23 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     const onMessage = (event: MessageEvent): void => {
       const file = [...frameEls.current.entries()].find(([, el]) => el.contentWindow === event.source)?.[0];
       if (file === undefined) return;
-      const data = event.data as { type?: string; id?: number; rect?: Rect; at?: { x: number; y: number }; tag?: string; style?: string; text?: string | null; href?: string };
+      const data = event.data as { type?: string; id?: number; rect?: Rect; at?: { x: number; y: number }; tag?: string; style?: string; text?: string | null; href?: string; phase?: string; x?: number; y?: number };
+      if (data.type === "dc:pan" && typeof data.x === "number" && typeof data.y === "number") {
+        // The middle button dragged inside a frame: where the pointer is, placed in the window by where
+        // the frame stands now; the board pans by how far that moved. Committed at once (`flushSync`), so
+        // the frame's next report is measured against the board as it now stands.
+        const el = frameEls.current.get(file);
+        if (el === undefined) return;
+        const box = el.getBoundingClientRect();
+        const scale = el.offsetWidth > 0 ? box.width / el.offsetWidth : 1;
+        const p = { x: box.left + data.x * scale, y: box.top + data.y * scale };
+        const was = framePan.current;
+        framePan.current = data.phase === "end" ? null : p;
+        if (data.phase === "start" || was === null) return;
+        moved.current = true;
+        flushSync(() => setView((v) => ({ ...v, x: v.x + p.x - was.x, y: v.y + p.y - was.y })));
+        return;
+      }
       if (data.type === "dc:ready") {
         // The frame's runtime is listening only once it has drawn — a mode sent at `load` can arrive
         // before that — so every `dc:ready` is answered with what the frame should be.
@@ -430,6 +495,27 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, sources]);
 
+  // Space held pans, as in every canvas: let go, the tool is what it was.
+  useEffect(() => {
+    const down = (e: KeyboardEvent): void => {
+      if (e.code !== "Space" || e.repeat || editingText !== null || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target instanceof HTMLElement && e.target.isContentEditable)) return;
+      e.preventDefault();
+      setSpaceHeld(true);
+    };
+    const up = (e: KeyboardEvent): void => {
+      if (e.code === "Space") setSpaceHeld(false);
+    };
+    const blur = (): void => setSpaceHeld(false);
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    window.addEventListener("blur", blur);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      window.removeEventListener("blur", blur);
+    };
+  }, [editingText]);
+
   useEffect(() => {
     const onKey = (e: KeyboardEvent): void => {
       if (editingText !== null || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
@@ -458,13 +544,23 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       }
       if (e.ctrlKey || e.metaKey || e.altKey) return;
       const picked = e.shiftKey && e.key.toLowerCase() === "l" ? "arrow" : SHORTCUT[e.key.toLowerCase()];
-      if (picked !== undefined) setTool(picked);
+      if (picked !== undefined) pickTool(picked);
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [remove, editingText, running, full]);
 
   // --- the board's gestures --------------------------------------------------------------------------
+
+  /** Zoom to `z`, the board's middle kept where it is. */
+  const zoomTo = (z: number): void => {
+    const el = board.current;
+    if (el === null) return;
+    moved.current = true;
+    const mx = el.clientWidth / 2;
+    const my = el.clientHeight / 2;
+    setView((v) => ({ z, x: mx - ((mx - v.x) * z) / v.z, y: my - ((my - v.y) * z) / v.z }));
+  };
 
   /** Pan so an artboard stands in the middle of the board, at the zoom it is at. */
   const bringIntoView = (file: string): void => {
@@ -485,6 +581,21 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       next.delete(file);
       return next;
     });
+
+  /** Pick a tool; one of a group is what that group's button stands for from then on. */
+  const pickTool = (next: CanvasTool): void => {
+    setTool(next);
+    const group = groupOf(next);
+    if (group !== undefined) setGroupPick((was) => ({ ...was, [group]: next }));
+  };
+
+  /** A pan from a press anywhere — the middle button on a label, a note, a handle — as the board's own. */
+  const startPan = (e: ReactPointerEvent<Element>): void => {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    setGesture({ kind: "pan", from: { x: e.clientX, y: e.clientY }, view });
+  };
 
   /** A pointer's place in board space. */
   const at = (e: { clientX: number; clientY: number }): { x: number; y: number } => {
@@ -516,7 +627,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     if (e.button !== 0 && e.button !== 1) return;
     e.currentTarget.setPointerCapture(e.pointerId);
     const p = at(e);
-    if (tool === "hand" || e.button === 1) {
+    if (tool === "hand" || e.button === 1 || spaceHeld) {
       setGesture({ kind: "pan", from: { x: e.clientX, y: e.clientY }, view });
       return;
     }
@@ -549,15 +660,18 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       moved.current = true;
       setView({ ...gesture.view, x: gesture.view.x + e.clientX - gesture.from.x, y: gesture.view.y + e.clientY - gesture.from.y });
     } else if (gesture.kind === "moveBoard") {
+      gestureMoved.current = true;
       const dx = p.x - gesture.from.x;
       const dy = p.y - gesture.from.y;
       setIndex((was) => ({ ...was, boards: { ...was.boards, [gesture.file]: { ...was.boards[gesture.file]!, x: Math.round(gesture.at.x + dx), y: Math.round(gesture.at.y + dy) } } }));
     } else if (gesture.kind === "resizeBoard") {
+      gestureMoved.current = true;
       setIndex((was) => ({
         ...was,
         boards: { ...was.boards, [gesture.file]: { ...was.boards[gesture.file]!, w: Math.max(40, Math.min(8000, Math.round(gesture.size.w + p.x - gesture.from.x))), h: Math.max(40, Math.min(8000, Math.round(gesture.size.h + p.y - gesture.from.y))) } },
       }));
     } else if (gesture.kind === "moveNote") {
+      gestureMoved.current = true;
       const dx = p.x - gesture.from.x;
       const dy = p.y - gesture.from.y;
       setIndex((was) => {
@@ -580,8 +694,12 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     const g = gesture;
     setGesture(null);
     if (g === null) return;
+    const dragged = gestureMoved.current;
+    gestureMoved.current = false;
     if (g.kind === "moveBoard" || g.kind === "resizeBoard" || g.kind === "moveNote") {
-      touch("project/canvas.json");
+      // Only a drag is an edit: a press on an artboard's name that moved nothing was a version of
+      // nothing (2026-11-07: v16 was canvas.json, reformatted), and hid the canvas from the thread.
+      if (dragged) touch("project/canvas.json");
       return;
     }
     if (g.kind !== "draw") return;
@@ -614,7 +732,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       changeIndex((was) => ({ ...was, notes: { ...(was.notes ?? {}), [id]: note } }));
       setSelection({ kind: "note", id });
     }
-    setTool("pointer");
+    pickTool("pointer");
   };
 
   // --- the selected element's properties -------------------------------------------------------------
@@ -641,8 +759,8 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const handSource = (file: string, w: Window | null | undefined): void => {
     if (w !== null && w !== undefined && sourceOf(file) !== granted.current[`project/${file}`]) w.postMessage({ type: "dc:source", text: sourceOf(file) }, "*");
   };
-  const order = (index.order ?? []).filter((f) => index.boards[f] !== undefined);
-  const layerOn = tool !== "pointer" && tool !== "text" && tool !== "comment";
+  const order = (index.order ?? []).filter((f) => index.boards[f] !== undefined && onPage(index.boards[f]!));
+  const layerOn = spaceHeld || (tool !== "pointer" && tool !== "text" && tool !== "comment");
   const interactive = order.filter((f) => index.boards[f]!.is_interactive === true);
   /** Numbered as they were written: a pin keeps its number when others are resolved. */
   const numbered = comments.map((c, i) => ({ ...c, n: i + 1 })).filter((c) => index.boards[c.file] !== undefined);
@@ -696,90 +814,49 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     );
   }
 
-  return (
-    <div ref={shellBox} style={{ ...shell, ...style }}>
-      {/*
-        One line, always the same height: a bar that wrapped grew and shrank as the status changed and
-        controls came and went, and every change of the board's height fitted the canvas again under the
-        pointer. The words give way first (an ellipsis, the whole in the tooltip); past that it scrolls.
-      */}
-      <div style={{ ...bar, overflowX: "auto", scrollbarWidth: "thin" }}>
-        <span style={{ ...barText, ...shrinks, flexShrink: 2, fontWeight: 600 }} title={index.title ?? "Canvas"}>
-          {index.title ?? "Canvas"}
-        </span>
-        <span style={{ ...barText, ...shrinks, color: status?.tone === "refused" || status?.tone === "error" ? "#d6453d" : "#5a5f7a" }} title={status?.words}>
-          {status?.words ?? (dirty.size > 0 ? "Unsaved" : `v${base}`)}
-        </span>
-        {status?.tone === "refused" ? (
-          <button type="button" style={button} onClick={onReload}>
-            Reload
-          </button>
-        ) : null}
-        <span style={{ flex: 1 }} />
-        {interactive.length > 0 ? (
-          running.size > 0 ? (
-            <button type="button" style={{ ...button, background: RUN, borderColor: RUN, color: "#fff" }} title="Stop every running artboard (Esc)" onClick={() => setRunning(new Set())}>
-              ■ Stop
-            </button>
-          ) : (
-            <button type="button" style={{ ...button, color: RUN }} title="Run every interactive artboard where it sits" onClick={() => setRunning(new Set(interactive))}>
-              ▶ Run canvas
-            </button>
-          )
-        ) : null}
-        {selection?.kind === "board" || selection?.kind === "element" ? (
-          <>
-            {onExport !== undefined ? (
-              <>
-                <button type="button" style={button} onClick={() => onExport(selection.file, "png", { width: index.boards[selection.file]!.w, height: index.boards[selection.file]!.h })}>
-                  PNG
-                </button>
-                <button type="button" style={button} onClick={() => onExport(selection.file, "pdf", { width: index.boards[selection.file]!.w, height: index.boards[selection.file]!.h })}>
-                  PDF
-                </button>
-              </>
-            ) : null}
-          </>
-        ) : null}
-        <button type="button" style={button} onClick={fit} title="See every artboard">
-          Fit
+  /** A tool's button in the top-left bar. */
+  const toolButtonFor = (t: (typeof TOOLS)[number], group?: ToolGroup): JSX.Element => (
+    <span key={group ?? t.tool} style={{ display: "inline-flex", alignItems: "center" }}>
+      <button
+        type="button"
+        title={`${t.label} (${t.key})`}
+        aria-label={t.label}
+        aria-pressed={tool === t.tool}
+        onClick={() => pickTool(t.tool)}
+        style={{ ...iconButton, background: tool === t.tool ? "var(--fill-ghost-selected, #e5e8f1)" : "transparent", color: tool === t.tool ? "var(--accent, #2563c7)" : "var(--text, #121526)" }}
+      >
+        <Glyph d={t.path} />
+      </button>
+      {group !== undefined ? (
+        <button type="button" aria-label={`More ${group === "pen" ? "pen and line" : "shape"} tools`} aria-haspopup="menu" aria-expanded={menu?.kind === "group" && menu.group === group} onClick={(e) => openMenu({ kind: "group", group }, e.currentTarget)} style={{ ...iconButton, width: 14, color: "var(--dim, #5a5f7a)" }}>
+          <Glyph d={CARET} size={10} />
         </button>
-        <span style={{ ...barText, minWidth: 40, textAlign: "right" }}>{Math.round(view.z * 100)}%</span>
-        {narrow ? (
-          <button type="button" style={{ ...button, background: panelOpen ? "var(--panel-3, #e5e8f1)" : button.background }} aria-label="Properties panel" aria-pressed={panelOpen} title="Properties, tweaks, layers and comments (Ctrl+\)" onClick={() => setPanelOpen((was) => !was)}>
-            Panel
-          </button>
-        ) : null}
-      </div>
-      <div style={{ display: "flex", flex: 1, minHeight: 0, position: "relative" }}>
-        <div role="toolbar" aria-label="Tools" aria-orientation="vertical" style={tools}>
-          {TOOLS.filter((t) => t.tool !== "comment" || onComment !== undefined).map((t) => (
-            <button
-              key={t.tool}
-              type="button"
-              title={`${t.label} (${t.key})`}
-              aria-label={t.label}
-              aria-pressed={tool === t.tool}
-              onClick={() => setTool(t.tool)}
-              style={{ ...toolButton, background: tool === t.tool ? "var(--panel-3, #e5e8f1)" : "transparent", color: tool === t.tool ? "var(--text, #121526)" : "var(--dim, #5a5f7a)" }}
-            >
-              <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                <path d={t.path} />
-              </svg>
-            </button>
-          ))}
-        </div>
-        <div ref={board} style={{ position: "relative", flex: 1, minWidth: narrow ? 0 : 280, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
+      ) : null}
+    </span>
+  );
+  const toolOf = (which: CanvasTool): (typeof TOOLS)[number] => TOOLS.find((t) => t.tool === which)!;
+  const pages = index.pages ?? [];
+
+  return (
+    <div style={{ ...shell, ...style }}>
+      <div style={{ position: "relative", display: "flex", flex: 1, minHeight: 0 }}>
+        <div ref={board} onMouseDown={(e) => e.button === 1 && e.preventDefault()} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
           {/* Under the frames and notes: a press here pans, and empties the selection. */}
           <div onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "default" }} />
           <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
-            {Object.entries(index.notes ?? {}).map(([id, n]) => (
+            {Object.entries(index.notes ?? {})
+              .filter(([, n]) => onPage(n))
+              .map(([id, n]) => (
               <EditableNote
                 key={id}
                 note={n}
                 selected={selection?.kind === "note" && selection.id === id}
                 editing={editingText !== null && "note" in editingText && editingText.note === id}
                 onPress={(e) => {
+                  if (e.button === 1) {
+                    startPan(e);
+                    return;
+                  }
                   e.stopPropagation();
                   if (tool !== "pointer") return;
                   setSelection({ kind: "note", id });
@@ -810,6 +887,10 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                 <div key={file} style={{ position: "absolute", left: b.x, top: b.y, width: b.w, height: b.h }}>
                   <div
                     onPointerDown={(e) => {
+                      if (e.button === 1) {
+                        startPan(e);
+                        return;
+                      }
                       e.stopPropagation();
                       setSelection({ kind: "board", file });
                       e.currentTarget.setPointerCapture(e.pointerId);
@@ -817,24 +898,25 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                     }}
                     onPointerMove={onLayerMove}
                     onPointerUp={onLayerUp}
-                    style={{ position: "absolute", left: 0, bottom: "100%", paddingBottom: 6, fontSize: 13 / Math.max(view.z, 0.25), lineHeight: 1.2, color: chosen ? "#4a4fd1" : "#5a5f7a", whiteSpace: "nowrap", cursor: "move", userSelect: "none", display: "flex", gap: 6, alignItems: "center" }}
+                    style={{ position: "absolute", left: 0, bottom: "100%", width: b.w, boxSizing: "border-box", paddingBottom: 6 / Math.max(view.z, 0.25), fontSize: 13 / Math.max(view.z, 0.25), lineHeight: 1.2, color: chosen ? "#4a4fd1" : "#5a5f7a", whiteSpace: "nowrap", cursor: "move", userSelect: "none", display: "flex", gap: "0.4em", alignItems: "center" }}
                   >
-                    {b.is_interactive === true ? <span style={{ width: 8, height: 8, borderRadius: 4, background: "#4a4fd1", display: "inline-block" }} /> : null}
-                    <span style={running.has(file) ? { color: RUN, fontWeight: 600 } : undefined}>
+                    {b.is_interactive === true ? <span title="Its controls respond" style={{ width: "0.6em", height: "0.6em", borderRadius: "50%", background: "#4a4fd1", display: "inline-block", flexShrink: 0 }} /> : null}
+                    <span style={{ overflow: "hidden", textOverflow: "ellipsis", minWidth: 0, ...(running.has(file) ? { color: RUN, fontWeight: 600 } : {}) }}>
                       {b.title ?? file.replace(/\.dc\.html$/, "")}
                       {running.has(file) ? " · running" : ""}
                     </span>
-                    {b.is_interactive === true ? (
-                      <RunControls
-                        running={running.has(file)}
-                        onRun={() => run(file)}
-                        onStop={() => stop(file)}
-                        onFull={() => {
-                          stop(file);
-                          setFull(file);
-                        }}
-                      />
-                    ) : null}
+                    <span style={{ flex: 1 }} />
+                    <LabelControls
+                      interactive={b.is_interactive === true}
+                      running={running.has(file)}
+                      onRun={() => run(file)}
+                      onStop={() => stop(file)}
+                      onFull={() => {
+                        stop(file);
+                        setFull(file);
+                      }}
+                      {...(onExport !== undefined ? { onDownload: (anchor: Element) => openMenu({ kind: "download", file }, anchor) } : {})}
+                    />
                   </div>
                   {!servable(file) ? (
                     <div style={{ width: b.w, height: b.h, background: "#fff", display: "grid", placeItems: "center", color: "#5a5f7a", fontSize: 13 / Math.max(view.z, 0.25), outline: chosen ? "2px solid #4a4fd1" : "none" }}>{dirty.size > 0 ? "Saving the new artboard…" : "Opening…"}</div>
@@ -890,6 +972,10 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                     <div
                       title="Resize"
                       onPointerDown={(e) => {
+                        if (e.button === 1) {
+                          startPan(e);
+                          return;
+                        }
                         e.stopPropagation();
                         e.currentTarget.setPointerCapture(e.pointerId);
                         setGesture({ kind: "resizeBoard", file, from: at(e), size: { w: b.w, h: b.h } });
@@ -947,9 +1033,57 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
             </Popover>
           ) : null}
           {/* Over the frames while a drawing tool is held, so a frame never takes the gesture. */}
-          {layerOn ? <div onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "crosshair" }} /> : null}
+          {layerOn ? <div onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" || spaceHeld ? (gesture?.kind === "pan" ? "grabbing" : "grab") : "crosshair" }} /> : null}
         </div>
-        <aside style={narrow ? { ...panel, display: panelOpen ? "flex" : "none", position: "absolute", top: 0, right: 0, bottom: 0, boxShadow: "-8px 0 24px rgba(18,21,38,.14)" } : panel}>
+        {/*
+          The canvas's own chrome, floating over the board as Claude Code's does (the person, 2026-11-07):
+          the tools at the top left, running, the panel and the zoom at the top right.
+        */}
+        <div role="toolbar" aria-label="Tools" style={{ ...floatBar, left: 8, flexWrap: "wrap", maxWidth: "calc(100% - 16px)", overflowX: "visible" }}>
+          {pages.length > 1 ? (
+            <>
+              <button type="button" aria-label="Page" aria-haspopup="menu" onClick={(e) => openMenu({ kind: "pages" }, e.currentTarget)} style={{ ...textButton, maxWidth: 180 }}>
+                <span style={{ ...countChip }}>{pages.length}</span>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{pages.find((p) => p.id === page)?.name ?? "Page"}</span>
+                <Glyph d={CARET} size={10} />
+              </button>
+              <span style={divider} />
+            </>
+          ) : null}
+          {(["pointer", "hand", "text", "artboard", "note"] as const).map((which) => toolButtonFor(toolOf(which)))}
+          {toolButtonFor(toolOf(groupPick.pen), "pen")}
+          {toolButtonFor(toolOf(groupPick.shape), "shape")}
+          {onComment !== undefined ? toolButtonFor(toolOf("comment")) : null}
+        </div>
+        <div role="toolbar" aria-label="Canvas" style={{ ...floatBar, right: 8, maxWidth: "calc(100% - 16px)", ...(stacked ? { top: "auto", bottom: 8 } : {}) }}>
+          <span style={{ ...barText, ...shrinks, maxWidth: 220, padding: "0 4px", color: status?.tone === "refused" || status?.tone === "error" ? "#d6453d" : "var(--dim, #5a5f7a)" }} title={status?.words ?? `v${String(base)}`}>
+            {status?.words ?? (dirty.size > 0 ? "Unsaved" : `v${String(base)}`)}
+          </span>
+          {status?.tone === "refused" ? (
+            <button type="button" style={textButton} onClick={onReload}>
+              Reload
+            </button>
+          ) : null}
+          {interactive.length > 0 ? (
+            running.size > 0 ? (
+              <button type="button" aria-label="Stop every running artboard" title="Stop every running artboard (Esc)" onClick={() => setRunning(new Set())} style={{ ...iconButton, color: RUN }}>
+                <Glyph d={STOP} filled />
+              </button>
+            ) : (
+              <button type="button" aria-label="Run canvas" title="Run every interactive artboard where it sits" onClick={() => setRunning(new Set(interactive))} style={iconButton}>
+                <Glyph d={PLAY} />
+              </button>
+            )
+          ) : null}
+          <button type="button" aria-label="Properties panel" aria-pressed={panelOpen} title="Properties, tweaks, layers and comments (Ctrl+\)" onClick={() => setPanelOpen((was) => !was)} style={{ ...iconButton, background: panelOpen ? "var(--fill-ghost-selected, #e5e8f1)" : "transparent" }}>
+            <Glyph d={SLIDERS} />
+          </button>
+          <button type="button" aria-label="Zoom" aria-haspopup="menu" title="Zoom" onClick={(e) => openMenu({ kind: "zoom" }, e.currentTarget)} style={{ ...textButton, fontVariantNumeric: "tabular-nums" }}>
+            {Math.round(view.z * 100)}%
+            <Glyph d={CARET} size={10} />
+          </button>
+        </div>
+        <aside aria-label="Properties" style={{ ...panel, display: panelOpen ? "flex" : "none", ...(stacked ? { top: 84, bottom: 50 } : {}) }}>
           <div role="tablist" style={{ display: "flex", borderBottom: "1px solid var(--line, #e0e3ec)", padding: "0 10px" }}>
             {(onComment !== undefined ? (["properties", "tweaks", "layers", "comments"] as const) : (["properties", "tweaks", "layers"] as const)).map((id) => (
               <button key={id} role="tab" type="button" aria-selected={tab === id} onClick={() => setTab(id)} style={{ ...tabButton, color: tab === id ? "var(--text, #121526)" : "var(--dim, #5a5f7a)", fontWeight: tab === id ? 600 : 400, boxShadow: tab === id ? "inset 0 -2px 0 var(--accent, #4a4fd1)" : "none" }}>
@@ -1012,30 +1146,132 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
           </div>
         </aside>
       </div>
+      {menu !== null ? (
+        <Popover ref={menuBox} anchor={menuAnchor} side="below" align={menu.kind === "zoom" || menu.kind === "download" ? "end" : "start"} gap={4} role="menu" style={menuCard} onPointerDown={(e) => e.stopPropagation()}>
+          {menu.kind === "group"
+            ? GROUPS[menu.group].map((which) => {
+                const t = toolOf(which);
+                return (
+                  <button
+                    key={which}
+                    type="button"
+                    role="menuitem"
+                    aria-label={t.label}
+                    onClick={() => {
+                      pickTool(which);
+                      setMenu(null);
+                    }}
+                    style={{ ...menuItem, color: tool === which ? "var(--accent, #2563c7)" : "inherit" }}
+                  >
+                    <Glyph d={t.path} />
+                    <span style={{ flex: 1 }}>{t.label}</span>
+                    <span style={{ color: "var(--dim, #5a5f7a)", fontSize: 11 }}>{t.key}</span>
+                  </button>
+                );
+              })
+            : menu.kind === "zoom"
+              ? (
+                  [
+                    ["Zoom to fit", () => fit()],
+                    ["50%", () => zoomTo(0.5)],
+                    ["100%", () => zoomTo(1)],
+                    ["200%", () => zoomTo(2)],
+                  ] as const
+                ).map(([label, act]) => (
+                  <button
+                    key={label}
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      act();
+                      setMenu(null);
+                    }}
+                    style={menuItem}
+                  >
+                    {label}
+                  </button>
+                ))
+              : menu.kind === "pages"
+                ? pages.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      role="menuitem"
+                      onClick={() => {
+                        setPage(p.id);
+                        setSelection(null);
+                        setMenu(null);
+                      }}
+                      style={{ ...menuItem, fontWeight: p.id === page ? 600 : 400 }}
+                    >
+                      {p.name}
+                    </button>
+                  ))
+                : onExport !== undefined
+                  ? (["png", "pdf"] as const).map((format) => (
+                      <button
+                        key={format}
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          const b = index.boards[menu.file];
+                          if (b !== undefined) onExport(menu.file, format, { width: b.w, height: b.h });
+                          setMenu(null);
+                        }}
+                        style={menuItem}
+                      >
+                        {format === "png" ? "PNG image" : "PDF document"}
+                      </button>
+                    ))
+                  : null}
+        </Popover>
+      ) : null}
     </div>
   );
 }
 
-/** An interactive artboard's controls on its label: ▶ runs it where it sits; running, ■ stops it and ⤢ fills the editor with it. */
-function RunControls({ running, onRun, onStop, onFull }: { running: boolean; onRun: () => void; onStop: () => void; onFull: () => void }): JSX.Element {
+/**
+ * An artboard's controls at the right of its label (Claude Code's canvas): ▶ runs an interactive one where
+ * it sits, ■ stops it; ⤢ shows it on its own, filling the editor; ⬇ saves it as a picture or a document.
+ */
+function LabelControls({ interactive, running, onRun, onStop, onFull, onDownload }: { interactive: boolean; running: boolean; onRun: () => void; onStop: () => void; onFull: () => void; onDownload?: (anchor: Element) => void }): JSX.Element {
   // The label drags its artboard: a press on a control is the control's.
-  const own = { onPointerDown: (e: ReactPointerEvent) => e.stopPropagation() };
-  const chip: CSSProperties = { font: "inherit", fontSize: "0.85em", lineHeight: 1.25, padding: "0 0.4em", borderRadius: "0.3em", border: `1px solid ${RUN}`, cursor: "pointer" };
-  return running ? (
+  const own = { onPointerDown: (e: ReactPointerEvent) => e.button === 0 && e.stopPropagation() };
+  const chip: CSSProperties = { font: "inherit", fontSize: "1em", lineHeight: 1, width: "1.5em", height: "1.5em", padding: 0, display: "inline-grid", placeItems: "center", border: 0, borderRadius: "0.3em", background: "transparent", color: "#5a5f7a", cursor: "pointer", flexShrink: 0 };
+  return (
     <>
-      <button type="button" {...own} onClick={onStop} title="Stop running it" aria-label="Stop" style={{ ...chip, background: RUN, color: "#fff" }}>
-        ■
+      {interactive ? (
+        running ? (
+          <button type="button" {...own} onClick={onStop} title="Stop running it" aria-label="Stop" style={{ ...chip, background: RUN, color: "#fff" }}>
+            <Glyph d={STOP} filled size="0.9em" />
+          </button>
+        ) : (
+          <button type="button" {...own} onClick={onRun} title="Run it where it sits" aria-label="Run" style={{ ...chip, color: RUN }}>
+            <Glyph d={PLAY} size="0.9em" />
+          </button>
+        )
+      ) : null}
+      <button type="button" {...own} onClick={onFull} title={interactive ? "Run it on its own, filling the editor" : "See it on its own, filling the editor"} aria-label="Open it on its own" style={chip}>
+        <Glyph d={EXPAND} size="0.9em" />
       </button>
-      <button type="button" {...own} onClick={onFull} title="Run it on its own, filling the editor" aria-label="Run it on its own" style={{ ...chip, background: "#fff", color: RUN }}>
-        ⤢
-      </button>
+      {onDownload !== undefined ? (
+        <button type="button" {...own} onClick={(e) => onDownload(e.currentTarget)} title="Save it as a picture or a document" aria-label="Download" aria-haspopup="menu" style={chip}>
+          <Glyph d={DOWNLOAD} size="0.9em" />
+        </button>
+      ) : null}
     </>
-  ) : (
-    <button type="button" {...own} onClick={onRun} title="Run it where it sits" aria-label="Run" style={{ ...chip, background: "#fff", color: RUN }}>
-      ▶
-    </button>
   );
 }
+
+/** A line icon on the editor's 24-unit grid, in the colour of its text. */
+function Glyph({ d, size = 16, filled = false }: { d: string; size?: number | string; filled?: boolean }): JSX.Element {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill={filled ? "currentColor" : "none"} stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: "block", flexShrink: 0 }}>
+      <path d={d} />
+    </svg>
+  );
+}
+
 
 /** A comment's pin: its point at the place it was put, its number in it. */
 function Pin({ n, at, zoom, open, resolved, onOpen, ref }: { n: number; at: { x: number; y: number }; zoom: number; open: boolean; resolved: boolean; onOpen: () => void; ref?: Ref<HTMLButtonElement> }): JSX.Element {
@@ -1527,9 +1763,16 @@ const barText: CSSProperties = { fontSize: 12, color: "var(--text, #121526)", wh
 /** A bar's words that give way to its controls: shortened to an ellipsis rather than wrapped. */
 const shrinks: CSSProperties = { minWidth: 24, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flexShrink: 1 };
 const button: CSSProperties = { font: "inherit", fontSize: 11.5, color: "var(--text, #121526)", background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "1px 8px", cursor: "pointer", flexShrink: 0, whiteSpace: "nowrap" };
-const tools: CSSProperties = { width: 44, flexShrink: 0, borderRight: "1px solid var(--line, #e0e3ec)", display: "flex", flexDirection: "column", alignItems: "center", gap: 2, padding: "8px 0", background: "var(--panel, #fff)" };
-const toolButton: CSSProperties = { width: 30, height: 30, borderRadius: 7, display: "grid", placeItems: "center", border: 0, cursor: "pointer" };
-const panel: CSSProperties = { width: 250, flexShrink: 0, borderLeft: "1px solid var(--line, #e0e3ec)", background: "var(--panel, #fff)", display: "flex", flexDirection: "column", minHeight: 0 };
+/** A bar floating over the board's top edge: a white pill, as Claude Code's canvas draws its two. */
+const floatBar: CSSProperties = { position: "absolute", top: 8, display: "flex", alignItems: "center", gap: 2, padding: 3, background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 10, boxShadow: "0 2px 8px rgba(18,21,38,.10)", minWidth: 0, overflowX: "auto", scrollbarWidth: "none" };
+const iconButton: CSSProperties = { width: 28, height: 28, borderRadius: 7, display: "grid", placeItems: "center", border: 0, padding: 0, background: "transparent", color: "var(--text, #121526)", cursor: "pointer", flexShrink: 0 };
+const textButton: CSSProperties = { font: "inherit", fontSize: 12.5, height: 28, display: "inline-flex", alignItems: "center", gap: 5, padding: "0 8px", border: 0, borderRadius: 7, background: "transparent", color: "var(--text, #121526)", cursor: "pointer", whiteSpace: "nowrap", flexShrink: 0 };
+const countChip: CSSProperties = { minWidth: 16, height: 16, borderRadius: 8, background: "var(--panel-3, #e5e8f1)", fontSize: 10.5, display: "inline-grid", placeItems: "center", color: "var(--dim, #5a5f7a)" };
+const divider: CSSProperties = { width: 1, alignSelf: "stretch", margin: "4px 3px", background: "var(--line, #e0e3ec)", flexShrink: 0 };
+const menuCard: CSSProperties = { minWidth: 160, padding: 4, background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 8, boxShadow: "0 10px 28px rgba(18,21,38,.18)", display: "grid", gap: 1, fontSize: 12.5, color: "var(--text, #121526)" };
+const menuItem: CSSProperties = { font: "inherit", display: "flex", alignItems: "center", gap: 8, padding: "6px 8px", border: 0, borderRadius: 5, background: "transparent", textAlign: "left", cursor: "pointer", color: "inherit" };
+/** The properties panel: a card over the board's right edge, under the top-right bar. */
+const panel: CSSProperties = { position: "absolute", top: 46, right: 8, bottom: 8, width: 260, maxWidth: "calc(100% - 16px)", boxSizing: "border-box", background: "var(--panel, #fff)", border: "1px solid var(--line, #e0e3ec)", borderRadius: 10, boxShadow: "0 8px 24px rgba(18,21,38,.14)", flexDirection: "column", minHeight: 0, overflow: "hidden" };
 const tabButton: CSSProperties = { font: "inherit", fontSize: 12, padding: "8px 8px 7px", border: 0, background: "transparent", cursor: "pointer" };
 const input: CSSProperties = { font: "inherit", fontSize: 12, border: "1px solid var(--line, #e0e3ec)", borderRadius: 6, padding: "2px 7px", background: "var(--panel, #fff)", color: "var(--text, #121526)", minWidth: 0 };
 const hint: CSSProperties = { margin: 12, fontSize: 12, color: "var(--dim, #5a5f7a)" };
