@@ -63,6 +63,8 @@ export * from "./connectUndo";
 export * from "./moveLegality";
 export * from "./moveQuestion";
 export * from "./nextMoves";
+// A conversation pinned to a set by its name from before the presets moved, given that set renamed.
+export { stackForOldPin } from "./permissionSetsMove";
 export * from "./sync";
 export * from "./drafts";
 export * from "./windowStates";

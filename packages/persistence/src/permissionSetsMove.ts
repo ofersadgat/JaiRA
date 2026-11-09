@@ -193,7 +193,6 @@ export function moveTaskPermissionSets(tasksDir: string, snapshotsDir: string, d
   } catch {
     return;
   }
-  const pinOf = db.prepare(`SELECT snapshot_hash AS snapshotHash, document_id AS documentId FROM task_runtime WHERE task_id = ?`);
   for (const name of names) {
     const file = join(tasksDir, name);
     let text: string;
@@ -214,12 +213,10 @@ export function moveTaskPermissionSets(tasksDir: string, snapshotsDir: string, d
       changed = true;
     }
     const settings = (meta["chatSettings"] ?? {}) as Record<string, unknown>;
-    if (typeof meta["workflow"] === "string" && CONVERSATION_WORKFLOWS.has(meta["workflow"]) && settings["permissionSet"] === undefined && typeof meta["id"] === "string") {
-      const source = pinnedSourceOf(snapshotsDir, pinOf.get(meta["id"]) as { snapshotHash: string | null; documentId: string | null } | undefined);
-      if (source !== undefined && namesOldPermissionSet(source)) {
-        meta["chatSettings"] = { ...settings, permissionSet: { layers: [renamedPermissionSetReferences(source)] } };
-        changed = true;
-      }
+    const given = settings["permissionSet"] === undefined && typeof meta["id"] === "string" ? stackForOldPin(meta, snapshotsDir, db) : undefined;
+    if (given !== undefined) {
+      meta["chatSettings"] = { ...settings, permissionSet: given };
+      changed = true;
     }
     if (!changed) continue;
     writeFileSync(file, `${JSON.stringify(meta, null, 2)}\n`, "utf8");
@@ -228,6 +225,22 @@ export function moveTaskPermissionSets(tasksDir: string, snapshotsDir: string, d
     const taskId = typeof meta["id"] === "string" ? meta["id"] : name.replace(/\.json$/, "");
     touch(db, "task", taskId, taskId, false);
   }
+}
+
+/**
+ * The stack a CONVERSATION with no stack of its own is given when its pinned workflow names its set by
+ * an old reference: that set, renamed — what its composer would read from the pin, which is frozen.
+ * `undefined` for a task that is no conversation, or whose pin names no old reference.
+ *
+ * Not only at open: a conversation's kept settings can lose their stack later (`keepChatSettings`), and
+ * its composer would then read the old name off the pin — a reference that matches no file, so a stack
+ * that offers nothing.
+ */
+export function stackForOldPin(meta: { id?: unknown; workflow?: unknown }, snapshotsDir: string, db: JairaDb): { layers: string[] } | undefined {
+  if (typeof meta.workflow !== "string" || !CONVERSATION_WORKFLOWS.has(meta.workflow) || typeof meta.id !== "string") return undefined;
+  const row = db.prepare(`SELECT snapshot_hash AS snapshotHash, document_id AS documentId FROM task_runtime WHERE task_id = ?`).get(meta.id) as { snapshotHash: string | null; documentId: string | null } | undefined;
+  const source = pinnedSourceOf(snapshotsDir, row);
+  return source !== undefined && namesOldPermissionSet(source) ? { layers: [renamedPermissionSetReferences(source)] } : undefined;
 }
 
 /** The reference a task's pinned workflow names its root's permission set by, if it names one. */

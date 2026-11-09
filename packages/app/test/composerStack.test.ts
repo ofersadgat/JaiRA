@@ -25,6 +25,7 @@ import {
   runtimeWordsOf,
   saveStackRequestOf,
   segmentsOf,
+  segmentTitleOf,
   segmentWordsOf,
   stackBucketOf,
   stackFormOf,
@@ -117,6 +118,16 @@ describe("the tools layer the Tools card writes (§2.6 step 5, ruling 8)", () =>
     // An inherited map IS what the stack comes to.
     expect(effectiveMapOf({ layers: [ASK_FIRST], tools: undefined }, below, inherited)).toBe(inherited);
   });
+
+  it("owns an inherited stack with NO lines while the stack under it is not known (2026-11-09)", () => {
+    // Measured against nothing, the state's whole map would be the conversation's own lines, newest of
+    // all — and `full` laid on top would still ask for every call.
+    const inherited = parsePermissionSet({ ...below, shell: "ask", write_file: "ask" }).permissionSet;
+    expect(ownedFormOf(withLayerAdded({ layers: [ASK_FIRST], tools: undefined }, "$/permission-sets/full"), undefined, inherited)).toEqual({
+      layers: [ASK_FIRST, "$/permission-sets/full"],
+      tools: {},
+    });
+  });
 });
 
 const viewOf = (layers: PermissionStackView["layers"]): Pick<PermissionStackView, "layers"> => ({ layers });
@@ -142,6 +153,21 @@ describe("the segments (§4.1, §7.4)", () => {
       ["app/build", "named", BUILD, 1],
       ["web/docs-sites", "named", DOCS, 2],
     ]);
+  });
+
+  it("draws a layer the engine could not follow, saying why, instead of no layers (2026-11-09)", () => {
+    const moved = "$/permission-sets/chat/ask-first";
+    const message = `reference '${moved}' matches no file under any layer root`;
+    // A stack that cannot be followed composes nothing: only the runtime layer comes back.
+    const broken = { layers: [{ id: "runtime", scope: "runtime", role: "runtime", icon: "history", lines: 0 }], issues: [{ path: "", message, severity: "error" }] } as Pick<PermissionStackView, "layers" | "issues">;
+    const layers = layerSegmentsOf(broken, { layers: [moved, "$/permission-sets/full"], tools: {} });
+    expect(layers.map((layer) => [layer.id, layer.role, layer.index, layer.problem])).toEqual([
+      ["chat/ask-first", "bottom", 0, message],
+      ["full", "named", 1, undefined],
+    ]);
+    expect(segmentTitleOf(layers[0]!)).toMatch(/cannot be read .* this stack offers nothing/);
+    // Followed, nothing is said.
+    expect(layerSegmentsOf({ ...view, issues: [] }, form).every((layer) => layer.problem === undefined)).toBe(true);
   });
 
   it("is drawn from the form alone until the engine has composed it", () => {

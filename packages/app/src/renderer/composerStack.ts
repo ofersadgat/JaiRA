@@ -113,9 +113,15 @@ export function belowSetOf(below: Record<string, unknown> | undefined): Permissi
 /**
  * A form the conversation OWNS, ready to be edited: an inherited one takes, as its tools layer, what
  * the state's map says beyond the stack under it — nothing, for a state that names a set and no more.
+ *
+ * `below` is `undefined` while the stack under it is not known — not read yet, or it could not be
+ * followed. Then nothing is taken: measured against nothing, the state's WHOLE map would become the
+ * conversation's own lines, newest of all, and every layer laid on top would be overruled by them
+ * (2026-11-09: `full` laid over a pin to a moved set still asked for every call).
  */
-export function ownedFormOf(form: StackForm, below: PermissionSet, inherited: PermissionSet): StackForm {
-  return form.tools !== undefined ? form : { layers: [...form.layers], tools: toolsLayerOf(below, inherited) };
+export function ownedFormOf(form: StackForm, below: PermissionSet | undefined, inherited: PermissionSet): StackForm {
+  if (form.tools !== undefined) return form;
+  return { layers: [...form.layers], tools: below !== undefined ? toolsLayerOf(below, inherited) : {} };
 }
 
 /** What the Tools card writes (§2.6 step 5, ruling 8): the stack's layers as they are, and the lines that make them come to `next`. */
@@ -169,6 +175,11 @@ export interface LayerSegment {
   lines: number;
   /** Where it is in the form's `layers` — absent for a standing layer, which settings keep. */
   index: number | undefined;
+  /**
+   * Why the stack could not be read through this layer — a reference that matches no file. A stack
+   * that cannot be followed offers nothing (§2.6), so it is drawn and said, never left out.
+   */
+  problem?: string;
 }
 
 export type StackSegment =
@@ -184,26 +195,37 @@ export type StackSegment =
  * was reached through share a `via`); a standing layer is a segment of its own, with no place in the
  * form. The tools layer is a segment of its own kind, and the run's answers ride on it ({@link segmentsOf}).
  */
-export function layerSegmentsOf(view: Pick<PermissionStackView, "layers"> | null | undefined, form: StackForm): LayerSegment[] {
-  if (view === null || view === undefined) {
-    return form.layers.map((reference, index) => ({
-      kind: "layer",
-      key: `layer:${index}:${reference}`,
-      id: layerIdOf(reference),
-      reference,
-      scope: scopeOfReference(reference),
-      role: index === 0 ? "bottom" : "named",
-      icon: "layers",
-      lines: 0,
-      index,
-    }));
-  }
+export function layerSegmentsOf(view: (Pick<PermissionStackView, "layers"> & Partial<Pick<PermissionStackView, "issues">>) | null | undefined, form: StackForm): LayerSegment[] {
+  const fromForm = (problemOf: (reference: string) => string | undefined): LayerSegment[] =>
+    form.layers.map((reference, index) => {
+      const problem = problemOf(reference);
+      return {
+        kind: "layer",
+        key: `layer:${index}:${reference}`,
+        id: layerIdOf(reference),
+        reference,
+        scope: scopeOfReference(reference),
+        role: index === 0 ? "bottom" : "named",
+        icon: "layers",
+        lines: 0,
+        index,
+        ...(problem !== undefined ? { problem } : {}),
+      };
+    });
+  if (view === null || view === undefined) return fromForm(() => undefined);
   const groups: PermissionStackViewLayer[][] = [];
   for (const layer of view.layers) {
     if (layer.role === "runtime" || layer.role === "own") continue;
     const last = groups.at(-1)?.at(-1);
     if (last !== undefined && last.role === layer.role && last.via !== undefined && last.via === layer.via) groups.at(-1)!.push(layer);
     else groups.push([layer]);
+  }
+  // The engine could not follow the stack — it then composes NOTHING, so no layer comes back. The
+  // form's own layers are drawn instead, each one the engine could not read saying why (2026-11-09: a
+  // conversation pinned to a set that had moved drew no layers at all, and said nothing).
+  const errors = (view.issues ?? []).filter((issue) => issue.severity === "error");
+  if (groups.length === 0 && form.layers.length > 0 && errors.length > 0) {
+    return fromForm((reference) => errors.find((issue) => issue.message.includes(`'${reference}'`))?.message);
   }
   // Each of the conversation's layers in order, matched to the form by what it names.
   let next = 0;
@@ -302,6 +324,7 @@ export function collapsedWordsOf(collapsed: CollapsedStack): string | null {
 export function segmentTitleOf(segment: StackSegment): string {
   switch (segment.kind) {
     case "layer":
+      if (segment.problem !== undefined) return `${segment.id} cannot be read — ${segment.problem}. Until it is swapped or removed, this stack offers nothing.`;
       return `${segment.id}${segment.scope !== undefined ? ` · ${segment.scope}` : ""}${segment.role === "standing" ? " · pinned to this project" : ""} — adjust this layer`;
     case "fold":
       return `${segment.layers.length} more layers: ${segment.layers.map((layer) => layer.id).join(" · ")}`;

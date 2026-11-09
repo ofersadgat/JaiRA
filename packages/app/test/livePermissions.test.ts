@@ -9,7 +9,7 @@
  * opening message (a run) and a later one (a chat turn) each hold their set where a change finds it,
  * the change is read the way a message's settings are, and nothing is held once they end.
  */
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,6 +157,53 @@ describe("a conversation keeps what its composer was left at", () => {
     expect(pushes.filter((m) => m.type === "store:invalidate" && (m as { taskId?: string }).taskId === one).length).toBe(writes);
     service.changeChatSettings({ taskId: one, overrides: {} });
     expect(service.taskDetail(one).chatSettings).toBeUndefined();
+  });
+
+  it("runs a message sent with LESS than the conversation keeps under what it keeps (2026-11-09)", async () => {
+    // A composer that has not read the conversation's settings yet sends `{}`; the turn must not run
+    // under the state's set instead of the stack the conversation keeps.
+    const taskId = await started("one");
+    const kept = { permissionSet: { layers: ["$/permission-sets/read-only"] } };
+    service.changeChatSettings({ taskId, overrides: kept as never });
+    const thread = service.chatThread({ taskId })!;
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "two", overrides: {}, fake: [{ output: "second answer" }] });
+    // What a message names still wins over what is kept.
+    await service.sendChatMessage({ taskId, instanceId: thread.instanceId, message: "three", overrides: { model: "fake/chosen" }, fake: [{ output: "third answer" }] });
+    const db = [...(service as never as { sessions: Map<string, { project: { db: { prepare: (sql: string) => { all: (...a: unknown[]) => Array<{ request_json: string }> } } } }> }).sessions.values()][0]!.project.db;
+    const sent = db
+      .prepare(`SELECT request_json FROM operation_records WHERE task_id = ? ORDER BY started_at`)
+      .all(taskId)
+      .map((row) => (JSON.parse(row.request_json) as { chatSettings?: unknown }).chatSettings)
+      .filter((settings) => settings !== undefined);
+    expect(sent).toEqual([kept, { ...kept, model: "fake/chosen" }]);
+  });
+
+  it("keeps a conversation pinned to a set by its name from before the move on that set, renamed, when its stack is cleared (2026-11-09)", async () => {
+    // A pin made before the presets left `chat/`: the state named its set by the old reference, and the
+    // set was there. Planted after the move ran at open, as the files stood before it.
+    const old = ["$/permission-sets/", "ch", "at/ask-first"].join("");
+    const jaira = join(dir, ".jaira");
+    mkdirSync(join(jaira, "permission-sets", "ch" + "at"), { recursive: true });
+    writeFileSync(join(jaira, "permission-sets", "ch" + "at", "ask-first.json"), JSON.stringify({ $ref: "$SYSTEM/permission-sets/ask-first" }));
+    const shipped = JSON.parse(readFileSync(join(dirname(SHIPPED), "workflows", "chat", "session.json"), "utf8")) as { operation: Record<string, unknown> };
+    mkdirSync(join(jaira, "workflows", "chat"), { recursive: true });
+    writeFileSync(join(jaira, "workflows", "chat", "session.json"), JSON.stringify({ ...shipped, operation: { ...shipped.operation, tools: old } }));
+    const taskId = await started("one");
+    const pinned = readdirSync(join(jaira, "system", "snapshots"), { recursive: true }).filter((file) => String(file).endsWith("session.json")).map((file) => readFileSync(join(jaira, "system", "snapshots", String(file)), "utf8"));
+    expect(pinned.some((text) => text.includes(old))).toBe(true);
+    // The move, done: the old file is gone, the pin is frozen with the old name in it.
+    rmSync(join(jaira, "permission-sets", "ch" + "at"), { recursive: true });
+    rmSync(join(jaira, "workflows", "chat"), { recursive: true });
+    // Its composer reads the set renamed as its stack, not the old name off the pin — which matches no
+    // file, so it would draw no layer and a layer laid on it would build a stack that offers nothing.
+    const instanceId = service.chatThread({ taskId })!.instanceId;
+    expect(service.chatPlan({ taskId, instanceId, overrides: {} })?.settings.permissionSet).toEqual({ layers: ["$/permission-sets/ask-first"] });
+    // What the composer picked is its own.
+    expect(service.chatPlan({ taskId, instanceId, overrides: { permissionSet: { layers: ["$/permission-sets/full"] } as never } })?.settings.permissionSet).toEqual({ layers: ["$/permission-sets/full"] });
+    // A chip changed on a composer that kept no stack: the conversation is given the set, renamed —
+    // its composer would otherwise read the old name off the pin, a set that matches no file.
+    service.changeChatSettings({ taskId, overrides: { model: "fake/chosen" } });
+    expect(service.taskDetail(taskId).chatSettings).toEqual({ model: "fake/chosen", permissionSet: { layers: ["$/permission-sets/ask-first"] } });
   });
 
   it("keeps what a conversation was STARTED with as its own", async () => {

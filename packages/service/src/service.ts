@@ -139,6 +139,7 @@ import {
   type ReplicaKnown,
   openSharedProject,
   sessionStoreFor,
+  stackForOldPin,
   JobOutputSink,
   jobOutput,
   SqliteMemoCache,
@@ -6406,7 +6407,13 @@ export class AppService {
     // wrong action, because `sendChatMessage` re-checks before it does anything.
     const live: ChatPlanView["live"] =
       open.liveCalls.get(sessionId) === undefined ? "idle" : open.liveCalls.canSend(sessionId) ? "steerable" : "busy";
-    const asked = chatPlanFor(context.path, request.overrides ?? {});
+    // A conversation pinned to its set by the name it had before the presets moved, and with no stack of
+    // its own, reads that set RENAMED as its stack — as the move gives it at open (`stackForOldPin`).
+    // Read off the pin, the old name matches no file: no layer to draw, and a layer laid on it builds a
+    // stack that offers nothing (2026-11-09).
+    const pinned = request.overrides?.permissionSet === undefined ? this.stackForOldPinOf(open, request.taskId) : undefined;
+    const overrides: ChatSettings = pinned !== undefined ? { ...(request.overrides ?? {}), permissionSet: pinned } : (request.overrides ?? {});
+    const asked = chatPlanFor(context.path, overrides);
     // Worded by the set the composer's stack comes to; the settings handed back are the composer's own.
     const plan = this.withChatStack(open, asked).plan;
     // Built ONCE and shared with `effectiveOf`: it lists the routes on offer here and supplies the
@@ -6744,6 +6751,13 @@ export class AppService {
     // `/design <brief>` becomes the prompt Claude Code sends for it (decision 0020 §2).
     request = { ...request, message: expandArtifactCommand(request.message) };
     const open = this.session(request.project);
+    // Sent under the conversation's OWN settings — what its composer keeps on the task (`chat:settings`,
+    // which every chip change goes through before anything is sent) — with what the message names over
+    // them. A composer that has not read them yet says less than they do, and its message must not run
+    // under the state's set instead (2026-11-09: a turn went out with `{}` from a conversation that kept
+    // a stack of its own).
+    const kept = open.project.tasks.tryRead(request.taskId)?.chatSettings;
+    if (kept !== undefined) request = { ...request, overrides: { ...kept, ...(request.overrides ?? {}) } };
     // The person writing again is what lets a task they stopped use the mouse and keyboard again.
     if (origin.by !== "host") this.drivingStopped.delete(`${this.refOfSession(open)}/${request.taskId}`);
     // Taken before this send installs its own, so it names the PREDECESSOR rather than itself.
@@ -7475,9 +7489,21 @@ export class AppService {
    * leaves no key. Unchanged settings write nothing, so a composer that says the same thing again does
    * not move the task.
    */
-  private keepChatSettings(open: ProjectSession, taskId: string, settings: ChatSettings): void {
+  /** The stack a conversation pinned to a moved set by its old name is given — see `stackForOldPin`. */
+  private stackForOldPinOf(open: ProjectSession, taskId: string): ChatSettings["permissionSet"] | undefined {
+    const meta = open.project.tasks.tryRead(taskId);
+    if (meta === undefined) return undefined;
+    return stackForOldPin(meta, open.project.paths.snapshotsDir, open.project.db) as unknown as ChatSettings["permissionSet"] | undefined;
+  }
+
+  private keepChatSettings(open: ProjectSession, taskId: string, given: ChatSettings): void {
     const meta = open.project.tasks.tryRead(taskId);
     if (meta === undefined) return;
+    // A conversation pinned to its set by the name it had before the presets moved keeps that set,
+    // renamed, as its own stack — as the move gave it at open (`permissionSetsMove.ts`). Left with no
+    // stack, its composer would read the old name off the frozen pin: a set that matches no file.
+    const pinned = given.permissionSet === undefined ? this.stackForOldPinOf(open, taskId) : undefined;
+    const settings: ChatSettings = pinned !== undefined ? { ...given, permissionSet: pinned } : given;
     const picked = Object.keys(settings).length > 0;
     if (JSON.stringify(meta.chatSettings ?? null) === JSON.stringify(picked ? settings : null)) return;
     const { chatSettings: _was, ...rest } = meta;

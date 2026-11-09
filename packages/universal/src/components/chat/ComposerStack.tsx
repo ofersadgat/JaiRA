@@ -129,13 +129,15 @@ export function StackBar({
         const mark = runtimeMarkOf(segment);
         const on = open === segment.key;
         const bottom = segment.kind === "layer" && segment.role === "bottom";
+        // A layer the engine could not read: said in --warn, with the reason in its tooltip.
+        const broken = segment.kind === "layer" && segment.problem !== undefined;
         return (
           <Segment key={segment.key} t={t} first={false} last={i === segments.length - 1} on={on} title={ruler ? undefined : segmentTitleOf(segment)} label={ruler ? undefined : segment.kind === "layer" ? segment.id : segment.kind} onPress={ruler ? undefined : (at) => onOpen(segment, at)}>
             {(lit) => (
               <>
-                {bottom ? <Icon name={setIconGlyph(segment.icon)} size={12} color={String(t.v(on ? "accent" : "tok-hint"))} /> : null}
+                {broken ? <Icon name="alert" size={12} color={String(t.v("warn"))} /> : bottom ? <Icon name={setIconGlyph(segment.icon)} size={12} color={String(t.v(on ? "accent" : "tok-hint"))} /> : null}
                 {segment.kind === "tools" ? <Icon name="tool" size={12} color={String(t.v(on ? "accent" : "tok-hint"))} /> : null}
-                <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: on ? "accent" : lit ? "text" : "dim" }} numberOfLines={1} flexShrink={0}>
+                <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: broken ? "warn" : on ? "accent" : lit ? "text" : "dim" }} numberOfLines={1} flexShrink={0}>
                   {words}
                 </Txt>
                 {/* The run's answers, in --accent: what this run changed, marked on the lines in the card. */}

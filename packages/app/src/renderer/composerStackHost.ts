@@ -90,6 +90,9 @@ export function useComposerStack({
   const belowView = useLast(useView("permissionSets:stack", belowRequest).value);
   const belowDecl = useMemo(() => (belowView !== undefined ? declOfView(belowView) : undefined), [belowView]);
   const below = useMemo(() => belowSetOf(belowDecl), [belowDecl]);
+  // What the layers under the tools layer come to, when that is KNOWN — read, and followed. An
+  // inherited form owned against anything less would take the state's whole map as its own lines.
+  const belowKnown = belowView !== undefined && !belowView.issues.some((issue) => issue.severity === "error") ? below : undefined;
   const map = useMemo(() => effectiveMapOf(form, belowDecl, inherited), [form, belowDecl, inherited]);
   const layers = useMemo(() => layerSegmentsOf(view, form), [view, form]);
   const refresh = (): void => {
@@ -105,8 +108,8 @@ export function useComposerStack({
     layers,
     runtime: view?.runtime ?? {},
     treeRequest: fullRequest,
-    write: (next) => write(ownedFormOf(next, below, inherited)),
-    writeTools: (next) => write(toolsWriteOf(ownedFormOf(form, below, inherited), below, next)),
+    write: (next) => write(ownedFormOf(next, belowKnown, inherited)),
+    writeTools: (next) => write(toolsWriteOf(ownedFormOf(form, belowKnown, inherited), below, next)),
     forget: async (keys) => {
       if (host?.taskId === undefined) return;
       await invoke("permissionSets:forgetRuntime", { taskId: host.taskId, ...(host.project !== undefined ? { project: host.project } : {}), ...(keys !== undefined ? { keys: [...keys] } : {}) });
@@ -125,13 +128,13 @@ export function useComposerStack({
       // Pinned, it stands under the conversation's layers by settings: the conversation's own copy goes.
       // Either way the settings are sent again, so what runs now — and what waits on the person — is
       // decided under the stack with the pin (`chat:settings`).
-      if (pin && segment.index !== undefined) write(withLayerRemoved(ownedFormOf(form, below, inherited), segment.index));
+      if (pin && segment.index !== undefined) write(withLayerRemoved(ownedFormOf(form, belowKnown, inherited), segment.index));
       else onOverrides({ ...overrides });
       refresh();
     },
     saveStack: async (name, layer) => {
       const project = host?.project;
-      await invoke("permissionSets:saveStack", { ...saveStackRequestOf(ownedFormOf(form, below, inherited), name, layer), ...(project !== undefined ? { project } : {}) });
+      await invoke("permissionSets:saveStack", { ...saveStackRequestOf(ownedFormOf(form, belowKnown, inherited), name, layer), ...(project !== undefined ? { project } : {}) });
     },
   };
 }
