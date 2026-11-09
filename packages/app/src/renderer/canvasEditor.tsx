@@ -84,6 +84,44 @@ type Selection =
   | { kind: "note"; id: string }
   | { kind: "element"; file: string; id: number; rect: Rect; tag: string; style: string; text: string | null };
 
+/** A selection's other artboards and notes, which move with the one dragged: where each stood. */
+interface Others {
+  boards: Record<string, { x: number; y: number }>;
+  notes: Record<string, { x: number; y: number; x2?: number; y2?: number }>;
+}
+
+/** `canvas.json` with `o`'s artboards and notes moved from where they stood by `dx`, `dy`. */
+function shifted<I extends CanvasIndex>(was: I, o: Others, dx: number, dy: number): I {
+  const boards = { ...was.boards };
+  for (const [f, at] of Object.entries(o.boards)) if (boards[f] !== undefined) boards[f] = { ...boards[f], x: Math.round(at.x + dx), y: Math.round(at.y + dy) };
+  const notes = { ...(was.notes ?? {}) };
+  for (const [id, at] of Object.entries(o.notes)) {
+    if (notes[id] !== undefined) notes[id] = { ...notes[id], x: Math.round(at.x + dx), y: Math.round(at.y + dy), ...(at.x2 !== undefined && at.y2 !== undefined ? { x2: Math.round(at.x2 + dx), y2: Math.round(at.y2 + dy) } : {}) };
+  }
+  return { ...was, boards, notes };
+}
+
+/** One selected thing's name, to tell two apart. */
+const keyOf = (s: Selection): string => (s.kind === "note" ? `n:${s.id}` : s.kind === "board" ? `b:${s.file}` : `e:${s.file}#${String(s.id)}`);
+
+/** The selected elements' numbers, by their artboard. */
+function elementsByFile(items: readonly Selection[]): Map<string, number[]> {
+  const by = new Map<string, number[]>();
+  for (const s of items) if (s.kind === "element") by.set(s.file, [...(by.get(s.file) ?? []), s.id]);
+  return by;
+}
+
+/** An element as an artboard's runtime measures it (`dc:elements`). */
+interface Measured {
+  id: number;
+  parent: number | null;
+  view: Rect;
+  rect: Rect;
+  tag: string;
+  style: string;
+  text: string | null;
+}
+
 interface Rect {
   x: number;
   y: number;
@@ -100,9 +138,10 @@ interface View {
 /** What a gesture on the board is doing until the pointer lets go. */
 type Gesture =
   | { kind: "pan"; from: { x: number; y: number }; view: View }
-  | { kind: "moveBoard"; file: string; from: { x: number; y: number }; at: { x: number; y: number } }
+  | { kind: "moveBoard"; file: string; from: { x: number; y: number }; at: { x: number; y: number }; others?: Others }
   | { kind: "resizeBoard"; file: string; from: { x: number; y: number }; size: { w: number; h: number } }
-  | { kind: "moveNote"; id: string; from: { x: number; y: number }; at: { x: number; y: number }; end?: { x: number; y: number } }
+  | { kind: "moveNote"; id: string; from: { x: number; y: number }; at: { x: number; y: number }; end?: { x: number; y: number }; others?: Others }
+  | { kind: "marquee"; from: { x: number; y: number } }
   | { kind: "draw"; tool: CanvasTool; start: { x: number; y: number }; now: { x: number; y: number }; points: Array<[number, number]> };
 
 const TOOLS: Array<{ tool: CanvasTool; label: string; key: string; path: string }> = [
@@ -180,7 +219,12 @@ function noteBox(n: CanvasNote | undefined): { x: number; y: number; w: number; 
 }
 
 /** What Ctrl+C or Ctrl+X took, for Ctrl+V — in this window, any canvas: an artboard pastes into another canvas too. */
-type Clip = { kind: "note"; note: CanvasNote } | { kind: "board"; file: string; entry: CanvasBoardEntry; source: string } | { kind: "element"; html: string };
+type Clip =
+  | { kind: "note"; note: CanvasNote }
+  | { kind: "board"; file: string; entry: CanvasBoardEntry; source: string }
+  /** Elements' markup, and where it was copied from: pasted after `after` in `file` when nothing else is chosen. */
+  | { kind: "element"; html: string; file: string; after: number }
+  | { kind: "many"; clips: Clip[] };
 let clipboard: { clip: Clip; pasted: number } | null = null;
 
 /** `canvas.json` as the editor holds it; its other keys ride along untouched. */
@@ -243,6 +287,15 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const [dirty, setDirty] = useState<Set<string>>(new Set());
   const [tool, setTool] = useState<CanvasTool>("pointer");
   const [selection, setSelection] = useState<Selection | null>(null);
+  /** Several things selected at once, by a selection rectangle; one is `selection`, and choosing one lets the rest go. */
+  const [group, setGroup] = useState<Selection[]>([]);
+  const groupKeys = useMemo(() => new Set(group.map(keyOf)), [group]);
+  const inGroup = (s: Selection): boolean => groupKeys.has(keyOf(s));
+  useEffect(() => {
+    if (selection !== null) setGroup([]);
+  }, [selection]);
+  /** The selection rectangle being drawn, in the board's coordinates. */
+  const [marquee, setMarquee] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
   const [view, setView] = useState<View>({ x: 40, y: 60, z: 0.5 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
   const [editingText, setEditingText] = useState<{ file: string; id: number; rect: Rect; text: string } | { note: string; text: string } | null>(null);
@@ -399,6 +452,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       frameEls.current.get(file)?.contentWindow?.postMessage({ type: "dc:source", text: to.sources[path] ?? "" }, "*");
     }
     setEditingText(null);
+    setGroup([]);
     // An element's number may name another element now; an artboard or a note may be gone.
     setSelection((was) => (was === null || was.kind === "element" ? null : was.kind === "board" ? (to.index.boards[was.file] !== undefined ? was : null) : to.index.notes?.[was.id] !== undefined ? was : null));
   };
@@ -460,7 +514,16 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       if (file === undefined) return;
       const data = event.data as { type?: string; id?: number; rect?: Rect; at?: { x: number; y: number }; tag?: string; style?: string; text?: string | null; href?: string; phase?: string; x?: number; y?: number };
       // A press or a key in one of this editor's artboards: the keyboard is this editor's.
-      if (data.type === "dc:pick" || data.type === "dc:dblclick" || data.type === "dc:moved" || data.type === "dc:key" || (data.type === "dc:pan" && data.phase === "start")) keysOwner = keysId;
+      if (data.type === "dc:pick" || data.type === "dc:dblclick" || data.type === "dc:moved" || data.type === "dc:key" || ((data.type === "dc:pan" || data.type === "dc:marquee") && data.phase === "start")) keysOwner = keysId;
+      if (data.type === "dc:marquee" && typeof data.x === "number" && typeof data.y === "number") {
+        frameMarquee.current(file, data.phase ?? "move", data.x, data.y);
+        return;
+      }
+      if (data.type === "dc:elements") {
+        const answer = event.data as { req?: unknown; elements?: Measured[] };
+        if (typeof answer.req === "string") measuring.current.get(answer.req)?.(answer.elements ?? []);
+        return;
+      }
       if (data.type === "dc:key") {
         // A key pressed while an artboard had the focus: read as if pressed on this window.
         const k = event.data as { phase?: string; key?: string; code?: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean; repeat?: boolean };
@@ -557,30 +620,44 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
 
   // --- keys ----------------------------------------------------------------------------------------
 
-  const remove = useCallback((): void => {
-    if (selection === null) return;
-    if (selection.kind === "note") {
+  /** Several things removed at once: artboards and notes from canvas.json, elements from their files. */
+  const removeAll = (items: readonly Selection[]): void => {
+    const boards = items.flatMap((s) => (s.kind === "board" ? [s.file] : []));
+    const notes = items.flatMap((s) => (s.kind === "note" ? [s.id] : []));
+    if (boards.length + notes.length > 0) {
       changeIndex((was) => {
-        const notes = { ...(was.notes ?? {}) };
-        delete notes[selection.id];
-        return { ...was, notes };
+        const nextBoards = { ...was.boards };
+        for (const f of boards) delete nextBoards[f];
+        const nextNotes = { ...(was.notes ?? {}) };
+        for (const id of notes) delete nextNotes[id];
+        return { ...was, boards: nextBoards, notes: nextNotes, order: (was.order ?? []).filter((f) => !boards.includes(f)) };
       });
-    } else if (selection.kind === "board") {
-      changeIndex((was) => {
-        const boards = { ...was.boards };
-        delete boards[selection.file];
-        return { ...was, boards, order: (was.order ?? []).filter((f) => f !== selection.file) };
-      });
-      setSources((was) => ({ ...was, [`project/${selection.file}`]: "" }));
-      setDirty((was) => new Set(was).add(`project/${selection.file}`));
-    } else {
-      changeSource(selection.file, removeElement(sourceOf(selection.file), selection.id));
+      if (boards.length > 0) {
+        setSources((was) => ({ ...was, ...Object.fromEntries(boards.map((f) => [`project/${f}`, ""])) }));
+        setDirty((was) => new Set([...was, ...boards.map((f) => `project/${f}`)]));
+      }
     }
+    // Last first: an element's number is its place in the file, and what comes before it keeps its own.
+    for (const [file, ids] of elementsByFile(items)) {
+      let text = sourceOf(file);
+      for (const id of [...ids].sort((a, b) => b - a)) text = removeElement(text, id);
+      changeSource(file, text);
+    }
+  };
+
+  const remove = useCallback((): void => {
+    if (group.length > 0) {
+      removeAll(group);
+      setGroup([]);
+      return;
+    }
+    if (selection === null) return;
+    removeAll([selection]);
     setSelection(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selection, sources]);
+  }, [selection, sources, group, index]);
 
-  /** Ctrl+C / Ctrl+X: what is selected, as a clip. */
+  /** Ctrl+C / Ctrl+X: one selected thing, as a clip. */
   const clipOf = (s: Selection | null): Clip | null => {
     if (s === null) return null;
     if (s.kind === "note") {
@@ -592,26 +669,54 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       return entry === undefined ? null : { kind: "board", file: s.file, entry, source: sourceOf(s.file) };
     }
     try {
-      return { kind: "element", html: elementMarkup(sourceOf(s.file), s.id) };
+      return { kind: "element", html: elementMarkup(sourceOf(s.file), s.id), file: s.file, after: s.id };
     } catch {
       return null;
     }
   };
+  /** Everything selected, as one clip: a rectangle's several things, or the one. Elements of one artboard go as one clip, in their file's order. */
+  const clipOfAll = (): Clip | null => {
+    if (group.length === 0) return clipOf(selection);
+    const clips: Clip[] = [];
+    for (const s of group) {
+      if (s.kind === "element") continue;
+      const clip = clipOf(s);
+      if (clip !== null) clips.push(clip);
+    }
+    for (const [file, ids] of elementsByFile(group)) {
+      const sorted = [...ids].sort((a, b) => a - b);
+      try {
+        const source = sourceOf(file);
+        clips.push({ kind: "element", html: sorted.map((id) => elementMarkup(source, id)).join("\n"), file, after: sorted.at(-1)! });
+      } catch {
+        // An element no longer in its file (changed meanwhile) is not copied.
+      }
+    }
+    return clips.length === 0 ? null : clips.length === 1 ? clips[0]! : { kind: "many", clips };
+  };
 
   /**
    * Ctrl+V and Ctrl+D: a note a step down and to the right of its original, an artboard beside it (a new
-   * file, its source copied), an element right after the selected one — or, with an artboard selected,
-   * last in its outermost box. The `n`th paste of one clip steps `n` times, so pastes do not pile up.
+   * file, its source copied), elements right after the selected element, or last in a selected artboard's
+   * outermost box — with neither selected, right after where they were copied from. The `n`th paste of
+   * one clip steps `n` times, so pastes do not pile up. Answers the artboards and notes it made.
    */
-  const paste = (clip: Clip, n: number): void => {
+  const paste = (clip: Clip, n: number): Selection[] => {
     const onThisPage = firstPage !== undefined && page !== undefined ? { page } : {};
+    if (clip.kind === "many") {
+      // Elements together, into one place: two pastes into one file in one turn would each start from
+      // the same text, and the second would undo the first.
+      const elements = clip.clips.filter((c): c is Extract<Clip, { kind: "element" }> => c.kind === "element");
+      const made = clip.clips.filter((c) => c.kind !== "element").flatMap((c) => paste(c, n));
+      if (elements.length > 0) paste({ ...elements[0]!, html: elements.map((c) => c.html).join("\n") }, n);
+      return made;
+    }
     if (clip.kind === "note") {
       const id = noteId();
       const d = 24 * n;
       const note = clip.note;
       changeIndex((was) => ({ ...was, notes: { ...(was.notes ?? {}), [id]: { ...note, ...onThisPage, x: note.x + d, y: note.y + d, ...(note.x2 !== undefined && note.y2 !== undefined ? { x2: note.x2 + d, y2: note.y2 + d } : {}) } } }));
-      setSelection({ kind: "note", id });
-      return;
+      return [{ kind: "note", id }];
     }
     if (clip.kind === "board") {
       const stem = clip.file.replace(/\.dc\.html$/, "").replace(/[^A-Za-z0-9_-]/g, "");
@@ -621,47 +726,167 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       changeIndex((was) => ({ ...was, boards: { ...was.boards, [file]: entry }, order: [...(was.order ?? []), file] }));
       setSources((was) => ({ ...was, [`project/${file}`]: clip.source }));
       touch(`project/${file}`);
-      setSelection({ kind: "board", file });
-      return;
+      return [{ kind: "board", file }];
     }
+    const intoTop = (file: string): void => {
+      const source = sourceOf(file);
+      const box = parse(source).elements.filter((el) => el.parent === null && !["helmet", "style", "script", "link", "meta"].includes(el.tag)).at(-1);
+      if (box !== undefined) changeSource(file, insertElement(source, box.n, clip.html));
+    };
     if (selection?.kind === "element") {
       changeSource(selection.file, insertAfter(sourceOf(selection.file), selection.id, clip.html));
-      setSelection(null);
     } else if (selection?.kind === "board") {
-      const source = sourceOf(selection.file);
-      const box = parse(source).elements.filter((el) => el.parent === null && !["helmet", "style", "script", "link", "meta"].includes(el.tag)).at(-1);
-      if (box !== undefined) changeSource(selection.file, insertElement(source, box.n, clip.html));
+      intoTop(selection.file);
+    } else if (index.boards[clip.file] !== undefined) {
+      try {
+        changeSource(clip.file, insertAfter(sourceOf(clip.file), clip.after, clip.html));
+      } catch {
+        intoTop(clip.file);
+      }
+    }
+    return [];
+  };
+  /** What a paste made becomes the selection: one thing, several, or — elements renumber what follows them — nothing. */
+  const selectMade = (made: Selection[]): void => {
+    if (made.length === 1) {
+      setSelection(made[0]!);
+    } else {
+      setSelection(null);
+      setGroup(made);
     }
   };
 
-  /** Arrow keys: a selected artboard or note moves a pixel, ten with Shift. (An element sits in its page's flow; it is dragged.) */
+  /** The artboards and notes among `items` (but `except`), where each stands: what moves with a drag or an arrow. */
+  const othersOf = (items: readonly Selection[], except: Selection | null): Others => {
+    const others: Others = { boards: {}, notes: {} };
+    for (const s of items) {
+      if (except !== null && keyOf(s) === keyOf(except)) continue;
+      if (s.kind === "board") {
+        const b = index.boards[s.file];
+        if (b !== undefined) others.boards[s.file] = { x: b.x, y: b.y };
+      } else if (s.kind === "note") {
+        const n = index.notes?.[s.id];
+        if (n !== undefined) others.notes[s.id] = { x: n.x, y: n.y, ...(n.x2 !== undefined && n.y2 !== undefined ? { x2: n.x2, y2: n.y2 } : {}) };
+      }
+    }
+    return others;
+  };
+
+  /** Arrow keys: the selected artboards and notes move a pixel, ten with Shift. (An element sits in its page's flow; it is dragged.) */
   const nudge = (dx: number, dy: number): boolean => {
-    if (selection?.kind === "board" && index.boards[selection.file] !== undefined) {
-      const file = selection.file;
-      changeIndex((was) => ({ ...was, boards: { ...was.boards, [file]: { ...was.boards[file]!, x: was.boards[file]!.x + dx, y: was.boards[file]!.y + dy } } }));
-      return true;
-    }
-    if (selection?.kind === "note" && index.notes?.[selection.id] !== undefined) {
-      const id = selection.id;
-      changeIndex((was) => {
-        const note = was.notes?.[id];
-        if (note === undefined) return was;
-        return { ...was, notes: { ...was.notes, [id]: { ...note, x: note.x + dx, y: note.y + dy, ...(note.x2 !== undefined && note.y2 !== undefined ? { x2: note.x2 + dx, y2: note.y2 + dy } : {}) } } };
-      });
-      return true;
-    }
-    return false;
+    const items = group.length > 0 ? group : selection !== null ? [selection] : [];
+    const o = othersOf(items, null);
+    if (Object.keys(o.boards).length + Object.keys(o.notes).length === 0) return false;
+    changeIndex((was) => shifted(was, o, dx, dy));
+    return true;
   };
 
-  /** Shift+2: the selected artboard (an element's own), or note, filling the board, 24 px clear, at no more than 100%. */
+  /** Shift+2: what is selected (an element by its artboard) filling the board, 24 px clear, at no more than 100%. */
   const zoomToSelection = (): void => {
     const el = board.current;
-    const box = selection === null ? undefined : selection.kind === "note" ? noteBox(index.notes?.[selection.id]) : index.boards[selection.file];
-    if (el === null || box === undefined || el.clientWidth <= 0) return;
+    const items = group.length > 0 ? group : selection !== null ? [selection] : [];
+    const boxes = items.flatMap((s) => {
+      const b = s.kind === "note" ? noteBox(index.notes?.[s.id]) : index.boards[s.file];
+      return b === undefined ? [] : [b];
+    });
+    if (el === null || boxes.length === 0 || el.clientWidth <= 0) return;
+    const x = Math.min(...boxes.map((b) => b.x));
+    const y = Math.min(...boxes.map((b) => b.y));
+    const box = { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
     moved.current = true;
     const z = Math.max(0.05, Math.min(1, (el.clientWidth - 48) / Math.max(box.w, 1), (el.clientHeight - 48) / Math.max(box.h, 1)));
     setView({ z, x: (el.clientWidth - box.w * z) / 2 - box.x * z, y: (el.clientHeight - box.h * z) / 2 - box.y * z });
   };
+
+  // --- the selection rectangle ------------------------------------------------------------------------
+
+  /** Every element's box, asked of an artboard's runtime (`dc:measure`); none if it does not answer. */
+  const measuring = useRef(new Map<string, (elements: Measured[]) => void>());
+  const measure = (file: string): Promise<Measured[]> =>
+    new Promise((resolve) => {
+      const req = `${file}#${Math.random().toString(36).slice(2)}`;
+      const timer = setTimeout(() => {
+        measuring.current.delete(req);
+        resolve([]);
+      }, 800);
+      measuring.current.set(req, (elements) => {
+        clearTimeout(timer);
+        measuring.current.delete(req);
+        resolve(elements);
+      });
+      const w = frameEls.current.get(file)?.contentWindow;
+      if (w === null || w === undefined) {
+        clearTimeout(timer);
+        measuring.current.delete(req);
+        resolve([]);
+        return;
+      }
+      w.postMessage({ type: "dc:measure", req }, "*");
+    });
+
+  /**
+   * The selection rectangle let go (the person, 2026-11-08: "it should start a select area (like you would
+   * see in file explorer) that selects elements in the area on release"). What it holds WHOLE is selected:
+   * an artboard inside it as the artboard; where it covers part of one, the elements of that artboard
+   * inside it — the outermost of them, never the artboard's own box; a note inside it. One thing is the
+   * selection as a click would make it; several are the `group`.
+   */
+  const finishMarquee = async (from: { x: number; y: number }, to: { x: number; y: number }): Promise<void> => {
+    const r = { x: Math.min(from.x, to.x), y: Math.min(from.y, to.y), w: Math.abs(to.x - from.x), h: Math.abs(to.y - from.y) };
+    if (r.w * view.z < 4 && r.h * view.z < 4) return;
+    const holds = (b: { x: number; y: number; w: number; h: number }): boolean => b.x >= r.x && b.y >= r.y && b.x + b.w <= r.x + r.w && b.y + b.h <= r.y + r.h;
+    const meets = (b: { x: number; y: number; w: number; h: number }): boolean => b.x < r.x + r.w && b.x + b.w > r.x && b.y < r.y + r.h && b.y + b.h > r.y;
+    const picked: Selection[] = [];
+    const partly: string[] = [];
+    for (const file of order) {
+      const b = index.boards[file]!;
+      if (holds(b)) picked.push({ kind: "board", file });
+      else if (meets(b) && !running.has(file) && frameEls.current.has(file)) partly.push(file);
+    }
+    for (const [id, n] of Object.entries(index.notes ?? {})) {
+      const box = noteBox(n);
+      if (onPage(n) && box !== undefined && holds(box)) picked.push({ kind: "note", id });
+    }
+    const measured = await Promise.all(partly.map((file) => measure(file)));
+    partly.forEach((file, i) => {
+      const b = index.boards[file]!;
+      const elements = measured[i] ?? [];
+      // A frame's viewport stands at its artboard's corner, one of its pixels to one of the board's.
+      const inside = elements.filter((e) => e.parent !== null && holds({ x: b.x + e.view.x, y: b.y + e.view.y, w: e.view.width, h: e.view.height }));
+      const ids = new Set(inside.map((e) => e.id));
+      const parentOf = new Map(elements.map((e) => [e.id, e.parent]));
+      const outermost = inside.filter((e) => {
+        for (let p = e.parent; p !== null; p = parentOf.get(p) ?? null) if (ids.has(p)) return false;
+        return true;
+      });
+      for (const e of outermost) picked.push({ kind: "element", file, id: e.id, rect: e.rect, tag: e.tag, style: e.style, text: e.text });
+    });
+    selectMade(picked);
+  };
+  const marqueeNow = useRef(marquee);
+  marqueeNow.current = marquee;
+  /** A rectangle begun on an artboard's background: its runtime tells where the pointer is, in the frame's viewport. */
+  const onFrameMarquee = (file: string, phase: string, x: number, y: number): void => {
+    const b = index.boards[file];
+    if (tool !== "pointer" || b === undefined) return;
+    const p = { x: b.x + x, y: b.y + y };
+    if (phase === "start") {
+      setSelection(null);
+      setGroup([]);
+      setEditingText(null);
+      setMarquee({ from: p, to: p });
+      return;
+    }
+    const was = marqueeNow.current;
+    if (phase === "end") {
+      setMarquee(null);
+      if (was !== null) finishMarquee(was.from, p).catch((e: unknown) => console.error("[canvas] the selection rectangle failed:", e));
+      return;
+    }
+    setMarquee((m) => (m === null ? m : { ...m, to: p }));
+  };
+  const frameMarquee = useRef(onFrameMarquee);
+  frameMarquee.current = onFrameMarquee;
 
   /** Typing somewhere that takes text: the key is the field's, not the canvas's. */
   const typing = (e: KeyboardEvent): boolean =>
@@ -697,7 +922,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         // Words selected on the page are the page's to copy.
         const words = window.getSelection();
         if (words !== null && !words.isCollapsed) return;
-        const clip = clipOf(selection);
+        const clip = clipOfAll();
         if (clip === null) return;
         act(() => {
           clipboard = { clip, pasted: 0 };
@@ -708,11 +933,11 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         if (held === null) return;
         act(() => {
           held.pasted += 1;
-          paste(held.clip, held.pasted);
+          selectMade(paste(held.clip, held.pasted));
         });
       } else if (k === "d") {
-        const clip = clipOf(selection);
-        if (clip !== null) act(() => paste(clip, 1));
+        const clip = clipOfAll();
+        if (clip !== null) act(() => selectMade(paste(clip, 1)));
       } else if (k === "=" || k === "+") act(() => zoomTo(Math.min(4, view.z * 1.25)));
       else if (k === "-" || k === "_") act(() => zoomTo(Math.max(0.05, view.z / 1.25)));
       else if (k === "0") act(() => zoomTo(1));
@@ -735,6 +960,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       setDraft(null);
       setOpenPin(null);
       setSelection(null);
+      setGroup([]);
       setTool("pointer");
       return;
     }
@@ -879,8 +1105,18 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       setTool("pointer");
       return;
     }
-    if (tool === "pointer" || tool === "comment") {
-      // On the board itself, not on a frame or note: nothing selected, no comment open, and a drag pans.
+    if (tool === "pointer") {
+      // On the board itself, not on an artboard or note: nothing selected, no comment open, and a drag
+      // draws a selection rectangle (the middle button, Space or the hand pans).
+      setSelection(null);
+      setGroup([]);
+      setDraft(null);
+      setOpenPin(null);
+      setGesture({ kind: "marquee", from: p });
+      setMarquee({ from: p, to: p });
+      return;
+    }
+    if (tool === "comment") {
       setSelection(null);
       setDraft(null);
       setOpenPin(null);
@@ -902,6 +1138,10 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       const dx = p.x - gesture.from.x;
       const dy = p.y - gesture.from.y;
       setIndex((was) => ({ ...was, boards: { ...was.boards, [gesture.file]: { ...was.boards[gesture.file]!, x: Math.round(gesture.at.x + dx), y: Math.round(gesture.at.y + dy) } } }));
+      const others = gesture.others;
+      if (others !== undefined) setIndex((was) => shifted(was, others, dx, dy));
+    } else if (gesture.kind === "marquee") {
+      setMarquee({ from: gesture.from, to: p });
     } else if (gesture.kind === "resizeBoard") {
       if (!gestureMoved.current) checkpoint();
       gestureMoved.current = true;
@@ -925,6 +1165,8 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
           },
         };
       });
+      const others = gesture.others;
+      if (others !== undefined) setIndex((was) => shifted(was, others, dx, dy));
     } else {
       setGesture({ ...gesture, now: p, points: gesture.tool === "pen" ? [...gesture.points, [Math.round(p.x - gesture.start.x), Math.round(p.y - gesture.start.y)]] : gesture.points });
     }
@@ -934,12 +1176,21 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     const g = gesture;
     setGesture(null);
     if (g === null) return;
+    if (g.kind === "marquee") {
+      const to = marqueeNow.current?.to ?? g.from;
+      setMarquee(null);
+      finishMarquee(g.from, to).catch((e: unknown) => console.error("[canvas] the selection rectangle failed:", e));
+      return;
+    }
     const dragged = gestureMoved.current;
     gestureMoved.current = false;
     if (g.kind === "moveBoard" || g.kind === "resizeBoard" || g.kind === "moveNote") {
       // Only a drag is an edit: a press on an artboard's name that moved nothing was a version of
       // nothing (2026-11-07: v16 was canvas.json, reformatted), and hid the canvas from the thread.
       if (dragged) touch("project/canvas.json");
+      // A press on one of several selected, that moved nothing, chooses it alone — as in a file explorer.
+      else if (g.kind === "moveBoard" && g.others !== undefined) setSelection({ kind: "board", file: g.file });
+      else if (g.kind === "moveNote" && g.others !== undefined) setSelection({ kind: "note", id: g.id });
       return;
     }
     if (g.kind !== "draw") return;
@@ -1082,7 +1333,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       <div style={{ position: "relative", display: "flex", flex: 1, minHeight: 0 }}>
         <div ref={board} onMouseDown={(e) => e.button === 1 && e.preventDefault()} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
           {/* Under the frames and notes: a press here pans, and empties the selection. */}
-          <div onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "default" }} />
+          <div data-canvas-ground="" onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "default" }} />
           <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>
             {Object.entries(index.notes ?? {})
               .filter(([, n]) => onPage(n))
@@ -1090,7 +1341,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               <EditableNote
                 key={id}
                 note={n}
-                selected={selection?.kind === "note" && selection.id === id}
+                selected={(selection?.kind === "note" && selection.id === id) || inGroup({ kind: "note", id })}
                 editing={editingText !== null && "note" in editingText && editingText.note === id}
                 onPress={(e) => {
                   if (e.button === 1) {
@@ -1099,9 +1350,11 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                   }
                   e.stopPropagation();
                   if (tool !== "pointer") return;
-                  setSelection({ kind: "note", id });
+                  // One of several selected: the press moves them all, and chooses nothing yet.
+                  const several = inGroup({ kind: "note", id });
+                  if (!several) setSelection({ kind: "note", id });
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  setGesture({ kind: "moveNote", id, from: at(e), at: { x: n.x, y: n.y }, ...(n.x2 !== undefined && n.y2 !== undefined ? { end: { x: n.x2, y: n.y2 } } : {}) });
+                  setGesture({ kind: "moveNote", id, from: at(e), at: { x: n.x, y: n.y }, ...(n.x2 !== undefined && n.y2 !== undefined ? { end: { x: n.x2, y: n.y2 } } : {}), ...(several ? { others: othersOf(group, { kind: "note", id }) } : {}) });
                 }}
                 onMove={onLayerMove}
                 onUp={onLayerUp}
@@ -1122,7 +1375,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
             ))}
             {order.map((file) => {
               const b = index.boards[file]!;
-              const chosen = selection !== null && selection.kind !== "note" && selection.file === file;
+              const chosen = (selection !== null && selection.kind !== "note" && selection.file === file) || inGroup({ kind: "board", file });
               return (
                 <div key={file} style={{ position: "absolute", left: b.x, top: b.y, width: b.w, height: b.h }}>
                   <div
@@ -1132,9 +1385,11 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                         return;
                       }
                       e.stopPropagation();
-                      setSelection({ kind: "board", file });
+                      // One of several selected: the press moves them all, and chooses nothing yet.
+                      const several = inGroup({ kind: "board", file });
+                      if (!several) setSelection({ kind: "board", file });
                       e.currentTarget.setPointerCapture(e.pointerId);
-                      setGesture({ kind: "moveBoard", file, from: at(e), at: { x: b.x, y: b.y } });
+                      setGesture({ kind: "moveBoard", file, from: at(e), at: { x: b.x, y: b.y }, ...(several ? { others: othersOf(group, { kind: "board", file }) } : {}) });
                     }}
                     onPointerMove={onLayerMove}
                     onPointerUp={onLayerUp}
@@ -1183,7 +1438,9 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                       border: 0,
                       display: "block",
                       background: "#fff",
-                      pointerEvents: layerOn && !running.has(file) ? "none" : "auto",
+                      // A drag begun on the board (a rectangle, a move, a pan) keeps the pointer as it crosses an
+                      // artboard: a frame under it would take the moves into its own document.
+                      pointerEvents: (layerOn && !running.has(file)) || gesture !== null ? "none" : "auto",
                       outline: running.has(file) ? `${2 / view.z}px solid ${RUN}` : chosen ? "2px solid #4a4fd1" : "none",
                       boxShadow: running.has(file) ? `0 0 0 ${6 / view.z}px rgba(15,122,69,.14)` : "none",
                       borderRadius: b.radius ?? 0,
@@ -1191,8 +1448,11 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                   />
                   )}
                   {selection?.kind === "element" && selection.file === file ? (
-                    <div style={{ position: "absolute", left: selection.rect.x, top: selection.rect.y, width: selection.rect.width, height: selection.rect.height, outline: `${1.5 / view.z}px solid #4a4fd1`, pointerEvents: "none" }} />
+                    <div data-selected-element={selection.id} style={{ position: "absolute", left: selection.rect.x, top: selection.rect.y, width: selection.rect.width, height: selection.rect.height, outline: `${1.5 / view.z}px solid #4a4fd1`, pointerEvents: "none" }} />
                   ) : null}
+                  {group.map((s) =>
+                    s.kind === "element" && s.file === file ? <div key={s.id} data-selected-element={s.id} style={{ position: "absolute", left: s.rect.x, top: s.rect.y, width: s.rect.width, height: s.rect.height, outline: `${1.5 / view.z}px solid #4a4fd1`, pointerEvents: "none" }} /> : null,
+                  )}
                   {editingText !== null && "file" in editingText && editingText.file === file ? (
                     <textarea
                       autoFocus
@@ -1229,6 +1489,22 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               );
             })}
             {gesture?.kind === "draw" ? <DrawingPreview gesture={gesture} /> : null}
+            {marquee !== null ? (
+              <div
+                aria-label="Selection area"
+                style={{
+                  position: "absolute",
+                  left: Math.min(marquee.from.x, marquee.to.x),
+                  top: Math.min(marquee.from.y, marquee.to.y),
+                  width: Math.abs(marquee.to.x - marquee.from.x),
+                  height: Math.abs(marquee.to.y - marquee.from.y),
+                  border: `${1 / view.z}px solid #4a4fd1`,
+                  background: "rgba(74, 79, 209, 0.08)",
+                  boxSizing: "border-box",
+                  pointerEvents: "none",
+                }}
+              />
+            ) : null}
             {shownPins.map((c) => {
               const b = index.boards[c.file]!;
               return (
@@ -1333,7 +1609,24 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
           </div>
           <div style={{ overflow: "auto", flex: 1 }}>
             {tab === "properties" ? (
-              element !== null ? (
+              group.length > 0 ? (
+                <Section title={`${String(group.length)} selected`}>
+                  <p style={hint}>
+                    {[
+                      ["artboard", group.filter((s) => s.kind === "board").length],
+                      ["note", group.filter((s) => s.kind === "note").length],
+                      ["element", group.filter((s) => s.kind === "element").length],
+                    ]
+                      .filter(([, count]) => (count as number) > 0)
+                      .map(([what, count]) => `${String(count)} ${String(what)}${count === 1 ? "" : "s"}`)
+                      .join(", ")}
+                    . Drag one to move the artboards and notes together; arrows nudge them; Ctrl+C, Ctrl+D and Delete take them all.
+                  </p>
+                  <button type="button" style={button} onClick={remove}>
+                    Delete them
+                  </button>
+                </Section>
+              ) : element !== null ? (
                 <ElementProperties
                   tag={element.tag}
                   style={styleRecord}
@@ -1355,7 +1648,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
               ) : selectedNote !== undefined && selection?.kind === "note" ? (
                 <NoteProperties note={selectedNote} onChange={(next) => changeIndex((was) => ({ ...was, notes: { ...was.notes, [selection.id]: { ...was.notes![selection.id]!, ...next } } }))} onDelete={remove} />
               ) : (
-                <p style={hint}>Select an artboard, a note or anything in an artboard. Delete removes it; Esc lets go.</p>
+                <p style={hint}>Select an artboard, a note or anything in an artboard; drag from the background to select everything in an area. Delete removes it; Esc lets go.</p>
               )
             ) : tab === "tweaks" ? (
               <TweaksTab
@@ -1445,6 +1738,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
                       onClick={() => {
                         setPage(p.id);
                         setSelection(null);
+                        setGroup([]);
                         setMenu(null);
                       }}
                       style={{ ...menuItem, fontWeight: p.id === page ? 600 : 400 }}

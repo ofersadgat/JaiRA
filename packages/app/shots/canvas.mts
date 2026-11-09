@@ -232,7 +232,7 @@ async function main(): Promise<void> {
       for (const at of candidates) {
         await app.hover(at.x, at.y);
         await settle(200);
-        const named = await app.evaluate<boolean>(`(() => { const h = window.__dc.filter((m) => m.type === "dc:hover").at(-1); return !!h && h.id !== null; })()`);
+        const named = await app.evaluate<boolean>(`(() => { const h = window.__dc.filter((m) => m.type === "dc:hover").at(-1); return !!h && h.id !== null && !h.top; })()`);
         if (named) return at;
       }
       throw new Error(`no point of the artboard is over one of its elements (${String(candidates.length)} tried)`);
@@ -408,6 +408,78 @@ async function main(): Promise<void> {
       if ((await count()) !== c) throw new Error("Ctrl+Z pressed after a press outside the editor undid in it");
       console.log("keys: after a press outside the editor, Ctrl+Z is not the editor's");
     }
+    // A selection rectangle (the person, 2026-11-08: "when the arrow icon is selected ... it should start a
+    // select area (like you would see in file explorer) that selects elements in the area on release", and
+    // "when the initial click doesnt land on an element"). First from the empty board beside the artboard,
+    // over most of it: what it holds whole is selected; Delete takes them all; Ctrl+Z brings them back.
+    await clickLabel("Pointer");
+    await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
+    await settle(900);
+    const selectedCount = (): Promise<number> => app.evaluate<number>(`document.querySelectorAll('[data-island="canvasEditor"] [data-selected-element]').length`);
+    const groundStart = await app.evaluate<{ x: number; y: number; to: { x: number; y: number } } | null>(
+      `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); const ground = (x, y) => { const e = document.elementFromPoint(x, y); return !!e && e.hasAttribute("data-canvas-ground"); }; const to = { x: r.left + r.width * 0.92, y: r.top + r.height * 0.7 }; for (let d = 4; d <= 40; d += 4) for (const y of [r.top + 8, r.top + 30, r.top + 60]) if (ground(r.left - d, y)) return { x: r.left - d, y, to }; return null; })()`,
+    );
+    if (groundStart === null) throw new Error("no empty board beside the artboard to start a selection rectangle from");
+    const movesBefore = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:moved").length`);
+    const filesBeforeArea = await filesNow();
+    await app.evaluate(`(() => { window.__errs = []; window.addEventListener("unhandledrejection", (e) => window.__errs.push(String(e.reason && e.reason.stack || e.reason))); return true; })()`);
+    // Pressed, moved and looked at while held: the rectangle is drawn as the pointer goes.
+    await app.mouse("mouseMoved", groundStart, false);
+    await app.mouse("mousePressed", groundStart);
+    for (let i = 1; i <= 8; i++) {
+      await app.mouse("mouseMoved", { x: groundStart.x + ((groundStart.to.x - groundStart.x) * i) / 8, y: groundStart.y + ((groundStart.to.y - groundStart.y) * i) / 8 });
+      await settle(40);
+    }
+    await settle(200);
+    const drawnArea = await app.evaluate<{ width: number; height: number } | null>(`(() => { const a = document.querySelector('[data-island="canvasEditor"] [aria-label="Selection area"]'); if (!a) return null; const r = a.getBoundingClientRect(); return { width: Math.round(r.width), height: Math.round(r.height) }; })()`);
+    await app.mouse("mouseReleased", groundStart.to);
+    await settle(1200);
+    console.log(`area: drawn while held ${JSON.stringify(drawnArea)}`);
+    if (drawnArea === null || drawnArea.width < 100 || drawnArea.height < 150) {
+      await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').contentWindow.postMessage({ type: "dc:measure", req: "rig" }, "*"); return true; })()`);
+      await settle(500);
+      const probe = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:elements" && m.req === "rig").length`);
+      throw new Error(`a drag from the empty board drew no selection rectangle as it went (${JSON.stringify(drawnArea)}); the artboard answers a measure asked directly: ${String(probe)}`);
+    }
+    const fromBoard = await selectedCount();
+    const panelWords = await app.evaluate<string>(`(() => { const p = document.querySelector('[data-island="canvasEditor"] [aria-label="Properties"]'); return p ? p.innerText.slice(0, 200) : ""; })()`);
+    console.log(`area: from the board over the artboard, ${String(fromBoard)} elements selected; the panel reads ${JSON.stringify(panelWords.split("\n")[0] ?? "")}`);
+    await app.shot("area-from-board");
+    if (fromBoard === 0) {
+      const answers = await app.evaluate<string>(
+        `JSON.stringify(window.__dc.filter((m) => m.type === "dc:elements").map((m) => ({ from: m.from, n: m.elements.length, some: m.elements.slice(0, 12).map((e) => [e.id, e.parent, e.tag, Math.round(e.view.x), Math.round(e.view.y), Math.round(e.view.width), Math.round(e.view.height)]) })))`,
+      );
+      const frameBox = await app.evaluate<string>(`(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); return f.title + " " + [r.left, r.top, r.width, r.height].map(Math.round).join(",") + " offset " + f.offsetWidth + "x" + f.offsetHeight; })()`);
+      throw new Error(`a selection rectangle from the board over most of an artboard selected none of its elements: from ${JSON.stringify(groundStart)}; frame ${frameBox}; answers ${answers}; page errors ${await app.evaluate<string>(`JSON.stringify(window.__errs)`)}`);
+    }
+    if ((await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:moved").length`)) !== movesBefore) throw new Error("the selection rectangle moved an element");
+    const areaDeleted = await keyed(`Delete (${String(fromBoard)} selected)`, "Delete", 46);
+    const changedFiles = Object.keys(areaDeleted).filter((path) => areaDeleted[path] !== filesBeforeArea[path] && path.endsWith(".dc.html"));
+    if (changedFiles.length === 0 || changedFiles.some((path) => (areaDeleted[path] ?? "").length >= (filesBeforeArea[path] ?? "").length)) throw new Error(`Delete did not take the selected elements out: changed ${JSON.stringify(changedFiles)}`);
+    const areaBack = await keyed("Ctrl+Z (the area's delete)", "z", 90, { ctrl: true });
+    if (!same(areaBack, filesBeforeArea)) throw new Error("Ctrl+Z did not bring back what the rectangle's Delete took");
+    console.log(`area: Delete took the ${String(fromBoard)} out of ${changedFiles.join(", ")}; Ctrl+Z brought them back`);
+    // Then from the artboard's own background (its corner): the frame tells the editor where the pointer
+    // is, no element moves, and the rectangle selects.
+    await app.press("Escape", 27);
+    await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
+    await settle(900);
+    const corner = await app.evaluate<{ x: number; y: number; to: { x: number; y: number } }>(
+      `(() => { const r = document.querySelector('[data-island="canvasEditor"] iframe').getBoundingClientRect(); return { x: r.left + 3, y: r.top + 3, to: { x: r.left + r.width * 0.95, y: r.top + r.height * 0.75 } }; })()`,
+    );
+    const marqueesBefore = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:marquee").length`);
+    const movesBeforeFrame = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:moved").length`);
+    await app.drag(corner, corner.to);
+    await settle(1200);
+    const told = await app.evaluate<string[]>(`window.__dc.filter((m) => m.type === "dc:marquee").slice(${String(marqueesBefore)}).map((m) => m.phase)`);
+    const fromFrame = await selectedCount();
+    console.log(`area: from the artboard's corner, the frame told ${JSON.stringify([...new Set(told)])}; ${String(fromFrame)} elements selected`);
+    await app.shot("area-from-artboard");
+    if (!told.includes("start") || !told.includes("end")) throw new Error(`a drag from the artboard's background did not start a selection rectangle (the frame told ${JSON.stringify(told)})`);
+    if ((await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:moved").length`)) !== movesBeforeFrame) throw new Error("a drag from the artboard's background moved an element");
+    if (fromFrame === 0) throw new Error("a selection rectangle from the artboard's background selected nothing");
+    await app.press("Escape", 27);
+
     // The artboard selected again, for Properties.
     await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
     await settle(900);

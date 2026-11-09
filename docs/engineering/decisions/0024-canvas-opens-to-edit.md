@@ -180,6 +180,50 @@ as the person's version. Ctrl+0 shows 100% and Shift+1 fits. With an artboard ho
 and Ctrl+Shift+Z come back to where they were. After a press outside the editor, Ctrl+Z saves nothing.
 Its first drag now presses on an element of the design, not the bare margin, where it drags nothing.
 
+## Round 4: a selection rectangle (2026-11-08)
+
+The person: "when the arrow icon is selected in the tool bar, when you click on the panel it should
+start a select area (like you would see in file explorer) that selects elements in the area on release".
+Asked where the rectangle starts, they answered: "when the initial click doesnt land on an element".
+
+- **Where it starts.** With the pointer tool, a drag that starts on no element draws a rectangle. That
+  means the empty board, or an artboard's own background: its top element, or bare page. A drag on the
+  empty board no longer pans; the middle button, Space held, the hand tool and the wheel still do. A
+  press on an element still selects it, and a drag on it still moves it. A press on an artboard's
+  background that does not move is still a click, and selects that box as before. Over an artboard, the
+  runtime tells the editor where the pointer is (`dc:marquee`, start / move / end, in the frame's
+  viewport, as `dc:pan` does). The rectangle is drawn by the editor, over the whole canvas, so one begun
+  in an artboard can reach past it.
+- **What it selects.** What it holds whole:
+  - an artboard inside it, as the artboard;
+  - where it covers part of an artboard, that artboard's elements inside it, the outermost of them and
+    never the artboard's own box (each artboard's runtime is asked for every element's box,
+    `dc:measure` → `dc:elements`);
+  - a note inside it.
+  One thing becomes the selection as a click would make it. Several become a group, drawn outlined,
+  and the Properties panel reads "N selected". The group goes away when anything else is chosen, on
+  Esc, on undo, and on another page.
+- **What a group takes.**
+  - Delete removes all of it: elements from their files, last first, so the numbers of the ones before
+    stay right.
+  - Ctrl+C / X / D take all of it. An artboard's elements go as one clip, in their file's order. With
+    nothing else chosen they paste right after where they were copied from.
+  - Arrows nudge its artboards and notes.
+  - Dragging one of its artboards or notes moves all of its artboards and notes. A press on one that
+    does not move chooses it alone, as in a file explorer.
+  - Elements in a group do not move together: each sits in its page's flow.
+- **Found by the rig: a board drag crossing an artboard lost the pointer.** A drag begun on the board
+  (the rectangle, and equally a pan or a note being moved) stopped receiving moves as soon as the
+  pointer crossed an artboard, because Chrome hands those moves to the frame's own document. While a
+  board gesture is held, the artboards now ignore the pointer.
+
+Seen: `shots/canvas.mts` gains the step and passed end to end. From the empty board over most of an
+artboard, the rectangle was drawn as the pointer moved (142 × 220) and selected 4 elements; Delete took
+the 4 out of `Main.dc.html` and Ctrl+Z brought them back. From the artboard's corner, the frame told the
+editor start, move and end, no element moved, and 4 elements were selected. The rig's element drag now
+skips the artboard's own box, which the runtime's hover marks (`top`), because a drag there draws a
+rectangle.
+
 ## Not done
 
 - **Comments on the phone and on the board.** The phone has no comment tool and no pins. The board

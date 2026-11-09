@@ -50,7 +50,7 @@ async function boot(): Promise<void> {
   const editing = editMode(() => text, container);
   window.addEventListener("message", (event) => {
     if (event.source !== window.parent) return;
-    const data = event.data as { type?: unknown; props?: unknown; mode?: unknown; text?: unknown; id?: unknown } | null;
+    const data = event.data as { type?: unknown; props?: unknown; mode?: unknown; text?: unknown; id?: unknown; req?: unknown } | null;
     // The mode is the page's, not the artboard's: kept even before the artboard is drawn.
     if (data?.type === "dc:mode" && (data.mode === "edit" || data.mode === "play" || data.mode === "view")) {
       editing.setMode(data.mode);
@@ -68,6 +68,8 @@ async function boot(): Promise<void> {
       editing.afterRender();
     } else if (data?.type === "dc:select") {
       editing.select(typeof data.id === "number" ? data.id : null);
+    } else if (data?.type === "dc:measure") {
+      editing.measure(data.req);
     }
   });
   window.addEventListener("error", (event) => post({ type: "dc:error", message: event.message }));
@@ -96,7 +98,7 @@ async function boot(): Promise<void> {
  * so the design's own handlers and links never run, and what is under the pointer is reported by its
  * template element's id. `play` and `view` let the page be itself.
  */
-function editMode(source: () => string, container: Element): { setMode: (mode: "edit" | "play" | "view") => void; select: (id: number | null) => void; afterRender: () => void } {
+function editMode(source: () => string, container: Element): { setMode: (mode: "edit" | "play" | "view") => void; select: (id: number | null) => void; afterRender: () => void; measure: (req: unknown) => void } {
   let mode: "edit" | "play" | "view" = "view";
   let selected: number | null = null;
   let hoverFrame = 0;
@@ -179,16 +181,56 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
    */
   let press: { el: HTMLElement; x: number; y: number; moved: boolean; transform: string } | null = null;
   let swallowClick = false;
+  /**
+   * A drag that starts on no element — the artboard's own background: its top element, or bare page —
+   * draws a selection rectangle (the person, 2026-11-08: "when the initial click doesnt land on an
+   * element"). The host draws it, over the whole canvas, and picks what it holds: told WHERE the pointer
+   * is, in this frame's viewport (`dc:marquee`, start | move | end), as `dc:pan` is. A press that does not
+   * move is still a click, and picks the top element as before.
+   */
+  let marquee: { x: number; y: number; started: boolean } | null = null;
+  /** The artboard's own box: an element no other element the editor can name holds. */
+  const isTop = (el: HTMLElement): boolean => el.parentElement?.closest("[data-dc-id]") == null;
   window.addEventListener(
     "pointerdown",
     (event) => {
       if (mode !== "edit" || event.button !== 0) return;
       const el = named(event.target);
-      if (!el || el.parentElement === null) return;
+      if (!el || isTop(el)) {
+        marquee = { x: event.clientX, y: event.clientY, started: false };
+        return;
+      }
       press = { el, x: event.clientX, y: event.clientY, moved: false, transform: el.style.transform };
     },
     true,
   );
+  window.addEventListener(
+    "pointermove",
+    (event) => {
+      if (mode !== "edit" || marquee === null) return;
+      if (!marquee.started) {
+        if (Math.hypot(event.clientX - marquee.x, event.clientY - marquee.y) < 4) return;
+        marquee.started = true;
+        post({ type: "dc:marquee", phase: "start", x: marquee.x, y: marquee.y });
+      }
+      post({ type: "dc:marquee", phase: "move", x: event.clientX, y: event.clientY });
+    },
+    true,
+  );
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (marquee === null || event.button !== 0) return;
+      const { started } = marquee;
+      marquee = null;
+      if (!started) return;
+      // The click a rectangle ends with is the rectangle's, not a pick.
+      swallowClick = true;
+      post({ type: "dc:marquee", phase: "end", x: event.clientX, y: event.clientY });
+    },
+    true,
+  );
+  window.addEventListener("pointercancel", () => (marquee = null), true);
   window.addEventListener(
     "pointermove",
     (event) => {
@@ -282,7 +324,8 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
       const target = event.target;
       hoverFrame = requestAnimationFrame(() => {
         const el = named(target);
-        post({ type: "dc:hover", id: el ? idOf(el) : null, rect: el ? rectOf(el) : null });
+        // `top`: the artboard's own box, where a drag draws a selection rectangle rather than moving it.
+        post({ type: "dc:hover", id: el ? idOf(el) : null, rect: el ? rectOf(el) : null, top: el ? isTop(el) : false });
       });
     },
     true,
@@ -304,6 +347,40 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     select: (id) => {
       selected = id;
       reportSelected();
+    },
+    /**
+     * Every element the editor can name, for what a selection rectangle holds (`dc:elements`, answering
+     * `req`): its box in this frame's viewport (`view`, where the host draws the rectangle) and on the page
+     * (`rect`, as `dc:pick` reports it), its nearest named ancestor, and its source's tag, style and text.
+     * An element drawn more than once (in a loop) is one template element: its boxes are joined.
+     */
+    measure: (req) => {
+      const text = source();
+      const doc = parse(text);
+      const byId = new Map<number, { id: number; parent: number | null; view: { x: number; y: number; width: number; height: number }; rect: { x: number; y: number; width: number; height: number } }>();
+      const join = (a: { x: number; y: number; width: number; height: number }, b: { x: number; y: number; width: number; height: number }) => {
+        const x = Math.min(a.x, b.x);
+        const y = Math.min(a.y, b.y);
+        return { x, y, width: Math.max(a.x + a.width, b.x + b.width) - x, height: Math.max(a.y + a.height, b.y + b.height) - y };
+      };
+      for (const el of container.querySelectorAll("[data-dc-id]")) {
+        const id = idOf(el);
+        const r = el.getBoundingClientRect();
+        if (r.width === 0 && r.height === 0) continue;
+        const view = { x: r.left, y: r.top, width: r.width, height: r.height };
+        const rect = rectOf(el);
+        const parent = el.parentElement?.closest("[data-dc-id]");
+        const was = byId.get(id);
+        byId.set(id, was ? { ...was, view: join(was.view, view), rect: join(was.rect, rect) } : { id, parent: parent ? idOf(parent) : null, view, rect });
+      }
+      post({
+        type: "dc:elements",
+        req,
+        elements: [...byId.values()].map((e) => {
+          const el = doc.elements[e.id];
+          return { ...e, tag: el?.tag ?? "div", style: el?.style ? decodeEntities(text.slice(el.style.start, el.style.end)) : "", text: el?.text ? decodeEntities(text.slice(el.text.start, el.text.end)) : null };
+        }),
+      });
     },
     afterRender: () => {
       // A frame later: React has committed, and the browser has laid the new tree out.

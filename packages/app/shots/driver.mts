@@ -657,6 +657,11 @@ export class App {
     await sleep(150);
   }
 
+  /** One raw mouse event, for a drag looked at while it is held (`drag` presses, moves and lets go in one call). */
+  async mouse(type: "mouseMoved" | "mousePressed" | "mouseReleased", at: { x: number; y: number }, held = type !== "mouseReleased"): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: type === "mouseMoved" ? 0 : 1, buttons: held ? 1 : 0 });
+  }
+
   /** Put the pointer somewhere and do not wait: {@link hover} without the pause for a hover card. */
   async pointer(x: number, y: number): Promise<void> {
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
