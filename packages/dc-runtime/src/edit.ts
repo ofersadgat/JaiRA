@@ -88,6 +88,22 @@ export function insertElement(source: string, parent: number | null, html: strin
   return splice(source, lineStart, lineStart, `${indent}${html}\n`);
 }
 
+/** Element `n`'s markup, start tag through end tag, verbatim: what the editor copies. */
+export function elementMarkup(source: string, n: number): string {
+  const el = elementAt(source, n);
+  return source.slice(el.outer.start, el.outer.end);
+}
+
+/** Inserts `html` right after element `n`, as its next sibling: a paste or a duplicate beside what is selected. */
+export function insertAfter(source: string, n: number, html: string): string {
+  const doc = parse(source);
+  const el = doc.elements[n];
+  if (!el) throw new Error(`The template has no element ${String(n)}.`);
+  const siblings = doc.elements.filter((e) => e.parent === el.parent);
+  const next = siblings.indexOf(el) + 1;
+  return insertElement(source, el.parent, html, next < siblings.length ? next : undefined);
+}
+
 /**
  * An inline style's declarations by their CSS names, values verbatim — holes, `!important` and all:
  * what the editor's properties panel reads and writes back with {@link formatStyle}. (`parseStyle` is

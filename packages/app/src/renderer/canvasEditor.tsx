@@ -16,9 +16,10 @@
  * the person's (`onSave`), a second after the last change; refused, because the model published the same
  * file meanwhile, it says so and offers to reload.
  */
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
-import { applyMove, editStyle, editText, formatStyle, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
+import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter, insertElement, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
+import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
 import { Popover } from "./popover";
 
@@ -130,10 +131,57 @@ const SLIDERS = "M4 7h9M17 7h3M4 17h3M11 17h9M15 5v4M9 15v4";
 const EXPAND = "M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7";
 const DOWNLOAD = "M12 4v11M7 10l5 5 5-5M5 20h14";
 
+/** How a shortcut's modifier is written: Cmd on a Mac, Ctrl elsewhere. */
+const MOD = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "Cmd" : "Ctrl";
+
 const SHORTCUT: Record<string, CanvasTool> = { v: "pointer", h: "hand", t: "text", a: "artboard", n: "note", p: "pen", r: "rect", o: "oval", l: "line", c: "comment" };
 
 /** The colour of a running artboard's ring and its controls. */
 const RUN = "#0f7a45";
+
+/**
+ * Which editor the keyboard is for. Several can be open at once — inline in the conversation, the side
+ * panel, the main view — and a key read off `window` reached every one: Ctrl+Z would undo in all of them,
+ * and Delete would delete in each that had a selection. The keys are the editor's the person last pressed
+ * in (its board, its bars, its menus and comment boxes, which carry `data-canvas-keys`, or one of its
+ * artboards); a press anywhere else in the window gives them back to the page.
+ */
+let keysOwner: string | null = null;
+let keysWatched = false;
+function watchKeysOwner(): void {
+  if (keysWatched || typeof window === "undefined") return;
+  keysWatched = true;
+  window.addEventListener(
+    "pointerdown",
+    (e) => {
+      keysOwner = (e.target instanceof Element ? e.target.closest("[data-canvas-keys]")?.getAttribute("data-canvas-keys") : null) ?? null;
+    },
+    true,
+  );
+  // A press in an artboard reaches the frame's window, not this one: this one loses the focus to it.
+  window.addEventListener("blur", () =>
+    setTimeout(() => {
+      const focused = document.activeElement;
+      if (focused instanceof HTMLIFrameElement) keysOwner = focused.closest("[data-canvas-keys]")?.getAttribute("data-canvas-keys") ?? keysOwner;
+    }, 0),
+  );
+}
+
+/** A note's box on the board, near enough to frame it (Shift+2). */
+function noteBox(n: CanvasNote | undefined): { x: number; y: number; w: number; h: number } | undefined {
+  if (n === undefined) return undefined;
+  if (n.x2 !== undefined && n.y2 !== undefined) return { x: Math.min(n.x, n.x2), y: Math.min(n.y, n.y2), w: Math.abs(n.x2 - n.x), h: Math.abs(n.y2 - n.y) };
+  if (n.points !== undefined && n.points.length > 0) {
+    const xs = n.points.map(([px]) => n.x + px);
+    const ys = n.points.map(([, py]) => n.y + py);
+    return { x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys) };
+  }
+  return { x: n.x, y: n.y, w: n.w ?? 220, h: n.h ?? 120 };
+}
+
+/** What Ctrl+C or Ctrl+X took, for Ctrl+V — in this window, any canvas: an artboard pastes into another canvas too. */
+type Clip = { kind: "note"; note: CanvasNote } | { kind: "board"; file: string; entry: CanvasBoardEntry; source: string } | { kind: "element"; html: string };
+let clipboard: { clip: Clip; pasted: number } | null = null;
 
 /** `canvas.json` as the editor holds it; its other keys ride along untouched. */
 function readIndex(text: string | undefined): CanvasIndex & Record<string, unknown> {
@@ -187,6 +235,8 @@ return {};
 }
 
 export function CanvasEditor({ files: initial, base: initialBase, frames, onSave, onReload, onExport, comments = [], onComment, serveVersion, onSettleComment, style }: CanvasEditorProps): JSX.Element {
+  /** This editor's name in `data-canvas-keys`: the keys are its while the person last pressed in it. */
+  const keysId = useId();
   const [index, setIndex] = useState(() => readIndex(initial["project/canvas.json"]));
   const [sources, setSources] = useState<Record<string, string>>(() => Object.fromEntries(Object.entries(initial).filter(([p]) => p.endsWith(".dc.html"))));
   const [base, setBase] = useState(initialBase);
@@ -330,12 +380,39 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
 
   // --- edits ------------------------------------------------------------------------------------
 
+  /** The canvas as last drawn, and what it was before each edit (canvasHistory.ts). */
+  const live = useRef<CanvasState<CanvasIndex & Record<string, unknown>>>({ index, sources });
+  live.current = { index, sources };
+  const history = useRef(new CanvasHistory<CanvasState<CanvasIndex & Record<string, unknown>>>());
+  /** Before an edit: the canvas as it stands is kept for Ctrl+Z. */
+  const checkpoint = (): void => history.current.record(live.current);
+  /** Back (or forward) to a kept state: what differs is marked changed and saved, and each frame redrawn. */
+  const restore = (to: CanvasState<CanvasIndex & Record<string, unknown>> | undefined): void => {
+    if (to === undefined) return;
+    const paths = changedPaths(live.current, to);
+    setIndex(to.index);
+    setSources(to.sources);
+    setDirty((was) => new Set([...was, ...paths]));
+    for (const path of paths) {
+      if (path === "project/canvas.json") continue;
+      const file = path.replace(/^project\//, "");
+      frameEls.current.get(file)?.contentWindow?.postMessage({ type: "dc:source", text: to.sources[path] ?? "" }, "*");
+    }
+    setEditingText(null);
+    // An element's number may name another element now; an artboard or a note may be gone.
+    setSelection((was) => (was === null || was.kind === "element" ? null : was.kind === "board" ? (to.index.boards[was.file] !== undefined ? was : null) : to.index.notes?.[was.id] !== undefined ? was : null));
+  };
+  const undo = (): void => restore(history.current.undo(live.current));
+  const redo = (): void => restore(history.current.redo(live.current));
+
   const touch = (path: string): void => setDirty((was) => new Set(was).add(path));
   const changeIndex = (next: (index: CanvasIndex & Record<string, unknown>) => CanvasIndex & Record<string, unknown>): void => {
+    checkpoint();
     setIndex((was) => next(was));
     touch("project/canvas.json");
   };
   const changeSource = (file: string, next: string): void => {
+    checkpoint();
     setSources((was) => ({ ...was, [`project/${file}`]: next }));
     touch(`project/${file}`);
     frameEls.current.get(file)?.contentWindow?.postMessage({ type: "dc:source", text: next }, "*");
@@ -382,6 +459,14 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       const file = [...frameEls.current.entries()].find(([, el]) => el.contentWindow === event.source)?.[0];
       if (file === undefined) return;
       const data = event.data as { type?: string; id?: number; rect?: Rect; at?: { x: number; y: number }; tag?: string; style?: string; text?: string | null; href?: string; phase?: string; x?: number; y?: number };
+      // A press or a key in one of this editor's artboards: the keyboard is this editor's.
+      if (data.type === "dc:pick" || data.type === "dc:dblclick" || data.type === "dc:moved" || data.type === "dc:key" || (data.type === "dc:pan" && data.phase === "start")) keysOwner = keysId;
+      if (data.type === "dc:key") {
+        // A key pressed while an artboard had the focus: read as if pressed on this window.
+        const k = event.data as { phase?: string; key?: string; code?: string; ctrlKey?: boolean; metaKey?: boolean; shiftKey?: boolean; altKey?: boolean; repeat?: boolean };
+        window.dispatchEvent(new KeyboardEvent(k.phase === "up" ? "keyup" : "keydown", { key: k.key ?? "", code: k.code ?? "", ctrlKey: k.ctrlKey === true, metaKey: k.metaKey === true, shiftKey: k.shiftKey === true, altKey: k.altKey === true, repeat: k.repeat === true }));
+        return;
+      }
       if (data.type === "dc:pan" && typeof data.x === "number" && typeof data.y === "number") {
         // The middle button dragged inside a frame: where the pointer is, placed in the window by where
         // the frame stands now; the board pans by how far that moved. Committed at once (`flushSync`), so
@@ -495,15 +580,201 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selection, sources]);
 
-  // Space held pans, as in every canvas: let go, the tool is what it was.
-  useEffect(() => {
-    const down = (e: KeyboardEvent): void => {
-      if (e.code !== "Space" || e.repeat || editingText !== null || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target instanceof HTMLElement && e.target.isContentEditable)) return;
+  /** Ctrl+C / Ctrl+X: what is selected, as a clip. */
+  const clipOf = (s: Selection | null): Clip | null => {
+    if (s === null) return null;
+    if (s.kind === "note") {
+      const note = index.notes?.[s.id];
+      return note === undefined ? null : { kind: "note", note };
+    }
+    if (s.kind === "board") {
+      const entry = index.boards[s.file];
+      return entry === undefined ? null : { kind: "board", file: s.file, entry, source: sourceOf(s.file) };
+    }
+    try {
+      return { kind: "element", html: elementMarkup(sourceOf(s.file), s.id) };
+    } catch {
+      return null;
+    }
+  };
+
+  /**
+   * Ctrl+V and Ctrl+D: a note a step down and to the right of its original, an artboard beside it (a new
+   * file, its source copied), an element right after the selected one — or, with an artboard selected,
+   * last in its outermost box. The `n`th paste of one clip steps `n` times, so pastes do not pile up.
+   */
+  const paste = (clip: Clip, n: number): void => {
+    const onThisPage = firstPage !== undefined && page !== undefined ? { page } : {};
+    if (clip.kind === "note") {
+      const id = noteId();
+      const d = 24 * n;
+      const note = clip.note;
+      changeIndex((was) => ({ ...was, notes: { ...(was.notes ?? {}), [id]: { ...note, ...onThisPage, x: note.x + d, y: note.y + d, ...(note.x2 !== undefined && note.y2 !== undefined ? { x2: note.x2 + d, y2: note.y2 + d } : {}) } } }));
+      setSelection({ kind: "note", id });
+      return;
+    }
+    if (clip.kind === "board") {
+      const stem = clip.file.replace(/\.dc\.html$/, "").replace(/[^A-Za-z0-9_-]/g, "");
+      let file = `${stem}Copy.dc.html`;
+      for (let k = 2; index.boards[file] !== undefined || sources[`project/${file}`] !== undefined; k++) file = `${stem}Copy${String(k)}.dc.html`;
+      const entry: CanvasBoardEntry = { ...clip.entry, ...onThisPage, x: clip.entry.x + (clip.entry.w + 80) * n, title: `${clip.entry.title ?? stem} copy` };
+      changeIndex((was) => ({ ...was, boards: { ...was.boards, [file]: entry }, order: [...(was.order ?? []), file] }));
+      setSources((was) => ({ ...was, [`project/${file}`]: clip.source }));
+      touch(`project/${file}`);
+      setSelection({ kind: "board", file });
+      return;
+    }
+    if (selection?.kind === "element") {
+      changeSource(selection.file, insertAfter(sourceOf(selection.file), selection.id, clip.html));
+      setSelection(null);
+    } else if (selection?.kind === "board") {
+      const source = sourceOf(selection.file);
+      const box = parse(source).elements.filter((el) => el.parent === null && !["helmet", "style", "script", "link", "meta"].includes(el.tag)).at(-1);
+      if (box !== undefined) changeSource(selection.file, insertElement(source, box.n, clip.html));
+    }
+  };
+
+  /** Arrow keys: a selected artboard or note moves a pixel, ten with Shift. (An element sits in its page's flow; it is dragged.) */
+  const nudge = (dx: number, dy: number): boolean => {
+    if (selection?.kind === "board" && index.boards[selection.file] !== undefined) {
+      const file = selection.file;
+      changeIndex((was) => ({ ...was, boards: { ...was.boards, [file]: { ...was.boards[file]!, x: was.boards[file]!.x + dx, y: was.boards[file]!.y + dy } } }));
+      return true;
+    }
+    if (selection?.kind === "note" && index.notes?.[selection.id] !== undefined) {
+      const id = selection.id;
+      changeIndex((was) => {
+        const note = was.notes?.[id];
+        if (note === undefined) return was;
+        return { ...was, notes: { ...was.notes, [id]: { ...note, x: note.x + dx, y: note.y + dy, ...(note.x2 !== undefined && note.y2 !== undefined ? { x2: note.x2 + dx, y2: note.y2 + dy } : {}) } } };
+      });
+      return true;
+    }
+    return false;
+  };
+
+  /** Shift+2: the selected artboard (an element's own), or note, filling the board, 24 px clear, at no more than 100%. */
+  const zoomToSelection = (): void => {
+    const el = board.current;
+    const box = selection === null ? undefined : selection.kind === "note" ? noteBox(index.notes?.[selection.id]) : index.boards[selection.file];
+    if (el === null || box === undefined || el.clientWidth <= 0) return;
+    moved.current = true;
+    const z = Math.max(0.05, Math.min(1, (el.clientWidth - 48) / Math.max(box.w, 1), (el.clientHeight - 48) / Math.max(box.h, 1)));
+    setView({ z, x: (el.clientWidth - box.w * z) / 2 - box.x * z, y: (el.clientHeight - box.h * z) / 2 - box.y * z });
+  };
+
+  /** Typing somewhere that takes text: the key is the field's, not the canvas's. */
+  const typing = (e: KeyboardEvent): boolean =>
+    editingText !== null || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement || (e.target instanceof HTMLElement && e.target.isContentEditable);
+
+  /**
+   * The keyboard, while this editor has it (`keysOwner`): the common canvas keys —
+   *
+   *   Ctrl+Z  undo · Ctrl+Shift+Z, Ctrl+Y  redo · Ctrl+C / X / V  copy, cut, paste · Ctrl+D  duplicate
+   *   Delete, Backspace  delete · arrows  nudge (Shift: 10 px) · Enter  edit the text · Esc  stop, let go
+   *   Ctrl+= / Ctrl+-  zoom in, out · Ctrl+0  100% · Shift+1  fit · Shift+2  zoom to the selection
+   *   Ctrl+\  the properties panel · Space held  pan · a tool's letter  that tool
+   *
+   * Cmd for Ctrl on a Mac. Read through a ref, so the one listener always sees this render's state.
+   */
+  const onKey = (e: KeyboardEvent): void => {
+    if (keysOwner !== keysId || typing(e)) return;
+    const mod = e.ctrlKey || e.metaKey;
+    const k = e.key.toLowerCase();
+    if ((e.code === "Space" || e.key === " ") && !mod) {
+      if (!e.repeat) setSpaceHeld(true);
       e.preventDefault();
-      setSpaceHeld(true);
-    };
+      return;
+    }
+    if (mod && !e.altKey) {
+      const act = (run: () => void): void => {
+        e.preventDefault();
+        run();
+      };
+      if (k === "z") act(e.shiftKey ? redo : undo);
+      else if (k === "y") act(redo);
+      else if (k === "c" || k === "x") {
+        // Words selected on the page are the page's to copy.
+        const words = window.getSelection();
+        if (words !== null && !words.isCollapsed) return;
+        const clip = clipOf(selection);
+        if (clip === null) return;
+        act(() => {
+          clipboard = { clip, pasted: 0 };
+          if (k === "x") remove();
+        });
+      } else if (k === "v") {
+        const held = clipboard;
+        if (held === null) return;
+        act(() => {
+          held.pasted += 1;
+          paste(held.clip, held.pasted);
+        });
+      } else if (k === "d") {
+        const clip = clipOf(selection);
+        if (clip !== null) act(() => paste(clip, 1));
+      } else if (k === "=" || k === "+") act(() => zoomTo(Math.min(4, view.z * 1.25)));
+      else if (k === "-" || k === "_") act(() => zoomTo(Math.max(0.05, view.z / 1.25)));
+      else if (k === "0") act(() => zoomTo(1));
+      else if (e.key === "\\") act(() => setPanelOpen((was) => !was));
+      return;
+    }
+    if (e.altKey) return;
+    if (e.key === "Delete" || e.key === "Backspace") {
+      e.preventDefault();
+      remove();
+      return;
+    }
+    if (e.key === "Escape") {
+      // What runs stops first; then the comment, the selection and the tool are let go.
+      if (running.size > 0 || full !== null) {
+        setRunning(new Set());
+        setFull(null);
+        return;
+      }
+      setDraft(null);
+      setOpenPin(null);
+      setSelection(null);
+      setTool("pointer");
+      return;
+    }
+    if (e.shiftKey && (e.code === "Digit1" || e.key === "!")) {
+      e.preventDefault();
+      fit();
+      return;
+    }
+    if (e.shiftKey && (e.code === "Digit2" || e.key === "@")) {
+      e.preventDefault();
+      zoomToSelection();
+      return;
+    }
+    const arrow = ({ ArrowLeft: [-1, 0], ArrowRight: [1, 0], ArrowUp: [0, -1], ArrowDown: [0, 1] } as Record<string, [number, number]>)[e.key];
+    if (arrow !== undefined) {
+      const step = e.shiftKey ? 10 : 1;
+      if (nudge(arrow[0] * step, arrow[1] * step)) e.preventDefault();
+      return;
+    }
+    if (e.key === "Enter") {
+      if (selection?.kind === "note" && index.notes?.[selection.id] !== undefined) {
+        e.preventDefault();
+        setEditingText({ note: selection.id, text: index.notes[selection.id]!.text ?? "" });
+      } else if (selection?.kind === "element" && typeof selection.text === "string") {
+        e.preventDefault();
+        setEditingText({ file: selection.file, id: selection.id, rect: selection.rect, text: selection.text });
+      }
+      return;
+    }
+    const picked = e.shiftKey && k === "l" ? "arrow" : SHORTCUT[k];
+    if (picked !== undefined) pickTool(picked);
+  };
+  const keyHandler = useRef(onKey);
+  keyHandler.current = onKey;
+  useEffect(() => {
+    watchKeysOwner();
+    const down = (e: KeyboardEvent): void => keyHandler.current(e);
+    // Space let go, or the window left: the tool is what it was.
     const up = (e: KeyboardEvent): void => {
-      if (e.code === "Space") setSpaceHeld(false);
+      if (e.code === "Space" || e.key === " ") setSpaceHeld(false);
     };
     const blur = (): void => setSpaceHeld(false);
     window.addEventListener("keydown", down);
@@ -514,41 +785,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       window.removeEventListener("keyup", up);
       window.removeEventListener("blur", blur);
     };
-  }, [editingText]);
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent): void => {
-      if (editingText !== null || e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return;
-      if (e.key === "Delete" || e.key === "Backspace") {
-        e.preventDefault();
-        remove();
-        return;
-      }
-      if (e.key === "Escape") {
-        // What runs stops first; then the comment, the selection and the tool are let go.
-        if (running.size > 0 || full !== null) {
-          setRunning(new Set());
-          setFull(null);
-          return;
-        }
-        setDraft(null);
-        setOpenPin(null);
-        setSelection(null);
-        setTool("pointer");
-        return;
-      }
-      if ((e.ctrlKey || e.metaKey) && e.key === "\\") {
-        e.preventDefault();
-        setPanelOpen((was) => !was);
-        return;
-      }
-      if (e.ctrlKey || e.metaKey || e.altKey) return;
-      const picked = e.shiftKey && e.key.toLowerCase() === "l" ? "arrow" : SHORTCUT[e.key.toLowerCase()];
-      if (picked !== undefined) pickTool(picked);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [remove, editingText, running, full]);
+  }, []);
 
   // --- the board's gestures --------------------------------------------------------------------------
 
@@ -660,17 +897,20 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       moved.current = true;
       setView({ ...gesture.view, x: gesture.view.x + e.clientX - gesture.from.x, y: gesture.view.y + e.clientY - gesture.from.y });
     } else if (gesture.kind === "moveBoard") {
+      if (!gestureMoved.current) checkpoint();
       gestureMoved.current = true;
       const dx = p.x - gesture.from.x;
       const dy = p.y - gesture.from.y;
       setIndex((was) => ({ ...was, boards: { ...was.boards, [gesture.file]: { ...was.boards[gesture.file]!, x: Math.round(gesture.at.x + dx), y: Math.round(gesture.at.y + dy) } } }));
     } else if (gesture.kind === "resizeBoard") {
+      if (!gestureMoved.current) checkpoint();
       gestureMoved.current = true;
       setIndex((was) => ({
         ...was,
         boards: { ...was.boards, [gesture.file]: { ...was.boards[gesture.file]!, w: Math.max(40, Math.min(8000, Math.round(gesture.size.w + p.x - gesture.from.x))), h: Math.max(40, Math.min(8000, Math.round(gesture.size.h + p.y - gesture.from.y))) } },
       }));
     } else if (gesture.kind === "moveNote") {
+      if (!gestureMoved.current) checkpoint();
       gestureMoved.current = true;
       const dx = p.x - gesture.from.x;
       const dy = p.y - gesture.from.y;
@@ -781,7 +1021,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   if (full !== null && index.boards[full] !== undefined) {
     const b = index.boards[full]!;
     return (
-      <div ref={fullBox} style={{ ...shell, ...style }}>
+      <div ref={fullBox} data-canvas-keys={keysId} style={{ ...shell, ...style }}>
         <div style={bar}>
           <button type="button" style={button} onClick={() => setFull(null)}>
             ← Back to the canvas
@@ -838,7 +1078,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const pages = index.pages ?? [];
 
   return (
-    <div style={{ ...shell, ...style }}>
+    <div data-canvas-keys={keysId} style={{ ...shell, ...style }}>
       <div style={{ position: "relative", display: "flex", flex: 1, minHeight: 0 }}>
         <div ref={board} onMouseDown={(e) => e.button === 1 && e.preventDefault()} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
           {/* Under the frames and notes: a press here pans, and empties the selection. */}
@@ -1015,12 +1255,12 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
           </div>
           {/* A comment's box: a float against its pin, so a narrow board never clips it. */}
           {draft !== null && index.boards[draft.file] !== undefined ? (
-            <Popover anchor={pinRef} side="right" align="start" gap={8} style={{ width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
+            <Popover data-canvas-keys={keysId} anchor={pinRef} side="right" align="start" gap={8} style={{ width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
               <CommentBox draft={draft} onChange={setDraft} onSubmit={submitDraft} onCancel={() => setDraft(null)} />
             </Popover>
           ) : null}
           {openComment !== undefined && draft === null ? (
-            <Popover anchor={pinRef} side="right" align="start" gap={8} style={{ width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
+            <Popover data-canvas-keys={keysId} anchor={pinRef} side="right" align="start" gap={8} style={{ width: 260 }} onPointerDown={(e) => e.stopPropagation()}>
               <CommentCard
                 comment={openComment}
                 boardTitle={index.boards[openComment.file]!.title ?? openComment.file}
@@ -1147,7 +1387,7 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
         </aside>
       </div>
       {menu !== null ? (
-        <Popover ref={menuBox} anchor={menuAnchor} side="below" align={menu.kind === "zoom" || menu.kind === "download" ? "end" : "start"} gap={4} role="menu" style={menuCard} onPointerDown={(e) => e.stopPropagation()}>
+        <Popover ref={menuBox} data-canvas-keys={keysId} anchor={menuAnchor} side="below" align={menu.kind === "zoom" || menu.kind === "download" ? "end" : "start"} gap={4} role="menu" style={menuCard} onPointerDown={(e) => e.stopPropagation()}>
           {menu.kind === "group"
             ? GROUPS[menu.group].map((which) => {
                 const t = toolOf(which);
@@ -1172,23 +1412,28 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
             : menu.kind === "zoom"
               ? (
                   [
-                    ["Zoom to fit", () => fit()],
-                    ["50%", () => zoomTo(0.5)],
-                    ["100%", () => zoomTo(1)],
-                    ["200%", () => zoomTo(2)],
+                    ["Zoom in", () => zoomTo(Math.min(4, view.z * 1.25)), `${MOD}+=`],
+                    ["Zoom out", () => zoomTo(Math.max(0.05, view.z / 1.25)), `${MOD}+-`],
+                    ["Zoom to fit", () => fit(), "Shift+1"],
+                    ["Zoom to selection", () => zoomToSelection(), "Shift+2"],
+                    ["50%", () => zoomTo(0.5), ""],
+                    ["100%", () => zoomTo(1), `${MOD}+0`],
+                    ["200%", () => zoomTo(2), ""],
                   ] as const
-                ).map(([label, act]) => (
+                ).map(([label, act, keys]) => (
                   <button
                     key={label}
                     type="button"
                     role="menuitem"
+                    disabled={label === "Zoom to selection" && selection === null}
                     onClick={() => {
                       act();
                       setMenu(null);
                     }}
-                    style={menuItem}
+                    style={{ ...menuItem, opacity: label === "Zoom to selection" && selection === null ? 0.45 : 1 }}
                   >
-                    {label}
+                    <span style={{ flex: 1 }}>{label}</span>
+                    {keys !== "" ? <span style={{ color: "var(--dim, #5a5f7a)", fontSize: 11 }}>{keys}</span> : null}
                   </button>
                 ))
               : menu.kind === "pages"

@@ -1,6 +1,6 @@
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
-import { applyMove, editStyle, editText, formatStyle, insertElement, parse, readStyle, removeElement, renderArtboard, setPropDefault, wrapElement } from "../src/index.js";
+import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter, insertElement, parse, readStyle, removeElement, renderArtboard, setPropDefault, wrapElement } from "../src/index.js";
 import { artboard, fixture } from "./fixtures.js";
 
 /** Asserts `after` is `before` with `[start, end)` replaced, and nothing else changed. */
@@ -106,6 +106,25 @@ describe("insertElement", () => {
     const after = insertElement(source, null, `<footer>end</footer>`);
     expect(parse(after).elements.at(-1)!.tag).toBe("footer");
     expect(parse(after).elements.find((el) => el.tag === "footer")!.parent).toBeNull();
+  });
+});
+
+describe("elementMarkup and insertAfter (copy, paste, duplicate)", () => {
+  const source = artboard(`<div style="display: flex">\n  <span>one</span>\n  <span>two</span>\n</div>`);
+  const [, one, two] = parse(source).elements.filter((el) => el.tag === "div" || el.tag === "span");
+
+  it("copies an element's markup verbatim", () => {
+    expect(elementMarkup(source, one!.n)).toBe("<span>one</span>");
+  });
+
+  it("puts a copy right after a middle child, indented as its siblings", () => {
+    expect(insertAfter(source, one!.n, elementMarkup(source, one!.n))).toBe(source.replace("  <span>one</span>\n", "  <span>one</span>\n  <span>one</span>\n"));
+  });
+
+  it("puts a copy after the last child, still inside its parent", () => {
+    const after = insertAfter(source, two!.n, "<span>two</span>");
+    expect(after).toBe(source.replace("  <span>two</span>\n</div>", "  <span>two</span>\n  <span>two</span>\n</div>"));
+    expect(parse(after).elements.filter((el) => el.tag === "span").every((el) => el.parent === parse(after).elements.find((e) => e.tag === "div")!.n)).toBe(true);
   });
 });
 

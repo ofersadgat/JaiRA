@@ -144,6 +144,42 @@ Seen: `shots/canvas.mts` passed end to end twice in a row on this round's code (
 pass). The label press and the middle pan (exactly 40, 30, both runs) are now its own checks. Its last step opens the main view through the eye, for
 comparison with Claude Code's picture.
 
+## Round 3: keyboard shortcuts (2026-11-08)
+
+The person: "the canvas should have common keyboard shortcuts like ctrl+z for undo".
+
+- **Undo and redo.** Ctrl+Z undoes, and Ctrl+Shift+Z or Ctrl+Y redoes (Cmd on a Mac). `canvasHistory.ts`
+  keeps what the canvas was before each edit: `canvas.json` as the editor holds it, and every artboard's
+  source, up to 200 steps. One press, one drag or one key is one step: the calls made in one turn are
+  kept together, and a drag is recorded once, at its first move. An undo is an edit of the files, so what
+  it changed is saved as the person's next version. It never rewinds the version history, and Claude's
+  publishes are not undone.
+- **Copy, cut, paste, duplicate.** Ctrl+C, Ctrl+X, Ctrl+V and Ctrl+D work on what is selected.
+  - A note: pasted a step down and to the right.
+  - An artboard: becomes a new file (`<Name>Copy.dc.html`) beside the original, its source copied.
+  - An element: goes in right after the selected element, or last in a selected artboard's outermost
+    box (`elementMarkup`, `insertAfter` in the runtime's `edit.ts`).
+  The clipboard is the window's, so an artboard copied in one canvas can be pasted into another.
+- **The rest.**
+  - Arrows nudge a selected artboard or note by 1 px, or 10 with Shift. An element sits in its page's
+    flow, so it is still dragged.
+  - Enter edits the text of a note, or of an element holding one text.
+  - Ctrl+= and Ctrl+- zoom in and out, Ctrl+0 is 100%, Shift+1 fits, and Shift+2 zooms to the selection.
+    The zoom menu lists these.
+  - The existing keys stay: Delete, Esc, Ctrl+\, Space held, and the tools' letters.
+- **Whose keys.** Several editors can be open at once: inline, in the side panel, and in the main view.
+  Before this, a key read off the window reached every one of them. Now the keys belong to the editor
+  the person last pressed in (its board, its bars, its menus and comment boxes, which carry
+  `data-canvas-keys`, or one of its artboards). A press anywhere else gives them back to the page. When
+  an artboard holds the focus, its runtime tells the editor its keys (`dc:key`), in edit mode only,
+  since a running artboard's keys are the design's.
+
+Seen: `shots/canvas.mts` gains a keys step. Ctrl+D copies an artboard into its own file, Shift+→ moves the
+copy 10 px, Ctrl+Z twice takes both back with the file, Ctrl+Y redoes and Ctrl+Z undoes again, each saved
+as the person's version. Ctrl+0 shows 100% and Shift+1 fits. With an artboard holding the focus, Ctrl+Z
+and Ctrl+Shift+Z come back to where they were. After a press outside the editor, Ctrl+Z saves nothing.
+Its first drag now presses on an element of the design, not the bare margin, where it drags nothing.
+
 ## Not done
 
 - **Comments on the phone and on the board.** The phone has no comment tool and no pins. The board

@@ -222,10 +222,26 @@ async function main(): Promise<void> {
       return at;
     };
 
+    /** A point of the artboard over one of its elements (the design's bare margin picks nothing, and drags nothing). */
+    const elementPoint = async (): Promise<{ x: number; y: number }> => {
+      await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
+      await settle(900);
+      const candidates = await app.evaluate<Array<{ x: number; y: number }>>(
+        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); const out = []; for (const fy of [0.3, 0.45, 0.6, 0.2, 0.75]) for (const fx of [0.5, 0.35, 0.65]) { const x = r.left + r.width * fx, y = r.top + r.height * fy; if (document.elementFromPoint(x, y) === f) out.push({ x, y }); } return out; })()`,
+      );
+      for (const at of candidates) {
+        await app.hover(at.x, at.y);
+        await settle(200);
+        const named = await app.evaluate<boolean>(`(() => { const h = window.__dc.filter((m) => m.type === "dc:hover").at(-1); return !!h && h.id !== null; })()`);
+        if (named) return at;
+      }
+      throw new Error(`no point of the artboard is over one of its elements (${String(candidates.length)} tried)`);
+    };
+
     // Moving an element: dragged inside its artboard, written as the person's version.
     let n = await count();
     // Measured again: the delete changed the editor's panels, and the board's layout with them.
-    const grip = await artboardPoint();
+    const grip = await elementPoint();
     await app.drag(grip, { x: grip.x + 30, y: grip.y + 40 });
     await settle(500);
     const moved = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:moved").length`);
@@ -319,6 +335,88 @@ async function main(): Promise<void> {
     // A press on an artboard's name that moved nothing is no edit (2026-11-07: it saved canvas.json as it was).
     if ((await count()) !== beforeLabel) throw new Error("a press on an artboard's label, with no move, saved a version");
     console.log("label: a press with no move saved nothing");
+
+    // Keys (the person, 2026-11-08: "the canvas should have common keyboard shortcuts like ctrl+z for
+    // undo"), the artboard selected by its label: Ctrl+D copies it, Shift+→ nudges the copy, Ctrl+Z takes
+    // both back, Ctrl+Y and Ctrl+Z again; each is saved as the person's version.
+    const filesNow = async (): Promise<Record<string, string>> => (await app.ipc<{ files: Record<string, string> }>("artifact:files", { taskId: made.taskId, artifact: canvas.id })).files;
+    const boardsIn = (f: Record<string, string>): Record<string, { x: number }> => (JSON.parse(f["project/canvas.json"] ?? "{}") as { boards?: Record<string, { x: number }> }).boards ?? {};
+    const keyed = async (what: string, key: string, code: number, held: { ctrl?: boolean; shift?: boolean } = {}): Promise<Record<string, string>> => {
+      const c = await count();
+      await app.press(key, code, held);
+      await personSaved(c, what);
+      // The editor saves a second after the last change: let it, so the next key is its own version.
+      await settle(600);
+      return filesNow();
+    };
+    const k0 = await filesNow();
+    const k1 = await keyed("Ctrl+D", "d", 68, { ctrl: true });
+    const copy = Object.keys(boardsIn(k1)).filter((f) => boardsIn(k0)[f] === undefined);
+    if (copy.length !== 1 || k1[`project/${copy[0]!}`] === undefined) throw new Error(`Ctrl+D did not copy the selected artboard into a file of its own: ${JSON.stringify(Object.keys(boardsIn(k1)))}`);
+    const copyFile = copy[0]!;
+    const k2 = await keyed("Shift+→", "ArrowRight", 39, { shift: true });
+    if (boardsIn(k2)[copyFile]!.x !== boardsIn(k1)[copyFile]!.x + 10) throw new Error(`Shift+→ moved the copy from ${String(boardsIn(k1)[copyFile]!.x)} to ${String(boardsIn(k2)[copyFile]!.x)}, not 10 px`);
+    const k3 = await keyed("Ctrl+Z (the nudge)", "z", 90, { ctrl: true });
+    if (boardsIn(k3)[copyFile]!.x !== boardsIn(k1)[copyFile]!.x) throw new Error("Ctrl+Z did not take the nudge back");
+    const k4 = await keyed("Ctrl+Z (the copy)", "z", 90, { ctrl: true });
+    if (boardsIn(k4)[copyFile] !== undefined || k4[`project/${copyFile}`] !== undefined) throw new Error("Ctrl+Z did not take the copy back, with its file");
+    const k5 = await keyed("Ctrl+Y", "y", 89, { ctrl: true });
+    if (boardsIn(k5)[copyFile] === undefined) throw new Error("Ctrl+Y did not bring the copy back");
+    const k6 = await keyed("Ctrl+Z (the copy, again)", "z", 90, { ctrl: true });
+    if (JSON.stringify(boardsIn(k6)) !== JSON.stringify(boardsIn(k0)) || Object.keys(k6).sort().join() !== Object.keys(k0).sort().join()) throw new Error("after the undos the canvas is not what it was");
+    console.log(`keys: Ctrl+D copied the artboard (${copyFile}), Shift+→ moved it 10, Ctrl+Z took both back, Ctrl+Y redid, Ctrl+Z undid again`);
+    // Zoom keys: Ctrl+0 is 100%, Shift+1 fits again.
+    const zoomWords = (): Promise<string> => app.evaluate<string>(`document.querySelector('[data-island="canvasEditor"] [aria-label="Zoom"]').textContent.trim()`);
+    await app.press("0", 48, { ctrl: true });
+    const atHundred = await zoomWords();
+    await app.press("!", 49, { shift: true });
+    const fitted = await zoomWords();
+    console.log(`keys: Ctrl+0 → ${atHundred}, Shift+1 → ${fitted}`);
+    if (!atHundred.startsWith("100%")) throw new Error(`Ctrl+0 zoomed to ${atHundred}`);
+    if (fitted.startsWith("100%")) throw new Error("Shift+1 did not fit the canvas");
+    // From inside an artboard: a press picks an element (the frame may take the focus, and tells the editor
+    // its keys), and Ctrl+Z, Ctrl+Shift+Z still reach the editor.
+    await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
+    await settle(900);
+    const inside = await app.evaluate<{ x: number; y: number }>(`(() => { const r = document.querySelector('[data-island="canvasEditor"] iframe').getBoundingClientRect(); return { x: r.left + r.width / 2, y: r.top + Math.min(r.height / 3, 120) }; })()`);
+    const picks = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:pick").length`);
+    await app.clickAt(inside.x, inside.y);
+    await settle(800);
+    if ((await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:pick").length`)) === picks) throw new Error("a press in the artboard picked nothing (for the keys from inside it)");
+    const k7 = await filesNow();
+    // The artboard holding the focus, as it does when a press in it takes it: the keys are the frame's
+    // document's, and reach the editor only as the runtime tells them (`dc:key`).
+    await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').contentWindow.focus(); return true; })()`);
+    await settle(300);
+    const framed = await app.evaluate<boolean>(`document.activeElement === document.querySelector('[data-island="canvasEditor"] iframe')`);
+    await keyed("Ctrl+Z from inside an artboard", "z", 90, { ctrl: true });
+    const k8 = await keyed("Ctrl+Shift+Z from inside an artboard", "Z", 90, { ctrl: true, shift: true });
+    const viaFrame = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:key").length`);
+    const same = (a: Record<string, string>, b: Record<string, string>): boolean => JSON.stringify(Object.entries(a).sort()) === JSON.stringify(Object.entries(b).sort());
+    if (!same(k8, k7)) throw new Error("Ctrl+Z then Ctrl+Shift+Z from inside an artboard did not come back to where it was");
+    console.log(`keys: from inside an artboard (the frame focused: ${String(framed)}), Ctrl+Z and Ctrl+Shift+Z undid and redid (${String(viaFrame)} keys told by the frame)`);
+    if (framed && viaFrame === 0) throw new Error("the focused artboard told the editor none of its keys");
+    // Pressed outside the editor, the keys are the page's: Ctrl+Z saves nothing.
+    // A press on the page itself, outside every editor. Sent to <body> rather than at a point: a real
+    // click somewhere outside landed on a sidebar row once and took the conversation away.
+    {
+      const c = await count();
+      await app.evaluate(`(() => { document.body.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, composed: true })); window.focus(); return true; })()`);
+      await settle(300);
+      await app.press("z", 90, { ctrl: true });
+      await settle(2500);
+      if ((await count()) !== c) throw new Error("Ctrl+Z pressed after a press outside the editor undid in it");
+      console.log("keys: after a press outside the editor, Ctrl+Z is not the editor's");
+    }
+    // The artboard selected again, for Properties.
+    await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
+    await settle(900);
+    const labelAgain = await app.evaluate<{ x: number; y: number }>(
+      `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const label = f.parentElement.firstElementChild; const r = label.getBoundingClientRect(); return { x: r.left + Math.min(r.width / 2, 30), y: r.top + r.height / 2 }; })()`,
+    );
+    await app.clickAt(labelAgain.x, labelAgain.y);
+    await settle(800);
+
     await panel(true);
     const works = await app.evaluate<boolean>(`(() => { const box = document.querySelector('[aria-label="Its controls respond: it runs (▶)"]'); if (!box) return null; return box.checked; })()`);
     if (works === null) throw new Error("selecting the artboard did not show its Properties");
@@ -366,20 +464,6 @@ async function main(): Promise<void> {
      * of the frame from its top-left may be the page's bare margin, which names nothing (the design differs
      * every run).
      */
-    const elementPoint = async (): Promise<{ x: number; y: number }> => {
-      await app.evaluate(`(() => { document.querySelector('[data-island="canvasEditor"] iframe').scrollIntoView({ block: "center" }); return true; })()`);
-      await settle(900);
-      const candidates = await app.evaluate<Array<{ x: number; y: number }>>(
-        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); const out = []; for (const fy of [0.3, 0.45, 0.6, 0.2, 0.75]) for (const fx of [0.5, 0.35, 0.65]) { const x = r.left + r.width * fx, y = r.top + r.height * fy; if (document.elementFromPoint(x, y) === f) out.push({ x, y }); } return out; })()`,
-      );
-      for (const at of candidates) {
-        await app.hover(at.x, at.y);
-        await settle(200);
-        const named = await app.evaluate<boolean>(`(() => { const h = window.__dc.filter((m) => m.type === "dc:hover").at(-1); return !!h && h.id !== null; })()`);
-        if (named) return at;
-      }
-      throw new Error(`no point of the artboard is over one of its elements (${String(candidates.length)} tried)`);
-    };
     // Stopped, the artboard is edited again: a click on an element in it picks it (and the export follows that).
     const picksStopped = await app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:pick").length`);
     let chosen = await elementPoint();

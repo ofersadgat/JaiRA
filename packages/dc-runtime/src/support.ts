@@ -229,6 +229,20 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     true,
   );
 
+  // A key pressed while an artboard being edited has the focus (the person pressed in it last) is the
+  // editor's — Ctrl+Z, Delete, a tool's letter — so it is told to the host, which reads its keys off its
+  // own window. Registered before `stop`, which keeps the design's own handlers from it. Not in play: a
+  // running artboard's keys are the design's.
+  for (const type of ["keydown", "keyup"] as const) {
+    window.addEventListener(
+      type,
+      (event) => {
+        if (mode !== "edit") return;
+        post({ type: "dc:key", phase: type === "keydown" ? "down" : "up", key: event.key, code: event.code, ctrlKey: event.ctrlKey, metaKey: event.metaKey, shiftKey: event.shiftKey, altKey: event.altKey, repeat: event.repeat });
+      },
+      true,
+    );
+  }
   for (const type of ["pointerdown", "pointerup", "mousedown", "mouseup", "contextmenu", "submit", "keydown", "keyup", "input", "change", "focusin"]) {
     window.addEventListener(type, stop, true);
   }
