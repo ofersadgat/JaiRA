@@ -117,7 +117,11 @@ The shell part WAS judged as `read_file`. What differed was everything around th
     set's to say, at its places, and the executor floor is the sandbox: these tools now read and search
     an outside path where it is, by the path the call named. `.jaira/` is refused anywhere, `~/.jaira`
     included. Writes keep the workspace: `write_file` and `edit` place files through the artifact
-    destination, which is the workspace's.
+    destination, which is the workspace's. **Amended 2026-11-11** (the person, of a conversation whose
+    `edit` of Claude's memory was refused as "outside the workspace" under `full`): but for the calling
+    agent's OWN folder (`$AGENT_WORKSPACE`, ruling 19), which is the agent's and not the project's. A
+    write or edit there goes where it is, by the absolute path the call named, placed by no destination;
+    whether the call may is the line's, at that place. A call no agent made has no such folder.
 19. **`$AGENT_WORKSPACE` is a named place, and each agent declares it.** The person: "the agents
     themselves should declare what their workspaces are. This way, chatgpt can have a different workspace
     than claude." An agent's declaration says the folder it keeps for itself while it works in a folder

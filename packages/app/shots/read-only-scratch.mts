@@ -2,6 +2,10 @@
  * `read-only-scratch` with a real agent (2026-11-05: "read only, but it provides the llm scratch
  * space in its agent workspace").
  *
+ * 2026-11-11: and a file already in its folder, which it did not write in this run, is edited too. Claude's
+ * Edit refuses a file its own Read has not read, and Read was taken from it (t-elvj5dhzoy: every edit of
+ * its memory index refused, "File has not been read yet", and Read "disabled for this session").
+ *
  * A real agent (claude-cli/haiku — this rig spends a little) under the shipped set, told to write a note
  * in its own folder (`~/.claude/projects/<its working directory, encoded>`), edit it, and then write a
  * file in the project. Passes when the note is written and edited, the project file is not, and nobody
@@ -10,7 +14,7 @@
  *   npm --workspace @jaira/app run build
  *   npx tsx packages/app/shots/read-only-scratch.mts
  */
-import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import { App } from "./driver.mjs";
@@ -33,8 +37,12 @@ async function main(): Promise<void> {
   const folder = agentFolder(world.project);
   const note = join(folder, "scratch", "note.md");
   const intruder = join(world.project, "intruder.md");
+  const kept = join(folder, "scratch", "kept.md");
   rmSync(join(folder, "scratch"), { recursive: true, force: true });
   rmSync(intruder, { force: true });
+  // Planted before the agent runs: a file of its folder it never wrote, as its memory index is.
+  mkdirSync(join(folder, "scratch"), { recursive: true });
+  writeFileSync(kept, "kept: one\n");
 
   const app = await App.launch(world, { out: OUT, port: 9268 });
   const failures: string[] = [];
@@ -47,10 +55,11 @@ async function main(): Promise<void> {
     await app.until(drawn, "the window to draw");
     await app.resize(1180, 820);
     const message = [
-      "Do these three steps in order, one tool call at a time, and do not stop if one is refused.",
+      "Do these four steps in order, one tool call at a time, and do not stop if one is refused.",
       `1. With your Write tool, create the file ${note} containing exactly: first draft`,
       `2. With your Edit tool, in that same file replace "first draft" with "second draft".`,
-      `3. With your Write tool, create the file ${intruder} containing exactly: should not exist`,
+      `3. With your Edit tool, in the existing file ${kept} replace "one" with "two" (read it first if you need to).`,
+      `4. With your Write tool, create the file ${intruder} containing exactly: should not exist`,
       "Then reply with one line per step: the step's number, then OK or REFUSED.",
     ].join("\n");
     const made = await app.ipc<{ taskId: string }>("task:create", { title: TITLE, workflow: "chat/session", conversation: true, inputs: { message } });
@@ -59,7 +68,7 @@ async function main(): Promise<void> {
     await app.until(says(TITLE), "the conversation in the Chat room", 200);
     await app.clickText(TITLE);
 
-    // The answer names step 3; while waiting, count any approval the turn asks for (there should be none).
+    // The answer names step 4; while waiting, count any approval the turn asks for (there should be none).
     for (let i = 0; ; i++) {
       const pending = (await app.ipc<Array<{ requestId: string; taskId?: string; command?: string }>>("approval:pending", undefined)).filter((p) => p.taskId === made.taskId);
       for (const p of pending) {
@@ -68,8 +77,8 @@ async function main(): Promise<void> {
         await app.ipc("approval:submit", { requestId: p.requestId, decision: "deny", scope: "once" });
       }
       const text = await app.evaluate<string>("document.body.innerText");
-      // The answer's list draws its number and its word on two lines: `3. \nREFUSED`.
-      if (/\b3\.\s*(OK|REFUSED)\b/.test(text)) break;
+      // The answer's list draws its number and its word on two lines: `4. \nREFUSED`.
+      if (/\b4\.\s*(OK|REFUSED)\b/.test(text)) break;
       if (i > 360) throw new Error(`no answer in three minutes; the page ends: ${JSON.stringify(text.slice(-800))}`);
       await settle(500);
     }
@@ -80,6 +89,7 @@ async function main(): Promise<void> {
 
     check(existsSync(note), `the note is written in the agent's folder (${note})`);
     check(existsSync(note) && readFileSync(note, "utf8").trim() === "second draft", `the note is edited (${existsSync(note) ? JSON.stringify(readFileSync(note, "utf8")) : "absent"})`);
+    check(readFileSync(kept, "utf8").trim() === "kept: two", `the file already in its folder is edited (${JSON.stringify(readFileSync(kept, "utf8"))})`);
     check(!existsSync(intruder), "the project file is not written");
     check(asked === 0, `nobody is asked (asked ${asked})`);
   } finally {

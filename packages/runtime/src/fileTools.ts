@@ -38,6 +38,7 @@ import {
   type Destination,
   type DestinationVars,
 } from "./artifactPath";
+import { callAgentOf } from "./callAgent";
 import { isDeniedPath } from "./policy";
 import { createShowArtifactTool } from "./showArtifact";
 
@@ -58,11 +59,86 @@ export interface FileToolOptions {
   /** Fallback workspace root when the operation carries no `ctx.workspace`. */
   cwd?: string;
   now?: () => number;
+  /** What each task's agent last read or wrote, file by file. Defaults to the one the process keeps. */
+  seen?: SeenFiles;
 }
 
 const DEFAULT_INLINE_MAX = 65_536;
 
 const sha256 = (text: string): string => createHash("sha256").update(text, "utf8").digest("hex");
+
+/**
+ * What an agent last saw of each file — the content's hash when it read it, or when it wrote or edited it
+ * — so a `write_file` over a file it never read, or one changed since, is refused rather than done.
+ *
+ * A write replaces the whole file: one made over a file the model has not read throws away whatever it
+ * did not think to include (t-elvj5dhzoy, 2026-11-11: a 587-line Sidebar.tsx replaced whole, its only
+ * read 120 lines, six days before). Claude Code's own Write refuses the same; ours did not.
+ *
+ * Kept per task, in the process: a conversation's turns are one task, so a file read in one turn may be
+ * written in the next. After a restart the agent reads again, which is the cost of one read.
+ */
+export class SeenFiles {
+  private readonly hashes = new Map<string, string>();
+  /** Note that the task's agent now knows the file as `text`. */
+  saw(taskId: string, file: string, text: string): void {
+    this.hashes.set(seenKey(taskId, file), sha256(text));
+  }
+  /** The hash of what the task's agent last saw of the file, or `undefined` for one it never read or wrote. */
+  hashOf(taskId: string, file: string): string | undefined {
+    return this.hashes.get(seenKey(taskId, file));
+  }
+}
+
+/** One file as {@link SeenFiles} keys it: absolute, slashes forward, case folded where the disk folds it. */
+function seenKey(taskId: string, file: string): string {
+  const slashed = normalize(file).replace(/\\/g, "/");
+  return `${taskId}\u0000${process.platform === "win32" ? slashed.toLowerCase() : slashed}`;
+}
+
+const PROCESS_SEEN = new SeenFiles();
+const seenOf = (options: FileToolOptions): SeenFiles => options.seen ?? PROCESS_SEEN;
+
+/** The file a logical path names, absolute — what {@link SeenFiles} keys it by. */
+const fileOf = (root: string, logical: string): string => resolvePath(root, logical);
+
+/**
+ * Why a `write_file` of `text`'s path may not replace it, or `undefined` when it may: the file does not
+ * exist, or the agent last saw it as it is now. Only an AGENT's call is held to it (`callAgentOf`): a call
+ * JaiRA makes itself — a workflow writing its output — is not a model that may have forgotten a file.
+ */
+function unreadRefusal(options: FileToolOptions, input: unknown, file: string, shown: string, current: string | undefined): string | undefined {
+  if (current === undefined || callAgentOf(input) === undefined) return undefined;
+  const last = seenOf(options).hashOf(options.vars.taskId, file);
+  if (last === undefined) {
+    return `'${shown}' already exists and you have not read it in this conversation, so writing it whole could drop what it holds. Nothing was changed. Read it with read_file first, then write it, or change part of it with edit.`;
+  }
+  if (last !== sha256(current)) {
+    return `'${shown}' has changed since you last read or wrote it. Nothing was changed. Read it again with read_file, then write it, or change part of it with edit.`;
+  }
+  return undefined;
+}
+
+/**
+ * A path in the calling agent's OWN folder (`$AGENT_WORKSPACE`, decision 0023 ruling 19), made absolute,
+ * or `undefined`. Writes keep the workspace (ruling 18) but for this folder, which is the agent's and not
+ * the project's: whether a call may write there is the line's, at that place, and the gate said so before
+ * the tool ran. A call no agent made has no such folder.
+ */
+function ownFolderPath(root: string, path: string, input: unknown): string | undefined {
+  if (!isAbsolute(path)) return undefined;
+  const folder = callAgentOf(input)?.workspace?.(root);
+  return folder !== undefined ? withinWorkspace(folder, path) : undefined;
+}
+
+/** A file's text, or `undefined` when it cannot be read — most often, it does not exist. */
+function textAt(file: string): string | undefined {
+  try {
+    return readFileSync(file, "utf8");
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * Normalize an agent-supplied path to the map's key form.
@@ -139,7 +215,7 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
   const now = options.now ?? Date.now;
   return {
     description:
-      "Write a file in the task's workspace. The path is where you will find it again; JaiRA may store the bytes elsewhere according to project configuration.",
+      "Write a file in the task's workspace, or in your own folder. The path is where you will find it again; JaiRA may store the bytes elsewhere according to project configuration. To replace a file that exists, read it with read_file first: a write over a file you have not read, or one changed since you read it, is refused. To change part of a file, use edit.",
     inputSchema: {
       type: "object",
       properties: {
@@ -152,10 +228,16 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown; content?: unknown };
       const raw = typeof args.path === "string" ? args.path : "";
-      const logical = logicalKey(raw, rootOf(options, ctx));
+      const root = rootOf(options, ctx);
       const content = typeof args.content === "string" ? args.content : "";
-      const refusal = refuseOutside(rootOf(options, ctx), raw) ?? refusePath(logical);
+      const own = ownFolderPath(root, raw, input);
+      if (own !== undefined) return writeOwn(options, input, raw, own, content);
+      const logical = logicalKey(raw, root);
+      const refusal = refuseOutside(root, raw) ?? refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
+      const existing = currentContent(options, logical, ctx);
+      const unread = unreadRefusal(options, input, fileOf(root, logical), logical, "text" in existing ? existing.text : undefined);
+      if (unread !== undefined) return { error: unread };
 
       try {
         const { record, physicalPath } = place(options, destination, options.vars.taskId, logical, content, now());
@@ -164,6 +246,7 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
           writeFileSync(physicalPath, content, "utf8");
         }
         store.put(record);
+        seenOf(options).saw(options.vars.taskId, fileOf(root, logical), content);
         // The agent is told about the path IT used. Reporting the physical path
         // would break the illusion the whole design depends on.
         return { path: logical, bytes: record.bytes };
@@ -173,6 +256,25 @@ export function createWriteFileTool(options: FileToolOptions): Tool {
       }
     },
   } as Tool;
+}
+
+/**
+ * A `write_file` into the calling agent's own folder ({@link ownFolderPath}): written where it is, by the
+ * path the call named — it is no artifact of the task's, and no destination places it.
+ */
+function writeOwn(options: FileToolOptions, input: unknown, raw: string, file: string, content: string): JsonValue {
+  const refused = refusePath(file);
+  if (refused !== undefined) return { error: refused };
+  const unread = unreadRefusal(options, input, file, raw, textAt(file));
+  if (unread !== undefined) return { error: unread };
+  try {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, content, "utf8");
+  } catch (e) {
+    return { error: `could not write '${raw}': ${(e as Error).message}` };
+  }
+  seenOf(options).saw(options.vars.taskId, file, content);
+  return { path: raw, bytes: Buffer.byteLength(content, "utf8") };
 }
 
 /**
@@ -191,7 +293,8 @@ function outsidePath(root: string, path: string): string | undefined {
 
 /**
  * A write's refusal of an ABSOLUTE path outside the workspace, judged on the path as the call wrote it.
- * Writes keep the workspace (decision 0023 ruling 18). Judged before the logical key, which drops a
+ * Writes keep the workspace (decision 0023 ruling 18), but for the calling agent's own folder, taken
+ * before this ({@link ownFolderPath}). Judged before the logical key, which drops a
  * leading `/`: on Linux `/tmp/x` would otherwise be written as the project's `tmp/x`. A relative path
  * that climbs out (`../x`) is the destination's to refuse, against its own root.
  */
@@ -205,7 +308,6 @@ function refuseOutside(root: string, path: string): string | undefined {
  * where it is ({@link outsidePath}).
  */
 export function createReadFileTool(options: FileToolOptions): Tool {
-  const store = options.store ?? new MemoryArtifactStore();
   return {
     description: "Read a file: a path relative to the workspace root, or an absolute path.",
     inputSchema: {
@@ -217,31 +319,28 @@ export function createReadFileTool(options: FileToolOptions): Tool {
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown };
       const raw = typeof args.path === "string" ? args.path : "";
-      const outside = outsidePath(rootOf(options, ctx), raw);
+      const root = rootOf(options, ctx);
+      const seen = seenOf(options);
+      const outside = outsidePath(root, raw);
       if (outside !== undefined) {
         const refused = refusePath(outside);
         if (refused !== undefined) return { error: refused };
         try {
-          return { path: raw, content: readFileSync(outside, "utf8") };
+          const content = readFileSync(outside, "utf8");
+          seen.saw(options.vars.taskId, outside, content);
+          return { path: raw, content };
         } catch (e) {
           return { error: `could not read '${raw}': ${(e as Error).message}` };
         }
       }
-      const logical = logicalKey(raw, rootOf(options, ctx));
+      const logical = logicalKey(raw, root);
       const refusal = refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
 
-      const record = store.get(options.vars.taskId, logical);
-      if (record?.content !== undefined) return { path: logical, content: record.content };
-      const target =
-        record?.physicalPath ??
-        withinWorkspace(ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree, logical);
-      if (target === undefined) return { error: `'${logical}' is outside the workspace` };
-      try {
-        return { path: logical, content: readFileSync(target, "utf8") };
-      } catch (e) {
-        return { error: `could not read '${logical}': ${(e as Error).message}` };
-      }
+      const read = currentContent(options, logical, ctx);
+      if ("error" in read) return { error: read.error };
+      seen.saw(options.vars.taskId, fileOf(root, logical), read.text);
+      return { path: logical, content: read.text };
     },
   } as Tool;
 }
@@ -256,6 +355,13 @@ export function createReadFileTool(options: FileToolOptions): Tool {
 function currentContent(options: FileToolOptions, logical: string, ctx?: ExecServices): { text: string } | { error: string } {
   const store = options.store ?? new MemoryArtifactStore();
   const record = store.get(options.vars.taskId, logical);
+  // A placed file is what its disk holds now: the copy kept inline is what was written, and a person (or
+  // a shell) may have changed it since — read back from the copy, the change was invisible to a read and
+  // an edit undid it. Only a `virtual:` artifact, which has no file, is its copy.
+  if (record?.physicalPath !== undefined) {
+    const now = textAt(record.physicalPath);
+    if (now !== undefined) return { text: now };
+  }
   if (record?.content !== undefined) return { text: record.content };
   const target = record?.physicalPath ?? withinWorkspace(ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree, logical);
   if (target === undefined) return { error: `'${logical}' is outside the workspace` };
@@ -263,6 +369,15 @@ function currentContent(options: FileToolOptions, logical: string, ctx?: ExecSer
     return { text: readFileSync(target, "utf8") };
   } catch (e) {
     return { error: `could not read '${logical}': ${(e as Error).message}` };
+  }
+}
+
+/** The current content of a file in the agent's own folder ({@link ownFolderPath}), read where it is. */
+function ownContent(file: string, raw: string): { text: string } | { error: string } {
+  try {
+    return { text: readFileSync(file, "utf8") };
+  } catch (e) {
+    return { error: `could not read '${raw}': ${(e as Error).message}` };
   }
 }
 
@@ -285,7 +400,7 @@ export function createEditFileTool(options: FileToolOptions): Tool {
   const now = options.now ?? Date.now;
   return {
     description:
-      "Replace exact text in an existing workspace file. `old` must appear exactly once unless `all` is set. Use write_file to create a file or replace one whole.",
+      "Replace exact text in an existing file, in the workspace or in your own folder. `old` must appear exactly once unless `all` is set. Use write_file to create a file or replace one whole.",
     inputSchema: {
       type: "object",
       properties: {
@@ -300,15 +415,17 @@ export function createEditFileTool(options: FileToolOptions): Tool {
     run: async (input, ctx?: ExecServices): Promise<JsonValue> => {
       const args = (input ?? {}) as { path?: unknown; old?: unknown; new?: unknown; all?: unknown };
       const raw = typeof args.path === "string" ? args.path : "";
-      const logical = logicalKey(raw, rootOf(options, ctx));
-      const refusal = refuseOutside(rootOf(options, ctx), raw) ?? refusePath(logical);
+      const root = rootOf(options, ctx);
+      const own = ownFolderPath(root, raw, input);
+      const logical = own !== undefined ? raw : logicalKey(raw, root);
+      const refusal = own !== undefined ? refusePath(own) : (refuseOutside(root, raw) ?? refusePath(logical));
       if (refusal !== undefined) return { error: refusal };
       const oldText = typeof args.old === "string" ? args.old : "";
       const newText = typeof args.new === "string" ? args.new : "";
       if (oldText === "") return { error: "`old` is empty — use write_file to create a file" };
       if (oldText === newText) return { error: "`old` and `new` are identical, so this edit would change nothing" };
 
-      const read = currentContent(options, logical, ctx);
+      const read = own !== undefined ? ownContent(own, raw) : currentContent(options, logical, ctx);
       if ("error" in read) return { error: read.error };
       const occurrences = read.text.split(oldText).length - 1;
       if (occurrences === 0) return { error: `'${logical}' does not contain that text` };
@@ -316,15 +433,24 @@ export function createEditFileTool(options: FileToolOptions): Tool {
         return { error: `that text appears ${occurrences} times in '${logical}' — include more context, or set \`all\`` };
       }
       const content = args.all === true ? read.text.split(oldText).join(newText) : read.text.replace(oldText, newText);
+      const replaced = args.all === true ? occurrences : 1;
 
       try {
+        // The agent's own folder: changed where it is, as a write there is (`writeOwn`).
+        if (own !== undefined) {
+          writeFileSync(own, content, "utf8");
+          seenOf(options).saw(options.vars.taskId, own, content);
+          return { path: raw, replaced, bytes: Buffer.byteLength(content, "utf8") };
+        }
         const { record, physicalPath } = place(options, destination, options.vars.taskId, logical, content, now());
         if (physicalPath !== undefined) {
           mkdirSync(dirname(physicalPath), { recursive: true });
           writeFileSync(physicalPath, content, "utf8");
         }
         store.put(record);
-        return { path: logical, replaced: args.all === true ? occurrences : 1, bytes: record.bytes };
+        // What the agent edited it knows: a write of it after is not of a file it has not read.
+        seenOf(options).saw(options.vars.taskId, fileOf(root, logical), content);
+        return { path: logical, replaced, bytes: record.bytes };
       } catch (e) {
         if (e instanceof DestinationError) return { error: e.message };
         return { error: `could not write '${logical}': ${(e as Error).message}` };

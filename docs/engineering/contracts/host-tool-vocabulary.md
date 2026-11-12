@@ -238,11 +238,15 @@ outside it.
 | Condition | Response | Caller does |
 | --- | --- | --- |
 | The permission gate refuses the call | upstream `PermissionDenied`, `{denied: true, tool, reason}` | read the reason; the model carries on without the tool |
+
+Served to an agent, an `{error: <string>}` value is an MCP error result (`isError`, `agents-api` `valueResult`), as a refusal and a throw are: the agent's record calls the call failed, and so does whatever reads it (the change list counts no refused edit).
 | `shell` gets an empty command, or a `cwd` containing `..` or `.jaira` | `{error: "no command given"}`, `{error: "cwd '<cwd>' is not allowed"}` | send a command, or a relative directory |
 | `shell` cannot start its interpreter | the call rejects with `failed to run '<command>': <message>` | fix the environment |
 | A file tool gets an empty path or one under `.jaira/` | `{error: "no path given"}`, `{error: "'<path>' is inside .jaira/, which agents may not write"}`, for reads too | name another path |
 | A read cannot open (a path outside the workspace is read where it is: whether it may be is the permission set's, decision 0023 ruling 18) | `{error: "could not read '<path>': <message>"}` | name a path that exists |
 | A write's destination refuses the path or the disk refuses the write | `{error}` with the `DestinationError` message, `{error: "could not write '<path>': <message>"}`, or `could not show` for `show_artifact` | name a path the destination admits |
+| A write names an absolute path outside the workspace that is not in the calling agent's own folder (`$AGENT_WORKSPACE`, decision 0023 ruling 18, amended 2026-11-11) | `{error: "'<path>' is outside the workspace"}` | write in the workspace or the agent's folder |
+| An agent's `write_file` would replace a file it has not read in this task, or one changed since it last read, wrote or edited it (a call no agent made is not held to it) | `{error: "'<path>' already exists and you have not read it …"}` or `{error: "'<path>' has changed since you last read or wrote it …"}`, nothing changed | `read_file` it, then write it, or `edit` part of it |
 | `edit` has empty `old`, identical `old` and `new`, absent text, or several matches without `all` | `{error}` naming which, the last with the count | include more context, or set `all` |
 | A search has no pattern, no workspace, or a `path` under `.jaira/` (one outside the workspace is searched where it is) | `{error: "no pattern given"}`, `{error: "this operation has no workspace to search"}`, or a path error | fix the argument |
 | A `glob` pattern or `grep` expression does not compile | `{error: "'<pattern>' is not a usable pattern: <message>"}` or `is not a usable regular expression` | fix the pattern |

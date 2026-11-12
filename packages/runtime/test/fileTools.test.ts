@@ -18,11 +18,14 @@ import {
   createReadFileTool,
   createWriteFileTool,
   registerFileTools,
+  SeenFiles,
   EDIT_FILE,
   READ_FILE,
   WRITE_FILE,
 } from "../src/fileTools";
 import { newRegistry } from "../src/wiring";
+import { noteCallAgent } from "../src/callAgent";
+import type { AgentToolDeclaration } from "@jaira/shared";
 
 let dir: string;
 let store: MemoryArtifactStore;
@@ -309,5 +312,91 @@ describe("edit", () => {
 
   it("is mutating, which is what a narrowing profile gates on", () => {
     expect(tools("$DEFAULT").edit.readOnly).toBe(false);
+  });
+});
+
+/** An agent whose own folder (`$AGENT_WORKSPACE`) is a sibling of the workspace, noted on each call as its wrapper notes it. */
+const agentHome = (): string => join(dir, "..", `${dir.split(sep).pop()}-agent`);
+const AGENT: AgentToolDeclaration = { channel: "tools", natives: {}, workspace: () => agentHome() };
+const byAgent = (input: Record<string, unknown>): Record<string, unknown> => {
+  noteCallAgent(input, AGENT);
+  return input;
+};
+
+describe("a write over a file the agent has not read (t-elvj5dhzoy, 2026-11-11)", () => {
+  it("refuses replacing a file the agent never read, and writes it once it has", async () => {
+    const { write, read } = tools("$DEFAULT");
+    writeFileSync(join(dir, "Sidebar.tsx"), "export const a = 1;\n");
+    expect(await call(write, byAgent({ path: "Sidebar.tsx", content: "x" }))).toMatchObject({
+      error: expect.stringMatching(/already exists and you have not read it.*Nothing was changed/) as unknown as string,
+    });
+    expect(readFileSync(join(dir, "Sidebar.tsx"), "utf8")).toBe("export const a = 1;\n");
+    await call(read, byAgent({ path: "Sidebar.tsx" }));
+    expect(await call(write, byAgent({ path: "Sidebar.tsx", content: "export const a = 2;\n" }))).toMatchObject({ path: "Sidebar.tsx" });
+    expect(readFileSync(join(dir, "Sidebar.tsx"), "utf8")).toBe("export const a = 2;\n");
+  });
+
+  it("refuses replacing a file changed since the agent read or wrote it", async () => {
+    const { write, read } = tools("$DEFAULT");
+    await call(write, byAgent({ path: "a.md", content: "one" }));
+    // What it wrote it knows: writing it again needs no read.
+    expect(await call(write, byAgent({ path: "a.md", content: "two" }))).toMatchObject({ path: "a.md" });
+    writeFileSync(join(dir, "a.md"), "the person's");
+    expect(await call(write, byAgent({ path: "a.md", content: "three" }))).toMatchObject({
+      error: expect.stringMatching(/has changed since you last read or wrote it/) as unknown as string,
+    });
+    expect(readFileSync(join(dir, "a.md"), "utf8")).toBe("the person's");
+    await call(read, byAgent({ path: "a.md" }));
+    expect(await call(write, byAgent({ path: "a.md", content: "three" }))).toMatchObject({ path: "a.md" });
+  });
+
+  it("counts an edit as knowing the file, and holds no new file and no call of JaiRA's own to it", async () => {
+    const { write, edit } = tools("$DEFAULT");
+    writeFileSync(join(dir, "b.ts"), "let x = 1;\n");
+    expect(await call(edit, byAgent({ path: "b.ts", old: "1", new: "2" }))).toMatchObject({ replaced: 1 });
+    expect(await call(write, byAgent({ path: "b.ts", content: "let x = 3;\n" }))).toMatchObject({ path: "b.ts" });
+    expect(await call(write, byAgent({ path: "new/c.ts", content: "c" }))).toMatchObject({ path: "new/c.ts" });
+    // A workflow writing its output is not a model that may have forgotten the file.
+    writeFileSync(join(dir, "out.md"), "last run's");
+    expect(await call(write, { path: "out.md", content: "this run's" })).toMatchObject({ path: "out.md" });
+  });
+
+  it("keeps what it saw per task: another task's read is not this one's", async () => {
+    const seen = new SeenFiles();
+    seen.saw("t-1", join(dir, "a.md"), "x");
+    expect(seen.hashOf("t-1", join(dir, "a.md"))).toBeDefined();
+    expect(seen.hashOf("t-2", join(dir, "a.md"))).toBeUndefined();
+  });
+});
+
+describe("the calling agent's own folder ($AGENT_WORKSPACE)", () => {
+  afterEach(() => rmSync(agentHome(), { recursive: true, force: true }));
+
+  it("writes and edits there by the absolute path the call named, where any other outside path is refused", async () => {
+    const { write, edit, read } = tools("$DEFAULT");
+    const note = join(agentHome(), "memory", "notes.md");
+    expect(await call(write, byAgent({ path: note, content: "# notes\n- one\n" }))).toMatchObject({ path: note });
+    expect(readFileSync(note, "utf8")).toBe("# notes\n- one\n");
+    expect(await call(edit, byAgent({ path: note, old: "- one", new: "- one\n- two" }))).toMatchObject({ replaced: 1 });
+    expect(readFileSync(note, "utf8")).toBe("# notes\n- one\n- two\n");
+    // Not the project's: no artifact is placed for it.
+    expect(store.get("t-1", note)).toBeUndefined();
+    // A file there it has not read is held to the read like any other.
+    writeFileSync(join(agentHome(), "MEMORY.md"), "- [a](a.md)\n");
+    expect(await call(write, byAgent({ path: join(agentHome(), "MEMORY.md"), content: "x" }))).toMatchObject({
+      error: expect.stringMatching(/have not read it/) as unknown as string,
+    });
+    await call(read, byAgent({ path: join(agentHome(), "MEMORY.md") }));
+    expect(await call(write, byAgent({ path: join(agentHome(), "MEMORY.md"), content: "- [a](a.md)\n- [b](b.md)\n" }))).toMatchObject({ bytes: 24 });
+  });
+
+  it("is the calling agent's alone: a call no agent made, or a path beside the folder, is outside the workspace", async () => {
+    const { write } = tools("$DEFAULT");
+    const note = join(agentHome(), "notes.md");
+    expect(await call(write, { path: note, content: "x" })).toMatchObject({ error: expect.stringMatching(/outside the workspace/) as unknown as string });
+    expect(await call(write, byAgent({ path: join(dir, "..", "elsewhere.md"), content: "x" }))).toMatchObject({
+      error: expect.stringMatching(/outside the workspace/) as unknown as string,
+    });
+    expect(existsSync(note)).toBe(false);
   });
 });

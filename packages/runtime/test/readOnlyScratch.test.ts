@@ -40,6 +40,24 @@ describe("read-only-scratch", () => {
     expect(readOnly.askNatives).not.toContain("Edit");
   });
 
+  it("keeps Claude's own Read beside its own Write and Edit, which refuse a file their Read has not read", () => {
+    // t-elvj5dhzoy, 2026-11-11: Read was displaced by ours, so every Edit of MEMORY.md was refused
+    // "File has not been read yet" and the Read asked for next was "disabled for this session".
+    const scratch = planAgentTools(SCRATCH, CLAUDE_TOOLS);
+    expect(scratch.askNatives).toContain("Read");
+    expect(scratch.displaced).not.toContain("Read");
+    expect(scratch.denyNatives).not.toContain("Read");
+    // Ours is still served beside it.
+    expect(scratch.inject).toContain("read_file");
+    // It is judged by the read line, at its places: the project's reads are pre-allowed as before.
+    const rules = compileClaudePlaceRules(linePlaces(SCRATCH), { root: ROOT, named: namedPlacesOf(ROOT, undefined, CLAUDE_TOOLS), declaration: CLAUDE_TOOLS });
+    expect(rules.allow).toEqual(expect.arrayContaining([`Read(${ROOT})`, `Read(${ROOT}/**)`]));
+    // Where the writers are ours, so is the reader: `read-only` keeps no Read of Claude's.
+    const readOnly = planAgentTools(READ_ONLY, CLAUDE_TOOLS);
+    expect(readOnly.askNatives).not.toContain("Read");
+    expect(readOnly.displaced).toContain("Read");
+  });
+
   it("hands Claude an allow rule for its own folder only — everywhere else falls to the per-call ask", () => {
     const rules = compileClaudePlaceRules(linePlaces(SCRATCH), { root: ROOT, named: namedPlacesOf(ROOT, undefined, CLAUDE_TOOLS), declaration: CLAUDE_TOOLS });
     const writes = (list: string[]) => list.filter((rule) => rule.startsWith("Write("));

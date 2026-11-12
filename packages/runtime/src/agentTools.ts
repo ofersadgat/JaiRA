@@ -350,6 +350,7 @@ export function planAgentTools(grant: PermissionSet | PermissionSetView, declara
   const plan: AgentToolPlan = { inject: [], displaced: [], askNatives: [], denyNatives: [], switches: {} };
   const holds = (standard: string): ToolImplementation | undefined =>
     view.held(standard) ?? (TOOL_SPEC_BY_NAME.get(standard)?.alwaysGranted === true ? "app" : undefined);
+  const keptWriter = keepsOwnWriter(view, declaration, holds);
 
   for (const spec of TOOL_SPECS) {
     // Named and not yet served (`ToolSpec.unserved`): nothing to inject and no agent's built-in to
@@ -372,6 +373,15 @@ export function planAgentTools(grant: PermissionSet | PermissionSetView, declara
       continue;
     }
     plan.inject.push(spec.name);
+    // The agent's own writers refuse a file its own reader has not read (Claude's Edit and Write:
+    // "File has not been read yet"), so a reader displaced beside a writer kept would leave it able to
+    // create files and never to change one (t-elvj5dhzoy, 2026-11-11, under `read-only-scratch`). Its
+    // reader is kept with it — ours is served as well — and judged by the read line, at its places.
+    if (spec.name === READ_STANDARD && keptWriter && natives.length > 0) {
+      if (refusedEverywhere(view, spec.name)) plan.denyNatives.push(...natives);
+      else plan.askNatives.push(...natives);
+      continue;
+    }
     plan.displaced.push(...natives);
   }
 
@@ -393,6 +403,22 @@ export function planAgentTools(grant: PermissionSet | PermissionSetView, declara
     plan.switches[name] = subjects.some((subject) => nativesOfStandard(declaration, subject).some((native) => kept.has(native)));
   }
   return plan;
+}
+
+/** The standard reader, kept beside a kept writer ({@link keepsOwnWriter}). */
+const READ_STANDARD = "read_file";
+
+/** The standard writers whose agent built-ins refuse a file their own reader has not read. */
+const WRITER_STANDARDS = ["write_file", "edit"] as const;
+
+/**
+ * Does the plan keep one of the agent's OWN writers, un-refused? Then its own reader is kept too: a
+ * Claude Edit or Write of a file that exists is refused unless Claude's own Read read it first, which
+ * our `read_file` cannot stand in for. A coarse transport (codex) keeps no reader of its own to keep.
+ */
+function keepsOwnWriter(view: PermissionSetView, declaration: AgentToolDeclaration, holds: (standard: string) => ToolImplementation | undefined): boolean {
+  if (declaration.channel !== "tools") return false;
+  return WRITER_STANDARDS.some((standard) => holds(standard) === "native" && keepsNative(view, declaration, standard) && !refusedEverywhere(view, standard));
 }
 
 /** What a permission set REFUSES — the reason a transport that enforces nothing cannot run it. */
