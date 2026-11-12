@@ -7,7 +7,7 @@ import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
 import type { ArtifactSurface, EditMessage } from "@jaira/ui/transcriptViewTypes";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, startOfBlock, type LiveTail, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
-import { keptUnderSummary, type CallSurface } from "@jaira/ui/transcriptRows";
+import { keptUnderSummary, replacedPublishes, type CallSurface } from "@jaira/ui/transcriptRows";
 import { openBlockOf, writingOf } from "@jaira/ui/stillRunning";
 import { isIdle } from "@jaira/ui/workSummary";
 import { WorkLookContext } from "@jaira/ui/workSummaryContext";
@@ -128,6 +128,9 @@ export const Transcript = memo(function Transcript({
   const chains = session !== null && session !== undefined ? session.sidechains : undefined;
   const sidechainOf = chains !== undefined || live?.sidechains !== undefined ? (call: string) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call]) : undefined;
   const blocks = blocksOf(shown);
+  // Across the whole conversation, not per block: the agent's words between two publishes end a block.
+  const replaced = replacedPublishes(shown);
+  const callsHere: CallSurface | undefined = replaced.size > 0 ? { ...calls, replaced } : calls;
   // Whether anything here may be called live is `stillRunning.ts`'s to say, and only of the last block.
   const writing = writingOf(working, session);
   // What an armed cut takes, counted once: the messages at or past the turn, replies included.
@@ -154,7 +157,7 @@ export const Transcript = memo(function Transcript({
               {cutLine}
               <Virtual>
                 <View minWidth={0} {...fade}>
-                  <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, blocks.length)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={calls} />
+                  <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, blocks.length)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={callsHere} />
                 </View>
               </Virtual>
             </Fragment>

@@ -2,11 +2,11 @@
  * What a transcript's work rows say: the reading `WorkRows`
  * (`packages/universal/src/components/panel/WorkRows.tsx`) draws its rows from.
  */
-import { artifactOf, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
+import { artifactOf, knownText, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { answersOfAnsweredText } from "./choicesModel";
 import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall, refusalWordsOf } from "./workSummary";
-import { resultValueOf, shellLineOf, type ToolEntry, type WorkEntry } from "./transcript";
+import { isAskUserQuestion, resultValueOf, shellLineOf, type ToolEntry, type TranscriptEntry, type WorkEntry } from "./transcript";
 
 /**
  * The type a tool call's OWN arguments say its payload is.
@@ -145,6 +145,11 @@ export interface CallSurface {
   outcomes?: "inline" | "rail";
   /** Take back an answer the conversation gave — the rewind "Answer it yourself" is. Absent ⇒ no button. */
   onAnswerYourself?: ((by: SettledByView) => void) | undefined;
+  /**
+   * The publishes a later one of the same artifact replaced before the person spoke
+   * ({@link replacedPublishes}): drawn as their line alone, a step like any other, with no card.
+   */
+  replaced?: ReadonlySet<ToolEntry> | undefined;
 }
 
 /**
@@ -160,7 +165,8 @@ export function keptUnderSummary(entry: WorkEntry, calls?: CallSurface): boolean
   if (entry.kind !== "tool") return false;
   // A subagent's call: its conversation is a child of this one, not a step of it.
   if (entry.sidechain !== undefined) return true;
-  if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || maybePublished(entry) || askedOf(entry) !== undefined) return true;
+  if (entry.output !== undefined || producedArtifact(entry.result) !== undefined || askedOf(entry) !== undefined) return true;
+  if (maybePublished(entry)) return calls?.replaced?.has(entry) !== true;
   return workflowToolOf(entry.name) !== undefined && entry.result !== undefined && entry.ok !== false && calls?.outcomes !== "rail";
 }
 
@@ -246,6 +252,62 @@ export function publishedOf(raw: JsonValue | undefined): PublishedRef | undefine
     ...(typeof a["icon"] === "string" ? { icon: a["icon"] } : {}),
     entry: a["entry"],
   };
+}
+
+/**
+ * Which artifact a publish wrote to (its `artifact://<task>/@<id>`), when it published and that can be
+ * read now: off the result's `artifact` where the result is here; else the `url` the call named (an
+ * update names it); else, for a create whose answer reached the window as a placeholder (a phone's 4 KB
+ * threshold; the Design type's runs to 35 KB), the address its answer opens with — "Created a new
+ * Artifact at artifact://…", which the placeholder's preview keeps.
+ */
+export function publishTargetOf(entry: ToolEntry): string | undefined {
+  const published = publishedOf(entry.result);
+  if (published !== undefined) return published.url;
+  if (!maybePublished(entry)) return undefined;
+  const args = entry.args as Record<string, JsonValue> | null | undefined;
+  const named = args?.["url"];
+  if (typeof named === "string" && ARTIFACT_URL.test(named)) return named;
+  const blocks = Array.isArray(entry.result) ? entry.result : [entry.result];
+  for (const block of blocks) {
+    const text = knownText(block !== null && typeof block === "object" && !Array.isArray(block) && "text" in block ? block["text"] : block);
+    const at = text === undefined ? null : /artifact:\/\/[^/\s"]+\/@[A-Za-z0-9_-]+/.exec(text);
+    if (at !== null) return at[0];
+  }
+  return undefined;
+}
+
+const ARTIFACT_URL = /^artifact:\/\/[^/\s]+\/@[A-Za-z0-9_-]+$/;
+
+/**
+ * The publishes whose card a later one replaces: a publish of an artifact that is published again before
+ * the person next speaks. Claude builds a canvas a call at a time — sixteen options, sixteen publishes, a
+ * thought or a line of narration between each ("Option 10, grouped by workspace:") — and every card was
+ * the same canvas a step less done. The newest says all they did, and their versions are a press away
+ * on it (v▾); each earlier call stays as its line, a step like any other.
+ *
+ * What ends a run is the person: a message of theirs (a new turn), or a question the agent put to them,
+ * which they answer looking at what is drawn. The agent's own words, its thoughts and its other calls do
+ * not. Only a call that published replaces: one still running or refused leaves the card before it.
+ * A publish in an earlier turn keeps its card, drawn as replaced by `PublishedView` (its title bar, and
+ * "vN is newer").
+ */
+export function replacedPublishes(entries: readonly TranscriptEntry[]): ReadonlySet<ToolEntry> {
+  const replaced = new Set<ToolEntry>();
+  let later = new Set<string>();
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if ((entry.kind === "message" && entry.role === "user") || (entry.kind === "tool" && isAskUserQuestion(entry))) {
+      later = new Set();
+      continue;
+    }
+    if (entry.kind !== "tool") continue;
+    const target = publishTargetOf(entry);
+    if (target === undefined) continue;
+    if (later.has(target)) replaced.add(entry);
+    else later.add(target);
+  }
+  return replaced;
 }
 
 /**
@@ -367,7 +429,7 @@ export function toolLineOf(
           : "outcome"
         : askedOf(entry) !== undefined
           ? "asked"
-          : publishedOf(entry.result) !== undefined || maybePublished(entry)
+          : (publishedOf(entry.result) !== undefined || maybePublished(entry)) && calls?.replaced?.has(entry) !== true
             ? "published"
           : listedPublished(entry)
             ? "publishedList"
