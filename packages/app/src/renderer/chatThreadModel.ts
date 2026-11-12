@@ -428,7 +428,10 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     const opening = surface.opening ?? (thread === null && surface.detail?.status === "running" ? openingMessage : null);
     const outstanding = opening === null ? sent : [opening, ...sent];
     const turns = thread?.session.turns ?? [];
-    const pending = outstanding.filter((text) => !turns.some((turn) => turn.role === "user" && turn.text === text));
+    // The messages that never reached the conversation, said where they were sent — the failure under
+    // them is `error`'s. One sent here and failing is the same message, said once.
+    const unsent = (thread?.unsent ?? []).map((u) => u.message);
+    const pending = [...unsent, ...outstanding.filter((text) => !unsent.includes(text))].filter((text) => !turns.some((turn) => turn.role === "user" && turn.text === text));
     return entriesOf(
       thread?.session ?? null,
       journalFor(surface.journal?.turns ?? [], thread?.session.stateId),
@@ -438,6 +441,9 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
       pending,
     );
   }, [thread, surface.journal, surface.live, afterglow, surface.opening, surface.detail?.status, openingMessage, sent]);
+
+  /** The last message that never reached the conversation, and why — said under the thread until one does. */
+  const unsent = thread?.unsent?.at(-1);
 
   /**
    * What the model is doing right now — read off exactly what is being rendered.
@@ -691,7 +697,9 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
     overrides,
     setOverrides: changeOverrides,
     sending,
-    error: error ?? unreadable,
+    error: error ?? unreadable ?? (unsent !== undefined ? unsentText(unsent.reason) : null),
+    /** The route the failing message went to — where the error offers a sign-in while that route is down. */
+    errorRoute: routeOfModel(unsent?.model ?? plan?.effective.model),
     draft,
     setDraft,
     arming,
@@ -743,4 +751,15 @@ export function useReadMark(surface: Pick<ChatSurface, "taskId" | "conversations
     const row = conversations.find((task) => task.taskId === taskId);
     if (row !== undefined) onSeen(row.taskId, row.updatedAt);
   }, [taskId, conversations, onSeen]);
+}
+
+/** What is said under a message that never reached its conversation. */
+export function unsentText(reason: string): string {
+  return `Not sent — ${reason}`;
+}
+
+/** Who answers a model id: the half before its first slash, or `undefined` when it names no route. */
+function routeOfModel(model: string | undefined): string | undefined {
+  const cut = model?.indexOf("/") ?? -1;
+  return model !== undefined && cut > 0 ? model.slice(0, cut) : undefined;
 }

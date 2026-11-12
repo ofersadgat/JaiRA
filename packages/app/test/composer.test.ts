@@ -28,7 +28,7 @@ import {
   type PermissionSetDecl,
 } from "@jaira/shared/browser";
 import { KEEP_WHERE, originWordsOf, permissionsHintOf } from "../src/renderer/composerCards";
-import { canSendOf, chipValuesOf, composerFactsOf, sendTitleOf, type ComposerFacts } from "../src/renderer/composerModel";
+import { canSendOf, chipValuesOf, composerFactsOf, routeDownOf, sendTitleOf, type ComposerFacts } from "../src/renderer/composerModel";
 import {
   commandGroupsOf,
   commandSubjectOf,
@@ -301,5 +301,31 @@ describe("the composer's button", () => {
     // `busy` alone.
     expect(canSendOf(undefined, true, undefined)).toBe(false);
     expect(canSendOf(undefined, true, false)).toBe(false);
+  });
+});
+
+describe("the composer's route, when it is down", () => {
+  // 2026-11-12, the person: "the default route shouldnt change if it becomes unavailable, it should stay but
+  // turn red ... disable the send message button".
+  const signedOut = { name: "claude-cli", status: "needs-sign-in" as const, detail: "'claude' responded" };
+  const missing = { name: "codex-cli", status: "failed" as const, detail: "'codex' could not be started: ENOENT", fix: "install it" };
+
+  it("is down while its last check says signed out, with why and that signing in fixes it", () => {
+    const down = routeDownOf("claude-cli", { "claude-cli": signedOut });
+    expect(down).toEqual({ route: "claude-cli", why: "Claude (cli) is signed out. Sign in to it (Settings → Connections → Agents), then send again.", signIn: true });
+    expect(canSendOf(undefined, undefined, undefined, down)).toBe(false);
+    expect(sendTitleOf(false, undefined, down)).toBe(`Cannot send: ${down!.why}`);
+  });
+
+  it("is down, with the check's own words, when it cannot run at all — and signing in is not the fix", () => {
+    expect(routeDownOf("codex-cli", { "codex-cli": missing })).toEqual({ route: "codex-cli", why: "Codex (cli) cannot run here: 'codex' could not be started: ENOENT — install it", signIn: false });
+  });
+
+  it("is up when it works, when nothing has checked it, and for a route that names nothing", () => {
+    expect(routeDownOf("claude-cli", { "claude-cli": { ...signedOut, status: "ok" } })).toBeUndefined();
+    expect(routeDownOf("claude-cli", {})).toBeUndefined();
+    expect(routeDownOf("claude-cli", undefined)).toBeUndefined();
+    expect(routeDownOf("", { "": signedOut })).toBeUndefined();
+    expect(routeDownOf("claude-cli", { "claude-cli": { ...signedOut, status: "disabled" } })).toBeUndefined();
   });
 });

@@ -5,17 +5,17 @@ import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { KEPT, armingText, replyPlaceholder, useChatThread } from "@jaira/ui/chatThreadModel";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
-import { routeOf } from "@jaira/ui/composerModel";
+import { routeDownOf, routeOf } from "@jaira/ui/composerModel";
 import { facesOf } from "@jaira/ui/environmentModel";
 import { placementSummaryOf } from "@jaira/ui/placementSummary";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { PLAIN_SCROLLER, Press, Txt, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
 import { Transcript } from "../panel/SessionTranscript";
-import { Composer } from "./Composer";
+import { Composer, RouteFixes } from "./Composer";
 import { useMentions } from "@jaira/ui/chatMentions";
 import { LiveStatusLine, LiveStatusPill, Paper } from "./Paper";
-import { useShell } from "../../app/shell";
+import { useShell, useShellOrNull } from "../../app/shell";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
 import { InlineHost } from "../panel/RunTranscript";
@@ -338,7 +338,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
             </View>
           </View>
         ) : null}
-        {m.error !== null ? <ChatError text={m.error} /> : null}
+        {m.error !== null ? <ChatError text={m.error} route={m.errorRoute} /> : null}
         <Composer
           plan={m.queued !== undefined ? m.startPlan : (m.plan ?? null)}
           busy={m.sending > 0 || m.answering}
@@ -371,11 +371,16 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
 }
 
 /** What went wrong, over the box. */
-export function ChatError({ text }: { text: string }): JSX.Element {
+export function ChatError({ text, route }: { text: string; route?: string | undefined }): JSX.Element {
   const t = useTokens();
+  // While the route the message went to is still down, what fixes it is offered here too.
+  const down = routeDownOf(route, useShellOrNull()?.state.probes);
   return (
-    <View width="100%" maxWidth={900} alignSelf="center" marginBottom={6} paddingVertical={6} paddingHorizontal={12} borderRadius={8} backgroundColor={t.mix(t.v("bad"), 12, "transparent") as never}>
-      <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "bad" }}>{text}</Txt>
+    <View width="100%" maxWidth={900} alignSelf="center" marginBottom={6} paddingVertical={6} paddingHorizontal={12} borderRadius={8} backgroundColor={t.mix(t.v("bad"), 12, "transparent") as never} flexDirection="row" alignItems="center" flexWrap="wrap" gap={8} role="alert">
+      <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "bad" }} flexGrow={1} flexShrink={1} flexBasis={240} minWidth={0}>
+        {text}
+      </Txt>
+      {down !== undefined ? <RouteFixes down={down} /> : null}
     </View>
   );
 }

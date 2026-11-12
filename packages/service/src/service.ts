@@ -139,6 +139,7 @@ import {
   type ReplicaKnown,
   openSharedProject,
   sessionStoreFor,
+  type RecordedCall,
   stackForOldPin,
   JobOutputSink,
   jobOutput,
@@ -618,7 +619,7 @@ import { EventTally } from "./eventTally";
 import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, routeOfModel, spentUntil, USAGE_LIMIT_CODE, type ContextReading, type LimitsView, type WaitingItem } from "@jaira/shared";
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
-import { EXECUTOR_TITLES } from "@jaira/shared";
+import { downAgentsOf, EXECUTOR_TITLES } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
 const ROUTE_TITLES: Readonly<Record<string, string>> = {
@@ -773,6 +774,7 @@ import type {
   ChatFork,
   ChatPlanView,
   ChatThreadView,
+  ChatUnsent,
   JairaPromptNode,
   PermissionMode,
   ToolChoice,
@@ -7842,6 +7844,7 @@ export class AppService {
     }
     // What the conversation has cost, summed from its journal — the figure an API key's composer shows.
     const costUsd = runCostUsd(project, request.taskId);
+    const unsent = AppService.unsentOf(store.records(), new Set(rows.map((row) => row.recordId)));
     return {
       taskId: request.taskId,
       instanceId: host,
@@ -7851,7 +7854,36 @@ export class AppService {
       ...(forks.length > 0 ? { forks } : {}),
       ...(origin !== undefined ? { origin } : {}),
       ...(costUsd !== undefined ? { costUsd } : {}),
+      ...(unsent.length > 0 ? { unsent } : {}),
     };
+  }
+
+  /**
+   * The messages that never reached a conversation (`ChatThreadView.unsent`): of a task's calls, oldest
+   * first, the prompts after the last one that landed in the thread that failed without landing.
+   *
+   * Only those AFTER it: a message that failed and was then sent again, and answered, is history the
+   * thread already tells. Only prompts: a gate or a function is not a message somebody typed.
+   */
+  static unsentOf(records: readonly RecordedCall[], landed: ReadonlySet<string>): ChatUnsent[] {
+    let from = 0;
+    records.forEach((record, i) => {
+      if (landed.has(record.recordId)) from = i + 1;
+    });
+    const unsent: ChatUnsent[] = [];
+    for (const record of records.slice(from)) {
+      if (record.status !== "failed" || landed.has(record.recordId)) continue;
+      const call = (record.request ?? {}) as { kind?: unknown; user?: unknown; config?: { model?: unknown } };
+      if (call.kind !== "prompt" || typeof call.user !== "string" || call.user.trim() === "") continue;
+      const reason = (record.error as { reason?: unknown } | undefined)?.reason;
+      unsent.push({
+        message: call.user,
+        reason: typeof reason === "string" && reason !== "" ? reason : "the call failed before it reached the agent",
+        ...(typeof call.config?.model === "string" ? { model: call.config.model } : {}),
+        ...(record.endedAt !== undefined ? { at: record.endedAt } : {}),
+      });
+    }
+    return unsent;
   }
 
   /**
@@ -11010,16 +11042,17 @@ export class AppService {
       const forge = forges?.find((f) => f.name === name);
       return { title: forge !== undefined ? `${name} (${forge.host})` : name, action: "sign-in", subject: name };
     });
-    // What the DEFAULT executor's tree resolves to, derived from both halves and only here: an
-    // executor whose binary is missing is not a route, which is the difference between "it routes to
-    // claude-cli" and "it routes to claude-cli and the run then fails to start it".
-    const available = new Set(executors.filter((p) => p.status === "ok").map((p) => p.name));
+    // What the DEFAULT executor's tree resolves to, derived from both halves and only here — the tree
+    // a run gets (`defaultTree`): an agent that is down keeps its route, marked with why, and is
+    // refused at the call rather than routed around.
+    const unavailable = downAgentsOf(executors);
     const tree = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
       providers: usableRouteKeys(config.models, secrets),
-      agents: Object.keys(agentPromptRouteNames(config.agents)).filter((name) => available.has(name)),
+      agents: Object.keys(agentPromptRouteNames(config.agents)),
       // Whose models each agent answers for, so the settings screen shows the same routing the run
       // will do — a bare `claude-sonnet-5` resolving to `claude-cli` is a property of the tree.
       vendors: agentRouteVendors(config.agents),
+      unavailable,
     });
     // …and over every configured agent, probed or not, for the presets' candidates (`modelAvailabilityIn`).
     const configured = resolveExecutorTree(config.executors[DEFAULT_EXECUTOR], {
@@ -11057,25 +11090,10 @@ export class AppService {
      */
     refuse = true,
   ): JairaOperationNode {
-    const available = this.availableExecutors();
-    return defaultExecutorTree(config, bundle, {
-      fake,
-      secrets,
-      refuse,
-      ...(available !== undefined ? { available } : {}),
-    });
-  }
-
-  /**
-   * The executors a check has shown to work, or `undefined` when none has run yet.
-   *
-   * `undefined` rather than an empty set, and the difference is the whole contract: an empty set says
-   * "nothing works here" and would refuse every run, where "no check has run" must stay optimistic —
-   * the same rule {@link AppService.stateViewOptions} follows for the same reason.
-   */
-  private availableExecutors(): ReadonlySet<string> | undefined {
-    if (this.availability.checkedAt === 0) return undefined;
-    return new Set(this.availability.executors.filter((p) => p.status === "ok").map((p) => p.name));
+    // The agents the last check found down keep their routes, refused with why (`JairaAgentNode.unavailable`).
+    // Before the first check nothing is down: the optimistic reading `stateViewOptions` takes, for the
+    // same reason — refusing over a check that never ran is worse than the failure it would prevent.
+    return defaultExecutorTree(config, bundle, { fake, secrets, refuse, unavailable: downAgentsOf(this.availability.executors) });
   }
 
   /**

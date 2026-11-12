@@ -242,14 +242,29 @@ export interface JairaAgentNode extends JairaPromptNodeBase {
    * prevent. Name it with `allow` and it becomes a candidate again.
    */
   vendor?: string;
+  /**
+   * Why this agent cannot answer right now, when a check found it so: signed out, its binary gone.
+   *
+   * Derived, never authored. Such a route stays in the tree where it stands, rather than being
+   * dropped, and every call that reaches it is refused with these words. Dropped, the routing
+   * reshuffled itself around the gap: the default became whichever agent sorted next, and a call
+   * naming `claude-cli/…` fell through to the provider path, which answered that "claude-cli" is no
+   * route at all (2026-11-12, a signed-out CLI).
+   */
+  unavailable?: string;
 }
 
 /** What is installed and reachable, which is what a derived tree is derived FROM. */
 export interface ExecutorAvailability {
   /** Model-route prefixes that can serve a call — `anthropic`, `local`, … */
   providers: string[];
-  /** Agent runtimes that are enabled and working — `claude-cli`, … */
+  /** Agent runtimes that are enabled — `claude-cli`, … — in the order they are preferred. */
   agents: string[];
+  /**
+   * Of {@link agents}, those a check found not working, and why (see {@link JairaAgentNode.unavailable}).
+   * They keep their routes and their place; their calls are refused with the reason.
+   */
+  unavailable?: Readonly<Record<string, string>>;
   /**
    * route name → whose models it serves, for the agent routes (see {@link JairaAgentNode.vendor}).
    *
@@ -464,7 +479,8 @@ function resolvePromptNode(node: JairaPromptNode | undefined, available: Executo
   }
   for (const agent of available.agents) {
     const vendor = available.vendors?.[agent];
-    routes[agent] = { kind: "agent", agent, ...(vendor === undefined ? {} : { vendor }) };
+    const unavailable = available.unavailable?.[agent];
+    routes[agent] = { kind: "agent", agent, ...(vendor === undefined ? {} : { vendor }), ...(unavailable === undefined ? {} : { unavailable }) };
   }
   for (const [prefix, override] of Object.entries(router.routes ?? {})) {
     routes[prefix] = mergePromptNode(routes[prefix], override, prefix, available);

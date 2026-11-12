@@ -3,6 +3,7 @@
  * cards that open from the chips compute is `composerCards.ts`.
  */
 import {
+  agentDownOf,
   declaresTools,
   DEFAULT_PERMISSION_SET_BUCKET,
   heldTools,
@@ -20,6 +21,7 @@ import {
   type ModelParametersView,
   type PermissionSet,
   type PermissionSetChoice,
+  type ProbeResult,
 } from "@jaira/shared/browser";
 
 /** The half before the first slash — who answers. Empty when the id names no route. */
@@ -180,12 +182,36 @@ export function chipStepOf(room: number, chips: readonly ChipWidths[], gap: numb
   return 3;
 }
 
-/** The send button's tooltip: what Enter will do right now. */
-export function sendTitleOf(spent: boolean, busy: boolean | undefined): string {
+/** The send button's tooltip: what Enter will do right now — nothing, while the route that would answer is down. */
+export function sendTitleOf(spent: boolean, busy: boolean | undefined, down?: RouteDown): string {
+  if (down !== undefined) return `Cannot send: ${down.why}`;
   return spent ? "Enter to send — it waits until the limit resets" : busy === true ? "Enter to send — this joins the turn in flight" : "Enter to send, Shift+Enter for a new line";
 }
 
-/** Whether Enter does anything right now — `joinable` names the two hosts that say no while busy. */
-export function canSendOf(disabled: string | undefined, busy: boolean | undefined, joinable: boolean | undefined): boolean {
-  return disabled === undefined && (busy !== true || joinable === true);
+/**
+ * Whether Enter does anything right now — `joinable` names the two hosts that say no while busy; `down`,
+ * the route that would answer cannot (a message sent to it is refused before it goes anywhere).
+ */
+export function canSendOf(disabled: string | undefined, busy: boolean | undefined, joinable: boolean | undefined, down?: RouteDown): boolean {
+  return disabled === undefined && down === undefined && (busy !== true || joinable === true);
+}
+
+/** Why the route a message would go to cannot take it, and whether signing in is the fix. */
+export interface RouteDown {
+  route: string;
+  why: string;
+  signIn: boolean;
+}
+
+/**
+ * The composer's route, when the last check found it down (`agentDownOf`): signed out, or not able to run.
+ *
+ * The route stays the one the composer shows (2026-11-12, the person: "the default route shouldnt change if
+ * it becomes unavailable, it should stay but turn red"), and this is what turns it red, says why and holds
+ * the send. `undefined` for a route no check has looked at, or one that is up.
+ */
+export function routeDownOf(route: string | undefined, probes: Readonly<Record<string, ProbeResult>> | undefined): RouteDown | undefined {
+  if (route === undefined || route === "") return undefined;
+  const down = agentDownOf(probes?.[route]);
+  return down === undefined ? undefined : { route, ...down };
 }

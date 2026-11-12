@@ -193,6 +193,34 @@ export interface ProbeResult {
   accounts?: AgentAccount[];
 }
 
+/**
+ * Why an agent a check looked at cannot answer, in words for the person — or `undefined` when it can,
+ * or when nothing says it cannot (no check, `not-checked`, `disabled`: a disabled agent is no route).
+ *
+ * One sentence for every place that says it: the call a run makes to that agent is refused with it, the
+ * composer's model chip carries it, and the line over the composer says it. `signIn` says the fix is a
+ * sign-in, which the composer and the conversation offer as a button.
+ */
+export function agentDownOf(probe: ProbeResult | undefined): { why: string; signIn: boolean } | undefined {
+  if (probe === undefined) return undefined;
+  const title = EXECUTOR_TITLES[probe.name] ?? probe.name;
+  if (probe.status === "needs-sign-in") {
+    return { why: `${title} is signed out. Sign in to it (Settings → Connections → Agents), then send again.`, signIn: true };
+  }
+  if (probe.status === "failed") return { why: `${title} cannot run here: ${probe.detail}${probe.fix !== undefined ? ` — ${probe.fix}` : ""}`, signIn: false };
+  return undefined;
+}
+
+/** Of these checks, the agents that cannot answer, and why ({@link agentDownOf}) — what a tree's `unavailable` takes. */
+export function downAgentsOf(probes: readonly ProbeResult[]): Record<string, string> {
+  const down: Record<string, string> = {};
+  for (const probe of probes) {
+    const said = agentDownOf(probe);
+    if (said !== undefined) down[probe.name] = said.why;
+  }
+  return down;
+}
+
 /** What a sign-in or sign-out came to: done, or the binary's own words for why not. */
 export type SignInOutcome = { ok: true } | { ok: false; reason: string };
 

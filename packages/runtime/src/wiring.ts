@@ -612,12 +612,13 @@ export function defaultExecutorTree(
     fake?: boolean;
     secrets?: SecretResolver;
     /**
-     * Agents a health check has shown to work here.
+     * Agents a health check found NOT working here, and why (`agentDownOf`).
      *
-     * Absent ⇒ every enabled agent is a candidate, which is the CLI's position: it takes no probes
-     * and must not refuse over a check it never ran.
+     * They keep their routes and their places, so the default does not move to whichever agent sorts
+     * next; a call reaching one is refused with the reason. Absent ⇒ none is known to be down, which is
+     * the CLI's position: it takes no probes and must not refuse over a check it never ran.
      */
-    available?: ReadonlySet<string>;
+    unavailable?: Readonly<Record<string, string>>;
     /**
      * Throw when nothing here can serve this bundle's prompts. Absent ⇒ true.
      *
@@ -630,9 +631,7 @@ export function defaultExecutorTree(
     refuse?: boolean;
   },
 ): JairaOperationNode {
-  const agents = Object.keys(agentPromptRouteNames(config.agents)).filter(
-    (name) => opts?.available === undefined || opts.available.has(name),
-  );
+  const agents = Object.keys(agentPromptRouteNames(config.agents));
   const providers = opts?.fake ? [] : usableRouteKeys(config.models, opts?.secrets);
   // `vendors` is what makes a BARE model id routable: it says which agent answers for whose models,
   // so `claude-sonnet-5` reaches `claude-cli` and never reaches `codex-cli`.
@@ -640,6 +639,7 @@ export function defaultExecutorTree(
     providers,
     agents,
     vendors: agentRouteVendors(config.agents),
+    ...(opts?.unavailable !== undefined ? { unavailable: opts.unavailable } : {}),
   });
 
   // A scripted run answers every prompt itself, and a workflow of only function states never calls a

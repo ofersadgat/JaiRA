@@ -1629,6 +1629,27 @@ export interface ChatThreadView {
   origin?: TaskOrigin;
   /** What this conversation has cost so far (USD), summed from its journal; absent when nothing was priced. */
   costUsd?: number;
+  /**
+   * Messages that never reached the conversation: calls after the last one that landed, which failed
+   * before they wrote anything (a signed-out agent refuses before it starts). Oldest first.
+   *
+   * Nothing else holds them. The thread is the records that landed, so a message whose call failed
+   * first was on the screen while it ran and gone the moment the run failed, with the failure nowhere
+   * (2026-11-12, the person: "i sent a message and no error showed up on screen").
+   */
+  unsent?: ChatUnsent[];
+}
+
+/** One message that never reached its conversation — see {@link ChatThreadView.unsent}. */
+export interface ChatUnsent {
+  /** What the person said. */
+  message: string;
+  /** Why the call failed, as the call's failure says it. */
+  reason: string;
+  /** The model the call asked for, when it named one — whose route a sign-in would fix. */
+  model?: string;
+  /** When it failed, epoch ms. */
+  at?: number;
 }
 
 /**

@@ -186,6 +186,33 @@ describe("a bare model id reaches the route that serves it", () => {
     expect(reasonOf(result)).toBeTruthy();
   });
 
+  /**
+   * A signed-out agent's route is refused with WHY, and never handed on.
+   *
+   * 2026-11-12: the CLI signed out, its route was dropped from the tree, and a chat asking for
+   * `claude-cli/default` fell through to the provider path, which answered that the model "must be
+   * route-prefixed" — about a prefix that is one. Nor may another agent answer in its place.
+   */
+  it("refuses a call to an agent that is down with its reason — named, bare or unnamed", async () => {
+    const cli = leaf();
+    const code = leaf();
+    const why = "Claude (cli) is signed out. Sign in to it (Settings → Connections → Agents), then send again.";
+    const tree = resolveExecutorTree(undefined, {
+      providers: ["anthropic"],
+      agents: ["claude-cli", "claude-code"],
+      vendors: { "claude-cli": "anthropic", "claude-code": "anthropic" },
+      unavailable: { "claude-cli": why },
+    }).prompt!;
+    const built = buildPromptTree(tree, { agents: { "claude-cli": cli.executor, "claude-code": code.executor } });
+
+    for (const model of ["claude-cli/default", "claude-sonnet-5", undefined]) {
+      const result = await built.start(promptOp(model), {} as never).result;
+      expect(reasonOf(result)).toBe(why);
+    }
+    expect(cli.seen).toEqual([]);
+    expect(code.seen).toEqual([]);
+  });
+
   it("never hands a bare id to an agent that does not serve its family", async () => {
     const codex = leaf();
     const tree = resolveExecutorTree(undefined, {

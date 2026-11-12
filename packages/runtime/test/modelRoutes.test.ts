@@ -15,6 +15,7 @@ import {
   defaultConfig,
   parseConfig,
   unnamedRouteOf,
+  type JairaAgentNode,
   type JairaConfig,
   type JairaPromptNode,
   type ProbeResult,
@@ -214,16 +215,28 @@ describe("defaultExecutorTree — the refusal that reported the bug", () => {
     expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).toContain("claude-cli");
   });
 
-  it("does not refuse over an agent whose binary a probe could not find", () => {
-    // `available` is what a health check saw a moment ago; a missing binary is a fact about this
+  it("does not refuse over an agent whose binary a probe could not find — its route stays, marked", () => {
+    // `unavailable` is what a health check saw a moment ago; a missing binary is a fact about this
     // moment rather than about the configuration. Refusing seven phases because an optional lens's
     // binary is not installed today would be refusing a run that never reaches it — and it is the
     // same call the function path already makes by registering codex whether or not it is present.
     const tree = defaultExecutorTree(config({}), namedBundle("codex-cli/default"), {
       secrets: secretsWith({}),
-      available: new Set(["claude-cli"]),
+      unavailable: { "codex-cli": "Codex (cli) cannot run here: 'codex' was not found" },
     });
-    expect(Object.keys((tree.prompt as { routes?: Record<string, unknown> }).routes ?? {})).not.toContain("codex-cli");
+    const routes = (tree.prompt as { routes?: Record<string, JairaAgentNode> }).routes ?? {};
+    expect(routes["codex-cli"]?.unavailable).toBe("Codex (cli) cannot run here: 'codex' was not found");
+    expect(routes["claude-cli"]?.unavailable).toBeUndefined();
+  });
+
+  it("keeps a signed-out agent the default — a state naming no model is not handed to the next agent", () => {
+    // 2026-11-12: the CLI signed out, its route was dropped, and the default became whichever agent sorted
+    // next. The person: "the default route shouldnt change if it becomes unavailable".
+    const tree = defaultExecutorTree(config({}), syncBundle(), {
+      secrets: secretsWith({}),
+      unavailable: { "claude-cli": "Claude (cli) is signed out." },
+    });
+    expect(unnamedRouteOf((tree.prompt as { routes?: Record<string, JairaPromptNode> }).routes)).toBe("claude-cli");
   });
 
   it("refuses a bare model no configured route serves, and says whose family it is", () => {

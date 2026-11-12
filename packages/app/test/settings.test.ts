@@ -16,7 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { initProject } from "@jaira/persistence";
-import { defaultAppearanceConfig, defaultLogPolicy, type JairaAppearanceConfig, type PushMessage } from "@jaira/shared";
+import { agentDownOf, defaultAppearanceConfig, defaultLogPolicy, type JairaAppearanceConfig, type PushMessage } from "@jaira/shared";
 import { testHome } from "@jaira/testing";
 import { AppService, type KeychainPort } from "@jaira/service";
 
@@ -778,12 +778,18 @@ describe("availability", { timeout: 30_000 }, () => {
 
     expect(tree?.kind).toBe("operation");
     expect(tree?.prompt?.kind).toBe("router");
-    const routes = Object.keys((tree?.prompt as { routes?: Record<string, unknown> }).routes ?? {});
-    // An executor whose binary is missing is not a route: that is the difference between routing to
-    // claude-cli and routing to claude-cli and then failing to start it.
+    const routes = (tree?.prompt as { routes?: Record<string, { unavailable?: string }> }).routes ?? {};
+    // An executor that does not work (its binary missing, signed out) is still a route — dropped, the
+    // default moved to the next agent and a call naming it fell to the provider path (2026-11-12) — but
+    // marked with why, which is what its calls are refused with.
     for (const executor of executors) {
-      if (executor.status === "ok") expect(routes).toContain(executor.name);
-      else expect(routes).not.toContain(executor.name);
+      if (executor.status === "disabled") {
+        expect(Object.keys(routes)).not.toContain(executor.name);
+        continue;
+      }
+      expect(Object.keys(routes)).toContain(executor.name);
+      const down = agentDownOf(executor);
+      expect(routes[executor.name]?.unavailable).toBe(down?.why);
     }
   });
 });

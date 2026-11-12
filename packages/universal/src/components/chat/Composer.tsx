@@ -17,7 +17,7 @@ import {
 } from "@jaira/shared/browser";
 import { fileFromText, mentionAt, withFiles, withMention, type ComposerFile } from "@jaira/ui/composerCards";
 import { useKeptDraft } from "@jaira/ui/composerDrafts";
-import { canSendOf, chipValuesOf, chipWordsAt, composerFactsOf, mapOfSettings, routeOf, sendTitleOf, shortChipWords, type ChipStep } from "@jaira/ui/composerModel";
+import { canSendOf, chipValuesOf, chipWordsAt, composerFactsOf, mapOfSettings, routeDownOf, routeOf, sendTitleOf, shortChipWords, type ChipStep, type RouteDown } from "@jaira/ui/composerModel";
 import { commandGroupsOf, type Parked } from "@jaira/ui/composerPermissionSet";
 import {
   collapsedOf,
@@ -56,6 +56,7 @@ import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
 import { FigureFace } from "../usage/Figures";
 import { BrandIcon } from "../settings/bits";
 import { usePhone } from "../../app/phone";
+import { useShellOrNull } from "../../app/shell";
 import { useKeyboardShown } from "../floats/keyboard";
 
 /**
@@ -186,8 +187,12 @@ export function Composer({
   const now = useNow();
   const account = accountFor(limits, route);
   const spent = account !== undefined && isSpent(account.reading, now);
-  const canSend = canSendOf(disabled, busy, joinable);
   const off = disabled !== undefined;
+  // The route a message would go to, when the last check found it down: it stays the route shown, red,
+  // and nothing is sent to it until it is back (signed in again, or checked again).
+  const shell = useShellOrNull();
+  const down = off ? undefined : routeDownOf(route, shell?.state.probes);
+  const canSend = canSendOf(disabled, busy, joinable, down);
   /** The card open, and the box it was opened from — for the stack, the segment's key and what it is. */
   const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Tools" | "account" | "context" | "stack"; at: FloatRect; key?: string; segment?: StackSegment } | null>(null);
   /** The Tools card on Everything (§7.4) rather than this conversation's lines. */
@@ -334,7 +339,10 @@ export function Composer({
   const figure = account !== undefined && figures !== "off";
   const live = plan?.live === "steerable" || plan?.live === "busy" ? plan.live : undefined;
   const chipLooks = {
-    model: { lead: <BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />, own: origin.model === "override" },
+    model:
+      down !== undefined
+        ? { lead: <Icon name="alert" size={13} color={String(t.v("bad"))} />, own: origin.model === "override", bad: down.why }
+        : { lead: <BrandIcon name={routeOf(effective.model ?? "")} size={13} ink={origin.model === "override" ? "accent" : "tok-hint"} />, own: origin.model === "override" },
     thinking: { icon: "think" as IconName, own: origin.reasoning === "override" },
   };
   const short = shortChipWords(chips);
@@ -404,6 +412,7 @@ export function Composer({
         {/* Positioned: painted after the conversation above it, with what else is. */}
         <View position="relative" flexDirection="column" borderRadius={21} backgroundColor={t.v(off ? "panel-2" : "panel") as never}>
           {!off ? <SpentLine route={route} /> : null}
+          {down !== undefined ? <DownLine down={down} /> : null}
           {head}
           {/* The ruler: each chip in each of its looks, and the live note's words, laid out where nothing
               shows them — a box of no size that clips — for the foot to be fitted by. */}
@@ -588,7 +597,7 @@ export function Composer({
                 </Press>
               ) : null}
               {busy === true && onStop !== undefined && !canSend ? null : (
-                <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy)} disabled={(draft.trim() === "" && files.length === 0) || !canSend} onPress={send} />
+                <SendButton t={t} spent={spent} title={sendTitleOf(spent, busy, down)} disabled={(draft.trim() === "" && files.length === 0) || !canSend} onPress={send} />
               )}
             </View>
           </View>
@@ -758,12 +767,12 @@ const NO_PARK = (): void => undefined;
 const CHIP_BOX = { flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 3, paddingHorizontal: 9, borderRadius: 999, borderWidth: 1, borderStyle: "solid", maxWidth: 210 } as const;
 
 /** What a chip shows: its icon (or `lead`), then its words — none at the narrowest steps. */
-function ChipFace({ t, icon, lead, own, words, lit }: { t: Tokens; icon?: IconName; lead?: ReactNode; own: boolean; words: string | null; lit: boolean }): JSX.Element {
+function ChipFace({ t, icon, lead, own, words, lit, bad }: { t: Tokens; icon?: IconName; lead?: ReactNode; own: boolean; words: string | null; lit: boolean; bad?: string | undefined }): JSX.Element {
   return (
     <>
       {lead ?? (icon !== undefined ? <Icon name={icon} size={13} color={String(t.v(own ? "accent" : "tok-hint"))} /> : null)}
       {words === null ? null : (
-        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: own ? "accent" : lit ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
+        <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: bad !== undefined ? "bad" : own ? "accent" : lit ? "text" : "dim" }} ellip minWidth={0} flexShrink={1}>
           {words}
         </Txt>
       )}
@@ -775,7 +784,7 @@ function ChipFace({ t, icon, lead, own, words, lit }: { t: Tokens; icon?: IconNa
  * A chip: one question, its icon and its answer; open, its card's ground and edge. `words`: the answer
  * as the foot's step has it — shorter, or none — while its title says it in full.
  */
-function Chip({ t, icon, lead, label, value, words, own, open, onOpen, floor = 0 }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; words: string | null; own: boolean; open: boolean; onOpen: (at: FloatRect) => void; floor?: number | undefined }): JSX.Element {
+function Chip({ t, icon, lead, label, value, words, own, open, onOpen, floor = 0, bad }: { t: Tokens; icon?: IconName; lead?: ReactNode; label: string; value: string; words: string | null; own: boolean; open: boolean; onOpen: (at: FloatRect) => void; floor?: number | undefined; bad?: string | undefined }): JSX.Element {
   const [ref, press] = useOpener(onOpen);
   return (
     // The chip stretches to its wrap rather than sizing to its words, so a wrap squeezed below them (the
@@ -785,15 +794,19 @@ function Chip({ t, icon, lead, label, value, words, own, open, onOpen, floor = 0
     <RNView ref={ref} collapsable={false} style={{ minWidth: floor, flexShrink: 1, maxWidth: 210, ...NO_STACK } as never}>
     <Press
       onPress={press}
-      title={`${label}: ${value}`}
+      title={bad !== undefined ? `${label}: ${value} — ${bad}` : `${label}: ${value}`}
       label={label}
       {...({ "aria-expanded": open } as object)}
       minWidth={0}
       flexShrink={1}
       {...CHIP_BOX}
-      box={({ hovered }) => ({ backgroundColor: open ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: open ? t.v("line") : "transparent" })}
+      box={({ hovered }) =>
+        bad !== undefined
+          ? { backgroundColor: t.mix(t.v("bad"), hovered || open ? 18 : 10, "transparent"), borderColor: t.mix(t.v("bad"), 45, "transparent") }
+          : { backgroundColor: open ? t.v("fill-ghost-selected") : hovered ? t.v("fill-ghost-hover") : "transparent", borderColor: open ? t.v("line") : "transparent" }
+      }
     >
-      {({ hovered }) => <ChipFace t={t} {...(icon !== undefined ? { icon } : {})} {...(lead !== undefined ? { lead } : {})} own={own} words={words} lit={hovered || open} />}
+      {({ hovered }) => <ChipFace t={t} {...(icon !== undefined ? { icon } : {})} {...(lead !== undefined ? { lead } : {})} own={own} words={words} lit={hovered || open} bad={bad} />}
     </Press>
     </RNView>
   );
@@ -893,5 +906,58 @@ function SendButton({ t, spent, title, disabled, onPress }: { t: Tokens; spent: 
     >
       <Icon name={spent ? "clock" : "send"} size={16} color={String(t.v(disabled ? "tok-hint" : "panel"))} />
     </Press>
+  );
+}
+
+/**
+ * The route a message would go to is down: why, over the box, with what fixes it — the way a spent
+ * allowance is said (`SpentLine`). While it shows, nothing is sent (`canSendOf`).
+ *
+ *   a line   margins 8 8 0, padding 6 10, radius 8, --tint-bad; the alert icon in --bad, the words in
+ *            --text, the buttons at its right end (Sign in, filled --bad; Check again, a ghost)
+ */
+function DownLine({ down }: { down: RouteDown }): JSX.Element {
+  const t = useTokens();
+  const size = Number(t.scaled("size-app", 1)) || 12.5;
+  return (
+    <View role="alert" flexDirection="row" alignItems="center" flexWrap="wrap" gap={8} marginTop={8} marginHorizontal={8} paddingVertical={6} paddingHorizontal={10} borderRadius={8} backgroundColor={t.v("tint-bad") as never}>
+      <Icon name="alert" size={size} color={String(t.v("bad"))} />
+      <Txt spec={{ voice: "app", scale: 1 }} flexGrow={1} flexShrink={1} flexBasis={200} minWidth={0}>
+        {down.why}
+      </Txt>
+      <RouteFixes down={down} />
+    </View>
+  );
+}
+
+/**
+ * What fixes a route that is down, as buttons: Check again (signed in from a terminal, or installed),
+ * and Sign in where that is the fix. Nothing where there is no shell to act through.
+ */
+export function RouteFixes({ down }: { down: RouteDown }): JSX.Element | null {
+  const t = useTokens();
+  const app = useShellOrNull();
+  if (app === null) return null;
+  const signing = app.state.signingIn.includes(down.route);
+  const checking = app.state.rechecking;
+  return (
+        <View flexDirection="row" alignItems="center" gap={6} marginLeft="auto">
+          <Press
+            onPress={() => void app.actions.recheckAvailability()}
+            disabled={checking}
+            title="Check this agent again — after signing in from a terminal"
+            paddingVertical={3}
+            paddingHorizontal={10}
+            borderRadius={7}
+            box={({ hovered }) => ({ backgroundColor: t.mix(t.v("bad"), hovered ? 22 : 14, "transparent") as never })}
+          >
+            <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "bad" }}>{checking ? "Checking…" : "Check again"}</Txt>
+          </Press>
+          {down.signIn ? (
+            <Press onPress={() => void app.actions.signIn(down.route)} disabled={signing} title="Sign in, in the browser" paddingVertical={3} paddingHorizontal={10} borderRadius={7} backgroundColor={t.v("bad") as never}>
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "panel" }}>{signing ? "Waiting for the browser…" : "Sign in"}</Txt>
+            </Press>
+          ) : null}
+        </View>
   );
 }

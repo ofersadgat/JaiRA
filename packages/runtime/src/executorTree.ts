@@ -133,6 +133,9 @@ function buildProviderNode(node: JairaProviderNode, deps: TreeDeps): StackedExec
  */
 function buildAgentNode(node: JairaAgentNode, deps: TreeDeps, path: string): StackedExecutor {
   const name = node.agent;
+  // Down when the tree was resolved (signed out, not installed): refused with why, by this route —
+  // never handed on to another, and never left to the provider path to call an unknown prefix.
+  if (node.unavailable !== undefined) return refusing(node.unavailable);
   const inner = name === undefined ? undefined : deps.agents?.[name];
   if (inner === undefined) {
     // Refused at the node rather than at the call, and by NAME: a tree that silently dropped a route
