@@ -326,6 +326,11 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
   };
   const onMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
     if (!pointers.current.has(e.pointerId)) return;
+    // A mouse with nothing held: its button was let go where no `pointerup` reached the board.
+    if (e.pointerType === "mouse" && e.buttons === 0) {
+      onUp(e);
+      return;
+    }
     pointers.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
     if (pinch.current !== null || drag.current !== null) moved.current = true;
     const p = pinch.current;

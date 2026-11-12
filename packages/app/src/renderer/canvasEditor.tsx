@@ -299,6 +299,9 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   const [marquee, setMarquee] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
   const [view, setView] = useState<View>({ x: 40, y: 60, z: 0.5 });
   const [gesture, setGesture] = useState<Gesture | null>(null);
+  /** The gesture as last drawn, taken (and emptied) by the up that ends it: two ends before a redraw end it once. */
+  const gestureNow = useRef(gesture);
+  gestureNow.current = gesture;
   const [editingText, setEditingText] = useState<{ file: string; id: number; rect: Rect; text: string } | { note: string; text: string } | null>(null);
   const [status, setStatus] = useState<{ tone: "saved" | "saving" | "refused" | "error"; words: string } | null>(null);
   const [tab, setTab] = useState<"properties" | "tweaks" | "layers" | "comments">("properties");
@@ -1140,7 +1143,13 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   };
 
   const onLayerMove = (e: ReactPointerEvent<HTMLDivElement>): void => {
-    if (gesture === null) return;
+    if (gesture === null || gestureNow.current === null) return;
+    // Nothing held: the button was let go where no `pointerup` reached us. A gesture left on panned the
+    // board at every plain mouse move (2026-11-09); it ends here, as the up would have ended it.
+    if (e.buttons === 0) {
+      onLayerUp();
+      return;
+    }
     const p = at(e);
     if (gesture.kind === "pan") {
       moved.current = true;
@@ -1186,7 +1195,8 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   };
 
   const onLayerUp = (): void => {
-    const g = gesture;
+    const g = gestureNow.current;
+    gestureNow.current = null;
     setGesture(null);
     if (g === null) return;
     if (g.kind === "marquee") {

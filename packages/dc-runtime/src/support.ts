@@ -140,7 +140,19 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
    * distance measured here is measured against a frame that has since moved (40 px panned 26, or 119).
    * Registered first, so no edit-mode listener sees it, and the browser's own autoscroll never starts.
    */
+  /**
+   * A pan ends when the middle button is no longer HELD (`buttons`), not only on a `pointerup` naming it:
+   * that up never comes when the button is let go outside this frame, or while another button is still
+   * down (the release is then a `pointermove`, and the last up names the other button). A pan left on
+   * panned the canvas at every plain hover over this one artboard (the person, 2026-11-09: "the whole
+   * canvas moves when i simply move my mouse without having any buttons pressed").
+   */
+  const MIDDLE = 4;
   let panning = false;
+  const panEnds = (event: PointerEvent): void => {
+    panning = false;
+    post({ type: "dc:pan", phase: "end", x: event.clientX, y: event.clientY });
+  };
   window.addEventListener(
     "pointerdown",
     (event) => {
@@ -157,18 +169,23 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     (event) => {
       if (!panning) return;
       event.stopImmediatePropagation();
-      post({ type: "dc:pan", phase: "move", x: event.clientX, y: event.clientY });
+      if ((event.buttons & MIDDLE) === 0) panEnds(event);
+      else post({ type: "dc:pan", phase: "move", x: event.clientX, y: event.clientY });
     },
     true,
   );
-  const panEnds = (event: PointerEvent): void => {
-    if (!panning || event.button !== 1) return;
-    event.stopImmediatePropagation();
-    panning = false;
-    post({ type: "dc:pan", phase: "end", x: event.clientX, y: event.clientY });
-  };
-  window.addEventListener("pointerup", panEnds, true);
-  window.addEventListener("pointercancel", () => (panning = false), true);
+  window.addEventListener(
+    "pointerup",
+    (event) => {
+      if (!panning || (event.buttons & MIDDLE) !== 0) return;
+      event.stopImmediatePropagation();
+      panEnds(event);
+    },
+    true,
+  );
+  window.addEventListener("pointercancel", (event) => panning && panEnds(event), true);
+  // Let go of while the window was elsewhere: nothing more will say so.
+  window.addEventListener("blur", () => panning && panEnds(new PointerEvent("pointerup")));
   for (const type of ["mousedown", "auxclick"]) {
     window.addEventListener(type, (event) => (event as MouseEvent).button === 1 && event.preventDefault(), true);
   }
@@ -230,6 +247,13 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     "pointermove",
     (event) => {
       if (mode !== "edit" || marquee === null) return;
+      // The left button let go where this frame did not see it: the rectangle ends here.
+      if ((event.buttons & 1) === 0) {
+        const { started } = marquee;
+        marquee = null;
+        if (started) post({ type: "dc:marquee", phase: "end", x: event.clientX, y: event.clientY });
+        return;
+      }
       if (!marquee.started) {
         if (Math.hypot(event.clientX - marquee.x, event.clientY - marquee.y) < 4) return;
         marquee.started = true;
@@ -257,6 +281,12 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
     "pointermove",
     (event) => {
       if (mode !== "edit" || press === null) return;
+      // The left button let go where this frame did not see it: the element goes back, nothing is moved.
+      if ((event.buttons & 1) === 0) {
+        press.el.style.transform = press.transform;
+        press = null;
+        return;
+      }
       const dx = event.clientX - press.x;
       const dy = event.clientY - press.y;
       if (!press.moved && Math.hypot(dx, dy) < 4) return;
