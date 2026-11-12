@@ -121,7 +121,7 @@ async function main(): Promise<void> {
     // An element selected in an artboard, deleted, kept as the person's version.
     const frame = await app.evaluate<{ x: number; y: number } | null>(
       // The middle of what is visible of the frame: its box clipped to the board around it.
-      `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) return null; f.scrollIntoView({ block: "center" }); const r = f.getBoundingClientRect(); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "hidden") c = c.parentElement; const b = c ? c.getBoundingClientRect() : r; const left = Math.max(r.left, b.left), right = Math.min(r.right, b.right), top = Math.max(r.top, b.top), bottom = Math.min(r.bottom, b.bottom); return { x: (left + right) / 2, y: top + Math.min((bottom - top) / 3, 120), box: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(",") + " in " + [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)].join(",") }; })()`,
+      `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) return null; f.scrollIntoView({ block: "center" }); const r = f.getBoundingClientRect(); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "clip") c = c.parentElement; const b = c ? c.getBoundingClientRect() : r; const left = Math.max(r.left, b.left), right = Math.min(r.right, b.right), top = Math.max(r.top, b.top), bottom = Math.min(r.bottom, b.bottom); return { x: (left + right) / 2, y: top + Math.min((bottom - top) / 3, 120), box: [Math.round(r.left), Math.round(r.top), Math.round(r.width), Math.round(r.height)].join(",") + " in " + [Math.round(b.left), Math.round(b.top), Math.round(b.width), Math.round(b.height)].join(",") }; })()`,
     );
     if (frame === null) throw new Error("the editor draws no artboard");
     await settle(2000);
@@ -215,7 +215,7 @@ async function main(): Promise<void> {
       if (at === null) {
         await app.shot("no-artboard-point");
         const why = await app.evaluate<string>(
-          `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "hidden") c = c.parentElement; const b = c.getBoundingClientRect(); const mx = r.left + r.width / 2, my = r.top + r.height / 2; const hit = document.elementFromPoint(mx, my); const desc = (e) => e ? e.tagName + "[" + (e.getAttribute("aria-label") || e.getAttribute("role") || "") + "] " + (e.getAttribute("style") || "").slice(0, 160) : "nothing"; return "frame " + [r.left, r.top, r.width, r.height].map(Math.round).join(",") + " board " + [b.left, b.top, b.width, b.height].map(Math.round).join(",") + " window " + innerWidth + "x" + innerHeight + "; at the frame's middle: " + desc(hit) + " < " + desc(hit && hit.parentElement); })()`,
+          `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "clip") c = c.parentElement; const b = c.getBoundingClientRect(); const mx = r.left + r.width / 2, my = r.top + r.height / 2; const hit = document.elementFromPoint(mx, my); const desc = (e) => e ? e.tagName + "[" + (e.getAttribute("aria-label") || e.getAttribute("role") || "") + "] " + (e.getAttribute("style") || "").slice(0, 160) : "nothing"; return "frame " + [r.left, r.top, r.width, r.height].map(Math.round).join(",") + " board " + [b.left, b.top, b.width, b.height].map(Math.round).join(",") + " window " + innerWidth + "x" + innerHeight + "; at the frame's middle: " + desc(hit) + " < " + desc(hit && hit.parentElement); })()`,
         );
         throw new Error(`no point of the artboard is under the pointer's reach: ${why}`);
       }
@@ -257,7 +257,7 @@ async function main(): Promise<void> {
     /** A bare stretch of the board's layer whose cursor is `cursor`, with room for a short drag. */
     const bareBoard = async (cursor: "crosshair" | "default"): Promise<{ x: number; y: number }> => {
       const at = await app.evaluate<{ x: number; y: number } | null>(
-        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) throw new Error("no artboard in the editor; islands " + [...document.querySelectorAll("[data-island]")].map((e) => e.getAttribute("data-island")).join(",")); f.scrollIntoView({ block: "center" }); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "hidden") c = c.parentElement; const layer = [...c.children].find((e) => e.style.cursor === ${JSON.stringify(cursor)}); const r = c.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 50; y += 10) for (let x = r.left + 10; x < r.right - 50; x += 10) { if (document.elementFromPoint(x, y) === layer && document.elementFromPoint(x + 48, y + 38) === layer && document.elementFromPoint(x + 24, y + 19) === layer) return { x, y }; } return null; })()`,
+        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); if (!f) throw new Error("no artboard in the editor; islands " + [...document.querySelectorAll("[data-island]")].map((e) => e.getAttribute("data-island")).join(",")); f.scrollIntoView({ block: "center" }); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "clip") c = c.parentElement; const layer = [...c.children].find((e) => e.style.cursor === ${JSON.stringify(cursor)}); const r = c.getBoundingClientRect(); for (let y = r.top + 10; y < r.bottom - 50; y += 10) for (let x = r.left + 10; x < r.right - 50; x += 10) { if (document.elementFromPoint(x, y) === layer && document.elementFromPoint(x + 48, y + 38) === layer && document.elementFromPoint(x + 24, y + 19) === layer) return { x, y }; } return null; })()`,
       );
       if (at === null) throw new Error(`no bare stretch of the board to draw on (${cursor})`);
       return at;
@@ -604,6 +604,49 @@ async function main(): Promise<void> {
     if (Math.abs(pannedBy.x - 40) > 6 || Math.abs(pannedBy.y - 30) > 6) throw new Error(`a middle-button drag over the artboard did not pan the board by (40, 30): ${JSON.stringify(pannedBy)}`);
     await settle(1500);
     if ((await count()) !== versionsBeforePan) throw new Error("a middle-button pan saved a version (it moved an element)");
+
+    // The wheel over an artboard is the canvas's, as over the empty board (the person, 2026-11-11: Ctrl+wheel
+    // "works over empty space in the canvas, but over an item, it wont zoom"): its frame tells the editor.
+    const frameBox = async (): Promise<{ x: number; y: number; w: number }> =>
+      app.evaluate<{ x: number; y: number; w: number }>(
+        `(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); const r = f.getBoundingClientRect(); return { x: r.left, y: r.top, w: r.width }; })()`,
+      );
+    const over = await elementPoint();
+    const beforeZoom = await frameBox();
+    for (let i = 0; i < 3; i++) {
+      await app.wheel(over, -100, true);
+      await settle(300);
+      const b = await frameBox();
+      console.log(`wheel: notch ${String(i + 1)}: the pointer at ${((over.x - b.x) / b.w).toFixed(3)} of the artboard's width (pointer x ${String(over.x)}, frame left ${b.x.toFixed(1)}, width ${b.w.toFixed(1)})`);
+    }
+    // The board box is never scrolled: a scrolled one put every place read off the pointer that far off.
+    const scrolled = await app.evaluate<number>(`(() => { const f = document.querySelector('[data-island="canvasEditor"] iframe'); let c = f.parentElement; while (c && getComputedStyle(c).overflow !== "clip") c = c.parentElement; return c ? c.scrollLeft + c.scrollTop : -1; })()`);
+    if (scrolled !== 0) throw new Error(`the board box is scrolled (${String(scrolled)}), or not found`);
+    const afterZoom = await frameBox();
+    const grew = afterZoom.w / beforeZoom.w;
+    // The point under the pointer stays under it: where it sat in the frame, as a share of its width.
+    const shareBefore = (over.x - beforeZoom.x) / beforeZoom.w;
+    const shareAfter = (over.x - afterZoom.x) / afterZoom.w;
+    console.log(`wheel: Ctrl+wheel over the artboard grew it ${grew.toFixed(3)}x; the pointer at ${shareBefore.toFixed(3)} of its width, then ${shareAfter.toFixed(3)}`);
+    if (grew < 1.3) throw new Error(`Ctrl+wheel over the artboard did not zoom the canvas in (${grew.toFixed(3)}x)`);
+    if (Math.abs(shareAfter - shareBefore) > 0.01) throw new Error("Ctrl+wheel over the artboard did not zoom about the pointer");
+    for (let i = 0; i < 3; i++) await app.wheel(over, 100, true);
+    await settle(400);
+    const backZoom = await frameBox();
+    console.log(`wheel: back out to ${(backZoom.w / beforeZoom.w).toFixed(3)}x`);
+    if (Math.abs(backZoom.w / beforeZoom.w - 1) > 0.02) throw new Error("Ctrl+wheel out over the artboard did not zoom back");
+    // A plain wheel over an artboard being edited pans the canvas (running, the design's scroll comes first).
+    const wheelsTold = async (): Promise<number> => app.evaluate<number>(`window.__dc.filter((m) => m.type === "dc:wheel").length`);
+    const toldBefore = await wheelsTold();
+    const beforeWheel = await frameBox();
+    await app.wheel(over, 60);
+    await settle(400);
+    const afterWheel = await frameBox();
+    const wheeled = { panned: Math.round(beforeWheel.y - afterWheel.y) };
+    const wheelTold = (await wheelsTold()) - toldBefore;
+    console.log(`wheel: a plain wheel over the artboard panned the canvas ${String(wheeled.panned)} px (the frame told ${String(wheelTold)})`);
+    if (Math.abs(wheeled.panned - 60) > 6) throw new Error(`a plain wheel over the artboard did not pan the canvas by 60: ${String(wheeled.panned)} (the frame told ${String(wheelTold)})`);
+    if ((await count()) !== versionsBeforePan) throw new Error("a wheel over the artboard saved a version");
 
     // Comments (decision 0024): the comment tool pins one on the artboard where it is pressed.
     const comment = async (text: string, toClaude: boolean): Promise<void> => {

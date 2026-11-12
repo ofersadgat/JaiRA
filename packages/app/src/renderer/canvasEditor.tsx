@@ -19,6 +19,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter, insertElement, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
+import { framePoint, frameWheel, wheelView } from "./canvasBoard";
 import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
 import { Popover } from "./popover";
@@ -515,6 +516,24 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
       const data = event.data as { type?: string; id?: number; rect?: Rect; at?: { x: number; y: number }; tag?: string; style?: string; text?: string | null; href?: string; phase?: string; x?: number; y?: number };
       // A press or a key in one of this editor's artboards: the keyboard is this editor's.
       if (data.type === "dc:pick" || data.type === "dc:dblclick" || data.type === "dc:moved" || data.type === "dc:key" || ((data.type === "dc:pan" || data.type === "dc:marquee") && data.phase === "start")) keysOwner = keysId;
+      const wheel = frameWheel(event.data);
+      if (wheel !== null) {
+        // A wheel over an artboard the design could not scroll with: the canvas's, as over the empty board.
+        const el = frameEls.current.get(file);
+        if (el === undefined) return;
+        if (full !== null) {
+          // Filling the editor: the box around it scrolls; nothing zooms.
+          if (!wheel.ctrl) el.parentElement?.scrollBy(wheel.dx, wheel.dy);
+          return;
+        }
+        const host = board.current;
+        if (host === null) return;
+        const p = framePoint(el, wheel.x, wheel.y);
+        const rect = host.getBoundingClientRect();
+        moved.current = true;
+        setView((v) => wheelView(v, p.x - rect.left, p.y - rect.top, wheel.dx, wheel.dy, wheel.ctrl));
+        return;
+      }
       if (data.type === "dc:marquee" && typeof data.x === "number" && typeof data.y === "number") {
         frameMarquee.current(file, data.phase ?? "move", data.x, data.y);
         return;
@@ -1072,14 +1091,8 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
     const onWheel = (e: WheelEvent): void => {
       moved.current = true;
       e.preventDefault();
-      setView((v) => {
-        if (!e.ctrlKey) return { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY };
-        const rect = el.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
-        const z = Math.min(4, Math.max(0.05, v.z * Math.exp(-e.deltaY * 0.0015)));
-        return { z, x: px - ((px - v.x) * z) / v.z, y: py - ((py - v.y) * z) / v.z };
-      });
+      const rect = el.getBoundingClientRect();
+      setView((v) => wheelView(v, e.clientX - rect.left, e.clientY - rect.top, e.deltaX, e.deltaY, e.ctrlKey));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -1331,7 +1344,9 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   return (
     <div data-canvas-keys={keysId} style={{ ...shell, ...style }}>
       <div style={{ position: "relative", display: "flex", flex: 1, minHeight: 0 }}>
-        <div ref={board} onMouseDown={(e) => e.button === 1 && e.preventDefault()} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "hidden", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
+        {/* `clip`, not `hidden`: a hidden box is still a scroll container, and focus scrolled it (16 px seen,
+            2026-11-11), so every place read off the pointer (`at`, the wheel's zoom) landed that far off. */}
+        <div ref={board} onMouseDown={(e) => e.button === 1 && e.preventDefault()} style={{ position: "relative", flex: 1, minHeight: 0, overflow: "clip", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: `${16 * view.z}px ${16 * view.z}px`, backgroundPosition: `${view.x}px ${view.y}px` }}>
           {/* Under the frames and notes: a press here pans, and empties the selection. */}
           <div data-canvas-ground="" onPointerDown={onLayerDown} onPointerMove={onLayerMove} onPointerUp={onLayerUp} style={{ position: "absolute", inset: 0, cursor: tool === "hand" ? "grab" : "default" }} />
           <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>

@@ -174,6 +174,28 @@ function editMode(source: () => string, container: Element): { setMode: (mode: "
   }
 
   /**
+   * The wheel over an artboard is the canvas's, as it is over the empty board: Ctrl+wheel (a pinch, too,
+   * which Chromium reports as Ctrl) zooms it, a plain wheel pans it. A wheel inside a frame is this
+   * document's and never reaches the window around it (the person, 2026-11-11: "ctrl + mouse wheel ...
+   * works over empty space in the canvas, but over an item, it wont zoom"), so it is told to the host
+   * (`dc:wheel`: where, in this frame's pixels, and by how much, in pixels) and kept from this page.
+   * Running (`play`), a plain wheel the design can scroll with — a list, a page taller than its artboard —
+   * is the design's; edited or looked at, the canvas's, as in Figma: a body margin makes most pages a few
+   * pixels taller than their artboard, and those few pixels took the wheel. Ctrl+wheel is never the design's.
+   */
+  window.addEventListener(
+    "wheel",
+    (event) => {
+      if (!event.ctrlKey && mode === "play" && scrollsWith(event.target, event.deltaX, event.deltaY)) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const unit = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? window.innerHeight : 1;
+      post({ type: "dc:wheel", x: event.clientX, y: event.clientY, dx: event.deltaX * unit, dy: event.deltaY * unit, ctrl: event.ctrlKey });
+    },
+    { capture: true, passive: false },
+  );
+
+  /**
    * A drag of an element (README, "Moving an element"): drawn here as it happens — the element follows
    * the pointer by a transform, nothing else changes — and reported when the pointer lets go, with what
    * the editor needs to write it: the element's, its parent's and its siblings' boxes and source styles.
@@ -411,6 +433,22 @@ async function pageSource(): Promise<string> {
     // The snapshot, below.
   }
   return snapshot;
+}
+
+/**
+ * Whether a wheel turned over `target` scrolls something in this page: a box under it (or the page
+ * itself) that scrolls along that way and is not yet at its end that way.
+ */
+function scrollsWith(target: EventTarget | null, dx: number, dy: number): boolean {
+  const root = document.scrollingElement ?? document.documentElement;
+  const along = (overflow: string, page: boolean): boolean => (page ? overflow !== "hidden" && overflow !== "clip" : overflow === "auto" || overflow === "scroll" || overflow === "overlay");
+  for (let el = target instanceof Element ? target : null; el !== null; el = el.parentElement) {
+    const page = el === root;
+    const style = getComputedStyle(el);
+    if (dy !== 0 && along(style.overflowY, page) && (dy < 0 ? el.scrollTop > 0 : el.scrollTop + el.clientHeight < el.scrollHeight - 1)) return true;
+    if (dx !== 0 && along(style.overflowX, page) && (dx < 0 ? el.scrollLeft > 0 : el.scrollLeft + el.clientWidth < el.scrollWidth - 1)) return true;
+  }
+  return false;
 }
 
 /**

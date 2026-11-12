@@ -16,6 +16,35 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
+/**
+ * The view after a wheel turned at (`px`, `py`), the pointer's place in the board's box: Ctrl (or a pinch,
+ * which Chromium reports as Ctrl) zooms about the pointer; else it pans. The board's own wheel and one an
+ * artboard passed up (`dc:wheel`) both go through here.
+ */
+export function wheelView<V extends { x: number; y: number; z: number }>(v: V, px: number, py: number, dx: number, dy: number, ctrl: boolean): V {
+  if (!ctrl) return { ...v, x: v.x - dx, y: v.y - dy };
+  const z = Math.min(4, Math.max(0.05, v.z * Math.exp(-dy * 0.0015)));
+  return { ...v, z, x: px - ((px - v.x) * z) / v.z, y: py - ((py - v.y) * z) / v.z };
+}
+
+/** A place a frame reported in its own pixels, in the window: by where the frame stands, at its scale, now. */
+export function framePoint(frame: HTMLIFrameElement, x: number, y: number): { x: number; y: number } {
+  const box = frame.getBoundingClientRect();
+  const scale = frame.offsetWidth > 0 ? box.width / frame.offsetWidth : 1;
+  return { x: box.left + x * scale, y: box.top + y * scale };
+}
+
+/**
+ * A wheel an artboard passed up (`dc:wheel`: where in its pixels, by how much, Ctrl held), or null. A
+ * wheel over a frame is the frame's document's and never reaches the board's own listener.
+ */
+export function frameWheel(data: unknown): { x: number; y: number; dx: number; dy: number; ctrl: boolean } | null {
+  const d = data as { type?: unknown; x?: unknown; y?: unknown; dx?: unknown; dy?: unknown; ctrl?: unknown } | null;
+  if (d?.type !== "dc:wheel" || typeof d.x !== "number" || typeof d.y !== "number" || typeof d.dx !== "number" || typeof d.dy !== "number") return null;
+  if (![d.x, d.y, d.dx, d.dy].every(Number.isFinite)) return null;
+  return { x: d.x, y: d.y, dx: d.dx, dy: d.dy, ctrl: d.ctrl === true };
+}
+
 /** One artboard's entry in `canvas.json`'s `boards`. */
 export interface CanvasBoardEntry {
   x: number;
@@ -195,6 +224,23 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
         flushSync(() => setView((v) => (v === null ? v : { ...v, x: v.x + p.x - was.x, y: v.y + p.y - was.y })));
         return;
       }
+      const wheel = frameWheel(data);
+      if (wheel !== null) {
+        const el = [...frames.current.values()].find((f) => f.contentWindow === event.source);
+        if (el === undefined) return;
+        // Opened alone: the box around the artboard scrolls; nothing zooms.
+        if (focused !== null) {
+          if (!wheel.ctrl) el.parentElement?.scrollBy(wheel.dx, wheel.dy);
+          return;
+        }
+        const host = box.current;
+        if (host === null) return;
+        const p = framePoint(el, wheel.x, wheel.y);
+        const rect = host.getBoundingClientRect();
+        moved.current = true;
+        setView((v) => (v === null ? v : wheelView(v, p.x - rect.left, p.y - rect.top, wheel.dx, wheel.dy, wheel.ctrl)));
+        return;
+      }
       if (data?.type !== "dc:navigate" || typeof data.href !== "string") return;
       const from = [...frames.current.entries()].find(([, el]) => el.contentWindow === event.source)?.[0];
       const target = data.href.replace(/^\/?project\//, "");
@@ -229,15 +275,8 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
     const onWheel = (e: WheelEvent): void => {
       e.preventDefault();
       moved.current = true;
-      setView((v) => {
-        if (v === null) return v;
-        if (!e.ctrlKey) return { ...v, x: v.x - e.deltaX, y: v.y - e.deltaY };
-        const rect = el.getBoundingClientRect();
-        const px = e.clientX - rect.left;
-        const py = e.clientY - rect.top;
-        const z = Math.min(4, Math.max(0.05, v.z * Math.exp(-e.deltaY * 0.0015)));
-        return { z, x: px - ((px - v.x) * z) / v.z, y: py - ((py - v.y) * z) / v.z };
-      });
+      const rect = el.getBoundingClientRect();
+      setView((v) => (v === null ? v : wheelView(v, e.clientX - rect.left, e.clientY - rect.top, e.deltaX, e.deltaY, e.ctrlKey)));
     };
     el.addEventListener("wheel", onWheel, { passive: false });
     return () => el.removeEventListener("wheel", onWheel);
@@ -367,7 +406,8 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
-        style={{ position: "relative", flex: 1, overflow: "hidden", cursor: drag.current !== null ? "grabbing" : "grab", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: "16px 16px", touchAction: "none" }}
+        // `clip`, not `hidden`: a hidden box can be scrolled (by focus), and the pointer's place read off it is then off.
+        style={{ position: "relative", flex: 1, overflow: "clip", cursor: drag.current !== null ? "grabbing" : "grab", background: "#eceef3", backgroundImage: "radial-gradient(#cfd3de 1px, transparent 1px)", backgroundSize: "16px 16px", touchAction: "none" }}
       >
         {view === null ? null : (
           <div style={{ position: "absolute", left: 0, top: 0, transformOrigin: "0 0", transform: `translate(${view.x}px, ${view.y}px) scale(${view.z})` }}>

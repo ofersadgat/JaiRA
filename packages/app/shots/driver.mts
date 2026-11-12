@@ -662,6 +662,13 @@ export class App {
     await this.send("Input.dispatchMouseEvent", { type, x: at.x, y: at.y, button: "left", clickCount: type === "mouseMoved" ? 0 : 1, buttons: held ? 1 : 0 });
   }
 
+  /** One turn of the wheel at a point, as a mouse turns it; `ctrl` held for a zoom. */
+  async wheel(at: { x: number; y: number }, deltaY: number, ctrl = false, deltaX = 0): Promise<void> {
+    await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: at.x, y: at.y });
+    await this.send("Input.dispatchMouseEvent", { type: "mouseWheel", x: at.x, y: at.y, deltaX, deltaY, modifiers: ctrl ? 2 : 0 });
+    await sleep(100);
+  }
+
   /** Put the pointer somewhere and do not wait: {@link hover} without the pause for a hover card. */
   async pointer(x: number, y: number): Promise<void> {
     await this.send("Input.dispatchMouseEvent", { type: "mouseMoved", x, y });
