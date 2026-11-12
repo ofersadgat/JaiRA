@@ -23,10 +23,10 @@
  * pre-run gate in `beginTaskRun` deliberately stays non-strict, because a state a
  * run never enters never needs its function.
  */
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync, readdirSync, statSync } from "node:fs";
 import { join, relative, resolve, sep } from "node:path";
 import type { FunctionCapabilities } from "@declarative-ai/exec";
-import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle, type LoadedState } from "@declarative-ai/hw";
+import { parseReferencedFile, resolveStateRef, snapshotHash, stateIdFromPath, validateBundle, type LoadedState, type Vfs } from "@declarative-ai/hw";
 import { baseAsProjectPaths, componentConfigIssues, isEventEnabled, isEventName, parseJsonText, type JairaConfig, type JairaPaths } from "@jaira/shared";
 import { approvalRefusalMessage, approveCommandFor } from "@jaira/shared";
 import type { LintIssue, StatePermissionSetIssue, WorkflowBrowser, WorkflowEntry, WorkflowFileEntry, WorkflowLayer, WritableLayer } from "@jaira/shared";
@@ -306,7 +306,8 @@ function tasksOf(project: Project): TaskIndex {
 }
 
 /**
- * The browse itself, over whatever layers it is handed.
+ * The browse itself, over whatever layers it is handed: the lint, kept while nothing it read has
+ * changed (see {@link keptLint}), with the tasks laid over it fresh.
  *
  * Extracted so the projectless case is the SAME code rather than a second, thinner reader that would
  * quietly disagree with this one about what a root is or which issues count.
@@ -317,6 +318,196 @@ function browseLayers(
   searchPath: readonly string[] | undefined,
   tasks: TaskIndex,
   options: BrowseOptions,
+): WorkflowBrowser {
+  return withTasks(keptLint(paths, layers, searchPath, options), tasks);
+}
+
+/**
+ * Which tasks run each workflow, and which of them are pinned to other source — read fresh on every
+ * browse, since a task starts or finishes without any workflow file changing.
+ *
+ * Every array is the caller's own: a kept lint is shared between browses, so what is handed out is
+ * a copy, down to the entries this lays tasks into.
+ */
+function withTasks(lint: WorkflowBrowser, tasks: TaskIndex): WorkflowBrowser {
+  return {
+    ...lint,
+    workflows: lint.workflows.map((workflow) => {
+      const pins = workflow.snapshotHash === undefined ? [] : (tasks.pins.get(workflow.rootId) ?? []);
+      return {
+        ...workflow,
+        taskIds: tasks.byWorkflow.get(workflow.rootId) ?? [],
+        // A task pinned to a different hash is running older source — worth showing, since execution
+        // reads the snapshot and never live `workflows/` (§5.3). A workflow that did not load has no
+        // hash to differ from.
+        driftedTasks: pins.filter((pin) => pin.snapshotHash !== workflow.snapshotHash).map((pin) => pin.taskId),
+      };
+    }),
+    files: [...lint.files],
+    unreachable: [...lint.unreachable],
+    ...(lint.disabled !== undefined ? { disabled: [...lint.disabled] } : {}),
+  };
+}
+
+/**
+ * A lint kept, with everything it read: each file's time and size (or that it was absent), and each
+ * folder's entries.
+ */
+interface KeptLint {
+  lint: WorkflowBrowser;
+  readings: Map<string, string>;
+  /** The module pair the lint resolved functions through (the process's, rebuilt when settings change). */
+  modules: ReturnType<typeof userModules>;
+  approvals: string;
+}
+
+const keptLints = new Map<string, KeptLint>();
+/** Browses kept, the last asked: a few per open project (its own, the shared root's). */
+const KEEP_LINTS = 16;
+/**
+ * A file changed this recently may change again within its clock's tick (whole seconds on some file
+ * systems) without its time moving, so a lint that read one is not kept — git's "racy" rule.
+ */
+const SETTLED_MS = 2000;
+/** More inputs than this (a search path pointing somewhere large) and statting them costs what the lint does: not kept. */
+const MOST_READINGS = 4000;
+
+/**
+ * The lint of a set of layers, kept while nothing it read has changed.
+ *
+ * A browse parses, loads and checks every layer's workflows — 70–120 ms with a person's own (2026-11-06),
+ * and the board, the file tree and a state's view each ask for one, per project, on every change. The
+ * watcher cannot be what says a kept one is stale: it does not watch recursively on Linux, it watches
+ * only the workflows folders, and another process (a CLI's approval) changes what a lint says. So what
+ * was read is read again, cheaply: the folders a lint walks are listed and each file statted, with
+ * every file the loader reached through its file system (a prompt, a type, a guard — in whatever
+ * layer it searched), and the approvals the modules answer by. Any difference, and the lint is done
+ * again. The settings it was handed are its key.
+ *
+ * A registry handed in (`functions`) is nothing this can compare, so such a lint is never kept.
+ */
+function keptLint(
+  paths: JairaPaths,
+  layers: ReadonlyArray<{ dir: string; layer: WorkflowLayer }>,
+  searchPath: readonly string[] | undefined,
+  options: BrowseOptions,
+): WorkflowBrowser {
+  if (options.functions !== undefined) return lintLayers(paths, layers, searchPath, options);
+  const key = JSON.stringify([
+    layers,
+    searchPath ?? null,
+    paths.roots,
+    options.events?.events ?? null,
+    options.standingLayers ?? null,
+  ]);
+  const modules = userModules();
+  const kept = keptLints.get(key);
+  if (kept !== undefined && kept.modules === modules && kept.approvals === approvalsReading(modules) && unchanged(kept.readings)) {
+    keptLints.delete(key);
+    keptLints.set(key, kept);
+    return kept.lint;
+  }
+  keptLints.delete(key);
+  const started = Date.now();
+  const reached = new Set<string>();
+  const lint = lintLayers(paths, layers, searchPath, options, (vfs) => ({
+    list: (dir) => {
+      reached.add(dir);
+      return vfs.list(dir);
+    },
+    read: (file) => {
+      reached.add(file);
+      return vfs.read(file);
+    },
+  }));
+  // What a lint reads without its file system: the state files and scripts along the search path, and
+  // each layer's permission sets.
+  const folders = new Set<string>([
+    ...layers.map((entry) => entry.dir),
+    ...searchPathOf(paths, searchPath),
+    ...paths.roots.map((root) => join(root, "permission-sets")),
+  ]);
+  const readings = new Map<string, string>();
+  let newest = 0;
+  const take = (path: string): number => {
+    const { reading, mtimeMs } = readingOf(path);
+    readings.set(path, reading);
+    newest = Math.max(newest, mtimeMs);
+    return mtimeMs;
+  };
+  const walk = (dir: string): void => {
+    if (readings.has(dir) || readings.size > MOST_READINGS) return;
+    take(dir);
+    let entries;
+    try {
+      entries = readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const entry of entries) {
+      if (entry.name.startsWith(".")) continue;
+      const full = join(dir, entry.name);
+      if (entry.isDirectory()) walk(full);
+      else if (!readings.has(full)) take(full);
+    }
+  };
+  for (const dir of folders) walk(dir);
+  for (const path of reached) if (!readings.has(path)) take(path);
+  if (readings.size <= MOST_READINGS && newest < started - SETTLED_MS) {
+    keptLints.set(key, { lint, readings, modules, approvals: approvalsReading(modules) });
+    while (keptLints.size > KEEP_LINTS) keptLints.delete(keptLints.keys().next().value!);
+  }
+  return lint;
+}
+
+/** The directories a bare state id is searched along, as the loader's options name them. */
+function searchPathOf(paths: JairaPaths, searchPath: readonly string[] | undefined): string[] {
+  const root = workflowLoadOptions(paths, searchPath !== undefined ? { path: searchPath } : {}).defaultRoot;
+  return root === undefined ? [] : typeof root === "string" ? [root] : [...root];
+}
+
+/** A file's time and size, a folder's entries, or that nothing is there — and when it last changed. */
+function readingOf(path: string): { reading: string; mtimeMs: number } {
+  let stat;
+  try {
+    stat = statSync(path);
+  } catch {
+    return { reading: "absent", mtimeMs: 0 };
+  }
+  if (!stat.isDirectory()) return { reading: `${stat.mtimeMs} ${stat.size}`, mtimeMs: stat.mtimeMs };
+  let names: string[];
+  try {
+    names = readdirSync(path).sort();
+  } catch {
+    names = [];
+  }
+  return { reading: `folder ${names.join("\u0000")}`, mtimeMs: stat.mtimeMs };
+}
+
+function unchanged(readings: ReadonlyMap<string, string>): boolean {
+  for (const [path, reading] of readings) if (readingOf(path).reading !== reading) return false;
+  return true;
+}
+
+/** The approvals the modules answer by — another process (the CLI's `approve`) may change them. */
+function approvalsReading(modules: ReturnType<typeof userModules>): string {
+  if (modules === undefined) return "";
+  return JSON.stringify([[...modules.approvals.all()], modules.approvals.unverified()]);
+}
+
+/** Forget every kept lint — for a test that changes what a lint reads behind its back. */
+export function forgetKeptLints(): void {
+  keptLints.clear();
+}
+
+/** The lint itself: every layer read, loaded and checked. Tasks are laid over it by {@link withTasks}. */
+function lintLayers(
+  paths: JairaPaths,
+  layers: ReadonlyArray<{ dir: string; layer: WorkflowLayer }>,
+  searchPath: readonly string[] | undefined,
+  options: BrowseOptions,
+  /** Wraps the loader's file system — how {@link keptLint} learns what a lint read. */
+  watchReads?: (vfs: Vfs) => Vfs,
 ): WorkflowBrowser {
   const byStateId = new Map<string, { file: string; raw: unknown; layer: WorkflowLayer; root: string }>();
   const fileEntries: WorkflowFileEntry[] = [];
@@ -349,7 +540,8 @@ function browseLayers(
   // A child reference is a PATH (WORKFLOWS.md §2.1), so `./critique` and `feature/plan/critique`
   // can name the same state. Roots are derived by "no one references me", which only works if both
   // spellings are reduced to the canonical id first.
-  const refOptions = workflowLoadOptions(paths, { tolerant: true, ...(searchPath !== undefined ? { path: searchPath } : {}) });
+  const loadOptions = workflowLoadOptions(paths, { tolerant: true, ...(searchPath !== undefined ? { path: searchPath } : {}) });
+  const refOptions = watchReads !== undefined && loadOptions.vfs !== undefined ? { ...loadOptions, vfs: watchReads(loadOptions.vfs) } : loadOptions;
   // The winning file per state id, keyed BY id — which is what makes the project's copy of a state
   // the one a bundle loads while the base copy sits inert beside it in the listing.
   const effective: Record<string, unknown> = {};
@@ -390,13 +582,13 @@ function browseLayers(
   const workflows: WorkflowEntry[] = roots.map((rootId) => {
     const source = byStateId.get(rootId);
     const label = labelOf(source?.raw);
-    const taskIds = tasks.byWorkflow.get(rootId) ?? [];
     const base: WorkflowEntry = {
       rootId,
       ...(label !== undefined ? { label } : {}),
       states: [],
       issues: [],
-      taskIds,
+      // Laid in by `withTasks`, fresh on every browse.
+      taskIds: [],
       driftedTasks: [],
       layer: source?.layer ?? "project",
       ...(off.has(rootId) ? { disabled: true as const } : {}),
@@ -532,9 +724,6 @@ function browseLayers(
     // A file that only follows another (decision 0021) says no label of its own: the one it follows does.
     const followedLabel = base.label === undefined ? bundle.states[bundle.rootId]?.label : undefined;
     const hash = snapshotHash(bundle);
-    // A task pinned to a different hash is running older source — worth showing,
-    // since execution reads the snapshot and never live `workflows/` (§5.3).
-    const drifted = (tasks.pins.get(rootId) ?? []).filter((pin) => pin.snapshotHash !== hash).map((p) => p.taskId);
     // A permission set line whose FUNCTION is an unapproved module still loads — lint reports the line — and
     // the file to approve is what that line is about, so it is said here as on a load that failed.
     const withheld = modules !== undefined && watch !== undefined ? withheldApprovalsOf(modules, watch.withheld()) : [];
@@ -544,7 +733,6 @@ function browseLayers(
       states,
       snapshotHash: hash,
       issues,
-      driftedTasks: drifted,
       ...(withheld.length > 0 ? { needsApproval: withheld } : {}),
       ...(speaks !== undefined ? { conversationInput: speaks } : {}),
     };

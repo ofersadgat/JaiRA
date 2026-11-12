@@ -14,11 +14,14 @@
  * the world, so the repository itself is only read.
  * `--profile`: a CPU profile of the window from the load, and of the main process (through its
  * inspector), each summed by function and by file — names need an unminified client.
+ * `--layers-from <dir>`: that shared root's workflows, prompts, functions and permission sets copied into the
+ * world's (times kept) once its tasks have started, so a browse lints what a person's own does — the world's
+ * own are a handful.
  * `--cold`: the app quit and started again over the world, the timeline from its window's first load
  * (the projects reopened by the main process as it starts) — rather than the window loaded again.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync } from "node:fs";
 import { initProject } from "@jaira/persistence";
 import { join } from "node:path";
 import { happyRules, specPlanningFiles, writeWorkflowFiles } from "@jaira/runtime";
@@ -36,6 +39,7 @@ const PROJECTS = Number(arg("--projects") ?? "0");
 const COLD = process.argv.includes("--cold");
 /** CPU profiles of the window and the main process across the load, summed by function (`--profile`). */
 const PROFILE = process.argv.includes("--profile");
+const LAYERS_FROM = ((i) => (i >= 0 ? process.argv[i + 1] : undefined))(process.argv.indexOf("--layers-from"));
 const CLONES = process.argv.flatMap((a, i) => (a === "--clone" && process.argv[i + 1] !== undefined ? [process.argv[i + 1]!] : []));
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
 
@@ -88,6 +92,12 @@ async function main(): Promise<void> {
       const project = projects[i % projects.length]!;
       const made = await desktop.ipc<{ taskId: string }>("task:create", { title, workflow: "feature/plan", inputs: { issue: `# ${title}` }, project });
       await desktop.ipc("task:start", { taskId: made.taskId, fake: i % 4 === 3 ? blockedAtTheGate() : happyRules(), project });
+    }
+    // After the tasks started: a person's own layers may switch off or override the world's workflow.
+    if (LAYERS_FROM !== undefined) {
+      for (const folder of ["workflows", "prompts", "functions", "permission-sets"]) {
+        if (existsSync(join(LAYERS_FROM, folder))) cpSync(join(LAYERS_FROM, folder), join(world.home, folder), { recursive: true, preserveTimestamps: true });
+      }
     }
     await sleep(4000);
     // The Tasks room, where the person saw it.
