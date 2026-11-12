@@ -1,53 +1,44 @@
-import { Fragment, useState, type JSX, type ReactNode } from "react";
+import { useState, type JSX, type ReactNode } from "react";
 import { View, isWeb } from "@tamagui/core";
-import { parentName } from "@jaira/ui/projects";
-import type { SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
-import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, WINDOW_GUTTER, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
+import { layoutPills, type PillCounts } from "@jaira/ui/pillModel";
+import type { SidebarAct, SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
+import { SIDEBAR_RAIL } from "@jaira/ui/uiState";
+import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
 import { usePhone } from "../app/phone";
 import { Pills } from "./Pills";
 
 /**
- * The one left column (SHELL.md §5.1), PROJECTS OVER VIEWS: the title row (the collapse button and the
- * app's name; the window's drag handle on this side), the root rows, the projects — the one the address
- * stands on expanded, its views nested inside it — and the foot, for what belongs to no project. Which
- * project is open is derived from the address, never stored. A row with something to browse IS the
- * accordion for it: its drawer is open exactly while its view is the one selected. A row carries its own
- * verbs as glyphs at its trailing end. Shut, it is a rail of glyphs and not gone, every view being
- * reached from here. How it looks:
+ * The one left column (SHELL.md §5.1), a RAIL beside a PANEL (the sidebar mockups, 2026-11-11: the
+ * person picked "R2 + R3"). The rail is what is GLOBAL: the root rooms (All tasks, All chats), a tile per
+ * project, Open a project, and Settings at its foot — each with its name under it and a badge for the
+ * most urgent thing waiting in it. The panel is the project the address stands on, and nothing else:
+ * its name, and its rooms as tabs (Files, Tasks, Chat) over the chosen one's drawer. With the address at
+ * the root, or Settings open, the panel is that room instead. Which project is open is derived from the
+ * address, never stored. Shut, the panel goes and the rail stays, the open project's rooms as small
+ * icons under its tile. How it looks:
  *
- *   the column           width --sidebar, a --line on its right; its own variables (`TokenScope`);
- *                        ground --panel-2, or --chrome under any named palette
- *   the title row        34 tall, padding 0 8, row, gap 8: the toggle (26 square, 11/12.5 app, -0.05em)
- *                        and the brand (app-label)
- *   the list, the foot   column, gap 1, padding 0 6 6; the foot 6 on top, under a --line
- *   the root rows        5 below, under a --line, 3 more below that
- *   a row                26 tall, row, gap 4, radius 6; hover --fill-ghost-hover, on --tint-accent
- *   its target           flex 1, padding 0 7, gap 8
- *   its glyph            15 wide, centred, 12.5/12.5 app, --dim (--text on the row you are on)
- *   its label            app-label (or app-secondary on "Open a project…"), one line
- *   a verb               20 square, radius 5, 11/12.5 app, --dim at half opacity until its row is
- *                        hovered or on; hover --fill-ghost-selected, on --accent over --tint-accent
- *   the open project     --panel between two --lines, 4 -6 outside, 0 6 4 inside, takes the height
- *   a project's row      padding 0 8 0 0, gap 7; its target 5 0 5 8 (8 0 6 8 when open), gap 7
- *   its dot              7 round, the project's hue
- *   its name             baseline row, gap 6: the name (data-title open, data-secondary shut) and
- *                        where it is (data-faint, right-aligned, yields first)
- *   its views            indented 12, a --rule on the left, 8 inside it, 4 below
- *   a drawer             3 0 6 6 outside, a --line on the left, 8 inside
- *   the twisty           16×20, 9/12.5 app, --dim
- *   a project's ⚙        shown only while the row is hovered (web; a phone has no hover)
- *   palettes             contrast: a 1.5px --rule edge, and the row you are on ringed rather than
- *                        filled; pastel(-rail): that row rounder (9); zinc: that row --panel with a
- *                        --line ring, or #191a1d in the dark
- *   shut (the rail)      rows 34 wide and centred, no labels or pills, project tiles
- *   the rail's views     rows 30 tall (the foot's stay 26)
- *   the Settings panel   over the column: top 34, padding 4 6 6, --panel-2, --lift
+ *   the column           --sidebar wide plus the rail (the panel's width is the pane), a --line on its
+ *                        right; its own variables (`TokenScope`); ground --panel-2, or --chrome under any
+ *                        named palette
+ *   the rail             `SIDEBAR_RAIL` wide, column, centred, gap 4; --panel-3 (classic) with a --line on
+ *                        its right; its head 34 tall (44 on a phone), the window's drag handle
+ *   a rail item          `SIDEBAR_RAIL` - 8 wide, radius 8, padding 6 0 5, column, gap 3: its icon (a
+ *                        34×30 box) or a project's tile (34 square, radius 10), its name under it (app at
+ *                        0.78, --dim; --text and 600 on the one you are on), one line
+ *   a badge              over the item's top right: the most urgent pill's count, filled in its colour
+ *   the panel            flex 1; its head 40 tall (48 on a phone): the name (data-title), where it is
+ *                        (data-faint), the room's verbs (20 square) and ⚙
+ *   the tabs             a track of --panel-3, radius 8, padding 2, margin 0 8 8; a tab 26 tall (34 on a
+ *                        phone), radius 6; the chosen one --panel with a --line ring; a dot in the colour
+ *                        of the most urgent thing in a tab
+ *   the drawer           the rest of the height, padding 0 6 6
  */
-const ROW_PILL_BUDGET = 96;
-const OPEN_PILL_BUDGET = 62;
 const ACT_WIDTH = 20;
+/** The rail's width, `uiState.ts`'s `SIDEBAR_RAIL`. */
+const RAIL = SIDEBAR_RAIL;
+const INK: Record<string, string> = { running: "accent", waiting: "warn", error: "bad", warning: "warn", success: "ok" };
 
 /** A colour the host wrote as CSS (`var(--p1)`), as this platform needs it. */
 export function colorOf(t: Tokens, css: string): string {
@@ -75,16 +66,14 @@ export type SidebarProps = {
   onTheme: (theme: "light" | "dark") => void;
   onChooseProject: (mode: "open" | "init") => void;
   onProjectSettings: (project: SidebarProject) => void;
+  /** What stands over Settings in the rail (`true`), and at the panel's foot (`false`). */
   update?: ((collapsed: boolean) => ReactNode) | undefined;
   /** Paired machines a project can be opened or made on (decision 0013 §8). */
   machines?: ReadonlyArray<{ id: string; label: string; online: boolean }>;
   onBrowse?: (machineId: string, mode: "open" | "init") => void;
-  /** `--sidebar`: the column's width while it is open. */
+  /** `--sidebar`: the panel's width while it is open (the rail is beside it). On a phone, the whole drawer's. */
   width: number;
 };
-
-/** The rail's width, `uiState.ts`'s `SIDEBAR_RAIL`. */
-const RAIL = 46;
 
 export function Sidebar(props: SidebarProps): JSX.Element {
   return (
@@ -92,6 +81,13 @@ export function Sidebar(props: SidebarProps): JSX.Element {
       <Column {...props} />
     </TokenScope>
   );
+}
+
+/** The most urgent of a set of counts, and its colour; `null` when nothing is waiting. */
+function worstOf(counts: PillCounts | undefined): { kind: string; n: number | undefined } | null {
+  if (counts === undefined) return null;
+  const top = layoutPills(counts, 400).fit[0];
+  return top === undefined ? null : { kind: top.kind, n: top.n };
 }
 
 function Column({
@@ -121,337 +117,558 @@ function Column({
   const look = useLook();
   const phone = usePhone();
   const [openMenu, setOpenMenu] = useState<MenuAt | null>(null);
-
-  const rowOf = (v: SidebarView, nested: boolean, scope: "root" | "project" | "any" = "any", mode?: { back?: () => void; expand?: () => void }, inRail = false): JSX.Element => {
-    const inScope = scope === "any" || v.keepsProject === true || (scope === "root") === (at === null);
-    const here = view === v.id && inScope;
-    const drawer = v.panel !== undefined && (here || mode?.back !== undefined) && !collapsed;
-    const acts = collapsed ? [] : (v.acts ?? []);
-    const go = (): void => {
-      if (mode?.back !== undefined) return mode.back();
-      mode?.expand?.();
-      if (scope === "root" && at !== null && v.keepsProject !== true) onProject(null);
-      onView(v.id);
-    };
-    return (
-      <Fragment key={v.id}>
-        <Row on={here} rail={collapsed} tall={inRail}>
-          {(hovered) => (
-            <>
-              {mode?.back !== undefined ? (
-                <Press onPress={mode.back} label="Back" title="back to where you were" width={20} height={20} marginLeft={4} alignItems="center" justifyContent="center" borderRadius={5} box={({ hovered: h }) => ({ backgroundColor: h ? t.v("fill-ghost-selected") : "transparent" })}>
-                  {({ hovered: h }) => (
-                    <Glyph scale={16 / 12.5} color={h ? "text" : "dim"} lineHeight={Number(t.scaled("size-app", 16 / 12.5)) || undefined}>
-                      ‹
-                    </Glyph>
-                  )}
-                </Press>
-              ) : null}
-              <Press
-                onPress={go}
-                label={v.label}
-                title={v.label}
-                {...((here ? { "aria-current": "page" } : {}) as object)}
-                flex={1}
-                minWidth={0}
-                alignSelf="stretch"
-                flexDirection="row"
-                alignItems="center"
-                gap={8}
-                paddingLeft={collapsed ? 0 : mode?.back !== undefined ? 3 : 7}
-                paddingRight={collapsed ? 0 : 7}
-                justifyContent={collapsed ? "center" : "flex-start"}
-                borderRadius={6}
-              >
-                <Glyph width={15} color={here ? "text" : "dim"}>
-                  {v.glyph}
-                </Glyph>
-                {collapsed ? null : (
-                  <Txt register="app-label" ellip flex={1} minWidth={0} color={(here ? t.v("text") : t.v("dim")) as never}>
-                    {v.label}
-                  </Txt>
-                )}
-              </Press>
-              {acts.map((act) => (
-                <Press
-                  key={act.id}
-                  // The button itself, for a verb that opens a menu under it (`SidebarAct.onAct`): on web the
-                  // press event's element; a phone has none, and the menu takes its own place.
-                  onPress={(e) => act.onAct((isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget : undefined) as never)}
-                  label={act.label}
-                  title={act.label}
-                  {...((act.on !== undefined ? { "aria-pressed": act.on } : {}) as object)}
-                  width={20}
-                  height={20}
-                  flexShrink={0}
-                  alignItems="center"
-                  justifyContent="center"
-                  borderRadius={5}
-                  opacity={hovered || here || act.on === true ? 1 : 0.5}
-                  box={({ hovered: h }) => ({ backgroundColor: act.on === true ? t.v("tint-accent") : h ? t.v("fill-ghost-selected") : "transparent" })}
-                >
-                  {({ hovered: h }) => <Glyph scale={11 / 12.5} color={act.on === true ? "accent" : h ? "text" : "dim"}>{act.glyph}</Glyph>}
-                </Press>
-              ))}
-              {v.counts !== undefined && !collapsed ? (
-                <Pills counts={v.counts} budget={ROW_PILL_BUDGET - acts.length * ACT_WIDTH} onClear={v.onSeen === undefined ? undefined : (from) => v.onSeen!(from as never)} {...(v.seenTitle !== undefined ? { clearTitle: v.seenTitle } : {})} />
-              ) : null}
-            </>
-          )}
-        </Row>
-        {drawer ? (
-          <View
-            flexDirection="column"
-            // In the Settings panel the drawer is as tall as its list and scrolls past that (`flex: 0 1 auto`);
-            // in the column it takes the rest — `flex: 1`, whose 0% basis CSS reads as the content in a
-            // section of no set height; Yoga's 0 would collapse the root's drawer to nothing, so the basis
-            // is said as what CSS makes of it.
-            {...(mode?.back !== undefined ? { flexGrow: 0, flexShrink: 1, flexBasis: "auto", ...(isWeb ? { overflowY: "auto", overflowX: "hidden", ...viewScrollbarProps(t) } : { overflow: "hidden" }) } : { flexGrow: 1, flexShrink: 1, flexBasis: "auto" })}
-            minHeight={0}
-            marginTop={3}
-            marginBottom={6}
-            marginLeft={6}
-            paddingLeft={8}
-            {...(edge(t, { left: 1 }) as object)}
-          >
-            {v.panel}
-          </View>
-        ) : null}
-      </Fragment>
-    );
+  const named = look.palette !== "classic";
+  const ground = named ? t.v("chrome") : t.v("panel-2");
+  const settingsOpen = view === settings.id || footer.some((row) => row.id === view);
+  const project = at === null ? null : (projects.find((p) => p.project === at) ?? null);
+  const rootOn = (v: SidebarView): boolean => view === v.id && (v.keepsProject === true || at === null);
+  const goRoot = (v: SidebarView): void => {
+    if (at !== null && v.keepsProject !== true) onProject(null);
+    onView(v.id);
   };
+  const goProject = (p: SidebarProject): void => {
+    if (settingsOpen) onLeaveSettings();
+    onProject(p.project);
+  };
+  // On a phone the drawer's width is the whole column; on the desktop the pane is the panel's alone.
+  const panelWidth = phone ? Math.max(0, width - RAIL) : width;
 
-  const projectRow = (p: SidebarProject): JSX.Element => {
-    const open = p.project === at;
-    return (
-      <View
-        key={p.project}
-        {...(open
-          ? {
-              backgroundColor: t.v("panel") as never,
-              ...edge(t, { top: 1, bottom: 1 }),
-              marginVertical: 4,
-              marginHorizontal: -6,
-              paddingTop: 0,
-              paddingHorizontal: 6,
-              paddingBottom: 4,
-              flex: 1,
-              minHeight: 0,
-            }
-          : { flexShrink: 0 })}
-      >
-        <ProjectRow p={p} open={open} onProject={onProject} onProjectSettings={onProjectSettings} />
-        {open ? (
-          <View flex={1} minHeight={0} gap={1} marginLeft={12} paddingLeft={8} paddingBottom={4} {...(edge(t, { left: 1 }, "rule") as object)}>
-            {views.map((v) => rowOf(v, true, "project"))}
-          </View>
-        ) : null}
-      </View>
-    );
+  const openProjectMenu = (e: unknown): void => {
+    const box = isWeb ? (e as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
+    const touch = (e as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
+    setOpenMenu({
+      x: box !== undefined ? box.right + 4 : (touch?.pageX ?? 0),
+      y: box?.top ?? touch?.pageY ?? 0,
+      items: [
+        { label: "Open project…", onSelect: () => onChooseProject("open") },
+        { label: "New project…", onSelect: () => onChooseProject("init") },
+        ...machines.flatMap((m, i) => [
+          {
+            label: `Open project on ${m.label}…`,
+            ...(i === 0 ? { separator: true } : {}),
+            disabled: !m.online,
+            ...(m.online ? {} : { note: "offline" }),
+            onSelect: () => onBrowse?.(m.id, "open" as const),
+          },
+          { label: `New project on ${m.label}…`, disabled: !m.online, onSelect: () => onBrowse?.(m.id, "init" as const) },
+        ]),
+      ],
+    });
   };
 
   const themeRow = (
-    <Press
-      onPress={() => onTheme(theme === "dark" ? "light" : "dark")}
-      label="Toggle theme"
+    <ListRow
+      on={false}
+      glyph={theme === "dark" ? "☀" : "☾"}
+      label={theme === "dark" ? "Light" : "Dark"}
       title={theme === "dark" ? "switch to light" : "switch to dark"}
-      width={collapsed ? 34 : "100%"}
-      height={26}
-      flexShrink={0}
-      flexDirection="row"
-      alignItems="center"
-      justifyContent={collapsed ? "center" : "flex-start"}
-      gap={8}
-      paddingHorizontal={collapsed ? 0 : 7}
-      borderRadius={6}
-      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
-    >
-      <Glyph width={15}>{theme === "dark" ? "☀" : "☾"}</Glyph>
-      {collapsed ? null : (
-        <Txt register="app-label" ellip flex={1} minWidth={0}>
-          {theme === "dark" ? "Light" : "Dark"}
-        </Txt>
-      )}
-    </Press>
+      onPress={() => onTheme(theme === "dark" ? "light" : "dark")}
+    />
   );
 
-  const settingsPanel = !collapsed && (view === settings.id || footer.some((row) => row.id === view));
-  const named = look.palette !== "classic";
+  // The room the panel shows: Settings; a root room (the address at the root, or a room that keeps
+  // the project, a phone's Inbox); else the open project.
+  const room = roots.find(rootOn);
+  const panel = settingsOpen ? (
+    <SettingsPane settings={settings} footer={footer} view={view} onView={onView} onLeave={onLeaveSettings} themeRow={themeRow} />
+  ) : project !== null && (room === undefined || room.keepsProject !== true) ? (
+    <ProjectPane project={project} views={views} view={view} onView={onView} onSettings={() => onProjectSettings(project)} />
+  ) : (
+    <RootPane room={room ?? roots.find((v) => v.id === view) ?? roots[0]} />
+  );
 
   return (
     <View
       {...(landmark("navigation") as object)}
-      width={collapsed ? RAIL : width}
+      width={collapsed ? RAIL : RAIL + panelWidth}
       flexShrink={0}
-      flexDirection="column"
+      flexDirection="row"
       minHeight={0}
-      backgroundColor={(named ? t.v("chrome") : t.v("panel-2")) as never}
+      backgroundColor={ground as never}
       {...(edge(t, { right: look.palette === "contrast" ? 1.5 : 1 }, look.palette === "contrast" ? "rule" : "line") as object)}
       overflow="hidden"
       position="relative"
     >
-      {/* The title row is the window's drag handle on the desktop (`DRAG_REGION`), inset on the left by what
-          the OS has put there (macOS's traffic lights); its button opts out again (`NO_DRAG`). */}
       <View
-        flexDirection="row"
-        alignItems="center"
-        justifyContent={collapsed ? "center" : "flex-start"}
-        gap={8}
+        width={RAIL}
         flexShrink={0}
-        height={phone ? 44 : 34}
-        paddingHorizontal={collapsed ? 4 : 8}
-        {...(collapsed ? {} : { paddingLeft: WINDOW_GUTTER.left(8) as never })}
-        style={DRAG_REGION as never}
+        flexDirection="column"
+        alignItems="center"
+        minHeight={0}
+        backgroundColor={(named ? t.v("chrome") : t.v("panel-3")) as never}
+        {...((collapsed ? {} : edge(t, { right: 1 })) as object)}
       >
-        <Press
-          onPress={() => onCollapsed(!collapsed)}
-          label={collapsed ? "Show the sidebar" : "Hide the sidebar"}
-          title={collapsed ? "show the sidebar" : "hide the sidebar"}
-          {...({ "aria-expanded": !collapsed } as object)}
-          style={NO_DRAG}
-          width={26}
-          height={26}
-          flexShrink={0}
-          alignItems="center"
-          justifyContent="center"
-          borderRadius={6}
-          box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
-        >
-          {({ hovered }) => (
-            <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: -0.05, color: hovered ? "text" : "dim" }} whiteSpace="nowrap">
-              {collapsed ? "▸|" : "|◂"}
-            </Txt>
-          )}
-        </Press>
-        {collapsed ? null : (
-          <Txt register="app-label" flexShrink={0}>
-            JAIRA
-          </Txt>
-        )}
-      </View>
-
-      {collapsed ? (
-        <View flexDirection="column" alignItems="center" flex={1} minHeight={0} paddingBottom={6}>
-          <View flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
-            {roots.map((v) => rowOf(v, false, "root", undefined, true))}
-          </View>
-          <RailSplit />
-          <View flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
-            {projects.map((p) => (
-              <RailTile key={p.project} p={p} on={p.project === at} onPress={() => onProject(p.project === at ? null : p.project)} />
-            ))}
-          </View>
-          {at !== null && views.length > 0 ? (
-            <>
-              <RailSplit />
-              <View flexDirection="column" alignItems="center" gap={1} flexShrink={0}>
-                {views.map((v) => rowOf(v, false, "any", undefined, true))}
-              </View>
-            </>
-          ) : null}
-        </View>
-      ) : (
-        <View flexDirection="column" gap={1} paddingHorizontal={6} paddingBottom={6} minHeight={0} flex={1}>
-          <View flexDirection="column" gap={1} flexShrink={0} paddingBottom={5} marginBottom={3} {...(edge(t, { bottom: 1 }) as object)}>
-            {roots.map((v) => rowOf(v, false, "root"))}
-          </View>
-          {projects.map(projectRow)}
+        {/* The rail's head is the window's drag handle on the desktop (`DRAG_REGION`); its button opts out. */}
+        <View height={phone ? 44 : 34} alignSelf="stretch" flexShrink={0} alignItems="center" justifyContent="center" style={DRAG_REGION as never}>
           <Press
-            // Open another: a menu under the row — open or make a project here, or on a paired machine.
-            onPress={(e) => {
-              const box = isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
-              const touch = (e as unknown as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
-              setOpenMenu({
-                x: box?.left ?? touch?.pageX ?? 0,
-                y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0),
-                items: [
-                  { label: "Open project…", onSelect: () => onChooseProject("open") },
-                  { label: "New project…", onSelect: () => onChooseProject("init") },
-                  ...machines.flatMap((m, i) => [
-                    {
-                      label: `Open project on ${m.label}…`,
-                      ...(i === 0 ? { separator: true } : {}),
-                      disabled: !m.online,
-                      ...(m.online ? {} : { note: "offline" }),
-                      onSelect: () => onBrowse?.(m.id, "open" as const),
-                    },
-                    { label: `New project on ${m.label}…`, disabled: !m.online, onSelect: () => onBrowse?.(m.id, "init" as const) },
-                  ]),
-                ],
-              });
-            }}
-            disabled={busy}
-            label="open another project"
-            title="open another project"
-            {...({ "aria-haspopup": "menu" } as object)}
-            width="100%"
-            height={phone ? 40 : 26}
-            flexShrink={0}
-            flexDirection="row"
+            onPress={() => onCollapsed(!collapsed)}
+            label={collapsed ? "Show the sidebar" : "Hide the sidebar"}
+            title={collapsed ? "show the sidebar" : "hide the sidebar"}
+            {...({ "aria-expanded": !collapsed } as object)}
+            style={NO_DRAG}
+            width={26}
+            height={26}
             alignItems="center"
-            gap={8}
-            paddingHorizontal={7}
+            justifyContent="center"
             borderRadius={6}
             box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
           >
-            <Glyph width={15}>+</Glyph>
-            <Txt register="app-secondary" ellip flex={1} minWidth={0}>
-              Open a project…
-            </Txt>
+            {({ hovered }) => (
+              <Txt spec={{ voice: "app", scale: 11 / 12.5, ls: -0.05, color: hovered ? "text" : "dim" }} whiteSpace="nowrap">
+                {collapsed ? "▸|" : "|◂"}
+              </Txt>
+            )}
           </Press>
         </View>
-      )}
-
-      <View
-        flexDirection="column"
-        gap={1}
-        paddingTop={6}
-        paddingHorizontal={collapsed ? 0 : 6}
-        paddingBottom={6}
-        minHeight={0}
-        flexShrink={0}
-        {...(edge(t, { top: 1 }) as object)}
-        {...(collapsed ? { alignItems: "center" } : {})}
-      >
-        {collapsed ? footer.map((v) => rowOf(v, false)) : null}
-        {collapsed ? themeRow : null}
-        {settingsPanel ? null : update?.(collapsed)}
-        {settingsPanel ? null : rowOf(settings, false, "any", collapsed ? { expand: () => onCollapsed(false) } : undefined)}
-      </View>
-
-      {settingsPanel ? (
         <View
-          position="absolute"
-          left={0}
-          right={0}
-          top={34}
-          bottom={0}
-          zIndex={5}
-          flexDirection="column"
+          flex={1}
           minHeight={0}
-          paddingTop={4}
-          paddingHorizontal={6}
+          alignSelf="stretch"
+          alignItems="center"
+          gap={4}
           paddingBottom={6}
-          gap={1}
-          backgroundColor={t.v("panel-2") as never}
-          {...({ boxShadow: t.v("lift") } as object)}
+          {...((isWeb ? { overflowY: "auto", overflowX: "hidden", ...viewScrollbarProps(t) } : { overflow: "hidden" }) as object)}
         >
-          {rowOf(settings, false, "any", { back: onLeaveSettings })}
-          <View flexDirection="column" gap={1} flexShrink={0} marginTop="auto" paddingTop={6} {...(edge(t, { top: 1 }) as object)}>
-            {footer.map((v) => rowOf(v, false))}
-            {themeRow}
-          </View>
+          {roots.map((v) => (
+            <RailItem key={v.id} on={rootOn(v) && !settingsOpen} label={v.label} caption={v.short ?? v.label} counts={v.counts} onPress={() => goRoot(v)}>
+              {(on) => <RailIcon on={on} glyph={v.glyph} />}
+            </RailItem>
+          ))}
+          <View width={28} height={1} flexShrink={0} marginVertical={3} backgroundColor={t.v("line") as never} />
+          {projects.map((p) => {
+            const on = p.project === at;
+            return (
+              <View key={p.project} alignItems="center" gap={2} flexShrink={0}>
+                <RailItem on={on && !settingsOpen && room === undefined} label={p.label} caption={p.label} counts={p.counts} title={p.project} onPress={() => goProject(p)}>
+                  {() => <ProjectTile p={p} on={on} />}
+                </RailItem>
+                {collapsed && on
+                  ? views.map((v) => (
+                      <ViewIcon key={v.id} v={v} on={view === v.id && room === undefined && !settingsOpen} onPress={() => onView(v.id)} />
+                    ))
+                  : null}
+              </View>
+            );
+          })}
+          <RailItem on={false} label="open another project" caption="Open" onPress={openProjectMenu} disabled={busy} haspopup>
+            {() => (
+              <View width={34} height={34} borderRadius={10} alignItems="center" justifyContent="center" {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, "line", "dashed") as object)}>
+                <Glyph scale={16 / 12.5}>+</Glyph>
+              </View>
+            )}
+          </RailItem>
         </View>
-      ) : null}
+        <View alignSelf="stretch" alignItems="center" gap={4} flexShrink={0} paddingTop={6} paddingBottom={8} {...(edge(t, { top: 1 }) as object)}>
+          {collapsed
+            ? footer.map((v) => (
+                <RailItem key={v.id} on={view === v.id} label={v.label} caption={v.label} counts={v.counts} onPress={() => onView(v.id)}>
+                  {(on) => <RailIcon on={on} glyph={v.glyph} />}
+                </RailItem>
+              ))
+            : null}
+          {update?.(true)}
+          <RailItem
+            on={view === settings.id}
+            label={settings.label}
+            caption={settings.label}
+            counts={settings.counts}
+            onPress={() => {
+              if (collapsed) onCollapsed(false);
+              onView(settings.id);
+            }}
+          >
+            {(on) => <RailIcon on={on} glyph={settings.glyph} />}
+          </RailItem>
+        </View>
+      </View>
+      {collapsed ? null : (
+        <View flex={1} minWidth={0} minHeight={0} flexDirection="column">
+          {panel}
+          {update?.(false)}
+        </View>
+      )}
       {openMenu !== null ? <ContextMenu anchor={openMenu} onClose={() => setOpenMenu(null)} /> : null}
     </View>
   );
 }
 
-/** A row: the ground that says hovered or on, around the row's target and its verbs. */
-function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean; tall?: boolean; children: (hovered: boolean) => ReactNode }): JSX.Element {
+/** A rail item: its icon or tile, its name under it, and a badge for what is waiting in it. */
+function RailItem({
+  on,
+  label,
+  caption,
+  counts,
+  title,
+  onPress,
+  disabled,
+  haspopup = false,
+  children,
+}: {
+  on: boolean;
+  label: string;
+  caption: string;
+  counts?: PillCounts | undefined;
+  title?: string;
+  onPress: (e: unknown) => void;
+  disabled?: boolean;
+  haspopup?: boolean;
+  children: (on: boolean) => ReactNode;
+}): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      onPress={onPress}
+      label={label}
+      title={title ?? label}
+      {...((on ? { "aria-current": "page" } : {}) as object)}
+      {...((haspopup ? { "aria-haspopup": "menu" } : {}) as object)}
+      {...(disabled !== undefined ? { disabled } : {})}
+      width={RAIL - 8}
+      flexShrink={0}
+      position="relative"
+      alignItems="center"
+      gap={3}
+      paddingTop={6}
+      paddingBottom={5}
+      borderRadius={8}
+      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}
+    >
+      {children(on)}
+      <Txt spec={{ voice: "app", scale: 0.78, weight: on ? 600 : 500, color: on ? "text" : "dim", lineHeight: 1.15 }} ellip maxWidth={RAIL - 12} textAlign="center">
+        {caption}
+      </Txt>
+      <Badge counts={counts} />
+    </Press>
+  );
+}
+
+/** A root room's icon, ringed while it is the room you are in. */
+function RailIcon({ on, glyph }: { on: boolean; glyph: string }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View width={34} height={30} borderRadius={8} alignItems="center" justifyContent="center" backgroundColor={(on ? t.v("tint-accent") : "transparent") as never}>
+      <Glyph scale={15 / 12.5} color={on ? "accent" : "dim"}>
+        {glyph}
+      </Glyph>
+    </View>
+  );
+}
+
+/** A project in the rail: two letters of its name on a tile, in its hue when the address is on it. */
+function ProjectTile({ p, on }: { p: SidebarProject; on: boolean }): JSX.Element {
+  const t = useTokens();
+  const hue = colorOf(t, p.hue);
+  return (
+    <View
+      width={34}
+      height={34}
+      borderRadius={10}
+      alignItems="center"
+      justifyContent="center"
+      {...(edge(t, { top: on ? 1.5 : 1, right: on ? 1.5 : 1, bottom: on ? 1.5 : 1, left: on ? 1.5 : 1 }, on ? hue : "line") as object)}
+      backgroundColor={(on ? t.mix(hue, 22, "transparent") : t.v("panel")) as never}
+    >
+      <Txt spec={{ voice: "data", scale: 0.875, weight: 600, color: on ? "text" : "dim" }}>{p.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}</Txt>
+    </View>
+  );
+}
+
+/** One of the open project's rooms, under its tile while the panel is shut. */
+function ViewIcon({ v, on, onPress }: { v: SidebarView; on: boolean; onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  const worst = worstOf(v.counts);
+  return (
+    <Press
+      onPress={onPress}
+      label={v.label}
+      title={v.label}
+      {...((on ? { "aria-current": "page" } : {}) as object)}
+      width={40}
+      height={26}
+      flexShrink={0}
+      position="relative"
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={6}
+      box={({ hovered }) => ({ backgroundColor: on ? t.v("panel") : hovered ? t.v("fill-ghost-hover") : "transparent", ...(on ? edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) : {}) })}
+    >
+      <Glyph scale={12 / 12.5} color={on ? "text" : "dim"}>
+        {v.glyph}
+      </Glyph>
+      {worst !== null ? <View position="absolute" top={3} right={8} width={6} height={6} borderRadius={999} backgroundColor={t.v(INK[worst.kind] ?? "dim") as never} /> : null}
+    </Press>
+  );
+}
+
+/** The most urgent thing waiting in a rail item, as a count in its colour over the item's top right. */
+function Badge({ counts }: { counts: PillCounts | undefined }): JSX.Element | null {
+  const t = useTokens();
+  const worst = worstOf(counts);
+  if (worst === null) return null;
+  return (
+    <View
+      position="absolute"
+      top={1}
+      right={6}
+      minWidth={16}
+      height={16}
+      paddingHorizontal={4}
+      borderRadius={8}
+      alignItems="center"
+      justifyContent="center"
+      backgroundColor={t.v(INK[worst.kind] ?? "dim") as never}
+      pointerEvents="none"
+      {...((isWeb ? { title: `${worst.n ?? ""} ${worst.kind}`.trim() } : {}) as object)}
+    >
+      <Txt spec={{ voice: "data", scale: 0.7, weight: 700, color: "panel", lineHeight: { px: 12 }, tabular: true }}>{worst.n !== undefined ? String(worst.n) : "•"}</Txt>
+    </View>
+  );
+}
+
+/** The panel's head: a name, what goes beside it, and the room's verbs. */
+function PaneHead({ children, acts = [] }: { children: ReactNode; acts?: readonly SidebarAct[] }): JSX.Element {
+  const phone = usePhone();
+  return (
+    <View flexDirection="row" alignItems="center" gap={4} flexShrink={0} height={phone ? 48 : 40} paddingLeft={12} paddingRight={8} style={DRAG_REGION as never}>
+      <View flex={1} minWidth={0} flexDirection="row" alignItems="baseline" gap={6}>
+        {children}
+      </View>
+      <View flexDirection="row" alignItems="center" gap={2} style={NO_DRAG as never}>
+        {acts.map((act) => (
+          <ActButton key={act.id} act={act} />
+        ))}
+      </View>
+    </View>
+  );
+}
+
+function ActButton({ act }: { act: SidebarAct }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      // The button itself, for a verb that opens a menu under it (`SidebarAct.onAct`): on web the press
+      // event's element; a phone has none, and the menu takes its own place.
+      onPress={(e) => act.onAct((isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget : undefined) as never)}
+      label={act.label}
+      title={act.label}
+      {...((act.on !== undefined ? { "aria-pressed": act.on } : {}) as object)}
+      width={ACT_WIDTH + 4}
+      height={ACT_WIDTH + 4}
+      flexShrink={0}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={5}
+      box={({ hovered }) => ({ backgroundColor: act.on === true ? t.v("tint-accent") : hovered ? t.v("fill-ghost-selected") : "transparent" })}
+    >
+      {({ hovered }) => <Glyph scale={12 / 12.5} color={act.on === true ? "accent" : hovered ? "text" : "dim"}>{act.glyph}</Glyph>}
+    </Press>
+  );
+}
+
+/** What fills the panel below its head: a drawer, its own scroller or not. */
+function Drawer({ children, scrolls = false }: { children: ReactNode; scrolls?: boolean }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View
+      flexDirection="column"
+      // `flex: 1` with its basis said as CSS reads it: Yoga's 0 would collapse a drawer to nothing.
+      flexGrow={1}
+      flexShrink={1}
+      flexBasis="auto"
+      minHeight={0}
+      paddingHorizontal={6}
+      paddingBottom={6}
+      {...((scrolls ? (isWeb ? { overflowY: "auto", overflowX: "hidden", ...viewScrollbarProps(t) } : { overflow: "hidden" }) : {}) as object)}
+    >
+      {children}
+    </View>
+  );
+}
+
+/** The open project: its name, its rooms as tabs, and the chosen room's drawer. */
+function ProjectPane({
+  project,
+  views,
+  view,
+  onView,
+  onSettings,
+}: {
+  project: SidebarProject;
+  views: readonly SidebarView[];
+  view: string;
+  onView: (id: string) => void;
+  onSettings: () => void;
+}): JSX.Element {
+  const t = useTokens();
+  const phone = usePhone();
+  const current = views.find((v) => v.id === view) ?? views.find((v) => v.id === "chat") ?? views[0];
+  // Only a grouped project's machines and workspaces: the folder it sits in cut the name short, and its
+  // tooltip says the whole path.
+  const where = project.where;
+  const settingsAct: SidebarAct = { id: "project-settings", glyph: "⚙", label: `${project.label}'s settings`, onAct: onSettings };
+  return (
+    <>
+      <PaneHead acts={[...(current?.acts ?? []), settingsAct]}>
+        <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...({ title: project.project } as object)}>
+          {project.label}
+        </Txt>
+        {where !== undefined && where !== "" ? (
+          <Txt register="data-faint" ellip flexShrink={2} minWidth={0}>
+            {where}
+          </Txt>
+        ) : null}
+      </PaneHead>
+      <View {...(isWeb ? { role: "tablist" } : {})} flexDirection="row" gap={2} padding={2} marginHorizontal={8} marginBottom={8} borderRadius={8} flexShrink={0} backgroundColor={t.v("panel-3") as never}>
+        {views.map((v) => {
+          const on = v.id === current?.id;
+          const worst = worstOf(v.counts);
+          return (
+            <Press
+              key={v.id}
+              role="tab"
+              {...({ "aria-selected": on } as object)}
+              onPress={() => onView(v.id)}
+              label={v.label}
+              flex={1}
+              height={phone ? 34 : 26}
+              flexDirection="row"
+              alignItems="center"
+              justifyContent="center"
+              gap={5}
+              borderRadius={6}
+              box={({ hovered }) => ({
+                backgroundColor: on ? t.v("panel") : hovered ? t.v("fill-ghost-hover") : "transparent",
+                ...(on ? edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) : {}),
+              })}
+            >
+              <Txt spec={{ voice: "app", scale: 0.92, weight: on ? 600 : 500, color: on ? "text" : "dim" }} whiteSpace="nowrap">
+                {v.label}
+              </Txt>
+              {worst !== null ? <View width={6} height={6} borderRadius={999} backgroundColor={t.v(INK[worst.kind] ?? "dim") as never} /> : null}
+            </Press>
+          );
+        })}
+      </View>
+      {current?.panel !== undefined ? (
+        <Drawer>{current.panel}</Drawer>
+      ) : (
+        <Drawer>
+          <Summary counts={current?.counts} onSeen={current?.onSeen} words="This project's board is open beside the sidebar." />
+        </Drawer>
+      )}
+    </>
+  );
+}
+
+/** A room at the root of the address (All tasks, All chats, a phone's Inbox): its name and its drawer. */
+function RootPane({ room }: { room: SidebarView | undefined }): JSX.Element {
+  return (
+    <>
+      <PaneHead acts={room?.acts ?? []}>
+        <Txt register="app-title" ellip flexShrink={1} minWidth={0}>
+          {room?.label ?? ""}
+        </Txt>
+      </PaneHead>
+      {room?.panel !== undefined ? (
+        <Drawer>{room.panel}</Drawer>
+      ) : (
+        <Drawer>
+          <Summary counts={room?.counts} onSeen={room?.onSeen} words="Every project's board is open beside the sidebar." />
+        </Drawer>
+      )}
+    </>
+  );
+}
+
+/** A room with no drawer: what is waiting in it, and where its content is. */
+function Summary({ counts, onSeen, words }: { counts: PillCounts | undefined; onSeen: SidebarView["onSeen"]; words: string }): JSX.Element {
+  return (
+    <View paddingHorizontal={6} paddingTop={4} gap={8}>
+      {counts !== undefined ? <Pills counts={counts} budget={240} onClear={onSeen === undefined ? undefined : (from) => onSeen(from as never)} /> : null}
+      <Txt register="app-secondary">{words}</Txt>
+    </View>
+  );
+}
+
+/** Settings: its sections, and the rooms that live inside it (Logs, Debug, Components) at its foot. */
+function SettingsPane({
+  settings,
+  footer,
+  view,
+  onView,
+  onLeave,
+  themeRow,
+}: {
+  settings: SidebarView;
+  footer: readonly SidebarView[];
+  view: string;
+  onView: (id: string) => void;
+  onLeave: () => void;
+  themeRow: ReactNode;
+}): JSX.Element {
+  const t = useTokens();
+  return (
+    <>
+      <View flexDirection="row" alignItems="center" gap={6} flexShrink={0} height={40} paddingHorizontal={8} style={DRAG_REGION as never}>
+        <Press
+          onPress={onLeave}
+          label="Back"
+          title="back to where you were"
+          style={NO_DRAG}
+          width={24}
+          height={24}
+          alignItems="center"
+          justifyContent="center"
+          borderRadius={5}
+          box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-selected") : "transparent" })}
+        >
+          {({ hovered }) => <Glyph scale={16 / 12.5} color={hovered ? "text" : "dim"}>‹</Glyph>}
+        </Press>
+        <Txt register="app-title" ellip flex={1} minWidth={0}>
+          {settings.label}
+        </Txt>
+        {settings.counts !== undefined ? (
+          <View style={NO_DRAG as never}>
+            <Pills counts={settings.counts} budget={90} onClear={settings.onSeen === undefined ? undefined : (from) => settings.onSeen!(from as never)} {...(settings.seenTitle !== undefined ? { clearTitle: settings.seenTitle } : {})} />
+          </View>
+        ) : null}
+      </View>
+      <View flexGrow={0} flexShrink={1} flexBasis="auto" minHeight={0} paddingHorizontal={6} {...((isWeb ? { overflowY: "auto", overflowX: "hidden", ...viewScrollbarProps(t) } : { overflow: "hidden" }) as object)}>
+        {settings.panel}
+      </View>
+      <View flexDirection="column" gap={1} flexShrink={0} marginTop="auto" paddingTop={6} paddingHorizontal={6} paddingBottom={6} {...(edge(t, { top: 1 }) as object)}>
+        {footer.map((v) => (
+          <ListRow key={v.id} on={view === v.id} glyph={v.glyph} label={v.label} counts={v.counts} onSeen={v.onSeen} seenTitle={v.seenTitle} onPress={() => onView(v.id)} />
+        ))}
+        {themeRow}
+      </View>
+    </>
+  );
+}
+
+/** A plain row of the panel (Settings' foot): its glyph, its name, its pills. */
+function ListRow({
+  on,
+  glyph,
+  label,
+  title,
+  counts,
+  onSeen,
+  seenTitle,
+  onPress,
+}: {
+  on: boolean;
+  glyph: string;
+  label: string;
+  title?: string;
+  counts?: PillCounts | undefined;
+  onSeen?: SidebarView["onSeen"];
+  seenTitle?: string | undefined;
+  onPress: () => void;
+}): JSX.Element {
   const t = useTokens();
   const look = useLook();
+  const phone = usePhone();
   const [hovered, hover] = useHover();
   // The row you are on, as each palette draws it.
   const onStyle: Record<string, unknown> =
@@ -462,126 +679,40 @@ function Row({ on, rail, tall = false, children }: { on: boolean; rail: boolean;
           ? { backgroundColor: "#191a1d" }
           : { backgroundColor: t.v("panel"), boxShadow: `0 0 0 1px ${String(t.v("line"))}` }
         : { backgroundColor: t.v("tint-accent") };
-  const radius = on && (look.palette === "pastel" || look.palette === "pastel-rail") ? 9 : 6;
-  // A phone's drawer: rows a finger can hit.
-  const phone = usePhone();
   return (
     <View
       {...(hover as object)}
       flexDirection="row"
       alignItems="center"
-      justifyContent={rail ? "center" : "flex-start"}
       gap={4}
-      width={rail ? 34 : "100%"}
-      // 30 tall in the rail's lists of views; 26 everywhere else; 40 in a phone's drawer.
-      height={phone ? 40 : tall ? 30 : 26}
+      height={phone ? 40 : 28}
       flexShrink={0}
-      borderRadius={radius}
+      borderRadius={6}
       backgroundColor={(hovered ? t.v("fill-ghost-hover") : "transparent") as never}
       {...((on ? onStyle : {}) as object)}
     >
-      {children(hovered)}
-    </View>
-  );
-}
-
-/** One project's row: its dot, its name and where it is, its pills, its ⚙ (on hover) and its twisty. */
-function ProjectRow({
-  p,
-  open,
-  onProject,
-  onProjectSettings,
-}: {
-  p: SidebarProject;
-  open: boolean;
-  onProject: (project: string | null) => void;
-  onProjectSettings: (project: SidebarProject) => void;
-}): JSX.Element {
-  const t = useTokens();
-  const [hovered, hover] = useHover();
-  const where = p.where ?? (open ? parentName(p.project) : undefined);
-  return (
-    <View
-      {...(hover as object)}
-      flexDirection="row"
-      alignItems="center"
-      gap={7}
-      width="100%"
-      flexShrink={0}
-      paddingRight={8}
-      borderRadius={6}
-      backgroundColor={(hovered ? t.v("fill-ghost-hover") : "transparent") as never}
-    >
       <Press
-        onPress={() => onProject(open ? null : p.project)}
-        title={p.project}
-        label={p.label}
-        {...({ "aria-expanded": open } as object)}
+        onPress={onPress}
+        label={label}
+        title={title ?? label}
+        {...((on ? { "aria-current": "page" } : {}) as object)}
         flex={1}
         minWidth={0}
         alignSelf="stretch"
         flexDirection="row"
         alignItems="center"
-        gap={7}
-        paddingTop={open ? 8 : 5}
-        paddingBottom={open ? 6 : 5}
-        paddingLeft={8}
+        gap={8}
+        paddingHorizontal={8}
         borderRadius={6}
       >
-        <View width={7} height={7} borderRadius={999} flexShrink={0} backgroundColor={colorOf(t, p.hue) as never} />
-        <View flex={1} minWidth={0} flexDirection="row" alignItems="baseline" gap={6}>
-          <Txt register={open ? "data-title" : "data-secondary"} ellip flexShrink={0} minWidth={0} maxWidth="100%">
-            {p.label}
-          </Txt>
-          {where !== undefined ? (
-            <Txt register="data-faint" ellip flexGrow={1} flexShrink={1} minWidth={0} textAlign="right">
-              {where}
-            </Txt>
-          ) : null}
-        </View>
+        <Glyph width={15} color={on ? "text" : "dim"}>
+          {glyph}
+        </Glyph>
+        <Txt spec={{ voice: "app", scale: 0.92, weight: 500, color: on ? "text" : "dim" }} ellip flex={1} minWidth={0}>
+          {label}
+        </Txt>
       </Press>
-      <Pills counts={p.counts} budget={open ? OPEN_PILL_BUDGET : ROW_PILL_BUDGET} onClear={p.onSeen} />
-      {hovered ? (
-        <Press onPress={() => onProjectSettings(p)} label={`Settings for ${p.label}`} title={`${p.label}'s settings`} width={20} height={20} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={5} opacity={1}>
-          <Glyph scale={11 / 12.5}>⚙</Glyph>
-        </Press>
-      ) : null}
-      {open ? null : (
-        <View width={16} height={20} flexShrink={0} alignItems="center" justifyContent="center" pointerEvents="none">
-          <Glyph scale={9 / 12.5}>▸</Glyph>
-        </View>
-      )}
+      {counts !== undefined ? <Pills counts={counts} budget={90} onClear={onSeen === undefined ? undefined : (from) => onSeen(from as never)} {...(seenTitle !== undefined ? { clearTitle: seenTitle } : {})} /> : null}
     </View>
-  );
-}
-
-function RailSplit(): JSX.Element {
-  const t = useTokens();
-  return <View width={20} height={1} flexShrink={0} marginVertical={2} backgroundColor={t.v("line") as never} />;
-}
-
-/** A project in the rail: two letters of its name on a tile, in its hue when the address is on it. */
-function RailTile({ p, on, onPress }: { p: SidebarProject; on: boolean; onPress: () => void }): JSX.Element {
-  const t = useTokens();
-  const hue = colorOf(t, p.hue);
-  return (
-    <Press
-      onPress={onPress}
-      title={p.project}
-      label={p.label}
-      {...((on ? { "aria-current": "true" } : {}) as object)}
-      width={28}
-      height={28}
-      flexShrink={0}
-      borderRadius={8}
-      alignItems="center"
-      justifyContent="center"
-      {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, on ? hue : "line") as object)}
-      backgroundColor={(on ? t.mix(hue, 22, "transparent") : t.v("panel")) as never}
-    >
-      <Txt spec={{ voice: "data", scale: 0.875, weight: 600, color: on ? "text" : "dim" }}>
-        {p.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}
-      </Txt>
-    </Press>
   );
 }

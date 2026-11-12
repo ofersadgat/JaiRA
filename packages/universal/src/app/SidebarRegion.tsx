@@ -210,12 +210,14 @@ export function ShellSidebar({ phone }: { phone?: PhoneSidebar | undefined } = {
       onBrowse={(machineId, mode) => setBrowsing({ machineId, mode })}
       // The Update row above Settings (`UpdateRow`). It opens About, where a failure or a download is
       // said in full — with the release notes open, from its menu (`aboutNotes`).
-      update={(collapsed) => (
-        <>
-          {phone !== undefined ? <PhoneMachinesRow onOpen={phone.onClose} /> : null}
-          <UpdateRow collapsed={collapsed} onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />
-        </>
-      )}
+      // In the rail (`collapsed`) the Update row; at the panel's foot, a phone's machines.
+      update={(collapsed) =>
+        collapsed ? (
+          <UpdateRow collapsed onOpenAbout={() => openAbout(false)} onNotes={() => openAbout(true)} onRetry={checkForUpdate} />
+        ) : phone !== undefined ? (
+          <PhoneMachinesRow onOpen={phone.onClose} />
+        ) : null
+      }
       onProjectSettings={(p) => {
         actions.standOn(p.project);
         actions.setConfigLayer(p.kind === "shared" ? "base" : "project");

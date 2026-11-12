@@ -1,6 +1,6 @@
 import { useWindowDimensions } from "react-native";
 import { columnsFitOf, useKeptColumn } from "@jaira/ui/shellFit";
-import { FOLD, PANE, openOf, paneOf } from "@jaira/ui/uiState";
+import { FOLD, PANE, SIDEBAR_RAIL, openOf, paneOf } from "@jaira/ui/uiState";
 import { SHEET_PEEK } from "../components/panel/PanelSheet";
 import { usePhone } from "./phone";
 import { useShell } from "./shell";
@@ -32,7 +32,8 @@ export function useColumnsFit(): { sidebar: boolean; panel: boolean } {
   const panelOpen = panelLeftOpen.use();
   const kept = useKeptColumn();
   const ui = state.settings.ui;
-  const sidebar = { open: openOf(ui, FOLD.shellSidebar), width: paneOf(ui, PANE.shellSidebar) };
+  // Open, the sidebar is its rail and its panel; the pane is the panel's width.
+  const sidebar = { open: openOf(ui, FOLD.shellSidebar), width: SIDEBAR_RAIL + paneOf(ui, PANE.shellSidebar) };
   if (phone) return { sidebar: sidebar.open, panel: panelOpen };
   return columnsFitOf({ width, sidebar, panel: { open: panelOpen, width: panelWidth }, kept });
 }

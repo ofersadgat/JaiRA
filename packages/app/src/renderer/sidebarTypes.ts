@@ -40,6 +40,8 @@ export interface SidebarView {
   id: string;
   glyph: string;
   label: string;
+  /** The name under its icon in the rail, where `label` is too long for it ("All chats"). */
+  short?: string;
   /**
    * What this view browses, shown under the row while the view is the one showing.
    *

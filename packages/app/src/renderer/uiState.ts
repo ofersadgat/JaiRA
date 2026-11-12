@@ -73,8 +73,11 @@ export const PANE_DEFAULTS: Record<string, number> = {
   [PANE.schemaReference]: 300,
 };
 
-/** How wide the sidebar is when it is collapsed: the nav glyphs and nothing else. */
-export const SIDEBAR_RAIL = 46;
+/**
+ * The sidebar's rail: always there, the panel beside it or not (the sidebar mockups, 2026-11-11). 68, so
+ * an item's name fits under its icon ("All tasks", "Settings"); `PANE.shellSidebar` is the panel's width.
+ */
+export const SIDEBAR_RAIL = 68;
 
 /**
  * How far a context panel may be dragged while it is HOLDING a value, in px.

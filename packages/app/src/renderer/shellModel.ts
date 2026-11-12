@@ -56,7 +56,7 @@ export const PANEL_VIEWS: ReadonlySet<string> = new Set<string>(["settings", ...
  */
 export const ROOT_VIEWS: readonly SidebarView[] = [
   { id: "tasks", glyph: "▦", label: "All tasks" },
-  { id: "chat", glyph: "✻", label: "All conversations" },
+  { id: "chat", glyph: "✻", label: "All conversations", short: "All chats" },
 ];
 
 /** Every nav row, for the lookups that do not care which group a view is in. */
