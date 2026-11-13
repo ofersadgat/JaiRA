@@ -2,7 +2,7 @@
  * What a transcript's work rows say: the reading `WorkRows`
  * (`packages/universal/src/components/panel/WorkRows.tsx`) draws its rows from.
  */
-import { artifactOf, knownText, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type SettledByView } from "@jaira/shared/browser";
+import { artifactOf, isLazy, knownText, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type LazyValue, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { answersOfAnsweredText } from "./choicesModel";
 import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall, refusalWordsOf } from "./workSummary";
@@ -314,17 +314,36 @@ export function replacedPublishes(entries: readonly TranscriptEntry[]): Readonly
  * The picture a tool handed back — a screenshot, a picture off the clipboard (decision 0019) — as a
  * `data:` address, out of whichever envelope it travelled in: MCP's `image` content (`{ type, data,
  * mimeType }`), the Anthropic block an agent's own record keeps (`{ type, source: { media_type, data } }`),
- * or the value's own `$images`. The first picture, or `undefined`.
+ * or the value's own `$images`. The first picture, or `undefined` — and `undefined` too while its data is
+ * still a placeholder (`hasPicture` says there is one to fetch).
  */
 export function pictureOf(result: JsonValue | undefined): string | undefined {
-  const fromBlock = (block: JsonValue): string | undefined => {
+  const found = pictureSourceOf(result);
+  return found !== undefined && typeof found.data === "string" ? `data:${found.mime};base64,${found.data}` : undefined;
+}
+
+/**
+ * Whether a tool handed back a picture, fetched or not. A screenshot's base64 is hundreds of KB, far over
+ * the 64 KB a window on this machine is handed whole (4 KB on a phone), so its data almost always
+ * reaches the view as a `$lazy` placeholder (decision 0018 §6); the call is still a picture's, and is
+ * drawn as one once the data is fetched.
+ */
+export function hasPicture(result: JsonValue | undefined): boolean {
+  return pictureSourceOf(result) !== undefined;
+}
+
+/** The first picture in a result, its data a string or a placeholder for one. */
+function pictureSourceOf(result: JsonValue | undefined): { mime: string; data: string | LazyValue } | undefined {
+  const dataOf = (value: JsonValue | undefined): string | LazyValue | undefined =>
+    typeof value === "string" ? (value.length > 0 ? value : undefined) : isLazy(value) ? value : undefined;
+  const fromBlock = (block: JsonValue): { mime: string; data: string | LazyValue } | undefined => {
     if (block === null || typeof block !== "object" || Array.isArray(block)) return undefined;
     const b = block as Record<string, JsonValue>;
     if (b["type"] !== "image") return undefined;
     const source = b["source"] !== null && typeof b["source"] === "object" && !Array.isArray(b["source"]) ? (b["source"] as Record<string, JsonValue>) : b;
     const mime = typeof source["media_type"] === "string" ? source["media_type"] : typeof source["mimeType"] === "string" ? source["mimeType"] : undefined;
-    const data = typeof source["data"] === "string" ? source["data"] : undefined;
-    return mime !== undefined && mime.startsWith("image/") && data !== undefined && data.length > 0 ? `data:${mime};base64,${data}` : undefined;
+    const data = dataOf(source["data"]);
+    return mime !== undefined && mime.startsWith("image/") && data !== undefined ? { mime, data } : undefined;
   };
   if (Array.isArray(result)) {
     for (const block of result) {
@@ -338,8 +357,9 @@ export function pictureOf(result: JsonValue | undefined): string | undefined {
   if (!Array.isArray(images)) return undefined;
   for (const image of images) {
     if (image === null || typeof image !== "object" || Array.isArray(image)) continue;
-    const { mimeType, data } = image as Record<string, JsonValue>;
-    if (typeof mimeType === "string" && mimeType.startsWith("image/") && typeof data === "string" && data.length > 0) return `data:${mimeType};base64,${data}`;
+    const { mimeType } = image as Record<string, JsonValue>;
+    const data = dataOf((image as Record<string, JsonValue>)["data"]);
+    if (typeof mimeType === "string" && mimeType.startsWith("image/") && data !== undefined) return { mime: mimeType, data };
   }
   return undefined;
 }
@@ -435,7 +455,7 @@ export function toolLineOf(
             ? "publishedList"
           : producedArtifact(entry.result) !== undefined
             ? "produced"
-            : pictureOf(entry.result) !== undefined
+            : hasPicture(entry.result)
               ? "picture"
               : entry.output !== undefined
                 ? "output"
