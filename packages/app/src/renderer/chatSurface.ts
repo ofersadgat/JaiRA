@@ -152,8 +152,8 @@ export interface ChatSurface {
   walkedInto?: string | undefined;
   onWalkInto: (instanceId: string | null) => void;
   /** The subagents walked into — see `ChatState.walkedChain` — and the way in and back out (null). */
-  walkedChain?: ReadonlyArray<{ call: string; name: string }> | undefined;
-  onWalkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string }> | null) => void;
+  walkedChain?: ReadonlyArray<{ call: string; name: string; host?: string }> | undefined;
+  onWalkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string; host?: string }> | null) => void;
 }
 
 type Actions = ReturnType<typeof useApp>["actions"];

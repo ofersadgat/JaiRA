@@ -71,7 +71,8 @@ export function ChildRunLine({
   took: string;
   open: boolean;
   onToggle: () => void;
-  onWalkIn: () => void;
+  /** Going in; a host with nowhere to go has none, and the line draws no button for it. */
+  onWalkIn?: (() => void) | undefined;
   children: ReactNode;
 }): JSX.Element {
   const t = useTokens();
@@ -85,6 +86,7 @@ export function ChildRunLine({
   const one = waits.length === 1 ? waits[0] : undefined;
   return (
     <View role="note" flexDirection="row" flexWrap="wrap" alignItems="center" gap={8} padding={4} minWidth={0}>
+      {onWalkIn !== undefined ? (
       <Press
         onPress={onWalkIn}
         label={`go into ${name}`}
@@ -105,6 +107,7 @@ export function ChildRunLine({
       >
         <Icon name="chevron" size={size} color={String(t.v("dim"))} />
       </Press>
+      ) : null}
       <Txt spec={words} flexShrink={0}>
         {verb}
       </Txt>

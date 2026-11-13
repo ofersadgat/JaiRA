@@ -134,6 +134,26 @@ export class LiveCalls {
 }
 
 /**
+ * The conversation a call runs in — its session ALONE, the name both ends of the register know.
+ *
+ * Not `ctx.session.id` as it comes: on a run's own call (a conversation's opening message, a workflow
+ * state) that is the call's POSITION, `<session>@<seq>`, while a chat turn's is the session. The opening
+ * call was registered under `…@0` and every message looked for `…`, so a message sent while the opening
+ * was still settling neither joined it nor waited for it: it ran beside it, resumed a provider session
+ * still in use, came back in a new one and was put on a branch the thread never draws (2026-11-13,
+ * "diverged at 1"). The position the session layers resolved (`session.at`) names the session plainly;
+ * failing that, the id's last `@<seq>` is cut, the same arithmetic the store's refs use.
+ */
+export function conversationOf(session: ExecServices["session"] | undefined): string | undefined {
+  const at = (session as { at?: { id?: unknown } } | undefined)?.at;
+  if (typeof at?.id === "string" && at.id.length > 0) return at.id;
+  const id = session?.id;
+  if (id === undefined) return undefined;
+  const cut = /@\d+$/.exec(id);
+  return cut === null ? id : id.slice(0, cut.index);
+}
+
+/**
  * Register one call while it runs, and hand back a handle that deregisters it.
  *
  * A plain function rather than an executor wrapper, because there is already a wrapper at exactly
@@ -154,7 +174,7 @@ export function register(
   ctx: ExecServices,
   handle: ExecHandle<ResolvedValue, WorkflowMetrics>,
 ): ExecHandle<ResolvedValue, WorkflowMetrics> {
-  const sessionId = ctx.session?.id;
+  const sessionId = conversationOf(ctx.session);
   if (sessionId === undefined) return handle;
 
   // Assigned synchronously below, and only ever READ from a `handle.result` continuation — which is a

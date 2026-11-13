@@ -55,14 +55,26 @@ const ctxWith = (id: string | undefined): ExecServices =>
 const op = { kind: "prompt", user: "hi", config: {}, input: {}, output: { name: "text", kind: "text" } } as Operation<InlineFamily>;
 
 describe("a call in flight", () => {
-  it("is reachable by the session id both ends already know", async () => {
+  it("is keyed by the session the layers resolved, where the call says it (`session.at`)", async () => {
+    const live = new LiveCalls();
+    const inner = pending({ steerable: false });
+    const handle = withTurnStream(() => {}, inner.executor, live).start(op, { session: { id: "s@0", at: { id: "s", seq: 0 } } } as unknown as ExecServices);
+    // The opening message's call (2026-11-13): registered under "s@0", a message sent while it settled
+    // looked for "s", found nothing, and ran beside it on a branch.
+    expect(live.sessions()).toEqual(["s"]);
+    inner.settle();
+    await handle.result;
+    expect(live.sessions()).toEqual([]);
+  });
+
+  it("is reachable by the conversation, though a run's call names its position (`s@4`)", async () => {
     const live = new LiveCalls();
     const inner = pending({ steerable: true });
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@4"));
 
-    expect(live.sessions()).toEqual(["s@4"]);
-    expect(live.canSend("s@4")).toBe(true);
-    await live.get("s@4")!.control!.send!("are you nearly done?");
+    expect(live.sessions()).toEqual(["s"]);
+    expect(live.canSend("s")).toBe(true);
+    await live.get("s")!.control!.send!("are you nearly done?");
     expect(inner.sent).toEqual(["are you nearly done?"]);
 
     inner.settle();
@@ -77,19 +89,19 @@ describe("a call in flight", () => {
     const inner = pending({ steerable: false });
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@1"));
 
-    expect(live.get("s@1")).toBeDefined();
-    expect(live.canSend("s@1")).toBe(false);
+    expect(live.get("s")).toBeDefined();
+    expect(live.canSend("s")).toBe(false);
 
     inner.settle();
     await handle.result;
-    expect(live.get("s@1")).toBeUndefined();
+    expect(live.get("s")).toBeUndefined();
   });
 
   it("is forgotten when it fails, not only when it succeeds", async () => {
     const live = new LiveCalls();
     const inner = pending({ steerable: true });
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@9"));
-    expect(live.sessions()).toEqual(["s@9"]);
+    expect(live.sessions()).toEqual(["s"]);
 
     inner.fail();
     await expect(handle.result).rejects.toThrow("boom");
@@ -117,7 +129,7 @@ describe("waiting for a call that cannot be steered", () => {
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@2"));
 
     let waited = false;
-    const waiting = live.settle("s@2").then(() => (waited = true));
+    const waiting = live.settle("s").then(() => (waited = true));
     // Still running: a waiter must not be released early, or it would send against a position the
     // call is about to claim.
     await Promise.resolve();
@@ -136,7 +148,7 @@ describe("waiting for a call that cannot be steered", () => {
     const live = new LiveCalls();
     const inner = pending({ steerable: false });
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@7"));
-    const waiting = live.settle("s@7");
+    const waiting = live.settle("s");
 
     inner.fail();
     await expect(handle.result).rejects.toThrow("boom");
@@ -148,7 +160,7 @@ describe("waiting for a call that cannot be steered", () => {
     const live = new LiveCalls();
     const inner = pending({ steerable: false });
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@3"));
-    const waiting = live.settle("s@3").then(() => live.get("s@3"));
+    const waiting = live.settle("s").then(() => live.get("s"));
 
     inner.settle();
     await handle.result;
@@ -170,13 +182,13 @@ describe("waiting for a call that cannot be steered", () => {
     const inner = pending({ steerable: false });
     const handle = withTurnStream(() => {}, inner.executor, live).start(op, ctxWith("s@5"));
 
-    expect(await live.settle("s@5", 10)).toBe(false);
+    expect(await live.settle("s", 10)).toBe(false);
     // And the call really is still running — the bound expired, it did not finish.
-    expect(live.get("s@5")).toBeDefined();
+    expect(live.get("s")).toBeDefined();
 
     inner.settle();
     await handle.result;
-    expect(await live.settle("s@5", 10)).toBe(true);
+    expect(await live.settle("s", 10)).toBe(true);
   });
 });
 
@@ -192,13 +204,13 @@ describe("two calls sharing one session id", () => {
     const h2 = withTurnStream(() => {}, second.executor, live).start(op, ctxWith("shared@1"));
 
     // The second replaced the first, which is what a register keyed by session means.
-    expect(live.canSend("shared@1")).toBe(true);
+    expect(live.canSend("shared")).toBe(true);
 
     first.settle();
     await h1.result;
     // Still the second's, and still steerable. This is the assertion that failed before.
-    expect(live.get("shared@1")).toBeDefined();
-    expect(live.canSend("shared@1")).toBe(true);
+    expect(live.get("shared")).toBeDefined();
+    expect(live.canSend("shared")).toBe(true);
 
     second.settle();
     await h2.result;

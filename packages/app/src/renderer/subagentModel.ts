@@ -17,7 +17,7 @@ import { approvalCallIndex } from "./approvalCall";
 import type { RunWait } from "./childRunModel";
 import type { TranscriptEntry, ToolEntry } from "./transcript";
 import { toolLineOf } from "./transcriptRows";
-import { isHostCall as isHostWork } from "./workSummary";
+import { isApprovalCall, isHostCall as isHostWork } from "./workSummary";
 
 export interface Subagent {
   /** The call that started it: its key everywhere (`ToolEntry.sidechain`). */
@@ -145,6 +145,48 @@ function runningStepIn(sub: Subagent, all: ReadonlyMap<string, Subagent>): Subag
     return { step: toolLineOf(entry, true, false).name, path: [], call: entry.callId };
   }
   return undefined;
+}
+
+/**
+ * One subagent read from its own entries alone — what a view with no live turn and no pending asks to
+ * hand knows (a run's page, the Tasks view, a panel): the line the Chat view draws, from what the
+ * transcript holds. `running` is the spawning call's own rule (`toolLineOf`'s); while it runs, an
+ * approval call in it or a subagent it started with no answer yet is what it waits for.
+ */
+export function subagentLineOf(entry: ToolEntry, entries: readonly TranscriptEntry[], chainOf: ((call: string) => TranscriptEntry[]) | undefined, running: boolean): { sub: Subagent; waits: RunWait[] } | undefined {
+  const call = entry.sidechain;
+  if (call === undefined) return undefined;
+  const all = subagentsOf({
+    entries: [entry],
+    chainOf: (c) => (c === call ? [...entries] : (chainOf?.(c) ?? [])),
+    streaming: running ? new Set([call]) : new Set(),
+    ended: new Set(),
+    answering: running,
+  });
+  const sub = all.get(call);
+  if (sub === undefined) return undefined;
+  const waits: RunWait[] = [];
+  if (running) {
+    for (const one of all.values()) {
+      if (!one.running && one !== sub) continue;
+      for (const e of one.entries) {
+        if (e.kind !== "tool" || !isApprovalCall(e) || !unanswered(e)) continue;
+        const input = (e.args ?? {}) as { tool?: unknown; command?: unknown };
+        const words = typeof input.command === "string" ? input.command.trim().split(/\s+/) : [];
+        waits.push({
+          instanceId: "",
+          path: namesOf(all, one.chain.slice(1)),
+          step: words.length > 0 ? words.slice(0, 2).join(" ") : typeof input.tool === "string" ? input.tool : "a call",
+          verb: "approve",
+          kind: "approve",
+          ...(words.length > 0 ? { note: "a shell command" } : {}),
+          ...(e.at !== undefined ? { since: e.at } : {}),
+          chain: one.chain.slice(1),
+        });
+      }
+    }
+  }
+  return { sub, waits };
 }
 
 /** The subagent whose own conversation holds the pending approval's call — the deepest, being its asker. */

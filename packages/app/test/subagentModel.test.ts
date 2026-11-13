@@ -7,7 +7,7 @@ import { describe, expect, it } from "vitest";
 import type { JsonValue } from "@declarative-ai/json";
 import type { RunWait } from "../src/renderer/childRunModel";
 import { secondLine } from "../src/renderer/childRunModel";
-import { chainScopedWaits, chainWaitCounts, endedAgentsOf, liveChainOfApproval, namesOf, subagentOfApproval, subagentsOf, withSubagentWaits } from "../src/renderer/subagentModel";
+import { subagentLineOf, chainScopedWaits, chainWaitCounts, endedAgentsOf, liveChainOfApproval, namesOf, subagentOfApproval, subagentsOf, withSubagentWaits } from "../src/renderer/subagentModel";
 import type { ToolEntry, TranscriptEntry } from "../src/renderer/transcript";
 
 const tool = (callId: string, name: string, extra: Partial<ToolEntry> = {}): ToolEntry => ({ kind: "tool", name, summary: "", callId, ...extra }) as ToolEntry;
@@ -95,5 +95,28 @@ describe("a subagent's approval", () => {
     const sidechains = { c_outer: [msg(["c_inner"])], c_inner: [msg(["c_shell"]), msg(["approve_x_req1"])] };
     expect(liveChainOfApproval(sidechains, "req1")).toEqual(["c_outer", "c_inner"]);
     expect(liveChainOfApproval(sidechains, "nope")).toBeUndefined();
+  });
+});
+
+describe("a subagent read from its entries alone (a run's page, the Tasks view)", () => {
+  const ask = tool("approve_x_req9", "approve_tool_call", { calledBy: "c_shell", args: { tool: "shell", command: "git grep -n quit" }, at: 4001 });
+  const innerEntries: TranscriptEntry[] = [chains["c_inner"]![0]!, chains["c_inner"]![1]!, ask];
+  const outerEntries = chains["c_outer"]!;
+  const chainOf = (call: string): TranscriptEntry[] => (call === "c_inner" ? innerEntries : []);
+
+  it("is named, counted and timed as the Chat view does, the subagents it started included", () => {
+    const read = subagentLineOf(outer, outerEntries, chainOf, false)!;
+    expect(read.sub).toMatchObject({ name: "Quit dialog for running work", kind: "claude", steps: 4, startedAt: 1000, lastAt: 4001, running: false });
+    expect(read.waits).toEqual([]);
+  });
+
+  it("while it runs, waits for the approval a subagent it started asks, with the names down to it", () => {
+    const read = subagentLineOf(outer, outerEntries, chainOf, true)!;
+    expect(read.waits).toMatchObject([{ step: "git grep", verb: "approve", path: ["Build quit-with-running-work dialog"], note: "a shell command", since: 4001 }]);
+    expect(read.sub.step).toMatchObject({ call: "c_shell", path: ["Build quit-with-running-work dialog"] });
+  });
+
+  it("is nothing for a call that started no subagent", () => {
+    expect(subagentLineOf(tool("c_x", "Read"), [], undefined, false)).toBeUndefined();
   });
 });

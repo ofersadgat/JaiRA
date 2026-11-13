@@ -4,7 +4,7 @@
 import { describe, expect, it } from "vitest";
 import type { JsonValue, RecordStore } from "@declarative-ai/exec";
 import { messagesOfRecord } from "@jaira/persistence";
-import { approvalCallEntries, approvalResultEntries, callIdsOf, callingCallOf, callingCallOfTurn, checkCallEntries, checkResultEntries, endedCallsOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
+import { joinedMessageEntries, approvalCallEntries, approvalResultEntries, callIdsOf, callingCallOf, callingCallOfTurn, checkCallEntries, checkResultEntries, endedCallsOf, mergeHostCalls, questionResultEntries, rememberedAnswersOf, unansweredAsksOf, withHostCalls } from "../src/hostCalls";
 import { ApprovalHub } from "../src/approval";
 
 const LINE = 'git fetch origin --quiet && echo "master=$(git rev-parse origin/master)"';
@@ -273,5 +273,42 @@ describe("rows answered one by one, at the hub", () => {
     expect(hub.grants("t1").list()).toEqual({ git: "allow", "terraform plan": "deny" });
     // The record keeps the rows as the person gave them.
     expect(seen).toEqual([[{ decision: "deny", scope: "once" }, { scope: "workflow-run", answers: rows }]]);
+  });
+});
+
+/**
+ * A message the person sent that joined the turn in flight (2026-11-13): the agent answered it inside
+ * the turn, and the record held the answer without the words that asked for it.
+ */
+describe("a message that joined the turn", () => {
+  const said = (text: string, at: number): JsonValue => ({ kind: "message", role: "assistant", content: [{ type: "text", text }], provider: "unknown", timing: { at } }) as JsonValue;
+  const turn = [{ kind: "message", role: "user", content: "pineapple?", provider: "unknown" } as JsonValue, said("pineapple", 1000), said("zebra", 3000)];
+
+  it("is placed by its time, before what the agent said after it", () => {
+    const merged = mergeHostCalls(turn, [joinedMessageEntries("and zebra?", 2000).record]);
+    expect(merged.left).toEqual([]);
+    expect(merged.entries.map((e) => (typeof (e as { content: unknown }).content === "string" ? (e as { content: string }).content : JSON.stringify((e as { content: unknown }).content)))).toEqual([
+      "pineapple?",
+      JSON.stringify([{ type: "text", text: "pineapple" }]),
+      "and zebra?",
+      JSON.stringify([{ type: "text", text: "zebra" }]),
+    ]);
+    expect(merged.entries[2]).toMatchObject({ role: "user", joined: true, timing: { at: 2000 } });
+  });
+
+  it("is placed by the agent file's stamp where a settled turn has no host clock", () => {
+    const stamped = (text: string, ms: number): JsonValue => ({ kind: "message", role: "assistant", content: [{ type: "text", text }], provider: "unknown", timestamp: new Date(ms).toISOString() }) as JsonValue;
+    // The prompt's entry is stamped when its record settled, after everything: it is not read.
+    const prompt = { kind: "message", role: "user", content: "pineapple?", provider: "unknown", timestamp: new Date(9000).toISOString() } as JsonValue;
+    const merged = mergeHostCalls([prompt, stamped("pineapple", 1000), stamped("zebra", 3000)], [joinedMessageEntries("and zebra?", 2000).record]);
+    expect(merged.entries.map((e) => (e as { joined?: unknown }).joined === true)).toEqual([false, false, true, false]);
+    // Sent before the agent said anything: before the first thing it said.
+    expect(mergeHostCalls([prompt, stamped("pineapple", 1000)], [joinedMessageEntries("early", 500).record]).entries.map((e) => (e as { joined?: unknown }).joined === true)).toEqual([false, true, false]);
+  });
+
+  it("is placed once when a stopped turn's partial already holds it, and last when nothing came after it", () => {
+    const withIt = [...turn, joinedMessageEntries("and zebra?", 2000).record];
+    expect(mergeHostCalls(withIt, [joinedMessageEntries("and zebra?", 2000).record]).entries).toHaveLength(4);
+    expect(mergeHostCalls(turn, [joinedMessageEntries("one more", 9000).record]).entries.at(-1)).toMatchObject({ content: "one more", joined: true });
   });
 });

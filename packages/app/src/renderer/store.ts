@@ -866,9 +866,11 @@ export interface ChatState {
   /**
    * The subagents walked into, outermost first — each the call that started it and its name — so that
    * subagent's conversation is the main view and the title a breadcrumb, a crumb per subagent (the way a
-   * run is walked into). Absent: the conversation itself. Never beside `walkedInto`.
+   * run is walked into). Absent: the conversation itself. Never beside `walkedInto`. `host` on the first
+   * is the instance whose conversation holds them — a run the conversation started — when it is not the
+   * conversation's own.
    */
-  walkedChain?: ReadonlyArray<{ call: string; name: string }>;
+  walkedChain?: ReadonlyArray<{ call: string; name: string; host?: string }>;
 }
 
 /** The rooms — the destinations the sidebar lists. */
@@ -3332,7 +3334,7 @@ export function useApp() {
       },
 
       /** Walk into a subagent of the open conversation — the chain of them down to it — or (null) back out. */
-      walkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string }> | null) => {
+      walkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string; host?: string }> | null) => {
         const { walkedInto: _was, walkedChain: _chain, ...chat } = ref.current.chat;
         patch({ chat: { ...chat, ...(chain !== null && chain.length > 0 ? { walkedChain: chain } : {}) } });
       },

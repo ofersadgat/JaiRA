@@ -117,6 +117,30 @@ function recorded(role: "assistant" | "user", calledBy: string | undefined, part
   } as JsonValue;
 }
 
+/**
+ * A message the person sent that JOINED the turn in flight (steering) — the live entry, and the record's.
+ *
+ * The agent reads it inside its turn, so the stream never echoes it and the record held only the answer
+ * to it: the conversation read "pineapple", then "zebra", with the words that asked for the second
+ * nowhere (2026-11-13). Marked `joined`: it has no call to stand beside, so a record places it by its
+ * time, before the first of the turn's entries after it (`mergeHostCalls`).
+ */
+export function joinedMessageEntries(text: string, at: number, by?: string): { live: JsonValue; record: JsonValue } {
+  return {
+    live: { kind: "message", role: "user", content: { role: "user", content: text }, at, joined: true, ...(by !== undefined ? { by } : {}) } as JsonValue,
+    record: {
+      kind: "message",
+      role: "user",
+      content: text,
+      provider: "unknown",
+      timestamp: new Date(at).toISOString(),
+      timing: { at },
+      joined: true,
+      ...(by !== undefined ? { by } : {}),
+    } as JsonValue,
+  };
+}
+
 /** `approve_tool_call` being called — the live entry, and the record's. */
 export function approvalCallEntries(callId: string, calledBy: string | undefined, input: ApprovalCallInput, at: number): { live: JsonValue; record: JsonValue } {
   const parts: JsonValue[] = [{ type: "tool_use", id: callId, name: APPROVAL_PROMPT_FUNCTION, input: input as unknown as JsonValue }];
@@ -408,6 +432,29 @@ export function mergeHostCalls(entries: readonly JsonValue[], pending: readonly 
   // Where each call of this record sits, and how many host entries already follow it.
   const placed = new Map<string, number>();
   for (const entry of pending) {
+    // A message that joined the turn: placed by its time, before the first of the main thread's entries
+    // after it (`joinedMessageEntries`).
+    const joined = entry as { joined?: unknown; timing?: { at?: unknown } };
+    if (joined.joined === true) {
+      // Already there when a stopped turn's partial is what settled (it carries the mark).
+      const text = (entry as { content?: unknown }).content;
+      if (out.some((e) => (e as { joined?: unknown }).joined === true && (e as { content?: unknown }).content === text)) continue;
+      const at = typeof joined.timing?.at === "number" ? joined.timing.at : Number.POSITIVE_INFINITY;
+      // After the last thing the AGENT said at or before it: its entries carry its own stamps (the agent
+      // file's `timestamp`, folded in by the capture before this merge, or the host clock, `timing.at`,
+      // live). A prompt's entry does not — it is stamped when its record settled — so it is not read.
+      // Nothing the agent said before it: before the first thing it said.
+      const when = (e: JsonValue): number => {
+        const r = e as { role?: unknown; sidechain?: unknown; timing?: { at?: unknown }; timestamp?: unknown };
+        if (r.sidechain !== undefined || r.role !== "assistant") return Number.NaN;
+        return typeof r.timing?.at === "number" ? r.timing.at : typeof r.timestamp === "string" ? Date.parse(r.timestamp) : Number.NaN;
+      };
+      let last = -1;
+      for (let i = 0; i < out.length; i++) if (when(out[i]!) <= at) last = i;
+      const first = out.findIndex((e) => (e as { role?: unknown; sidechain?: unknown }).role === "assistant" && (e as { sidechain?: unknown }).sidechain === undefined);
+      out.splice(last >= 0 ? last + 1 : first >= 0 ? first : out.length, 0, entry);
+      continue;
+    }
     const answers = partsOf(entry).find((part) => part["type"] === "tool_result")?.["tool_use_id"];
     const caller = (entry as { calledBy?: unknown }).calledBy ?? answers;
     if (typeof caller !== "string") {

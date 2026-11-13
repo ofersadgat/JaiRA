@@ -122,6 +122,25 @@ async function main(): Promise<void> {
     await app.clickText(title);
     await settle(1500);
     await app.shot("5-back-out", undefined, false);
+
+    // Outside the Chat view (no host draws it): the same line from the subagent's entries alone, and its
+    // go-in walking the Tasks view's trail.
+    await app.clickText("All tasks");
+    await settle(1500);
+    await app.clickText(title);
+    await app.until(says(outer), "the subagent's line in the Tasks view", 120);
+    await settle(1500);
+    const line = await app.evaluate<{ go: boolean; steps: boolean }>(`(() => ({
+      go: [...document.querySelectorAll('[aria-label]')].some((e) => e.getAttribute('aria-label') === ${JSON.stringify(`go into ${outer}`)}),
+      steps: /99 steps/.test(document.body.innerText),
+    }))()`);
+    console.log(`subagent-view: tasks view line ${JSON.stringify(line)}`);
+    await app.shot("6-tasks-view", undefined, false);
+    if (line.go) {
+      await press(`go into ${outer}`);
+      await settle(1500);
+      await app.shot("7-tasks-walked-in", undefined, false);
+    }
     console.log("subagent-view: done");
   } finally {
     await app.close();

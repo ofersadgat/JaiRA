@@ -353,6 +353,7 @@ import {
   statusOfResult,
   withNativeCapture,
   withHostCalls,
+  joinedMessageEntries,
   callIdsOf,
   callingCallOfTurn,
   approvalCallEntries,
@@ -6814,8 +6815,21 @@ export class AppService {
     // replaced, or one after it — and "say this instead" is the opposite of "also say this".
     const steer = request.branchAt === undefined && origin.continuing === undefined ? this.steerOf(open, context.position) : undefined;
     if (steer !== undefined) {
-      await steer.send(request.message);
-      return { instanceId: context.hostInstanceId, index: context.index, steered: true };
+      try {
+        // When it was sent, not when sending returned: `send` comes back after the agent has answered it.
+        const at = Date.now();
+        await steer.send(request.message);
+        // Said in the conversation where it joined: the stream never echoes it (`joinedMessageEntries`).
+        const joined = joinedMessageEntries(request.message, at, origin.by);
+        this.hostCall(open, request.taskId, joined.live, joined.record, at);
+        return { instanceId: context.hostInstanceId, index: context.index, steered: true };
+      } catch (e) {
+        // Too late to join: the turn answered between the plan and the send ("the agent's turn has
+        // ended"), and its call is still settling. The message goes AFTER it instead, waiting below as
+        // for any call in flight — not refused, which lost the message, nor sent beside it, which ran on
+        // a branch the thread never draws (2026-11-13).
+        this.log({ level: "info", source: "run", message: `a message could not join the turn in flight, so it goes after it: ${(e as Error).message}`, project: open.key, taskId: request.taskId });
+      }
     }
 
     /**

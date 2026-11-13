@@ -84,6 +84,8 @@ function messageEntry(raw: JsonValue, call: string | undefined): { at?: number; 
       ...(call !== undefined ? { sidechain: { id: call, parentToolUseId: call } } : {}),
       // A call a TOOL made (`approve_tool_call`), by the call that made it — see `SessionTurn.calledBy`.
       ...(typeof rec.calledBy === "string" ? { calledBy: rec.calledBy } : {}),
+      // A message that joined the turn (`joinedMessageEntries`): a partial written down keeps the mark.
+      ...((rec as { joined?: unknown }).joined === true ? { joined: true } : {}),
     } as JsonValue,
   };
 }

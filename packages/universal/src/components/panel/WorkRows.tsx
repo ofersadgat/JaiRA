@@ -9,8 +9,9 @@ import { sizeOf, thoughtTime } from "@jaira/ui/liveStatusModel";
 import { clockOf, useElapsed } from "@jaira/ui/runActivityModel";
 import { thoughtLiveOf } from "@jaira/ui/stillRunning";
 import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type TranscriptEntry, type WorkEntry, type WritingEntry } from "@jaira/ui/transcript";
-import { isHostCall } from "@jaira/ui/workSummary";
-import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
+import { isHostCall, secondsOf } from "@jaira/ui/workSummary";
+import { subagentLineOf } from "@jaira/ui/subagentModel";
+import { ApprovalAskContext, useNow } from "@jaira/ui/workSummaryContext";
 import { askedOf, pictureOf, producedArtifact, publishedOf, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useFilled } from "@jaira/ui/useView";
@@ -19,6 +20,7 @@ import { useTokens, type Tokens } from "../../tokens";
 import { colorOf } from "../Sidebar";
 import { ChoiceList, ChoiceSteps, FieldFrame } from "../floats/Choices";
 import { Pulse } from "../chat/Pulse";
+import { ChildRunLine } from "../chat/ChildRun";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
 import { OutcomeHostContext } from "./outcomeHost";
@@ -278,7 +280,12 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
       const hosted = subagentHost?.(entry.sidechain!);
       if (hosted !== undefined) return hosted;
     }
-    if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />;
+    if (line.shown === "sidechain")
+      return sub !== undefined ? (
+        <SubagentDoor entry={entry} entries={sub} sidechainOf={sidechainOf} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />
+      ) : (
+        <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />
+      );
     if (line.shown === "outcome") {
       const outcome = workflowOutcomeOf(entry.result!);
       return outcome === undefined ? null : <OutcomeNote outcome={outcome} />;
@@ -405,6 +412,38 @@ export function WorkColumn({ children, ...box }: { children: ReactNode } & Recor
     <View flexDirection="column" minWidth={0} marginTop={6} marginHorizontal={-6} marginBottom={10} {...box}>
       {children}
     </View>
+  );
+}
+
+/**
+ * `SubagentDoor`: a subagent under the call that started it, drawn the way a run a conversation started
+ * is (`ChildRunLine`, the person 2026-11-12: "the same way as viewing a nested workflow") wherever no host
+ * draws more (`SubagentHostContext`): go in (the host's `onOpen`: the trail, the panel's stack), what it
+ * is doing, "N steps · time ⌄", and its conversation opened in place. Read from its entries alone
+ * (`subagentLineOf`).
+ */
+function SubagentDoor({ entry, entries, sidechainOf, running, transcript: Inner, onOpen, artifacts }: { entry: ToolEntry; entries: TranscriptEntry[]; sidechainOf?: ((call: string) => TranscriptEntry[]) | undefined; running: boolean; transcript: TranscriptOf; onOpen?: OpenSidechain | undefined; artifacts?: ArtifactSurface | undefined }): JSX.Element {
+  const [open, setOpen] = useState(false);
+  const now = useNow(running);
+  const read = subagentLineOf(entry, entries, sidechainOf, running);
+  if (read === undefined) return <></>;
+  const { sub, waits } = read;
+  const took = sub.startedAt === undefined ? "" : `${secondsOf(Math.max(0, (sub.running ? now : (sub.lastAt ?? sub.startedAt)) - sub.startedAt))}${sub.running ? " so far" : ""}`;
+  return (
+    <ChildRunLine
+      verb={sub.kind ?? "agent"}
+      name={sub.name}
+      goTitle={`open ${sub.name}'s conversation`}
+      waits={waits}
+      running={waits.length === 0 && sub.step !== undefined ? { step: sub.step.step, path: sub.step.path } : undefined}
+      steps={sub.steps}
+      took={took}
+      open={open}
+      onToggle={() => setOpen((was) => !was)}
+      {...(onOpen !== undefined ? { onWalkIn: () => onOpen(entry.sidechain!, sub.name) } : {})}
+    >
+      {open ? <Inner entries={entries} working={running} onOpenSidechain={onOpen} artifacts={artifacts} /> : null}
+    </ChildRunLine>
   );
 }
 

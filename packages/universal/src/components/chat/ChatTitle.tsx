@@ -12,7 +12,7 @@ import { Icon } from "../panel/Icon";
 import { useAnchorRect } from "./ComposerCards";
 import { EnvironmentList } from "./EnvironmentBar";
 import { useChatEnvironment } from "./environment";
-import { childRunsOf, waitCountsByLevel, waitsOf } from "@jaira/ui/childRunModel";
+import { childRunsOf, keysTo, waitCountsByLevel, waitsOf } from "@jaira/ui/childRunModel";
 import { liveChainOfApproval } from "@jaira/ui/subagentModel";
 import { CrumbBar } from "../Crumbs";
 
@@ -60,8 +60,11 @@ export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversatio
   const chain = surface.walkedChain ?? [];
   const asking = chain.length > 0 ? liveChainOfApproval(surface.live?.sidechains, surface.approval?.requestId) : undefined;
   const waitingIn = (depth: number): number => (depth === 0 ? (surface.approval !== undefined ? 1 : 0) : asking !== undefined && chain.slice(0, depth).every((step, i) => asking[i] === step.call) ? 1 : 0);
+  // A run's subagent: the run the conversation started is a crumb between them, going back into the run.
+  const hostRun = chain[0]?.host !== undefined ? childRunsOf(surface.detail?.instances).find((run) => keysTo([run], chain[0]!.host!) !== undefined) : undefined;
   const chainCrumbs: Parameters<typeof CrumbBar>[0]["crumbs"] = [
     { text: title, kind: "run", title: "back to the conversation", go: () => surface.onWalkIntoSubagent(null), wide: true, ...(waitingIn(0) > 0 ? { counts: { waiting: waitingIn(0) } } : {}) },
+    ...(hostRun !== undefined ? [{ text: hostRun.childKey ?? hostRun.stateId, kind: "run" as const, title: `back to the run of ${hostRun.stateId}`, go: () => surface.onWalkInto(hostRun.instanceId) }] : []),
     ...chain.map((step, i) => ({
       text: step.name,
       kind: "run" as const,
