@@ -164,6 +164,7 @@ function Frame(): JSX.Element {
   // keyboard's focus ring, the one scrollbar. Web only; a phone has neither.
   useWindowTitle(windowTitle(state.at, state.view, state.doc?.path ?? state.dir?.path ?? null));
   usePageRules(t);
+  const paned = state.view === "tasks" || state.view === "files" || state.view === "chat";
   return (
     // The window's ground (--bg) is the page's own canvas on web (`usePageRules` gives it to `body`); a
     // phone paints it here. Positioned on web, so it is the box of last resort for whatever is placed
@@ -186,7 +187,9 @@ function Frame(): JSX.Element {
       ) : null}
       <View flex={1} minWidth={0} minHeight={0} flexDirection="column">
         {/* The title bar: at least 34 tall, --panel, a --line under it — 1.5px of --rule under the
-            contrast palette, a --rule under blueprint. */}
+            contrast palette, a --rule under blueprint. Not over a room with panes (decision 0025): each
+            pane goes top to bottom, its head at the window's top, holding what the bar would. */}
+        {paned ? null : (
         <View
           {...(landmark("banner") as object)}
           flexDirection="row"
@@ -198,6 +201,7 @@ function Frame(): JSX.Element {
         >
           <ShellTitleBar />
         </View>
+        )}
         {/* A phone's machine while none is reached (a tablet draws this frame): nothing on the desktop. */}
         <RemoteLine />
         {/* The viewport: the open room, taking the rest of the height. */}

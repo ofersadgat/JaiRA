@@ -13,8 +13,7 @@ import { useShell } from "./shell";
 import { usePhone } from "./phone";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
-import { boardAt, newTaskOpener, panelTopKind, runMode, splitView } from "./viewState";
-import { paneHeaded, roomPaneOf } from "@jaira/ui/splitModel";
+import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
 
 /**
  * What stands in the title bar: the ADDRESS of what is open. In Tasks, the task address bar
@@ -24,17 +23,8 @@ import { paneHeaded, roomPaneOf } from "@jaira/ui/splitModel";
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
-  const phone = usePhone();
-  const split = splitView.use();
   // A phone has no window to drag: the bar is its address alone, which may take the whole width.
-  if (phone && state.view === "tasks") return <TasksAddress />;
-  // The room's address is in the head of the pane that holds the room, once panes have heads (decision
-  // 0025): across the window it would be about every pane, and is about one. The bar is then the strip
-  // the window is moved by and its buttons are drawn in, and nothing of any room.
-  if (!phone && (state.view === "chat" || state.view === "files" || state.view === "tasks")) {
-    const held = roomPaneOf(split);
-    if (held === null || paneHeaded(split, held.pane)) return <TitleDrag />;
-  }
+  if (usePhone() && state.view === "tasks") return <TasksAddress />;
   if (state.view === "chat") return <ChatAddress />;
   if (state.view === "files") {
     return (
@@ -56,7 +46,8 @@ export function ShellTitleBar(): JSX.Element {
 
 /**
  * The room's address alone — the Tasks room's crumbs and tools (the run's reading toggle, New task), the
- * conversation's name, the file's — for the head of the pane holding the room (`SplitPane.tsx`).
+ * conversation's name, the file's — the crumbs of the room's own view in a pane's head (`SplitPane.tsx`):
+ * a room with panes draws no title bar (decision 0025).
  */
 export function RoomAddress(): JSX.Element | null {
   const { state } = useShell();

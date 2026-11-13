@@ -18,17 +18,19 @@ import { surfaceOf } from "./places";
 import { useShell } from "./shell";
 
 /**
- * What a split's pane shows of an entry on its path (decision 0025, as amended 2026-11-13: "07 and 09
- * are the correct design"): the REAL view, as the main column draws it, never a side panel's face in
- * its frame.
+ * What a pane draws of the entry its path stands on — the ONE function a path is drawn by, whichever
+ * pane it is in and whether or not the column is split (decision 0025, as the person ruled 2026-11-13:
+ * "if you opened the same path, the two panels should look pixel identical"). The room's own view is
+ * the only entry drawn elsewhere (`SplitPane.tsx`), being the room's: the Chat room's conversation is
+ * not that — it is this, by its own entry. The REAL view, as the main column draws it, never a side
+ * panel's face in its frame.
  *
  *   a conversation   the Chat room's thread (`ChatThread`) with its composer, over the conversation's
  *                    own run (`useTaskRun`, `usePaneChatSurface`): what it says, what it asks, what is
  *                    sent from its box — all by its own id
  *   a task's run     its conversation as the run is read (`TaskConversation`, by the panel's face of
  *                    its Conversation tab, without the panel's head and tabs)
- *   an artifact      the artifact filling the pane (`PublishedView`'s `fill`), with no title bar of its
- *                    own (`headless`): the pane's head names it and carries its place buttons
+ *   an artifact      the artifact filling the pane (`PublishedView`'s `fill`): its title bar, its places
  *   anything else    a value, a state, a subagent's conversation: its face's body alone, filling the
  *                    pane or scrolling in it (padding 12 12 18)
  *
@@ -39,7 +41,7 @@ export function PaneBody({ entry, face, onOpen }: { entry: PanelEntry; face: (en
   if (published !== undefined) {
     return (
       <View flex={1} minHeight={0}>
-        <PublishedView key={`${published.ref.id}@${String(published.ref.version)}`} published={published.ref} artifacts={surfaceOf(published.ref.taskId, published.project)} fill headless />
+        <PublishedView key={`${published.ref.id}@${String(published.ref.version)}`} published={published.ref} artifacts={surfaceOf(published.ref.taskId, published.project)} fill />
       </View>
     );
   }
@@ -75,12 +77,13 @@ function PaneTask({ taskId, project, face, onOpen }: { taskId: string; project: 
   const context = useFileSurfaces();
   const { state } = useShell();
   const run = useTaskRun(taskId, project, context);
+  const chat = <PaneChat taskId={taskId} project={project} run={{ detail: run.detail, conversation: run.context.conversation, liveTurn: run.context.liveTurn }} onOpen={onOpen} />;
+  // The Chat room's own conversation is a conversation before its run can say so (its opening message).
+  if (state.chat.taskId === taskId) return chat;
   if (run.failed !== null) return <PanelEmpty>{"Could not read this task: "}{run.failed}</PanelEmpty>;
   if (run.detail === null) return <PanelEmpty>Reading the task…</PanelEmpty>;
   // A conversation: one the chat started, or one the Chat room lists (a chat workflow's task, however made).
-  if (isConversation(run.detail) || state.allConversations.some((c) => c.taskId === taskId)) {
-    return <PaneChat taskId={taskId} project={project} run={{ detail: run.detail, conversation: run.context.conversation, liveTurn: run.context.liveTurn }} onOpen={onOpen} />;
-  }
+  if (isConversation(run.detail) || state.allConversations.some((c) => c.taskId === taskId)) return chat;
   return <FaceBody face={face(taskPaneEntryOf(taskId, project))} />;
 }
 

@@ -19,7 +19,6 @@ import {
   openInSplit,
   paneBack,
   paneForward,
-  paneHeaded,
   placeMoveOf,
   placesOffered,
   pushPath,
@@ -48,9 +47,8 @@ const paths = (split: SplitState): string[][] => split.panes.map((p) => keys(p.e
 const path = (...entries: PaneEntry[]): PanePath => ({ entries, ahead: [] });
 
 describe("the panes", () => {
-  it("opens on one pane whose path is the room, with no head of its own", () => {
+  it("opens on one pane whose path is where the room stands", () => {
     expect(paths(NO_SPLIT)).toEqual([["room"]]);
-    expect(paneHeaded(NO_SPLIT, 0)).toBe(false);
     expect(isSplit(NO_SPLIT)).toBe(false);
   });
 
@@ -58,7 +56,6 @@ describe("the panes", () => {
     const split = openInSplit(NO_SPLIT, task("a"));
     expect(paths(split)).toEqual([["room"], ["task:a"]]);
     expect(split.focus).toBe(1);
-    expect(paneHeaded(split, 0) && paneHeaded(split, 1)).toBe(true);
     expect(paths(openInSplit(split, task("b")))).toEqual([["room"], ["task:a", "task:b"]]);
   });
 
@@ -110,6 +107,13 @@ describe("closing", () => {
     expect(paths(onPane(split, 1, () => ({ entries: [], ahead: [] })))).toEqual([["room", "task:c"]]);
   });
 
+  it("leaves what a pane gave away ahead of it, as ‹ does: › walks to it again", () => {
+    const split = openInPane(openInSplit(NO_SPLIT, task("a")), 1, task("b"));
+    const left = leavePane(split, 1);
+    expect(paths(left)).toEqual([["room"], ["task:a"]]);
+    expect(keys(left.panes[1]!.ahead)).toEqual(["task:b"]);
+  });
+
   it("swaps the panes, each with its path, focus going with its pane", () => {
     const swapped = swapPanes(split);
     expect(paths(swapped)).toEqual([["task:a", "task:b"], ["room", "task:c"]]);
@@ -121,14 +125,25 @@ describe("closing", () => {
 describe("the room", () => {
   it("moved, the pane holding it goes back to it", () => {
     const split = openInPane(openInSplit(NO_SPLIT, task("a")), 0, task("b"));
-    expect(paths(roomMoved(split))).toEqual([["room"], ["task:a"]]);
-    expect(roomMoved(NO_SPLIT)).toBe(NO_SPLIT);
+    expect(paths(roomMoved(split, ROOM))).toEqual([["room"], ["task:a"]]);
+    expect(roomMoved(NO_SPLIT, ROOM)).toBe(NO_SPLIT);
+  });
+
+  it("standing on a conversation, its pane's path is that conversation's own entry — the same as any pane's", () => {
+    const onChat = roomMoved(NO_SPLIT, task("c"));
+    expect(paths(onChat)).toEqual([["task:c"]]);
+    const both = openInSplit(onChat, task("c"));
+    expect(paths(both)).toEqual([["task:c"], ["task:c"]]);
+    // Another conversation: the pane that held the room's goes on to it; the other keeps its own.
+    expect(paths(roomMoved(both, task("d")))).toEqual([["task:d"], ["task:c"]]);
+    // Back to the room's own view (another room).
+    expect(paths(roomMoved(onChat, ROOM))).toEqual([["room"]]);
   });
 
   it("moved with no pane holding it, it goes on the focused pane's path", () => {
     const lost = closePane(openInSplit(NO_SPLIT, task("a")), 0);
     expect(roomPaneOf(lost)).toBeNull();
-    expect(paths(roomMoved(lost))).toEqual([["task:a", "room"]]);
+    expect(paths(roomMoved(lost, ROOM))).toEqual([["task:a", "room"]]);
   });
 
   it("is where a sidebar press goes while the focused pane stands on it; else the pane goes on", () => {
@@ -137,6 +152,7 @@ describe("the room", () => {
     expect(routeOpen(focusOn(split, 0), task("b"))).toBeNull();
     expect(routeOpen(split, task("b"), true)).toBeNull();
     expect(routeOpen(NO_SPLIT, task("b"))).toBeNull();
+    expect(routeOpen(roomMoved(NO_SPLIT, task("c")), task("b"))).toBeNull();
   });
 
   it("names what the room stands on, for the side panel", () => {
@@ -157,6 +173,8 @@ describe("focus", () => {
     const split = openInSplit(NO_SPLIT, { ...task("a"), project: "p" } as PanelEntry);
     expect(focusRuleOf(split)).toEqual({ kind: "convo", key: "convo:a", taskId: "a", project: "p", tab: "steps" });
     expect(focusRuleOf(focusOn(split, 0))).toBeNull();
+    // On what the room stands on, the room's own rule.
+    expect(focusRuleOf(roomMoved(NO_SPLIT, task("c")))).toBeNull();
     expect(focusRuleOf(openInPane(split, 0, task("b")))?.key).toBe("convo:b");
     expect(focusRuleOf(openInSplit(NO_SPLIT, artifactEntryOf(ref("x"))))).toBeNull();
   });

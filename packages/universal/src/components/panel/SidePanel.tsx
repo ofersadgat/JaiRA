@@ -5,7 +5,7 @@ import { ScrollView, type GestureResponderEvent, type LayoutChangeEvent } from "
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
 import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { labelPlan } from "@jaira/ui/panelTabs";
-import { PLAIN_SCROLLER, Press, Txt, edge, scrollbarProps } from "../../primitives";
+import { DRAG_REGION, PLAIN_SCROLLER, Press, Txt, WINDOW_GUTTER, edge, scrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { Icon } from "./Icon";
 import { bodyMotion } from "./panelMotion";
@@ -267,10 +267,10 @@ function FrameControls({ stack, onStack, onFold, closeFolds }: { stack: PanelSta
 }
 
 /** The folded rail: the root's tabs as a column of icons, each named, and pin and unfold at the foot. */
-function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face: PanelFace | undefined; onStack: OnStack; onUnfold: () => void }): JSX.Element {
+function PanelRail({ stack, face, onStack, onUnfold, top = false }: { stack: PanelStack; face: PanelFace | undefined; onStack: OnStack; onUnfold: () => void; top?: boolean }): JSX.Element {
   const t = useTokens();
   return (
-    <View flex={1} flexDirection="column" justifyContent="space-between" paddingVertical={10} paddingHorizontal={6} backgroundColor={t.v("panel-2") as never} aria-label="Side panel, folded">
+    <View flex={1} flexDirection="column" justifyContent="space-between" paddingTop={top ? 44 : 10} paddingBottom={10} paddingHorizontal={6} backgroundColor={t.v("panel-2") as never} aria-label="Side panel, folded">
       <View flexDirection="column" alignItems="center" gap={4}>
         {face?.glyph !== undefined ? (
           // What the panel is of, named on hover: folded, the glyph is all there is of its head.
@@ -334,6 +334,7 @@ export function SidePanel({
   folded,
   onFold,
   closeFolds = false,
+  top: atTop = false,
 }: {
   stack: PanelStack;
   onStack: OnStack;
@@ -341,6 +342,12 @@ export function SidePanel({
   folded: boolean;
   onFold: (folded: boolean) => void;
   closeFolds?: boolean;
+  /**
+   * The panel stands at the window's top, its head in the row the OS draws the window's buttons over (a
+   * room with panes has no title bar, decision 0025): the head keeps them clear at its end, a stretch
+   * the window is moved by; folded, the rail starts under them.
+   */
+  top?: boolean;
 }): JSX.Element | null {
   const t = useTokens();
   /**
@@ -383,7 +390,7 @@ export function SidePanel({
   const rootFace = root === undefined ? undefined : root === top ? topFace : face(root);
 
   if (top === undefined || topFace === undefined) return null;
-  if (folded) return <PanelRail stack={stack} face={rootFace} onStack={onStack} onUnfold={() => onFold(false)} />;
+  if (folded) return <PanelRail stack={stack} face={rootFace} onStack={onStack} onUnfold={() => onFold(false)} top={atTop} />;
 
   const pushed = stack.entries.length > 1;
   const verbs = topFace.verbs ?? [];
@@ -449,6 +456,7 @@ export function SidePanel({
           </View>
         ) : null}
         <FrameControls stack={stack} onStack={onStack} onFold={() => onFold(true)} closeFolds={closeFolds} />
+        {atTop && isWeb ? <View width={WINDOW_GUTTER.right(0) as never} alignSelf="stretch" flexShrink={0} marginVertical={-7} marginRight={-8} style={DRAG_REGION as never} /> : null}
       </View>
 
       {pushed && topFace.sub !== undefined ? sub(topFace.sub, { flexShrink: 0, paddingVertical: 4, paddingHorizontal: 12, ...edge(t, { bottom: 1 }) }) : null}

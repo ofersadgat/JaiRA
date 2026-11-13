@@ -111,6 +111,10 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     }
     const settleTimer = setTimeout(() => {
       follow.current = false;
+      // Which day the thread stands on once it has settled where it opened: a thread opened at its end,
+      // that nothing then scrolls or grows, had no day over it (2026-11-13, two panes on one
+      // conversation drew the chip in one and not the other).
+      if (isWeb) readDay();
     }, 400);
     return () => clearTimeout(settleTimer);
   }, [m.thread, surface.live, m.taskId]);
@@ -124,10 +128,15 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     if (box === null || box === undefined || typeof box.querySelectorAll !== "function") return;
     const top = box.getBoundingClientRect().top;
     let found: string | null = null;
-    for (const node of Array.from(box.querySelectorAll<HTMLElement>("[data-day]"))) {
+    const stamped = Array.from(box.querySelectorAll<HTMLElement>("[data-day]"));
+    for (const node of stamped) {
       if (node.getBoundingClientRect().top - top > 30) break;
       found = node.dataset["day"] ?? found;
     }
+    // None passed under the chip yet: the day of the first one under it. What the chip says is then a
+    // function of where the thread stands alone, not of where it stood before (two panes on one
+    // conversation drew it in one and not the other, 2026-11-13).
+    if (found === null) found = stamped[0]?.dataset["day"] ?? null;
     setDay((was) => (was === found ? was : (found ?? was)));
   };
   useEffect(() => () => {

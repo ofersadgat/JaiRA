@@ -407,7 +407,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         {...((isWeb && geometry.open ? { "data-place": "panel" } : {}) as object)}
       >
         <ToolsFieldProvider value={toolsFieldData}>
-          <SidePanel stack={panelStack} onStack={onStack} face={face} folded={!geometry.open} onFold={(folded) => geometry.foldKey !== null && actions.setFold(geometry.foldKey, !folded)} closeFolds={closeFoldsOf(panelStack)} />
+          <SidePanel stack={panelStack} onStack={onStack} face={face} folded={!geometry.open} onFold={(folded) => geometry.foldKey !== null && actions.setFold(geometry.foldKey, !folded)} closeFolds={closeFoldsOf(panelStack)} top={splits} />
         </ToolsFieldProvider>
       </View>
     </>

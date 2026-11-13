@@ -1,9 +1,8 @@
-import { Fragment, useEffect, useState, type JSX, type ReactNode } from "react";
+import { Fragment, useEffect, useRef, useState, type JSX, type ReactNode } from "react";
 import type { GestureResponderEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import type { PanelEntry } from "@jaira/ui/panelStack";
 import {
-  PLACES,
   SPLIT_PANE_MIN,
   closePane,
   crumbTo,
@@ -17,9 +16,9 @@ import {
   openInPane,
   paneBack,
   paneForward,
-  paneHeaded,
   publishedOfEntry,
   rightWidthOf,
+  ROOM,
   roomEntryOf,
   roomMoved,
   roomPaneOf,
@@ -31,22 +30,21 @@ import {
   type PaneEntry,
   type PanePath,
 } from "@jaira/ui/splitModel";
-import { PANE, paneDefault, paneOf } from "@jaira/ui/uiState";
+import { PANE, PANEL_RAIL, paneDefault, paneOf } from "@jaira/ui/uiState";
 import { Splitter } from "../components/files/Splitter";
 import { anchorRectOf } from "../components/floats/anchor";
 import { ContextMenu, type MenuAt } from "../components/Menu";
 import { panelOnStack } from "../components/panel/panelBridge";
 import { PanelEmpty } from "../components/panel/PanelViews";
-import { PlaceButtons } from "../components/panel/PlaceButtons";
 import { SpIcon } from "../components/panel/SidePanel";
-import { Press, Txt, edge } from "../primitives";
+import { DRAG_REGION, Press, Txt, WINDOW_GUTTER, edge } from "../primitives";
 import { useTokens } from "../tokens";
-import { useRoomWidth } from "./columnsFit";
+import { useColumnsFit, useRoomWidth } from "./columnsFit";
 import { PaneBody } from "./PaneBody";
-import { openInPanel, placeArtifact, placeEntry, surfaceOf, usePlacesHere, useShownPlaces } from "./places";
+import { openInPanel, placeEntry } from "./places";
 import { useShell } from "./shell";
 import { RoomAddress } from "./TitleBar";
-import { paneFaces, paneTitles, splitView } from "./viewState";
+import { paneFaces, paneTitles, panelOpenWidth, splitView } from "./viewState";
 import { usePhone } from "./phone";
 
 /**
@@ -73,8 +71,8 @@ import { usePhone } from "./phone";
  *                    has no title bar of its own, so it has one head on either side
  *   the divider      the splitter before the second pane (`files/Splitter.tsx`); it sizes that pane,
  *                    kept as `PANE.splitRight`, never so wide the first goes under 360
- *   focus            the pane last pressed in: a 2px --accent line along its top, an inset shadow over
- *                    what it shows (`FocusLine`) — never a coloured left edge
+ *   focus            the pane last pressed in: a 2px --accent row along its top, above its head
+ *                    (every pane has the row; the others' is clear) — never a coloured left edge
  *   narrow           too narrow for two panes of 360 and the divider (`splitFits`): one pane, the two
  *                    as tabs over it (`SplitTabs`), a dot on the hidden one when what it shows changed
  *   ⋯                Swap the panes, Only this pane, Move to the side panel, Close this pane (a
@@ -92,12 +90,6 @@ function focusProps(pane: number): Record<string, unknown> {
           return false;
         },
       };
-}
-
-/** The focused pane's line: 2px of --accent along its top, an inset shadow over what the pane shows. */
-function FocusLine(): JSX.Element {
-  const t = useTokens();
-  return <View position="absolute" top={0} left={0} right={0} height={2} zIndex={11} pointerEvents="none" {...({ boxShadow: `inset 0 2px 0 ${String(t.v("accent"))}` } as object)} />;
 }
 
 /**
@@ -175,17 +167,6 @@ function crumbGlyphOf(entry: PaneEntry): string | undefined {
   return published.ref.kind === "canvas" ? "◫" : published.ref.kind === "markdown" ? "¶" : "▥";
 }
 
-/** An artifact's three places, in the head of the pane it stands in: lit where it is, a press moving it. */
-function ArtifactPlaces({ entry }: { entry: PaneEntry }): JSX.Element | null {
-  const phone = usePhone();
-  const published = publishedOfEntry(entry);
-  const here = usePlacesHere(phone);
-  const lit = useShownPlaces(published?.ref.id ?? "");
-  if (published === undefined) return null;
-  const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
-  return <PlaceButtons offered={offered} lit={lit} onPlace={(place) => placeArtifact(place, published.ref, surfaceOf(published.ref.taskId, published.project), phone)} />;
-}
-
 /** One crumb of a pane's path: what it says, where pressing it goes, or (the room on top) the room's own address. */
 interface Crumb {
   key: string;
@@ -199,12 +180,13 @@ interface Crumb {
  * A pane's head (boards 07 and 09): ‹ › and the pane's path as crumbs, what is on top's own controls,
  * then ⋯ and (split) ✕. The same for every pane.
  */
-function PaneHead({ pane, path, crumbs, tools, closable, onStep, onPath, onMenu, onClose }: {
+function PaneHead({ pane, path, crumbs, closable, gutter, onStep, onPath, onMenu, onClose }: {
   pane: number;
   path: PanePath;
   crumbs: readonly Crumb[];
-  tools: ReactNode;
   closable: boolean;
+  /** Where the OS draws the window's buttons over this head (`WINDOW_GUTTER`), kept clear. */
+  gutter: number | string;
   onStep: (step: (path: PanePath) => PanePath) => void;
   onPath: (e: GestureResponderEvent) => void;
   onMenu: (e: GestureResponderEvent) => void;
@@ -255,9 +237,8 @@ function PaneHead({ pane, path, crumbs, tools, closable, onStep, onPath, onMenu,
           );
         })}
       </View>
-      {/* The room's address fills the head itself; crumbs leave the rest to a filler. */}
-      {crumbs.at(-1)?.address === true ? null : <View flex={1} minWidth={8} />}
-      {tools}
+      {/* What the window is moved by: the head's empty stretch, as the title bar's was. */}
+      <View flex={1} minWidth={8} alignSelf="stretch" style={DRAG_REGION as never} />
       <Press onPress={onMenu} label="This pane's menu" title="This pane's menu" {...({ "aria-haspopup": "menu" } as object)} width={26} height={26} alignItems="center" justifyContent="center" borderRadius={5} box={({ hovered }) => (hovered ? { backgroundColor: t.v("fill-ghost-hover") } : {})}>
         {({ hovered }) => (
           <Txt spec={{ voice: "app", scale: 1.1, color: hovered ? "text" : "dim" }} lineHeight={16}>
@@ -266,6 +247,7 @@ function PaneHead({ pane, path, crumbs, tools, closable, onStep, onPath, onMenu,
         )}
       </Press>
       {closable ? <SpIcon icon="cross" label="Close this pane" onPress={onClose} /> : null}
+      {gutter !== 0 ? <View width={gutter as never} alignSelf="stretch" flexShrink={0} style={DRAG_REGION as never} /> : null}
     </View>
   );
 }
@@ -274,7 +256,8 @@ function PaneHead({ pane, path, crumbs, tools, closable, onStep, onPath, onMenu,
  * One pane: its head, and what its path stands on — the room (kept mounted under anything on top of
  * it, when this pane holds it) or an entry drawn as the main view draws it (`PaneBody`).
  */
-function Pane({ pane, room, roomBox, narrow, width }: { pane: number; room: ReactNode | null; roomBox: Record<string, unknown>; narrow: boolean; width: number | null }): JSX.Element | null {
+function Pane({ pane, room, roomBox, narrow, width, gutter }: { pane: number; room: ReactNode | null; roomBox: Record<string, unknown>; narrow: boolean; width: number | null; gutter: number | string }): JSX.Element | null {
+  const t = useTokens();
   const { state } = useShell();
   const split = splitView.use();
   const faces = paneFaces.use();
@@ -350,7 +333,6 @@ function Pane({ pane, room, roomBox, narrow, width }: { pane: number; room: Reac
       ],
     });
   };
-  const headed = paneHeaded(split, pane);
   const hidden = splitOn && narrow && split.tab !== pane;
   return (
     <View
@@ -361,11 +343,20 @@ function Pane({ pane, room, roomBox, narrow, width }: { pane: number; room: Reac
       flexDirection="column"
       overflow="hidden"
       position="relative"
+      // Each pane is a layer of its own, on the window's ground: its text is smoothed the same way
+      // whichever pane it is and whatever stands beside it (overlapping another layer changes that).
+      backgroundColor={t.v("bg") as never}
+      {...((isWeb ? { willChange: "transform" } : {}) as object)}
       {...(splitOn ? focusProps(pane) : {})}
       {...((hidden ? { display: "none" } : {}) as object)}
     >
+      {/* The focused pane's line: a 2px row every pane has, --accent on the focused one. In the flow,
+          so the panes on one path lay out alike focused or not; not a box laid over the pane, whose
+          overlap paints the pane's text in another layer, nor an inset shadow, which bled a hairline
+          along the pane's foot. The panes on one path are the same picture but for this row. */}
+      <View height={2} flexShrink={0} backgroundColor={(splitOn && !narrow && split.focus === pane ? t.v("accent") : "transparent") as never} />
       {splitOn && narrow ? <SplitTabs shown={pane} /> : null}
-      {headed ? <PaneHead pane={pane} path={path} crumbs={crumbs} tools={<ArtifactPlaces entry={top} />} closable={splitOn} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} /> : null}
+      <PaneHead pane={pane} path={path} crumbs={crumbs} closable={splitOn} gutter={gutter} onStep={onStep} onPath={onPath} onMenu={onMenu} onClose={close} />
       <View flex={1} minWidth={0} minHeight={0} position="relative" flexDirection="column">
         {room !== null ? (
           // The room, kept mounted under what is put on top of it: back finds it where it was.
@@ -375,7 +366,6 @@ function Pane({ pane, room, roomBox, narrow, width }: { pane: number; room: Reac
         ) : null}
         {isRoom(top) ? null : face === null ? <PanelEmpty>Opening…</PanelEmpty> : <PaneBody key={top.key} entry={top} face={face} onOpen={(entry) => splitView.set(openInPane(splitView.get(), pane, entry))} />}
       </View>
-      {splitOn && !narrow && split.focus === pane ? <FocusLine /> : null}
       {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
     </View>
   );
@@ -383,19 +373,30 @@ function Pane({ pane, room, roomBox, narrow, width }: { pane: number; room: Reac
 
 /**
  * A room's middle column as its panes: one, or two side by side with the divider between (decision
- * 0025). `room` is what the room draws there; `roomBox` the box it stands in (a row for Files, the
- * phone's sheet inset for Chat). `at` is what the room stands on: when it moves, the room is shown
- * (`roomMoved`). A phone has no panes: the room alone.
+ * 0025) — and one pane is the unsplit main view, the same pane: its head at the window's top (the title
+ * bar is not drawn over a room with panes, `UniversalApp.tsx`). `here` is what the room stands on as a
+ * path's entry: the room's own view (`ROOM`, drawn by `room` in the box `roomBox` — a row for Files),
+ * or the Chat room's conversation by its own entry, drawn as any pane draws it (`PaneBody`). `at` says
+ * where in the room it stands; when either moves, the room is shown (`roomMoved`). A phone has no
+ * panes: the room alone.
  */
-export function Panes({ at, room, roomBox = {} }: { at?: string | null | undefined; room: ReactNode; roomBox?: Record<string, unknown> }): JSX.Element {
+export function Panes({ here = ROOM, at: where, room, roomBox = {} }: { here?: PaneEntry; at?: string | null | undefined; room: ReactNode; roomBox?: Record<string, unknown> }): JSX.Element {
   const { state, actions } = useShell();
   const split = splitView.use();
   const phone = usePhone();
   const roomWidth = useRoomWidth();
   const narrow = !splitFits(roomWidth);
+  // What the room stands on, as a path's entry: by key, so the same place drawn again moves nothing.
+  const at = useRef(here);
+  at.current = here;
   useEffect(() => {
-    if (!phone) splitView.set(roomMoved(splitView.get()));
-  }, [at, phone]);
+    if (!phone) splitView.set(roomMoved(splitView.get(), at.current));
+  }, [here.key, where, phone]);
+  // The window's buttons are drawn over the top row's right end: the side panel's head keeps them clear
+  // while it stands open; else the last pane's head does (less the folded panel's rail under them).
+  const fit = useColumnsFit();
+  const panelWidth = panelOpenWidth.use();
+  const gutter = panelWidth > 0 && fit.panel ? 0 : isWeb ? (panelWidth > 0 ? `max(0px, ${String(WINDOW_GUTTER.right(-PANEL_RAIL))})` : WINDOW_GUTTER.right(0)) : 0;
   if (phone) {
     return (
       <View flex={1} minWidth={0} minHeight={0} position="relative" {...((isWeb ? { "data-place": "main" } : {}) as object)} {...roomBox}>
@@ -403,7 +404,11 @@ export function Panes({ at, room, roomBox = {} }: { at?: string | null | undefin
       </View>
     );
   }
-  const holder = roomPaneOf(split)?.pane ?? null;
+  // The pane whose path holds the room's own view draws it: one view, mounted once.
+  const holder = ((): number | null => {
+    const at = split.panes.findIndex((path) => path.entries.some(isRoom));
+    return at < 0 ? null : at;
+  })();
   const splitOn = isSplit(split);
   const width = rightWidthOf(paneOf(state.settings.ui, PANE.splitRight), roomWidth);
   return (
@@ -413,7 +418,7 @@ export function Panes({ at, room, roomBox = {} }: { at?: string | null | undefin
           {pane === 1 && splitOn && !narrow ? (
             <Splitter label="Resize the split" value={width} reset={paneDefault(PANE.splitRight)} invert min={SPLIT_PANE_MIN} max={Math.max(SPLIT_PANE_MIN, roomWidth - SPLIT_PANE_MIN - 6)} onChange={(size) => actions.setPane(PANE.splitRight, size)} />
           ) : null}
-          <Pane pane={pane} room={holder === pane ? room : null} roomBox={roomBox} narrow={narrow} width={pane === 1 && splitOn && !narrow ? width : null} />
+          <Pane pane={pane} room={holder === pane ? room : null} roomBox={roomBox} narrow={narrow} width={pane === 1 && splitOn && !narrow ? width : null} gutter={pane === split.panes.length - 1 ? gutter : 0} />
         </Fragment>
       ))}
       {/* No pane holds the room: kept mounted out of sight, until it is put on one again. */}

@@ -50,6 +50,9 @@ export function usePaneChatSurface(
   const [walkedInto, setWalkedInto] = useState<string | undefined>(undefined);
   const [walkedChain, setWalkedChain] = useState<ChatSurface["walkedChain"]>(undefined);
   const queued = state.queue.find((q) => q.taskId === taskId);
+  // The conversation the room has open: what the room knows of it before its run does (its opening
+  // message while it is made, a send's failure) is its, wherever it is drawn.
+  const own = room.taskId === taskId;
   const approval = askOfTask(state.approvals, taskId);
   const question = state.questions.find((q) => q.taskId === taskId);
   const gate = parkedGateOf(state.pending, taskId);
@@ -58,10 +61,10 @@ export function usePaneChatSurface(
       ...room,
       taskId,
       project: project ?? room.project,
-      busy: false,
-      opening: null,
-      error: null,
-      detail: run.detail,
+      busy: own ? room.busy : false,
+      opening: own ? room.opening : null,
+      error: own ? room.error : null,
+      detail: run.detail ?? (own ? room.detail : null),
       journal: run.conversation,
       live: run.liveTurn,
       queued,

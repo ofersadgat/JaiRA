@@ -10,9 +10,12 @@ decides_for: [engineering/decisions/0008-side-panels, engineering/decisions/0020
 
 The person, 2026-11-13, over the canvas "Artifacts: main, split, side panel (round 2)"
 (artifact://t-8c3atezj6l/@a-3gtknh8f15): boards 02, 05, 06, 07, 08, 09, 10 and 12 accepted, then "go
-ahead build it". Amended twice the same day (below): "07 and 09 are the correct design for split view
-panels", then "both panels should be fully self contained. I.e. their ui should be identical. You should
-be able to close either of them."
+ahead build it". Amended three times the same day (below): "07 and 09 are the correct design for split
+view panels"; "both panels should be fully self contained. I.e. their ui should be identical. You should
+be able to close either of them."; and "like 09, each panel goes the whole way top to bottom. they both
+have breadcrumb paths and are identical other than potentially different paths. when you open something
+in a split view, the only thing different there is that you're opening a different path. if you opened
+the same path, the two panels should look pixel identical".
 
 ## What was there
 
@@ -30,16 +33,16 @@ column was always one thing: the room's own.
 2. **The side panel's width is unchanged** ("keep it as is").
 3. **Panes (05, 06, 07, 10, 12; as amended, 07 and 09, and self-contained).** The room's middle column
    is one pane, or two side by side (two at most) with a divider between them whose width is
-   remembered like any pane (`PANE.splitRight`). The panes are IDENTICAL: one component, the same head
-   — ‹ Back, › Forward, the pane's path as crumbs (every crumb but the last walks the pane back to it),
-   what stands on top's own controls, ⋯, ✕ — the same body for the same thing whichever side it is
-   on, the same behaviour. Holding ‹, or pressing the last crumb, lists "This pane's path", newest
-   first, the current one marked.
+   remembered like any pane (`PANE.splitRight`). Each goes the whole way top to bottom, its head at
+   the window's top. The panes are IDENTICAL but for their paths: one component, the same head — ‹ Back,
+   › Forward, the pane's path as crumbs (every crumb but the last walks the pane back to it), ⋯, ✕ —
+   and the same view for the same path, to the pixel. Holding ‹, or pressing the last crumb, lists "This
+   pane's path", newest first, the current one marked. One pane is the unsplit main view.
 4. **Anything can go in a pane (06), as the real view:** a conversation is the Chat room's thread with
    its composer, a task's run its run, an artifact the artifact — not a side panel's face. The room's
    own view is an entry like these, on whichever pane holds it.
-5. **Focus.** The pane last pressed in is focused: a 2px --accent line along its top (an inset shadow,
-   never a coloured left edge). A row pressed in the sidebar's Chat or Tasks list lands in the focused
+5. **Focus.** The pane last pressed in is focused: a 2px --accent line along its top (never a coloured
+   left edge). A row pressed in the sidebar's Chat or Tasks list lands in the focused
    pane.
 6. **The side panel follows the focused pane (10).** With the focused pane on a task of its own path,
    the panel is that task's context; on the room, the room's rule as before.
@@ -79,7 +82,8 @@ identical. You should be able to close either of them." What changed:
   mounted under anything put on top of it. No pane holding it (its pane was closed), it is kept mounted
   out of sight, and goes on the focused pane's path again when the room moves (`roomMoved`).
 - **One head per artifact.** In a pane the artifact has no title bar of its own (`PublishedView`'s
-  `headless`): the pane's head names it and carries its three place buttons.
+  `headless`): the pane's head names it and carries its three place buttons. (Undone by the third
+  amendment: the head is the path's, and the place buttons are the artifact view's.)
 - **Closing is symmetric** (`closePane`): the other pane is the only view, its path kept. Swap
   exchanges the panes with their paths; Only this pane is closing the other.
 - **The room's address is in the head of the pane holding the room** while that pane has a head
@@ -88,16 +92,51 @@ identical. You should be able to close either of them." What changed:
 - **The main view is the first pane** in a room with panes: an artifact sent there goes on that
   pane's path. `artifactInMain` is what is left where there are no panes: a phone, the Debug room.
 
+## Amended 2026-11-13 (third): one path, one picture
+
+The person rejected the second build ("the main chat and the split view aren't identical panels"):
+an empty window-wide strip sat over both panes, the heads differed (the room's pane carried the
+conversation's glyph and its "this machine / project" chip, an artifact's carried its place buttons),
+and the room's conversation was drawn by the room's thread while the same conversation in the other
+pane was drawn another way. Then the ruling quoted above. What changed:
+
+- **No title bar over a room with panes** (`UniversalApp.tsx`): each pane's head is at the window's top.
+  The empty stretch of a head is what the window is moved by (`DRAG_REGION`), as the title bar's was.
+  The OS draws the window's buttons over the top row's right end (`titleBarOverlay`): the side panel's
+  head keeps them clear at its end while it stands open (`SidePanel`'s `top`); folded or absent, the
+  last pane's head does (less the rail's 60), and the folded rail starts under them.
+- **A head is a function of the path only**: ‹ › crumbs ⋯ ✕, the same pieces in the same order. The
+  place buttons are the artifact's view's (its title bar, the same in either pane), not the head's;
+  the room's address (the Tasks room's crumbs and tools) is the crumb of the room's own entry
+  (`RoomAddress`), drawn for that path, whichever pane holds it.
+- **One function draws a path** (`PaneBody`), in every pane and unsplit alike. What the room stands
+  on is `here` (`splitModel.ts`): the room's own entry (the board, the file, the Chat start page,
+  which only the room draws) or — the Chat room on a conversation — that conversation's own entry, so
+  the room's conversation and the same conversation opened anywhere else are one path, one view.
+- **The same path is the same picture**, which the rig measures (below), and four things that made a
+  view's picture depend on its history rather than its path were fixed on the way: the focus line is a
+  2px row in every pane's flow (a box laid over the pane put its text in another layer, smoothed
+  differently; an inset shadow bled a hairline along its foot); each pane is a layer of its own
+  (`will-change`), so what stands beside it does not change how its text is smoothed; the day over a
+  thread is worked out where the thread settles and, nothing having passed under it, is the first
+  message's day (`ChatThread`), not whatever a scroll last left.
+- **Leaving a pane is going back**: what a pane gives away (an artifact moved to another place) is
+  ahead of it, › away (`leavePane`).
+
+Measured (shots/split-view.mts): the same conversation in both panes and the same artifact in both
+panes, each pane photographed while the other is focused (neither focused in its own picture), the
+panes equally wide at an even width; and the unsplit main view of the conversation at the pane's width
+against the pane's content. The numbers are in the build's commit.
+
 ## The model
 
 A pane's path is a panel stack's shape (`entries`, what › goes forward to in `ahead`) of the side
 panel's entry kinds and the room. `splitModel.ts` is pure: the panes, which is focused, which tab shows
 when narrow; ‹ › and crumbs (`paneBack`, `paneForward`, `crumbTo`, `pushPath`); the path's menu
 (`historyOf`, `walkTo`); opening on a pane's path (`openInPane`, `openInSplit`); closing, Only this pane
-and Swap (`closePane`, `onlyPane`, `swapPanes`); the room moving (`roomMoved`); whether a pane has a
-head (`paneHeaded`: always while split, alone once its path is more than the room); where a press
-from the sidebar lands (`routeOpen`: the room goes there itself while the focused pane stands on it,
-else the pane goes on); the panel's rule (`focusRuleOf`); a place button's move (`placeMoveOf`,
+and Swap (`closePane`, `onlyPane`, `swapPanes`); the room moving to stand on `here` (`roomMoved`);
+where a press from the sidebar lands (`routeOpen`: the room goes there itself while the focused pane
+stands on `here`, else the pane goes on); the panel's rule (`focusRuleOf`); a place button's move (`placeMoveOf`,
 `shownPlacesOf`); the drop zones (`dropZonesOf`, `zoneAt`, `openHereLine`); and whether two panes fit
 (`splitFits`).
 
@@ -114,10 +153,9 @@ faces over each pane's own path (`paneFaces`) for what they draw by a face.
 - **Phone.** No panes: the Split button is not offered, and anything sent to "split" opens in the main
   view, over the room. No drag.
 - **Two panes at most.** The split is not kept across a reload; the panel stack is not either.
-- **The window's title bar stays as a strip** (the window is dragged by it, the OS draws its buttons
-  in it: `titleBarStyle: "hidden"` with `titleBarOverlay`), holding nothing of any room once the
-  room's address is in a pane's head. With one pane on the room alone, it is the room's address as
-  it always was, and the pane has no head.
+- **The Chat room's conversation has no title bar of its own any more**: its name is the pane's crumb.
+  Renaming it, and the model and placement chips the bar carried, are where the thread itself draws
+  them (the composer's chips, the placement under the box) or the conversation list's ⋯.
 - **✕ only while split**: the only pane does not close; its ‹ goes back along its path.
 - **The side panel's rule** while the focused pane stands on a task of its own path is that task's
   context beside its conversation (`convo`: Steps, Produced, Changes, Held). On anything else (an
@@ -134,4 +172,6 @@ faces over each pane's own path (`paneFaces`) for what they draw by a face.
 3. The narrow tabs and the phone rule.
 4. Drop zones for an artifact's title bar; a sidebar row dragged onto a pane.
 5. (First amendment) Both heads with crumbs, the real views, "Open here".
-6. (Second amendment) One pane component; the room an entry; one head per artifact; symmetric ✕.
+6. (Second amendment) One pane component; the room an entry; symmetric ✕.
+7. (Third amendment) No title bar over panes; heads by path alone; one function draws a path; the
+   pixel comparison in the rig.

@@ -8,9 +8,12 @@
  * head. There are one or two, and they are the same thing: nothing here is about a left or a right pane
  * but the order they stand in. A path is a panel stack's shape (`panelStack.ts`: `entries`, what › goes
  * forward to in `ahead`), its entries the side panel's kinds — a task or a conversation, an artifact, a
- * state — and one more, the ROOM: what the Tasks, Files or Chat room shows from the store. The room is
- * an entry like any other, on whichever pane holds it (at most one: it is one view), and the window
- * opens on one pane whose path is the room alone.
+ * state — and one more, the ROOM: the Tasks room's board, the Files room's file, the Chat room's start
+ * page, which only the room draws. What the room stands on is `here`: that room entry, or — the Chat
+ * room on a conversation — the conversation's own entry, the same path any pane opens it by, so it is
+ * drawn the same wherever it stands (the person, 2026-11-13: "if you opened the same path, the two
+ * panels should look pixel identical"). `here` is on whichever pane holds it; the window opens on one
+ * pane whose path is `here` alone, and one pane is the unsplit main view.
  *
  * Pure: a value in, a new value out. The shell holds the split (`viewState.ts`' `splitView`) and the
  * panes draw it (`SplitPane.tsx`); the rules are tested here without a window.
@@ -46,10 +49,12 @@ export interface SplitState {
   tab: number;
   /** The hidden tab's pane changed since it was last shown: its tab carries a dot. */
   changed: number | null;
+  /** What the room stands on, as a path's entry: the room's own view, or the Chat room's conversation. */
+  here: PaneEntry;
 }
 
 export const ROOM_PATH: PanePath = { entries: [ROOM], ahead: [] };
-export const NO_SPLIT: SplitState = { panes: [ROOM_PATH], focus: 0, tab: 0, changed: null };
+export const NO_SPLIT: SplitState = { panes: [ROOM_PATH], focus: 0, tab: 0, changed: null, here: ROOM };
 
 /** The narrowest a pane may be: a conversation's composer still fits in it. */
 export const SPLIT_PANE_MIN = 360;
@@ -71,23 +76,13 @@ export function isRoom(entry: PaneEntry | undefined | null): entry is RoomEntry 
   return entry?.kind === "room";
 }
 
-/** The pane holding the room, and how deep in its path; null when no pane holds it. */
+/** The pane holding what the room stands on (`here`), and how deep in its path; null when no pane holds it. */
 export function roomPaneOf(split: SplitState): { pane: number; at: number } | null {
   for (let pane = 0; pane < split.panes.length; pane++) {
-    const at = split.panes[pane]!.entries.findIndex(isRoom);
+    const at = split.panes[pane]!.entries.findIndex((entry) => entry.key === split.here.key);
     if (at >= 0) return { pane, at };
   }
   return null;
-}
-
-/**
- * Whether a pane draws its head (‹ › crumbs ⋯ ✕): always while split; alone, once its path is more than
- * the room — the window's title bar says where the room stands while it is all there is.
- */
-export function paneHeaded(split: SplitState, pane: number): boolean {
-  if (isSplit(split)) return true;
-  const path = split.panes[pane];
-  return path !== undefined && !(path.entries.length === 1 && isRoom(path.entries[0]));
 }
 
 /**
@@ -149,7 +144,7 @@ export function onPane(split: SplitState, pane: number, step: (path: PanePath) =
 export function openInPane(split: SplitState, pane: number, entry: PaneEntry): SplitState {
   if (pane >= split.panes.length) {
     const panes = withoutRoomElsewhere(split.panes, -1, entry).filter((path) => path.entries.length > 0);
-    return { panes: [...panes, { entries: [entry], ahead: [] }], focus: panes.length, tab: panes.length, changed: null };
+    return { panes: [...panes, { entries: [entry], ahead: [] }], focus: panes.length, tab: panes.length, changed: null, here: split.here };
   }
   const panes = withoutRoomElsewhere(split.panes, pane, entry);
   panes[pane] = pushPath(panes[pane]!, entry);
@@ -166,9 +161,9 @@ export function openInSplit(split: SplitState, entry: PaneEntry): SplitState {
  * either pane. The only pane does not close; `emptied` (its path ran out) leaves it on the room.
  */
 export function closePane(split: SplitState, pane: number, emptied = false): SplitState {
-  if (!isSplit(split)) return emptied ? NO_SPLIT : split;
+  if (!isSplit(split)) return emptied ? { ...NO_SPLIT, panes: [{ entries: [split.here], ahead: [] }], here: split.here } : split;
   const rest = split.panes.filter((_, i) => i !== pane);
-  return { panes: rest, focus: 0, tab: 0, changed: null };
+  return { panes: rest, focus: 0, tab: 0, changed: null, here: split.here };
 }
 
 /** Only this pane: the other closes. */
@@ -180,30 +175,35 @@ export function onlyPane(split: SplitState, pane: number): SplitState {
 export function swapPanes(split: SplitState): SplitState {
   if (!isSplit(split)) return split;
   const flip = (i: number | null): number | null => (i === null ? null : 1 - i);
-  return { panes: [split.panes[1]!, split.panes[0]!], focus: 1 - split.focus, tab: 1 - split.tab, changed: flip(split.changed) };
+  return { panes: [split.panes[1]!, split.panes[0]!], focus: 1 - split.focus, tab: 1 - split.tab, changed: flip(split.changed), here: split.here };
 }
 
 /**
- * The room moved (another task, conversation or file; another room): it is shown. The pane holding it
- * goes back to it, what was on top dropped; no pane holding it, it goes on the focused pane's path.
+ * The room moved (another task, conversation or file; another room): it stands on `here` now, and is
+ * shown. The pane that held where it stood goes on to it there, what was on top dropped; no pane
+ * holding it, it goes on the focused pane's path.
  */
-export function roomMoved(split: SplitState): SplitState {
+export function roomMoved(split: SplitState, here: PaneEntry): SplitState {
   const held = roomPaneOf(split);
-  if (held === null) return openInPane(split, Math.min(split.focus, split.panes.length - 1), ROOM);
+  const moved = { ...split, here };
+  if (held === null) return openInPane(moved, Math.min(split.focus, split.panes.length - 1), here);
   const path = split.panes[held.pane]!;
-  if (held.at === path.entries.length - 1 && path.ahead.length === 0) return split;
-  return setPath(split, held.pane, { entries: path.entries.slice(0, held.at + 1), ahead: [] });
+  if (split.here.key === here.key && held.at === path.entries.length - 1 && path.ahead.length === 0) return split.here === here ? split : moved;
+  const panes = withoutRoomElsewhere(split.panes, held.pane, here);
+  panes[held.pane] = { entries: [...path.entries.slice(0, held.at), here], ahead: [] };
+  return { ...moved, panes };
 }
 
 /**
  * Take the top off a pane — what it showed has gone somewhere else (another place). It goes back a
- * level; a pane whose path runs out closes, or, the only one, stands on the room.
+ * level, as ‹ does: what it showed is ahead of it, › away; a pane whose path runs out closes, or, the
+ * only one, stands on the room.
  */
 export function leavePane(split: SplitState, pane: number): SplitState {
   const path = split.panes[pane];
   if (path === undefined) return split;
   if (path.entries.length <= 1) return closePane(split, pane, true);
-  return setPath(split, pane, { entries: path.entries.slice(0, -1), ahead: [] });
+  return setPath(split, pane, paneBack(path));
 }
 
 /** A press in a pane focuses it. */
@@ -227,7 +227,7 @@ export function showTab(split: SplitState, pane: number): SplitState {
 export function routeOpen(split: SplitState, entry: PanelEntry, phone = false): SplitState | null {
   if (phone) return null;
   const pane = Math.min(split.focus, split.panes.length - 1);
-  if (isRoom(topOfPath(split.panes[pane]))) return null;
+  if (topOfPath(split.panes[pane])?.key === split.here.key) return null;
   return openInPane(split, pane, entry);
 }
 
@@ -265,7 +265,9 @@ export function taskOfEntry(entry: PaneEntry | undefined | null): { taskId: stri
  * what is beside it. Null on the room (the room's rule stands) or on anything that is not a task.
  */
 export function focusRuleOf(split: SplitState): PanelEntry | null {
-  const task = taskOfEntry(topOfPath(split.panes[Math.min(split.focus, split.panes.length - 1)]));
+  const top = topOfPath(split.panes[Math.min(split.focus, split.panes.length - 1)]);
+  if (top?.key === split.here.key) return null;
+  const task = taskOfEntry(top);
   if (task === undefined) return null;
   return { kind: "convo", key: `convo:${task.taskId}`, taskId: task.taskId, ...(task.project !== undefined ? { project: task.project } : {}), tab: "steps" };
 }
