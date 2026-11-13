@@ -218,6 +218,10 @@ import {
   artifactWiring,
   buildPromptExecutor,
   askedSoFar,
+  conversationTitleFrom,
+  conversationTitleOperation,
+  conversationTitleServices,
+  titleRulesOf,
   followUpOperation,
   followUpQuestionsOf,
   followUpServices,
@@ -576,6 +580,8 @@ import {
   type CatalogStatusView,
   type ModelParametersView,
   isConversation,
+  openingOf,
+  openingTitleOf,
 } from "@jaira/shared";
 import { gitIgnoredPaths } from "./gitIgnored";
 import { Diagnostics, stackDetail } from "./diagnostics";
@@ -5917,6 +5923,8 @@ export class AppService {
 
     const fakeRules = opts.fake !== undefined ? parseFakeRules(opts.fake) : undefined;
     if (fakeRules !== undefined) open.fakeRules.set(taskId, fakeRules);
+    // A conversation still carrying its birth name is given a better one while its first turn runs.
+    this.titleConversation(open, taskId, fakeRules);
     // The scope floor, compiled into a delegated agent's OWN permission rules and folded over every
     // prompt call. This is the run path's half of the rule compiler: the chat path emits the same
     // rules per message, and without this a workflow's states bounded nothing but our own callbacks
@@ -10878,6 +10886,60 @@ export class AppService {
     const result = await prompt.start(op, followUpServices()).result;
     if ("error" in result) throw new Error(result.error.reason);
     return followUpQuestionsOf(result.value as JsonValue | undefined, askedSoFar(config, inputs));
+  }
+
+  /** Conversations being named right now, by `{session}\0{taskId}` — one call each at a time. */
+  private readonly titling = new Set<string>();
+
+  /**
+   * Name a conversation from what it opened with, while its first turn runs (`conversationTitle.ts`).
+   *
+   * Only a conversation still carrying the name it was BORN with — recomputed from its opening
+   * (`openingTitleOf`), the rule the Chat view named it by, so nothing extra is stored. A title a
+   * person typed is a decision, and is never overruled; checked again when the answer lands, since a
+   * rename while the call was out is one too. A resumed run asks again only while the first attempt
+   * left the birth name standing.
+   *
+   * Fire and forget, off the run's path: a run never waits on its own name, and a call that fails —
+   * no model the `simple` preset can reach, a route that is down — leaves the birth name and a line in
+   * the log. A scripted run asks only when its script names the title model (`titleRulesOf`).
+   */
+  private titleConversation(open: ProjectSession, taskId: string, fakeRules: FakeRule[] | undefined): void {
+    const meta = open.project.tasks.tryRead(taskId);
+    if (meta === undefined || !isConversation(meta)) return;
+    const opening = openingOf(meta.inputs);
+    if (opening === null || opening.trim() === "") return;
+    const born = openingTitleOf(opening);
+    if (meta.title !== born) return;
+    const rules = fakeRules !== undefined ? titleRulesOf(fakeRules) : undefined;
+    if (rules !== undefined && rules.length === 0) return;
+    const key = `${open.key}\0${taskId}`;
+    if (this.titling.has(key)) return;
+    this.titling.add(key);
+    const fake = rules !== undefined;
+    void (async () => {
+      try {
+        const config = open.project.config;
+        const secrets = this.secretResolver(open);
+        const prompt = buildPromptExecutor({
+          ...(rules !== undefined ? { fakeRules: rules } : {}),
+          ...this.promptWiring(config, { fake, secrets }),
+          tree: this.defaultTree(config, { rootId: "conversation_title", states: {} }, fake, secrets, false).prompt,
+        });
+        const result = await prompt.start(conversationTitleOperation(opening), conversationTitleServices()).result;
+        if ("error" in result) throw new Error(result.error.reason);
+        const title = conversationTitleFrom(result.value as JsonValue | undefined);
+        if (title === undefined || title === born) return;
+        if (this.closed || open.closing || this.sessions.get(open.key) !== open) return;
+        // Renamed, deleted or moved while the call was out: the person's answer stands.
+        if (open.project.tasks.tryRead(taskId)?.title !== born) return;
+        this.renameTask({ taskId, title, project: this.refOfSession(open) });
+      } catch (e) {
+        this.log({ level: "warn", source: "run", message: `could not name conversation ${taskId}: ${(e as Error).message}`, project: open.key, taskId });
+      } finally {
+        this.titling.delete(key);
+      }
+    })();
   }
 
   /**

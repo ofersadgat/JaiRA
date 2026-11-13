@@ -277,6 +277,34 @@ export const CHAT_SESSION = "chat/session";
  * started from the Chat view, and never what a session turns into.
  */
 export const CHAT_CONTROL = "chat/control";
+
+/**
+ * What a conversation was opened with: the one text input its workflow takes (decision 0021) — `message`
+ * for `chat/session`, whatever another workflow calls it. `null` when the inputs hold no single text.
+ */
+export function openingOf(inputs: Readonly<Record<string, JsonValue>> | undefined): string | null {
+  const texts = Object.values(inputs ?? {}).filter((value): value is string => typeof value === "string");
+  return texts.length === 1 ? texts[0]! : null;
+}
+
+/**
+ * A conversation's BIRTH name, from the words it opened with.
+ *
+ * The same rule every chat client uses, and for the same reason: a list of conversations all called
+ * "Conversation" is a list you have to open to read. The first line beats the first N characters —
+ * a pasted stack trace names itself by its first line, and cutting mid-word through paragraph two
+ * names it by nothing.
+ *
+ * In shared because both ends ask it: the Chat view names a new conversation with it, and the engine
+ * recomputes it to tell a conversation still carrying the name it was born with — one it may give a
+ * better name (`titleConversation`) — from one a person renamed.
+ */
+export function openingTitleOf(message: string): string {
+  const line = message.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
+  if (line === "") return "New conversation";
+  return line.length <= 60 ? line : `${line.slice(0, 57).trimEnd()}…`;
+}
+
 /** Where a dynamic workflow's root state is minted (`persistence/documents.ts`): a conversation with children. */
 export const DYNAMIC_WORKFLOW_PREFIX = "dynamic/";
 

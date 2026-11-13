@@ -2,7 +2,7 @@
 id: ui/surfaces/conversation-list
 type: ui-surface
 status: shipped
-updated: 2026-10-02
+updated: 2026-11-13
 kind: panel
 realizes: [ux/patterns/filter-in-place, ux/patterns/ordered-by-urgency-then-recency, ux/patterns/live-facts-and-unseen-counts, ux/patterns/name-it-where-it-will-live, ux/patterns/verbs-on-the-thing-itself, ux/patterns/second-deliberate-step-for-irreversible, ux/patterns/absence-is-stated]
 serves: [product/chat-with-agents, product/see-what-changed-since-you-looked, product/all-projects-in-one-place, product/keep-track-of-everything]
@@ -59,6 +59,7 @@ The drawer of conversations that hangs in the [sidebar](sidebar.md) under the `C
 - `⌕` on the row shows the field and puts the typing caret in it. Each keystroke narrows the list by title, ignoring case. Escape clears the text; turning `⌕` off hides the field and drops the filter.
 - Right-clicking a row opens its menu at the pointer. `Open` opens it. `Copy task id` copies the conversation's task id with no sign on screen. `Rename…` turns the row into its text box: Enter saves a changed, non-empty title everywhere it is shown, and Escape or leaving the box keeps the old one. `Delete…` asks first.
 - `+` on the row starts a new conversation in the chat view; at the root it belongs to the shared root.
+- A new conversation's row reads its first line (60 characters at most) until a better name arrives a moment later: the engine asks the `simple` model preset for three to six words about the opening message while the first turn runs, and the row changes in place. A conversation renamed by a person keeps that name, and one whose call fails keeps its first line.
 - Choosing any other sidebar row closes the drawer.
 
 ## The drawer takes the band's height, and a typed search lasts only while its field shows

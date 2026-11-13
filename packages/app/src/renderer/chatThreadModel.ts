@@ -248,8 +248,10 @@ export function useChatThread(surface: ChatSurface, jump: MutableRefObject<() =>
    *
    * A conversation is born named after its first line, which is the best guess available before
    * anybody has answered and a poor one afterwards — "look at the failing test" names half the list.
-   * The agent writes a title into its session file a few turns in, that lands in the record, and this
-   * is where it becomes the name in the sidebar.
+   * An agent that writes a title into its session file (`ai-title`) has it land in the record, and
+   * this is where it becomes the name in the sidebar. Claude Code writes none in a headless run, which
+   * is how JaiRA runs it, so the ENGINE names a conversation itself while its first turn runs
+   * (`titleConversation`, `conversationTitle.ts`); whichever lands first wins, by the rule below.
    *
    * Only while the conversation is still carrying the name it was born with. A title somebody typed
    * is a decision, and an agent that renamed it back on the next turn would be overruling them once

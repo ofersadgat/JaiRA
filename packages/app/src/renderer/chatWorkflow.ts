@@ -64,14 +64,10 @@ export interface ConversationStart {
   choices: Array<{ stateId: string; label?: string | undefined; input: string }>;
 }
 
-/**
- * What a conversation was opened with: the one text input its workflow takes (decision 0021) — `message`
- * for `chat/session`, whatever another workflow calls it. `null` when the inputs hold no single text.
- */
-export function openingOf(inputs: Readonly<Record<string, JsonValue>> | undefined): string | null {
-  const texts = Object.values(inputs ?? {}).filter((value): value is string => typeof value === "string");
-  return texts.length === 1 ? texts[0]! : null;
-}
+// What a conversation opened with, and the name it is born with (`titleOf`): in `@jaira/shared`
+// (`task.ts`), because the engine recomputes the birth name too — it names a conversation still
+// carrying it (`titleConversation`).
+export { openingOf, openingTitleOf as titleOf } from "@jaira/shared/browser";
 
 /**
  * Settings → Runs → Conversations (decision 0021): each row a choice of the workflows that can be a
@@ -107,20 +103,6 @@ export function conversationStartOf(effective: JsonValue | undefined, workflows:
     disabled: entry?.disabled === true,
     choices: workflows.flatMap((w) => (w.conversationInput !== undefined && w.disabled !== true && w.loadError === undefined ? [{ stateId: w.rootId, label: w.label, input: w.conversationInput }] : [])),
   };
-}
-
-/**
- * A conversation's name, from the words it opened with.
- *
- * The same rule every chat client uses, and for the same reason: a list of conversations all called
- * "Conversation" is a list you have to open to read. The first line beats the first N characters —
- * a pasted stack trace names itself by its first line, and cutting mid-word through paragraph two
- * names it by nothing.
- */
-export function titleOf(message: string): string {
-  const line = message.trim().split("\n").find((l) => l.trim() !== "")?.trim() ?? "";
-  if (line === "") return "New conversation";
-  return line.length <= 60 ? line : `${line.slice(0, 57).trimEnd()}…`;
 }
 
 /**

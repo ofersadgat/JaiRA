@@ -16,6 +16,7 @@ export * from "./fakeExecutor";
 export * from "./scriptedFunctions";
 export * from "./interaction";
 export * from "./followUp";
+export * from "./conversationTitle";
 export * from "./autopilot";
 export * from "./demoWorkflow";
 export * from "./componentsWorkflow";
