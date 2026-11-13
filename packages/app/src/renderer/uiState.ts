@@ -54,6 +54,8 @@ export const PANE = {
   panelSteps: "panel.steps",
   /** The field reference beside the JSON editor. */
   schemaReference: "schema.reference",
+  /** A split's right pane (decision 0025): one width for every room, as the person left it. */
+  splitRight: "split.right",
 } as const;
 
 /**
@@ -71,6 +73,7 @@ export const PANE_DEFAULTS: Record<string, number> = {
   [PANE.panelPreview]: 560,
   [PANE.panelSteps]: 300,
   [PANE.schemaReference]: 300,
+  [PANE.splitRight]: 480,
 };
 
 /**

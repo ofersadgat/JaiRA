@@ -34,6 +34,7 @@ import { GalleryView } from "./GalleryView";
 import { LogsView } from "./LogsView";
 import { PanelColumn } from "./PanelColumn";
 import { SettingsView } from "./SettingsView";
+import { LeftPane } from "./SplitPane";
 import { AppContext, useShell, useShellHub } from "./shell";
 import { useColumnsFit } from "./columnsFit";
 import { PhoneContext } from "./phone";
@@ -202,10 +203,10 @@ function Frame(): JSX.Element {
         <View flex={1} minHeight={0} flexDirection="row">
           {state.view === "tasks" ? (
             <>
-              <View flex={1} minWidth={0} minHeight={0} position="relative">
+              <LeftPane at={state.selected}>
                 <BoardColumn />
                 <ArtifactInMain at={state.selected} />
-              </View>
+              </LeftPane>
               <PanelColumn />
             </>
           ) : state.view === "files" ? (

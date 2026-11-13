@@ -1,5 +1,5 @@
 import { useWindowDimensions } from "react-native";
-import { columnsFitOf, useKeptColumn } from "@jaira/ui/shellFit";
+import { columnsFitOf, roomWidthOf, useKeptColumn } from "@jaira/ui/shellFit";
 import { FOLD, PANE, SIDEBAR_RAIL, openOf, paneOf } from "@jaira/ui/uiState";
 import { SHEET_PEEK } from "../components/panel/PanelSheet";
 import { usePhone } from "./phone";
@@ -25,6 +25,18 @@ export function useSheetInset(): number {
 }
 
 export function useColumnsFit(): { sidebar: boolean; panel: boolean } {
+  return useColumns().fit;
+}
+
+/**
+ * The room the middle column has between the two columns as they stand, for a split to decide whether
+ * its two panes fit side by side (`splitModel.ts`' `splitFits`).
+ */
+export function useRoomWidth(): number {
+  return useColumns().room;
+}
+
+function useColumns(): { fit: { sidebar: boolean; panel: boolean }; room: number } {
   const { state } = useShell();
   const phone = usePhone();
   const { width } = useWindowDimensions();
@@ -34,6 +46,7 @@ export function useColumnsFit(): { sidebar: boolean; panel: boolean } {
   const ui = state.settings.ui;
   // Open, the sidebar is its rail and its panel; the pane is the panel's width.
   const sidebar = { open: openOf(ui, FOLD.shellSidebar), width: SIDEBAR_RAIL + paneOf(ui, PANE.shellSidebar) };
-  if (phone) return { sidebar: sidebar.open, panel: panelOpen };
-  return columnsFitOf({ width, sidebar, panel: { open: panelOpen, width: panelWidth }, kept });
+  const panel = { open: panelOpen, width: panelWidth };
+  const fit = phone ? { sidebar: sidebar.open, panel: panelOpen } : columnsFitOf({ width, sidebar, panel, kept });
+  return { fit, room: roomWidthOf({ width, sidebar, panel }, fit) };
 }

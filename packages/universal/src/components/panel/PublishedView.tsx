@@ -5,23 +5,18 @@ import { publishedMime, type ArtifactComment, type PublishedVersion } from "@jai
 import { invoke } from "@jaira/ui/store";
 import { shownKindOf, shownMimeOf, type PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
-import { useValuePanel } from "@jaira/ui/valuePanel";
+import { PLACES } from "@jaira/ui/splitModel";
 import { usePhone } from "../../app/phone";
-import { artifactInMain, sheetAsk } from "../../app/viewState";
+import { placeArtifact, surfaceOf, usePlacesHere, useShownPlaces } from "../../app/places";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Markdown } from "../Markdown";
 import { Press, Txt, viewScrollbarProps } from "../../primitives";
 import { Island } from "../../islands";
 import { useTokens } from "../../tokens";
+import { PlaceButtons } from "./PlaceButtons";
 import { SpIcon } from "./SidePanel";
 import { ValueView } from "./ValueView";
 import { callCardOf } from "./publishedCard";
-
-/**
- * The surface of an artifact drawn away from its conversation: which task and project it reads from. Its
- * frame comes from its own grant, never `serve`, and there is no composer for a page to write into.
- */
-export const surfaceOf = (taskId: string, project: string | undefined): ArtifactSurface => ({ serve: () => Promise.reject(new Error("no frame")), taskId, project });
 
 /**
  * A published artifact in the conversation (decision 0020 §3–§4): the page Claude made, a Markdown
@@ -38,9 +33,10 @@ export const surfaceOf = (taskId: string, project: string | undefined): Artifact
  *                    comments), and as a board of its artboards where nobody saves — a version a newer
  *                    one replaced, and the phone
  *   Rendered/Source  the entry file's (a canvas's: its first artboard's) as any value's
- *   the verbs        the title bar's right: open it on its own in the side panel (where a panel can take
- *                    it), and ⇤ into the main view (on a phone, the panel's sheet lowered to its head);
- *                    in the main view, ‹ back in their place
+ *   the places       the title bar's right: the three place buttons (decision 0025, `PlaceButtons`) —
+ *                    Main view, Split, Side panel — the place it is in lit, a press moving it there
+ *                    (`places.ts`); no Split on a phone, no Side panel in a room without one. In the
+ *                    main view, ‹ back before them
  *
  * Where it stands is its caller's. In the conversation and a list it is as tall as its frame; `fill`, it
  * owns the column it is in (`ValueView`'s `pinned`), the frame as tall as the room measured for it and
@@ -50,8 +46,9 @@ export const surfaceOf = (taskId: string, project: string | undefined): Artifact
  */
 export function PublishedView({ published, artifacts, fill = false, onBack }: { published: PublishedRef; artifacts?: ArtifactSurface | undefined; fill?: boolean; onBack?: (() => void) | undefined }): JSX.Element {
   const t = useTokens();
-  const panel = useValuePanel();
   const phone = usePhone();
+  const here = usePlacesHere(phone);
+  const lit = useShownPlaces(published.id);
   const [version, setVersion] = useState(published.version);
   const [files, setFiles] = useState<Record<string, string> | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
@@ -192,24 +189,21 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
   const fileKind = fileMime !== undefined ? shownKindOf(fileMime) : undefined;
   const glyph = fileKind !== undefined ? fileKind.glyph : published.kind === "canvas" ? "◫" : published.kind === "markdown" ? "¶" : "▥";
   // At the version on screen: where it is opened shows what was being looked at.
-  const here: PublishedRef = { ...published, version };
+  const atVersion: PublishedRef = { ...published, version };
+  // The three places (decision 0025): those this room offers, and those it is in now, lit.
+  const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
+  const places =
+    newest === null || superseded ? null : (
+      <PlaceButtons offered={offered} lit={lit} onPlace={(place) => placeArtifact(place, atVersion, artifacts ?? surfaceOf(taskId, undefined), phone)} />
+    );
   const verbs =
     onBack !== undefined ? (
-      <SpIcon icon="back" label="Back out of this artifact" onPress={onBack} />
-    ) : newest === null || superseded ? null : (
       <>
-        {/* The person, 2026-11-07: the eye shows it whole, in the main view; →| (⇤ turned round) puts it in the side panel. */}
-        {panel !== null ? <SpIcon icon="adopt" flip label="Open it on its own, in the side panel" onPress={() => panel.open({ title: published.title ?? published.entry, published: { ref: here, ...project } })} /> : null}
-        <SpIcon
-          icon="read"
-          label="Show this artifact in the main view"
-          onPress={() => {
-            artifactInMain.set({ published: here, artifacts: artifacts ?? surfaceOf(taskId, undefined) });
-            // A phone's panel is a sheet over the main view: lowered to its head, so the artifact is seen.
-            if (phone) sheetAsk.set({ detent: "peek", at: Date.now() });
-          }}
-        />
+        <SpIcon icon="back" label="Back out of this artifact" onPress={onBack} />
+        {places}
       </>
+    ) : (
+      places
     );
   const titleBar = (
     <View flexDirection="row" alignItems="center" gap={8} paddingTop={6} paddingHorizontal={fill ? 10 : 2} paddingBottom={4} minWidth={0}>

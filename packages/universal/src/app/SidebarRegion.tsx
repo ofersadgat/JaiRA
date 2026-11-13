@@ -39,7 +39,9 @@ import { UpdateRow } from "../components/floats/UpdateRow";
 import { PointerMenus } from "../components/floats/PointerMenus";
 import { useShell } from "./shell";
 import { useColumnsFit } from "./columnsFit";
-import { aboutNotes } from "./viewState";
+import { aboutNotes, splitView } from "./viewState";
+import { usePhone } from "./phone";
+import { routeOpen, taskPaneEntryOf } from "@jaira/ui/splitModel";
 import { phoneMachines } from "./remoteStatus";
 import { View } from "@tamagui/core";
 import { Press, Txt } from "../primitives";
@@ -432,6 +434,7 @@ function FilesDrawer({ find, draft, onDraft, floats }: { find: boolean; draft: T
  */
 function ChatDrawer({ find }: { find: boolean }): JSX.Element {
   const { state, actions } = useShell();
+  const phone = usePhone();
   const surface = useChatSurface();
   const ui = state.settings.ui;
   const group = groupOf(groupProjects(state.projects, ui.groupWorkspaces !== false), state.at);
@@ -460,7 +463,17 @@ function ChatDrawer({ find }: { find: boolean }): JSX.Element {
               .map((w) => ({ label: w.label, note: `on ${m.label}`, onSelect: () => void actions.runQueuedOn(task.taskId, task.project ?? group.key, w.project) })),
           ),
   };
-  return <ChatListPanel surface={surface} find={find} arrange={arrange} />;
+  // A row lands in the focused pane (decision 0025): on the right pane's path while that is focused.
+  const routed = { ...surface, onOpen: (taskId: string | null, project?: string) => (taskId !== null && openInFocusedPane(taskId, project, phone)) || surface.onOpen(taskId, project) };
+  return <ChatListPanel surface={routed} find={find} arrange={arrange} />;
+}
+
+/** A conversation or task pressed in the sidebar, onto the right pane's path when that pane is focused; false when the left takes it. */
+function openInFocusedPane(taskId: string, project: string | undefined, phone: boolean): boolean {
+  const next = routeOpen(splitView.get(), taskPaneEntryOf(taskId, project), phone);
+  if (next === null) return false;
+  splitView.set(next);
+  return true;
 }
 
 /**
@@ -471,6 +484,7 @@ function ChatDrawer({ find }: { find: boolean }): JSX.Element {
  */
 function TasksDrawer(): JSX.Element {
   const { state, actions } = useShell();
+  const phone = usePhone();
   const ui = state.settings.ui;
   const group = groupOf(groupProjects(state.projects, ui.groupWorkspaces !== false), state.at);
   const scope = group === undefined ? {} : scopeOf(ui, group);
@@ -516,6 +530,7 @@ function TasksDrawer(): JSX.Element {
           onWhen: (w) => actions.setMode(TASK_WHEN_MODE, w),
         }}
         onOpen={(card) => {
+          if (openInFocusedPane(card.taskId, projectOf(card), phone)) return;
           actions.setView("tasks");
           actions.select(card.taskId, projectOf(card));
         }}

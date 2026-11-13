@@ -1,7 +1,7 @@
 import { createContext, useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
 import { steadyMemo, useSteadyHandlers } from "../../steady";
 import { View, isWeb } from "@tamagui/core";
-import { ScrollView, type LayoutChangeEvent } from "react-native";
+import { ScrollView, type GestureResponderEvent, type LayoutChangeEvent } from "react-native";
 import type { PanelTabSpec, PanelVerb } from "@jaira/ui/panelFaceModel";
 import { acceptOffer, close, crumbOf, forward, historyButton, historyKey, kindWordOf, pin, pop, popTo, setTab, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
 import { labelPlan } from "@jaira/ui/panelTabs";
@@ -41,6 +41,8 @@ import { bodyMotion } from "./panelMotion";
  *   the body             flex 1, column; scrolling, it pads 12 12 18; filling, it clips; it comes in as
  *                        the stack moved (`data-spmotion`, `panelMotion.web.ts`)
  *   the folded rail      column, spaced, padding 10 6, --panel-2; its tabs 17px icons over 9.5px names
+ *   as a split's pane    the same frame (`pane`), its head led by ‹ and › always (disabled at 0.4 where
+ *                        there is nowhere to go), the pane's ⋯ and ✕ in place of pin, fold and close
  */
 
 /** What an entry says: the frame asks for it and draws the rest. */
@@ -87,11 +89,12 @@ export function colourOr(t: Tokens, name: string, fallback: string): string {
 }
 
 /** The panel's icon button: a 26px target, the glyph at 15. */
-export function SpIcon({ icon, label, onPress, on = false, toggle = false, primary = false, danger = false, disabled = false, flip = false }: { icon: PanelVerb["icon"]; label: string; onPress: () => void; on?: boolean; /** A toggle (the pin): says `aria-pressed`. */ toggle?: boolean; primary?: boolean; danger?: boolean; disabled?: boolean; flip?: boolean }): JSX.Element {
+export function SpIcon({ icon, label, onPress, onLongPress, on = false, toggle = false, primary = false, danger = false, disabled = false, flip = false }: { icon: PanelVerb["icon"]; label: string; onPress: () => void; /** Held: a split pane's ‹ lists its path (decision 0025). */ onLongPress?: ((e: GestureResponderEvent) => void) | undefined; on?: boolean; /** A toggle (the pin): says `aria-pressed`. */ toggle?: boolean; primary?: boolean; danger?: boolean; disabled?: boolean; flip?: boolean }): JSX.Element {
   const t = useTokens();
   return (
     <Press
       onPress={onPress}
+      {...(onLongPress !== undefined ? { onLongPress } : {})}
       disabled={disabled}
       label={label}
       title={label}
@@ -323,6 +326,16 @@ function PanelRail({ stack, face, onStack, onUnfold }: { stack: PanelStack; face
 }
 
 /**
+ * The frame drawn as a split's right pane instead (decision 0025): its ‹ and › always there (dim when
+ * there is nowhere to go), ‹ held or the name pressed listing the pane's path (`onPath`), and the pane's
+ * own controls (its ⋯ and ✕) where the panel's pin, fold and close are. It never folds.
+ */
+export interface PaneFrame {
+  controls: ReactNode;
+  onPath: (e: GestureResponderEvent) => void;
+}
+
+/**
  * One side panel. `face` answers for any entry in the stack; the frame asks for the top one, the
  * nearest tabbed one (whose tabs are drawn), and the root (which the rail draws).
  */
@@ -333,6 +346,7 @@ export function SidePanel({
   folded,
   onFold,
   closeFolds = false,
+  pane,
 }: {
   stack: PanelStack;
   onStack: OnStack;
@@ -340,6 +354,8 @@ export function SidePanel({
   folded: boolean;
   onFold: (folded: boolean) => void;
   closeFolds?: boolean;
+  /** Drawn as a split's right pane (`PaneFrame`). */
+  pane?: PaneFrame | undefined;
 }): JSX.Element | null {
   const t = useTokens();
   /**
@@ -387,17 +403,34 @@ export function SidePanel({
   const pushed = stack.entries.length > 1;
   const verbs = topFace.verbs ?? [];
   const next = stack.ahead[0];
-  const ahead = next !== undefined ? <SpIcon icon="back" flip label={`Forward to ${crumbOf(next)}`} onPress={() => onStack(forward)} /> : null;
+  const ahead =
+    pane !== undefined ? (
+      <SpIcon icon="back" flip label={next !== undefined ? `Forward to ${crumbOf(next)}` : "Forward"} disabled={next === undefined} onPress={() => onStack(forward)} />
+    ) : next !== undefined ? (
+      <SpIcon icon="back" flip label={`Forward to ${crumbOf(next)}`} onPress={() => onStack(forward)} />
+    ) : null;
+  // A pane's ‹ is always there, held for its path; a panel's only once something is pushed.
+  const back = <SpIcon icon="back" label="Back" disabled={pane !== undefined && !pushed} onPress={() => onStack(pop)} onLongPress={pane?.onPath} />;
   const sub = (words: ReactNode, extra: Record<string, unknown> = {}): JSX.Element => (
     <Txt spec={{ voice: "app", scale: 0.92, color: "dim" }} ellip {...extra}>
       {words}
     </Txt>
   );
+  const title = (
+    <Txt spec={{ voice: "app", scale: 1.08, weight: 600, lineHeight: 1.3 }} ellip minWidth={0} flexShrink={1} title={topFace.titleText}>
+      {topFace.title}
+    </Txt>
+  );
   const name = (
     <View flexDirection="row" alignItems="baseline" gap={8} minWidth={0}>
-      <Txt spec={{ voice: "app", scale: 1.08, weight: 600, lineHeight: 1.3 }} ellip minWidth={0} flexShrink={1} title={topFace.titleText}>
-        {topFace.title}
-      </Txt>
+      {pane !== undefined ? (
+        // In a pane the name is a way to its path, as holding ‹ is.
+        <Press onPress={pane.onPath} label={`${topFace.titleText}: this pane's path`} {...({ "aria-haspopup": "menu" } as object)} flexShrink={1} minWidth={0}>
+          {title}
+        </Press>
+      ) : (
+        title
+      )}
       {pushed ? (
         <Txt spec={{ voice: "app", scale: 0.92, color: "dim" }} flexShrink={0}>
           {kindWordOf(top)}
@@ -410,7 +443,7 @@ export function SidePanel({
       <View flexDirection="row" alignItems="center" gap={8} minHeight={44} paddingTop={7} paddingRight={8} paddingBottom={7} paddingLeft={12} flexShrink={0} {...(edge(t, { bottom: 1 }) as object)}>
         {pushed ? (
           <>
-            <SpIcon icon="back" label="Back" onPress={() => onStack(pop)} />
+            {back}
             {ahead}
             <View flex={1} minWidth={0} flexDirection="column" gap={1}>
               <View flexDirection="row" alignItems="baseline" gap={3} minWidth={0} overflow="hidden">
@@ -432,6 +465,7 @@ export function SidePanel({
           </>
         ) : (
           <>
+            {pane !== undefined ? back : null}
             {ahead}
             {topFace.glyph !== undefined ? <View flexShrink={0}>{topFace.glyph}</View> : null}
             <View flex={1} minWidth={0} flexDirection="column" gap={1}>
@@ -447,7 +481,7 @@ export function SidePanel({
             ))}
           </View>
         ) : null}
-        <FrameControls stack={stack} onStack={onStack} onFold={() => onFold(true)} closeFolds={closeFolds} />
+        {pane !== undefined ? pane.controls : <FrameControls stack={stack} onStack={onStack} onFold={() => onFold(true)} closeFolds={closeFolds} />}
       </View>
 
       {pushed && topFace.sub !== undefined ? sub(topFace.sub, { flexShrink: 0, paddingVertical: 4, paddingHorizontal: 12, ...edge(t, { bottom: 1 }) }) : null}

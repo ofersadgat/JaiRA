@@ -6,7 +6,8 @@ import { projectName } from "@jaira/ui/projects";
 import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, useHeldStates, usePanelStacks, usePanelTween, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
-import { EMPTY_STACK, topOf, type PanelEntry } from "@jaira/ui/panelStack";
+import { EMPTY_STACK, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
+import { focusRuleOf, onRight } from "@jaira/ui/splitModel";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { useViews } from "@jaira/ui/useView";
@@ -15,7 +16,7 @@ import { EventsTaskAutomations } from "../components/workflow/ConfigPanel";
 import { wantPart } from "../components/settings/parts";
 import { ToolsFieldProvider, useToolsFieldRead } from "@jaira/ui/toolsFieldModel";
 import { NewTaskForm } from "../components/panel/NewTaskForm";
-import { panelOnStack, runFocus, runViewed } from "../components/panel/panelBridge";
+import { panelOnStack, panelTop, panelUnfold, runFocus, runViewed } from "../components/panel/panelBridge";
 import type { TranscriptSource } from "../components/panel/RunTranscript";
 import { useRunContext } from "../components/run/runContext";
 import { SidePanel } from "../components/panel/SidePanel";
@@ -26,7 +27,8 @@ import { Splitter } from "../components/files/Splitter";
 import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
-import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, sheetAsk } from "./viewState";
+import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, sheetAsk, splitHere, splitView } from "./viewState";
+import { SplitPane } from "./SplitPane";
 import { usePhone } from "./phone";
 import { useColumnsFit } from "./columnsFit";
 
@@ -56,7 +58,18 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const mode = runMode.use();
   const conversationInMain = conversationInMainOf(state, mode);
   const chatAt = chat !== undefined ? { taskId: chat.taskId, project: chat.project } : { taskId: state.chat.taskId, project: chatProjectOf(state.chat.project, state.at) };
-  const rule = room === null ? null : panelRuleOf(room, state, chatAt, conversationInMain);
+  // The split (decision 0025): drawn here, before the panel, in the rooms whose middle column splits.
+  const phone = usePhone();
+  const splits = room !== null && room !== "debug" && !phone;
+  const split = splitView.use();
+  useEffect(() => {
+    splitHere.set(splits);
+    return () => splitHere.set(false);
+  }, [splits]);
+  // With the right pane focused on a task, the panel is that task's context (board 10); else the room's rule.
+  const focusRule = splits ? focusRuleOf(split) : null;
+  const onRightStack = useCallback((step: (stack: PanelStack) => PanelStack) => splitView.set(onRight(splitView.get(), step)), []);
+  const rule = room === null ? null : (focusRule ?? panelRuleOf(room, state, chatAt, conversationInMain));
   const detail = state.detail;
   const inlineGate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
   useRoomRule(room, rule, inlineGate?.requestId, setStacks);
@@ -65,7 +78,6 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const selectedProject = state.selectedProject ?? undefined;
   const startAgain = useCallback((taskId: string) => startAgainOf(actions, detail, selectedProject, taskId), [actions, detail, selectedProject]);
   const top = topOf(panelStack);
-  const phone = usePhone();
   // Published as the person left it, for the window to fit its columns by (`columnsFit.ts`); drawn as
   // the window has it — folded to its rail where the room between the columns would be too narrow.
   const left = panelGeometryOf(ui, room, top);
@@ -85,6 +97,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const geometry = phone ? left : panelGeometryOf(ui, room, top, fit.panel);
   // The width animates when the kind on top changes or the panel folds, not while it is dragged.
   const tween = usePanelTween(geometry.widthKey, geometry.open, top === undefined);
+  // What the panel shows, for the place buttons to light: nothing while it is folded to its rail.
+  const shownTop = geometry.open ? top : undefined;
+  useEffect(() => panelTop.set(shownTop), [shownTop]);
+  useEffect(() => () => panelTop.set(undefined), []);
   // The New-task button's side of the stack (`viewState.ts`): what is on top, and how to open the form.
   const topKind = top?.kind ?? null;
   useEffect(() => panelTopKind.set(topKind), [topKind]);
@@ -98,11 +114,17 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     if (rerunOf !== null && state.workflowForms[rerunOf] === undefined) actions.pickWorkflow(rerunOf);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [rerunOf]);
-  // The stack, for the middle column's links into the panel (`panelBridge.ts`).
+  // The stack, for the middle column's links into the panel (`panelBridge.ts`), and how to unfold it for
+  // what is put in it from elsewhere (a place button, `places.ts`).
   useEffect(() => {
     panelOnStack.set(onStack);
     return () => panelOnStack.set(null);
   }, [onStack]);
+  const foldKeyLeft = left.foldKey;
+  useEffect(() => {
+    panelUnfold.set(() => foldKeyLeft !== null && actions.setFold(foldKeyLeft, true));
+    return () => panelUnfold.set(null);
+  }, [foldKeyLeft, actions]);
   // The step the middle column's conversation is showing, for the Steps index beside it.
   const viewed = runViewed.use();
   // The values somebody asked to HOLD — the Held tab.
@@ -114,7 +136,9 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
    * The detail of a task the panel shows that is not the selection — a subtask pushed on the stack, an
    * entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
    */
-  const shownTasks = [...new Set(panelStack.entries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [entry.taskId] : [])))]
+  // What the split's right pane shows is read the same way: its faces are this host's.
+  const shownEntries = splits && split.right !== null ? [...panelStack.entries, ...split.right.entries] : panelStack.entries;
+  const shownTasks = [...new Set(shownEntries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [entry.taskId] : [])))]
     .filter((taskId) => taskId !== detail?.taskId)
     .sort();
   // Held in the window's store (decision 0018) while the panel shows them, kept current from the change
@@ -132,7 +156,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
 
   // A state the panel shows that the store is not holding — a pinned one, one a value opened here
   // (`panelHost.ts`' `useHeldStates`).
-  const heldStates = useHeldStates(panelStack.entries, state, actions.pickWorkflow);
+  const heldStates = useHeldStates(shownEntries, state, actions.pickWorkflow);
 
   // The run's verbs and links as the middle column has them: both read the one context.
   const run = useRunContext();
@@ -305,6 +329,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     },
   };
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
+  // The right pane's faces: this host over the pane's own path, so a link inside it pushes there.
+  const paneHost: FaceHost = { ...host, onStack: onRightStack };
+  const paneFace = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(paneHost, entry);
+  const splitPane = splits && split.right !== null ? <SplitPane face={paneFace} /> : null;
   void roomRef;
   const ask = sheetAsk.use();
   // A phone's swipe in from the right edge (`PhoneFrame`): unfold the panel where it folds, and raise its
@@ -320,7 +348,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     return () => phonePanelOpener.set(null);
   }, [canOpen, foldKey, unfolded, actions]);
 
-  if (top === undefined) return null;
+  if (top === undefined) return splitPane;
   // A phone's panel is a sheet over the room (`PanelSheet`). Tasks always has it, at its head at least; a
   // room whose panel folds to a rail (Chat, Files) has it while it is unfolded, and folding it closes it.
   if (phone) {
@@ -337,6 +365,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   }
   return (
     <>
+      {splitPane}
       {/* The side panel's splitter: a drag writes the width of the kind on top (`widthKey`) — it sizes
           the pane after it, so a drag left widens it. */}
       {geometry.open ? (

@@ -29,7 +29,7 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   | "copy" | "rewind"
   | "typeProse" | "typePlain" | "typeCode" | "typeData" | "typeTable" | "typeChanges" | "typeMedia"
   | "pin" | "adopt" | "play" | "stop" | "back" | "info" | "external" | "arrow" | "pause"
-  | "eyeOff" | "layers", string[]> = {
+  | "eyeOff" | "layers" | "placeMain" | "placeSplit" | "placePanel", string[]> = {
   terminal: ["M4 17l6-6-6-6", "M12 19h8"],
   read: ["M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7-10-7-10-7Z", "M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z"],
   write: ["M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7", "M18.4 2.6a2.1 2.1 0 0 1 3 3L12 15l-4 1 1-4Z"],
@@ -164,6 +164,12 @@ export const PATHS: Record<WorkIconName | "chevron" | "check" | "cross" | "send"
   // ⇤ for "show this in the main view" — an arrow into a bar, the direction the thing moves.
   pin: ["M9 4h6", "M10 4v5l-3 4h10l-3-4V4", "M12 13v7"],
   adopt: ["M4 4v16", "M20 12H8", "m12 8-4 4 4 4"],
+  // The three places an artifact can be put (decision 0025), drawn as the window they put it in: the
+  // main view whole, the main view split down its middle, the main view with a column on its right. In a
+  // group of three, each named by its button (`PlaceButtons`), never alone.
+  placeMain: ["M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z"],
+  placeSplit: ["M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z", "M12 5v14"],
+  placePanel: ["M5 5h14a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z", "M15 5v14"],
   play: ["M7 5v14l11-7Z"],
   stop: ["M7 7h10v10H7Z"],
   // A conversation waiting for you (the status line, 2026-10-24): the board's waiting pill's two bars.

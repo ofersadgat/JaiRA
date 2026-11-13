@@ -32,11 +32,21 @@ export interface ColumnsIn {
   kept?: Column | undefined;
 }
 
+/**
+ * The room between the columns, as they stand (`open`): the window, less the sidebar (or its rail) and the
+ * side panel (or its rail, or nothing while it has nothing on it), and a splitter beside each open one.
+ * What a split's two panes are given (`splitModel.ts`' `splitFits`).
+ */
+export function roomWidthOf({ width, sidebar, panel }: Omit<ColumnsIn, "kept">, open: { sidebar: boolean; panel: boolean }): number {
+  const present = panel.width > 0;
+  return width - (open.sidebar ? sidebar.width + SPLITTER : SIDEBAR_RAIL) - (!present ? 0 : open.panel ? panel.width + SPLITTER : PANEL_RAIL);
+}
+
 /** Which of the two stand open in the window: the sidebar folds first, then the panel, until the room fits. */
 export function columnsFitOf({ width, sidebar, panel, kept }: ColumnsIn): { sidebar: boolean; panel: boolean } {
   const present = panel.width > 0;
   const open = { sidebar: sidebar.open, panel: present && panel.open };
-  const room = (): number => width - (open.sidebar ? sidebar.width + SPLITTER : SIDEBAR_RAIL) - (!present ? 0 : open.panel ? panel.width + SPLITTER : PANEL_RAIL);
+  const room = (): number => roomWidthOf({ width, sidebar, panel }, open);
   const order: Column[] = kept === "sidebar" ? ["panel"] : kept === "panel" ? ["sidebar"] : ["sidebar", "panel"];
   for (const column of order) {
     if (room() >= ROOM_FLOOR) break;

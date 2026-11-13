@@ -6,7 +6,8 @@ import { shownKindOf, shownMimeOf, type PublishedRef } from "@jaira/ui/transcrip
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { Press, Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
-import { PublishedView, surfaceOf } from "./PublishedView";
+import { surfaceOf } from "../../app/places";
+import { PublishedView } from "./PublishedView";
 
 /**
  * A task's published artifacts (decision 0020 §3), one row per artifact at its latest version — the

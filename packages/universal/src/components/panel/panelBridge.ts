@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { PanelStack } from "@jaira/ui/panelStack";
+import type { PanelEntry, PanelStack } from "@jaira/ui/panelStack";
 
 /**
  * What passes between the middle column and the side panel, which are separate regions of the shell
@@ -30,6 +30,12 @@ export type OnStack = (next: (stack: PanelStack) => PanelStack) => void;
 
 /** The panel column's `onStack`, while it is drawn. */
 export const panelOnStack = shared<OnStack | null>(null);
+
+/** Unfold the room's panel where it folds — what putting something in it does — while the column is drawn. */
+export const panelUnfold = shared<(() => void) | null>(null);
+
+/** What is on top of the side panel's stack, for the place buttons to light (`places.ts`). */
+export const panelTop = shared<PanelEntry | undefined>(undefined);
 
 /** The step the run's conversation in the middle column is showing, and every step with a sheet on screen. */
 export const runViewed = shared<{ current?: string | undefined; onScreen?: ReadonlySet<string> | undefined }>({});

@@ -1,6 +1,7 @@
 import { useSyncExternalStore } from "react";
 import type { PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
+import { NO_SPLIT, type SplitState } from "@jaira/ui/splitModel";
 
 /**
  * The few facts more than one of the shell's regions reads or sets — the reading of a drilled run (the
@@ -34,10 +35,23 @@ function shared<T>(initial: T): { get: () => T; set: (next: T) => void; use: () 
 export const runMode = shared<"board" | "conversation">("board");
 
 /**
- * The published artifact drawn over the main view (`ArtifactInMain.tsx`), set by the ⇤ on its title bar
- * from wherever it was drawn, the side panel or the conversation.
+ * The published artifact drawn over the main view (`ArtifactInMain.tsx`), put there by its Main view
+ * place button (`places.ts`) from wherever it was drawn: the conversation, the side panel, a split.
  */
 export const artifactInMain = shared<{ published: PublishedRef; artifacts: ArtifactSurface } | null>(null);
+
+/**
+ * The split (decision 0025, `splitModel.ts`): the right pane's path, which pane is focused, which shows
+ * while narrow. One for the window, as a pinned panel stack is: drawn by the Tasks, Files and Chat rooms
+ * beside their middle column (`SplitPane.tsx`), and not kept across a reload.
+ */
+export const splitView = shared<SplitState>(NO_SPLIT);
+
+/** The room on screen can split its middle column: the panel column says so while it draws a room that can. */
+export const splitHere = shared(false);
+
+/** What the right pane shows, by name: its tab says it while the room is too narrow for both panes. */
+export const splitTitle = shared("Split");
 
 /**
  * The side panel as the person left it, for the window to fit the columns by (`columnsFit.ts`): how wide
