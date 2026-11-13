@@ -56,14 +56,14 @@ export const splitHere = shared(false);
  * What each pane shows, by name: the right's tab says it while the room is too narrow for both panes,
  * and a drop zone over a pane says what ‹ will return to.
  */
-export const paneTitles = shared<{ left: string; right: string }>({ left: "Main view", right: "Split" });
+export const paneTitles = shared<readonly string[]>(["Main view", "Split"]);
 
 /**
- * How a pane draws what is on its path that is not a conversation or an artifact (a state, a run's
- * subagent, a value): the side panel's faces over the pane's own path, which the panel column makes
- * from its host (`PanelColumn.tsx`) — a link inside one goes on that pane's path.
+ * How each pane draws what is on its path that is not a conversation or an artifact (a state, a run's
+ * subagent, a value), by the pane's place: the side panel's faces over that pane's own path, which the
+ * panel column makes from its host (`PanelColumn.tsx`) — a link inside one goes on that pane's path.
  */
-export const paneFaces = shared<{ left: (entry: PanelEntry) => PanelFace; right: (entry: PanelEntry) => PanelFace } | null>(null);
+export const paneFaces = shared<readonly ((entry: PanelEntry) => PanelFace)[] | null>(null);
 
 /**
  * The side panel as the person left it, for the window to fit the columns by (`columnsFit.ts`): how wide

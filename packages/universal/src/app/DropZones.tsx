@@ -1,6 +1,6 @@
 import { useEffect, type JSX } from "react";
 import { View, isWeb } from "@tamagui/core";
-import { openHereLine, openInPane, taskPaneEntryOf, zoneAt, type DropZone, type Place } from "@jaira/ui/splitModel";
+import { isSplit, openHereLine, openInPane, paneOfPlace, taskPaneEntryOf, zoneAt, type DropZone, type Place } from "@jaira/ui/splitModel";
 import { TipLayer } from "../components/floats/TipLayer";
 import { Icon, type IconName } from "../components/panel/Icon";
 import { colourOr } from "../components/panel/SidePanel";
@@ -9,7 +9,6 @@ import { useTokens } from "../tokens";
 import { placeEntry } from "./places";
 import { dragFrom, setDropper, usePlaceDrag } from "./placeDrag";
 import { usePhone } from "./phone";
-import { useToMain } from "./SplitPane";
 import { paneTitles, splitView } from "./viewState";
 
 const ZONE: Record<Place, { icon: IconName; label: string }> = {
@@ -25,8 +24,8 @@ const ZONE: Record<Place, { icon: IconName; label: string }> = {
  *
  *   an artifact     (board 08) the three places as zones; a drop MOVES it there (`placeEntry`)
  *   a sidebar row   (board 09) split, each pane is a zone and only the one under the pointer is drawn,
- *                   "Open here"; a drop puts the row on THAT pane's path — the left's too, ‹ returning
- *                   to what it showed (`openInPane`). Not split, the three places, as an artifact's
+ *                   "Open here"; a drop puts the row on THAT pane's path, either pane, ‹ returning to
+ *                   what it showed (`openInPane`). Not split, the three places, as an artifact's
  *
  * How it looks:
  *
@@ -45,17 +44,16 @@ export function DropZones(): JSX.Element | null {
   const drag = usePlaceDrag();
   const split = splitView.use();
   const titles = paneTitles.use();
-  const toMain = useToMain();
   const phone = usePhone();
   useEffect(() => {
     setDropper((place, entry, kind) => {
       const now = splitView.get();
       // A row on a pane of a split: that pane goes on to it.
-      if (kind === "pane" && now.right !== null && place !== "panel") splitView.set(openInPane(now, place === "main" ? "left" : "right", entry));
-      else placeEntry(place, entry, toMain, phone);
+      if (kind === "pane" && isSplit(now) && place !== "panel") splitView.set(openInPane(now, paneOfPlace(place), entry));
+      else placeEntry(place, entry, phone);
     });
     return () => setDropper(null);
-  }, [toMain, phone]);
+  }, [phone]);
   // A row of the sidebar's Chat or Tasks list, picked up by what it says it is (`data-drag-task`).
   useEffect(() => {
     if (!isWeb || phone || typeof document === "undefined") return undefined;
@@ -69,7 +67,7 @@ export function DropZones(): JSX.Element | null {
   }, [phone]);
   if (drag === null) return null;
   const hot = zoneAt(drag.zones, drag.x, drag.y);
-  const panes = drag.kind === "pane" && split.right !== null;
+  const panes = drag.kind === "pane" && isSplit(split);
   const openHere = (zone: DropZone): JSX.Element => (
     <View
       key={zone.place}
@@ -88,7 +86,7 @@ export function DropZones(): JSX.Element | null {
     >
       <Txt spec={{ voice: "app", scale: 14 / 12.5, weight: 600, color: "accent" }}>Open here</Txt>
       <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }} textAlign="center">
-        {openHereLine(drag.label, zone.place === "main" ? titles.left : titles.right)}
+        {openHereLine(drag.label, titles[paneOfPlace(zone.place)] ?? null)}
       </Txt>
     </View>
   );

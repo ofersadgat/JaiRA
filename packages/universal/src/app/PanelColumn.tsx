@@ -7,7 +7,7 @@ import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, useHeldStates, usePanelStacks, usePanelTween, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
-import { focusRuleOf, onPane } from "@jaira/ui/splitModel";
+import { focusRuleOf, isRoom, setPath, type PaneEntry } from "@jaira/ui/splitModel";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { useViews } from "@jaira/ui/useView";
@@ -28,7 +28,6 @@ import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
 import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, paneFaces, sheetAsk, splitHere, splitView } from "./viewState";
-import { SplitPane } from "./SplitPane";
 import { usePhone } from "./phone";
 import { useColumnsFit } from "./columnsFit";
 
@@ -58,7 +57,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const mode = runMode.use();
   const conversationInMain = conversationInMainOf(state, mode);
   const chatAt = chat !== undefined ? { taskId: chat.taskId, project: chat.project } : { taskId: state.chat.taskId, project: chatProjectOf(state.chat.project, state.at) };
-  // The split (decision 0025): drawn here, before the panel, in the rooms whose middle column splits.
+  // The panes (decision 0025, `SplitPane.tsx`), in the rooms whose middle column splits.
   const phone = usePhone();
   const splits = room !== null && room !== "debug" && !phone;
   const split = splitView.use();
@@ -69,8 +68,19 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   // With the right pane focused on a task, the panel is that task's context (board 10); else the room's rule.
   // So with the left pane's own path on a task (something dropped on it, or swapped in).
   const focusRule = splits ? focusRuleOf(split) : null;
-  const onLeftStack = useCallback((step: (stack: PanelStack) => PanelStack) => splitView.set(onPane(splitView.get(), "left", step)), []);
-  const onRightStack = useCallback((step: (stack: PanelStack) => PanelStack) => splitView.set(onPane(splitView.get(), "right", step)), []);
+  // A link inside a pane's face goes on that pane's path: the face's stack is the path, as a panel stack.
+  const onPaneStack = useCallback(
+    (pane: number) =>
+      (step: (stack: PanelStack) => PanelStack): void => {
+        const now = splitView.get();
+        const path = now.panes[pane];
+        if (path === undefined) return;
+        const was: PanelStack = { ...EMPTY_STACK, entries: path.entries as readonly PanelEntry[], ahead: path.ahead as readonly PanelEntry[] };
+        const next = step(was);
+        if (next !== was) splitView.set(setPath(now, pane, { entries: next.entries as readonly PaneEntry[], ahead: next.ahead as readonly PaneEntry[] }));
+      },
+    [],
+  );
   const rule = room === null ? null : (focusRule ?? panelRuleOf(room, state, chatAt, conversationInMain));
   const detail = state.detail;
   const inlineGate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
@@ -139,7 +149,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
    * entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
    */
   // What the split's panes show on their paths is read the same way: their faces are this host's.
-  const shownEntries = splits ? [...panelStack.entries, ...split.left.entries, ...(split.right?.entries ?? [])] : panelStack.entries;
+  const shownEntries = splits ? [...panelStack.entries, ...split.panes.flatMap((path) => path.entries.filter((entry): entry is PanelEntry => !isRoom(entry)))] : panelStack.entries;
   const shownTasks = [...new Set(shownEntries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [entry.taskId] : [])))]
     .filter((taskId) => taskId !== detail?.taskId)
     .sort();
@@ -333,13 +343,11 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
   // The panes' faces, for what they draw that is not a conversation or an artifact (`PaneBody`): this
   // host over each pane's own path, so a link inside one goes on that pane's path.
-  const leftHost: FaceHost = { ...host, onStack: onLeftStack };
-  const rightHost: FaceHost = { ...host, onStack: onRightStack };
+
   useEffect(() => {
-    paneFaces.set(splits ? { left: (entry) => faceOf(leftHost, entry), right: (entry) => faceOf(rightHost, entry) } : null);
+    paneFaces.set(splits ? [0, 1].map((pane) => (entry: PanelEntry) => faceOf({ ...host, onStack: onPaneStack(pane) }, entry)) : null);
   });
   useEffect(() => () => paneFaces.set(null), []);
-  const splitPane = splits && split.right !== null ? <SplitPane /> : null;
   void roomRef;
   const ask = sheetAsk.use();
   // A phone's swipe in from the right edge (`PhoneFrame`): unfold the panel where it folds, and raise its
@@ -355,7 +363,7 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     return () => phonePanelOpener.set(null);
   }, [canOpen, foldKey, unfolded, actions]);
 
-  if (top === undefined) return splitPane;
+  if (top === undefined) return null;
   // A phone's panel is a sheet over the room (`PanelSheet`). Tasks always has it, at its head at least; a
   // room whose panel folds to a rail (Chat, Files) has it while it is unfolded, and folding it closes it.
   if (phone) {
@@ -372,7 +380,6 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
   }
   return (
     <>
-      {splitPane}
       {/* The side panel's splitter: a drag writes the width of the kind on top (`widthKey`) — it sizes
           the pane after it, so a drag left widens it. */}
       {geometry.open ? (

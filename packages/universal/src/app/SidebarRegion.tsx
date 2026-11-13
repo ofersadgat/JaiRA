@@ -463,12 +463,12 @@ function ChatDrawer({ find }: { find: boolean }): JSX.Element {
               .map((w) => ({ label: w.label, note: `on ${m.label}`, onSelect: () => void actions.runQueuedOn(task.taskId, task.project ?? group.key, w.project) })),
           ),
   };
-  // A row lands in the focused pane (decision 0025): on the right pane's path while that is focused.
+  // A row lands in the focused pane (decision 0025): on its path, unless it stands on the room.
   const routed = { ...surface, onOpen: (taskId: string | null, project?: string) => (taskId !== null && openInFocusedPane(taskId, project, phone)) || surface.onOpen(taskId, project) };
   return <ChatListPanel surface={routed} find={find} arrange={arrange} />;
 }
 
-/** A conversation or task pressed in the sidebar, onto the right pane's path when that pane is focused; false when the left takes it. */
+/** A conversation or task pressed in the sidebar, onto the focused pane's path; false when that pane stands on the room, which goes there itself. */
 function openInFocusedPane(taskId: string, project: string | undefined, phone: boolean): boolean {
   const next = routeOpen(splitView.get(), taskPaneEntryOf(taskId, project), phone);
   if (next === null) return false;

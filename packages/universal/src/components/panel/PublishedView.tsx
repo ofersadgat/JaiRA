@@ -40,6 +40,8 @@ import { callCardOf } from "./publishedCard";
  *                    main view, ‹ back before them
  *   the title bar,   dragged by a mouse (not from a button on it): the three places as drop zones over
  *   dragged          the room (`DropZones.tsx`); the bar says so with a grab cursor
+ *   in a pane        `headless`: no title bar — the pane's head names it and carries its places
+ *                    (`SplitPane.tsx`), so the artifact has one head on either side
  *
  * Where it stands is its caller's. In the conversation and a list it is as tall as its frame; `fill`, it
  * owns the column it is in (`ValueView`'s `pinned`), the frame as tall as the room measured for it and
@@ -47,7 +49,7 @@ import { callCardOf } from "./publishedCard";
  *
  * What the call returned names the artifact and its version, never its files: those are read here.
  */
-export function PublishedView({ published, artifacts, fill = false, onBack }: { published: PublishedRef; artifacts?: ArtifactSurface | undefined; fill?: boolean; onBack?: (() => void) | undefined }): JSX.Element {
+export function PublishedView({ published, artifacts, fill = false, onBack, headless = false }: { published: PublishedRef; artifacts?: ArtifactSurface | undefined; fill?: boolean; onBack?: (() => void) | undefined; /** Drawn in a pane, whose head carries its title and its places: no title bar of its own. */ headless?: boolean }): JSX.Element {
   const t = useTokens();
   const phone = usePhone();
   const here = usePlacesHere(phone);
@@ -335,6 +337,7 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
   })();
 
   if (newest === null || superseded) {
+    if (headless) return <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "tok-hint" }} padding={10}>Opening…</Txt>;
     return (
       <View flexDirection="row" alignItems="center" gap={8} minWidth={0}>
         <View flexShrink={1} minWidth={0}>
@@ -358,11 +361,11 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
       <View minWidth={0} {...(fill ? { flex: 1, minHeight: 0 } : {})}>
         {files === null || failed !== null ? (
           <>
-            {titleBar}
+            {headless ? null : titleBar}
             <View paddingHorizontal={fill ? 10 : 2}>{lead}</View>
           </>
         ) : (
-          <ValueView value={{ path: published.entry, mediaType: fileMime, content: files[published.entry] ?? "" }} hint={{ mime: fileMime }} pinned={fill} titleBar={titleBar} segment={segment} />
+          <ValueView value={{ path: published.entry, mediaType: fileMime, content: files[published.entry] ?? "" }} hint={{ mime: fileMime }} pinned={fill} titleBar={headless ? null : titleBar} segment={segment} />
         )}
         {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
       </View>
@@ -377,7 +380,7 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
         value={{ path: shownPath, mediaType: publishedMime(shownPath), content: shownText ?? "" }}
         hint={{ mime: publishedMime(shownPath) }}
         pinned={fill}
-        titleBar={titleBar}
+        titleBar={headless ? null : titleBar}
         lead={{
           label: "Artifact",
           hint: "The artifact as Claude published it",

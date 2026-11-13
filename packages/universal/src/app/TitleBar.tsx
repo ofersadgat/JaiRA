@@ -14,6 +14,7 @@ import { usePhone } from "./phone";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
 import { boardAt, newTaskOpener, panelTopKind, runMode, splitView } from "./viewState";
+import { paneHeaded, roomPaneOf } from "@jaira/ui/splitModel";
 
 /**
  * What stands in the title bar: the ADDRESS of what is open. In Tasks, the task address bar
@@ -27,9 +28,13 @@ export function ShellTitleBar(): JSX.Element {
   const split = splitView.use();
   // A phone has no window to drag: the bar is its address alone, which may take the whole width.
   if (phone && state.view === "tasks") return <TasksAddress />;
-  // Split (decision 0025, boards 07 and 09), the room's address is the LEFT pane's, in its head as its
-  // path's crumbs: across the window it would be about both panes, and is about one.
-  if (!phone && split.right !== null && (state.view === "chat" || state.view === "files" || state.view === "tasks")) return <TitleDrag />;
+  // The room's address is in the head of the pane that holds the room, once panes have heads (decision
+  // 0025): across the window it would be about every pane, and is about one. The bar is then the strip
+  // the window is moved by and its buttons are drawn in, and nothing of any room.
+  if (!phone && (state.view === "chat" || state.view === "files" || state.view === "tasks")) {
+    const held = roomPaneOf(split);
+    if (held === null || paneHeaded(split, held.pane)) return <TitleDrag />;
+  }
   if (state.view === "chat") return <ChatAddress />;
   if (state.view === "files") {
     return (
@@ -47,6 +52,23 @@ export function ShellTitleBar(): JSX.Element {
       <TitleDrag />
     </>
   );
+}
+
+/**
+ * The room's address alone — the Tasks room's crumbs and tools (the run's reading toggle, New task), the
+ * conversation's name, the file's — for the head of the pane holding the room (`SplitPane.tsx`).
+ */
+export function RoomAddress(): JSX.Element | null {
+  const { state } = useShell();
+  if (state.view === "chat") return <ChatName />;
+  if (state.view === "files") return <FilesAddress />;
+  if (state.view === "tasks") return <TasksAddress />;
+  return null;
+}
+
+/** The open conversation's name, on the store. */
+function ChatName(): JSX.Element {
+  return <ChatTitle surface={useChatSurface()} />;
 }
 
 /**

@@ -47,7 +47,7 @@ export function setDropper(next: ((place: Place, entry: PanelEntry, kind: DragKi
   dropper = next;
 }
 
-/** Where the panes and the panel stand now: the boxes marked `data-place` (`LeftPane`, `SplitPane`, `PanelColumn`). */
+/** Where the panes and the panel stand now: the boxes marked `data-place` (each `Pane`, by its place, and `PanelColumn`). */
 function placeRects(): { main?: ZoneRect; split?: ZoneRect; panel?: ZoneRect } {
   const out: { main?: ZoneRect; split?: ZoneRect; panel?: ZoneRect } = {};
   for (const place of ["main", "split", "panel"] as const) {

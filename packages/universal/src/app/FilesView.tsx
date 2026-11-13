@@ -7,7 +7,7 @@ import { FactsButton, FileAddressBar, FileInspector, FolderInspector } from "../
 import { FilePanel } from "../components/files/FilePanel";
 import { ArtifactInMain } from "./ArtifactInMain";
 import { PanelColumn } from "./PanelColumn";
-import { LeftPane } from "./SplitPane";
+import { Panes } from "./SplitPane";
 import { useShell } from "./shell";
 import { definitionReveal, issueReveal, runMode } from "./viewState";
 
@@ -100,7 +100,11 @@ export function FilesView(): JSX.Element {
   const context = useFileSurfaces();
   return (
     <View flex={1} minWidth={0} minHeight={0} flexDirection="row">
-      <LeftPane at={state.doc?.path ?? state.dir?.path} flexDirection="row">
+      <Panes
+        at={state.doc?.path ?? state.dir?.path}
+        roomBox={{ flexDirection: "row" }}
+        room={
+          <>
         <FilePanel
           doc={state.doc}
           dir={state.dir}
@@ -113,7 +117,9 @@ export function FilesView(): JSX.Element {
           onSave={actions.saveDoc}
         />
         <ArtifactInMain at={state.doc?.path ?? state.dir?.path} />
-      </LeftPane>
+          </>
+        }
+      />
       <PanelColumn />
     </View>
   );

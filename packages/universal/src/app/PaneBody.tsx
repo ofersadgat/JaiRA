@@ -27,8 +27,8 @@ import { useShell } from "./shell";
  *                    sent from its box — all by its own id
  *   a task's run     its conversation as the run is read (`TaskConversation`, by the panel's face of
  *                    its Conversation tab, without the panel's head and tabs)
- *   an artifact      the artifact filling the pane (`PublishedView`'s `fill`), its place buttons lit
- *                    where it is
+ *   an artifact      the artifact filling the pane (`PublishedView`'s `fill`), with no title bar of its
+ *                    own (`headless`): the pane's head names it and carries its place buttons
  *   anything else    a value, a state, a subagent's conversation: its face's body alone, filling the
  *                    pane or scrolling in it (padding 12 12 18)
  *
@@ -39,7 +39,7 @@ export function PaneBody({ entry, face, onOpen }: { entry: PanelEntry; face: (en
   if (published !== undefined) {
     return (
       <View flex={1} minHeight={0}>
-        <PublishedView key={`${published.ref.id}@${String(published.ref.version)}`} published={published.ref} artifacts={surfaceOf(published.ref.taskId, published.project)} fill />
+        <PublishedView key={`${published.ref.id}@${String(published.ref.version)}`} published={published.ref} artifacts={surfaceOf(published.ref.taskId, published.project)} fill headless />
       </View>
     );
   }
