@@ -9,6 +9,7 @@ import { describe, expect, it, vi } from "vitest";
 import { renderToolResult } from "@declarative-ai/llm";
 import type { RecordStore } from "@declarative-ai/exec";
 import { captureNativeSession, foldIntoEntries, withNativeCapture } from "../src/nativeCapture";
+import { withHostCalls } from "../src/hostCalls";
 
 type Settled = Parameters<RecordStore["finish"]>[1];
 
@@ -199,6 +200,69 @@ describe("withNativeCapture", () => {
     ]);
     // The chain that predates this record's start was cut, so it contributes nothing at all.
     expect(JSON.stringify(entries)).not.toContain("old");
+  });
+
+  /**
+   * t-wdxyhs1w6w, 2026-11-12: the main thread started a background agent, which started the agent that
+   * did the work. That one streams no turn, so the record held none of its calls, and the approvals
+   * they asked for had no call to stand beside.
+   */
+  describe("a subagent's subagent, which the stream never carried", () => {
+    const at = (s: number): string => new Date(s * 1000).toISOString();
+    const inner = [
+      { type: "user", isSidechain: true, uuid: "i0", timestamp: at(10), message: { role: "user", content: "run the build" } },
+      { type: "assistant", isSidechain: true, uuid: "i1", timestamp: at(11), message: { role: "assistant", content: [{ type: "tool_use", id: "toolu_shell", name: "mcp__dai__shell", input: { command: "npm run build" } }] } },
+      { type: "user", isSidechain: true, uuid: "i2", timestamp: at(20), toolUseResult: { exit: 0 }, message: { role: "user", content: [{ type: "tool_result", tool_use_id: "toolu_shell", content: "built" }] } },
+      { type: "assistant", isSidechain: true, uuid: "i3", timestamp: at(21), message: { role: "assistant", content: [{ type: "text", text: "Built." }] } },
+    ];
+    const outerCall = { kind: "message", role: "assistant", provider: "unknown", sidechain: { id: "toolu_outer", parentToolUseId: "toolu_outer" }, content: [{ type: "tool_use", id: "toolu_inner", name: "Agent", input: { prompt: "run the build" } }] };
+    const settle = async (store: RecordStore): Promise<void> =>
+      store.finish({ id: "r1" }, {
+        result: { value: { entries: [{ kind: "message", role: "assistant", provider: "unknown", content: [{ type: "tool_use", id: "toolu_outer", name: "Agent", input: {} }] }, outerCall], finishReason: "stop" } as never },
+        metrics: { startMs: 5000, durationMs: 10 },
+        sessionOutcome: { providerSessionId: SID },
+      });
+    const sidechains = async () => [{ agentId: "a2", toolUseId: "toolu_inner", meta: { spawnDepth: 2 }, lines: inner }];
+
+    it("adds its turns whole from its file, on its chain, and not its prompt", async () => {
+      const { store, closes } = recorder();
+      await settle(withNativeCapture(store, { cwd: "C:\\w", read: async () => [], readSidechains: sidechains }));
+      const entries = (closes[0]!.settled.result as { value: { entries: Array<Record<string, unknown>> } }).value.entries;
+      const chain = entries.filter((e) => e["kind"] === "message" && (e["sidechain"] as { parentToolUseId?: string } | undefined)?.parentToolUseId === "toolu_inner");
+      expect(chain.map((e) => e["uuid"])).toEqual(["i1", "i2", "i3"]);
+      expect(chain[0]).toMatchObject({ role: "assistant", sidechain: { id: "a2", parentToolUseId: "toolu_inner" }, content: [{ type: "tool_use", id: "toolu_shell" }] });
+      // The structured result is folded onto its block, as for any captured turn.
+      expect(chain[1]!["content"]).toMatchObject([{ type: "tool_result", tool_use_id: "toolu_shell", data: { exit: 0 } }]);
+    });
+
+    it("lets an approval that call asked for stand beside it, merged after the capture", async () => {
+      const { store, closes } = recorder();
+      const approval = { kind: "message", role: "assistant", provider: "jaira", calledBy: "toolu_shell", content: [{ type: "tool_use", id: "approve_1", name: "approve_tool_call", input: {} }] };
+      const kept: unknown[] = [];
+      // The service's order: the host calls INSIDE the capture.
+      const records = withNativeCapture(
+        withHostCalls(store, () => [approval as never], (left) => kept.push(...left)),
+        { cwd: "C:\\w", read: async () => [], readSidechains: sidechains },
+      );
+      await settle(records);
+      const entries = (closes[0]!.settled.result as { value: { entries: Array<Record<string, unknown>> } }).value.entries;
+      expect(kept).toEqual([]);
+      const at = entries.findIndex((e) => e["calledBy"] === "toolu_shell");
+      expect(entries[at - 1]).toMatchObject({ uuid: "i1" });
+      expect(entries[at]).toMatchObject({ sidechain: { id: "a2", parentToolUseId: "toolu_inner" } });
+    });
+
+    it("adds nothing to a chain the stream did carry", async () => {
+      const { store, closes } = recorder();
+      const carried = [{ kind: "message", role: "assistant", provider: "unknown", sidechain: { id: "toolu_inner", parentToolUseId: "toolu_inner" }, content: [{ type: "tool_use", id: "toolu_shell", name: "mcp__dai__shell", input: { command: "npm run build" } }] }];
+      await withNativeCapture(store, { cwd: "C:\\w", read: async () => [], readSidechains: sidechains }).finish({ id: "r1" }, {
+        result: { value: { entries: carried, finishReason: "stop" } as never },
+        metrics: { startMs: 5000, durationMs: 10 },
+        sessionOutcome: { providerSessionId: SID },
+      });
+      const entries = (closes[0]!.settled.result as { value: { entries: Array<Record<string, unknown>> } }).value.entries;
+      expect(entries.filter((e) => e["kind"] === "message")).toHaveLength(1);
+    });
   });
 
   it("mirrors the inner store's `bySession` presence — absent MEANS the store cannot read", () => {

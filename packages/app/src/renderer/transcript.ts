@@ -789,9 +789,10 @@ export interface LiveTail {
  * One event as entries, wherever it came from — a live `{kind:"event"}` passthrough (the executor's
  * event, payload nested under `provider_event`) or a record's pinned provider event (the payload
  * itself). Shown rather than dropped: the two everyone recognises get said in words, the rest keep
- * the provider's own name, and every row opens to the whole payload — with ONE named exception:
+ * the provider's own name, and every row opens to the whole payload — with TWO named exceptions:
  * `stream_event` is delta bookkeeping whose content arrives again on the finished turn, and a row
- * per fragment would bury the conversation under it.
+ * per fragment would bury the conversation under it; `task_progress` restates a subagent's call,
+ * which is a row of that subagent's own conversation.
  */
 export function eventEntry(event: JsonValue): TranscriptEntry[] {
   const e = (event ?? {}) as Record<string, unknown>;
@@ -810,6 +811,11 @@ export function eventEntry(event: JsonValue): TranscriptEntry[] {
   const type = typeof payload["type"] === "string" ? (payload["type"] as string) : "provider event";
   const subtype = typeof payload["subtype"] === "string" ? (payload["subtype"] as string) : "";
   if (subtype === "init") return [{ kind: "event", tone: "plain", text: "session started", detail }];
+  // The second named exception: one per tool a subagent uses, naming the tool, and that call is a row
+  // of the subagent's own conversation behind its doorway (streamed, or followed in its file:
+  // `UnstreamedChains`). As rows of their own they were 95 lines in one conversation with nothing
+  // else of that work beside them (t-wdxyhs1w6w, 2026-11-12).
+  if (subtype === "task_progress") return [];
   // Something the agent left running did not finish, which it is never told as anything but this line.
   if (subtype === "task_notification" && (payload["status"] === "stopped" || payload["status"] === "failed")) {
     const name = typeof payload["summary"] === "string" && payload["summary"].length > 0 ? ` “${payload["summary"]}”` : "";
@@ -1274,11 +1280,14 @@ export function entriesOf(
  *
  * A spawning call INSIDE the chain is marked as a doorway of its own: a subagent that spawned a
  * subagent keys the nested chain by its own call id in the same flat map, so the walk can continue.
+ * `liveChains` is the whole live map, so a nested chain still streaming (or followed in its file:
+ * `UnstreamedChains`) is a doorway before the record holds it.
  */
 export function sidechainEntriesOf(
   session: SessionView | null,
   call: string,
   live?: readonly JsonValue[],
+  liveChains?: Readonly<Record<string, readonly JsonValue[]>>,
 ): TranscriptEntry[] {
   const said: Array<TranscriptEntry | ResultPart> = [];
   for (const turn of session?.sidechains?.[call] ?? []) said.push(...messageOf(turn));
@@ -1287,7 +1296,7 @@ export function sidechainEntriesOf(
   markRefusals(entries);
   const chains = session?.sidechains ?? {};
   for (const entry of entries) {
-    if (entry.kind === "tool" && entry.callId !== undefined && entry.callId !== call && chains[entry.callId] !== undefined) {
+    if (entry.kind === "tool" && entry.callId !== undefined && entry.callId !== call && (chains[entry.callId] !== undefined || liveChains?.[entry.callId] !== undefined)) {
       entry.sidechain = entry.callId;
     }
   }

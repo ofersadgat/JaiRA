@@ -78,7 +78,7 @@ export function sidechainWorkingOf(session: SessionView | null, call: string, li
       if (entry.callId === call) return running;
       if (seen.has(entry.callId) || (chains[entry.callId] === undefined && streaming[entry.callId] === undefined)) continue;
       seen.add(entry.callId);
-      const found = within(sidechainEntriesOf(session, entry.callId, streaming[entry.callId]), running);
+      const found = within(sidechainEntriesOf(session, entry.callId, streaming[entry.callId], streaming), running);
       if (found !== undefined) return found;
     }
     return undefined;

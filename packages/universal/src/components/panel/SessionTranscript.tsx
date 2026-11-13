@@ -126,7 +126,7 @@ export const Transcript = memo(function Transcript({
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
   if (shown.length === 0) return <Empty>{empty ?? session?.empty ?? "Nothing has been said here yet."}</Empty>;
   const chains = session !== null && session !== undefined ? session.sidechains : undefined;
-  const sidechainOf = chains !== undefined || live?.sidechains !== undefined ? (call: string) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call]) : undefined;
+  const sidechainOf = chains !== undefined || live?.sidechains !== undefined ? (call: string) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call], live?.sidechains) : undefined;
   const blocks = blocksOf(shown);
   // Across the whole conversation, not per block: the agent's words between two publishes end a block.
   const replaced = replacedPublishes(shown);

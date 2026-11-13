@@ -25,6 +25,7 @@ import {
   previewOf,
   resultValueOf,
   sidechainEntriesOf,
+  liveEntriesOf,
   signatureOf,
   type ToolEntry,
   type TranscriptEntry,
@@ -447,6 +448,26 @@ describe("subagent conversations", () => {
     // And with no record at all, the live turns alone are the conversation.
     const bare = sidechainEntriesOf(null, "toolu_task", live as never);
     expect(bare.find((e): e is ToolEntry => e.kind === "tool")?.result).toBe("AZIMUTH");
+  });
+
+  it("marks a nested spawning call whose chain is only LIVE as a doorway (a subagent's subagent, followed in its file)", () => {
+    const live = {
+      toolu_outer: [
+        { kind: "message", role: "assistant", parentToolUseId: "toolu_outer", content: { role: "assistant", content: [{ type: "tool_use", id: "toolu_inner", name: "Agent", input: { prompt: "build it" } }] } },
+      ],
+      toolu_inner: [
+        { kind: "message", role: "assistant", parentToolUseId: "toolu_inner", content: { role: "assistant", content: [{ type: "tool_use", id: "toolu_sh", name: "mcp__dai__shell", input: { command: "npm test" } }] } },
+      ],
+    };
+    const sub = sidechainEntriesOf(null, "toolu_outer", live.toolu_outer as never, live as never);
+    expect(sub.find((e): e is ToolEntry => e.kind === "tool" && e.name === "Agent")?.sidechain).toBe("toolu_inner");
+    const deeper = sidechainEntriesOf(null, "toolu_inner", live.toolu_inner as never, live as never);
+    expect(deeper.find((e): e is ToolEntry => e.kind === "tool")?.callId).toBe("toolu_sh");
+  });
+
+  it("draws no row for a subagent's task_progress: the call it restates is a row of that subagent's conversation", () => {
+    const progress = { type: "provider_event", payload: { type: "system", subtype: "task_progress", task_id: "a1", tool_use_id: "toolu_inner", description: "Running npm test", last_tool_name: "Bash" } };
+    expect(liveEntriesOf({ kind: "event", event: progress } as never)).toEqual([]);
   });
 
   it("keeps a live turn tagged for ANOTHER chain out of the one being read", () => {

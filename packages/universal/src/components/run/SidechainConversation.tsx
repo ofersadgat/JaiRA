@@ -51,7 +51,8 @@ export function SidechainConversation({
   }, [sessions, step.instanceId, host, onLoadSessions]);
 
   const liveItems = liveTurn?.sidechains[call];
-  const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems), [view, call, liveItems]);
+  const liveChains = liveTurn?.sidechains;
+  const entries = useMemo(() => sidechainEntriesOf(view, call, liveItems, liveChains), [view, call, liveItems, liveChains]);
   // Still being written exactly while the call that spawned it is still running (`stillRunning.ts`):
   // the host's record going on after the subagent answered does not make the subagent's last step live.
   const working = useMemo(() => {

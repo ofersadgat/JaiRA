@@ -36,7 +36,12 @@ type Settled = Parameters<RecordStore["finish"]>[1];
 /** The captured delta: the main file's kept lines, and each subagent file's, keyed like `sidechains`. */
 export interface Captured {
   nativeLines?: NativeLine[];
-  nativeSidechains?: Record<string, { agentId: string; meta?: JsonValue; lines: NativeLine[] }>;
+  /**
+   * Each subagent file, by the spawning call. `bodies` holds its message lines WHOLE, by `uuid`, for a
+   * chain the stream never carried: an agent a subagent starts streams no turn (`UnstreamedChains`),
+   * so its file is the only place its conversation is.
+   */
+  nativeSidechains?: Record<string, { agentId: string; meta?: JsonValue; lines: NativeLine[]; bodies?: Record<string, JsonValue> }>;
   /**
    * The main chain's message lines WHOLE — bodies included — by `uuid`. Read only for a RECOVERY
    * ({@link captureNativeSession}'s `bodies`): at a close the stream carried every message and the
@@ -142,18 +147,7 @@ export async function captureNativeSession(
   const native = nativeLinesOf(namingTools(lines), cut);
   if (native.length > 0) captured.nativeLines = native;
   if (options.bodies === true) {
-    // The same cut as the envelopes, stamped the same way: an unstamped line inherits the last stamp.
-    const bodies: Record<string, JsonValue> = {};
-    let stampMs: number | undefined;
-    for (const raw of lines) {
-      if (!isRecord(raw)) continue;
-      const stamp = typeof raw["timestamp"] === "string" ? Date.parse(raw["timestamp"]) : Number.NaN;
-      if (!Number.isNaN(stamp)) stampMs = stamp;
-      if (options.sinceMs !== undefined && stampMs !== undefined && stampMs < options.sinceMs) continue;
-      if ((raw["type"] === "user" || raw["type"] === "assistant") && raw["isSidechain"] !== true && typeof raw["uuid"] === "string") {
-        bodies[raw["uuid"]] = raw as JsonValue;
-      }
-    }
+    const bodies = bodiesOf(lines, options.sinceMs, false);
     if (Object.keys(bodies).length > 0) captured.nativeBodies = bodies;
   }
   // The subagents' files, keyed the way `sidechains` already is. The same cut applies per file: a
@@ -161,16 +155,38 @@ export async function captureNativeSession(
   // call's own close captured it.
   const chains: NonNullable<Captured["nativeSidechains"]> = {};
   for (const chain of await readSidechains(providerSessionId, options.cwd)) {
-    const lines = nativeLinesOf(namingTools(before(chain.lines, options.untilMs)), { ...cut, sidechain: true });
+    const kept = before(chain.lines, options.untilMs);
+    const lines = nativeLinesOf(namingTools(kept), { ...cut, sidechain: true });
     if (lines.length === 0) continue;
+    const bodies = bodiesOf(kept, options.sinceMs, true);
     chains[chain.toolUseId ?? `agent-${chain.agentId}`] = {
       agentId: chain.agentId,
       ...(chain.meta !== undefined ? { meta: chain.meta } : {}),
       lines,
+      ...(Object.keys(bodies).length > 0 ? { bodies } : {}),
     };
   }
   if (Object.keys(chains).length > 0) captured.nativeSidechains = chains;
   return captured;
+}
+
+/**
+ * A file's message lines whole, by `uuid`: the main chain's, or (`sidechain`) a subagent file's own.
+ * The same cut as the envelopes, stamped the same way: an unstamped line inherits the last stamp.
+ */
+function bodiesOf(lines: readonly unknown[], sinceMs: number | undefined, sidechain: boolean): Record<string, JsonValue> {
+  const bodies: Record<string, JsonValue> = {};
+  let stampMs: number | undefined;
+  for (const raw of lines) {
+    if (!isRecord(raw)) continue;
+    const stamp = typeof raw["timestamp"] === "string" ? Date.parse(raw["timestamp"]) : Number.NaN;
+    if (!Number.isNaN(stamp)) stampMs = stamp;
+    if (sinceMs !== undefined && stampMs !== undefined && stampMs < sinceMs) continue;
+    if ((raw["type"] === "user" || raw["type"] === "assistant") && (raw["isSidechain"] === true) === sidechain && typeof raw["uuid"] === "string") {
+      bodies[raw["uuid"]] = raw as JsonValue;
+    }
+  }
+  return bodies;
 }
 
 /**
@@ -285,7 +301,11 @@ export function foldIntoEntries(value: Record<string, unknown>, captured: Captur
     const marker = { id: chain.agentId, parentToolUseId: key };
     const mine = entries.filter((e) => isRecord(e["sidechain"]) && (e["sidechain"] as { id?: unknown }).id === key);
     for (const entry of mine) entry["sidechain"] = { ...marker };
-    foldChain(mine, chain.lines, marker, invariants, folded);
+    // A chain the stream carried none of is an agent a subagent started, which streams no turn
+    // (`UnstreamedChains`): its file is its whole conversation, so its turns are added from it.
+    const carried = mine.length;
+    foldChain(mine, chain.lines, marker, invariants, folded, carried === 0 ? chain.bodies : undefined);
+    entries.push(...mine.slice(carried));
     // The agent's own sidecar — why the subagent existed — has no message to hang on, so it is an
     // event of the chain it describes rather than a map on the side.
     folded.push({
@@ -355,13 +375,15 @@ function foldChain(
     if (type === "user" && ids.length === 0 && line["toolUseResult"] === undefined) continue;
     const entry = ids.length > 0 ? entryNamingTool(entries, ids, type, marker) : nextEntryOfRole(entries, cursor, type, marker);
     if (entry === undefined) {
-      // A message the record never received — the stream was cut off before it — added from the
-      // file, where it is whole. Only a recovery reads bodies; at a close every message rode the
-      // stream, and a line with nothing to annotate is one this fold has no business inventing.
+      // A message the record never received — the stream was cut off before it, or (a subagent's
+      // subagent) never carried it — added from the file, where it is whole. Only those read bodies;
+      // otherwise every message rode the stream, and a line with nothing to annotate is one this fold
+      // has no business inventing.
       const body = typeof line["uuid"] === "string" ? bodies?.[line["uuid"]] : undefined;
       if (body === undefined) continue;
       const added = messageEntryOf(body as Record<string, unknown>);
       if (added === undefined) continue;
+      if (marker !== undefined) added["sidechain"] = { ...marker };
       entries.push(added);
       cursor = entries.length;
       annotate(added, line, ids);

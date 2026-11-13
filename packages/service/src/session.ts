@@ -24,6 +24,7 @@ import type { ApprovalHub, ApprovalJudge, ApprovalRequest, EventHub, Interaction
 import type { InlineFamily, PromptOp } from "@declarative-ai/exec";
 import type { ChatSettings, PermissionSet, PermissionStackDecl, SyncDirection, WorkflowLayer } from "@jaira/shared";
 import { LiveTurnLog } from "./liveTurns";
+import { UnstreamedChains } from "./unstreamedChains";
 import type { FastForwardRun } from "./fastForward";
 
 /**
@@ -395,6 +396,8 @@ export class ProjectSession {
    * where navigation cannot lose it and served back over `session:live`. See {@link LiveTurnLog}.
    */
   readonly liveTurns = new LiveTurnLog();
+  /** The subagents' subagents, whose turns the stream never carries, followed in their own files. See {@link UnstreamedChains}. */
+  readonly unstreamed = new UnstreamedChains();
 
   /**
    * The workflows watchers and their shared debounce timer (§11.1 re-lint).

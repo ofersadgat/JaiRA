@@ -5970,7 +5970,7 @@ export class AppService {
     });
     // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
     open.liveFlush.set(taskId, () => liveFlush.flush());
-    const streaming = withTurnStream((delta) => {
+    const onDelta = (delta: Parameters<Parameters<typeof withTurnStream>[0]>[0]): void => {
       // Folded into main's live-turn log FIRST, so the number the push carries is the count a
       // `session:live` snapshot taken now would report — the merge protocol that lets a viewer seed
       // from the snapshot and skip the pushes already folded into it. The published entry is the
@@ -5989,7 +5989,9 @@ export class AppService {
         ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
         ...(entry !== undefined ? { entry } : {}),
       });
-    }, prompt, open.liveCalls);
+      this.followUnstreamed(open, taskId, delta, workspace.root, onDelta);
+    };
+    const streaming = withTurnStream(onDelta, prompt, open.liveCalls);
 
     // Conversation `summary` mode (DESIGN §14 phase 7): installed only for the
     // sessions whose states asked for it, and summarizing through this run's own
@@ -6013,6 +6015,10 @@ export class AppService {
     // own session file holds the context injections, `toolUseResult` records and line threading that
     // never ride the wire — and the file is the agent's, prunable on its schedule. Captured into the
     // record at each close, keyed by the workspace the agent ran in.
+    // The calls a tool made in this run — `approve_tool_call` — folded into the record of the call that made each,
+    // INSIDE the capture below, so they are merged after it: a call made by a subagent the stream never
+    // carried is in the record only once the capture has read that subagent's file.
+    session.records = this.withHostCallsOf(open, taskId, session.records);
     session.records = withNativeCapture(session.records, {
       cwd: workspace.root,
       onError: (e: Error) =>
@@ -6025,8 +6031,6 @@ export class AppService {
           ...stackDetail(e),
         }),
     });
-    // The calls a tool made in this run — `approve_tool_call` — folded into the record of the call that made each.
-    session.records = this.withHostCallsOf(open, taskId, session.records);
 
     // Policy for this run: authored project rules compiled to an ExecPolicy, with
     // every decision audited and `require_approval` routed to the inbox (§10.2).
@@ -6171,6 +6175,7 @@ export class AppService {
               // Kept in step with the renderer, which drops its own copy on the same two events.
               if (event.type === "operation.completed" || event.type === "operation.failed") {
                 open.liveTurns.clear(taskId);
+                open.unstreamed.stop(taskId);
               }
               if (event.type === "operation.failed") {
                 const refused = usageRefusalOf((event as { failure?: unknown }).failure);
@@ -6325,6 +6330,7 @@ export class AppService {
         open.approvals.unseed(taskId);
         open.questions.unseed(taskId);
         open.liveTurns.drop(taskId);
+        open.unstreamed.stop(taskId);
         liveFlush.dispose();
         open.liveFlush.delete(taskId);
         this.publishFor(open, { type: "store:invalidate", scope: "tasks" });
@@ -6913,6 +6919,10 @@ export class AppService {
     const stores = { ...sessionServicesFor({ inner: liveStore }), limits: this.limits.position, continuation: this.continuationPorts(open, liveStore) };
     // The same capture `startRun` wires: a chat turn is a real delegated call, and its record would
     // otherwise be the one kind missing the agent's own session lines.
+    // The calls a tool made in this turn — `approve_tool_call` — folded into its record when it settles,
+    // INSIDE the capture below, so they are merged after it: a call made by a subagent the stream never
+    // carried is in the record only once the capture has read that subagent's file.
+    stores.records = this.withHostCallsOf(open, request.taskId, stores.records);
     stores.records = withNativeCapture(stores.records, {
       cwd: workspaceRoot,
       onError: (e: Error) =>
@@ -6925,8 +6935,6 @@ export class AppService {
           ...stackDetail(e),
         }),
     });
-    // The calls a tool made in this turn — `approve_tool_call` — folded into its record when it settles.
-    stores.records = this.withHostCallsOf(open, request.taskId, stores.records);
     /**
      * The live turn, for a message somebody typed — everything `startRun` wires, wired here too.
      *
@@ -6963,7 +6971,7 @@ export class AppService {
     });
     // What "stop" writes down before it stops anything — see `ProjectSession.liveFlush`.
     open.liveFlush.set(request.taskId, () => liveFlush.flush());
-    const streaming = withTurnStream((delta) => {
+    const onDelta = (delta: Parameters<Parameters<typeof withTurnStream>[0]>[0]): void => {
       const { n, entry } = open.liveTurns.apply(request.taskId, delta);
       liveFlush.note();
       this.abandonEndedAsks(open, request.taskId, entry);
@@ -6977,7 +6985,9 @@ export class AppService {
         ...(delta.thinking !== undefined ? { thinking: delta.thinking } : {}),
         ...(entry !== undefined ? { entry } : {}),
       });
-    }, prompt, open.liveCalls);
+      this.followUnstreamed(open, request.taskId, delta, workspaceRoot, onDelta);
+    };
+    const streaming = withTurnStream(onDelta, prompt, open.liveCalls);
     const executor = withSessionLayers(stores, streaming);
 
     // JaiRA registered these and JaiRA compiled the policy, so it always knows what it is handing
@@ -7157,6 +7167,7 @@ export class AppService {
           recorder.record(event, atMs);
           if (event.type === "operation.completed" || event.type === "operation.failed") {
             open.liveTurns.clear(request.taskId);
+            open.unstreamed.stop(request.taskId);
           }
           this.publishFor(open, {
             type: "engine:event",
@@ -7368,6 +7379,7 @@ export class AppService {
       if (!open.chatTurns.has(taskId)) {
         this.abandonAsksOfTask(open, taskId);
         open.liveTurns.clear(taskId);
+        open.unstreamed.stop(taskId);
         open.liveFlush.delete(taskId);
         open.approvals.unseed(taskId);
         open.questions.unseed(taskId);
@@ -10076,6 +10088,8 @@ export class AppService {
   private recordApprovalCall(session: ProjectSession, request: ApprovalRequest): void {
     const taskId = request.taskId;
     if (taskId === undefined) return;
+    // The call that asked may be one an unstreamed subagent made, in a file not read since it was written.
+    session.unstreamed.readNow(taskId);
     const snap = session.liveTurns.snapshot(taskId);
     const caller = snap !== null ? callingCallOfTurn(snap, request.input) : undefined;
     const calledBy = caller?.call;
@@ -10142,6 +10156,8 @@ export class AppService {
    * 2026-10-24, option B). Open until the function comes to something: `recordCheckResult`.
    */
   private recordCheckCall(session: ProjectSession, taskId: string, request: PermissionFunctionRequest): void {
+    // The call that asked may be one an unstreamed subagent made, in a file not read since it was written.
+    session.unstreamed.readNow(taskId);
     const snap = session.liveTurns.snapshot(taskId);
     const caller = snap !== null ? callingCallOfTurn(snap, request.input) : undefined;
     const calledBy = caller?.call;
@@ -10187,6 +10203,8 @@ export class AppService {
    * rule, not a function: the conversation reads "Denied by the permission set".
    */
   private recordRuleRefusal(session: ProjectSession, taskId: string, refused: RuleRefusal): void {
+    // The call that asked may be one an unstreamed subagent made, in a file not read since it was written.
+    session.unstreamed.readNow(taskId);
     const snap = session.liveTurns.snapshot(taskId);
     const caller = snap !== null ? callingCallOfTurn(snap, refused.input) : undefined;
     const calledBy = caller?.call;
@@ -10274,6 +10292,28 @@ export class AppService {
    * joins the tail rather than replacing it, and flushed at once, so a turn cut off keeps it — and into
    * what waits for the record to settle. A subagent's goes on that subagent's `chain`.
    */
+  /**
+   * Follow, in its own file, a subagent the stream announces but will not carry (a subagent's own
+   * subagent), and hand its turns on at the announcing delta's position as if they had streamed —
+   * see {@link UnstreamedChains}.
+   */
+  private followUnstreamed(
+    session: ProjectSession,
+    taskId: string,
+    delta: Parameters<Parameters<typeof withTurnStream>[0]>[0],
+    cwd: string,
+    onDelta: (delta: Parameters<Parameters<typeof withTurnStream>[0]>[0]) => void,
+  ): void {
+    if (delta.entry === undefined) return;
+    const where = {
+      ...(delta.session !== undefined ? { session: delta.session } : {}),
+      ...(delta.stateId !== undefined ? { stateId: delta.stateId } : {}),
+    };
+    session.unstreamed.heard(taskId, delta.entry, { cwd, providerSessionId: session.liveTurns.snapshot(taskId)?.providerSessionId }, (entry) =>
+      onDelta({ ...where, entry, at: Date.now() }),
+    );
+  }
+
   private hostCall(session: ProjectSession, taskId: string, live: JsonValue, record: JsonValue, at: number, chain?: string): void {
     const waiting = session.hostCalls.get(taskId) ?? [];
     waiting.push(record);
