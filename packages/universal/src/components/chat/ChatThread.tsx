@@ -29,6 +29,7 @@ import { QueuedMessage } from "./QueuedMessage";
 import { useChatEnvironment } from "./environment";
 import { useChildRunHost } from "./childRunHost";
 import { OutcomeHostContext } from "../panel/outcomeHost";
+import { SubagentHostContext } from "../panel/subagentHost";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 
 /**
@@ -82,7 +83,13 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const { state: shell } = useShell();
   const place = useMemo(() => lookOf(shell.config).conversation.liveStatus, [shell.config]);
   const jumpIf = away ? { onJump: jump } : {};
-  const runs = useChildRunHost(surface, () => jumpRef.current(), m.status !== null && place === "pill" ? <LiveStatusPill status={m.status} {...jumpIf} /> : undefined);
+  const live = surface.live ?? m.afterglow;
+  const runs = useChildRunHost(surface, () => jumpRef.current(), m.status !== null && place === "pill" ? <LiveStatusPill status={m.status} {...jumpIf} /> : undefined, {
+    session: m.thread?.session ?? null,
+    entries: m.entries,
+    live,
+    answering: m.answering,
+  });
   const mentions = useMentions(surface.hasProject, m.project);
   const env = useChatEnvironment(surface);
   const placement = placementSummaryOf({
@@ -140,7 +147,6 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     pinned.current = at;
     setAway((was) => (was === !at ? was : !at));
   };
-  const live = surface.live ?? m.afterglow;
   const narrated = m.status !== null ? { narrated: true } : {};
   const doomed = m.doomedFrom !== undefined ? { doomedFrom: m.doomedFrom } : {};
   // What the agent is blocked on — the command it waits to run, the question it asked — drawn where the
@@ -200,6 +206,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         {/* Which day you are reading, floating over the thread (sticky, 0 tall). */}
         {isWeb ? <DayChip day={day} moving={moving} /> : null}
         <OutcomeHostContext.Provider value={runs.outcomeHost}>
+        <SubagentHostContext.Provider value={runs.subagentHost}>
         <ApprovalAskContext.Provider value={m.askValue}>
         <Paper minHeight={viewport}>
           {m.queued !== undefined ? (
@@ -265,6 +272,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
           </>
         ) : null}
         </ApprovalAskContext.Provider>
+        </SubagentHostContext.Provider>
         </OutcomeHostContext.Provider>
         {/* The end the pills over the box would cover, left free while they show. */}
         {runs.pillSpace > 0 ? <View height={runs.pillSpace} flexShrink={0} /> : null}

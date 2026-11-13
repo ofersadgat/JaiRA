@@ -1524,6 +1524,10 @@ function restrictToEventsFunctions(registry: ReturnType<typeof newRegistry>): vo
   for (const name of [...registry.functions.keys()]) if (!EVENTS_FUNCTIONS.has(name)) registry.functions.delete(name);
 }
 
+/** How long a tool's call waits to find the call it is about in a followed file: 15 × 100 ms. */
+const CALLER_TRIES = 15;
+const CALLER_RETRY_MS = 100;
+
 export class AppService {
   /**
    * The open projects, by {@link sessionKey}.
@@ -10088,16 +10092,22 @@ export class AppService {
   private recordApprovalCall(session: ProjectSession, request: ApprovalRequest): void {
     const taskId = request.taskId;
     if (taskId === undefined) return;
-    // The call that asked may be one an unstreamed subagent made, in a file not read since it was written.
-    session.unstreamed.readNow(taskId);
-    const snap = session.liveTurns.snapshot(taskId);
-    const caller = snap !== null ? callingCallOfTurn(snap, request.input) : undefined;
-    const calledBy = caller?.call;
-    const chain = caller?.chain;
     // Unique across the conversation, not the process: a conversation outlives the process that asked,
     // and the request id is stamped with that process's start.
     const callId = `approve_${request.at.toString(36)}_${request.requestId}`;
-    session.approvalCalls.set(request.requestId, { callId, ...(calledBy !== undefined ? { calledBy } : {}), ...(chain !== undefined ? { chain } : {}), taskId, at: request.at });
+    // Known at once, so an answer finds it; who made it is filled in when found (`withCaller`).
+    const held: { callId: string; calledBy?: string; chain?: string; taskId: string; at: number } = { callId, taskId, at: request.at };
+    session.approvalCalls.set(request.requestId, held);
+    this.withCaller(session, taskId, request.input, (caller) => this.putApprovalCall(session, request, taskId, held, caller));
+  }
+
+  /** `recordApprovalCall`, once the call that asked is found (or given up on). */
+  private putApprovalCall(session: ProjectSession, request: ApprovalRequest, taskId: string, held: { callId: string; calledBy?: string; chain?: string }, caller: { call: string; chain?: string } | undefined): void {
+    const callId = held.callId;
+    const calledBy = caller?.call;
+    const chain = caller?.chain;
+    if (calledBy !== undefined) held.calledBy = calledBy;
+    if (chain !== undefined) held.chain = chain;
     // The WHOLE request: a question the app closes under is found again in the record and put to the
     // person from it (`recoveredAsksOf`), so what the prompt draws and what a call made again is matched
     // by have to be here. The tool's input only when the call it belongs to is not beside it.
@@ -10131,6 +10141,11 @@ export class AppService {
     if (call === undefined) return;
     session.approvalCalls.delete(requestId);
     if (by === "closed") return;
+    // After its call is down, which may still be waiting to find who made it (`withCaller`).
+    this.inOrder(call.taskId, () => this.putApprovalAnswer(session, call, decision, by, reach));
+  }
+
+  private putApprovalAnswer(session: ProjectSession, call: { callId: string; calledBy?: string; chain?: string; taskId: string; at: number }, decision: PermissionDecision, by: ApprovalAnsweredBy, reach: ApprovalReach): void {
     const at = Date.now();
     const answer = {
       decision: decision.decision,
@@ -10156,10 +10171,10 @@ export class AppService {
    * 2026-10-24, option B). Open until the function comes to something: `recordCheckResult`.
    */
   private recordCheckCall(session: ProjectSession, taskId: string, request: PermissionFunctionRequest): void {
-    // The call that asked may be one an unstreamed subagent made, in a file not read since it was written.
-    session.unstreamed.readNow(taskId);
-    const snap = session.liveTurns.snapshot(taskId);
-    const caller = snap !== null ? callingCallOfTurn(snap, request.input) : undefined;
+    this.withCaller(session, taskId, request.input, (caller) => this.putCheckCall(session, taskId, request, caller));
+  }
+
+  private putCheckCall(session: ProjectSession, taskId: string, request: PermissionFunctionRequest, caller: { call: string; chain?: string } | undefined): void {
     const calledBy = caller?.call;
     const chain = caller?.chain;
     const at = Date.now();
@@ -10186,6 +10201,11 @@ export class AppService {
 
   /** What the function came to, beside its call — once; a second word about the same check is no news. */
   private recordCheckResult(session: ProjectSession, taskId: string, request: PermissionFunctionRequest, verdict: CheckCallAnswer["verdict"], reason?: string): void {
+    // After its call is down (`withCaller`).
+    this.inOrder(taskId, () => this.putCheckResult(session, taskId, request, verdict, reason));
+  }
+
+  private putCheckResult(session: ProjectSession, taskId: string, request: PermissionFunctionRequest, verdict: CheckCallAnswer["verdict"], reason?: string): void {
     const key = this.checkKeyOf(taskId, request);
     const open = session.checkCalls.get(key);
     const call = open?.shift();
@@ -10203,10 +10223,10 @@ export class AppService {
    * rule, not a function: the conversation reads "Denied by the permission set".
    */
   private recordRuleRefusal(session: ProjectSession, taskId: string, refused: RuleRefusal): void {
-    // The call that asked may be one an unstreamed subagent made, in a file not read since it was written.
-    session.unstreamed.readNow(taskId);
-    const snap = session.liveTurns.snapshot(taskId);
-    const caller = snap !== null ? callingCallOfTurn(snap, refused.input) : undefined;
+    this.withCaller(session, taskId, refused.input, (caller) => this.putRuleRefusal(session, taskId, refused, caller));
+  }
+
+  private putRuleRefusal(session: ProjectSession, taskId: string, refused: RuleRefusal, caller: { call: string; chain?: string } | undefined): void {
     const calledBy = caller?.call;
     const chain = caller?.chain;
     const at = Date.now();
@@ -10292,6 +10312,60 @@ export class AppService {
    * joins the tail rather than replacing it, and flushed at once, so a turn cut off keeps it — and into
    * what waits for the record to settle. A subagent's goes on that subagent's `chain`.
    */
+  /**
+   * The calls a tool made for a task (an approval, a check, a refusal, their answers), put down IN ORDER:
+   * one waiting to find who made it (`withCaller`) holds those after it. Nothing waiting, a step runs now,
+   * as it always did.
+   */
+  private readonly hostCallQueue = new Map<string, Promise<void>>();
+
+  private inOrder(taskId: string, step: () => void | Promise<void>): void {
+    const was = this.hostCallQueue.get(taskId);
+    const settle = (p: Promise<void>): void => {
+      const held = p.catch(() => undefined).finally(() => {
+        if (this.hostCallQueue.get(taskId) === held) this.hostCallQueue.delete(taskId);
+      });
+      this.hostCallQueue.set(taskId, held);
+    };
+    if (was === undefined) {
+      const ran = step();
+      if (ran instanceof Promise) settle(ran);
+      return;
+    }
+    settle(was.then(() => step()));
+  }
+
+  /**
+   * The call a tool's call is about — the newest whose input is the one asked about — handed to `record`.
+   *
+   * An agent a subagent started streams nothing: its calls are read off its file (`UnstreamedChains`), and
+   * the agent asks at the same instant it writes the call there (measured 2026-11-13: the `tool_use` line
+   * and the approval in the same millisecond). So while the task follows such a file and the call is not
+   * found, the file is read again for a moment before the call is put down without it.
+   */
+  private withCaller(session: ProjectSession, taskId: string, input: unknown, record: (caller: { call: string; chain?: string } | undefined) => void): void {
+    const find = (): { call: string; chain?: string } | undefined => {
+      session.unstreamed.readNow(taskId);
+      const snap = session.liveTurns.snapshot(taskId);
+      return snap !== null ? callingCallOfTurn(snap, input) : undefined;
+    };
+    this.inOrder(taskId, () => {
+      const now = find();
+      if (now !== undefined || !session.unstreamed.following(taskId)) return record(now);
+      return new Promise<void>((resolve) => {
+        let tries = 0;
+        const tick = (): void => {
+          const found = find();
+          if (found !== undefined || ++tries >= CALLER_TRIES) {
+            record(found);
+            resolve();
+          } else setTimeout(tick, CALLER_RETRY_MS);
+        };
+        setTimeout(tick, CALLER_RETRY_MS);
+      });
+    });
+  }
+
   /**
    * Follow, in its own file, a subagent the stream announces but will not carry (a subagent's own
    * subagent), and hand its turns on at the announcing delta's position as if they had streamed —
@@ -14824,11 +14898,19 @@ export function sidechainsOf(value: JsonValue | undefined): Record<string, Sessi
   if (!Array.isArray(entries)) return undefined;
   const out: Record<string, SessionTurn[]> = {};
   for (const raw of entries) {
-    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; calledBy?: unknown; sidechain?: { id?: unknown; parentToolUseId?: unknown } } | null;
+    const entry = raw as { kind?: unknown; role?: unknown; content?: JsonValue; calledBy?: unknown; timing?: { at?: unknown; startedAt?: unknown; thoughtMs?: unknown }; sidechain?: { id?: unknown; parentToolUseId?: unknown } } | null;
     if (entry === null || typeof entry !== "object" || entry.kind !== "message") continue;
     const call = typeof entry.sidechain?.parentToolUseId === "string" ? entry.sidechain.parentToolUseId : entry.sidechain?.id;
     if (typeof call !== "string") continue;
-    (out[call] ??= []).push({ ...turnOf({ role: entry.role, content: entry.content } as JsonValue), ...(typeof entry.calledBy === "string" ? { calledBy: entry.calledBy } : {}) });
+    // The clocks ride on the entry, as the main thread's do (`turnsOf`): a subagent's line says how long it ran.
+    const timing = entry.timing ?? {};
+    (out[call] ??= []).push({
+      ...turnOf({ role: entry.role, content: entry.content } as JsonValue),
+      ...(typeof entry.calledBy === "string" ? { calledBy: entry.calledBy } : {}),
+      ...(typeof timing.at === "number" ? { at: timing.at } : {}),
+      ...(typeof timing.startedAt === "number" ? { startedAt: timing.startedAt } : {}),
+      ...(typeof timing.thoughtMs === "number" ? { thoughtMs: timing.thoughtMs } : {}),
+    });
   }
   return Object.keys(out).length > 0 ? out : undefined;
 }

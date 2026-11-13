@@ -1,6 +1,5 @@
 import { useState, type JSX, type ReactNode } from "react";
 import { View } from "@tamagui/core";
-import type { WorkflowOutcome } from "@jaira/shared/browser";
 import { CUT, fitPills, secondLine, type PillLevel, type RunWait } from "@jaira/ui/childRunModel";
 import { thoughtTime } from "@jaira/ui/liveStatusModel";
 import { useElapsed } from "@jaira/ui/runActivityModel";
@@ -46,7 +45,9 @@ import { Pulse } from "./Pulse";
  *                     waited, ticking, where a run's ends on its clock
  */
 export function ChildRunLine({
-  outcome,
+  verb,
+  name,
+  goTitle,
   waits,
   running,
   steps,
@@ -56,7 +57,11 @@ export function ChildRunLine({
   onWalkIn,
   children,
 }: {
-  outcome: WorkflowOutcome;
+  /** What the line says the run is — "entered" a workflow, an "agent" — and its name, in bold after it. */
+  verb: string;
+  name: string;
+  /** What going in does, said on hover. */
+  goTitle?: string;
   /** This run's waits, their paths from inside it. */
   waits: readonly RunWait[];
   /** The step it works on, while nothing waits; its path from inside the run. */
@@ -72,7 +77,6 @@ export function ChildRunLine({
   const t = useTokens();
   const size = Number(t.scaled("size-app", 11.5 / 12.5)) || 11.5;
   const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
-  const name = outcome.standsAt.split("/")[0] ?? outcome.standsAt;
   const step = (text: string, color: string): JSX.Element => (
     <Txt spec={{ ...words, voice: "data", weight: 600, color }} fontSize={t.scaled("size-app", 11.5 / 12.5)} flexShrink={0}>
       {text}
@@ -84,7 +88,7 @@ export function ChildRunLine({
       <Press
         onPress={onWalkIn}
         label={`go into ${name}`}
-        title={`make ${name}'s run the main view`}
+        title={goTitle ?? `make ${name}'s run the main view`}
         flexShrink={0}
         alignSelf="center"
         flexDirection="row"
@@ -102,7 +106,7 @@ export function ChildRunLine({
         <Icon name="chevron" size={size} color={String(t.v("dim"))} />
       </Press>
       <Txt spec={words} flexShrink={0}>
-        {outcome.verb}
+        {verb}
       </Txt>
       <Txt spec={{ ...words, weight: 600, color: "text" }} flexShrink={0}>
         {name}

@@ -151,6 +151,9 @@ export interface ChatSurface {
   /** The started run walked into — see `ChatState.walkedInto` — and the way in and back out (null). */
   walkedInto?: string | undefined;
   onWalkInto: (instanceId: string | null) => void;
+  /** The subagents walked into — see `ChatState.walkedChain` — and the way in and back out (null). */
+  walkedChain?: ReadonlyArray<{ call: string; name: string }> | undefined;
+  onWalkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string }> | null) => void;
 }
 
 type Actions = ReturnType<typeof useApp>["actions"];
@@ -253,5 +256,7 @@ export function chatSurfaceOf(
     onGate: (requestId, value) => void actions.answer(requestId, value),
     walkedInto: state.chat.walkedInto,
     onWalkInto: actions.walkIntoChildRun,
+    walkedChain: state.chat.walkedChain,
+    onWalkIntoSubagent: actions.walkIntoSubagent,
   };
 }

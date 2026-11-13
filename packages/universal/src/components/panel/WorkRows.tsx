@@ -22,6 +22,7 @@ import { Pulse } from "../chat/Pulse";
 import { Button } from "../settings/Button";
 import { Icon } from "./Icon";
 import { OutcomeHostContext } from "./outcomeHost";
+import { SubagentHostContext } from "./subagentHost";
 import { ValueView } from "./ValueView";
 import { PublishedView } from "./PublishedView";
 import { PublishedList } from "./PublishedList";
@@ -246,6 +247,8 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   // The approval a conversation cut off by the app closing is still waiting on: asked, though its
   // stretch is no longer being written.
   const ask = useContext(ApprovalAskContext);
+  // A host with more to say about a subagent draws it instead of the fold (`subagentHost.ts`).
+  const subagentHost = useContext(SubagentHostContext);
   const askedHere = ask?.pending.recovered === true && held.callId === ask.pending.requestId;
   const line = toolLineOf(held, open || askedHere, sub !== undefined || onOpenSidechain !== undefined, calls);
   // What is drawn unasked under the line — a page it produced, its output, a question, an outcome —
@@ -271,6 +274,10 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   // The approval prompt, and a permission check: its line is the whole of it.
   if (isHostCall(entry)) return <Row {...head} />;
   const shown = ((): ReactNode => {
+    if (line.shown === "sidechain") {
+      const hosted = subagentHost?.(entry.sidechain!);
+      if (hosted !== undefined) return hosted;
+    }
     if (line.shown === "sidechain") return <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />;
     if (line.shown === "outcome") {
       const outcome = workflowOutcomeOf(entry.result!);

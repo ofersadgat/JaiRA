@@ -13,6 +13,7 @@ import { useAnchorRect } from "./ComposerCards";
 import { EnvironmentList } from "./EnvironmentBar";
 import { useChatEnvironment } from "./environment";
 import { childRunsOf, waitCountsByLevel, waitsOf } from "@jaira/ui/childRunModel";
+import { liveChainOfApproval } from "@jaira/ui/subagentModel";
 import { CrumbBar } from "../Crumbs";
 
 /**
@@ -30,7 +31,7 @@ import { CrumbBar } from "../Crumbs";
  *                       11/12.5 --text (--dim while nothing is decided), a ⌄ 11 when it opens the list;
  *                       hovered --fill-ghost-hover
  */
-export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversations" | "taskId" | "project" | "queued" | "runOn" | "detail" | "onRunOn" | "walkedInto" | "onWalkInto" | "gate" | "approval" | "question"> }): JSX.Element {
+export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversations" | "taskId" | "project" | "queued" | "runOn" | "detail" | "onRunOn" | "walkedInto" | "onWalkInto" | "walkedChain" | "onWalkIntoSubagent" | "live" | "gate" | "approval" | "question"> }): JSX.Element {
   const t = useTokens();
   const env = useChatEnvironment(surface);
   const chip = titleChipOf(barFactsOf(env.view, env.stage));
@@ -52,11 +53,32 @@ export function ChatTitle({ surface }: { surface: Pick<ChatSurface, "conversatio
   const walked = surface.walkedInto !== undefined ? childRunsOf(surface.detail?.instances).find((run) => run.instanceId === surface.walkedInto) : undefined;
   const walkedKey = walked !== undefined ? (walked.childKey ?? walked.stateId) : undefined;
   const counts = walkedKey !== undefined ? waitCountsByLevel(waitsOf({ instances: surface.detail?.instances, gate: surface.gate, approval: surface.approval, question: surface.question }), [walkedKey]) : [];
+  // Walked into subagents: the conversation, then a crumb per subagent walked through, each going back
+  // to its level and carrying how many things wait inside it. The title bar holds no transcript, so the
+  // approval's subagent is read off the live turn (`liveChainOfApproval`); an approval is the one wait a
+  // subagent has.
+  const chain = surface.walkedChain ?? [];
+  const asking = chain.length > 0 ? liveChainOfApproval(surface.live?.sidechains, surface.approval?.requestId) : undefined;
+  const waitingIn = (depth: number): number => (depth === 0 ? (surface.approval !== undefined ? 1 : 0) : asking !== undefined && chain.slice(0, depth).every((step, i) => asking[i] === step.call) ? 1 : 0);
+  const chainCrumbs: Parameters<typeof CrumbBar>[0]["crumbs"] = [
+    { text: title, kind: "run", title: "back to the conversation", go: () => surface.onWalkIntoSubagent(null), wide: true, ...(waitingIn(0) > 0 ? { counts: { waiting: waitingIn(0) } } : {}) },
+    ...chain.map((step, i) => ({
+      text: step.name,
+      kind: "run" as const,
+      title: i === chain.length - 1 ? "the subagent this conversation's agent started" : `back to ${step.name}`,
+      ...(i < chain.length - 1 ? { go: () => surface.onWalkIntoSubagent(chain.slice(0, i + 1)) } : {}),
+      ...(waitingIn(i + 1) > 0 ? { counts: { waiting: waitingIn(i + 1) } } : {}),
+    })),
+  ];
   const box = { flexDirection: "row", alignItems: "center", gap: 7, paddingVertical: 2, paddingLeft: 7, paddingRight: 9, borderWidth: 1, borderStyle: chip?.dashed === true ? "dashed" : "solid", borderColor: t.v("line"), borderRadius: 999 } as const;
   return (
     <View flexDirection="row" alignItems="center" gap={7} flexShrink={1} minWidth={0} paddingHorizontal={16}>
       <Icon name="comment" size={14} color={String(t.v("dim"))} />
-      {walked !== undefined ? (
+      {chain.length > 0 ? (
+        <View flexShrink={1} minWidth={0} marginLeft={-12}>
+          <CrumbBar crumbs={chainCrumbs} />
+        </View>
+      ) : walked !== undefined ? (
         // Walked into a run the conversation started: the conversation and the run as run crumbs, the
         // way the Tasks view's address draws a run walked into — the first goes back out. Each carries
         // what waits inside it, as the sidebar's pills; the conversation's name gives way last.

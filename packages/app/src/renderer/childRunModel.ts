@@ -102,6 +102,8 @@ export interface RunWait {
   /** The conversation's own agent asking, in no run: what the conversation's status would say, so it says
    *  it instead, with the status's ticking time in place of the clock. */
   own?: true;
+  /** A subagent's wait: the calls that started the subagents down to the one that asks (`subagentModel.ts`). */
+  chain?: string[];
 }
 
 const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
@@ -230,7 +232,8 @@ const MORE = 110;
  */
 export function secondLine(wait: RunWait, level: PillLevel, clock: (at: number) => string, waited?: string): string {
   if (level < 2) return "";
-  const where = wait.path.length === 0 ? "in this conversation" : level >= 4 ? `in ${wait.path.join(" › ")}` : level === 3 ? `in ${wait.path[wait.path.length - 1]}` : "";
+  // A subagent's wait seen from inside the subagent that asks is here, not in the conversation: it says only what it holds.
+  const where = wait.path.length === 0 ? (wait.chain === undefined ? "in this conversation" : "") : level >= 4 ? `in ${wait.path.join(" › ")}` : level === 3 ? `in ${wait.path[wait.path.length - 1]}` : "";
   const when = wait.own === true && waited !== undefined ? waited : level >= 4 && wait.since !== undefined ? clock(wait.since) : "";
   return [where, wait.note ?? "", when].filter((part) => part !== "").join(" · ");
 }

@@ -863,6 +863,12 @@ export interface ChatState {
    * mockups of 2026-10-25). Absent: the conversation itself. Cleared when another conversation opens.
    */
   walkedInto?: string;
+  /**
+   * The subagents walked into, outermost first — each the call that started it and its name — so that
+   * subagent's conversation is the main view and the title a breadcrumb, a crumb per subagent (the way a
+   * run is walked into). Absent: the conversation itself. Never beside `walkedInto`.
+   */
+  walkedChain?: ReadonlyArray<{ call: string; name: string }>;
 }
 
 /** The rooms — the destinations the sidebar lists. */
@@ -3230,8 +3236,9 @@ export function useApp() {
         // Unnamed — a reload restoring it by id — its own project where a list knows it, so the
         // thread's header and composer say where it is rather than where the window stands.
         const at = project ?? (taskId === null ? undefined : projectOfTask(taskId));
-        const { walkedInto: was, ...chat } = ref.current.chat;
-        patch({ chat: { ...chat, taskId, project: at ?? null, opening: null, error: null, ...(was !== undefined && taskId === chat.taskId ? { walkedInto: was } : {}) } });
+        const { walkedInto: was, walkedChain: wasChain, ...chat } = ref.current.chat;
+        const same = taskId === chat.taskId;
+        patch({ chat: { ...chat, taskId, project: at ?? null, opening: null, error: null, ...(was !== undefined && same ? { walkedInto: was } : {}), ...(wasChain !== undefined && same ? { walkedChain: wasChain } : {}) } });
         actionsRef.current.select(taskId, at);
       },
 
@@ -3320,8 +3327,14 @@ export function useApp() {
        */
       /** Walk into a run the open conversation started, or (null) back out to the conversation. */
       walkIntoChildRun: (instanceId: string | null) => {
-        const { walkedInto: _was, ...chat } = ref.current.chat;
+        const { walkedInto: _was, walkedChain: _chain, ...chat } = ref.current.chat;
         patch({ chat: { ...chat, ...(instanceId !== null ? { walkedInto: instanceId } : {}) } });
+      },
+
+      /** Walk into a subagent of the open conversation — the chain of them down to it — or (null) back out. */
+      walkIntoSubagent: (chain: ReadonlyArray<{ call: string; name: string }> | null) => {
+        const { walkedInto: _was, walkedChain: _chain, ...chat } = ref.current.chat;
+        patch({ chat: { ...chat, ...(chain !== null && chain.length > 0 ? { walkedChain: chain } : {}) } });
       },
 
       setRunOn: (target: RunTarget | undefined) => {

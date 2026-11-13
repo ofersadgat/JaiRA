@@ -1,13 +1,18 @@
 import { useMemo, useState, type ReactNode } from "react";
-import type { InstanceNode, WorkflowOutcome } from "@jaira/shared/browser";
+import type { InstanceNode, SessionView, WorkflowOutcome } from "@jaira/shared/browser";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { childRunFor, childRunsOf, keysTo, runningStepOf, scopedWaits, stepsIn, waitsOf, type RunWait } from "@jaira/ui/childRunModel";
+import { chainScopedWaits, endedAgentsOf, subagentOfApproval, subagentsOf, withSubagentWaits, type Subagent } from "@jaira/ui/subagentModel";
+import { sidechainEntriesOf, type LiveTail, type TranscriptEntry } from "@jaira/ui/transcript";
 import { secondsOf } from "@jaira/ui/workSummary";
 import { useNow } from "@jaira/ui/workSummaryContext";
 import { useRunContext } from "../run/runContext";
 import { OutcomeHostContext } from "../panel/outcomeHost";
 import { RunTranscript, type TranscriptSource } from "../panel/RunTranscript";
+import { SubagentHostContext } from "../panel/subagentHost";
+import { Transcript } from "../panel/SessionTranscript";
 import { ChildRunLine, WaitPills, WAIT_PILLS_HEIGHT } from "./ChildRun";
+import { SubagentPage } from "./SubagentPage";
 import { LIVE_PILL_HEIGHT } from "./Paper";
 
 /** "9:37 PM": when a wait began, on a pill. */
@@ -34,9 +39,13 @@ export function useChildRunHost(
   surface: ChatSurface,
   jump: () => void,
   /** The conversation's own status pill, first in the pills' row (`appearance.conversation.liveStatus`). */
-  lead?: ReactNode,
+  lead: ReactNode | undefined,
+  /** The conversation's own thread: where its subagents are (`subagentModel.ts`). */
+  thread: { session: SessionView | null; entries: readonly TranscriptEntry[]; live: LiveTail | null; answering: boolean },
 ): {
   outcomeHost: ((outcome: WorkflowOutcome) => ReactNode | undefined) | undefined;
+  /** A subagent's line under the call that started it, the way a run's is drawn (`subagentHost.ts`). */
+  subagentHost: ((call: string) => ReactNode | undefined) | undefined;
   walkedIn: ReactNode | null;
   pills: ReactNode | null;
   /** What the thread leaves free at its end so the pills cover none of it. */
@@ -49,13 +58,35 @@ export function useChildRunHost(
   const detail = surface.detail;
   const instances = detail?.instances;
   const runs = useMemo(() => childRunsOf(instances), [instances]);
-  const waits = useMemo(() => waitsOf({ instances, gate: surface.gate, approval: surface.approval, question: surface.question }), [instances, surface.gate, surface.approval, surface.question]);
+  // The subagents the conversation's agent started, nested ones too, and which one an approval is asked by.
+  const { session: threadSession, entries: threadEntries, live: threadLive, answering } = thread;
+  const subagents = useMemo(() => {
+    const chains = threadLive?.sidechains;
+    return subagentsOf({
+      entries: threadEntries,
+      chainOf: (call) => sidechainEntriesOf(threadSession, call, chains?.[call], chains),
+      streaming: new Set(Object.keys(chains ?? {})),
+      ended: endedAgentsOf(threadLive?.entries),
+      answering,
+    });
+  }, [threadSession, threadEntries, threadLive, answering]);
+  const approvalSub = subagentOfApproval(subagents, surface.approval?.requestId);
+  const waits = useMemo(
+    () => withSubagentWaits(waitsOf({ instances, gate: surface.gate, approval: surface.approval, question: surface.question }), approvalSub, subagents),
+    [instances, surface.gate, surface.approval, surface.question, approvalSub, subagents],
+  );
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
   const [focus, setFocus] = useState<{ instance: string; at: number } | undefined>(undefined);
   const [onScreen, setOnScreen] = useState<ReadonlySet<string> | undefined>(undefined);
-  const now = useNow(runs.some(live));
+  const now = useNow(runs.some(live) || [...subagents.values()].some((sub) => sub.running));
   const walked = surface.walkedInto !== undefined ? runs.find((run) => run.instanceId === surface.walkedInto) : undefined;
   const scope = walked !== undefined ? [keyOf(walked)] : [];
+  // The subagent walked into, while every call of the chain is still one this conversation holds.
+  const walkedChain = (surface.walkedChain ?? []).map((step) => step.call);
+  const walkedSub = walkedChain.length > 0 && walkedChain.every((call) => subagents.has(call)) ? subagents.get(walkedChain[walkedChain.length - 1]!) : undefined;
+  const walkInto = (sub: Subagent): void => surface.onWalkIntoSubagent(sub.chain.map((call) => ({ call, name: subagents.get(call)?.name ?? "subagent" })));
+  const tookOf = (sub: Subagent): string =>
+    sub.startedAt === undefined ? "" : `${secondsOf(Math.max(0, (sub.running ? now : (sub.lastAt ?? sub.startedAt)) - sub.startedAt))}${sub.running ? " so far" : ""}`;
 
   /** Whose the agent's ask is: a run's, by its instance, or the conversation's. */
   const askRun = (instanceId: string | undefined): InstanceNode | undefined => (instanceId === undefined ? undefined : runs.find((run) => keysTo([run], instanceId) !== undefined));
@@ -83,6 +114,11 @@ export function useChildRunHost(
 
   /** A press on a pill: the conversation's own wait is in its thread; a run's is in the run, at its step. */
   const go = (wait: RunWait): void => {
+    if (wait.chain !== undefined) {
+      const sub = subagents.get(wait.chain[wait.chain.length - 1]!);
+      if (sub !== undefined) walkInto(sub);
+      return;
+    }
     const run = askRun(wait.instanceId);
     if (run === undefined) {
       surface.onWalkInto(null);
@@ -104,7 +140,8 @@ export function useChildRunHost(
           const isOpen = open.has(run.instanceId);
           return (
             <ChildRunLine
-              outcome={outcome}
+              verb={outcome.verb}
+              name={outcome.standsAt.split("/")[0] ?? outcome.standsAt}
               waits={own}
               running={step !== undefined ? { step: step.step, path: step.path.slice(1) } : undefined}
               steps={stepsIn(run)}
@@ -130,11 +167,66 @@ export function useChildRunHost(
           );
         };
 
-  // What is waited for, from where you stand; while nothing is, the step a run in scope works on.
-  const here = scopedWaits(waits, scope);
-  const working = here.length === 0 ? (walked !== undefined ? [walked] : runs).filter(live).map((run) => ({ run, step: runningStepOf(run) })).find((one) => one.step !== undefined) : undefined;
+  /** A subagent under the call that started it: a run's line, its conversation opened in place under it. */
+  const subagentHost =
+    subagents.size === 0
+      ? undefined
+      : (call: string): ReactNode | undefined => {
+          const sub = subagents.get(call);
+          if (sub === undefined) return undefined;
+          const own = chainScopedWaits(waits, sub.chain);
+          const isOpen = open.has(call);
+          return (
+            <ChildRunLine
+              verb={sub.kind ?? "agent"}
+              name={sub.name}
+              goTitle={`make ${sub.name}'s conversation the main view`}
+              waits={own}
+              running={own.length === 0 && sub.step !== undefined ? { step: sub.step.step, path: sub.step.path } : undefined}
+              steps={sub.steps}
+              took={tookOf(sub)}
+              open={isOpen}
+              onToggle={() =>
+                setOpen((was) => {
+                  const next = new Set(was);
+                  if (next.has(call)) next.delete(call);
+                  else next.add(call);
+                  return next;
+                })
+              }
+              onWalkIn={() => walkInto(sub)}
+            >
+              {isOpen ? <Transcript session={threadSession} entries={sub.entries} live={threadLive} working={sub.running} /> : null}
+            </ChildRunLine>
+          );
+        };
+
+  // What is waited for, from where you stand; while nothing is, the step a run in scope works on — or,
+  // walked into a subagent, the call it is on. A run's scope holds no subagent's wait, nor the reverse.
+  const here = walkedSub !== undefined ? chainScopedWaits(waits, walkedSub.chain) : scopedWaits(walked !== undefined ? waits.filter((wait) => wait.chain === undefined) : waits, scope);
+  const working = here.length === 0 && walkedSub === undefined ? (walked !== undefined ? [walked] : runs).filter(live).map((run) => ({ run, step: runningStepOf(run) })).find((one) => one.step !== undefined) : undefined;
+  // A subagent at work, while nothing waits and no run does: the one walked into, else the newest at the top.
+  const busySub =
+    here.length === 0 && working === undefined && walked === undefined
+      ? walkedSub !== undefined
+        ? walkedSub.running
+          ? walkedSub
+          : undefined
+        : [...subagents.values()].filter((sub) => sub.chain.length === 1 && sub.running).pop()
+      : undefined;
+  const subRunning =
+    busySub?.step !== undefined
+      ? {
+          step: busySub.step.step,
+          path: walkedSub !== undefined ? busySub.step.path : [busySub.name, ...busySub.step.path],
+          took: tookOf(busySub),
+          onGo: () => walkInto(busySub),
+        }
+      : undefined;
   const running =
-    working?.step !== undefined
+    subRunning !== undefined
+      ? subRunning
+      : working?.step !== undefined
       ? {
           step: working.step.step,
           path: working.step.path.slice(scope.length),
@@ -148,12 +240,24 @@ export function useChildRunHost(
   const showPills = here.length > 0 || running !== undefined;
   // Walked into a run, the run is the page: the conversation's own status is not drawn over it. Nor
   // beside the conversation's own wait, which says the same with its time (`RunWait.own`).
-  const leading = walked === undefined && lead !== undefined && lead !== null && !here.some((wait) => wait.own === true) ? lead : undefined;
+  const leading = walked === undefined && walkedSub === undefined && lead !== undefined && lead !== null && !here.some((wait) => wait.own === true) ? lead : undefined;
   const pills =
     showPills || leading !== undefined ? <WaitPills lead={leading} waits={here} running={running} {...(walked !== undefined ? { onScreen } : {})} clock={shortClock} onGo={go} /> : null;
 
   const walkedIn =
-    walked === undefined || detail === null ? null : (
+    walkedSub !== undefined ? (
+      <SubagentHostContext.Provider value={subagentHost}>
+        <SubagentPage
+          sub={walkedSub}
+          session={threadSession}
+          live={threadLive}
+          {...(approvalSub?.call === walkedSub.call && surface.approval !== undefined && surface.onApproval !== undefined
+            ? { approval: surface.approval, onApproval: (decision, how, extras) => surface.onApproval!(surface.approval!.requestId, decision, how, extras) }
+            : {})}
+          bottomInset={showPills ? WAIT_PILLS_HEIGHT : 0}
+        />
+      </SubagentHostContext.Provider>
+    ) : walked === undefined || detail === null ? null : (
       <OutcomeHostContext.Provider value={undefined}>
         <RunTranscript
           detail={detail}
@@ -167,5 +271,5 @@ export function useChildRunHost(
       </OutcomeHostContext.Provider>
     );
 
-  return { outcomeHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined, ownQuestion: questionRun === undefined };
+  return { outcomeHost, subagentHost, walkedIn, pills, pillSpace: showPills ? WAIT_PILLS_HEIGHT : leading !== undefined ? LIVE_PILL_HEIGHT : 0, ownApproval: approvalRun === undefined && approvalSub === undefined, ownQuestion: questionRun === undefined };
 }
