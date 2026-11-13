@@ -3739,6 +3739,16 @@ export function useApp() {
       },
 
       /**
+       * Mark rows unread again — a chat row's menu. Forgetting how far a row was read is what makes it
+       * unread (`isUnread`: nothing read is older than its last word); the next time it is opened and
+       * read, `markSeen` records it again.
+       */
+      markUnread: (taskIds: readonly string[]) => {
+        const next = forgetSeen(ref.current.settings.ui, taskIds);
+        if (next !== ref.current.settings.ui) setUi(next);
+      },
+
+      /**
        * An event notice read — dismissed with ×, or opened. Per viewer, in the ui state, so a reload
        * or another window does not bring it back; `backlog` is what main still holds, which bounds
        * the marks kept (`withNoticeRead`).

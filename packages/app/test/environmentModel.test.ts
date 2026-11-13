@@ -26,7 +26,7 @@ import {
 } from "../src/renderer/environmentModel";
 import { MACHINE_ANCHORS, MACHINE_MARKS, MACHINE_SHAPES, WORK_RING, machineIconAt, machineIconSizes } from "../src/renderer/machineIcons";
 import { askNameOf, placementSummaryOf } from "../src/renderer/placementSummary";
-import { conversationsAt, conversationsSpan } from "../src/renderer/chatSurface";
+import { conversationsAt } from "../src/renderer/chatSurface";
 
 const GB = 1024 ** 3;
 const HERE = "C:/code/mist-server-3";
@@ -381,15 +381,12 @@ describe("a project's conversations", () => {
       ["t-a", "/a"],
       ["t-b", "/b"],
     ]);
-    expect(conversationsSpan({ at: "/a", projects })).toBe(true);
   });
 
   it("are the open workspace's alone when it is the only one, or when workspaces are listed apart — stamped all the same", () => {
     expect(conversationsAt({ at: "/c", allConversations: all, projects }).map((c) => [c.taskId, c.project])).toEqual([["t-c", "/c"]]);
     expect(conversationsAt({ at: "/solo", allConversations: all, projects })).toEqual([]);
     expect(conversationsAt({ at: "/a", allConversations: all, projects }, false).map((c) => [c.taskId, c.project])).toEqual([["t-a", "/a"]]);
-    expect(conversationsSpan({ at: "/c", projects })).toBe(false);
-    expect(conversationsSpan({ at: "/a", projects }, false)).toBe(false);
   });
 
   it("follow the address and nothing else — no second list to fall behind it", () => {
@@ -402,7 +399,6 @@ describe("a project's conversations", () => {
 
   it("are everything at the root", () => {
     expect(conversationsAt({ at: null, allConversations: all, projects })).toBe(all);
-    expect(conversationsSpan({ at: null, projects })).toBe(true);
   });
 });
 

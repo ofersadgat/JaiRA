@@ -93,7 +93,6 @@ export function sidebarProjectsOf(
     project: g.key,
     label: g.label,
     kind: g.kind,
-    ...(g.where !== undefined ? { where: g.where } : {}),
     // Looked up rather than recomputed from THIS list's index: the sidebar hides one project and the
     // strip and the crumb bar hide none, and a hue derived from each list's own position would give
     // one project two colours the moment those lists differ.

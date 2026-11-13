@@ -33,6 +33,11 @@ export interface SidebarAct {
    * a menu is. Every other act ignores it.
    */
   onAct: (from: HTMLElement) => void;
+  /**
+   * The other ways to do it, as a menu under a caret beside the verb (the sidebar mockups, board 25):
+   * `+ New ⌄`, where `+` starts a conversation where the title points and `⌄` lists the other places.
+   */
+  more?: (from: HTMLElement) => void;
 }
 
 /** One row of the view switcher, and whatever it opens onto. */
@@ -89,7 +94,5 @@ export interface SidebarProject {
    */
   hue: string;
   counts: PillCounts;
-  /** Beside the name, always: how many machines and workspaces a grouped project spans (decision 0013 §4). */
-  where?: string;
   onSeen?: () => void;
 }

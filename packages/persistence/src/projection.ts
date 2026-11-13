@@ -574,6 +574,8 @@ export interface TaskProjection {
   /** Set when archived: the card carries it, and the board decides whether to show it. */
   archived?: TaskArchived;
   updatedAt: number;
+  /** When it was made, as a time (`BoardCard.createdAt`). */
+  createdAt?: number;
   run: ProjectedRun;
   /** How a fan-out made this task, when one did (decision 0003) — what files a mount task in its parent's column. */
   origin?: TaskOrigin;
@@ -627,6 +629,7 @@ function cardOf(
     ...(task.inReview !== undefined ? { inReview: task.inReview } : {}),
     ...(task.undoable === true ? { undoable: true as const } : {}),
     updatedAt: task.updatedAt,
+    ...(task.createdAt !== undefined ? { createdAt: task.createdAt } : {}),
   };
 }
 

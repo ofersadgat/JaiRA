@@ -753,6 +753,7 @@ function projectionsFor(project: Project, shape: WorkflowShape | undefined, work
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
       ...(summary.undoable === true ? { undoable: true as const } : {}),
       updatedAt: summary.updatedAt,
+      ...(Number.isFinite(Date.parse(summary.createdAt)) ? { createdAt: Date.parse(summary.createdAt) } : {}),
       run: taskRun(project, summary.taskId, shape),
     }));
 }
@@ -992,6 +993,7 @@ export function rootsBoard(project: Project, browser: WorkflowBrowser, options?:
       ...(summary.inReview !== undefined ? { inReview: summary.inReview } : {}),
       ...(summary.undoable === true ? { undoable: true as const } : {}),
       updatedAt: summary.updatedAt,
+      ...(Number.isFinite(Date.parse(summary.createdAt)) ? { createdAt: Date.parse(summary.createdAt) } : {}),
     };
     // Always found: the loop above made a column for every flow the summaries resolve to, whether
     // or not a file backs it.

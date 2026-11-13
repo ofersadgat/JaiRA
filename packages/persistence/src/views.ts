@@ -81,7 +81,9 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
   const answering = new Set(
     (project.db.prepare(`SELECT DISTINCT task_id FROM operation_records WHERE status = 'open'`).all() as Array<{ task_id: string }>).map((r) => r.task_id),
   );
-  return (only === undefined ? rows : rows.filter((row) => only.has(row.taskId))).map((row) => {
+  const listed = only === undefined ? rows : rows.filter((row) => only.has(row.taskId));
+  const lastMessage = lastMessageTimes(project, listed.map((row) => row.taskId));
+  return listed.map((row) => {
     const meta = project.tasks.tryRead(row.taskId);
     const startedBy =
       meta?.startedBy?.by !== "events" || project.runtime.get(meta.startedBy.fromTask) !== undefined
@@ -113,6 +115,7 @@ export function taskSummaries(project: Project, only?: ReadonlySet<string>): Tas
       ...(connectUndoStands(project, meta) ? { undoable: true as const } : {}),
       createdAt: meta?.createdAt ?? new Date(row.createdAt).toISOString(),
       updatedAt: row.updatedAt,
+      ...(lastMessage.has(row.taskId) ? { lastMessageAt: lastMessage.get(row.taskId)! } : {}),
     };
   });
 }
@@ -833,6 +836,7 @@ export function boardView(project: Project, level?: string, options?: ViewOption
     ...(summary.waitingFor !== undefined ? { waitingFor: summary.waitingFor } : {}),
     ...(summary.undoable === true ? { undoable: true as const } : {}),
     updatedAt: summary.updatedAt,
+    ...(Number.isFinite(Date.parse(summary.createdAt)) ? { createdAt: Date.parse(summary.createdAt) } : {}),
     run: taskRun(project, summary.taskId, shape),
   }));
   return projectBoard(shape, target, projections, { breadcrumb: breadcrumbOf(shape, rootId, target) });
@@ -908,4 +912,22 @@ export function taskDetailView(project: Project, taskId: string, options?: ViewO
           ],
     timeline,
   };
+}
+
+/**
+ * When each task's conversation last said something (`TaskSummary.lastMessageAt`): over its calls, a
+ * completed one's reply (`ended_at`), else the message that started it (`started_at`): one still
+ * being answered, or one that failed or was stopped. One statement for the whole list, reaching only
+ * the listed tasks' records by `operation_records_scope` (task_id first); no conversation is loaded.
+ * A typed turn moves no task row (`runChatMessage`), so the row's own clock cannot say this.
+ */
+export function lastMessageTimes(project: Project, taskIds: readonly string[]): Map<string, number> {
+  if (taskIds.length === 0) return new Map();
+  const rows = project.db
+    .prepare(
+      `SELECT task_id, MAX(CASE WHEN status = 'completed' AND ended_at IS NOT NULL THEN ended_at ELSE started_at END) AS at
+         FROM operation_records WHERE task_id IN (SELECT value FROM json_each(?)) GROUP BY task_id`,
+    )
+    .all(JSON.stringify(taskIds)) as Array<{ task_id: string; at: number | null }>;
+  return new Map(rows.flatMap((r) => (r.at === null ? [] : [[r.task_id, r.at] as [string, number]])));
 }

@@ -19,7 +19,7 @@ import {
 import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarProps, useHover } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import type { AskSpec } from "@jaira/ui/menuTypes";
-import { ContextMenu, type MenuAt } from "../Menu";
+import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
 import { AskDialog } from "./AskDialog";
 import { Chip } from "./Chip";
 import { disabledChipTitle } from "@jaira/ui/workflowSwitch";
@@ -72,6 +72,8 @@ export interface FileTreePanelProps {
   onRenameFile: (layer: WorkflowLayer, path: string, to: string, force?: boolean) => Promise<FileMutationResult | null>;
   onDeleteFile: (layer: WorkflowLayer, path: string, force?: boolean) => Promise<FileMutationResult | null>;
   onReveal: (file: string) => void;
+  /** Start a conversation about a project file (its menu's "Ask about it in a new chat"). */
+  onAsk?: (path: string) => void;
   /** Switch a state off or back on in a layer (decision 0021). Absent ⇒ no switch in the menus. */
   onSetDisabled?: ((stateId: string, layer: WritableLayer, disabled: boolean, project?: string) => void) | undefined;
   find?: boolean;
@@ -105,6 +107,7 @@ export function FileTreePanel({
   onRenameFile,
   onDeleteFile,
   onReveal,
+  onAsk,
   onSetDisabled,
   find = false,
   draft,
@@ -143,7 +146,7 @@ export function FileTreePanel({
     return at.under === key ? <DraftRow key="draft" draft={draft} depth={at.depth} missing={at.missing} onCommit={commitDraft} onCancel={() => onDraft(null)} /> : null;
   };
   const openNew = (root: FileRoot, dir: string, x: number, y: number): void => setMenu({ x, y, items: newItems(root, dir, startDraft) });
-  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, copy: copyText, setAsk, startDraft, onSetDisabled });
+  const { itemsFor, rootItems } = treeMenus({ hasProject, onOpen, onMove, onDelete, onRenameFile, onDeleteFile, onReveal, ...(onAsk !== undefined ? { onAsk } : {}), copy: copyText, setAsk, startDraft, onSetDisabled });
 
   return (
     <View flexDirection="column" flex={1} minHeight={0} gap={8} paddingTop={2} paddingBottom={4}>
@@ -233,6 +236,40 @@ function RootRow({ root, writable, onNew, onMenu }: { root: FileRoot; writable: 
         <Chip title="What ships with JaiRA. It is never changed in place: editing a file here copies it into Shared (~/.jaira), and the copy is what is used.">edits copy to Shared</Chip>
       )}
     </View>
+  );
+}
+
+/**
+ * A row's `⋯`, hidden until its row is hovered (the sidebar mockups, board 43): the menu its right-click
+ * opens, for a person who does not know to right-click. Where the pointer has no hover there is the long
+ * press, so it is not drawn there at all.
+ */
+function MoreButton({ label, shown, onMenu }: { label: string; shown: boolean; onMenu: (x: number, y: number) => void }): JSX.Element | null {
+  const t = useTokens();
+  const at = useRef<RNView>(null);
+  if (!isWeb) return null;
+  return (
+    <RNView ref={at} collapsable={false} style={{ flexShrink: 0, ...PLAIN_SCROLLER } as never}>
+      <Press
+        onPress={() => at.current?.measureInWindow((x, y, w, h) => onMenu(x + w - MENU_WIDTH, y + h + 2))}
+        title={`more for ${label}`}
+        label={`${label}: more`}
+        {...({ "aria-haspopup": "menu" } as object)}
+        width={16}
+        height={16}
+        alignItems="center"
+        justifyContent="center"
+        borderRadius={4}
+        opacity={shown ? 1 : 0}
+        box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-selected") : "transparent", ...(hovered ? { opacity: 1 } : {}) })}
+      >
+        {({ hovered }) => (
+          <Txt spec={{ voice: "app", scale: 12 / 12.5, color: hovered ? "text" : "dim", lineHeight: 1 }} textAlign="center">
+            ⋯
+          </Txt>
+        )}
+      </Press>
+    </RNView>
   );
 }
 
@@ -366,6 +403,7 @@ function TreeNode({
               </Chip>
             ) : null}
             {row.isDir && isWritableLayer(node.layer) ? <AddButton label={node.name} shown={hovered} onNew={(x, y) => onNew(node, x, y)} /> : null}
+            {row.inert ? null : <MoreButton label={node.name} shown={hovered} onMenu={(x, y) => onMenu(node, x, y)} />}
           </>
         )}
       </Press>

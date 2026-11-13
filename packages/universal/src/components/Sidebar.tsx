@@ -3,11 +3,13 @@ import { View, isWeb } from "@tamagui/core";
 import { layoutPills, type PillCounts } from "@jaira/ui/pillModel";
 import type { SidebarAct, SidebarProject, SidebarView } from "@jaira/ui/sidebarTypes";
 import { SIDEBAR_RAIL } from "@jaira/ui/uiState";
+import { crumbFit, type Scope, type ScopeMachine } from "@jaira/ui/scopeModel";
 import { DRAG_REGION, Glyph, NO_DRAG, Press, Txt, edge, landmark, useHover, viewScrollbarProps } from "../primitives";
 import { TokenScope, useLook, useTokens, type Tokens } from "../tokens";
 import { ContextMenu, type MenuAt } from "./Menu";
 import { usePhone } from "../app/phone";
 import { Pills } from "./Pills";
+import { Icon } from "./panel/Icon";
 
 /**
  * The one left column (SHELL.md §5.1), a RAIL beside a PANEL (the sidebar mockups, 2026-11-11: the
@@ -73,6 +75,11 @@ export type SidebarProps = {
   onBrowse?: (machineId: string, mode: "open" | "init") => void;
   /** `--sidebar`: the panel's width while it is open (the rail is beside it). On a phone, the whole drawer's. */
   width: number;
+  /**
+   * The open project's machines and workspaces, and what its title narrows the panel to
+   * (`scopeModel.ts`). Absent for a project of one workspace: its title is its name alone.
+   */
+  scope?: { machines: readonly ScopeMachine[]; scope: Scope; onScope: (scope: Scope) => void } | undefined;
 };
 
 export function Sidebar(props: SidebarProps): JSX.Element {
@@ -112,6 +119,7 @@ function Column({
   machines = [],
   onBrowse,
   width,
+  scope,
 }: SidebarProps): JSX.Element {
   const t = useTokens();
   const look = useLook();
@@ -172,7 +180,7 @@ function Column({
   const panel = settingsOpen ? (
     <SettingsPane settings={settings} footer={footer} view={view} onView={onView} onLeave={onLeaveSettings} themeRow={themeRow} />
   ) : project !== null && (room === undefined || room.keepsProject !== true) ? (
-    <ProjectPane project={project} views={views} view={view} onView={onView} onSettings={() => onProjectSettings(project)} />
+    <ProjectPane project={project} views={views} view={view} onView={onView} onSettings={() => onProjectSettings(project)} scope={scope} width={panelWidth} />
   ) : (
     <RootPane room={room ?? roots.find((v) => v.id === view) ?? roots[0]} />
   );
@@ -485,40 +493,37 @@ function Drawer({ children, scrolls = false }: { children: ReactNode; scrolls?: 
   );
 }
 
-/** The open project: its name, its rooms as tabs, and the chosen room's drawer. */
+/**
+ * The open project: its title (a breadcrumb that narrows the panel, {@link Crumb}), its rooms as tabs,
+ * the chosen room's verbs in a bar under them, and the room's drawer.
+ */
 function ProjectPane({
   project,
   views,
   view,
   onView,
   onSettings,
+  scope,
+  width,
 }: {
   project: SidebarProject;
   views: readonly SidebarView[];
   view: string;
   onView: (id: string) => void;
   onSettings: () => void;
+  scope: SidebarProps["scope"];
+  width: number;
 }): JSX.Element {
   const t = useTokens();
   const phone = usePhone();
   const current = views.find((v) => v.id === view) ?? views.find((v) => v.id === "chat") ?? views[0];
-  // Only a grouped project's machines and workspaces: the folder it sits in cut the name short, and its
-  // tooltip says the whole path.
-  const where = project.where;
   const settingsAct: SidebarAct = { id: "project-settings", glyph: "⚙", label: `${project.label}'s settings`, onAct: onSettings };
   return (
     <>
-      <PaneHead acts={[...(current?.acts ?? []), settingsAct]}>
-        <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...({ title: project.project } as object)}>
-          {project.label}
-        </Txt>
-        {where !== undefined && where !== "" ? (
-          <Txt register="data-faint" ellip flexShrink={2} minWidth={0}>
-            {where}
-          </Txt>
-        ) : null}
+      <PaneHead acts={[settingsAct]}>
+        <Crumb project={project} scope={scope} width={width - 12 - 8 - ACT_WIDTH - 8} />
       </PaneHead>
-      <View {...(isWeb ? { role: "tablist" } : {})} flexDirection="row" gap={2} padding={2} marginHorizontal={8} marginBottom={8} borderRadius={8} flexShrink={0} backgroundColor={t.v("panel-3") as never}>
+      <View {...(isWeb ? { role: "tablist" } : {})} flexDirection="row" gap={2} padding={2} marginHorizontal={8} marginBottom={6} borderRadius={8} flexShrink={0} backgroundColor={t.v("panel-3") as never}>
         {views.map((v) => {
           const on = v.id === current?.id;
           const worst = worstOf(v.counts);
@@ -549,6 +554,7 @@ function ProjectPane({
           );
         })}
       </View>
+      {current?.acts !== undefined && current.acts.length > 0 ? <RoomBar acts={current.acts} room={current.label} /> : null}
       {current?.panel !== undefined ? (
         <Drawer>{current.panel}</Drawer>
       ) : (
@@ -557,6 +563,222 @@ function ProjectPane({
         </Drawer>
       )}
     </>
+  );
+}
+
+/**
+ * The chosen room's verbs, under the tabs and over the list they act on (the person, 2026-11-12: "the
+ * button for add and search dont make sense placement wise"): find as a field-shaped toggle that
+ * fills the row, the room's `+` as its one filled button, any other verb as a glyph.
+ */
+function RoomBar({ acts, room }: { acts: readonly SidebarAct[]; room: string }): JSX.Element {
+  const t = useTokens();
+  const phone = usePhone();
+  const height = phone ? 34 : 28;
+  const pressOf = (act: SidebarAct) => (e: unknown) => act.onAct((isWeb ? (e as { currentTarget: HTMLElement }).currentTarget : undefined) as never);
+  return (
+    <View flexDirection="row" alignItems="center" gap={4} paddingHorizontal={8} paddingBottom={4} flexShrink={0}>
+      {acts.map((act) =>
+        act.id === "find" ? (
+          <Press
+            key={act.id}
+            onPress={pressOf(act)}
+            label={act.label}
+            title={act.label}
+            {...({ "aria-pressed": act.on === true } as object)}
+            flex={1}
+            minWidth={0}
+            height={height}
+            flexDirection="row"
+            alignItems="center"
+            gap={6}
+            paddingHorizontal={8}
+            borderRadius={8}
+            box={({ hovered }) => ({
+              backgroundColor: t.v("bg"),
+              ...edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, act.on === true ? "accent" : hovered ? "rule" : "line"),
+            })}
+          >
+            <Glyph scale={12 / 12.5} color="dim">
+              ⌕
+            </Glyph>
+            <Txt spec={{ voice: "app", scale: 12 / 12.5, color: "dim" }} ellip flex={1} minWidth={0}>
+              {act.on === true ? "Searching…" : `Search ${room.toLowerCase()}`}
+            </Txt>
+          </Press>
+        ) : act.id === "new" ? (
+          <View key={act.id} flexDirection="row" flexShrink={0} borderRadius={7} overflow="hidden">
+            <Press
+              onPress={pressOf(act)}
+              label={act.label}
+              title={act.label}
+              height={height}
+              flexDirection="row"
+              alignItems="center"
+              gap={4}
+              paddingHorizontal={9}
+              box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent") })}
+            >
+              <Txt spec={{ voice: "app", scale: 15 / 12.5, weight: 600, color: "on-accent" }}>+</Txt>
+              <Txt spec={{ voice: "app", scale: 12 / 12.5, weight: 600, color: "on-accent" }}>New</Txt>
+            </Press>
+            {act.more !== undefined ? (
+              <Press
+                onPress={(e) => act.more!((isWeb ? (e as unknown as { currentTarget: HTMLElement }).currentTarget : undefined) as never)}
+                label="More ways to start"
+                title="more ways to start"
+                {...({ "aria-haspopup": "menu" } as object)}
+                width={20}
+                height={height}
+                alignItems="center"
+                justifyContent="center"
+                {...(edge(t, { left: 1 }, "rule") as object)}
+                box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-accent-hover") : t.v("fill-accent") })}
+              >
+                <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "on-accent" }}>⌄</Txt>
+              </Press>
+            ) : null}
+          </View>
+        ) : (
+          <ActButton key={act.id} act={act} />
+        ),
+      )}
+    </View>
+  );
+}
+
+/**
+ * The project panel's title: `project › [machine | workspace]` on ONE line (boards 49–50). The step
+ * you are on is the title, large; short of room the steps before it shrink to their icons, oldest
+ * first (`crumbFit`), and only then does its name trim. The machine and the workspace are two halves
+ * of one pill, each its own menu; a workspace is on one machine, so choosing it chooses that machine.
+ * The ✕ lets the narrowing go; so does pressing the project.
+ */
+function Crumb({ project, scope, width }: { project: SidebarProject; scope: SidebarProps["scope"]; width: number }): JSX.Element {
+  const t = useTokens();
+  const [menu, setMenu] = useState<MenuAt | null>(null);
+  if (scope === undefined) {
+    return (
+      <Txt register="data-title" ellip flexShrink={1} minWidth={0} {...({ title: project.project } as object)}>
+        {project.label}
+      </Txt>
+    );
+  }
+  const { machines, scope: now, onScope } = scope;
+  const machine = machines.find((m) => m.id === now.machine);
+  const workspace = machine?.workspaces.find((w) => w.project === now.workspace);
+  const narrowed = machine !== undefined;
+  const fit = crumbFit({ project: project.label, ...(machine !== undefined ? { machine: machine.label } : {}), ...(workspace !== undefined ? { workspace: workspace.label } : {}) }, width - (narrowed ? 20 : 0));
+  const hue = colorOf(t, project.hue);
+  const anchor = (e: unknown): { x: number; y: number } => {
+    const box = isWeb ? (e as { currentTarget: HTMLElement }).currentTarget.getBoundingClientRect() : undefined;
+    const touch = (e as { nativeEvent?: { pageX?: number; pageY?: number } }).nativeEvent;
+    return { x: box?.left ?? touch?.pageX ?? 0, y: box !== undefined ? box.bottom + 4 : (touch?.pageY ?? 0) };
+  };
+  const machineMenu = (e: unknown): void =>
+    setMenu({
+      ...anchor(e),
+      items: [
+        { label: "All machines", checked: !narrowed, onSelect: () => onScope({}) },
+        ...machines.map((m, i) => ({
+          label: m.label,
+          checked: m.id === now.machine,
+          ...(i === 0 ? { separator: true } : {}),
+          note: [m.self ? "this machine" : m.state === "online" ? undefined : m.state, `${m.workspaces.length} workspace${m.workspaces.length === 1 ? "" : "s"}`].filter((x) => x !== undefined).join(" · "),
+          onSelect: () => onScope(m.workspaces.some((w) => w.project === now.workspace) ? now : { machine: m.id }),
+        })),
+      ],
+    });
+  const workspaceMenu = (e: unknown): void => {
+    const shown = machine === undefined ? machines : [machine];
+    setMenu({
+      ...anchor(e),
+      items: [
+        { label: "All workspaces", checked: now.workspace === undefined, ...(machine !== undefined ? { note: `on ${machine.label}` } : {}), onSelect: () => onScope(machine !== undefined ? { machine: machine.id } : {}) },
+        ...shown.flatMap((m, i) =>
+          m.workspaces.map((w, j) => ({
+            label: w.label,
+            checked: w.project === now.workspace,
+            ...(i === 0 && j === 0 ? { separator: true } : {}),
+            note: machine === undefined ? `${m.label} · ${w.dir}` : w.dir,
+            onSelect: () => onScope({ machine: m.id, workspace: w.project }),
+          })),
+        ),
+      ],
+    });
+  };
+  const half = { flexDirection: "row", alignItems: "center", gap: 5, height: 24, paddingHorizontal: 6, flexShrink: 0, minWidth: 0 } as const;
+  const smallSpec = { voice: "data", scale: 11.5 / 12.5, weight: 500, color: "dim" } as const;
+  const name = (step: "machine" | "workspace", label: string): JSX.Element =>
+    fit.current === step ? (
+      <Txt register="data-title" ellip flexShrink={1} minWidth={0}>
+        {label}
+      </Txt>
+    ) : (
+      <Txt spec={smallSpec} whiteSpace="nowrap">
+        {label}
+      </Txt>
+    );
+  // The pill's marks are line icons (`iconPaths.ts`), drawn the same on a phone as on the desktop and
+  // centred on the row: a screen on its stand for the machine, a folder for the workspace, a chevron
+  // for each menu. They were font glyphs (▭, ❏, ⌄): a bare box and a shadowed square that said neither,
+  // of two sizes, and chevrons that hung below the names on the font's baseline.
+  const ink = (on: boolean): string => String(t.v(on ? "text" : "dim"));
+  const chevron = <Icon name="chevron" size={11} color={ink(false)} />;
+  const machineDot = (m: ScopeMachine | undefined): JSX.Element => (
+    <View width={6} height={6} borderRadius={999} flexShrink={0} backgroundColor={t.v(m === undefined || m.state === "online" ? "ok" : "warn") as never} />
+  );
+  return (
+    <View flex={1} minWidth={0} flexDirection="row" alignItems="center" gap={2} style={NO_DRAG as never} {...((isWeb ? { overflow: "hidden" } : {}) as object)}>
+      <Press
+        onPress={() => onScope({})}
+        disabled={!narrowed}
+        label={narrowed ? `${project.label}: show every machine` : project.label}
+        title={project.project}
+        flexShrink={fit.current === "project" ? 1 : 0}
+        minWidth={0}
+        borderRadius={6}
+        paddingHorizontal={fit.project === "icon" ? 2 : 4}
+        height={26}
+        justifyContent="center"
+        box={({ hovered }) => ({ backgroundColor: hovered && narrowed ? t.v("fill-ghost-hover") : "transparent" })}
+      >
+        {fit.project === "icon" ? (
+          <View width={20} height={20} borderRadius={6} alignItems="center" justifyContent="center" backgroundColor={t.mix(hue, 22, "transparent") as never} {...(edge(t, { top: 1.5, right: 1.5, bottom: 1.5, left: 1.5 }, hue) as object)}>
+            <Txt spec={{ voice: "data", scale: 9 / 12.5, weight: 600, color: "text" }}>{project.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}</Txt>
+          </View>
+        ) : fit.current === "project" ? (
+          <Txt register="data-title" ellip>
+            {project.label}
+          </Txt>
+        ) : (
+          <Txt spec={smallSpec} whiteSpace="nowrap">
+            {project.label}
+          </Txt>
+        )}
+      </Press>
+      <Txt spec={{ voice: "app", scale: 1, color: "faint" }}>›</Txt>
+      <View flexDirection="row" alignItems="center" minWidth={0} flexShrink={1} borderRadius={7} {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }) as object)}>
+        <Press onPress={machineMenu} label={machine === undefined ? "Machine: all" : `Machine: ${machine.label}`} title={machine === undefined ? "Show one machine" : `${machine.label} · ${machine.state}`} {...({ "aria-haspopup": "menu" } as object)} {...half} flexShrink={fit.current === "machine" ? 1 : 0} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+          <Icon name="system" size={14} color={ink(machine !== undefined)} />
+          {machineDot(machine)}
+          {machine !== undefined && fit.machine === "name" ? name("machine", machine.label) : null}
+          {fit.current === "machine" || machine === undefined ? chevron : null}
+        </Press>
+        <View width={1} height={14} flexShrink={0} backgroundColor={t.v("line") as never} />
+        <Press onPress={workspaceMenu} label={workspace === undefined ? "Workspace: all" : `Workspace: ${workspace.label}`} title={workspace === undefined ? "Show one workspace" : workspace.dir} {...({ "aria-haspopup": "menu" } as object)} {...half} flexShrink={fit.current === "workspace" ? 1 : 0} borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+          <Icon name="folder" size={14} color={ink(workspace !== undefined)} />
+          {workspace !== undefined ? name("workspace", workspace.label) : null}
+          {chevron}
+        </Press>
+      </View>
+      {narrowed ? (
+        <Press onPress={() => onScope({})} label="Show every machine again" title="show every machine again" width={18} height={18} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={4} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("fill-ghost-hover") : "transparent" })}>
+          <Icon name="cross" size={11} color={ink(false)} />
+        </Press>
+      ) : null}
+      {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
+    </View>
   );
 }
 

@@ -43,8 +43,18 @@ export interface ChatSurface {
    * "in" mist-server because mist-server's conversation was the last one opened.
    */
   listed: string | null;
-  /** Whether the rows are of several projects, so each names its own (`conversationsSpan`). */
+  /**
+   * Whether the rows are of several projects, so each names its own: only at the root. Inside a
+   * project every row is that project's, and a chip naming it on each was a column of the same word
+   * (the person, 2026-11-12: "why does every chat have \"Jaira\" before the last message time?").
+   */
   spans: boolean;
+  /**
+   * Inside a project of several workspaces, what to call a row's workspace where the list is not
+   * narrowed to one (`scopeModel.ts`): `JaiRA-2`, `build-box`. Absent for a row on the project's
+   * first workspace, and everywhere once the title has narrowed to one workspace.
+   */
+  places?: Readonly<Record<string, string>>;
   /** The open one, and the project it belongs to. */
   taskId: string | null;
   project: string | null;
@@ -178,11 +188,6 @@ export function conversationsAt(state: Pick<AppState, "at" | "allConversations" 
   return state.allConversations.filter((c) => c.project !== undefined && here.has(c.project));
 }
 
-/** Whether the list at this address spans projects — the root, or a project's several workspaces — and so names each row's. */
-export function conversationsSpan(state: Pick<AppState, "at" | "projects">, grouped = true): boolean {
-  return state.at === null || projectsAt(state, grouped).size > 1;
-}
-
 /** The projects whose conversations are listed while standing on `at`: its workspaces when grouped, else itself. */
 function projectsAt(state: Pick<AppState, "at" | "projects">, grouped: boolean): Set<string> {
   const identity = grouped ? state.projects.find((p) => p.project === state.at)?.identity : undefined;
@@ -205,6 +210,7 @@ export function chatSurfaceOf(
   parts: {
     conversations: ChatSurface["conversations"];
     spans: boolean;
+    places?: Readonly<Record<string, string>>;
     hues: Readonly<Record<string, string>>;
     names: Readonly<Record<string, string>>;
   },
@@ -216,6 +222,7 @@ export function chatSurfaceOf(
     names: parts.names,
     listed: state.at,
     spans: parts.spans,
+    ...(parts.places !== undefined ? { places: parts.places } : {}),
     taskId: state.chat.taskId,
     project: chatProjectOf(state.chat.project, state.at),
     busy: state.chat.busy,

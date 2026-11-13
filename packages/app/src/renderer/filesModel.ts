@@ -852,6 +852,8 @@ export function filePanelOf(props: PanelSurfaceProps, half: HalfMode, from?: Sur
 /** What {@link treeMenus} acts through — `FileTreePanel`'s props, and the host's dialog and clipboard. */
 export interface TreeVerbs {
   hasProject: boolean;
+  /** Start a conversation about a project file, by its path in the project. Absent: not offered. */
+  onAsk?: (path: string) => void;
   onOpen: (stateId: string, layer: WorkflowLayer) => void;
   onMove: (request: MoveWorkflowRequest) => Promise<WorkflowMutationResult | null>;
   onDelete: (stateId: string, layer: WorkflowLayer, force?: boolean) => Promise<WorkflowMutationResult | null>;
@@ -1028,17 +1030,22 @@ export function treeMenus(verbs: TreeVerbs): { itemsFor: (node: FileNode, root: 
       return [...newItems(root, node.path, startDraft), ...pathItems(node, abs), ...reveal];
     }
 
+    // A project file can be asked about: a new conversation, the file mentioned in its first message
+    // (the sidebar mockups, board 43). Only the project's own, which is what a conversation reads.
+    const ask: MenuItem[] = verbs.onAsk !== undefined && root.layer === "project" ? [{ label: "Ask about it in a new chat", onSelect: () => verbs.onAsk!(node.path) }] : [];
+
     if (node.stateId === undefined) {
       // A prompt, a skill, or config: real files, but not states. No state-id verbs — but the same
       // rename and delete, addressed by path, because "the tree cannot rename a prompt" is not a
       // distinction anyone holds in their head while looking at one.
-      return [...newItems(root, parentDir, startDraft), ...pathItems(node, abs), ...reveal];
+      return [...ask, ...newItems(root, parentDir, startDraft), ...pathItems(node, abs), ...reveal];
     }
 
     const id = node.stateId;
     const other: WorkflowLayer = node.layer === "base" ? "project" : "base";
     return [
       { label: "Open", onSelect: () => onOpen(id, node.layer) },
+      ...ask,
       {
         // The folder as well as the state: `feature/` is where `feature.json`'s children live, and
         // the first child is what creates it. Typed under the parent's own row — see

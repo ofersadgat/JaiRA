@@ -325,6 +325,8 @@ export interface BoardCard {
    */
   next?: NextMove[];
   updatedAt: number;
+  /** When the task was made (`TaskSummary.createdAt`, as a time): what the Tasks list's When can say instead. */
+  createdAt?: number;
   /**
    * When the run ENDED, from the journal — the last instance of it to terminate.
    *
@@ -1323,6 +1325,13 @@ export interface TaskSummary {
   undoable?: true;
   createdAt: string;
   updatedAt: number;
+  /**
+   * When its conversation last said something: the newest call's reply, or, while a call is still
+   * being answered or ended without one, the message that started it. What the Chat list's When says
+   * by default (2026-11-12: the row's own clock does not move for a typed turn, so the list showed
+   * when a conversation began). Absent for a task that has made no call.
+   */
+  lastMessageAt?: number;
 }
 
 /**
