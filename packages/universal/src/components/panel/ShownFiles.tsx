@@ -44,7 +44,8 @@ export function ShownFilesView({ shown, artifacts }: { shown: ShownFiles; artifa
                   {item.caption}
                 </Txt>
               ) : null}
-              <PublishedView published={item} artifacts={artifacts} />
+              {/* Keyed by version: the card holds the version it shows, read once from what it is handed. */}
+              <PublishedView key={`${item.id}@${String(item.version)}`} published={item} artifacts={artifacts} />
             </View>
           ))}
         </View>
