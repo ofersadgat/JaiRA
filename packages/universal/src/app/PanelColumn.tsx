@@ -7,7 +7,7 @@ import { chatProjectOf } from "@jaira/ui/chatWorkflow";
 import { lookOf } from "@jaira/ui/appearanceLayer";
 import { closeFoldsOf, conversationInMainOf, openNewTaskWith, panelGeometryOf, panelRuleOf, parkedGateOf, rerunSurfaceFor, roomOf, runSurfaceFor, startAgainOf, useAdoptSubagent, useHeldStates, usePanelStacks, usePanelTween, useRoomRule, type PanelRoom } from "@jaira/ui/panelHost";
 import { EMPTY_STACK, topOf, type PanelEntry, type PanelStack } from "@jaira/ui/panelStack";
-import { focusRuleOf, onRight } from "@jaira/ui/splitModel";
+import { focusRuleOf, onPane } from "@jaira/ui/splitModel";
 import { PANE, PANEL_MIN, PANE_WIDE, SHUT, paneDefault, paneOf, shutOf } from "@jaira/ui/uiState";
 import type { PinnedValue } from "@jaira/ui/valuePanel";
 import { useViews } from "@jaira/ui/useView";
@@ -27,7 +27,7 @@ import { Splitter } from "../components/files/Splitter";
 import { edge, landmark } from "../primitives";
 import { useTokens } from "../tokens";
 import { useShell } from "./shell";
-import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, sheetAsk, splitHere, splitView } from "./viewState";
+import { newTaskOpener, panelLeftOpen, panelOpenWidth, panelTopKind, phonePanelOpener, runMode, paneFaces, sheetAsk, splitHere, splitView } from "./viewState";
 import { SplitPane } from "./SplitPane";
 import { usePhone } from "./phone";
 import { useColumnsFit } from "./columnsFit";
@@ -67,8 +67,10 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     return () => splitHere.set(false);
   }, [splits]);
   // With the right pane focused on a task, the panel is that task's context (board 10); else the room's rule.
+  // So with the left pane's own path on a task (something dropped on it, or swapped in).
   const focusRule = splits ? focusRuleOf(split) : null;
-  const onRightStack = useCallback((step: (stack: PanelStack) => PanelStack) => splitView.set(onRight(splitView.get(), step)), []);
+  const onLeftStack = useCallback((step: (stack: PanelStack) => PanelStack) => splitView.set(onPane(splitView.get(), "left", step)), []);
+  const onRightStack = useCallback((step: (stack: PanelStack) => PanelStack) => splitView.set(onPane(splitView.get(), "right", step)), []);
   const rule = room === null ? null : (focusRule ?? panelRuleOf(room, state, chatAt, conversationInMain));
   const detail = state.detail;
   const inlineGate = state.view === "tasks" && detail !== null ? parkedGateOf(state.pending, detail.taskId) : undefined;
@@ -136,8 +138,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
    * The detail of a task the panel shows that is not the selection — a subtask pushed on the stack, an
    * entry left under a pushed card. Fetched once per task and dropped when nothing shows it.
    */
-  // What the split's right pane shows is read the same way: its faces are this host's.
-  const shownEntries = splits && split.right !== null ? [...panelStack.entries, ...split.right.entries] : panelStack.entries;
+  // What the split's panes show on their paths is read the same way: their faces are this host's.
+  const shownEntries = splits ? [...panelStack.entries, ...split.left.entries, ...(split.right?.entries ?? [])] : panelStack.entries;
   const shownTasks = [...new Set(shownEntries.flatMap((entry) => ("taskId" in entry && entry.taskId !== undefined ? [entry.taskId] : [])))]
     .filter((taskId) => taskId !== detail?.taskId)
     .sort();
@@ -329,10 +331,15 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
     },
   };
   const face = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(host, entry);
-  // The right pane's faces: this host over the pane's own path, so a link inside it pushes there.
-  const paneHost: FaceHost = { ...host, onStack: onRightStack };
-  const paneFace = (entry: PanelEntry): ReturnType<typeof faceOf> => faceOf(paneHost, entry);
-  const splitPane = splits && split.right !== null ? <SplitPane face={paneFace} /> : null;
+  // The panes' faces, for what they draw that is not a conversation or an artifact (`PaneBody`): this
+  // host over each pane's own path, so a link inside one goes on that pane's path.
+  const leftHost: FaceHost = { ...host, onStack: onLeftStack };
+  const rightHost: FaceHost = { ...host, onStack: onRightStack };
+  useEffect(() => {
+    paneFaces.set(splits ? { left: (entry) => faceOf(leftHost, entry), right: (entry) => faceOf(rightHost, entry) } : null);
+  });
+  useEffect(() => () => paneFaces.set(null), []);
+  const splitPane = splits && split.right !== null ? <SplitPane /> : null;
   void roomRef;
   const ask = sheetAsk.use();
   // A phone's swipe in from the right edge (`PhoneFrame`): unfold the panel where it folds, and raise its

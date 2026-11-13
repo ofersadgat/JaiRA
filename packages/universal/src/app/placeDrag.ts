@@ -16,6 +16,8 @@ import { dropZonesOf, zoneAt, type DropZone, type Place, type ZoneRect } from "@
 export interface PlaceDragState {
   entry: PanelEntry;
   label: string;
+  /** `place`: an artifact, to any of the three places; `pane`: a sidebar row, onto a pane's path (board 09). */
+  kind: DragKind;
   x: number;
   y: number;
   zones: DropZone[];
@@ -37,9 +39,11 @@ export function usePlaceDrag(): PlaceDragState | null {
   return useSyncExternalStore(subscribe, () => current, () => current);
 }
 
+export type DragKind = "place" | "pane";
+
 /** What a drop does: `DropZones` sets it while it is drawn. */
-let dropper: ((place: Place, entry: PanelEntry) => void) | null = null;
-export function setDropper(next: ((place: Place, entry: PanelEntry) => void) | null): void {
+let dropper: ((place: Place, entry: PanelEntry, kind: DragKind) => void) | null = null;
+export function setDropper(next: ((place: Place, entry: PanelEntry, kind: DragKind) => void) | null): void {
   dropper = next;
 }
 
@@ -58,30 +62,37 @@ function placeRects(): { main?: ZoneRect; split?: ZoneRect; panel?: ZoneRect } {
 const MOVED = 6;
 
 /**
+ * Whether the press going on — or the last one — became a drag. A row's long press opens its menu; one
+ * the person dragged away is not a long press, and the row's own press never hears it let go (the
+ * release lands on the drag's sheet), so the row asks here before it opens anything.
+ */
+let spent = false;
+export function pressWasDrag(): boolean {
+  return spent;
+}
+
+/**
  * Make an element a place to drag from. `pick` says what a press at a target inside it would drag —
  * null where nothing is (a button inside it keeps its press). Answers the way to stop listening.
  */
-export function dragFrom(el: unknown, pick: (target: Element) => { entry: PanelEntry; label: string } | null): () => void {
+export function dragFrom(el: unknown, pick: (target: Element) => { entry: PanelEntry; label: string; kind: DragKind } | null): () => void {
   const host = el as HTMLElement | null;
   if (!isWeb || host === null || typeof host.addEventListener !== "function") return () => undefined;
   const onDown = (down: PointerEvent): void => {
     // A finger scrolls what it is on; a mouse or a pen drags.
     if (down.button !== 0 || down.pointerType === "touch" || !(down.target instanceof Element)) return;
     const picked = pick(down.target);
+    spent = false;
     if (picked === null) return;
     let zones: DropZone[] | null = null;
     const move = (e: PointerEvent): void => {
       if (zones === null) {
         if (Math.abs(e.clientX - down.clientX) < MOVED && Math.abs(e.clientY - down.clientY) < MOVED) return;
-        zones = dropZonesOf(placeRects());
+        zones = dropZonesOf(placeRects(), picked.kind === "pane");
+        // From here a sheet over the window takes the pointer (`DropZones`): a page in its frame under
+        // it would otherwise take the moves and the release, and the drag would never hear it let go.
         if (zones.length === 0) return end();
-        // From here every move and the release are the drag's: a page in its frame under the pointer
-        // would otherwise take them, and the drag would never hear it let go.
-        try {
-          host.setPointerCapture(down.pointerId);
-        } catch {
-          // The pointer is gone already: the release ends it.
-        }
+        spent = true;
       }
       e.preventDefault();
       set({ ...picked, x: e.clientX, y: e.clientY, zones });
@@ -98,7 +109,7 @@ export function dragFrom(el: unknown, pick: (target: Element) => { entry: PanelE
       };
       window.addEventListener("click", swallow, true);
       setTimeout(() => window.removeEventListener("click", swallow, true), 0);
-      if (zone !== undefined) dropper?.(zone.place, picked.entry);
+      if (zone !== undefined) dropper?.(zone.place, picked.entry, picked.kind);
     };
     const key = (e: KeyboardEvent): void => {
       if (e.key === "Escape") end();

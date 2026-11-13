@@ -9,6 +9,7 @@ import { PLAIN_SCROLLER, ENTER_KEEPS_FOCUS, Press, Txt, edge, font, scrollbarPro
 import { useTokens } from "../../tokens";
 import { ProjectChip } from "../InboxStrip";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
+import { pressWasDrag } from "../../app/placeDrag";
 import { Icon } from "../panel/Icon";
 import { AskDialog } from "../files/AskDialog";
 import { ListHead, type SortHead } from "../ListHead";
@@ -281,7 +282,7 @@ function Row({
     <Press
       onPress={onOpen}
       // A phone has no right button: a long press opens the row's menu where the finger is.
-      onLongPress={(e) => onMenu(e.nativeEvent.pageX, e.nativeEvent.pageY)}
+      onLongPress={(e) => !pressWasDrag() && onMenu(e.nativeEvent.pageX, e.nativeEvent.pageY)}
       {...((isWeb
         ? {
             onContextMenu: (e: { preventDefault: () => void; clientX: number; clientY: number }) => {

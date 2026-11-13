@@ -2,6 +2,8 @@ import { useSyncExternalStore } from "react";
 import type { PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { NO_SPLIT, type SplitState } from "@jaira/ui/splitModel";
+import type { PanelEntry } from "@jaira/ui/panelStack";
+import type { PanelFace } from "../components/panel/SidePanel";
 
 /**
  * The few facts more than one of the shell's regions reads or sets — the reading of a drilled run (the
@@ -50,8 +52,18 @@ export const splitView = shared<SplitState>(NO_SPLIT);
 /** The room on screen can split its middle column: the panel column says so while it draws a room that can. */
 export const splitHere = shared(false);
 
-/** What the right pane shows, by name: its tab says it while the room is too narrow for both panes. */
-export const splitTitle = shared("Split");
+/**
+ * What each pane shows, by name: the right's tab says it while the room is too narrow for both panes,
+ * and a drop zone over a pane says what ‹ will return to.
+ */
+export const paneTitles = shared<{ left: string; right: string }>({ left: "Main view", right: "Split" });
+
+/**
+ * How a pane draws what is on its path that is not a conversation or an artifact (a state, a run's
+ * subagent, a value): the side panel's faces over the pane's own path, which the panel column makes
+ * from its host (`PanelColumn.tsx`) — a link inside one goes on that pane's path.
+ */
+export const paneFaces = shared<{ left: (entry: PanelEntry) => PanelFace; right: (entry: PanelEntry) => PanelFace } | null>(null);
 
 /**
  * The side panel as the person left it, for the window to fit the columns by (`columnsFit.ts`): how wide

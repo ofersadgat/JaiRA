@@ -208,7 +208,7 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
   useEffect(() => {
     if (!draggable) return undefined;
     return dragFrom(bar.current, (target) =>
-      target.closest("button, [role='button'], [role='group']") !== null ? null : { entry: artifactEntryOf(dragged.current.ref, dragged.current.project), label: dragged.current.ref.title ?? dragged.current.ref.entry },
+      target.closest("button, [role='button'], [role='group']") !== null ? null : { entry: artifactEntryOf(dragged.current.ref, dragged.current.project), label: dragged.current.ref.title ?? dragged.current.ref.entry, kind: "place" },
     );
   }, [draggable]);
   const verbs =

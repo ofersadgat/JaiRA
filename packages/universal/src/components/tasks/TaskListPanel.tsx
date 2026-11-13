@@ -8,6 +8,7 @@ import { PLAIN_SCROLLER, Press, Txt, scrollbarProps, useHover } from "../../prim
 import { useTokens } from "../../tokens";
 import { ListHead, type SortHead } from "../ListHead";
 import { ContextMenu, MENU_WIDTH, type MenuAt } from "../Menu";
+import { pressWasDrag } from "../../app/placeDrag";
 
 /** The Tasks list's sorts: State most urgent first, Name A to Z, When newest first; When shows the last activity or the making. */
 export function taskSortHeads(head: Pick<TaskListHead, "when" | "onWhen">): SortHead[] {
@@ -126,7 +127,7 @@ function TaskRow({ card, when, selected, onOpen, onMenu, onStop }: { card: Board
     <View {...(hover as object)} position="relative" {...((isWeb ? { "data-drag-task": card.taskId, "data-drag-project": card.project ?? "", "data-drag-label": card.title } : {}) as object)}>
       <Press
         onPress={onOpen}
-        onLongPress={(e) => onMenu(e.nativeEvent.pageX, e.nativeEvent.pageY)}
+        onLongPress={(e) => !pressWasDrag() && onMenu(e.nativeEvent.pageX, e.nativeEvent.pageY)}
         {...((isWeb
           ? {
               onContextMenu: (e: { preventDefault: () => void; clientX: number; clientY: number }) => {

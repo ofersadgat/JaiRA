@@ -13,7 +13,7 @@ import { useShell } from "./shell";
 import { usePhone } from "./phone";
 import { ChatTitle } from "../components/chat/ChatTitle";
 import { useChatSurface } from "../components/chat/surface";
-import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
+import { boardAt, newTaskOpener, panelTopKind, runMode, splitView } from "./viewState";
 
 /**
  * What stands in the title bar: the ADDRESS of what is open. In Tasks, the task address bar
@@ -23,8 +23,13 @@ import { boardAt, newTaskOpener, panelTopKind, runMode } from "./viewState";
  */
 export function ShellTitleBar(): JSX.Element {
   const { state } = useShell();
+  const phone = usePhone();
+  const split = splitView.use();
   // A phone has no window to drag: the bar is its address alone, which may take the whole width.
-  if (usePhone() && state.view === "tasks") return <TasksAddress />;
+  if (phone && state.view === "tasks") return <TasksAddress />;
+  // Split (decision 0025, boards 07 and 09), the room's address is the LEFT pane's, in its head as its
+  // path's crumbs: across the window it would be about both panes, and is about one.
+  if (!phone && split.right !== null && (state.view === "chat" || state.view === "files" || state.view === "tasks")) return <TitleDrag />;
   if (state.view === "chat") return <ChatAddress />;
   if (state.view === "files") {
     return (

@@ -1,6 +1,9 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
+import type { ConversationView, TaskDetail } from "@jaira/shared/browser";
 import type { ChatSurface } from "@jaira/ui/chatSurface";
 import { chatSurfaceOf, conversationsAt } from "@jaira/ui/chatSurface";
+import { askOfTask } from "@jaira/ui/approvalCall";
+import { parkedGateOf } from "@jaira/ui/panelHost";
 import { hueOf } from "@jaira/ui/pillModel";
 import { inScope, placesOf, scopeOf } from "@jaira/ui/scopeModel";
 import { groupOf, groupProjects } from "@jaira/ui/workspaceGroups";
@@ -27,4 +30,52 @@ export function useChatSurface(): ChatSurface {
   const hues = useMemo(() => Object.fromEntries(state.projects.map((p, i) => [p.project, hueOf(p.kind, i)])), [state.projects]);
   const names = useMemo(() => Object.fromEntries(state.projects.map((p) => [p.project, p.label])), [state.projects]);
   return chatSurfaceOf(state, actions, { conversations, spans: state.at === null, ...(places !== undefined ? { places } : {}), hues, names });
+}
+
+/**
+ * The surface of a conversation a split's pane shows (decision 0025): the room's surface, with
+ * everything about THE conversation taken from that one — its run, loaded on its own (`useTaskRun`), its
+ * asks, and the runs and subagents walked into, which are the pane's to walk, not the room's. A link
+ * to another conversation goes on the pane's path (`onOpen`). The composer sends by the conversation's
+ * own id (`chatThreadModel.ts`), so it writes to the conversation the pane shows.
+ */
+export function usePaneChatSurface(
+  taskId: string,
+  project: string | undefined,
+  run: { detail: TaskDetail | null; conversation: ConversationView | null; liveTurn: ChatSurface["live"] },
+  onOpen: (taskId: string, project?: string) => void,
+): ChatSurface {
+  const room = useChatSurface();
+  const { state } = useShell();
+  const [walkedInto, setWalkedInto] = useState<string | undefined>(undefined);
+  const [walkedChain, setWalkedChain] = useState<ChatSurface["walkedChain"]>(undefined);
+  const queued = state.queue.find((q) => q.taskId === taskId);
+  const approval = askOfTask(state.approvals, taskId);
+  const question = state.questions.find((q) => q.taskId === taskId);
+  const gate = parkedGateOf(state.pending, taskId);
+  return useMemo(
+    () => ({
+      ...room,
+      taskId,
+      project: project ?? room.project,
+      busy: false,
+      opening: null,
+      error: null,
+      detail: run.detail,
+      journal: run.conversation,
+      live: run.liveTurn,
+      queued,
+      approval,
+      question,
+      gate,
+      walkedInto,
+      onWalkInto: (instanceId: string | null) => setWalkedInto(instanceId ?? undefined),
+      walkedChain,
+      onWalkIntoSubagent: (chain: ChatSurface["walkedChain"] | null) => setWalkedChain(chain ?? undefined),
+      onOpen: (id: string | null, at?: string) => (id === null ? room.onOpen(null, at) : onOpen(id, at)),
+    }),
+    // `onOpen` is the pane's, made again with it; what it does does not change with it.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [room, taskId, project, run.detail, run.conversation, run.liveTurn, queued, approval, question, gate, walkedInto, walkedChain],
+  );
 }

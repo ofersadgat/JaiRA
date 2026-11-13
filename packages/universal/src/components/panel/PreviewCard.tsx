@@ -12,16 +12,15 @@ import { ValueView } from "./ValueView";
  *
  *   the card         flex 1
  *   a value          flex 1; the value owns the column (`ValueView`'s `pinned`)
- *   an artifact      flex 1; the whole of `PublishedView`, filling the panel (or the right pane of a
- *                    split, which draws the same entries). It goes back by the panel's own ‹, as anything
- *                    on the stack does, and moves by its place buttons
+ *   an artifact      flex 1; the whole of `PublishedView`, filling the panel. It goes back by the panel's
+ *                    own ‹, as anything on the stack does, and moves by its place buttons
  */
 export function PreviewCard({ item }: { item: PinnedValue }): JSX.Element {
   if (item.published !== undefined) {
     const { ref, project } = item.published;
     return (
       <View flex={1} minHeight={0}>
-        {/* Its place buttons light where it stands (`places.ts`): the panel, or a split's right pane. */}
+        {/* Its place buttons light where it stands (`places.ts`): here, the panel. */}
         <PublishedView key={`${ref.id}@${String(ref.version)}`} published={ref} artifacts={surfaceOf(ref.taskId, project)} fill />
       </View>
     );
