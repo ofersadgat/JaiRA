@@ -5,6 +5,7 @@ import { AskDialog } from "../files/AskDialog";
 import { SuggestHost } from "../form/SuggestLayer";
 import { ApprovalDialog, ModuleApprovalDialog } from "./Dialogs";
 import { PairCodeDialog } from "./PairCodeDialog";
+import { QuitDialog } from "./QuitDialog";
 import { Toast } from "./Toast";
 
 /**
@@ -27,6 +28,8 @@ export function ShellFloats(): JSX.Element {
       ) : null}
       {state.initPrompt !== null ? <AskDialog spec={initPromptSpec(state.initPrompt, () => void actions.initProject())} onCancel={actions.dismissInit} /> : null}
       <PairCodeDialog />
+      {/* Quitting with work going: the question, then the strip while the quit waits (desktop only). */}
+      <QuitDialog />
       <Toast error={state.error} notice={state.notice} onDismissError={actions.dismissError} onDismissNotice={actions.dismissNotice} />
       {/* A phone's layer for a box's suggestions, over the frame (nothing on web: `SuggestLayer.web.tsx`). */}
       <SuggestHost />

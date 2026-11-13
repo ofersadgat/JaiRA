@@ -106,6 +106,37 @@ export interface UpdateBusy {
 }
 
 /**
+ * One task with work in flight in this process's engine — what a quit would cut, one row of the quit
+ * dialog (`AppService.runningWork`). A task with a run and a turn both going is one item, a `run`.
+ */
+export interface RunningWork {
+  taskId: string;
+  /** The project's folder. */
+  project: string;
+  title: string;
+  /** A workflow run, or a chat turn being answered. */
+  kind: "run" | "turn";
+  /**
+   * Parked rather than working: on the person (a gate, an approval, an agent's question) or on the
+   * world (a forge, an event). A quit suspends such a run, and a cut turn's question is asked again at
+   * the next open, so "wait, then quit" does not wait for it — nothing would end it but the person.
+   */
+  waiting?: "person" | "event";
+}
+
+/** The person's answer to the quit dialog (the person, 2026-11-12). */
+export type QuitChoice = "wait" | "now" | "cancel";
+
+/**
+ * Where a quit attempt stands, pushed to the window as `quit:changed`: nothing (`idle`), the dialog up
+ * (`asking`), or quitting once what is working has finished (`waiting`). `work` is what is going.
+ */
+export interface QuitState {
+  phase: "idle" | "asking" | "waiting";
+  work: RunningWork[];
+}
+
+/**
  * The `jaira` command on this machine's PATH (decision 0011 §7), for About's Command line row: the
  * installer puts it there on Windows and with the .deb; macOS gets an install action.
  */

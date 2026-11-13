@@ -31,6 +31,7 @@ import {
   type JairaAppearanceConfig,
   type IpcChannel,
   type PushMessage,
+  type QuitChoice,
   type SaveFileRequest,
   type ExportArtboardRequest,
 } from "@jaira/shared";
@@ -55,6 +56,8 @@ import {
   type HostedEngine,
 } from "@jaira/service";
 import { UpdateManager, type RestartChoice, type UpdaterPort } from "./updates";
+import { QuitGuard } from "./quitGuard";
+import { nativeQuitWords } from "../renderer/quitModel";
 import { cliCommandStatus, installCliCommand, type CliCommandContext } from "./cliCommand";
 import { localLink, remoteLink, type EngineLink } from "./engineLink";
 import { CLIENT_SCHEME_PRIVILEGES, CLIENT_URL, registerClientProtocol } from "./clientProtocol";
@@ -400,8 +403,13 @@ const updates = (() => {
     // binary it runs on — a server this install started — and then it is stopped before the install.
     busy: () => (link === undefined ? { runs: 0, turns: 0 } : link.mode === "local" || sameInstall() ? link.activeWork() : { runs: 0, turns: 0 }),
     suspendForUpdate: () => (link === undefined ? undefined : link.mode === "local" || sameInstall() ? link.suspendForUpdate() : undefined),
-    // The ordinary quit: `before-quit` below drains, closes, and then lets the updater install.
-    quit: () => setImmediate(() => app.quit()),
+    // The ordinary quit: `before-quit` below drains, closes, and then lets the updater install. Not
+    // asked about again: "Wait + update" has waited, and "Pause + update" suspended what was going.
+    quit: () =>
+      setImmediate(() => {
+        quitGuard.letGo();
+        app.quit();
+      }),
     ...(dismissed !== undefined ? { dismissed } : {}),
     saveDismissed: (version) => {
       try {
@@ -413,6 +421,48 @@ const updates = (() => {
     },
   });
 })();
+
+/** The quit attempt being asked about began as the window's close (`createWindow`). */
+let closedByWindow = false;
+
+/** Tell the window alone — not the engine's pipe, whose phones and windows are not quitting. */
+function tellWindow(message: PushMessage): void {
+  try {
+    if (window && !window.isDestroyed() && rendererAlive) window.webContents.send(PUSH_CHANNEL, message);
+  } catch (e) {
+    reportCrash("push", new Error(`'${message.type}' could not be delivered: ${(e as Error).message}`));
+  }
+}
+
+/**
+ * Quitting with work going (`quitGuard.ts`): what this process's quit would cut — everything a local
+ * engine has going, and a separate server's only when the quit stops that server (`quitStopsRemote`).
+ */
+const quitGuard = new QuitGuard({
+  work: async () => (link === undefined ? [] : link.mode === "local" || quitStopsRemote(link) ? await link.runningWork() : []),
+  quit: () =>
+    setImmediate(() => {
+      // A quit that began as the window's close: the window goes now, as an unheld close's did,
+      // and the drain runs behind it.
+      if (closedByWindow && window !== undefined && !window.isDestroyed()) window.hide();
+      app.quit();
+    }),
+  publish: (state) => tellWindow({ type: "quit:changed", state }),
+  canDraw: () => window !== undefined && !window.isDestroyed() && rendererAlive && window.isVisible() && !window.webContents.isCrashed(),
+  askNatively: async (work, signal) => {
+    const words = nativeQuitWords(work);
+    const options = { type: "question" as const, buttons: words.buttons, defaultId: 0, cancelId: words.choices.indexOf("cancel"), message: words.message, detail: words.detail, signal };
+    const usable = window !== undefined && !window.isDestroyed() ? window : undefined;
+    const { response } = usable !== undefined ? await dialog.showMessageBox(usable, options) : await dialog.showMessageBox(options);
+    return words.choices[response] ?? "cancel";
+  },
+  focus: () => {
+    if (window === undefined || window.isDestroyed()) return;
+    if (window.isMinimized()) window.restore();
+    window.focus();
+  },
+  log: (level, message) => link?.recordApp(level, message),
+});
 
 /**
  * The downloadable plugins as the window sees them (decision 0011 §6): the store's status, with the
@@ -619,6 +669,9 @@ const hostHandlers: Record<HostChannel, Handler> = {
   "update:download": (() => updates.download()) as Handler,
   "update:install": ((request: { when?: RestartChoice } | undefined) => updates.apply(request?.when ?? "wait")) as Handler,
   "update:dismiss": ((request: { version: string }) => updates.dismiss(request.version)) as Handler,
+  "quit:state": (() => quitGuard.current()) as Handler,
+  "quit:answer": ((request: { choice: QuitChoice }) => quitGuard.answer(request.choice)) as Handler,
+  "quit:shown": (() => quitGuard.shown()) as Handler,
   "plugin:list": (() => pluginStatuses()) as Handler,
   "plugin:install": ((request: { id: PluginId }) => installPlugin(request.id)) as Handler,
   "plugin:remove": ((request: { id: PluginId }) => removePlugin(request.id)) as Handler,
@@ -833,6 +886,17 @@ async function createWindow(): Promise<BrowserWindow> {
    */
   win.webContents.on("did-finish-load", () => {
     rendererAlive = true;
+  });
+  /**
+   * Closing the window is quitting, everywhere but macOS (`window-all-closed`), so it is asked about
+   * the way a quit is (`quitGuard`) — and asked while the window still stands to draw the question.
+   * Held, and `app.quit()` is what goes on once the guard lets it; a quit under way passes.
+   */
+  win.on("close", (event) => {
+    if (process.platform === "darwin" || closing || quitGuard.allows()) return;
+    event.preventDefault();
+    closedByWindow = true;
+    void quitGuard.request();
   });
   /**
    * A link with `target="_blank"` — a package's source on the Licenses page, a review's forge page —
@@ -1372,11 +1436,14 @@ app.on("window-all-closed", () => {
  * `engine.keepServerRunning` says otherwise; a server on this very executable goes when an update is
  * about to replace the executable. Anything else — another window, a command — is not this window's.
  */
-async function releaseRemote(engine: EngineLink): Promise<void> {
+function quitStopsRemote(engine: EngineLink): boolean {
   const keep = machineSettings(baseDir).engine.keepServerRunning === true;
+  return engine.host?.kind === "server" && ((startedServer && !keep) || (updates.canInstall() && sameInstall()));
+}
+
+async function releaseRemote(engine: EngineLink): Promise<void> {
   const installing = updates.canInstall();
-  const stopIt = engine.host?.kind === "server" && ((startedServer && !keep) || (installing && sameInstall()));
-  if (!stopIt) return;
+  if (!quitStopsRemote(engine)) return;
   const pid = engine.host!.pid;
   await engine.invoke("engine:stop", undefined).catch(() => undefined);
   // Its drain is its own; an installer must not start before the executable is free.
@@ -1390,6 +1457,12 @@ let closing = false;
 app.on("before-quit", (event) => {
   if (closing) return;
   event.preventDefault();
+  // Work going: ask first (`quitGuard`), which calls `app.quit()` again once the quit may go.
+  if (!quitGuard.allows()) {
+    closedByWindow = false;
+    void quitGuard.request();
+    return;
+  }
   closing = true;
   const engine = link;
   // The other end of the launch line. A log that ends mid-sentence is a crash; a log that ends here

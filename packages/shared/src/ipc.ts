@@ -38,7 +38,7 @@ import type { ModuleApproval } from "./refusal";
 import type { ChatPlanView, ChatSettings } from "./operationVocabulary";
 import type { LimitsView, WaitingItem } from "./usage";
 import type { EnvironmentView, FolderListing, CopyChoice, MachineForm, MachinesView, OutboxView, PlacementNote, PlacementView, QueuedPlacement, RunTarget } from "./machines";
-import type { CliCommandStatus, EngineStatus, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
+import type { CliCommandStatus, EngineStatus, QuitChoice, QuitState, UpdateBusy, UpdateRestartAnswer, UpdateRestartChoice, UpdateState } from "./updates";
 import type { PluginId, PluginStatus } from "./plugins";
 import type { HealthItem } from "./health";
 import type { SyncPage } from "./sync";
@@ -2552,6 +2552,15 @@ export interface IpcContract {
    * menu opens; `busy` in the state is only kept while an update is waiting.
    */
   "update:busy": { request: void; response: UpdateBusy };
+  /** Where a quit attempt stands (`quit:changed` carries each change) — for a window that was reloaded. */
+  "quit:state": { request: void; response: QuitState };
+  /**
+   * The person's answer to the quit dialog, or to the waiting strip: `wait` quits once nothing is
+   * working, `now` quits as any quit does, `cancel` stays.
+   */
+  "quit:answer": { request: { choice: QuitChoice }; response: QuitState };
+  /** The window drew the quit dialog; without this soon after asking, main asks with the OS's own box. */
+  "quit:shown": { request: void; response: void };
   /** The downloadable plugins (decision 0011 §6), as this machine sees them. Empty when the build ships no manifest. */
   "plugin:list": { request: void; response: PluginStatus[] };
   /**
@@ -2831,6 +2840,9 @@ export const IPC_CHANNELS = [
   "update:install",
   "update:dismiss",
   "update:busy",
+  "quit:state",
+  "quit:answer",
+  "quit:shown",
   "plugin:list",
   "plugin:install",
   "plugin:remove",
@@ -3199,6 +3211,8 @@ export type PushMessage =
   | { type: "environment:changed"; project: string }
   /** The updater moved (decision 0011 §4). */
   | { type: "update:changed"; state: UpdateState }
+  /** A quit attempt moved: the dialog up, waiting for work to finish, or nothing. Sent to the window only. */
+  | { type: "quit:changed"; state: QuitState }
   /** A plugin download moved, ended or failed, or a plugin was removed. */
   | { type: "plugin:changed"; plugins: PluginStatus[] }
   /** This window's engine moved: it became a client, or took the engine over when its host went. */

@@ -11,7 +11,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import { EngineConnections, serviceHandlers, type AppService, type CrashKind, type EngineClient, type EngineHostInfo, type Handler, type HostedEngine } from "@jaira/service";
-import type { ArtifactPolicy, HealthItem, LogLevel } from "@jaira/shared";
+import type { ArtifactPolicy, HealthItem, LogLevel, RunningWork } from "@jaira/shared";
 
 /** What a frame is answered with for a granted path: the bytes, their type, and the policy to serve them under (decision 0020 §4). */
 export interface ServedArtifact {
@@ -35,6 +35,8 @@ export interface EngineLink {
   healthSet(item: Omit<HealthItem, "since">): void;
   healthClear(id: string): void;
   activeWork(): Promise<{ runs: number; turns: number }>;
+  /** The same, one named item per task, each saying whether it is parked — for the quit dialog. */
+  runningWork(): Promise<RunningWork[]>;
   suspendForUpdate(): Promise<void>;
   probeExecutors(): Promise<void>;
   kickRemotes(): void;
@@ -73,6 +75,7 @@ export function localLink(service: AppService, hosted: HostedEngine | undefined)
     healthSet: (item) => service.health.set(item),
     healthClear: (id) => service.health.clear(id),
     activeWork: async () => service.activeWork(),
+    runningWork: async () => service.runningWork(),
     suspendForUpdate: async () => service.suspendForUpdate(),
     probeExecutors: async () => {
       await service.probeExecutors();
@@ -123,6 +126,7 @@ export function remoteLink(client: EngineClient): EngineLink {
     healthSet: (item) => tell("engine:healthSet", item),
     healthClear: (id) => tell("engine:healthClear", { id }),
     activeWork: async () => (await client.invoke("engine:activeWork")) as { runs: number; turns: number },
+    runningWork: async () => (await client.invoke("engine:runningWork")) as RunningWork[],
     suspendForUpdate: async () => {
       await client.invoke("engine:suspendForUpdate");
     },

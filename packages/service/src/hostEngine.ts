@@ -72,6 +72,7 @@ export const PEER_CHANNELS = [
   "engine:healthSet",
   "engine:healthClear",
   "engine:activeWork",
+  "engine:runningWork",
   "engine:suspendForUpdate",
   "engine:probeExecutors",
   "engine:kickRemotes",

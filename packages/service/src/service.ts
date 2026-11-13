@@ -621,6 +621,7 @@ import { accountOfRoute, CREDIT_EXHAUSTED_CODE, isSpent, remainingPercent, route
 import { ProjectSession, type LivePermissions, type RecoveredAsk, type SyncHolder, SUSPENDED_FORWARDING, SUSPENDED_UPDATE, SUSPENDED_WAITING } from "./session";
 import { HealthBoard } from "./health";
 import { downAgentsOf, EXECUTOR_TITLES } from "@jaira/shared";
+import type { RunningWork } from "@jaira/shared";
 
 /** What Settings calls each model route when one it could use stops working. */
 const ROUTE_TITLES: Readonly<Record<string, string>> = {
@@ -8465,15 +8466,19 @@ export class AppService {
     if (row?.status === "completed" && !recovered) return "finished";
     const held = recovered || open.live.has(taskId) || open.project.jobs.liveRunJob(taskId, Date.now()) !== undefined || row?.status === "running" || row?.status === "stopping";
     if (!held) return "stopped";
-    const asking =
-      recovered ||
+    if (recovered || this.asksPerson(open, taskId)) return "waiting-input";
+    if (open.userEvents.list().some((wait) => wait.taskId === taskId)) return "waiting-event";
+    return "working";
+  }
+
+  /** Whether a task has something open put to the person: a gate, an agent's question, an approval. */
+  private asksPerson(open: ProjectSession, taskId: string): boolean {
+    return (
       open.hub.list().some((request) => (request.taskId ?? open.requestTask.get(request.requestId)) === taskId) ||
       open.questions.list().some((question) => question.taskId === taskId) ||
       open.approvals.list().some((approval) => approval.taskId === taskId) ||
-      open.project.interactions.forTask(taskId).some((stored) => !isMoveQuestion(stored.requestId));
-    if (asking) return "waiting-input";
-    if (open.userEvents.list().some((wait) => wait.taskId === taskId)) return "waiting-event";
-    return "working";
+      open.project.interactions.forTask(taskId).some((stored) => !isMoveQuestion(stored.requestId))
+    );
   }
 
   /**
@@ -14537,6 +14542,42 @@ export class AppService {
       for (const set of session.chatTurns.values()) turns += set.size;
     }
     return { runs, turns };
+  }
+
+  /**
+   * The same work as {@link activeWork}, one item per task and named, for the quit dialog (the person,
+   * 2026-11-12: "if I try and close JaiRA ... pop up a dialog if there are still running
+   * workflows/sessions"). Only this process's own sessions: what a quit of this process would cut.
+   *
+   * Each says whether it is parked, which `activeWork` answers by leaving it out: a run parked on a gate
+   * or on the world (`parkedRuns`), and a run or turn with an approval or a question open
+   * (`asksPerson`) — those are cut by a quit and asked again at the next open, and waiting for them to
+   * finish would be waiting for the person who is trying to quit.
+   */
+  runningWork(): RunningWork[] {
+    const work: RunningWork[] = [];
+    for (const session of this.sessions.values()) {
+      const parked = session.parkedRuns();
+      const turning = [...session.chatTurns].filter(([, set]) => set.size > 0).map(([taskId]) => taskId);
+      for (const taskId of new Set([...session.live.keys(), ...turning])) {
+        const kind = session.live.has(taskId) ? "run" : "turn";
+        const waiting = this.asksPerson(session, taskId)
+          ? "person"
+          : parked.has(taskId)
+            ? session.userEvents.list().some((wait) => wait.taskId === taskId)
+              ? "person"
+              : "event"
+            : undefined;
+        work.push({
+          taskId,
+          project: session.dir,
+          title: session.project.tasks.tryRead(taskId)?.title ?? taskId,
+          kind,
+          ...(waiting !== undefined ? { waiting } : {}),
+        });
+      }
+    }
+    return work;
   }
 
   /**
