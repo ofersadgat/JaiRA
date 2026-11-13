@@ -3,7 +3,7 @@ import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { publishedMime, type ArtifactComment, type PublishedVersion } from "@jaira/shared/browser";
 import { invoke } from "@jaira/ui/store";
-import type { PublishedRef } from "@jaira/ui/transcriptRows";
+import { shownKindOf, shownMimeOf, type PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useValuePanel } from "@jaira/ui/valuePanel";
 import { usePhone } from "../../app/phone";
@@ -119,7 +119,8 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
         setDownloads(read.capabilities !== undefined && "downloads" in read.capabilities);
         // The grant the Artifact view runs in: the whole artifact at this version - on a phone, at the
         // engine's HTTP route (the phone's engine bridge says where).
-        if (published.kind === "markdown") return;
+        // A document is drawn here, and a shown file by its value view: neither runs in a frame.
+        if (published.kind === "markdown" || published.kind === "file") return;
         const opens = published.kind === "canvas" ? "project/canvas.json" : published.entry;
         if (read.files[opens] === undefined) return;
         const granted = await invoke("artifact:serve", { taskId, artifact: published.id, version, path: opens, ...project });
@@ -186,7 +187,10 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
     });
   };
 
-  const glyph = published.kind === "canvas" ? "◫" : published.kind === "markdown" ? "¶" : "▥";
+  // A shown file (2026-11-13): its type from its one file (a `data:` URI says), else from its source's name.
+  const fileMime = published.kind === "file" ? shownMimeOf(published.entry, files?.[published.entry]) : undefined;
+  const fileKind = fileMime !== undefined ? shownKindOf(fileMime) : undefined;
+  const glyph = fileKind !== undefined ? fileKind.glyph : published.kind === "canvas" ? "◫" : published.kind === "markdown" ? "¶" : "▥";
   // At the version on screen: where it is opened shows what was being looked at.
   const here: PublishedRef = { ...published, version };
   const verbs =
@@ -218,7 +222,8 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
         {published.title ?? published.entry}
       </Txt>
       <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} numberOfLines={1} flexShrink={0}>
-        {published.kind === "canvas" ? "canvas" : published.kind === "markdown" ? "document" : "page"} · v{version}
+        {fileKind !== undefined ? fileKind.word : published.kind === "canvas" ? "canvas" : published.kind === "markdown" ? "document" : "page"} · v{version}
+        {published.from !== undefined ? ` · from ${published.from}` : ""}
       </Txt>
       {verbs !== null ? (
         <>
@@ -333,6 +338,24 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
             </Txt>
           </Press>
         ) : null}
+      </View>
+    );
+  }
+
+  // A shown file is its value, read the ways a tool's result is (a picture, code, a table, a diff), the
+  // version picker the toggle's last segment as on any card.
+  if (published.kind === "file") {
+    return (
+      <View minWidth={0} {...(fill ? { flex: 1, minHeight: 0 } : {})}>
+        {files === null || failed !== null ? (
+          <>
+            {titleBar}
+            <View paddingHorizontal={fill ? 10 : 2}>{lead}</View>
+          </>
+        ) : (
+          <ValueView value={{ path: published.entry, mediaType: fileMime, content: files[published.entry] ?? "" }} hint={{ mime: fileMime }} pinned={fill} titleBar={titleBar} segment={segment} />
+        )}
+        {menu !== null ? <ContextMenu anchor={menu} onClose={() => setMenu(null)} /> : null}
       </View>
     );
   }

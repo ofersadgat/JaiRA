@@ -12465,7 +12465,7 @@ export class AppService {
     string,
     | { kind: "body"; body: string; mediaType: string; interactive: boolean }
     // Decision 0020: a published artifact at one version, every file of it loadable by its own path.
-    | { kind: "published"; session: ProjectSession; taskId: string; artifact: string; version: number; artifactKind: "page" | "markdown" | "canvas" }
+    | { kind: "published"; session: ProjectSession; taskId: string; artifact: string; version: number; artifactKind: "page" | "markdown" | "canvas" | "file" }
   >();
 
   /**

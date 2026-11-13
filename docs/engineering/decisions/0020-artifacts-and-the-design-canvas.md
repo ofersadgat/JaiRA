@@ -106,6 +106,32 @@ instructions are passed verbatim and name them:
     artifact unless the call gives `url`. The Design type's answer to a create is kept word for word, and
     JaiRA adds one paragraph after it saying so (`inlineCanvasNote`), because the instructions have the
     model write every file first.
+- **Amended 2026-11-13** (task `t-wdxyhs1w6w`). The agent ended a turn with "Screenshots to look at:" and
+  three paths: a `.png` was refused ("a page is a .html, .htm or .md file"), and nothing told it a picture
+  could be shown. Its subagent also "couldn't view images": `read_file` handed a PNG over as 72,843
+  characters of text, which the CLI refused as too long. The person ruled: "show_artifact should be
+  similar to SendUserFile … any file whether it be on disk, inline, from an artifact path, url, etc … it
+  should take any format, but it may error if the format doesnt have a renderer", and gave the shape
+  (mockups: `0020` amendment artifact "Show Any File"):
+  - `artifacts`: one `ArtifactSource`, a list, or a list of `{ artifact, caption }`; `caption` over all of
+    it. A source is a string, a path (absolute or from the workspace) or a URI (`file://`, `https://`,
+    `artifact://<task>/@<id>[/<path in it>]`, `data:`), or `{ data, encoding?: utf8 | base64, name?,
+    mimeType? }` sent in the call, typed by `name` or `mimeType`. `file_path` stays the one-item spelling.
+    The answer lists `shown` (`url`, `version`, `source`, `from`, `caption`) and `refused` (`source`,
+    `why`); a call fails only when it showed nothing.
+  - What a source is shown as is decided by its type alone: a page, a Markdown document, or a new kind,
+    `file` (migration 35 widens `artifact_versions.kind`): one file, its `entry` the source (what showing
+    it again matches, so the same path or address is the next version; data sent in the call matches by
+    its `name`), its text, or its bytes as a `data:` URI for a picture, clip or track. The window draws a
+    file with the value views a tool's result gets. A type none of them draws (a PDF, an archive, bytes
+    that are not text) is refused, naming what would have worked.
+  - Sources are judged where reading them would be: a path at `read_file`'s line (`publishedReadsOf`), an
+    address at `web_fetch`'s (`publishedFetchesOf`), fetched once and kept as fetched. Data in the call
+    and an artifact of this task read nothing.
+  - Several pictures in one call draw as a gallery under the call; anything else as stacked cards. What a
+    subagent showed is drawn under its line in the conversation too (`shownInChain`).
+  - `read_file` on a PNG, JPEG, GIF or WebP answers `$images`, which the model sees, up to 3.75 MB.
+  - The chat prompt and the tool's description tell the agent to show a file rather than name a path.
 - Claude Code's own `Artifact` never runs: it publishes to claude.ai. It is declared as `show_artifact`'s
   native, which displaces it, and `show_artifact` is `appOnly`: the composer offers no pick, and a
   permission set entry recording `implementation: "native"` is not honoured.

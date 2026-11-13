@@ -12,7 +12,7 @@ import { iconOf, takenApartOf, type ThoughtEntry, type ToolEntry, type Transcrip
 import { isHostCall, secondsOf } from "@jaira/ui/workSummary";
 import { subagentLineOf } from "@jaira/ui/subagentModel";
 import { ApprovalAskContext, useNow } from "@jaira/ui/workSummaryContext";
-import { askedOf, pictureOf, producedArtifact, publishedOf, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
+import { askedOf, pictureOf, producedArtifact, publishedOf, shownInChain, shownOf, toolLineOf, type CallSurface, type RowMark, type RowTone } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { useFilled } from "@jaira/ui/useView";
 import { Press, Txt, edge, lengthToken } from "../../primitives";
@@ -27,6 +27,7 @@ import { OutcomeHostContext } from "./outcomeHost";
 import { SubagentHostContext } from "./subagentHost";
 import { ValueView } from "./ValueView";
 import { PublishedView } from "./PublishedView";
+import { ShownFilesView } from "./ShownFiles";
 import { PublishedList } from "./PublishedList";
 import { Media } from "./ValueReadings";
 
@@ -278,14 +279,27 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
   const shown = ((): ReactNode => {
     if (line.shown === "sidechain") {
       const hosted = subagentHost?.(entry.sidechain!);
-      if (hosted !== undefined) return hosted;
-    }
-    if (line.shown === "sidechain")
-      return sub !== undefined ? (
-        <SubagentDoor entry={entry} entries={sub} sidechainOf={sidechainOf} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />
+      const door =
+        hosted !== undefined ? (
+          hosted
+        ) : sub !== undefined ? (
+          <SubagentDoor entry={entry} entries={sub} sidechainOf={sidechainOf} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />
+        ) : (
+          <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />
+        );
+      // What the subagent showed the person is drawn under its line, not only inside it (2026-11-13).
+      const files = sub !== undefined ? shownInChain(sub, sidechainOf) : undefined;
+      return files === undefined ? (
+        door
       ) : (
-        <SidechainDoor call={entry.sidechain!} name={line.chainName} entries={sub} running={running} transcript={transcript} onOpen={onOpenSidechain} artifacts={artifacts} />
+        <>
+          {door}
+          <View paddingLeft={34} paddingTop={4} paddingBottom={4} minWidth={0}>
+            <ShownFilesView shown={files} artifacts={artifacts} />
+          </View>
+        </>
       );
+    }
     if (line.shown === "outcome") {
       const outcome = workflowOutcomeOf(entry.result!);
       return outcome === undefined ? null : <OutcomeNote outcome={outcome} />;
@@ -301,6 +315,8 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
     }
     if (line.shown === "published") {
       // Fetched above when the answer was a placeholder; a call that published nothing draws nothing.
+      const files = shownOf(entry.result);
+      if (files !== undefined) return <ShownFilesView shown={files} artifacts={artifacts} />;
       const published = publishedOf(entry.result);
       return published !== undefined ? <PublishedView published={published} artifacts={artifacts} /> : undefined;
     }

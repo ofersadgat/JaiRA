@@ -28,8 +28,9 @@
 import { randomBytes, createHash } from "node:crypto";
 import { readFileSync, statSync } from "node:fs";
 import { basename, dirname, extname, isAbsolute, join, relative, resolve as resolvePath } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { ExecServices, JsonValue, Tool } from "@declarative-ai/exec";
-import { defaultBuiltInDir } from "@jaira/shared";
+import { defaultBuiltInDir, extensionForMime, isTextMime, mediaKindOf, mimeOfPath } from "@jaira/shared";
 import { filesAt, MemoryArtifactStore, type ArtifactKind, type ArtifactStore, type ArtifactVersion } from "./artifacts";
 import { parseDestination, resolveDestination, withinWorkspace } from "./artifactPath";
 import type { FileToolOptions } from "./fileTools";
@@ -51,6 +52,10 @@ export interface ShowArtifactOptions extends FileToolOptions {
   builtInDir?: string;
   /** Mints an artifact's id. Defaults to `a-` and ten random base-36 characters. */
   mintId?: () => string;
+  /** How an `https://` source is fetched. Injected in tests; the platform `fetch` otherwise. */
+  fetch?: typeof globalThis.fetch;
+  /** How long a fetch may take. 30 s, as `web_fetch`'s. */
+  fetchTimeoutMs?: number;
 }
 
 /**
@@ -162,6 +167,11 @@ export function publishedReadsOf(input: unknown): string[] {
   if (action !== "publish") return [];
   if (typeof args["type_url"] === "string" && args["type_url"].length > 0) return [];
   const reads: string[] = [];
+  // Each source `artifacts` names on disk: a path, or a `file://` URI read as the path it names.
+  for (const item of showItemsOf(args["artifacts"]) ?? []) {
+    const at = sourceReadOf(item.source);
+    if (at?.tool === "read_file") reads.push(at.path);
+  }
   if (typeof args["file_path"] === "string" && args["file_path"].length > 0 && typeof args["content"] !== "string") reads.push(args["file_path"]);
   const root = typeof args["root"] === "string" && args["root"].length > 0 ? args["root"].replace(/[\\/]+$/, "") : undefined;
   const files = args["files"];
@@ -175,6 +185,92 @@ export function publishedReadsOf(input: unknown): string[] {
   }
   return [...new Set(reads)];
 }
+
+/**
+ * The web addresses one `show_artifact` call FETCHES (`https://…` sources in `artifacts`): what the gate
+ * judges at `web_fetch`'s line, address by address — showing a page off the web is fetching it.
+ */
+export function publishedFetchesOf(input: unknown): string[] {
+  if (input === null || typeof input !== "object" || Array.isArray(input)) return [];
+  const args = input as Record<string, unknown>;
+  if (typeof args["action"] === "string" && args["action"].length > 0 && args["action"] !== "publish") return [];
+  const urls: string[] = [];
+  for (const item of showItemsOf(args["artifacts"]) ?? []) {
+    const at = sourceReadOf(item.source);
+    if (at?.tool === "web_fetch") urls.push(at.url);
+  }
+  return [...new Set(urls)];
+}
+
+/**
+ * A file `show_artifact` shows the person (2026-11-13), however it is named: a path (absolute, or from the
+ * workspace), a URI — `file://`, `https://`, `artifact://<task>/@<id>[/<path in it>]`, `data:` — or its
+ * bytes sent in the call, typed by `name` (its extension) or `mimeType`.
+ */
+export type ArtifactSource = string | { data: string; encoding?: "utf8" | "base64"; name?: string; mimeType?: string };
+
+/** One thing a call shows, and the line written above it (under its tile, in a gallery). */
+export interface ShowItem {
+  source: ArtifactSource;
+  caption?: string;
+}
+
+const isInlineSource = (value: unknown): value is { data: string; encoding?: unknown; name?: unknown; mimeType?: unknown } =>
+  value !== null && typeof value === "object" && !Array.isArray(value) && typeof (value as { data?: unknown }).data === "string";
+
+/**
+ * `artifacts` as a list of items: one source, a list of them, or a list of `{ artifact, caption }`.
+ * `undefined` when the call does not use it; an empty list for one that names nothing showable.
+ */
+export function showItemsOf(raw: unknown): ShowItem[] | undefined {
+  if (raw === undefined || raw === null) return undefined;
+  const one = (value: unknown): ShowItem | undefined => {
+    if (typeof value === "string") return value.trim().length > 0 ? { source: value.trim() } : undefined;
+    if (isInlineSource(value)) return { source: value as ArtifactSource };
+    if (value !== null && typeof value === "object" && !Array.isArray(value) && "artifact" in value) {
+      const inner = one((value as { artifact: unknown }).artifact);
+      const caption = (value as { caption?: unknown }).caption;
+      return inner === undefined ? undefined : { ...inner, ...(typeof caption === "string" && caption.trim().length > 0 ? { caption: caption.trim() } : {}) };
+    }
+    return undefined;
+  };
+  const list = Array.isArray(raw) ? raw : [raw];
+  return list.map(one).filter((item): item is ShowItem => item !== undefined);
+}
+
+/** What showing a source reads, for the gate: a file at `read_file`'s line, an address at `web_fetch`'s. Nothing for data sent in the call or an artifact of this task. */
+export function sourceReadOf(source: ArtifactSource): { tool: "read_file"; path: string } | { tool: "web_fetch"; url: string } | undefined {
+  if (typeof source !== "string") return undefined;
+  if (/^https?:\/\//i.test(source)) return { tool: "web_fetch", url: source };
+  if (/^file:\/\//i.test(source)) {
+    try {
+      return { tool: "read_file", path: fileURLToPath(source) };
+    } catch {
+      return undefined;
+    }
+  }
+  if (/^(artifact|data):/i.test(source)) return undefined;
+  return { tool: "read_file", path: source };
+}
+
+/** A shown file's text, or its bytes as a `data:` URI: what its one file holds in the store. */
+const dataUri = (mime: string, bytes: Buffer): string => `data:${mime};base64,${bytes.toString("base64")}`;
+
+/** The type before its parameters (`text/html; charset=utf-8` → `text/html`), lower-cased. */
+const bareMime = (mime: string): string => mime.split(";")[0]!.trim().toLowerCase();
+
+/** The magic numbers of the pictures a file without a telling name may still be. */
+function sniffedMime(bytes: Buffer): string | undefined {
+  if (bytes.length >= 8 && bytes[0] === 0x89 && bytes.toString("latin1", 1, 4) === "PNG") return "image/png";
+  if (bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return "image/jpeg";
+  if (bytes.length >= 6 && bytes.toString("latin1", 0, 4) === "GIF8") return "image/gif";
+  if (bytes.length >= 12 && bytes.toString("latin1", 0, 4) === "RIFF" && bytes.toString("latin1", 8, 12) === "WEBP") return "image/webp";
+  if (bytes.length >= 5 && bytes.toString("latin1", 0, 5) === "%PDF-") return "application/pdf";
+  return undefined;
+}
+
+/** What JaiRA can draw, in the words a refusal names it with. */
+const SHOWN_KINDS = "pictures, clips and tracks, pages, Markdown, code, data (JSON, YAML, TOML, CSV), diffs, and any text";
 
 export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
   const store: ArtifactStore = options.store ?? new MemoryArtifactStore();
@@ -506,6 +602,197 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
     };
   };
 
+  /**
+   * One source, read: the key it is shown under (what showing it again matches — the path as the
+   * workspace names it, the address, the artifact URI, or the name of data sent in the call), its name,
+   * its type, and its bytes. `from` names where it came from when that was not this machine.
+   */
+  type Resolved = { key: string; name: string; mime: string; bytes: Buffer; from?: string } | { again: ArtifactVersion };
+
+  const resolveSource = async (taskId: string, source: ArtifactSource, ctx?: ExecServices): Promise<Resolved> => {
+    if (typeof source !== "string") {
+      const named = typeof source.name === "string" && source.name.trim().length > 0 ? basename(source.name.trim().replace(/\\/g, "/")) : undefined;
+      const declared = typeof source.mimeType === "string" && source.mimeType.length > 0 ? bareMime(source.mimeType) : undefined;
+      if (named === undefined && declared === undefined) throw new Refusal(`Not shown: data sent in the call needs a \`name\` (its extension says what it is) or a \`mimeType\`.`);
+      const bytes = source.encoding === "base64" ? Buffer.from(source.data, "base64") : Buffer.from(source.data, "utf8");
+      const mime = declared ?? mimeOfPath(named!);
+      const name = named ?? `shown.${extensionForMime(mime) ?? "txt"}`;
+      return { key: name, name, mime, bytes };
+    }
+    const data = /^data:([^;,]*)((?:;[^;,]*)*),(.*)$/s.exec(source);
+    if (data !== null) {
+      const mime = bareMime(data[1]! || "text/plain");
+      const bytes = /;base64/i.test(data[2]!) ? Buffer.from(data[3]!, "base64") : Buffer.from(decodeURIComponent(data[3]!), "utf8");
+      const name = `shown.${extensionForMime(mime) ?? "txt"}`;
+      return { key: name, name, mime, bytes };
+    }
+    if (/^artifact:\/\//i.test(source)) {
+      const at = /^artifact:\/\/([^/]+)\/@([A-Za-z0-9_-]+)(?:\/(.+))?$/.exec(source) ?? /^artifact:\/\/()(a-[A-Za-z0-9_-]+)(?:\/(.+))?$/.exec(source);
+      if (at === null || (at[1] !== "" && at[1] !== taskId)) throw new Refusal(`Not shown: ${source} is not an artifact of this task.`);
+      const id = at[2]!;
+      const latest = store.versions(taskId, id).at(-1);
+      if (latest === undefined) throw new Refusal(`Not shown: there is no artifact at ${source} in this task.`);
+      // The artifact itself, as it is now: its newest version, shown again with no new one made.
+      if (at[3] === undefined) return { again: latest };
+      const path = decodeURIComponent(at[3]).replace(/^\/+/, "");
+      const held = filesAt(store, taskId, id)[path];
+      if (held === undefined) throw new Refusal(`Not shown: ${artifactUrl(taskId, id)} has no file ${path}.`);
+      const inner = /^data:([^;,]+);base64,(.*)$/s.exec(held);
+      const mime = inner !== null ? bareMime(inner[1]!) : mimeOfPath(path);
+      return { key: `${artifactUrl(taskId, id)}/${path}`, name: basename(path), mime, bytes: inner !== null ? Buffer.from(inner[2]!, "base64") : Buffer.from(held, "utf8"), from: latest.title ?? latest.entry };
+    }
+    if (/^https?:\/\//i.test(source)) return fetchSource(source, ctx);
+    const read = sourceReadOf(source);
+    if (read?.tool !== "read_file") throw new Refusal(`Not shown: ${source} names no file.`);
+    const key = keyOf(read.path, ctx);
+    const name = basename(key);
+    const bytes = readShownBytes(key, name, ctx);
+    return { key, name, mime: mimeOfPath(name), bytes };
+  };
+
+  /** A file's bytes as `show_artifact` reads them: the artifact map's copy of a workspace path (else the path itself), or a file outside it. */
+  const readShownBytes = (key: string, name: string, ctx?: ExecServices): Buffer => {
+    if (isAbsolute(key)) return readOutside(key, name);
+    const record = store.get(options.vars.taskId, key);
+    if (record?.physicalPath === undefined && record?.content !== undefined) return Buffer.from(record.content, "utf8");
+    const target = record?.physicalPath ?? withinWorkspace(workspaceRoot(ctx), key);
+    if (target === undefined) throw new Refusal(`Not shown: ${name} is outside the workspace.`);
+    if (record === undefined) refuseJaira(resolvePath(target), name);
+    try {
+      if (!statSync(target).isFile()) throw new Refusal(`Not shown: ${name} is not a file.`);
+      return readFileSync(target);
+    } catch (e) {
+      if (e instanceof Refusal) throw e;
+      throw new Refusal(`Not shown: ${name} could not be read (${(e as Error).message}).`);
+    }
+  };
+
+  /** A page or file off the web, fetched once and kept as fetched: the gate judged the address at `web_fetch`'s line. */
+  const fetchSource = async (url: string, ctx?: ExecServices): Promise<Resolved> => {
+    const doFetch = options.fetch ?? globalThis.fetch;
+    const clock = new AbortController();
+    const timer = setTimeout(() => clock.abort(), options.fetchTimeoutMs ?? 30_000);
+    const cancel = (): void => clock.abort();
+    const signal = (ctx as { signal?: AbortSignal } | undefined)?.signal;
+    signal?.addEventListener("abort", cancel, { once: true });
+    try {
+      const res = await doFetch(url, { signal: clock.signal, redirect: "follow" });
+      if (!res.ok) throw new Refusal(`Not shown: ${url} answered ${res.status}${res.statusText.length > 0 ? ` ${res.statusText}` : ""}.`);
+      const length = Number(res.headers.get("content-length") ?? "0");
+      if (length > PAGE_MAX_BYTES) throw new Refusal(`Not shown: ${url} is ${(length / 1048576).toFixed(1)} MiB, and a file shown is at most 16 MiB.`);
+      const bytes = Buffer.from(await res.arrayBuffer());
+      const path = new URL(res.url.length > 0 ? res.url : url).pathname;
+      const last = decodeURIComponent(path.slice(path.lastIndexOf("/") + 1));
+      const declared = bareMime(res.headers.get("content-type") ?? "");
+      const byName = last.length > 0 ? mimeOfPath(last) : undefined;
+      // What the server says, unless it says nothing useful: then the name's, then the bytes'.
+      const mime = declared.length > 0 && declared !== "application/octet-stream" ? declared : byName !== undefined && byName !== "text/plain" ? byName : (sniffedMime(bytes) ?? byName ?? "text/plain");
+      const ext = extensionForMime(mime);
+      const name = last.length > 0 && (extname(last).length > 0 || ext === undefined) ? last : `${last.length > 0 ? last : new URL(url).hostname}.${ext}`;
+      return { key: url.replace(/#.*$/, ""), name, mime, bytes, from: new URL(url).hostname };
+    } catch (e) {
+      if (e instanceof Refusal) throw e;
+      const reason = (e as Error).name === "AbortError" ? "it timed out or was cancelled" : (e as Error).message;
+      throw new Refusal(`Not shown: ${url} could not be fetched (${reason}).`);
+    } finally {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", cancel);
+    }
+  };
+
+  /**
+   * What a resolved source is shown AS, by its type alone: a page (it runs in its frame), a Markdown
+   * document, or a file, whose view the window picks from the same list a tool's result gets — a
+   * picture, a clip or a track kept as a `data:` URI, anything that is text as its text. A type none of
+   * those draws (a PDF, an archive, a Word file) is refused, and so are bytes that claim to be text and
+   * are not.
+   */
+  const shapeOf = (resolved: { name: string; mime: string; bytes: Buffer }): { kind: ArtifactKind; text: string } => {
+    const { name } = resolved;
+    let mime = resolved.mime;
+    if (mime === "text/plain" || mime === "application/octet-stream") mime = sniffedMime(resolved.bytes) ?? mime;
+    const ext = extname(name).toLowerCase();
+    if (mime === "text/html" || ext === ".html" || ext === ".htm") return { kind: "page", text: decodeText(resolved.bytes, name) };
+    if (mime === "text/markdown" || ext === ".md") return { kind: "markdown", text: decodeText(resolved.bytes, name) };
+    if (mediaKindOf(mime) !== undefined && mime !== "image/svg+xml") return { kind: "file", text: dataUri(mime, resolved.bytes) };
+    if (isTextMime(mime) || mime === "application/octet-stream") {
+      try {
+        return { kind: "file", text: decodeText(resolved.bytes, name) };
+      } catch {
+        // Not text after all: refused below as a type with no view.
+      }
+    }
+    throw new Refusal(`Not shown: JaiRA has no view for ${name} (${mime === "text/plain" ? "binary" : mime}). It shows ${SHOWN_KINDS}. Name the file in your answer instead.`);
+  };
+
+  /**
+   * Show the person what `artifacts` names (2026-11-13), each source as one artifact: shown again —
+   * the same path, address or URI, or data under the same name — it is that artifact's next version.
+   * What can be shown is shown; what cannot comes back in `refused` with why, and only a call that
+   * showed nothing fails.
+   */
+  const showSources = async (taskId: string, items: readonly ShowItem[], caption: string | undefined, ctx?: ExecServices): Promise<JsonValue> => {
+    if (items.length === 0) return { error: "Not shown: `artifacts` names nothing — give a path, a URI, or `{ data, name }`." };
+    const shownItems: JsonValue[] = [];
+    const refused: Array<{ source: string; why: string }> = [];
+    const lines: string[] = [];
+    let callBytes = 0;
+    for (const item of items) {
+      const label = typeof item.source === "string" ? (item.source.startsWith("data:") ? `${item.source.slice(0, 32)}…` : item.source) : `{ data, name: ${JSON.stringify(item.source.name ?? item.source.mimeType ?? "")} }`;
+      try {
+        const resolved = await resolveSource(taskId, item.source, ctx);
+        if ("again" in resolved) {
+          const latest = resolved.again;
+          seen.set(latest.artifact, latest.version);
+          shownItems.push({ ...(shown(latest) as unknown as Record<string, JsonValue>), source: label, ...(item.caption !== undefined ? { caption: item.caption } : {}) });
+          lines.push(`- ${label}: ${artifactUrl(taskId, latest.artifact)}, version ${latest.version}, as it is now.`);
+          continue;
+        }
+        if (resolved.bytes.length > PAGE_MAX_BYTES) throw new Refusal(`Not shown: ${resolved.name} is ${(resolved.bytes.length / 1048576).toFixed(1)} MiB, and a file shown is at most 16 MiB.`);
+        callBytes += resolved.bytes.length;
+        if (callBytes > CALL_MAX_BYTES * 4) throw new Refusal(`Not shown: one call shows at most 64 MiB; show the rest in another call.`);
+        const shape = shapeOf(resolved);
+        // A page or a document keeps the name it is served by, as one published from a file does today;
+        // any other file keeps its source, which is what showing it again names.
+        const entry = shape.kind === "file" ? resolved.key : resolved.name;
+        const id = store.latest(taskId).find((v) => v.kind === shape.kind && v.entry === entry)?.artifact;
+        if (id !== undefined && overwritesPerson(taskId, id, [entry]).length > 0) {
+          throw new Refusal(`Not shown: someone changed ${resolved.name} since you last showed it. Read it (\`action: "read"\`, \`url\`: ${artifactUrl(taskId, id)}) and show it again.`);
+        }
+        const title = shape.kind === "page" ? (titleOf(shape.text) ?? resolved.name) : resolved.name;
+        const version = store.publish({
+          taskId,
+          artifact: id ?? mintId(),
+          author: "model",
+          kind: shape.kind,
+          title,
+          entry,
+          changes: { [entry]: shape.text },
+          createdAt: now(),
+        });
+        seen.set(version.artifact, version.version);
+        shownItems.push({
+          ...(shown(version) as unknown as Record<string, JsonValue>),
+          source: label,
+          ...(resolved.from !== undefined ? { from: resolved.from } : {}),
+          ...(item.caption !== undefined ? { caption: item.caption } : {}),
+        });
+        lines.push(`- ${label}: ${artifactUrl(taskId, version.artifact)}, version ${version.version}${version.version === 1 ? " (new)" : ""}.`);
+      } catch (e) {
+        if (!(e instanceof Refusal)) throw e;
+        refused.push({ source: label, why: e.message });
+      }
+    }
+    if (shownItems.length === 0) return { error: refused.map((r) => r.why).join("\n") };
+    const answer = [
+      `Shown in this conversation:`,
+      ...lines,
+      ...(refused.length > 0 ? [`Not shown:`, ...refused.map((r) => `- ${r.source}: ${r.why}`)] : []),
+      `To show a new version, show the same source again.`,
+    ].join("\n");
+    return { answer, ...(caption !== undefined ? { caption } : {}), shown: shownItems, refused: refused as unknown as JsonValue };
+  };
+
   const read = (taskId: string, args: { url?: unknown; path?: unknown }): JsonValue => {
     const path = typeof args.path === "string" ? args.path.replace(/^\/+/, "") : "";
     // The type's own files: what JaiRA has of them, verbatim.
@@ -552,11 +839,30 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
 
   return {
     description:
-      "The Artifact tool (wherever instructions name `Artifact` or 'your Artifact tool', they mean this one). Publish what you made for the user to look at: a page (`.html`, `.htm`), a Markdown document (`.md`), or a design canvas. Give the text in the call — `content` for a page (with `file_path` only to name it, `notes.md` for Markdown), or `files: { \"project/<path>\": { \"content\": \"…\" } }` for a canvas's files — or write the file first and publish it with `file_path` (its absolute path). Sending the text needs no file and no write permission. A file you publish must be one you may read. The page is shown in the conversation and every publish is a new version of the same artifact: to update one, give its `url` (or, for a page from a file, publish the same `file_path` again in this conversation); `action: \"read\"` gives back what it holds now. A page is one self-contained file: it may load fonts from Google Fonts and scripts from cdnjs, unpkg, cdn.tailwindcss.com, code.jquery.com and cdn.jsdelivr.net/npm/, and nothing else — inline other CSS and JavaScript, embed images as data URIs, use in-page anchors (relative links do not resolve); at most 16 MiB. The page's `<title>` names it. When the person wants a design or a mock-up, in whatever words and whether or not they typed `/design`, your first call is `action: \"quickstart\"` with `intent: \"design\"`, before you write any file, and then you do what it answers: the result is a design canvas, which the person can edit. A page or a Markdown document is for what is not a design. `action: \"read\"` reads an artifact (`url`, and `path` for one of a canvas's files); `action: \"list\"` lists this task's artifacts.",
+      "Show the person a file, and the Artifact tool (wherever instructions name `Artifact` or 'your Artifact tool', they mean this one). When you want the person to see a file — a screenshot, a picture, a page, a log, a diff, a table — show it with `artifacts`; don't name a path for them to go and open. `artifacts` is one source or a list, each a path (absolute, or from the workspace), a URI (`file://…`, `https://…` fetched once, `artifact://<task>/@<id>` or with `/<path in it>` for one of its files, `data:<type>;base64,…`), or `{ data, encoding?: \"utf8\" | \"base64\", name?, mimeType? }` sent in the call, typed by `name` (its extension) or `mimeType`; or a list of `{ artifact: <source>, caption }`. `caption` is a line over what is shown. Any type is taken: pictures, clips and tracks, pages, Markdown, code, data (JSON, YAML, TOML, CSV), diffs and any text are drawn; a type none of those draws (a PDF, an archive) is refused with why. Several pictures in one call are shown side by side. Showing the same source again is its next version. The answer lists each one's `url` and version, and what was refused. Beside showing files, it publishes what you made: a page (`.html`, `.htm`), a Markdown document (`.md`), or a design canvas. Give the text in the call — `content` for a page (with `file_path` only to name it, `notes.md` for Markdown), or `files: { \"project/<path>\": { \"content\": \"…\" } }` for a canvas's files — or write the file first and publish it with `file_path` (its absolute path). Sending the text needs no file and no write permission. A file you publish must be one you may read. The page is shown in the conversation and every publish is a new version of the same artifact: to update one, give its `url` (or, for a page from a file, publish the same `file_path` again in this conversation); `action: \"read\"` gives back what it holds now. A page is one self-contained file: it may load fonts from Google Fonts and scripts from cdnjs, unpkg, cdn.tailwindcss.com, code.jquery.com and cdn.jsdelivr.net/npm/, and nothing else — inline other CSS and JavaScript, embed images as data URIs, use in-page anchors (relative links do not resolve); at most 16 MiB. The page's `<title>` names it. When the person wants a design or a mock-up, in whatever words and whether or not they typed `/design`, your first call is `action: \"quickstart\"` with `intent: \"design\"`, before you write any file, and then you do what it answers: the result is a design canvas, which the person can edit. A page or a Markdown document is for what is not a design. `action: \"read\"` reads an artifact (`url`, and `path` for one of a canvas's files); `action: \"list\"` lists this task's artifacts.",
     inputSchema: {
       type: "object",
       properties: {
-        action: { type: "string", enum: ["publish", "read", "list", "quickstart"], description: "Omit (or 'publish') to publish `file_path`. 'read' reads an artifact; 'list' lists them; 'quickstart' starts a design." },
+        action: { type: "string", enum: ["publish", "read", "list", "quickstart"], description: "Omit (or 'publish') to show `artifacts` or publish `file_path`. 'read' reads an artifact; 'list' lists them; 'quickstart' starts a design." },
+        artifacts: {
+          description:
+            "What to show the person: one source, a list of them, or a list of `{ artifact, caption }`. A source is a path or a URI (file://, https://, artifact://<task>/@<id>[/<path>], data:) as a string, or `{ data, encoding?, name?, mimeType? }`.",
+          anyOf: [
+            { type: "string" },
+            { type: "object", properties: { data: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, name: { type: "string" }, mimeType: { type: "string" } }, required: ["data"] },
+            {
+              type: "array",
+              items: {
+                anyOf: [
+                  { type: "string" },
+                  { type: "object", properties: { data: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, name: { type: "string" }, mimeType: { type: "string" } }, required: ["data"] },
+                  { type: "object", properties: { artifact: { anyOf: [{ type: "string" }, { type: "object", properties: { data: { type: "string" }, encoding: { type: "string", enum: ["utf8", "base64"] }, name: { type: "string" }, mimeType: { type: "string" } }, required: ["data"] }] }, caption: { type: "string" } }, required: ["artifact"] },
+                ],
+              },
+            },
+          ],
+        },
+        caption: { type: "string", description: "One line written over what is shown." },
         file_path: { type: "string", description: "The absolute path of the file to publish (a page, or one of a canvas's files). With `content`, it only names the page (or the canvas path)." },
         content: { type: "string", description: "The page's whole text, sent in the call instead of written to a file." },
         root: { type: "string", description: "A canvas: the folder holding `project/`." },
@@ -603,6 +909,10 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
         if (action === "read") return read(taskId, args);
         if (action === "list") return list(taskId, args);
         if (action !== "publish") return { error: `Not done: \`action\` is publish, read, list or quickstart.` };
+        const caption = typeof args["caption"] === "string" && args["caption"].trim().length > 0 ? args["caption"].trim() : undefined;
+        // Show the person files, from wherever they are (2026-11-13).
+        const items = showItemsOf(args["artifacts"]);
+        if (items !== undefined) return await showSources(taskId, items, caption, ctx);
         if (typeof args["type_url"] === "string" && args["type_url"].length > 0) {
           if (args["type_url"] !== DESIGN_TYPE_URL) return { error: `Not published: JaiRA knows one Artifact type, the design canvas (${DESIGN_TYPE_URL}).` };
           if (typeof args["url"] === "string" && args["url"].length > 0) return { error: `Not published: the canvas exists — use its \`url\` and send \`type_url\` no more.` };
@@ -623,6 +933,11 @@ export function createShowArtifactTool(options: ShowArtifactOptions): Tool {
         if ((filePath.includes("/project/") || filePath.startsWith("project/")) && (filePath.endsWith(".dc.html") || filePath.endsWith("/canvas.json"))) {
           const canvas = store.latest(taskId).filter((v) => v.kind === "canvas").at(-1);
           if (canvas !== undefined) return publishCanvas(taskId, canvas.artifact, args, ctx);
+        }
+        // `file_path` is the one-item spelling of `artifacts`: any file that is not a page is shown as itself.
+        if (filePath.length > 0 && url.length === 0 && ![".html", ".htm", ".md"].includes(extname(filePath).toLowerCase())) {
+          const source: ArtifactSource = typeof args["content"] === "string" ? { data: args["content"], name: filePath } : filePath;
+          return await showSources(taskId, [{ source }], caption, ctx);
         }
         return publishPage(taskId, args, ctx);
       } catch (e) {

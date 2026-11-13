@@ -67,7 +67,7 @@ import { namedPlacesOf, placesForCall } from "./linePlaces";
 import { CLAUDE_TOOLS, standardOfAnyNative } from "./agentTools";
 import { callDialectOf } from "./callDialect";
 import { registerFileTools, READ_FILE, SHOW_ARTIFACT, WRITE_FILE, type FileToolOptions } from "./fileTools";
-import { publishedReadsOf } from "./showArtifact";
+import { publishedFetchesOf, publishedReadsOf } from "./showArtifact";
 import { registerSearchTools } from "./searchTools";
 import { registerWebTools, type WebToolOptions } from "./webTools";
 import { registerWorkflowTools, type WorkflowToolHost } from "./workflowTools";
@@ -759,7 +759,7 @@ export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNar
       if (stricter) {
         // Not `own`: nothing but this narrowing holds a publish to its reads, so it is enforced here.
         answered = { answer: reading.answer, block: reading.block };
-        judged = { tool: READ_FILE, input: { path: reading.path } };
+        judged = { tool: reading.tool, input: reading.input };
       }
     }
     if (answered === undefined) return undefined;
@@ -806,25 +806,33 @@ export function placeNarrowingFor(options: PlaceNarrowingOptions = {}): ScopeNar
 }
 
 /**
- * The strictest answer `read_file`'s line gives for the files one publish reads (`publishedReadsOf`), and
- * the file it gave it for — a publish shows a person a file's bytes, so it may publish what a read could
- * read (decision 0020, amended 2026-11-05). `undefined` when it reads no file (its text is in the call)
- * or no permission set judges it.
+ * The strictest answer a publish's sources get at the lines of the tools that would read them, and the
+ * call it was given for: each file it reads at `read_file`'s (`publishedReadsOf`) — a publish shows a
+ * person a file's bytes, so it may publish what a read could read (decision 0020, amended 2026-11-05) —
+ * and each address it fetches at `web_fetch`'s (`publishedFetchesOf`, 2026-11-13). `undefined` when it
+ * reads nothing (its text is in the call) or no permission set judges it.
  */
 function publishReadAnswerOf(
   input: unknown,
   authored: PermissionsDecl | undefined,
   fallback: PermissionsDecl | undefined,
   here: PlaceNarrowingOptions,
-): { answer: ToolPlaceAnswer; block: PermissionsDecl; path: string } | undefined {
-  let worst: { answer: ToolPlaceAnswer; block: PermissionsDecl; path: string } | undefined;
-  for (const path of publishedReadsOf(input)) {
-    const answered = toolPlaceAnswerOf(READ_FILE, { path }, authored, { ...here, fallback }) ?? ownAnswerOf(READ_FILE, authored ?? fallback);
+): { answer: ToolPlaceAnswer; block: PermissionsDecl; tool: string; input: Record<string, string> } | undefined {
+  let worst: { answer: ToolPlaceAnswer; block: PermissionsDecl; tool: string; input: Record<string, string> } | undefined;
+  const reads = [
+    ...publishedReadsOf(input).map((path) => ({ tool: READ_FILE, input: { path } })),
+    ...publishedFetchesOf(input).map((url) => ({ tool: WEB_FETCH_TOOL, input: { url } })),
+  ];
+  for (const read of reads) {
+    const answered = toolPlaceAnswerOf(read.tool, read.input, authored, { ...here, fallback }) ?? ownAnswerOf(read.tool, authored ?? fallback);
     if (answered === undefined) continue;
-    if (worst === undefined || modeStrictness(answered.answer.mode) > modeStrictness(worst.answer.mode)) worst = { answer: answered.answer, block: answered.block, path };
+    if (worst === undefined || modeStrictness(answered.answer.mode) > modeStrictness(worst.answer.mode)) worst = { answer: answered.answer, block: answered.block, ...read };
   }
   return worst;
 }
+
+/** `web_fetch`, by the name its line has. */
+const WEB_FETCH_TOOL = "web_fetch";
 
 /**
  * The line's OWN answer for a direct call to a tool whose line has no places — read off a lowered map

@@ -2,7 +2,7 @@ import { useEffect, useState, type JSX } from "react";
 import { View } from "@tamagui/core";
 import type { PublishedArtifact } from "@jaira/shared/browser";
 import { invoke } from "@jaira/ui/store";
-import type { PublishedRef } from "@jaira/ui/transcriptRows";
+import { shownKindOf, shownMimeOf, type PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { Press, Txt } from "../../primitives";
 import { useTokens } from "../../tokens";
@@ -60,13 +60,13 @@ export function PublishedList({
           borderRadius={6}
           box={({ hovered }) => ({ backgroundColor: row.id === chosen || hovered ? t.v("panel-2") : "transparent" })}
         >
-          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "accent" }}>{row.kind === "canvas" ? "◫" : row.kind === "markdown" ? "¶" : "▥"}</Txt>
+          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "accent" }}>{row.kind === "file" ? shownKindOf(shownMimeOf(row.entry, undefined)).glyph : row.kind === "canvas" ? "◫" : row.kind === "markdown" ? "¶" : "▥"}</Txt>
           <Txt spec={{ voice: "app", scale: 12.5 / 12.5 }} numberOfLines={1} flexShrink={1}>
             {row.title ?? row.entry}
           </Txt>
           <View flex={1} />
           <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }} numberOfLines={1} flexShrink={0}>
-            {row.kind === "canvas" ? "canvas" : row.kind === "markdown" ? "document" : "page"} · v{row.version}
+            {row.kind === "file" ? shownKindOf(shownMimeOf(row.entry, undefined)).word : row.kind === "canvas" ? "canvas" : row.kind === "markdown" ? "document" : "page"} · v{row.version}
             {row.author === "person" ? " · your edit" : ""}
           </Txt>
         </Press>

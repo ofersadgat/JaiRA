@@ -2,7 +2,7 @@
  * What a transcript's work rows say: the reading `WorkRows`
  * (`packages/universal/src/components/panel/WorkRows.tsx`) draws its rows from.
  */
-import { artifactOf, isLazy, knownText, mimeOfPath, toolDisplayOf, workflowToolOf, type AgentQuestion, type LazyValue, type SettledByView } from "@jaira/shared/browser";
+import { artifactOf, isCodeMime, isLazy, knownText, mediaKindOf, mimeOfPath, structuredFormatOf, toolDisplayOf, workflowToolOf, type AgentQuestion, type LazyValue, type SettledByView } from "@jaira/shared/browser";
 import type { JsonValue } from "@declarative-ai/json";
 import { answersOfAnsweredText } from "./choicesModel";
 import { approvalAboutOf, approvalAnswerOf, approvalWordsOf, checkWordsOf, isApprovalCall, isCheckCall, refusalWordsOf } from "./workSummary";
@@ -218,11 +218,15 @@ export interface PublishedRef {
   id: string;
   url: string;
   version: number;
-  kind: "page" | "markdown" | "canvas";
+  kind: "page" | "markdown" | "canvas" | "file";
   type?: string;
   title?: string;
   icon?: string;
   entry: string;
+  /** Where a shown file came from when not this machine: a web address's host, another artifact's name. */
+  from?: string;
+  /** The line written over it (under its tile, in a gallery). */
+  caption?: string;
 }
 
 /**
@@ -236,11 +240,17 @@ export function publishedOf(raw: JsonValue | undefined): PublishedRef | undefine
   if (result === null || result === undefined || typeof result !== "object" || Array.isArray(result)) return undefined;
   const artifact = (result as Record<string, JsonValue>)["artifact"];
   if (artifact === null || typeof artifact !== "object" || Array.isArray(artifact)) return undefined;
+  return publishedRefOf(artifact);
+}
+
+/** One artifact as a result names it — `{ url, version, kind, entry, … }` — or `undefined`. */
+function publishedRefOf(artifact: JsonValue | undefined): PublishedRef | undefined {
+  if (artifact === null || artifact === undefined || typeof artifact !== "object" || Array.isArray(artifact)) return undefined;
   const a = artifact as Record<string, JsonValue>;
   const url = typeof a["url"] === "string" ? a["url"] : "";
   const at = /^artifact:\/\/([^/]+)\/@([A-Za-z0-9_-]+)$/.exec(url);
   const kind = a["kind"];
-  if (at === null || typeof a["version"] !== "number" || typeof a["entry"] !== "string" || (kind !== "page" && kind !== "markdown" && kind !== "canvas")) return undefined;
+  if (at === null || typeof a["version"] !== "number" || typeof a["entry"] !== "string" || (kind !== "page" && kind !== "markdown" && kind !== "canvas" && kind !== "file")) return undefined;
   return {
     taskId: at[1]!,
     id: at[2]!,
@@ -251,7 +261,85 @@ export function publishedOf(raw: JsonValue | undefined): PublishedRef | undefine
     ...(typeof a["title"] === "string" ? { title: a["title"] } : {}),
     ...(typeof a["icon"] === "string" ? { icon: a["icon"] } : {}),
     entry: a["entry"],
+    ...(typeof a["from"] === "string" ? { from: a["from"] } : {}),
+    ...(typeof a["caption"] === "string" ? { caption: a["caption"] } : {}),
   };
+}
+
+/**
+ * A shown file's type: a `data:` URI's own, else its entry's — the source it was shown from, whose last
+ * segment names it (a web address's query and fragment aside).
+ */
+export function shownMimeOf(entry: string, content: string | undefined): string {
+  const data = content === undefined ? null : /^data:([^;,]+)[;,]/.exec(content);
+  if (data !== null) return data[1]!.toLowerCase();
+  const path = entry.replace(/[?#].*$/, "").replace(/\\/g, "/");
+  return mimeOfPath(path.slice(path.lastIndexOf("/") + 1));
+}
+
+/** The word a shown file's title bar calls it by, and the glyph beside it. */
+export function shownKindOf(mime: string): { word: string; glyph: string } {
+  const media = mediaKindOf(mime);
+  if (media === "image") return { word: "picture", glyph: "▣" };
+  if (media === "video") return { word: "clip", glyph: "▶" };
+  if (media === "audio") return { word: "track", glyph: "♪" };
+  if (mime === "text/x-diff" || mime === "text/x-patch") return { word: "diff", glyph: "±" };
+  const format = structuredFormatOf(mime);
+  if (format === "delimited") return { word: "table", glyph: "▦" };
+  if (format !== undefined) return { word: "data", glyph: "{}" };
+  if (isCodeMime(mime)) return { word: "code", glyph: "‹›" };
+  return { word: "text", glyph: "¶" };
+}
+
+/** What one `show_artifact` call showed the person (2026-11-13): the line over it, each file shown, and each it could not. */
+export interface ShownFiles {
+  caption?: string;
+  items: PublishedRef[];
+  refused: Array<{ source: string; why: string }>;
+}
+
+/**
+ * What a call showed, out of its result's `shown` and `refused` — the answer to `artifacts`, or to a
+ * `file_path` that is not a page. `undefined` for a result that is not one (a page's or a canvas's
+ * publish answers `artifact`, read by {@link publishedOf}).
+ */
+export function shownOf(raw: JsonValue | undefined): ShownFiles | undefined {
+  const result = raw === undefined ? undefined : resultValueOf(raw);
+  if (result === null || result === undefined || typeof result !== "object" || Array.isArray(result)) return undefined;
+  const r = result as Record<string, JsonValue>;
+  if (!Array.isArray(r["shown"])) return undefined;
+  const items = r["shown"].map(publishedRefOf).filter((ref): ref is PublishedRef => ref !== undefined);
+  const refused = (Array.isArray(r["refused"]) ? r["refused"] : []).flatMap((x) =>
+    x !== null && typeof x === "object" && !Array.isArray(x) && typeof x["why"] === "string" ? [{ source: typeof x["source"] === "string" ? x["source"] : "", why: x["why"] }] : [],
+  );
+  return { ...(typeof r["caption"] === "string" ? { caption: r["caption"] } : {}), items, refused };
+}
+
+/**
+ * What a subagent showed the person, and the subagents it started (2026-11-13): each file its chain's
+ * `show_artifact` calls showed, the newest version of each, in the order they were last shown — drawn
+ * under the subagent's line, since showing is for the person and they should not have to walk in to
+ * find it. Refusals stay inside the subagent, at their calls. `undefined` when it showed nothing.
+ */
+export function shownInChain(entries: readonly TranscriptEntry[], sidechainOf?: (call: string) => TranscriptEntry[] | undefined, depth = 0): ShownFiles | undefined {
+  const byUrl = new Map<string, PublishedRef>();
+  const walk = (list: readonly TranscriptEntry[], level: number): void => {
+    for (const entry of list) {
+      if (entry.kind !== "tool") continue;
+      if (entry.sidechain !== undefined && sidechainOf !== undefined && level < 8) {
+        const inner = sidechainOf(entry.sidechain);
+        if (inner !== undefined) walk(inner, level + 1);
+        continue;
+      }
+      if (entry.ok === false) continue;
+      for (const item of shownOf(entry.result)?.items ?? []) {
+        byUrl.delete(item.url);
+        byUrl.set(item.url, item);
+      }
+    }
+  };
+  walk(entries, depth);
+  return byUrl.size === 0 ? undefined : { items: [...byUrl.values()], refused: [] };
 }
 
 /**
@@ -261,7 +349,14 @@ export function publishedOf(raw: JsonValue | undefined): PublishedRef | undefine
  * threshold; the Design type's runs to 35 KB), the address its answer opens with — "Created a new
  * Artifact at artifact://…", which the placeholder's preview keeps.
  */
-export function publishTargetOf(entry: ToolEntry): string | undefined {
+export function publishTargetsOf(entry: ToolEntry): string[] {
+  const shown = shownOf(entry.result);
+  if (shown !== undefined) return shown.items.map((item) => item.url);
+  const one = publishTargetOf(entry);
+  return one === undefined ? [] : [one];
+}
+
+function publishTargetOf(entry: ToolEntry): string | undefined {
   const published = publishedOf(entry.result);
   if (published !== undefined) return published.url;
   if (!maybePublished(entry)) return undefined;
@@ -302,10 +397,11 @@ export function replacedPublishes(entries: readonly TranscriptEntry[]): Readonly
       continue;
     }
     if (entry.kind !== "tool") continue;
-    const target = publishTargetOf(entry);
-    if (target === undefined) continue;
-    if (later.has(target)) replaced.add(entry);
-    else later.add(target);
+    const targets = publishTargetsOf(entry);
+    if (targets.length === 0) continue;
+    // A call that showed several is replaced only when every one of them was shown again after it.
+    if (targets.every((target) => later.has(target))) replaced.add(entry);
+    for (const target of targets) later.add(target);
   }
   return replaced;
 }

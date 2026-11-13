@@ -44,10 +44,12 @@ export interface ArtifactRecord {
 }
 
 /**
- * What a published artifact is (decision 0020): a page (`.html`/`.htm`), a Markdown document, or a
- * canvas — `project/canvas.json` and one `.dc.html` per artboard, Claude Design's files.
+ * What a published artifact is (decision 0020): a page (`.html`/`.htm`), a Markdown document, a
+ * canvas — `project/canvas.json` and one `.dc.html` per artboard, Claude Design's files — or any other
+ * FILE `show_artifact` showed the person (2026-11-13): a picture, a log, a diff, a table. A file is one
+ * file, its `entry` the source it was shown from, its text as it is or its bytes as a `data:` URI.
  */
-export type ArtifactKind = "page" | "markdown" | "canvas";
+export type ArtifactKind = "page" | "markdown" | "canvas" | "file";
 
 /**
  * One publish of an artifact (decision 0020 §1): every `show_artifact` publish, and every save a person

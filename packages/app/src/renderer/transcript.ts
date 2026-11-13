@@ -569,7 +569,33 @@ export function resultValueOf(raw: JsonValue): JsonValue {
 /** What a call's collapsed line says: a workflow tool's own sentence, else the first argument. */
 function summaryOfCall(name: string, args: unknown): string {
   const workflow = workflowToolOf(name);
-  return workflow !== undefined ? workflowToolSummary(workflow, args) : firstArgOf(args);
+  if (workflow !== undefined) return workflowToolSummary(workflow, args);
+  return shownSourcesOf(name, args) ?? firstArgOf(args);
+}
+
+/**
+ * What a `show_artifact` call that shows files says on its line (2026-11-13): the names of what it
+ * shows — "before.png, after.png, menu.png" — rather than its caption, which the card draws.
+ */
+function shownSourcesOf(name: string, args: unknown): string | undefined {
+  if (name !== "show_artifact" && !name.endsWith("__show_artifact")) return undefined;
+  if (args === null || typeof args !== "object" || Array.isArray(args)) return undefined;
+  const raw = (args as Record<string, unknown>)["artifacts"];
+  if (raw === undefined || raw === null) return undefined;
+  const nameOf = (source: unknown): string | undefined => {
+    if (source !== null && typeof source === "object" && !Array.isArray(source) && "artifact" in source) return nameOf((source as { artifact: unknown }).artifact);
+    if (source !== null && typeof source === "object" && !Array.isArray(source)) {
+      const named = (source as { name?: unknown }).name;
+      return typeof named === "string" ? named : "data";
+    }
+    const text = knownText(source);
+    if (text === undefined) return undefined;
+    if (text.startsWith("data:")) return text.slice(0, text.search(/[;,]/) > 0 ? text.search(/[;,]/) : 16);
+    const path = text.replace(/[?#].*$/, "").replace(/\\/g, "/").replace(/\/+$/, "");
+    return /^https?:\/\//i.test(text) ? text : path.slice(path.lastIndexOf("/") + 1);
+  };
+  const names = (Array.isArray(raw) ? raw : [raw]).map(nameOf).filter((n): n is string => n !== undefined && n.length > 0);
+  return names.length > 0 ? names.join(", ") : undefined;
 }
 
 /** The one argument worth putting on a collapsed line: a path, a command, the first string there is. */

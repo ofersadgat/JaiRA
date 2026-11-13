@@ -400,3 +400,31 @@ describe("the calling agent's own folder ($AGENT_WORKSPACE)", () => {
     expect(existsSync(note)).toBe(false);
   });
 });
+
+describe("read_file on a picture (2026-11-13)", () => {
+  const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+
+  it("hands it over as a picture the model sees — `$images` — not as text, in the workspace and outside it", async () => {
+    mkdirSync(join(dir, "shots"), { recursive: true });
+    writeFileSync(join(dir, "shots", "a.png"), png);
+    const { read } = tools("$DEFAULT");
+    expect(await call(read, { path: "shots/a.png" })).toEqual({ path: "shots/a.png", mediaType: "image/png", bytes: png.length, $images: [{ mimeType: "image/png", data: png.toString("base64") }] });
+    const outside = mkdtempSync(join(tmpdir(), "jaira-pic-"));
+    try {
+      writeFileSync(join(outside, "b.jpg"), png);
+      expect(await call(read, { path: join(outside, "b.jpg") })).toMatchObject({ mediaType: "image/jpeg", $images: [{ mimeType: "image/jpeg" }] });
+    } finally {
+      rmSync(outside, { recursive: true, force: true });
+    }
+    // An SVG is markup: read as text, as before.
+    writeFileSync(join(dir, "shots", "c.svg"), "<svg/>", "utf8");
+    expect(await call(read, { path: "shots/c.svg" })).toEqual({ path: "shots/c.svg", content: "<svg/>" });
+  });
+
+  it("says so, with no picture, when one is too large for a model to take", async () => {
+    writeFileSync(join(dir, "big.png"), Buffer.concat([png, Buffer.alloc(3_800_000)]));
+    const answer = await call(tools("$DEFAULT").read, { path: "big.png" });
+    expect(answer).not.toHaveProperty("$images");
+    expect(String(answer["note"])).toMatch(/more than a model takes as one image .* show_artifact/);
+  });
+});

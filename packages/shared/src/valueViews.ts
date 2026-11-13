@@ -371,6 +371,9 @@ export function viewsFor(value: unknown, hint: ViewHint = {}): ViewId[] {
   const rendered = views.includes("media");
 
   const text = textOf(value);
+  // A picture, clip or track carried as a `data:` URI is its media and nothing else: the URI's text is
+  // base64, which no reading of it — source, code — makes legible (a shown screenshot, 2026-11-13).
+  if (rendered && text !== undefined && /^data:/i.test(text.trimStart())) return views;
   const declared = viewOfMime(hint.mime) ?? viewOfMime(mimeOfSchema(hint.schema));
   if (text !== undefined) {
     // A declared type is a statement and beats the sniffer, which only ever offers.

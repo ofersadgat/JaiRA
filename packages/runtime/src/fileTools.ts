@@ -325,6 +325,8 @@ export function createReadFileTool(options: FileToolOptions): Tool {
       if (outside !== undefined) {
         const refused = refusePath(outside);
         if (refused !== undefined) return { error: refused };
+        const picture = pictureRead(raw, outside, (text) => seen.saw(options.vars.taskId, outside, text));
+        if (picture !== undefined) return picture;
         try {
           const content = readFileSync(outside, "utf8");
           seen.saw(options.vars.taskId, outside, content);
@@ -337,12 +339,47 @@ export function createReadFileTool(options: FileToolOptions): Tool {
       const refusal = refusePath(logical);
       if (refusal !== undefined) return { error: refusal };
 
+      // A picture on disk is handed over as a picture (`$images`), which the model sees.
+      const record = (options.store ?? new MemoryArtifactStore()).get(options.vars.taskId, logical);
+      const onDisk = record?.physicalPath ?? (record?.content === undefined ? withinWorkspace(ctx?.workspace?.root ?? options.cwd ?? options.vars.worktree, logical) : undefined);
+      if (onDisk !== undefined) {
+        const picture = pictureRead(logical, onDisk, (text) => seen.saw(options.vars.taskId, fileOf(root, logical), text));
+        if (picture !== undefined) return picture;
+      }
       const read = currentContent(options, logical, ctx);
       if ("error" in read) return { error: read.error };
       seen.saw(options.vars.taskId, fileOf(root, logical), read.text);
       return { path: logical, content: read.text };
     },
   } as Tool;
+}
+
+/** The pictures a model can be handed as pictures (Anthropic's and OpenAI's image inputs alike). */
+const SEEN_PICTURES: ReadonlySet<string> = new Set(["image/png", "image/jpeg", "image/gif", "image/webp"]);
+/** A picture's bytes past which it is not handed over: 5 MB once in base64, a model API's limit for one image. */
+export const PICTURE_MAX_BYTES = 3_750_000;
+
+/**
+ * `read_file` on a picture (2026-11-13): its bytes as a picture the model SEES — `$images`, which every
+ * route hands a model as an image beside the rest — rather than as text. Read as UTF-8 text a PNG is tens
+ * of thousands of characters of mojibake: an agent asked to check a screenshot was refused it as too long
+ * and "couldn't view images". `undefined` for anything that is not such a picture, read as text as before.
+ */
+function pictureRead(path: string, file: string, saw: (text: string) => void): JsonValue | undefined {
+  const mediaType = mimeOfPath(path.replace(/\\/g, "/"));
+  if (!SEEN_PICTURES.has(mediaType)) return undefined;
+  let bytes: Buffer;
+  try {
+    bytes = readFileSync(file);
+  } catch (e) {
+    return { error: `could not read '${path}': ${(e as Error).message}` };
+  }
+  // What a later write is measured against is the file as a text read would see it.
+  saw(bytes.toString("utf8"));
+  if (bytes.length > PICTURE_MAX_BYTES) {
+    return { path, mediaType, bytes: bytes.length, note: `${path} is a picture of ${(bytes.length / 1048576).toFixed(1)} MB, more than a model takes as one image (3.75 MB). Show it to the person with show_artifact, or make a smaller copy and read that.` };
+  }
+  return { path, mediaType, bytes: bytes.length, $images: [{ mimeType: mediaType, data: bytes.toString("base64") }] };
 }
 
 /**

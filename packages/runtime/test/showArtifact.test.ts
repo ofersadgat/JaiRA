@@ -15,7 +15,7 @@ import type { ExecServices, Tool } from "@declarative-ai/exec";
 import { filesAt, MemoryArtifactStore } from "../src/artifacts";
 import { parseDestination } from "../src/artifactPath";
 import { createWriteFileTool } from "../src/fileTools";
-import { artifactIdOf, createShowArtifactTool, DESIGN_TYPE_URL, inlineCanvasNote, publishedReadsOf } from "../src/showArtifact";
+import { artifactIdOf, createShowArtifactTool, DESIGN_TYPE_URL, inlineCanvasNote, publishedFetchesOf, publishedReadsOf, showItemsOf } from "../src/showArtifact";
 
 let dir: string;
 let store: MemoryArtifactStore;
@@ -70,8 +70,9 @@ describe("a page", () => {
     expect((await call({ file_path: write("notes.md", "# Notes"), title: "Given" }))["artifact"]).not.toHaveProperty("title");
   });
 
-  it("refuses what Claude Code refuses: another extension, text that is not UTF-8, the replacement character, a file that is not there", async () => {
-    expect(await call({ file_path: write("x.txt", "x") })).toMatchObject({ error: expect.stringMatching(/\.html, \.htm or \.md/) as unknown as string });
+  it("refuses what Claude Code refuses: text that is not UTF-8, the replacement character, a file that is not there — and shows another extension as itself", async () => {
+    // `file_path` is the one-item spelling of `artifacts` (2026-11-13): a file that is not a page is shown.
+    expect(await call({ file_path: write("x.txt", "x") })).toMatchObject({ shown: [{ kind: "file", entry: "x.txt" }] });
     const bad = join(dir, "bad.html");
     writeFileSync(bad, Buffer.from([0x3c, 0x70, 0x3e, 0xff, 0xfe, 0x0a]));
     expect(await call({ file_path: bad })).toMatchObject({ error: expect.stringMatching(/not UTF-8.*line 1, column 4/) as unknown as string });
@@ -108,7 +109,7 @@ describe("a page", () => {
     expect(filesAt(store, "t-1", "a-1")["page.html"]).toBe("<!doctype html><title>Six directions</title><p>2</p>");
     // Another page sent in the call, with no url, is another artifact; `file_path` names it and is never read.
     expect((await call({ content: "# Notes", file_path: "C:/nowhere/notes.md" }))["artifact"]).toMatchObject({ id: "a-2", kind: "markdown", entry: "notes.md" });
-    expect(await call({ content: "x", file_path: "notes.txt" })).toMatchObject({ error: expect.stringMatching(/\.html, \.htm or \.md/) as unknown as string });
+    expect(await call({ content: "x", file_path: "notes.txt" })).toMatchObject({ shown: [{ kind: "file", entry: "notes.txt", title: "notes.txt" }] });
     expect(await call({ content: "a\uFFFD" })).toMatchObject({ error: expect.stringMatching(/U\+FFFD/) as unknown as string });
     expect(await call({})).toMatchObject({ error: expect.stringMatching(/give `content`/) as unknown as string });
   });
@@ -267,5 +268,103 @@ describe("artifactIdOf", () => {
     expect(artifactIdOf("a-xyz", "t-1")).toBe("a-xyz");
     expect(artifactIdOf("artifact://t-2/@a-xyz", "t-1")).toBeUndefined();
     expect(artifactIdOf("https://claude.ai/artifact/9Beb", "t-1")).toBeUndefined();
+  });
+});
+
+/** A PNG's first bytes: enough for the type to be told by name or by its magic number. */
+const PNG = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, 0x49, 0x48, 0x44, 0x52]);
+
+describe("showing any file (2026-11-13)", () => {
+  const writeBytes = (rel: string, bytes: Buffer): string => {
+    const path = join(dir, rel);
+    mkdirSync(join(path, ".."), { recursive: true });
+    writeFileSync(path, bytes);
+    return path;
+  };
+
+  it("shows a picture as itself, kept as a data: URI under its source, and showing the same path again is its next version", async () => {
+    writeBytes("shots/before.png", PNG);
+    const first = await call({ artifacts: "shots/before.png", caption: "Before" });
+    expect(first).toMatchObject({ caption: "Before", refused: [], shown: [{ url: "artifact://t-1/@a-1", version: 1, kind: "file", entry: "shots/before.png", title: "before.png", source: "shots/before.png" }] });
+    expect(filesAt(store, "t-1", "a-1")["shots/before.png"]).toBe(`data:image/png;base64,${PNG.toString("base64")}`);
+    expect(String(first["answer"])).toMatch(/artifact:\/\/t-1\/@a-1, version 1 \(new\)/);
+    // The same file named absolutely is the same source.
+    expect((await call({ artifacts: [join(dir, "shots", "before.png")] }))["shown"]).toMatchObject([{ id: "a-1", version: 2 }]);
+  });
+
+  it("takes data sent in the call, typed by its name or its mimeType, and the same name again is its next version", async () => {
+    expect((await call({ artifacts: { data: "a,b\n1,2", name: "timings.csv" } }))["shown"]).toMatchObject([{ kind: "file", entry: "timings.csv", version: 1 }]);
+    expect(filesAt(store, "t-1", "a-1")["timings.csv"]).toBe("a,b\n1,2");
+    expect((await call({ artifacts: [{ data: "a,b\n3,4", name: "timings.csv" }] }))["shown"]).toMatchObject([{ id: "a-1", version: 2 }]);
+    expect((await call({ artifacts: { data: PNG.toString("base64"), encoding: "base64", mimeType: "image/png" } }))["shown"]).toMatchObject([{ kind: "file", entry: "shown.png" }]);
+    expect((await call({ artifacts: `data:image/png;base64,${PNG.toString("base64")}` }))["shown"]).toMatchObject([{ kind: "file", entry: "shown.png" }]);
+    // A page or a document sent this way is still a page or a document.
+    expect((await call({ artifacts: { data: "# Notes", name: "notes.md" } }))["shown"]).toMatchObject([{ kind: "markdown", entry: "notes.md" }]);
+    expect(await call({ artifacts: { data: "x" } })).toMatchObject({ error: expect.stringMatching(/needs a `name`/) as unknown as string });
+  });
+
+  it("fetches a web address once and keeps it as fetched, from its host; an answer that is not ok is refused", async () => {
+    const fetched: string[] = [];
+    tool = createShowArtifactTool({
+      destination: parseDestination("virtual:"),
+      store,
+      vars: { worktree: dir, project: dir, jaira: join(dir, ".jaira"), artifactDir: "artifacts", taskId: "t-1" },
+      now: () => 1_000,
+      mintId: () => `a-${++minted}`,
+      builtInDir,
+      fetch: (async (url: string) => {
+        fetched.push(url);
+        if (url.endsWith("/missing.png")) return new Response("no", { status: 404, statusText: "Not Found" });
+        return new Response(new Uint8Array(PNG), { status: 200, headers: { "content-type": "image/png" } });
+      }) as unknown as typeof fetch,
+    });
+    const shown = await call({ artifacts: ["https://example.com/img/raw?id=3", "https://example.com/missing.png"] });
+    expect(shown["shown"]).toMatchObject([{ kind: "file", entry: "https://example.com/img/raw?id=3", title: "raw.png", from: "example.com" }]);
+    expect(shown["refused"]).toMatchObject([{ source: "https://example.com/missing.png", why: expect.stringMatching(/answered 404 Not Found/) as unknown as string }]);
+    expect(fetched).toEqual(["https://example.com/img/raw?id=3", "https://example.com/missing.png"]);
+  });
+
+  it("shows a file of an artifact of this task by its URI, and the artifact itself as it is now with no new version", async () => {
+    await call({ content: "<title>Board</title>" });
+    store.publish({ taskId: "t-1", artifact: "a-1", author: "model", kind: "page", title: "Board", entry: "page.html", changes: { "_blob/abc": `data:image/png;base64,${PNG.toString("base64")}` }, createdAt: 2 });
+    const one = await call({ artifacts: "artifact://t-1/@a-1/_blob/abc" });
+    expect(one["shown"]).toMatchObject([{ id: "a-2", kind: "file", entry: "artifact://t-1/@a-1/_blob/abc", from: "Board" }]);
+    const again = await call({ artifacts: { artifact: "artifact://t-1/@a-1", caption: "As it is now" } });
+    expect(again["shown"]).toMatchObject([{ id: "a-1", version: 2, kind: "page", caption: "As it is now" }]);
+    expect(store.versions("t-1", "a-1")).toHaveLength(2);
+    expect((await call({ artifacts: "artifact://t-9/@a-1" }))["error"]).toMatch(/not an artifact of this task/);
+  });
+
+  it("refuses only a type nothing draws, says what would have worked, shows the rest, and fails a call that showed nothing", async () => {
+    writeBytes("docs/q.pdf", Buffer.from("%PDF-1.7\n\u0000\u00ff binary", "latin1"));
+    writeBytes("blob.bin", Buffer.from([0x00, 0xff, 0xfe, 0x80, 0x81]));
+    write("src/a.ts", "export const a = 1;\n");
+    const mixed = await call({ artifacts: ["docs/q.pdf", "src/a.ts", "blob.bin"] });
+    expect(mixed["shown"]).toMatchObject([{ kind: "file", entry: "src/a.ts" }]);
+    expect(mixed["refused"]).toMatchObject([
+      { source: "docs/q.pdf", why: expect.stringMatching(/no view for q\.pdf \(application\/pdf\)\. It shows pictures/) as unknown as string },
+      { source: "blob.bin", why: expect.stringMatching(/no view for blob\.bin \(binary\)/) as unknown as string },
+    ]);
+    expect(String(mixed["answer"])).toMatch(/Not shown:/);
+    expect(await call({ artifacts: "docs/q.pdf" })).toMatchObject({ error: expect.stringMatching(/no view for q\.pdf/) as unknown as string });
+    expect(await call({ artifacts: [] })).toMatchObject({ error: expect.stringMatching(/names nothing/) as unknown as string });
+  });
+
+  it("keeps each item's caption, and a picture through `file_path` is shown the same way", async () => {
+    writeBytes("a.png", PNG);
+    writeBytes("b.png", PNG);
+    const shown = await call({ artifacts: [{ artifact: "a.png", caption: "A" }, "b.png"], caption: "Both" });
+    expect(shown).toMatchObject({ caption: "Both", shown: [{ entry: "a.png", caption: "A" }, { entry: "b.png" }] });
+    expect((shown["shown"] as Array<Record<string, unknown>>)[1]).not.toHaveProperty("caption");
+    expect((await call({ file_path: join(dir, "a.png") }))["shown"]).toMatchObject([{ entry: "a.png", version: 2 }]);
+  });
+
+  it("names, for the gate, each file it reads and each address it fetches — nothing it is sent or holds already", () => {
+    const input = { artifacts: ["shots/a.png", "file:///C:/x/b.png", { artifact: "https://e.com/c.png" }, "artifact://t-1/@a-1/x", "data:image/png;base64,AA==", { data: "x", name: "n.txt" }] };
+    expect(publishedReadsOf(input)).toEqual(["shots/a.png", fileURLToPath("file:///C:/x/b.png")]);
+    expect(publishedFetchesOf(input)).toEqual(["https://e.com/c.png"]);
+    expect(publishedFetchesOf({ action: "read", artifacts: "https://e.com/c.png" })).toEqual([]);
+    expect(showItemsOf(undefined)).toBeUndefined();
+    expect(showItemsOf(" ")).toEqual([]);
   });
 });

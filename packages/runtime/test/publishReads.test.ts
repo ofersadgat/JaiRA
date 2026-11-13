@@ -70,6 +70,19 @@ describe("a publish, judged at read_file's line", () => {
     expect(strict({ content: "<p>x</p>" }).mode).toBeUndefined();
   });
 
+  it("judges each source `artifacts` names: a file at read_file's line, a web address at web_fetch's (2026-11-13)", () => {
+    expect(publish({ artifacts: [`${ROOT}/shots/a.png`, { artifact: `${ROOT}/shots/b.png`, caption: "B" }] }).mode).toBeUndefined();
+    const elsewhere = publish({ artifacts: ["shots/a.png", "C:/Users/someone/Pictures/x.png"] });
+    expect(elsewhere.mode).toBe("ask");
+    expect(commandDecisionOf(elsewhere.input)?.parts?.parts[0]).toMatchObject({ subject: "read_file", paths: ["C:/Users/someone/Pictures/x.png"] });
+    // A fetch where web_fetch's line would deny it is denied, as the fetch: a set that fetches nothing shows nothing off the web.
+    const noWeb = publisher(parsePermissionSet({ read_file: "allow", web_fetch: "deny", show_artifact: "allow", other: "deny" }).permissionSet, "$/permission-sets/no-web");
+    expect(noWeb({ artifacts: ["https://example.com/x.png"] }).mode).toBe("deny");
+    expect(noWeb({ artifacts: [`${ROOT}/shots/a.png`] }).mode).toBeUndefined();
+    // Data sent in the call and an artifact of this task read nothing.
+    expect(noWeb({ artifacts: [{ data: "x", name: "n.txt" }, "artifact://t-1/@a-1/x", "data:image/png;base64,AA=="] }).mode).toBeUndefined();
+  });
+
   it("is never pre-approved past that judgement: the gate's word with no input is not `allow`", () => {
     const set = shipped("read-only-scratch");
     const policy = compilePolicy({}, { permissionSet: set, workspaceRoot: ROOT });

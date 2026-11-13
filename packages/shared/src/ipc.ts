@@ -1549,7 +1549,7 @@ export interface PublishedArtifact {
   /** What the model calls it: `artifact://<task>/@<id>`. */
   url: string;
   version: number;
-  kind: "page" | "markdown" | "canvas";
+  kind: "page" | "markdown" | "canvas" | "file";
   type?: string;
   title?: string;
   icon?: string;

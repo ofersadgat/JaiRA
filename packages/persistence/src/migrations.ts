@@ -23,7 +23,7 @@
  *  - **Change `SCHEMA` too**, so a fresh database is born in the shape the step leaves an old one in.
  */
 import type { JairaDb } from "./db";
-import { SYNC_SQL, SYNC_TRIGGERS_AGAIN_SQL } from "./sync";
+import { allowShownFiles, SYNC_SQL, SYNC_TRIGGERS_AGAIN_SQL } from "./sync";
 import { DEVICE_LAYOUTS_SQL, WINDOW_STATES_SQL } from "./windowStates";
 import { moveRecordedPermissionSets } from "./permissionSetsMove";
 
@@ -128,6 +128,11 @@ UPDATE event_waits SET name = CASE name
     version: 34,
     note: "comments on a published artifact (artifact_comments): a pin on a canvas's artboard, sent to Claude or kept for people, in the change log (2026-11-07)",
     sql: SYNC_SQL,
+  },
+  {
+    version: 35,
+    note: "show_artifact shows any file (2026-11-13): artifact_versions.kind may be 'file', a picture, a log or a diff shown as itself; the table is made again under the widened CHECK (allowShownFiles)",
+    run: allowShownFiles,
   },
 ];
 

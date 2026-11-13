@@ -71,6 +71,7 @@ async function main(): Promise<void> {
     await app.until(says(title), "the conversation in the Chat list");
     await app.clickText(title);
     await settle(2500);
+    await app.shot("0-thread-end", undefined, false);
     // The thread opens at its end; the screenshot is near its start.
     await app.evaluate(`(() => { for (const el of document.querySelectorAll('*')) if (el.scrollHeight > el.clientHeight + 200 && getComputedStyle(el).overflowY !== 'visible') el.scrollTop = 0; })()`);
     await settle(1500);
@@ -82,7 +83,11 @@ async function main(): Promise<void> {
       const r = el.getBoundingClientRect();
       return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
     })()`);
-    if (tail === null) throw new Error("no '6 steps' phase tail");
+    // Another record (a second argument) has no such phase: its end is photographed, and that is all.
+    if (tail === null) {
+      console.log("screenshot-view: no '6 steps' phase; 0-thread-end is this record's end");
+      return;
+    }
     await app.clickAt(tail.x, tail.y);
     await settle(1500);
 

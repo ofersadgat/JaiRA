@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { openDb, type JairaDb } from "../src/db";
-import { changesSince, pruneTombstones, syncHorizon, syncNow, touch } from "../src/sync";
+import { allowShownFiles, changesSince, pruneTombstones, syncHorizon, syncNow, touch } from "../src/sync";
 import { stageTable } from "../src/fileStorage";
 import { migrate } from "../src/migrations";
 
@@ -164,5 +164,25 @@ describe("the change log", () => {
     expect(pruneTombstones(db, 0, deletedAt + 1)).toBe(1);
     expect(syncHorizon(db)).toBe(deletedAt);
     expect(changesSince(db, 0).map((c) => c.id)).toEqual(["t-a"]);
+  });
+});
+
+describe("migration 35: a shown file (2026-11-13)", () => {
+  it("makes artifact_versions again under the widened rule, its rows kept, its triggers made again", () => {
+    // A database as migration 34 left it: `file` refused.
+    db.exec(`DROP TABLE artifact_versions;
+      CREATE TABLE artifact_versions (task_id TEXT NOT NULL, artifact TEXT NOT NULL, version INTEGER NOT NULL, author TEXT NOT NULL CHECK (author IN ('model', 'person')), kind TEXT NOT NULL CHECK (kind IN ('page', 'markdown', 'canvas')), type TEXT, title TEXT, icon TEXT, entry TEXT NOT NULL, changes_json TEXT NOT NULL, capabilities_json TEXT, record_id TEXT, created_at INTEGER NOT NULL, PRIMARY KEY (task_id, artifact, version));
+      INSERT INTO artifact_versions VALUES ('t-1', 'a-1', 1, 'model', 'page', NULL, 'Board', NULL, 'page.html', '{"page.html":"<p>1</p>"}', NULL, NULL, 5);`);
+    const insertFile = (): unknown => db.prepare(`INSERT INTO artifact_versions VALUES ('t-1', 'a-2', 1, 'model', 'file', NULL, 'a.png', NULL, 'a.png', '{}', NULL, NULL, 6)`).run();
+    expect(insertFile).toThrow(/CHECK/);
+    allowShownFiles(db);
+    expect(db.prepare(`SELECT title, entry FROM artifact_versions`).all()).toEqual([{ title: "Board", entry: "page.html" }]);
+    const before = changesSince(db, 0).length;
+    insertFile();
+    expect(changesSince(db, 0).map((c) => c.id)).toContain("t-1/a-2/1");
+    expect(changesSince(db, 0).length).toBe(before + 1);
+    // Run again, it changes nothing.
+    allowShownFiles(db);
+    expect((db.prepare(`SELECT COUNT(*) AS n FROM artifact_versions`).get() as { n: number }).n).toBe(2);
   });
 });

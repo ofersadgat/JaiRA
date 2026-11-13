@@ -75,6 +75,29 @@ function triggers(t: Tracked): string {
 }
 
 /**
+ * The table every publish of an artifact is a row of (decision 0020), under `name`: its own, or the copy
+ * migration 35 rebuilds it through. A row holds what that version changed (changes_json: path to text,
+ * or null for a file it removed). `file` (2026-11-13): any file `show_artifact` showed the person — a
+ * picture, a log, a diff — its one file's text, or its bytes as a `data:` URI.
+ */
+export const artifactVersionsTable = (name: string): string => `CREATE TABLE IF NOT EXISTS ${name} (
+  task_id           TEXT NOT NULL,
+  artifact          TEXT NOT NULL,
+  version           INTEGER NOT NULL,
+  author            TEXT NOT NULL CHECK (author IN ('model', 'person')),
+  kind              TEXT NOT NULL CHECK (kind IN ('page', 'markdown', 'canvas', 'file')),
+  type              TEXT,
+  title             TEXT,
+  icon              TEXT,
+  entry             TEXT NOT NULL,
+  changes_json      TEXT NOT NULL,
+  capabilities_json TEXT,
+  record_id         TEXT,
+  created_at        INTEGER NOT NULL,
+  PRIMARY KEY (task_id, artifact, version)
+);`;
+
+/**
  * The log, its triggers, and the horizon below which tombstones have been dropped. Idempotent, so it is
  * both a migration's step and part of a fresh database's schema.
  */
@@ -86,23 +109,7 @@ CREATE TABLE IF NOT EXISTS drafts (
   updated_at INTEGER NOT NULL
 );
 -- Every publish of an artifact (decision 0020): made here, as drafts is, because its trigger below needs it.
--- A row holds what that version changed (changes_json: path to text, or null for a file it removed).
-CREATE TABLE IF NOT EXISTS artifact_versions (
-  task_id           TEXT NOT NULL,
-  artifact          TEXT NOT NULL,
-  version           INTEGER NOT NULL,
-  author            TEXT NOT NULL CHECK (author IN ('model', 'person')),
-  kind              TEXT NOT NULL CHECK (kind IN ('page', 'markdown', 'canvas')),
-  type              TEXT,
-  title             TEXT,
-  icon              TEXT,
-  entry             TEXT NOT NULL,
-  changes_json      TEXT NOT NULL,
-  capabilities_json TEXT,
-  record_id         TEXT,
-  created_at        INTEGER NOT NULL,
-  PRIMARY KEY (task_id, artifact, version)
-);
+${artifactVersionsTable("artifact_versions")}
 -- A comment on a published artifact (a pin on a canvas's artboard): beside the versions, never in them.
 -- element_json: the element the pin was put on, at \`version\` ({id, tag, text?}).
 CREATE TABLE IF NOT EXISTS artifact_comments (
@@ -144,6 +151,23 @@ ${TRACKED.map(triggers).join("\n")}
  */
 export const SYNC_TRIGGERS_AGAIN_SQL = `${TRACKED.flatMap((t) => ["insert", "update", "delete"].map((event) => `DROP TRIGGER IF EXISTS sync_${t.table}_${event};`)).join("\n")}
 ${SYNC_SQL}`;
+
+/**
+ * Migration 35: `artifact_versions` may hold a `file` (2026-11-13). SQLite cannot change a CHECK in
+ * place, so the table is made again under its new rule, its rows copied (the copy has no triggers yet,
+ * so the log is not stamped for rows that did not change), the old one dropped with its triggers, and
+ * the triggers made again on the new one. A database made with the new rule is left as it is.
+ */
+export function allowShownFiles(db: JairaDb): void {
+  const made = db.prepare(`SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'artifact_versions'`).get() as { sql: string } | undefined;
+  if (made !== undefined && made.sql.includes("'file'")) return;
+  const columns = "task_id, artifact, version, author, kind, type, title, icon, entry, changes_json, capabilities_json, record_id, created_at";
+  db.exec(`DROP TABLE IF EXISTS artifact_versions_next;
+${artifactVersionsTable("artifact_versions_next")}
+${made !== undefined ? `INSERT INTO artifact_versions_next (${columns}) SELECT ${columns} FROM artifact_versions;\nDROP TABLE artifact_versions;` : ""}
+ALTER TABLE artifact_versions_next RENAME TO artifact_versions;
+${SYNC_SQL}`);
+}
 
 /**
  * Enter a change the database does not see: a task's file, a gate held in memory, the placement queue.

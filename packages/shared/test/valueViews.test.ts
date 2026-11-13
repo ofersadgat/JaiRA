@@ -430,3 +430,13 @@ describe("asserting a type is a correction that has to land", () => {
     ]);
   });
 });
+
+describe("a picture carried as a data: URI (2026-11-13)", () => {
+  it("is its picture alone: base64 has no reading as source or code, and the envelope keeps its JSON", () => {
+    const uri = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    expect(viewsFor(uri, { mime: "image/png" })).toEqual(["media"]);
+    expect(viewsFor({ path: "shots/a.png", mediaType: "image/png", content: uri }, { mime: "image/png" })).toEqual(["media", "json"]);
+    // An SVG's text is its source, and keeps its readings.
+    expect(viewsFor("<svg xmlns='http://www.w3.org/2000/svg'/>", { mime: "image/svg+xml" })).toContain("text");
+  });
+});
