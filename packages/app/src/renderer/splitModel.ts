@@ -210,6 +210,52 @@ export function leftEntryOf(
   return null;
 }
 
+/** A box on screen, in the window's pixels. */
+export interface ZoneRect {
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+}
+
+/** Where a drop would put what is dragged, and the box that takes it. */
+export interface DropZone {
+  place: Place;
+  rect: ZoneRect;
+}
+
+/**
+ * The drop zones while something is dragged (decision 0025, boards 08 and 09), from where the panes
+ * and the side panel stand. With a split, each pane is its own zone and the panel its own, as they are
+ * on screen. Without one, the room (the middle column and the panel beside it, if open) is cut into
+ * three bands, left to right: Main view, Split, Side panel — the panel's band its own column where it
+ * stands open.
+ */
+export function dropZonesOf(at: { main?: ZoneRect | undefined; split?: ZoneRect | undefined; panel?: ZoneRect | undefined }): DropZone[] {
+  const { main, split, panel } = at;
+  if (main === undefined) return [];
+  if (split !== undefined) return [{ place: "main", rect: main }, { place: "split", rect: split }, ...(panel !== undefined ? [{ place: "panel" as const, rect: panel }] : [])];
+  if (panel !== undefined) {
+    const half = Math.round(main.width / 2);
+    return [
+      { place: "main", rect: { ...main, width: half } },
+      { place: "split", rect: { ...main, left: main.left + half, width: main.width - half } },
+      { place: "panel", rect: panel },
+    ];
+  }
+  const third = Math.round(main.width / 3);
+  return [
+    { place: "main", rect: { ...main, width: third } },
+    { place: "split", rect: { ...main, left: main.left + third, width: third } },
+    { place: "panel", rect: { ...main, left: main.left + 2 * third, width: main.width - 2 * third } },
+  ];
+}
+
+/** The zone under the pointer, if any. */
+export function zoneAt(zones: readonly DropZone[], x: number, y: number): DropZone | undefined {
+  return zones.find(({ rect }) => x >= rect.left && x < rect.left + rect.width && y >= rect.top && y < rect.top + rect.height);
+}
+
 /** The right pane's top swapped for what the left showed (null: the right pane closes). */
 export function swapRight(split: SplitState, left: PanelEntry | null): SplitState {
   if (split.right === null) return split;

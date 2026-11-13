@@ -4,6 +4,7 @@ import {
   NO_SPLIT,
   artifactEntryOf,
   closeSplit,
+  dropZonesOf,
   focusOn,
   focusRuleOf,
   historyOf,
@@ -22,6 +23,7 @@ import {
   swapRight,
   taskPaneEntryOf,
   walkTo,
+  zoneAt,
 } from "../src/renderer/splitModel";
 import type { PublishedRef } from "../src/renderer/transcriptRows";
 
@@ -131,6 +133,37 @@ describe("the place buttons", () => {
   it("has no split on a phone: split opens over the main view", () => {
     expect(placesOffered(true)).toEqual(["main", "panel"]);
     expect(placeMoveOf(["panel"], "split", true)).toEqual({ open: "main", close: ["panel"] });
+  });
+});
+
+describe("the drop zones", () => {
+  const main = { left: 100, top: 40, width: 600, height: 500 };
+  const panel = { left: 706, top: 40, width: 400, height: 500 };
+  const split = { left: 400, top: 40, width: 300, height: 500 };
+
+  it("cuts a room with no split and no panel into three bands", () => {
+    expect(dropZonesOf({ main }).map((z) => [z.place, z.rect.left, z.rect.width])).toEqual([
+      ["main", 100, 200],
+      ["split", 300, 200],
+      ["panel", 500, 200],
+    ]);
+  });
+
+  it("halves the middle beside an open panel, the panel its own zone", () => {
+    expect(dropZonesOf({ main, panel }).map((z) => [z.place, z.rect.left, z.rect.width])).toEqual([
+      ["main", 100, 300],
+      ["split", 400, 300],
+      ["panel", 706, 400],
+    ]);
+  });
+
+  it("takes each pane as it stands once split", () => {
+    const zones = dropZonesOf({ main: { ...main, width: 294 }, split, panel });
+    expect(zones.map((z) => z.place)).toEqual(["main", "split", "panel"]);
+    expect(zoneAt(zones, 450, 100)?.place).toBe("split");
+    expect(zoneAt(zones, 150, 100)?.place).toBe("main");
+    expect(zoneAt(zones, 50, 100)).toBeUndefined();
+    expect(dropZonesOf({})).toEqual([]);
   });
 });
 

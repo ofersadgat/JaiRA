@@ -33,8 +33,8 @@ const kept = arg("--task");
 /** Every tool allowed: the rig is about the artifact, not about asking. */
 const FULL = Object.fromEntries(["read_file", "glob", "grep", "edit", "write_file", "show_artifact", "shell", "web_fetch", "web_search", "other"].map((line) => [line, "allow"]));
 
-const TO_MAIN = "Show this artifact in the main view";
-const TO_PANEL = "Open it on its own, in the side panel";
+const TO_MAIN = "Open in the main view";
+const TO_PANEL = "Open in the side panel";
 const OUT_OF_MAIN = "Back out of this artifact";
 
 interface Published {

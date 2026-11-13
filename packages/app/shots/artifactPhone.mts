@@ -22,8 +22,8 @@ import { drawn, settle } from "./parityWorld.mjs";
 const TITLE = "Mock up a settings screen";
 const OUT = join(import.meta.dirname, "out", "artifact-phone");
 const WORLD = join(import.meta.dirname, ".world-artifact-views");
-const TO_MAIN = "Show this artifact in the main view";
-const TO_PANEL = "Open it on its own, in the side panel";
+const TO_MAIN = "Open in the main view";
+const TO_PANEL = "Open in the side panel";
 const OUT_OF_MAIN = "Back out of this artifact";
 const PHONE = { width: 400, height: 860 };
 

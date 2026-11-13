@@ -27,7 +27,7 @@ import { usePhone } from "./phone";
  *
  *   the divider      the splitter between the panes (`files/Splitter.tsx`); it sizes the right pane,
  *                    kept as `PANE.splitRight`, never so wide the left goes under 360
- *   the right pane   --bg-panel's --panel, a column; the panel's head (‹ › always, the trail, the name),
+ *   the right pane   --panel, a column; the panel's head (‹ › always, the trail, the name),
  *                    then ⋯ and ✕ where the panel's pin, fold and close are
  *   focus            the pane last pressed in: a 2px --accent line along its top, an inset shadow over
  *                    what it shows (`FocusLine`) — never a coloured left edge
@@ -124,7 +124,7 @@ export function LeftPane({ at, children, ...box }: { at?: string | null | undefi
   const rightTitle = splitTitle.use();
   const hidden = splitOn && narrow && split.tab === "right";
   return (
-    <View flex={1} minWidth={0} minHeight={0} position="relative" {...(splitOn ? focusProps("left") : {})} {...((hidden ? { display: "none" } : {}) as object)} {...((isWeb ? { dataSet: { place: "main" } } : {}) as object)}>
+    <View flex={1} minWidth={0} minHeight={0} position="relative" {...(splitOn ? focusProps("left") : {})} {...((hidden ? { display: "none" } : {}) as object)} {...((isWeb ? { "data-place": "main" } : {}) as object)}>
       {splitOn && narrow ? <SplitTabs shown="left" right={rightTitle} /> : null}
       <View flex={1} minWidth={0} minHeight={0} position="relative" {...box}>
         {children}
@@ -216,7 +216,7 @@ export function SplitPane({ face }: { face: (entry: PanelEntry) => PanelFace }):
       project: state.at,
     });
   };
-  const paneMenu = (e: GestureResponderEvent): void =>
+  const paneMenu = (e: GestureResponderEvent): void => {
     setMenu({
       ...menuPointOf(e),
       items: [
@@ -248,6 +248,7 @@ export function SplitPane({ face }: { face: (entry: PanelEntry) => PanelFace }):
         { label: "Close this pane", separator: true, onSelect: () => splitView.set(closeSplit()) },
       ],
     });
+  };
   const pathMenu = (e: GestureResponderEvent): void =>
     setMenu({
       ...menuPointOf(e),
@@ -288,7 +289,7 @@ export function SplitPane({ face }: { face: (entry: PanelEntry) => PanelFace }):
         backgroundColor={t.v("panel") as never}
         {...focusProps("right")}
         {...((hidden ? { display: "none" } : {}) as object)}
-        {...((isWeb ? { dataSet: { place: "split" } } : {}) as object)}
+        {...((isWeb ? { "data-place": "split" } : {}) as object)}
       >
         {narrow ? <SplitTabs shown="right" right={rightTitle} /> : null}
         <SidePanel stack={right} onStack={onStack} face={face} folded={false} onFold={() => undefined} pane={{ controls, onPath: pathMenu }} />

@@ -68,10 +68,11 @@ own column, so the pane's faces get the same `FaceHost` the panel's do, over the
   view. No drag.
 - **Two panes at most.** The split is not kept across a reload; the panel stack is not either.
 - **A conversation in the right pane** is the task's conversation as the side panel draws it
-  (`TaskConversation` over the task's own run), live and readable, with its gates and approvals, but
-  no composer: the Chat room's composer is bound to the store's one open conversation
-  (`state.chat`, `chatSurfaceOf`), and a second would need a second chat surface end to end. Swap or
-  Only this pane brings it to the left, where it has one.
+  (`TaskConversation` over the task's own run), live, with its gates, approvals and the panel's own
+  composer ("Ask for more changes…"), which sends into it (seen in `shots/split-view.mts --send`). It
+  is not the Chat room's thread: that one's composer, its walk-ins and its title are bound to the
+  store's one open conversation (`state.chat`, `chatSurfaceOf`). Swap or Only this pane brings it to the
+  left as the Chat room's.
 - **The ⋯ menu is the right pane's.** The left pane is the room's middle column, whose own head is
   the title bar. "Only this pane" makes the right pane's content the main view and closes the split.
 - **The side panel's rule** while the right pane is focused on a task is that task's context beside

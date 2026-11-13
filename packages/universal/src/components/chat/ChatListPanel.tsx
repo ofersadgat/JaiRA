@@ -275,8 +275,9 @@ function Row({
   return (
     // A row's own actions behind a ⋯ that shows on hover, over its right end (the sidebar mockups,
     // board 28) — the menu its right-click opens, for a person who does not know to right-click. A
-    // sibling of the row's button, not inside it: a button in a button is not one.
-    <View {...(hover as object)} position="relative">
+    // sibling of the row's button, not inside it: a button in a button is not one. On web it can be
+    // dragged onto a pane (decision 0025, `placeDrag.ts`): it says what it is.
+    <View {...(hover as object)} position="relative" {...((isWeb ? { "data-drag-task": task.taskId, "data-drag-project": homeOf(task, surface) ?? "", "data-drag-label": task.title } : {}) as object)}>
     <Press
       onPress={onOpen}
       // A phone has no right button: a long press opens the row's menu where the finger is.

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type JSX } from "react";
-import { View } from "@tamagui/core";
+import { View, isWeb } from "@tamagui/core";
 import { SHARED_SESSION, type TaskDetail } from "@jaira/shared/browser";
 import { EVENTS_STATE_ID } from "@jaira/ui/automationsModel";
 import { projectName } from "@jaira/ui/projects";
@@ -389,6 +389,8 @@ export function PanelColumn({ chat }: { chat?: { taskId: string | null; project:
         backgroundColor={t.v("panel") as never}
         {...(edge(t, { left: 1 }, geometry.open ? "line" : "rule") as object)}
         {...(paneTween(tween) as object)}
+        // Where a drag finds the panel to drop on (`placeDrag.ts`), while it stands open.
+        {...((isWeb && geometry.open ? { "data-place": "panel" } : {}) as object)}
       >
         <ToolsFieldProvider value={toolsFieldData}>
           <SidePanel stack={panelStack} onStack={onStack} face={face} folded={!geometry.open} onFold={(folded) => geometry.foldKey !== null && actions.setFold(geometry.foldKey, !folded)} closeFolds={closeFoldsOf(panelStack)} />

@@ -122,7 +122,8 @@ function TaskRow({ card, when, selected, onOpen, onMenu, onStop }: { card: Board
   );
   return (
     // The row's tools are siblings of its button, over its right end: a button in a button is not one.
-    <View {...(hover as object)} position="relative">
+    // On web it can be dragged onto a pane (decision 0025, `placeDrag.ts`): it says what it is.
+    <View {...(hover as object)} position="relative" {...((isWeb ? { "data-drag-task": card.taskId, "data-drag-project": card.project ?? "", "data-drag-label": card.title } : {}) as object)}>
       <Press
         onPress={onOpen}
         onLongPress={(e) => onMenu(e.nativeEvent.pageX, e.nativeEvent.pageY)}

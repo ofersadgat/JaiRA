@@ -1,12 +1,13 @@
-import { useEffect, useState, type JSX } from "react";
+import { useEffect, useRef, useState, type JSX } from "react";
 import type { GestureResponderEvent, LayoutChangeEvent } from "react-native";
 import { Text, View, isWeb } from "@tamagui/core";
 import { publishedMime, type ArtifactComment, type PublishedVersion } from "@jaira/shared/browser";
 import { invoke } from "@jaira/ui/store";
 import { shownKindOf, shownMimeOf, type PublishedRef } from "@jaira/ui/transcriptRows";
 import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
-import { PLACES } from "@jaira/ui/splitModel";
+import { PLACES, artifactEntryOf } from "@jaira/ui/splitModel";
 import { usePhone } from "../../app/phone";
+import { dragFrom } from "../../app/placeDrag";
 import { placeArtifact, surfaceOf, usePlacesHere, useShownPlaces } from "../../app/places";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Markdown } from "../Markdown";
@@ -37,6 +38,8 @@ import { callCardOf } from "./publishedCard";
  *                    Main view, Split, Side panel — the place it is in lit, a press moving it there
  *                    (`places.ts`); no Split on a phone, no Side panel in a room without one. In the
  *                    main view, ‹ back before them
+ *   the title bar,   dragged by a mouse (not from a button on it): the three places as drop zones over
+ *   dragged          the room (`DropZones.tsx`); the bar says so with a grab cursor
  *
  * Where it stands is its caller's. In the conversation and a list it is as tall as its frame; `fill`, it
  * owns the column it is in (`ValueView`'s `pinned`), the frame as tall as the room measured for it and
@@ -196,6 +199,18 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
     newest === null || superseded ? null : (
       <PlaceButtons offered={offered} lit={lit} onPlace={(place) => placeArtifact(place, atVersion, artifacts ?? surfaceOf(taskId, undefined), phone)} />
     );
+  // Its title bar dragged takes it to a place (decision 0025, board 08; `placeDrag.ts`): web, not a phone,
+  // and not from a button on the bar, which keeps its press.
+  const bar = useRef<unknown>(null);
+  const dragged = useRef({ ref: atVersion, project: artifacts?.project });
+  dragged.current = { ref: atVersion, project: artifacts?.project };
+  const draggable = isWeb && !phone && newest !== null && !superseded;
+  useEffect(() => {
+    if (!draggable) return undefined;
+    return dragFrom(bar.current, (target) =>
+      target.closest("button, [role='button'], [role='group']") !== null ? null : { entry: artifactEntryOf(dragged.current.ref, dragged.current.project), label: dragged.current.ref.title ?? dragged.current.ref.entry },
+    );
+  }, [draggable]);
   const verbs =
     onBack !== undefined ? (
       <>
@@ -206,7 +221,7 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
       places
     );
   const titleBar = (
-    <View flexDirection="row" alignItems="center" gap={8} paddingTop={6} paddingHorizontal={fill ? 10 : 2} paddingBottom={4} minWidth={0}>
+    <View ref={bar as never} flexDirection="row" alignItems="center" gap={8} paddingTop={6} paddingHorizontal={fill ? 10 : 2} paddingBottom={4} minWidth={0} {...((draggable ? { cursor: "grab", userSelect: "none" } : {}) as object)}>
       <View width={16} height={16} borderRadius={4} backgroundColor={t.v("panel-3") as never} alignItems="center" justifyContent="center" flexShrink={0}>
         <Text color={t.v("accent") as never} fontSize={10}>
           {glyph}

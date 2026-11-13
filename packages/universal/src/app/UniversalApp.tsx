@@ -29,6 +29,7 @@ import { ArtifactInMain } from "./ArtifactInMain";
 import { BoardColumn } from "./BoardColumn";
 import { ChatView } from "./ChatView";
 import { DebugView } from "./DebugView";
+import { DropZones } from "./DropZones";
 import { FilesView } from "./FilesView";
 import { GalleryView } from "./GalleryView";
 import { LogsView } from "./LogsView";
@@ -227,6 +228,8 @@ function Frame(): JSX.Element {
       </View>
       {/* The dialogs the shell raises on its own, over any room: module and orphan approvals, the init prompt. */}
       <ShellFloats />
+      {/* Where a thing dragged to a place can land (decision 0025): nothing until something is dragged. */}
+      {isWeb ? <DropZones /> : null}
     </View>
   );
 }

@@ -705,7 +705,7 @@ async function main(): Promise<void> {
     const sentNote = (await app.ipc<{ session: { turns: Array<{ role: string; text?: string }> } } | null>("chat:thread", { taskId: made.taskId }))?.session.turns.some((t) => (t.text ?? "").includes(NOTE));
     if (sentNote === true) throw new Error("the note for people reached the conversation");
     // The eye shows the canvas whole, in the main view: the editor at full width, as Claude Code's canvas.
-    await clickLabel("Show this artifact in the main view");
+    await clickLabel("Open in the main view");
     await settle(2500);
     const inMain = await app.evaluate<number>(`document.querySelectorAll('[data-island="canvasEditor"]').length`);
     console.log(`main view: ${String(inMain)} editors drawn`);
