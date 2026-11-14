@@ -27,6 +27,37 @@ export function wheelView<V extends { x: number; y: number; z: number }>(v: V, p
   return { ...v, z, x: px - ((px - v.x) * z) / v.z, y: py - ((py - v.y) * z) / v.z };
 }
 
+/**
+ * `next` kept from running off the canvas: every artboard and note (`extent`, in board space) may come no
+ * further than a margin from the box's far edge on either side, so a wheel or a drag stops where the
+ * design ends rather than scrolling on into nothing. Content smaller than the box stays wholly in it,
+ * that margin clear. A view already past the bound (the extent shrank, the box narrowed) is not snapped
+ * back: it may move toward the bound, never further past it than it was (`was`).
+ */
+export function boundView<V extends { x: number; y: number; z: number }>(next: V, was: { x: number; y: number; z: number } | null, extent: { x: number; y: number; w: number; h: number }, box: { w: number; h: number }): V {
+  if (box.w <= 0 || box.h <= 0) return next;
+  const axis = (at: number, from: number | undefined, fromZ: number, start: number, size: number, side: number): number => {
+    const margin = Math.min(120, side / 4);
+    // Where the content's near edge may stand in the box, at zoom `z`.
+    const range = (z: number): [number, number] => [Math.min(margin, side - margin - size * z), Math.max(margin, side - margin - size * z)];
+    const [lo, hi] = range(next.z);
+    let low = lo;
+    let high = hi;
+    if (from !== undefined) {
+      const [wasLo, wasHi] = range(fromZ);
+      const wasEdge = from + start * fromZ;
+      low -= Math.max(0, wasLo - wasEdge);
+      high += Math.max(0, wasEdge - wasHi);
+    }
+    const edge = at + start * next.z;
+    return Math.min(Math.max(edge, low), high) - start * next.z;
+  };
+  const z = was?.z ?? next.z;
+  const x = axis(next.x, was?.x, z, extent.x, extent.w, box.w);
+  const y = axis(next.y, was?.y, z, extent.y, extent.h, box.h);
+  return x === next.x && y === next.y ? next : { ...next, x, y };
+}
+
 /** A place a frame reported in its own pixels, in the window: by where the frame stands, at its scale, now. */
 export function framePoint(frame: HTMLIFrameElement, x: number, y: number): { x: number; y: number } {
   const box = frame.getBoundingClientRect();
@@ -149,7 +180,14 @@ export interface CanvasBoardProps {
 export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): JSX.Element {
   const box = useRef<HTMLDivElement | null>(null);
   const [page, setPage] = useState<string | undefined>(index.launch?.page ?? first(index));
-  const [view, setView] = useState<{ x: number; y: number; z: number } | null>(null);
+  const [view, setFreeView] = useState<{ x: number; y: number; z: number } | null>(null);
+  /** Every change of view goes through here, kept on the canvas (`boundView`). */
+  const setView = (next: { x: number; y: number; z: number } | null | ((v: { x: number; y: number; z: number } | null) => { x: number; y: number; z: number } | null)): void =>
+    setFreeView((was) => {
+      const v = typeof next === "function" ? next(was) : next;
+      const el = box.current;
+      return v === null || el === null ? v : boundView(v, was, extentNow.current, { w: el.clientWidth, h: el.clientHeight });
+    });
   const [focused, setFocused] = useState<string | null>(index.launch?.view === "focused" ? (index.launch.file ?? null) : null);
   const drag = useRef<{ x: number; y: number; vx: number; vy: number } | null>(null);
   /** The interactive artboards running where they sit: the pointer is theirs, not the board's. */
@@ -166,6 +204,8 @@ export function CanvasBoard({ index, base, style, chrome }: CanvasBoardProps): J
     if (stopped.length > 0) setFresh((was) => ({ ...was, ...Object.fromEntries(stopped.map((file) => [file, (was[file] ?? 0) + 1])) }));
   }, [running]);
   const extent = useMemo(() => extentOf(index, page), [index, page]);
+  const extentNow = useRef(extent);
+  extentNow.current = extent;
   const order = useMemo(() => {
     const listed = (index.order ?? []).filter((f) => index.boards[f] !== undefined);
     return [...listed, ...Object.keys(index.boards).filter((f) => !listed.includes(f))];

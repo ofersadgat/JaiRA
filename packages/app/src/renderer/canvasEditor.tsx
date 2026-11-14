@@ -19,7 +19,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref } from "react";
 import { flushSync } from "react-dom";
 import { applyMove, editStyle, editText, elementMarkup, formatStyle, insertAfter, insertElement, parse, readStyle, removeElement, setPropDefault, wrapElement, type Moved } from "@jaira/dc-runtime/source";
-import { framePoint, frameWheel, wheelView } from "./canvasBoard";
+import { boundView, framePoint, frameWheel, wheelView } from "./canvasBoard";
 import { CanvasHistory, changedPaths, type CanvasState } from "./canvasHistory";
 import type { CanvasBoardEntry, CanvasIndex, CanvasNote } from "./canvasIndex";
 import { Popover } from "./popover";
@@ -297,7 +297,15 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   }, [selection]);
   /** The selection rectangle being drawn, in the board's coordinates. */
   const [marquee, setMarquee] = useState<{ from: { x: number; y: number }; to: { x: number; y: number } } | null>(null);
-  const [view, setView] = useState<View>({ x: 40, y: 60, z: 0.5 });
+  const [view, setFreeView] = useState<View>({ x: 40, y: 60, z: 0.5 });
+  /** Every change of view goes through here, kept on the canvas (`boundView`): the extent is read when it lands. */
+  const setView = (next: View | ((v: View) => View)): void =>
+    setFreeView((was) => {
+      const v = typeof next === "function" ? next(was) : next;
+      const el = board.current;
+      const extent = extentNow.current();
+      return el === null || extent === null ? v : boundView(v, was, extent, { w: el.clientWidth, h: el.clientHeight });
+    });
   const [gesture, setGesture] = useState<Gesture | null>(null);
   /** The gesture as last drawn, taken (and emptied) by the up that ends it: two ends before a redraw end it once. */
   const gestureNow = useRef(gesture);
@@ -434,6 +442,23 @@ export function CanvasEditor({ files: initial, base: initialBase, frames, onSave
   };
   const fitNow = useRef(fit);
   fitNow.current = fit;
+  /** Every artboard (with its name strip) and note in what the board shows, in board space; null when there is none. */
+  const extentOf = (): { x: number; y: number; w: number; h: number } | null => {
+    const boxes = [
+      ...Object.values(index.boards)
+        .filter(onPage)
+        .map((b) => ({ x: b.x, y: b.y - 24, w: b.w, h: b.h + 24 })),
+      ...Object.values(index.notes ?? {})
+        .filter(onPage)
+        .flatMap((n) => noteBox(n) ?? []),
+    ];
+    if (boxes.length === 0) return null;
+    const x = Math.min(...boxes.map((b) => b.x));
+    const y = Math.min(...boxes.map((b) => b.y));
+    return { x, y, w: Math.max(...boxes.map((b) => b.x + b.w)) - x, h: Math.max(...boxes.map((b) => b.y + b.h)) - y };
+  };
+  const extentNow = useRef(extentOf);
+  extentNow.current = extentOf;
 
   // --- edits ------------------------------------------------------------------------------------
 
