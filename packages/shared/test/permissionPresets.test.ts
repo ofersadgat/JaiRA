@@ -27,6 +27,7 @@ import { READ_ONLY_PRESET_TOOLS, SMART_MODE, type PermissionSetMode } from "../s
 import { TOOL_SPEC_BY_NAME, TOOL_SPECS } from "../src/toolVocabulary";
 import { heldTools, linePlaces, offeredTools, parsePermissionSet, toolImplementations, toolModes, type PermissionSet } from "../src/permissionSets";
 import { resolvePlace } from "../src/places";
+import { composePermissionSetLayers } from "../src/permissionLayers";
 
 /**
  * Each tool's mode IN THE PROJECT — what the frozen presets were about. Since decision 0023 §7.1 a
@@ -306,6 +307,45 @@ describe("what ships gains places (decision 0023 §7.1)", () => {
       // A credential pinned by name is refused even inside the agent's folder (ruling 3).
       expect(at("read-only-scratch", tool, "C:/Users/me/.claude/projects/C--work-app-wt/.env"), tool).toBe("deny");
       expect(at("read-only", tool, memory), tool).toBe("deny");
+    }
+  });
+
+  /**
+   * A preset laid on another REPLACES it, line for line (2026-11-13). A newer layer's place map keeps
+   * every place below that it does not name (§2.1, §2.2), so a preset that leaves out a place another
+   * preset names lets that one speak through it: `full` laid on `ask-first` still asked before every
+   * read, glob and grep in the project, because only ask-first named `$PROJECT`. So every top-level
+   * preset names every place another one names, on every line they both write as a map.
+   */
+  it("each one laid on any other says, on every line it writes, exactly what it says alone", () => {
+    const presets = topLevel().map((name) => name.replace(/\.json$/, ""));
+    expect(presets.length).toBeGreaterThan(1);
+    for (const lower of presets) {
+      for (const upper of presets) {
+        if (lower === upper) continue;
+        const composed = composePermissionSetLayers([
+          { id: lower, decl: shipped(lower) as Record<string, unknown> },
+          { id: upper, decl: shipped(upper) as Record<string, unknown> },
+        ]).permissionSet;
+        const alone = parsePermissionSet(shipped(upper)).permissionSet;
+        for (const [subject, entry] of Object.entries(alone.entries)) {
+          const got = composed.entries[subject];
+          expect({ mode: got?.mode, places: got?.places }, `${upper} over ${lower}: ${subject}`).toEqual({ mode: entry.mode, places: entry.places });
+        }
+      }
+    }
+  });
+
+  it("full laid on ask-first reads, globs and greps in the project without asking", () => {
+    const composed = composePermissionSetLayers([
+      { id: "ask-first", decl: shipped("ask-first") as Record<string, unknown> },
+      { id: "full", decl: shipped("full") as Record<string, unknown> },
+    ]).permissionSet;
+    for (const tool of ["read_file", "glob", "grep"]) {
+      const entry = composed.entries[tool]!;
+      const map = { ...(entry.mode !== undefined ? { "**": entry.mode } : {}), ...entry.places };
+      expect(resolvePlace(map, "path", `${ROOT}/packages`, options)?.decision, tool).toBe("allow");
+      expect(resolvePlace(map, "path", `${ROOT}/.env`, options)?.decision, tool).toBe("ask");
     }
   });
 
