@@ -31,6 +31,7 @@ import { useChildRunHost } from "./childRunHost";
 import { OutcomeHostContext } from "../panel/outcomeHost";
 import { SubagentHostContext } from "../panel/subagentHost";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
+import { EDGE_START, UP_KEYS, dragging, pressed, readerUp, repin, resized, scrolled, settled, type EdgeState } from "./liveEdge";
 
 /**
  * One conversation: the thread on its sheet, the live status line, and the box under it. Everything it
@@ -64,16 +65,22 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const scroller = useRef<ScrollView | null>(null);
   // What a phone keeps drawn of the thread: what shows and three screens either side (`Virtual`).
   const scrollWindow = useScrollWindow(scroller);
-  /** Whether the reader is at the live edge. */
-  const pinned = useRef(true);
+  /** Whether the reader is pinned to the live edge, and what lets go of it (`liveEdge.ts`). */
+  const edge = useRef<EdgeState>(EDGE_START);
   const [away, setAway] = useState(false);
   const [viewport, setViewport] = useState<number | undefined>(undefined);
-  const jump = (): void => {
-    pinned.current = true;
-    setAway(false);
+  const settle = (next: EdgeState): void => {
+    edge.current = next;
+    setAway((was) => (was === !next.pinned ? was : !next.pinned));
+  };
+  const toEnd = (): void => {
     // To the very end: `scrollToEnd` stops a fraction short on web.
     scroller.current?.scrollTo({ y: 1e9, animated: false });
     scrollWindow.atEnd();
+  };
+  const jump = (): void => {
+    settle(repin(edge.current));
+    toEnd();
   };
   const jumpRef = useRef(jump);
   jumpRef.current = jump;
@@ -100,17 +107,13 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     selfId: env.view?.machines.find((machine) => machine.self)?.id,
   });
   const placed = placement !== undefined ? <PlacementSummary summary={placement} faces={facesOf(env.view)} clock={clockOf} /> : null;
-  // What the thread follows: a new thread or a word of the live tail opens a short window in which the
-  // content growing is followed; anything else the reader does is not.
-  const follow = useRef(true);
+  // Another conversation opens at its end.
   useEffect(() => {
-    follow.current = true;
-    if (pinned.current) {
-      scroller.current?.scrollTo({ y: 1e9, animated: false });
-      scrollWindow.atEnd();
-    }
+    settle(repin(edge.current));
+  }, [m.taskId]);
+  useEffect(() => {
+    if (edge.current.pinned) toEnd();
     const settleTimer = setTimeout(() => {
-      follow.current = false;
       // Which day the thread stands on once it has settled where it opened: a thread opened at its end,
       // that nothing then scrolls or grows, had no day over it (2026-11-13, two panes on one
       // conversation drew the chip in one and not the other).
@@ -151,11 +154,56 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     }
     const { contentOffset, contentSize, layoutMeasurement } = e.nativeEvent;
     scrollWindow.scrolled(contentOffset.y);
-    // Within 24px of the end is at it.
-    const at = contentSize.height - contentOffset.y - layoutMeasurement.height <= 24;
-    pinned.current = at;
-    setAway((was) => (was === !at ? was : !at));
+    settle(scrolled(edge.current, { y: contentOffset.y, content: contentSize.height, viewport: layoutMeasurement.height }, Date.now()));
   };
+  // What only the reader does (web): a wheel or a key upward lets go at once, before the scroll it
+  // makes is reported (a word arriving in between would otherwise be followed back down); a drag of
+  // the scrollbar or a finger makes the scrolls up during it the reader's; a press on something in the
+  // thread that can be pressed may unfold it (`resized`).
+  const walkedIn = runs.walkedIn !== null;
+  useEffect(() => {
+    if (!isWeb || walkedIn) return;
+    const node = (scroller.current as unknown as { getScrollableNode?: () => HTMLElement | null } | null)?.getScrollableNode?.();
+    if (node === null || node === undefined || typeof node.addEventListener !== "function") return;
+    const onWheel = (e: WheelEvent): void => {
+      if (e.deltaY < 0 && node.scrollTop > 0) settle(readerUp(edge.current));
+    };
+    const onKey = (e: KeyboardEvent): void => {
+      const target = e.target as HTMLElement | null;
+      if (target !== null && (target.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(target.tagName))) return;
+      if ((UP_KEYS.has(e.key) || (e.key === " " && e.shiftKey)) && node.scrollTop > 0) settle(readerUp(edge.current));
+    };
+    const onDown = (e: PointerEvent): void => {
+      // The scroller itself under the pointer is its scrollbar.
+      if (e.target === node) edge.current = dragging(edge.current, true, Date.now());
+      else if (e.target instanceof Element) {
+        const hit = e.target.closest('button, a, [role="button"], [tabindex]');
+        if (hit !== null && hit !== node && node.contains(hit)) edge.current = pressed(edge.current, Date.now());
+      }
+    };
+    const onTouch = (): void => {
+      edge.current = dragging(edge.current, true, Date.now());
+    };
+    const onRelease = (): void => {
+      if (edge.current.drivingUntil === Infinity) edge.current = dragging(edge.current, false, Date.now());
+    };
+    node.addEventListener("wheel", onWheel, { passive: true });
+    node.addEventListener("keydown", onKey);
+    node.addEventListener("pointerdown", onDown);
+    node.addEventListener("touchstart", onTouch, { passive: true });
+    window.addEventListener("pointerup", onRelease);
+    window.addEventListener("touchend", onRelease);
+    window.addEventListener("touchcancel", onRelease);
+    return () => {
+      node.removeEventListener("wheel", onWheel);
+      node.removeEventListener("keydown", onKey);
+      node.removeEventListener("pointerdown", onDown);
+      node.removeEventListener("touchstart", onTouch);
+      window.removeEventListener("pointerup", onRelease);
+      window.removeEventListener("touchend", onRelease);
+      window.removeEventListener("touchcancel", onRelease);
+    };
+  }, [walkedIn]);
   const narrated = m.status !== null ? { narrated: true } : {};
   const doomed = m.doomedFrom !== undefined ? { doomedFrom: m.doomedFrom } : {};
   // What the agent is blocked on — the command it waits to run, the question it asked — drawn where the
@@ -195,19 +243,29 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
         onLayout={(e) => {
           setViewport(e.nativeEvent.layout.height);
           scrollWindow.sized(e.nativeEvent.layout.height);
+          // A viewport that shrank (the composer grew a line, a wait came over the box) keeps the end.
+          if (edge.current.pinned) toEnd();
         }}
         onScroll={onScroll}
         scrollEventThrottle={32}
-        // Follow the live edge while the reader is standing on it.
+        // A phone's drag and fling (web reads its own events above).
+        onScrollBeginDrag={() => {
+          edge.current = dragging(edge.current, true, Date.now());
+        }}
+        onScrollEndDrag={() => {
+          edge.current = dragging(edge.current, false, Date.now());
+        }}
+        onMomentumScrollEnd={() => {
+          edge.current = settled(edge.current);
+        }}
+        // Follow the live edge while pinned to it: everything that grows the thread, but a row the
+        // reader just opened (`resized`).
         onContentSizeChange={(width, height) => {
           // Whatever grew moved what is under it: a phone measures its pieces again (`Virtual`).
           scrollWindow.moved(width, height);
-          // Only what `follow` covers moves the pin: the thread and the live tail — not a row
-          // opened, or a summary unfolded, by the reader.
-          if (pinned.current && follow.current) {
-            scroller.current?.scrollTo({ y: 1e9, animated: false });
-            scrollWindow.atEnd();
-          }
+          const { state, follow } = resized(edge.current, height, Date.now());
+          settle(state);
+          if (follow) toEnd();
           if (isWeb) readDay();
         }}
       >
