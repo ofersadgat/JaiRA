@@ -4,10 +4,9 @@
  * what the Tools card writes as the tools layer, a pin, and the stack saved as a set — `composerStack.ts`.
  */
 import { describe, expect, it } from "vitest";
-import { defaultUiState, parsePermissionSet, type PermissionSetTree, type PermissionSetTreeSet, type PermissionStackView } from "@jaira/shared/browser";
+import { parsePermissionSet, type PermissionSetTree, type PermissionSetTreeSet, type PermissionStackView } from "@jaira/shared/browser";
 import {
   belowSetOf,
-  browserModeOf,
   childrenOf,
   collapsedOf,
   collapsedWordsOf,
@@ -17,6 +16,8 @@ import {
   footFitOf,
   layerSegmentsOf,
   ownedFormOf,
+  panelColumnsOf,
+  panelRowsOf,
   pinnedConfigOf,
   referenceOfPick,
   runtimeAnswersOf,
@@ -27,11 +28,13 @@ import {
   segmentsOf,
   segmentTitleOf,
   segmentWordsOf,
+  setListOf,
+  setListRowsOf,
+  setListStepOf,
   stackBucketOf,
   stackFormOf,
   stackRowsOf,
   stackSettingsOf,
-  STACK_BROWSER_MODE,
   standingOf,
   toolsWriteOf,
   treeAtOf,
@@ -43,7 +46,6 @@ import {
   type LayerSegment,
 } from "../src/renderer/composerStack";
 import { mapOfSettings } from "../src/renderer/composerModel";
-import { withMode } from "../src/renderer/uiState";
 
 const ASK_FIRST = "$/permission-sets/ask-first";
 const BUILD = "$/permission-sets/app/build";
@@ -345,14 +347,92 @@ describe("the expanded browser's tree (§4.1)", () => {
   });
 });
 
-describe("the remembered look (ruling 11)", () => {
-  it("is compact until ⤢, and stays expanded — for every segment — until ⤡", () => {
-    const ui = defaultUiState();
-    expect(browserModeOf(ui)).toBe("compact");
-    expect(browserModeOf(withMode(ui, STACK_BROWSER_MODE, "expanded"))).toBe("expanded");
-    // A word another version wrote cannot put it into a look it no longer has.
-    expect(browserModeOf(withMode(ui, STACK_BROWSER_MODE, "docked"))).toBe("compact");
-    expect(browserModeOf(undefined)).toBe("compact");
+describe("the stack panel's set list (2026-11-14)", () => {
+  const described = (scope: "built in" | "global" | "project", bucket: string, name: string, description: string, extra: Partial<PermissionSetTreeSet> = {}): PermissionSetTreeSet => set(scope, bucket, name, { description, ...extra });
+  const LISTED: PermissionSetTree = {
+    scopes: [
+      {
+        scope: "built in",
+        layer: "system",
+        label: "built in",
+        // In the order the tree reads them; the list puts the presets' names in the presets' order.
+        sets: [described("built in", "", "full", "anything, without asking"), described("built in", "", "ask-first", "stop and ask before every call", { inStack: true }), described("built in", "", "read-only", "reading goes ahead")],
+        buckets: [{ name: "control", path: "control", buckets: [], sets: [described("built in", "control", "ask-first", "ask before starting anything")] }],
+      },
+      { scope: "project", layer: "project", label: ".jaira", sets: [], buckets: [{ name: "app", path: "app", buckets: [], sets: [set("project", "app", "build", { lines: 6 })] }] },
+      { scope: "runtime", label: "runtime", buckets: [], sets: [{ id: "runtime", name: "runtime", bucket: "", scope: "runtime", file: "this task's answers, for this run", lines: 2, icon: "history", inStack: true }] },
+    ],
+  };
+  const shape = (groups: ReturnType<typeof setListOf>): string[] => groups.flatMap((group) => [`${group.label}${group.near ? " (beside it)" : ""}`, ...group.rows.map((row) => `  ${row.id} — ${row.hint}${row.current ? " ✓" : ""}`)]);
+
+  it("groups every set by scope and bucket, the presets in their order, each with one line on what it is for", () => {
+    expect(shape(setListOf(LISTED, undefined))).toEqual([
+      "Built in",
+      "  ask-first — stop and ask before every call",
+      "  read-only — reading goes ahead",
+      "  full — anything, without asking",
+      "Built in › control",
+      "  control/ask-first — ask before starting anything",
+      // A set that says nothing of itself says how many lines it writes. The runtime scope is no file.
+      "Project › app",
+      "  app/build — 6 lines",
+    ]);
+  });
+
+  it("puts the layer's own group first, its set ticked, and lays what was looked at", () => {
+    const groups = setListOf(LISTED, { reference: "$/permission-sets/app/build", id: "app/build" });
+    expect(shape(groups).slice(0, 2)).toEqual(["Project › app (beside it)", "  app/build — 6 lines ✓"]);
+    expect(groups[1]!.rows.find((row) => row.id === "read-only")?.reference).toBe("$/permission-sets/read-only");
+  });
+
+  it("keeps the rows with every word typed, in the id or the line", () => {
+    expect(setListRowsOf(setListOf(LISTED, undefined, "ask")).map((row) => row.id)).toEqual(["ask-first", "full", "control/ask-first"]);
+    expect(setListRowsOf(setListOf(LISTED, undefined, "ASK-first")).map((row) => row.id)).toEqual(["ask-first", "control/ask-first"]);
+    expect(setListRowsOf(setListOf(LISTED, undefined, "before every")).map((row) => row.id)).toEqual(["ask-first"]);
+    expect(setListOf(LISTED, undefined, "nothing like this")).toEqual([]);
+  });
+
+  it("says when a nearer scope has its own copy", () => {
+    const shadowed: PermissionSetTree = { scopes: [{ ...LISTED.scopes[0]!, sets: [described("built in", "", "ask-first", "stop and ask", { shadowedBy: "project" })], buckets: [] }] };
+    expect(setListRowsOf(setListOf(shadowed, undefined))[0]!.hint).toBe("stop and ask · project has its own");
+  });
+
+  it("steps ↑ and ↓ from the row picked, from the layer's own while none is, and stops at the ends", () => {
+    const groups = setListOf(LISTED, { reference: "$/permission-sets/read-only", id: "read-only" });
+    expect(setListStepOf(groups, undefined, 1)).toBe("set:built in:full");
+    expect(setListStepOf(groups, undefined, -1)).toBe("set:built in:ask-first");
+    expect(setListStepOf(groups, "set:built in:ask-first", -1)).toBe("set:built in:ask-first");
+    expect(setListStepOf(groups, "set:built in:full", 1)).toBe("set:built in:control/ask-first");
+    expect(setListStepOf(setListOf(LISTED, undefined), undefined, 1)).toBe("set:built in:ask-first");
+  });
+});
+
+describe("the stack panel's rows and widths (2026-11-14)", () => {
+  const view: PermissionStackView = {
+    layers: [
+      { id: "ask-first", reference: ASK_FIRST, scope: "built in", role: "bottom", icon: "ask", lines: 48 },
+      { id: "app/build", reference: "$/permission-sets/app/build", scope: "project", role: "standing", icon: "layers", lines: 6 },
+      { id: "full", reference: "$/permission-sets/full", scope: "built in", role: "named", icon: "allow", lines: 40 },
+    ],
+    lines: [],
+    runtime: {},
+    issues: [],
+  };
+  const layers = layerSegmentsOf(view, { layers: [ASK_FIRST, "$/permission-sets/full"], tools: {} });
+
+  it("lists every layer newest on top, saying which the bar folds away", () => {
+    const rows = panelRowsOf(layers, segmentsOf(layers, 0, 0, true));
+    expect(rows.map((row) => `${row.layer.id}${row.bottom ? " (bottom)" : ""}${row.folded ? " (folded)" : ""}`)).toEqual(["full (folded)", "app/build (folded)", "ask-first (bottom)"]);
+    expect(panelRowsOf(layers, segmentsOf(layers, 0, 0, false)).some((row) => row.folded)).toBe(false);
+  });
+
+  it("unfolds the contents beside the list, giving way first on a narrow window, and over the list on a phone", () => {
+    expect(panelColumnsOf("list", false, 1200, false)).toEqual({ left: 300, right: 0, over: false });
+    expect(panelColumnsOf("list", true, 1200, false)).toEqual({ left: 300, right: 500, over: false });
+    expect(panelColumnsOf("rows", true, 760, false)).toEqual({ left: 400, right: 360, over: false });
+    expect(panelColumnsOf("rows", true, 700, false)).toEqual({ left: 400, right: 0, over: true });
+    expect(panelColumnsOf("list", true, 1200, true)).toEqual({ left: 300, right: 0, over: true });
+    expect(panelColumnsOf("whole", true, 600, false)).toEqual({ left: 600, right: 0, over: false });
   });
 });
 

@@ -22,10 +22,10 @@ import {
   permissionSetIdOf,
   PERMISSION_SET_LAYERS_KEY,
   PERMISSION_SET_REF_KEY,
+  permissionSetRank,
   TOOLS_LAYER,
   toolsLayerOf,
   type ChatSettings,
-  type JairaUiState,
   type PermissionSet,
   type PermissionSetScope,
   type PermissionSetTree,
@@ -38,7 +38,6 @@ import {
   type WritableLayer,
 } from "@jaira/shared/browser";
 import type { ChipStep, ChipWidths } from "./composerModel";
-import { modeOf } from "./uiState";
 
 // --- the form a conversation keeps ---------------------------------------------------------------
 
@@ -633,16 +632,133 @@ export function contentsNoteOf(set: Pick<PermissionSetTreeSet, "scope" | "lines"
   return `${set.scope} · ${set.lines} ${set.lines === 1 ? "line" : "lines"} — only what it writes is shown`;
 }
 
-// --- the remembered mode -------------------------------------------------------------------------
+// --- the stack panel (2026-11-14, round 3 of the mockups) ----------------------------------------
+//
+// What each part of the bar opens: a layer, the sets beside it as a list to swap it for; `+`, the same
+// list to lay one on top; `⋯ n` (and the stack collapsed), a row per layer; the shield, the whole
+// picture. A row's `›` unfolds that set's contents out to the RIGHT of the list, which stays where it
+// is — the list and the contents beside it are the browser. One float, which morphs between them.
 
-/** The two looks of a segment's popover (ruling 11): compact, or the browser it widens into. */
-export const BROWSER_MODES = ["compact", "expanded"] as const;
-export type BrowserMode = (typeof BROWSER_MODES)[number];
-/** Where the look is remembered — the window's UI state (`JairaUiState.modes`), so it stays expanded on every segment until ⤡. */
-export const STACK_BROWSER_MODE = "composer.stack.browser";
+/** One set as the list offers it. */
+export interface SetListRow {
+  key: string;
+  id: string;
+  /** What it is for — its description, else how many lines it writes — and what else is so of it. */
+  hint: string;
+  icon: string;
+  /** What the stack names it by when it is picked ({@link referenceOfPick}). */
+  reference: string | undefined;
+  set: PermissionSetTreeSet;
+  /** The set the layer is now. */
+  current: boolean;
+  inStack: boolean;
+  /** Why the file could not be read: said in --warn. */
+  problem?: string;
+}
 
-export function browserModeOf(ui: JairaUiState | undefined): BrowserMode {
-  return ui === undefined ? "compact" : modeOf(ui, STACK_BROWSER_MODE, BROWSER_MODES, "compact");
+/** One group of the list: a scope's sets, or a bucket's in it. */
+export interface SetListGroup {
+  key: string;
+  /** `Built in`, `Built in › control`. */
+  label: string;
+  /** The group the layer's own set is in: listed first, as `Beside it`. */
+  near: boolean;
+  rows: SetListRow[];
+}
+
+const listHintOf = (set: PermissionSetTreeSet): string =>
+  [set.description ?? `${set.lines} ${set.lines === 1 ? "line" : "lines"}`, set.shadowedBy !== undefined ? `${set.shadowedBy} has its own` : undefined].filter((each) => each !== undefined).join(" · ");
+
+/**
+ * The sets a layer can be swapped for, or laid on top: every set file of every scope, a group per
+ * scope and per bucket (built in first, as the tree reads), each in the presets' order. The group that
+ * holds `current` — the layer's own set — comes first. `query` keeps the rows whose id or hint has
+ * every word of it.
+ */
+export function setListOf(tree: PermissionSetTree, current: { reference: string | undefined; id: string } | undefined, query = ""): SetListGroup[] {
+  const at = current !== undefined ? treeAtOf(tree, current.reference, current.id) : undefined;
+  const words = query.toLowerCase().split(/\s+/).filter((word) => word !== "");
+  const groups: SetListGroup[] = [];
+  const add = (scope: PermissionSetTreeScope, path: string, sets: readonly PermissionSetTreeSet[]): void => {
+    const scopeName = SCOPE_WORDS[scope.scope]?.name ?? scope.scope;
+    const rows = [...sets]
+      .sort((a, b) => permissionSetRank(a.name) - permissionSetRank(b.name) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0))
+      .map(
+        (set): SetListRow => ({
+          key: `set:${scope.scope}:${set.id}`,
+          id: set.id,
+          hint: listHintOf(set),
+          icon: set.icon,
+          reference: referenceOfPick(set),
+          set,
+          current: at !== undefined && at.scope === scope.scope && at.set === set.id,
+          inStack: set.inStack,
+          ...(set.problem !== undefined ? { problem: set.problem } : {}),
+        }),
+      )
+      .filter((row) => words.every((word) => row.id.toLowerCase().includes(word) || row.hint.toLowerCase().includes(word)));
+    if (rows.length === 0) return;
+    groups.push({ key: `group:${scope.scope}:${path}`, label: path === "" ? scopeName : `${scopeName} › ${path.split("/").join(" › ")}`, near: rows.some((row) => row.current), rows });
+  };
+  const walk = (scope: PermissionSetTreeScope, buckets: readonly PermissionSetTreeBucket[]): void => {
+    for (const bucket of buckets) {
+      add(scope, bucket.path, bucket.sets);
+      walk(scope, bucket.buckets);
+    }
+  };
+  for (const scope of browsableScopes(tree)) {
+    add(scope, "", scope.sets);
+    walk(scope, scope.buckets);
+  }
+  // The layer's own group first: what sits beside it is the likeliest pick.
+  return [...groups.filter((group) => group.near), ...groups.filter((group) => !group.near)];
+}
+
+/** The rows of a list, in the order they are drawn — what ↑ and ↓ step through. */
+export function setListRowsOf(groups: readonly SetListGroup[]): SetListRow[] {
+  return groups.flatMap((group) => group.rows);
+}
+
+/** The row ↑ (−1) or ↓ (+1) lands on, from `from` — the current row when nothing is picked yet, else the first. */
+export function setListStepOf(groups: readonly SetListGroup[], from: string | undefined, by: -1 | 1): string | undefined {
+  const rows = setListRowsOf(groups);
+  if (rows.length === 0) return undefined;
+  const at = rows.findIndex((row) => row.key === from);
+  const start = at >= 0 ? at : rows.findIndex((row) => row.current);
+  if (start < 0) return rows[by > 0 ? 0 : rows.length - 1]!.key;
+  return rows[Math.max(0, Math.min(rows.length - 1, start + by))]!.key;
+}
+
+/** One row of `⋯ n`'s panel: a layer, newest first, and whether the bar shows it or folds it away. */
+export interface PanelRow {
+  layer: LayerSegment;
+  bottom: boolean;
+  folded: boolean;
+}
+
+/** `⋯ n`'s panel (and the stack collapsed): EVERY layer, newest on top — moving one needs its neighbours in view. */
+export function panelRowsOf(layers: readonly LayerSegment[], bar: readonly StackSegment[]): PanelRow[] {
+  const drawn = new Set(bar.filter((segment) => segment.kind === "layer").map((segment) => segment.key));
+  return layers.map((layer, i) => ({ layer, bottom: i === 0, folded: !drawn.has(layer.key) })).reverse();
+}
+
+/** The panel's widths. */
+export const PANEL_WIDTHS = { list: 300, rows: 400, whole: 900, contents: 500 } as const;
+/** How tall the panel stands while contents are unfolded beside a list: as tall as the room over the bar leaves, 200 to 440. */
+export const UNFOLDED_HEIGHT = { min: 200, max: 440 } as const;
+
+export type PanelView = "list" | "rows" | "whole";
+
+/**
+ * How wide the panel's two columns are: the list's (or the rows', or the whole picture's), and the
+ * contents' beside it when unfolded — the contents giving way first, never under 320, when the window
+ * is narrow. A phone has no room beside: its contents take the list's place (`over`).
+ */
+export function panelColumnsOf(view: PanelView, unfolded: boolean, room: number, phone: boolean): { left: number; right: number; over: boolean } {
+  const left = Math.min(PANEL_WIDTHS[view], room);
+  if (!unfolded || view === "whole") return { left, right: 0, over: false };
+  if (phone || room - left < 320) return { left, right: 0, over: true };
+  return { left, right: Math.min(PANEL_WIDTHS.contents, room - left), over: false };
 }
 
 // --- pinning, and saving the stack ---------------------------------------------------------------

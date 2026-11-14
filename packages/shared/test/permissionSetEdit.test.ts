@@ -151,6 +151,10 @@ describe("adding an answer AT A PLACE, allow or deny (decision 0023 §2.8, §4.4
     expect(describeAddition({ "npm run build": { packages: "deny" }, git: "allow" })).toBe('"npm run build": { "packages": "deny" }, "git": "allow"');
   });
 
+  it("refuses `description`, which says what the file is for and is no subject", () => {
+    expect(() => addToPermissionSetText("{}", { description: "allow" })).toThrow(/not a subject/);
+  });
+
   it("refuses `icon`, which names the file's icon and is no subject", () => {
     expect(() => addToPermissionSetText("{}", { icon: "allow" })).toThrow(/not a subject/);
   });

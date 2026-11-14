@@ -25,6 +25,7 @@ import {
   MODE_WHEN_UNSET,
   OTHER_SUBJECT,
   isPermissionSetInstructionKey,
+  PERMISSION_SET_DESCRIPTION_KEY,
   PERMISSION_SET_ICON_KEY,
   PERMISSION_SET_LAYERS_KEY,
   PERMISSION_SET_REF_KEY,
@@ -273,8 +274,8 @@ export function setPermissionSetText(text: string, next: PermissionSetDecl, foll
     const key = keyOf(prop);
     const valueNode = prop.children![1]!;
     const replace = (value: string): string => out.slice(0, valueNode.offset) + value + out.slice(valueNode.offset + valueNode.length);
-    // The stack a file is built from, and its icon, are no lines: they stay as they are written.
-    if (key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY) continue;
+    // The stack a file is built from, its icon and its description are no lines: they stay as they are written.
+    if (key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY || key === PERMISSION_SET_DESCRIPTION_KEY) continue;
     if (key === PERMISSION_SET_REF_KEY) {
       if (follows === undefined) out = removeProperty(out, root, index);
       else if (valueNode.value !== follows) out = replace(JSON.stringify(follows));

@@ -12,6 +12,8 @@ export function MenuLayer({ onClose, children }: {
   onClose: () => void;
   /** The web layer's place in the stack (`MenuLayer.web.tsx`); a phone's `Modal` is always on top. */
   z?: number;
+  /** What a press outside goes through to, on web (`MenuLayer.web.tsx`); a phone's press outside closes. */
+  through?: string;
   children: ReactNode;
 }): JSX.Element {
   return (

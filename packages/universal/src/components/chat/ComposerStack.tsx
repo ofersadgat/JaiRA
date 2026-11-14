@@ -1,83 +1,104 @@
-import { useMemo, useState, type JSX, type ReactNode } from "react";
-import { View as RNView, useWindowDimensions } from "react-native";
-import { View } from "@tamagui/core";
+import { useEffect, useMemo, useRef, useState, type JSX, type ReactNode } from "react";
+import { View as RNView, TextInput, useWindowDimensions } from "react-native";
+import { View, isWeb } from "@tamagui/core";
 import type { PermissionSetTree, PermissionSetTreeRequest, PermissionSetTreeSet, ToolChoice, WritableLayer } from "@jaira/shared/browser";
 import { permissionSetIdAt } from "@jaira/shared/browser";
 import {
-  BROWSER_MODES,
-  STACK_BROWSER_MODE,
-  browserModeOf,
+  UNFOLDED_HEIGHT,
   collapsedWordsOf,
   contentsNoteOf,
   crumbsOf,
   childrenOf,
   ownSetOf,
+  panelColumnsOf,
+  panelRowsOf,
   referenceOfPick,
   runtimeMarkOf,
   segmentTitleOf,
   segmentWordsOf,
   setAtOf,
+  setListOf,
+  setListRowsOf,
+  setListStepOf,
   stackRowsOf,
   treeAtOf,
   treeRowsOf,
-  type BrowserMode,
   type CollapsedStack,
   type Crumb,
   type CrumbChoice,
   type LayerSegment,
+  type PanelRow,
+  type PanelView,
+  type SetListGroup,
+  type SetListRow,
   type StackPick,
   type StackSegment,
   type TreeAt,
   type TreeRow,
 } from "@jaira/ui/composerStack";
-import type { FloatRect } from "@jaira/ui/floatPlace";
+import { placeFloat, type FloatRect } from "@jaira/ui/floatPlace";
 import { KEEP_WHERE } from "@jaira/ui/composerCards";
 import { setIconGlyph } from "@jaira/ui/permissionSetWords";
 import type { Schema } from "@jaira/ui/schemaForm/types";
 import { useView } from "@jaira/ui/useView";
-import { NO_STACK, Press, Txt, edge } from "../../primitives";
+import { NO_STACK, Press, Txt, edge, font, placeholderColor } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
 import { useShellOrNull, type AppModel } from "../../app/shell";
 import { usePhone } from "../../app/phone";
+import { useCanHover } from "../../canHover";
 import { MenuLayer } from "../MenuLayer";
-import { Float } from "../floats/Float";
+import { useKeyboardInset } from "../floats/keyboard";
 import { SchemaForm } from "../form/SchemaForm";
 import { Icon, type IconName } from "../panel/Icon";
 import { PermissionSetCard } from "../settings/permissions/PermissionSetCard";
 import { SubMenu, useAnchorRect } from "./ComposerCards";
+import { arriveMotion, columnMotion, morphMotion, turnMotion } from "./stackMotion";
 
 /**
  * The composer's permission STACK (decision 0023 §4.1, design 6 of round 8): the Permissions chip as one
- * joined segment per layer, oldest to newest, and what each opens. What it says and every edit are
- * `composerStack.ts`'s; what it reads and writes, `composerStackHost.ts`'s. Render functions: the caller
- * places the bar and opens the cards.
+ * joined segment per layer, oldest to newest, and the PANEL each part of it opens (2026-11-14, round 3
+ * of the mockups). What it says and every edit are `composerStack.ts`'s; what it reads and writes,
+ * `composerStackHost.ts`'s. Render functions: the caller places the bar and opens the panel.
  *
  *   the bar          row, the segments 1 apart; a segment padding 3 9, app 11.5/12.5, --panel-2, --dim
  *                    (hovered --panel-3 and --text; open --accent 13% and --accent); the first rounded on
  *                    its left, the last on its right; the shield cap first, its icon 13 --tok-hint; the
  *                    bottom layer's icon 12 and its ⌄; the tools segment's run answers `· 3` in --accent
  *   collapsed        one segment, round both ends: the shield 13, the bottom layer's icon 12, `+n`
- *   a layer's card   above its segment, 7 apart, 480 wide (expanded: 860, at most the window less 32);
- *                    padding 0 0 2, 1px --line, radius 12, --panel, --lift
- *   its head         row, centred, gap 4, padding 8 9 2 (expanded: 8 9, a --panel-2 rule under it): the
- *                    file glyph (17.6 × 22, 1px, corners 3 8 3 3; --accent and its 10% wash when it is the
- *                    one shown), the crumbs › apart, ⤢ or ⤡ pushed right
- *   a crumb          row, gap 3, padding 2 7, radius 6, data 500 12/12 on 1.5, --dim, ⌄ 12 --dim; open, or
- *                    the one shown in the expanded browser, --accent 13% and --text
- *   the toggle       padding 3 7, 1px --line, radius 6, --panel, --dim app 11/12.5 (expanded: --accent 12%
- *                    and --accent, its edge --accent 50% into --line)
- *   the note         padding 0 9 6, app 10.5/12.5 --tok-hint
- *   the contents     the permission set card, read-only, padding 0 9
- *   the actions      row, wraps, gap 12, padding 7 9 8, a --panel-2 rule above, app 10.5/12.5 --accent;
+ *
+ * The panel — ONE float, above the segment pressed, 7 apart; 1px --line, radius 12, --panel, --lift.
+ * It never swaps one view for another: it widens, narrows, grows and slides (`stackMotion.web.ts`).
+ *
+ *   a layer          the sets it can be swapped for, 300 wide: a label (`Swap ask-first for`), a find
+ *                    box, the sets in groups — its own group first, `Beside it` — and the layer's
+ *                    actions under them. A pinned layer cannot be swapped: its list opens unfolded on
+ *                    its own contents, its rows only to look at.
+ *   +                the same list, `Lay on top`.
+ *   ⋯ n              a row per layer, newest on top, 400 wide: its name (pressed: the list, to swap it),
+ *                    `folded` where the bar folds it, later ↑, earlier ↓, pin, ×; `Lay a set on top…`
+ *                    and `Whole picture ⤢` under them. The stack collapsed opens this too.
+ *   the shield       the whole picture, 900 wide: this stack's layers and tools above the scopes' tree,
+ *                    beside what the one picked writes.
+ *   a row's ›        unfolds that set's contents out to the RIGHT, 500 wide, the list staying where it
+ *                    is; the › turns into ‹ while they are out. A phone has no room beside: its contents
+ *                    come over the list, `‹` to go back.
+ *
+ *   a list row       row, centred, gap 9, padding 5 8, radius 7, 4 in; icon 14 --dim (the layer's own:
+ *                    --accent, its row --accent 13%, a ✓); the id data 500 12, `in the stack` beside it;
+ *                    what it is for app 10.5 --tok-hint (a file that cannot be read: why, --warn); the ›
+ *                    22 square, shown under the pointer, on the layer's own row, on the row unfolded
+ *                    and on the row the keys are on — always, where nothing hovers
+ *   a group label    app 600 9.5 upper, --tok-hint, padding 8 12 3
+ *   the find box     row, gap 7, margin 6 8 4, padding 5 9, 1px --line, radius 8, --bg; app 12.5
+ *   the actions      row, wraps, gap 12, padding 7 9 8, a --panel-2 rule above, app 10.5 --accent;
  *                    `remove` --bad, pushed right
- *   the browser      a grid: the tree 300 wide, a --panel-2 rule on its right, 430 tall, scrolling; the
- *                    contents beside it, scrolling (a phone: the tree over the contents, 180 tall)
- *   a tree row       row, centred, gap 9, padding 6 8, radius 7, 14 in per level; chevron 14, icon 14
- *                    --dim, name app 500 12/12.5 (a bucket and a file in the data face 11.5); selected
- *                    --accent 13%; `in the stack` an --accent 13% tag
- *   the foot         row, gap 8, padding 7 9 9, a --panel-2 rule above: `open in Settings` --tok-hint
- *                    pushed left; Cancel bordered, the verb on --accent
+ *   the contents     a head (padding 8 9, a --panel-2 rule under it: the file glyph, the crumbs, ⤡),
+ *                    the set's card, read-only, scrolling; a foot with what may be done with THIS set
  */
+
+/** The bar drawn (not the ruler's copy), marked for the panel: a press on one of its segments goes through the panel's layer to it. */
+const STACK_BAR_MARK: Record<string, unknown> = isWeb ? { "data-stackbar": "" } : {};
+const STACK_SEGMENT = "[data-stackbar] [aria-expanded]";
 
 /** One row of the bar's look, measured in the composer's ruler. */
 export function StackBar({
@@ -102,7 +123,7 @@ export function StackBar({
     const more = collapsedWordsOf(collapsed);
     const lit = open !== undefined;
     return (
-      <View flexDirection="row" alignItems="center" flexShrink={0}>
+      <View flexDirection="row" alignItems="center" flexShrink={0} {...(ruler ? {} : STACK_BAR_MARK)}>
         <Segment t={t} first last on={lit} title={ruler ? undefined : collapsed.title} label={ruler ? undefined : "Permissions"} onPress={onLead}>
           {(hovered) => (
             <>
@@ -120,7 +141,7 @@ export function StackBar({
     );
   }
   return (
-    <View flexDirection="row" alignItems="center" flexShrink={0} {...(ruler ? {} : ({ role: "group", "aria-label": "Permissions" } as object))}>
+    <View flexDirection="row" alignItems="center" flexShrink={0} {...(ruler ? {} : ({ role: "group", "aria-label": "Permissions", ...STACK_BAR_MARK } as object))}>
       <Segment t={t} first last={false} on={open === "lead"} title={ruler ? undefined : "Permissions: everything the stack comes to"} label={ruler ? undefined : "Permissions"} onPress={onLead}>
         {() => <Icon name="shield" size={13} color={String(t.v(open === "lead" ? "accent" : "tok-hint"))} />}
       </Segment>
@@ -186,31 +207,768 @@ function Segment({ t, first, last, on, title, label, onPress, children }: { t: T
   );
 }
 
-// --- the cards -----------------------------------------------------------------------------------
+// --- the panel ------------------------------------------------------------------------------------
 
-/** A stack card's float: above its segment, on --panel with the lifted shadow. */
-function StackFloat({ anchor, width, onClose, children }: { anchor: FloatRect; width: number; onClose: () => void; children: ReactNode }): JSX.Element {
+/**
+ * The float every view of the panel is drawn in: placed above its anchor by `floatPlace.ts`, at the
+ * width it is handed and the height its contents come to, and — on web — easing from each to the next
+ * (`morphMotion`), so a view becoming another is the same box changing shape. Its height is measured
+ * off what is in it; until it is known the box is drawn where it will not be seen.
+ */
+function MorphFloat({ anchor, width, onClose, children }: { anchor: FloatRect; width: number; onClose: () => void; children: ReactNode }): JSX.Element {
   const t = useTokens();
-  const win = useWindowDimensions();
+  const whole = useWindowDimensions();
+  const covered = useKeyboardInset();
+  const win = covered > 0 ? { width: whole.width, height: whole.height - covered } : whole;
+  const [natural, setNatural] = useState<number | null>(null);
+  // Drawn once where it lands before anything eases: nothing comes in from where it never was.
+  const [settled, setSettled] = useState(false);
+  const height = natural === null ? null : natural + 2;
+  const placed = height === null ? null : placeFloat(anchor, { width, height }, win, "above", "start", 7);
+  const shown = placed !== null;
+  useEffect(() => {
+    if (!shown || settled) return;
+    const timer = setTimeout(() => setSettled(true), 200);
+    return () => clearTimeout(timer);
+  }, [shown, settled]);
   return (
-    <MenuLayer onClose={onClose}>
-      <Float
-        anchor={anchor}
-        side="above"
-        align="start"
-        offset={7}
-        width={Math.min(width, win.width - 32)}
-        paddingBottom={2}
+    // A press on another segment of the bar goes through to it: the same float is carried there.
+    <MenuLayer onClose={onClose} through={STACK_SEGMENT}>
+      <View
+        position="absolute"
+        left={placed?.left ?? 0}
+        top={placed?.top ?? 0}
+        width={width}
+        {...(height !== null ? { height: placed?.maxHeight ?? height } : {})}
+        {...(placed === null ? { opacity: 0, pointerEvents: "none" } : {})}
+        {...((placed?.maxHeight !== undefined ? (isWeb ? { overflowY: "auto" } : {}) : {}) as object)}
+        overflow={placed?.maxHeight !== undefined && isWeb ? undefined : "hidden"}
         borderWidth={1}
         borderStyle="solid"
         borderColor={t.v("line") as never}
         borderRadius={12}
         backgroundColor={t.v("panel") as never}
         {...({ boxShadow: String(t.v("lift")) } as object)}
+        {...(placed !== null ? morphMotion(settled ? "on" : "opening") : {})}
       >
-        {children}
-      </Float>
+        <View flexShrink={0} onLayout={(e: { nativeEvent: { layout: { height: number } } }) => setNatural((was) => (was !== null && Math.abs(was - e.nativeEvent.layout.height) < 0.5 ? was : e.nativeEvent.layout.height))}>
+          {children}
+        </View>
+      </View>
     </MenuLayer>
+  );
+}
+
+/** What opened the panel: a layer's segment, `+`, `⋯ n` (or the stack collapsed), or the shield. */
+export type StackDoor = { kind: "layer"; layer: LayerSegment } | { kind: "add" } | { kind: "rows" } | { kind: "whole" };
+
+/** A layer as the panel keeps hold of it: by what it names, so it is found again as the stack moves. */
+interface LayerHold {
+  reference: string | undefined;
+  role: LayerSegment["role"];
+  id: string;
+}
+
+const holdOf = (layer: LayerSegment): LayerHold => ({ reference: layer.reference, role: layer.role, id: layer.id });
+const liveOf = (layers: readonly LayerSegment[], hold: LayerHold): LayerSegment | undefined =>
+  layers.find((layer) => layer.reference === hold.reference && layer.role === hold.role) ?? layers.find((layer) => layer.id === hold.id && layer.role === hold.role);
+/** A rows panel's row, by what it names — its key moves with its place. */
+const rowKeyOf = (layer: LayerSegment): string => `${layer.role}:${layer.reference ?? layer.id}`;
+/** What `shown` is for a list unfolded on the layer's OWN set before its row is known. */
+const SELF = "self";
+
+/** Where the panel is. */
+interface PanelNav {
+  /** The door it was opened by: another door pressed starts again. */
+  door: string;
+  view: PanelView;
+  /** The layer a list swaps. Absent: `+`'s list. */
+  layer?: LayerHold;
+  /** Reached from the rows: `‹` goes back to them. */
+  fromRows: boolean;
+  /** What is unfolded: a list row's key, {@link SELF}, or a rows panel's row ({@link rowKeyOf}). */
+  shown?: string;
+  /** The list row the keys are on. */
+  picked?: string;
+  query: string;
+}
+
+function navOf(door: StackDoor, key: string, actionsOf: (layer: LayerSegment) => LayerActions): PanelNav {
+  switch (door.kind) {
+    case "layer":
+      // A layer that cannot be swapped opens on what it writes: that is what there is to see.
+      return { door: key, view: "list", layer: holdOf(door.layer), fromRows: false, ...(actionsOf(door.layer).onSwap === undefined ? { shown: SELF } : {}), query: "" };
+    case "add":
+      return { door: key, view: "list", fromRows: false, query: "" };
+    case "rows":
+      return { door: key, view: "rows", fromRows: false, query: "" };
+    case "whole":
+      return { door: key, view: "whole", fromRows: false, query: "" };
+  }
+}
+
+/** The set unfolded beside the list: what it is named by, and its file. */
+interface Shown {
+  key: string;
+  id: string;
+  icon: string;
+  reference: string | undefined;
+  set: PermissionSetTreeSet | undefined;
+  /** It is the layer's own set. */
+  own: boolean;
+  /** The rows panel's layer it is, there. */
+  layer?: LayerSegment;
+}
+
+const setOfLayer = (tree: PermissionSetTree | undefined, layer: LayerSegment): PermissionSetTreeSet | undefined => (tree !== undefined ? setAtOf(tree, treeAtOf(tree, layer.reference, layer.id)) : undefined);
+
+/**
+ * The stack's panel (2026-11-14): what a layer, `+`, `⋯ n` and the shield open, in one float that
+ * morphs between them. `door` says which was pressed and `doorKey` which segment, so pressing another
+ * while it is open carries the float there.
+ */
+export function StackPanel({
+  anchor,
+  door,
+  doorKey,
+  host,
+  layers,
+  bar,
+  actionsOf,
+  onAdd,
+  tools,
+  runtime,
+  toolsBody,
+  onClose,
+}: {
+  anchor: FloatRect;
+  door: StackDoor;
+  doorKey: string;
+  host: StackCardHost;
+  /** The stack's layers, oldest first, as they stand now. */
+  layers: readonly LayerSegment[];
+  /** The bar as it is drawn — which layers it folds away. */
+  bar: readonly StackSegment[];
+  actionsOf: (layer: LayerSegment) => LayerActions;
+  onAdd: (reference: string) => void;
+  /** The tools offered, and the answers this run gave — what the whole picture's `tools` row says. */
+  tools: number;
+  runtime: number;
+  /** The Tools card's body, drawn when the whole picture's `tools` is picked. */
+  toolsBody: ReactNode;
+  onClose: () => void;
+}): JSX.Element {
+  const t = useTokens();
+  const phone = usePhone();
+  const win = useWindowDimensions();
+  const tree = useView("permissionSets:tree", host.treeRequest).value;
+  const [kept, setNav] = useState<PanelNav>(() => navOf(door, doorKey, actionsOf));
+  // Another door pressed while open: the same float, starting again from it.
+  const nav = kept.door === doorKey ? kept : navOf(door, doorKey, actionsOf);
+  if (nav !== kept) setNav(nav);
+  const update = (patch: Partial<PanelNav>): void => setNav((was) => ({ ...(was.door === doorKey ? was : nav), ...patch }));
+
+  const layer = nav.layer !== undefined ? liveOf(layers, nav.layer) : undefined;
+  const actions = layer !== undefined ? actionsOf(layer) : undefined;
+  const adding = nav.view === "list" && nav.layer === undefined;
+  const still = nav.view === "list" && !adding && actions?.onSwap === undefined;
+  const groups = useMemo(
+    () => (tree !== undefined && nav.view === "list" ? setListOf(tree, layer !== undefined && !adding ? { reference: layer.reference, id: layer.id } : undefined, nav.query) : []),
+    [tree, nav.view, adding, layer?.reference, layer?.id, nav.query],
+  );
+  const rows = setListRowsOf(groups);
+  const panelRows = nav.view === "rows" ? panelRowsOf(layers, bar) : [];
+
+  // What is unfolded beside the list, as a set to draw.
+  const shown: Shown | undefined = (() => {
+    if (nav.shown === undefined) return undefined;
+    if (nav.view === "rows") {
+      const row = panelRows.find((each) => rowKeyOf(each.layer) === nav.shown);
+      return row !== undefined ? { key: nav.shown, id: row.layer.id, icon: row.layer.icon, reference: row.layer.reference, set: setOfLayer(tree, row.layer), own: true, layer: row.layer } : undefined;
+    }
+    if (nav.view !== "list") return undefined;
+    const row = nav.shown === SELF ? rows.find((each) => each.current) : rows.find((each) => each.key === nav.shown);
+    if (row !== undefined) return { key: row.key, id: row.id, icon: row.icon, reference: row.set.explicit ?? row.reference, set: row.set, own: row.current };
+    if (nav.shown === SELF && layer !== undefined) return { key: SELF, id: layer.id, icon: layer.icon, reference: layer.reference, set: setOfLayer(tree, layer), own: true };
+    return undefined;
+  })();
+
+  const unfolded = shown !== undefined;
+  const room = Math.max(280, win.width - 32);
+  const cols = panelColumnsOf(nav.view, unfolded, room, phone);
+  const unfoldedHeight = Math.max(UNFOLDED_HEIGHT.min, Math.min(UNFOLDED_HEIGHT.max, anchor.top - 7 - 16));
+  // The rows a list shows before it scrolls: as many as the room over the bar leaves for them.
+  const listHeight = Math.max(160, Math.min(380, anchor.top - 7 - 16 - 170));
+
+  // Folding away, the contents stay drawn while their column narrows to nothing.
+  const lastShown = useRef<Shown | undefined>(undefined);
+  if (shown !== undefined) lastShown.current = shown;
+  if (nav.view === "whole") lastShown.current = undefined;
+  const drawnRight = shown ?? lastShown.current;
+  // Each time the contents come out they come in from behind the list; another set's, while out, fades across.
+  const wasUnfolded = useRef(false);
+  const outings = useRef(0);
+  if (unfolded && !wasUnfolded.current) outings.current += 1;
+  useEffect(() => {
+    wasUnfolded.current = unfolded;
+  });
+  const leftKey = `${nav.view}:${nav.layer?.reference ?? nav.layer?.id ?? ""}:${nav.fromRows ? "rows" : ""}`;
+  const firstLeft = useRef(leftKey);
+  const moved = useRef(false);
+  if (leftKey !== firstLeft.current) moved.current = true;
+
+  const close = onClose;
+  const choose = (row: SetListRow): void => {
+    if (row.reference === undefined) return;
+    if (adding) {
+      onAdd(row.reference);
+      close();
+      return;
+    }
+    if (still || actions?.onSwap === undefined) return;
+    if (!row.current) actions.onSwap(row.reference);
+    close();
+  };
+  const unfold = (key: string | undefined): void => update({ shown: key });
+  const backToRows = (): void => update({ view: "rows", fromRows: false, shown: undefined, picked: undefined, query: "" });
+
+  // The keys, on web: ↑ ↓ pick a row, → unfolds it, ← folds it away (or goes back to the rows), ↵ picks.
+  const keys = useRef<(e: KeyboardEvent) => void>(() => undefined);
+  keys.current = (e: KeyboardEvent): void => {
+    if (nav.view !== "list") return;
+    const typing = nav.query !== "" && nav.picked === undefined;
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      const next = setListStepOf(groups, nav.picked, e.key === "ArrowDown" ? 1 : -1);
+      if (next === undefined) return;
+      e.preventDefault();
+      update({ picked: next, ...(unfolded ? { shown: next } : {}) });
+    } else if (e.key === "ArrowRight" && !typing) {
+      const target = nav.picked ?? rows.find((row) => row.current)?.key ?? rows[0]?.key;
+      if (target === undefined) return;
+      e.preventDefault();
+      unfold(target);
+    } else if (e.key === "ArrowLeft" && !typing) {
+      if (unfolded) {
+        e.preventDefault();
+        unfold(undefined);
+      } else if (nav.fromRows) {
+        e.preventDefault();
+        backToRows();
+      }
+    } else if (e.key === "Enter") {
+      const row = rows.find((each) => each.key === nav.picked) ?? (rows.length === 1 ? rows[0] : undefined);
+      if (row === undefined) return;
+      e.preventDefault();
+      choose(row);
+    }
+  };
+  useEffect(() => {
+    if (!isWeb || typeof window === "undefined") return;
+    const listen = (e: KeyboardEvent): void => keys.current(e);
+    window.addEventListener("keydown", listen, true);
+    return () => window.removeEventListener("keydown", listen, true);
+  }, []);
+
+  const contentsFoot = (at: Shown): ReactNode => {
+    if (adding) {
+      return (
+        <ContentsFoot note={at.set?.inStack === true ? "Already in the stack." : "Not in the stack."}>
+          <VerbButton verb="Lay it on top" disabled={at.reference === undefined} onPress={() => (at.reference !== undefined ? (onAdd(at.reference), close()) : undefined)} />
+        </ContentsFoot>
+      );
+    }
+    const owner = at.layer ?? layer;
+    const ownerActions = owner !== undefined ? actionsOf(owner) : undefined;
+    if (at.own || nav.view === "rows") {
+      return (
+        <ContentsFoot note={at.layer !== undefined ? undefined : "This is the layer."}>
+          {ownerActions?.onEdit !== undefined ? <ActionWord word="edit a copy" title="Open it in Settings → Tools; its first change writes this layer's copy" onPress={() => (ownerActions.onEdit?.(), close())} /> : null}
+        </ContentsFoot>
+      );
+    }
+    return (
+      <ContentsFoot note="Previewing — the stack is unchanged.">
+        {!still && ownerActions?.onSwap !== undefined && owner !== undefined ? (
+          <VerbButton verb={`Swap ${owner.id} for this`} disabled={at.reference === undefined} onPress={() => (at.reference !== undefined ? (ownerActions.onSwap?.(at.reference), close()) : undefined)} />
+        ) : null}
+      </ContentsFoot>
+    );
+  };
+
+  const contents = (at: Shown, over: boolean): JSX.Element => (
+    <ContentsPane host={host} tree={tree} shown={at} over={over} onFold={() => unfold(undefined)} foot={contentsFoot(at)} />
+  );
+
+  let left: ReactNode;
+  if (cols.over && shown !== undefined) {
+    left = contents(shown, true);
+  } else if (nav.view === "list") {
+    left = (
+      <SetListView
+        host={host}
+        loaded={tree !== undefined}
+        groups={groups}
+        query={nav.query}
+        onQuery={(query) => update({ query, picked: undefined })}
+        label={adding ? { words: "Lay on top" } : still ? { words: "is pinned to this project · unpin it to swap", id: layer?.id } : { words: "Swap", id: layer?.id, after: "for" }}
+        {...(nav.fromRows ? { onBack: backToRows } : {})}
+        still={still}
+        picked={nav.picked}
+        shown={shown?.key}
+        listHeight={listHeight}
+        onChoose={choose}
+        onUnfold={(key) => unfold(nav.shown === key || shown?.key === key ? undefined : key)}
+        foot={
+          adding ? (
+            <BrowserLinks host={host} onClose={close} />
+          ) : actions !== undefined ? (
+            <LayerActionsRow actions={actions} onClose={close} />
+          ) : null
+        }
+      />
+    );
+  } else if (nav.view === "rows") {
+    left = (
+      <StackRowsView
+        rows={panelRows}
+        tree={tree}
+        shown={nav.shown}
+        actionsOf={actionsOf}
+        onSwap={(row) => update({ view: "list", layer: holdOf(row), fromRows: true, shown: undefined, picked: undefined, query: "" })}
+        onUnfold={(row) => unfold(nav.shown === rowKeyOf(row) ? undefined : rowKeyOf(row))}
+        onRemoved={(row) => (nav.shown === rowKeyOf(row) ? unfold(undefined) : undefined)}
+        onAdd={() => update({ view: "list", layer: undefined, fromRows: true, shown: undefined, picked: undefined, query: "" })}
+        onWhole={() => update({ view: "whole", shown: undefined })}
+        host={host}
+        onClose={close}
+      />
+    );
+  } else {
+    left = (
+      <WholePicture
+        host={host}
+        tree={tree}
+        layers={layers}
+        tools={tools}
+        runtime={runtime}
+        actionsOf={actionsOf}
+        toolsBody={toolsBody}
+        onAdd={onAdd}
+        paneHeight={Math.max(240, Math.min(480, anchor.top - 7 - 110))}
+        onClose={close}
+      />
+    );
+  }
+
+  return (
+    <MorphFloat anchor={anchor} width={cols.left + cols.right + 2} onClose={close}>
+      {/* Unfolded, as tall as the room over the bar leaves: the contents beside a short list still have room. */}
+      <View flexDirection="row" alignItems="stretch" minHeight={unfolded && !cols.over ? unfoldedHeight : 0}>
+        <View width={cols.left} flexShrink={0} overflow="hidden" {...columnMotion()}>
+          <View key={cols.over && shown !== undefined ? `over:${shown.key}` : leftKey} width={cols.left} flexDirection="column" {...(moved.current ? arriveMotion("fade") : {})}>
+            {left}
+          </View>
+        </View>
+        <View width={cols.right} flexShrink={0} overflow="hidden" position="relative" {...columnMotion()} {...(cols.right > 0 ? (edge(t, { left: 1 }, "panel-2") as object) : {})}>
+          {drawnRight !== undefined && !cols.over ? (
+            <View key={`${outings.current}:${drawnRight.key}`} position="absolute" top={0} bottom={0} left={0} width={cols.right > 0 ? cols.right : Math.min(500, room - cols.left)} flexDirection="column" {...arriveMotion(wasUnfolded.current && unfolded ? "fade" : "unfold")}>
+              {contents(drawnRight, false)}
+            </View>
+          ) : null}
+        </View>
+      </View>
+    </MorphFloat>
+  );
+}
+
+/** A list's head: what the list is for, and `‹` back to the rows it was reached from. */
+function ListLabel({ words, id, after, onBack }: { words: string; id?: string | undefined; after?: string; onBack?: (() => void) | undefined }): JSX.Element {
+  const t = useTokens();
+  const upper = { voice: "app", scale: 9.5 / 12.5, weight: 600, upper: true, ls: 0.06, color: "tok-hint" } as const;
+  return (
+    <View flexDirection="row" alignItems="center" gap={4} paddingTop={onBack !== undefined ? 5 : 9} paddingHorizontal={onBack !== undefined ? 6 : 12} paddingBottom={2} flexWrap="wrap">
+      {onBack !== undefined ? (
+        <Press onPress={onBack} title="Back to the layers" label="Back to the layers" width={22} height={22} alignItems="center" justifyContent="center" borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-3") : "transparent" })}>
+          <Icon name="back" size={13} color={String(t.v("dim"))} />
+        </Press>
+      ) : null}
+      {id !== undefined && after !== undefined ? <Txt spec={upper}>{words}</Txt> : null}
+      {id !== undefined ? (
+        <Txt spec={{ voice: "data", scale: 10.5 / 12, weight: 500, color: "dim" }} numberOfLines={1}>
+          {id}
+        </Txt>
+      ) : null}
+      <Txt spec={upper}>{id !== undefined && after !== undefined ? after : words}</Txt>
+    </View>
+  );
+}
+
+/** The ›: unfolds a set's contents to the right, and — turned half round, ‹ — folds them away. */
+function UnfoldButton({ on, visible, label, onPress }: { on: boolean; visible: boolean; label: string; onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press
+      onPress={onPress}
+      title={on ? "Fold its contents away" : label}
+      label={on ? "Fold its contents away" : label}
+      {...({ "aria-expanded": on } as object)}
+      width={22}
+      height={22}
+      flexShrink={0}
+      alignItems="center"
+      justifyContent="center"
+      borderRadius={6}
+      opacity={visible ? 1 : 0}
+      box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-3") : "transparent" })}
+    >
+      {({ hovered }) => (
+        <RNView style={{ transform: [{ rotate: on ? "0deg" : "180deg" }] }} {...(turnMotion() as object)}>
+          <Icon name="back" size={13} color={String(t.v(on ? "accent" : hovered ? "text" : "tok-hint"))} />
+        </RNView>
+      )}
+    </Press>
+  );
+}
+
+/** The sets a layer can be swapped for, or laid on top: a find box, the groups, and what is under them. */
+function SetListView({
+  host,
+  loaded,
+  groups,
+  query,
+  onQuery,
+  label,
+  onBack,
+  still,
+  picked,
+  shown,
+  listHeight,
+  onChoose,
+  onUnfold,
+  foot,
+}: {
+  host: StackCardHost;
+  loaded: boolean;
+  groups: readonly SetListGroup[];
+  query: string;
+  onQuery: (query: string) => void;
+  label: { words: string; id?: string | undefined; after?: string };
+  onBack?: (() => void) | undefined;
+  /** Rows to look at, not to pick: a pinned layer's. */
+  still: boolean;
+  picked: string | undefined;
+  shown: string | undefined;
+  listHeight: number;
+  onChoose: (row: SetListRow) => void;
+  onUnfold: (key: string) => void;
+  foot: ReactNode;
+}): JSX.Element {
+  const t = useTokens();
+  const hover = useCanHover();
+  const phone = usePhone();
+  return (
+    <View flexDirection="column">
+      <ListLabel {...label} onBack={onBack} />
+      <View flexDirection="row" alignItems="center" gap={7} marginTop={6} marginHorizontal={8} marginBottom={4} paddingVertical={5} paddingHorizontal={9} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} backgroundColor={t.v("bg") as never}>
+        <Icon name="search" size={13} color={String(t.v("tok-hint"))} />
+        <TextInput
+          value={query}
+          onChangeText={onQuery}
+          placeholder="Find a set"
+          placeholderTextColor={placeholderColor("light")}
+          accessibilityLabel="Find a set"
+          spellCheck={false}
+          autoFocus={!phone}
+          style={{ ...(font(t, { voice: "app", scale: 12.5 / 12.5, color: "text" }) as object), flex: 1, minWidth: 0, padding: 0, borderWidth: 0, backgroundColor: "transparent", ...(isWeb ? { outlineStyle: "none" } : {}) } as never}
+        />
+      </View>
+      <View maxHeight={listHeight} paddingBottom={4} {...({ overflowY: "auto" } as object)}>
+        {!loaded ? (
+          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} paddingVertical={8} paddingHorizontal={12}>
+            {host.treeRequest === null ? "No permission sets to browse here." : "…"}
+          </Txt>
+        ) : groups.length === 0 ? (
+          <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} paddingVertical={8} paddingHorizontal={12}>
+            {query !== "" ? `No set matches “${query}”.` : "No permission sets here."}
+          </Txt>
+        ) : (
+          groups.map((group) => (
+            <View key={group.key} flexDirection="column">
+              <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 600, upper: true, ls: 0.06, color: "tok-hint" }} paddingTop={8} paddingHorizontal={12} paddingBottom={3}>
+                {group.near ? `Beside it · ${group.label}` : group.label}
+              </Txt>
+              {group.rows.map((row) => {
+                const out = row.key === shown;
+                const keyed = row.key === picked;
+                return (
+                  <Press
+                    key={row.key}
+                    {...(still ? {} : { onPress: () => onChoose(row) })}
+                    {...(still ? { focusable: false, cursor: "default" } : {})}
+                    title={still ? row.id : row.current ? `${row.id} — the layer as it is` : `Use ${row.id}`}
+                    flexDirection="row"
+                    alignItems="center"
+                    gap={9}
+                    paddingVertical={5}
+                    paddingLeft={8}
+                    paddingRight={5}
+                    marginHorizontal={4}
+                    borderRadius={7}
+                    {...(keyed ? { borderWidth: 1, borderStyle: "solid", borderColor: t.mix(t.v("accent"), 45, "transparent") } : { borderWidth: 1, borderStyle: "solid", borderColor: "transparent" })}
+                    box={({ hovered }) => ({
+                      backgroundColor: row.current ? t.mix(t.v("accent"), 13, "transparent") : out ? t.mix(t.v("accent"), 8, "transparent") : hovered && !still ? t.mix(t.v("text"), 6, "transparent") : "transparent",
+                    })}
+                  >
+                    {({ hovered }) => (
+                      <>
+                        <Icon name={setIconGlyph(row.icon)} size={14} color={String(t.v(row.current ? "accent" : "dim"))} />
+                        <View flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                          <View flexDirection="row" alignItems="center" gap={6} minWidth={0}>
+                            <Txt spec={{ voice: "data", scale: 12 / 12, weight: 500, lineHeight: 1.35, color: still && !row.current ? "dim" : "text" }} numberOfLines={1} flexShrink={1}>
+                              {row.id}
+                            </Txt>
+                            {row.inStack && !row.current ? <StackTag /> : null}
+                          </View>
+                          <Txt spec={{ voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: row.problem !== undefined ? "warn" : "tok-hint" }} numberOfLines={1}>
+                            {row.problem ?? row.hint}
+                          </Txt>
+                        </View>
+                        {row.current ? <Icon name="check" size={13} color={String(t.v("accent"))} /> : null}
+                        <UnfoldButton on={out} visible={!hover || hovered || row.current || out || keyed} label={`What ${row.id} writes`} onPress={() => onUnfold(row.key)} />
+                      </>
+                    )}
+                  </Press>
+                );
+              })}
+            </View>
+          ))
+        )}
+      </View>
+      {hover && isWeb ? (
+        <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "tok-hint" }} paddingHorizontal={12} paddingBottom={6}>
+          ↑ ↓ pick · → contents · ↵ {still ? "—" : "use"}
+        </Txt>
+      ) : null}
+      {foot}
+    </View>
+  );
+}
+
+/** A layer's own actions, under its list: earlier, later, pin, edit a copy, remove. */
+function LayerActionsRow({ actions, onClose }: { actions: LayerActions; onClose: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={12} paddingTop={7} paddingHorizontal={9} paddingBottom={8} {...(edgeTop(t) as object)}>
+      {actions.onMove !== undefined ? (
+        <>
+          <ActionWord word="‹ earlier" title="Move this layer one earlier — under the one before it" disabled={!actions.canEarlier} onPress={() => actions.onMove?.(-1)} />
+          <ActionWord word="later ›" title="Move this layer one later — over the one after it" disabled={!actions.canLater} onPress={() => actions.onMove?.(1)} />
+        </>
+      ) : null}
+      {actions.onPin !== undefined ? (
+        <ActionWord
+          word={actions.pinned ? "unpin from this project" : "pin to this project"}
+          title={actions.pinned ? "Take it off this project's standing layers" : "Keep it in this project's stack for every conversation: a standing layer, in settings"}
+          onPress={() => void Promise.resolve(actions.onPin?.()).then(onClose)}
+        />
+      ) : null}
+      {actions.onEdit !== undefined ? <ActionWord word="edit a copy" title="Open it in Settings → Tools; its first change writes this layer's copy" onPress={() => (actions.onEdit?.(), onClose())} /> : null}
+      {actions.onRemove !== undefined ? <ActionWord word="remove" bad title="Take this layer out of the stack" onPress={() => (actions.onRemove?.(), onClose())} /> : null}
+    </View>
+  );
+}
+
+/** `+`'s foot: Settings, where every set is edited. */
+function BrowserLinks({ host, onClose }: { host: StackCardHost; onClose: () => void }): JSX.Element {
+  const t = useTokens();
+  const app = useShellOrNull();
+  return (
+    <View flexDirection="row" alignItems="center" justifyContent="flex-end" paddingTop={7} paddingHorizontal={9} paddingBottom={8} {...(edgeTop(t) as object)}>
+      {app !== null ? <ActionWord word="open in Settings" title="Settings → Tools, where every permission set is edited" onPress={() => (openSettingsTools(app, host.project), onClose())} /> : null}
+    </View>
+  );
+}
+
+/** A small grey tag: `folded`, `pinned`. */
+function GreyTag({ children }: { children: string }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Txt spec={{ voice: "app", scale: 10 / 12.5, weight: 600, lineHeight: 1.5, color: "dim" }} flexShrink={0} paddingHorizontal={7} borderRadius={999} backgroundColor={t.v("panel-2") as never} numberOfLines={1}>
+      {children}
+    </Txt>
+  );
+}
+
+/** One of a row's small buttons: an icon on nothing, --panel-3 under the pointer. */
+function RowButton({ icon, turn, title, bad = false, disabled = false, onPress }: { icon: IconName; turn?: number; title: string; bad?: boolean; disabled?: boolean; onPress: () => void }): JSX.Element {
+  const t = useTokens();
+  return (
+    <Press onPress={onPress} disabled={disabled} title={title} label={title} width={22} height={22} flexShrink={0} alignItems="center" justifyContent="center" borderRadius={6} opacity={disabled ? 0.32 : 1} box={({ hovered }) => ({ backgroundColor: hovered && !disabled ? t.v("panel-3") : "transparent" })}>
+      {({ hovered }) => <Icon name={icon} size={13} color={String(t.v(hovered && !disabled ? (bad ? "bad" : "text") : "tok-hint"))} {...(turn !== undefined ? { box: { transform: [{ rotate: `${turn}deg` }] } } : {})} />}
+    </Press>
+  );
+}
+
+/** `⋯ n`'s panel: a row per layer, newest on top, each with what may be done to it. */
+function StackRowsView({
+  rows,
+  tree,
+  shown,
+  actionsOf,
+  onSwap,
+  onUnfold,
+  onRemoved,
+  onAdd,
+  onWhole,
+  host,
+  onClose,
+}: {
+  rows: readonly PanelRow[];
+  tree: PermissionSetTree | undefined;
+  shown: string | undefined;
+  actionsOf: (layer: LayerSegment) => LayerActions;
+  onSwap: (layer: LayerSegment) => void;
+  onUnfold: (layer: LayerSegment) => void;
+  onRemoved: (layer: LayerSegment) => void;
+  onAdd: () => void;
+  onWhole: () => void;
+  host: StackCardHost;
+  onClose: () => void;
+}): JSX.Element {
+  const t = useTokens();
+  const app = useShellOrNull();
+  return (
+    <View flexDirection="column">
+      <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 600, upper: true, ls: 0.06, color: "tok-hint" }} paddingTop={9} paddingHorizontal={12} paddingBottom={4}>
+        The stack · newest on top
+      </Txt>
+      {rows.map(({ layer, bottom, folded }) => {
+        const actions = actionsOf(layer);
+        const out = shown === rowKeyOf(layer);
+        const standing = layer.role === "standing";
+        const hint = layer.problem ?? [bottom ? "bottom" : undefined, standing ? "pinned to this project" : layer.scope, setOfLayer(tree, layer)?.description ?? `${layer.lines} ${layer.lines === 1 ? "line" : "lines"}`].filter((each) => each !== undefined).join(" · ");
+        return (
+          <View key={layer.key} flexDirection="row" alignItems="center" gap={9} paddingVertical={5} paddingLeft={8} paddingRight={5} marginHorizontal={4} borderRadius={7} backgroundColor={(out ? t.mix(t.v("accent"), 8, "transparent") : "transparent") as never}>
+            <Icon name={layer.problem !== undefined ? "alert" : setIconGlyph(layer.icon)} size={14} color={String(t.v(layer.problem !== undefined ? "warn" : "dim"))} />
+            <View flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+              <View flexDirection="row" alignItems="center" gap={6} minWidth={0}>
+                {actions.onSwap !== undefined ? (
+                  <Press onPress={() => onSwap(layer)} title={`Swap ${layer.id} for another set`} flexDirection="row" alignItems="center" gap={3} paddingHorizontal={3} marginLeft={-3} borderRadius={5} flexShrink={1} minWidth={0} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-3") : "transparent" })}>
+                    <Txt spec={{ voice: "data", scale: 12 / 12, weight: 500, lineHeight: 1.35, color: layer.problem !== undefined ? "warn" : "text" }} numberOfLines={1} flexShrink={1}>
+                      {layer.id}
+                    </Txt>
+                    <Icon name="chevron" size={10} color={String(t.v("tok-hint"))} />
+                  </Press>
+                ) : (
+                  <Txt spec={{ voice: "data", scale: 12 / 12, weight: 500, lineHeight: 1.35, color: layer.problem !== undefined ? "warn" : "text" }} numberOfLines={1} flexShrink={1}>
+                    {layer.id}
+                  </Txt>
+                )}
+                {folded ? <GreyTag>folded</GreyTag> : null}
+              </View>
+              <Txt spec={{ voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: layer.problem !== undefined ? "warn" : "tok-hint" }} numberOfLines={1}>
+                {hint}
+              </Txt>
+            </View>
+            {standing ? <GreyTag>pinned</GreyTag> : null}
+            {actions.onMove !== undefined ? (
+              <>
+                <RowButton icon="arrow" turn={-90} title="Later — over the one after it" disabled={!actions.canLater} onPress={() => actions.onMove?.(1)} />
+                <RowButton icon="arrow" turn={90} title="Earlier — under the one before it" disabled={!actions.canEarlier} onPress={() => actions.onMove?.(-1)} />
+              </>
+            ) : null}
+            {actions.onPin !== undefined ? <RowButton icon="pin" title={actions.pinned ? "Unpin from this project" : "Pin to this project"} onPress={() => void actions.onPin?.()} /> : null}
+            {actions.onRemove !== undefined ? (
+              <RowButton
+                icon="cross"
+                bad
+                title="Take this layer out of the stack"
+                onPress={() => {
+                  onRemoved(layer);
+                  actions.onRemove?.();
+                }}
+              />
+            ) : null}
+            <UnfoldButton on={out} visible label={`What ${layer.id} writes`} onPress={() => onUnfold(layer)} />
+          </View>
+        );
+      })}
+      <Press onPress={onAdd} title="Lay a permission set on top" flexDirection="row" alignItems="center" gap={7} marginTop={6} marginHorizontal={8} marginBottom={6} paddingVertical={5} paddingHorizontal={9} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={8} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-2") : t.v("bg") })}>
+        <Icon name="search" size={13} color={String(t.v("tok-hint"))} />
+        <Txt spec={{ voice: "app", scale: 12.5 / 12.5, color: "tok-hint" }}>Lay a set on top…</Txt>
+      </Press>
+      <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={12} paddingTop={7} paddingHorizontal={9} paddingBottom={8} {...(edgeTop(t) as object)}>
+        <ActionWord word="Whole picture ⤢" title="Every layer and what the stack comes to, beside the scopes" onPress={onWhole} />
+        {app !== null ? (
+          <View marginLeft="auto">
+            <ActionWord word="open in Settings" title="Settings → Tools, where every permission set is edited" onPress={() => (openSettingsTools(app, host.project), onClose())} />
+          </View>
+        ) : null}
+      </View>
+    </View>
+  );
+}
+
+/** The contents unfolded: the set's path as crumbs, what its file writes, and what may be done with it. */
+function ContentsPane({ host, tree, shown, over, onFold, foot }: { host: StackCardHost; tree: PermissionSetTree | undefined; shown: Shown; over: boolean; onFold: () => void; foot: ReactNode }): JSX.Element {
+  const t = useTokens();
+  const at = shown.set !== undefined ? { scope: shown.set.scope, bucket: shown.set.bucket, set: shown.set.id } : undefined;
+  return (
+    <View flexDirection="column" flexGrow={1} minHeight={0} {...(over ? {} : { height: "100%" })}>
+      <View flexDirection="row" alignItems="center" gap={4} paddingVertical={8} paddingHorizontal={9} {...(edge(t, { bottom: 1 }, "panel-2") as object)}>
+        {over ? (
+          <Press onPress={onFold} title="Back to the list" label="Back to the list" width={22} height={22} alignItems="center" justifyContent="center" borderRadius={6} box={({ hovered }) => ({ backgroundColor: hovered ? t.v("panel-3") : "transparent" })}>
+            <Icon name="back" size={13} color={String(t.v("dim"))} />
+          </Press>
+        ) : null}
+        <FileGlyph icon={shown.icon} on />
+        {tree !== undefined && at !== undefined && at.scope !== "runtime" ? (
+          <CrumbPickers tree={tree} crumbs={crumbsOf(tree, at)} still onPick={() => undefined} />
+        ) : (
+          <Txt spec={{ voice: "data", scale: 12 / 12, weight: 500, lineHeight: 1.5 }} paddingHorizontal={7} numberOfLines={1} flexShrink={1}>
+            {shown.id}
+          </Txt>
+        )}
+        {!over ? (
+          <Press
+            onPress={onFold}
+            title="Fold the contents away"
+            label="Fold the contents away"
+            marginLeft="auto"
+            flexShrink={0}
+            paddingVertical={3}
+            paddingHorizontal={7}
+            borderRadius={6}
+            borderWidth={1}
+            borderStyle="solid"
+            box={({ hovered }) => ({ borderColor: t.mix(t.v("accent"), 50, t.v("line")), backgroundColor: hovered ? t.mix(t.v("accent"), 18, t.v("panel")) : t.mix(t.v("accent"), 12, t.v("panel")) })}
+          >
+            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "accent" }}>⤡</Txt>
+          </Press>
+        ) : null}
+      </View>
+      <View flexGrow={1} flexShrink={1} minHeight={0} paddingTop={7} {...(over ? { maxHeight: 360 } : {})} {...({ overflowY: "auto" } as object)}>
+        <SetContents host={host} reference={shown.reference} set={shown.set} />
+      </View>
+      {foot}
+    </View>
+  );
+}
+
+/** The contents' foot: a note on what this set is to the stack, and what may be done with it, pushed right. */
+function ContentsFoot({ note, children }: { note?: string | undefined; children?: ReactNode }): JSX.Element {
+  const t = useTokens();
+  return (
+    <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={10} paddingTop={7} paddingHorizontal={9} paddingBottom={9} {...(edgeTop(t) as object)}>
+      {note !== undefined ? (
+        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} flexShrink={1}>
+          {note}
+        </Txt>
+      ) : null}
+      <View flexDirection="row" alignItems="center" gap={10} marginLeft="auto">
+        {children}
+      </View>
+    </View>
   );
 }
 
@@ -243,32 +1001,6 @@ function FileGlyph({ icon, on }: { icon: string; on: boolean }): JSX.Element {
     >
       <Icon name={setIconGlyph(icon)} size={12} color={String(t.v(on ? "accent" : "dim"))} />
     </View>
-  );
-}
-
-/** The ⤢ / ⤡ toggle, remembered (ruling 11). */
-function ModeToggle({ mode, onMode }: { mode: BrowserMode; onMode: (next: BrowserMode) => void }): JSX.Element {
-  const t = useTokens();
-  const expanded = mode === "expanded";
-  return (
-    <Press
-      onPress={() => onMode(expanded ? "compact" : "expanded")}
-      title={expanded ? "back to compact — stays until you press it again" : "expand to browse — stays expanded until you press it again"}
-      label={expanded ? "Back to compact" : "Expand to browse"}
-      marginLeft="auto"
-      flexShrink={0}
-      paddingVertical={3}
-      paddingHorizontal={7}
-      borderRadius={6}
-      borderWidth={1}
-      borderStyle="solid"
-      box={({ hovered }) => ({
-        borderColor: expanded ? t.mix(t.v("accent"), 50, t.v("line")) : t.v("line"),
-        backgroundColor: expanded ? t.mix(t.v("accent"), 12, t.v("panel")) : hovered ? t.v("panel-2") : t.v("panel"),
-      })}
-    >
-      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: expanded ? "accent" : "dim" }}>{expanded ? "⤡" : "⤢"}</Txt>
-    </Press>
   );
 }
 
@@ -426,170 +1158,14 @@ export interface LayerActions {
   canEarlier: boolean;
   canLater: boolean;
   /** Pin to the project, or take the pin off. Absent where there is no project to pin to. */
-  onPin?: (() => void) | undefined;
+  onPin?: (() => void | Promise<void>) | undefined;
   pinned: boolean;
   /** Settings → Tools, where a copy is edited. Absent outside the app. */
   onEdit?: (() => void) | undefined;
   onRemove?: (() => void) | undefined;
 }
 
-/**
- * A layer's card (§4.1): compact — the set's path as crumbs that are pickers, its contents, and the
- * layer's actions — or the browser it widens into, the tree beside the contents with the crumbs over
- * both in step with the tree, and `Use as this layer`. The look is remembered (`browserModeOf`).
- */
-export function LayerCard({ anchor, segment, host, actions, onClose }: { anchor: FloatRect; segment: LayerSegment; host: StackCardHost; actions: LayerActions; onClose: () => void }): JSX.Element {
-  const t = useTokens();
-  const [mode, setMode] = useBrowserMode();
-  const tree = useView("permissionSets:tree", host.treeRequest).value;
-  const at = tree !== undefined ? treeAtOf(tree, segment.reference, segment.id) : undefined;
-  if (mode === "expanded" && tree !== undefined) {
-    return (
-      <SetBrowser
-        anchor={anchor}
-        tree={tree}
-        host={host}
-        start={at}
-        verb={actions.onSwap !== undefined ? "Use as this layer" : undefined}
-        mode={mode}
-        onMode={setMode}
-        onUse={(reference) => {
-          actions.onSwap?.(reference);
-          onClose();
-        }}
-        onClose={onClose}
-      />
-    );
-  }
-  const crumbs = tree !== undefined && at !== undefined ? crumbsOf(tree, at) : undefined;
-  const set = tree !== undefined ? setAtOf(tree, at) : undefined;
-  return (
-    <StackFloat anchor={anchor} width={480} onClose={onClose}>
-      <View flexDirection="row" alignItems="center" gap={4} paddingTop={8} paddingHorizontal={9} paddingBottom={2}>
-        <FileGlyph icon={segment.icon} on />
-        {crumbs !== undefined && tree !== undefined ? (
-          <CrumbPickers
-            tree={tree}
-            crumbs={crumbs}
-            still={actions.onSwap === undefined}
-            onPick={(choice) => {
-              const reference = choice.set !== undefined ? referenceOfPick(choice.set) : undefined;
-              if (reference !== undefined) actions.onSwap?.(reference);
-            }}
-          />
-        ) : (
-          <Txt spec={{ voice: "data", scale: 12 / 12, weight: 500, lineHeight: 1.5 }} paddingHorizontal={7} numberOfLines={1}>
-            {segment.id}
-          </Txt>
-        )}
-        {tree !== undefined ? <ModeToggle mode={mode} onMode={setMode} /> : null}
-      </View>
-      <View height={6} />
-      <View maxHeight={420} {...({ overflowY: "auto" } as object)}>
-        <SetContents host={host} reference={segment.reference} set={set} />
-      </View>
-      <View flexDirection="row" flexWrap="wrap" alignItems="center" gap={12} paddingTop={7} paddingHorizontal={9} paddingBottom={8} marginTop={4} {...(edgeTop(t) as object)}>
-        {actions.onMove !== undefined ? (
-          <>
-            <ActionWord word="‹ earlier" title="Move this layer one earlier — under the one before it" disabled={!actions.canEarlier} onPress={() => actions.onMove?.(-1)} />
-            <ActionWord word="later ›" title="Move this layer one later — over the one after it" disabled={!actions.canLater} onPress={() => actions.onMove?.(1)} />
-          </>
-        ) : null}
-        {actions.onPin !== undefined ? (
-          <ActionWord
-            word={actions.pinned ? "unpin from this project" : "pin to this project"}
-            title={actions.pinned ? "Take it off this project's standing layers" : "Keep it in this project's stack for every conversation: a standing layer, in settings"}
-            onPress={actions.onPin}
-          />
-        ) : null}
-        {actions.onEdit !== undefined ? <ActionWord word="edit a copy" title="Open it in Settings → Tools; its first change writes this layer's copy" onPress={actions.onEdit} /> : null}
-        {actions.onRemove !== undefined ? <ActionWord word="remove" bad title="Take this layer out of the stack" onPress={actions.onRemove} /> : null}
-      </View>
-    </StackFloat>
-  );
-}
-
 const edgeTop = (t: Tokens): unknown => edge(t, { top: 1 }, "panel-2");
-
-/**
- * The browser (§4.1): a tree of scopes, buckets and files beside the selected file's contents, the
- * crumbs above both in step with the tree's selection. `verb` presses with the reference picked — `Use as
- * this layer` for a segment, `Lay it on top` for `+`; absent, nothing is picked (a standing layer).
- */
-export function SetBrowser({
-  anchor,
-  tree,
-  host,
-  start,
-  verb,
-  mode,
-  onMode,
-  onUse,
-  onClose,
-}: {
-  anchor: FloatRect;
-  tree: PermissionSetTree;
-  host: StackCardHost;
-  start: TreeAt | undefined;
-  verb: string | undefined;
-  /** The remembered look — absent for `+`, which is always the browser. */
-  mode?: BrowserMode | undefined;
-  onMode?: ((next: BrowserMode) => void) | undefined;
-  onUse: (reference: string) => void;
-  onClose: () => void;
-}): JSX.Element {
-  const t = useTokens();
-  const phone = usePhone();
-  const [selected, setSelected] = useState<TreeAt | undefined>(start);
-  const [toggled, setToggled] = useState<Record<string, boolean>>({});
-  const rows = treeRowsOf(tree, toggled, selected);
-  const crumbs = selected !== undefined ? crumbsOf(tree, selected) : undefined;
-  const set = setAtOf(tree, selected);
-  const reference = set !== undefined ? referenceOfPick(set) : undefined;
-  const select = (at: TreeAt): void => setSelected(at);
-  // The panes as tall as the room over the segment leaves, less the head and the foot: 430 at most, 200 at least.
-  const paneHeight = Math.max(200, Math.min(430, anchor.top - 7 - 110));
-  return (
-    <StackFloat anchor={anchor} width={860} onClose={onClose}>
-      <View flexDirection="row" alignItems="center" gap={4} paddingVertical={8} paddingHorizontal={9} {...(edge(t, { bottom: 1 }, "panel-2") as object)}>
-        <FileGlyph icon={set?.icon ?? "layers"} on={set !== undefined} />
-        {crumbs !== undefined ? (
-          <CrumbPickers tree={tree} crumbs={crumbs} shownAt={crumbs.at(-1)?.key} onPick={(choice) => choice.set !== undefined && select(choice.at)} onFolder={select} />
-        ) : (
-          <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "tok-hint" }} paddingHorizontal={7}>
-            pick a permission set
-          </Txt>
-        )}
-        {mode !== undefined && onMode !== undefined ? <ModeToggle mode={mode} onMode={onMode} /> : null}
-      </View>
-      <View flexDirection={phone ? "column" : "row"} height={phone ? undefined : paneHeight} minHeight={0}>
-        <View
-          {...(phone ? { maxHeight: 180, ...(edge(t, { bottom: 1 }, "panel-2") as object) } : { width: 300, flexShrink: 0, ...(edge(t, { right: 1 }, "panel-2") as object) })}
-          paddingVertical={4}
-          paddingRight={4}
-          paddingLeft={4}
-          {...({ overflowY: "auto" } as object)}
-        >
-          {rows.map((row) => (
-            <TreeRowView key={row.key} row={row} onPress={() => (row.kind === "set" ? select(row.at) : setToggled((was) => ({ ...was, [row.key]: !(row.open ?? false) })))} />
-          ))}
-        </View>
-        <View flexGrow={1} flexShrink={1} minWidth={0} paddingTop={7} {...(phone ? { maxHeight: 320 } : {})} {...({ overflowY: "auto" } as object)}>
-          {set !== undefined ? (
-            <SetContents host={host} reference={set.explicit ?? reference} set={set} />
-          ) : (
-            <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} paddingHorizontal={9}>
-              Pick a set on the left to see what it writes.
-            </Txt>
-          )}
-        </View>
-      </View>
-      <BrowserFoot host={host} onClose={onClose} close="Cancel">
-        {verb !== undefined ? <VerbButton verb={verb} disabled={reference === undefined} onPress={() => reference !== undefined && onUse(reference)} /> : null}
-      </BrowserFoot>
-    </StackFloat>
-  );
-}
 
 /** One row of the browser's tree: a scope or a bucket, folding, or a set file with its glyph. */
 function TreeRowView({ row, onPress }: { row: TreeRow; onPress: () => void }): JSX.Element {
@@ -701,76 +1277,38 @@ export function useOpenSettingsTools(project: string | undefined): (() => void) 
   return app === null ? undefined : () => openSettingsTools(app, project);
 }
 
-/** The remembered look of a layer's card (ruling 11): the window's UI state, else this composer's own. */
-export function useBrowserMode(): [BrowserMode, (next: BrowserMode) => void] {
-  const app = useShellOrNull();
-  const [own, setOwn] = useState<BrowserMode>("compact");
-  if (app === null) return [own, setOwn];
-  return [browserModeOf(app.state.settings.ui), (next) => app.actions.setMode(STACK_BROWSER_MODE, BROWSER_MODES.includes(next) ? next : "compact")];
-}
-
-/** `+` (§4.1): the browser, to pick a set to lay on top of the conversation's layers. */
-export function AddLayerCard({ anchor, host, start, onAdd, onClose }: { anchor: FloatRect; host: StackCardHost; start: { reference: string | undefined; id: string } | undefined; onAdd: (reference: string) => void; onClose: () => void }): JSX.Element {
-  const tree = useView("permissionSets:tree", host.treeRequest).value;
-  if (tree === undefined) {
-    return (
-      <StackFloat anchor={anchor} width={320} onClose={onClose}>
-        <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} padding={12}>
-          {host.treeRequest === null ? "No permission sets to browse here." : "…"}
-        </Txt>
-      </StackFloat>
-    );
-  }
-  // Opened on the bottom layer's bucket, with nothing picked: what sits beside it is the likeliest pick.
-  const near = start !== undefined ? treeAtOf(tree, start.reference, start.id) : undefined;
-  return (
-    <SetBrowser
-      anchor={anchor}
-      tree={tree}
-      host={host}
-      start={near !== undefined ? { scope: near.scope, bucket: near.bucket } : undefined}
-      verb="Lay it on top"
-      onUse={(reference) => {
-        onAdd(reference);
-        onClose();
-      }}
-      onClose={onClose}
-    />
-  );
-}
-
 /**
- * The shield (2026-11-03): the whole permission picture in the expanded browser. Its tree starts with
- * THIS stack — each layer oldest first, then `tools` — above the scopes. A layer picked shows what its
- * file writes, its crumbs swap it, and its actions are in the foot; `tools` is the Tools card, every
+ * The shield (2026-11-03): the whole permission picture, drawn in the panel 900 wide. Its tree starts
+ * with THIS stack — each layer oldest first, then `tools` — above the scopes. A layer picked shows what
+ * its file writes, its crumbs swap it, and its actions are in the foot; `tools` is the Tools card, every
  * line with what this run changed marked; a set picked from a scope can be laid on top.
  */
-export function StackBrowser({
-  anchor,
+function WholePicture({
   host,
+  tree,
   layers,
   tools,
   runtime,
   actionsOf,
   toolsBody,
   onAdd,
+  paneHeight,
   onClose,
 }: {
-  anchor: FloatRect;
   host: StackCardHost;
+  tree: PermissionSetTree | undefined;
   layers: readonly LayerSegment[];
-  /** The tools offered, and the answers this run gave — what the `tools` row says. */
   tools: number;
   runtime: number;
   actionsOf: (layer: LayerSegment) => LayerActions;
-  /** The Tools card's body, drawn when `tools` is picked. */
   toolsBody: ReactNode;
   onAdd: (reference: string) => void;
+  /** How tall the tree and what is beside it stand. */
+  paneHeight: number;
   onClose: () => void;
 }): JSX.Element {
   const t = useTokens();
   const phone = usePhone();
-  const tree = useView("permissionSets:tree", host.treeRequest).value;
   const [pick, setPick] = useState<StackPick>({ kind: "tools" });
   // The layer picked, found again as the stack moves: by its key, else by what it names.
   const [picked, setPicked] = useState<LayerSegment | undefined>(undefined);
@@ -784,13 +1322,12 @@ export function StackBrowser({
   const reference = set !== undefined ? referenceOfPick(set) : undefined;
   const layerAt = tree !== undefined && layer !== undefined ? treeAtOf(tree, layer.reference, layer.id) : undefined;
   const actions = layer !== undefined ? actionsOf(layer) : undefined;
-  const paneHeight = Math.max(240, Math.min(480, anchor.top - 7 - 110));
   const choose = (next: StackPick, segment?: LayerSegment): void => {
     setPick(next);
     setPicked(segment);
   };
   return (
-    <StackFloat anchor={anchor} width={900} onClose={onClose}>
+    <View flexDirection="column">
       <View flexDirection="row" alignItems="center" gap={4} paddingVertical={8} paddingHorizontal={9} {...(edge(t, { bottom: 1 }, "panel-2") as object)}>
         {pick.kind === "tools" ? (
           <>
@@ -916,7 +1453,7 @@ export function StackBrowser({
                 <ActionWord word="later ›" title="Move this layer one later — over the one after it" disabled={!actions.canLater} onPress={() => actions.onMove?.(1)} />
               </>
             ) : null}
-            {actions.onPin !== undefined ? <ActionWord word={actions.pinned ? "unpin from this project" : "pin to this project"} onPress={actions.onPin} /> : null}
+            {actions.onPin !== undefined ? <ActionWord word={actions.pinned ? "unpin from this project" : "pin to this project"} onPress={() => void actions.onPin?.()} /> : null}
             {actions.onRemove !== undefined ? (
               <ActionWord
                 word="remove"
@@ -942,42 +1479,7 @@ export function StackBrowser({
           />
         ) : null}
       </BrowserFoot>
-    </StackFloat>
-  );
-}
-
-/** `⋯ {n}` (§7.4): the layers folded out of the bar, oldest first; each opens as its own segment would. */
-export function FoldCard({ anchor, layers, onOpenLayer, onClose }: { anchor: FloatRect; layers: readonly LayerSegment[]; onOpenLayer: (layer: LayerSegment) => void; onClose: () => void }): JSX.Element {
-  const t = useTokens();
-  return (
-    <StackFloat anchor={anchor} width={340} onClose={onClose}>
-      <Txt spec={{ voice: "app", scale: 9.5 / 12.5, weight: 600, upper: true, ls: 0.06, color: "tok-hint" }} paddingTop={8} paddingHorizontal={10} paddingBottom={2}>
-        Folded — oldest first
-      </Txt>
-      <View flexDirection="column" gap={1} padding={4}>
-        {layers.map((layer) => (
-          <Press key={layer.key} onPress={() => onOpenLayer(layer)} flexDirection="row" alignItems="center" gap={9} paddingVertical={6} paddingHorizontal={8} borderRadius={7} box={({ hovered }) => ({ backgroundColor: hovered ? t.mix(t.v("text"), 7, "transparent") : "transparent" })}>
-            {({ hovered }) => (
-              <>
-                <Icon name={setIconGlyph(layer.icon)} size={14} color={String(t.v("dim"))} />
-                <View flexDirection="column" gap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Txt spec={{ voice: "data", scale: 11.5 / 12, weight: 500, lineHeight: 1.3, color: hovered ? "text" : "dim" }} numberOfLines={1}>
-                    {layer.id}
-                  </Txt>
-                  <Txt spec={{ voice: "app", scale: 10.5 / 12.5, lineHeight: 1.3, color: "tok-hint" }} numberOfLines={1}>
-                    {[layer.scope, layer.role === "standing" ? "pinned" : undefined, `${layer.lines} ${layer.lines === 1 ? "line" : "lines"}`].filter((each) => each !== undefined).join(" · ")}
-                  </Txt>
-                </View>
-                <Icon name="chevron" size={11} color={String(t.v("dim"))} box={{ transform: [{ rotate: "-90deg" }] }} />
-              </>
-            )}
-          </Press>
-        ))}
-      </View>
-      <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "tok-hint" }} paddingTop={0} paddingHorizontal={9} paddingBottom={8}>
-        Press one to adjust it, as its own segment would.
-      </Txt>
-    </StackFloat>
+    </View>
   );
 }
 

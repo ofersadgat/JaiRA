@@ -45,12 +45,35 @@ function onEscape(event: KeyboardEvent): void {
  * `overflow` round the row it was opened from. Closed by a press outside the menu, Escape, or the window
  * resizing.
  */
-export function MenuLayer({ onClose, z = 1000, children }: {
+export function MenuLayer({ onClose, z = 1000, through, children }: {
   onClose: () => void;
   /** Its place in the stack: a menu's over everything, a dialog's (`--z-modal` 50) under the toast (`--z-toast` 60). */
   z?: number;
+  /**
+   * What a press outside goes THROUGH to rather than closing the layer: a selector of what lies under
+   * it. The composer's stack panel lets another segment of its bar be pressed while it is open, so the
+   * same float is carried there (2026-11-14) — the element under the press is pressed instead.
+   */
+  through?: string;
   children: ReactNode;
 }): JSX.Element {
+  const root = useRef<HTMLElement | null>(null);
+  const outside = (event: { nativeEvent?: { clientX?: number; clientY?: number } }): void => {
+    const x = event.nativeEvent?.clientX;
+    const y = event.nativeEvent?.clientY;
+    if (through !== undefined && root.current !== null && x !== undefined && y !== undefined) {
+      // What is under the layer at the press: the layer stepped out of the way for one look.
+      root.current.style.pointerEvents = "none";
+      const under = document.elementFromPoint(x, y);
+      root.current.style.pointerEvents = "";
+      const target = under?.closest(through);
+      if (target instanceof HTMLElement) {
+        target.click();
+        return;
+      }
+    }
+    onClose();
+  };
   // The latest `onClose`, for an entry made once: a host that hands a new function each render must not
   // move its layer to the top of the stack by doing so.
   const live = useRef(onClose);
@@ -69,9 +92,9 @@ export function MenuLayer({ onClose, z = 1000, children }: {
     return () => window.removeEventListener("resize", onClose);
   }, [onClose]);
   return createPortal(
-    <View style={{ position: "fixed" as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: z }}>
+    <View ref={root as never} style={{ position: "fixed" as never, top: 0, left: 0, right: 0, bottom: 0, zIndex: z }}>
       {/* Out of the Tab order: a menu is closed by a press anywhere else, which is no control at all. */}
-      <Pressable tabIndex={-1} onPress={onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, cursor: "default" as never }} accessibilityLabel="close the menu" />
+      <Pressable tabIndex={-1} onPress={through !== undefined ? (outside as never) : onClose} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, cursor: "default" as never }} accessibilityLabel="close the menu" />
       <View style={FLOATS as never}>{children}</View>
     </View>,
     document.body,

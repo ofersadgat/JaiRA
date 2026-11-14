@@ -49,7 +49,7 @@ import { Icon, type IconName } from "../panel/Icon";
 import { Svg } from "../panel/Svg";
 import { INK, Ring } from "../usage/Ring";
 import { ChipCard, RouteCascade, ThinkingBody } from "./ComposerCards";
-import { AddLayerCard, FoldCard, LayerCard, SaveStack, StackBar, StackBrowser, ToolsSwitch, useOpenSettingsTools, type StackCardHost } from "./ComposerStack";
+import { SaveStack, StackBar, StackPanel, ToolsSwitch, useOpenSettingsTools, type LayerActions, type StackCardHost, type StackDoor } from "./ComposerStack";
 import { ToolsBody } from "./ComposerTools";
 import { Pulse } from "./Pulse";
 import { AccountCard, ContextCard, SpentLine } from "./UsageCards";
@@ -193,8 +193,8 @@ export function Composer({
   const shell = useShellOrNull();
   const down = off ? undefined : routeDownOf(route, shell?.state.probes);
   const canSend = canSendOf(disabled, busy, joinable, down);
-  /** The card open, and the box it was opened from — for the stack, the segment's key and what it is. */
-  const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Tools" | "account" | "context" | "stack"; at: FloatRect; key?: string; segment?: StackSegment } | null>(null);
+  /** The card open, and the box it was opened from — for the stack, the segment's key and what its panel opens on (none: the tools segment's card). */
+  const [card, setCard] = useState<{ which: "Model" | "Thinking" | "Tools" | "account" | "context" | "stack"; at: FloatRect; key?: string; door?: StackDoor } | null>(null);
   /** The Tools card on Everything (§7.4) rather than this conversation's lines. */
   const [everything, setEverything] = useState(false);
   // The `@` list stands over the box it completes into, at the box's width.
@@ -292,28 +292,29 @@ export function Composer({
   };
   const close = (): void => setCard(null);
   const opener = (which: NonNullable<typeof card>["which"]) => (at: FloatRect) => setCard((was) => (was?.which === which ? null : { which, at }));
-  /** A layer's segment as the stack stands NOW — its card stays on it while it moves. */
-  const liveLayer = (segment: LayerSegment): LayerSegment => stack.layers.find((layer) => layer.reference === segment.reference && layer.role === segment.role) ?? segment;
-  /** A segment's card, or closed when it was the one open. */
+  /** What a segment opens (2026-11-14): a layer its list, `+` the list to lay one on top, `⋯ n` the rows — the tools segment its card. */
+  const doorOf = (segment: StackSegment): StackDoor | undefined => (segment.kind === "layer" ? { kind: "layer", layer: segment } : segment.kind === "fold" ? { kind: "rows" } : segment.kind === "add" ? { kind: "add" } : undefined);
+  /** A segment's panel, or closed when it was the one open. Another pressed while it is open carries the panel there. */
   const openSegment = (segment: StackSegment, at: FloatRect): void => {
     if (segment.kind === "tools") setEverything(false);
-    setCard((was) => (was?.which === "stack" && was.key === segment.key ? null : { which: "stack", at, key: segment.key, segment }));
+    const door = doorOf(segment);
+    setCard((was) => (was?.which === "stack" && was.key === segment.key ? null : { which: "stack", at, key: segment.key, ...(door !== undefined ? { door } : {}) }));
   };
   const cardHost: StackCardHost = { treeRequest: stack.treeRequest, project: stackHost?.project, tools: offered };
   const openSettings = useOpenSettingsTools(stackHost?.project);
   const canPin = stackHost !== undefined && (saveLayers ?? ["project", "base"]).includes("project");
-  /** What a layer's card may do to its layer — a standing layer is settings', and moves only by its pin. */
-  const actionsOf = (segment: LayerSegment) => {
+  /** What may be done to a layer — a standing layer is settings', and moves only by its pin. The panel says when it closes. */
+  const actionsOf = (segment: LayerSegment): LayerActions => {
     const index = segment.index;
     const named = index !== undefined;
     return {
       ...(named && stackHost !== undefined ? { onSwap: (reference: string) => stack.write(withLayerSwapped(stack.form, index, reference)) } : {}),
-      ...(named ? { onMove: (by: -1 | 1) => stack.write(withLayerMoved(stack.form, index, by)), onRemove: () => (stack.write(withLayerRemoved(stack.form, index)), close()) } : {}),
+      ...(named ? { onMove: (by: -1 | 1) => stack.write(withLayerMoved(stack.form, index, by)), onRemove: () => stack.write(withLayerRemoved(stack.form, index)) } : {}),
       canEarlier: index !== undefined && index > 0,
       canLater: index !== undefined && index < stack.form.layers.length - 1,
-      ...(canPin && segment.reference !== undefined ? { onPin: () => void stack.pin(segment, segment.role !== "standing").then(close) } : {}),
+      ...(canPin && segment.reference !== undefined ? { onPin: () => stack.pin(segment, segment.role !== "standing") } : {}),
       pinned: segment.role === "standing",
-      ...(openSettings !== undefined ? { onEdit: () => (openSettings(), close()) } : {}),
+      ...(openSettings !== undefined ? { onEdit: openSettings } : {}),
     };
   };
   // A phone's: the chips folded while the keyboard is up, and the full-screen writer.
@@ -538,8 +539,8 @@ export function Composer({
                     collapsed={fit.look === "collapsed" ? collapsed : undefined}
                     open={openKey}
                     onOpen={openSegment}
-                    // The shield, and the whole of a collapsed stack: everything, in the browser.
-                    onLead={(at) => setCard((was) => (was?.which === "stack" && was.key === "lead" ? null : { which: "stack", at, key: "lead" }))}
+                    // The shield: the whole picture. The stack collapsed: a row per layer, as `⋯ n` opens.
+                    onLead={(at) => setCard((was) => (was?.which === "stack" && was.key === "lead" ? null : { which: "stack", at, key: "lead", door: fit.look === "collapsed" ? { kind: "rows" } : { kind: "whole" } }))}
                   />
                 </View>
               </>
@@ -668,14 +669,20 @@ export function Composer({
           {toolsBody}
         </ChipCard>
       ) : null}
-      {card?.which === "stack" && card.key === "lead" ? (
-        <StackBrowser
+      {card?.which === "stack" && card.door !== undefined ? (
+        // ONE panel for a layer, `+`, `⋯ n` and the shield, in one place in the tree: pressing another of
+        // them while it is open carries the same float there (2026-11-14, round 3).
+        <StackPanel
           anchor={card.at}
+          door={card.door}
+          doorKey={`${card.key ?? ""}:${card.door.kind}`}
           host={cardHost}
           layers={stack.layers}
+          bar={bar}
+          actionsOf={actionsOf}
+          onAdd={(reference) => stack.write(withLayerAdded(stack.form, reference))}
           tools={toolsCount}
           runtime={runtimeCount}
-          actionsOf={actionsOf}
           toolsBody={
             <>
               <View flexDirection="row" alignItems="center" marginBottom={6}>
@@ -684,22 +691,6 @@ export function Composer({
               {toolsBody}
             </>
           }
-          onAdd={(reference) => stack.write(withLayerAdded(stack.form, reference))}
-          onClose={close}
-        />
-      ) : null}
-      {card?.which === "stack" && card.segment?.kind === "layer" ? (
-        <LayerCard key={card.segment.key} anchor={card.at} segment={liveLayer(card.segment)} host={cardHost} actions={actionsOf(liveLayer(card.segment))} onClose={close} />
-      ) : null}
-      {card?.which === "stack" && card.segment?.kind === "fold" ? (
-        <FoldCard anchor={card.at} layers={card.segment.layers} onOpenLayer={(layer) => setCard({ which: "stack", at: card.at, key: layer.key, segment: layer })} onClose={close} />
-      ) : null}
-      {card?.which === "stack" && card.segment?.kind === "add" ? (
-        <AddLayerCard
-          anchor={card.at}
-          host={cardHost}
-          start={stack.layers[0] !== undefined ? { reference: stack.layers[0].reference, id: stack.layers[0].id } : undefined}
-          onAdd={(reference) => stack.write(withLayerAdded(stack.form, reference))}
           onClose={close}
         />
       ) : null}

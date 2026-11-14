@@ -127,7 +127,7 @@ async function main(): Promise<void> {
     await app.shot("5-add", undefined, false);
     console.log(`chat-stack-restart: removals: ${JSON.stringify(await app.evaluate<string[]>("window.__seen.filter((s) => s.includes(' - ')).slice(0, 40)"))}`);
     console.log(`chat-stack-restart: why full.json is not seen: ${await app.evaluate<string>(`(() => {
-      const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && (e.textContent || "").trim() === "full.json");
+      const el = [...document.querySelectorAll("*")].find((e) => e.children.length === 0 && (e.textContent || "").trim() === "full");
       if (!el) return "no element";
       const out = [];
       for (let n = el; n && n !== document.documentElement; n = n.parentElement) {
@@ -137,8 +137,8 @@ async function main(): Promise<void> {
       }
       return out.join(" | ");
     })()`)}`);
-    await pressText("full.json");
-    await pressText("Lay it on top");
+    // `+`'s list: pressing a set's row lays it on top (2026-11-14).
+    await pressText("full");
     await settle(4000);
     await app.shot("6-after-add", undefined, false);
     const kept = JSON.parse(readFileSync(taskFile, "utf8")) as { chatSettings?: unknown };

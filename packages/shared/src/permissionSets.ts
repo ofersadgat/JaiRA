@@ -150,11 +150,21 @@ export const PERMISSION_SET_LAYERS_KEY = "layers";
  * generic layers glyph (`permissionSetIconOf` in `permissionSetBuckets.ts`).
  */
 export const PERMISSION_SET_ICON_KEY = "icon";
+/**
+ * The key a set FILE says what it is for by, in one line (2026-11-14, the composer's set list): what a
+ * row in the list says under the set's name. Like `icon`, the file's own — never a subject, not merged,
+ * not inherited through `$ref`. Absent, a shipped preset says its own words and anybody else's set its
+ * line count (`permissionSetDescriptionOf` in `permissionSetBuckets.ts`).
+ */
+export const PERMISSION_SET_DESCRIPTION_KEY = "description";
 
-/** Is this key of a set file one of its instructions — `$ref`, `layers`, `icon` — rather than a line? */
+/** Is this key of a set file one of its instructions — `$ref`, `layers`, `icon`, `description` — rather than a line? */
 export function isPermissionSetInstructionKey(key: string): boolean {
-  return key === PERMISSION_SET_REF_KEY || key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY;
+  return key === PERMISSION_SET_REF_KEY || key === PERMISSION_SET_LAYERS_KEY || key === PERMISSION_SET_ICON_KEY || key === PERMISSION_SET_DESCRIPTION_KEY;
 }
+
+/** The longest description a set file may say, in characters: one line in the set list. */
+export const PERMISSION_SET_DESCRIPTION_MAX = 120;
 
 /**
  * WRITTEN BY LOWERING, never authored: the two `permissions.tools` entries that say "this block was
@@ -421,6 +431,12 @@ export function parsePermissionSet(decl: unknown): { permissionSet: PermissionSe
       if (typeof value !== "string" || !/^[a-z][a-z0-9-]{0,39}$/.test(value.trim())) error(`'${PERMISSION_SET_ICON_KEY}' names the set's icon — a short glyph name like "hammer", in lower case`);
       continue;
     }
+    if (subject === PERMISSION_SET_DESCRIPTION_KEY) {
+      if (typeof value !== "string" || value.trim() === "" || /[\r\n]/.test(value) || value.trim().length > PERMISSION_SET_DESCRIPTION_MAX) {
+        error(`'${PERMISSION_SET_DESCRIPTION_KEY}' says what the set is for in one line — text of at most ${PERMISSION_SET_DESCRIPTION_MAX} characters`);
+      }
+      continue;
+    }
     if (subject.startsWith("$") || subject === PERMISSION_SET_LAYERS_KEY) {
       error(
         subject === PERMISSION_SET_LAYERS_KEY
@@ -657,7 +673,7 @@ export function permissionSetLayersOf(
   const named = node[PERMISSION_SET_LAYERS_KEY];
   if (reference === undefined && named === undefined) {
     // The file's icon is the file's, not a line of the layer it is.
-    const { [PERMISSION_SET_ICON_KEY]: _icon, ...lines } = node;
+    const { [PERMISSION_SET_ICON_KEY]: _icon, [PERMISSION_SET_DESCRIPTION_KEY]: _description, ...lines } = node;
     return [{ id, decl: lines }];
   }
   const out: PermissionSetLayerDecl[] = [];
@@ -681,7 +697,7 @@ export function permissionSetLayersOf(
       out.push(...layer);
     }
   }
-  const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, ...lines } = node;
+  const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, [PERMISSION_SET_DESCRIPTION_KEY]: _description, ...lines } = node;
   if (Object.keys(lines).length > 0) out.push({ id, decl: lines });
   return out;
 }

@@ -138,10 +138,7 @@ const SHIPPED_NAME_ORDER: readonly string[] = ["ask-first", "read-only", "read-o
  * the presets always had (scratch beside the read-only it widens), then anybody else's by name.
  */
 export function permissionSetsOfBucket(choices: readonly PermissionSetChoice[], bucket: string): PermissionSetChoice[] {
-  const rank = (choice: PermissionSetChoice): number => {
-    const at = SHIPPED_NAME_ORDER.indexOf(choice.name);
-    return at === -1 ? SHIPPED_NAME_ORDER.length : at;
-  };
+  const rank = (choice: PermissionSetChoice): number => permissionSetRank(choice.name);
   return choices
     .filter((choice) => choice.bucket === bucket)
     .sort((a, b) => rank(a) - rank(b) || (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
@@ -179,6 +176,23 @@ export function permissionSetIconOf(id: string, own: unknown): string {
   if (typeof named === "string" && /^[a-z][a-z0-9-]{0,39}$/.test(named.trim())) return named.trim();
   const shipped = SHIPPED_PERMISSION_SET_WORDS[id]?.glyph;
   return shipped !== undefined ? modeWord(shipped) : GENERIC_PERMISSION_SET_ICON;
+}
+
+/**
+ * What a set FILE says it is for, in one line — the second line of its row in the composer's set list
+ * (2026-11-14): its own `"description"` (`PERMISSION_SET_DESCRIPTION_KEY`), else a shipped preset's
+ * words, else nothing (the list then says how many lines it writes). `own` is the file's own text read.
+ */
+export function permissionSetDescriptionOf(id: string, own: unknown): string | undefined {
+  const named = own !== null && typeof own === "object" && !Array.isArray(own) ? (own as Record<string, unknown>)["description"] : undefined;
+  if (typeof named === "string" && named.trim() !== "" && !/[\r\n]/.test(named)) return named.trim();
+  return SHIPPED_PERMISSION_SET_WORDS[id]?.hint;
+}
+
+/** Where a set's NAME sits among the sets of its bucket: the names that ship in the presets' order, then everybody else's (by name, after). */
+export function permissionSetRank(name: string): number {
+  const at = SHIPPED_NAME_ORDER.indexOf(name);
+  return at === -1 ? SHIPPED_NAME_ORDER.length : at;
 }
 
 const SHIPPED_BUCKET_HINTS: Readonly<Record<string, string>> = {

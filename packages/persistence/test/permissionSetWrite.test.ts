@@ -228,7 +228,7 @@ describe("sets as files, for the browser (decision 0023 §4.1, rulings 10–11)"
   beforeEach(() => {
     write(builtIn, "permission-sets/ask-first.json", SHIPPED);
     write(builtIn, "permission-sets/read-only.json", { read_file: "allow", other: "deny" });
-    write(paths.base.baseDir, "permission-sets/web/docs-sites.json", { icon: "globe", web_fetch: { "docs.example.com": "allow" } });
+    write(paths.base.baseDir, "permission-sets/web/docs-sites.json", { icon: "globe", description: "reads the docs sites", web_fetch: { "docs.example.com": "allow" } });
     write(paths.jairaDir, "permission-sets/ask-first.json", { $ref: "$SYSTEM/permission-sets/ask-first", git: "allow" });
     write(paths.jairaDir, "permission-sets/feature/implementation/writes.json", { layers: ["$/permission-sets/read-only"], write_file: "ask" });
     write(paths.jairaDir, "permission-sets/feature/broken.json", "{ nope");
@@ -257,13 +257,16 @@ describe("sets as files, for the browser (decision 0023 §4.1, rulings 10–11)"
       // This project's copy is what the bare reference finds.
       shadowedBy: "project",
     });
-    // A file's own `icon`, else the generic layers glyph.
+    // A shipped preset says what it is for in its own words.
+    expect(askFirst.description).toBe("stop and ask before every call");
+    // A file's own `icon`, else the generic layers glyph; its own `description`, else none. Neither is a line.
     const docs = tree.scopes[1]!.buckets[0]!.sets[0]!;
-    expect(docs).toMatchObject({ id: "web/docs-sites", icon: "globe", lines: 1, inStack: false });
+    expect(docs).toMatchObject({ id: "web/docs-sites", icon: "globe", description: "reads the docs sites", lines: 1, inStack: false });
     const project = tree.scopes[2]!;
     const feature = project.buckets.find((bucket) => bucket.name === "feature")!;
     expect(feature.buckets.map((bucket) => bucket.path)).toEqual(["feature/implementation"]);
     expect(feature.buckets[0]!.sets[0]).toMatchObject({ id: "feature/implementation/writes", icon: "layers", lines: 1, layers: ["$/permission-sets/read-only"] });
+    expect(feature.buckets[0]!.sets[0]!.description).toBeUndefined();
     // A file nobody can read is listed, with why.
     expect(feature.sets.find((set) => set.name === "broken")!.problem).toBeDefined();
     expect(project.sets.find((set) => set.name === "ask-first")).toMatchObject({ follows: "$SYSTEM/permission-sets/ask-first", lines: 1, inStack: true });
@@ -276,11 +279,12 @@ describe("sets as files, for the browser (decision 0023 §4.1, rulings 10–11)"
     expect(() => readOwnPermissionSet(paths, "$/permission-sets/nope")).toThrow(/no scope holds/);
   });
 
-  it("never reads a file's icon as a line of the set", () => {
+  it("never reads a file's icon or description as a line of the set", () => {
     write(paths.workflowsDir, "plan.json", state({ tools: "$/permission-sets/web/docs-sites" }));
     const loaded = loadPlan();
     expect(loaded.issues).toEqual([]);
     expect(JSON.stringify(loaded.permissions)).not.toContain("globe");
+    expect(JSON.stringify(loaded.permissions)).not.toContain("docs sites");
   });
 });
 

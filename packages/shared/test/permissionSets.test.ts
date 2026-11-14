@@ -6,6 +6,7 @@ import { Ajv } from "ajv";
 import { describe, expect, it } from "vitest";
 import { operationSchema, toolsSchema } from "../src/schemas";
 import { runnerModeOf } from "../src/commandRunners";
+import { permissionSetDescriptionOf } from "../src/permissionSetBuckets";
 import {
   declOfPermissionSet,
   heldTools,
@@ -83,6 +84,18 @@ describe("parsing the map", () => {
     expect(offeredTools(permissionSet)).toEqual(["read_file", "web_fetch", "shell"]);
     expect(toolModes(permissionSet)).toEqual({ read_file: "allow", web_fetch: "ask", shell: "ask" });
     expect(offeredTools(permissionSet)).not.toContain("write_file");
+  });
+
+  it("reads a file's `description` as what it is for, one line, and never as a subject (2026-11-14)", () => {
+    const { permissionSet, issues } = parsePermissionSet({ description: "reads the docs sites", read_file: "allow" });
+    expect(issues).toEqual([]);
+    expect(heldTools(permissionSet)).toEqual(["read_file"]);
+    for (const bad of ["two\nlines", "", 7, "x".repeat(121)]) {
+      expect(parsePermissionSet({ description: bad }).issues).toEqual([expect.objectContaining({ path: "description", severity: "error" })]);
+    }
+    expect(permissionSetDescriptionOf("web/docs", { description: " reads the docs " })).toBe("reads the docs");
+    expect(permissionSetDescriptionOf("ask-first", {})).toBe("stop and ask before every call");
+    expect(permissionSetDescriptionOf("web/docs", { description: "two\nlines" })).toBeUndefined();
   });
 
   it("WITHHOLDS a shell it denies outright — held as written, handed to nobody", () => {

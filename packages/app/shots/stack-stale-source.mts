@@ -125,8 +125,8 @@ async function main(): Promise<void> {
     await press(`${BAR} [aria-label="add"]`);
     await settle(1000);
     await app.shot("3-add", undefined, false);
-    await pressText("full.json");
-    await pressText("Lay it on top");
+    // `+`'s list: pressing a set's row lays it on top (2026-11-14).
+    await pressText("full");
     for (let i = 0; (await pending(made.taskId)).length > 0 && i < 40; i++) await settle(250);
     await settle(1500);
     const stillAsks = (await pending(made.taskId)).length > 0;

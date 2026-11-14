@@ -36,6 +36,7 @@ import {
   normalizeSubject,
   OTHER_SUBJECT,
   parsePermissionSet,
+  PERMISSION_SET_DESCRIPTION_KEY,
   PERMISSION_SET_ICON_KEY,
   PERMISSION_SET_LAYERS_KEY,
   PERMISSION_SET_REF_KEY,
@@ -259,7 +260,7 @@ export function permissionStackOf(
     const list = (listed as string[] | undefined) ?? [];
     bottomReference = reference ?? list[0];
     named = reference !== undefined ? list : list.slice(1);
-    const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, ...lines } = node;
+    const { [PERMISSION_SET_REF_KEY]: _ref, [PERMISSION_SET_LAYERS_KEY]: _layers, [PERMISSION_SET_ICON_KEY]: _icon, [PERMISSION_SET_DESCRIPTION_KEY]: _description, ...lines } = node;
     own = lines;
   } else {
     issues.push({ path: "", message: "a permission set is a map from a subject to a mode, or a reference to one", severity: "error" });

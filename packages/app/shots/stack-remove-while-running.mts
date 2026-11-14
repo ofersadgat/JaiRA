@@ -65,11 +65,10 @@ async function main(): Promise<void> {
     await app.shot("1-asked", undefined, false);
     console.log(`bar: ${JSON.stringify(await app.evaluate<string>(`document.querySelector(${JSON.stringify(BAR)})?.innerText ?? ""`))}`);
 
-    // full laid on top from the + segment's browser.
+    // full laid on top from the + segment's list: its row, pressed (2026-11-14).
     await click(`document.querySelector('${BAR} [aria-label="add"]')`, "the + segment");
     await app.shot("2-add-open", undefined, false);
-    await click(byText("full.json"), "full.json");
-    await click(byText("Lay it on top"), "Lay it on top");
+    await click(byText("full"), "full in the list");
     for (let i = 0; (await pending(made.taskId)).length > 0 && i < 40; i++) await settle(250);
     check((await pending(made.taskId)).length === 0, "full on top answered the waiting call");
     await settle(1500);

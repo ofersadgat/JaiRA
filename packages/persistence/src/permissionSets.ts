@@ -65,6 +65,7 @@ import {
   GENERIC_PERMISSION_SET_ICON,
   ownLineCount,
   ownLinesOf,
+  permissionSetDescriptionOf,
   permissionSetIconOf,
   permissionSetIdOf,
   SCOPE_OF_LAYER,
@@ -783,6 +784,8 @@ function treeSetOf(layer: PermissionSetLayer, found: PermissionSetFile, inStack:
     const own: unknown = parseReferencedFile(found.file, readFileSync(found.file, "utf8"));
     set.lines = ownLineCount(own);
     set.icon = permissionSetIconOf(found.id, own);
+    const description = permissionSetDescriptionOf(found.id, own);
+    if (description !== undefined) set.description = description;
     if (own !== null && typeof own === "object" && !Array.isArray(own)) {
       const follows = (own as Record<string, unknown>)["$ref"];
       const layers = (own as Record<string, unknown>)["layers"];

@@ -56,6 +56,8 @@ export interface PermissionSetTreeSet {
   lines: number;
   /** Its icon — see `permissionSetIconOf`: a glyph name, or a mode word for that mode's glyph. */
   icon: string;
+  /** What it is for, in one line — see `permissionSetDescriptionOf`. Absent when neither the file nor the shipped words say. */
+  description?: string;
   /** In the stack being looked at — by id, so a project copy of a set in the stack counts. */
   inStack: boolean;
   /** A nearer scope holds its own copy, so `reference` finds that one, not this. */
