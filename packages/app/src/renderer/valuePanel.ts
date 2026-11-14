@@ -62,7 +62,8 @@ export interface PinnedValue {
    * canvas with its editor. Not a {@link node}, which would be a snapshot nobody can read: the panel has
    * to know this is an artifact, which takes the whole of it (`PanelFace`'s `full`).
    */
-  published?: { ref: PublishedRef; project?: string | undefined } | undefined;
+  /** `follows`: the publish call it goes on from, in its run (`splitModel.ts`' `artifactEntryOf`). */
+  published?: { ref: PublishedRef; project?: string | undefined; follows?: number | undefined } | undefined;
   hint?: ViewHint | undefined;
   label?: string | undefined;
   serve?: ((path: string) => Promise<ServedArtifact>) | undefined;

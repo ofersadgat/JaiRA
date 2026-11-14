@@ -124,7 +124,14 @@ function stripNode(entry: PanelEntry): unknown {
  * starts a new way, and the old one is gone.
  */
 export function push(stack: PanelStack, entry: PanelEntry): PanelStack {
-  if (topOf(stack)?.key === entry.key) return stack;
+  const top = topOf(stack);
+  if (top?.key === entry.key) {
+    // Another version of the artifact on top: the same place, at the version pushed.
+    const was = top.kind === "preview" ? top.preview.published : undefined;
+    const now = entry.kind === "preview" ? entry.preview.published : undefined;
+    if (was === undefined || now === undefined || (was.ref.version === now.ref.version && was.follows === now.follows)) return stack;
+    return { ...stack, entries: [...stack.entries.slice(0, -1), entry], closedOn: null, motion: "replace" };
+  }
   // Pushing something already lower down pops back to it rather than stacking a second copy — a
   // trail that read `task › step › task` would be a loop, not a history.
   const at = stack.entries.findIndex((one) => one.key === entry.key);

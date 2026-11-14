@@ -407,6 +407,34 @@ export function replacedPublishes(entries: readonly TranscriptEntry[]): Readonly
 }
 
 /**
+ * Where each replaced publish's card went (the rule of {@link replacedPublishes}): `<url>@<version>` of
+ * a publish a later one in the same run replaced, to the run's newest publish of that artifact. A view
+ * opened from the earlier call's card goes on to it, as the card did (the person, 2026-11-14: "if there
+ * is a new show artifact before the turn ends and the user hasnt typed anything then we move forward").
+ * Only what a result names: a create still a placeholder says its address but not its version.
+ */
+export function publishSuccessorsOf(entries: readonly TranscriptEntry[]): Map<string, PublishedRef> {
+  const out = new Map<string, PublishedRef>();
+  let newest = new Map<string, PublishedRef>();
+  for (let i = entries.length - 1; i >= 0; i--) {
+    const entry = entries[i]!;
+    if ((entry.kind === "message" && entry.role === "user") || (entry.kind === "tool" && isAskUserQuestion(entry))) {
+      newest = new Map();
+      continue;
+    }
+    if (entry.kind !== "tool") continue;
+    const one = publishedOf(entry.result);
+    const refs = one !== undefined ? [one] : (shownOf(entry.result)?.items ?? []);
+    for (const ref of refs) {
+      const later = newest.get(ref.url);
+      if (later === undefined) newest.set(ref.url, ref);
+      else if (later.version !== ref.version) out.set(`${ref.url}@${String(ref.version)}`, later);
+    }
+  }
+  return out;
+}
+
+/**
  * The picture a tool handed back — a screenshot, a picture off the clipboard (decision 0019) — as a
  * `data:` address, out of whichever envelope it travelled in: MCP's `image` content (`{ type, data,
  * mimeType }`), the Anthropic block an agent's own record keeps (`{ type, source: { media_type, data } }`),

@@ -7,7 +7,8 @@ import { typeKeyOf, useMessageTypes } from "@jaira/ui/messageTypes";
 import type { ArtifactSurface, EditMessage } from "@jaira/ui/transcriptViewTypes";
 import { clockOf } from "@jaira/ui/runActivityModel";
 import { blocksOf, dayLabelOf, endOfBlock, gapBetween, sidechainEntriesOf, startOfBlock, type LiveTail, type MessageEntry, type TranscriptEntry, type WorkEntry } from "@jaira/ui/transcript";
-import { keptUnderSummary, replacedPublishes, type CallSurface } from "@jaira/ui/transcriptRows";
+import { keptUnderSummary, publishSuccessorsOf, replacedPublishes, type CallSurface } from "@jaira/ui/transcriptRows";
+import { followPublishes } from "../../app/places";
 import { openBlockOf, writingOf } from "@jaira/ui/stillRunning";
 import { isIdle } from "@jaira/ui/workSummary";
 import { WorkLookContext } from "@jaira/ui/workSummaryContext";
@@ -124,6 +125,11 @@ export const Transcript = memo(function Transcript({
     });
   }, [pressed]);
   const shown = narrated === true ? entries.filter((entry) => entry.kind !== "writing") : entries;
+  // A view opened from a publish's card goes on to a later publish in the same run, as the card does
+  // (`publishSuccessorsOf`): told whenever a publish lands that replaces another.
+  const successors = publishSuccessorsOf(shown);
+  const followed = [...successors].map(([call, ref]) => `${call}>${String(ref.version)}`).join(" ");
+  useEffect(() => followPublishes(successors), [followed]); // eslint-disable-line react-hooks/exhaustive-deps
   if (shown.length === 0) return <Empty>{empty ?? session?.empty ?? "Nothing has been said here yet."}</Empty>;
   const chains = session !== null && session !== undefined ? session.sidechains : undefined;
   const sidechainOf = chains !== undefined || live?.sidechains !== undefined ? (call: string) => sidechainEntriesOf(session ?? null, call, live?.sidechains?.[call], live?.sidechains) : undefined;

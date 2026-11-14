@@ -8,7 +8,7 @@ import type { ArtifactSurface } from "@jaira/ui/transcriptViewTypes";
 import { PLACES, artifactEntryOf } from "@jaira/ui/splitModel";
 import { usePhone } from "../../app/phone";
 import { dragFrom } from "../../app/placeDrag";
-import { placeArtifact, surfaceOf, usePlacesHere, useShownPlaces } from "../../app/places";
+import { pressPlace, surfaceOf, usePlacesHere, useLitPlaces } from "../../app/places";
 import { ContextMenu, type MenuAt } from "../Menu";
 import { Markdown } from "../Markdown";
 import { Press, Txt, viewScrollbarProps } from "../../primitives";
@@ -47,12 +47,35 @@ import { callCardOf } from "./publishedCard";
  *
  * What the call returned names the artifact and its version, never its files: those are read here.
  */
-export function PublishedView({ published, artifacts, fill = false, onBack }: { published: PublishedRef; artifacts?: ArtifactSurface | undefined; fill?: boolean; onBack?: (() => void) | undefined }): JSX.Element {
+export function PublishedView({
+  published,
+  artifacts,
+  fill = false,
+  onBack,
+  follows,
+}: {
+  published: PublishedRef;
+  artifacts?: ArtifactSurface | undefined;
+  fill?: boolean;
+  onBack?: (() => void) | undefined;
+  /**
+   * The publish call this view goes on from (`splitModel.ts`' `artifactEntryOf`): a call's card passes
+   * its own version, a place opened from one passes what it was opened with. A place put from here takes
+   * it along, unless a version was picked off the menu (the person, 2026-11-14: a view opened on purpose
+   * at a version stays there).
+   */
+  follows?: number | undefined;
+}): JSX.Element {
   const t = useTokens();
   const phone = usePhone();
   const here = usePlacesHere(phone);
-  const lit = useShownPlaces(published.id);
   const [version, setVersion] = useState(published.version);
+  /** A version was picked off the menu: what is put elsewhere from here stays at it. */
+  const [picked, setPicked] = useState(false);
+  const following = picked ? undefined : follows;
+  // The places this view lights: where it is shown at the version on screen — a place's own view, at the
+  // version that place holds (`published`), whatever its menu has turned to since.
+  const lit = useLitPlaces({ id: published.id, version: fill ? published.version : version, follows: following });
   const [files, setFiles] = useState<Record<string, string> | null>(null);
   const [frame, setFrame] = useState<string | null>(null);
   const [versions, setVersions] = useState<PublishedVersion[] | null>(null);
@@ -177,7 +200,10 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
           label: `v${v.version}${v.version === published.version ? " · this call" : ""}`,
           note: `${v.author === "person" ? "your edit" : "Claude"} · ${when(v.createdAt)}`,
           checked: v.version === version,
-          onSelect: () => setVersion(v.version),
+          onSelect: () => {
+            setVersion(v.version);
+            setPicked(true);
+          },
         })),
       });
     if (versions !== null) show(versions);
@@ -197,18 +223,18 @@ export function PublishedView({ published, artifacts, fill = false, onBack }: { 
   const offered = PLACES.filter((place) => place === "main" || here[place] || lit.includes(place));
   const places =
     newest === null || superseded ? null : (
-      <PlaceButtons offered={offered} lit={lit} onPlace={(place) => placeArtifact(place, atVersion, artifacts ?? surfaceOf(taskId, undefined), phone)} />
+      <PlaceButtons offered={offered} lit={lit} onPlace={(place) => pressPlace(place, lit, atVersion, artifacts ?? surfaceOf(taskId, undefined), phone, following)} />
     );
   // Its title bar dragged takes it to a place (decision 0025, board 08; `placeDrag.ts`): web, not a phone,
   // and not from a button on the bar, which keeps its press.
   const bar = useRef<unknown>(null);
-  const dragged = useRef({ ref: atVersion, project: artifacts?.project });
-  dragged.current = { ref: atVersion, project: artifacts?.project };
+  const dragged = useRef({ ref: atVersion, project: artifacts?.project, follows: following });
+  dragged.current = { ref: atVersion, project: artifacts?.project, follows: following };
   const draggable = isWeb && !phone && newest !== null && !superseded;
   useEffect(() => {
     if (!draggable) return undefined;
     return dragFrom(bar.current, (target) =>
-      target.closest("button, [role='button'], [role='group']") !== null ? null : { entry: artifactEntryOf(dragged.current.ref, dragged.current.project), label: dragged.current.ref.title ?? dragged.current.ref.entry, kind: "place" },
+      target.closest("button, [role='button'], [role='group']") !== null ? null : { entry: artifactEntryOf(dragged.current.ref, dragged.current.project, dragged.current.follows), label: dragged.current.ref.title ?? dragged.current.ref.entry, kind: "place" },
     );
   }, [draggable]);
   const verbs =

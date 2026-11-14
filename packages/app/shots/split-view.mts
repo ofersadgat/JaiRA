@@ -198,6 +198,9 @@ async function main(): Promise<void> {
         : await app.ipc<{ taskId: string }>("task:create", {
             title: TITLE,
             workflow: "chat/session",
+            // A conversation is one the Chat view started (decision 0021): without this it is a plain
+            // task, listed under Tasks and not under Chat.
+            conversation: true,
             inputs: { message: 'Call show_artifact once with content "<!doctype html><title>Split test</title><h1>Split test</h1><p>One page.</p>" and file_path "split-test.html". Then say "done" and nothing else.' },
           });
     if (kept === undefined) await app.ipc("task:start", { taskId: made.taskId, overrides: { model: MODEL, permissionSet: FULL } });
@@ -245,17 +248,21 @@ async function main(): Promise<void> {
     await settle(2000);
     check((await count("[data-pane]")) === 2, "the card's Split moved it out of the panel into a split");
 
-    // Focus on the second pane: a sidebar press goes on its path.
+    // Focus on the second pane: a sidebar press goes on its path. The split stands on the page's own
+    // path, its conversation › it (the person, 2026-11-14): the conversation pressed is that path's
+    // first step, so the pane walks back to it, the page ahead.
+    check(JSON.stringify(await crumbs(HEAD(1))) === JSON.stringify([TITLE, PAGE]), `the split stands on the page's own path (${(await crumbs(HEAD(1))).join(" › ")})`);
     await press(`[data-drag-task="${made.taskId}"] button`);
     await settle(3500);
-    check((await crumbs(HEAD(1))).join(" › ") === `${PAGE} › ${TITLE}`, `the sidebar row went on the focused pane's path (${(await crumbs(HEAD(1))).join(" › ")})`);
+    check((await crumbs(HEAD(1))).join(" › ") === TITLE, `the sidebar row walked the focused pane back to the conversation (${(await crumbs(HEAD(1))).join(" › ")})`);
     check((await count(`${PANE(1)} textarea`)) === 1, "the pane draws the conversation with its composer");
 
-    // The pane's path: a crumb, ›, the path menu.
-    await press(`${HEAD(1)} [aria-label="Back to ${PAGE}"]`);
-    check((await paneName(1)) === PAGE, `the crumb "${PAGE}" walked the pane back to it`);
+    // The pane's path: ›, a crumb, the path menu.
     await press(`${HEAD(1)} [aria-label="Forward"]`);
-    check((await paneName(1)) === TITLE, "› came forward again");
+    check((await paneName(1)) === PAGE, "› came forward to the page");
+    await press(`${HEAD(1)} [aria-label="Back to ${TITLE}"]`);
+    check((await paneName(1)) === TITLE, `the crumb "${TITLE}" walked the pane back to it`);
+    await press(`${HEAD(1)} [aria-label="Forward"]`);
     const back = await centre(`${HEAD(1)} [aria-label="Back"]`);
     if (back !== null) {
       await app.mouse("mousePressed", back);
@@ -265,7 +272,7 @@ async function main(): Promise<void> {
     }
     const pathItems = await app.evaluate<string[]>(`[...document.querySelectorAll('[role="menu"] [role="menuitem"]')].map((e) => e.textContent)`);
     await app.shot("path-menu", undefined, false);
-    check(pathItems.length === 2 && pathItems[0]!.includes(TITLE) && pathItems[0]!.includes("here") && pathItems[1]!.includes(PAGE), `holding ‹ lists "This pane's path" (${pathItems.join(" | ")})`);
+    check(pathItems.length === 2 && pathItems[0]!.includes(PAGE) && pathItems[0]!.includes("here") && pathItems[1]!.includes(TITLE), `holding ‹ lists "This pane's path" (${pathItems.join(" | ")})`);
     await app.press("Escape", 27);
     await settle(500);
     const verbsOf = async (i: number): Promise<string[]> => {
@@ -335,13 +342,11 @@ async function main(): Promise<void> {
     console.log(`  same-path-chat: ${String(chatDiff.differ)} of ${String(chatDiff.of)} device pixels differ (panes ${String(b0.width)}x${String(b0.height)} css, each photographed unfocused) ${chatDiff.where}`);
     check(chatDiff.differ === 0, `the same conversation in both panes is the same picture (${String(chatDiff.differ)} pixels differ)`);
 
-    // …and an artifact on both: the second pane's card puts the page on its path (Split); the first's
-    // moves it to the main view (the first pane's path), the second going back a step; its › walks to
-    // the page again. Both paths: the conversation, then the page.
-    await press(`${PANE(1)} [aria-label="Open in a split"]`, "last");
-    await settle(2000);
-    await press(`${PANE(0)} [aria-label="Open in the main view"]`, "last");
-    await settle(2000);
+    // …and an artifact on both: each pane's › walks to the page ahead of it. (Not by its place buttons:
+    // a place button MOVES it, closing it wherever else it stood — the person, 2026-11-14.) Both
+    // paths: the conversation, then the page.
+    await press(`${HEAD(0)} [aria-label="Forward"]`);
+    await settle(1500);
     await press(`${HEAD(1)} [aria-label="Forward"]`);
     await settle(1500);
     const p0 = await crumbs(HEAD(0));

@@ -41,7 +41,7 @@ export function PaneBody({ entry, face, onOpen }: { entry: PanelEntry; face: (en
   if (published !== undefined) {
     return (
       <View flex={1} minHeight={0}>
-        <PublishedView key={`${published.ref.id}@${String(published.ref.version)}`} published={published.ref} artifacts={surfaceOf(published.ref.taskId, published.project)} fill />
+        <PublishedView key={`${published.ref.id}@${String(published.ref.version)}`} published={published.ref} artifacts={surfaceOf(published.ref.taskId, published.project)} fill follows={published.follows} />
       </View>
     );
   }

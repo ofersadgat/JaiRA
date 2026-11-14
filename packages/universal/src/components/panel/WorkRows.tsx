@@ -318,7 +318,7 @@ function Tool({ entry: held, open, sidechainOf, onOpenSidechain, artifacts, call
       const files = shownOf(entry.result);
       if (files !== undefined) return <ShownFilesView shown={files} artifacts={artifacts} />;
       const published = publishedOf(entry.result);
-      return published !== undefined ? <PublishedView key={`${published.id}@${String(published.version)}`} published={published} artifacts={artifacts} /> : undefined;
+      return published !== undefined ? <PublishedView key={`${published.id}@${String(published.version)}`} published={published} artifacts={artifacts} follows={published.version} /> : undefined;
     }
     if (line.shown === "publishedList") return artifacts?.taskId !== undefined ? <PublishedList taskId={artifacts.taskId} project={artifacts.project} artifacts={artifacts} /> : undefined;
     if (line.shown === "produced") return <ValueView value={producedArtifact(entry.result)} {...served(artifacts)} />;

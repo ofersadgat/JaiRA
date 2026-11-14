@@ -17,11 +17,11 @@ import { ValueView } from "./ValueView";
  */
 export function PreviewCard({ item }: { item: PinnedValue }): JSX.Element {
   if (item.published !== undefined) {
-    const { ref, project } = item.published;
+    const { ref, project, follows } = item.published;
     return (
       <View flex={1} minHeight={0}>
         {/* Its place buttons light where it stands (`places.ts`): here, the panel. */}
-        <PublishedView key={`${ref.id}@${String(ref.version)}`} published={ref} artifacts={surfaceOf(ref.taskId, project)} fill />
+        <PublishedView key={`${ref.id}@${String(ref.version)}`} published={ref} artifacts={surfaceOf(ref.taskId, project)} fill follows={follows} />
       </View>
     );
   }

@@ -102,6 +102,17 @@ describe("the panel stack", () => {
   });
 });
 
+describe("an artifact on the stack", () => {
+  it("pushed at another version, stands where it stood at that version", () => {
+    const at = (version: number): PanelEntry => ({ kind: "preview", key: "artifact:x", preview: { title: "X", published: { ref: { taskId: "t", id: "x", url: "artifact://t/@x", version, kind: "page", entry: "index.html" } } } });
+    const one = push(EMPTY_STACK, at(1));
+    const two = push(one, at(2));
+    expect(two.entries).toHaveLength(1);
+    expect(two.entries[0]).toEqual(at(2));
+    expect(push(two, at(2))).toBe(two);
+  });
+});
+
 describe("tab labels", () => {
   const tabs = [
     { bare: 40, label: 90 },

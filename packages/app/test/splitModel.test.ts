@@ -4,6 +4,11 @@ import {
   NO_SPLIT,
   ROOM,
   artifactEntryOf,
+  artifactPathOf,
+  followedSplit,
+  leaveArtifactPane,
+  litPlacesOf,
+  openPathInPane,
   closePane,
   crumbTo,
   dropZonesOf,
@@ -45,6 +50,10 @@ const task = (taskId: string): PanelEntry => taskPaneEntryOf(taskId);
 const keys = (entries: readonly PaneEntry[] | undefined): string[] => (entries ?? []).map((e) => e.key);
 const paths = (split: SplitState): string[][] => split.panes.map((p) => keys(p.entries));
 const path = (...entries: PaneEntry[]): PanePath => ({ entries, ahead: [] });
+const publishedOfTop = (p: PanePath): PublishedRef | undefined => {
+  const top = p.entries.at(-1);
+  return top?.kind === "preview" ? top.preview.published?.ref : undefined;
+};
 
 describe("the panes", () => {
   it("opens on one pane whose path is where the room stands", () => {
@@ -207,6 +216,56 @@ describe("the place buttons", () => {
     expect(shownPlacesOf("x", { main: ref("x"), second: entry, panel: undefined })).toEqual(["main", "split"]);
     expect(shownPlacesOf("x", { main: null, first: entry, panel: undefined })).toEqual(["main"]);
     expect(shownPlacesOf("y", { main: ref("x"), second: entry, panel: entry })).toEqual([]);
+  });
+
+  it("lights only where this artifact stands at this version; a call's card, where it was opened from that call", () => {
+    const v2 = artifactEntryOf(ref("x", 2));
+    expect(litPlacesOf({ id: "x", version: 2 }, { main: null, second: v2, panel: undefined })).toEqual(["split"]);
+    expect(litPlacesOf({ id: "x", version: 3 }, { main: null, second: v2, panel: undefined })).toEqual([]);
+    expect(litPlacesOf({ id: "y", version: 2 }, { main: null, second: v2, panel: v2 })).toEqual([]);
+    // Opened from call v2, the person's edits after it shown on both: still the same place.
+    const fromCall = artifactEntryOf(ref("x", 4), undefined, 2);
+    expect(litPlacesOf({ id: "x", version: 5, follows: 2 }, { main: null, second: fromCall, panel: undefined })).toEqual(["split"]);
+    expect(litPlacesOf({ id: "x", version: 5, follows: 3 }, { main: null, second: fromCall, panel: undefined })).toEqual([]);
+  });
+
+  it("keys an artifact by its id: two of one title are two places, two versions of one are one", () => {
+    const a = artifactEntryOf(ref("a"));
+    const b = artifactEntryOf({ ...ref("b"), title: "Page a" });
+    expect(a.key).not.toBe(b.key);
+    const p = pushPath(path(task("t-1"), a), artifactEntryOf(ref("a", 2)));
+    expect(keys(p.entries)).toEqual(["task:t-1", "artifact:a"]);
+    expect(publishedOfTop(p)?.version).toBe(2);
+    expect(pushPath(p, artifactEntryOf(ref("a", 2)))).toBe(p);
+  });
+
+  it("opens an artifact in a pane on its own path: its conversation, then it", () => {
+    const split = openInSplit(NO_SPLIT, task("b"));
+    const opened = openPathInPane(split, 1, artifactPathOf(ref("x", 3), "p"));
+    expect(paths(opened)).toEqual([["room"], ["task:t-1", "artifact:x"]]);
+    expect(opened.focus).toBe(1);
+    expect(paths(openPathInPane(NO_SPLIT, 1, artifactPathOf(ref("x"))))).toEqual([["room"], ["task:t-1", "artifact:x"]]);
+  });
+
+  it("moved away, closes a pane opened for it alone; any other path goes back a level", () => {
+    const own = openPathInPane(openInSplit(NO_SPLIT, task("b")), 1, artifactPathOf(ref("x")));
+    expect(paths(leaveArtifactPane(own, 1))).toEqual([["room"]]);
+    const walked = openInPane(openInSplit(NO_SPLIT, task("b")), 1, artifactEntryOf(ref("x")));
+    expect(paths(leaveArtifactPane(walked, 1))).toEqual([["room"], ["task:b"]]);
+  });
+
+  it("goes on to a later publish in the run from the call it was opened from, and only then", () => {
+    const later = ref("x", 5);
+    const successors = new Map([["artifact://t-1/@x@2", later]]);
+    const followed = openPathInPane(NO_SPLIT, 1, artifactPathOf(ref("x", 2), undefined, 2));
+    const moved = followedSplit(followed, successors);
+    expect(paths(moved)).toEqual([["room"], ["task:t-1", "artifact:x"]]);
+    expect(publishedOfTop(moved.panes[1]!)?.version).toBe(5);
+    // Now it follows v5's call, which nothing replaced.
+    expect(followedSplit(moved, successors)).toBe(moved);
+    // Opened at a version picked on purpose: it stays.
+    const pinned = openPathInPane(NO_SPLIT, 1, artifactPathOf(ref("x", 2)));
+    expect(followedSplit(pinned, successors)).toBe(pinned);
   });
 
   it("moves: opens at the place pressed and closes every other", () => {

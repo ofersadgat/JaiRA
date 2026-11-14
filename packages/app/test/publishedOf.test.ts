@@ -3,7 +3,7 @@
  * one, and at which version, off what `show_artifact` returned, and `toolLineOf` shows it under the line.
  */
 import { describe, expect, it } from "vitest";
-import { keptUnderSummary, publishedOf, replacedPublishes, toolLineOf } from "../src/renderer/transcriptRows";
+import { keptUnderSummary, publishSuccessorsOf, publishedOf, replacedPublishes, toolLineOf } from "../src/renderer/transcriptRows";
 import type { ToolEntry, TranscriptEntry } from "../src/renderer/transcript";
 
 const result = {
@@ -95,6 +95,14 @@ describe("replacedPublishes", () => {
     const asked = { kind: "tool", name: "AskUserQuestion", summary: "", ok: true, args: { questions: [{ question: "Which?", options: [] }] }, result: "…" } as unknown as ToolEntry;
     const replaced = replacedPublishes([v1, says("darker", "user"), v2, asked, v3]);
     expect([v1, v2, v3].map((e) => replaced.has(e))).toEqual([false, false, false]);
+  });
+
+  it("says where each replaced publish's card went: the run's newest publish of it", () => {
+    const [v1, v2, v3, v4] = [publish(1), publish(2), publish(3), publish(4)];
+    const next = publishSuccessorsOf([v1, says("darker", "user"), v2, thought, v3, says("Option 2:"), v4]);
+    expect([...next.keys()].sort()).toEqual([`${url}@2`, `${url}@3`]);
+    expect(next.get(`${url}@2`)?.version).toBe(4);
+    expect(publishSuccessorsOf([v1, says("darker", "user"), v2]).size).toBe(0);
   });
 
   it("is replaced only by a publish of the same artifact that published", () => {

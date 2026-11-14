@@ -90,7 +90,9 @@ export function roomPaneOf(split: SplitState): { pane: number; at: number } | nu
  * › would go forward to is going forward; anything else starts a new way ahead.
  */
 export function pushPath(path: PanePath, entry: PaneEntry): PanePath {
-  if (topOfPath(path)?.key === entry.key) return path;
+  const top = topOfPath(path);
+  // Another version of the artifact on top is the same place on the path, at the version pushed.
+  if (top?.key === entry.key) return sameVersion(top, entry) ? path : { entries: [...path.entries.slice(0, -1), entry], ahead: path.ahead };
   const at = path.entries.findIndex((one) => one.key === entry.key);
   if (at >= 0) return crumbTo(path, at);
   const ahead = path.ahead[0]?.key === entry.key ? path.ahead.slice(1) : [];
@@ -151,6 +153,19 @@ export function openInPane(split: SplitState, pane: number, entry: PaneEntry): S
   return { ...split, panes: panes.filter((path) => path.entries.length > 0), focus: pane, tab: pane, changed: split.changed === pane ? null : split.changed };
 }
 
+/**
+ * A whole path put on a pane, the pane focused and shown — an artifact opened by its place button, on
+ * its own path (`artifactPathOf`). Pane 1 with the column not split splits it.
+ */
+export function openPathInPane(split: SplitState, pane: number, path: PanePath): SplitState {
+  if (pane >= split.panes.length) {
+    const panes = split.panes.filter((one) => one.entries.length > 0);
+    return { panes: [...panes, path], focus: panes.length, tab: panes.length, changed: null, here: split.here };
+  }
+  const panes = split.panes.map((one, i) => (i === pane ? path : one));
+  return { ...split, panes, focus: pane, tab: pane, changed: split.changed === pane ? null : split.changed };
+}
+
 /** Open something in a split: on the second pane's path, splitting the column if it was not. */
 export function openInSplit(split: SplitState, entry: PaneEntry): SplitState {
   return openInPane(split, 1, entry);
@@ -204,6 +219,20 @@ export function leavePane(split: SplitState, pane: number): SplitState {
   if (path === undefined) return split;
   if (path.entries.length <= 1) return closePane(split, pane, true);
   return setPath(split, pane, paneBack(path));
+}
+
+/**
+ * An artifact moved out of a pane (the person, 2026-11-14: where it was, it closes). A pane standing on
+ * the artifact's own path and nothing more (`artifactPathOf`: its conversation › it) was opened for it,
+ * and closes with it — left on the conversation, it would take the side panel's rule from where the
+ * artifact was moved to. Any other path goes back a level (`leavePane`).
+ */
+export function leaveArtifactPane(split: SplitState, pane: number): SplitState {
+  const path = split.panes[pane];
+  const held = publishedOfEntry(topOfPath(path));
+  if (path === undefined || held === undefined) return split;
+  const own = path.entries.length === 2 && path.entries[0]!.key === taskPaneEntryOf(held.ref.taskId).key && path.ahead.length === 0;
+  return own ? closePane(split, pane, true) : leavePane(split, pane);
 }
 
 /** A press in a pane focuses it. */
@@ -277,28 +306,115 @@ export function taskPaneEntryOf(taskId: string, project?: string): PanelEntry {
   return { kind: "task", key: `task:${taskId}`, taskId, ...(project !== undefined ? { project } : {}), tab: "conversation" };
 }
 
-/** An artifact as an entry: what the side panel and a pane hold for one. */
-export function artifactEntryOf(ref: PublishedRef, project?: string): PanelEntry {
+/**
+ * An artifact as an entry: what the side panel and a pane hold for one. Keyed by the artifact's id, so
+ * two artifacts of one title are two entries and two versions of one are the same place on a path.
+ *
+ * `follows`: the version of the publish CALL it was opened from, when it was opened from a call's card
+ * at what that card showed of its own accord (not a version picked off its menu). Such an entry goes on
+ * to a later publish of the artifact in the same run, as the conversation's card does
+ * (`publishSuccessorsOf`, the person's ruling of 2026-11-14); one opened any other way stays where it was put.
+ */
+export function artifactEntryOf(ref: PublishedRef, project?: string, follows?: number): PanelEntry {
   const title = ref.title ?? ref.entry;
-  return { kind: "preview", key: `preview:${title}`, preview: { title, published: { ref, ...(project !== undefined ? { project } : {}) } } };
+  return {
+    kind: "preview",
+    key: `artifact:${ref.id}`,
+    preview: { title, published: { ref, ...(project !== undefined ? { project } : {}), ...(follows !== undefined ? { follows } : {}) } },
+  };
 }
 
 /** The artifact an entry holds, if it holds one. */
-export function publishedOfEntry(entry: PaneEntry | undefined | null): { ref: PublishedRef; project?: string | undefined } | undefined {
+export function publishedOfEntry(entry: PaneEntry | undefined | null): { ref: PublishedRef; project?: string | undefined; follows?: number | undefined } | undefined {
   return entry?.kind === "preview" ? entry.preview.published : undefined;
+}
+
+/** Two entries at one place on a path, the same in all but an artifact's version: whether that is the same too. */
+function sameVersion(a: PaneEntry, b: PaneEntry): boolean {
+  const one = publishedOfEntry(a);
+  const two = publishedOfEntry(b);
+  return one === undefined || two === undefined || (one.ref.version === two.ref.version && one.follows === two.follows);
+}
+
+/**
+ * An artifact's own path, as a pane opens it from its place button (the person, 2026-11-14): the task
+ * it belongs to — its conversation — and the artifact on it, as if it had been walked to from there.
+ * ‹ goes to its conversation.
+ */
+export function artifactPathOf(ref: PublishedRef, project?: string, follows?: number): PanePath {
+  return { entries: [taskPaneEntryOf(ref.taskId, project), artifactEntryOf(ref, project, follows)], ahead: [] };
+}
+
+/** What stands on top of each place. */
+export interface PlacesAt {
+  main: PublishedRef | null;
+  first?: PaneEntry | undefined;
+  second?: PaneEntry | undefined;
+  panel: PanelEntry | undefined;
 }
 
 /**
  * Every place an artifact stands in now: the main view (drawn over a room with no panes of its own, or
  * on top of the first pane), on top of the second pane, on top of the side panel. By its id — another
- * version of the same artifact is the same artifact.
+ * version of the same artifact is the same artifact, and a move takes it from wherever it is.
  */
-export function shownPlacesOf(id: string, at: { main: PublishedRef | null; first?: PaneEntry | undefined; second?: PaneEntry | undefined; panel: PanelEntry | undefined }): Place[] {
+export function shownPlacesOf(id: string, at: PlacesAt): Place[] {
+  return placesWhere(at, ({ ref }) => ref.id === id);
+}
+
+/**
+ * The places a view of an artifact LIGHTS: those showing this artifact at this version (the person,
+ * 2026-11-14 — another version, or another artifact, lights nothing). A call's card that `follows` its
+ * call lights a place opened from that same call, whichever version the two then went on to show (the
+ * person's edits after the call, which both show).
+ */
+export function litPlacesOf(shown: { id: string; version: number; follows?: number | undefined }, at: PlacesAt): Place[] {
+  return placesWhere(at, ({ ref, follows }) => ref.id === shown.id && (ref.version === shown.version || (shown.follows !== undefined && follows === shown.follows)));
+}
+
+function placesWhere(at: PlacesAt, is: (held: { ref: PublishedRef; follows?: number | undefined }) => boolean): Place[] {
   const out: Place[] = [];
-  if (at.main?.id === id || publishedOfEntry(at.first)?.ref.id === id) out.push("main");
-  if (publishedOfEntry(at.second)?.ref.id === id) out.push("split");
-  if (publishedOfEntry(at.panel)?.ref.id === id) out.push("panel");
+  const holds = (entry: PaneEntry | undefined): boolean => {
+    const held = publishedOfEntry(entry);
+    return held !== undefined && is(held);
+  };
+  if ((at.main !== null && is({ ref: at.main })) || holds(at.first)) out.push("main");
+  if (holds(at.second)) out.push("split");
+  if (holds(at.panel)) out.push("panel");
   return out;
+}
+
+/**
+ * The later publish an entry goes on to, by the call it follows: `successors` maps `<url>@<call
+ * version>` to the newest publish of that artifact in the same run (`publishSuccessorsOf`). The entry
+ * itself when nothing replaced its call.
+ */
+export function followedEntry<E extends PaneEntry>(entry: E, successors: ReadonlyMap<string, PublishedRef>): E | PanelEntry {
+  const published = publishedOfEntry(entry);
+  if (published?.follows === undefined) return entry;
+  const next = successors.get(`${published.ref.url}@${String(published.follows)}`);
+  if (next === undefined || next.version === published.follows) return entry;
+  return artifactEntryOf(next, published.project, next.version);
+}
+
+/** Every entry of a path (and ahead of it) gone on to its later publish; the same path when none moved. */
+export function followedPath(path: PanePath, successors: ReadonlyMap<string, PublishedRef>): PanePath {
+  let moved = false;
+  const step = (entry: PaneEntry): PaneEntry => {
+    const next = followedEntry(entry, successors);
+    if (next !== entry) moved = true;
+    return next;
+  };
+  const entries = path.entries.map(step);
+  const ahead = path.ahead.map(step);
+  return moved ? { entries, ahead } : path;
+}
+
+/** Every pane's path gone on to the later publishes; the same split when nothing moved. */
+export function followedSplit(split: SplitState, successors: ReadonlyMap<string, PublishedRef>): SplitState {
+  if (successors.size === 0) return split;
+  const panes = split.panes.map((path) => followedPath(path, successors));
+  return panes.every((path, i) => path === split.panes[i]) ? split : { ...split, panes };
 }
 
 /**
