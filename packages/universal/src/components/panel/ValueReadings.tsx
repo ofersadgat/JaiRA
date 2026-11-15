@@ -6,7 +6,7 @@ import { changeStats, mimeOfPath, patchStats, totalStats } from "@jaira/shared/b
 import { Island } from "../../islands";
 import { Press, Txt, edge, font, scrollbarProps, viewScrollbarProps } from "../../primitives";
 import { useTokens, type Tokens } from "../../tokens";
-import { Picture } from "../Picture";
+import { SizedPicture } from "../SizedPicture";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
 import { Icon } from "./Icon";
 
@@ -327,13 +327,14 @@ function Cell({ text, head, top, left, below, right, t }: { text: string | undef
 }
 
 /**
- * `Media`: a picture at its own size — no wider than the column, no taller than 420 — or, on web, a
+ * `Media`: a picture the person can size (`SizedPicture`; at rest no wider than the column, no taller
+ * than 420) — or, on web, a
  * clip or a track in the browser's own player. A phone has no player here yet: it says so, and the
  * source is under Source.
  */
 export function Media({ src, kind }: { src: string; kind: MediaKind }): JSX.Element {
   const t = useTokens();
-  if (kind === "image") return <Picture src={src} maxHeight={420} box={{ borderRadius: 6, backgroundColor: t.v("panel-2") }} />;
+  if (kind === "image") return <SizedPicture src={src} />;
   if (isWeb) {
     const style = { display: "block", maxWidth: "100%", maxHeight: 420, borderRadius: 6, background: String(t.v("panel-2")), ...(kind === "audio" ? { width: "100%", maxWidth: 420, height: 36 } : {}) };
     return kind === "video" ? <video src={src} controls style={style} /> : <audio src={src} controls style={style} />;

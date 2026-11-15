@@ -74,6 +74,21 @@ export function useHoverFloat(linger = 160): HoverFloat {
     clearTimeout(timer.current);
     setOpen(false);
   };
+  // Whether the pointer is over the anchor or the float: the focus leaving the anchor — a press on a
+  // control in the float takes it — closes nothing the pointer is still on (2026-11-14, a picture's
+  // + in a phase's card closed the card).
+  const over = useRef(false);
+  const enter = (): void => {
+    over.current = true;
+    stay();
+  };
+  const exit = (): void => {
+    over.current = false;
+    leave();
+  };
+  const blur = (): void => {
+    if (!over.current) leave();
+  };
   useEffect(() => () => clearTimeout(timer.current), []);
   useEffect(() => {
     if (!open || !isWeb || typeof window === "undefined") return undefined;
@@ -92,8 +107,8 @@ export function useHoverFloat(linger = 160): HoverFloat {
     anchor,
     rect,
     hovers,
-    bind: hovers ? { onMouseEnter: stay, onMouseLeave: leave, onFocus: stay, onBlur: leave } : {},
-    cardBind: hovers ? { onMouseEnter: stay, onMouseLeave: leave } : {},
+    bind: hovers ? { onMouseEnter: enter, onMouseLeave: exit, onFocus: stay, onBlur: blur } : {},
+    cardBind: hovers ? { onMouseEnter: enter, onMouseLeave: exit } : {},
     press: () => {
       if (hovers) return;
       if (open) return close();

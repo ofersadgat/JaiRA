@@ -32,6 +32,7 @@ import { OutcomeHostContext } from "../panel/outcomeHost";
 import { SubagentHostContext } from "../panel/subagentHost";
 import { AgentHostContext } from "../panel/AgentRail";
 import { ScrollWindowProvider, useScrollWindow } from "../Virtual";
+import { PictureSizesContext } from "../pictureSize";
 import { EDGE_START, UP_KEYS, dragging, pressed, readerUp, repin, resized, scrolled, settled, type EdgeState } from "./liveEdge";
 
 /**
@@ -86,6 +87,9 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
   const jumpRef = useRef(jump);
   jumpRef.current = jump;
   const m = useChatThread(surface, jumpRef);
+  // The sizes the person gave its pictures: kept while the conversation is open, dropped when it is left.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const pictureSizes = useMemo(() => new Map<string, number>(), [m.taskId]);
   /** The runs this conversation started: their lines, the one walked into, and the waits over the box. */
   // Where it says what the agent is doing: a pill over the thread's end, or the composer's first line.
   const { state: shell } = useShell();
@@ -229,6 +233,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
     ) : null;
   const plain = m.split === null && (m.seam === null || m.seam.own.length === 0);
   return (
+    <PictureSizesContext.Provider value={pictureSizes}>
     <View flex={1} minHeight={0} minWidth={0} flexDirection="column">
       {/* Walked into a run the conversation started: that run is the page, and nothing outside it. */}
       {runs.walkedIn !== null ? (
@@ -447,6 +452,7 @@ export function ChatThread({ surface }: { surface: ChatSurface }): JSX.Element {
       {runs.pills}
       </View>
     </View>
+    </PictureSizesContext.Provider>
   );
 }
 
