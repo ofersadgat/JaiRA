@@ -5,6 +5,7 @@
 import type { ProjectSummary, ProjectTask } from "@jaira/shared/browser";
 import { addCounts, minusCounts, projectCounts, sumCounts, taskCounts, unseenRows, unseenTasks, type PillCounts } from "./pillModel";
 import { projectName } from "./projects";
+import { groupRingItems } from "./ringModel";
 import type { SidebarProject, SidebarView } from "./sidebarTypes";
 import type { View } from "./store";
 import { groupOf, type ProjectGroup } from "./workspaceGroups";
@@ -99,6 +100,7 @@ export function sidebarProjectsOf(
     hue: projectHues[g.key] ?? "var(--p0)",
     // A group's pills are its workspaces', together.
     counts: sumCounts(g.members.map((m) => projectCounts(m, seen))),
+    ring: groupRingItems(g.members, seen),
     onSeen: () => {
       for (const m of g.members) markProjectSeen(m.project);
     },

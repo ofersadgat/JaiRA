@@ -1253,6 +1253,24 @@ export interface ProjectSummary {
    * bounds this to the tasks a status pill could possibly be counting.
    */
   ended: EndedTask[];
+  /**
+   * Every task working or parked on a person, and since when — what the ring round the project's tile
+   * measures (`ringModel.ts`). A parked task is here once, as `waiting`, never also as `running`. A
+   * conversation answering a typed turn (`TaskSummary.answering`) is here, though its row says it ended.
+   * Absent from a machine whose engine predates it: its ring then shows only what has stopped.
+   */
+  live?: LiveTask[];
+}
+
+/**
+ * One task working or parked on a person (see {@link ProjectSummary.live}). `since` is when it was
+ * asked — the earliest open approval or question — for a parked one, and otherwise the task row's
+ * clock, which is also what a gate without a clock of its own counts from.
+ */
+export interface LiveTask {
+  taskId: string;
+  kind: "running" | "waiting";
+  since: number;
 }
 
 /** One stopped task, as small as an unseen count needs it (see {@link ProjectSummary.ended}). */

@@ -10,6 +10,7 @@ import { ContextMenu, type MenuAt } from "./Menu";
 import { usePhone } from "../app/phone";
 import { Pills } from "./Pills";
 import { Icon } from "./panel/Icon";
+import { TileRing } from "./StatusRing";
 
 /**
  * The one left column (SHELL.md §5.1), a RAIL beside a PANEL (the sidebar mockups, 2026-11-11: the
@@ -247,7 +248,7 @@ function Column({
             const on = p.project === at;
             return (
               <View key={p.project} alignItems="center" gap={2} flexShrink={0}>
-                <RailItem on={on && !settingsOpen && room === undefined} label={p.label} caption={p.label} counts={p.counts} title={p.project} onPress={() => goProject(p)}>
+                <RailItem on={on && !settingsOpen && room === undefined} label={p.label} caption={p.label} title={p.project} onPress={() => goProject(p)}>
                   {() => <ProjectTile p={p} on={on} />}
                 </RailItem>
                 {collapsed && on
@@ -362,21 +363,35 @@ function RailIcon({ on, glyph }: { on: boolean; glyph: string }): JSX.Element {
   );
 }
 
-/** A project in the rail: two letters of its name on a tile, in its hue when the address is on it. */
+/**
+ * A project in the rail: two letters of its name on a tile, in its hue when the address is on it, inside
+ * the ring of what it has working, asking and stopped (`StatusRing.tsx`) — which stands out 5 past the
+ * tile on every side, over the item's padding rather than adding to its height.
+ */
 function ProjectTile({ p, on }: { p: SidebarProject; on: boolean }): JSX.Element {
   const t = useTokens();
   const hue = colorOf(t, p.hue);
   return (
-    <View
-      width={34}
-      height={34}
-      borderRadius={10}
-      alignItems="center"
-      justifyContent="center"
-      {...(edge(t, { top: on ? 1.5 : 1, right: on ? 1.5 : 1, bottom: on ? 1.5 : 1, left: on ? 1.5 : 1 }, on ? hue : "line") as object)}
-      backgroundColor={(on ? t.mix(hue, 22, "transparent") : t.v("panel")) as never}
-    >
-      <Txt spec={{ voice: "data", scale: 0.875, weight: 600, color: on ? "text" : "dim" }}>{p.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}</Txt>
+    <View marginHorizontal={-5} marginTop={-5} marginBottom={-2}>
+      <TileRing
+        items={p.ring}
+        size={44}
+        on={on}
+        letters={p.label.replace(/[^a-z0-9]/gi, "").slice(0, 2).toLowerCase() || "·"}
+        tile={(body) => (
+          <View
+            width={34}
+            height={34}
+            borderRadius={10}
+            alignItems="center"
+            justifyContent="center"
+            {...(edge(t, { top: on ? 1.5 : 1, right: on ? 1.5 : 1, bottom: on ? 1.5 : 1, left: on ? 1.5 : 1 }, on ? hue : "line") as object)}
+            backgroundColor={(on ? t.mix(hue, 22, "transparent") : t.v("panel")) as never}
+          >
+            {body}
+          </View>
+        )}
+      />
     </View>
   );
 }

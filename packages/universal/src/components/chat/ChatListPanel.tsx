@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type JSX } from "react";
 import { ScrollView, TextInput } from "react-native";
 import { View, isWeb } from "@tamagui/core";
-import { CHAT_GROUP_LABELS, CHAT_WHENS, CHAT_WHEN_LABELS, CHAT_WHEN_SHORT, arrangeConversations, whenOf, type ChatGroup, type ChatSort, type ChatWhen, agoOf, chatRowMenu, controlsOf, deleteAskOf, emptyListText, forkTitleOf, isAnswering, isUnread, renamedTitle, shownConversations, unreadTitle, type ChatRow } from "@jaira/ui/chatListModel";
+import { CHAT_GROUP_LABELS, CHAT_WHENS, CHAT_WHEN_LABELS, CHAT_WHEN_SHORT, arrangeConversations, whenOf, type ChatGroup, type ChatSort, type ChatWhen, agoOf, chatRowMenu, controlsOf, deleteAskOf, emptyListText, forkTitleOf, isUnread, renamedTitle, shownConversations, type ChatRow } from "@jaira/ui/chatListModel";
 import type { AskSpec } from "@jaira/ui/menuTypes";
 import { projectName } from "@jaira/ui/projects";
 import { copyText } from "../../clipboard";
@@ -14,6 +14,8 @@ import { Icon } from "../panel/Icon";
 import { AskDialog } from "../files/AskDialog";
 import { ListHead, type SortHead } from "../ListHead";
 import { Spinner } from "./Spinner";
+import { RowRing, RowRingClock } from "../StatusRing";
+import { chatRingItems } from "@jaira/ui/ringModel";
 
 /** What the list needs from the shell — `ChatSurface`'s list half (`chatSurface.ts`). */
 export interface ChatListSurface {
@@ -31,6 +33,8 @@ export interface ChatListSurface {
   producing: Readonly<Record<string, number>>;
   /** The conversations that have not started: being placed, or waiting for a workspace with room. */
   unplaced?: Readonly<Record<string, "placing" | "waiting">> | undefined;
+  /** When each conversation asked the person, for its ring — `ChatSurface.asked`. */
+  asked?: Readonly<Record<string, number>> | undefined;
   seen: Readonly<Record<string, number>>;
   onOpen: (taskId: string | null, project?: string) => void;
   onRename: (taskId: string, title: string, project?: string) => void;
@@ -92,10 +96,12 @@ function homeOf(task: ChatRow, surface: ChatListSurface): string | undefined {
  *   the rows           flex 1, scrolls
  *   a row              row, centred, gap 6, padding 4 8, radius 6, app 12.5/12.5; hovered --panel-2;
  *                      selected --accent 14% over transparent
- *   its dot            7 round, 1px --line; unread --accent filled
+ *   its ring           22 round (`StatusRing.tsx`): a segment for answering, asking, and how it
+ *                      stopped while unread; the oldest ask's age, or the answer's clock, inside
  *   its title          flex 1, one line; a fork's glyph 11 square, 4 right, --accent 70% into --dim
  *   what it controls   padding 0 6, 1px --line, pill, data 600 10/12.5 line 1.6, --dim
- *   when               app 11/12.5, --dim; answering: the spinner, 12, --accent
+ *   when               app 11/12.5, --dim, only while the ring is empty; else the work's clock
+ *                      (data 600, --accent) when the ring's middle tells a wait, else nothing
  *   the rename         flex 1, padding 2 4, 1px --accent, radius 4, --bg, app 12.5/12.5
  *   empty              --dim, padding 8 0 (and a paragraph's 1em margins)
  */
@@ -234,7 +240,10 @@ function Row({
 }): JSX.Element {
   const t = useTokens();
   const [hovered, hover] = useHover();
-  const unread = isUnread(task, surface.seen);
+  const ring = useMemo(
+    () => chatRingItems(task, { seen: surface.seen, producing: surface.producing, askedAt: surface.asked?.[task.taskId] }),
+    [task, surface.seen, surface.producing, surface.asked],
+  );
   const controls = controlsOf(task);
   const fork = forkTitleOf(task);
   const ground = (hovered: boolean): string => String(selected ? t.mix(t.v("accent"), 14, "transparent") : hovered ? t.v("panel-2") : "transparent");
@@ -294,15 +303,7 @@ function Row({
       {...row}
       box={({ hovered }) => ({ backgroundColor: ground(hovered) })}
     >
-      <View
-        width={7}
-        height={7}
-        flexShrink={0}
-        borderRadius={999}
-        backgroundColor={(unread ? t.v("accent") : "transparent") as never}
-        {...(edge(t, { top: 1, right: 1, bottom: 1, left: 1 }, unread ? "accent" : "line") as object)}
-        {...((isWeb ? { title: unreadTitle(unread) } : {}) as object)}
-      />
+      <RowRing items={ring} />
       <Txt spec={{ voice: "app", scale: 1, color: "text" }} ellip flex={1} minWidth={0} {...((isWeb && fork !== undefined ? { title: fork } : {}) as object)}>
         {task.origin !== undefined ? (
           <View display={"inline-flex" as never} width={11} height={11} marginRight={4} {...((isWeb ? { verticalAlign: -1 } : {}) as object)}>
@@ -332,10 +333,9 @@ function Row({
         <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Finding somewhere for it to run" } : {}) as object)}>
           <Spinner size={12} color={String(t.v("dim"))} />
         </View>
-      ) : isAnswering(task, surface.producing) ? (
-        <View flexShrink={0} flexDirection="row" alignItems="center" {...((isWeb ? { title: "Answering now" } : {}) as object)}>
-          <Spinner size={12} color={String(t.v("accent"))} />
-        </View>
+      ) : ring.length > 0 ? (
+        // The ring says how long; the row's end says only the work's clock beside a wait (board 11).
+        <RowRingClock items={ring} />
       ) : (
         <Txt spec={{ voice: "app", scale: 11 / 12.5, color: "dim" }} flexShrink={0} {...((isWeb ? { title: `${CHAT_WHEN_LABELS[when]} ${new Date(whenOf(task, when)).toLocaleString()}` } : {}) as object)}>
           {agoOf(whenOf(task, when))}

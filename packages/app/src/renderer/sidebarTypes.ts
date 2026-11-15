@@ -5,6 +5,7 @@
  */
 import type { ReactNode } from "react";
 import type { PillCounts } from "./pillModel";
+import type { RingItem } from "./ringModel";
 
 /**
  * One thing a row can DO, drawn as a glyph inside it.
@@ -94,5 +95,7 @@ export interface SidebarProject {
    */
   hue: string;
   counts: PillCounts;
+  /** What the ring round its tile measures — `ringModel.ts`. */
+  ring: RingItem[];
   onSeen?: () => void;
 }

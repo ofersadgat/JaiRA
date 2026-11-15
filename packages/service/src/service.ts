@@ -5269,8 +5269,14 @@ export class AppService {
         const taskId = request.taskId ?? session.requestTask.get(request.requestId);
         if (taskId !== undefined && running.has(taskId)) parked.add(taskId);
       }
+      // When each was asked, for the ring round the tile (`ProjectSummary.live`): an approval and a
+      // question carry their own clock; a gate does not, and counts from its task row's. Kept for a
+      // conversation answering a typed turn too, which asks while its row still says `completed`.
+      const askedAt = new Map<string, number>();
       for (const request of [...session.approvals.list(), ...session.questions.list()]) {
-        if (request.taskId !== undefined && running.has(request.taskId)) parked.add(request.taskId);
+        if (request.taskId === undefined) continue;
+        askedAt.set(request.taskId, Math.min(askedAt.get(request.taskId) ?? Infinity, request.at));
+        if (running.has(request.taskId)) parked.add(request.taskId);
       }
       for (const taskId of asking) if (running.has(taskId)) parked.add(taskId);
       const identity = session.kind === "user" ? this.repositoryOf(session.dir) : undefined;
@@ -5296,6 +5302,15 @@ export class AppService {
         ended: tasks
           .filter((t) => t.status !== "running" && t.status !== "queued")
           .map((t) => ({ taskId: t.taskId, status: t.status, updatedAt: t.updatedAt })),
+        // A run, and a conversation answering a typed turn (`answering`: a turn moves no task status,
+        // so this conversation, mid-answer, reads `completed` on its row). One that asks is `waiting`.
+        live: tasks
+          .filter((t) => t.status === "running" || t.answering === true)
+          .map((t) =>
+            parked.has(t.taskId) || askedAt.has(t.taskId)
+              ? { taskId: t.taskId, kind: "waiting" as const, since: askedAt.get(t.taskId) ?? t.updatedAt }
+              : { taskId: t.taskId, kind: "running" as const, since: t.status === "running" ? t.updatedAt : (t.lastMessageAt ?? t.updatedAt) },
+          ),
       });
     }
     // The user's work first, then the shared root — outward from what you are working on to the

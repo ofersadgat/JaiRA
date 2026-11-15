@@ -36,9 +36,6 @@ export function isAnswering(task: TaskSummary, producing: Readonly<Record<string
   return task.status === "running" || (producing[task.taskId] ?? 0) > 0;
 }
 
-/** The dot's tooltip. */
-export const unreadTitle = (unread: boolean): string => (unread ? "The latest reply has not been read" : "Read");
-
 /** A fork's tooltip on its title: where it came from. */
 export function forkTitleOf(task: TaskSummary): string | undefined {
   return task.origin !== undefined ? `forked from ${task.origin.title ?? "a task since deleted"}, ${task.origin.label}` : undefined;

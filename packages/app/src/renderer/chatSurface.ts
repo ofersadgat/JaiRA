@@ -6,6 +6,7 @@ import type { AppState, useApp } from "./store";
 import { askOfTask } from "./approvalCall";
 import { chatProjectOf, conversationStartOf, type ConversationStart } from "./chatWorkflow";
 import { parkedGateOf } from "./panelHost";
+import { askedAtOf } from "./ringModel";
 import type {
   ApprovalScope,
   ChatSettings,
@@ -100,6 +101,8 @@ export interface ChatSurface {
    * `waiting` while none has room (decision 0013 §5). The list draws it where a row says "answering".
    */
   unplaced: Readonly<Record<string, "placing" | "waiting">>;
+  /** When each conversation asked the person — its oldest open approval or question — for the ring on its row (`ringModel.ts`). */
+  asked: Readonly<Record<string, number>>;
   /** How far each conversation has been read — see `JairaUiState.seen`. */
   seen: Readonly<Record<string, number>>;
   /** Remember that a conversation has been read up to a moment. Monotonic; safe to call often. */
@@ -237,6 +240,7 @@ export function chatSurfaceOf(
     hasProject: state.at !== null,
     producing: state.producing,
     unplaced: Object.fromEntries(state.queue.map((q) => [q.taskId, q.phase])),
+    asked: askedAtOf([...state.approvals, ...state.questions]),
     seen: state.settings.ui.seen,
     onSeen: actions.markSeen,
     onOpen: actions.openConversation,
