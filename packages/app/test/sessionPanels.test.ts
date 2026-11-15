@@ -68,7 +68,7 @@ const pageOf = (parent: InstanceNode | undefined, refs: SessionRef[], notes: Ban
  */
 const rowsOf = (page: PageRows): string[] =>
   page.rows.map((row) =>
-    row.kind === "note" ? row.note.kind : row.band.segments.map((segment) => segment.pieces.map((piece) => `#${piece.node.instanceId}`).join(" ")).join(" | "),
+    row.kind === "note" || row.kind === "agent" ? row.note.kind : row.band.segments.map((segment) => segment.pieces.map((piece) => `#${piece.node.instanceId}`).join(" ")).join(" | "),
   );
 
 describe("what a conversation draws", () => {

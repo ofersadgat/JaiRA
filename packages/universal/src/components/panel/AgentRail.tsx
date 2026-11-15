@@ -16,6 +16,7 @@ import { ChildRunLine } from "../chat/ChildRun";
 import { Pulse } from "../chat/Pulse";
 import { Float } from "../floats/Float";
 import { HoverFloatLayer } from "../floats/hoverFloat";
+import { MenuLayer } from "../MenuLayer";
 import { Icon, type IconName } from "./Icon";
 import { ShownFilesView } from "./ShownFiles";
 import { Svg, type Shape } from "./Svg";
@@ -63,6 +64,13 @@ export interface AgentHost {
 
 export const AgentHostContext = createContext<AgentHost | undefined>(undefined);
 
+/**
+ * What a registered row tells the drawing besides where it is: a nest's trunk (where its conversation's
+ * own trunk stands, or `draw`: the rail draws the lane down it itself — a band has no trunk of its own),
+ * a block's time (where a wait that began then is marked).
+ */
+type Extra = { trunk?: number; draw?: boolean; at?: number };
+
 /** A part of a lane's row the rail is drawn against. */
 type Part = "head" | "nest" | "foot";
 type Rect = { x: number; y: number; w: number; h: number };
@@ -72,15 +80,21 @@ interface RailCtx {
   hueOf: (call: string) => string;
   open: ReadonlySet<string>;
   toggle: (key: string) => void;
-  register: (key: string, extra?: { trunk: number }) => (el: unknown) => void;
+  register: (key: string, extra?: Extra) => (el: unknown) => void;
   forkOf: (call: string) => ToolEntry | undefined;
   sidechainOf: ((call: string) => TranscriptEntry[]) | undefined;
   streaming: ReadonlySet<string>;
   working: boolean;
   onOpenSidechain: ((call: string, name: string) => void) | undefined;
   artifacts: ArtifactSurface | undefined;
-  /** An agent's conversation, nested beside its lane, with its lane as its trunk. */
-  nested: (entries: TranscriptEntry[], working: boolean, hue: string) => ReactNode;
+  /** An agent's conversation, nested beside its lane, with its lane as its trunk (lit with it). */
+  nested: (entries: TranscriptEntry[], working: boolean, hue: string, lit: boolean) => ReactNode;
+  /** The lane lit under the pointer, held here so a nested conversation's trunk lights with it. */
+  lit: string | null;
+  setLit: (call: string | null) => void;
+  /** The background agent whose stretch is laid out side by side with the conversation (⧉). */
+  sideBySide: string | null;
+  setSideBySide: (call: string | null) => void;
 }
 
 const RailContext = createContext<RailCtx | null>(null);
@@ -104,6 +118,7 @@ export function useRailFrame({
   sidechainOf,
   onOpenSidechain,
   lane,
+  laneLit = false,
   artifacts,
   nested,
 }: {
@@ -113,6 +128,8 @@ export function useRailFrame({
   sidechainOf: ((call: string) => TranscriptEntry[]) | undefined;
   onOpenSidechain: ((call: string, name: string) => void) | undefined;
   lane: string | undefined;
+  /** This conversation's trunk is a lane lit under the pointer in the conversation it is nested in. */
+  laneLit?: boolean;
   artifacts: ArtifactSurface | undefined;
   nested: RailCtx["nested"];
 }): { on: boolean; ctx: RailCtx; gutter: number; columnProps: Record<string, unknown>; overlay: ReactNode } {
@@ -126,9 +143,11 @@ export function useRailFrame({
     return next;
   }), []);
   // What the rows registered, and where each was last measured against the column.
-  const els = useRef(new Map<string, { el: unknown; trunk?: number }>()).current;
+  const els = useRef(new Map<string, { el: unknown } & Extra>()).current;
+  const [lit, setLit] = useState<string | null>(null);
+  const [sideBySide, setSideBySide] = useState<string | null>(null);
   const column = useRef<unknown>(null);
-  const [geo, setGeo] = useState<{ size: { w: number; h: number }; rects: Map<string, Rect>; trunks: Map<string, number> }>(() => ({ size: { w: 0, h: 0 }, rects: new Map(), trunks: new Map() }));
+  const [geo, setGeo] = useState<Geo>(() => ({ size: { w: 0, h: 0 }, rects: new Map(), extras: new Map() }));
   const frame = useRef<number | undefined>(undefined);
   const measure = useCallback(() => {
     if (frame.current !== undefined) return;
@@ -137,17 +156,17 @@ export function useRailFrame({
       const col = column.current as Measurable | null;
       if (col === null) return;
       measureAll(col, els, (size, rects) => {
-        const trunks = new Map<string, number>();
-        for (const [key, one] of els) if (one.trunk !== undefined) trunks.set(key, one.trunk);
-        setGeo((was) => (sameGeo(was, size, rects) ? was : { size, rects, trunks }));
+        const extras = new Map<string, Extra>();
+        for (const [key, one] of els) if (one.trunk !== undefined || one.at !== undefined || one.draw !== undefined) extras.set(key, { ...(one.trunk !== undefined ? { trunk: one.trunk } : {}), ...(one.draw !== undefined ? { draw: one.draw } : {}), ...(one.at !== undefined ? { at: one.at } : {}) });
+        setGeo((was) => (sameGeo(was, size, rects) ? was : { size, rects, extras }));
       });
     };
     frame.current = typeof requestAnimationFrame === "function" ? (requestAnimationFrame(run) as unknown as number) : (setTimeout(run, 16) as unknown as number);
   }, [els]);
   const register = useCallback(
-    (key: string, extra?: { trunk: number }) => (el: unknown) => {
+    (key: string, extra?: Extra) => (el: unknown) => {
       if (el === null) els.delete(key);
-      else els.set(key, { el, ...(extra !== undefined ? { trunk: extra.trunk } : {}) });
+      else els.set(key, { el, ...(extra ?? {}) });
       measure();
     },
     [els, measure],
@@ -170,13 +189,15 @@ export function useRailFrame({
     return map;
   }, [rail]);
   const ctx = useMemo<RailCtx>(
-    () => ({ rail, hueOf: (call) => laneHueOf(rail, call), open, toggle, register, forkOf: (call) => forks.get(call), sidechainOf, streaming, working, onOpenSidechain, artifacts, nested }),
-    [rail, open, toggle, register, forks, sidechainOf, streaming, working, onOpenSidechain, artifacts, nested],
+    () => ({ rail, hueOf: (call) => laneHueOf(rail, call), open, toggle, register, forkOf: (call) => forks.get(call), sidechainOf, streaming, working, onOpenSidechain, artifacts, nested, lit, setLit, sideBySide, setSideBySide }),
+    [rail, open, toggle, register, forks, sidechainOf, streaming, working, onOpenSidechain, artifacts, nested, lit, sideBySide],
   );
   const columnProps = on ? { ref: (el: unknown) => void (column.current = el), onLayout: () => measure(), position: "relative" } : {};
-  const overlay = on ? <RailOverlay ctx={ctx} geo={geo} trunkColour={lane} /> : null;
+  const overlay = on ? <RailOverlay ctx={ctx} geo={geo} trunkColour={lane} trunkLit={laneLit} /> : null;
   return { on, ctx, gutter: gutterOf(rail.columns), columnProps, overlay };
 }
+
+type Geo = { size: { w: number; h: number }; rects: Map<string, Rect>; extras: Map<string, Extra> };
 
 type Measurable = {
   getBoundingClientRect?: () => { left: number; top: number; width: number; height: number };
@@ -261,6 +282,9 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
   const files = useMemo(() => (mark.mark === "fork" ? shownInChain(chain, ctx?.sidechainOf) : undefined), [mark.mark, chain, ctx]);
   const fromCross = useMemo(() => (mark.mark !== "cross" || since === undefined ? chain : chain.filter((one) => ((one as { at?: number }).at ?? since) >= since)), [chain, mark.mark, since]);
   if (ctx === null || fork === undefined) return null;
+  // Agents started together are drawn once, by the first of them (`BatchRow`).
+  if (lane.inBatch !== undefined) return null;
+  if (lane.batch !== undefined && mark.mark === "fork") return <BatchRow lane={lane} ctx={ctx} />;
   const known = host?.info?.(call);
   const sub = local?.sub;
   const name = known?.name ?? sub?.name ?? "agent";
@@ -295,7 +319,7 @@ export function AgentLaneRow({ entry, mark }: { entry: TranscriptEntry; mark: { 
   const nest = isOpen ? (
     <>
       <View ref={ctx.register(keyOf(call, mark.mark, "nest"), { trunk: trunkXOf(innerColumns) }) as never} marginLeft={NEST_LEFT - innerColumns * LANE_PITCH} minWidth={0}>
-        {ctx.nested(fromCross, running, hue)}
+        {ctx.nested(fromCross, running, hue, ctx.lit === call)}
       </View>
       <View ref={ctx.register(keyOf(call, mark.mark, "foot")) as never} role="note" flexDirection="row" alignItems="center" gap={8} padding={4} minHeight={30} minWidth={0}>
         {running ? <Pulse /> : <Icon name="check" size={13} color={String(t.v("ok"))} />}
@@ -357,10 +381,16 @@ interface Hit {
   bottom: number;
 }
 
-function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w: number; h: number }; rects: Map<string, Rect>; trunks: Map<string, number> }; trunkColour: string | undefined }): JSX.Element | null {
+function RailOverlay({ ctx, geo, trunkColour, trunkLit }: { ctx: RailCtx; geo: Geo; trunkColour: string | undefined; trunkLit: boolean }): JSX.Element | null {
   const t = useTokens();
   const hovers = useCanHover();
-  const [hot, setHot] = useState<{ call: string; sx: number; sy: number } | null>(null);
+  const host = useContext(AgentHostContext);
+  const [point, setPoint] = useState<{ call: string; sx: number; sy: number } | null>(null);
+  const hot = point !== null && ctx.lit === point.call ? point : null;
+  const setHot = (next: { call: string; sx: number; sy: number } | null): void => {
+    setPoint(next);
+    ctx.setLit(next?.call ?? null);
+  };
   const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
   useEffect(() => () => clearTimeout(timer.current), []);
   const { rail, open } = ctx;
@@ -374,7 +404,7 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
     shapes.push({ kind: "circle", cx, cy, r: 4.5, fill: bg, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
     if (filled) shapes.push({ kind: "circle", cx, cy, r: 2.2, fill: colour, ...(lit ? { filter: LIT } : {}) });
   };
-  if (h > 0) shapes.push({ kind: "path", d: `M${X} 0 V ${h}`, stroke: rule, strokeWidth: 2, linecap: "butt" });
+  if (h > 0) shapes.push({ kind: "path", d: `M${X} 0 V ${h}`, stroke: rule, strokeWidth: 2, linecap: "butt", ...(trunkLit ? { filter: LIT } : {}) });
 
   /** The right side of a lane: into its nest and back out under it, or the bump of a folded one. */
   const rightOf = (lane: AgentLane, mark: LaneMark, head: Rect, colour: string, lit: boolean, from: number): void => {
@@ -382,8 +412,11 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
     const foot = geo.rects.get(keyOf(lane.call, mark, "foot"));
     const mid = midOf(head);
     if (open.has(openKey(lane.call, mark)) && nest !== undefined) {
-      const inner = nest.x + (geo.trunks.get(keyOf(lane.call, mark, "nest")) ?? 9);
+      const extra = geo.extras.get(keyOf(lane.call, mark, "nest"));
+      const inner = nest.x + (extra?.trunk ?? 9);
       shapes.push({ kind: "path", d: `M${from} ${mid} C ${from} ${mid + 7}, ${inner} ${nest.y - 6}, ${inner} ${nest.y}`, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
+      // A band has no trunk of its own: the lane runs down its side, drawn here.
+      if (extra?.draw === true) shapes.push({ kind: "path", d: `M${inner} ${nest.y} V ${nest.y + nest.h}`, stroke: colour, strokeWidth: 2, linecap: "butt", ...(lit ? { filter: LIT } : {}) });
       hits.push({ call: lane.call, x: inner, top: nest.y, bottom: nest.y + nest.h });
       if (foot !== undefined) {
         const fm = midOf(foot);
@@ -397,7 +430,11 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
     hits.push({ call: lane.call, x: X + 9, top: mid - 6, bottom: mid + 17 });
   };
 
+  // Where each block of the conversation starts, by its time: where a wait that began then is marked.
+  const blocks = [...geo.extras].flatMap(([key, extra]) => (key.startsWith("block:") && extra.at !== undefined && geo.rects.has(key) ? [{ at: extra.at, y: geo.rects.get(key)!.y }] : [])).sort((a, b) => a.y - b.y);
+  const warn = cssColour(t, "var(--warn)");
   for (const lane of rail.lanes) {
+    if (lane.inBatch !== undefined) continue;
     const colour = cssColour(t, ctx.hueOf(lane.call));
     const lit = hot?.call === lane.call;
     const head = geo.rects.get(keyOf(lane.call, "fork", "head"));
@@ -416,7 +453,9 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
       const endMark: LaneMark | undefined = lane.cross !== undefined ? "cross" : lane.back !== undefined ? "back" : undefined;
       const end = endMark !== undefined ? geo.rects.get(keyOf(lane.call, endMark, "head")) : undefined;
       shapes.push({ kind: "path", d: `M${X} ${mid} C ${X} ${mid + 7}, ${lx} ${Math.min(mid + 9, bottom - 4)}, ${lx} ${bottom}`, stroke: colour, strokeWidth: 2, ...(lit ? { filter: LIT } : {}) });
-      const stop = end !== undefined ? end.y : endMark === undefined ? h - 14 : undefined;
+      // Its end inside a stretch laid out side by side is not drawn as a row: the lane runs to the band's foot.
+      const band = geo.rects.get("band:together");
+      const stop = end !== undefined ? end.y : endMark === undefined ? h - 14 : band !== undefined && band.y + band.h > bottom ? band.y + band.h : undefined;
       if (stop !== undefined && stop > bottom) {
         shapes.push({ kind: "path", d: `M${lx} ${bottom} V ${stop}`, stroke: colour, strokeWidth: 2, linecap: "butt", ...(lit ? { filter: LIT } : {}) });
         hits.push({ call: lane.call, x: lx, top: bottom, bottom: stop });
@@ -430,6 +469,16 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
         // Still running: its live end, level with the conversation's foot.
         shapes.push({ kind: "circle", cx: lx, cy: stop, r: 7, fill: colour, opacity: 0.18 });
         shapes.push({ kind: "circle", cx: lx, cy: stop, r: 3.5, fill: colour });
+      }
+      // Waiting on you: a warn knot with a pause, on the lane where the wait began (the first block that
+      // started at or after it; the live end when none has).
+      const waits = endMark === undefined ? (host?.info?.(lane.call)?.waits ?? []) : [];
+      if (waits.length > 0 && stop !== undefined) {
+        const since = Math.min(...waits.map((wait) => wait.since ?? Number.POSITIVE_INFINITY));
+        const at = blocks.find((block) => block.at >= since && block.y > bottom);
+        const wy = Math.min(at?.y ?? stop - 16, stop - 16);
+        shapes.push({ kind: "circle", cx: lx, cy: wy, r: 5.5, fill: bg, stroke: warn, strokeWidth: 2 });
+        shapes.push({ kind: "path", d: `M${lx - 1.6} ${wy - 2.4} V ${wy + 2.4} M${lx + 1.6} ${wy - 2.4} V ${wy + 2.4}`, stroke: warn, strokeWidth: 1.6 });
       }
       knot(X, mid, colour, lit);
     } else {
@@ -471,7 +520,12 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
           }}
         />
       ))}
-      {hot !== null && hovered !== undefined ? (
+      {hot !== null && hovered !== undefined && !hovers ? (
+        <MenuLayer onClose={() => setHot(null)}>
+          <LaneSheet lane={hovered} ctx={ctx} done={() => setHot(null)} />
+        </MenuLayer>
+      ) : null}
+      {hot !== null && hovered !== undefined && hovers ? (
         <HoverFloatLayer hover={{ hovers, close: () => setHot(null) }}>
           <Float
             anchor={{ left: hot.sx - 17, right: hot.sx - 17, top: hot.sy, bottom: hot.sy }}
@@ -481,7 +535,7 @@ function RailOverlay({ ctx, geo, trunkColour }: { ctx: RailCtx; geo: { size: { w
             pointerEvents="auto"
             {...(hovers ? ({ onMouseEnter: stay, onMouseLeave: leave } as object) : {})}
           >
-            <LaneStack lane={hovered} ctx={ctx} words={!hovers} done={() => setHot(null)} />
+            <LaneStack lane={hovered} ctx={ctx} words={false} done={() => setHot(null)} />
           </Float>
         </HoverFloatLayer>
       ) : null}
@@ -527,10 +581,20 @@ function LaneHit({ hit, hovers, onPoint, onLeave, onPress }: { hit: Hit; hovers:
   );
 }
 
-/** The four buttons on a lane: its own click, the main window, beside, the side panel. */
-function LaneStack({ lane, ctx, words, done }: { lane: AgentLane; ctx: RailCtx; words: boolean; done: () => void }): JSX.Element {
-  const t = useTokens();
-  const host = useContext(AgentHostContext);
+interface LaneButton {
+  icon: IconName;
+  say: string;
+  note?: string;
+  on: boolean;
+  go: (() => void) | undefined;
+}
+
+/**
+ * The moves a lane offers, in their order: its own click (bring here, send back, fold, show here), the
+ * main window, beside, the side panel — and for a background lane, its stretch side by side (⧉).
+ * `phone`: a phone has no split.
+ */
+function laneButtons(lane: AgentLane, ctx: RailCtx, host: AgentHost | undefined, phone: boolean): LaneButton[] {
   const fork = ctx.forkOf(lane.call);
   const name = fork !== undefined ? (subagentNameOf(fork) ?? "agent") : "agent";
   const open = ctx.open.has(lane.call);
@@ -543,12 +607,24 @@ function LaneStack({ lane, ctx, words, done }: { lane: AgentLane; ctx: RailCtx; 
       ? { icon: "fold", say: "Fold it" }
       : { icon: "unfold", say: "Show it here" };
   const walkIn = host?.walkIn ?? ctx.onOpenSidechain;
-  const buttons: { icon: IconName; say: string; on: boolean; go: (() => void) | undefined }[] = [
-    { icon: first.icon, say: first.say, on: false, go: () => ctx.toggle(lane.call) },
-    { icon: "placeMain", say: "Open as the main view", on: false, go: walkIn !== undefined ? () => walkIn(lane.call, name) : undefined },
-    { icon: "placeSplit", say: "Open beside", on: lit.beside, go: host?.beside !== undefined ? () => host.beside!(lane.call, name) : undefined },
+  const together = ctx.sideBySide === lane.call;
+  const buttons: LaneButton[] = [
+    { icon: first.icon, say: first.say, ...(lane.background ? { note: open ? "its lane goes back to the left" : "its lane moves to the right" } : {}), on: false, go: () => ctx.toggle(lane.call) },
+    { icon: "placeMain", say: "Open as the main view", note: "like entering a substate", on: false, go: walkIn !== undefined ? () => walkIn(lane.call, name) : undefined },
+    { icon: "placeSplit", say: "Open beside", note: "in a split pane", on: lit.beside, go: !phone && host?.beside !== undefined ? () => host.beside!(lane.call, name) : undefined },
     { icon: "placePanel", say: "Open in the side panel", on: lit.panel, go: host?.panel !== undefined ? () => host.panel!(lane.call, name) : undefined },
+    ...(lane.background && lane.column > 0 && !open
+      ? [{ icon: "columns" as const, say: together ? "Back to the conversation alone" : "Side by side with the conversation", note: "what it did while you talked", on: together, go: () => ctx.setSideBySide(together ? null : lane.call) }]
+      : []),
   ];
+  return buttons.filter((b) => b.go !== undefined);
+}
+
+/** The buttons on a lane, out of it at the pointer (4C). */
+function LaneStack({ lane, ctx, words, done }: { lane: AgentLane; ctx: RailCtx; words: boolean; done: () => void }): JSX.Element {
+  const t = useTokens();
+  const host = useContext(AgentHostContext);
+  const buttons = laneButtons(lane, ctx, host, false);
   return (
     <View
       flexDirection="column"
@@ -561,9 +637,7 @@ function LaneStack({ lane, ctx, words, done }: { lane: AgentLane; ctx: RailCtx; 
       backgroundColor={t.v("panel") as never}
       {...({ boxShadow: "0px 6px 18px rgba(15, 20, 30, 0.16)" } as object)}
     >
-      {buttons
-        .filter((b) => b.go !== undefined)
-        .map((b) => (
+      {buttons.map((b) => (
           <Press
             key={b.icon}
             onPress={() => {
@@ -595,4 +669,358 @@ function subagentNameOf(entry: ToolEntry): string | undefined {
   const args = entry.args as Record<string, unknown> | null | undefined;
   const d = args !== null && typeof args === "object" ? args["description"] : undefined;
   return typeof d === "string" && d.trim().length > 0 ? d.trim() : entry.summary.length > 0 ? entry.summary : undefined;
+}
+
+/**
+ * The lane's moves under a finger: pressed, the lane opens them as a sheet from the window's foot, each
+ * with its words (round 5, 5D) — a phone has no hover and no split.
+ *
+ *   the sheet        at the foot, --panel, radius 18 18 0 0, the lift; padding 8 14 18
+ *   its grab         38 × 4, radius 4, --line, 10 under
+ *   its head         the agent's name 600, what it is doing --dim
+ *   a row            row, centred, gap 12, padding 11 4, a --line rule above; the icon 16 --dim, the
+ *                    words app 14 --text, the note 11.5 --dim
+ */
+function LaneSheet({ lane, ctx, done }: { lane: AgentLane; ctx: RailCtx; done: () => void }): JSX.Element {
+  const t = useTokens();
+  const host = useContext(AgentHostContext);
+  const fork = ctx.forkOf(lane.call);
+  const known = host?.info?.(lane.call);
+  const name = known?.name ?? (fork !== undefined ? subagentNameOf(fork) : undefined) ?? "agent";
+  const buttons = laneButtons(lane, ctx, host, true);
+  return (
+    <View position="absolute" left={0} right={0} bottom={0} paddingTop={8} paddingHorizontal={14} paddingBottom={18} backgroundColor={t.v("panel") as never} borderTopLeftRadius={18} borderTopRightRadius={18} {...({ boxShadow: String(t.v("lift")) } as object)}>
+      <View width={38} height={4} borderRadius={4} backgroundColor={t.v("line") as never} alignSelf="center" marginBottom={10} />
+      <View flexDirection="row" alignItems="center" gap={8} marginBottom={8} minWidth={0}>
+        <Txt spec={{ voice: "app", scale: 13 / 12.5, weight: 600, color: "text" }} flexShrink={1} ellip>
+          {name}
+        </Txt>
+        {lane.background ? <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "dim", upper: true, ls: 0.07 }}>background</Txt> : null}
+      </View>
+      {buttons.map((b) => (
+        <Press
+          key={b.icon}
+          onPress={() => {
+            b.go?.();
+            done();
+          }}
+          label={b.say}
+          flexDirection="row"
+          alignItems="center"
+          gap={12}
+          paddingVertical={11}
+          paddingHorizontal={4}
+          borderTopWidth={1}
+          borderStyle="solid"
+          borderColor={t.v("line") as never}
+        >
+          <Icon name={b.icon} size={16} color={String(t.v(b.on ? "accent" : "dim"))} />
+          <View flexShrink={1} minWidth={0}>
+            <Txt spec={{ voice: "app", scale: 14 / 12.5, color: "text" }}>{b.say}</Txt>
+            {b.note !== undefined ? <Txt spec={{ voice: "app", scale: 11.5 / 12.5, color: "dim" }}>{b.note}</Txt> : null}
+          </View>
+        </Press>
+      ))}
+    </View>
+  );
+}
+
+// --- several agents at once ----------------------------------------------------
+
+/** What one agent of a batch says of itself: its line's words, read as `AgentLaneRow` reads them. */
+function useAgentSays(ctx: RailCtx, lane: AgentLane): { name: string; kind: string; steps: number; took: string; running: boolean; chain: TranscriptEntry[]; walkIn?: () => void } {
+  const host = useContext(AgentHostContext);
+  const fork = ctx.forkOf(lane.call);
+  const chain = useMemo(() => ctx.sidechainOf?.(lane.call) ?? [], [ctx, lane.call]);
+  const running = ctx.streaming.has(lane.call) || (ctx.working && fork?.result === undefined);
+  const now = useNow(running);
+  const local = useMemo(() => (fork !== undefined ? subagentLineOf(fork, chain, ctx.sidechainOf, running) : undefined), [fork, chain, ctx, running]);
+  const known = host?.info?.(lane.call);
+  const sub = local?.sub;
+  const name = known?.name ?? sub?.name ?? "agent";
+  const walkIn = host?.walkIn !== undefined ? () => host.walkIn!(lane.call, name) : ctx.onOpenSidechain !== undefined ? () => ctx.onOpenSidechain!(lane.call, name) : undefined;
+  return {
+    name,
+    kind: known?.kind ?? sub?.kind ?? "agent",
+    steps: known?.steps ?? sub?.steps ?? 0,
+    took: known?.took ?? (sub?.startedAt === undefined ? "" : `${secondsOf(Math.max(0, (running ? now : (sub.lastAt ?? sub.startedAt)) - sub.startedAt))}${running ? " so far" : ""}`),
+    running,
+    chain,
+    ...(walkIn !== undefined ? { walkIn } : {}),
+  };
+}
+
+/**
+ * Agents one turn started together and waited for together: one lane, and opened, a concurrent band
+ * under it (`SessionBands.tsx`' — round 2, D): two side by side, three or more as tabs, the switch in
+ * the band's corner. Folded, its line names them all.
+ *
+ *   the band        margin-left so its lane (drawn by the rail down its left, 9 in) stands under the
+ *                   knot's lane; padding 30 0 4 20 (the switch over its top right)
+ *   the switch      absolute, top 0, right 0, a 1px --line box, radius 6, clipped; app 11, padding 2 8,
+ *                   --panel --dim, chosen --panel-2 --text
+ *   columns         row, gap 12, top-aligned, each flex 1
+ *   tabs            row, gap 2, 60 clear at the right; a tab at most 220, data 11.5, padding 4 12, radius
+ *                   8 8 0 0, a --line edge but the bottom; --bg --dim, chosen --panel --text
+ *   a column        its head (go in, its kind, its name 600, steps · time, ✓ or the pulse), then its
+ *                   sheet: --panel, 1px --line, radius 12 (under tabs, its top left 0)
+ */
+function BatchRow({ lane, ctx }: { lane: AgentLane; ctx: RailCtx }): JSX.Element {
+  const t = useTokens();
+  const calls = lane.batch ?? [lane.call];
+  const members = calls.map((call) => ctx.rail.lanes.find((one) => one.call === call)!).filter((one) => one !== undefined);
+  const says = members.map((member) => useAgentSays(ctx, member)); // eslint-disable-line react-hooks/rules-of-hooks -- a batch's members are fixed for its row
+  const [tabbed, setTabbed] = useState(members.length > 2);
+  const [chosen, setChosen] = useState(0);
+  const isOpen = ctx.open.has(lane.call);
+  const running = says.filter((one) => one.running).length;
+  const steps = says.reduce((n, one) => n + one.steps, 0);
+  const took = says.map((one) => one.took).sort((a, b) => b.length - a.length)[0] ?? "";
+  const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
+  const column = (i: number, flat: boolean): JSX.Element => {
+    const one = says[i]!;
+    return (
+      // Side by side the columns share the row (flex 1); tabbed, the one shown stands in a column of its own, as tall as it is.
+      <View key={members[i]!.call} {...(flat ? {} : { flex: 1 })} minWidth={0}>
+        {flat ? null : <ColumnHead one={one} />}
+        <View
+          minWidth={0}
+          borderWidth={1}
+          borderStyle="solid"
+          borderColor={t.v("line") as never}
+          borderRadius={12}
+          {...(flat ? { borderTopLeftRadius: 0 } : {})}
+          backgroundColor={t.v("panel") as never}
+          overflow="hidden"
+        >
+          {flat ? (
+            <View paddingTop={6} paddingHorizontal={10}>
+              <ColumnHead one={one} />
+            </View>
+          ) : null}
+          {ctx.nested(one.chain, one.running, ctx.hueOf(members[i]!.call), false)}
+        </View>
+      </View>
+    );
+  };
+  return (
+    <View flexDirection="column" minWidth={0}>
+      <View ref={ctx.register(keyOf(lane.call, "fork", "head")) as never} minWidth={0}>
+        <ChildRunLine
+          verb={`${members.length} agents`}
+          name={says.map((one) => one.name).join(", ")}
+          waits={[]}
+          running={running > 0 ? { step: `${running} running`, path: [] } : undefined}
+          steps={steps}
+          took={took}
+          open={isOpen}
+          onToggle={() => ctx.toggle(lane.call)}
+          nest={false}
+        >
+          {null}
+        </ChildRunLine>
+      </View>
+      {isOpen ? (
+        <>
+          <View ref={ctx.register(keyOf(lane.call, "fork", "nest"), { trunk: 9, draw: true }) as never} marginLeft={NEST_LEFT} paddingLeft={20} paddingTop={30} paddingBottom={4} minWidth={0} position="relative">
+            <View position="absolute" top={0} right={0} flexDirection="row" borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} overflow="hidden">
+              {(["Side by side", "Tabbed"] as const).map((mode) => {
+                const on = (mode === "Tabbed") === tabbed;
+                return (
+                  <Press key={mode} onPress={() => setTabbed(mode === "Tabbed")} label={mode} paddingVertical={2} paddingHorizontal={8} backgroundColor={t.v(on ? "panel-2" : "panel") as never}>
+                    <Txt spec={{ voice: "app", scale: 11 / 12.5, color: on ? "text" : "dim" }}>{mode}</Txt>
+                  </Press>
+                );
+              })}
+            </View>
+            {tabbed ? (
+              <View minWidth={0}>
+                <View flexDirection="row" gap={2} paddingRight={60} minWidth={0}>
+                  {says.map((one, i) => (
+                    <Press
+                      key={members[i]!.call}
+                      onPress={() => setChosen(i)}
+                      label={one.name}
+                      maxWidth={220}
+                      paddingVertical={4}
+                      paddingHorizontal={12}
+                      borderWidth={1}
+                      borderBottomWidth={0}
+                      borderStyle="solid"
+                      borderColor={t.v("line") as never}
+                      borderTopLeftRadius={8}
+                      borderTopRightRadius={8}
+                      backgroundColor={t.v(i === chosen ? "panel" : "bg") as never}
+                    >
+                      <Txt spec={{ voice: "data", scale: 11.5 / 12, color: i === chosen ? "text" : "dim" }} numberOfLines={1}>
+                        {`${one.name}${one.running ? "" : " ✓"}`}
+                      </Txt>
+                    </Press>
+                  ))}
+                </View>
+                {column(Math.min(chosen, says.length - 1), true)}
+              </View>
+            ) : (
+              <View flexDirection="row" gap={12} alignItems="flex-start" minWidth={0}>
+                {says.map((_, i) => column(i, false))}
+              </View>
+            )}
+          </View>
+          <View ref={ctx.register(keyOf(lane.call, "fork", "foot")) as never} role="note" flexDirection="row" alignItems="center" gap={8} padding={4} minHeight={30} minWidth={0}>
+            {running > 0 ? <Pulse /> : <Icon name="check" size={13} color={String(t.v("ok"))} />}
+            <Txt spec={{ voice: "data", scale: 11 / 12, color: "text" }}>{`${members.length} agents`}</Txt>
+            <Txt spec={words}>{running > 0 ? `${running} still running` : "returned"}</Txt>
+            <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim", tabular: true }} marginLeft="auto" paddingHorizontal={3}>
+              {took}
+            </Txt>
+          </View>
+        </>
+      ) : null}
+    </View>
+  );
+}
+
+/** A band column's head: go in, its kind and name, steps and time, done or running. */
+function ColumnHead({ one }: { one: ReturnType<typeof useAgentSays> }): JSX.Element {
+  const t = useTokens();
+  const words = { voice: "app" as const, scale: 11.5 / 12.5, color: "dim" };
+  return (
+    <View flexDirection="row" alignItems="center" gap={7} paddingBottom={5} minWidth={0}>
+      {one.walkIn !== undefined ? (
+        <Press onPress={one.walkIn} label={`go into ${one.name}`} title={`open ${one.name} as the main view`} width={22} height={22} alignItems="center" justifyContent="center" borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={6} backgroundColor={t.v("panel-2") as never}>
+          <View transform={[{ rotate: "-90deg" }]}>
+            <Icon name="chevron" size={11} color={String(t.v("dim"))} />
+          </View>
+        </Press>
+      ) : null}
+      <Txt spec={words} flexShrink={0}>
+        {one.kind}
+      </Txt>
+      <Txt spec={{ ...words, weight: 600, color: "text" }} flexShrink={1} ellip>
+        {one.name}
+      </Txt>
+      <View flex={1} />
+      {one.running ? <Pulse /> : <Icon name="check" size={12} color={String(t.v("ok"))} />}
+      <Txt spec={{ voice: "data", scale: 10.5 / 12, color: "dim", tabular: true }} flexShrink={0}>
+        {`${one.steps} steps · ${one.took}`}
+      </Txt>
+    </View>
+  );
+}
+
+// --- side by side ----------------------------------------------------------------
+
+/** What a time-band row holds: one side's run of entries, from one moment. */
+interface BandRun {
+  side: "agent" | "here";
+  at: number | undefined;
+  entries: TranscriptEntry[];
+}
+
+/**
+ * Two stretches as runs in the order they happened: each side's entries, a run per side until the other
+ * spoke. An entry with no time of its own goes with the one before it on its side.
+ */
+export function bandRunsOf(agent: readonly TranscriptEntry[], here: readonly TranscriptEntry[]): BandRun[] {
+  type Item = { side: BandRun["side"]; at: number; seq: number; entry: TranscriptEntry };
+  const items: Item[] = [];
+  const add = (side: BandRun["side"], entries: readonly TranscriptEntry[], offset: number): void => {
+    let last = Number.NEGATIVE_INFINITY;
+    entries.forEach((entry, i) => {
+      const at = (entry as { at?: number }).at;
+      if (typeof at === "number") last = at;
+      items.push({ side, at: last, seq: offset + i, entry });
+    });
+  };
+  add("agent", agent, 0);
+  add("here", here, agent.length);
+  items.sort((a, b) => a.at - b.at || a.seq - b.seq);
+  const runs: BandRun[] = [];
+  for (const item of items) {
+    const last = runs[runs.length - 1];
+    if (last !== undefined && last.side === item.side) last.entries.push(item.entry);
+    else runs.push({ side: item.side, at: Number.isFinite(item.at) ? item.at : undefined, entries: [item.entry] });
+  }
+  return runs;
+}
+
+/**
+ * A background agent's stretch laid out beside the conversation by time (⧉, round 2, G): the agent's
+ * column on the left, where its lane runs, the conversation's on the right, a row per moment one of
+ * them spoke, its time in the gutter before them.
+ *
+ *   the band      column, margin 6 0; its head row: the agent (its lane's dot, its kind, its name 600,
+ *                 "background") and "This conversation", app 12 --dim, 5 under
+ *   a row         grid 56 | 1fr | 1fr, gap 12; the time data 11 --dim, right, 10 down
+ *   a cell        --panel, a --line edge either side; the first of a column's cells rounds its top (12),
+ *                 the last its foot; a column with nothing at that moment is empty ground
+ */
+export function TimeBand({ lane, ctx, here, draw }: { lane: AgentLane; ctx: RailCtx; here: readonly TranscriptEntry[]; draw: (entries: TranscriptEntry[]) => ReactNode }): JSX.Element {
+  const t = useTokens();
+  const one = useAgentSays(ctx, lane);
+  const fork = ctx.forkOf(lane.call);
+  const from = fork?.at;
+  const agent = useMemo(() => (from === undefined ? one.chain : one.chain.filter((entry) => ((entry as { at?: number }).at ?? from) >= from)), [one.chain, from]);
+  const runs = useMemo(() => bandRunsOf(agent, here), [agent, here]);
+  const clock = (at: number | undefined): string => (at === undefined ? "" : new Date(at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }));
+  const colour = cssColour(t, ctx.hueOf(lane.call));
+  const head = { voice: "app" as const, scale: 12 / 12.5, color: "dim" };
+  const cell = (side: BandRun["side"], i: number): Record<string, unknown> => {
+    const sideRuns = runs.map((run, k) => (run.side === side ? k : -1)).filter((k) => k >= 0);
+    const first = sideRuns[0] === i;
+    const last = sideRuns[sideRuns.length - 1] === i;
+    return {
+      flex: 1,
+      minWidth: 0,
+      backgroundColor: t.v("panel"),
+      borderLeftWidth: 1,
+      borderRightWidth: 1,
+      borderStyle: "solid",
+      borderColor: t.v("line"),
+      ...(first ? { borderTopWidth: 1, borderTopLeftRadius: 12, borderTopRightRadius: 12 } : {}),
+      ...(last ? { borderBottomWidth: 1, borderBottomLeftRadius: 12, borderBottomRightRadius: 12 } : {}),
+    };
+  };
+  return (
+    <View ref={ctx.register("band:together") as never} flexDirection="column" marginVertical={6} minWidth={0}>
+      <View flexDirection="row" gap={12} paddingBottom={5} minWidth={0}>
+        <View width={56} />
+        <View flex={1} flexDirection="row" alignItems="center" gap={7} minWidth={0}>
+          <View width={8} height={8} borderRadius={4} backgroundColor={colour as never} />
+          <Txt spec={head}>{one.kind}</Txt>
+          <Txt spec={{ ...head, weight: 600, color: "text" }} flexShrink={1} ellip>
+            {one.name}
+          </Txt>
+          <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "dim", upper: true, ls: 0.07 }}>background</Txt>
+        </View>
+        <View flex={1} flexDirection="row" alignItems="center" gap={7} minWidth={0}>
+          <View width={8} height={8} borderRadius={4} backgroundColor={cssColour(t, "var(--rule)") as never} />
+          <Txt spec={{ ...head, weight: 600, color: "text" }}>This conversation</Txt>
+        </View>
+      </View>
+      {runs.map((run, i) => (
+        <View key={i} flexDirection="row" gap={12} minWidth={0}>
+          <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim", tabular: true }} width={56} textAlign="right" paddingTop={10}>
+            {clock(run.at)}
+          </Txt>
+          {run.side === "agent" ? (
+            <>
+              <View {...(cell("agent", i) as object)}>{draw(run.entries)}</View>
+              <View flex={1} minWidth={0} {...(runs.slice(i + 1).some((r) => r.side === "here") && runs.slice(0, i).some((r) => r.side === "here") ? (cell("here", -1) as object) : {})} />
+            </>
+          ) : (
+            <>
+              <View flex={1} minWidth={0} {...(runs.slice(i + 1).some((r) => r.side === "agent") && runs.slice(0, i).some((r) => r.side === "agent") ? (cell("agent", -1) as object) : {})} />
+              <View {...(cell("here", i) as object)}>{draw(run.entries)}</View>
+            </>
+          )}
+        </View>
+      ))}
+    </View>
+  );
+}
+
+/** The rail a transcript is drawn inside, for a host that lays parts of it out on its own (side by side). */
+export function useRail(): RailCtx | null {
+  return useContext(RailContext);
 }

@@ -485,7 +485,7 @@ export interface BandNote {
    * "could not enter X" — rather than as a bare reason, because that is what it is. `failure` is
    * everything else that went wrong: a call that failed, a state that gave up.
    */
-  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped" | "moved" | "asked";
+  kind: "failure" | "blocked" | "entered" | "transition" | "made" | "skipped" | "moved" | "asked" | "agent";
   /** The state DEFINITION the note is about, when the journal named one — what the title shows. */
   stateId?: string;
   /** For a `made` note: the runs the batch's elements became — see `MadeBatch`. */
@@ -497,6 +497,13 @@ export interface BandNote {
   moved?: WorkflowOutcome;
   /** For a `moved` note: the tool call that did it, when the row names it — where {@link splitAtNotes} cuts. */
   toolCallId?: string;
+  /**
+   * For an `agent` note: an agent a state's conversation started (an `Agent` call), drawn on the rail as
+   * a nested state is (the person, 2026-11-14): its own lane, its conversation a sheet on it, and the
+   * sheet it was started from torn around it — cut at its call ({@link toolCallId}) as a move's is.
+   * Read from the conversation's record, not the journal: `agentNotesOf`.
+   */
+  agent?: { call: string; name: string; kind?: string };
   /**
    * For an `asked` note: a move's INPUT QUESTION (decision 0005, the rulings of 2026-09-22), drawn
    * where the move asked it — live while it is open, as it was answered once it is not.
@@ -822,7 +829,7 @@ export function groupNeverEntered(notes: readonly BandNote[]): BandNote[] {
  * at its two ends.
  */
 export function splitAtNotes(bands: readonly SessionBand[], notes: readonly BandNote[]): SessionBand[] {
-  const moved = notes.filter((note) => note.kind === "moved");
+  const moved = notes.filter((note) => note.kind === "moved" || note.kind === "agent");
   if (moved.length === 0) return [...bands];
   const inside = (piece: SessionPiece, at: number): boolean => piece.startedAt <= at && (piece.endedAt === undefined || at <= piece.endedAt);
   const out: SessionBand[] = [];

@@ -23,6 +23,8 @@ import type { World } from "./world.mjs";
 const SOURCE = process.argv[2] ?? "t-wdxyhs1w6w";
 /** One record of it, by id: the turn with the background agents (2026-11-13) is no longer its latest. */
 const RECORD = process.argv[3] ?? "a368cb9cee15afe7e8fb65dfae81731603f7a0858eb6b25b7248227a44444db8";
+/** `BATCH=1`: the two background launches read as agents that answered at once — one turn starting two, waited for together. */
+const BATCH = process.env["BATCH"] === "1";
 const OUT = join(import.meta.dirname, "out", "agent-rail");
 const WORLD = join(tmpdir(), "jaira-shots-agent-rail");
 type Db = { prepare(sql: string): { get(...a: unknown[]): unknown; run(...a: unknown[]): unknown }; close(): void };
@@ -56,7 +58,8 @@ async function main(): Promise<void> {
   rmSync(WORLD, { recursive: true, force: true });
   const world: World = { home: join(WORLD, "home"), project: join(WORLD, "project"), userData: join(WORLD, "user-data") };
   initProject(world.project, world.home);
-  const entries = await realEntries();
+  const real = await realEntries();
+  const entries = BATCH ? (JSON.parse(JSON.stringify(real).split("Async agent launched").join("Agent finished")) as unknown[]) : real;
   console.log(`the record: ${entries.length} entries`);
   const app = await App.launch(world, { out: OUT, port: 9258 });
   try {
@@ -102,6 +105,7 @@ async function main(): Promise<void> {
       const at = await app.evaluate<{ x: number; y: number } | null>(`(() => {
         const el = [...document.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === ${JSON.stringify("@@")});
         if (!el) return null;
+        el.scrollIntoView({ block: 'center' });
         const r = el.getBoundingClientRect();
         return { x: r.x + r.width / 2, y: r.y + r.height / 2 };
       })()`.replace(JSON.stringify("@@"), JSON.stringify(label)));
@@ -110,32 +114,62 @@ async function main(): Promise<void> {
       await settle(1500);
       return true;
     };
+    /** Scroll the element's own scroller so the element stands near its top (a scroll the page hears, which unpins its end). */
+    const bringUp = async (find: string): Promise<void> => {
+      const said = await app.evaluate<string>(`(() => {
+        const el = ${find};
+        if (!el) return 'not found';
+        let box = el.parentElement;
+        while (box && !(box.scrollHeight > box.clientHeight + 4 && /(auto|scroll)/.test(getComputedStyle(box).overflowY))) box = box.parentElement;
+        if (!box) return 'no scroller';
+        box.scrollTop += el.getBoundingClientRect().top - box.getBoundingClientRect().top - 120;
+        box.dispatchEvent(new Event('scroll'));
+        return 'scrolled ' + Math.round(box.scrollTop);
+      })()`);
+      console.log("bring up:", said);
+      await settle(1200);
+    };
+    const scrollTo = (text: string): Promise<void> => bringUp(`[...document.querySelectorAll('*')].find((d) => d.childElementCount === 0 && d.textContent === ${JSON.stringify(text)})`);
+    const scrollToLabel = (label: string): Promise<void> => bringUp(`[...document.querySelectorAll('[aria-label]')].find((e) => e.getAttribute('aria-label') === ${JSON.stringify(label)})`);
+    const pressFirst = async (test: (label: string) => boolean): Promise<string | null> => {
+      const labels = await app.evaluate<string[]>(`[...document.querySelectorAll('[aria-label]')].map((e) => e.getAttribute('aria-label'))`);
+      const label = labels.find(test);
+      if (label === undefined) return null;
+      await press(label);
+      return label;
+    };
+    if (BATCH) {
+      // Two agents one turn started together and waited for: one lane, a band under it.
+      console.log("batch:", await pressFirst((label) => label.startsWith("show ") && label.includes(", ")));
+      await settle(1500);
+      await app.shot("b1-batch-open", undefined, false);
+      console.log("tabbed:", await press("Tabbed"));
+      await app.shot("b2-batch-tabbed", undefined, false);
+      return;
+    }
     console.log("hover:", await hoverLane());
     await app.shot("2-hover-stack", undefined, false);
+    // Side by side: the stretch the background agent ran beside the conversation, by time.
+    console.log("side by side:", await press("Side by side with the conversation"));
+    await settle(1500);
+    await app.hover(1300, 700);
+    await scrollTo("This conversation");
+    await app.shot("3-side-by-side", undefined, false);
+    if (await hoverLane()) console.log("alone again:", await press("Back to the conversation alone"));
+    await settle(1000);
+    console.log("hover:", await hoverLane());
     console.log("bring here:", await press("Bring into this conversation"));
-    await app.shot("3-brought-here", undefined, false);
-    if (await hoverLane()) {
-      await app.shot("4-hover-brought", undefined, false);
-      console.log("send back:", await press("Send back to the background"));
-    }
-    // The main window: entered, as a substate — the agent is the page, the title a breadcrumb; back out by it.
-    if (await hoverLane()) {
-      console.log("main view:", await press("Open as the main view"));
-      await settle(1500);
-      await app.shot("5-main-view", undefined, false);
-      await app.clickText(title);
-      await settle(2000);
-    }
-    if (await hoverLane()) {
-      console.log("beside:", await press("Open beside"));
-      await settle(1500);
-      await app.shot("5-beside", undefined, false);
-    }
-    if (await hoverLane()) {
-      console.log("panel:", await press("Open in the side panel"));
-      await settle(1500);
-      await app.shot("6-panel", undefined, false);
-    }
+    await app.shot("4-brought-here", undefined, false);
+    // The Tasks view: an agent is a lane of its own on the run's rail, its conversation a sheet on it.
+    await app.clickText("All tasks");
+    await settle(1500);
+    await app.clickText(title);
+    await settle(4000);
+    await app.shot("5-tasks-view", undefined, false);
+    console.log("tasks open:", await pressFirst((label) => label.startsWith("show ") && label.includes("Quit dialog")));
+    await settle(2500);
+    await scrollToLabel("hide Quit dialog for running work's run");
+    await app.shot("6-tasks-agent-open", undefined, false);
   } finally {
     await app.close();
   }

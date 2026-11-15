@@ -29,7 +29,7 @@ import { Virtual } from "../Virtual";
 import { Icon } from "./Icon";
 import { Empty } from "./RunTranscript";
 import { MessageRail } from "./MessageRail";
-import { AgentLaneRow, RailProvider, useLaneMarks, useRailFrame } from "./AgentRail";
+import { AgentLaneRow, RailProvider, TimeBand, useLaneMarks, useRailFrame } from "./AgentRail";
 import { baselineOf } from "./SessionBands";
 
 /**
@@ -81,6 +81,7 @@ export const Transcript = memo(function Transcript({
   padding = [12, 16, 22, 16],
   agentRail = false,
   lane,
+  laneLit = false,
 }: {
   session: SessionView | null;
   entries: TranscriptEntry[];
@@ -116,6 +117,8 @@ export const Transcript = memo(function Transcript({
   agentRail?: boolean | undefined;
   /** This conversation is an agent's, opened beside its lane: its trunk is that lane, in this colour. */
   lane?: string | undefined;
+  /** That lane is lit under the pointer in the conversation this one is nested in. */
+  laneLit?: boolean | undefined;
 }): JSX.Element {
   // With no pointer that hovers, the message whose rail a press opened (its block), and the message the
   // touch now landing is on: a touch anywhere else in the window puts the rail away. The shell's root
@@ -145,8 +148,8 @@ export const Transcript = memo(function Transcript({
   const streaming = useMemo(() => new Set(Object.keys(live?.sidechains ?? {})), [live]);
   const railWorking = writingOf(working, session);
   const nestedLane = useCallback(
-    (inner: TranscriptEntry[], innerWorking: boolean, hue: string) => (
-      <Transcript session={session} entries={inner} live={live} working={innerWorking} onOpenSidechain={onOpenSidechain} artifacts={artifacts} agentRail lane={hue} />
+    (inner: TranscriptEntry[], innerWorking: boolean, hue: string, lit: boolean) => (
+      <Transcript session={session} entries={inner} live={live} working={innerWorking} onOpenSidechain={onOpenSidechain} artifacts={artifacts} agentRail lane={hue} laneLit={lit} />
     ),
     [session, live, onOpenSidechain, artifacts],
   );
@@ -157,6 +160,7 @@ export const Transcript = memo(function Transcript({
     sidechainOf: railSidechainOf,
     onOpenSidechain,
     lane,
+    laneLit,
     artifacts,
     nested: nestedLane,
   });
@@ -181,17 +185,24 @@ export const Transcript = memo(function Transcript({
   // drawn since — a reading that DROPS with none between gets a line of its own anyway.
   let lastContext: ContextReading | undefined;
   let compactedSince = false;
-  return (
-    <View flexDirection="column" width="100%" paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={frame.on ? frame.gutter + 6 : padding[3]} minWidth={0} {...frame.columnProps}>
-      <RailProvider ctx={frame.ctx}>
-      {blocks.map((block, i) => {
+  // The blocks of a stretch of the conversation, numbered from `offset` of `total`.
+  const marks = frame.on && frame.ctx.rail.columns > 0;
+  const drawBlocks = (list: typeof blocks, offset: number, total: number): ReactNode[] =>
+    list.map((block, j) => {
+      const i = offset + j;
         // Once a doomed message has gone by, everything under it goes too.
         const crossed = !doomed && doomedFrom !== undefined && block.kind === "message" && block.turn !== undefined && block.turn >= doomedFrom;
         if (crossed) doomed = true;
         const cutLine = crossed ? <CutLine key={`cut-${i}`} count={doomedCount} /> : null;
         const fade = doomed ? { opacity: 0.38 } : {};
-        const gap = gapBetween(endOfBlock(blocks[i - 1]), startOfBlock(block));
-        const before = gap === undefined ? null : <GapMark gap={gap} />;
+        const gap = gapBetween(endOfBlock(list[j - 1]), startOfBlock(block));
+        const marker = marks ? <View ref={frame.ctx.register(`block:${i}`, { at: startOfBlock(block) ?? 0 }) as never} height={0} /> : null;
+        const before = (
+          <>
+            {marker}
+            {gap === undefined ? null : <GapMark gap={gap} />}
+          </>
+        );
         if (block.kind === "work") {
           return (
             <Fragment key={i}>
@@ -199,7 +210,7 @@ export const Transcript = memo(function Transcript({
               {cutLine}
               <Virtual>
                 <View minWidth={0} {...fade}>
-                  <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, blocks.length)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={callsHere} />
+                  <WorkBlockView entries={block.entries} working={openBlockOf(writing, i, total)} sidechainOf={sidechainOf} onOpenSidechain={onOpenSidechain} artifacts={artifacts} narrated={narrated} calls={callsHere} />
                 </View>
               </Virtual>
             </Fragment>
@@ -268,7 +279,35 @@ export const Transcript = memo(function Transcript({
             ) : null}
           </View>
         );
-      })}
+    });
+  // A background agent laid out side by side (⧉): the conversation from its start to where its lane
+  // ends drawn by time beside it, in place of those rows.
+  const together = frame.on && frame.ctx.sideBySide !== null ? frame.ctx.rail.lanes.find((one) => one.call === frame.ctx.sideBySide && one.column > 0) : undefined;
+  const drawn: ReactNode = ((): ReactNode => {
+    if (together === undefined) return drawBlocks(blocks, 0, blocks.length);
+    const to = together.cross ?? together.back ?? shown.length;
+    const first = blocksOf(shown.slice(0, together.fork + 1));
+    const middle = shown.slice(together.fork + 1, to);
+    const last = blocksOf(shown.slice(to));
+    const total = first.length + 1 + last.length;
+    return (
+      <>
+        {drawBlocks(first, 0, total)}
+        <TimeBand
+          key="together"
+          lane={together}
+          ctx={frame.ctx}
+          here={middle}
+          draw={(inner) => <Transcript session={session} entries={inner} live={live} working={false} artifacts={artifacts} onOpenSidechain={onOpenSidechain} padding={[4, 10, 6, 10]} agentRail />}
+        />
+        {drawBlocks(last, first.length + 1, total)}
+      </>
+    );
+  })();
+  return (
+    <View flexDirection="column" width="100%" paddingTop={padding[0]} paddingRight={padding[1]} paddingBottom={padding[2]} paddingLeft={frame.on ? frame.gutter + 6 : padding[3]} minWidth={0} {...frame.columnProps}>
+      <RailProvider ctx={frame.ctx}>
+      {drawn}
       </RailProvider>
       {frame.overlay}
     </View>

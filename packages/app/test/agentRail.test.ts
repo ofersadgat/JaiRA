@@ -68,6 +68,22 @@ describe("an agent's lane", () => {
   });
 });
 
+describe("agents started together", () => {
+  it("are one batch when one turn started them in a row and waited for them all", () => {
+    const rail = agentRailOf([said("splitting it"), agent("c1", { result: "a" }), agent("c2", { result: "b" }), agent("c3", { result: "c" }), said("all three are in")]);
+    expect(rail.lanes[0]!.batch).toEqual(["c1", "c2", "c3"]);
+    expect(rail.lanes.slice(1).map((lane) => lane.inBatch)).toEqual(["c1", "c1"]);
+  });
+  it("are, with a rate limit or a note arriving between the calls", () => {
+    const limit: EventEntry = { kind: "event", tone: "warn", text: "rate limit" };
+    expect(agentRailOf([agent("c1", { result: "a" }), limit, agent("c2", { result: "b" })]).lanes[0]!.batch).toEqual(["c1", "c2"]);
+  });
+  it("are not, with anything said between them, or when one ran in the background", () => {
+    expect(agentRailOf([agent("c1", { result: "a" }), said("then"), agent("c2", { result: "b" })]).lanes[0]!.batch).toBeUndefined();
+    expect(agentRailOf([agent("c1", { result: "a" }), agent("c2", { result: launched("a2") })]).lanes[0]!.batch).toBeUndefined();
+  });
+});
+
 describe("left columns", () => {
   it("gives two agents running at once two columns, and reuses a column once its lane ended", () => {
     const entries: TranscriptEntry[] = [

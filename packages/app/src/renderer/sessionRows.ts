@@ -18,6 +18,8 @@ import { forksOf, pathFrom, placeNotes, placeOf, segmentsFrom, splitAtNotes, sta
  * at all — which is the whole content of the note. Both are drawn against their parent.
  */
 export function stepOfNote(note: BandNote, root: string): RailStep {
+  // An agent opens a lane of its own under the state whose conversation started it.
+  if (note.kind === "agent" && note.agent !== undefined) return { key: `a${note.agent.call}`, stateId: agentLaneName(note.agent.name), at: [...segmentsFrom(note.path, root), `⑂${note.agent.call}`], opens: true };
   const at = segmentsFrom(note.path, root);
   const opens = note.kind === "entered";
   // A made task's path is the element's (`work[0]`), and the row belongs to the state that made it:
@@ -58,7 +60,10 @@ export function isSolo(bands: readonly SessionBand[]): boolean {
 }
 
 /** One row of the page: a note between bands, or a band. */
-export type PageRow = { kind: "note"; note: BandNote } | { kind: "band"; band: SessionBand };
+export type PageRow = { kind: "note"; note: BandNote } | { kind: "band"; band: SessionBand } | { kind: "agent"; note: BandNote };
+
+/** What an agent's lane is called on the rail, and coloured by. */
+export const agentLaneName = (name: string): string => `⑂ ${name}`;
 
 export interface PageRows {
   /** The bands as drawn — cut where a workflow tool's note took effect (`splitAtNotes`). */
@@ -116,6 +121,8 @@ export function pageRowsOf(given: readonly SessionBand[], notes: readonly BandNo
         laneNotes.set(step.key, note);
       }
       add(step, { kind: "note", note }, note.at);
+      // Its conversation, on its lane: a row of its own under the line that started it.
+      if (note.kind === "agent" && note.agent !== undefined) add({ key: `ab${note.agent.call}`, stateId: step.stateId, at: step.at, opens: false }, { kind: "agent", note }, note.at);
     }
   };
   for (const [i, band] of bands.entries()) {

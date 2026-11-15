@@ -17,6 +17,7 @@
  */
 import type { JsonValue } from "@declarative-ai/json";
 import type { EventEntry, ToolEntry, TranscriptEntry } from "./transcript";
+import { isHostCall as isHostWork } from "./workSummary";
 
 /** What a row of the conversation is to an agent's lane. */
 export type LaneMark = "fork" | "cross" | "back";
@@ -39,6 +40,13 @@ export interface AgentLane {
    * (waited for from the start, or a background agent whose end the record never said).
    */
   column: number;
+  /**
+   * Agents the conversation started TOGETHER and waited for together (one turn, several calls in a
+   * row): the first holds the calls of all of them, the rest name the first. They share one lane, and
+   * opened, a concurrent band (`SessionBands.tsx`' columns or tabs) under it.
+   */
+  batch?: string[];
+  inBatch?: string;
 }
 
 export interface AgentRail {
@@ -97,6 +105,18 @@ export function agentRailOf(entries: readonly TranscriptEntry[], running: Readon
   const byAgent = new Map<string, AgentLane>();
   const byCall = new Map<string, AgentLane>();
   const marks = new Map<TranscriptEntry, { lane: AgentLane; mark: LaneMark }>();
+  /**
+   * The entry before `i` that is the conversation's own doing: not a call a tool made, not a thought, not
+   * an event (a rate limit, a note) that arrived while the calls went out.
+   */
+  const lastFork = (i: number): number => {
+    for (let j = i - 1; j >= 0; j--) {
+      const e = entries[j]!;
+      if (e.kind === "thought" || e.kind === "event" || e.kind === "writing" || (e.kind === "tool" && (e.calledBy !== undefined || isHostWork(e)))) continue;
+      return j;
+    }
+    return -1;
+  };
   for (const [i, entry] of entries.entries()) {
     if (entry.kind === "tool" && entry.sidechain !== undefined && !byCall.has(entry.sidechain) && entry.calledBy === undefined) {
       const background = isLaunchNote(entry.result) || askedBackground(entry);
@@ -106,6 +126,13 @@ export function agentRailOf(entries: readonly TranscriptEntry[], running: Readon
       byCall.set(lane.call, lane);
       if (agentId !== undefined) byAgent.set(agentId, lane);
       marks.set(entry, { lane, mark: "fork" });
+      // Started in the same breath as the waited-for agent just before it: one batch.
+      const before = lanes[lanes.length - 2];
+      if (!background && before !== undefined && !before.background && before.fork === lastFork(i)) {
+        const head = before.inBatch !== undefined ? byCall.get(before.inBatch)! : before;
+        head.batch = [...(head.batch ?? [head.call]), lane.call];
+        lane.inBatch = head.call;
+      }
       continue;
     }
     const waited = waitedAgentOf(entry);

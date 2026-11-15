@@ -22,7 +22,12 @@ import type { CallSurface } from "@jaira/ui/transcriptRows";
 import { ApprovalAskContext } from "@jaira/ui/workSummaryContext";
 import { ApprovalSurface } from "../floats/ApprovalSurface";
 import { QuestionSurface } from "../floats/QuestionSurface";
-import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, type LiveTail, type TranscriptEntry } from "@jaira/ui/transcript";
+import { entriesOf, entriesOfPart, journalFor, markAnsweredQuestions, previewOf, sidechainEntriesOf, type LiveTail, type ToolEntry, type TranscriptEntry } from "@jaira/ui/transcript";
+import { addressSegment } from "@jaira/shared/browser";
+import { agentLaneName } from "@jaira/ui/sessionRows";
+import { subagentLineOf } from "@jaira/ui/subagentModel";
+import { secondsOf } from "@jaira/ui/workSummary";
+import { ChildRunLine } from "../chat/ChildRun";
 import { useSteadyHandlers } from "../../steady";
 import { PLAIN_SCROLLER, Txt, edge, scrollbarProps } from "../../primitives";
 import { useLook, useTokens } from "../../tokens";
@@ -122,8 +127,52 @@ export function RunTranscript({
   const { conversation, sessions, sessionHistory, records, liveTurn, onLoadSessions, shutStates, onToggleShutState, onSetShutStates } = source;
   const bands = useMemo(() => bandsOf(piecesOf(parent, sessionHistory), { batches: source.batches }), [parent, sessionHistory, source.batches]);
   const needed = useMemo(() => instancesOf(bands), [bands]);
-  const palette = useMemo(() => paletteOfRun(detail.instances), [detail.instances]);
-  const notes = useMemo(() => notesOf(conversation?.turns ?? [], parent), [conversation, parent]);
+  const runPalette = useMemo(() => paletteOfRun(detail.instances), [detail.instances]);
+  const journalNotes = useMemo(() => notesOf(conversation?.turns ?? [], parent), [conversation, parent]);
+  // The agents each state's conversation started, read from its record once it is loaded: a note each
+  // where its call was made, which the page draws as a lane of its own with the agent's conversation a
+  // sheet on it, the sheet it was started from torn around it (the person, 2026-11-14).
+  const agentsHere = useMemo(() => {
+    const found: BandNote[] = [];
+    const byCall = new Map<string, { entry: ToolEntry; piece: SessionPiece; view: SessionView }>();
+    for (const band of bands)
+      for (const segment of band.segments)
+        for (const piece of segment.pieces) {
+          const view = sessions[sessionKey(recordAt(piece))];
+          if (view === undefined) continue;
+          for (const entry of pieceEntriesOf(view, conversation?.turns, null, piece).entries) {
+            if (entry.kind !== "tool" || entry.sidechain === undefined || entry.calledBy !== undefined || entry.callId === undefined || byCall.has(entry.sidechain)) continue;
+            const args = (entry.args ?? {}) as Record<string, unknown>;
+            const name = typeof args["description"] === "string" && args["description"].trim() !== "" ? args["description"].trim() : entry.summary || "agent";
+            const kind = typeof args["subagent_type"] === "string" ? args["subagent_type"] : undefined;
+            found.push({
+              seq: 0,
+              at: entry.at ?? piece.startedAt,
+              kind: "agent",
+              path: (piece.node.address ?? []).map(addressSegment).join("/"),
+              text: "",
+              toolCallId: entry.callId,
+              agent: { call: entry.sidechain, name, ...(kind !== undefined ? { kind } : {}) },
+            });
+            byCall.set(entry.sidechain, { entry, piece, view });
+          }
+        }
+    return { found, byCall };
+  }, [bands, sessions, conversation]);
+  const notes = useMemo(() => (agentsHere.found.length === 0 ? journalNotes : [...journalNotes, ...agentsHere.found].sort((a, b) => a.at - b.at)), [journalNotes, agentsHere]);
+  /** The agents' calls, which their notes draw in place of the call's row. */
+  const hostedCalls = useMemo(() => new Set(agentsHere.byCall.keys()), [agentsHere]);
+  const [agentsOpen, setAgentsOpen] = useState<ReadonlySet<string>>(() => new Set());
+  // Each agent's lane takes the next hue on the run's ladder (`paletteOf`), after the states'.
+  const palette = useMemo(() => {
+    if (agentsHere.found.length === 0) return runPalette;
+    const next = new Map(runPalette);
+    agentsHere.found.forEach((note, i) => {
+      const hue = (18 + (runPalette.size + i) * 137.508) % 360;
+      next.set(agentLaneName(note.agent!.name), `hsl(${hue.toFixed(1)} var(--rail-s) var(--rail-l))`);
+    });
+    return next;
+  }, [runPalette, agentsHere]);
   const rootPath = useMemo(() => (parent === undefined ? "" : mountPathOf(detail.instances, parent.instanceId)), [detail, parent]);
   const askingHere = useMemo(() => (gate === undefined || onGate === undefined ? undefined : askingInstanceOf(detail.instances)), [gate, onGate, detail.instances]);
   const waits = useMemo(() => [...source.userEvents].filter((one) => one.taskId === detail.taskId).sort((a, b) => a.at - b.at), [source.userEvents, detail.taskId]);
@@ -158,10 +207,10 @@ export function RunTranscript({
     if (onRewind === undefined || onFork === undefined || arm === undefined) return undefined;
     const taskId = detail.taskId;
     return {
-      rewind: (note) => arm(armedRewindOf(note, notes, rootPath)),
+      rewind: (note) => arm(armedRewindOf(note, journalNotes, rootPath)),
       fork: (note) => onFork(taskId, note.seq),
     };
-  }, [detail.taskId, onRewind, onFork, steady.onArm, notes, rootPath]);
+  }, [detail.taskId, onRewind, onFork, steady.onArm, journalNotes, rootPath]);
 
   // Every panel is open, so every transcript in them is needed — fetched in one round.
   useEffect(() => {
@@ -315,7 +364,7 @@ export function RunTranscript({
       liveTurn !== null &&
       (piece.sessionId !== undefined ? liveTurn.sessionId === piece.sessionId && liveTurn.seq === piece.seq : liveTurn.stateId === piece.node.stateId && piece.node.status === "running");
     const live = matches ? liveTurn : null;
-    const transcript = <PieceTranscript piece={piece} view={view} turns={conversation?.turns} live={live} calls={calls} onCut={onCut} notes={notes} onOpenSidechain={openSidechain} />;
+    const transcript = <PieceTranscript piece={piece} view={view} turns={conversation?.turns} live={live} calls={calls} onCut={onCut} notes={notes} onOpenSidechain={openSidechain} hidden={hostedCalls} />;
     // The agent's question or the command it is waiting to run, under what it said before asking.
     if (piece.node.instanceId !== agentHere) return transcript;
     const { entries, working } = pieceEntriesOf(view, conversation?.turns, live, piece);
@@ -366,6 +415,69 @@ export function RunTranscript({
       </InlineHost>
     );
   };
+  /** An agent on its lane: its line where its call was made, and opened, its conversation a sheet on the lane. */
+  const agent = {
+    line: (note: BandNote): ReactNode => {
+      const at = note.agent !== undefined ? agentsHere.byCall.get(note.agent.call) : undefined;
+      if (at === undefined || note.agent === undefined) return null;
+      const call = note.agent.call;
+      const chainOf = (c: string): TranscriptEntry[] => sidechainEntriesOf(at.view, c, liveTurn?.sidechains?.[c], liveTurn?.sidechains);
+      const running = liveTurn?.sidechains?.[call] !== undefined;
+      const read = subagentLineOf(at.entry, chainOf(call), chainOf, running);
+      const sub = read?.sub;
+      const took = sub?.startedAt === undefined ? "" : `${secondsOf(Math.max(0, (sub.lastAt ?? sub.startedAt) - sub.startedAt))}${running ? " so far" : ""}`;
+      const open = agentsOpen.has(call);
+      return (
+        <ChildRunLine
+          verb={note.agent.kind ?? "agent"}
+          name={note.agent.name}
+          goTitle={`open ${note.agent.name} as the main view`}
+          waits={read?.waits ?? []}
+          running={(read?.waits.length ?? 0) === 0 && sub?.step !== undefined ? { step: sub.step.step, path: sub.step.path } : undefined}
+          steps={sub?.steps ?? 0}
+          took={took}
+          open={open}
+          onToggle={() =>
+            setAgentsOpen((was) => {
+              const next = new Set(was);
+              if (!next.delete(call)) next.add(call);
+              return next;
+            })
+          }
+          {...(openSidechain !== undefined ? { onWalkIn: () => openSidechain(at.piece.node, call, note.agent!.name) } : {})}
+          nest={false}
+        >
+          {null}
+        </ChildRunLine>
+      );
+    },
+    sheet: (note: BandNote): ReactNode => {
+      const at = note.agent !== undefined ? agentsHere.byCall.get(note.agent.call) : undefined;
+      if (at === undefined || note.agent === undefined || !agentsOpen.has(note.agent.call)) return null;
+      const call = note.agent.call;
+      const chain = sidechainEntriesOf(at.view, call, liveTurn?.sidechains?.[call], liveTurn?.sidechains);
+      return (
+        <View minWidth={0} marginVertical={4} backgroundColor={t.v("panel") as never} borderWidth={1} borderStyle="solid" borderColor={t.v("line") as never} borderRadius={12} overflow="hidden">
+          <View flexDirection="row" alignItems="center" gap={8} paddingVertical={7} paddingHorizontal={12} minWidth={0} {...(edge(t, { bottom: 1 }, "rule") as object)}>
+            <Icon name="agent" size={13} color={String(t.v("dim"))} />
+            <Txt spec={{ voice: "app", scale: 10 / 12.5, color: "dim", upper: true, ls: 0.07 }}>agent</Txt>
+            <Txt spec={{ voice: "app", scale: 12.5 / 12.5, weight: 600, color: "text" }} flexShrink={1} numberOfLines={1}>
+              {note.agent.name}
+            </Txt>
+            {note.agent.kind !== undefined ? <Txt spec={{ voice: "data", scale: 11 / 12, color: "dim" }}>{note.agent.kind}</Txt> : null}
+          </View>
+          <Transcript
+            session={at.view}
+            entries={chain}
+            live={liveTurn}
+            working={liveTurn?.sidechains?.[call] !== undefined}
+            agentRail
+            {...(openSidechain !== undefined ? { onOpenSidechain: (c: string, n: string) => openSidechain(at.piece.node, c, n) } : {})}
+          />
+        </View>
+      );
+    },
+  };
   /** An ADOPTED task's history, expanded where the adoption happened: the conversation simply grows. */
   const adopted = (taskId: string): ReactNode => <AdoptedHistory taskId={taskId} source={source} />;
   const empty = bands.length === 0 && notes.length === 0;
@@ -389,6 +501,7 @@ export function RunTranscript({
           {...(source.onSelectTask !== undefined ? { onSelectTask: source.onSelectTask } : {})}
           adopted={adopted}
           readingOf={readingOf}
+          agent={agent}
         />
       </View>
     );
@@ -430,6 +543,7 @@ export function RunTranscript({
             readingOf={readingOf}
             {...(detail.origin !== undefined ? { origin: { ...detail.origin, ...(source.onSelectTask !== undefined ? { onGo: () => source.onSelectTask!(detail.origin!.taskId) } : {}) } } : {})}
             adopted={adopted}
+            agent={agent}
           />
         )}
         </RowSpyContext.Provider>
@@ -462,6 +576,7 @@ const PieceTranscript = memo(function PieceTranscript({
   onCut,
   notes,
   onOpenSidechain,
+  hidden,
 }: {
   piece: SessionPiece;
   view: SessionView;
@@ -471,8 +586,11 @@ const PieceTranscript = memo(function PieceTranscript({
   onCut: CutOffer | undefined;
   notes: readonly BandNote[];
   onOpenSidechain: ((node: InstanceNode, call: string, name: string) => void) | undefined;
+  /** Agents' calls drawn as notes of their own (their lanes): not drawn again here. */
+  hidden?: ReadonlySet<string> | undefined;
 }): JSX.Element {
-  const { entries, working } = useMemo(() => pieceEntriesOf(view, turns, live, piece), [view, turns, live, piece]);
+  const { entries: all, working } = useMemo(() => pieceEntriesOf(view, turns, live, piece), [view, turns, live, piece]);
+  const entries = useMemo(() => (hidden === undefined || hidden.size === 0 ? all : all.filter((entry) => entry.kind !== "tool" || entry.sidechain === undefined || !hidden.has(entry.sidechain))), [all, hidden]);
   // The message that opened this state's conversation is where its entry into the run is: a rewind or
   // a fork from it cuts at the same journal point as the rail's entered row — for a message typed into
   // the run, before that message.

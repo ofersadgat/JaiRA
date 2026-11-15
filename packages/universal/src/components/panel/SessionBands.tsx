@@ -51,7 +51,7 @@ import { OneLine } from "./OneLine";
  */
 
 /** What each kind of note says it is. */
-const VERB: Record<BandNote["kind"], string> = { entered: "entered", transition: "entered", blocked: "could not enter", failure: "", made: "made", skipped: "skipped", moved: "", asked: "asked" };
+const VERB: Record<BandNote["kind"], string> = { entered: "entered", transition: "entered", blocked: "could not enter", failure: "", made: "made", skipped: "skipped", moved: "", asked: "asked", agent: "started" };
 
 /** What the machine did to make the runs. */
 const MADE_VERB: Record<MadeBatch["kind"], string> = { split: "split off", task: "made", adopt: "adopted", started: "started" };
@@ -91,6 +91,7 @@ export function SessionBands({
   moveQuestion,
   onOpenWorkflow,
   readingOf,
+  agent,
   empty,
 }: {
   bands: readonly SessionBand[];
@@ -114,6 +115,8 @@ export function SessionBands({
   onOpenWorkflow?: ((piece: SessionPiece) => void) | undefined;
   /** How full a piece's conversation was after its last turn — each letterhead's `+30k`. */
   readingOf?: ((piece: SessionPiece) => ContextReading | undefined) | undefined;
+  /** An agent a state started (an `agent` note): its line where it started, and its sheet on its lane. */
+  agent?: { line: (note: BandNote) => ReactNode; sheet: (note: BandNote) => ReactNode } | undefined;
   empty?: ReactNode;
 }): JSX.Element {
   const goTo = useGoTo();
@@ -153,6 +156,8 @@ export function SessionBands({
         if (item.kind === "cut") return <CutRow states={item.states} />;
         if (item.kind === "origin") return <OriginMark origin={origin!} onGo={origin!.onGo} />;
         const row = page.rows[item.index]!;
+        if (row.kind === "agent") return agent?.sheet(row.note) ?? null;
+        if (row.kind === "note" && row.note.kind === "agent") return agent?.line(row.note) ?? null;
         if (row.kind === "note") return <NoteRow note={row.note} root={root} cuts={cuts} onSelectTask={onSelectTask} adopted={adopted} moveQuestion={moveQuestion} />;
         return <Band band={row.band} starters={page.starters} forks={page.forks} goTo={goTo} onOpenWorkflow={onOpenWorkflow} readingOf={readingOf} asking={asking} shut={shut} onToggle={onToggle} onSetShut={onSetShut} scope={scope} render={render} />;
       }}
